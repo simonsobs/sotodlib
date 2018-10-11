@@ -1,0 +1,2 @@
+include versioneer.py
+include sotodlib/_version.py
