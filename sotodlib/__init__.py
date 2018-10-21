@@ -10,6 +10,7 @@ Contents:
 
     * db: database access for detector properties, observations, etc.
     * toast: tools specifically for working with the external TOAST package.
+    * scripts: commandline entry points.
 
 """
 
