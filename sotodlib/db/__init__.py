@@ -1,4 +1,4 @@
-# Copyright (c) 2018 Simons Observatory.
+# Copyright (c) 2018-2019 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Database Access for Simons Observatory TOD Simulation and Processing.
 
