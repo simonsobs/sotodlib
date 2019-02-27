@@ -18,7 +18,7 @@ setup_opts = dict()
 # script in sotodlib.scripts.<foo>.main()
 setup_opts["entry_points"] = {
     "console_scripts": [
-        "sotod_create_detdb = sotodlib.scripts.create_detdb.main",
+        "so_sim_detdb = sotodlib.scripts.simulate_detector_db.main",
     ]
 }
 

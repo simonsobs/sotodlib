@@ -11,9 +11,9 @@ import toml
 
 from ._helpers import create_outdir
 
-from sotodlib.db.config import get_example
+from sotodlib.hardware.config import get_example
 
-from sotodlib.db.hardware import (sim_wafer_detectors,)
+from sotodlib.hardware.sim import (sim_wafer_detectors,)
 
 
 class HardwareTest(TestCase):
