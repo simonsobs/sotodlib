@@ -54,7 +54,8 @@ class SOTestCommand(TestCommand):
     def run(self):
         loader = unittest.TestLoader()
         runner = unittest.TextTestRunner(verbosity=2)
-        suite = loader.discover("tests", pattern="test_*.py", top_level_dir=".")
+        suite = loader.discover("tests", pattern="test_*.py",
+                                top_level_dir=".")
         runner.run(suite)
 
 # Add our custom test runner

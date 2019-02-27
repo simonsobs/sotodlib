@@ -15,12 +15,13 @@ External Dependencies
 ------------------------
 
 This code depends on a standard Python3 software stack with the usual packages
-(numpy, scipy, matplotlib, etc).  There are multiple ways of installing a
-working python3 stack on both Linux and OS X.  The solution you choose likely
-depends on what other things you are using Python for- not just Simons
-Observatory work.  In these examples, we'll be creating a python stack in
-${HOME}/software/so, however if you already have a python stack for use with
-S.O. tools, just skip this section.
+(numpy, scipy, matplotlib, etc).  There are also several additional python
+package dependencies (toml, quaternionarray) that can be pip-installed.  There
+are multiple ways of installing a working python3 stack on both Linux and OS X.
+The solution you choose likely depends on what other things you are using
+Python for- not just Simons Observatory work.  In these examples, we'll be
+creating a python stack in ${HOME}/software/so, however if you already have a
+python stack for use with S.O. tools, just skip this section.
 
 Use Anaconda...
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -31,7 +32,8 @@ Create a new conda environment::
 
   %> conda create --copy -m -p ${HOME}/software/so
   %> conda activate ~/software/so
-  %> conda install numpy scipy matplotlib
+  %> conda install pip numpy scipy matplotlib
+  %> pip install quaternionarray
 
 ... Or Use Virtualenv and Pip
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -46,6 +48,7 @@ it::
 Now use pip to install the dependencies we need::
 
     %> pip install numpy scipy matplotlib
+    %> pip install quaternionarray
 
 
 S.O. Affiliated Dependencies
