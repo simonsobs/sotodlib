@@ -210,9 +210,8 @@ def get_example():
         ttyp = ltubes[tindx]
         tb = OrderedDict()
         tb["type"] = ttyp
-        tb["wafersize"] = 127.89
+        tb["waferspace"] = 127.89
         tb["wafers"] = list()
-
         for tw in range(3):
             off = 0
             for w, props in cnf["wafers"].items():
@@ -231,9 +230,8 @@ def get_example():
         ttyp = stubes[tindx]
         tb = OrderedDict()
         tb["type"] = ttyp
-        tb["wafersize"] = 127.89
+        tb["waferspace"] = 127.89
         tb["wafers"] = list()
-
         for tw in range(7):
             off = 0
             for w, props in cnf["wafers"].items():
@@ -253,26 +251,46 @@ def get_example():
     tele = OrderedDict()
     tele["tubes"] = ["LT0", "LT1", "LT2", "LT3", "LT4", "LT5", "LT6"]
     tele["platescale"] = 0.00495
+    tele["tubespace"] = 300.0
+    fwhm = OrderedDict()
+    fwhm["LF1"] = 7.4
+    fwhm["LF2"] = 5.1
+    fwhm["MFF1"] = 2.2
+    fwhm["MFF2"] = 1.4
+    fwhm["MFS1"] = 2.2
+    fwhm["MFS2"] = 1.4
+    fwhm["UHF1"] = 1.0
+    fwhm["UHF2"] = 0.9
+    tele["fwhm"] = fwhm
     telescopes["LAT"] = tele
+
+    sfwhm = OrderedDict()
+    scale = 0.09668 / 0.00495
+    for k, v in fwhm.items():
+        sfwhm[k] = float(int(scale * v * 10.0) // 10)
 
     tele = OrderedDict()
     tele["tubes"] = ["ST0"]
     tele["platescale"] = 0.09668
+    tele["fwhm"] = sfwhm
     telescopes["SAT0"] = tele
 
     tele = OrderedDict()
     tele["tubes"] = ["ST1"]
     tele["platescale"] = 0.09668
+    tele["fwhm"] = sfwhm
     telescopes["SAT1"] = tele
 
     tele = OrderedDict()
     tele["tubes"] = ["ST2"]
     tele["platescale"] = 0.09668
+    tele["fwhm"] = sfwhm
     telescopes["SAT2"] = tele
 
     tele = OrderedDict()
     tele["tubes"] = ["ST3"]
     tele["platescale"] = 0.09668
+    tele["fwhm"] = sfwhm
     telescopes["SAT3"] = tele
 
     cnf["telescopes"] = telescopes

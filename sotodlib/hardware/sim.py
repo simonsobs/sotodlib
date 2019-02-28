@@ -172,69 +172,67 @@ def hex_layout(npos, width, rotate=None):
     angdiameter = width * np.pi / 180.0
 
     # find the angular packing size of one detector
-    test = npos - 1
-    nrings = 1
-    while (test - 6 * nrings) >= 0:
-        test -= 6 * nrings
-        nrings += 1
-    posdiam = angdiameter / (2 * nrings - 1)
+    nrings = hex_nring(npos)
+    posdiam = angdiameter / (2 * nrings - 2)
 
     result = np.zeros((npos, 4), dtype=np.float64)
 
     for pos in range(npos):
         if pos == 0:
             # center position has no offset
-            result[pos] = nullquat
-            continue
-        # Not at the center, find ring for this position
-        test = pos - 1
-        ring = 1
-        while (test - 6 * ring) >= 0:
-            test -= 6 * ring
-            ring += 1
-        sectors = int(test / ring)
-        sectorsteps = np.mod(test, ring)
+            posrot = nullquat
+        else:
+            # Not at the center, find ring for this position
+            test = pos - 1
+            ring = 1
+            while (test - 6 * ring) >= 0:
+                test -= 6 * ring
+                ring += 1
+            sectors = int(test / ring)
+            sectorsteps = np.mod(test, ring)
 
-        # Convert angular steps around the ring into the angle and distance
-        # in polar coordinates.  Each "sector" of 60 degrees is essentially
-        # an equilateral triangle, and each step is equally spaced along the
-        # the edge opposite the vertex:
-        #
-        #          O
-        #         O O (step 2)
-        #        O   O (step 1)
-        #       X O O O (step 0)
-        #
-        # For a given ring, "R" (center is R=0), there are R steps along
-        # the sector edge.  The line from the origin to the opposite edge
-        # that bisects this triangle has length R*sqrt(3)/2.  For each
-        # equally-spaced step, we use the right triangle formed with this
-        # bisection line to compute the angle and radius within this sector.
+            # Convert angular steps around the ring into the angle and distance
+            # in polar coordinates.  Each "sector" of 60 degrees is essentially
+            # an equilateral triangle, and each step is equally spaced along
+            # the edge opposite the vertex:
+            #
+            #          O
+            #         O O (step 2)
+            #        O   O (step 1)
+            #       X O O O (step 0)
+            #
+            # For a given ring, "R" (center is R=0), there are R steps along
+            # the sector edge.  The line from the origin to the opposite edge
+            # that bisects this triangle has length R*sqrt(3)/2.  For each
+            # equally-spaced step, we use the right triangle formed with this
+            # bisection line to compute the angle and radius within this
+            # sector.
 
-        # the distance from the origin to the midpoint of the opposite side.
-        midline = rtthreebytwo * float(ring)
+            # The distance from the origin to the midpoint of the opposite
+            # side.
+            midline = rtthreebytwo * float(ring)
 
-        # the distance along the opposite edge from the midpoint (positive
-        # or negative)
-        edgedist = float(sectorsteps) - 0.5 * float(ring)
+            # the distance along the opposite edge from the midpoint (positive
+            # or negative)
+            edgedist = float(sectorsteps) - 0.5 * float(ring)
 
-        # the angle relative to the midpoint line (positive or negative)
-        relang = np.arctan2(edgedist, midline)
+            # the angle relative to the midpoint line (positive or negative)
+            relang = np.arctan2(edgedist, midline)
 
-        # total angle is based on number of sectors we have and the angle
-        # within the final sector.
-        posang = sectors * sixty + thirty + relang
+            # total angle is based on number of sectors we have and the angle
+            # within the final sector.
+            posang = sectors * sixty + thirty + relang
 
-        posdist = rtthreebytwo * posdiam * float(ring) / np.cos(relang)
+            posdist = rtthreebytwo * posdiam * float(ring) / np.cos(relang)
 
-        posx = np.sin(posdist) * np.cos(posang)
-        posy = np.sin(posdist) * np.sin(posang)
-        posz = np.cos(posdist)
-        posdir = np.array([posx, posy, posz], dtype=np.float64)
-        norm = np.sqrt(np.dot(posdir, posdir))
-        posdir /= norm
+            posx = np.sin(posdist) * np.cos(posang)
+            posy = np.sin(posdist) * np.sin(posang)
+            posz = np.cos(posdist)
+            posdir = np.array([posx, posy, posz], dtype=np.float64)
+            norm = np.sqrt(np.dot(posdir, posdir))
+            posdir /= norm
 
-        posrot = qa.from_vectors(zaxis, posdir)
+            posrot = qa.from_vectors(zaxis, posdir)
 
         if rotate is None:
             result[pos] = posrot
@@ -341,7 +339,7 @@ def rhombus_layout(npos, width, rotate=None):
     dim = rhomb_dim(npos)
 
     # find the angular packing size of one detector
-    posdiam = angwidth / dim
+    posdiam = angwidth / (dim - 1)
 
     result = np.zeros((npos, 4), dtype=np.float64)
 
@@ -390,6 +388,12 @@ def rhombus_hex_layout(rhombus_npos, rhombus_width, gap, rhombus_rotate=None):
     sixty = np.pi / 3.0
     thirty = np.pi / 6.0
 
+    # rhombus dim
+    dim = rhomb_dim(rhombus_npos)
+
+    # width in radians
+    radwidth = rhombus_width * np.pi / 180.0
+
     # First layout one rhombus
     rquat = rhombus_layout(rhombus_npos, rhombus_width,
                            rotate=rhombus_rotate)
@@ -397,8 +401,16 @@ def rhombus_hex_layout(rhombus_npos, rhombus_width, gap, rhombus_rotate=None):
     # angular separation of rhombi
     gap *= np.pi / 180.0
 
-    # compute the individual rhombus centers
-    shift = (0.5 * gap) / np.cos(thirty)
+    # half-width of rhombus in radians
+    halfwidth = 0.5 * radwidth
+
+    # width of one pixel
+    pixwidth = radwidth / (dim - 1)
+
+    # Compute the individual rhombus centers.  This is the shift of origin
+    # in the X direction for the "vertical" rhombus.
+    shift = halfwidth + (0.5 * pixwidth) + ((0.5 * gap) / np.cos(thirty))
+
     centers = [
         np.array([shift, 0.0, 0.0]),
         np.array([-shift * np.cos(sixty), shift * np.sin(sixty),
@@ -419,7 +431,7 @@ def rhombus_hex_layout(rhombus_npos, rhombus_width, gap, rhombus_rotate=None):
     return result
 
 
-def sim_wafer_detectors(conf, wafer, platescale, band=None,
+def sim_wafer_detectors(conf, wafer, platescale, fwhm, band=None,
                         center=np.array([0, 0, 0, 1], dtype=np.float64)):
     """Generate detector properties for a wafer.
 
@@ -430,8 +442,10 @@ def sim_wafer_detectors(conf, wafer, platescale, band=None,
         conf (dict): The hardware properties, as read from a TOML config file.
         wafer (str): The wafer name.
         platescale (float): The plate scale in degrees / mm.
+        fwhm (dict): Dictionary of nominal FWHM values in arcminutes for
+            each band.
         band (str, optional): Optionally only use this band.
-        center (array): The quaternion offset of the center.
+        center (array, optional): The quaternion offset of the center.
 
     Returns:
         (OrderedDict): The properties of all selected detectors.
@@ -468,9 +482,6 @@ def sim_wafer_detectors(conf, wafer, platescale, band=None,
         dim = rhomb_dim(nrhombus)
         # This is the center-center distance along the short axis
         width = (dim - 1) * pixsep
-        # In this formalism, the "gap" includes the radius of the pixel on
-        # either side of the gap.
-        realgap = pixsep + gap
         # The orientation within each rhombus alternates between zero and 45
         # degrees.  However there is an offset.  We choose this arbitrarily
         # for the nominal rhombus position, and then the rotation of the
@@ -483,13 +494,12 @@ def sim_wafer_detectors(conf, wafer, platescale, band=None,
             row, col = rhomb_row_col(nrhombus, p)
             if np.mod(row, 2) == 0:
                 pol_A[p] = 0.0 + poloff
-                pol_B[p] = 45.0 + poloff
             else:
                 pol_A[p] = 45.0 + poloff
-                pol_B[p] = 0.0 + poloff
-        layout_A = rhombus_hex_layout(nrhombus, width, realgap,
+            pol_B[p] = 90.0 + pol_A[p]
+        layout_A = rhombus_hex_layout(nrhombus, width, gap,
                                       rhombus_rotate=pol_A)
-        layout_B = rhombus_hex_layout(nrhombus, width, realgap,
+        layout_B = rhombus_hex_layout(nrhombus, width, gap,
                                       rhombus_rotate=pol_B)
     elif wprops["packing"] == "S":
         # Sinuous (Berkeley style)
@@ -510,10 +520,9 @@ def sim_wafer_detectors(conf, wafer, platescale, band=None,
                 handed.append("R")
             if np.mod(col, 4) < 2:
                 pol_A[p] = 0.0
-                pol_B[p] = 45.0
             else:
                 pol_A[p] = 45.0
-                pol_B[p] = 0.0
+            pol_B[p] = 90.0 + pol_A[p]
         layout_A = hex_layout(npix, width, rotate=pol_A)
         layout_B = hex_layout(npix, width, rotate=pol_B)
     else:
@@ -534,8 +543,9 @@ def sim_wafer_detectors(conf, wafer, platescale, band=None,
             for pl, layout in zip(["A", "B"], [layout_A, layout_B]):
                 dprops = OrderedDict()
                 dprops["wafer"] = wafer
-                dprops["pixel"] = p
+                dprops["pixel"] = pstr
                 dprops["band"] = b
+                dprops["fwhm"] = fwhm[b]
                 dprops["pol"] = pl
                 if handed is not None:
                     dprops["handed"] = handed[p]
@@ -554,28 +564,82 @@ def sim_wafer_detectors(conf, wafer, platescale, band=None,
     return dets
 
 
-#
-#
-#
-# def sim_telescope_detectors(conf, tele, tubes=None):
-#     """Generate detector properties for a telescope.
-#
-#     Given a configuration dictionary, generate all detector properties for
-#     the specified telescope and optionally a subset of optics tubes (for the
-#     LAT).
-#
-#     Args:
-#         conf (dict): The hardware properties, as read from a TOML config file.
-#         tele (str): The telescope name.
-#         tubes (list, optional): The optional list of tubes to include.
-#
-#     Returns:
-#         (OrderedDict): The properties of all selected detectors.
-#
-#     """
-#
-#
-#
+def sim_telescope_detectors(conf, tele, tubes=None):
+    """Generate detector properties for a telescope.
+
+    Given a configuration dictionary, generate all detector properties for
+    the specified telescope and optionally a subset of optics tubes (for the
+    LAT).
+
+    Args:
+        conf (dict): The hardware properties, as read from a TOML config file.
+        tele (str): The telescope name.
+        tubes (list, optional): The optional list of tubes to include.
+
+    Returns:
+        (OrderedDict): The properties of all selected detectors.
+
+    """
+    thirty = np.pi / 6.0
+    # The properties of this telescope
+    teleprops = conf["telescopes"][tele]
+    platescale = teleprops["platescale"]
+    fwhm = teleprops["fwhm"]
+
+    # The tubes
+    alltubes = teleprops["tubes"]
+    ntube = len(alltubes)
+    if tubes is None:
+        tubes = alltubes
+    else:
+        for t in tubes:
+            if t not in alltubes:
+                raise RuntimeError("Invalid tube '{}' for telescope '{}'"
+                                   .format(t, tele))
+
+    alldets = OrderedDict()
+    if ntube == 1:
+        # This is a SAT.  We have one tube at the center.
+        tubeprops = conf["tubes"][tubes[0]]
+        waferspace = tubeprops["waferspace"]
+
+        wcenters = hex_layout(7, (2 * waferspace) * platescale)
+        windx = 0
+        for wafer in tubeprops["wafers"]:
+            dets = sim_wafer_detectors(conf, wafer, platescale, fwhm,
+                                       center=wcenters[windx])
+            alldets.update(dets)
+            windx += 1
+    else:
+        # This is the LAT.  Compute the tube centers
+        tubespace = teleprops["tubespace"]
+        tcenters = hex_layout(7, tubespace * platescale)
+        tindx = 0
+        for tube in tubes:
+            print(tube, flush=True)
+            tubeprops = conf["tubes"][tube]
+            waferspace = tubeprops["waferspace"]
+
+            wradius = 0.5 * (waferspace * platescale * np.pi / 180.0)
+            wcenters = [
+                np.array([np.tan(thirty) * wradius, wradius, 0.0]),
+                np.array([-wradius / np.cos(thirty), 0.0, 0.0]),
+                np.array([np.tan(thirty) * wradius, -wradius, 0.0])
+            ]
+            qwcenters = ang_to_quat(wcenters)
+
+            windx = 0
+            for wafer in tubeprops["wafers"]:
+                dets = sim_wafer_detectors(conf, wafer, platescale, fwhm,
+                                           center=qwcenters[windx])
+                for d in dets.keys():
+                    dets[d]["quat"] = qa.mult(tcenters[tindx], dets[d]["quat"])
+                alldets.update(dets)
+                windx += 1
+            tindx += 1
+    return alldets
+
+
 #
 #
 # def create_tube(conf, tube, platescale,
