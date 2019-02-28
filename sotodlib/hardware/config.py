@@ -251,7 +251,7 @@ def get_example():
     tele = OrderedDict()
     tele["tubes"] = ["LT0", "LT1", "LT2", "LT3", "LT4", "LT5", "LT6"]
     tele["platescale"] = 0.00495
-    tele["tubespace"] = 300.0
+    tele["tubespace"] = 600.0
     fwhm = OrderedDict()
     fwhm["LF1"] = 7.4
     fwhm["LF2"] = 5.1
