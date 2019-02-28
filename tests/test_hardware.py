@@ -42,29 +42,25 @@ class HardwareTest(TestCase):
         self.assertTrue(conf == check)
         return
 
-    # def test_sim_wafer(self):
-    #     conf = get_example()
-    #     for tele, teleprops in conf["telescopes"].items():
-    #         platescale = teleprops["platescale"]
-    #         plotdim = 150.0 * platescale
-    #         fwhm = teleprops["fwhm"]
-    #         for tube in teleprops["tubes"]:
-    #             tubeprops = conf["tubes"][tube]
-    #             for wafer in tubeprops["wafers"]:
-    #                 wprops = conf["wafers"][wafer]
-    #                 print("telescope {}, tube {}, wafer {}, platescale = {},"
-    #                       " fwhm = {}".format(tele, tube, wafer, platescale,
-    #                       fwhm[wprops["bands"][0]]), flush=True)
-    #                 outpath = os.path.join(self.outdir,
-    #                                        "wafer_{}.toml".format(wafer))
-    #                 dets = sim_wafer_detectors(conf, wafer, platescale, fwhm)
-    #                 # with open(outpath, "w") as f:
-    #                 #     toml.dump(dets, f)
-    #                 outpath = os.path.join(self.outdir,
-    #                                        "wafer_{}.pdf".format(wafer))
-    #                 plot_detectors(dets, plotdim, plotdim, outpath,
-    #                                labels=True)
-    #     return
+    def test_sim_wafer(self):
+        conf = get_example()
+        for tele, teleprops in conf["telescopes"].items():
+            platescale = teleprops["platescale"]
+            plotdim = 150.0 * platescale
+            fwhm = teleprops["fwhm"]
+            for tube in teleprops["tubes"]:
+                tubeprops = conf["tubes"][tube]
+                for wafer in tubeprops["wafers"]:
+                    outpath = os.path.join(self.outdir,
+                                           "wafer_{}.toml".format(wafer))
+                    dets = sim_wafer_detectors(conf, wafer, platescale, fwhm)
+                    # with open(outpath, "w") as f:
+                    #     toml.dump(dets, f)
+                    outpath = os.path.join(self.outdir,
+                                           "wafer_{}.pdf".format(wafer))
+                    plot_detectors(dets, plotdim, plotdim, outpath,
+                                   labels=True)
+        return
 
     def test_sim_telescope(self):
         conf = get_example()

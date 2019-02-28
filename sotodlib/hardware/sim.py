@@ -603,11 +603,22 @@ def sim_telescope_detectors(conf, tele, tubes=None):
         tubeprops = conf["tubes"][tubes[0]]
         waferspace = tubeprops["waferspace"]
 
-        wcenters = hex_layout(7, (2 * waferspace) * platescale)
+        shift = waferspace * platescale * np.pi / 180.0
+        wcenters = [
+            np.array([0.0, 0.0, 0.0]),
+            np.array([shift * np.cos(thirty), shift * np.sin(thirty), 0.0]),
+            np.array([0.0, shift, 0.0]),
+            np.array([-shift * np.cos(thirty), shift * np.sin(thirty), 0.0]),
+            np.array([-shift * np.cos(thirty), -shift * np.sin(thirty), 0.0]),
+            np.array([0.0, -shift, 0.0]),
+            np.array([shift * np.cos(thirty), -shift * np.sin(thirty), 0.0])
+        ]
+        centers = ang_to_quat(wcenters)
+
         windx = 0
         for wafer in tubeprops["wafers"]:
             dets = sim_wafer_detectors(conf, wafer, platescale, fwhm,
-                                       center=wcenters[windx])
+                                       center=centers[windx])
             alldets.update(dets)
             windx += 1
     else:
@@ -616,7 +627,6 @@ def sim_telescope_detectors(conf, tele, tubes=None):
         tcenters = hex_layout(7, tubespace * platescale)
         tindx = 0
         for tube in tubes:
-            print(tube, flush=True)
             tubeprops = conf["tubes"][tube]
             waferspace = tubeprops["waferspace"]
 
@@ -627,13 +637,14 @@ def sim_telescope_detectors(conf, tele, tubes=None):
                 np.array([np.tan(thirty) * wradius, -wradius, 0.0])
             ]
             qwcenters = ang_to_quat(wcenters)
+            centers = list()
+            for qwc in qwcenters:
+                centers.append(qa.mult(tcenters[tindx], qwc))
 
             windx = 0
             for wafer in tubeprops["wafers"]:
                 dets = sim_wafer_detectors(conf, wafer, platescale, fwhm,
-                                           center=qwcenters[windx])
-                for d in dets.keys():
-                    dets[d]["quat"] = qa.mult(tcenters[tindx], dets[d]["quat"])
+                                           center=centers[windx])
                 alldets.update(dets)
                 windx += 1
             tindx += 1
@@ -722,30 +733,7 @@ def sim_telescope_detectors(conf, tele, tubes=None):
 #     return tdets
 #
 #
-# DB_TABLES = [
-#     ("detprops", [
-#         "`det_id` integer",
-#         "`det_name` varchar(16)",
-#         "`time0` integer",
-#         "`time1` integer",
-#         "`telescope` integer",
-#         "`tube` integer",
-#         "`wafer_type` character(3)",
-#         "`pixel_type` character(3)",
-#         "`band` character(3)",
-#         "`det_type` character(2)",
-#     ]),
-#     ("geometry", [
-#         "`det_id` integer",
-#         "`time0` integer",
-#         "`time1` integer",
-#         "`qx` double",
-#         "`qy` double",
-#         "`qz` double",
-#         "`qw` double",
-#         "`pol` double",
-#     ]),
-# ]
+
 #
 #
 # def sim_small_aperature(pixels, bands, beams, readout, telescope, dbpath=None):
