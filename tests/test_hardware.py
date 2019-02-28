@@ -7,6 +7,8 @@ import os
 
 from unittest import TestCase
 
+from collections import OrderedDict
+
 import toml
 
 from ._helpers import create_outdir
@@ -17,6 +19,8 @@ from sotodlib.hardware.sim import (sim_wafer_detectors,
                                    sim_telescope_detectors)
 
 from sotodlib.hardware.vis import plot_detectors
+
+from sotodlib.hardware.db import DataBase
 
 
 class HardwareTest(TestCase):
@@ -80,3 +84,15 @@ class HardwareTest(TestCase):
                                    "telescope_{}.pdf".format(tele))
             plot_detectors(dets, plotdim, plotdim, outpath, labels=False)
         return
+
+    # def test_sim_db(self):
+    #     conf = get_example()
+    #     alldets = OrderedDict()
+    #     for tele, teleprops in conf["telescopes"].items():
+    #         dets = sim_telescope_detectors(conf, tele)
+    #         alldets.update(dets)
+    #     dbpath = os.path.join(self.outdir, "hardware.db")
+    #     if os.path.exists(dbpath):
+    #         os.remove(dbpath)
+    #     db = DataBase(dbpath, conf=conf, dets=alldets)
+    #     return

@@ -549,6 +549,7 @@ def sim_wafer_detectors(conf, wafer, platescale, fwhm, band=None,
 
     doff = 0
     p = 0
+    idoff = int(wafer) * 10000
     for px in range(npix):
         if px in kill:
             continue
@@ -557,6 +558,7 @@ def sim_wafer_detectors(conf, wafer, platescale, fwhm, band=None,
             for pl, layout in zip(["A", "B"], [layout_A, layout_B]):
                 dprops = OrderedDict()
                 dprops["wafer"] = wafer
+                dprops["ID"] = idoff + doff
                 dprops["pixel"] = pstr
                 dprops["band"] = b
                 dprops["fwhm"] = fwhm[b]
