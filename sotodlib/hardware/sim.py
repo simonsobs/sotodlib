@@ -368,7 +368,8 @@ def rhombus_layout(npos, width, rotate=None):
     return result
 
 
-def rhombus_hex_layout(rhombus_npos, rhombus_width, gap, rhombus_rotate=None):
+def rhombus_hex_layout(rhombus_npos, rhombus_width, gap, rhombus_rotate=None,
+                       killpix=None):
     """
     Construct a hexagon from 3 rhombi.
 
@@ -380,6 +381,8 @@ def rhombus_hex_layout(rhombus_npos, rhombus_width, gap, rhombus_rotate=None):
         rhombus_rotate (array, optional): An additional angle rotation of
             each position on each rhombus before the rhombus is rotated
             into place.
+        killpix (list, optional): Pixel indices to remove for mechanical
+            reasons.
 
     Returns:
         (dict): Keys are the hexagon position and values are quaternions.
@@ -420,13 +423,17 @@ def rhombus_hex_layout(rhombus_npos, rhombus_width, gap, rhombus_rotate=None):
     ]
     qcenters = ang_to_quat(centers)
 
-    result = np.zeros((3 * rhombus_npos, 4), dtype=np.float64)
+    nkill = len(killpix)
+    result = np.zeros((3 * rhombus_npos - nkill, 4), dtype=np.float64)
 
     off = 0
+    px = 0
     for qc in qcenters:
         for p in range(rhombus_npos):
-            result[off] = qa.mult(qc, rquat[p])
-            off += 1
+            if px not in killpix:
+                result[off] = qa.mult(qc, rquat[p])
+                off += 1
+            px += 1
 
     return result
 
@@ -474,6 +481,7 @@ def sim_wafer_detectors(conf, wafer, platescale, fwhm, band=None,
     layout_A = None
     layout_B = None
     handed = None
+    kill = []
     if wprops["packing"] == "F":
         # Feedhorn (NIST style)
         gap = platescale * wprops["rhombusgap"]
@@ -497,10 +505,13 @@ def sim_wafer_detectors(conf, wafer, platescale, fwhm, band=None,
             else:
                 pol_A[p] = 45.0 + poloff
             pol_B[p] = 90.0 + pol_A[p]
+        # We are going to remove 2 pixels for mechanical reasons
+        kf = dim * (dim - 1) // 2
+        kill = [kf, kf + dim - 2]
         layout_A = rhombus_hex_layout(nrhombus, width, gap,
-                                      rhombus_rotate=pol_A)
+                                      rhombus_rotate=pol_A, killpix=kill)
         layout_B = rhombus_hex_layout(nrhombus, width, gap,
-                                      rhombus_rotate=pol_B)
+                                      rhombus_rotate=pol_B, killpix=kill)
     elif wprops["packing"] == "S":
         # Sinuous (Berkeley style)
         # This is the center-center distance along the vertex-vertex axis
@@ -537,7 +548,10 @@ def sim_wafer_detectors(conf, wafer, platescale, fwhm, band=None,
     chan_per_bias = cardprops["nchannel"] // cardprops["nbias"]
 
     doff = 0
-    for p in range(npix):
+    p = 0
+    for px in range(npix):
+        if px in kill:
+            continue
         pstr = "{:03d}".format(p)
         for b in bands:
             for pl, layout in zip(["A", "B"], [layout_A, layout_B]):
@@ -560,6 +574,7 @@ def sim_wafer_detectors(conf, wafer, platescale, fwhm, band=None,
                 dname = "{}_{}_{}_{}".format(wafer, pstr, b, pl)
                 dets[dname] = dprops
                 doff += 1
+        p += 1
 
     return dets
 
@@ -624,7 +639,7 @@ def sim_telescope_detectors(conf, tele, tubes=None):
     else:
         # This is the LAT.  Compute the tube centers
         tubespace = teleprops["tubespace"]
-        tcenters = hex_layout(7, tubespace * platescale)
+        tcenters = hex_layout(7, (tubespace * platescale) / np.cos(thirty))
         tindx = 0
         for tube in tubes:
             tubeprops = conf["tubes"][tube]
