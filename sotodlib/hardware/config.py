@@ -1,27 +1,160 @@
 # Copyright (c) 2018-2019 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
-"""Configuration file utilities.
+"""Hardware configuration utilities.
 """
 
+import os
+import re
+import copy
+
 from collections import OrderedDict
+
+import gzip
 
 import numpy as np
 
 import toml
 
 
+def select(conf, match=dict()):
+    """Select a subset of detectors.
+
+    Given the input config dictionary, select detectors whose properties
+    match some criteria.  If a matching expression is not specified for a
+    given property name, then this is equivalent to selecting all values of
+    that property.
+
+    Each key of the "match" dictionary should be the name of a detector
+    property to be considered for selection (e.g. band, wafer, pol, pixel).
+    The value is a matching expression which can be:
+
+        - A list of explicit values to match.
+        - A string containing a regex expression to apply.
+
+    Example:
+        Imagine you wanted to select all 90GHz detectors on wafers 25 and 26
+        which have "A" polarization and are located in pixels 20-29 (recall
+        the "." matches a single character)::
+
+        newconf = select(conf,
+                         {"wafer": ["25", "26"],
+                          "band": "MF.1",
+                          "pol": "A",
+                          "pixel": "02."})
+
+    Args:
+        conf (dict): The config dictionary.
+        match (dict): The dictionary of property names and their matching
+            expressions.
+
+    """
+    dets = conf["detectors"]
+    newconf = OrderedDict()
+
+    # Copy over auxilliary info
+    aux = [
+        "cards",
+        "crates",
+        "bands",
+        "wafers",
+        "tubes",
+        "telescopes"
+    ]
+    for ax in aux:
+        newconf[ax] = copy.deepcopy(conf[ax])
+
+    # Build regex matches for each property
+    reg = dict()
+    for k, v in match.items():
+        if isinstance(v, list):
+            reg[k] = re.compile(r"("+"|".join(v)+r")")
+        else:
+            reg[k] = re.compile(v)
+
+    # Go through all detectors selecting things that match all fields
+    newdets = OrderedDict()
+    for d, props in dets.items():
+        keep = True
+        for k, v in reg.items():
+            if k in props:
+                test = v.match(props[k])
+                if test is None:
+                    keep = False
+                    break
+        if keep:
+            newdets[d] = copy.deepcopy(props)
+    newconf["detectors"] = newdets
+    return newconf
+
+
+def dump(path, conf, overwrite=False, compress=False):
+    """Write a config to a TOML file.
+
+    Dump a config dictionary to a TOML format file, optionally compressing
+    the contents with gzip and optionally overwriting the file.
+
+    Args:
+        path (str): The file to write.
+        conf (dict): The config dictionary.
+        overwrite (bool): If True, overwrite the file if it exists.  If False,
+            then existing files will cause an exception.
+        compress (bool): If True, compress the data with gzip on write.
+
+    Returns:
+        None
+
+    """
+    if os.path.exists(path):
+        if overwrite:
+            os.remove(path)
+        else:
+            raise RuntimeError("Dump path {} already exists.  Use "
+                               "overwrite option".format(path))
+    if compress:
+        with gzip.open(path, "wb") as f:
+            dstr = toml.dumps(conf)
+            f.write(dstr.encode())
+    else:
+        with open(path, "w") as f:
+            dstr = toml.dumps(conf)
+            f.write(dstr.encode())
+
+    return
+
+
+def load(path):
+    """Read a config from a TOML file.
+
+    The file can either be regular text or a gzipped version of a TOML file.
+
+    Args:
+        path (str): The file to read.
+
+    Returns:
+        (OrderedDict): The config dictionary.
+
+    """
+    dstr = None
+    conf = None
+    try:
+        with gzip.open(path, "rb") as f:
+            dstr = f.read()
+            conf = toml.loads(dstr.decode())
+    except OSError:
+        with open(path, "r") as f:
+            dstr = f.read()
+            conf = toml.loads(dstr)
+    return conf
+
+
 def get_example():
     """Return an example config with the required sections.
 
-    The purpose of these configuration files is to generate a mock hardware
-    model for simulations.  This model can then be used to populate databases
-    that look and feel like the real databases that will be in use.
-
-    Once real hardware exists and its properties are measured and known, then
-    the databases can be updated directly by other software.
+    The returned config dictionary has 4 fake detectors as an example.  These
+    detectors can be replaced by the results of other simulation functions.
 
     Returns:
-        (OrderedDict): Dictionary of all parameters.
+        (OrderedDict): Dictionary of hardware parameters.
 
     """
     cnf = OrderedDict()
@@ -294,5 +427,30 @@ def get_example():
     telescopes["SAT3"] = tele
 
     cnf["telescopes"] = telescopes
+
+    pl = ["A", "B"]
+    hand = ["L", "R"]
+
+    dets = OrderedDict()
+    for d in range(4):
+        dprops = OrderedDict()
+        dprops["wafer"] = "42"
+        dprops["ID"] = d
+        dprops["pixel"] = "000"
+        bindx = d % 2
+        dprops["band"] = "LF{}".format(bindx)
+        dprops["fwhm"] = 1.0
+        dprops["pol"] = pl[bindx]
+        dprops["handed"] = hand[bindx]
+        dprops["card"] = "42"
+        dprops["channel"] = d
+        dprops["coax"] = 0
+        dprops["bias"] = 0
+        dprops["quat"] = np.array([0.0, 0.0, 0.0, 1.0])
+        dname = "fake_{}_{}_{}_{}".format("42", "000", dprops["band"],
+                                     dprops["pol"])
+        dets[dname] = dprops
+
+    cnf["detectors"] = dets
 
     return cnf
