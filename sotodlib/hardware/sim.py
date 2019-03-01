@@ -438,15 +438,15 @@ def rhombus_hex_layout(rhombus_npos, rhombus_width, gap, rhombus_rotate=None,
     return result
 
 
-def sim_wafer_detectors(conf, wafer, platescale, fwhm, band=None,
+def sim_wafer_detectors(hw, wafer, platescale, fwhm, band=None,
                         center=np.array([0, 0, 0, 1], dtype=np.float64)):
     """Generate detector properties for a wafer.
 
-    Given a configuration dictionary, generate all detector properties for
+    Given a Hardware configuration, generate all detector properties for
     the specified wafer and optionally only the specified band.
 
     Args:
-        conf (dict): The hardware properties, as read from a TOML config file.
+        hw (Hardware): The hardware properties.
         wafer (str): The wafer name.
         platescale (float): The plate scale in degrees / mm.
         fwhm (dict): Dictionary of nominal FWHM values in arcminutes for
@@ -459,10 +459,10 @@ def sim_wafer_detectors(conf, wafer, platescale, fwhm, band=None,
 
     """
     # The properties of this wafer
-    wprops = conf["wafers"][wafer]
+    wprops = hw.data["wafers"][wafer]
     # The readout card and its properties
     card = wprops["card"]
-    cardprops = conf["cards"][card]
+    cardprops = hw.data["cards"][card]
     # The bands
     bands = wprops["bands"]
     if band is not None:
@@ -581,15 +581,14 @@ def sim_wafer_detectors(conf, wafer, platescale, fwhm, band=None,
     return dets
 
 
-def sim_telescope_detectors(conf, tele, tubes=None):
+def sim_telescope_detectors(hw, tele, tubes=None):
     """Generate detector properties for a telescope.
 
-    Given a configuration dictionary, generate all detector properties for
-    the specified telescope and optionally a subset of optics tubes (for the
-    LAT).
+    Given a Hardware model, generate all detector properties for the specified
+    telescope and optionally a subset of optics tubes (for the LAT).
 
     Args:
-        conf (dict): The hardware properties, as read from a TOML config file.
+        hw (Hardware): The hardware object to use.
         tele (str): The telescope name.
         tubes (list, optional): The optional list of tubes to include.
 
@@ -600,7 +599,7 @@ def sim_telescope_detectors(conf, tele, tubes=None):
     zaxis = np.array([0, 0, 1], dtype=np.float64)
     thirty = np.pi / 6.0
     # The properties of this telescope
-    teleprops = conf["telescopes"][tele]
+    teleprops = hw.data["telescopes"][tele]
     platescale = teleprops["platescale"]
     fwhm = teleprops["fwhm"]
 
@@ -618,7 +617,7 @@ def sim_telescope_detectors(conf, tele, tubes=None):
     alldets = OrderedDict()
     if ntube == 1:
         # This is a SAT.  We have one tube at the center.
-        tubeprops = conf["tubes"][tubes[0]]
+        tubeprops = hw.data["tubes"][tubes[0]]
         waferspace = tubeprops["waferspace"]
 
         shift = waferspace * platescale * np.pi / 180.0
@@ -635,7 +634,7 @@ def sim_telescope_detectors(conf, tele, tubes=None):
 
         windx = 0
         for wafer in tubeprops["wafers"]:
-            dets = sim_wafer_detectors(conf, wafer, platescale, fwhm,
+            dets = sim_wafer_detectors(hw, wafer, platescale, fwhm,
                                        center=centers[windx])
             alldets.update(dets)
             windx += 1
@@ -649,7 +648,7 @@ def sim_telescope_detectors(conf, tele, tubes=None):
             tcenters[tc] = qa.mult(tuberot, tcenters[tc])
         tindx = 0
         for tube in tubes:
-            tubeprops = conf["tubes"][tube]
+            tubeprops = hw.data["tubes"][tube]
             waferspace = tubeprops["waferspace"]
 
             wradius = 0.5 * (waferspace * platescale * np.pi / 180.0)
@@ -665,7 +664,7 @@ def sim_telescope_detectors(conf, tele, tubes=None):
 
             windx = 0
             for wafer in tubeprops["wafers"]:
-                dets = sim_wafer_detectors(conf, wafer, platescale, fwhm,
+                dets = sim_wafer_detectors(hw, wafer, platescale, fwhm,
                                            center=centers[windx])
                 alldets.update(dets)
                 windx += 1

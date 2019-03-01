@@ -13,7 +13,11 @@ import numpy as np
 
 import sqlite3
 
-from sotoddb import DetDB
+#from sotoddb import DetDB
+
+
+# NOTE:  This source is not currently used.  It is kept here in case we revisit
+# the use of databases.
 
 
 class DataBase(object):
