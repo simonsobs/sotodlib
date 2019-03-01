@@ -154,7 +154,7 @@ class DataBase(object):
             "`qw` float"
         ]
 
-        # Create the DB and detector tables
+        # Create the DB and detector tables, then close.
         sodb = DetDB(map_file=self._path, init_db=True)
         sodb.create_table("detprops", dschema)
         sodb.create_table("detgeom", dqschema)
