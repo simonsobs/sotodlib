@@ -636,17 +636,17 @@ def sim_telescope_detectors(hw, tele, tubes=None):
             alldets.update(dets)
             windx += 1
     else:
-        # This is the LAT.  Compute the tube centers
-        tubespace = teleprops["tubespace"]
-        tcenters = hex_layout(7, (tubespace * platescale) / np.cos(thirty))
+        # This is the LAT.  Compute the tube centers.
         # Rotate each tube by 90 degrees, so that it is pointed "down".
-        tuberot = qa.rotation(zaxis, np.pi/2.0)
-        for tc in range(len(tcenters)):
-            tcenters[tc] = qa.mult(tuberot, tcenters[tc])
+        tubespace = teleprops["tubespace"]
+        tuberot = 90.0 * np.ones(19, dtype=np.float64)
+        tcenters = hex_layout(19, 4 * (tubespace * platescale), rotate=tuberot)
+
         tindx = 0
         for tube in tubes:
             tubeprops = hw.data["tubes"][tube]
             waferspace = tubeprops["waferspace"]
+            location = tubeprops["location"]
 
             wradius = 0.5 * (waferspace * platescale * np.pi / 180.0)
             wcenters = [
@@ -657,7 +657,7 @@ def sim_telescope_detectors(hw, tele, tubes=None):
             qwcenters = ang_to_quat(wcenters)
             centers = list()
             for qwc in qwcenters:
-                centers.append(qa.mult(tcenters[tindx], qwc))
+                centers.append(qa.mult(tcenters[location], qwc))
 
             windx = 0
             for wafer in tubeprops["wafers"]:

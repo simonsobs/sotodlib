@@ -458,6 +458,7 @@ def get_example():
     }
 
     ltubes = ["UHF", "UHF", "MFF", "MFF", "MFS", "MFS", "LF"]
+    ltubepos = [0, 1, 2, 3, 5, 6, 10]
     for tindx in range(7):
         nm = "LT{:d}".format(tindx)
         ttyp = ltubes[tindx]
@@ -474,7 +475,7 @@ def get_example():
                         woff[ttyp] += 1
                         break
                     off += 1
-        tb["location"] = tindx
+        tb["location"] = ltubepos[tindx]
         tubes[nm] = tb
 
     stubes = ["UHF", "MFF", "MFS", "LF"]

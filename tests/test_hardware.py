@@ -39,7 +39,6 @@ class HardwareTest(TestCase):
         # Simulate all wafers
         for tele, teleprops in hw.data["telescopes"].items():
             platescale = teleprops["platescale"]
-            plotdim = 150.0 * platescale
             fwhm = teleprops["fwhm"]
             for tube in teleprops["tubes"]:
                 tubeprops = hw.data["tubes"][tube]
@@ -52,27 +51,19 @@ class HardwareTest(TestCase):
                     hw.dump(outpath, overwrite=True, compress=True)
                     outpath = os.path.join(self.outdir,
                                            "wafer_{}.pdf".format(wafer))
-                    plot_detectors(dets, outpath, width=plotdim,
-                                   height=plotdim, labels=True)
+                    plot_detectors(dets, outpath, labels=True)
         return
 
     def test_sim_telescope(self):
         hw = get_example()
         for tele, teleprops in hw.data["telescopes"].items():
-            platescale = teleprops["platescale"]
-            plotdim = None
-            if tele[0] == "S":
-                plotdim = 400.0 * platescale
-            else:
-                plotdim = 900.0 * platescale
             hw.data["detectors"] = sim_telescope_detectors(hw, tele)
             outpath = os.path.join(self.outdir,
                                    "telescope_{}.toml.gz".format(tele))
             hw.dump(outpath, overwrite=True, compress=True)
             outpath = os.path.join(self.outdir,
                                    "telescope_{}.pdf".format(tele))
-            plot_detectors(hw.data["detectors"], outpath, width=plotdim,
-                           height=plotdim, labels=False)
+            plot_detectors(hw.data["detectors"], outpath, labels=False)
         return
 
     def test_sim_full(self):
