@@ -88,10 +88,10 @@ class HardwareTest(TestCase):
         # Test selection of 90GHz detectors on wafers 25 and 26 which have
         # "A" polarization configuration and are located in pixels 20-29.
         wbhw = hw.select(
-            {"wafer": ["25", "26"],
-             "band": "MF.1",
-             "pol": "A",
-             "pixel": "02."})
+            match={"wafer": ["25", "26"],
+                   "band": "MF.1",
+                   "pol": "A",
+                   "pixel": "02."})
         dbpath = os.path.join(self.outdir, "w25-26_b1_p20-29_A.toml.gz")
         wbhw.dump(dbpath, overwrite=True, compress=True)
         check = Hardware(dbpath)

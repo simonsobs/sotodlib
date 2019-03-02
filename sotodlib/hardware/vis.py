@@ -28,10 +28,9 @@ def plot_detectors(dets, width, height, outfile, labels=False, bandcolor=None):
     """Visualize a dictionary of detectors.
 
     This makes a simple plot of the detector positions on the projected
-    focalplane.  If the detector dictionary contains a key "fwhm", that will
-    be assumed to be in arcminutes.  Otherwise a nominal value is used.
-    If the color and label options are specified, they will override the
-    defaults.
+    focalplane.  The size of detector circles are controlled by the detector
+    "fwhm" key, which is in arcminutes.  If the bandcolor is specified it will
+    override the defaults.
 
     Args:
         dets (dict): Dictionary of detector properties.
@@ -70,7 +69,7 @@ def plot_detectors(dets, width, height, outfile, labels=False, bandcolor=None):
         band = props["band"]
         pixel = props["pixel"]
         pol = props["pol"]
-        quat = props["quat"]
+        quat = np.array(props["quat"]).astype(np.float64)
         fwhm = props["fwhm"]
 
         # radius in degrees
@@ -128,4 +127,54 @@ def plot_detectors(dets, width, height, outfile, labels=False, bandcolor=None):
 
     plt.savefig(outfile)
     plt.close()
+    return
+
+
+class clr:
+    WHITE = "\033[97m"
+    PURPLE = "\033[95m"
+    BLUE = "\033[94m"
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    RED = "\033[91m"
+    ENDC = "\033[0m"
+
+    def disable(self):
+        self.WHITE = ""
+        self.PURPLE = ""
+        self.BLUE = ""
+        self.GREEN = ""
+        self.YELLOW = ""
+        self.RED = ""
+        self.ENDC = ""
+
+
+def summary_text(hw):
+    """Print a textual summary of a hardware configuration.
+
+    Args:
+        hw (Hardware): A hardware dictionary.
+
+    Returns:
+        None
+
+    """
+    for obj, props in hw.data.items():
+        nsub = len(props)
+        print("{}{:<12}: {}{:5d} objects{}".format(clr.WHITE, obj, clr.RED,
+                                                   nsub, clr.ENDC))
+        if nsub <= 200:
+            line = ""
+            for k in list(props.keys()):
+                if (len(line) + len(k)) > 72:
+                    print("    {}{}{}".format(clr.BLUE, line, clr.ENDC))
+                    line = ""
+                line = "{}{}, ".format(line, k)
+            if len(line) > 0:
+                print("    {}{}{}".format(clr.BLUE, line.rstrip(", "),
+                      clr.ENDC))
+        else:
+            # Too many to print!
+            print("    {}(Too many to print){}".format(clr.BLUE, clr.ENDC))
+
     return
