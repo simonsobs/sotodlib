@@ -51,7 +51,7 @@ def main():
     hw = Hardware(args.hardware)
     # summary_text(hw)
 
-    print("\nGenerating detector plot...", flush=True)
+    print("Generating detector plot...", flush=True)
     plot_detectors(hw.data["detectors"], outfile, width=args.width,
                    height=args.height, labels=args.labels)
 

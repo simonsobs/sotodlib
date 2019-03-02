@@ -98,7 +98,6 @@ def main():
     for k, v in match.items():
         print("  {} = r'{}'".format(k, v), flush=True)
 
-    print("...", flush=True)
     newhw = hw.select(telescopes=telescopes, tubes=tubes, match=match)
 
     if args.plain:
