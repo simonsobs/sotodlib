@@ -41,3 +41,12 @@ The resulting detector dictionary can be used independently or can be inserted i
     hw.data["detectors"] = dets
     # OR, just append these detectors:
     hw.data["detectors"].update(dets)
+
+Visualization
+~~~~~~~~~~~~~~~~~~~~~~
+
+The detectors in a given Hardware model can be plotted with this function:
+
+.. autofunction:: sotodlib.hardware.plot_detectors
+
+To plot only a subset of detectors, first apply a selection to make a reduced hardware model and pass that to the plotting function.

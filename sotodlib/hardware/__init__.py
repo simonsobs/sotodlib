@@ -13,4 +13,4 @@ from .config import (Hardware, get_example)
 
 from .sim import (sim_wafer_detectors, sim_telescope_detectors)
 
-from .vis import (plot_detectors,)
+from .vis import (plot_detectors, summary_text)

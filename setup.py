@@ -18,7 +18,10 @@ setup_opts = dict()
 # script in sotodlib.scripts.<foo>.main()
 setup_opts["entry_points"] = {
     "console_scripts": [
-        "so_sim_detdb = sotodlib.scripts.simulate_detector_db.main",
+        "so_hardware_sim = sotodlib.scripts.hardware_sim:main",
+        "so_hardware_plot = sotodlib.scripts.hardware_plot:main",
+        "so_hardware_trim = sotodlib.scripts.hardware_trim:main",
+        "so_hardware_info = sotodlib.scripts.hardware_info:main",
     ]
 }
 
@@ -29,7 +32,7 @@ setup_opts["description"] = "Simons Observatory TOD Simulation and Processing"
 setup_opts["author"] = "Simons Observatory Collaboration"
 setup_opts["author_email"] = "so_software@simonsobservatory.org"
 setup_opts["url"] = "https://github.com/simonsobs/sotodlib"
-setup_opts["packages"] = ["sotodlib"]
+setup_opts["packages"] = find_packages(where=".", exclude="tests")
 setup_opts["license"] = "MIT"
 setup_opts["requires"] = ["Python (>3.4.0)", ]
 

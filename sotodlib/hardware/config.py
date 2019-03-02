@@ -61,7 +61,7 @@ class Hardware(object):
         else:
             with open(path, "w") as f:
                 dstr = toml.dumps(self.data)
-                f.write(dstr.encode())
+                f.write(dstr)
         return
 
     def load(self, path):
@@ -88,13 +88,16 @@ class Hardware(object):
                 self.data = toml.loads(dstr)
         return
 
-    def select(self, match):
+    def select(self, telescopes=None, tubes=None, match=dict()):
         """Select a subset of detectors.
 
         Select detectors whose properties match some criteria.  A new Hardware
         object is created and returned.  If a matching expression is not
         specified for a given property name, then this is equivalent to
         selecting all values of that property.
+
+        Before selecting on detector properties, any telescope / tube filtering
+        criteria are first applied.
 
         Each key of the "match" dictionary should be the name of a detector
         property to be considered for selection (e.g. band, wafer, pol, pixel).
@@ -114,6 +117,10 @@ class Hardware(object):
                                  "pixel": "02."})
 
         Args:
+            telescopes (str): A regex string to apply to telescope names or a
+                list of explicit names.
+            tubes (str): A regex string to apply to tube names or a list of
+                explicit names.
             match (dict): The dictionary of property names and their matching
                 expressions.
 
@@ -121,11 +128,29 @@ class Hardware(object):
             (Hardware): A new Hardware instance with the selected detectors.
 
         """
+        # First parse any telescope and tube options into a list of wafers
+        wselect = None
+        tbselect = None
+        if telescopes is not None:
+            tbselect = list()
+            for tele in telescopes:
+                tbselect.extend(self.data["telescopes"][tele]["tubes"])
+        if tubes is not None:
+            if tbselect is None:
+                tbselect = list()
+            tbselect.extend(tubes)
+        if tbselect is not None:
+            wselect = list()
+            for tb in tbselect:
+                wselect.extend(self.data["tubes"][tb]["wafers"])
+
         dets = self.data["detectors"]
+
         hw = Hardware()
         hw.data = OrderedDict()
 
         # Copy over auxilliary info
+
         aux = [
             "cards",
             "crates",
@@ -140,10 +165,24 @@ class Hardware(object):
         # Build regex matches for each property
         reg = dict()
         for k, v in match.items():
-            if isinstance(v, list):
-                reg[k] = re.compile(r"("+"|".join(v)+r")")
+            if (k == "wafer"):
+                if wselect is None:
+                    if isinstance(v, list):
+                        reg[k] = re.compile(r"("+"|".join(v)+r")")
+                    else:
+                        reg[k] = re.compile(v)
+                else:
+                    wall = list(wselect)
+                    if isinstance(v, list):
+                        wall.extend(v)
+                    else:
+                        wall.append(v)
+                    reg[k] = re.compile(r"("+"|".join(wall)+r")")
             else:
-                reg[k] = re.compile(v)
+                if isinstance(v, list):
+                    reg[k] = re.compile(r"("+"|".join(v)+r")")
+                else:
+                    reg[k] = re.compile(v)
 
         # Go through all detectors selecting things that match all fields
         newdets = OrderedDict()

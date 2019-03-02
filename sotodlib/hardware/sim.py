@@ -13,9 +13,6 @@ import numpy as np
 
 import quaternionarray as qa
 
-from sotoddb import DetDB
-
-
 # FIXME:  much of this code is copy/pasted from the toast source, simply to
 # avoid a dependency.  Once we can "pip install toast", we should consider
 # just calling that package.
