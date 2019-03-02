@@ -5,6 +5,10 @@ Developer Guidelines
 
 Here are some basic guidelines for contributing:
 
+- This is a public repo.  Do not put any real or proprietary data files in this
+  repo.  Use one of the private repos instead.  In general, large data files
+  should not go in a git repo.
+
 - If you are making changes larger than a small bugfix, make a branch for your
   changes and open a pull request when you are going to merge.  Even if you
   self-merge the PR, it notifies other developers about what is going on.
