@@ -18,7 +18,10 @@ setup_opts = dict()
 # script in sotodlib.scripts.<foo>.main()
 setup_opts["entry_points"] = {
     "console_scripts": [
-        "sotod_create_detdb = sotodlib.scripts.create_detdb.main",
+        "so_hardware_sim = sotodlib.scripts.hardware_sim:main",
+        "so_hardware_plot = sotodlib.scripts.hardware_plot:main",
+        "so_hardware_trim = sotodlib.scripts.hardware_trim:main",
+        "so_hardware_info = sotodlib.scripts.hardware_info:main",
     ]
 }
 
@@ -29,7 +32,7 @@ setup_opts["description"] = "Simons Observatory TOD Simulation and Processing"
 setup_opts["author"] = "Simons Observatory Collaboration"
 setup_opts["author_email"] = "so_software@simonsobservatory.org"
 setup_opts["url"] = "https://github.com/simonsobs/sotodlib"
-setup_opts["packages"] = ["sotodlib"]
+setup_opts["packages"] = find_packages(where=".", exclude="tests")
 setup_opts["license"] = "MIT"
 setup_opts["requires"] = ["Python (>3.4.0)", ]
 
@@ -54,7 +57,8 @@ class SOTestCommand(TestCommand):
     def run(self):
         loader = unittest.TestLoader()
         runner = unittest.TextTestRunner(verbosity=2)
-        suite = loader.discover("tests", pattern="test_*.py", top_level_dir=".")
+        suite = loader.discover("tests", pattern="test_*.py",
+                                top_level_dir=".")
         runner.run(suite)
 
 # Add our custom test runner
