@@ -24,6 +24,7 @@ class HardwareTest(TestCase):
     def setUp(self):
         fixture_name = os.path.splitext(os.path.basename(__file__))[0]
         self.outdir = create_outdir(fixture_name)
+        self.skip_plots = os.environ["SOTODLIB_TEST_DISABLE_PLOTS"]
 
     def test_config_example(self):
         outpath = os.path.join(self.outdir, "hardware_example.toml.gz")
@@ -49,10 +50,11 @@ class HardwareTest(TestCase):
                     # replace detectors with this set for dumping
                     hw.data["detectors"] = dets
                     hw.dump(outpath, overwrite=True, compress=True)
-                    outpath = os.path.join(self.outdir,
-                                           "wafer_{}.pdf".format(wafer))
-                    plot_detectors(dets, outpath, labels=True)
-        return
+                    if not self.skip_plots:
+                        outpath = os.path.join(self.outdir,
+                                               "wafer_{}.pdf".format(wafer))
+                        plot_detectors(dets, outpath, labels=True)
+            return
 
     def test_sim_telescope(self):
         hw = get_example()
@@ -61,9 +63,10 @@ class HardwareTest(TestCase):
             outpath = os.path.join(self.outdir,
                                    "telescope_{}.toml.gz".format(tele))
             hw.dump(outpath, overwrite=True, compress=True)
-            outpath = os.path.join(self.outdir,
-                                   "telescope_{}.pdf".format(tele))
-            plot_detectors(hw.data["detectors"], outpath, labels=False)
+            if not self.skip_plots:
+                outpath = os.path.join(self.outdir,
+                                       "telescope_{}.pdf".format(tele))
+                plot_detectors(hw.data["detectors"], outpath, labels=False)
         return
 
     def test_sim_full(self):
