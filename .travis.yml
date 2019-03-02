@@ -12,12 +12,10 @@ before_install:
     - pip3 install -q numpy matplotlib toml quaternionarray
 
 # Install sotodlib
-
 install:
     - python3 setup.py install
 
 # Run tests.  Disable plot output which can be time-consuming.
-
 script:
     - export SOTODLIB_TEST_DISABLE_PLOTS=1
     - python3 setup.py test
