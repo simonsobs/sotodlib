@@ -88,6 +88,46 @@ class Hardware(object):
                 self.data = toml.loads(dstr)
         return
 
+    def wafer_map(self):
+        """Construct wafer mapping to other auxilliary data.
+
+        Given the current data state, build dictionaries to go from wafers
+        to all other non-detector info:  telescopes, tubes, cards, crates,
+        and bands.  This is a convenient mapping when pruning the hardware
+        information or doing other kinds of lookups.
+
+        Returns:
+            (dict): Nested dictionaries from wafers to other properties.
+
+        """
+        result = OrderedDict()
+
+        tube_to_tele = dict()
+        for tele, props in self.data["telescopes"].items():
+            for tb in props["tubes"]:
+                tube_to_tele[tb] = tele
+
+        wafer_to_tube = dict()
+        for tb, props in self.data["tubes"].items():
+            for wf in props["wafers"]:
+                wafer_to_tube[wf] = tb
+
+        crate_to_card = dict()
+        for crate, props in self.data["crates"].items():
+            for card in props["cards"]:
+                crate_to_card[card] = crate
+
+        result["cards"] = {x: y["card"]
+                           for x, y in self.data["wafers"].items()}
+        result["crates"] = {x: crate_to_card[y["card"]]
+                            for x, y in self.data["wafers"].items()}
+        result["bands"] = {x: y["bands"]
+                           for x, y in self.data["wafers"].items()}
+        result["tubes"] = wafer_to_tube
+        result["telescopes"] = {x: tube_to_tele[wafer_to_tube[x]] for x in
+                                list(self.data["wafers"].keys())}
+        return result
+
     def select(self, telescopes=None, tubes=None, match=dict()):
         """Select a subset of detectors.
 
@@ -146,38 +186,36 @@ class Hardware(object):
 
         dets = self.data["detectors"]
 
-        hw = Hardware()
-        hw.data = OrderedDict()
-
-        # Copy over auxilliary info
-
-        aux = [
-            "cards",
-            "crates",
-            "bands",
-            "wafers",
-            "tubes",
-            "telescopes"
-        ]
-        for ax in aux:
-            hw.data[ax] = copy.deepcopy(self.data[ax])
-
         # Build regex matches for each property
         reg = dict()
+        if "wafer" in match:
+            # Handle wafer case separately, since we need to merge any
+            # match with our telescope / tube selection of wafers above.
+            k = "wafer"
+            v = match[k]
+            if wselect is None:
+                # Just the regular behavior
+                if isinstance(v, list):
+                    reg[k] = re.compile(r"("+"|".join(v)+r")")
+                else:
+                    reg[k] = re.compile(v)
+            else:
+                # Merge our selection
+                wall = list(wselect)
+                if isinstance(v, list):
+                    wall.extend(v)
+                else:
+                    wall.append(v)
+                reg[k] = re.compile(r"("+"|".join(wall)+r")")
+        elif wselect is not None:
+            # No pattern in the match dictionary, just our list from the
+            # telescope / tube selection.
+            reg["wafer"] = re.compile(r"("+"|".join(wselect)+r")")
+
         for k, v in match.items():
             if (k == "wafer"):
-                if wselect is None:
-                    if isinstance(v, list):
-                        reg[k] = re.compile(r"("+"|".join(v)+r")")
-                    else:
-                        reg[k] = re.compile(v)
-                else:
-                    wall = list(wselect)
-                    if isinstance(v, list):
-                        wall.extend(v)
-                    else:
-                        wall.append(v)
-                    reg[k] = re.compile(r"("+"|".join(wall)+r")")
+                # Already handled above
+                continue
             else:
                 if isinstance(v, list):
                     reg[k] = re.compile(r"("+"|".join(v)+r")")
@@ -185,6 +223,7 @@ class Hardware(object):
                     reg[k] = re.compile(v)
 
         # Go through all detectors selecting things that match all fields
+        newwafers = set()
         newdets = OrderedDict()
         for d, props in dets.items():
             keep = True
@@ -195,8 +234,36 @@ class Hardware(object):
                         keep = False
                         break
             if keep:
+                newwafers.add(props["wafer"])
                 newdets[d] = copy.deepcopy(props)
+
+        # Now compute the reduced set of auxilliary data needed for these
+        # detectors.
+        wafermap = self.wafer_map()
+
+        # Copy this data
+        hw = Hardware()
+        hw.data = OrderedDict()
+        for k, v in wafermap.items():
+            hw.data[k] = OrderedDict()
+            tocopy = set()
+            for wf in newwafers:
+                if isinstance(v[wf], list):
+                    for iv in v[wf]:
+                        tocopy.add(iv)
+                else:
+                    tocopy.add(v[wf])
+            for elem in tocopy:
+                hw.data[k][elem] = copy.deepcopy(self.data[k][elem])
+
+        # Copy over the wafer data
+        hw.data["wafers"] = OrderedDict()
+        for wf in newwafers:
+            hw.data["wafers"][wf] = copy.deepcopy(self.data["wafers"][wf])
+
+        # And the detectors...
         hw.data["detectors"] = newdets
+
         return hw
 
 

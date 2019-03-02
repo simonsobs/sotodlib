@@ -3,7 +3,6 @@
 """Plot a hardware model.
 """
 
-import sys
 import argparse
 
 from ..hardware import Hardware, plot_detectors, summary_text
@@ -27,12 +26,12 @@ def main():
     )
 
     parser.add_argument(
-        "--width", required=False, default=40.0,
+        "--width", required=False, default=None,
         help="The width of the plot in degrees."
     )
 
     parser.add_argument(
-        "--height", required=False, default=40.0,
+        "--height", required=False, default=None,
         help="The height of the plot in degrees."
     )
 
@@ -50,10 +49,10 @@ def main():
 
     print("Loading hardware file {}...".format(args.hardware), flush=True)
     hw = Hardware(args.hardware)
-    summary_text(hw)
+    # summary_text(hw)
 
     print("\nGenerating detector plot...", flush=True)
-    plot_detectors(hw.data["detectors"], args.width, args.height,
-                   outfile, args.labels)
+    plot_detectors(hw.data["detectors"], outfile, width=args.width,
+                   height=args.height, labels=args.labels)
 
     return

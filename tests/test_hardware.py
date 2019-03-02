@@ -52,8 +52,8 @@ class HardwareTest(TestCase):
                     hw.dump(outpath, overwrite=True, compress=True)
                     outpath = os.path.join(self.outdir,
                                            "wafer_{}.pdf".format(wafer))
-                    plot_detectors(dets, plotdim, plotdim, outpath,
-                                   labels=True)
+                    plot_detectors(dets, outpath, width=plotdim,
+                                   height=plotdim, labels=True)
         return
 
     def test_sim_telescope(self):
@@ -71,8 +71,8 @@ class HardwareTest(TestCase):
             hw.dump(outpath, overwrite=True, compress=True)
             outpath = os.path.join(self.outdir,
                                    "telescope_{}.pdf".format(tele))
-            plot_detectors(hw.data["detectors"], plotdim, plotdim, outpath,
-                           labels=False)
+            plot_detectors(hw.data["detectors"], outpath, width=plotdim,
+                           height=plotdim, labels=False)
         return
 
     def test_sim_full(self):
