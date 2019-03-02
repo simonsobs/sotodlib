@@ -11,6 +11,7 @@ Welcome to SOTODLib's documentation!
    :caption: Contents:
 
    intro.rst
+   cli.rst
    reference.rst
    dev.rst
 

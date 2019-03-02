@@ -9,18 +9,20 @@ This package contains software for time-domain data processing.
 Installation
 ===============
 
-This package is currently only python with no compiled code.  It can be installed / used with typical setuptools commands.
+This package is currently only python with no compiled code.  It can be
+installed / used with typical setuptools commands.
 
 External Dependencies
 ------------------------
 
 This code depends on a standard Python3 software stack with the usual packages
-(numpy, scipy, matplotlib, etc).  There are multiple ways of installing a
-working python3 stack on both Linux and OS X.  The solution you choose likely
-depends on what other things you are using Python for- not just Simons
-Observatory work.  In these examples, we'll be creating a python stack in
-${HOME}/software/so, however if you already have a python stack for use with
-S.O. tools, just skip this section.
+(numpy, scipy, matplotlib, etc).  There are also several additional python
+package dependencies (toml, quaternionarray) that can be pip-installed.  There
+are multiple ways of installing a working python3 stack on both Linux and OS X.
+The solution you choose likely depends on what other things you are using
+Python for- not just Simons Observatory work.  In these examples, we'll be
+creating a python stack in ${HOME}/software/so, however if you already have a
+python stack for use with S.O. tools, just skip this section.
 
 Use Anaconda...
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -31,7 +33,8 @@ Create a new conda environment::
 
   %> conda create --copy -m -p ${HOME}/software/so
   %> conda activate ~/software/so
-  %> conda install numpy scipy matplotlib
+  %> conda install pip numpy scipy matplotlib
+  %> pip install quaternionarray
 
 ... Or Use Virtualenv and Pip
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -46,6 +49,7 @@ it::
 Now use pip to install the dependencies we need::
 
     %> pip install numpy scipy matplotlib
+    %> pip install quaternionarray
 
 
 S.O. Affiliated Dependencies
@@ -55,11 +59,8 @@ Activate / load your python stack from the previous section.  Since you created
 a conda environment or virtualenv directory specifically for S.O. tools, you
 can always delete that directory and make a new one as needed.
 
-Currently the sotodlib package requires the "sotoddb" package for working with detector databases.  From a git checkout of sotoddb, install this into your conda environment / virtualenv::
-
-    %> cd sotoddb
-    %> python setup.py clean
-    %> python setup.py install
+Currently the sotodlib package does not require any other S.O. packages.  In
+the future, it will require sotoddb and so3g as dependencies.
 
 
 Installing sotodlib
@@ -71,10 +72,22 @@ You can either install directly to your conda environment / virtualenv::
     %> python setup.py clean
     %> python setup.py install
 
-Or (if you are frequently hacking on this code) you can install the package in "develop" mode, which installs symlinks from your conda environment / virtualenv that point back to your source checkout::
+Or (if you are frequently hacking on this code) you can install the package in
+"develop" mode, which installs symlinks from your conda environment /
+virtualenv that point back to your source checkout::
 
     %> cd sotodlib
     %> python setup.py develop
+
+
+Running Tests
+------------------
+
+After installing, the unit tests can be run with::
+
+    %> python setup.py test
+
+Beware that these will take several minutes.
 
 
 Something Went Wrong!
