@@ -49,4 +49,6 @@ The detectors in a given Hardware model can be plotted with this function:
 
 .. autofunction:: sotodlib.hardware.plot_detectors
 
-To plot only a subset of detectors, first apply a selection to make a reduced hardware model and pass that to the plotting function.
+To plot only a subset of detectors, first apply a selection to make a reduced hardware model and pass that to the plotting function.  You can also dump out to the console a pretty formatted summary of the hardware configuration:
+
+.. autofunction:: sotodlib.hardware.summary_text

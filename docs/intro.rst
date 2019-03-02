@@ -9,7 +9,8 @@ This package contains software for time-domain data processing.
 Installation
 ===============
 
-This package is currently only python with no compiled code.  It can be installed / used with typical setuptools commands.
+This package is currently only python with no compiled code.  It can be
+installed / used with typical setuptools commands.
 
 External Dependencies
 ------------------------
@@ -58,11 +59,8 @@ Activate / load your python stack from the previous section.  Since you created
 a conda environment or virtualenv directory specifically for S.O. tools, you
 can always delete that directory and make a new one as needed.
 
-Currently the sotodlib package requires the "sotoddb" package for working with detector databases.  From a git checkout of sotoddb, install this into your conda environment / virtualenv::
-
-    %> cd sotoddb
-    %> python setup.py clean
-    %> python setup.py install
+Currently the sotodlib package does not require any other S.O. packages.  In
+the future, it will require sotoddb and so3g as dependencies.
 
 
 Installing sotodlib
@@ -74,10 +72,22 @@ You can either install directly to your conda environment / virtualenv::
     %> python setup.py clean
     %> python setup.py install
 
-Or (if you are frequently hacking on this code) you can install the package in "develop" mode, which installs symlinks from your conda environment / virtualenv that point back to your source checkout::
+Or (if you are frequently hacking on this code) you can install the package in
+"develop" mode, which installs symlinks from your conda environment /
+virtualenv that point back to your source checkout::
 
     %> cd sotodlib
     %> python setup.py develop
+
+
+Running Tests
+------------------
+
+After installing, the unit tests can be run with::
+
+    %> python setup.py test
+
+Beware that these will take several minutes.
 
 
 Something Went Wrong!
