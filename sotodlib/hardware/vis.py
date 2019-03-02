@@ -24,7 +24,8 @@ default_band_colors = {
 }
 
 
-def plot_detectors(dets, width, height, outfile, labels=False, bandcolor=None):
+def plot_detectors(dets, outfile, width=None, height=None, labels=False,
+                   bandcolor=None):
     """Visualize a dictionary of detectors.
 
     This makes a simple plot of the detector positions on the projected
@@ -33,10 +34,10 @@ def plot_detectors(dets, width, height, outfile, labels=False, bandcolor=None):
     override the defaults.
 
     Args:
-        dets (dict): Dictionary of detector properties.
-        width (float): Width of plot in degrees.
-        height (float): Height of plot in degrees.
         outfile (str): Output PDF path.
+        dets (dict): Dictionary of detector properties.
+        width (float): Width of plot in degrees (None = autoscale).
+        height (float): Height of plot in degrees (None = autoscale).
         labels (bool): If True, label each detector.
         bandcolor (dict, optional): Dictionary of color values for each band.
 
@@ -44,10 +45,50 @@ def plot_detectors(dets, width, height, outfile, labels=False, bandcolor=None):
         None
 
     """
+    xaxis = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    zaxis = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    wmin = 1.0
+    wmax = -1.0
+    hmin = 1.0
+    hmax = -1.0
+    if (width is None) or (height is None):
+        # We are autoscaling.  Compute the angular extent of all detectors
+        # and add some buffer.
+        for d, props in dets.items():
+            quat = np.array(props["quat"]).astype(np.float64)
+            dir = qa.rotate(quat, zaxis).flatten()
+            if (dir[0] > wmax):
+                wmax = dir[0]
+            if (dir[0] < wmin):
+                wmin = dir[0]
+            if (dir[1] > hmax):
+                hmax = dir[1]
+            if (dir[1] < hmin):
+                hmin = dir[1]
+        wmin = np.arcsin(wmin) * 180.0 / np.pi
+        wmax = np.arcsin(wmax) * 180.0 / np.pi
+        hmin = np.arcsin(hmin) * 180.0 / np.pi
+        hmax = np.arcsin(hmax) * 180.0 / np.pi
+        wbuf = 0.1 * (wmax - wmin)
+        hbuf = 0.1 * (hmax - hmin)
+        wmin -= wbuf
+        wmax += wbuf
+        hmin -= hbuf
+        hmax += hbuf
+        width = wmax - wmin
+        height = hmax - hmin
+    else:
+        half_width = 0.5 * width
+        half_height = 0.5 * height
+        wmin = -half_width
+        wmax = half_width
+        hmin = -half_height
+        hmax = half_height
+
     if bandcolor is None:
         bandcolor = default_band_colors
     xfigsize = 10.0
-    yfigsize = 10.0
+    yfigsize = xfigsize * (height / width)
     figdpi = 75
     yfigpix = int(figdpi * yfigsize)
     ypixperdeg = yfigpix / height
@@ -55,15 +96,10 @@ def plot_detectors(dets, width, height, outfile, labels=False, bandcolor=None):
     fig = plt.figure(figsize=(xfigsize, yfigsize), dpi=figdpi)
     ax = fig.add_subplot(1, 1, 1)
 
-    half_width = 0.5 * width
-    half_height = 0.5 * height
     ax.set_xlabel("Degrees", fontsize="large")
     ax.set_ylabel("Degrees", fontsize="large")
-    ax.set_xlim([-half_width, half_width])
-    ax.set_ylim([-half_height, half_height])
-
-    xaxis = np.array([1.0, 0.0, 0.0], dtype=np.float64)
-    zaxis = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    ax.set_xlim([wmin, wmax])
+    ax.set_ylim([hmin, hmax])
 
     for d, props in dets.items():
         band = props["band"]
@@ -163,7 +199,7 @@ def summary_text(hw):
         nsub = len(props)
         print("{}{:<12}: {}{:5d} objects{}".format(clr.WHITE, obj, clr.RED,
                                                    nsub, clr.ENDC))
-        if nsub <= 200:
+        if nsub <= 2000:
             line = ""
             for k in list(props.keys()):
                 if (len(line) + len(k)) > 72:

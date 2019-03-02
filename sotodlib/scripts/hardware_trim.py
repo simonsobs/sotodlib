@@ -33,6 +33,11 @@ def main():
     )
 
     parser.add_argument(
+        "--overwrite", required=False, default=False, action="store_true",
+        help="Overwrite any existing output file."
+    )
+
+    parser.add_argument(
         "--telescopes", required=False, default=None,
         help="Select only detectors on these telescope (LAT, SAT0, SAT1, etc)\
             .  This should be either a regex string or a comma-separated\
@@ -99,10 +104,10 @@ def main():
     if args.plain:
         outpath = "{}.toml".format(args.out)
         print("Dumping selected config to {}...".format(outpath))
-        newhw.dump(outpath, overwrite=True, compress=False)
+        newhw.dump(outpath, overwrite=args.overwrite, compress=False)
     else:
         outpath = "{}.toml.gz".format(args.out)
         print("Dumping selected config to {}...".format(outpath))
-        newhw.dump(outpath, overwrite=True, compress=True)
+        newhw.dump(outpath, overwrite=args.overwrite, compress=True)
 
     return

@@ -27,6 +27,11 @@ def main():
         help="Write plain text (without gzip compression)"
     )
 
+    parser.add_argument(
+        "--overwrite", required=False, default=False, action="store_true",
+        help="Overwrite any existing output file."
+    )
+
     args = parser.parse_args()
 
     print("Getting example config...", flush=True)
@@ -41,10 +46,10 @@ def main():
     if args.plain:
         outpath = "{}.toml".format(args.out)
         print("Dumping config to {}...".format(outpath))
-        hw.dump(outpath, overwrite=True, compress=False)
+        hw.dump(outpath, overwrite=args.overwrite, compress=False)
     else:
         outpath = "{}.toml.gz".format(args.out)
         print("Dumping config to {}...".format(outpath))
-        hw.dump(outpath, overwrite=True, compress=True)
+        hw.dump(outpath, overwrite=args.overwrite, compress=True)
 
     return
