@@ -24,7 +24,9 @@ class HardwareTest(TestCase):
     def setUp(self):
         fixture_name = os.path.splitext(os.path.basename(__file__))[0]
         self.outdir = create_outdir(fixture_name)
-        self.skip_plots = os.environ["SOTODLIB_TEST_DISABLE_PLOTS"]
+        self.skip_plots = False
+        if "SOTODLIB_TEST_DISABLE_PLOTS" in os.environ:
+            self.skip_plots = os.environ["SOTODLIB_TEST_DISABLE_PLOTS"]
 
     def test_config_example(self):
         outpath = os.path.join(self.outdir, "hardware_example.toml.gz")
