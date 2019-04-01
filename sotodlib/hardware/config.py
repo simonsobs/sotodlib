@@ -151,10 +151,10 @@ class Hardware(object):
             26 which have "A" polarization and are located in pixels 20-29
             (recall the "." matches a single character)::
 
-                new = hw.select({"wafer": ["25", "26"],
-                                 "band": "MF.1",
-                                 "pol": "A",
-                                 "pixel": "02."})
+                new = hw.select(match={"wafer": ["25", "26"],
+                                "band": "MF.1",
+                                "pol": "A",
+                                "pixel": "02."})
 
         Args:
             telescopes (str): A regex string to apply to telescope names or a
