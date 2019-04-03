@@ -312,6 +312,10 @@ def get_example():
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
+    # Noise elevation scaling fits from Carlos Sierra
+    # These numbers are for V3 LAT baseline
+    bnd["A"] = 0.09
+    bnd["C"] = 0.87
     bands["LF1"] = bnd
 
     bnd = OrderedDict()
@@ -323,6 +327,8 @@ def get_example():
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
+    bnd["A"] = 0.25
+    bnd["C"] = 0.64
     bands["LF2"] = bnd
 
     bnd = OrderedDict()
@@ -334,6 +340,8 @@ def get_example():
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
+    bnd["A"] = 0.14
+    bnd["C"] = 0.80
     bands["MFF1"] = bnd
 
     bnd = OrderedDict()
@@ -345,6 +353,8 @@ def get_example():
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
+    bnd["A"] = 0.17
+    bnd["C"] = 0.76
     bands["MFF2"] = bnd
 
     bnd = OrderedDict()
@@ -356,6 +366,8 @@ def get_example():
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
+    bnd["A"] = 0.19
+    bnd["C"] = 0.74
     bands["MFS1"] = bnd
 
     bnd = OrderedDict()
@@ -367,6 +379,8 @@ def get_example():
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
+    bnd["A"] = 0.19
+    bnd["C"] = 0.73
     bands["MFS2"] = bnd
 
     bnd = OrderedDict()
@@ -378,6 +392,8 @@ def get_example():
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
+    bnd["A"] = 0.30
+    bnd["C"] = 0.58
     bands["UHF1"] = bnd
 
     bnd = OrderedDict()
@@ -389,6 +405,8 @@ def get_example():
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
+    bnd["A"] = 0.36
+    bnd["C"] = 0.49
     bands["UHF2"] = bnd
 
     cnf["bands"] = bands
