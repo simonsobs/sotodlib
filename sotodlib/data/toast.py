@@ -17,6 +17,7 @@ import numpy as np
 import toast
 from toast.mpi import MPI
 from toast.tod.interval import intervals_to_chunklist
+import toast.qarray as qa
 
 # Import so3g first so that it can control the import and monkey-patching
 # of spt3g.  Then our import of spt3g_core will use whatever has been imported
@@ -234,30 +235,41 @@ def tod_to_frames(
                     ndata = frame_sizes[f]
                     datalast = dataoff + ndata
                     chunks = list()
+                    idomain = (0, ndata-1)
                     for intr in fint:
+                        # Interval sample ranges are defined relative to the
+                        # frame itself.
                         cfirst = None
                         clast = None
                         if (intr[0] < datalast) and (intr[1] >= dataoff):
                             # there is some overlap...
                             if intr[0] < dataoff:
-                                cfirst = dataoff
+                                cfirst = 0
                             else:
-                                cfirst = intr[0]
+                                cfirst = intr[0] - dataoff
                             if intr[1] >= datalast:
-                                clast = datalast - 1
+                                clast = ndata - 1
                             else:
-                                clast = intr[1]
+                                clast = intr[1] - dataoff
                             chunks.append([cfirst, clast])
-                    if len(chunks) == 0:
-                        chunks.append([-1, -1])
                     if mapfield is None:
-                        fdata[f][framefield] = \
-                            so3g.IntervalsInt.from_array(
-                                np.array(chunks, dtype=np.int64))
+                        if len(chunks) == 0:
+                            fdata[f][framefield] = \
+                                so3g.IntervalsInt()
+                        else:
+                            fdata[f][framefield] = \
+                                so3g.IntervalsInt.from_array(
+                                    np.array(chunks, dtype=np.int64))
+                        fdata[f][framefield].domain = idomain
                     else:
-                        fdata[f][framefield][mapfield] = \
-                            so3g.IntervalsInt.from_array(
-                                np.array(chunks, dtype=np.int64))
+                        if len(chunks) == 0:
+                            fdata[f][framefield][mapfield] = \
+                                so3g.IntervalsInt()
+                        else:
+                            fdata[f][framefield][mapfield] = \
+                                so3g.IntervalsInt.from_array(
+                                    np.array(chunks, dtype=np.int64))
+                            fdata[f][framefield][mapfield].domain = idomain
                 del fint
             elif g3t == core3g.G3Timestream:
                 for f in range(n_frames):
@@ -314,19 +326,30 @@ def tod_to_frames(
     # Now gather the full sample data one field at a time.  The root process
     # splits up the results into frames.
 
-    # First collect boresight data
+    # First collect boresight data.  In addition to quaternions for the Az/El
+    # pointing, we convert this back into angles that follow the specs
+    # for telescope pointing.
 
     bore = None
     if rankdet == 0:
         bore = tod.read_boresight(local_start=cacheoff, n=ncache)
     bore = gather_field(0, bore.flatten(), 4, MPI.DOUBLE, cacheoff, ncache, 0)
-    split_field(bore.reshape(-1, 4), core3g.G3VectorDouble, "boresight_radec")
+    split_field(bore.reshape(-1, 4), core3g.G3VectorDouble, "qboresight_radec")
 
     bore = None
     if rankdet == 0:
         bore = tod.read_boresight_azel(local_start=cacheoff, n=ncache)
     bore = gather_field(0, bore.flatten(), 4, MPI.DOUBLE, cacheoff, ncache, 1)
-    split_field(bore.reshape(-1, 4), core3g.G3VectorDouble, "boresight_azel")
+    split_field(bore.reshape(-1, 4), core3g.G3VectorDouble, "qboresight_azel")
+
+    if tod.mpicomm.rank == 0:
+        for f in range(n_frames):
+            fdata[f]["boresight"] = core3g.G3TimestreamMap()
+
+    ang_az, ang_el, ang_roll = qa.to_angles(bore)
+    split_field(ang_az, core3g.G3Timestream, "boresight", "az")
+    split_field(ang_el, core3g.G3Timestream, "boresight", "el")
+    split_field(ang_roll, core3g.G3Timestream, "boresight", "roll")
 
     # Now the position and velocity information
 
@@ -522,6 +545,11 @@ class ToastExport(toast.Operator):
         f = core3g.G3Frame(core3g.G3FrameType.Observation)
         for k, v in props.items():
             f[k] = s3utils.to_g3_type(v)
+        indx = core3g.G3MapInt()
+        for k, v in detindx.items():
+            indx[k] = int(v)
+        f["detector_uid"] = indx
+        writer(f)
         return
 
     def _write_precal(self, writer, dets, noise):
@@ -539,9 +567,36 @@ class ToastExport(toast.Operator):
         f[qname] = core3g.G3MapVectorDouble()
         for k, v in dets.items():
             f[qname][k] = core3g.G3VectorDouble(v)
-
-        # FIXME: write the PSDs and rms here...
-
+        if noise is not None:
+            kfreq = "noise_stream_freq"
+            kpsd = "noise_stream_psd"
+            kindx = "noise_stream_index"
+            dstr = "noise_detector_streams"
+            dwt = "noise_detector_weights"
+            f[kfreq] = core3g.G3MapVectorDouble()
+            f[kpsd] = core3g.G3MapVectorDouble()
+            f[kindx] = core3g.G3MapInt()
+            f[dstr] = core3g.G3MapVectorInt()
+            f[dwt] = core3g.G3MapVectorDouble()
+            nse_dets = list(noise.detectors)
+            nse_keys = list(noise.keys)
+            st = dict()
+            wts = dict()
+            for d in nse_dets:
+                st[d] = list()
+                wts[d] = list()
+            for k in nse_keys:
+                f[kfreq][k] = core3g.G3VectorDouble(noise.freq(k).tolist())
+                f[kpsd][k] = core3g.G3VectorDouble(noise.psd(k).tolist())
+                f[kindx][k] = int(noise.index(k))
+                for d in nse_dets:
+                    wt = noise.weight(d, k)
+                    if wt > 0:
+                        st[d].append(noise.index(k))
+                        wts[d].append(wt)
+            for d in nse_dets:
+                f[dstr][d] = core3g.G3VectorInt(st[d])
+                f[dwt][d] = core3g.G3VectorDouble(wts[d])
         writer(f)
         return
 
@@ -662,7 +717,7 @@ class ToastExport(toast.Operator):
             flavors.discard(self._cache_name)
             flavors.discard(self._cache_flag_name)
             copy_flavors = [
-                (x, flavor_type[x], flavor_maptype[x], "signal-{}".format(x))
+                (x, flavor_type[x], flavor_maptype[x], "signal_{}".format(x))
                 for x in flavors]
 
             print("found cache flavors ", flavors, flush=True)

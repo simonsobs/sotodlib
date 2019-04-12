@@ -52,7 +52,7 @@ class ToastExportTest(TestCase):
         detquats = {k: v["quat"] for k, v in hw.data["detectors"].items()}
 
         # Samples per observation
-        self.totsamp = 100000
+        self.totsamp = 10000
 
         # Pixelization
         nside = 512
