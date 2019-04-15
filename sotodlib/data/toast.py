@@ -207,7 +207,7 @@ def tod_to_frames(
             chunks.append([grp[0], grp[-1]])
         return chunks
 
-    def split_field(data, g3t, framefield, mapfield=None):
+    def split_field(data, g3t, framefield, mapfield=None, g3units=units):
         """Split a gathered data buffer into frames.
         """
         if tod.mpicomm.rank == 0:
@@ -276,19 +276,19 @@ def tod_to_frames(
                     dataoff = fdataoff[f]
                     ndata = frame_sizes[f]
                     if mapfield is None:
-                        if units is None:
+                        if g3units is None:
                             fdata[f][framefield] = \
                                 g3t(data[dataoff:dataoff+ndata])
                         else:
                             fdata[f][framefield] = \
-                                g3t(data[dataoff:dataoff+ndata], units)
+                                g3t(data[dataoff:dataoff+ndata], g3units)
                     else:
-                        if units is None:
+                        if g3units is None:
                             fdata[f][framefield][mapfield] = \
                                 g3t(data[dataoff:dataoff+ndata])
                         else:
                             fdata[f][framefield][mapfield] = \
-                                g3t(data[dataoff:dataoff+ndata], units)
+                                g3t(data[dataoff:dataoff+ndata], g3units)
             else:
                 # The bindings of G3Vector seem to only work with
                 # lists.  This is probably horribly inefficient.
@@ -346,10 +346,13 @@ def tod_to_frames(
         for f in range(n_frames):
             fdata[f]["boresight"] = core3g.G3TimestreamMap()
 
-    ang_az, ang_el, ang_roll = qa.to_angles(bore)
-    split_field(ang_az, core3g.G3Timestream, "boresight", "az")
-    split_field(ang_el, core3g.G3Timestream, "boresight", "el")
-    split_field(ang_roll, core3g.G3Timestream, "boresight", "roll")
+    ang_theta, ang_phi, ang_psi = qa.to_angles(bore)
+    ang_az = ang_phi * 180.0 / np.pi
+    ang_el = 90.0 - ang_theta * 180.0 / np.pi
+    ang_roll = ang_psi * 180.0 / np.pi
+    split_field(ang_az, core3g.G3Timestream, "boresight", "az", None)
+    split_field(ang_el, core3g.G3Timestream, "boresight", "el", None)
+    split_field(ang_roll, core3g.G3Timestream, "boresight", "roll", None)
 
     # Now the position and velocity information
 
