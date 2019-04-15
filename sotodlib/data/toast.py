@@ -347,9 +347,9 @@ def tod_to_frames(
             fdata[f]["boresight"] = core3g.G3TimestreamMap()
 
     ang_theta, ang_phi, ang_psi = qa.to_angles(bore)
-    ang_az = ang_phi * 180.0 / np.pi
-    ang_el = 90.0 - ang_theta * 180.0 / np.pi
-    ang_roll = ang_psi * 180.0 / np.pi
+    ang_az = ang_phi
+    ang_el = (np.pi / 2.0) - ang_theta
+    ang_roll = ang_psi
     split_field(ang_az, core3g.G3Timestream, "boresight", "az", None)
     split_field(ang_el, core3g.G3Timestream, "boresight", "el", None)
     split_field(ang_roll, core3g.G3Timestream, "boresight", "roll", None)
