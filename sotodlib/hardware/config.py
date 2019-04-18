@@ -279,28 +279,6 @@ def get_example():
     """
     cnf = OrderedDict()
 
-    cards = OrderedDict()
-    crates = OrderedDict()
-
-    cdindx = 0
-    for cr in range(8):
-        crn = "{:d}".format(cr)
-        crt = OrderedDict()
-        crt["cards"] = list()
-        for cd in range(6):
-            crd = "{:02d}".format(cdindx)
-            cdprops = OrderedDict()
-            cdprops["nbias"] = 12
-            cdprops["ncoax"] = 2
-            cdprops["nchannel"] = 2000
-            cards[crd] = cdprops
-            crt["cards"].append(crd)
-            cdindx += 1
-        crates[crn] = crt
-
-    cnf["cards"] = cards
-    cnf["crates"] = crates
-
     bands = OrderedDict()
 
     bnd = OrderedDict()
@@ -459,8 +437,6 @@ def get_example():
             wf["bands"] = wbd[wt]
             wf["card"] = "{:02d}".format(cardindx)
             cardindx += 1
-            if cardindx > 47:
-                cardindx = 0
             wafers[wn] = wf
             windx += 1
 
@@ -568,6 +544,48 @@ def get_example():
     telescopes["SAT3"] = tele
 
     cnf["telescopes"] = telescopes
+    
+    cards = OrderedDict()
+    crates = OrderedDict()
+    
+    crt_indx = 0
+    
+    for tel in cnf["telescopes"]:
+        crn = "{:d}".format(crt_indx)
+        crt = OrderedDict()
+        crt['cards'] = list()
+        crt['telescope'] = tel
+    
+        ## get all the wafer card numbers for a telescope
+        tb_wfrs = [cnf['tubes'][t]['wafers'] for t in cnf['telescopes'][tel]['tubes']]
+        tl_wfrs = [i for sl in tb_wfrs for i in sl]
+        wafer_cards = [cnf['wafers'][w]['card'] for w in tl_wfrs]
+        
+        # add all cards to the card table and assign to crates
+        for crd in wafer_cards:
+            cdprops = OrderedDict()
+            cdprops["nbias"] = 12
+            cdprops["ncoax"] = 2
+            cdprops["nchannel"] = 2000
+            cards[crd] = cdprops
+            
+            crt["cards"].append(crd)
+            
+            # name new crates when current one is full
+            if ('S' in tel and len(crt["cards"]) >=4) or len(crt["cards"]) >=6:
+                crates[crn] = crt
+                crt_indx += 1
+                crn = "{:d}".format(crt_indx)
+                crt = OrderedDict()
+                crt['cards'] = list()
+                crt['telescope'] = tel
+        
+        # each telescope starts with a new crate
+        crates[crn] = crt
+        crt_indx += 1
+
+    cnf["cards"] = cards
+    cnf["crates"] = crates
 
     pl = ["A", "B"]
     hand = ["L", "R"]
