@@ -31,6 +31,9 @@ import sotodlib.hardware
 if tt.tidas_available:
     from toast.tod.tidas import OpTidasExport, TODTidas
 
+from sotodlib.data.toast import ToastExport
+from spt3g import core as core3g
+
 import gc
 
 try:
@@ -115,10 +118,6 @@ def memreport(comm=None, msg=""):
     if comm is not None:
         comm.Barrier()
     return
-
-
-# from sotodlib.data.toast import ToastExport
-# from spt3g import core as core3g
 
 
 # import warnings
@@ -1745,8 +1744,6 @@ def output_tidas(args, comm, data, totalname):
 def export_TOD(args, comm, data, totalname):
     if args.export is None:
         return
-    raise RuntimeError("TOAST export not yet implemented")
-    """
     autotimer = timing.auto_timer()
 
     path = os.path.abspath(args.export)
@@ -1761,7 +1758,7 @@ def export_TOD(args, comm, data, totalname):
         prefix=args.band,
         use_intervals=True,
         cache_name=totalname,
-        mask_flag_common=tod.TURNAROUND,
+        mask_flag_common=data.obs[0]['tod'].TURNAROUND,
         filesize=500000,
         units=core3g.G3TimestreamUnits.Tcmb,
     )
@@ -1776,7 +1773,7 @@ def export_TOD(args, comm, data, totalname):
             flush=args.flush,
         )
     del autotimer
-    """
+
     return
 
 
