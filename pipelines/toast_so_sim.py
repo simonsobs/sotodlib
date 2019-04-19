@@ -31,8 +31,94 @@ import sotodlib.hardware
 if tt.tidas_available:
     from toast.tod.tidas import OpTidasExport, TODTidas
 
-#from sotodlib.data.toast import ToastExport
-#from spt3g import core as core3g
+import gc
+
+try:
+    import psutil
+except:
+    psutil = None
+
+
+def memreport(comm=None, msg=""):
+    # Gather and report the amount of allocated, free and swapped system memory
+    if psutil is None:
+        return
+    vmem = psutil.virtual_memory()._asdict()
+    gc.collect()
+    vmem2 = psutil.virtual_memory()._asdict()
+    memstr = "Memory usage {}\n".format(msg)
+    for key, value in vmem.items():
+        value2 = vmem2[key]
+        if comm is None:
+            vlist = [value]
+            vlist2 = [value2]
+        else:
+            vlist = comm.gather(value)
+            vlist2 = comm.gather(value2)
+        if comm is None or comm.rank == 0:
+            vlist = np.array(vlist, dtype=np.float64)
+            vlist2 = np.array(vlist2, dtype=np.float64)
+            if key != "percent":
+                # From bytes to better units
+                if np.amax(vlist) < 2 ** 20:
+                    vlist /= 2 ** 10
+                    vlist2 /= 2 ** 10
+                    unit = "kB"
+                elif np.amax(vlist) < 2 ** 30:
+                    vlist /= 2 ** 20
+                    vlist2 /= 2 ** 20
+                    unit = "MB"
+                else:
+                    vlist /= 2 ** 30
+                    vlist2 /= 2 ** 30
+                    unit = "GB"
+            else:
+                unit = "% "
+            if comm is None or comm.size == 1:
+                memstr += "{:>12} : {:8.3f} {}\n".format(key, vlist[0], unit)
+                if np.abs(vlist2[0] - vlist[0]) / vlist[0] > 1e-3:
+                    memstr += "{:>12} : {:8.3f} {} (after GC)\n".format(
+                        key, vlist2[0], unit
+                    )
+            else:
+                med1 = np.median(vlist)
+                memstr += (
+                    "{:>12} : {:8.3f} {}  < {:8.3f} +- {:8.3f} {}  "
+                    "< {:8.3f} {}\n".format(
+                        key,
+                        np.amin(vlist),
+                        unit,
+                        med1,
+                        np.std(vlist),
+                        unit,
+                        np.amax(vlist),
+                        unit,
+                    )
+                )
+                med2 = np.median(vlist2)
+                if np.abs(med2 - med1) / med1 > 1e-3:
+                    memstr += (
+                        "{:>12} : {:8.3f} {}  < {:8.3f} +- {:8.3f} {}  "
+                        "< {:8.3f} {} (after GC)\n".format(
+                            key,
+                            np.amin(vlist2),
+                            unit,
+                            med2,
+                            np.std(vlist2),
+                            unit,
+                            np.amax(vlist2),
+                            unit,
+                        )
+                    )
+    if comm is None or comm.rank == 0:
+        print(memstr, flush=True)
+    if comm is not None:
+        comm.Barrier()
+    return
+
+
+# from sotodlib.data.toast import ToastExport
+# from spt3g import core as core3g
 
 
 # import warnings
@@ -1659,7 +1745,7 @@ def output_tidas(args, comm, data, totalname):
 def export_TOD(args, comm, data, totalname):
     if args.export is None:
         return
-    raise RuntimeError('TOAST export not yet implemented')
+    raise RuntimeError("TOAST export not yet implemented")
     """
     autotimer = timing.auto_timer()
 
@@ -1864,6 +1950,8 @@ def main():
     # there is just one group which spans MPI_COMM_WORLD.
     comm = toast.Comm()
 
+    memreport(comm.comm_world, "at the beginning of the pipeline")
+
     if comm.comm_world.rank == 0:
         print(
             "Running with {} processes at {}".format(
@@ -1901,6 +1989,8 @@ def main():
 
     data, telescope_data = create_observations(args, comm, schedules)
 
+    memreport(comm.comm_world, "after creating observations")
+
     # Split the communicator for day and season mapmaking
 
     time_comms = get_time_communicators(comm, data)
@@ -1910,6 +2000,8 @@ def main():
 
     expand_pointing(args, comm, data)
 
+    memreport(comm.comm_world, "after pointing")
+
     # Optionally rewrite the noise PSD:s in each observation to include
     # elevation-dependence
     get_elevation_noise(args, comm, data)
@@ -1918,10 +2010,14 @@ def main():
 
     _, localsm, subnpix = get_submaps(args, comm, data)
 
+    memreport(comm.comm_world, "after submaps")
+
     if args.input_pysm_model:
         signalname = simulate_sky_signal(args, comm, data, schedules, subnpix, localsm)
     else:
         signalname = scan_sky_signal(args, comm, data, localsm, subnpix)
+
+    memreport(comm.comm_world, "after PySM")
 
     # Set up objects to take copies of the TOD at appropriate times
 
@@ -1939,6 +2035,8 @@ def main():
 
         simulate_atmosphere(args, comm, data, mc, totalname)
 
+        memreport(comm.comm_world, "after atmosphere")
+
         scale_atmosphere_by_bandpass(args, comm, data, totalname, mc)
 
         # update_atmospheric_noise_weights(args, comm, data, freq, mc)
@@ -1947,6 +2045,8 @@ def main():
 
         simulate_noise(args, comm, data, mc, totalname)
 
+        memreport(comm.comm_world, "after noise")
+
         scramble_gains(args, comm, data, mc, totalname)
 
         if mc == firstmc:
@@ -1954,6 +2054,8 @@ def main():
             # export the timestream data.
             output_tidas(args, comm, data, totalname)
             export_TOD(args, comm, data, totalname)
+
+            memreport(comm.comm_world, "after export")
 
         outpath = setup_output(args, comm, mc)
 
@@ -1974,6 +2076,8 @@ def main():
             first_call=True,
         )
 
+        memreport(comm.comm_world, "after madam")
+
         if args.polyorder is not None or args.groundorder is not None:
 
             # Filter signal
@@ -1981,6 +2085,8 @@ def main():
             apply_polyfilter(args, comm, data, totalname)
 
             apply_groundfilter(args, comm, data, totalname)
+
+            memreport(comm.comm_world, "after filter")
 
             # Bin maps
 
@@ -2000,11 +2106,15 @@ def main():
                 extra_prefix="filtered",
             )
 
+            memreport(comm.comm_world, "after filter & bin")
+
     comm.comm_world.barrier()
     if timing.enabled():
         global_timer.stop()
         if comm.comm_world.rank == 0:
             global_timer.report()
+
+    memreport(comm.comm_world, "at the end of the pipeline")
 
     del autotimer
     return
