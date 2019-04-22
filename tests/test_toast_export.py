@@ -154,6 +154,7 @@ class ToastExportTest(TestCase):
             prefix="sat3",
             use_intervals=True,
             cache_name="signal",
+            cache_copy=["component1", "component2"],
             mask_flag_common=tod.TURNAROUND,
             filesize=500000,
             units=core3g.G3TimestreamUnits.Tcmb)
