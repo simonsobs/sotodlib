@@ -504,6 +504,8 @@ class ToastExport(toast.Operator):
         cache_flag_name (str):   The name of the cache object
             (<name>_<detector>) in the existing TOD to use for the flag
             timestream.  If None, use the read* methods from the existing TOD.
+        cache_copy (list):  A list of cache names (<name>_<detector>) that
+            contain additional detector signals to be copied to the frames.
         mask_flag_common (int):  Bitmask to apply to common flags.
         mask_flag (int):  Bitmask to apply to per-detector flags.
         filesize (int):  The approximate file size of each frame file in
@@ -513,13 +515,14 @@ class ToastExport(toast.Operator):
     """
     def __init__(self, outdir, prefix="so", use_todchunks=False,
                  use_intervals=False, cache_name=None, cache_common=None,
-                 cache_flag_name=None, mask_flag_common=255, mask_flag=255,
-                 filesize=500000000, units=None):
+                 cache_flag_name=None, cache_copy=None, mask_flag_common=255,
+                 mask_flag=255, filesize=500000000, units=None):
         self._outdir = outdir
         self._prefix = prefix
         self._cache_common = cache_common
         self._cache_name = cache_name
         self._cache_flag_name = cache_flag_name
+        self._cache_copy = cache_copy
         self._mask_flag = mask_flag
         self._mask_flag_common = mask_flag_common
         if use_todchunks and use_intervals:
@@ -713,17 +716,23 @@ class ToastExport(toast.Operator):
                                 flavors.add(pref)
                                 flavor_type[pref] = so3g.IntervalsInt
                                 flavor_maptype[pref] = so3g.MapIntervalsInt
-                            else:
-                                msg = "Cache prefix {} has unsupported \
-                                    data type.  Skipping export"
-                                raise RuntimeError(msg)
-            flavors.discard(self._cache_name)
-            flavors.discard(self._cache_flag_name)
-            copy_flavors = [
-                (x, flavor_type[x], flavor_maptype[x], "signal_{}".format(x))
-                for x in flavors]
+            # If the main signals and flags are coming from the cache, remove
+            # them from consideration here.
+            if self._cache_name is None:
+                flavors.discard(self._cache_name)
+            if self._cache_flag_name is None:
+                flavors.discard(self._cache_flag_name)
 
-            print("found cache flavors ", flavors, flush=True)
+            # Restrict this list of available flavors to just those that
+            # we want to export.
+            copy_flavors = None
+            if self._cache_copy is not None:
+                copy_flavors = list()
+                for flv in flavors:
+                    if flv in self._cache_copy:
+                        copy_flavors.append(
+                            (flv, flavor_type[flv], flavor_maptype[flv],
+                             "signal_{}".format(flv)))
 
             # Given the dimensions of this observation, compute the frame
             # file sizes and all relevant offsets.
@@ -756,7 +765,8 @@ class ToastExport(toast.Operator):
             for ifile, (ffile, foff) in enumerate(zip(ex_files,
                                                   file_frame_offs)):
                 nframes = None
-                print("  ifile = {}, ffile = {}, foff = {}".format(ifile, ffile, foff), flush=True)
+                # print("  ifile = {}, ffile = {}, foff = {}"
+                #       .format(ifile, ffile, foff), flush=True)
                 if ifile == len(ex_files) - 1:
                     # we are at the last file
                     nframes = len(framesizes) - foff
@@ -781,7 +791,8 @@ class ToastExport(toast.Operator):
 
                 if cgroup.rank == 0:
                     print("  {} file {}".format(obsdir, ifile), flush=True)
-                    print("    start frame = {}, nframes = {}".format(foff, nframes), flush=True)
+                    print("    start frame = {}, nframes = {}"
+                          .format(foff, nframes), flush=True)
                     print("    frame offs = ", frm_offsets, flush=True)
                     print("    frame sizes = ", frm_sizes, flush=True)
 

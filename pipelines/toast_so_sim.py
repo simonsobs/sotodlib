@@ -1741,7 +1741,7 @@ def output_tidas(args, comm, data, totalname):
     return
 
 
-def export_TOD(args, comm, data, totalname):
+def export_TOD(args, comm, data, totalname, other=None):
     if args.export is None:
         return
     autotimer = timing.auto_timer()
@@ -1750,7 +1750,8 @@ def export_TOD(args, comm, data, totalname):
 
     comm.comm_world.Barrier()
     if comm.comm_world.rank == 0:
-        print("Exporting data to directory tree at {}".format(path), flush=args.flush)
+        print("Exporting data to directory tree at {}".format(path),
+              flush=args.flush)
     start = MPI.Wtime()
 
     export = ToastExport(
@@ -1758,6 +1759,7 @@ def export_TOD(args, comm, data, totalname):
         prefix=args.band,
         use_intervals=True,
         cache_name=totalname,
+        cache_copy=other,
         mask_flag_common=data.obs[0]['tod'].TURNAROUND,
         filesize=500000,
         units=core3g.G3TimestreamUnits.Tcmb,
@@ -2050,7 +2052,7 @@ def main():
             # For the first realization and frequency, optionally
             # export the timestream data.
             output_tidas(args, comm, data, totalname)
-            export_TOD(args, comm, data, totalname)
+            export_TOD(args, comm, data, totalname, other=[signalname])
 
             memreport(comm.comm_world, "after export")
 
