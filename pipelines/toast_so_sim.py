@@ -1494,7 +1494,7 @@ def scale_atmosphere_by_bandpass(args, comm, data, totalname, mc):
             # integral across the bandpass
             det_freqs = np.linspace(center - width / 2, center + width / 2, nstep)
             absorption_det = np.mean(np.interp(det_freqs, freqs, absorption))
-            cachename = "{}_{}".format(totalname_freq, det)
+            cachename = "{}_{}".format(totalname, det)
             ref = tod.cache.reference(cachename)
             ref *= absorption_det
             del ref
