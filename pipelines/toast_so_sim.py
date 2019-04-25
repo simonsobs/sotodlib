@@ -3,10 +3,13 @@
 # Copyright (c) 2019 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
+import so3g
+
 from toast.mpi import MPI, finalize
 
 import copy
 from datetime import datetime
+import gc
 import os
 import pickle
 import re
@@ -27,14 +30,11 @@ import toast.tod as tt
 import toast.todmap as ttm
 
 import sotodlib.hardware
-
-if tt.tidas_available:
-    from toast.tod.tidas import OpTidasExport, TODTidas
-
 from sotodlib.data.toast import ToastExport
 from spt3g import core as core3g
 
-import gc
+if tt.tidas_available:
+    from toast.tod.tidas import OpTidasExport, TODTidas
 
 try:
     import psutil
