@@ -14,16 +14,16 @@ import operator
 
 import numpy as np
 
-import toast
-from toast.mpi import MPI
-from toast.tod.interval import intervals_to_chunklist
-import toast.qarray as qa
-
 # Import so3g first so that it can control the import and monkey-patching
 # of spt3g.  Then our import of spt3g_core will use whatever has been imported
 # by so3g.
 import so3g
 from spt3g import core as core3g
+
+import toast
+from toast.mpi import MPI
+import toast.qarray as qa
+from toast.tod.interval import intervals_to_chunklist
 from toast.tod import spt3g_utils as s3utils
 
 
