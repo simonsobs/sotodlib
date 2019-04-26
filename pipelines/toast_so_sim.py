@@ -1436,6 +1436,9 @@ def scale_atmosphere_by_bandpass(args, comm, data, totalname, mc):
     if args.skip_atmosphere:
         return
 
+    if comm.comm_world.rank == 0:
+        print("Scaling atmosphere by bandpass", flush=args.flush)
+
     autotimer = timing.auto_timer()
     start = MPI.Wtime()
     for obs in data.obs:
