@@ -1764,7 +1764,7 @@ def export_TOD(args, comm, data, totalname, other=None):
         cache_name=totalname,
         cache_copy=other,
         mask_flag_common=data.obs[0]['tod'].TURNAROUND,
-        filesize=500000,
+        filesize=500000000,
         units=core3g.G3TimestreamUnits.Tcmb,
     )
     export.exec(data)
