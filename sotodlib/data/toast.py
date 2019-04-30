@@ -748,6 +748,9 @@ class ToastExport(toast.Operator):
                         copy_flavors.append(
                             (flv, flavor_type[flv], flavor_maptype[flv],
                              "signal_{}".format(flv)))
+                if cgroup.rank == 0 and len(copy_flavors) > 0:
+                    print("Found {} extra TOD flavors: {}".format(
+                        len(copy_flavors), copy_flavors), flush=True)
 
             # Given the dimensions of this observation, compute the frame
             # file sizes and all relevant offsets.
@@ -758,7 +761,7 @@ class ToastExport(toast.Operator):
             if cgroup.rank == 0:
                 # Compute the frame file breaks.  We ignore the observation
                 # and calibration frames since they are small.
-                sampbytes = self._bytes_per_sample(len(detquat), len(flavors))
+                sampbytes = self._bytes_per_sample(len(detquat), len(copy_flavors) + 1)
 
                 file_sample_offs, file_frame_offs, frame_sample_offs = \
                     s3utils.compute_file_frames(
