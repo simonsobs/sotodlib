@@ -804,11 +804,11 @@ def load_focalplanes(args, comm, schedules):
             for idet, (detname, detdata) in enumerate(hw.data["detectors"].items()):
                 if detdata["band"] != band:
                     continue
-                # DEBUG begin
-                if idet % 100 == 0:
-                    print("WARNING: truncating focalplane for testing")
-                else:
-                    continue
+                ## DEBUG begin
+                #if idet % 10 == 0:
+                #    print("WARNING: truncating focalplane for testing")
+                #else:
+                #    continue
                 # DEBUG end
                 focalplane[detname] = {
                     "NET": net,
@@ -827,7 +827,8 @@ def load_focalplanes(args, comm, schedules):
             focalplanes.append(focalplane)
             stop1 = MPI.Wtime()
             print(
-                "Load {} {}: {:.2f} seconds".format(telescope, band, stop1 - start1),
+                "Load {} {} focalplane ({} detectors): {:.2f} seconds".format(
+                    telescope, band, len(focalplane), stop1 - start1),
                 flush=args.flush,
             )
     focalplanes = comm.comm_world.bcast(focalplanes)
@@ -1843,10 +1844,8 @@ def apply_madam(
     pars = copy.deepcopy(madampars)
     pars["path_output"] = outpath
     file_root = pars["file_root"]
-    if len(file_root) > 0 and not file_root.endswith("_"):
-        file_root += "_"
     if extra_prefix is not None:
-        file_root += "{}_".format(extra_prefix)
+        file_root += "_{}".format(extra_prefix)
 
     if first_call:
         if mc != firstmc:
@@ -1911,8 +1910,8 @@ def apply_madam(
                     pars["write_binmap"] = True
 
             start1 = MPI.Wtime()
-            madam.params["file_root"] = "{}_telescope_{}_time_{}".format(
-                file_root, tele_name, time_name
+            madam.params["file_root"] = "{}_{}_{}_time_{}".format(
+                file_root, tele_name, args.band, time_name
             )
             if time_comm == comm.comm_world:
                 madam.params["info"] = info
