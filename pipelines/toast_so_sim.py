@@ -790,15 +790,15 @@ def load_focalplanes(args, comm, schedules):
             hw = hw.select(match={"band": band})
             # Transfer the detector information into a TOAST dictionary
             focalplane = {}
-            net = hw.data["bands"][band]["NET"]
-            fknee = hw.data["bands"][band]["fknee"]
-            fmin = hw.data["bands"][band]["fmin"]
+            net = hw.data["bands"][band]["NET"] * 1e-6  # uK -> K
+            fknee = hw.data["bands"][band]["fknee"] * 1e-3  # mHz -> Hz
+            fmin = hw.data["bands"][band]["fmin"] * 1e-3  # mHz -> Hz
             alpha = hw.data["bands"][band]["alpha"]
             A = hw.data["bands"][band]["A"]
             C = hw.data["bands"][band]["C"]
-            center = hw.data["bands"][band]["center"]
-            lower = hw.data["bands"][band]["low"]
-            upper = hw.data["bands"][band]["high"]
+            center = hw.data["bands"][band]["center"]  # GHz
+            lower = hw.data["bands"][band]["low"]  # GHz
+            upper = hw.data["bands"][band]["high"]  # GHz
             bandcenter = 0.5 * (lower + upper)
             bandwidth = upper - lower
             for idet, (detname, detdata) in enumerate(hw.data["detectors"].items()):
