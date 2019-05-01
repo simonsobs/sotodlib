@@ -793,7 +793,8 @@ def load_focalplanes(args, comm, schedules):
             net = hw.data["bands"][band]["NET"] * 1e-6  # uK -> K
             fknee = hw.data["bands"][band]["fknee"] * 1e-3  # mHz -> Hz
             fmin = hw.data["bands"][band]["fmin"] * 1e-3  # mHz -> Hz
-            alpha = hw.data["bands"][band]["alpha"]
+            # alpha = hw.data["bands"][band]["alpha"]
+            alpha = 1  # hardwire a sensible number. 3.5 is not realistic.
             A = hw.data["bands"][band]["A"]
             C = hw.data["bands"][band]["C"]
             center = hw.data["bands"][band]["center"]  # GHz
