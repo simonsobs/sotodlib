@@ -1765,7 +1765,7 @@ def export_TOD(args, comm, data, totalname, other=None):
         cache_name=totalname,
         cache_copy=other,
         mask_flag_common=data.obs[0]['tod'].TURNAROUND,
-        filesize=500000000,
+        filesize=2**30,
         units=core3g.G3TimestreamUnits.Tcmb,
     )
     export.exec(data)
@@ -2054,7 +2054,8 @@ def main():
             # For the first realization and frequency, optionally
             # export the timestream data.
             output_tidas(args, comm, data, totalname)
-            export_TOD(args, comm, data, totalname, other=[signalname])
+            #export_TOD(args, comm, data, totalname, other=[signalname])
+            export_TOD(args, comm, data, totalname)
 
             memreport(comm.comm_world, "after export")
 
