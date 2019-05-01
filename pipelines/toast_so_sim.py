@@ -805,7 +805,7 @@ def load_focalplanes(args, comm, schedules):
                 if detdata["band"] != band:
                     continue
                 ## DEBUG begin
-                #if idet % 10 == 0:
+                #if idet % 100 == 0:
                 #    print("WARNING: truncating focalplane for testing")
                 #else:
                 #    continue

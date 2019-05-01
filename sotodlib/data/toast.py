@@ -210,7 +210,7 @@ def tod_to_frames(
             chunks.append([grp[0], grp[-1]])
         return chunks
 
-    def split_field(data, g3t, framefield, mapfield=None, g3units=units):
+    def split_field(data, g3t, framefield, mapfield=None, g3units=units, times=None):
         """Split a gathered data buffer into frames- only on root process.
         """
         if g3t == core3g.G3VectorTime:
@@ -274,6 +274,9 @@ def tod_to_frames(
                         fdata[f][framefield][mapfield].domain = idomain
             del fint
         elif g3t == core3g.G3Timestream:
+            if times is None:
+                raise RuntimeError(
+                    "You must provide the time stamp vector with a Timestream object")
             for f in range(n_frames):
                 dataoff = fdataoff[f]
                 ndata = frame_sizes[f]
@@ -291,6 +294,11 @@ def tod_to_frames(
                     else:
                         fdata[f][framefield][mapfield] = \
                             g3t(data[dataoff:dataoff+ndata], g3units)
+                timeslice = times[dataoff:dataoff + ndata]
+                tstart = timeslice[0] * 1e8
+                tstop = timeslice[-1] * 1e8
+                fdata[f][framefield][mapfield].start = core3g.G3Time(tstart)
+                fdata[f][framefield][mapfield].stop = core3g.G3Time(tstop)
         else:
             # The bindings of G3Vector seem to only work with
             # lists.  This is probably horribly inefficient.
@@ -332,6 +340,11 @@ def tod_to_frames(
     # pointing, we convert this back into angles that follow the specs
     # for telescope pointing.
 
+    times = None
+    if rankdet == 0:
+        times = tod.local_times()
+    times = gather_field(0, times, 1, MPI.DOUBLE, cacheoff, ncache, 0)
+
     bore = None
     if rankdet == 0:
         bore = tod.read_boresight(local_start=cacheoff, n=ncache).flatten()
@@ -356,9 +369,9 @@ def tod_to_frames(
         ang_az = ang_phi
         ang_el = (np.pi / 2.0) - ang_theta
         ang_roll = ang_psi
-        split_field(ang_az, core3g.G3Timestream, "boresight", "az", None)
-        split_field(ang_el, core3g.G3Timestream, "boresight", "el", None)
-        split_field(ang_roll, core3g.G3Timestream, "boresight", "roll", None)
+        split_field(ang_az, core3g.G3Timestream, "boresight", "az", None, times=times)
+        split_field(ang_el, core3g.G3Timestream, "boresight", "el", None, times=times)
+        split_field(ang_roll, core3g.G3Timestream, "boresight", "roll", None, times=times)
 
     # Now the position and velocity information
 
@@ -456,7 +469,7 @@ def tod_to_frames(
         detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
                                ncache, dindx)
         if tod.mpicomm.rank == 0:
-            split_field(detdata, core3g.G3Timestream, "signal", mapfield=dname)
+            split_field(detdata, core3g.G3Timestream, "signal", mapfield=dname, times=times)
 
         # "flags"
 
@@ -489,7 +502,7 @@ def tod_to_frames(
                 detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
                                        ncache, dindx)
                 if tod.mpicomm.rank == 0:
-                    split_field(detdata, g3typ, fnm, mapfield=dname)
+                    split_field(detdata, g3typ, fnm, mapfield=dname, times=times)
 
     return fdata
 
@@ -624,6 +637,7 @@ class ToastExport(toast.Operator):
     def _bytes_per_sample(self, ndet, nflavor):
         # For each sample we have:
         #   - 1 x 8 bytes for timestamp
+        #   - 1 x 1 bytes for common flags
         #   - 4 x 8 bytes for boresight RA/DEC quats
         #   - 4 x 8 bytes for boresight Az/El quats
         #   - 2 x 8 bytes for boresight Az/El angles
