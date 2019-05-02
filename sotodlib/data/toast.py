@@ -754,7 +754,7 @@ class ToastExport(toast.Operator):
 
             # Restrict this list of available flavors to just those that
             # we want to export.
-            copy_flavors = None
+            copy_flavors = []
             if self._cache_copy is not None:
                 copy_flavors = list()
                 for flv in flavors:
