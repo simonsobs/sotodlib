@@ -1952,6 +1952,8 @@ def main():
     # there is just one group which spans MPI_COMM_WORLD.
     comm = toast.Comm()
 
+    tstart0 = MPI.Wtime()
+
     memreport(comm.comm_world, "at the beginning of the pipeline")
 
     if comm.comm_world.rank == 0:
@@ -2118,6 +2120,10 @@ def main():
             global_timer.report()
 
     memreport(comm.comm_world, "at the end of the pipeline")
+
+    stop0 = MPI.Wtime()
+    if comm.comm_world.rank == 0:
+        print("Pipeline completed in {:.3f} s".format(stop0 - start0), flush=args.flush)
 
     del autotimer
     return
