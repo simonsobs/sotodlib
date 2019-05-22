@@ -15,8 +15,6 @@ from sotodlib.hardware.config import get_example
 
 from sotodlib.hardware.sim import sim_telescope_detectors
 
-from sotodlib.data.toast import ToastExport
-
 from spt3g import core as core3g
 
 
@@ -27,6 +25,7 @@ if toast_available is None:
         from toast.mpi import MPI
         from toast.tod import TODGround
         from toast.tod import AnalyticNoise
+        from sotodlib.data.toast import ToastExport
         toast_available = True
     except ImportError:
         toast_available = False
