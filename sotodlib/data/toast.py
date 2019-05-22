@@ -14,16 +14,16 @@ import operator
 
 import numpy as np
 
-import toast
-from toast.mpi import MPI
-from toast.tod.interval import intervals_to_chunklist
-import toast.qarray as qa
-
 # Import so3g first so that it can control the import and monkey-patching
 # of spt3g.  Then our import of spt3g_core will use whatever has been imported
 # by so3g.
 import so3g
 from spt3g import core as core3g
+
+import toast
+from toast.mpi import MPI
+import toast.qarray as qa
+from toast.tod.interval import intervals_to_chunklist
 from toast.tod import spt3g_utils as s3utils
 
 
@@ -85,6 +85,7 @@ def tod_to_frames(
         """
         mtype = None
         pdata = None
+        nnz = 0
         if rankdet == prow:
             ref = tod.cache.reference(fld)
             nnz = 1
@@ -118,7 +119,9 @@ def tod_to_frames(
         allnnz = 0
 
         # Size of the local buffer
-        pz = len(pdata)
+        pz = 0
+        if pdata is not None:
+            pz = len(pdata)
 
         if rankdet == prow:
             psizes = tod.grid_comm_row.gather(pz, root=0)
@@ -207,102 +210,109 @@ def tod_to_frames(
             chunks.append([grp[0], grp[-1]])
         return chunks
 
-    def split_field(data, g3t, framefield, mapfield=None, g3units=units):
-        """Split a gathered data buffer into frames.
+    def split_field(data, g3t, framefield, mapfield=None, g3units=units, times=None):
+        """Split a gathered data buffer into frames- only on root process.
         """
-        if tod.mpicomm.rank == 0:
-            if g3t == core3g.G3VectorTime:
-                # Special case for time values stored as int64_t, but
-                # wrapped in a class.
-                for f in range(n_frames):
-                    dataoff = fdataoff[f]
-                    ndata = frame_sizes[f]
-                    g3times = list()
-                    for t in range(ndata):
-                        g3times.append(core3g.G3Time(data[dataoff + t]))
-                    if mapfield is None:
-                        fdata[f][framefield] = core3g.G3VectorTime(g3times)
+        if g3t == core3g.G3VectorTime:
+            # Special case for time values stored as int64_t, but
+            # wrapped in a class.
+            for f in range(n_frames):
+                dataoff = fdataoff[f]
+                ndata = frame_sizes[f]
+                g3times = list()
+                for t in range(ndata):
+                    g3times.append(core3g.G3Time(data[dataoff + t]))
+                if mapfield is None:
+                    fdata[f][framefield] = core3g.G3VectorTime(g3times)
+                else:
+                    fdata[f][framefield][mapfield] = \
+                        core3g.G3VectorTime(g3times)
+                del g3times
+        elif g3t == so3g.IntervalsInt:
+            # This means that the data is actually flags
+            # and we should convert it into a list of intervals.
+            fint = flags_to_intervals(data)
+            for f in range(n_frames):
+                dataoff = fdataoff[f]
+                ndata = frame_sizes[f]
+                datalast = dataoff + ndata
+                chunks = list()
+                idomain = (0, ndata-1)
+                for intr in fint:
+                    # Interval sample ranges are defined relative to the
+                    # frame itself.
+                    cfirst = None
+                    clast = None
+                    if (intr[0] < datalast) and (intr[1] >= dataoff):
+                        # there is some overlap...
+                        if intr[0] < dataoff:
+                            cfirst = 0
+                        else:
+                            cfirst = intr[0] - dataoff
+                        if intr[1] >= datalast:
+                            clast = ndata - 1
+                        else:
+                            clast = intr[1] - dataoff
+                        chunks.append([cfirst, clast])
+                if mapfield is None:
+                    if len(chunks) == 0:
+                        fdata[f][framefield] = \
+                            so3g.IntervalsInt()
+                    else:
+                        fdata[f][framefield] = \
+                            so3g.IntervalsInt.from_array(
+                                np.array(chunks, dtype=np.int64))
+                    fdata[f][framefield].domain = idomain
+                else:
+                    if len(chunks) == 0:
+                        fdata[f][framefield][mapfield] = \
+                            so3g.IntervalsInt()
                     else:
                         fdata[f][framefield][mapfield] = \
-                            core3g.G3VectorTime(g3times)
-                    del g3times
-            elif g3t == so3g.IntervalsInt:
-                # This means that the data is actually flags
-                # and we should convert it into a list of intervals.
-                fint = flags_to_intervals(data)
-                for f in range(n_frames):
-                    dataoff = fdataoff[f]
-                    ndata = frame_sizes[f]
-                    datalast = dataoff + ndata
-                    chunks = list()
-                    idomain = (0, ndata-1)
-                    for intr in fint:
-                        # Interval sample ranges are defined relative to the
-                        # frame itself.
-                        cfirst = None
-                        clast = None
-                        if (intr[0] < datalast) and (intr[1] >= dataoff):
-                            # there is some overlap...
-                            if intr[0] < dataoff:
-                                cfirst = 0
-                            else:
-                                cfirst = intr[0] - dataoff
-                            if intr[1] >= datalast:
-                                clast = ndata - 1
-                            else:
-                                clast = intr[1] - dataoff
-                            chunks.append([cfirst, clast])
-                    if mapfield is None:
-                        if len(chunks) == 0:
-                            fdata[f][framefield] = \
-                                so3g.IntervalsInt()
-                        else:
-                            fdata[f][framefield] = \
-                                so3g.IntervalsInt.from_array(
-                                    np.array(chunks, dtype=np.int64))
-                        fdata[f][framefield].domain = idomain
-                    else:
-                        if len(chunks) == 0:
-                            fdata[f][framefield][mapfield] = \
-                                so3g.IntervalsInt()
-                        else:
-                            fdata[f][framefield][mapfield] = \
-                                so3g.IntervalsInt.from_array(
-                                    np.array(chunks, dtype=np.int64))
-                            fdata[f][framefield][mapfield].domain = idomain
-                del fint
-            elif g3t == core3g.G3Timestream:
-                for f in range(n_frames):
-                    dataoff = fdataoff[f]
-                    ndata = frame_sizes[f]
-                    if mapfield is None:
-                        if g3units is None:
-                            fdata[f][framefield] = \
-                                g3t(data[dataoff:dataoff+ndata])
-                        else:
-                            fdata[f][framefield] = \
-                                g3t(data[dataoff:dataoff+ndata], g3units)
-                    else:
-                        if g3units is None:
-                            fdata[f][framefield][mapfield] = \
-                                g3t(data[dataoff:dataoff+ndata])
-                        else:
-                            fdata[f][framefield][mapfield] = \
-                                g3t(data[dataoff:dataoff+ndata], g3units)
-            else:
-                # The bindings of G3Vector seem to only work with
-                # lists.  This is probably horribly inefficient.
-                for f in range(n_frames):
-                    dataoff = fdataoff[f]
-                    ndata = frame_sizes[f]
-                    if len(data.shape) == 1:
+                            so3g.IntervalsInt.from_array(
+                                np.array(chunks, dtype=np.int64))
+                        fdata[f][framefield][mapfield].domain = idomain
+            del fint
+        elif g3t == core3g.G3Timestream:
+            if times is None:
+                raise RuntimeError(
+                    "You must provide the time stamp vector with a Timestream object")
+            for f in range(n_frames):
+                dataoff = fdataoff[f]
+                ndata = frame_sizes[f]
+                if mapfield is None:
+                    if g3units is None:
                         fdata[f][framefield] = \
-                            g3t(data[dataoff:dataoff+ndata].tolist())
+                            g3t(data[dataoff:dataoff+ndata])
                     else:
-                        # We have a 2D quantity
                         fdata[f][framefield] = \
-                            g3t(data[dataoff:dataoff+ndata, :].flatten()
-                                .tolist())
+                            g3t(data[dataoff:dataoff+ndata], g3units)
+                else:
+                    if g3units is None:
+                        fdata[f][framefield][mapfield] = \
+                            g3t(data[dataoff:dataoff+ndata])
+                    else:
+                        fdata[f][framefield][mapfield] = \
+                            g3t(data[dataoff:dataoff+ndata], g3units)
+                timeslice = times[dataoff:dataoff + ndata]
+                tstart = timeslice[0] * 1e8
+                tstop = timeslice[-1] * 1e8
+                fdata[f][framefield][mapfield].start = core3g.G3Time(tstart)
+                fdata[f][framefield][mapfield].stop = core3g.G3Time(tstop)
+        else:
+            # The bindings of G3Vector seem to only work with
+            # lists.  This is probably horribly inefficient.
+            for f in range(n_frames):
+                dataoff = fdataoff[f]
+                ndata = frame_sizes[f]
+                if len(data.shape) == 1:
+                    fdata[f][framefield] = \
+                        g3t(data[dataoff:dataoff+ndata].tolist())
+                else:
+                    # We have a 2D quantity
+                    fdata[f][framefield] = \
+                        g3t(data[dataoff:dataoff+ndata, :].flatten()
+                            .tolist())
         return
 
     # Compute the overlap of all frames with the local process.  We want to
@@ -330,43 +340,54 @@ def tod_to_frames(
     # pointing, we convert this back into angles that follow the specs
     # for telescope pointing.
 
-    bore = None
+    times = None
     if rankdet == 0:
-        bore = tod.read_boresight(local_start=cacheoff, n=ncache)
-    bore = gather_field(0, bore.flatten(), 4, MPI.DOUBLE, cacheoff, ncache, 0)
-    split_field(bore.reshape(-1, 4), core3g.G3VectorDouble, "qboresight_radec")
+        times = tod.local_times()
+    times = gather_field(0, times, 1, MPI.DOUBLE, cacheoff, ncache, 0)
 
     bore = None
     if rankdet == 0:
-        bore = tod.read_boresight_azel(local_start=cacheoff, n=ncache)
-    bore = gather_field(0, bore.flatten(), 4, MPI.DOUBLE, cacheoff, ncache, 1)
-    split_field(bore.reshape(-1, 4), core3g.G3VectorDouble, "qboresight_azel")
+        bore = tod.read_boresight(local_start=cacheoff, n=ncache).flatten()
+    bore = gather_field(0, bore, 4, MPI.DOUBLE, cacheoff, ncache, 0)
+    if tod.mpicomm.rank == 0:
+        split_field(bore.reshape(-1, 4), core3g.G3VectorDouble,
+                    "qboresight_radec")
+
+    bore = None
+    if rankdet == 0:
+        bore = tod.read_boresight_azel(
+            local_start=cacheoff, n=ncache).flatten()
+    bore = gather_field(0, bore, 4, MPI.DOUBLE, cacheoff, ncache, 1)
+    if tod.mpicomm.rank == 0:
+        split_field(bore.reshape(-1, 4), core3g.G3VectorDouble,
+                    "qboresight_azel")
 
     if tod.mpicomm.rank == 0:
         for f in range(n_frames):
             fdata[f]["boresight"] = core3g.G3TimestreamMap()
-
-    ang_theta, ang_phi, ang_psi = qa.to_angles(bore)
-    ang_az = ang_phi
-    ang_el = (np.pi / 2.0) - ang_theta
-    ang_roll = ang_psi
-    split_field(ang_az, core3g.G3Timestream, "boresight", "az", None)
-    split_field(ang_el, core3g.G3Timestream, "boresight", "el", None)
-    split_field(ang_roll, core3g.G3Timestream, "boresight", "roll", None)
+        ang_theta, ang_phi, ang_psi = qa.to_angles(bore)
+        ang_az = ang_phi
+        ang_el = (np.pi / 2.0) - ang_theta
+        ang_roll = ang_psi
+        split_field(ang_az, core3g.G3Timestream, "boresight", "az", None, times=times)
+        split_field(ang_el, core3g.G3Timestream, "boresight", "el", None, times=times)
+        split_field(ang_roll, core3g.G3Timestream, "boresight", "roll", None, times=times)
 
     # Now the position and velocity information
 
     pos = None
     if rankdet == 0:
-        pos = tod.read_position(local_start=cacheoff, n=ncache)
-    pos = gather_field(0, pos.flatten(), 3, MPI.DOUBLE, cacheoff, ncache, 2)
-    split_field(pos.reshape(-1, 3), core3g.G3VectorDouble, "site_position")
+        pos = tod.read_position(local_start=cacheoff, n=ncache).flatten()
+    pos = gather_field(0, pos, 3, MPI.DOUBLE, cacheoff, ncache, 2)
+    if tod.mpicomm.rank == 0:
+        split_field(pos.reshape(-1, 3), core3g.G3VectorDouble, "site_position")
 
     vel = None
     if rankdet == 0:
-        vel = tod.read_velocity(local_start=cacheoff, n=ncache)
-    vel = gather_field(0, vel.flatten(), 3, MPI.DOUBLE, cacheoff, ncache, 3)
-    split_field(vel.reshape(-1, 3), core3g.G3VectorDouble, "site_velocity")
+        vel = tod.read_velocity(local_start=cacheoff, n=ncache).flatten()
+    vel = gather_field(0, vel, 3, MPI.DOUBLE, cacheoff, ncache, 3)
+    if tod.mpicomm.rank == 0:
+        split_field(vel.reshape(-1, 3), core3g.G3VectorDouble, "site_velocity")
 
     # Now handle the common flags- either from a cache object or from the
     # TOD methods
@@ -381,9 +402,11 @@ def tod_to_frames(
     else:
         cflags, nnz, mtype = get_local_cache(0, cache_common_flags, cacheoff,
                                              ncache)
-        cflags &= mask_flag_common
+        if cflags is not None:
+            cflags &= mask_flag_common
     cflags = gather_field(0, cflags, nnz, mtype, cacheoff, ncache, 4)
-    split_field(cflags, so3g.IntervalsInt, "flags_common")
+    if tod.mpicomm.rank == 0:
+        split_field(cflags, so3g.IntervalsInt, "flags_common")
 
     # Any extra common fields
 
@@ -393,7 +416,8 @@ def tod_to_frames(
         for cindx, (cname, g3typ, fname) in enumerate(copy_common):
             cdata, nnz, mtype = get_local_cache(0, cname, cacheoff, ncache)
             cdata = gather_field(0, cdata, nnz, mtype, cacheoff, ncache, cindx)
-            split_field(cdata, g3typ, fname)
+            if tod.mpicomm.rank == 0:
+                split_field(cdata, g3typ, fname)
 
     # Now read all per-detector quantities.
 
@@ -444,7 +468,8 @@ def tod_to_frames(
                                                   ncache)
         detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
                                ncache, dindx)
-        split_field(detdata, core3g.G3Timestream, "signal", mapfield=dname)
+        if tod.mpicomm.rank == 0:
+            split_field(detdata, core3g.G3Timestream, "signal", mapfield=dname, times=times)
 
         # "flags"
 
@@ -460,10 +485,12 @@ def tod_to_frames(
             cache_det = "{}_{}".format(cache_flags, dname)
             detdata, nnz, mtype = get_local_cache(prow, cache_det, cacheoff,
                                                   ncache)
-            detdata &= mask_flag
+            if detdata is not None:
+                detdata &= mask_flag
         detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
                                ncache, dindx)
-        split_field(detdata, so3g.IntervalsInt, "flags", mapfield=dname)
+        if tod.mpicomm.rank == 0:
+            split_field(detdata, so3g.IntervalsInt, "flags", mapfield=dname)
 
         # Now copy any additional fields.
 
@@ -474,7 +501,8 @@ def tod_to_frames(
                                                       cacheoff, ncache)
                 detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
                                        ncache, dindx)
-                split_field(detdata, g3typ, fnm, mapfield=dname)
+                if tod.mpicomm.rank == 0:
+                    split_field(detdata, g3typ, fnm, mapfield=dname, times=times)
 
     return fdata
 
@@ -504,6 +532,8 @@ class ToastExport(toast.Operator):
         cache_flag_name (str):   The name of the cache object
             (<name>_<detector>) in the existing TOD to use for the flag
             timestream.  If None, use the read* methods from the existing TOD.
+        cache_copy (list):  A list of cache names (<name>_<detector>) that
+            contain additional detector signals to be copied to the frames.
         mask_flag_common (int):  Bitmask to apply to common flags.
         mask_flag (int):  Bitmask to apply to per-detector flags.
         filesize (int):  The approximate file size of each frame file in
@@ -513,13 +543,14 @@ class ToastExport(toast.Operator):
     """
     def __init__(self, outdir, prefix="so", use_todchunks=False,
                  use_intervals=False, cache_name=None, cache_common=None,
-                 cache_flag_name=None, mask_flag_common=255, mask_flag=255,
-                 filesize=500000000, units=None):
+                 cache_flag_name=None, cache_copy=None, mask_flag_common=255,
+                 mask_flag=255, filesize=500000000, units=None):
         self._outdir = outdir
         self._prefix = prefix
         self._cache_common = cache_common
         self._cache_name = cache_name
         self._cache_flag_name = cache_flag_name
+        self._cache_copy = cache_copy
         self._mask_flag = mask_flag
         self._mask_flag_common = mask_flag_common
         if use_todchunks and use_intervals:
@@ -606,6 +637,7 @@ class ToastExport(toast.Operator):
     def _bytes_per_sample(self, ndet, nflavor):
         # For each sample we have:
         #   - 1 x 8 bytes for timestamp
+        #   - 1 x 1 bytes for common flags
         #   - 4 x 8 bytes for boresight RA/DEC quats
         #   - 4 x 8 bytes for boresight Az/El quats
         #   - 2 x 8 bytes for boresight Az/El angles
@@ -713,17 +745,26 @@ class ToastExport(toast.Operator):
                                 flavors.add(pref)
                                 flavor_type[pref] = so3g.IntervalsInt
                                 flavor_maptype[pref] = so3g.MapIntervalsInt
-                            else:
-                                msg = "Cache prefix {} has unsupported \
-                                    data type.  Skipping export"
-                                raise RuntimeError(msg)
-            flavors.discard(self._cache_name)
-            flavors.discard(self._cache_flag_name)
-            copy_flavors = [
-                (x, flavor_type[x], flavor_maptype[x], "signal_{}".format(x))
-                for x in flavors]
+            # If the main signals and flags are coming from the cache, remove
+            # them from consideration here.
+            if self._cache_name is None:
+                flavors.discard(self._cache_name)
+            if self._cache_flag_name is None:
+                flavors.discard(self._cache_flag_name)
 
-            print("found cache flavors ", flavors, flush=True)
+            # Restrict this list of available flavors to just those that
+            # we want to export.
+            copy_flavors = []
+            if self._cache_copy is not None:
+                copy_flavors = list()
+                for flv in flavors:
+                    if flv in self._cache_copy:
+                        copy_flavors.append(
+                            (flv, flavor_type[flv], flavor_maptype[flv],
+                             "signal_{}".format(flv)))
+                if cgroup.rank == 0 and len(copy_flavors) > 0:
+                    print("Found {} extra TOD flavors: {}".format(
+                        len(copy_flavors), copy_flavors), flush=True)
 
             # Given the dimensions of this observation, compute the frame
             # file sizes and all relevant offsets.
@@ -734,7 +775,7 @@ class ToastExport(toast.Operator):
             if cgroup.rank == 0:
                 # Compute the frame file breaks.  We ignore the observation
                 # and calibration frames since they are small.
-                sampbytes = self._bytes_per_sample(len(detquat), len(flavors))
+                sampbytes = self._bytes_per_sample(len(detquat), len(copy_flavors) + 1)
 
                 file_sample_offs, file_frame_offs, frame_sample_offs = \
                     s3utils.compute_file_frames(
@@ -756,7 +797,8 @@ class ToastExport(toast.Operator):
             for ifile, (ffile, foff) in enumerate(zip(ex_files,
                                                   file_frame_offs)):
                 nframes = None
-                print("  ifile = {}, ffile = {}, foff = {}".format(ifile, ffile, foff), flush=True)
+                # print("  ifile = {}, ffile = {}, foff = {}"
+                #       .format(ifile, ffile, foff), flush=True)
                 if ifile == len(ex_files) - 1:
                     # we are at the last file
                     nframes = len(framesizes) - foff
@@ -781,7 +823,8 @@ class ToastExport(toast.Operator):
 
                 if cgroup.rank == 0:
                     print("  {} file {}".format(obsdir, ifile), flush=True)
-                    print("    start frame = {}, nframes = {}".format(foff, nframes), flush=True)
+                    print("    start frame = {}, nframes = {}"
+                          .format(foff, nframes), flush=True)
                     print("    frame offs = ", frm_offsets, flush=True)
                     print("    frame sizes = ", frm_sizes, flush=True)
 

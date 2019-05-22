@@ -5,6 +5,8 @@
 
 import os
 
+import numpy as np
+
 from unittest import TestCase
 
 from ._helpers import create_outdir
@@ -34,10 +36,14 @@ class ToastExportTest(TestCase):
 
     def setUp(self):
         fixture_name = os.path.splitext(os.path.basename(__file__))[0]
-        self.outdir = create_outdir(fixture_name)
         if not toast_available:
             print("toast cannot be imported- skipping unit tests", flush=True)
             return
+
+        self.outdir = None
+        if MPI.COMM_WORLD.rank == 0:
+            self.outdir = create_outdir(fixture_name)
+        self.outdir = MPI.COMM_WORLD.bcast(self.outdir, root=0)
 
         toastcomm = toast.Comm()
         self.data = toast.Data(toastcomm)
@@ -47,7 +53,7 @@ class ToastExportTest(TestCase):
         dets = sim_telescope_detectors(hwfull, "SAT3")
         hwfull.data["detectors"] = dets
         hw = hwfull.select(
-            match={"wafer": "42", "band": "LF1", "pixel": "000"})
+            match={"wafer": "42", "band": "LF1", "pixel": "00[01]"})
         print(hw.data["detectors"], flush=True)
         detquats = {k: v["quat"] for k, v in hw.data["detectors"].items()}
 
@@ -79,7 +85,6 @@ class ToastExportTest(TestCase):
         self.alpha = 1.0
         self.fknee = 0.05
 
-        # Create a ground based TOD
         tod = TODGround(
             self.data.comm.comm_group,
             detquats,
@@ -154,6 +159,7 @@ class ToastExportTest(TestCase):
             prefix="sat3",
             use_intervals=True,
             cache_name="signal",
+            cache_copy=["component1", "component2"],
             mask_flag_common=tod.TURNAROUND,
             filesize=500000,
             units=core3g.G3TimestreamUnits.Tcmb)
