@@ -541,6 +541,11 @@ def parse_arguments(comm):
         "UHF1 (225GHz), UHF2 (280GHz)",
     )
     parser.add_argument(
+        "--tube",
+        required=False,
+        help="Only include detectors from one optics tube: LT0-LT6 or ST0-ST3",
+    )
+    parser.add_argument(
         "--tidas", required=False, default=None, help="Output TIDAS export path"
     )
     parser.add_argument(
@@ -769,13 +774,15 @@ def load_focalplanes(args, comm, schedules):
     focalplanes = []
     if comm.comm_world.rank == 0:
         for telescope, band in zip(args.telescope.split(","), args.band.split(",")):
-            itele = {"SAT0": 0, "SAT1": 1, "SAT2": 2, "SAT3": 3, "LAT": 4}[telescope]
             start1 = MPI.Wtime()
             hw = sotodlib.hardware.get_example()
             hw.data["detectors"] = sotodlib.hardware.sim_telescope_detectors(
                 hw, telescope
             )
-            hw = hw.select(match={"band": band})
+            match = {"band": band}
+            if args.tube is not None:
+                match["tube"] = tube
+            hw = hw.select(match)
             # Transfer the detector information into a TOAST dictionary
             focalplane = {}
             net = hw.data["bands"][band]["NET"] * 1e-6  # uK -> K
@@ -791,8 +798,10 @@ def load_focalplanes(args, comm, schedules):
             bandcenter = 0.5 * (lower + upper)
             bandwidth = upper - lower
             for idet, (detname, detdata) in enumerate(hw.data["detectors"].items()):
-                if detdata["band"] != band:
-                    continue
+                tube = detdata["tube"]
+                itube = {"LT0": 0, "LT1": 1, "LT2": 2, "LT3": 3,
+                         "LT4": 4, "LT5": 5, "LT6": 6,
+                         "ST0": 7, "ST1": 8, "ST2": 9, "ST3": 10}[tube]
                 ## DEBUG begin
                 #if idet % 100 == 0:
                 #    print("WARNING: truncating focalplane for testing")
@@ -811,7 +820,7 @@ def load_focalplanes(args, comm, schedules):
                     "freq": center,
                     "bandcenter_ghz": bandcenter,
                     "bandwidth_ghz": bandwidth,
-                    "index": idet + 1000000 * itele,
+                    "index": idet + 1000000 * itube,
                 }
             focalplanes.append(focalplane)
             stop1 = MPI.Wtime()
