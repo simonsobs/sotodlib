@@ -553,13 +553,13 @@ def get_example():
     for tel in cnf["telescopes"]:
         crn = "{:d}".format(crt_indx)
         crt = OrderedDict()
-        crt['cards'] = list()
-        crt['telescope'] = tel
+        crt["cards"] = list()
+        crt["telescope"] = tel
     
         ## get all the wafer card numbers for a telescope
-        tb_wfrs = [cnf['tubes'][t]['wafers'] for t in cnf['telescopes'][tel]['tubes']]
+        tb_wfrs = [cnf["tubes"][t]["wafers"] for t in cnf["telescopes"][tel]["tubes"]]
         tl_wfrs = [i for sl in tb_wfrs for i in sl]
-        wafer_cards = [cnf['wafers'][w]['card'] for w in tl_wfrs]
+        wafer_cards = [cnf["wafers"][w]["card"] for w in tl_wfrs]
         
         # add all cards to the card table and assign to crates
         for crd in wafer_cards:
@@ -577,8 +577,8 @@ def get_example():
                 crt_indx += 1
                 crn = "{:d}".format(crt_indx)
                 crt = OrderedDict()
-                crt['cards'] = list()
-                crt['telescope'] = tel
+                crt["cards"] = list()
+                crt["telescope"] = tel
         
         # each telescope starts with a new crate
         crates[crn] = crt
