@@ -52,3 +52,26 @@ The detectors in a given Hardware model can be plotted with this function:
 To plot only a subset of detectors, first apply a selection to make a reduced hardware model and pass that to the plotting function.  You can also dump out to the console a pretty formatted summary of the hardware configuration:
 
 .. autofunction:: sotodlib.hardware.summary_text
+
+
+Data Processing
+-----------------------
+These modules are used to process detector timestream data within a G3Pipeline. The base class, :class:`DataG3Module`, handles the translation between a G3TimestreamMap and any filtering/conditioning we want to do on the timestreams.  
+
+DataG3Module
+~~~~~~~~~~~~~~~~~~~~~~   
+.. autoclass:: sotodlib.data.DataG3Module
+    :members:
+
+
+Filters
+~~~~~~~~~~~~~~~~~~~~~~   
+
+.. automodule:: sotodlib.data.filter
+   :members:
+   
+Conditioning
+~~~~~~~~~~~~~~~~~~~~~~   
+
+.. automodule:: sotodlib.data.condition
+   :members:
