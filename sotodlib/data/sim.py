@@ -6,6 +6,10 @@ This module contains code for simulating data.
 
 """
 
+import numpy as np
+
+from spt3g import core
+from sotodlib.data import DataG3Module
 
 class MakeNoiseData(DataG3Module):
     """
