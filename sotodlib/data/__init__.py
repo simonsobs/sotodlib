@@ -56,8 +56,10 @@ class DataG3Module(object):
             data (G3Timestream): data for a single detector
             det_name (str): the detector name in the focal plane,
                 in case it's needed for accessing calibration info
+        Returns:
+            data (G3Timestream)
         """
-        pass
+        return data
     
     def apply(self, f):
         """
