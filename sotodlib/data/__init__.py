@@ -24,6 +24,7 @@ class DataG3Module(object):
     TODO:
         * Add detector masking capabilities so we don't waste CPU time on cut detectors
         * Add a parallizable __call__ option 
+        * Decide if "Modules that add members to frames" should be a default type
     """
     def __init__(self, input='signal', output='signal_out'):
         self.input = input
@@ -58,6 +59,32 @@ class DataG3Module(object):
         """
         pass
     
+    def apply(self, f):
+        """
+        Applies the G3Module on an individual G3Frame or G3TimestreamMap. Likely
+        to be useful when debugging
+        
+        Args:
+            f (G3Frame or G3TimestreamMap)
+            
+        Returns:
+            G3Frame: if f is a G3Frame it returns the frame after the module has been applied
+            G3TimestreamMap: if f is a G3TimestreamMap it returns self.output
+        """
+        if type(f) == core.G3Frame:
+            if f.type != core.G3FrameType.Scan:
+                raise ValueError("""Cannot apply {} on a {} frame""".format(self.__class__,
+                                                                           f.type))
+            self.__call__(f)
+            return f
+        if type(f) == core.G3TimestreamMap:
+            frame = core.G3Frame()
+            frame.type = core.G3FrameType.Scan
+            frame[self.input] = f
+            self.__call__(frame)
+            return frame[self.output]
+        raise ValueError('apply requires a G3Frame or a G3TimestreamMap, you gave me {}'.format(type(f)))
+        
     @classmethod
     def from_function(cls, function, input='signal', output=None):
         """
