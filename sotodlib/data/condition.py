@@ -9,12 +9,18 @@ Attributes:
     MedianSubtract (DataG3Module): Inline definition for median subtracting data
 """
 import numpy as np
+import scipy.signal as signal
 
 from spt3g import core
 from sotodlib.data import DataG3Module
 
-MeanSubtract = DataG3Module.from_function(lambda data: data - np.nanmean(data))
-MedianSubtract = DataG3Module.from_function(lambda data: data - np.nanmedian(data))
+class MeanSubtract(DataG3Module):
+    def process(self, data, det_name):
+        return data-np.nanmean(data)
+
+class MedianSubtract(DataG3Module):
+    def process(self, data, det_name):
+        return data-np.nanmedian(data)
 
 class Detrend(DataG3Module):
     """

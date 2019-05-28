@@ -11,6 +11,70 @@ import numpy as np
 from spt3g import core
 from sotodlib.data import DataG3Module
 
+
+class PipelineSeeder(list):
+    """
+    A way to introduce statically generated frames into a pipeline.
+    Instantiate this as a list of seed Frames, then add it as the
+    first Pipeline element.
+    """
+    def __call__(self, frame_in):
+        output = []
+        if frame_in is not None:
+            output.append(frame_in)
+        if len(self):
+            output.append(self.pop(0))
+        return output
+    
+def enumerate_det_id(n_dets, freq=39, band='LF1'):
+    """
+    Generator for looping through detector names. Not very smart, only for
+    basic testing.
+    
+    Args:
+        n_dets (int): number of detector names to make
+        freq (int): detector freqency
+        band (str): detector band
+        
+    Returns:
+        SO formatted detector keys
+    """
+    types = ['A', 'B']
+    for n in range(n_dets):
+        dnum = int(np.floor(n/2))
+        t = int(np.mod(n,2))
+        yield '{}_{:03}_{}_{}'.format(freq,dnum,band,types[t])
+
+def noise_scan_frames(n_frames=3, n_dets=20, input='signal', n_samps=200, 
+                      samp_rate=0.005*core.G3Units.second, 
+                      t_start=core.G3Time('2020-1-1T00:00:00')):
+    """
+    Generate a list of frames filled with noise data and nothing else. 
+    
+    Args:
+        n_frames (int): number of frames to make
+        n_dets (int): number of detectors per frame
+        input (str): name of G3TimestreamMap for detectors, should be some form of 'signal'
+        n_samps (int): number of samples per detector timestream
+        samp_rate (G3Unit.second): detector sampling rate
+        t_start (G3Time): start time of the set of frames
+    """
+    frame_list = []
+    for n in range(n_frames):
+        f = core.G3Frame()
+        f.type = core.G3FrameType.Scan
+        tsm = core.G3TimestreamMap()
+        z = np.zeros( (n_samps,) )
+        for d in enumerate_det_id(n_dets):
+            tsm[d] = core.G3Timestream(z)
+        tsm.start = t_start
+        tsm.stop = t_start + n_samps*samp_rate
+        tsm = MakeNoiseData().apply(tsm)
+        f[input] = tsm
+        t_start += n_samps*samp_rate
+        frame_list.append(f)
+    return frame_list    
+    
 class MakeNoiseData(DataG3Module):
     """
     Writes a signal with just noise. To be used where an observation 
@@ -32,7 +96,8 @@ class MakeNoiseData(DataG3Module):
     Returns:
         None
     """
-    def __init__(self, input='signal', output=None, white_noise = 24, f_knee = 0.01, f_knee_index=-2):
+    def __init__(self, input='signal', output=None, white_noise = 0.005, 
+                 f_knee = 0.01, f_knee_index=-2):
         self.white_noise = white_noise
         self.f_knee = f_knee
         self.f_knee_index = f_knee_index
