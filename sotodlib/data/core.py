@@ -24,7 +24,8 @@ class DataG3Module(object):
             
     TODO:
         * Add detector masking capabilities so we don't waste CPU time on cut detectors
-        * Add a parallizable __call__ option 
+        * Make an option for input/output to be a list, so processing can be done on multiple timestreams
+        * Make it possible for input/output to be a G3Timestream, instead of a G3TimestreamMap
         * Decide if "Modules that add members to frames" should be a default type
     """
     def __init__(self, input='signal', output='signal_out'):
