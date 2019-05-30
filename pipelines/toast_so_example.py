@@ -15,7 +15,15 @@ from sotodlib.hardware import get_example, sim_telescope_detectors
 from sotodlib.data.toast_load import load_data
 
 
+
 def binned_map(data, npix, subnpix, out="."):
+    """Make a binned map
+
+    This function should exist in toast, but all the pieces do.  If we are
+    doing MCs we break these operations into two pieces and only generate
+    the noise weighted map each realization.
+
+    """
     start = MPI.Wtime()
 
     # The global MPI communicator
@@ -65,20 +73,12 @@ def binned_map(data, npix, subnpix, out="."):
     if cworld.rank == 0:
         print("Building hits and N_pp^-1 took {:.3f} s".format(elapsed),
               flush=True)
-    start = stop
 
     hits.write_healpix_fits(os.path.join(out, "hits.fits"))
     invnpp.write_healpix_fits(os.path.join(out, "invnpp.fits"))
 
-    comm.comm_world.barrier()
-    stop = MPI.Wtime()
-    elapsed = stop - start
-    if cworld.rank == 0:
-        print("Writing hits and N_pp^-1 took {:.3f} s".format(elapsed),
-              flush=True)
-    start = stop
-
     # invert it
+    start = stop
     tm.covariance_invert(invnpp, 1.0e-3)
 
     comm.comm_world.barrier()
@@ -87,16 +87,9 @@ def binned_map(data, npix, subnpix, out="."):
     if comm.comm_world.rank == 0:
         print("Inverting N_pp^-1 took {:.3f} s".format(elapsed),
               flush=True)
-    start = stop
 
     invnpp.write_healpix_fits(os.path.join(out, "npp.fits"))
 
-    cworld.barrier()
-    stop = MPI.Wtime()
-    elapsed = stop - start
-    if cworld.rank == 0:
-        print("Writing N_pp took {:.3f} s".format(elapsed),
-              flush=True)
     start = stop
 
     tm.covariance_apply(invnpp, zmap)
@@ -121,10 +114,11 @@ dets = sim_telescope_detectors(hw, "LAT")
 hw.data["detectors"] = dets
 
 # Dowselect to just 10 pixels on one wafer
-small_hw = hw.select(match={"wafer": ["00"], "pixel": "00."})
+small_hw = hw.select(match={"wafer": ["44"], "pixel": "00."})
 
 # The data directory (this is a single band)
 dir = "/project/projectdirs/sobs/sims/pipe-s0001/datadump_LAT_UHF1"
+#dir = "/home/kisner/scratch/sobs/pipe/datadump_LAT_LF1"
 
 # Our toast communicator- use the default for now, which is one
 # process group spanning all processes.
@@ -132,6 +126,18 @@ comm = toast.Comm()
 
 # Load our selected data
 data = load_data(dir, comm=comm, dets=small_hw)
+
+if comm.world_rank == 0:
+    # Plot some local data from the first observation
+    import matplotlib.pyplot as plt
+    ob = data.obs[0]
+    tod = ob["tod"]
+    boloname = tod.local_dets[0]
+    bolodata = tod.cache.reference("signal_{}".format(boloname))
+    fig = plt.figure()
+    plt.plot(np.arange(len(bolodata)), bolodata)
+    plt.savefig("bolo_{}.png".format(boloname))
+    del bolodata
 
 # Construct a pointing matrix
 nside = 2048
@@ -157,3 +163,10 @@ polyfilter.exec(data)
 npix = 12 * nside**2
 subnpix = 12 * 16**2
 binned_map(data, npix, subnpix)
+
+if comm.world_rank == 0:
+    # Plot the hit map
+    import healpy as hp
+    import matplotlib.pyplot as plt
+    hits = hp.read_map("hits.fits")
+    hp.gnomview(hits, rot=(41.4, -43.4), xsize=800, reso=2.0)
