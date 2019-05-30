@@ -106,6 +106,7 @@ def binned_map(data, npix, subnpix, out="."):
     return
 
 
+
 # First, get the list of detectors we want to use
 
 # (Eventually we would load this from disk.  Here we simulate it.)
@@ -115,17 +116,37 @@ hw.data["detectors"] = dets
 
 # Dowselect to just 10 pixels on one wafer
 small_hw = hw.select(match={"wafer": ["44"], "pixel": "00."})
+#small_hw = hw
 
 # The data directory (this is a single band)
-dir = "/project/projectdirs/sobs/sims/pipe-s0001/datadump_LAT_UHF1"
-#dir = "/home/kisner/scratch/sobs/pipe/datadump_LAT_LF1"
+#dir = "/project/projectdirs/sobs/sims/pipe-s0001/datadump_LAT_UHF1"
+dir = "/home/kisner/scratch/sobs/pipe/datadump_LAT_LF1"
 
 # Our toast communicator- use the default for now, which is one
 # process group spanning all processes.
 comm = toast.Comm()
 
 # Load our selected data
-data = load_data(dir, comm=comm, dets=small_hw)
+data = load_data(
+    dir,
+    obs=["CES-ATACAMA-LAT-Tier1DEC-035..-045_RA+040..+050-0-0"],
+    comm=comm,
+    dets=small_hw
+)
+
+# Everybody look at their data
+my_world_rank = data.comm.world_rank
+my_group_rank = data.comm.group_rank
+for ob in data.obs:
+    tod = ob["tod"]
+    my_dets = tod.local_dets
+    my_first_samp, my_nsamp = tod.local_samples
+    msg = "proc {} with group rank {} has {} dets for samples {} - {}".format(
+        my_world_rank, my_group_rank, len(my_dets), my_first_samp,
+        my_first_samp + my_nsamp - 1
+    )
+    print(msg, flush=True)
+
 
 if comm.world_rank == 0:
     # Plot some local data from the first observation
@@ -170,3 +191,7 @@ if comm.world_rank == 0:
     import matplotlib.pyplot as plt
     hits = hp.read_map("hits.fits")
     hp.gnomview(hits, rot=(41.4, -43.4), xsize=800, reso=2.0)
+    plt.savefig("hits.png")
+    binned = hp.read_map("binned.fits")
+    hp.gnomview(binned, rot=(41.4, -43.4), xsize=800, reso=2.0)
+    plt.savefig("binned.png")

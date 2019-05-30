@@ -257,11 +257,21 @@ class SOTOD(TOD):
         return
 
 
-def parse_cal_frame(frm):
+def parse_cal_frame(frm, dets):
+    detlist = None
+    if isinstance(dets, Hardware):
+        detlist = list(sorted(dets.data["detectors"].keys()))
+    elif isinstance(dets, list):
+        detlist = dets
     qname = "detector_offset"
     detoffset = dict()
-    for d, q in frm[qname]:
-        detoffset[d] = np.array(q)
+    if detlist is None:
+        for d, q in frm[qname]:
+            detoffset[d] = np.array(q)
+    else:
+        for d, q in frm[qname]:
+            if d in detlist:
+                detoffset[d] = np.array(q)
     kfreq = "noise_stream_freq"
     kpsd = "noise_stream_psd"
     kindx = "noise_stream_index"
@@ -395,7 +405,7 @@ def load_observation(path, dets=None, mpicomm=None, prefix=None, **kwargs):
 
     if latest_cal is None:
         raise RuntimeError("No calibration frame with detector offsets!")
-    detoffset, noise = parse_cal_frame(latest_cal)
+    detoffset, noise = parse_cal_frame(latest_cal, dets)
 
     obs["noise"] = noise
 
