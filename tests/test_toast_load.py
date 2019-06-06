@@ -1,8 +1,8 @@
 # Copyright (c) 2018-2019 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
-"""Test toast data export.
+"""Test toast data loading.
 """
-
+import sys
 import os
 
 import numpy as np
@@ -30,12 +30,13 @@ if toast_available is None:
         from toast.tod import TODGround
         from toast.tod import AnalyticNoise
         from sotodlib.data.toast_export import ToastExport
+        from sotodlib.data.toast_load import load_data
         toast_available = True
     except ImportError:
         toast_available = False
 
 
-class ToastExportTest(TestCase):
+class ToastLoadTest(TestCase):
 
     def setUp(self):
         fixture_name = os.path.splitext(os.path.basename(__file__))[0]
@@ -57,7 +58,7 @@ class ToastExportTest(TestCase):
         hwfull.data["detectors"] = dets
         hw = hwfull.select(
             match={"wafer": "42", "band": "LF1", "pixel": "00[01]"})
-        print(hw.data["detectors"], flush=True)
+        # print(hw.data["detectors"], flush=True)
         detquats = {k: v["quat"] for k, v in hw.data["detectors"].items()}
 
         # Samples per observation
@@ -88,60 +89,62 @@ class ToastExportTest(TestCase):
         self.alpha = 1.0
         self.fknee = 0.05
 
-        tod = TODGround(
-            self.data.comm.comm_group,
-            detquats,
-            self.totsamp,
-            detranks=self.data.comm.group_size,
-            firsttime=0.0,
-            rate=self.rate,
-            site_lon=self.site_lon,
-            site_lat=self.site_lat,
-            site_alt=self.site_alt,
-            azmin=self.azmin,
-            azmax=self.azmax,
-            el=self.el,
-            coord=self.coord,
-            scanrate=self.scanrate,
-            scan_accel=self.scan_accel,
-            CES_start=self.CES_start)
+        for ob in range(3):
+            ftime = (self.totsamp / self.rate) * ob
+            tod = TODGround(
+                self.data.comm.comm_group,
+                detquats,
+                self.totsamp,
+                detranks=self.data.comm.group_size,
+                firsttime=ftime,
+                rate=self.rate,
+                site_lon=self.site_lon,
+                site_lat=self.site_lat,
+                site_alt=self.site_alt,
+                azmin=self.azmin,
+                azmax=self.azmax,
+                el=self.el,
+                coord=self.coord,
+                scanrate=self.scanrate,
+                scan_accel=self.scan_accel,
+                CES_start=self.CES_start)
 
-        # Analytic noise model
-        detnames = list(detquats.keys())
-        drate = {x: self.rate for x in detnames}
-        dfmin = {x: self.fmin for x in detnames}
-        dfknee = {x: self.fknee for x in detnames}
-        dalpha = {x: self.alpha for x in detnames}
-        dnet = {x: self.NET for x in detnames}
-        nse = AnalyticNoise(
-            rate=drate,
-            fmin=dfmin,
-            detectors=detnames,
-            fknee=dfknee,
-            alpha=dalpha,
-            NET=dnet
-        )
+            # Analytic noise model
+            detnames = list(detquats.keys())
+            drate = {x: self.rate for x in detnames}
+            dfmin = {x: self.fmin for x in detnames}
+            dfknee = {x: self.fknee for x in detnames}
+            dalpha = {x: self.alpha for x in detnames}
+            dnet = {x: self.NET for x in detnames}
+            nse = AnalyticNoise(
+                rate=drate,
+                fmin=dfmin,
+                detectors=detnames,
+                fknee=dfknee,
+                alpha=dalpha,
+                NET=dnet
+            )
 
-        # Single observation
-        obs = dict()
-        obs["tod"] = tod
-        obs["noise"] = nse
-        obs["id"] = 12345
-        obs["intervals"] = tod.subscans
-        obs["site"] = "SimonsObs"
-        obs["telescope"] = "SAT3"
-        obs["site_id"] = 1
-        obs["telescope_id"] = 4
-        obs["fpradius"] = 5.0
-        obs["start_time"] = 0
-        obs["altitude"] = self.site_alt
-        obs["name"] = "test"
+            # Single observation
+            obs = dict()
+            obs["tod"] = tod
+            obs["noise"] = nse
+            obs["id"] = 12345
+            obs["intervals"] = tod.subscans
+            obs["site"] = "SimonsObs"
+            obs["telescope"] = "SAT3"
+            obs["site_id"] = 1
+            obs["telescope_id"] = 4
+            obs["fpradius"] = 5.0
+            obs["start_time"] = ftime
+            obs["altitude"] = self.site_alt
+            obs["name"] = "test_{:02}".format(ob)
 
-        # Add the observation to the dataset
-        self.data.obs.append(obs)
+            # Add the observation to the dataset
+            self.data.obs.append(obs)
         return
 
-    def test_dump(self):
+    def test_load(self):
         if not toast_available:
             return
 
@@ -168,19 +171,9 @@ class ToastExportTest(TestCase):
             units=core3g.G3TimestreamUnits.Tcmb)
         dumper.exec(self.data)
 
-        # Inspect the dumped frames
-        for root, dirs, files in os.walk(self.outdir):
-            files = sorted(files)
-            for f in files:
-                path = os.path.join(root, f)
-                print("file {}".format(path), flush=True)
-                gf = core3g.G3File(path)
-                for frm in gf:
-                    print(frm, flush=True)
-                    # if frm.type == core3g.G3FrameType.Scan:
-                    #     common = frm.get("flags_common")
-                    #     print(common.array(), flush=True)
-                    #     print(frm.get("flags"))
-                    #     print(frm.get("signal"), flush=True)
+        # Load the data back in
+
+        checkdata = load_data(self.outdir, comm=self.data.comm)
+        checkdata.info(sys.stdout)
 
         return
