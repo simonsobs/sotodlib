@@ -119,8 +119,7 @@ small_hw = hw.select(match={"wafer": ["44"], "pixel": "00."})
 #small_hw = hw
 
 # The data directory (this is a single band)
-#dir = "/project/projectdirs/sobs/sims/pipe-s0001/datadump_LAT_UHF1"
-dir = "/home/kisner/scratch/sobs/pipe/datadump_LAT_LF1"
+dir = "/project/projectdirs/sobs/sims/pipe-s0001/datadump_LAT_UHF1"
 
 # Our toast communicator- use the default for now, which is one
 # process group spanning all processes.
