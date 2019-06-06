@@ -25,6 +25,11 @@ setup_opts["entry_points"] = {
     ]
 }
 
+pipes = [
+    "pipelines/toast_so_sim.py",
+    "pipelines/toast_so_example.py"
+]
+
 setup_opts["name"] = "sotodlib"
 setup_opts["provides"] = "sotodlib"
 setup_opts["version"] = versioneer.get_version()
@@ -35,7 +40,7 @@ setup_opts["url"] = "https://github.com/simonsobs/sotodlib"
 setup_opts["packages"] = find_packages(where=".", exclude="tests")
 setup_opts["license"] = "MIT"
 setup_opts["requires"] = ["Python (>3.4.0)", ]
-setup_opts["scripts"] = ["pipelines/toast_so_sim.py"]
+setup_opts["scripts"] = pipes
 
 # Command Class dictionary.
 # Begin with the versioneer command class dictionary.
