@@ -266,10 +266,10 @@ def parse_cal_frame(frm, dets):
     qname = "detector_offset"
     detoffset = dict()
     if detlist is None:
-        for d, q in frm[qname]:
+        for d, q in frm[qname].iteritems():
             detoffset[d] = np.array(q)
     else:
-        for d, q in frm[qname]:
+        for d, q in frm[qname].iteritems():
             if d in detlist:
                 detoffset[d] = np.array(q)
     kfreq = "noise_stream_freq"
