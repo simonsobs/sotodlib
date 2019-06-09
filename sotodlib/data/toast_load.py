@@ -504,6 +504,13 @@ def load_data(dir, obs=None, comm=None, prefix=None, **kwargs):
                 weight[d] = obsweight(os.path.join(root, dir), prefix=prefix)
             break
         obslist = sorted(obslist)
+        # Filter by the requested obs
+        fobs = list()
+        if obs is not None:
+            for ob in obslist:
+                if ob in obs:
+                    fobs.append(ob)
+            obslist = fobs
 
     if cworld is not None:
         obslist = cworld.bcast(obslist, root=0)
