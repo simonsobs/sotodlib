@@ -106,8 +106,11 @@ def binned_map(data, npix, subnpix, out="."):
     return
 
 
-# First, get the list of detectors we want to use
+# Our toast communicator- use the default for now, which is one
+# process group spanning all processes.
+comm = toast.Comm()
 
+# First, get the list of detectors we want to use
 # (Eventually we would load this from disk.  Here we simulate it.)
 hw = get_example()
 dets = sim_telescope_detectors(hw, "LAT")
@@ -115,15 +118,12 @@ hw.data["detectors"] = dets
 
 # Dowselect to just 10 pixels on one wafer
 small_hw = hw.select(match={"wafer": "41", "pixel": "00."})
-small_hw.dump("selected.toml", overwrite=True)
+if comm.world_rank == 0:
+    small_hw.dump("selected.toml", overwrite=True)
 
 # The data directory (this is a single band)
 dir = "/project/projectdirs/sobs/sims/pipe-s0001/datadump_LAT_LF1"
 # dir = "/home/kisner/scratch/sobs/pipe/datadump_LAT_LF1"
-
-# Our toast communicator- use the default for now, which is one
-# process group spanning all processes.
-comm = toast.Comm()
 
 # Here we divide the data for each observation into a process grid.
 # "detranks = 1" is one extreme, where every process has all detectors for
