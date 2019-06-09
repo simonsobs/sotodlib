@@ -185,8 +185,16 @@ class ToastExport(toast.Operator):
         # the same rank within their group
         crank = comm.comm_rank
 
+        worldrank = 0
+        if cworld is not None:
+            worldrank = cworld.rank
+
+        grouprank = 0
+        if cgroup is not None:
+            grouprank = cgroup.rank
+
         # One process checks the path
-        if cworld.rank == 0:
+        if worldrank == 0:
             if not os.path.isdir(self._outdir):
                 os.makedirs(self._outdir)
         cworld.barrier()
@@ -278,7 +286,7 @@ class ToastExport(toast.Operator):
                         copy_flavors.append(
                             (flv, flavor_type[flv], flavor_maptype[flv],
                              "signal_{}".format(flv)))
-                if cgroup.rank == 0 and len(copy_flavors) > 0:
+                if grouprank == 0 and len(copy_flavors) > 0:
                     print("Found {} extra TOD flavors: {}".format(
                         len(copy_flavors), copy_flavors), flush=True)
 
@@ -288,19 +296,21 @@ class ToastExport(toast.Operator):
             frame_sample_offs = None
             file_sample_offs = None
             file_frame_offs = None
-            if cgroup.rank == 0:
+            if grouprank == 0:
                 # Compute the frame file breaks.  We ignore the observation
                 # and calibration frames since they are small.
-                sampbytes = self._bytes_per_sample(len(detquat), len(copy_flavors) + 1)
+                sampbytes = self._bytes_per_sample(len(detquat),
+                                                   len(copy_flavors) + 1)
 
                 file_sample_offs, file_frame_offs, frame_sample_offs = \
                     s3utils.compute_file_frames(
                         sampbytes, framesizes,
                         file_size=self._target_framefile)
 
-            file_sample_offs = cgroup.bcast(file_sample_offs, root=0)
-            file_frame_offs = cgroup.bcast(file_frame_offs, root=0)
-            frame_sample_offs = cgroup.bcast(frame_sample_offs, root=0)
+            if cgroup is not None:
+                file_sample_offs = cgroup.bcast(file_sample_offs, root=0)
+                file_frame_offs = cgroup.bcast(file_frame_offs, root=0)
+                frame_sample_offs = cgroup.bcast(frame_sample_offs, root=0)
 
             ex_files = [os.path.join(obsdir,
                         "{}_{:08d}.g3".format(self._prefix, x))
@@ -323,7 +333,7 @@ class ToastExport(toast.Operator):
                     nframes = file_frame_offs[ifile+1] - foff
 
                 writer = None
-                if cgroup.rank == 0:
+                if grouprank == 0:
                     writer = core3g.G3Writer(ffile)
                     self._write_obs(writer, props, detindx)
                     if "noise" in obs:
@@ -337,7 +347,7 @@ class ToastExport(toast.Operator):
                                for f in range(nframes)]
                 frm_sizes = [framesizes[foff+f] for f in range(nframes)]
 
-                if cgroup.rank == 0:
+                if grouprank == 0:
                     print("  {} file {}".format(obsdir, ifile), flush=True)
                     print("    start frame = {}, nframes = {}"
                           .format(foff, nframes), flush=True)
@@ -353,7 +363,7 @@ class ToastExport(toast.Operator):
                     copy_detector=copy_flavors,
                     units=self._units)
 
-                if cgroup.rank == 0:
+                if grouprank == 0:
                     for fdt in fdata:
                         writer(fdt)
                     del writer

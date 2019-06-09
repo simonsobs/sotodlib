@@ -17,6 +17,7 @@ import so3g
 from spt3g import core as core3g
 
 from toast.mpi import MPI
+
 import toast.qarray as qa
 from toast.tod import spt3g_utils as s3utils
 
@@ -44,8 +45,11 @@ def frames_to_tod(
         None
 
     """
+    comm = tod.mpicomm
+
     # First broadcast the frame data.
-    frame_data = tod.mpicomm.bcast(frame_data, root=0)
+    if comm is not None:
+        frame_data = comm.bcast(frame_data, root=0)
 
     # Local sample range
     local_first = tod.local_samples[0]
@@ -70,7 +74,9 @@ def frames_to_tod(
             raise RuntimeError(msg)
         if not tod.cache.exists(cache_fld):
             # The field does not yet exist in cache, so create it.
-            #print("proc {}:  create cache field {}, {}, ({}, {})".format(tod.mpicomm.rank, fld, ftype, tod.local_samples[1], nnz), flush=True)
+            # print("proc {}:  create cache field {}, {}, ({},
+            # {})".format(tod.mpicomm.rank, fld, ftype, tod.local_samples[1],
+            # nnz), flush=True)
             if nnz == 1:
                 rf = tod.cache.create(cache_fld, ftype,
                                       (tod.local_samples[1],))
@@ -78,7 +84,8 @@ def frames_to_tod(
                 rf = tod.cache.create(cache_fld, ftype,
                                       (tod.local_samples[1], nnz))
             del rf
-        #print("proc {}: get cache ref for {}".format(tod.mpicomm.rank, cache_fld), flush=True)
+        # print("proc {}: get cache ref for {}".format(tod.mpicomm.rank,
+        # cache_fld), flush=True)
         rf = tod.cache.reference(cache_fld)
         # Verify that the dimensions of the cache object are what we expect,
         # then copy the data.
@@ -95,7 +102,7 @@ def frames_to_tod(
         if cache_samples != tod.local_samples[1]:
             msg = "frame {}, field {}: cache has {} samples, which is"
             " different from local TOD size {}"\
-            .format(frame, fld, cache_samples, tod.local_samples[1])
+                .format(frame, fld, cache_samples, tod.local_samples[1])
             raise RuntimeError(msg)
 
         if cache_nnz != nnz:
@@ -107,12 +114,16 @@ def frames_to_tod(
         if cache_nnz > 1:
             slc = \
                 np.array(data[fld][nnz*froff:nnz*(froff+nfr)],
-                copy=False).reshape((-1, nnz))
-            #print("proc {}:  copy_slice field {}[{}:{},:] = frame[{}:{},:]".format(tod.mpicomm.rank, fld, cacheoff, cacheoff+nfr, froff, froff+nfr), flush=True)
-            rf[cacheoff:cacheoff+nfr,:] = slc
+                         copy=False).reshape((-1, nnz))
+            # print("proc {}:  copy_slice field {}[{}:{},:] = \
+            # frame[{}:{},:]".format(tod.mpicomm.rank, fld, cacheoff,
+            # cacheoff+nfr, froff, froff+nfr), flush=True)
+            rf[cacheoff:cacheoff+nfr, :] = slc
         else:
             slc = np.array(data[fld][froff:froff+nfr], copy=False)
-            #print("proc {}:  copy_slice field {}[{}:{}] = frame[{}:{}]".format(tod.mpicomm.rank, fld, cacheoff, cacheoff+nfr, froff, froff+nfr), flush=True)
+            # print("proc {}:  copy_slice field {}[{}:{}] = \
+            # frame[{}:{}]".format(tod.mpicomm.rank, fld, cacheoff,
+            # cacheoff+nfr, froff, froff+nfr), flush=True)
             rf[cacheoff:cacheoff+nfr] = slc
         del rf
         return
@@ -143,7 +154,7 @@ def frames_to_tod(
         if cache_samples != tod.local_samples[1]:
             msg = "frame {}, field {}: cache has {} samples, which is"
             " different from local TOD size {}"\
-            .format(frame, fld, cache_samples, tod.local_samples[1])
+                .format(frame, fld, cache_samples, tod.local_samples[1])
             raise RuntimeError(msg)
 
         slc = np.array(ndata[froff:froff+nfr], copy=False)
@@ -152,7 +163,9 @@ def frames_to_tod(
         return
 
     if cacheoff is not None:
-        #print("proc {} has overlap with frame {}:  {} {} {}".format(tod.mpicomm.rank, frame, cacheoff, froff, nfr), flush=True)
+        # print("proc {} has overlap with frame {}:  {} {} \
+        # {}".format(tod.mpicomm.rank, frame, cacheoff, froff, nfr),
+        # flush=True)
 
         # This process has some overlap with the frame.
         # FIXME:  need to account for multiple timestream maps.
@@ -182,7 +195,9 @@ def frames_to_tod(
             for field in frame_data[detector_map].keys():
                 for dp in dpats:
                     if dp.match(field) is not None:
-                        #print("proc {} copy frame {}, field {}".format(tod.mpicomm.rank, frame, field), flush=True)
+                        # print("proc {} copy frame {}, field
+                        # {}".format(tod.mpicomm.rank, frame, field),
+                        # flush=True)
                         copy_slice(frame_data[detector_map], field, "signal_")
                         break
         if flag_map is not None:
@@ -239,6 +254,12 @@ def tod_to_frames(
             None values.
 
     """
+    comm = tod.mpicomm
+    rank = 0
+    if comm is not None:
+        rank = comm.rank
+    comm_row = tod.grid_comm_row
+
     # Detector names
     detnames = tod.detectors
 
@@ -294,13 +315,17 @@ def tod_to_frames(
             pz = len(pdata)
 
         if rankdet == prow:
-            psizes = tod.grid_comm_row.gather(pz, root=0)
+            psizes = None
+            if comm_row is None:
+                psizes = [pz]
+            else:
+                psizes = comm_row.gather(pz, root=0)
             disp = None
             totsize = None
             if ranksamp == 0:
                 # We are the process collecting the gathered data.
                 allnnz = nnz
-                gproc = tod.mpicomm.rank
+                gproc = rank
                 # Compute the displacements into the receive buffer.
                 disp = [0]
                 for ps in psizes[:-1]:
@@ -310,8 +335,10 @@ def tod_to_frames(
                 # allocate receive buffer
                 gdata = np.zeros(totsize, dtype=pdata.dtype)
 
-            tod.grid_comm_row.Gatherv(pdata, [gdata, psizes, disp, mpitype],
-                                      root=0)
+            if comm_row is None:
+                pdata[:] = gdata
+            else:
+                comm_row.Gatherv(pdata, [gdata, psizes, disp, mpitype], root=0)
             del disp
             del psizes
 
@@ -319,10 +346,11 @@ def tod_to_frames(
         # Only one process (the first one in process row "prow") has data
         # to send.
 
-        # All processes find out which one did the gather
-        gproc = tod.mpicomm.allreduce(gproc, MPI.SUM)
-        # All processes find out the field dimensions
-        allnnz = tod.mpicomm.allreduce(allnnz, MPI.SUM)
+        if comm is not None:
+            # All processes find out which one did the gather
+            gproc = comm.allreduce(gproc, MPI.SUM)
+            # All processes find out the field dimensions
+            allnnz = comm.allreduce(allnnz, MPI.SUM)
 
         mtag = 10 * tag
 
@@ -335,20 +363,20 @@ def tod_to_frames(
                     rdata = gdata.reshape((-1, allnnz))
         else:
             # Data not yet on rank 0
-            if tod.mpicomm.rank == 0:
+            if rank == 0:
                 # Receive data from the first process in this row
-                rtype = tod.mpicomm.recv(source=gproc, tag=(mtag+1))
-                rsize = tod.mpicomm.recv(source=gproc, tag=(mtag+2))
+                rtype = comm.recv(source=gproc, tag=(mtag+1))
+                rsize = comm.recv(source=gproc, tag=(mtag+2))
                 rdata = np.zeros(rsize, dtype=np.dtype(rtype))
-                tod.mpicomm.Recv(rdata, source=gproc, tag=mtag)
+                comm.Recv(rdata, source=gproc, tag=mtag)
                 # Reshape if needed
                 if allnnz > 1:
                     rdata = rdata.reshape((-1, allnnz))
-            elif (tod.mpicomm.rank == gproc):
+            elif (rank == gproc):
                 # Send our data
-                tod.mpicomm.send(gdata.dtype.char, dest=0, tag=(mtag+1))
-                tod.mpicomm.send(len(gdata), dest=0, tag=(mtag+2))
-                tod.mpicomm.Send(gdata, 0, tag=mtag)
+                comm.send(gdata.dtype.char, dest=0, tag=(mtag+1))
+                comm.send(len(gdata), dest=0, tag=(mtag+2))
+                comm.Send(gdata, 0, tag=mtag)
         return rdata
 
     # For efficiency, we are going to gather the data for all frames at once.
@@ -362,7 +390,7 @@ def tod_to_frames(
 
     # The list of frames- only on the root process.
     fdata = None
-    if tod.mpicomm.rank == 0:
+    if rank == 0:
         fdata = [core3g.G3Frame(core3g.G3FrameType.Scan)
                  for f in range(n_frames)]
     else:
@@ -380,7 +408,8 @@ def tod_to_frames(
             chunks.append([grp[0], grp[-1]])
         return chunks
 
-    def split_field(data, g3t, framefield, mapfield=None, g3units=units, times=None):
+    def split_field(data, g3t, framefield, mapfield=None, g3units=units,
+                    times=None):
         """Split a gathered data buffer into frames- only on root process.
         """
         if g3t == core3g.G3VectorTime:
@@ -446,7 +475,8 @@ def tod_to_frames(
         elif g3t == core3g.G3Timestream:
             if times is None:
                 raise RuntimeError(
-                    "You must provide the time stamp vector with a Timestream object")
+                    "You must provide the time stamp vector with a "
+                    "Timestream object")
             for f in range(n_frames):
                 dataoff = fdataoff[f]
                 ndata = frame_sizes[f]
@@ -513,13 +543,15 @@ def tod_to_frames(
     times = None
     if rankdet == 0:
         times = tod.local_times()
-    times = gather_field(0, times, 1, MPI.DOUBLE, cacheoff, ncache, 0)
+    if comm is not None:
+        times = gather_field(0, times, 1, MPI.DOUBLE, cacheoff, ncache, 0)
 
     bore = None
     if rankdet == 0:
         bore = tod.read_boresight(local_start=cacheoff, n=ncache).flatten()
-    bore = gather_field(0, bore, 4, MPI.DOUBLE, cacheoff, ncache, 0)
-    if tod.mpicomm.rank == 0:
+    if comm is not None:
+        bore = gather_field(0, bore, 4, MPI.DOUBLE, cacheoff, ncache, 0)
+    if rank == 0:
         split_field(bore.reshape(-1, 4), core3g.G3VectorDouble,
                     "qboresight_radec")
 
@@ -527,36 +559,42 @@ def tod_to_frames(
     if rankdet == 0:
         bore = tod.read_boresight_azel(
             local_start=cacheoff, n=ncache).flatten()
-    bore = gather_field(0, bore, 4, MPI.DOUBLE, cacheoff, ncache, 1)
-    if tod.mpicomm.rank == 0:
+    if comm is not None:
+        bore = gather_field(0, bore, 4, MPI.DOUBLE, cacheoff, ncache, 1)
+    if rank == 0:
         split_field(bore.reshape(-1, 4), core3g.G3VectorDouble,
                     "qboresight_azel")
 
-    if tod.mpicomm.rank == 0:
+    if rank == 0:
         for f in range(n_frames):
             fdata[f]["boresight"] = core3g.G3TimestreamMap()
         ang_theta, ang_phi, ang_psi = qa.to_angles(bore)
         ang_az = ang_phi
         ang_el = (np.pi / 2.0) - ang_theta
         ang_roll = ang_psi
-        split_field(ang_az, core3g.G3Timestream, "boresight", "az", None, times=times)
-        split_field(ang_el, core3g.G3Timestream, "boresight", "el", None, times=times)
-        split_field(ang_roll, core3g.G3Timestream, "boresight", "roll", None, times=times)
+        split_field(ang_az, core3g.G3Timestream, "boresight", "az", None,
+                    times=times)
+        split_field(ang_el, core3g.G3Timestream, "boresight", "el", None,
+                    times=times)
+        split_field(ang_roll, core3g.G3Timestream, "boresight", "roll", None,
+                    times=times)
 
     # Now the position and velocity information
 
     pos = None
     if rankdet == 0:
         pos = tod.read_position(local_start=cacheoff, n=ncache).flatten()
-    pos = gather_field(0, pos, 3, MPI.DOUBLE, cacheoff, ncache, 2)
-    if tod.mpicomm.rank == 0:
+    if comm is not None:
+        pos = gather_field(0, pos, 3, MPI.DOUBLE, cacheoff, ncache, 2)
+    if rank == 0:
         split_field(pos.reshape(-1, 3), core3g.G3VectorDouble, "site_position")
 
     vel = None
     if rankdet == 0:
         vel = tod.read_velocity(local_start=cacheoff, n=ncache).flatten()
-    vel = gather_field(0, vel, 3, MPI.DOUBLE, cacheoff, ncache, 3)
-    if tod.mpicomm.rank == 0:
+    if comm is not None:
+        vel = gather_field(0, vel, 3, MPI.DOUBLE, cacheoff, ncache, 3)
+    if rank == 0:
         split_field(vel.reshape(-1, 3), core3g.G3VectorDouble, "site_velocity")
 
     # Now handle the common flags- either from a cache object or from the
@@ -564,7 +602,6 @@ def tod_to_frames(
 
     cflags = None
     nnz = 1
-    mtype = MPI.UINT8_T
     if cache_common_flags is None:
         if rankdet == 0:
             cflags = tod.read_common_flags(local_start=cacheoff, n=ncache)
@@ -574,19 +611,22 @@ def tod_to_frames(
                                              ncache)
         if cflags is not None:
             cflags &= mask_flag_common
-    cflags = gather_field(0, cflags, nnz, mtype, cacheoff, ncache, 4)
-    if tod.mpicomm.rank == 0:
+    if comm is not None:
+        mtype = MPI.UINT8_T
+        cflags = gather_field(0, cflags, nnz, mtype, cacheoff, ncache, 4)
+    if rank == 0:
         split_field(cflags, so3g.IntervalsInt, "flags_common")
 
     # Any extra common fields
 
-    tod.mpicomm.barrier()
+    if comm is not None:
+        comm.barrier()
 
     if copy_common is not None:
         for cindx, (cname, g3typ, fname) in enumerate(copy_common):
             cdata, nnz, mtype = get_local_cache(0, cname, cacheoff, ncache)
             cdata = gather_field(0, cdata, nnz, mtype, cacheoff, ncache, cindx)
-            if tod.mpicomm.rank == 0:
+            if rank == 0:
                 split_field(cdata, g3typ, fname)
 
     # Now read all per-detector quantities.
@@ -594,7 +634,7 @@ def tod_to_frames(
     # For each detector field, processes which have the detector
     # in their local_dets should be in the same process row.
 
-    if tod.mpicomm.rank == 0:
+    if rank == 0:
         for f in range(n_frames):
             fdata[f]["signal"] = core3g.G3TimestreamMap()
             fdata[f]["flags"] = so3g.MapIntervalsInt()
@@ -608,9 +648,13 @@ def tod_to_frames(
             drow = rankdet
         # As a sanity check, verify that every process which
         # has this detector is in the same process row.
-        rowcheck = tod.mpicomm.gather(drow, root=0)
+        rowcheck = None
+        if comm is None:
+            rowcheck = [drow]
+        else:
+            rowcheck = comm.gather(drow, root=0)
         prow = 0
-        if tod.mpicomm.rank == 0:
+        if rank == 0:
             rc = np.array([x for x in rowcheck if (x >= 0)],
                           dtype=np.int32)
             prow = np.max(rc)
@@ -618,16 +662,17 @@ def tod_to_frames(
                 msg = "Processes with detector {} are not in the "\
                     "same row of the process grid\n".format(dname)
                 sys.stderr.write(msg)
-                tod.mpicomm.abort()
+                if comm is not None:
+                    comm.abort()
 
         # Every process finds out which process row is participating.
-        prow = tod.mpicomm.bcast(prow, root=0)
+        if comm is not None:
+            prow = comm.bcast(prow, root=0)
 
         # "signal"
 
         detdata = None
         nnz = 1
-        mtype = MPI.DOUBLE
         if cache_signal is None:
             if rankdet == prow:
                 detdata = tod.read(detector=dname, local_start=cacheoff,
@@ -636,16 +681,18 @@ def tod_to_frames(
             cache_det = "{}_{}".format(cache_signal, dname)
             detdata, nnz, mtype = get_local_cache(prow, cache_det, cacheoff,
                                                   ncache)
-        detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
-                               ncache, dindx)
-        if tod.mpicomm.rank == 0:
-            split_field(detdata, core3g.G3Timestream, "signal", mapfield=dname, times=times)
+        if comm is not None:
+            mtype = MPI.DOUBLE
+            detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
+                                   ncache, dindx)
+        if rank == 0:
+            split_field(detdata, core3g.G3Timestream, "signal",
+                        mapfield=dname, times=times)
 
         # "flags"
 
         detdata = None
         nnz = 1
-        mtype = MPI.UINT8_T
         if cache_flags is None:
             if rankdet == prow:
                 detdata = tod.read_flags(detector=dname, local_start=cacheoff,
@@ -657,9 +704,11 @@ def tod_to_frames(
                                                   ncache)
             if detdata is not None:
                 detdata &= mask_flag
-        detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
-                               ncache, dindx)
-        if tod.mpicomm.rank == 0:
+        if comm is not None:
+            mtype = MPI.UINT8_T
+            detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
+                                   ncache, dindx)
+        if rank == 0:
             split_field(detdata, so3g.IntervalsInt, "flags", mapfield=dname)
 
         # Now copy any additional fields.
@@ -671,7 +720,8 @@ def tod_to_frames(
                                                       cacheoff, ncache)
                 detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
                                        ncache, dindx)
-                if tod.mpicomm.rank == 0:
-                    split_field(detdata, g3typ, fnm, mapfield=dname, times=times)
+                if rank == 0:
+                    split_field(detdata, g3typ, fnm, mapfield=dname,
+                                times=times)
 
     return fdata
