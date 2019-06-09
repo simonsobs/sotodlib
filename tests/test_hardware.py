@@ -96,4 +96,17 @@ class HardwareTest(TestCase):
         with open(chkpath, "w") as f:
             for d in check.data["detectors"]:
                 f.write("{}\n".format(d))
+
+        # Test selection of pixels on 27GHz wafer 44.
+        lfhw = hw.select(
+            match={"wafer": ["44"],
+                   "pixel": "00."})
+        dbpath = os.path.join(self.outdir, "w44_bLF1_p000-009.toml.gz")
+        lfhw.dump(dbpath, overwrite=True, compress=True)
+        check = Hardware(dbpath)
+        self.assertTrue(len(check.data["detectors"]) == 40)
+        chkpath = os.path.join(self.outdir, "w44_bLF1_p000-009.txt")
+        with open(chkpath, "w") as f:
+            for d in check.data["detectors"]:
+                f.write("{}\n".format(d))
         return

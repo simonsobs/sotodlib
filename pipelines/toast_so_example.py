@@ -4,6 +4,7 @@
 # Full license can be found in the top level "LICENSE" file.
 
 import os
+
 import numpy as np
 
 from toast.mpi import MPI
@@ -13,7 +14,6 @@ import toast.tod as tt
 
 from sotodlib.hardware import get_example, sim_telescope_detectors
 from sotodlib.data.toast_load import load_data
-
 
 
 def binned_map(data, npix, subnpix, out="."):
@@ -106,7 +106,6 @@ def binned_map(data, npix, subnpix, out="."):
     return
 
 
-
 # First, get the list of detectors we want to use
 
 # (Eventually we would load this from disk.  Here we simulate it.)
@@ -115,22 +114,34 @@ dets = sim_telescope_detectors(hw, "LAT")
 hw.data["detectors"] = dets
 
 # Dowselect to just 10 pixels on one wafer
-small_hw = hw.select(match={"wafer": ["44"], "pixel": "00."})
-#small_hw = hw
+small_hw = hw.select(match={"wafer": "41", "pixel": "00."})
+small_hw.dump("selected.toml", overwrite=True)
 
 # The data directory (this is a single band)
-dir = "/project/projectdirs/sobs/sims/pipe-s0001/datadump_LAT_UHF1"
+dir = "/project/projectdirs/sobs/sims/pipe-s0001/datadump_LAT_LF1"
+# dir = "/home/kisner/scratch/sobs/pipe/datadump_LAT_LF1"
 
 # Our toast communicator- use the default for now, which is one
 # process group spanning all processes.
 comm = toast.Comm()
+
+# Here we divide the data for each observation into a process grid.
+# "detranks = 1" is one extreme, where every process has all detectors for
+# some number of frame-sized chunks.  The other extreme is where each process
+# has the full time length for a subset of detectors.
+#
+# (all detectors for some number of frame-sized chunks):
+detranks = 1
+# (some detectors for the whole observation):
+# detranks = comm.group_size
 
 # Load our selected data
 data = load_data(
     dir,
     obs=["CES-ATACAMA-LAT-Tier1DEC-035..-045_RA+040..+050-0-0"],
     comm=comm,
-    dets=small_hw
+    dets=small_hw,
+    detranks=detranks
 )
 
 # Everybody look at their data
