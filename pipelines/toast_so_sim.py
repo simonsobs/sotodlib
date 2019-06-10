@@ -541,6 +541,11 @@ def parse_arguments(comm):
         "UHF1 (225GHz), UHF2 (280GHz)",
     )
     parser.add_argument(
+        "--tube",
+        required=False,
+        help="Only include detectors from one optics tube: LT0-LT6 or ST0-ST3",
+    )
+    parser.add_argument(
         "--tidas", required=False, default=None, help="Output TIDAS export path"
     )
     parser.add_argument(
@@ -769,13 +774,23 @@ def load_focalplanes(args, comm, schedules):
     focalplanes = []
     if comm.comm_world.rank == 0:
         for telescope, band in zip(args.telescope.split(","), args.band.split(",")):
-            itele = {"SAT0": 0, "SAT1": 1, "SAT2": 2, "SAT3": 3, "LAT": 4}[telescope]
             start1 = MPI.Wtime()
             hw = sotodlib.hardware.get_example()
             hw.data["detectors"] = sotodlib.hardware.sim_telescope_detectors(
                 hw, telescope
             )
-            hw = hw.select(match={"band": band})
+            match = {"band": band}
+            if args.tube is None:
+                telescopes = [telescope]
+                tubes = None
+            else:
+                telescopes = None
+                tubes = [args.tube]
+            hw = hw.select(telescopes=telescopes, tubes=tubes, match=match)
+            if len(hw.data["detectors"]) == 0:
+                raise RuntimeError(
+                    "No detectors match query: telescopes={}, "
+                    "tubes={}, match={}".format(telescopes, tubes, match))
             # Transfer the detector information into a TOAST dictionary
             focalplane = {}
             net = hw.data["bands"][band]["NET"] * 1e-6  # uK -> K
@@ -791,14 +806,16 @@ def load_focalplanes(args, comm, schedules):
             bandcenter = 0.5 * (lower + upper)
             bandwidth = upper - lower
             for idet, (detname, detdata) in enumerate(hw.data["detectors"].items()):
-                if detdata["band"] != band:
-                    continue
-                ## DEBUG begin
-                #if idet % 100 == 0:
-                #    print("WARNING: truncating focalplane for testing")
-                #else:
-                #    continue
-                # DEBUG end
+                wafer = detdata["wafer"]
+                itube = None
+                for tube, tubedata in hw.data["tubes"].items():
+                    if wafer in tubedata["wafers"]:
+                        itube = {"LT0": 0, "LT1": 1, "LT2": 2, "LT3": 3,
+                                 "LT4": 4, "LT5": 5, "LT6": 6,
+                                 "ST0": 7, "ST1": 8, "ST2": 9, "ST3": 10}[tube]
+                        break
+                if itube is None:
+                    raise RuntimeError("Wafer {} not found in tubes".format(wafer))
                 focalplane[detname] = {
                     "NET": net,
                     "fknee": fknee,
@@ -811,13 +828,17 @@ def load_focalplanes(args, comm, schedules):
                     "freq": center,
                     "bandcenter_ghz": bandcenter,
                     "bandwidth_ghz": bandwidth,
-                    "index": idet + 1000000 * itele,
+                    "index": idet + 1000000 * itube,
+                    "telescope": telescope,
+                    "tube": tube,
+                    "band": band,
                 }
             focalplanes.append(focalplane)
             stop1 = MPI.Wtime()
             print(
-                "Load {} {} focalplane ({} detectors): {:.2f} seconds".format(
-                    telescope, band, len(focalplane), stop1 - start1),
+                "Load tele = {} tube = {} band = {} focalplane ({} detectors): "
+                "{:.2f} seconds".format(
+                    telescope, args.tube, band, len(focalplane), stop1 - start1),
                 flush=args.flush,
             )
     focalplanes = comm.comm_world.bcast(focalplanes)
