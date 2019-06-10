@@ -4,6 +4,7 @@
 # Full license can be found in the top level "LICENSE" file.
 
 import os
+
 import numpy as np
 
 from toast.mpi import MPI
@@ -15,7 +16,6 @@ from sotodlib.hardware import get_example, sim_telescope_detectors
 from sotodlib.data.toast_load import load_data
 
 
-
 def binned_map(data, npix, subnpix, out="."):
     """Make a binned map
 
@@ -24,8 +24,6 @@ def binned_map(data, npix, subnpix, out="."):
     the noise weighted map each realization.
 
     """
-    start = MPI.Wtime()
-
     # The global MPI communicator
     cworld = data.comm.comm_world
 
@@ -48,6 +46,10 @@ def binned_map(data, npix, subnpix, out="."):
     invnpp.data.fill(0.0)
     hits.data.fill(0)
     zmap.data.fill(0.0)
+
+    start = MPI.Wtime()
+    if cworld.rank == 0:
+        print("Accumulating hits and N_pp'^-1 ...", flush=True)
 
     # Setting detweights to None gives uniform weighting.
     build_invnpp = tm.OpAccumDiag(
@@ -74,23 +76,34 @@ def binned_map(data, npix, subnpix, out="."):
         print("Building hits and N_pp^-1 took {:.3f} s".format(elapsed),
               flush=True)
 
+    if cworld.rank == 0:
+        print("Writing hits and N_pp'^-1 ...", flush=True)
+
     hits.write_healpix_fits(os.path.join(out, "hits.fits"))
     invnpp.write_healpix_fits(os.path.join(out, "invnpp.fits"))
 
-    # invert it
     start = stop
+    if cworld.rank == 0:
+        print("Inverting N_pp'^-1 ...", flush=True)
+
+    # invert it
     tm.covariance_invert(invnpp, 1.0e-3)
 
-    comm.comm_world.barrier()
+    cworld.barrier()
     stop = MPI.Wtime()
     elapsed = stop - start
-    if comm.comm_world.rank == 0:
+    if cworld.rank == 0:
         print("Inverting N_pp^-1 took {:.3f} s".format(elapsed),
               flush=True)
 
+    if cworld.rank == 0:
+        print("Writing N_pp' ...", flush=True)
     invnpp.write_healpix_fits(os.path.join(out, "npp.fits"))
 
     start = stop
+
+    if cworld.rank == 0:
+        print("Computing binned map ...", flush=True)
 
     tm.covariance_apply(invnpp, zmap)
 
@@ -98,39 +111,62 @@ def binned_map(data, npix, subnpix, out="."):
     stop = MPI.Wtime()
     elapsed = stop - start
     if cworld.rank == 0:
-        print("  Computing binned map took {:.3f} s"
+        print("Computing binned map took {:.3f} s"
               .format(elapsed), flush=True)
     start = stop
 
+    if cworld.rank == 0:
+        print("Writing binned map ...", flush=True)
     zmap.write_healpix_fits(os.path.join(out, "binned.fits"))
+    if cworld.rank == 0:
+        print("Binned map done", flush=True)
+
     return
 
 
+# Our toast communicator- use the default for now, which is one
+# process group spanning all processes.
+comm = toast.Comm()
 
+if comm.world_rank == 0:
+    print("Simulating all detector properties...", flush=True)
 # First, get the list of detectors we want to use
-
 # (Eventually we would load this from disk.  Here we simulate it.)
 hw = get_example()
 dets = sim_telescope_detectors(hw, "LAT")
 hw.data["detectors"] = dets
 
+if comm.world_rank == 0:
+    print("Selecting detectors...", flush=True)
 # Dowselect to just 10 pixels on one wafer
-small_hw = hw.select(match={"wafer": ["44"], "pixel": "00."})
-#small_hw = hw
+small_hw = hw.select(match={"wafer": "41", "pixel": "00."})
+if comm.world_rank == 0:
+    small_hw.dump("selected.toml", overwrite=True)
 
 # The data directory (this is a single band)
-dir = "/project/projectdirs/sobs/sims/pipe-s0001/datadump_LAT_UHF1"
+dir = "/project/projectdirs/sobs/sims/pipe-s0001/datadump_LAT_LF1"
+# dir = "/home/kisner/scratch/sobs/pipe/datadump_LAT_LF1"
 
-# Our toast communicator- use the default for now, which is one
-# process group spanning all processes.
-comm = toast.Comm()
+# Here we divide the data for each observation into a process grid.
+# "detranks = 1" is one extreme, where every process has all detectors for
+# some number of frame-sized chunks.  The other extreme is where each process
+# has the full time length for a subset of detectors.
+#
+# (all detectors for some number of frame-sized chunks):
+detranks = 1
+# (some detectors for the whole observation):
+# detranks = comm.group_size
+
+if comm.world_rank == 0:
+    print("Loading data from disk...", flush=True)
 
 # Load our selected data
 data = load_data(
     dir,
     obs=["CES-ATACAMA-LAT-Tier1DEC-035..-045_RA+040..+050-0-0"],
     comm=comm,
-    dets=small_hw
+    dets=small_hw,
+    detranks=detranks
 )
 
 # Everybody look at their data
