@@ -164,6 +164,13 @@ def parse_arguments(comm):
         "(from toast_ground_schedule.py)",
     )
     parser.add_argument(
+        "--split_schedule",
+        required=False,
+        help='Only use a subset of the schedule.  The argument is a string '
+        'of the form "[isplit],[nsplit]" and only observations that satisfy '
+        'scan % nsplit == isplit are included',
+    )
+    parser.add_argument(
         "--weather",
         required=False,
         help="Comma-separated list of TOAST weather files for "
@@ -656,6 +663,11 @@ def load_schedule(args, comm):
     schedules = []
 
     if comm.comm_world.rank == 0:
+        isplit, nsplit = None, None
+        if args.split_schedule is not None:
+            isplit, nsplit = args.split_schedule.split(",")
+            isplit = np.int(isplit)
+            nsplit = np.int(nsplit)
         for fn in args.schedule.split(","):
             if not os.path.isfile(fn):
                 raise RuntimeError("No such schedule file: {}".format(fn))
@@ -697,6 +709,9 @@ def load_schedule(args, comm):
                         scan,
                         subscan,
                     ) = line.split()
+                    if nsplit:
+                        if int(scan) % nsplit != isplit:
+                            continue`
                     start_time = start_date + " " + start_time
                     stop_time = stop_date + " " + stop_time
                     # Define season as a calendar year.  This can be
@@ -728,7 +743,8 @@ def load_schedule(args, comm):
             schedules.append([site, all_ces])
             stop1 = MPI.Wtime()
             print(
-                "Load {}: {:.2f} seconds".format(fn, stop1 - start1), flush=args.flush
+                "Load {} (sub)scans in {}: {:.2f} seconds".format(
+                    len(all_ces), fn, stop1 - start1), flush=args.flush
             )
 
     schedules = comm.comm_world.bcast(schedules)
