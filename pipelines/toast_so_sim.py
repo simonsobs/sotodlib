@@ -272,18 +272,6 @@ def parse_arguments(comm):
         help="Disable simulating the atmosphere.",
     )
     parser.add_argument(
-        "--elevation_noise_a",
-        required=False,
-        type=np.float,
-        help="a/sin(el)+b noise parameter",
-    )
-    parser.add_argument(
-        "--elevation_noise_b",
-        required=False,
-        type=np.float,
-        help="a/sin(el)+b noise parameter",
-    )
-    parser.add_argument(
         "--skip_noise",
         required=False,
         default=False,
@@ -900,12 +888,8 @@ def get_elevation_noise(args, comm, data, key="noise"):
     """ Insert elevation-dependent noise
 
     """
-    if args.elevation_noise_a is None:
-        return
     autotimer = timing.auto_timer()
     start = MPI.Wtime()
-    a = args.elevation_noise_a
-    b = args.elevation_noise_b
     fsample = args.samplerate
     for obs in data.obs:
         tod = obs["tod"]
@@ -1134,7 +1118,7 @@ def create_observations(args, comm, schedules):
             obs = create_observation(args, comm, all_ces_tot, ices, noise)
             data.obs.append(obs)
 
-    if args.skip_atmosphere and args.elevation_noise_a is None:
+    if args.skip_atmosphere and args.skip_noise:
         for ob in data.obs:
             tod = ob["tod"]
             tod.free_azel_quats()
