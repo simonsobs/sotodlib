@@ -101,6 +101,10 @@ class SOTOD(TOD):
         return
 
     def load_frames(self):
+        rank = 0
+        if self.mpicomm is not None:
+            rank = self.mpicomm.rank
+
         # Timestamps
         self.cache.create("timestamps", np.int64, (self.local_samples[1],))
 
@@ -114,8 +118,10 @@ class SOTOD(TOD):
         self.cache.create("flags_common", np.uint8, (self.local_samples[1],))
 
         # Telescope position and velocity
-        self.cache.create("site_position", np.float64, (self.local_samples[1], 3))
-        self.cache.create("site_velocity", np.float64, (self.local_samples[1], 3))
+        self.cache.create("site_position", np.float64,
+                          (self.local_samples[1], 3))
+        self.cache.create("site_velocity", np.float64,
+                          (self.local_samples[1], 3))
 
         # Detector data and flags
         for det in self.local_dets:
@@ -125,17 +131,24 @@ class SOTOD(TOD):
             self.cache.create(name, np.uint8, (self.local_samples[1],))
 
         for ifile, (ffile, fnf, foff) in enumerate(
-                zip(self._file_names, self._file_nframes, self._file_frame_offs)):
+                zip(self._file_names, self._file_nframes,
+                    self._file_frame_offs)):
 
             # Loop over all frames- only the root process will actually
             # read data from disk.
             gfile = [None for x in range(fnf)]
-            if self.mpicomm.rank == 0:
+            if rank == 0:
                 gfile = core3g.G3File(ffile)
 
             scanframe = 0
             for fileframe, fdata in enumerate(gfile):
-                if fdata.type != core3g.G3FrameType.Scan:
+                is_scan = True
+                if rank == 0:
+                    if fdata.type != core3g.G3FrameType.Scan:
+                        is_scan = False
+                if self.mpicomm is not None:
+                    is_scan = self.mpicomm.bcast(is_scan, root=0)
+                if not is_scan:
                     continue
                 frame = foff + scanframe
                 frame_offset = self._frame_sample_offs[frame]
@@ -151,7 +164,8 @@ class SOTOD(TOD):
                     flag_map="flags")
 
                 scanframe += 1
-                self.mpicomm.barrier()
+                if self.mpicomm is not None:
+                    self.mpicomm.barrier()
             del gfile
         return
 
@@ -327,7 +341,9 @@ def load_observation(path, dets=None, mpicomm=None, prefix=None, **kwargs):
         (dict):  The observation dictionary.
 
     """
-
+    rank = 0
+    if mpicomm is not None:
+        rank = mpicomm.rank
     frame_sizes = list()
     frame_sample_offs = list()
     file_names = list()
@@ -340,7 +356,7 @@ def load_observation(path, dets=None, mpicomm=None, prefix=None, **kwargs):
     latest_obs = None
     latest_cal = None
 
-    if mpicomm.rank == 0:
+    if rank == 0:
         pat = None
         if prefix is None:
             pat = re.compile(r".*_(\d{8}).g3")
@@ -389,14 +405,15 @@ def load_observation(path, dets=None, mpicomm=None, prefix=None, **kwargs):
         file_frame_offs = np.array(file_frame_offs, dtype=np.int64)
         frame_sample_offs = np.array(frame_sample_offs, dtype=np.int64)
 
-    latest_obs = mpicomm.bcast(latest_obs, root=0)
-    latest_cal = mpicomm.bcast(latest_cal, root=0)
-    nframes = mpicomm.bcast(nframes, root=0)
-    file_names = mpicomm.bcast(file_names, root=0)
-    file_sample_offs = mpicomm.bcast(file_sample_offs, root=0)
-    file_frame_offs = mpicomm.bcast(file_frame_offs, root=0)
-    frame_sizes = mpicomm.bcast(frame_sizes, root=0)
-    frame_sample_offs = mpicomm.bcast(frame_sample_offs, root=0)
+    if mpicomm is not None:
+        latest_obs = mpicomm.bcast(latest_obs, root=0)
+        latest_cal = mpicomm.bcast(latest_cal, root=0)
+        nframes = mpicomm.bcast(nframes, root=0)
+        file_names = mpicomm.bcast(file_names, root=0)
+        file_sample_offs = mpicomm.bcast(file_sample_offs, root=0)
+        file_frame_offs = mpicomm.bcast(file_frame_offs, root=0)
+        frame_sizes = mpicomm.bcast(frame_sizes, root=0)
+        frame_sample_offs = mpicomm.bcast(frame_sample_offs, root=0)
 
     if latest_obs is None:
         raise RuntimeError("No observation frame was found!")
@@ -474,7 +491,11 @@ def load_data(dir, obs=None, comm=None, prefix=None, **kwargs):
     obslist = list()
     weight = dict()
 
-    if cworld.rank == 0:
+    worldrank = 0
+    if cworld is not None:
+        worldrank = cworld.rank
+
+    if worldrank == 0:
         for root, dirs, files in os.walk(dir, topdown=True):
             for d in dirs:
                 # FIXME:  Add some check here to make sure that this is a
@@ -483,9 +504,17 @@ def load_data(dir, obs=None, comm=None, prefix=None, **kwargs):
                 weight[d] = obsweight(os.path.join(root, dir), prefix=prefix)
             break
         obslist = sorted(obslist)
+        # Filter by the requested obs
+        fobs = list()
+        if obs is not None:
+            for ob in obslist:
+                if ob in obs:
+                    fobs.append(ob)
+            obslist = fobs
 
-    obslist = cworld.bcast(obslist, root=0)
-    weight = cworld.bcast(weight, root=0)
+    if cworld is not None:
+        obslist = cworld.bcast(obslist, root=0)
+        weight = cworld.bcast(weight, root=0)
 
     # Distribute observations based on approximate size
     dweight = [weight[x] for x in obslist]
@@ -508,9 +537,10 @@ def load_data(dir, obs=None, comm=None, prefix=None, **kwargs):
             exc_type, exc_value, exc_traceback = sys.exc_info()
             lines = traceback.format_exception(exc_type, exc_value,
                                                exc_traceback)
-            lines = ["Proc {}: {}".format(MPI.COMM_WORLD.rank, x)
+            lines = ["Proc {}: {}".format(worldrank, x)
                      for x in lines]
             print("".join(lines), flush=True)
-            MPI.COMM_WORLD.Abort()
+            if cworld is not None:
+                cworld.Abort()
 
     return data
