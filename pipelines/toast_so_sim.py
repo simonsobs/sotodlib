@@ -668,6 +668,7 @@ def load_schedule(args, comm):
             isplit, nsplit = args.split_schedule.split(",")
             isplit = np.int(isplit)
             nsplit = np.int(nsplit)
+            scan_counters = {}
         for fn in args.schedule.split(","):
             if not os.path.isfile(fn):
                 raise RuntimeError("No such schedule file: {}".format(fn))
@@ -710,8 +711,25 @@ def load_schedule(args, comm):
                         subscan,
                     ) = line.split()
                     if nsplit:
-                        if int(scan) % nsplit != isplit:
-                            continue`
+                        # Only accept 1 / `nsplit` of the rising and setting
+                        # scans in patch `name`.  Selection is performed
+                        # during the first subscan.
+                        if int(subscan) == 0:
+                            if name not in scan_counters:
+                                scan_counters[name] = {}
+                            counter = scan_counters[name]
+                            # Separate counters for rising and setting scans
+                            if rs not in counter:
+                                counter[rs] = 0
+                            else:
+                                counter[rs] += 1
+                            iscan = counter[rs]
+                        if iscan % nsplit != isplit:
+                            print('Skipping {}th {} scan to {}'.format( # DEBUG
+                                iscan, rs, name))  # DEBUG
+                            continue
+                        print('Including {}th {} scan to {}'.format( # DEBUG
+                            iscan, rs, name))  # DEBUG
                     start_time = start_date + " " + start_time
                     stop_time = stop_date + " " + stop_time
                     # Define season as a calendar year.  This can be
