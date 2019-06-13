@@ -129,6 +129,38 @@ def memreport(comm=None, msg=""):
 XAXIS, YAXIS, ZAXIS = np.eye(3)
 
 
+class CES(object):
+    def __init__(self, start_time, stop_time, name, mjdstart, scan, subscan,
+                 azmin, azmax, el, season, start_date,
+                 rising, mindist_sun, mindist_moon, el_sun):
+        self.start_time = start_time
+        self.stop_time = stop_time
+        self.name = name
+        self.mjdstart = mjdstart
+        self.scan = scan
+        self.subscan = subscan
+        self.azmin = azmin
+        self.azmax = azmax
+        self.el = el
+        self.season = season
+        self.start_date = start_date
+        self.rising = rising
+        self.mindist_sun = mindist_sun
+        self.mindist_moon = mindist_moon
+        self.el_sun = el_sun
+
+
+class Site(object):
+    def __init__(self, name, telescope, lat, lon, alt):
+        self.name = name
+        self.telescope = telescope
+        self.lat = lat
+        self.lon = lon
+        self.alt = alt
+        self.id = name2id(name)
+        self.telescope_id = name2id(telescope)
+
+
 def parse_arguments(comm):
 
     parser = argparse.ArgumentParser(
@@ -654,6 +686,24 @@ def load_weather(args, comm, schedules):
     return
 
 
+def min_sso_dist(el, azmin, azmax, sso_el1, sso_az1, sso_el2, sso_az2):
+    """ Return a rough minimum angular distance between the bore sight
+    and a solar system object"""
+    sso_vec1 = hp.dir2vec(sso_az1, sso_el1, lonlat=True)
+    sso_vec2 = hp.dir2vec(sso_az2, sso_el2, lonlat=True)
+    az1 = azmin
+    az2 = azmax
+    if az2 < az1:
+        az2 += 360
+    n = 100
+    az = np.linspace(az1, az2, n)
+    el = np.ones(n) * el
+    vec = hp.dir2vec(az, el, lonlat=True)
+    dist1 = np.degrees(np.arccos(np.dot(sso_vec1, vec)))
+    dist2 = np.degrees(np.arccos(np.dot(sso_vec2, vec)))
+    return min(np.amin(dist1), np.amin(dist2))
+
+
 def load_schedule(args, comm):
     """ Load the observing schedule(s).
 
@@ -679,8 +729,8 @@ def load_schedule(args, comm):
                     if line.startswith("#"):
                         continue
                     (site_name, telescope, site_lat, site_lon, site_alt) = line.split()
-                    site_alt = float(site_alt)
-                    site = (site_name, telescope, site_lat, site_lon, site_alt)
+                    site = Site(site_name, telescope,
+                                float(site_lat), float(site_lon), float(site_alt))
                     break
                 all_ces = []
                 for line in f:
@@ -725,16 +775,22 @@ def load_schedule(args, comm):
                                 counter[rs] += 1
                             iscan = counter[rs]
                         if iscan % nsplit != isplit:
-                            print('Skipping {}th {} scan to {}'.format( # DEBUG
-                                iscan, rs, name))  # DEBUG
                             continue
-                        print('Including {}th {} scan to {}'.format( # DEBUG
-                            iscan, rs, name))  # DEBUG
                     start_time = start_date + " " + start_time
                     stop_time = stop_date + " " + stop_time
                     # Define season as a calendar year.  This can be
                     # changed later and could even be in the schedule file.
                     season = int(start_date.split("-")[0])
+                    # Gather other useful metadata
+                    mindist_sun = min_sso_dist(
+                        *np.array(
+                            [el, azmin, azmax, sun_el1, sun_az1,
+                             sun_el2, sun_az2]).astype(np.float))
+                    mindist_moon = min_sso_dist(
+                        *np.array(
+                            [el, azmin, azmax, moon_el1, moon_az1,
+                             moon_el2, moon_az2]).astype(np.float))
+                    el_sun = max(float(sun_el1), float(sun_el2))
                     try:
                         start_time = dateutil.parser.parse(start_time + " +0000")
                         stop_time = dateutil.parser.parse(stop_time + " +0000")
@@ -744,19 +800,23 @@ def load_schedule(args, comm):
                     start_timestamp = start_time.timestamp()
                     stop_timestamp = stop_time.timestamp()
                     all_ces.append(
-                        [
-                            start_timestamp,
-                            stop_timestamp,
-                            name,
-                            float(mjdstart),
-                            int(scan),
-                            int(subscan),
-                            float(azmin),
-                            float(azmax),
-                            float(el),
-                            season,
-                            start_date,
-                        ]
+                        CES(
+                            start_time=start_timestamp,
+                            stop_time=stop_timestamp,
+                            name=name,
+                            mjdstart=float(mjdstart),
+                            scan=int(scan),
+                            subscan=int(subscan),
+                            azmin=float(azmin),
+                            azmax=float(azmax),
+                            el=float(el),
+                            season=season,
+                            start_date=start_date,
+                            rising=(rs.upper() == "R"),
+                            mindist_sun=mindist_sun,
+                            mindist_moon=mindist_moon,
+                            el_sun=el_sun,
+                        )
                     )
             schedules.append([site, all_ces])
             stop1 = MPI.Wtime()
@@ -1121,24 +1181,7 @@ def create_observation(args, comm, all_ces_tot, ices, noise):
     """
     autotimer = timing.auto_timer()
     ces, site, fp, fpradius, detquats, weather = all_ces_tot[ices]
-
-    (
-        CES_start,
-        CES_stop,
-        CES_name,
-        mjdstart,
-        scan,
-        subscan,
-        azmin,
-        azmax,
-        el,
-        season,
-        date,
-    ) = ces
-
-    _, _, site_lat, site_lon, site_alt = site
-
-    totsamples = int((CES_stop - CES_start) * args.samplerate)
+    totsamples = int((ces.stop_time - ces.start_time) * args.samplerate)
 
     # create the TOD for this observation
 
@@ -1148,14 +1191,14 @@ def create_observation(args, comm, all_ces_tot, ices, noise):
             detquats,
             totsamples,
             detranks=comm.comm_group.size,
-            firsttime=CES_start,
+            firsttime=ces.start_time,
             rate=args.samplerate,
-            site_lon=site_lon,
-            site_lat=site_lat,
-            site_alt=site_alt,
-            azmin=azmin,
-            azmax=azmax,
-            el=el,
+            site_lon=site.lon,
+            site_lat=site.lat,
+            site_alt=site.alt,
+            azmin=ces.azmin,
+            azmax=ces.azmax,
+            el=ces.el,
             scanrate=args.scanrate,
             scan_accel=args.scan_accel,
             CES_start=None,
@@ -1167,37 +1210,36 @@ def create_observation(args, comm, all_ces_tot, ices, noise):
     except RuntimeError as e:
         raise RuntimeError(
             'Failed to create TOD for {}-{}-{}: "{}"'
-            "".format(CES_name, scan, subscan, e)
+            "".format(ces.name, ces.scan, ces.subscan, e)
         )
 
     # Create the observation
 
-    site_name = site[0]
-    telescope_name = site[1]
-    site_id = name2id(site_name)
-    telescope_id = name2id(telescope_name)
-
     obs = {}
     obs["name"] = "CES-{}-{}-{}-{}-{}".format(
-        site_name, telescope_name, CES_name, scan, subscan
+        site.name, site.telescope, ces.name, ces.scan, ces.subscan
     )
     obs["tod"] = tod
     obs["baselines"] = None
     obs["noise"] = noise
-    obs["id"] = int(mjdstart * 10000)
+    obs["id"] = int(ces.mjdstart * 10000)
     obs["intervals"] = tod.subscans
-    obs["site"] = site_name
-    obs["telescope"] = telescope_name
-    obs["site_id"] = site_id
-    obs["telescope_id"] = telescope_id
+    obs["site"] = site.name
+    obs["telescope"] = site.telescope
+    obs["site_id"] = site.id
+    obs["telescope_id"] = site.telescope_id
     obs["fpradius"] = fpradius
     obs["weather"] = weather
-    obs["start_time"] = CES_start
-    obs["altitude"] = site_alt
-    obs["season"] = season
-    obs["date"] = date
-    obs["MJD"] = mjdstart
+    obs["start_time"] = ces.start_time
+    obs["altitude"] = site.alt
+    obs["season"] = ces.season
+    obs["date"] = ces.start_date
+    obs["MJD"] = ces.mjdstart
     obs["focalplane"] = fp
+    obs["rising"] = ces.rising
+    obs["mindist_sun"] = ces.mindist_sun
+    obs["mindist_moon"] = ces.mindist_moon
+    obs["el_sun"] = ces.el_sun
     del autotimer
     return obs
 
