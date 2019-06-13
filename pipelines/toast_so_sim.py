@@ -3,7 +3,7 @@
 # Copyright (c) 2019 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
-import so3g
+#import so3g
 
 from toast.mpi import MPI, finalize
 
@@ -30,8 +30,6 @@ import toast.tod as tt
 import toast.todmap as ttm
 
 import sotodlib.hardware
-from sotodlib.data.toast import ToastExport
-from spt3g import core as core3g
 
 if tt.tidas_available:
     from toast.tod.tidas import OpTidasExport, TODTidas
@@ -154,6 +152,10 @@ def parse_arguments(comm):
     )
     parser.add_argument(
         "--coord", required=False, default="C", help="Sky coordinate system [C,E,G]"
+    )
+    parser.add_argument(
+        "--hardware", required=False, default=None,
+        help="Input hardware file"
     )
     parser.add_argument(
         "--schedule",
@@ -755,6 +757,42 @@ def get_focalplane_radius(args, focalplane, rmin=1.0):
     return maxdist * 1.001
 
 
+def get_band_params(banddata):
+    net = banddata["NET"] * 1e-6  # uK -> K
+    fknee = banddata["fknee"] * 1e-3  # mHz -> Hz
+    fmin = banddata["fmin"] * 1e-3  # mHz -> Hz
+    # alpha = banddata[band]["alpha"]
+    alpha = 1  # hardwire a sensible number. 3.5 is not realistic.
+    A = banddata["A"]
+    C = banddata["C"]
+    lower = banddata["low"]  # GHz
+    center = banddata["center"]  # GHz
+    upper = banddata["high"]  # GHz
+    return net, fknee, fmin, alpha, A, C, lower, center, upper
+
+
+def get_det_params(detdata, band_net, band_fknee, band_fmin, band_alpha,
+                   band_A, band_C, band_lower, band_center, band_upper):
+    def get_par(key, default, scale=1):
+        if key in detdata:
+            return detdata[key] * scale
+        else:
+            return default
+    net = get_par("NET", band_net, 1e-6)  # uK -> K
+    fknee = get_par("fknee", band_fknee, 1e-3)  # mHz -> Hz
+    fmin = get_par("fmin", band_fmin, 1e-3)  # mHz -> Hz
+    alpha = get_par("alpha", band_alpha)
+    alpha = 1  # hardwire a sensible number. 3.5 is not realistic.
+    A = get_par("A", band_A)
+    C = get_par("C", band_C)
+    lower = get_par("low", band_lower)  # GHz
+    center = get_par("center", band_center)  # GHz
+    upper = get_par("high", band_upper)  # GHz
+    center = 0.5 * (lower + upper)
+    width = upper - lower
+    return net, fknee, fmin, alpha, A, C, center, width
+
+
 def load_focalplanes(args, comm, schedules):
     """ Attach a focalplane to each of the schedules.
 
@@ -775,10 +813,21 @@ def load_focalplanes(args, comm, schedules):
     if comm.comm_world.rank == 0:
         for telescope, band in zip(args.telescope.split(","), args.band.split(",")):
             start1 = MPI.Wtime()
-            hw = sotodlib.hardware.get_example()
-            hw.data["detectors"] = sotodlib.hardware.sim_telescope_detectors(
-                hw, telescope
-            )
+            if args.hardware:
+                print("Loading hardware configuration from {}..."
+                      "".format(args.hardware), flush=True)
+                hw = sotodlib.hardware.Hardware(args.hardware)
+            else:
+                print("Simulating default hardware configuration", flush=True)
+                hw = sotodlib.hardware.get_example()
+                hw.data["detectors"] = sotodlib.hardware.sim_telescope_detectors(
+                    hw, telescope
+                )
+            # Construct a running index for all detectors across all
+            # telescopes for independent noise realizations
+            detindex = {}
+            for idet, det in enumerate(sorted(hw.data["detectors"])):
+                detindex[det] = idet
             match = {"band": band}
             if args.tube is None:
                 telescopes = [telescope]
@@ -793,29 +842,17 @@ def load_focalplanes(args, comm, schedules):
                     "tubes={}, match={}".format(telescopes, tubes, match))
             # Transfer the detector information into a TOAST dictionary
             focalplane = {}
-            net = hw.data["bands"][band]["NET"] * 1e-6  # uK -> K
-            fknee = hw.data["bands"][band]["fknee"] * 1e-3  # mHz -> Hz
-            fmin = hw.data["bands"][band]["fmin"] * 1e-3  # mHz -> Hz
-            # alpha = hw.data["bands"][band]["alpha"]
-            alpha = 1  # hardwire a sensible number. 3.5 is not realistic.
-            A = hw.data["bands"][band]["A"]
-            C = hw.data["bands"][band]["C"]
-            center = hw.data["bands"][band]["center"]  # GHz
-            lower = hw.data["bands"][band]["low"]  # GHz
-            upper = hw.data["bands"][band]["high"]  # GHz
-            bandcenter = 0.5 * (lower + upper)
-            bandwidth = upper - lower
+            banddata = hw.data["bands"][band]
+            (band_net, band_fknee, band_fmin, band_alpha, band_A, band_C,
+             band_lower, band_center, band_upper) = get_band_params(banddata)
             for idet, (detname, detdata) in enumerate(hw.data["detectors"].items()):
+                (net, fknee, fmin, alpha, A, C, center, width) = get_det_params(
+                    detdata, band_net, band_fknee, band_fmin, band_alpha,
+                    band_A, band_C, band_lower, band_center, band_upper)
                 wafer = detdata["wafer"]
-                itube = None
                 for tube, tubedata in hw.data["tubes"].items():
                     if wafer in tubedata["wafers"]:
-                        itube = {"LT0": 0, "LT1": 1, "LT2": 2, "LT3": 3,
-                                 "LT4": 4, "LT5": 5, "LT6": 6,
-                                 "ST0": 7, "ST1": 8, "ST2": 9, "ST3": 10}[tube]
                         break
-                if itube is None:
-                    raise RuntimeError("Wafer {} not found in tubes".format(wafer))
                 focalplane[detname] = {
                     "NET": net,
                     "fknee": fknee,
@@ -826,11 +863,12 @@ def load_focalplanes(args, comm, schedules):
                     "quat": detdata["quat"],
                     "FWHM": detdata["fwhm"],
                     "freq": center,
-                    "bandcenter_ghz": bandcenter,
-                    "bandwidth_ghz": bandwidth,
-                    "index": idet + 1000000 * itube,
+                    "bandcenter_ghz": center,
+                    "bandwidth_ghz": width,
+                    "index": detindex[detname],
                     "telescope": telescope,
                     "tube": tube,
+                    "wafer": wafer,
                     "band": band,
                 }
             focalplanes.append(focalplane)
@@ -1754,7 +1792,12 @@ def output_tidas(args, comm, data, totalname):
 def export_TOD(args, comm, data, totalname, other=None):
     if args.export is None:
         return
+
     autotimer = timing.auto_timer()
+
+    # Only import spt3g if we are writing out so3g files
+    from spt3g import core as core3g
+    from sotodlib.data.toast import ToastExport
 
     path = os.path.abspath(args.export)
 
