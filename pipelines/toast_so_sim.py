@@ -281,6 +281,13 @@ def parse_arguments(comm):
         help="Disable simulating detector noise.",
     )
     parser.add_argument(
+        "--common_mode_noise",
+        required=False,
+        help="String defining analytical parameters of a per-tube "
+        "common mode that is co-added with every detector: "
+        "'fmin[Hz],fknee[Hz],alpha,NET[K]'",
+    )
+    parser.add_argument(
         "--skip_bin",
         required=False,
         default=False,
@@ -531,21 +538,19 @@ def parse_arguments(comm):
         help="Override focal plane radius [deg]",
     )
     parser.add_argument(
-        "--telescope",
-        required=True,
-        help="Comma-separated list of telescopes (SAT0-SAT3 or LAT)",
-    )
-    parser.add_argument(
-        "--band",
+        "--bands",
         required=True,
         help="Comma-separated list of bands: LF1 (27GHz), LF2 (39GHz), "
         "MFF1 (93GHz), MFF2 (145GHz), MFS1 (93GHz), MFS2 (145GHz), "
-        "UHF1 (225GHz), UHF2 (280GHz)",
+        "UHF1 (225GHz), UHF2 (280GHz). "
+        "Length of list must equal --tubes",
     )
     parser.add_argument(
-        "--tube",
-        required=False,
-        help="Only include detectors from one optics tube: LT0-LT6 or ST0-ST3",
+        "--tubes",
+        required=True,
+        help="Comma-separated list of  optics tubes: LT0 (UHF), LT1 (UHF), "
+        " LT2 (MFF), LT3 (MFF), LT4 (MFS), LT5 (MFS), LT6 (LF). "
+        "Length of list must equal --bands",
     )
     parser.add_argument(
         "--tidas", required=False, default=None, help="Output TIDAS export path"
@@ -556,10 +561,7 @@ def parse_arguments(comm):
 
     args = timing.add_arguments_and_parse(parser, timing.FILE(noquotes=True))
 
-    if args.band is None:
-        raise RuntimeError("You must specify at least one of [frequency, band].")
-
-    if len(args.band.split(",")) != 1:
+    if len(args.bands.split(",")) != 1:
         # Multi frequency run.  We don't support multiple copies of
         # scanned signal.
         if args.input_map:
@@ -802,16 +804,19 @@ def load_focalplanes(args, comm, schedules):
 
     # Load focalplane information
 
-    telescopes = args.telescope.split(",")
-    bands = args.band.split(",")
-    if len(telescopes) == 1 and len(bands) > 1:
-        telescopes *= len(bands)
-    if len(telescopes) > 1 and len(bands) == 1:
-        bands *= len(telescopes)
+    bands = args.bands.split(",")
+    tubes = args.tubes.split(",")
+    telescopes = []
+    hwexample = sotodlib.hardware.get_example()
+    for tube in tubes:
+        for telescope, teledata in hwexample.data['telescopes'].items():
+            if tube in teledata['tubes']:
+                telescopes.append(telescope)
+                break
 
     focalplanes = []
     if comm.comm_world.rank == 0:
-        for telescope, band in zip(args.telescope.split(","), args.band.split(",")):
+        for telescope, band, tube in zip(telescopes, bands, tubes):
             start1 = MPI.Wtime()
             if args.hardware:
                 print("Loading hardware configuration from {}..."
@@ -829,13 +834,7 @@ def load_focalplanes(args, comm, schedules):
             for idet, det in enumerate(sorted(hw.data["detectors"])):
                 detindex[det] = idet
             match = {"band": band}
-            if args.tube is None:
-                telescopes = [telescope]
-                tubes = None
-            else:
-                telescopes = None
-                tubes = [args.tube]
-            hw = hw.select(telescopes=telescopes, tubes=tubes, match=match)
+            hw = hw.select(telescopes=None, tubes=[tube], match=match)
             if len(hw.data["detectors"]) == 0:
                 raise RuntimeError(
                     "No detectors match query: telescopes={}, "
@@ -849,6 +848,10 @@ def load_focalplanes(args, comm, schedules):
                 (net, fknee, fmin, alpha, A, C, center, width) = get_det_params(
                     detdata, band_net, band_fknee, band_fmin, band_alpha,
                     band_A, band_C, band_lower, band_center, band_upper)
+                # DEBUG begin
+                #if idet % 100 != 0:
+                #    continue
+                # DEBUG end
                 wafer = detdata["wafer"]
                 for tube, tubedata in hw.data["tubes"].items():
                     if wafer in tubedata["wafers"]:
@@ -876,7 +879,7 @@ def load_focalplanes(args, comm, schedules):
             print(
                 "Load tele = {} tube = {} band = {} focalplane ({} detectors): "
                 "{:.2f} seconds".format(
-                    telescope, args.tube, band, len(focalplane), stop1 - start1),
+                    telescope, tube, band, len(focalplane), stop1 - start1),
                 flush=args.flush,
             )
     focalplanes = comm.comm_world.bcast(focalplanes)
@@ -918,29 +921,66 @@ def get_analytic_noise(args, focalplane):
     """
     autotimer = timing.auto_timer()
     detectors = sorted(focalplane.keys())
-    fmin = {}
-    fknee = {}
-    alpha = {}
-    NET = {}
+    fmins = {}
+    fknees = {}
+    alphas = {}
+    NETs = {}
     rates = {}
     indices = {}
     for d in detectors:
         rates[d] = args.samplerate
-        fmin[d] = focalplane[d]["fmin"]
-        fknee[d] = focalplane[d]["fknee"]
-        alpha[d] = focalplane[d]["alpha"]
-        NET[d] = focalplane[d]["NET"]
+        fmins[d] = focalplane[d]["fmin"]
+        fknees[d] = focalplane[d]["fknee"]
+        alphas[d] = focalplane[d]["alpha"]
+        NETs[d] = focalplane[d]["NET"]
         indices[d] = focalplane[d]["index"]
-    del autotimer
-    return tt.AnalyticNoise(
+
+    if args.common_mode_noise:
+        # Add an extra "virtual" detector for common mode noise for
+        # every optics tube
+        fmin, fknee, alpha, net = np.array(
+            args.common_mode_noise.split(",")
+        ).astype(np.float64)
+        hw = sotodlib.hardware.get_example()
+        for itube, tube in enumerate(sorted(hw.data["tubes"].keys())):
+            d = "common_mode_{}".format(tube)
+            detectors.append(d)
+            rates[d] = args.samplerate
+            fmins[d] = fmin
+            fknees[d] = fknee
+            alphas[d] = alpha
+            NETs[d] = net
+            indices[d] = 100000 + itube
+
+    noise = tt.AnalyticNoise(
         rate=rates,
-        fmin=fmin,
+        fmin=fmins,
         detectors=detectors,
-        fknee=fknee,
-        alpha=alpha,
-        NET=NET,
+        fknee=fknees,
+        alpha=alphas,
+        NET=NETs,
         indices=indices,
     )
+
+    if args.common_mode_noise:
+        # Update the mixing matrix in the noise operator
+        mixmatrix = {}
+        keys = set()
+        for det in focalplane.keys():
+            tube = focalplane[det]["tube"]
+            common = "common_mode_{}".format(tube)
+            mixmatrix[det] = {det : 1, common : 1}
+            keys.add(det)
+            keys.add(common)
+        # There should probably be an accessor method to update the
+        # mixmatrix in the TOAST Noise object.
+        if noise._mixmatrix is not None:
+            raise RuntimeError("Did not expect non-empty mixing matrix")
+        noise._mixmatrix = mixmatrix
+        noise._keys = list(sorted(keys))
+
+    del autotimer
+    return noise
 
 
 def get_elevation_noise(args, comm, data, key="noise"):
@@ -1809,7 +1849,7 @@ def export_TOD(args, comm, data, totalname, other=None):
 
     export = ToastExport(
         path,
-        prefix=args.band,
+        prefix=args.bands,
         use_intervals=True,
         cache_name=totalname,
         cache_copy=other,
@@ -1960,7 +2000,7 @@ def apply_madam(
 
             start1 = MPI.Wtime()
             madam.params["file_root"] = "{}_{}_{}_time_{}".format(
-                file_root, tele_name, args.band, time_name
+                file_root, tele_name, args.bands, time_name
             )
             if time_comm == comm.comm_world:
                 madam.params["info"] = info
@@ -2097,6 +2137,23 @@ def main():
 
         simulate_noise(args, comm, data, mc, totalname)
 
+        # DEBUG begin
+        """
+        import matplotlib.pyplot as plt
+        tod = data.obs[0]['tod']
+        times = tod.local_times()
+        for det in tod.local_dets:
+            sig = tod.local_signal(det, totalname)
+            plt.plot(times, sig, label=det)
+        plt.legend(loc='best')
+        fnplot = 'debug_{}.png'.format(args.madam_prefix)
+        plt.savefig(fnplot)
+        plt.close()
+        print('DEBUG plot saved in', fnplot)
+        return
+        """
+        # DEBUG end
+
         memreport(comm.comm_world, "after noise")
 
         scramble_gains(args, comm, data, mc, totalname)
@@ -2169,9 +2226,9 @@ def main():
 
     memreport(comm.comm_world, "at the end of the pipeline")
 
-    stop0 = MPI.Wtime()
+    tstop0 = MPI.Wtime()
     if comm.comm_world.rank == 0:
-        print("Pipeline completed in {:.3f} s".format(stop0 - start0), flush=args.flush)
+        print("Pipeline completed in {:.3f} s".format(tstop0 - tstart0), flush=args.flush)
 
     del autotimer
     return
