@@ -129,6 +129,45 @@ def memreport(comm=None, msg=""):
 XAXIS, YAXIS, ZAXIS = np.eye(3)
 
 
+class CES(object):
+    def __init__(self, start_time, stop_time, name, mjdstart, scan, subscan,
+                 azmin, azmax, el, season, start_date,
+                 rising, mindist_sun, mindist_moon, el_sun):
+        self.start_time = start_time
+        self.stop_time = stop_time
+        self.name = name
+        self.mjdstart = mjdstart
+        self.scan = scan
+        self.subscan = subscan
+        self.azmin = azmin
+        self.azmax = azmax
+        self.el = el
+        self.season = season
+        self.start_date = start_date
+        self.rising = rising
+        self.mindist_sun = mindist_sun
+        self.mindist_moon = mindist_moon
+        self.el_sun = el_sun
+
+
+class Site(object):
+    def __init__(self, name, lat, lon, alt):
+        self.name = name
+        # Strings get interpreted correctly pyEphem.
+        # Floats must be in radians
+        self.lat = str(lat)
+        self.lon = str(lon)
+        self.alt = alt
+        self.id = 0
+
+class Telescope(object):
+    def __init__(self, name):
+        self.name = name
+        self.id = {
+            'LAT' : 0, 'SAT0' : 1, 'SAT1' : 2, 'SAT2' : 3, 'SAT3' : 4
+        }[name]
+
+
 def parse_arguments(comm):
 
     parser = argparse.ArgumentParser(
@@ -162,6 +201,13 @@ def parse_arguments(comm):
         required=True,
         help="Comma-separated list CES schedule files "
         "(from toast_ground_schedule.py)",
+    )
+    parser.add_argument(
+        "--split_schedule",
+        required=False,
+        help='Only use a subset of the schedule.  The argument is a string '
+        'of the form "[isplit],[nsplit]" and only observations that satisfy '
+        'scan % nsplit == isplit are included',
     )
     parser.add_argument(
         "--weather",
@@ -279,6 +325,13 @@ def parse_arguments(comm):
         default=False,
         action="store_true",
         help="Disable simulating detector noise.",
+    )
+    parser.add_argument(
+        "--common_mode_noise",
+        required=False,
+        help="String defining analytical parameters of a per-tube "
+        "common mode that is co-added with every detector: "
+        "'fmin[Hz],fknee[Hz],alpha,NET[K]'",
     )
     parser.add_argument(
         "--skip_bin",
@@ -431,13 +484,13 @@ def parse_arguments(comm):
     parser.add_argument(
         "--outdir", required=False, default="out", help="Output directory"
     )
-    parser.add_argument(
-        "--zip",
-        required=False,
-        default=False,
-        action="store_true",
-        help="Compress the output fits files",
-    )
+    #parser.add_argument(
+    #    "--zip",
+    #    required=False,
+    #    default=False,
+    #    action="store_true",
+    #    help="Compress the output fits files",
+    #)
     parser.add_argument(
         "--debug",
         required=False,
@@ -531,21 +584,19 @@ def parse_arguments(comm):
         help="Override focal plane radius [deg]",
     )
     parser.add_argument(
-        "--telescope",
-        required=True,
-        help="Comma-separated list of telescopes (SAT0-SAT3 or LAT)",
-    )
-    parser.add_argument(
-        "--band",
+        "--bands",
         required=True,
         help="Comma-separated list of bands: LF1 (27GHz), LF2 (39GHz), "
         "MFF1 (93GHz), MFF2 (145GHz), MFS1 (93GHz), MFS2 (145GHz), "
-        "UHF1 (225GHz), UHF2 (280GHz)",
+        "UHF1 (225GHz), UHF2 (280GHz). "
+        "Length of list must equal --tubes",
     )
     parser.add_argument(
-        "--tube",
-        required=False,
-        help="Only include detectors from one optics tube: LT0-LT6 or ST0-ST3",
+        "--tubes",
+        required=True,
+        help="Comma-separated list of  optics tubes: LT0 (UHF), LT1 (UHF), "
+        " LT2 (MFF), LT3 (MFF), LT4 (MFS), LT5 (MFS), LT6 (LF). "
+        "Length of list must equal --bands",
     )
     parser.add_argument(
         "--tidas", required=False, default=None, help="Output TIDAS export path"
@@ -556,10 +607,7 @@ def parse_arguments(comm):
 
     args = timing.add_arguments_and_parse(parser, timing.FILE(noquotes=True))
 
-    if args.band is None:
-        raise RuntimeError("You must specify at least one of [frequency, band].")
-
-    if len(args.band.split(",")) != 1:
+    if len(args.bands.split(",")) != 1:
         # Multi frequency run.  We don't support multiple copies of
         # scanned signal.
         if args.input_map:
@@ -645,6 +693,24 @@ def load_weather(args, comm, schedules):
     return
 
 
+def min_sso_dist(el, azmin, azmax, sso_el1, sso_az1, sso_el2, sso_az2):
+    """ Return a rough minimum angular distance between the bore sight
+    and a solar system object"""
+    sso_vec1 = hp.dir2vec(sso_az1, sso_el1, lonlat=True)
+    sso_vec2 = hp.dir2vec(sso_az2, sso_el2, lonlat=True)
+    az1 = azmin
+    az2 = azmax
+    if az2 < az1:
+        az2 += 360
+    n = 100
+    az = np.linspace(az1, az2, n)
+    el = np.ones(n) * el
+    vec = hp.dir2vec(az, el, lonlat=True)
+    dist1 = np.degrees(np.arccos(np.dot(sso_vec1, vec)))
+    dist2 = np.degrees(np.arccos(np.dot(sso_vec2, vec)))
+    return min(np.amin(dist1), np.amin(dist2))
+
+
 def load_schedule(args, comm):
     """ Load the observing schedule(s).
 
@@ -654,6 +720,12 @@ def load_schedule(args, comm):
     schedules = []
 
     if comm.comm_world.rank == 0:
+        isplit, nsplit = None, None
+        if args.split_schedule is not None:
+            isplit, nsplit = args.split_schedule.split(",")
+            isplit = np.int(isplit)
+            nsplit = np.int(nsplit)
+            scan_counters = {}
         for fn in args.schedule.split(","):
             if not os.path.isfile(fn):
                 raise RuntimeError("No such schedule file: {}".format(fn))
@@ -664,8 +736,7 @@ def load_schedule(args, comm):
                     if line.startswith("#"):
                         continue
                     (site_name, telescope, site_lat, site_lon, site_alt) = line.split()
-                    site_alt = float(site_alt)
-                    site = (site_name, telescope, site_lat, site_lon, site_alt)
+                    site = Site(site_name, site_lat, site_lon, float(site_alt))
                     break
                 all_ces = []
                 for line in f:
@@ -695,11 +766,37 @@ def load_schedule(args, comm):
                         scan,
                         subscan,
                     ) = line.split()
+                    if nsplit:
+                        # Only accept 1 / `nsplit` of the rising and setting
+                        # scans in patch `name`.  Selection is performed
+                        # during the first subscan.
+                        if int(subscan) == 0:
+                            if name not in scan_counters:
+                                scan_counters[name] = {}
+                            counter = scan_counters[name]
+                            # Separate counters for rising and setting scans
+                            if rs not in counter:
+                                counter[rs] = 0
+                            else:
+                                counter[rs] += 1
+                            iscan = counter[rs]
+                        if iscan % nsplit != isplit:
+                            continue
                     start_time = start_date + " " + start_time
                     stop_time = stop_date + " " + stop_time
                     # Define season as a calendar year.  This can be
                     # changed later and could even be in the schedule file.
                     season = int(start_date.split("-")[0])
+                    # Gather other useful metadata
+                    mindist_sun = min_sso_dist(
+                        *np.array(
+                            [el, azmin, azmax, sun_el1, sun_az1,
+                             sun_el2, sun_az2]).astype(np.float))
+                    mindist_moon = min_sso_dist(
+                        *np.array(
+                            [el, azmin, azmax, moon_el1, moon_az1,
+                             moon_el2, moon_az2]).astype(np.float))
+                    el_sun = max(float(sun_el1), float(sun_el2))
                     try:
                         start_time = dateutil.parser.parse(start_time + " +0000")
                         stop_time = dateutil.parser.parse(stop_time + " +0000")
@@ -709,24 +806,29 @@ def load_schedule(args, comm):
                     start_timestamp = start_time.timestamp()
                     stop_timestamp = stop_time.timestamp()
                     all_ces.append(
-                        [
-                            start_timestamp,
-                            stop_timestamp,
-                            name,
-                            float(mjdstart),
-                            int(scan),
-                            int(subscan),
-                            float(azmin),
-                            float(azmax),
-                            float(el),
-                            season,
-                            start_date,
-                        ]
+                        CES(
+                            start_time=start_timestamp,
+                            stop_time=stop_timestamp,
+                            name=name,
+                            mjdstart=float(mjdstart),
+                            scan=int(scan),
+                            subscan=int(subscan),
+                            azmin=float(azmin),
+                            azmax=float(azmax),
+                            el=float(el),
+                            season=season,
+                            start_date=start_date,
+                            rising=(rs.upper() == "R"),
+                            mindist_sun=mindist_sun,
+                            mindist_moon=mindist_moon,
+                            el_sun=el_sun,
+                        )
                     )
             schedules.append([site, all_ces])
             stop1 = MPI.Wtime()
             print(
-                "Load {}: {:.2f} seconds".format(fn, stop1 - start1), flush=args.flush
+                "Load {} (sub)scans in {}: {:.2f} seconds".format(
+                    len(all_ces), fn, stop1 - start1), flush=args.flush
             )
 
     schedules = comm.comm_world.bcast(schedules)
@@ -802,16 +904,19 @@ def load_focalplanes(args, comm, schedules):
 
     # Load focalplane information
 
-    telescopes = args.telescope.split(",")
-    bands = args.band.split(",")
-    if len(telescopes) == 1 and len(bands) > 1:
-        telescopes *= len(bands)
-    if len(telescopes) > 1 and len(bands) == 1:
-        bands *= len(telescopes)
+    bands = args.bands.split(",")
+    tubes = args.tubes.split(",")
+    telescopes = []
+    hwexample = sotodlib.hardware.get_example()
+    for tube in tubes:
+        for telescope, teledata in hwexample.data['telescopes'].items():
+            if tube in teledata['tubes']:
+                telescopes.append(telescope)
+                break
 
     focalplanes = []
     if comm.comm_world.rank == 0:
-        for telescope, band in zip(args.telescope.split(","), args.band.split(",")):
+        for telescope, band, tube in zip(telescopes, bands, tubes):
             start1 = MPI.Wtime()
             if args.hardware:
                 print("Loading hardware configuration from {}..."
@@ -829,13 +934,7 @@ def load_focalplanes(args, comm, schedules):
             for idet, det in enumerate(sorted(hw.data["detectors"])):
                 detindex[det] = idet
             match = {"band": band}
-            if args.tube is None:
-                telescopes = [telescope]
-                tubes = None
-            else:
-                telescopes = None
-                tubes = [args.tube]
-            hw = hw.select(telescopes=telescopes, tubes=tubes, match=match)
+            hw = hw.select(telescopes=None, tubes=[tube], match=match)
             if len(hw.data["detectors"]) == 0:
                 raise RuntimeError(
                     "No detectors match query: telescopes={}, "
@@ -849,6 +948,10 @@ def load_focalplanes(args, comm, schedules):
                 (net, fknee, fmin, alpha, A, C, center, width) = get_det_params(
                     detdata, band_net, band_fknee, band_fmin, band_alpha,
                     band_A, band_C, band_lower, band_center, band_upper)
+                # DEBUG begin
+                #if idet % 100 != 0:
+                #    continue
+                # DEBUG end
                 wafer = detdata["wafer"]
                 for tube, tubedata in hw.data["tubes"].items():
                     if wafer in tubedata["wafers"]:
@@ -876,21 +979,24 @@ def load_focalplanes(args, comm, schedules):
             print(
                 "Load tele = {} tube = {} band = {} focalplane ({} detectors): "
                 "{:.2f} seconds".format(
-                    telescope, args.tube, band, len(focalplane), stop1 - start1),
+                    telescope, tube, band, len(focalplane), stop1 - start1),
                 flush=args.flush,
             )
     focalplanes = comm.comm_world.bcast(focalplanes)
+    telescopes = comm.comm_world.bcast(telescopes)
 
-    if len(focalplanes) == 1 and len(schedules) > 1:
-        focalplanes *= len(schedules)
+    if len(schedules) == 1:
+        schedules *= len(focalplanes)
+
     if len(focalplanes) != len(schedules):
         raise RuntimeError(
-            "Number of focalplanes must equal number of schedules or be 1."
+            "Number of focalplanes must equal number of schedules"
         )
 
     detweights = {}
-    for schedule, focalplane in zip(schedules, focalplanes):
+    for schedule, focalplane, telescope in zip(schedules, focalplanes, telescopes):
         schedule.append(focalplane)
+        schedule.append(Telescope(telescope))
         for detname, detdata in focalplane.items():
             # Transfer the detector properties from the band dictionary to the detectors
             net = detdata["NET"]
@@ -918,29 +1024,66 @@ def get_analytic_noise(args, focalplane):
     """
     autotimer = timing.auto_timer()
     detectors = sorted(focalplane.keys())
-    fmin = {}
-    fknee = {}
-    alpha = {}
-    NET = {}
+    fmins = {}
+    fknees = {}
+    alphas = {}
+    NETs = {}
     rates = {}
     indices = {}
     for d in detectors:
         rates[d] = args.samplerate
-        fmin[d] = focalplane[d]["fmin"]
-        fknee[d] = focalplane[d]["fknee"]
-        alpha[d] = focalplane[d]["alpha"]
-        NET[d] = focalplane[d]["NET"]
+        fmins[d] = focalplane[d]["fmin"]
+        fknees[d] = focalplane[d]["fknee"]
+        alphas[d] = focalplane[d]["alpha"]
+        NETs[d] = focalplane[d]["NET"]
         indices[d] = focalplane[d]["index"]
-    del autotimer
-    return tt.AnalyticNoise(
+
+    if args.common_mode_noise:
+        # Add an extra "virtual" detector for common mode noise for
+        # every optics tube
+        fmin, fknee, alpha, net = np.array(
+            args.common_mode_noise.split(",")
+        ).astype(np.float64)
+        hw = sotodlib.hardware.get_example()
+        for itube, tube in enumerate(sorted(hw.data["tubes"].keys())):
+            d = "common_mode_{}".format(tube)
+            detectors.append(d)
+            rates[d] = args.samplerate
+            fmins[d] = fmin
+            fknees[d] = fknee
+            alphas[d] = alpha
+            NETs[d] = net
+            indices[d] = 100000 + itube
+
+    noise = tt.AnalyticNoise(
         rate=rates,
-        fmin=fmin,
+        fmin=fmins,
         detectors=detectors,
-        fknee=fknee,
-        alpha=alpha,
-        NET=NET,
+        fknee=fknees,
+        alpha=alphas,
+        NET=NETs,
         indices=indices,
     )
+
+    if args.common_mode_noise:
+        # Update the mixing matrix in the noise operator
+        mixmatrix = {}
+        keys = set()
+        for det in focalplane.keys():
+            tube = focalplane[det]["tube"]
+            common = "common_mode_{}".format(tube)
+            mixmatrix[det] = {det : 1, common : 1}
+            keys.add(det)
+            keys.add(common)
+        # There should probably be an accessor method to update the
+        # mixmatrix in the TOAST Noise object.
+        if noise._mixmatrix is not None:
+            raise RuntimeError("Did not expect non-empty mixing matrix")
+        noise._mixmatrix = mixmatrix
+        noise._keys = list(sorted(keys))
+
+    del autotimer
+    return noise
 
 
 def get_elevation_noise(args, comm, data, key="noise"):
@@ -1046,25 +1189,8 @@ def create_observation(args, comm, all_ces_tot, ices, noise):
 
     """
     autotimer = timing.auto_timer()
-    ces, site, fp, fpradius, detquats, weather = all_ces_tot[ices]
-
-    (
-        CES_start,
-        CES_stop,
-        CES_name,
-        mjdstart,
-        scan,
-        subscan,
-        azmin,
-        azmax,
-        el,
-        season,
-        date,
-    ) = ces
-
-    _, _, site_lat, site_lon, site_alt = site
-
-    totsamples = int((CES_stop - CES_start) * args.samplerate)
+    ces, site, telescope, fp, fpradius, detquats, weather = all_ces_tot[ices]
+    totsamples = int((ces.stop_time - ces.start_time) * args.samplerate)
 
     # create the TOD for this observation
 
@@ -1074,14 +1200,14 @@ def create_observation(args, comm, all_ces_tot, ices, noise):
             detquats,
             totsamples,
             detranks=comm.comm_group.size,
-            firsttime=CES_start,
+            firsttime=ces.start_time,
             rate=args.samplerate,
-            site_lon=site_lon,
-            site_lat=site_lat,
-            site_alt=site_alt,
-            azmin=azmin,
-            azmax=azmax,
-            el=el,
+            site_lon=site.lon,
+            site_lat=site.lat,
+            site_alt=site.alt,
+            azmin=ces.azmin,
+            azmax=ces.azmax,
+            el=ces.el,
             scanrate=args.scanrate,
             scan_accel=args.scan_accel,
             CES_start=None,
@@ -1093,37 +1219,36 @@ def create_observation(args, comm, all_ces_tot, ices, noise):
     except RuntimeError as e:
         raise RuntimeError(
             'Failed to create TOD for {}-{}-{}: "{}"'
-            "".format(CES_name, scan, subscan, e)
+            "".format(ces.name, ces.scan, ces.subscan, e)
         )
 
     # Create the observation
 
-    site_name = site[0]
-    telescope_name = site[1]
-    site_id = name2id(site_name)
-    telescope_id = name2id(telescope_name)
-
     obs = {}
     obs["name"] = "CES-{}-{}-{}-{}-{}".format(
-        site_name, telescope_name, CES_name, scan, subscan
+        site.name, telescope.name, ces.name, ces.scan, ces.subscan
     )
     obs["tod"] = tod
     obs["baselines"] = None
     obs["noise"] = noise
-    obs["id"] = int(mjdstart * 10000)
+    obs["id"] = int(ces.mjdstart * 10000)
     obs["intervals"] = tod.subscans
-    obs["site"] = site_name
-    obs["telescope"] = telescope_name
-    obs["site_id"] = site_id
-    obs["telescope_id"] = telescope_id
+    obs["site"] = site.name
+    obs["site_id"] = site.id
+    obs["telescope"] = telescope.name
+    obs["telescope_id"] = telescope.id
     obs["fpradius"] = fpradius
     obs["weather"] = weather
-    obs["start_time"] = CES_start
-    obs["altitude"] = site_alt
-    obs["season"] = season
-    obs["date"] = date
-    obs["MJD"] = mjdstart
+    obs["start_time"] = ces.start_time
+    obs["altitude"] = site.alt
+    obs["season"] = ces.season
+    obs["date"] = ces.start_date
+    obs["MJD"] = ces.mjdstart
     obs["focalplane"] = fp
+    obs["rising"] = ces.rising
+    obs["mindist_sun"] = ces.mindist_sun
+    obs["mindist_moon"] = ces.mindist_moon
+    obs["el_sun"] = ces.el_sun
     del autotimer
     return obs
 
@@ -1147,10 +1272,10 @@ def create_observations(args, comm, schedules):
     for schedule in schedules:
 
         if args.weather is None:
-            site, all_ces, focalplane = schedule
+            site, all_ces, focalplane, telescope = schedule
             weather = None
         else:
-            site, all_ces, weather, focalplane = schedule
+            site, all_ces, weather, focalplane, telescope = schedule
 
         fpradius = get_focalplane_radius(args, focalplane)
 
@@ -1163,7 +1288,7 @@ def create_observations(args, comm, schedules):
         all_ces_tot = []
         nces = len(all_ces)
         for ces in all_ces:
-            all_ces_tot.append((ces, site, focalplane, fpradius, detquats, weather))
+            all_ces_tot.append((ces, site, telescope, focalplane, fpradius, detquats, weather))
 
         breaks = get_breaks(comm, all_ces, nces, args)
 
@@ -1809,7 +1934,7 @@ def export_TOD(args, comm, data, totalname, other=None):
 
     export = ToastExport(
         path,
-        prefix=args.band,
+        prefix=args.bands,
         use_intervals=True,
         cache_name=totalname,
         cache_copy=other,
@@ -1960,7 +2085,7 @@ def apply_madam(
 
             start1 = MPI.Wtime()
             madam.params["file_root"] = "{}_{}_{}_time_{}".format(
-                file_root, tele_name, args.band, time_name
+                file_root, tele_name, args.bands, time_name
             )
             if time_comm == comm.comm_world:
                 madam.params["info"] = info
@@ -2097,6 +2222,23 @@ def main():
 
         simulate_noise(args, comm, data, mc, totalname)
 
+        # DEBUG begin
+        """
+        import matplotlib.pyplot as plt
+        tod = data.obs[0]['tod']
+        times = tod.local_times()
+        for det in tod.local_dets:
+            sig = tod.local_signal(det, totalname)
+            plt.plot(times, sig, label=det)
+        plt.legend(loc='best')
+        fnplot = 'debug_{}.png'.format(args.madam_prefix)
+        plt.savefig(fnplot)
+        plt.close()
+        print('DEBUG plot saved in', fnplot)
+        return
+        """
+        # DEBUG end
+
         memreport(comm.comm_world, "after noise")
 
         scramble_gains(args, comm, data, mc, totalname)
@@ -2169,9 +2311,9 @@ def main():
 
     memreport(comm.comm_world, "at the end of the pipeline")
 
-    stop0 = MPI.Wtime()
+    tstop0 = MPI.Wtime()
     if comm.comm_world.rank == 0:
-        print("Pipeline completed in {:.3f} s".format(stop0 - start0), flush=args.flush)
+        print("Pipeline completed in {:.3f} s".format(tstop0 - tstart0), flush=args.flush)
 
     del autotimer
     return
