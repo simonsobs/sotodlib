@@ -151,14 +151,21 @@ class CES(object):
 
 
 class Site(object):
-    def __init__(self, name, telescope, lat, lon, alt):
+    def __init__(self, name, lat, lon, alt):
         self.name = name
-        self.telescope = telescope
-        self.lat = lat
-        self.lon = lon
+        # Strings get interpreted correctly pyEphem.
+        # Floats must be in radians
+        self.lat = str(lat)
+        self.lon = str(lon)
         self.alt = alt
-        self.id = name2id(name)
-        self.telescope_id = name2id(telescope)
+        self.id = 0
+
+class Telescope(object):
+    def __init__(self, name):
+        self.name = name
+        self.id = {
+            'LAT' : 0, 'SAT0' : 1, 'SAT1' : 2, 'SAT2' : 3, 'SAT3' : 4
+        }[name]
 
 
 def parse_arguments(comm):
@@ -477,13 +484,13 @@ def parse_arguments(comm):
     parser.add_argument(
         "--outdir", required=False, default="out", help="Output directory"
     )
-    parser.add_argument(
-        "--zip",
-        required=False,
-        default=False,
-        action="store_true",
-        help="Compress the output fits files",
-    )
+    #parser.add_argument(
+    #    "--zip",
+    #    required=False,
+    #    default=False,
+    #    action="store_true",
+    #    help="Compress the output fits files",
+    #)
     parser.add_argument(
         "--debug",
         required=False,
@@ -729,8 +736,7 @@ def load_schedule(args, comm):
                     if line.startswith("#"):
                         continue
                     (site_name, telescope, site_lat, site_lon, site_alt) = line.split()
-                    site = Site(site_name, telescope,
-                                float(site_lat), float(site_lon), float(site_alt))
+                    site = Site(site_name, site_lat, site_lon, float(site_alt))
                     break
                 all_ces = []
                 for line in f:
@@ -977,17 +983,20 @@ def load_focalplanes(args, comm, schedules):
                 flush=args.flush,
             )
     focalplanes = comm.comm_world.bcast(focalplanes)
+    telescopes = comm.comm_world.bcast(telescopes)
 
-    if len(focalplanes) == 1 and len(schedules) > 1:
-        focalplanes *= len(schedules)
+    if len(schedules) == 1:
+        schedules *= len(focalplanes)
+
     if len(focalplanes) != len(schedules):
         raise RuntimeError(
-            "Number of focalplanes must equal number of schedules or be 1."
+            "Number of focalplanes must equal number of schedules"
         )
 
     detweights = {}
-    for schedule, focalplane in zip(schedules, focalplanes):
+    for schedule, focalplane, telescope in zip(schedules, focalplanes, telescopes):
         schedule.append(focalplane)
+        schedule.append(Telescope(telescope))
         for detname, detdata in focalplane.items():
             # Transfer the detector properties from the band dictionary to the detectors
             net = detdata["NET"]
@@ -1180,7 +1189,7 @@ def create_observation(args, comm, all_ces_tot, ices, noise):
 
     """
     autotimer = timing.auto_timer()
-    ces, site, fp, fpradius, detquats, weather = all_ces_tot[ices]
+    ces, site, telescope, fp, fpradius, detquats, weather = all_ces_tot[ices]
     totsamples = int((ces.stop_time - ces.start_time) * args.samplerate)
 
     # create the TOD for this observation
@@ -1217,7 +1226,7 @@ def create_observation(args, comm, all_ces_tot, ices, noise):
 
     obs = {}
     obs["name"] = "CES-{}-{}-{}-{}-{}".format(
-        site.name, site.telescope, ces.name, ces.scan, ces.subscan
+        site.name, telescope.name, ces.name, ces.scan, ces.subscan
     )
     obs["tod"] = tod
     obs["baselines"] = None
@@ -1225,9 +1234,9 @@ def create_observation(args, comm, all_ces_tot, ices, noise):
     obs["id"] = int(ces.mjdstart * 10000)
     obs["intervals"] = tod.subscans
     obs["site"] = site.name
-    obs["telescope"] = site.telescope
     obs["site_id"] = site.id
-    obs["telescope_id"] = site.telescope_id
+    obs["telescope"] = telescope.name
+    obs["telescope_id"] = telescope.id
     obs["fpradius"] = fpradius
     obs["weather"] = weather
     obs["start_time"] = ces.start_time
@@ -1263,10 +1272,10 @@ def create_observations(args, comm, schedules):
     for schedule in schedules:
 
         if args.weather is None:
-            site, all_ces, focalplane = schedule
+            site, all_ces, focalplane, telescope = schedule
             weather = None
         else:
-            site, all_ces, weather, focalplane = schedule
+            site, all_ces, weather, focalplane, telescope = schedule
 
         fpradius = get_focalplane_radius(args, focalplane)
 
@@ -1279,7 +1288,7 @@ def create_observations(args, comm, schedules):
         all_ces_tot = []
         nces = len(all_ces)
         for ces in all_ces:
-            all_ces_tot.append((ces, site, focalplane, fpradius, detquats, weather))
+            all_ces_tot.append((ces, site, telescope, focalplane, fpradius, detquats, weather))
 
         breaks = get_breaks(comm, all_ces, nces, args)
 
