@@ -1540,9 +1540,10 @@ def simulate_sky_signal(args, comm, data, schedules, subnpix, localsm):
         subnpix=subnpix,
         localsm=localsm,
         apply_beam=args.apply_beam,
-        coord=args.coord,
+        coord="G", # setting G doesn't perform any rotation
         map_dist=map_dist,
     )
+    assert args.coord == "Q", "Input SO models are always in Equatorial coordinates"
     op_sim_pysm.exec(data)
     stop = MPI.Wtime()
     if comm.comm_world.rank == 0:
