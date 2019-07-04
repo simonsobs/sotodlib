@@ -313,7 +313,7 @@ def parse_arguments(comm):
         'this pipeline also supports the SO specific models from '
         'so_pysm_models, see https://github.com/simonsobs/so_pysm_models '
         'currently the most complete PySM model for simulations is:'
-        '"SO_d0,SO_s0,SO_a0,SO_f0,SO_x1_cib,SO_x1_tsz,SO_x1_ksz,SO_x1_cmb_lensed"',
+        '"SO_d0,SO_s0,SO_a0,SO_f0,SO_x1_cib,SO_x1_tsz,SO_x1_ksz,SO_x1_cmb_lensed_solardipole"',
 
     )
     parser.add_argument(
@@ -1510,11 +1510,13 @@ def simulate_sky_signal(args, comm, data, schedules, subnpix, localsm):
                     )
                 )
             elif model_tag.startswith("SO_x1_cmb"):
-                lensed = model_tag.endswith("_lensed")
+                lensed = "unlensed" not in model_tag
+                include_solar_dipole = "solar" in model_tag
                 pysm_component_objects.append(
                     so_pysm_models.WebSkyCMBMap(
                         websky_version="0.3",
                         lensed=lensed,
+                        include_solar_dipole=include_solar_dipole,
                         seed=1,
                         nside=args.nside,
                         map_dist=map_dist,
