@@ -519,6 +519,12 @@ def parse_arguments(comm):
         help="Maximum number of CG iterations in Madam",
     )
     parser.add_argument(
+        "--madam_nside_cross",
+        required=False,
+        type=np.int,
+        help="Madam destriping resolution (default is nside / 2)",
+    )
+    parser.add_argument(
         "--madam_baseline_length",
         required=False,
         default=10000.0,
@@ -1364,6 +1370,7 @@ def expand_pointing(args, comm, data):
         hwprpm=hwprpm,
         hwpstep=hwpstep,
         hwpsteptime=hwpsteptime,
+        single_precision=True,
     )
 
     pointing.exec(data)
@@ -1531,7 +1538,10 @@ def setup_madam(args):
     autotimer = timing.auto_timer()
     pars = {}
 
-    cross = args.nside // 2
+    if args.madam_nside_cross:
+        cross = args.madam_nside_cross
+    else:
+        cross = args.nside // 2
     submap = 16
     if submap > args.nside:
         submap = args.nside
