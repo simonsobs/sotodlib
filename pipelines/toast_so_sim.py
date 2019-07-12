@@ -40,7 +40,7 @@ from toast.tod import (
     OpGainScrambler,
     OpPolyFilter,
     OpGroundFilter,
-    #OpSimAtmosphere,
+    OpSimAtmosphere,
 )
 
 
