@@ -31,6 +31,7 @@ from toast.map import OpMadam, OpLocalPixels, DistPixels
 from toast.tod import (
     AnalyticNoise,
     OpSimNoise,
+    OpSimScanSynchronousSignal,
     OpPointingHpix,
     OpSimPySM,
     OpMemoryCounter,
@@ -330,6 +331,14 @@ def parse_arguments(comm):
     )
 
     parser.add_argument("--input_map", required=False, help="Input map for signal")
+    parser.add_argument("--groundmap", required=False, help="Fixed ground template map")
+    parser.add_argument(
+        "--simulate_ground",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Enable simulating ground pickup.",
+    )
     parser.add_argument(
         "--input_pysm_model",
         required=False,
@@ -1888,6 +1897,24 @@ def simulate_noise(args, comm, data, mc, totalname):
         timer.report("Noise simulation")
     return
 
+@function_timer
+def simulate_sss(args, comm, data, mc, totalname):
+    if not args.simulate_ground:
+        return
+    log = Logger.get()
+    timer = Timer()
+    if comm.world_rank == 0:
+        log.info("Simulating sss")
+    timer.start()
+    nse = OpSimScanSynchronousSignal(out=totalname, realization=mc, path=args.groundmap)
+    nse.exec(data)
+    if comm.comm_world is not None:
+        comm.comm_world.barrier()
+    timer.stop()
+    if comm.world_rank == 0:
+        timer.report("sss simulation")
+    return
+
 
 @function_timer
 def scramble_gains(args, comm, data, mc, totalname):
@@ -2304,6 +2331,7 @@ def main():
         add_sky_signal(data, totalname, signalname)
 
         simulate_noise(args, comm, data, mc, totalname)
+        simulate_sss(args, comm, data, mc, totalname)
 
         # DEBUG begin
         """
