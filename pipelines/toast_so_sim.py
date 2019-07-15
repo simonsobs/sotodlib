@@ -197,6 +197,10 @@ def parse_arguments(comm):
         help="Input hardware file"
     )
     parser.add_argument(
+        "--thinfp", required=False, type=np.int,
+        help="Thin the focalplane by this factor"
+    )
+    parser.add_argument(
         "--schedule",
         required=True,
         help="Comma-separated list CES schedule files "
@@ -962,6 +966,11 @@ def load_focalplanes(args, comm, schedules):
                 for tube, tubedata in hw.data["tubes"].items():
                     if wafer in tubedata["wafers"]:
                         break
+                index = detindex[detname]
+                if args.thinfp and index % args.thinfp != 0:
+                    # Only accept a fraction of the detectors for
+                    # testing and development
+                    continue
                 focalplane[detname] = {
                     "NET": net,
                     "fknee": fknee,
@@ -974,7 +983,7 @@ def load_focalplanes(args, comm, schedules):
                     "freq": center,
                     "bandcenter_ghz": center,
                     "bandwidth_ghz": width,
-                    "index": detindex[detname],
+                    "index": index,
                     "telescope": telescope,
                     "tube": tube,
                     "wafer": wafer,
