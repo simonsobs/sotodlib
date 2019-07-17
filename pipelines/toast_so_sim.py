@@ -1504,6 +1504,7 @@ def simulate_sky_signal(args, comm, data, schedules, subnpix, localsm):
     """ Use PySM to simulate smoothed sky signal.
 
     """
+    log = Logger.get()
     timer = Timer()
     timer.start()
     # Convolve a signal TOD from PySM
@@ -1511,7 +1512,8 @@ def simulate_sky_signal(args, comm, data, schedules, subnpix, localsm):
         log.info("Simulating sky signal with PySM")
 
     map_dist = (
-        None if comm is None else pysm.MapDistribution(nside=args.side, mpi_comm=comm)
+        None if comm is None
+        else pysm.MapDistribution(nside=args.nside, mpi_comm=comm.comm_rank)
     )
     pysm_component_objects = []
     pysm_model = []
@@ -1568,7 +1570,6 @@ def simulate_sky_signal(args, comm, data, schedules, subnpix, localsm):
                     )
                 )
 
-    log = Logger.get()
     if comm.world_rank == 0:
         log.info("Simulating sky signal with PySM")
 
@@ -1586,7 +1587,7 @@ def simulate_sky_signal(args, comm, data, schedules, subnpix, localsm):
         coord="G", # setting G doesn't perform any rotation
         map_dist=map_dist,
     )
-    assert args.coord == "Q", "Input SO models are always in Equatorial coordinates"
+    assert args.coord in "CQ", "Input SO models are always in Equatorial coordinates"
     op_sim_pysm.exec(data)
     if comm.comm_world is not None:
         comm.comm_world.barrier()
