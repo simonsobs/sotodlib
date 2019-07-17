@@ -31,6 +31,13 @@ import toast.todmap as ttm
 
 import sotodlib.hardware
 
+try:
+    import pysm
+    import so_pysm_models
+except:
+    pysm = None
+    so_pysm_models = None
+
 if tt.tidas_available:
     from toast.tod.tidas import OpTidasExport, TODTidas
 
@@ -306,7 +313,12 @@ def parse_arguments(comm):
         "--input_pysm_model",
         required=False,
         help="Comma separated models for on-the-fly PySM "
-        'simulation, e.g. s3,d6,f1,a2"',
+        'simulation, e.g. s3,d6,f1,a2" '
+        'this pipeline also supports the SO specific models from '
+        'so_pysm_models, see https://github.com/simonsobs/so_pysm_models '
+        'currently the most complete PySM model for simulations is:'
+        '"SO_d0,SO_s0,SO_a0,SO_f0,SO_x1_cib,SO_x1_tsz,SO_x1_ksz,SO_x1_cmb_lensed_solardipole"',
+
     )
     parser.add_argument(
         "--apply_beam",
@@ -1474,19 +1486,82 @@ def simulate_sky_signal(args, comm, data, schedules, subnpix, localsm):
     # Convolve a signal TOD from PySM
     if comm.comm_world.rank == 0:
         print("Simulating sky signal with PySM", flush=args.flush)
+
+    map_dist = (
+        None if comm is None else pysm.MapDistribution(nside=args.side, mpi_comm=comm)
+    )
+    pysm_component_objects = []
+    pysm_model = []
+    for model_tag in args.input_pysm_model.split(","):
+
+        if not model_tag.startswith("SO"):
+            pysm_model.append(model_tag)
+        else:
+
+            if model_tag == "SO_x1_cib":
+                pysm_component_objects.append(
+                    so_pysm_models.WebSkyCIB(
+                        websky_version="0.3",
+                        interpolation_kind="linear",
+                        nside=args.nside,
+                        map_dist=map_dist,
+                    )
+                )
+            elif model_tag == "SO_x1_ksz":
+                pysm_component_objects.append(
+                    so_pysm_models.WebSkySZ(
+                        version="0.3",
+                        nside=args.nside,
+                        map_dist=map_dist,
+                        sz_type="kinetic",
+                    )
+                )
+            elif model_tag == "SO_x1_tsz":
+                pysm_component_objects.append(
+                    so_pysm_models.WebSkySZ(
+                        version="0.3",
+                        nside=args.nside,
+                        map_dist=map_dist,
+                        sz_type="thermal",
+                    )
+                )
+            elif model_tag.startswith("SO_x1_cmb"):
+                lensed = "unlensed" not in model_tag
+                include_solar_dipole = "solar" in model_tag
+                pysm_component_objects.append(
+                    so_pysm_models.WebSkyCMBMap(
+                        websky_version="0.3",
+                        lensed=lensed,
+                        include_solar_dipole=include_solar_dipole,
+                        seed=1,
+                        nside=args.nside,
+                        map_dist=map_dist,
+                    )
+                )
+            else:
+                pysm_component_objects.append(
+                    so_pysm_models.get_so_models(
+                        model_tag, args.nside, map_dist=map_dist
+                    )
+                )
+
+
     start = MPI.Wtime()
     signalname = "signal"
     op_sim_pysm = ttm.OpSimPySM(
         comm=comm.comm_rank,
         out=signalname,
-        pysm_model=args.input_pysm_model,
+        pysm_model=pysm_model,
+        pysm_component_objects=pysm_component_objects,
         focalplanes=[s[3] for s in schedules],
         nside=args.nside,
         subnpix=subnpix,
         localsm=localsm,
         apply_beam=args.apply_beam,
-        coord=args.coord,
+        coord="G", # setting G doesn't perform any rotation
+        map_dist=map_dist,
     )
+    assert args.coord == "Q", "Input SO models are always in Equatorial coordinates"
     op_sim_pysm.exec(data)
     stop = MPI.Wtime()
     if comm.comm_world.rank == 0:
