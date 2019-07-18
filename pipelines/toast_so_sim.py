@@ -154,7 +154,8 @@ def memreport(comm=None, msg=""):
     return
 
 
-# import warnings
+import warnings
+warnings.filterwarnings("ignore")
 # warnings.filterwarnings('error')
 # warnings.simplefilter('ignore', ImportWarning)
 # warnings.simplefilter('ignore', ResourceWarning)
@@ -1268,6 +1269,7 @@ def create_observation(args, comm, all_ces_tot, ices, noise):
             sun_angle_min=args.sun_angle_min,
             coord=args.coord,
             sampsizes=None,
+            report_timing=args.debug,
         )
     except RuntimeError as e:
         raise RuntimeError(
@@ -1611,7 +1613,7 @@ def scan_sky_signal(args, comm, data, localsm, subnpix):
         # Scan the sky signal
         if comm.world_rank == 0 and not os.path.isfile(args.input_map):
             raise RuntimeError("Input map does not exist: {}".format(args.input_map))
-        distmap = tm.DistPixels(
+        distmap = DistPixels(
             comm=comm.comm_world,
             size=npix,
             nnz=3,
