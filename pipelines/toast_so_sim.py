@@ -1481,11 +1481,11 @@ def get_submaps(args, comm, data):
 
 
 @function_timer
-def add_sky_signal(data, totalname, signalname):
+def add_sky_signal(data, totalname, signalname, delete_signal=False):
     """ Add previously simulated sky signal to the atmospheric noise.
 
     """
-    if signalname is not None:
+    if signalname is not None and totalname != signalname:
         for obs in data.obs:
             tod = obs["tod"]
             for det in tod.local_dets:
@@ -1498,11 +1498,13 @@ def add_sky_signal(data, totalname, signalname):
                 else:
                     ref_out = tod.cache.put(cachename_out, ref_in)
                 del ref_in, ref_out
+            if delete_signal:
+                tod.cache.clear(signalname + ".*")
     return
 
 
 @function_timer
-def simulate_sky_signal(args, comm, data, schedules, subnpix, localsm):
+def simulate_sky_signal(args, comm, data, schedules, subnpix, localsm, signalname=None):
     """ Use PySM to simulate smoothed sky signal.
 
     """
@@ -1572,7 +1574,8 @@ def simulate_sky_signal(args, comm, data, schedules, subnpix, localsm):
                     )
                 )
 
-    signalname = "signal"
+    if signalname is None:
+        signalname = "signal"
     op_sim_pysm = OpSimPySM(
         comm=comm.comm_rank,
         out=signalname,
@@ -1593,16 +1596,15 @@ def simulate_sky_signal(args, comm, data, schedules, subnpix, localsm):
     timer.stop()
     if comm.world_rank == 0:
         timer.report("PySM")
+
     return signalname
 
 
 @function_timer
-def scan_sky_signal(args, comm, data, localsm, subnpix):
+def scan_sky_signal(args, comm, data, localsm, subnpix, signalname=None):
     """ Scan sky signal from a map.
 
     """
-    signalname = None
-
     if args.input_map:
         log = Logger.get()
         timer = Timer()
@@ -1621,17 +1623,17 @@ def scan_sky_signal(args, comm, data, localsm, subnpix):
             submap=subnpix,
             local=localsm,
         )
+        if signalname is None:
+            signalname = "signal"
         distmap.read_healpix_fits(args.input_map)
-        scansim = OpSimScan(distmap=distmap, out="signal")
+        scansim = OpSimScan(distmap=distmap, out=signalname)
         scansim.exec(data)
-        signalname = "signal"
 
         if comm.comm_world is not None:
             comm.comm_world.barrier()
         timer.stop()
         if comm.world_rank == 0:
             timer.report("Read and sample map")
-
     return signalname
 
 
@@ -2309,16 +2311,16 @@ def main():
 
     memreport(comm.comm_world, "after submaps")
 
+    # Set up objects to take copies of the TOD at appropriate times
+
+    totalname = "total"
+
     if args.input_pysm_model:
         signalname = simulate_sky_signal(args, comm, data, schedules, subnpix, localsm)
     else:
         signalname = scan_sky_signal(args, comm, data, localsm, subnpix)
 
     memreport(comm.comm_world, "after PySM")
-
-    # Set up objects to take copies of the TOD at appropriate times
-
-    totalname = "total"
 
     # Loop over Monte Carlos
 
@@ -2332,16 +2334,23 @@ def main():
 
         simulate_atmosphere(args, comm, data, mc, totalname)
 
-        memreport(comm.comm_world, "after atmosphere")
-
         scale_atmosphere_by_bandpass(args, comm, data, totalname, mc)
+
+        memreport(comm.comm_world, "after atmosphere")
 
         # update_atmospheric_noise_weights(args, comm, data, freq, mc)
 
-        add_sky_signal(data, totalname, signalname)
+        add_sky_signal(data, totalname, signalname, delete_signal=(nmc == 1))
+
+        memreport(comm.comm_world, "after adding sky")
 
         simulate_noise(args, comm, data, mc, totalname)
+
+        memreport(comm.comm_world, "after simulating noise")
+
         simulate_sss(args, comm, data, mc, totalname)
+
+        memreport(comm.comm_world, "after simulating SSS")
 
         # DEBUG begin
         """
@@ -2359,8 +2368,6 @@ def main():
         return
         """
         # DEBUG end
-
-        memreport(comm.comm_world, "after noise")
 
         scramble_gains(args, comm, data, mc, totalname)
 
