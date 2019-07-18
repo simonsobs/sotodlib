@@ -1356,10 +1356,10 @@ def create_observations(args, comm, schedules):
             obs = create_observation(args, comm, all_ces_tot, ices, noise)
             data.obs.append(obs)
 
-    if args.skip_atmosphere and args.skip_noise:
-        for ob in data.obs:
-            tod = ob["tod"]
-            tod.free_azel_quats()
+    #if args.skip_atmosphere and args.skip_noise:
+    #    for ob in data.obs:
+    #        tod = ob["tod"]
+    #        tod.free_azel_quats()
 
     if comm.comm_group.rank == 0:
         log.info("Group # {:4} has {} observations.".format(comm.group, len(data.obs)))
@@ -1569,9 +1569,6 @@ def simulate_sky_signal(args, comm, data, schedules, subnpix, localsm):
                         model_tag, args.nside, map_dist=map_dist
                     )
                 )
-
-    if comm.world_rank == 0:
-        log.info("Simulating sky signal with PySM")
 
     signalname = "signal"
     op_sim_pysm = OpSimPySM(
