@@ -201,7 +201,10 @@ class Telescope(object):
     def __init__(self, name):
         self.name = name
         self.id = {
-            'LAT' : 0, 'SAT0' : 1, 'SAT1' : 2, 'SAT2' : 3, 'SAT3' : 4
+            # Use the same telescope index for all SATs to re-use the
+            # atmospheric simulation
+            #'LAT' : 0, 'SAT0' : 1, 'SAT1' : 2, 'SAT2' : 3, 'SAT3' : 4
+            'LAT' : 0, 'SAT0' : 4, 'SAT1' : 4, 'SAT2' : 4, 'SAT3' : 4
         }[name]
 
 
