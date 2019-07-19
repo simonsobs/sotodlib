@@ -1010,14 +1010,12 @@ def load_focalplanes(args, comm, schedules):
                 (net, fknee, fmin, alpha, A, C, center, width) = get_det_params(
                     detdata, band_net, band_fknee, band_fmin, band_alpha,
                     band_A, band_C, band_lower, band_center, band_upper)
-                # DEBUG begin
-                #if idet % 100 != 0:
-                #    continue
-                # DEBUG end
                 wafer = detdata["wafer"]
+                # Determine which tube has this wafer
                 for tube, tubedata in hw.data["tubes"].items():
                     if wafer in tubedata["wafers"]:
                         break
+                # RNG index for this detector
                 index = detindex[detname]
                 if args.thinfp and index % args.thinfp != 0:
                     # Only accept a fraction of the detectors for
