@@ -391,6 +391,13 @@ def parse_arguments(comm):
         "'fmin[Hz],fknee[Hz],alpha,NET[K]'",
     )
     parser.add_argument(
+        "--skip_maps",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Disable all mapmaking.",
+    )
+    parser.add_argument(
         "--skip_bin",
         required=False,
         default=False,
@@ -2240,6 +2247,8 @@ def main():
     log = Logger.get()
     gt = GlobalTimers.get()
     gt.start("toast_so_sim (total)")
+    timer0 = Timer()
+    timer0.start()
 
     mpiworld, procs, rank = get_world()
     if rank == 0:
@@ -2381,6 +2390,9 @@ def main():
 
             memreport(comm.comm_world, "after export")
 
+        if args.skip_maps:
+            continue
+
         outpath = setup_output(args, comm, mc)
 
         # Bin and destripe maps
@@ -2448,6 +2460,9 @@ def main():
         dump_timing(alltimers, out)
         timer.stop()
         timer.report("Gather and dump timing info")
+    timer0.stop()
+    if comm.world_rank == 0:
+        timer0.report("toast_so_sim.py pipeline")
     return
 
 
