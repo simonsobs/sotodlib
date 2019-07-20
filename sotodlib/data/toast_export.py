@@ -219,7 +219,7 @@ class ToastExport(toast.Operator):
             detnames = tod.detectors
 
             # Get any other metadata from the TOD
-            props.update(tod.meta())
+            props.update(tod.meta)
 
             # First process in the group makes the output directory
             obsdir = os.path.join(self._outdir, obsname)
