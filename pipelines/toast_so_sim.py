@@ -668,10 +668,10 @@ def parse_arguments(comm):
         "--export", required=False, default=None, help="Output TOD export path"
     )
 
-    try:
-        args = parser.parse_args()
-    except SystemExit:
-        return
+    #try:
+    args = parser.parse_args()
+    #except SystemExit as e:
+    #    return
 
     if len(args.bands.split(",")) != 1:
         # Multi frequency run.  We don't support multiple copies of
@@ -2047,7 +2047,7 @@ def export_TOD(args, comm, data, totalname, other=None):
 
     # Only import spt3g if we are writing out so3g files
     from spt3g import core as core3g
-    from sotodlib.data.toast import ToastExport
+    from sotodlib.data.toast_export import ToastExport
 
     path = os.path.abspath(args.export)
 
