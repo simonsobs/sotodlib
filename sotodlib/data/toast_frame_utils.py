@@ -225,7 +225,9 @@ def tod_to_frames(
         copy_detector=None,
         mask_flag_common=255,
         mask_flag=255,
-        units=None):
+        units=None,
+        dets=None,
+):
     """Gather all data from the distributed TOD cache for a set of frames.
 
     Args:
@@ -248,6 +250,8 @@ def tod_to_frames(
         mask_flag_common (int):  Bitmask to apply to common flags.
         mask_flag (int):  Bitmask to apply to per-detector flags.
         units: G3 units of the detector data.
+        dets (list):  List of detectors to include in the frame.  If None,
+            use all of the detectors in the TOD object.
 
     Returns:
         (list): List of frames on rank zero.  Other processes have a list of
@@ -261,7 +265,14 @@ def tod_to_frames(
     comm_row = tod.grid_comm_row
 
     # Detector names
-    detnames = tod.detectors
+    if dets is None:
+        detnames = tod.detectors
+    else:
+        detnames = []
+        use_dets = set(dets)
+        for det in tod.detectors:
+            if det in use_dets:
+                detnames.append(det)
 
     # Local sample range
     local_first = tod.local_samples[0]
