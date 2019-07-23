@@ -169,8 +169,110 @@ class ToastExport(toast.Operator):
         persample = 8 + 1 + 32 + 48 + 24 + 24 + 8 * ndet * nflavor
         return persample
 
+    def _get_framesizes(self, tod, obs, nsamp, keep_offsets):
+        """ Determine frame sizes based on the data distribution
+        """
+        if keep_offsets:
+            framesizes = self._framesizes
+        else:
+            framesizes = None
+            if self._usechunks:
+                framesizes = tod.total_chunks
+            elif self._useintervals:
+                if "intervals" not in obs:
+                    raise RuntimeError(
+                        "Observation does not contain intervals, cannot "
+                        "distribute using them")
+                framesizes = intervals_to_chunklist(obs["intervals"], nsamp)
+            if framesizes is None:
+                framesizes = [nsamp]
+            self._framesizes = framesizes
+        return framesizes
+
+    def _get_flavors(self, tod, detnames, grouprank):
+        """ Examine all the cache objects and find the set of prefixes
+        """
+        flavors = set()
+        flavor_type = dict()
+        flavor_maptype = dict()
+        pat = re.compile(r"^(.*?)_(.*)")
+        for nm in list(tod.cache.keys()):
+            mat = pat.match(nm)
+            if mat is not None:
+                pref = mat.group(1)
+                md = mat.group(2)
+                if md in detnames:
+                    # This cache field has the form <prefix>_<det>
+                    if pref not in flavor_type:
+                        ref = tod.cache.reference(nm)
+                        if ref.dtype == np.dtype(np.float64):
+                            flavors.add(pref)
+                            flavor_type[pref] = core3g.G3Timestream
+                            flavor_maptype[pref] = core3g.G3TimestreamMap
+                        elif ref.dtype == np.dtype(np.int32):
+                            flavors.add(pref)
+                            flavor_type[pref] = core3g.G3VectorInt
+                            flavor_maptype[pref] = core3g.G3MapVectorInt
+                        elif ref.dtype == np.dtype(np.uint8):
+                            flavors.add(pref)
+                            flavor_type[pref] = so3g.IntervalsInt
+                            flavor_maptype[pref] = so3g.MapIntervalsInt
+        # If the main signals and flags are coming from the cache, remove
+        # them from consideration here.
+        if self._cache_name is None:  # FIXME: isn't this test inverted?
+            flavors.discard(self._cache_name)
+        if self._cache_flag_name is None:  # FIXME: isn't this test inverted?
+            flavors.discard(self._cache_flag_name)
+
+        # Restrict this list of available flavors to just those that
+        # we want to export.
+        copy_flavors = []
+        if self._cache_copy is not None:
+            copy_flavors = list()
+            for flv in flavors:
+                if flv in self._cache_copy:
+                    copy_flavors.append(
+                        (flv, flavor_type[flv], flavor_maptype[flv],
+                         "signal_{}".format(flv)))
+            if grouprank == 0 and len(copy_flavors) > 0:
+                print("Found {} extra TOD flavors: {}".format(
+                    len(copy_flavors), copy_flavors), flush=True)
+
+        return flavors, flavor_type, flavor_maptype, copy_flavors
+
+    def _get_offsets(self, cgroup, grouprank, keep_offsets, ndet, nflavor, framesizes):
+        """Given the dimensions of this observation, compute the frame
+        file sizes and all relevant offsets.
+        """
+
+        frame_sample_offs = None
+        file_sample_offs = None
+        file_frame_offs = None
+        if grouprank == 0:
+            # Compute the frame file breaks.  We ignore the observation
+            # and calibration frames since they are small.
+            if keep_offsets:
+                file_sample_offs = self._file_sample_offs
+                file_frame_offs = self._file_frame_offs
+                frame_sample_offs = self._frame_sample_offs
+            else:
+                sampbytes = self._bytes_per_sample(ndet, nflavor + 1)
+                file_sample_offs, file_frame_offs, frame_sample_offs = \
+                    s3utils.compute_file_frames(
+                        sampbytes, framesizes,
+                        file_size=self._target_framefile)
+                self._file_sample_offs = file_sample_offs
+                self._file_frame_offs = file_frame_offs
+                self._frame_sample_offs = frame_sample_offs
+
+        if cgroup is not None:
+            file_sample_offs = cgroup.bcast(file_sample_offs, root=0)
+            file_frame_offs = cgroup.bcast(file_frame_offs, root=0)
+            frame_sample_offs = cgroup.bcast(frame_sample_offs, root=0)
+        return frame_sample_offs, file_sample_offs, file_frame_offs
+
     def _export_observation(self, obs, cgroup,
-                            detgroup=None, detectors=None):
+                            detgroup=None, detectors=None, keep_offsets=False):
         """ Export observation in one or more frame files
         """
 
@@ -222,87 +324,14 @@ class ToastExport(toast.Operator):
 
         detranks, sampranks = tod.grid_size
 
-        # Determine frame sizes based on the data distribution
-        framesizes = None
-        if self._usechunks:
-            framesizes = tod.total_chunks
-        elif self._useintervals:
-            if "intervals" not in obs:
-                raise RuntimeError(
-                    "Observation does not contain intervals, cannot \
-                    distribute using them")
-            framesizes = intervals_to_chunklist(obs["intervals"], nsamp)
-        if framesizes is None:
-            framesizes = [nsamp]
+        framesizes = self._get_framesizes(tod, obs, nsamp, keep_offsets)
 
-        # Examine all the cache objects and find the set of prefixes
-        flavors = set()
-        flavor_type = dict()
-        flavor_maptype = dict()
-        pat = re.compile(r"^(.*?)_(.*)")
-        for nm in list(tod.cache.keys()):
-            mat = pat.match(nm)
-            if mat is not None:
-                pref = mat.group(1)
-                md = mat.group(2)
-                if md in detnames:
-                    # This cache field has the form <prefix>_<det>
-                    if pref not in flavor_type:
-                        ref = tod.cache.reference(nm)
-                        if ref.dtype == np.dtype(np.float64):
-                            flavors.add(pref)
-                            flavor_type[pref] = core3g.G3Timestream
-                            flavor_maptype[pref] = core3g.G3TimestreamMap
-                        elif ref.dtype == np.dtype(np.int32):
-                            flavors.add(pref)
-                            flavor_type[pref] = core3g.G3VectorInt
-                            flavor_maptype[pref] = core3g.G3MapVectorInt
-                        elif ref.dtype == np.dtype(np.uint8):
-                            flavors.add(pref)
-                            flavor_type[pref] = so3g.IntervalsInt
-                            flavor_maptype[pref] = so3g.MapIntervalsInt
-        # If the main signals and flags are coming from the cache, remove
-        # them from consideration here.
-        if self._cache_name is None:  # FIXME: isn't this test inverted?
-            flavors.discard(self._cache_name)
-        if self._cache_flag_name is None:  # FIXME: isn't this test inverted?
-            flavors.discard(self._cache_flag_name)
+        (flavors, flavor_type, flavor_maptype, copy_flavors
+        ) = self._get_flavors(tod, detnames, grouprank)
 
-        # Restrict this list of available flavors to just those that
-        # we want to export.
-        copy_flavors = []
-        if self._cache_copy is not None:
-            copy_flavors = list()
-            for flv in flavors:
-                if flv in self._cache_copy:
-                    copy_flavors.append(
-                        (flv, flavor_type[flv], flavor_maptype[flv],
-                         "signal_{}".format(flv)))
-            if grouprank == 0 and len(copy_flavors) > 0:
-                print("Found {} extra TOD flavors: {}".format(
-                    len(copy_flavors), copy_flavors), flush=True)
-
-        # Given the dimensions of this observation, compute the frame
-        # file sizes and all relevant offsets.
-
-        frame_sample_offs = None
-        file_sample_offs = None
-        file_frame_offs = None
-        if grouprank == 0:
-            # Compute the frame file breaks.  We ignore the observation
-            # and calibration frames since they are small.
-            sampbytes = self._bytes_per_sample(len(detquat),
-                                               len(copy_flavors) + 1)
-
-            file_sample_offs, file_frame_offs, frame_sample_offs = \
-                s3utils.compute_file_frames(
-                    sampbytes, framesizes,
-                    file_size=self._target_framefile)
-
-        if cgroup is not None:
-            file_sample_offs = cgroup.bcast(file_sample_offs, root=0)
-            file_frame_offs = cgroup.bcast(file_frame_offs, root=0)
-            frame_sample_offs = cgroup.bcast(frame_sample_offs, root=0)
+        (frame_sample_offs, file_sample_offs, file_frame_offs
+        ) = self._get_offsets(cgroup, grouprank, keep_offsets, len(detquat),
+                              len(copy_flavors), framesizes)
 
         if detgroup is None:
             prefix = self._prefix
@@ -408,7 +437,9 @@ class ToastExport(toast.Operator):
                 detectors = obs["tod"].detectors
                 self._export_observation(obs, cgroup)
             else:
+                keep_offsets = False
                 for detgroup, detectors in self._detgroups.items():
-                    self._export_observation(obs, cgroup, detgroup, detectors)
+                    self._export_observation(obs, cgroup, detgroup, detectors, keep_offsets)
+                    keep_offsets = True
 
         return
