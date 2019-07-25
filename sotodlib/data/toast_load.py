@@ -54,12 +54,13 @@ class SOTOD(TOD):
         detranks (int):  The dimension of the process grid in the detector
             direction.  The MPI communicator size must be evenly divisible
             by this number.
+        all_flavors (bool):  Return all signal flavors
 
     """
     def __init__(self, path, file_names, file_nframes, file_sample_offs,
                  frame_sizes, frame_sizes_by_offset,
                  frame_sample_offs, detquats,
-                 mpicomm, detranks=1):
+                 mpicomm, detranks=1, all_flavors=False):
         self._path = path
         self._units = None
         self._detquats = detquats
@@ -68,6 +69,7 @@ class SOTOD(TOD):
         self._file_names = file_names
         self._file_nframes = file_nframes
         self._file_sample_offs = file_sample_offs
+        self._all_flavors = all_flavors
 
         sampsizes = []
         nsamp = 0
@@ -168,8 +170,8 @@ class SOTOD(TOD):
                     frame_offset,
                     frame_size,
                     frame_data=fdata,
-                    detector_map="signal",
-                    flag_map="flags")
+                    all_flavors=self._all_flavors,
+                )
 
                 if self.mpicomm is not None:
                     self.mpicomm.barrier()

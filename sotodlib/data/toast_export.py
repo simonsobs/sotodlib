@@ -58,6 +58,10 @@ class ToastExport(toast.Operator):
         detgroups (dict):  Dictionary of groups to arrange the detectors into.
             Each key is a name of the group and each value is a list of
             detector names
+        gain_compressor (float):  Extra gain to apply to the signal before
+            encoding in 24-bit integers.  Only applied when compress=True.
+        compress (bool):  Store the timestreams as FLAC-compressed, 24-bit
+            integers instead of uncompressed doubles.  See `gain_compressor`.
 
     """
     def __init__(self, outdir, prefix="so", use_todchunks=False,
@@ -65,6 +69,8 @@ class ToastExport(toast.Operator):
                  cache_flag_name=None, cache_copy=None, mask_flag_common=255,
                  mask_flag=255, filesize=500000000, units=None,
                  detgroups=None,
+                 gain_compressor=30000,
+                 compress=False,
     ):
         self._outdir = outdir
         self._prefix = prefix
@@ -81,6 +87,8 @@ class ToastExport(toast.Operator):
         self._target_framefile = filesize
         self._units = units
         self._detgroups = detgroups
+        self._gain_compressor = gain_compressor
+        self._compress = compress
         # We call the parent class constructor
         super().__init__()
 
@@ -391,6 +399,8 @@ class ToastExport(toast.Operator):
                 dets=detnames,
                 mask_flag_common=self._mask_flag_common,
                 mask_flag=self._mask_flag,
+                gain_compressor=self._gain_compressor,
+                compress=self._compress,
             )
 
             if grouprank == 0:
