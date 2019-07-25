@@ -20,11 +20,21 @@ from toast.mpi import MPI
 
 import toast.qarray as qa
 from toast.tod import spt3g_utils as s3utils
+from toast.tod import TOD
 
+# Mapping between TOAST cache names and so3g fields
 
-def frames_to_tod(
+FIELD_TO_CACHE= {
+    #"timestamps" : TOD.TIMESTAMP_NAME,
+    "flags_common" : TOD.COMMON_FLAG_NAME,
+    "site_velocity" : TOD.VELOCITY_NAME,
+    "site_position" : TOD.POSITION_NAME,
+    "flags" : TOD.FLAG_NAME,
+    "signal" : TOD.SIGNAL_NAME,
+}
+
+def frame_to_tod(
         tod,
-        frame,
         frame_offset,
         frame_size,
         frame_data=None,
@@ -34,7 +44,6 @@ def frames_to_tod(
 
     Args:
         tod (toast.TOD): instance of a TOD class.
-        frame (int): the frame index.
         frame_offset (int): the first sample of the frame.
         frame_size (int): the number of samples in the the frame.
         frame_data (G3Frame): the input frame (only on rank zero).
@@ -59,107 +68,139 @@ def frames_to_tod(
     cacheoff, froff, nfr = s3utils.local_frame_indices(
         local_first, nlocal, frame_offset, frame_size)
 
+    # Helper function to expand time stamps from a core3g.G3Timestream object
+    def copy_times(fieldval):
+        ref = tod.local_times()
+        if ref[cacheoff] != 0 and ref[cacheoff + nfr - 1] != 0:
+            # the timestamps were already cached
+            return
+        tstart = fieldval.start.mjd
+        tstop = fieldval.stop.mjd
+        # Convert the MJD time stamps to UNIX time
+        tstart = (tstart - 2440587.5 + 2400000.5) * 86400
+        tstop = (tstop - 2440587.5 + 2400000.5) * 86400
+        n = len(fieldval)
+        ref[cacheoff : cacheoff + nfr] \
+            = np.linspace(tstart, tstop, n)[froff : froff + nfr]
+        del ref
+        return
+
     # Helper function to actually copy a slice of data into cache.
-    def copy_slice(data, fld, cache_prefix):
-        cache_fld = fld
-        if cache_prefix is not None:
-            cache_fld = "{}{}".format(cache_prefix, fld)
+    def copy_slice(data, field, cache_prefix):
+        if isinstance(data[field], core3g.G3Timestream):
+            # every G3Timestream has time stamps, we'll only use the
+            # first one
+            copy_times(data[field])
+        if cache_prefix is None:
+            if field in FIELD_TO_CACHE:
+                cache_field = FIELD_TO_CACHE[field]
+            else:
+                cache_field = field
+        else:
+            cache_field = "{}{}".format(cache_prefix, field)
         # Check field type and data shape
-        ftype = s3utils.g3_dtype(data[fld])
-        flen = len(data[fld])
+        ftype = s3utils.g3_dtype(data[field])
+        flen = len(data[field])
         nnz = flen // frame_size
         if nnz * frame_size != flen:
-            msg = "frame {}, field {} has length {} which is not "\
-                "divisible by size {}".format(frame, fld, flen, frame_size)
+            msg = "field {} has length {} which is not "\
+                "divisible by size {}".format(field, flen, frame_size)
             raise RuntimeError(msg)
-        if not tod.cache.exists(cache_fld):
+        if not tod.cache.exists(cache_field):
             # The field does not yet exist in cache, so create it.
             # print("proc {}:  create cache field {}, {}, ({},
-            # {})".format(tod.mpicomm.rank, fld, ftype, tod.local_samples[1],
+            # {})".format(tod.mpicomm.rank, field, ftype, tod.local_samples[1],
             # nnz), flush=True)
             if nnz == 1:
-                rf = tod.cache.create(cache_fld, ftype,
+                tod.cache.create(cache_field, ftype,
                                       (tod.local_samples[1],))
             else:
-                rf = tod.cache.create(cache_fld, ftype,
+                tod.cache.create(cache_field, ftype,
                                       (tod.local_samples[1], nnz))
-            del rf
         # print("proc {}: get cache ref for {}".format(tod.mpicomm.rank,
-        # cache_fld), flush=True)
-        rf = tod.cache.reference(cache_fld)
+        # cache_field), flush=True)
+        ref = tod.cache.reference(cache_field)
         # Verify that the dimensions of the cache object are what we expect,
         # then copy the data.
         cache_samples = None
         cache_nnz = None
-        if (len(rf.shape) > 1) and (rf.shape[1] > 0):
+        if (len(ref.shape) > 1) and (ref.shape[1] > 0):
             # We have a packed 2D array
-            cache_samples = rf.shape[0]
-            cache_nnz = rf.shape[1]
+            cache_samples = ref.shape[0]
+            cache_nnz = ref.shape[1]
         else:
             cache_nnz = 1
-            cache_samples = len(rf)
+            cache_samples = len(ref)
 
         if cache_samples != tod.local_samples[1]:
-            msg = "frame {}, field {}: cache has {} samples, which is"
+            msg = "field {}: cache has {} samples, which is"
             " different from local TOD size {}"\
-                .format(frame, fld, cache_samples, tod.local_samples[1])
+                .format(field, cache_samples, tod.local_samples[1])
             raise RuntimeError(msg)
 
         if cache_nnz != nnz:
-            msg = "frame {}, field {}: cache has nnz = {}, which is"\
+            msg = "field {}: cache has nnz = {}, which is"\
                 " different from frame nnz {}"\
-                .format(frame, fld, cache_nnz, nnz)
+                .format(field, cache_nnz, nnz)
             raise RuntimeError(msg)
 
         if cache_nnz > 1:
             slc = \
-                np.array(data[fld][nnz*froff:nnz*(froff+nfr)],
+                np.array(data[field][nnz * froff : nnz * (froff + nfr)],
                          copy=False).reshape((-1, nnz))
             # print("proc {}:  copy_slice field {}[{}:{},:] = \
-            # frame[{}:{},:]".format(tod.mpicomm.rank, fld, cacheoff,
+            # frame[{}:{},:]".format(tod.mpicomm.rank, field, cacheoff,
             # cacheoff+nfr, froff, froff+nfr), flush=True)
-            rf[cacheoff:cacheoff+nfr, :] = slc
+            ref[cacheoff : cacheoff + nfr, :] = slc
         else:
-            slc = np.array(data[fld][froff:froff+nfr], copy=False)
+            slc = np.array(data[field][froff : froff + nfr], copy=False)
             # print("proc {}:  copy_slice field {}[{}:{}] = \
-            # frame[{}:{}]".format(tod.mpicomm.rank, fld, cacheoff,
+            # frame[{}:{}]".format(tod.mpicomm.rank, field, cacheoff,
             # cacheoff+nfr, froff, froff+nfr), flush=True)
-            rf[cacheoff:cacheoff+nfr] = slc
-        del rf
+            ref[cacheoff : cacheoff + nfr] = slc
+        del ref
         return
 
-    def copy_flags(chunks, fld, cache_prefix):
-        ndata = np.zeros(froff+nfr, dtype=np.uint8)
+    def copy_flags(chunks, field, cache_prefix):
+        """ Translate flag intervals into sample ranges
+        and record them in the TOD cache
+
+        FIXME: uses sample indices instead of time stamps
+        """
+        ndata = np.zeros(froff + nfr, dtype=np.uint8)
         for beg, end in chunks.array():
-            ndata[beg:end] = 1
-        cache_fld = fld
-        if cache_prefix is not None:
-            cache_fld = "{}{}".format(cache_prefix, fld)
+            ndata[beg : end + 1] = 1
+        if cache_prefix is None:
+            if field in FIELD_TO_CACHE:
+                cache_field = FIELD_TO_CACHE[field]
+            else:
+                cache_field = field
+        else:
+            cache_field = "{}{}".format(cache_prefix, field)
         # Check field type and data shape
         ftype = np.dtype(np.uint8)
         flen = len(ndata)
         nnz = flen // frame_size
         if nnz * frame_size != flen:
-            msg = "frame {}, field {} has length {} which is not "\
-                "divisible by size {}".format(frame, fld, flen, frame_size)
+            msg = "field {} has length {} which is not "\
+                "divisible by size {}".format(field, flen, frame_size)
             raise RuntimeError(msg)
-        if not tod.cache.exists(cache_fld):
-            rf = tod.cache.create(cache_fld, ftype, (tod.local_samples[1],))
-            del rf
-        rf = tod.cache.reference(cache_fld)
+        if not tod.cache.exists(cache_field):
+            tod.cache.create(cache_field, ftype, (tod.local_samples[1],))
+        ref = tod.cache.reference(cache_field)
         # Verify that the dimensions of the cache object are what we expect,
         # then copy the data.
-        cache_samples = len(rf)
+        cache_samples = len(ref)
 
         if cache_samples != tod.local_samples[1]:
-            msg = "frame {}, field {}: cache has {} samples, which is"
+            msg = "field {}: cache has {} samples, which is"
             " different from local TOD size {}"\
-                .format(frame, fld, cache_samples, tod.local_samples[1])
+                .format(field, cache_samples, tod.local_samples[1])
             raise RuntimeError(msg)
 
-        slc = np.array(ndata[froff:froff+nfr], copy=False)
-        rf[cacheoff:cacheoff+nfr] = slc
-        del rf
+        slc = np.array(ndata[froff : froff + nfr], copy=False)
+        ref[cacheoff : cacheoff + nfr] = slc
+        del ref
         return
 
     if cacheoff is not None:
@@ -198,7 +239,7 @@ def frames_to_tod(
                         # print("proc {} copy frame {}, field
                         # {}".format(tod.mpicomm.rank, frame, field),
                         # flush=True)
-                        copy_slice(frame_data[detector_map], field, "signal_")
+                        copy_slice(frame_data[detector_map], field, TOD.SIGNAL_NAME + "_")
                         break
         if flag_map is not None:
             # If the field name contains any of our local detectors,
@@ -207,7 +248,7 @@ def frames_to_tod(
                 for dp in dpats:
                     if dp.match(field) is not None:
                         chunks = frame_data[flag_map][field]
-                        copy_flags(chunks, field, "flags_")
+                        copy_flags(chunks, field, TOD.FLAG_NAME + "_")
                         break
     return
 
@@ -282,14 +323,14 @@ def tod_to_frames(
     detranks, sampranks = tod.grid_size
     rankdet, ranksamp = tod.grid_ranks
 
-    def get_local_cache(prow, fld, cacheoff, ncache):
+    def get_local_cache(prow, field, cacheoff, ncache):
         """Read a local slice of a cache field.
         """
         mtype = None
         pdata = None
         nnz = 0
         if rankdet == prow:
-            ref = tod.cache.reference(fld)
+            ref = tod.cache.reference(field)
             nnz = 1
             if (len(ref.shape) > 1) and (ref.shape[1] > 0):
                 nnz = ref.shape[1]
@@ -303,10 +344,10 @@ def tod_to_frames(
                 mtype = MPI.UINT8_T
             else:
                 msg = "Cannot use cache field {} of type {}"\
-                    .format(fld, ref.dtype)
+                    .format(field, ref.dtype)
                 raise RuntimeError(msg)
             if cacheoff is not None:
-                pdata = ref.flatten()[nnz*cacheoff:nnz*(cacheoff+ncache)]
+                pdata = ref.flatten()[nnz * cacheoff : nnz * (cacheoff + ncache)]
             else:
                 pdata = np.zeros(0, dtype=ref.dtype)
         return (pdata, nnz, mtype)
@@ -397,7 +438,7 @@ def tod_to_frames(
     fdataoff = [0]
     for f in frame_sizes[:-1]:
         last = fdataoff[-1]
-        fdataoff.append(last+f)
+        fdataoff.append(last + f)
 
     # The list of frames- only on the root process.
     fdata = None
@@ -409,6 +450,8 @@ def tod_to_frames(
 
     def flags_to_intervals(flgs):
         """Convert a flag vector to an interval list.
+
+        FIXME: uses sample indices instead of time stamps
         """
         groups = [
             [i for i, value in it] for key, it in
@@ -416,7 +459,7 @@ def tod_to_frames(
             if key != 0]
         chunks = list()
         for grp in groups:
-            chunks.append([grp[0], grp[-1]])
+            chunks.append([grp[0], grp[-1] + 1])
         return chunks
 
     def split_field(data, g3t, framefield, mapfield=None, g3units=units,
@@ -447,7 +490,7 @@ def tod_to_frames(
                 ndata = frame_sizes[f]
                 datalast = dataoff + ndata
                 chunks = list()
-                idomain = (0, ndata-1)
+                idomain = (0, ndata - 1)
                 for intr in fint:
                     # Interval sample ranges are defined relative to the
                     # frame itself.
@@ -459,7 +502,7 @@ def tod_to_frames(
                             cfirst = 0
                         else:
                             cfirst = intr[0] - dataoff
-                        if intr[1] >= datalast:
+                        if intr[1] > datalast:
                             clast = ndata - 1
                         else:
                             clast = intr[1] - dataoff
@@ -494,18 +537,18 @@ def tod_to_frames(
                 if mapfield is None:
                     if g3units is None:
                         fdata[f][framefield] = \
-                            g3t(data[dataoff:dataoff+ndata])
+                            g3t(data[dataoff : dataoff + ndata])
                     else:
                         fdata[f][framefield] = \
-                            g3t(data[dataoff:dataoff+ndata], g3units)
+                            g3t(data[dataoff : dataoff + ndata], g3units)
                 else:
                     if g3units is None:
                         fdata[f][framefield][mapfield] = \
-                            g3t(data[dataoff:dataoff+ndata])
+                            g3t(data[dataoff : dataoff + ndata])
                     else:
                         fdata[f][framefield][mapfield] = \
-                            g3t(data[dataoff:dataoff+ndata], g3units)
-                timeslice = times[dataoff:dataoff + ndata]
+                            g3t(data[dataoff : dataoff + ndata], g3units)
+                timeslice = times[cacheoff + dataoff : cacheoff + dataoff + ndata]
                 tstart = timeslice[0] * 1e8
                 tstop = timeslice[-1] * 1e8
                 fdata[f][framefield][mapfield].start = core3g.G3Time(tstart)
@@ -518,11 +561,11 @@ def tod_to_frames(
                 ndata = frame_sizes[f]
                 if len(data.shape) == 1:
                     fdata[f][framefield] = \
-                        g3t(data[dataoff:dataoff+ndata].tolist())
+                        g3t(data[dataoff : dataoff + ndata].tolist())
                 else:
                     # We have a 2D quantity
                     fdata[f][framefield] = \
-                        g3t(data[dataoff:dataoff+ndata, :].flatten()
+                        g3t(data[dataoff : dataoff + ndata, :].flatten()
                             .tolist())
         return
 
