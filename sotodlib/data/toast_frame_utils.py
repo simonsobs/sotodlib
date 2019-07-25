@@ -33,13 +33,32 @@ FIELD_TO_CACHE= {
     "signal" : TOD.SIGNAL_NAME,
 }
 
+
+def recode_timestream(ts, cal):
+    """ts is a G3Timestream and cal is a double.  Returns a new
+    G3Timestream for same samples as ts, but with data scaled by cal,
+    rounded, and with FLAC compression enabled.
+
+    """
+    v = np.round(np.array(ts) * cal)
+
+    new_ts = core3g.G3Timestream(v)
+    new_ts.units = core3g.G3TimestreamUnits.Counts
+    new_ts.SetFLACCompression(True)
+    new_ts.start = ts.start
+    new_ts.stop = ts.stop
+    return new_ts
+
+
 def frame_to_tod(
         tod,
         frame_offset,
         frame_size,
         frame_data=None,
         detector_map="signal",
-        flag_map="flags"):
+        flag_map="flags",
+        all_flavors=False,
+):
     """Distribute a frame from the rank zero process.
 
     Args:
@@ -49,6 +68,8 @@ def frame_to_tod(
         frame_data (G3Frame): the input frame (only on rank zero).
         detector_map (str): the name of the frame timestream map.
         flag_map (str): then name of the frame flag map.
+        all_flavors (bool):  Return all signal flavors that start
+             with `detector_map`
 
     Returns:
         None
@@ -239,8 +260,24 @@ def frame_to_tod(
                         # print("proc {} copy frame {}, field
                         # {}".format(tod.mpicomm.rank, frame, field),
                         # flush=True)
-                        copy_slice(frame_data[detector_map], field, TOD.SIGNAL_NAME + "_")
+                        copy_slice(frame_data[detector_map],
+                                   field,
+                                   TOD.SIGNAL_NAME + "_")
                         break
+            # Look for additional signal flavors and cache them as well
+            if all_flavors:
+                prefix = detector_map + "_"
+                for key in frame_data.keys():
+                    if prefix in key:
+                        flavor = key.replace(prefix, "")
+                        for field in frame_data[key].keys():
+                            for dp in dpats:
+                                if dp.match(field) is not None:
+                                    copy_slice(frame_data[key],
+                                               field,
+                                               flavor + "_")
+                            break
+
         if flag_map is not None:
             # If the field name contains any of our local detectors,
             # then cache it.
@@ -268,6 +305,8 @@ def tod_to_frames(
         mask_flag=255,
         units=None,
         dets=None,
+        gain_compressor=30000,
+        compress=False,
 ):
     """Gather all data from the distributed TOD cache for a set of frames.
 
@@ -293,6 +332,10 @@ def tod_to_frames(
         units: G3 units of the detector data.
         dets (list):  List of detectors to include in the frame.  If None,
             use all of the detectors in the TOD object.
+        gain_compressor (float):  Extra gain to apply to the signal before
+            encoding in 24-bit integers.  Only applied when compress=True.
+        compress (bool):  Store the timestreams as FLAC-compressed, 24-bit
+            integers instead of uncompressed doubles.  See `gain_compressor`.
 
     Returns:
         (list): List of frames on rank zero.  Other processes have a list of
@@ -534,6 +577,9 @@ def tod_to_frames(
             for f in range(n_frames):
                 dataoff = fdataoff[f]
                 ndata = frame_sizes[f]
+                timeslice = times[cacheoff + dataoff : cacheoff + dataoff + ndata]
+                tstart = timeslice[0] * 1e8
+                tstop = timeslice[-1] * 1e8
                 if mapfield is None:
                     if g3units is None:
                         fdata[f][framefield] = \
@@ -541,18 +587,20 @@ def tod_to_frames(
                     else:
                         fdata[f][framefield] = \
                             g3t(data[dataoff : dataoff + ndata], g3units)
+                    fdata[f][framefield].start = core3g.G3Time(tstart)
+                    fdata[f][framefield].stop = core3g.G3Time(tstop)
                 else:
+                    # Individual detector data.  The only fields that
+                    # we (optionally) compress.
                     if g3units is None:
-                        fdata[f][framefield][mapfield] = \
-                            g3t(data[dataoff : dataoff + ndata])
+                        tstream = g3t(data[dataoff : dataoff + ndata])
                     else:
-                        fdata[f][framefield][mapfield] = \
-                            g3t(data[dataoff : dataoff + ndata], g3units)
-                timeslice = times[cacheoff + dataoff : cacheoff + dataoff + ndata]
-                tstart = timeslice[0] * 1e8
-                tstop = timeslice[-1] * 1e8
-                fdata[f][framefield][mapfield].start = core3g.G3Time(tstart)
-                fdata[f][framefield][mapfield].stop = core3g.G3Time(tstop)
+                        tstream = g3t(data[dataoff : dataoff + ndata], g3units)
+                    if compress:
+                        tstream = recode_timestream(tstream, gain_compressor)
+                    fdata[f][framefield][mapfield] = tstream
+                    fdata[f][framefield][mapfield].start = core3g.G3Time(tstart)
+                    fdata[f][framefield][mapfield].stop = core3g.G3Time(tstop)
         else:
             # The bindings of G3Vector seem to only work with
             # lists.  This is probably horribly inefficient.
@@ -695,6 +743,8 @@ def tod_to_frames(
             if copy_detector is not None:
                 for cname, g3typ, g3maptyp, fnm in copy_detector:
                     fdata[f][fnm] = g3maptyp()
+            if compress:
+                fdata[f]["gain_compressor"] = s3utils.to_g3_type(gain_compressor)
 
     for dindx, dname in enumerate(detnames):
         drow = -1
