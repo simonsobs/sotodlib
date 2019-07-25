@@ -145,7 +145,7 @@ class SOTOD(TOD):
                 self._file_names, self._file_nframes,
                 self._frame_sample_offs, self._frame_sizes):
 
-            print("{} : Loading {}".format(rank, ffile), flush=True)  # DEBUG
+            # print("{} : Loading {}".format(rank, ffile), flush=True)
 
             # Loop over all frames- only the root process will actually
             # read data from disk.

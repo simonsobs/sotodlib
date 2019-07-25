@@ -34,20 +34,44 @@ FIELD_TO_CACHE= {
 }
 
 
-def recode_timestream(ts, cal):
-    """ts is a G3Timestream and cal is a double.  Returns a new
-    G3Timestream for same samples as ts, but with data scaled by cal,
+def recode_timestream(ts, rmstarget=2 ** 14):
+    """ts is a G3Timestream.  Returns a new
+    G3Timestream for same samples as ts, but with data
+    scaled and translated with gain and offset,
     rounded, and with FLAC compression enabled.
 
-    """
-    v = np.round(np.array(ts) * cal)
+    Args:
+        ts (G3Timestream) :  Input signal
+        rmstarget (float) :  Scale the input signal to have this RMS.
+            Should be much smaller then the 24-bit integer range:
+            [-2 ** 23 : 2 ** 23] = [-8,388,608 : 8,388,608].
+            The gain will be reduced if the scaled signal does
+            not fit within the range of allowed values.
+    Returns:
+        new_ts (G3Timestream) :  Scaled and translated timestream
+            with the FLAC compression enabled
+        gain (float) :  The applied gain
+        offset (float) :  The removed offset
 
+    """
+    v = np.array(ts)
+    vmin = np.amin(v)
+    vmax = np.amax(v)
+    offset = 0.5 * (vmin + vmax)
+    amp = vmax - offset
+    rms = np.std(v)
+    gain = rmstarget / rms
+    # If the data have extreme outliers, we have to reduce the gain
+    # to fit the 24-bit signed integer range
+    while amp * gain >= 2 ** 23:
+        gain *= 0.5
+    v = np.round((v - offset) * gain)
     new_ts = core3g.G3Timestream(v)
     new_ts.units = core3g.G3TimestreamUnits.Counts
     new_ts.SetFLACCompression(True)
     new_ts.start = ts.start
     new_ts.stop = ts.stop
-    return new_ts
+    return new_ts, gain, offset
 
 
 def frame_to_tod(
@@ -106,8 +130,19 @@ def frame_to_tod(
         del ref
         return
 
+    def get_gain_and_offset(frame_data, tsmap, field):
+        """ Check if the timestream in framedata[tsmap][field] was
+        scaled and translated for compression.
+        """
+        try:
+            gain = frame_data["_".join([tsmap, field, "compressor_gain"])]
+            offset = frame_data["_".join([tsmap, field, "compressor_offset"])]
+        except:
+            gain, offset = None, None
+        return gain, offset
+
     # Helper function to actually copy a slice of data into cache.
-    def copy_slice(data, field, cache_prefix):
+    def copy_slice(data, field, cache_prefix, gain=None, offset=None):
         if isinstance(data[field], core3g.G3Timestream):
             # every G3Timestream has time stamps, we'll only use the
             # first one
@@ -169,15 +204,17 @@ def frame_to_tod(
             slc = \
                 np.array(data[field][nnz * froff : nnz * (froff + nfr)],
                          copy=False).reshape((-1, nnz))
-            # print("proc {}:  copy_slice field {}[{}:{},:] = \
-            # frame[{}:{},:]".format(tod.mpicomm.rank, field, cacheoff,
-            # cacheoff+nfr, froff, froff+nfr), flush=True)
+            if gain is not None:
+                slc /= gain
+            if offset is not None:
+                slc += offset
             ref[cacheoff : cacheoff + nfr, :] = slc
         else:
             slc = np.array(data[field][froff : froff + nfr], copy=False)
-            # print("proc {}:  copy_slice field {}[{}:{}] = \
-            # frame[{}:{}]".format(tod.mpicomm.rank, field, cacheoff,
-            # cacheoff+nfr, froff, froff+nfr), flush=True)
+            if gain is not None:
+                slc /= gain
+            if offset is not None:
+                slc += offset
             ref[cacheoff : cacheoff + nfr] = slc
         del ref
         return
@@ -233,18 +270,19 @@ def frame_to_tod(
         # FIXME:  need to account for multiple timestream maps.
         for field, fieldval in frame_data.iteritems():
             # Skip over maps
-            if isinstance(fieldval, core3g.G3TimestreamMap):
-                continue
-            if isinstance(fieldval, core3g.G3MapVectorDouble):
-                continue
-            if isinstance(fieldval, core3g.G3MapVectorInt):
-                continue
-            if isinstance(fieldval, so3g.MapIntervalsInt):
+            if isinstance(fieldval, core3g.G3TimestreamMap) or \
+               isinstance(fieldval, core3g.G3MapVectorDouble) or \
+               isinstance(fieldval, core3g.G3MapVectorInt) or \
+               isinstance(fieldval, so3g.MapIntervalsInt):
                 continue
             if isinstance(fieldval, so3g.IntervalsInt):
                 copy_flags(fieldval, field, None)
             else:
-                copy_slice(frame_data, field, None)
+                try:
+                    copy_slice(frame_data, field, None)
+                except TypeError:
+                    # scalar metadata instead of vector
+                    continue
 
         dpats = None
         if (detector_map is not None) or (flag_map is not None):
@@ -260,9 +298,13 @@ def frame_to_tod(
                         # print("proc {} copy frame {}, field
                         # {}".format(tod.mpicomm.rank, frame, field),
                         # flush=True)
+                        gain, offset = get_gain_and_offset(
+                            frame_data, detector_map, field)
                         copy_slice(frame_data[detector_map],
                                    field,
-                                   TOD.SIGNAL_NAME + "_")
+                                   TOD.SIGNAL_NAME + "_",
+                                   gain=gain, offset=offset,
+                        )
                         break
             # Look for additional signal flavors and cache them as well
             if all_flavors:
@@ -273,10 +315,14 @@ def frame_to_tod(
                         for field in frame_data[key].keys():
                             for dp in dpats:
                                 if dp.match(field) is not None:
+                                    gain, offset = get_gain_and_offset(
+                                        frame_data, key, field)
                                     copy_slice(frame_data[key],
                                                field,
-                                               flavor + "_")
-                            break
+                                               flavor + "_",
+                                               gain=gain, offset=offset,
+                                    )
+                                    break
 
         if flag_map is not None:
             # If the field name contains any of our local detectors,
@@ -305,7 +351,6 @@ def tod_to_frames(
         mask_flag=255,
         units=None,
         dets=None,
-        gain_compressor=30000,
         compress=False,
 ):
     """Gather all data from the distributed TOD cache for a set of frames.
@@ -332,10 +377,8 @@ def tod_to_frames(
         units: G3 units of the detector data.
         dets (list):  List of detectors to include in the frame.  If None,
             use all of the detectors in the TOD object.
-        gain_compressor (float):  Extra gain to apply to the signal before
-            encoding in 24-bit integers.  Only applied when compress=True.
         compress (bool):  Store the timestreams as FLAC-compressed, 24-bit
-            integers instead of uncompressed doubles.  See `gain_compressor`.
+            integers instead of uncompressed doubles.
 
     Returns:
         (list): List of frames on rank zero.  Other processes have a list of
@@ -597,7 +640,11 @@ def tod_to_frames(
                     else:
                         tstream = g3t(data[dataoff : dataoff + ndata], g3units)
                     if compress:
-                        tstream = recode_timestream(tstream, gain_compressor)
+                        (tstream, gain, offset) = recode_timestream(tstream)
+                        fdata[f]["_".join([framefield, mapfield, "compressor_gain"])] \
+                            = s3utils.to_g3_type(gain)
+                        fdata[f]["_".join([framefield, mapfield, "compressor_offset"])] \
+                            = s3utils.to_g3_type(offset)
                     fdata[f][framefield][mapfield] = tstream
                     fdata[f][framefield][mapfield].start = core3g.G3Time(tstart)
                     fdata[f][framefield][mapfield].stop = core3g.G3Time(tstop)
@@ -655,7 +702,7 @@ def tod_to_frames(
         bore = gather_field(0, bore, 4, MPI.DOUBLE, cacheoff, ncache, 0)
     if rank == 0:
         split_field(bore.reshape(-1, 4), core3g.G3VectorDouble,
-                    "qboresight_radec")
+                    "boresight_radec")
 
     bore = None
     if rankdet == 0:
@@ -665,7 +712,7 @@ def tod_to_frames(
         bore = gather_field(0, bore, 4, MPI.DOUBLE, cacheoff, ncache, 1)
     if rank == 0:
         split_field(bore.reshape(-1, 4), core3g.G3VectorDouble,
-                    "qboresight_azel")
+                    "boresight_azel")
 
     if rank == 0:
         for f in range(n_frames):
@@ -743,8 +790,6 @@ def tod_to_frames(
             if copy_detector is not None:
                 for cname, g3typ, g3maptyp, fnm in copy_detector:
                     fdata[f][fnm] = g3maptyp()
-            if compress:
-                fdata[f]["gain_compressor"] = s3utils.to_g3_type(gain_compressor)
 
     for dindx, dname in enumerate(detnames):
         drow = -1
@@ -779,8 +824,7 @@ def tod_to_frames(
         nnz = 1
         if cache_signal is None:
             if rankdet == prow:
-                detdata = tod.read(detector=dname, local_start=cacheoff,
-                                   n=ncache)
+                detdata = tod.local_signal(dname)[cacheoff : cacheoff + ncache]
         else:
             cache_det = "{}_{}".format(cache_signal, dname)
             detdata, nnz, mtype = get_local_cache(prow, cache_det, cacheoff,
@@ -799,8 +843,7 @@ def tod_to_frames(
         nnz = 1
         if cache_flags is None:
             if rankdet == prow:
-                detdata = tod.read_flags(detector=dname, local_start=cacheoff,
-                                         n=ncache)
+                detdata = tod.local_flags(dname)[cacheoff : cacheoff + ncache]
                 detdata &= mask_flag
         else:
             cache_det = "{}_{}".format(cache_flags, dname)
