@@ -389,6 +389,8 @@ class ToastExport(toast.Operator):
                 copy_detector=copy_flavors,
                 units=self._units,
                 dets=detnames,
+                mask_flag_common=self._mask_flag_common,
+                mask_flag=self._mask_flag,
             )
 
             if grouprank == 0:

@@ -2,10 +2,14 @@
 # Full license can be found in the top level "LICENSE" file.
 """Test toast data loading.
 """
+from glob import glob
 import sys
 import os
 
 import numpy as np
+from numpy.testing import (
+    assert_equal, assert_array_almost_equal, assert_array_equal, assert_allclose,
+)
 
 from unittest import TestCase
 
@@ -90,7 +94,7 @@ class ToastLoadTest(TestCase):
         self.fknee = 0.05
 
         for ob in range(3):
-            ftime = (self.totsamp / self.rate) * ob
+            ftime = (self.totsamp / self.rate) * ob + 1564015655.88
             tod = TODGround(
                 self.data.comm.comm_group,
                 detquats,
@@ -175,5 +179,79 @@ class ToastLoadTest(TestCase):
 
         checkdata = load_data(self.outdir, comm=self.data.comm)
         checkdata.info(sys.stdout)
+
+        return
+
+
+    def test_load_split(self):
+        if not toast_available:
+            return
+
+        # Simulate some noise into multiple cache prefixes.  This is used
+        # to test the export of multiple timestream flavors.
+        nse = toast.tod.OpSimNoise(out="signal", realization=0)
+        nse.exec(self.data)
+        nse = toast.tod.OpSimNoise(out="component1", realization=0)
+        nse.exec(self.data)
+        nse = toast.tod.OpSimNoise(out="component2", realization=0)
+        nse.exec(self.data)
+
+        obs = self.data.obs[0]
+        tod = obs["tod"]
+
+        # Split the detectors into separate groups
+        dets = sorted(tod.detectors)
+        detgroups = {}
+        for idet, det in enumerate(dets):
+            detgroups["group{}".format(idet)] = [det]
+
+        outdir = self.outdir
+        prefix = "sat3"
+
+        # Dump to disk
+        dumper = ToastExport(
+            outdir,
+            prefix=prefix,
+            use_intervals=True,
+            cache_name="signal",
+            cache_copy=["component1", "component2"],
+            mask_flag_common=tod.TURNAROUND,
+            filesize=500000,
+            units=core3g.G3TimestreamUnits.Tcmb,
+            detgroups=detgroups,
+        )
+        dumper.exec(self.data)
+
+        # Count the number of resulting files
+        files = glob("{}/{}/sat3_*_00000000.g3".format(outdir, obs['name']))
+        assert_equal(len(files), len(detgroups),
+                     "Exported files ({}) does not match the detector "
+                     "groups ({})".format(files, detgroups))
+
+        # Load the data back in
+
+        checkdata = load_data(outdir, comm=self.data.comm,
+                              prefix="{}_{}".format(prefix, "group."))
+
+        # Verify that input and output are equal
+
+        checktod = checkdata.obs[0]["tod"]
+
+        times = tod.local_times()
+        checktimes = checktod.local_times()
+        assert_allclose(checktimes, times, rtol=1e-6, err_msg="Timestamps do not agree")
+
+        cflags = ((tod.local_common_flags() & tod.TURNAROUND) != 0).astype(np.uint8)
+        checkcflags = checktod.local_common_flags()
+        assert_array_equal(checkcflags, cflags, err_msg="Common flags do not agree")
+
+        for det in dets:
+            sig = tod.local_signal(det)
+            checksig = checktod.local_signal(det)
+            assert_allclose(checksig, sig, rtol=1e-6, err_msg="Signal does not agree")
+
+            flg = tod.local_flags(det)
+            checkflg = checktod.local_flags(det)
+            assert_array_equal(checkflg, flg, err_msg="Flags do not agree")
 
         return
