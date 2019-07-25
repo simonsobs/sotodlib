@@ -58,10 +58,8 @@ class ToastExport(toast.Operator):
         detgroups (dict):  Dictionary of groups to arrange the detectors into.
             Each key is a name of the group and each value is a list of
             detector names
-        gain_compressor (float):  Extra gain to apply to the signal before
-            encoding in 24-bit integers.  Only applied when compress=True.
         compress (bool):  Store the timestreams as FLAC-compressed, 24-bit
-            integers instead of uncompressed doubles.  See `gain_compressor`.
+            integers instead of uncompressed doubles.
 
     """
     def __init__(self, outdir, prefix="so", use_todchunks=False,
@@ -69,7 +67,6 @@ class ToastExport(toast.Operator):
                  cache_flag_name=None, cache_copy=None, mask_flag_common=255,
                  mask_flag=255, filesize=500000000, units=None,
                  detgroups=None,
-                 gain_compressor=30000,
                  compress=False,
     ):
         self._outdir = outdir
@@ -87,7 +84,6 @@ class ToastExport(toast.Operator):
         self._target_framefile = filesize
         self._units = units
         self._detgroups = detgroups
-        self._gain_compressor = gain_compressor
         self._compress = compress
         # We call the parent class constructor
         super().__init__()
@@ -227,9 +223,9 @@ class ToastExport(toast.Operator):
                             flavor_maptype[pref] = so3g.MapIntervalsInt
         # If the main signals and flags are coming from the cache, remove
         # them from consideration here.
-        if self._cache_name is None:  # FIXME: isn't this test inverted?
+        if self._cache_name is not None:
             flavors.discard(self._cache_name)
-        if self._cache_flag_name is None:  # FIXME: isn't this test inverted?
+        if self._cache_flag_name is not None:
             flavors.discard(self._cache_flag_name)
 
         # Restrict this list of available flavors to just those that
@@ -363,7 +359,7 @@ class ToastExport(toast.Operator):
                 nframes = len(framesizes) - foff
             else:
                 # get number of frames in this file
-                nframes = file_frame_offs[ifile+1] - foff
+                nframes = file_frame_offs[ifile + 1] - foff
 
             writer = None
             if grouprank == 0:
@@ -376,9 +372,9 @@ class ToastExport(toast.Operator):
 
             # Collect data for all frames in the file in one go.
 
-            frm_offsets = [frame_sample_offs[foff+f]
+            frm_offsets = [frame_sample_offs[foff + f]
                            for f in range(nframes)]
-            frm_sizes = [framesizes[foff+f] for f in range(nframes)]
+            frm_sizes = [framesizes[foff + f] for f in range(nframes)]
 
             if grouprank == 0:
                 print("  {} file {} detector group {}".format(
@@ -399,7 +395,6 @@ class ToastExport(toast.Operator):
                 dets=detnames,
                 mask_flag_common=self._mask_flag_common,
                 mask_flag=self._mask_flag,
-                gain_compressor=self._gain_compressor,
                 compress=self._compress,
             )
 
@@ -451,7 +446,8 @@ class ToastExport(toast.Operator):
             else:
                 keep_offsets = False
                 for detgroup, detectors in self._detgroups.items():
-                    self._export_observation(obs, cgroup, detgroup, detectors, keep_offsets)
+                    self._export_observation(obs, cgroup, detgroup, detectors,
+                                             keep_offsets)
                     keep_offsets = True
 
         return

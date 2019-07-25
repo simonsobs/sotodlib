@@ -87,7 +87,7 @@ class ToastLoadTest(TestCase):
 
         # Noise properties
         self.rate = 100.0
-        self.NET = 5.0
+        self.NET = 1e-3  # 1 mK NET
         self.epsilon = 0.0
         self.fmin = 1.0e-5
         self.alpha = 1.0
@@ -164,9 +164,10 @@ class ToastLoadTest(TestCase):
         tod = self.data.obs[0]["tod"]
 
         # Dump to disk
+        prefix = "sat3"
         dumper = ToastExport(
             self.outdir,
-            prefix="sat3",
+            prefix=prefix,
             use_intervals=True,
             cache_name="signal",
             cache_copy=["component1", "component2"],
@@ -177,7 +178,7 @@ class ToastLoadTest(TestCase):
 
         # Load the data back in
 
-        checkdata = load_data(self.outdir, comm=self.data.comm)
+        checkdata = load_data(self.outdir, comm=self.data.comm, prefix=prefix)
         checkdata.info(sys.stdout)
 
         return
@@ -223,7 +224,7 @@ class ToastLoadTest(TestCase):
         dumper.exec(self.data)
 
         # Count the number of resulting files
-        files = glob("{}/{}/sat3_*_00000000.g3".format(outdir, obs['name']))
+        files = glob("{}/{}/sat3_group*_00000000.g3".format(outdir, obs['name']))
         assert_equal(len(files), len(detgroups),
                      "Exported files ({}) does not match the detector "
                      "groups ({})".format(files, detgroups))
@@ -231,7 +232,8 @@ class ToastLoadTest(TestCase):
         # Load the data back in
 
         checkdata = load_data(outdir, comm=self.data.comm,
-                              prefix="{}_{}".format(prefix, "group."))
+                              prefix="{}_{}".format(prefix, "group."),
+                              all_flavors=True)
 
         # Verify that input and output are equal
 
@@ -246,9 +248,99 @@ class ToastLoadTest(TestCase):
         assert_array_equal(checkcflags, cflags, err_msg="Common flags do not agree")
 
         for det in dets:
+            sig0 = tod.local_signal(det)
+            sig1 = tod.local_signal(det, "component1")
+            sig2 = tod.local_signal(det, "component2")
+            checksig0 = checktod.local_signal(det)
+            checksig1 = checktod.local_signal(det, "component1")
+            checksig2 = checktod.local_signal(det, "component2")
+            assert_allclose(checksig0, sig0, rtol=1e-6,
+                            err_msg="Signal0 does not agree")
+            assert_allclose(checksig1, sig1, rtol=1e-6,
+                            err_msg="Signal1 does not agree")
+            assert_allclose(checksig2, sig2, rtol=1e-6,
+                            err_msg="Signal2 does not agree")
+
+            flg = tod.local_flags(det)
+            checkflg = checktod.local_flags(det)
+            assert_array_equal(checkflg, flg, err_msg="Flags do not agree")
+
+        return
+
+
+    def test_load_compressed(self):
+        if not toast_available:
+            return
+
+        # Simulate some noise into multiple cache prefixes.  This is used
+        # to test the export of multiple timestream flavors.
+        nse = toast.tod.OpSimNoise(out="signal", realization=0)
+        nse.exec(self.data)
+
+        obs = self.data.obs[0]
+        tod = obs["tod"]
+
+        outdir = self.outdir
+        uncompressed_prefix = "sat3_uncompressed"
+
+        # Dump to disk
+        dumper = ToastExport(
+            outdir,
+            prefix=uncompressed_prefix,
+            use_intervals=True,
+            mask_flag_common=tod.TURNAROUND,
+            filesize=500000,
+            units=core3g.G3TimestreamUnits.Tcmb,
+            compress=False,
+        )
+        dumper.exec(self.data)
+
+        compressed_prefix = "sat3_compressed"
+
+        # Dump to disk
+        dumper = ToastExport(
+            outdir,
+            prefix=compressed_prefix,
+            use_intervals=True,
+            mask_flag_common=tod.TURNAROUND,
+            filesize=500000,
+            units=core3g.G3TimestreamUnits.Tcmb,
+            compress=True,
+        )
+        dumper.exec(self.data)
+
+        # Check that the files do shrink in size
+
+        uncompressed_files = glob("{}/{}/sat3_uncompressed*.g3"
+                                  "".format(outdir, obs["name"]))
+        for fname1 in uncompressed_files:
+            fname2 = fname1.replace("uncompressed", "compressed")
+            size1 = os.path.getsize(fname1)
+            size2 = os.path.getsize(fname2)
+            assert size1 > size2
+
+        # Load the data back in
+
+        checkdata = load_data(outdir, comm=self.data.comm,
+                              prefix=compressed_prefix)
+
+        # Verify that input and output are equal
+
+        checktod = checkdata.obs[0]["tod"]
+
+        times = tod.local_times()
+        checktimes = checktod.local_times()
+        assert_allclose(checktimes, times, rtol=1e-6, err_msg="Timestamps do not agree")
+
+        cflags = ((tod.local_common_flags() & tod.TURNAROUND) != 0).astype(np.uint8)
+        checkcflags = checktod.local_common_flags()
+        assert_array_equal(checkcflags, cflags, err_msg="Common flags do not agree")
+
+        for det in tod.detectors:
             sig = tod.local_signal(det)
             checksig = checktod.local_signal(det)
-            assert_allclose(checksig, sig, rtol=1e-6, err_msg="Signal does not agree")
+            assert_allclose(checksig, sig, atol=1e-6, rtol=1e-4,
+                            err_msg="Compressed signal does not agree with the input")
 
             flg = tod.local_flags(det)
             checkflg = checktod.local_flags(det)
