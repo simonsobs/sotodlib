@@ -55,17 +55,22 @@ def recode_timestream(ts, rmstarget=2 ** 14):
 
     """
     v = np.array(ts)
-    vmin = np.amin(v)
-    vmax = np.amax(v)
-    offset = 0.5 * (vmin + vmax)
-    amp = vmax - offset
     rms = np.std(v)
-    gain = rmstarget / rms
-    # If the data have extreme outliers, we have to reduce the gain
-    # to fit the 24-bit signed integer range
-    while amp * gain >= 2 ** 23:
-        gain *= 0.5
-    v = np.round((v - offset) * gain)
+    if rms == 0:
+        gain = 1
+        offset = v[0]
+        v -= offset
+    else:
+        vmin = np.amin(v)
+        vmax = np.amax(v)
+        offset = 0.5 * (vmin + vmax)
+        amp = vmax - offset
+        gain = rmstarget / rms
+        # If the data have extreme outliers, we have to reduce the gain
+        # to fit the 24-bit signed integer range
+        while amp * gain >= 2 ** 23:
+            gain *= 0.5
+        v = np.round((v - offset) * gain)
     new_ts = core3g.G3Timestream(v)
     new_ts.units = core3g.G3TimestreamUnits.Counts
     new_ts.SetFLACCompression(True)
@@ -135,8 +140,8 @@ def frame_to_tod(
         scaled and translated for compression.
         """
         try:
-            gain = frame_data["_".join([tsmap, field, "compressor_gain"])]
-            offset = frame_data["_".join([tsmap, field, "compressor_offset"])]
+            gain = frame_data["compressor_gain_" + tsmap][field]
+            offset = frame_data["compressor_offset_" + tsmap][field]
         except:
             gain, offset = None, None
         return gain, offset
@@ -273,7 +278,8 @@ def frame_to_tod(
             if isinstance(fieldval, core3g.G3TimestreamMap) or \
                isinstance(fieldval, core3g.G3MapVectorDouble) or \
                isinstance(fieldval, core3g.G3MapVectorInt) or \
-               isinstance(fieldval, so3g.MapIntervalsInt):
+               isinstance(fieldval, so3g.MapIntervalsInt) or \
+               isinstance(fieldval, core3g.G3MapDouble):
                 continue
             if isinstance(fieldval, so3g.IntervalsInt):
                 copy_flags(fieldval, field, None)
@@ -639,12 +645,10 @@ def tod_to_frames(
                         tstream = g3t(data[dataoff : dataoff + ndata])
                     else:
                         tstream = g3t(data[dataoff : dataoff + ndata], g3units)
-                    if compress:
+                    if compress and "compressor_gain_" + framefield in fdata[f]:
                         (tstream, gain, offset) = recode_timestream(tstream)
-                        fdata[f]["_".join([framefield, mapfield, "compressor_gain"])] \
-                            = s3utils.to_g3_type(gain)
-                        fdata[f]["_".join([framefield, mapfield, "compressor_offset"])] \
-                            = s3utils.to_g3_type(offset)
+                        fdata[f]["compressor_gain_" + framefield][mapfield] = gain
+                        fdata[f]["compressor_offset_" + framefield][mapfield] = offset
                     fdata[f][framefield][mapfield] = tstream
                     fdata[f][framefield][mapfield].start = core3g.G3Time(tstart)
                     fdata[f][framefield][mapfield].stop = core3g.G3Time(tstop)
@@ -786,10 +790,16 @@ def tod_to_frames(
     if rank == 0:
         for f in range(n_frames):
             fdata[f]["signal"] = core3g.G3TimestreamMap()
+            if compress:
+                fdata[f]["compressor_gain_signal"] = core3g.G3MapDouble()
+                fdata[f]["compressor_offset_signal"] = core3g.G3MapDouble()
             fdata[f]["flags"] = so3g.MapIntervalsInt()
             if copy_detector is not None:
                 for cname, g3typ, g3maptyp, fnm in copy_detector:
                     fdata[f][fnm] = g3maptyp()
+                    if compress:
+                        fdata[f]["compressor_gain_" + fnm] = core3g.G3MapDouble()
+                        fdata[f]["compressor_offset_" + fnm] = core3g.G3MapDouble()
 
     for dindx, dname in enumerate(detnames):
         drow = -1
