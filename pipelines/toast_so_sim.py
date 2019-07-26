@@ -678,6 +678,13 @@ def parse_arguments(comm):
         "--export_key", required=False, default=None,
         help="Group exported TOD by a detector trait: wafer, card, crate or tube",
     )
+    parser.add_argument(
+        "--export_compress",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Re-digitize and compress the exported signal.",
+    )
 
     #try:
     args = parser.parse_args()
@@ -2088,6 +2095,7 @@ def export_TOD(args, comm, data, totalname, focalplanes, other=None):
         filesize=2**30,
         units=core3g.G3TimestreamUnits.Tcmb,
         detgroups=detgroups,
+        compress=args.export_compress,
     )
     export.exec(data)
     if comm.comm_world is not None:
