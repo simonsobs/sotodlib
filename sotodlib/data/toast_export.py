@@ -60,6 +60,7 @@ class ToastExport(toast.Operator):
             detector names
         compress (bool):  Store the timestreams as FLAC-compressed, 24-bit
             integers instead of uncompressed doubles.
+        verbose (bool):  Verbose reporting
 
     """
     def __init__(self, outdir, prefix="so", use_todchunks=False,
@@ -67,7 +68,7 @@ class ToastExport(toast.Operator):
                  cache_flag_name=None, cache_copy=None, mask_flag_common=255,
                  mask_flag=255, filesize=500000000, units=None,
                  detgroups=None,
-                 compress=False,
+                 compress=False, verbose=True,
     ):
         self._outdir = outdir
         self._prefix = prefix
@@ -85,6 +86,7 @@ class ToastExport(toast.Operator):
         self._units = units
         self._detgroups = detgroups
         self._compress = compress
+        self._verbose = verbose
         # We call the parent class constructor
         super().__init__()
 
@@ -238,7 +240,7 @@ class ToastExport(toast.Operator):
                     copy_flavors.append(
                         (flv, flavor_type[flv], flavor_maptype[flv],
                          "signal_{}".format(flv)))
-            if grouprank == 0 and len(copy_flavors) > 0:
+            if grouprank == 0 and len(copy_flavors) > 0 and self._verbose:
                 print("Found {} extra TOD flavors: {}".format(
                     len(copy_flavors), copy_flavors), flush=True)
 
@@ -376,7 +378,7 @@ class ToastExport(toast.Operator):
                            for f in range(nframes)]
             frm_sizes = [framesizes[foff + f] for f in range(nframes)]
 
-            if grouprank == 0:
+            if grouprank == 0 and self._verbose:
                 print("  {} file {} detector group {}".format(
                     obsdir, ifile, detgroup), flush=True)
                 print("    start frame = {}, nframes = {}"

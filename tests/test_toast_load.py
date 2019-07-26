@@ -65,6 +65,9 @@ class ToastLoadTest(TestCase):
         # print(hw.data["detectors"], flush=True)
         detquats = {k: v["quat"] for k, v in hw.data["detectors"].items()}
 
+        # File dump size in bytes (1MB)
+        self.dumpsize = 2 ** 20
+
         # Samples per observation
         self.totsamp = 10000
 
@@ -146,20 +149,23 @@ class ToastLoadTest(TestCase):
 
             # Add the observation to the dataset
             self.data.obs.append(obs)
-        return
-
-    def test_load(self):
-        if not toast_available:
-            return
 
         # Simulate some noise into multiple cache prefixes.  This is used
         # to test the export of multiple timestream flavors.
+
         nse = toast.tod.OpSimNoise(out="signal", realization=0)
         nse.exec(self.data)
         nse = toast.tod.OpSimNoise(out="component1", realization=0)
         nse.exec(self.data)
         nse = toast.tod.OpSimNoise(out="component2", realization=0)
         nse.exec(self.data)
+
+
+        return
+
+    def test_load(self):
+        if not toast_available:
+            return
 
         tod = self.data.obs[0]["tod"]
 
@@ -172,8 +178,10 @@ class ToastLoadTest(TestCase):
             cache_name="signal",
             cache_copy=["component1", "component2"],
             mask_flag_common=tod.TURNAROUND,
-            filesize=500000,
-            units=core3g.G3TimestreamUnits.Tcmb)
+            filesize=self.dumpsize,
+            units=core3g.G3TimestreamUnits.Tcmb,
+            verbose=False,
+        )
         dumper.exec(self.data)
 
         # Load the data back in
@@ -187,15 +195,6 @@ class ToastLoadTest(TestCase):
     def test_load_split(self):
         if not toast_available:
             return
-
-        # Simulate some noise into multiple cache prefixes.  This is used
-        # to test the export of multiple timestream flavors.
-        nse = toast.tod.OpSimNoise(out="signal", realization=0)
-        nse.exec(self.data)
-        nse = toast.tod.OpSimNoise(out="component1", realization=0)
-        nse.exec(self.data)
-        nse = toast.tod.OpSimNoise(out="component2", realization=0)
-        nse.exec(self.data)
 
         obs = self.data.obs[0]
         tod = obs["tod"]
@@ -217,9 +216,10 @@ class ToastLoadTest(TestCase):
             cache_name="signal",
             cache_copy=["component1", "component2"],
             mask_flag_common=tod.TURNAROUND,
-            filesize=500000,
+            filesize=self.dumpsize,
             units=core3g.G3TimestreamUnits.Tcmb,
             detgroups=detgroups,
+            verbose=False,
         )
         dumper.exec(self.data)
 
@@ -272,52 +272,94 @@ class ToastLoadTest(TestCase):
         if not toast_available:
             return
 
-        # Simulate some noise into multiple cache prefixes.  This is used
-        # to test the export of multiple timestream flavors.
-        nse = toast.tod.OpSimNoise(out="signal", realization=0)
-        nse.exec(self.data)
-
         obs = self.data.obs[0]
         tod = obs["tod"]
+
+        # We'll write the file with and without one detector
+        # to measure the change in the TOD size
+        dets = sorted(tod.detectors)
+        detgroups = {'all_but_one' : []}
+        for det in enumerate(dets[1:]):
+            detgroups["all_but_one"].append(det)
+
+        # uncompressed output
 
         outdir = self.outdir
         uncompressed_prefix = "sat3_uncompressed"
 
-        # Dump to disk
         dumper = ToastExport(
             outdir,
             prefix=uncompressed_prefix,
             use_intervals=True,
             mask_flag_common=tod.TURNAROUND,
-            filesize=500000,
+            filesize=self.dumpsize * 100,
             units=core3g.G3TimestreamUnits.Tcmb,
             compress=False,
+            verbose=False,
         )
         dumper.exec(self.data)
 
+        dumper = ToastExport(
+            outdir,
+            prefix=uncompressed_prefix,
+            use_intervals=True,
+            mask_flag_common=tod.TURNAROUND,
+            filesize=self.dumpsize * 100,
+            units=core3g.G3TimestreamUnits.Tcmb,
+            compress=False,
+            detgroups=detgroups,
+            verbose=False,
+        )
+        dumper.exec(self.data)
+
+        # compressed output
+
         compressed_prefix = "sat3_compressed"
 
-        # Dump to disk
         dumper = ToastExport(
             outdir,
             prefix=compressed_prefix,
             use_intervals=True,
             mask_flag_common=tod.TURNAROUND,
-            filesize=500000,
+            filesize=self.dumpsize * 100,
             units=core3g.G3TimestreamUnits.Tcmb,
             compress=True,
+            verbose=False,
         )
         dumper.exec(self.data)
 
-        # Check that the files do shrink in size
+        compressed_prefix = "sat3_compressed"
 
-        uncompressed_files = glob("{}/{}/sat3_uncompressed*.g3"
-                                  "".format(outdir, obs["name"]))
-        for fname1 in uncompressed_files:
-            fname2 = fname1.replace("uncompressed", "compressed")
-            size1 = os.path.getsize(fname1)
-            size2 = os.path.getsize(fname2)
-            assert size1 > size2
+        dumper = ToastExport(
+            outdir,
+            prefix=compressed_prefix,
+            use_intervals=True,
+            mask_flag_common=tod.TURNAROUND,
+            filesize=self.dumpsize * 100,
+            units=core3g.G3TimestreamUnits.Tcmb,
+            compress=True,
+            detgroups=detgroups,
+            verbose=False,
+        )
+        dumper.exec(self.data)
+
+        # Check that the timestreams do shrink in size
+
+        sizes = {}
+        for prefix in ["uncompressed", "uncompressed_all_but_one",
+                       "compressed", "compressed_all_but_one"]:
+            fnames =  glob("{}/{}/sat3_{}_0*.g3"
+                           "".format(outdir, obs["name"], prefix))
+            sizes[prefix] = 0
+            for fname in fnames:
+                size = os.path.getsize(fname)
+                sizes[prefix] += size
+
+        # These are the sizes of individual timestreams
+        uncompressed_size = sizes["uncompressed"] - sizes["uncompressed_all_but_one"]
+        compressed_size = sizes["compressed"] - sizes["compressed_all_but_one"]
+        ratio = compressed_size / uncompressed_size
+        assert ratio < 1
 
         # Load the data back in
 
@@ -336,10 +378,12 @@ class ToastLoadTest(TestCase):
         checkcflags = checktod.local_common_flags()
         assert_array_equal(checkcflags, cflags, err_msg="Common flags do not agree")
 
+        print('\nCompression ratio is {:.4f}\n'.format(ratio), flush=True)
+
         for det in tod.detectors:
             sig = tod.local_signal(det)
             checksig = checktod.local_signal(det)
-            assert_allclose(checksig, sig, atol=1e-6, rtol=1e-4,
+            assert_allclose(checksig, sig, atol=1e-5, rtol=1e-3,
                             err_msg="Compressed signal does not agree with the input")
 
             flg = tod.local_flags(det)

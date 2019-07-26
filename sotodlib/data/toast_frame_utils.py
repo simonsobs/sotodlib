@@ -34,7 +34,7 @@ FIELD_TO_CACHE= {
 }
 
 
-def recode_timestream(ts, rmstarget=2 ** 14):
+def recode_timestream(ts, rmstarget=2 ** 10):
     """ts is a G3Timestream.  Returns a new
     G3Timestream for same samples as ts, but with data
     scaled and translated with gain and offset,
@@ -55,7 +55,7 @@ def recode_timestream(ts, rmstarget=2 ** 14):
 
     """
     v = np.array(ts)
-    rms = np.std(v)
+    rms = np.std(np.diff(v)) / np.sqrt(2)
     if rms == 0:
         gain = 1
         offset = v[0]
