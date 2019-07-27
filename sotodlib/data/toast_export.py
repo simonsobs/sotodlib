@@ -58,8 +58,9 @@ class ToastExport(toast.Operator):
         detgroups (dict):  Dictionary of groups to arrange the detectors into.
             Each key is a name of the group and each value is a list of
             detector names
-        compress (bool):  Store the timestreams as FLAC-compressed, 24-bit
-            integers instead of uncompressed doubles.
+        compress (bool or dict):  If True or a dictionary of compression parameters,
+            store the timestreams as FLAC-compressed, 24-bit integers instead of
+            uncompressed doubles.
         verbose (bool):  Verbose reporting
 
     """

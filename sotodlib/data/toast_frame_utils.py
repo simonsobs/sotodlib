@@ -34,7 +34,7 @@ FIELD_TO_CACHE= {
 }
 
 
-def recode_timestream(ts, rmstarget=2 ** 10):
+def recode_timestream(ts, params, rmstarget=2 ** 10, rmsmode="white"):
     """ts is a G3Timestream.  Returns a new
     G3Timestream for same samples as ts, but with data
     scaled and translated with gain and offset,
@@ -42,11 +42,22 @@ def recode_timestream(ts, rmstarget=2 ** 10):
 
     Args:
         ts (G3Timestream) :  Input signal
-        rmstarget (float) :  Scale the input signal to have this RMS.
+        compresspar (bool or dict) :  if True, compress with default
+            parameters.  If dict with 'rmstarget' member, override
+            default `rmstarget`.  If dict with `gain` and `offset`
+            members, use those instead.
+        params (None, bool or dict) :  If None, False or an empty dict,
+             no compression or casting to integers.  If True or
+             non-empty dictionary, enable compression.  Expected fields
+             in the dictionary ('rmstarget', 'gain', 'offset', 'rmsmode')
+             allow overriding defaults.
+        rmstarget (float) :  Scale the iput signal to have this RMS.
             Should be much smaller then the 24-bit integer range:
             [-2 ** 23 : 2 ** 23] = [-8,388,608 : 8,388,608].
             The gain will be reduced if the scaled signal does
             not fit within the range of allowed values.
+        rmsmode (string) : "white" or "full", determines how the
+            signal RMS is measured.
     Returns:
         new_ts (G3Timestream) :  Scaled and translated timestream
             with the FLAC compression enabled
@@ -54,23 +65,45 @@ def recode_timestream(ts, rmstarget=2 ** 10):
         offset (float) :  The removed offset
 
     """
+    if not params:
+        return ts, 1, 0
+    gain = None
+    offset = None
+    if isinstance(params, dict):
+        if "rmsmode" in params:
+            rmsmode = params["rmsmode"]
+        if "rmstarget" in params:
+            rmstarget = params["rmstarget"]
+        if "gain" in params:
+            gain = params["gain"]
+        if "offset" in params:
+            offset = params["offset"]
     v = np.array(ts)
-    rms = np.std(np.diff(v)) / np.sqrt(2)
-    if rms == 0:
-        gain = 1
-        offset = v[0]
-        v -= offset
-    else:
-        vmin = np.amin(v)
-        vmax = np.amax(v)
+    vmin = np.amin(v)
+    vmax = np.amax(v)
+    if offset is None:
         offset = 0.5 * (vmin + vmax)
         amp = vmax - offset
-        gain = rmstarget / rms
-        # If the data have extreme outliers, we have to reduce the gain
-        # to fit the 24-bit signed integer range
-        while amp * gain >= 2 ** 23:
-            gain *= 0.5
-        v = np.round((v - offset) * gain)
+    else:
+        amp = np.max(np.abs(vmin - offset), np.abs(vmax - offset))
+    if gain is None:
+        if rmsmode == "white":
+            rms = np.std(np.diff(v)) / np.sqrt(2)
+        elif rmsmode == "full":
+            rms = np.std(v)
+        else:
+            raise RuntimeError("Unrecognized RMS mode = '{}'".format(rmsmode))
+        if rms == 0:
+            gain = 1
+        else:
+            gain = rmstarget / rms
+            # If the data have extreme outliers, we have to reduce the gain
+            # to fit the 24-bit signed integer range
+            while amp * gain >= 2 ** 23:
+                gain *= 0.5
+    elif amp * gain >= 2 ** 23:
+        raise RuntimeError("The specified gain and offset saturate the band.")
+    v = np.round((v - offset) * gain)
     new_ts = core3g.G3Timestream(v)
     new_ts.units = core3g.G3TimestreamUnits.Counts
     new_ts.SetFLACCompression(True)
@@ -383,8 +416,9 @@ def tod_to_frames(
         units: G3 units of the detector data.
         dets (list):  List of detectors to include in the frame.  If None,
             use all of the detectors in the TOD object.
-        compress (bool):  Store the timestreams as FLAC-compressed, 24-bit
-            integers instead of uncompressed doubles.
+        compress (bool or dict):  If True or a dictionary of compression parameters,
+            store the timestreams as FLAC-compressed, 24-bit integers instead of
+            uncompressed doubles.
 
     Returns:
         (list): List of frames on rank zero.  Other processes have a list of
@@ -646,7 +680,7 @@ def tod_to_frames(
                     else:
                         tstream = g3t(data[dataoff : dataoff + ndata], g3units)
                     if compress and "compressor_gain_" + framefield in fdata[f]:
-                        (tstream, gain, offset) = recode_timestream(tstream)
+                        (tstream, gain, offset) = recode_timestream(tstream, compress)
                         fdata[f]["compressor_gain_" + framefield][mapfield] = gain
                         fdata[f]["compressor_offset_" + framefield][mapfield] = offset
                     fdata[f][framefield][mapfield] = tstream
