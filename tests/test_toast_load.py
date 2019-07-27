@@ -343,11 +343,43 @@ class ToastLoadTest(TestCase):
         )
         dumper.exec(self.data)
 
+        # Very high compression ratio
+
+        very_compressed_prefix = "sat3_very_compressed"
+        rmstarget = 2 ** 8
+
+        dumper = ToastExport(
+            outdir,
+            prefix=very_compressed_prefix,
+            use_intervals=True,
+            mask_flag_common=tod.TURNAROUND,
+            filesize=self.dumpsize * 100,
+            units=core3g.G3TimestreamUnits.Tcmb,
+            compress={"rmstarget" : rmstarget},
+            verbose=False,
+        )
+        dumper.exec(self.data)
+
+        dumper = ToastExport(
+            outdir,
+            prefix=very_compressed_prefix,
+            use_intervals=True,
+            mask_flag_common=tod.TURNAROUND,
+            filesize=self.dumpsize * 100,
+            units=core3g.G3TimestreamUnits.Tcmb,
+            compress={"rmstarget" : rmstarget},
+            detgroups=detgroups,
+            verbose=False,
+        )
+        dumper.exec(self.data)
+
         # Check that the timestreams do shrink in size
 
         sizes = {}
         for prefix in ["uncompressed", "uncompressed_all_but_one",
-                       "compressed", "compressed_all_but_one"]:
+                       "compressed", "compressed_all_but_one",
+                       "very_compressed", "very_compressed_all_but_one",
+        ]:
             fnames =  glob("{}/{}/sat3_{}_0*.g3"
                            "".format(outdir, obs["name"], prefix))
             sizes[prefix] = 0
@@ -358,8 +390,11 @@ class ToastLoadTest(TestCase):
         # These are the sizes of individual timestreams
         uncompressed_size = sizes["uncompressed"] - sizes["uncompressed_all_but_one"]
         compressed_size = sizes["compressed"] - sizes["compressed_all_but_one"]
-        ratio = compressed_size / uncompressed_size
-        assert ratio < 1
+        very_compressed_size = sizes["very_compressed"] - sizes["very_compressed_all_but_one"]
+        ratio1 = compressed_size / uncompressed_size
+        assert ratio1 < 1
+        ratio2 = very_compressed_size / uncompressed_size
+        assert ratio2 < ratio1
 
         # Load the data back in
 
@@ -378,7 +413,10 @@ class ToastLoadTest(TestCase):
         checkcflags = checktod.local_common_flags()
         assert_array_equal(checkcflags, cflags, err_msg="Common flags do not agree")
 
-        print('\nCompression ratio is {:.4f}\n'.format(ratio), flush=True)
+        print("\nCompression ratio1 is {:.4f} (default)\n"
+              "".format(ratio1), flush=True)
+        print("\nCompression ratio2 is {:.4f} (rmstarget={})\n"
+              "".format(ratio2, rmstarget), flush=True)
 
         for det in tod.detectors:
             sig = tod.local_signal(det)
