@@ -674,6 +674,17 @@ def parse_arguments(comm):
     parser.add_argument(
         "--export", required=False, default=None, help="Output TOD export path"
     )
+    parser.add_argument(
+        "--export_key", required=False, default=None,
+        help="Group exported TOD by a detector trait: wafer, card, crate or tube",
+    )
+    parser.add_argument(
+        "--export_compress",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Re-digitize and compress the exported signal.",
+    )
 
     #try:
     args = parser.parse_args()
@@ -697,8 +708,8 @@ def parse_arguments(comm):
 
     if comm.world_rank == 0:
         print("\nAll parameters:")
-        print(args, flush=args.flush)
-        print("")
+        print(args)
+        print("", flush=True)
 
     if args.groupsize:
         comm = toast.Comm(groupsize=args.groupsize)
@@ -1031,14 +1042,14 @@ def load_focalplanes(args, comm, schedules):
                     # Only accept a fraction of the detectors for
                     # testing and development
                     continue
-                focalplane[detname] = {
+                focalplane[detname] = detdata.copy()
+                focalplane[detname].update({
                     "NET": net,
                     "fknee": fknee,
                     "fmin": fmin,
                     "alpha": alpha,
                     "A": A,
                     "C": C,
-                    "quat": detdata["quat"],
                     "FWHM": detdata["fwhm"],
                     "freq": center,
                     "bandcenter_ghz": center,
@@ -1046,9 +1057,8 @@ def load_focalplanes(args, comm, schedules):
                     "index": index,
                     "telescope": telescope,
                     "tube": tube,
-                    "wafer": wafer,
                     "band": band,
-                }
+                })
             focalplanes.append(focalplane)
             timer1.stop()
             timer1.report(
@@ -1081,7 +1091,7 @@ def load_focalplanes(args, comm, schedules):
     timer.stop()
     if comm.world_rank == 0:
         timer.report("Loading focalplane(s)")
-    return detweights
+    return detweights, focalplanes
 
 
 @function_timer
@@ -2045,7 +2055,7 @@ def output_tidas(args, comm, data, totalname):
 
 
 @function_timer
-def export_TOD(args, comm, data, totalname, other=None):
+def export_TOD(args, comm, data, totalname, focalplanes, other=None):
     if args.export is None:
         return
 
@@ -2058,18 +2068,34 @@ def export_TOD(args, comm, data, totalname, other=None):
 
     path = os.path.abspath(args.export)
 
+    key = args.export_key
+    if key is not None:
+        prefix = "{}_{}".format(args.bands, key)
+        detgroups = {}
+        for fp in focalplanes:
+            for det, detdata in fp.items():
+                value = detdata[key]
+                if value not in detgroups:
+                    detgroups[value] = []
+                detgroups[value].append(det)
+    else:
+        prefix = args.bands
+        detgroups = None
+
     if comm.world_rank == 0:
         log.info("Exporting data to directory tree at {}".format(path))
     timer.start()
     export = ToastExport(
         path,
-        prefix=args.bands,
+        prefix=prefix,
         use_intervals=True,
         cache_name=totalname,
         cache_copy=other,
         mask_flag_common=data.obs[0]['tod'].TURNAROUND,
         filesize=2**30,
         units=core3g.G3TimestreamUnits.Tcmb,
+        detgroups=detgroups,
+        compress=args.export_compress,
     )
     export.exec(data)
     if comm.comm_world is not None:
@@ -2289,9 +2315,9 @@ def main():
 
     load_weather(args, comm, schedules)
 
-    # load or simulate the focalplane
+    # load or simulate the focalplane and pair it with each schedule
 
-    detweights = load_focalplanes(args, comm, schedules)
+    detweights, focalplanes = load_focalplanes(args, comm, schedules)
 
     # Create the TOAST data object to match the schedule.  This will
     # include simulating the boresight pointing.
@@ -2386,7 +2412,7 @@ def main():
             # export the timestream data.
             output_tidas(args, comm, data, totalname)
             #export_TOD(args, comm, data, totalname, other=[signalname])
-            export_TOD(args, comm, data, totalname)
+            export_TOD(args, comm, data, totalname, focalplanes)
 
             memreport(comm.comm_world, "after export")
 
