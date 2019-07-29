@@ -4,6 +4,7 @@
 # Full license can be found in the top level "LICENSE" file.
 
 import os
+import sys
 
 import numpy as np
 
@@ -138,13 +139,21 @@ hw.data["detectors"] = dets
 
 if comm.world_rank == 0:
     print("Selecting detectors...", flush=True)
-# Dowselect to just 10 pixels on one wafer
-small_hw = hw.select(match={"wafer": "41", "pixel": "00."})
+# Downselect to just 10 pixels on one wafer
+#small_hw = hw.select(match={"wafer": "41", "pixel": "00."})
+#small_hw = hw.select(match={"wafer": "41"})
+small_hw = hw.select(match={"wafer": "40"})
+#small_hw = hw.select(match={"band": "LF1"})
 if comm.world_rank == 0:
     small_hw.dump("selected.toml", overwrite=True)
 
 # The data directory (this is a single band)
-dir = "/project/projectdirs/sobs/sims/pipe-s0001/datadump_LAT_LF1"
+# dir = "/project/projectdirs/sobs/sims/pipe-s0001/datadump_LAT_LF1"
+if len(sys.argv) > 1:
+    dir = sys.argv[1]
+    print("Loading data from {}".format(dir), flush=True)
+else:
+    dir = "datadump_LAT_LF1"
 # dir = "/home/kisner/scratch/sobs/pipe/datadump_LAT_LF1"
 
 # Here we divide the data for each observation into a process grid.
