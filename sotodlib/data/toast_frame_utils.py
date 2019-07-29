@@ -42,7 +42,7 @@ def recode_timestream(ts, params, rmstarget=2 ** 10, rmsmode="white"):
 
     Args:
         ts (G3Timestream) :  Input signal
-        compresspar (bool or dict) :  if True, compress with default
+        params (bool or dict) :  if True, compress with default
             parameters.  If dict with 'rmstarget' member, override
             default `rmstarget`.  If dict with `gain` and `offset`
             members, use those instead.
@@ -97,10 +97,10 @@ def recode_timestream(ts, params, rmstarget=2 ** 10, rmsmode="white"):
             gain = 1
         else:
             gain = rmstarget / rms
-            # If the data have extreme outliers, we have to reduce the gain
-            # to fit the 24-bit signed integer range
-            while amp * gain >= 2 ** 23:
-                gain *= 0.5
+        # If the data have extreme outliers, we have to reduce the gain
+        # to fit the 24-bit signed integer range
+        while amp * gain >= 2 ** 23:
+            gain *= 0.5
     elif amp * gain >= 2 ** 23:
         raise RuntimeError("The specified gain and offset saturate the band.")
     v = np.round((v - offset) * gain)
