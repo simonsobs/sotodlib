@@ -24,12 +24,17 @@ def create_observation(args, comm, all_ces_tot, ices, noise, verbose=True):
 
     # create the TOD for this observation
 
+    if comm.comm_group is not None:
+        ndetrank = comm.comm_group.size
+    else:
+        ndetrank = 1
+
     try:
         tod = TODGround(
             comm.comm_group,
             detquats,
             totsamples,
-            detranks=comm.comm_group.size,
+            detranks=ndetrank,
             firsttime=ces.start_time,
             rate=args.sample_rate,
             site_lon=site.lon,
@@ -141,7 +146,7 @@ def create_observations(args, comm, schedules):
     #        tod = ob["tod"]
     #        tod.free_azel_quats()
 
-    if comm.comm_group.rank == 0:
+    if comm.comm_world is None or comm.comm_group.rank == 0:
         log.info("Group # {:4} has {} observations.".format(comm.group, len(data.obs)))
 
     if len(data.obs) == 0:
@@ -153,7 +158,7 @@ def create_observations(args, comm, schedules):
     if comm.comm_world is not None:
         comm.comm_world.barrier()
     timer.stop()
-    if comm.world_rank == 0:
+    if comm.comm_world is None or comm.world_rank == 0:
         timer.report("Simulated scans")
 
     # Split the data object for each telescope for separate mapmaking.

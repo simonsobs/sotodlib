@@ -30,7 +30,7 @@ def scale_atmosphere_by_bandpass(args, comm, data, totalname, mc, verbose=False)
     timer = Timer()
     log = Logger.get()
 
-    if comm.world_rank == 0 and verbose:
+    if (comm.comm_world or comm.world_rank == 0) and verbose:
         log.info("Scaling atmosphere by bandpass")
 
     timer.start()
@@ -55,9 +55,14 @@ def scale_atmosphere_by_bandpass(args, comm, data, totalname, mc, verbose=False)
         freqmax = 1000
         nfreq = 10001
         freqstep = (freqmax - freqmin) / (nfreq - 1)
-        nfreq_task = int(nfreq // todcomm.size) + 1
-        my_ifreq_min = nfreq_task * todcomm.rank
-        my_ifreq_max = min(nfreq, nfreq_task * (todcomm.rank + 1))
+        if todcomm is None:
+            nfreq_task = nfreq
+            my_ifreq_min = 0
+            my_ifreq_max = nfreq
+        else:
+            nfreq_task = int(nfreq // todcomm.size) + 1
+            my_ifreq_min = nfreq_task * todcomm.rank
+            my_ifreq_max = min(nfreq, nfreq_task * (todcomm.rank + 1))
         my_nfreq = my_ifreq_max - my_ifreq_min
         if my_nfreq > 0:
             if atm_available_utils:
@@ -78,8 +83,12 @@ def scale_atmosphere_by_bandpass(args, comm, data, totalname, mc, verbose=False)
         else:
             my_freqs = np.array([])
             my_absorption = np.array([])
-        freqs = np.hstack(todcomm.allgather(my_freqs))
-        absorption = np.hstack(todcomm.allgather(my_absorption))
+        if todcomm is None:
+            freqs = my_freqs
+            absorption = my_absorption
+        else:
+            freqs = np.hstack(todcomm.allgather(my_freqs))
+            absorption = np.hstack(todcomm.allgather(my_absorption))
         # loading = atm_atmospheric_loading(altitude, pwv, freq)
         for det in tod.local_dets:
             # Use detector bandpass from the focalplane
@@ -98,6 +107,6 @@ def scale_atmosphere_by_bandpass(args, comm, data, totalname, mc, verbose=False)
     if comm.comm_world is not None:
         comm.comm_world.barrier()
     timer.stop()
-    if comm.world_rank == 0 and verbose:
+    if (comm.comm_world is None or comm.world_rank == 0) and verbose:
         timer.report("Atmosphere scaling")
     return
