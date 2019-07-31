@@ -30,7 +30,7 @@ def scale_atmosphere_by_bandpass(args, comm, data, totalname, mc, verbose=False)
     timer = Timer()
     log = Logger.get()
 
-    if (comm.comm_world or comm.world_rank == 0) and verbose:
+    if comm.world_rank == 0 and verbose:
         log.info("Scaling atmosphere by bandpass")
 
     timer.start()
@@ -107,6 +107,6 @@ def scale_atmosphere_by_bandpass(args, comm, data, totalname, mc, verbose=False)
     if comm.comm_world is not None:
         comm.comm_world.barrier()
     timer.stop()
-    if (comm.comm_world is None or comm.world_rank == 0) and verbose:
+    if comm.world_rank == 0 and verbose:
         timer.report("Atmosphere scaling")
     return

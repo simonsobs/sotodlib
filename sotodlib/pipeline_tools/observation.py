@@ -158,7 +158,7 @@ def create_observations(args, comm, schedules):
     if comm.comm_world is not None:
         comm.comm_world.barrier()
     timer.stop()
-    if comm.comm_world is None or comm.world_rank == 0:
+    if comm.world_rank == 0:
         timer.report("Simulated scans")
 
     # Split the data object for each telescope for separate mapmaking.
