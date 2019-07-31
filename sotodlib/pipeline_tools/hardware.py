@@ -122,7 +122,7 @@ def load_focalplanes(args, comm, schedules, verbose=False):
                 break
 
     focalplanes = []
-    if comm.world_rank == 0:
+    if comm.comm_world is None or comm.world_rank == 0:
         timer1 = Timer()
         for telescope, band, tube in zip(telescopes, bands, tubes):
             timer1.start()
@@ -212,8 +212,9 @@ def load_focalplanes(args, comm, schedules, verbose=False):
                 "Load tele = {} tube = {} band = {} focalplane ({} detectors)"
                 "".format(telescope, tube, band, len(focalplane))
             )
-    focalplanes = comm.comm_world.bcast(focalplanes)
-    telescopes = comm.comm_world.bcast(telescopes)
+    if comm.comm_world is not None:
+        focalplanes = comm.comm_world.bcast(focalplanes)
+        telescopes = comm.comm_world.bcast(telescopes)
 
     if len(schedules) == 1:
         schedules *= len(focalplanes)
@@ -235,6 +236,6 @@ def load_focalplanes(args, comm, schedules, verbose=False):
             detweights[detname] = detweight
 
     timer.stop()
-    if comm.world_rank == 0 and verbose:
+    if (comm.comm_world is None or comm.world_rank == 0) and verbose:
         timer.report("Loading focalplane(s)")
     return detweights, focalplanes
