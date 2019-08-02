@@ -4,7 +4,7 @@
 import numpy as np
 
 from toast.dist import distribute_uniform, Data
-from toast.pipeline_tools import get_breaks, get_focalplane_radius
+from toast.pipeline_tools import get_breaks
 from toast.timing import function_timer, Timer
 from toast.tod import TODGround
 from toast.utils import Logger
@@ -13,13 +13,14 @@ from .noise import get_analytic_noise
 
 
 @function_timer
-def create_observation(args, comm, all_ces_tot, ices, noise, verbose=True):
+def create_observation(args, comm, telescope, ces, noise, verbose=True):
     """ Create a TOAST observation.
 
     Create an observation for the CES scan defined by all_ces_tot[ices].
 
     """
-    ces, site, telescope, fp, fpradius, detquats, weather = all_ces_tot[ices]
+    focalplane = telescope.focalplane
+    site = telescope.site
     totsamples = int((ces.stop_time - ces.start_time) * args.sample_rate)
 
     # create the TOD for this observation
@@ -32,7 +33,7 @@ def create_observation(args, comm, all_ces_tot, ices, noise, verbose=True):
     try:
         tod = TODGround(
             comm.comm_group,
-            detquats,
+            focalplane.detquats,
             totsamples,
             detranks=ndetrank,
             firsttime=ces.start_time,
@@ -66,21 +67,21 @@ def create_observation(args, comm, all_ces_tot, ices, noise, verbose=True):
     )
     obs["tod"] = tod
     obs["baselines"] = None
-    obs["noise"] = noise
+    obs["noise"] = focalplane.noise
     obs["id"] = int(ces.mjdstart * 10000)
     obs["intervals"] = tod.subscans
     obs["site"] = site.name
     obs["site_id"] = site.id
     obs["telescope"] = telescope.name
     obs["telescope_id"] = telescope.id
-    obs["fpradius"] = fpradius
-    obs["weather"] = weather
+    obs["fpradius"] = focalplane.radius
+    obs["weather"] = site.weather
     obs["start_time"] = ces.start_time
     obs["altitude"] = site.alt
     obs["season"] = ces.season
     obs["date"] = ces.start_date
     obs["MJD"] = ces.mjdstart
-    obs["focalplane"] = fp
+    obs["focalplane"] = focalplane.detector_data
     obs["rising"] = ces.rising
     obs["mindist_sun"] = ces.mindist_sun
     obs["mindist_moon"] = ces.mindist_moon
@@ -108,26 +109,10 @@ def create_observations(args, comm, schedules):
 
     for schedule in schedules:
 
-        if args.weather is None:
-            site, all_ces, focalplane, telescope = schedule
-            weather = None
-        else:
-            site, all_ces, weather, focalplane, telescope = schedule
-
-        fpradius = get_focalplane_radius(args, focalplane)
-
-        # Focalplane information for this schedule
-        detectors = sorted(focalplane.keys())
-        detquats = {}
-        for d in detectors:
-            detquats[d] = focalplane[d]["quat"]
-
-        all_ces_tot = []
+        telescope = schedule.telescope
+        noise = telescope.focalplane.noise
+        all_ces = schedule.ceslist
         nces = len(all_ces)
-        for ces in all_ces:
-            all_ces_tot.append(
-                (ces, site, telescope, focalplane, fpradius, detquats, weather)
-            )
 
         breaks = get_breaks(comm, all_ces, args)
 
@@ -137,14 +122,8 @@ def create_observations(args, comm, schedules):
 
         for ices in range(group_firstobs, group_firstobs + group_numobs):
             # Noise model for this CES
-            noise = get_analytic_noise(args, comm, focalplane)
-            obs = create_observation(args, comm, all_ces_tot, ices, noise)
+            obs = create_observation(args, comm, telescope, all_ces[ices], noise)
             data.obs.append(obs)
-
-    # if args.skip_atmosphere and args.skip_noise:
-    #    for ob in data.obs:
-    #        tod = ob["tod"]
-    #        tod.free_azel_quats()
 
     if comm.comm_world is None or comm.comm_group.rank == 0:
         log.info("Group # {:4} has {} observations.".format(comm.group, len(data.obs)))

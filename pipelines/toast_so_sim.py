@@ -211,7 +211,7 @@ def main():
 
     # load or simulate the focalplane
 
-    detweights, focalplanes = load_focalplanes(args, comm, schedules)
+    detweights = load_focalplanes(args, comm, schedules)
 
     # Create the TOAST data object to match the schedule.  This will
     # include simulating the boresight pointing.
@@ -313,7 +313,7 @@ def main():
             # export the timestream data.
             output_tidas(args, comm, data, totalname)
             # export_TOD(args, comm, data, totalname, other=[signalname])
-            export_TOD(args, comm, data, totalname, focalplanes)
+            export_TOD(args, comm, data, totalname, schedules)
 
             memreport(comm.comm_world, "after export")
 
