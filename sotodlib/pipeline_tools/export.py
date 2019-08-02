@@ -76,7 +76,7 @@ def export_TOD(args, comm, data, totalname, schedules, other=None, verbose=True)
     timer.start()
     export = ToastExport(
         path,
-        prefix=args.bands,
+        prefix=prefix,
         use_intervals=True,
         cache_name=totalname,
         cache_copy=other,
