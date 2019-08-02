@@ -1,6 +1,9 @@
 # Copyright (c) 2019 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
+import os
+import sys
+
 import numpy as np
 
 from toast.timing import function_timer, Timer
@@ -46,7 +49,7 @@ def export_TOD(args, comm, data, totalname, schedules, other=None, verbose=True)
 
     # Only import spt3g if we are writing out so3g files
     from spt3g import core as core3g
-    from sotodlib.data.toast_export import ToastExport
+    from ..data.toast_export import ToastExport
 
     path = os.path.abspath(args.export)
 
@@ -62,7 +65,7 @@ def export_TOD(args, comm, data, totalname, schedules, other=None, verbose=True)
                 value = det_data[key]
                 if value not in det_groups:
                     det_groups[value] = []
-                det_groups[value].append(det)
+                det_groups[value].append(det_name)
     else:
         prefix = args.bands
         detgroups = None
@@ -81,7 +84,7 @@ def export_TOD(args, comm, data, totalname, schedules, other=None, verbose=True)
         filesize=2 ** 30,
         units=core3g.G3TimestreamUnits.Tcmb,
         detgroups=det_groups,
-        compress=args.export_compress,
+        compress=args.compress,
     )
     export.exec(data)
     if comm.comm_world is not None:
