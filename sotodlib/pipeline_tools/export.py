@@ -37,7 +37,7 @@ def add_export_args(parser):
 
 
 @function_timer
-def export_TOD(args, comm, data, totalname, focalplanes, other=None, verbose=True):
+def export_TOD(args, comm, data, totalname, schedules, other=None, verbose=True):
     if args.export is None:
         return
 
@@ -53,13 +53,16 @@ def export_TOD(args, comm, data, totalname, focalplanes, other=None, verbose=Tru
     key = args.export_key
     if key is not None:
         prefix = "{}_{}".format(args.bands, key)
-        detgroups = {}
-        for fp in focalplanes:
-            for det, detdata in fp.items():
-                value = detdata[key]
-                if value not in detgroups:
-                    detgroups[value] = []
-                detgroups[value].append(det)
+        det_groups = {}
+        for schedule in schedules:
+            for (
+                det_name,
+                det_data,
+            ) in schedule.telescope.focalplane.detector_data.items():
+                value = det_data[key]
+                if value not in det_groups:
+                    det_groups[value] = []
+                det_groups[value].append(det)
     else:
         prefix = args.bands
         detgroups = None
@@ -77,7 +80,7 @@ def export_TOD(args, comm, data, totalname, focalplanes, other=None, verbose=Tru
         mask_flag_common=TODGround.TURNAROUND,
         filesize=2 ** 30,
         units=core3g.G3TimestreamUnits.Tcmb,
-        detgroups=detgroups,
+        detgroups=det_groups,
         compress=args.export_compress,
     )
     export.exec(data)

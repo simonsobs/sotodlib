@@ -3,7 +3,7 @@
 
 import numpy as np
 
-from toast.pipeline_tools import Telescope
+from toast.pipeline_tools import Telescope, Focalplane, Site, Schedule, CES
 from toast.timing import function_timer, Timer
 from toast.utils import Logger
 
@@ -12,7 +12,8 @@ from .. import hardware
 
 class SOTelescope(Telescope):
     def __init__(self, name):
-        self.name = name
+        site = Site("Atacama", lat="-22.958064", lon="-67.786222", alt=5200)
+        super().__init__(name, site=site)
         self.id = {
             # Use the same telescope index for all SATs to re-use the
             # atmospheric simulation
@@ -53,57 +54,95 @@ def add_hw_args(parser):
     return
 
 
-def get_band_params(banddata):
-    net = banddata["NET"] * 1e-6  # uK -> K
-    fknee = banddata["fknee"] * 1e-3  # mHz -> Hz
-    fmin = banddata["fmin"] * 1e-3  # mHz -> Hz
-    # alpha = banddata[band]["alpha"]
-    alpha = 1  # hardwire a sensible number. 3.5 is not realistic.
-    A = banddata["A"]
-    C = banddata["C"]
-    lower = banddata["low"]  # GHz
-    center = banddata["center"]  # GHz
-    upper = banddata["high"]  # GHz
-    return net, fknee, fmin, alpha, A, C, lower, center, upper
+class BandParams:
+    def __init__(self, band_name, band_data):
+        self.name = band_name
+        self.net = band_data["NET"] * 1e-6  # uK -> K
+        self.fknee = band_data["fknee"] * 1e-3  # mHz -> Hz
+        self.fmin = band_data["fmin"] * 1e-3  # mHz -> Hz
+        # self.alpha = banddata[band]["alpha"]
+        self.alpha = 1  # hardwire a sensible number. 3.5 is not realistic.
+        self.A = band_data["A"]
+        self.C = band_data["C"]
+        self.lower = band_data["low"]  # GHz
+        self.center = band_data["center"]  # GHz
+        self.upper = band_data["high"]  # GHz
+        return
 
 
-def get_det_params(
-    detdata,
-    band_net,
-    band_fknee,
-    band_fmin,
-    band_alpha,
-    band_A,
-    band_C,
-    band_lower,
-    band_center,
-    band_upper,
-):
-    def get_par(key, default, scale=1):
-        if key in detdata:
-            return detdata[key] * scale
-        else:
-            return default
+class DetectorParams:
+    def __init__(self, det_data, band, wafer, tube, telescope, index):
+        """
+        Args:
+            det_data (dict) :  Dictionary of detector parameters
+                from sotodlib.hardware
+            band (BandParams) :  band parameters act as defaults
+            wafer (int) :  wafer number
+            tube (str) :  tube name
+            telescope (str) :  telescope name
+            index (int) :  RNG index
+        """
 
-    net = get_par("NET", band_net, 1e-6)  # uK -> K
-    fknee = get_par("fknee", band_fknee, 1e-3)  # mHz -> Hz
-    fmin = get_par("fmin", band_fmin, 1e-3)  # mHz -> Hz
-    alpha = get_par("alpha", band_alpha)
-    alpha = 1  # hardwire a sensible number. 3.5 is not realistic.
-    A = get_par("A", band_A)
-    C = get_par("C", band_C)
-    lower = get_par("low", band_lower)  # GHz
-    center = get_par("center", band_center)  # GHz
-    upper = get_par("high", band_upper)  # GHz
-    center = 0.5 * (lower + upper)
-    width = upper - lower
-    return net, fknee, fmin, alpha, A, C, center, width
+        def get_par(key, default, scale=1):
+            if key in det_data:
+                return det_data[key] * scale
+            else:
+                return default
+
+        self.band = band.name
+        self.det_data = det_data
+        self.net = get_par("NET", band.net, 1e-6)  # uK -> K
+        self.fknee = get_par("fknee", band.fknee, 1e-3)  # mHz -> Hz
+        self.fmin = get_par("fmin", band.fmin, 1e-3)  # mHz -> Hz
+        self.alpha = get_par("alpha", band.alpha)
+        self.alpha = 1  # hardwire a sensible number. 3.5 is not realistic.
+        self.A = get_par("A", band.A)
+        self.C = get_par("C", band.C)
+        self.lower = get_par("low", band.lower)  # GHz
+        self.center = get_par("center", band.center)  # GHz
+        self.upper = get_par("high", band.upper)  # GHz
+        self.center = 0.5 * (self.lower + self.upper)
+        self.width = self.upper - self.lower
+        self.wafer = wafer
+        self.tube = tube
+        self.telescope = telescope
+        self.index = index
+        return
+
+    def get_dict(self):
+        det_dict = {
+            "NET": self.net,
+            "fknee": self.fknee,
+            "fmin": self.fmin,
+            "alpha": self.alpha,
+            "A": self.A,
+            "C": self.C,
+            "quat": self.det_data["quat"],
+            "FWHM": self.det_data["fwhm"],
+            "freq": self.center,
+            "bandcenter_ghz": self.center,
+            "bandwidth_ghz": self.width,
+            "index": self.index,
+            "telescope": self.telescope,
+            "tube": self.tube,
+            "wafer": self.wafer,
+            "band": self.band,
+        }
+        return det_dict
 
 
 @function_timer
 def load_focalplanes(args, comm, schedules, verbose=False):
     """ Attach a focalplane to each of the schedules.
 
+    Args:
+        schedules (list) :  List of Schedule instances.
+            Each schedule has two members, telescope
+            and ceslist, a list of CES objects.
+    Returns:
+        detweights (dict) : Inverse variance noise weights for every
+            detector across all focal planes. In [K_CMB^-2].
+            They can be used to bin the TOD.
     """
     log = Logger.get()
     timer = Timer()
@@ -113,129 +152,106 @@ def load_focalplanes(args, comm, schedules, verbose=False):
 
     bands = args.bands.split(",")
     tubes = args.tubes.split(",")
-    telescopes = []
     hwexample = hardware.get_example()
-    for tube in tubes:
-        for telescope, teledata in hwexample.data["telescopes"].items():
-            if tube in teledata["tubes"]:
-                telescopes.append(telescope)
-                break
 
-    focalplanes = []
+    telescope = None
     if comm.comm_world is None or comm.world_rank == 0:
         timer1 = Timer()
-        for telescope, band, tube in zip(telescopes, bands, tubes):
-            timer1.start()
-            if args.hardware:
-                if verbose:
-                    log.info(
-                        "Loading hardware configuration from {}..."
-                        "".format(args.hardware)
-                    )
-                hw = hardware.Hardware(args.hardware)
-            else:
-                if verbose:
-                    log.info("Simulating default hardware configuration")
-                hw = hardware.get_example()
-                hw.data["detectors"] = hardware.sim_telescope_detectors(hw, telescope)
-            # Construct a running index for all detectors across all
-            # telescopes for independent noise realizations
-            detindex = {}
-            for idet, det in enumerate(sorted(hw.data["detectors"])):
-                detindex[det] = idet
-            match = {"band": band}
-            hw = hw.select(telescopes=None, tubes=[tube], match=match)
-            if len(hw.data["detectors"]) == 0:
-                raise RuntimeError(
-                    "No detectors match query: telescopes={}, "
-                    "tubes={}, match={}".format(telescopes, tubes, match)
-                )
-            # Transfer the detector information into a TOAST dictionary
-            focalplane = {}
-            banddata = hw.data["bands"][band]
-            (
-                band_net,
-                band_fknee,
-                band_fmin,
-                band_alpha,
-                band_A,
-                band_C,
-                band_lower,
-                band_center,
-                band_upper,
-            ) = get_band_params(banddata)
-            for idet, (detname, detdata) in enumerate(hw.data["detectors"].items()):
-                (net, fknee, fmin, alpha, A, C, center, width) = get_det_params(
-                    detdata,
-                    band_net,
-                    band_fknee,
-                    band_fmin,
-                    band_alpha,
-                    band_A,
-                    band_C,
-                    band_lower,
-                    band_center,
-                    band_upper,
-                )
-                wafer = detdata["wafer"]
-                # Determine which tube has this wafer
-                for tube, tubedata in hw.data["tubes"].items():
-                    if wafer in tubedata["wafers"]:
+        timer1.start()
+        for band, tube in zip(bands, tubes):
+            for tube in tubes:
+                for telescope_name, telescope_data in hwexample.data[
+                    "telescopes"
+                ].items():
+                    if tube in telescope_data["tubes"]:
+                        if telescope is None:
+                            telescope = SOTelescope(telescope_name)
+                        elif telescope.name != telescope_name:
+                            raise RuntimeError(
+                                "Tubes '{}' span more than one telescope".format(tubes)
+                            )
                         break
-                # RNG index for this detector
-                index = detindex[detname]
-                if args.thinfp and index % args.thinfp != 0:
-                    # Only accept a fraction of the detectors for
-                    # testing and development
-                    continue
-                focalplane[detname] = {
-                    "NET": net,
-                    "fknee": fknee,
-                    "fmin": fmin,
-                    "alpha": alpha,
-                    "A": A,
-                    "C": C,
-                    "quat": detdata["quat"],
-                    "FWHM": detdata["fwhm"],
-                    "freq": center,
-                    "bandcenter_ghz": center,
-                    "bandwidth_ghz": width,
-                    "index": index,
-                    "telescope": telescope,
-                    "tube": tube,
-                    "wafer": wafer,
-                    "band": band,
-                }
-            focalplanes.append(focalplane)
-            timer1.stop()
-            timer1.report(
-                "Load tele = {} tube = {} band = {} focalplane ({} detectors)"
-                "".format(telescope, tube, band, len(focalplane))
+                if telescope is None:
+                    raise RuntimeError(
+                        "Failed to match tube = '{}' with a telescope".format(tube)
+                    )
+        if args.hardware:
+            if verbose:
+                log.info(
+                    "Loading hardware configuration from {}..." "".format(args.hardware)
+                )
+            hw = hardware.Hardware(args.hardware)
+        else:
+            if verbose:
+                log.info("Simulating default hardware configuration")
+            hw = hardware.get_example()
+            hw.data["detectors"] = hardware.sim_telescope_detectors(hw, telescope.name)
+        # Construct a running index for all detectors across all
+        # telescopes for independent noise realizations
+        det_index = {}
+        for idet, det in enumerate(sorted(hw.data["detectors"])):
+            det_index[det] = idet
+        match = {"band": "|".join(bands)}
+        hw = hw.select(telescopes=None, tubes=tubes, match=match)
+        ndetector = len(hw.data["detectors"])
+        if ndetector == 0:
+            raise RuntimeError(
+                "No detectors match query: telescopes={}, "
+                "tubes={}, match={}".format(telescopes, tubes, match)
             )
+        log.info(
+            "Telescope = {} tubes = {} bands = {} matches {} detectors"
+            "".format(telescope.name, tubes, bands, ndetector)
+        )
+        # Transfer the detector information into a TOAST dictionary
+        detector_data = {}
+        band_data = hw.data["bands"][band]
+        band_params = {}
+        for band_name, band_data in hw.data["bands"].items():
+            band_params[band_name] = BandParams(band_name, band_data)
+        for idet, (det_name, det_data) in enumerate(hw.data["detectors"].items()):
+            # RNG index for this detector
+            index = det_index[det_name]
+            if args.thinfp and index % args.thinfp != 0:
+                # Only accept a fraction of the detectors for
+                # testing and development
+                continue
+            wafer = det_data["wafer"]
+            # Determine which tube has this wafer
+            for tube_name, tube_data in hw.data["tubes"].items():
+                if wafer in tube_data["wafers"]:
+                    break
+            det_params = DetectorParams(
+                det_data,
+                band_params[det_data["band"]],
+                wafer,
+                tube,
+                telescope_name,
+                index,
+            )
+            detector_data[det_name] = det_params.get_dict()
+        # Create a focal plane in the telescope
+        focalplane = Focalplane(
+            detector_data=detector_data,
+            sample_rate=args.sample_rate,
+            radius_deg=args.focalplane_radius_deg,
+        )
+        telescope.focalplane = focalplane
+        timer1.report_clear("Collect focaplane information")
+
     if comm.comm_world is not None:
-        focalplanes = comm.comm_world.bcast(focalplanes)
-        telescopes = comm.comm_world.bcast(telescopes)
+        telescope = comm.comm_world.bcast(telescope)
 
-    if len(schedules) == 1:
-        schedules *= len(focalplanes)
+    for schedule in schedules:
+        # Replace the telescope created from reading the observing schedule but
+        # keep the weather object
+        weather = schedule.telescope.site.weather
+        schedule.telescope = telescope
+        schedule.telescope.site.weather = weather
 
-    if len(focalplanes) != len(schedules):
-        raise RuntimeError("Number of focalplanes must equal number of schedules")
-
-    detweights = {}
-    for schedule, focalplane, telescope in zip(schedules, focalplanes, telescopes):
-        schedule.append(focalplane)
-        schedule.append(SOTelescope(telescope))
-        for detname, detdata in focalplane.items():
-            # Transfer the detector properties from the band dictionary to the detectors
-            net = detdata["NET"]
-            # And build a dictionary of detector weights
-            detweight = 1.0 / (args.sample_rate * net * net)
-            if detname in detweights and detweights[detname] != detweight:
-                raise RuntimeError("Detector weight for {} changes".format(detname))
-            detweights[detname] = detweight
+    detweights = telescope.focalplane.detweights
 
     timer.stop()
     if (comm.comm_world is None or comm.world_rank == 0) and verbose:
-        timer.report("Loading focalplane(s)")
-    return detweights, focalplanes
+        timer.report("Loading focalplane")
+    return detweights
