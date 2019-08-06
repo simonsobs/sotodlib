@@ -26,6 +26,7 @@ from toast.timing import dump as dump_timing
 
 from toast.pipeline_tools import (
     add_dist_args,
+    add_debug_args,
     get_time_communicators,
     get_comm,
     add_polyfilter_args,
@@ -123,6 +124,7 @@ def parse_arguments(comm):
     add_so_noise_args(parser)
     add_pysm_args(parser)
     add_export_args(parser)
+    add_debug_args(parser)
 
     parser.add_argument(
         "--no-maps",
