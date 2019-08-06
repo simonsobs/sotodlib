@@ -51,7 +51,7 @@ def create_observation(args, comm, telescope, ces, noise, verbose=True):
             sun_angle_min=args.sun_angle_min,
             coord=args.coord,
             sampsizes=None,
-            report_timing=verbose,
+            report_timing=args.debug,
         )
     except RuntimeError as e:
         raise RuntimeError(
