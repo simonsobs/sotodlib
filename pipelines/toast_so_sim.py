@@ -255,7 +255,8 @@ def main():
     totalname = "total"
 
     if args.input_pysm_model:
-        signalname = simulate_sky_signal(args, comm, data, schedules, subnpix, localsm)
+        focalplanes = [s.telescope.focalplane.detector_data for s in schedules]
+        signalname = simulate_sky_signal(args, comm, data, focalplanes, subnpix, localsm)
     else:
         signalname = scan_sky_signal(args, comm, data, localsm, subnpix)
 
