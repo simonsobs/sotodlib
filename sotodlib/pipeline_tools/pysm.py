@@ -30,7 +30,7 @@ def add_pysm_args(parser):
 
 
 @function_timer
-def simulate_sky_signal(args, comm, data, schedules, subnpix, localsm, signalname=None):
+def simulate_sky_signal(args, comm, data, focalplanes, subnpix, localsm, signalname=None):
     """ Use PySM to simulate smoothed sky signal.
 
     """
@@ -108,7 +108,7 @@ def simulate_sky_signal(args, comm, data, schedules, subnpix, localsm, signalnam
         out=signalname,
         pysm_model=pysm_model,
         pysm_component_objects=pysm_component_objects,
-        focalplanes=[s[3] for s in schedules],
+        focalplanes=focalplanes,
         nside=args.nside,
         subnpix=subnpix,
         localsm=localsm,
