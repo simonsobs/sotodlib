@@ -19,13 +19,14 @@ import numpy as np
 import so3g
 from spt3g import core as core3g
 
-from toast.mpi import MPI
-
 from toast.dist import Data, distribute_discrete
 
 import toast.qarray as qa
 from toast.tod import TOD, Noise
 from toast.tod import spt3g_utils as s3utils
+from toast.utils import Logger, Environment, memreport
+from toast.timing import Timer
+from toast.mpi import MPI
 
 from ..hardware import Hardware
 
@@ -107,9 +108,38 @@ class SOTOD(TOD):
 
         # Now that the data distribution is set, read frames into memory.
         self.load_frames()
+
+        self.get_azel()
+        return
+
+    def get_azel(self):
+        """ Translate the boresight az/el quaternions into azimuth and
+        elevation
+        """
+        quats = self.cache.reference("boresight_azel")
+        theta, phi = qa.to_position(quats)
+        self._az = (-phi % (2 * np.pi))
+        self._el = np.pi / 2 - theta
+        if len(self._az) > 0:
+            azmin = np.amin(self._az)
+            azmax = np.amax(self._az)
+            elmin = np.amin(self._el)
+            elmax = np.amax(self._el)
+        else:
+            azmin = 1000
+            azmax = -1000
+            elmin = 1000
+            elmax = -1000
+        if self.mpicomm is not None:
+            azmin = self.mpicomm.allreduce(azmin, MPI.MIN)
+            azmax = self.mpicomm.allreduce(azmax, MPI.MAX)
+            elmin = self.mpicomm.allreduce(elmin, MPI.MIN)
+            elmax = self.mpicomm.allreduce(elmax, MPI.MAX)
+        self.scan_range = (azmin, azmax, elmin, elmax)
         return
 
     def load_frames(self):
+        log = Logger.get()
         rank = 0
         if self.mpicomm is not None:
             rank = self.mpicomm.rank
@@ -119,9 +149,9 @@ class SOTOD(TOD):
                           (self.local_samples[1],))
 
         # Boresight pointing
-        self.cache.create("qboresight_radec", np.float64,
+        self.cache.create("boresight_radec", np.float64,
                           (self.local_samples[1], 4))
-        self.cache.create("qboresight_azel", np.float64,
+        self.cache.create("boresight_azel", np.float64,
                           (self.local_samples[1], 4))
 
         # Common flags
@@ -141,12 +171,13 @@ class SOTOD(TOD):
             name = "{}_{}".format(self.FLAG_NAME, det)
             self.cache.create(name, np.uint8, (self.local_samples[1],))
 
-        for (ffile, fnf, frame_offsets, frame_sizes) in zip(
-                self._file_names, self._file_nframes,
-                self._frame_sample_offs, self._frame_sizes):
-
-            # print("{} : Loading {}".format(rank, ffile), flush=True)
-
+        timer = Timer()
+        for ffile in self._file_names:
+            fnf = self._file_nframes[ffile]
+            frame_offsets = self._frame_sample_offs[ffile]
+            frame_sizes = self._frame_sizes[ffile]
+            if rank == 0:
+                log.debug("Loading {} frames from {}".format(fnf, ffile))
             # Loop over all frames- only the root process will actually
             # read data from disk.
             if rank == 0:
@@ -154,6 +185,8 @@ class SOTOD(TOD):
             else:
                 gfile = [None] * fnf
 
+            timer.clear()
+            timer.start()
             for fdata, frame_offset, frame_size in zip(
                     gfile, frame_offsets, frame_sizes):
                 is_scan = True
@@ -172,9 +205,11 @@ class SOTOD(TOD):
                     frame_data=fdata,
                     all_flavors=self._all_flavors,
                 )
-
                 if self.mpicomm is not None:
                     self.mpicomm.barrier()
+            timer.stop()
+            if rank == 0:
+                log.debug("Translated frames in {}s".format(timer.seconds()))
             del gfile
         return
 
@@ -182,21 +217,21 @@ class SOTOD(TOD):
         return dict(self._detquats)
 
     def _get_boresight(self, start, n):
-        ref = self.cache.reference("qboresight_radec")[start:start+n, :]
+        ref = self.cache.reference("boresight_radec")[start:start+n, :]
         return ref
 
     def _put_boresight(self, start, data):
-        ref = self.cache.reference("qboresight_radec")
+        ref = self.cache.reference("boresight_radec")
         ref[start:(start+data.shape[0]), :] = data
         del ref
         return
 
     def _get_boresight_azel(self, start, n):
-        ref = self.cache.reference("qboresight_azel")[start:start+n, :]
+        ref = self.cache.reference("boresight_azel")[start:start+n, :]
         return ref
 
     def _put_boresight_azel(self, start, data):
-        ref = self.cache.reference("qboresight_azel")
+        ref = self.cache.reference("boresight_azel")
         ref[start:(start+data.shape[0]), :] = data
         del ref
         return
@@ -279,6 +314,22 @@ class SOTOD(TOD):
         del ref
         return
 
+    def read_boresight_az(self, local_start=0, n=0):
+        if n == 0:
+            n = self.local_samples[1] - local_start
+        if self.local_samples[1] <= 0:
+            raise RuntimeError(
+                "cannot read boresight azimuth - process "
+                "has no assigned local samples"
+            )
+        if (local_start < 0) or (local_start + n > self.local_samples[1]):
+            raise ValueError(
+                "local sample range {} - {} is invalid".format(
+                    local_start, local_start + n - 1
+                )
+            )
+        return self._az[local_start : local_start + n]
+
 
 def parse_cal_frames(calframes, dets):
     detlist = None
@@ -353,15 +404,16 @@ def load_observation(path, dets=None, mpicomm=None, prefix=None, **kwargs):
         (dict):  The observation dictionary.
 
     """
+    log = Logger.get()
     rank = 0
     if mpicomm is not None:
         rank = mpicomm.rank
-    frame_sizes = list()
+    frame_sizes = {}
     frame_sizes_by_offset = {}
-    frame_sample_offs = list()
+    frame_sample_offs = {}
     file_names = list()
-    file_sample_offs = list()
-    nframes = list()
+    file_sample_offs = {}
+    nframes = {}
 
     obs = dict()
 
@@ -385,9 +437,9 @@ def load_observation(path, dets=None, mpicomm=None, prefix=None, **kwargs):
                         first_offset = fsampoff
                     file_names.append(ffile)
                     allframes = 0
-                    file_sample_offs.append(fsampoff)
-                    frame_sizes.append([])
-                    frame_sample_offs.append([])
+                    file_sample_offs[ffile] = fsampoff
+                    frame_sizes[ffile] = []
+                    frame_sample_offs[ffile] = []
                     for frame in core3g.G3File(ffile):
                         allframes += 1
                         if frame.type == core3g.G3FrameType.Scan:
@@ -403,12 +455,12 @@ def load_observation(path, dets=None, mpicomm=None, prefix=None, **kwargs):
                                             fsampoff,
                                             frame_sizes_by_offset[fsampoff],
                                             fsz))
-                            frame_sample_offs[-1].append(fsampoff)
-                            frame_sizes[-1].append(fsz)
+                            frame_sample_offs[ffile].append(fsampoff)
+                            frame_sizes[ffile].append(fsz)
                             fsampoff += fsz
                         else:
-                            frame_sample_offs[-1].append(0)
-                            frame_sizes[-1].append(0)
+                            frame_sample_offs[ffile].append(0)
+                            frame_sizes[ffile].append(0)
                             if frame.type == core3g.G3FrameType.Observation:
                                 latest_obs = frame
                             elif frame.type == core3g.G3FrameType.Calibration:
@@ -417,14 +469,15 @@ def load_observation(path, dets=None, mpicomm=None, prefix=None, **kwargs):
                             else:
                                 # Unknown frame type- skip it.
                                 pass
-                    frame_sample_offs[-1] = np.array(frame_sample_offs[-1], dtype=np.int64)
-                    nframes.append(allframes)
+                    frame_sample_offs[ffile] = np.array(frame_sample_offs[ffile], dtype=np.int64)
+                    nframes[ffile] = allframes
+                    log.debug("{} starts at {} and has {} frames".format(
+                        ffile, file_sample_offs[ffile], nframes[ffile]))
             break
         if len(file_names) == 0:
             raise RuntimeError(
                 "No frames found at '{}' with prefix '{}'"
                 .format(path, prefix))
-        file_sample_offs = np.array(file_sample_offs, dtype=np.int64)
 
     if mpicomm is not None:
         latest_obs = mpicomm.bcast(latest_obs, root=0)
@@ -503,6 +556,7 @@ def load_data(dir, obs=None, comm=None, prefix=None, **kwargs):
         (toast.Data):  The distributed data object.
 
     """
+    log = Logger.get()
     # the global communicator
     cworld = comm.comm_world
     # the communicator within the group
@@ -550,6 +604,7 @@ def load_data(dir, obs=None, comm=None, prefix=None, **kwargs):
     nobs = distobs[comm.group][1]
     for ob in range(firstobs, firstobs+nobs):
         opath = os.path.join(dir, obslist[ob])
+        log.debug("Loading {}".format(opath))
         # In case something goes wrong on one process, make sure the job
         # is killed.
         try:

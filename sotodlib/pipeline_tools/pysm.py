@@ -102,7 +102,7 @@ def simulate_sky_signal(args, comm, data, focalplanes, subnpix, localsm, signaln
                 )
 
     if signalname is None:
-        signalname = "signal"
+        signalname = "pysmsignal"
     op_sim_pysm = OpSimPySM(
         comm=comm.comm_rank,
         out=signalname,

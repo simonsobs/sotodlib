@@ -21,6 +21,8 @@ from toast.mpi import MPI
 import toast.qarray as qa
 from toast.tod import spt3g_utils as s3utils
 from toast.tod import TOD
+from toast.utils import Logger, Environment, memreport
+from toast.timing import Timer
 
 # Mapping between TOAST cache names and so3g fields
 
@@ -137,7 +139,12 @@ def frame_to_tod(
         None
 
     """
+    log = Logger.get()
     comm = tod.mpicomm
+    if comm is None:
+        rank = 0
+    else:
+        rank = comm.rank
 
     # First broadcast the frame data.
     if comm is not None:
@@ -322,7 +329,6 @@ def frame_to_tod(
                 except TypeError:
                     # scalar metadata instead of vector
                     continue
-
         dpats = None
         if (detector_map is not None) or (flag_map is not None):
             # Build our list of regex matches

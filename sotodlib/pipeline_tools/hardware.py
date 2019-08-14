@@ -132,6 +132,129 @@ class DetectorParams:
 
 
 @function_timer
+def get_hardware(args, comm, verbose=False):
+    """ Get the hardware configuration, either from file or by simulating.
+    Then trim it down to the bands that were selected.
+    """
+    log = Logger.get()
+    telescope = get_telescope(args, comm, verbose=verbose)
+    if comm.world_rank == 0:
+        if args.hardware:
+            log.info(
+                "Loading hardware configuration from {}..." "".format(args.hardware)
+            )
+            hw = hardware.Hardware(args.hardware)
+        else:
+            log.info("Simulating default hardware configuration")
+            hw = hardware.get_example()
+            hw.data["detectors"] = hardware.sim_telescope_detectors(hw, telescope.name)
+        # Construct a running index for all detectors across all
+        # telescopes for independent noise realizations
+        det_index = {}
+        for idet, det in enumerate(sorted(hw.data["detectors"])):
+            det_index[det] = idet
+        match = {"band": args.bands.replace(",", "|")}
+        tubes = args.tubes.split(",")
+        hw = hw.select(telescopes=[telescope.name], tubes=tubes, match=match)
+        if args.thinfp:
+            # Only accept a fraction of the detectors for
+            # testing and development
+            delete_detectors = []
+            for det_name in hw.data["detectors"].keys():
+                if det_index[det_name] % args.thinfp != 0:
+                    delete_detectors.append(det_name)
+            for det_name in delete_detectors:
+                del hw.data["detectors"][det_name]
+        ndetector = len(hw.data["detectors"])
+        if ndetector == 0:
+            raise RuntimeError(
+                "No detectors match query: telescope={}, "
+                "tubes={}, match={}".format(telescope, tubes, match)
+            )
+        log.info(
+            "Telescope = {} tubes = {} bands = {}, thinfp = {} matches {} detectors"
+            "".format(telescope.name, args.tubes, args.bands, args.thinfp, ndetector)
+        )
+    else:
+        hw = None
+        det_index = None
+    if comm.comm_world is not None:
+        hw = comm.comm_world.bcast(hw)
+        det_index = comm.comm_world.bcast(det_index)
+    return hw, telescope, det_index
+
+
+@function_timer
+def get_telescope(args, comm, verbose=False):
+    """ Determine which telescope matches the detector selections
+    """
+    telescope = None
+    if comm.world_rank == 0:
+        hwexample = hardware.get_example()
+        tubes = args.tubes.split(",")
+        for tube in tubes:
+            for telescope_name, telescope_data in hwexample.data[
+                "telescopes"
+            ].items():
+                if tube in telescope_data["tubes"]:
+                    if telescope is None:
+                        telescope = SOTelescope(telescope_name)
+                    elif telescope.name != telescope_name:
+                        raise RuntimeError(
+                            "Tubes '{}' span more than one telescope".format(tubes)
+                        )
+                    break
+            if telescope is None:
+                raise RuntimeError(
+                    "Failed to match tube = '{}' with a telescope".format(tube)
+                )
+    if comm.comm_world is not None:
+        telescope = comm.comm_world.bcast(telescope)
+    return telescope
+
+
+def get_focalplane(args, comm, hw, det_index, verbose=False):
+    """ Translate hardware configuration into a TOAST focalplane dictionary
+    """
+    if comm.world_rank == 0:
+        detector_data = {}
+        band_params = {}
+        for band_name, band_data in hw.data["bands"].items():
+            band_params[band_name] = BandParams(band_name, band_data)
+        for idet, (det_name, det_data) in enumerate(hw.data["detectors"].items()):
+            # RNG index for this detector
+            index = det_index[det_name]
+            wafer = det_data["wafer"]
+            # Determine which tube has this wafer
+            for tube_name, tube_data in hw.data["tubes"].items():
+                if wafer in tube_data["wafers"]:
+                    break
+            # Determine which telescope has this tube
+            for telescope_name, telescope_data in hw.data["telescopes"].items():
+                if tube_name in telescope_data["tubes"]:
+                    break
+            det_params = DetectorParams(
+                det_data,
+                band_params[det_data["band"]],
+                wafer,
+                tube_name,
+                telescope_name,
+                index,
+            )
+            detector_data[det_name] = det_params.get_dict()
+        # Create a focal plane in the telescope
+        focalplane = Focalplane(
+            detector_data=detector_data,
+            sample_rate=args.sample_rate,
+            radius_deg=args.focalplane_radius_deg,
+        )
+    else:
+        focalplane = None
+    if comm.comm_world is not None:
+        focalplane = comm.comm_world.bcast(focalplane)
+    return focalplane
+
+@function_timer
 def load_focalplanes(args, comm, schedules, verbose=False):
     """ Attach a focalplane to each of the schedules.
 
@@ -150,97 +273,14 @@ def load_focalplanes(args, comm, schedules, verbose=False):
 
     # Load focalplane information
 
-    bands = args.bands.split(",")
-    tubes = args.tubes.split(",")
-    hwexample = hardware.get_example()
+    timer1 = Timer()
+    timer1.start()
+    hw, telescope, det_index = get_hardware(args, comm, verbose=verbose)
+    focalplane = get_focalplane(args, comm, hw, det_index, verbose=verbose)
+    telescope.focalplane = focalplane
 
-    telescope = None
-    if comm.comm_world is None or comm.world_rank == 0:
-        timer1 = Timer()
-        timer1.start()
-        for band, tube in zip(bands, tubes):
-            for tube in tubes:
-                for telescope_name, telescope_data in hwexample.data[
-                    "telescopes"
-                ].items():
-                    if tube in telescope_data["tubes"]:
-                        if telescope is None:
-                            telescope = SOTelescope(telescope_name)
-                        elif telescope.name != telescope_name:
-                            raise RuntimeError(
-                                "Tubes '{}' span more than one telescope".format(tubes)
-                            )
-                        break
-                if telescope is None:
-                    raise RuntimeError(
-                        "Failed to match tube = '{}' with a telescope".format(tube)
-                    )
-        if args.hardware:
-            if verbose:
-                log.info(
-                    "Loading hardware configuration from {}..." "".format(args.hardware)
-                )
-            hw = hardware.Hardware(args.hardware)
-        else:
-            if verbose:
-                log.info("Simulating default hardware configuration")
-            hw = hardware.get_example()
-            hw.data["detectors"] = hardware.sim_telescope_detectors(hw, telescope.name)
-        # Construct a running index for all detectors across all
-        # telescopes for independent noise realizations
-        det_index = {}
-        for idet, det in enumerate(sorted(hw.data["detectors"])):
-            det_index[det] = idet
-        match = {"band": "|".join(bands)}
-        hw = hw.select(telescopes=None, tubes=tubes, match=match)
-        ndetector = len(hw.data["detectors"])
-        if ndetector == 0:
-            raise RuntimeError(
-                "No detectors match query: telescopes={}, "
-                "tubes={}, match={}".format(telescopes, tubes, match)
-            )
-        log.info(
-            "Telescope = {} tubes = {} bands = {} matches {} detectors"
-            "".format(telescope.name, tubes, bands, ndetector)
-        )
-        # Transfer the detector information into a TOAST dictionary
-        detector_data = {}
-        band_data = hw.data["bands"][band]
-        band_params = {}
-        for band_name, band_data in hw.data["bands"].items():
-            band_params[band_name] = BandParams(band_name, band_data)
-        for idet, (det_name, det_data) in enumerate(hw.data["detectors"].items()):
-            # RNG index for this detector
-            index = det_index[det_name]
-            if args.thinfp and index % args.thinfp != 0:
-                # Only accept a fraction of the detectors for
-                # testing and development
-                continue
-            wafer = det_data["wafer"]
-            # Determine which tube has this wafer
-            for tube_name, tube_data in hw.data["tubes"].items():
-                if wafer in tube_data["wafers"]:
-                    break
-            det_params = DetectorParams(
-                det_data,
-                band_params[det_data["band"]],
-                wafer,
-                tube,
-                telescope_name,
-                index,
-            )
-            detector_data[det_name] = det_params.get_dict()
-        # Create a focal plane in the telescope
-        focalplane = Focalplane(
-            detector_data=detector_data,
-            sample_rate=args.sample_rate,
-            radius_deg=args.focalplane_radius_deg,
-        )
-        telescope.focalplane = focalplane
+    if comm.world_rank == 0 and verbose:
         timer1.report_clear("Collect focaplane information")
-
-    if comm.comm_world is not None:
-        telescope = comm.comm_world.bcast(telescope)
 
     for schedule in schedules:
         # Replace the telescope created from reading the observing schedule but

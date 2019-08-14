@@ -135,6 +135,22 @@ def parse_arguments(comm):
     )
 
     parser.add_argument(
+        "--import-dir",
+        required=False,
+        help="Directory to load TOD from",
+    )
+    parser.add_argument(
+        "--import-obs",
+        required=False,
+        help="Comma-separated list of observations to load.  Default is to load "
+        "all observations in --import-dir",
+    )
+    parser.add_argument(
+        "--import-prefix",
+        required=False,
+        help="Prefix for TOD files to import"
+    )
+    parser.add_argument(
         "--outdir", required=False, default="out", help="Output directory"
     )
 
@@ -203,28 +219,86 @@ def main():
 
     madampars = setup_madam(args)
 
-    # Load and broadcast the schedule file
+    if args.import_dir is not None:
+        schedules = None
+        # Load existing data and optionally
+        # add simulated data to it
+        from sotodlib.data.toast_load import load_data
+        if args.import_obs is not None:
+            import_obs = args.import_obs.split(",")
+        else:
+            import_obs = None
+        from sotodlib.pipeline_tools.hardware import get_hardware, get_focalplane
+        hw, telescope, det_index = get_hardware(args, comm, verbose=True)
+        focalplane = get_focalplane(args, comm, hw, det_index, verbose=True)
+        detweights = focalplane.detweights
+        telescope.focalplane = focalplane
 
-    schedules = load_schedule(args, comm)
+        if comm.world_rank == 0:
+            log.info("Loading TOD from {}".format(args.import_dir))
+        timer = Timer()
+        timer.start()
+        data = load_data(
+            args.import_dir,
+            obs=import_obs,
+            comm=comm,
+            prefix=args.import_prefix,
+            dets=hw,
+            detranks=comm.group_size,
+            )
+        if comm.world_rank == 0:
+            timer.report_clear("Load data")
+        telescope_data = [("all", data)]
+        site = telescope.site
+        focalplane = telescope.focalplane
+        for obs in data.obs:
+            #obs["baselines"] = None
+            obs["noise"] = focalplane.noise
+            #obs["id"] = int(ces.mjdstart * 10000)
+            #obs["intervals"] = tod.subscans
+            obs["site"] = site.name
+            obs["site_id"] = site.id
+            obs["telescope"] = telescope.name
+            obs["telescope_id"] = telescope.id
+            obs["fpradius"] = focalplane.radius
+            #obs["weather"] = site.weather
+            #obs["start_time"] = ces.start_time
+            obs["altitude"] = site.alt
+            #obs["season"] = ces.season
+            #obs["date"] = ces.start_date
+            #obs["MJD"] = ces.mjdstart
+            obs["focalplane"] = focalplane.detector_data
+            #obs["rising"] = ces.rising
+            #obs["mindist_sun"] = ces.mindist_sun
+            #obs["mindist_moon"] = ces.mindist_moon
+            #obs["el_sun"] = ces.el_sun
+        memreport(comm.comm_world, "after imports")
+        totalname = "signal"
+    else:
+        # Load and broadcast the schedule file
 
-    # Load the weather and append to schedules
+        schedules = load_schedule(args, comm)
 
-    load_weather(args, comm, schedules)
+        # Load the weather and append to schedules
 
-    # load or simulate the focalplane
+        load_weather(args, comm, schedules)
 
-    detweights = load_focalplanes(args, comm, schedules)
+        # load or simulate the focalplane
 
-    # Create the TOAST data object to match the schedule.  This will
-    # include simulating the boresight pointing.
+        detweights = load_focalplanes(args, comm, schedules)
 
-    data, telescope_data = create_observations(args, comm, schedules)
+        # Create the TOAST data object to match the schedule.  This will
+        # include simulating the boresight pointing.
 
-    memreport(comm.comm_world, "after creating observations")
+        data, telescope_data = create_observations(args, comm, schedules)
 
-    # Split the communicator for day and season mapmaking
+        memreport(comm.comm_world, "after creating observations")
 
-    time_comms = get_time_communicators(comm, data)
+        # Optionally rewrite the noise PSD:s in each observation to include
+        # elevation-dependence
+        get_elevation_noise(args, comm, data)
+
+        totalname = "total"
 
     # Expand boresight quaternions into detector pointing weights and
     # pixel numbers
@@ -236,13 +310,17 @@ def main():
     if (args.tidas is None) and (args.export is None):
         for ob in data.obs:
             tod = ob["tod"]
-            tod.free_radec_quats()
+            try:
+                tod.free_radec_quats()
+            except AttributeError:
+                # These TOD objects do not have RA/Dec quaternions
+                pass
 
     memreport(comm.comm_world, "after pointing")
 
-    # Optionally rewrite the noise PSD:s in each observation to include
-    # elevation-dependence
-    get_elevation_noise(args, comm, data)
+    # Split the communicator for day and season mapmaking
+
+    time_comms = get_time_communicators(comm, data)
 
     # Prepare auxiliary information for distributed map objects
 
@@ -252,10 +330,11 @@ def main():
 
     # Set up objects to take copies of the TOD at appropriate times
 
-    totalname = "total"
-
     if args.input_pysm_model:
-        focalplanes = [s.telescope.focalplane.detector_data for s in schedules]
+        if schedules is not None:
+            focalplanes = [s.telescope.focalplane.detector_data for s in schedules]
+        else:
+            focalplanes = [telescope.focalplane.detector_data]
         signalname = simulate_sky_signal(args, comm, data, focalplanes, subnpix, localsm)
     else:
         signalname = scan_sky_signal(args, comm, data, localsm, subnpix)
