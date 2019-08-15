@@ -9,7 +9,29 @@ from toast.timing import function_timer, Timer
 from toast.tod import TODGround
 from toast.utils import Logger
 
+from ..data.toast_load import load_data
 from .noise import get_analytic_noise
+from .hardware import get_hardware, get_focalplane
+
+
+def add_import_args(parser):
+    parser.add_argument(
+        "--import-dir",
+        required=False,
+        help="Directory to load TOD from",
+    )
+    parser.add_argument(
+        "--import-obs",
+        required=False,
+        help="Comma-separated list of observations to load.  Default is to load "
+        "all observations in --import-dir",
+    )
+    parser.add_argument(
+        "--import-prefix",
+        required=False,
+        help="Prefix for TOD files to import"
+    )
+    return
 
 
 @function_timer
@@ -151,4 +173,58 @@ def create_observations(args, comm, schedules):
     else:
         telescope_data = []
     telescope_data.insert(0, ("all", data))
+    return data, telescope_data
+
+
+def load_observations(args, comm):
+    """Load existing data and put it in TOAST observations.
+    """
+    log = Logger.get()
+    if args.import_obs is not None:
+        import_obs = args.import_obs.split(",")
+    else:
+        import_obs = None
+    hw, telescope, det_index = get_hardware(args, comm, verbose=True)
+    focalplane = get_focalplane(args, comm, hw, det_index, verbose=True)
+    detweights = focalplane.detweights
+    telescope.focalplane = focalplane
+
+    if comm.world_rank == 0:
+        log.info("Loading TOD from {}".format(args.import_dir))
+    timer = Timer()
+    timer.start()
+    data = load_data(
+        args.import_dir,
+        obs=import_obs,
+        comm=comm,
+        prefix=args.import_prefix,
+        dets=hw,
+        detranks=comm.group_size,
+        )
+    if comm.world_rank == 0:
+        timer.report_clear("Load data")
+    telescope_data = [("all", data)]
+    site = telescope.site
+    focalplane = telescope.focalplane
+    for obs in data.obs:
+        #obs["baselines"] = None
+        obs["noise"] = focalplane.noise
+        #obs["id"] = int(ces.mjdstart * 10000)
+        #obs["intervals"] = tod.subscans
+        obs["site"] = site.name
+        obs["site_id"] = site.id
+        obs["telescope"] = telescope.name
+        obs["telescope_id"] = telescope.id
+        obs["fpradius"] = focalplane.radius
+        #obs["weather"] = site.weather
+        #obs["start_time"] = ces.start_time
+        obs["altitude"] = site.alt
+        #obs["season"] = ces.season
+        #obs["date"] = ces.start_date
+        #obs["MJD"] = ces.mjdstart
+        obs["focalplane"] = focalplane.detector_data
+        #obs["rising"] = ces.rising
+        #obs["mindist_sun"] = ces.mindist_sun
+        #obs["mindist_moon"] = ces.mindist_moon
+        #obs["el_sun"] = ces.el_sun
     return data, telescope_data
