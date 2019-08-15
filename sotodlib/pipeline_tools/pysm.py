@@ -17,7 +17,7 @@ except:
 
 def add_pysm_args(parser):
     parser.add_argument(
-        "--input-pysm-model",
+        "--pysm-model",
         required=False,
         help="Comma separated models for on-the-fly PySM "
         'simulation, e.g. s3,d6,f1,a2" '
@@ -26,6 +26,21 @@ def add_pysm_args(parser):
         "currently the most complete PySM model for simulations is:"
         '"SO_d0,SO_s0,SO_a0,SO_f0,SO_x1_cib,SO_x1_tsz,SO_x1_ksz,SO_x1_cmb_lensed_solardipole"',
     )
+    parser.add_argument(
+        "--pysm-apply-beam",
+        required=False,
+        action="store_true",
+        help="Convolve sky with detector beam",
+        dest="pysm_apply_beam",
+    )
+    parser.add_argument(
+        "--no-pysm-apply-beam",
+        required=False,
+        action="store_false",
+        help="Do not convolve sky with detector beam.",
+        dest="pysm_apply_beam",
+    )
+    parser.set_defaults(pysm_apply_beam=True)
     return
 
 
@@ -48,7 +63,7 @@ def simulate_sky_signal(args, comm, data, focalplanes, subnpix, localsm, signaln
     )
     pysm_component_objects = []
     pysm_model = []
-    for model_tag in args.input_pysm_model.split(","):
+    for model_tag in args.pysm_model.split(","):
 
         if not model_tag.startswith("SO"):
             pysm_model.append(model_tag)
@@ -112,7 +127,7 @@ def simulate_sky_signal(args, comm, data, focalplanes, subnpix, localsm, signaln
         nside=args.nside,
         subnpix=subnpix,
         localsm=localsm,
-        apply_beam=args.apply_beam,
+        apply_beam=args.pysm_apply_beam,
         coord="G",  # setting G doesn't perform any rotation
         map_dist=map_dist,
     )
