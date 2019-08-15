@@ -300,6 +300,8 @@ def main():
 
         totalname = "total"
 
+    time_comms = get_time_communicators(args, comm, data)
+
     # Expand boresight quaternions into detector pointing weights and
     # pixel numbers
 
