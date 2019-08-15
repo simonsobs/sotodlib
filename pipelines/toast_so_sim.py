@@ -300,6 +300,8 @@ def main():
 
         totalname = "total"
 
+    # Split the communicator for day and season mapmaking
+
     time_comms = get_time_communicators(args, comm, data)
 
     # Expand boresight quaternions into detector pointing weights and
@@ -320,10 +322,6 @@ def main():
 
     memreport(comm.comm_world, "after pointing")
 
-    # Split the communicator for day and season mapmaking
-
-    time_comms = get_time_communicators(comm, data)
-
     # Prepare auxiliary information for distributed map objects
 
     _, localsm, subnpix = get_submaps(args, comm, data)
@@ -332,7 +330,7 @@ def main():
 
     # Set up objects to take copies of the TOD at appropriate times
 
-    if args.input_pysm_model:
+    if args.pysm_model:
         if schedules is not None:
             focalplanes = [s.telescope.focalplane.detector_data for s in schedules]
         else:

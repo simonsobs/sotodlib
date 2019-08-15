@@ -118,7 +118,7 @@ class DetectorParams:
             "A": self.A,
             "C": self.C,
             "quat": self.det_data["quat"],
-            "FWHM": self.det_data["fwhm"],
+            "fwhm": self.det_data["fwhm"],
             "freq": self.center,
             "bandcenter_ghz": self.center,
             "bandwidth_ghz": self.width,
