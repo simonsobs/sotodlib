@@ -1488,7 +1488,7 @@ def simulate_sky_signal(args, comm, data, schedules, subnpix, localsm):
         print("Simulating sky signal with PySM", flush=args.flush)
 
     map_dist = (
-        None if comm is None else pysm.MapDistribution(nside=args.nside, mpi_comm=comm)
+        None if comm is None else pysm.MapDistribution(nside=args.side, mpi_comm=comm)
     )
     pysm_component_objects = []
     pysm_model = []
