@@ -9,7 +9,6 @@ from toast.timing import function_timer, Timer
 from toast.tod import TODGround
 from toast.utils import Logger
 
-from ..data.toast_load import load_data
 from .noise import get_analytic_noise
 from .hardware import get_hardware, get_focalplane
 
@@ -179,6 +178,9 @@ def create_observations(args, comm, schedules):
 def load_observations(args, comm):
     """Load existing data and put it in TOAST observations.
     """
+    # This import is not at the top of the file to avoid
+    # loading spt3g through so3g unnecessarily
+    from ..data.toast_load import load_data
     log = Logger.get()
     if args.import_obs is not None:
         import_obs = args.import_obs.split(",")
