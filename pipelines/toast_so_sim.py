@@ -283,6 +283,11 @@ def main():
     firstmc = int(args.MC_start)
     nmc = int(args.MC_count)
 
+    if nmc == 1:
+        # When there is only one MC realization, we don't need to keep
+        # a copy of the sky signal
+        totalname = signalname
+
     for mc in range(firstmc, firstmc + nmc):
 
         if comm.world_rank == 0:
