@@ -1,17 +1,21 @@
-"""Supports loading of TOD data from files disk.  Does not assume you
-have TOAST, but can populate TOAST structures if you do.
+"""Functions and classes to support the loading of TOD data from files
+on disk.  The routines provide the standard no-TOAST representation of
+SO TOD data, and also should be leveraged to populate TOAST TOD
+objects.
 
-For large datasets, we assume that time and detector information can
-be mapped to filenames using an ObsFileDB, implemented in sotoddb.
-Such database structures provide a guide for finding requested data
-without doing expensive searches.
+The basic routines here provide structures for automatically unpacking
+series of G3 frames into coherent data structures.
 
-We also support loading streams from specified G3 files, in the
-absence of a database.
+Additional routines use an ObsFileDB (provided by the user) to
+optimize disk reads for loading particular data of interest to a user.
+These routines rely on the completeness and accuracy of the ObsFileDB,
+and are appropriate for large archives of files that have been
+pre-scanned to log their contents.
 
 There will inevitably be a few different "file formats" out there, at
 the very least some variations in the schema used on top of G3.
-Presently the loader targets the pipe-s0001 "1day" TOD sim for the LAT.
+Presently the loader targets the pipe-s0001 "1day" TOD sim for the
+LAT.
 
 """
 
@@ -38,7 +42,7 @@ class FieldGroup(list):
         "site_velocity" (spt3g.core.G3VectorDouble) => 3327 elements
       ]
 
-    might have a roadmap defined like this:
+    might have a roadmap defined like this::
 
       request = FieldGroup('root', [
         FieldGroup('boresight', ['az', 'el', 'roll']),
@@ -47,7 +51,7 @@ class FieldGroup(list):
 
     Note that the name 'root', of the outermost FieldGroup, is not
     needed to decode a G3FrameObject... but you might use it for
-    something else.q
+    something else.
 
     """
     def __init__(self, name, items=None, timestamp_field=None,
@@ -200,11 +204,11 @@ def unpack_frames(filename, field_request, streams):
             unpack_frame_object(frame, field_request, streams)
     return streams
 
-def load_observation(db, obs_name, dets=None, prefix=None,
-                     mpicomm=None, toast=False):
+def load_observation(db, obs_id, dets=None, prefix=None):
     """Load the data for some observation.  You can restrict to only some
     detectors. Coming soon: also restrict by time range / sample
     index.
+
 
     This specifically targets the pipe-s0001 sim format.
 
@@ -212,7 +216,7 @@ def load_observation(db, obs_name, dets=None, prefix=None,
 
       db (ObsFileDB): The database describing this observation file
         set.
-      obs_name (str): The identifier of the observation.
+      obs_id (str): The identifier of the observation.
       dets (list of str): The detector names of interest.  If None,
         loads all dets present in this observation.
       prefix (str): The root address of the data files.  If not
@@ -231,7 +235,7 @@ def load_observation(db, obs_name, dets=None, prefix=None,
     # the list of detsets implicated in this observation.
     c = db.conn.execute('select distinct DS.name, DS.det from detsets DS '
                         'join files on DS.name=files.detset '
-                        'where obs_id=?', (obs_name,))
+                        'where obs_id=?', (obs_id,))
     pairs = [tuple(r) for r in c.fetchall()]
 
     # Now filter to only the dets requested.
@@ -243,8 +247,8 @@ def load_observation(db, obs_name, dets=None, prefix=None,
         dets_req = [p[1] for p in pairs_req]
         unmatched = [d for d in dets if not d in dets_req]
         if len(unmatched):
-            raise RuntimeError("User requested invalid dets (e.g. %s) for obs=%s" %
-                               unmatched[0], obs_name)
+            raise RuntimeError("User requested invalid dets (e.g. %s) "
+                               "for obs_id=%s" % (unmatched[0], obs_id))
 
     # Group by detset.
     dets_by_detset = OrderedDict([(p[0],[]) for p in pairs_req])
@@ -253,11 +257,12 @@ def load_observation(db, obs_name, dets=None, prefix=None,
 
     # Loop through relevant files, in sample order, and accumulate
     # lists of stream segments.
+
     stream_groups = []
     for detset, dets in dets_by_detset.items():
         c = db.conn.execute('select name from files '
-                            'where obs_id=? and detset=? '
-                            'order by sample_start', (obs_name, detset))
+                            'where obs_id=? and detset=? ' +
+                            'order by sample_start', (obs_id, detset))
         streams = None
         request = FieldGroup('root', [
             FieldGroup('signal', dets, timestamp_field='timestamps',
@@ -267,7 +272,6 @@ def load_observation(db, obs_name, dets=None, prefix=None,
             'site_velocity',
             'boresight_azel',
             'boresight_radec',
-            #'flags_common',
         ])
         for row in c:
             f = row[0]
@@ -281,37 +285,23 @@ def load_observation(db, obs_name, dets=None, prefix=None,
         
     FieldGroup.hstack_result(streams)
 
-    if not toast:
-        return streams
+    # Re-pack into something plausibly standardizable.  In first sims,
+    # everything is co-sampled by design, and thus "primary".  But we
+    # return an object that includes a place for "secondary"
+    # (non-cosampled) timestreams.
 
-    #
-    # Re-process streams into standard TOD.cache info.
-    #
-    from toast.tod import TOD
+    streams = OrderedDict([
+        ('primary', {
+            'signal': streams['signal'],
+            'timestamps': streams['timestamps'],
+            'boresight': streams['boresight'],
+            'qboresight_azel': streams['boresight_azel'].reshape((-1, 4)),
+            'qboresight_radec': streams['boresight_radec'].reshape((-1, 4)),
+            'site': {'position': streams['site_position'].reshape((-1, 3)),
+                     'velocity': streams['site_velocity'].reshape((-1, 3))},
+            }
+         ),
+        ('secondary', {})
+        ])
 
-    detquats = []
-    nsamp = len(streams['boresight']['az'])
-    dets = list(streams['signal'].keys())
-    detranks = 1
-    sampsizes = [(0, nsamp)]
-    meta = {}
-    tod = TOD(mpicomm, dets, nsamp, detranks=detranks, meta=meta)
-
-    v_shape = (nsamp,)
-    # Populate "signal_*" and "flags_*"
-    for k in dets:
-        tod.cache.put('signal_{}'.format(k), streams['signal'][k])
-        tod.cache.create('flag_{}'.format(k), 'uint8', v_shape)
-
-    # Populate... other stuff.
-    tod.cache.put('timestamps', streams['timestamps'])
-    for k in ['boresight_azel', 'boresight_radec']:
-        tod.cache.put('q' + k, streams[k].reshape(-1,4))
-    for k in ['position', 'velocity']:
-        tod.cache.put(k, streams['site_' + k].reshape((-1,3)))
-
-    # Flags look weird in data, so just make empty.
-    #tod.cache.put('common_flags', streams['flags_common'])
-    tod.cache.create('common_flags', 'uint8', v_shape)
-    return tod
-
+    return streams
