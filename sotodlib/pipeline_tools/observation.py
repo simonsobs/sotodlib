@@ -73,7 +73,7 @@ def create_observation(args, comm, telescope, ces, noise, verbose=True):
             coord=args.coord,
             sampsizes=None,
             report_timing=args.debug,
-            hwprpm=args.hwp_rpm
+            hwprpm=args.hwp_rpm,
             hwpstep=args.hwp_step_deg,
             hwpsteptime=args.hwp_step_time_s,
         )
