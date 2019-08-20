@@ -3,6 +3,9 @@
 # Copyright (c) 2019 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
+# TOAST must be imported before numpy to ensure the right MKL is used
+import toast
+
 # import so3g
 
 import copy
