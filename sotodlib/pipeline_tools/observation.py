@@ -73,6 +73,9 @@ def create_observation(args, comm, telescope, ces, noise, verbose=True):
             coord=args.coord,
             sampsizes=None,
             report_timing=args.debug,
+            hwprpm=hwprpm,
+            hwpstep=hwpstep,
+            hwpsteptime=hwpsteptime,
         )
     except RuntimeError as e:
         raise RuntimeError(
