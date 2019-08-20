@@ -275,7 +275,9 @@ def main():
             focalplanes = [s.telescope.focalplane.detector_data for s in schedules]
         else:
             focalplanes = [telescope.focalplane.detector_data]
-        signalname = simulate_sky_signal(args, comm, data, focalplanes, subnpix, localsm)
+        signalname = simulate_sky_signal(
+            args, comm, data, focalplanes, subnpix, localsm
+        )
     else:
         signalname = scan_sky_signal(args, comm, data, localsm, subnpix)
 
@@ -285,11 +287,6 @@ def main():
 
     firstmc = int(args.MC_start)
     nmc = int(args.MC_count)
-
-    if nmc == 1:
-        # When there is only one MC realization, we don't need to keep
-        # a copy of the sky signal
-        totalname = signalname
 
     for mc in range(firstmc, firstmc + nmc):
 
@@ -304,7 +301,9 @@ def main():
 
         # update_atmospheric_noise_weights(args, comm, data, freq, mc)
 
-        add_signal(args, comm, data, totalname, signalname, purge=(nmc == 1))
+        add_signal(
+            args, comm, data, totalname, signalname, purge=(mc == firstmc + nmc - 1)
+        )
 
         memreport("after adding sky", comm.comm_world)
 
