@@ -211,7 +211,7 @@ def main():
 
     if args.import_dir is not None:
         schedules = None
-        data, telescope_data = load_observations(args, comm)
+        data, telescope_data, detweights = load_observations(args, comm)
         memreport("after load", comm.comm_world)
         totalname = "signal"
     else:

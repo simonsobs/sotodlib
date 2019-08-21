@@ -232,4 +232,4 @@ def load_observations(args, comm):
         #obs["mindist_sun"] = ces.mindist_sun
         #obs["mindist_moon"] = ces.mindist_moon
         #obs["el_sun"] = ces.el_sun
-    return data, telescope_data
+    return data, telescope_data, detweights
