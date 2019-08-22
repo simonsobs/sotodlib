@@ -68,7 +68,7 @@ def export_TOD(args, comm, data, totalname, schedules, other=None, verbose=True)
                 det_groups[value].append(det_name)
     else:
         prefix = args.bands
-        detgroups = None
+        det_groups = None
 
     if comm.world_rank == 0 and verbose:
         log.info("Exporting data to directory tree at {}".format(path))
