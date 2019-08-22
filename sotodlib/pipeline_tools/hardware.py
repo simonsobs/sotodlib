@@ -10,7 +10,7 @@ from toast.utils import Logger
 from .. import hardware
 
 
-FOCALPLANE_RADII_DEG = {"LAT" : 8, "ST0" : 30, "ST1" : 30, "ST2" : 30, "ST3" : 30}
+FOCALPLANE_RADII_DEG = {"LAT" : 8, "SAT0" : 30, "SAT1" : 30, "SAT2" : 30, "SAT3" : 30}
 
 
 class SOTelescope(Telescope):
