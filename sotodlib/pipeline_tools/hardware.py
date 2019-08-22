@@ -10,6 +10,9 @@ from toast.utils import Logger
 from .. import hardware
 
 
+FOCALPLANE_RADII_DEG = {"LAT" : 8, "ST0" : 30, "ST1" : 30, "ST2" : 30, "ST3" : 30}
+
+
 class SOTelescope(Telescope):
     def __init__(self, name):
         site = Site("Atacama", lat="-22.958064", lon="-67.786222", alt=5200)
@@ -221,6 +224,16 @@ def get_focalplane(args, comm, hw, det_index, verbose=False):
         band_params = {}
         for band_name, band_data in hw.data["bands"].items():
             band_params[band_name] = BandParams(band_name, band_data)
+        # User may force the effective focal plane radius to be larger
+        # than the default.  This will widen the size of the simulated
+        # atmosphere but has not other effect for the time being.
+        fpradius = None
+        try:
+            fpradius = args.focalplane_radius_deg
+        except:
+            pass
+        if fpradius is None:
+            fpradius = 0
         for idet, (det_name, det_data) in enumerate(hw.data["detectors"].items()):
             # RNG index for this detector
             index = det_index[det_name]
@@ -233,6 +246,7 @@ def get_focalplane(args, comm, hw, det_index, verbose=False):
             for telescope_name, telescope_data in hw.data["telescopes"].items():
                 if tube_name in telescope_data["tubes"]:
                     break
+            fpradius = max(fpradius, FOCALPLANE_RADII_DEG[telescope_name])
             det_params = DetectorParams(
                 det_data,
                 band_params[det_data["band"]],
@@ -246,7 +260,7 @@ def get_focalplane(args, comm, hw, det_index, verbose=False):
         focalplane = Focalplane(
             detector_data=detector_data,
             sample_rate=args.sample_rate,
-            radius_deg=args.focalplane_radius_deg,
+            radius_deg=fpradius,
         )
     else:
         focalplane = None
