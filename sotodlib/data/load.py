@@ -53,6 +53,12 @@ class FieldGroup(list):
     needed to decode a G3FrameObject... but you might use it for
     something else.
 
+    When a string appears in the list, it is promoted to a "Field",
+    internally.  If a field requires special processing, instantiate
+    it directly to set options; e.g.::
+
+      Field('site_velocity', optional=True)
+
     """
     def __init__(self, name, items=None, timestamp_field=None,
                  compression=False):
@@ -88,7 +94,8 @@ class FieldGroup(list):
                 if item.timestamp_field:
                     output[item.timestamp_field] = []
             else:
-                output[item] = []
+                item = Field.as_field(item)
+                output[item.name] = []
         return output
 
     @staticmethod
@@ -139,7 +146,21 @@ class FieldGroup(list):
                     FieldGroup.merge_result(dest[k], src[k])
             else:
                 dest[k] = src[k]
-    
+
+class Field:
+    def __init__(self, name, optional=False):
+        self.name = name
+        self.opts = {'optional': optional}
+
+    @staticmethod
+    def as_field(item):
+        if isinstance(item, Field):
+            return item
+        if isinstance(item, str):
+            return Field(item)
+        raise TypeError('Cannot promote %s to Field.' % item)
+
+
 def unpack_frame_object(fo, field_request, streams, compression_info=None):
     """Unpack requested fields from a G3FrameObject, and update a data structure.
     
@@ -167,13 +188,22 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None):
                 streams[item.timestamp_field].append(np.linspace(t0, t1, ns))
             continue
         # This is a simple field.
+        item = Field.as_field(item)
+        key = item.name
+        if item.opts['optional']:
+            if not key in fo.keys():
+                if key in streams:
+                    assert(len(streams[key]) == 0) # field went missing?
+                    del streams[key]
+                assert(key not in streams)
+                continue
         if compression_info is not None:
             gain, offset = compression_info
-            m, b = gain.get(item, 1.), offset.get(item, 0.)
-            v = np.array(fo[item], dtype='float32') / m + b
+            m, b = gain.get(key, 1.), offset.get(key, 0.)
+            v = np.array(fo[key], dtype='float32') / m + b
         else:
-            v = np.array(fo[item])
-        streams[item].append(v)
+            v = np.array(fo[key])
+        streams[key].append(v)
 
 def unpack_frames(filename, field_request, streams):
     """Read frames from the specified file and expand the data by stream.
@@ -268,6 +298,7 @@ def load_observation(db, obs_id, dets=None, prefix=None):
             FieldGroup('signal', dets, timestamp_field='timestamps',
                        compression=True),
             FieldGroup('boresight', ['az', 'el', 'roll']),
+            Field('hwp_angle', optional=True),
             'site_position',
             'site_velocity',
             'boresight_azel',
@@ -290,7 +321,7 @@ def load_observation(db, obs_id, dets=None, prefix=None):
     # return an object that includes a place for "secondary"
     # (non-cosampled) timestreams.
 
-    streams = OrderedDict([
+    streams_out = OrderedDict([
         ('primary', {
             'signal': streams['signal'],
             'timestamps': streams['timestamps'],
@@ -304,4 +335,9 @@ def load_observation(db, obs_id, dets=None, prefix=None):
         ('secondary', {})
         ])
 
-    return streams
+    # Optional fields.
+
+    if 'hwp_angle' in streams:
+        streams_out['primary']['hwp_angle'] = streams['hwp_angle']
+
+    return streams_out
