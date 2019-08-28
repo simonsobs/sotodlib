@@ -20,32 +20,131 @@ from toast.mpi import MPI
 
 import toast.qarray as qa
 from toast.tod import spt3g_utils as s3utils
+from toast.tod import TOD
+from toast.utils import Logger, Environment, memreport
+from toast.timing import Timer
+
+# Mapping between TOAST cache names and so3g fields
+
+FIELD_TO_CACHE= {
+    #"timestamps" : TOD.TIMESTAMP_NAME,
+    "flags_common" : TOD.COMMON_FLAG_NAME,
+    "site_velocity" : TOD.VELOCITY_NAME,
+    "site_position" : TOD.POSITION_NAME,
+    "flags" : TOD.FLAG_NAME,
+    "signal" : TOD.SIGNAL_NAME,
+}
 
 
-def frames_to_tod(
+def recode_timestream(ts, params, rmstarget=2 ** 10, rmsmode="white"):
+    """ts is a G3Timestream.  Returns a new
+    G3Timestream for same samples as ts, but with data
+    scaled and translated with gain and offset,
+    rounded, and with FLAC compression enabled.
+
+    Args:
+        ts (G3Timestream) :  Input signal
+        params (bool or dict) :  if True, compress with default
+            parameters.  If dict with 'rmstarget' member, override
+            default `rmstarget`.  If dict with `gain` and `offset`
+            members, use those instead.
+        params (None, bool or dict) :  If None, False or an empty dict,
+             no compression or casting to integers.  If True or
+             non-empty dictionary, enable compression.  Expected fields
+             in the dictionary ('rmstarget', 'gain', 'offset', 'rmsmode')
+             allow overriding defaults.
+        rmstarget (float) :  Scale the iput signal to have this RMS.
+            Should be much smaller then the 24-bit integer range:
+            [-2 ** 23 : 2 ** 23] = [-8,388,608 : 8,388,608].
+            The gain will be reduced if the scaled signal does
+            not fit within the range of allowed values.
+        rmsmode (string) : "white" or "full", determines how the
+            signal RMS is measured.
+    Returns:
+        new_ts (G3Timestream) :  Scaled and translated timestream
+            with the FLAC compression enabled
+        gain (float) :  The applied gain
+        offset (float) :  The removed offset
+
+    """
+    if not params:
+        return ts, 1, 0
+    gain = None
+    offset = None
+    if isinstance(params, dict):
+        if "rmsmode" in params:
+            rmsmode = params["rmsmode"]
+        if "rmstarget" in params:
+            rmstarget = params["rmstarget"]
+        if "gain" in params:
+            gain = params["gain"]
+        if "offset" in params:
+            offset = params["offset"]
+    v = np.array(ts)
+    vmin = np.amin(v)
+    vmax = np.amax(v)
+    if offset is None:
+        offset = 0.5 * (vmin + vmax)
+        amp = vmax - offset
+    else:
+        amp = np.max(np.abs(vmin - offset), np.abs(vmax - offset))
+    if gain is None:
+        if rmsmode == "white":
+            rms = np.std(np.diff(v)) / np.sqrt(2)
+        elif rmsmode == "full":
+            rms = np.std(v)
+        else:
+            raise RuntimeError("Unrecognized RMS mode = '{}'".format(rmsmode))
+        if rms == 0:
+            gain = 1
+        else:
+            gain = rmstarget / rms
+        # If the data have extreme outliers, we have to reduce the gain
+        # to fit the 24-bit signed integer range
+        while amp * gain >= 2 ** 23:
+            gain *= 0.5
+    elif amp * gain >= 2 ** 23:
+        raise RuntimeError("The specified gain and offset saturate the band.")
+    v = np.round((v - offset) * gain)
+    new_ts = core3g.G3Timestream(v)
+    new_ts.units = core3g.G3TimestreamUnits.Counts
+    new_ts.SetFLACCompression(True)
+    new_ts.start = ts.start
+    new_ts.stop = ts.stop
+    return new_ts, gain, offset
+
+
+def frame_to_tod(
         tod,
-        frame,
         frame_offset,
         frame_size,
         frame_data=None,
         detector_map="signal",
-        flag_map="flags"):
+        flag_map="flags",
+        all_flavors=False,
+):
     """Distribute a frame from the rank zero process.
 
     Args:
         tod (toast.TOD): instance of a TOD class.
-        frame (int): the frame index.
         frame_offset (int): the first sample of the frame.
         frame_size (int): the number of samples in the the frame.
         frame_data (G3Frame): the input frame (only on rank zero).
         detector_map (str): the name of the frame timestream map.
         flag_map (str): then name of the frame flag map.
+        all_flavors (bool):  Return all signal flavors that start
+             with `detector_map`
 
     Returns:
         None
 
     """
+    log = Logger.get()
     comm = tod.mpicomm
+    if comm is None:
+        rank = 0
+    else:
+        rank = comm.rank
 
     # First broadcast the frame data.
     if comm is not None:
@@ -59,107 +158,152 @@ def frames_to_tod(
     cacheoff, froff, nfr = s3utils.local_frame_indices(
         local_first, nlocal, frame_offset, frame_size)
 
+    # Helper function to expand time stamps from a core3g.G3Timestream object
+    def copy_times(fieldval):
+        ref = tod.local_times()
+        if ref[cacheoff] != 0 and ref[cacheoff + nfr - 1] != 0:
+            # the timestamps were already cached
+            return
+        tstart = fieldval.start.mjd
+        tstop = fieldval.stop.mjd
+        # Convert the MJD time stamps to UNIX time
+        tstart = (tstart - 2440587.5 + 2400000.5) * 86400
+        tstop = (tstop - 2440587.5 + 2400000.5) * 86400
+        n = len(fieldval)
+        ref[cacheoff : cacheoff + nfr] \
+            = np.linspace(tstart, tstop, n)[froff : froff + nfr]
+        del ref
+        return
+
+    def get_gain_and_offset(frame_data, tsmap, field):
+        """ Check if the timestream in framedata[tsmap][field] was
+        scaled and translated for compression.
+        """
+        try:
+            gain = frame_data["compressor_gain_" + tsmap][field]
+            offset = frame_data["compressor_offset_" + tsmap][field]
+        except:
+            gain, offset = None, None
+        return gain, offset
+
     # Helper function to actually copy a slice of data into cache.
-    def copy_slice(data, fld, cache_prefix):
-        cache_fld = fld
-        if cache_prefix is not None:
-            cache_fld = "{}{}".format(cache_prefix, fld)
+    def copy_slice(data, field, cache_prefix, gain=None, offset=None):
+        if isinstance(data[field], core3g.G3Timestream):
+            # every G3Timestream has time stamps, we'll only use the
+            # first one
+            copy_times(data[field])
+        if cache_prefix is None:
+            if field in FIELD_TO_CACHE:
+                cache_field = FIELD_TO_CACHE[field]
+            else:
+                cache_field = field
+        else:
+            cache_field = "{}{}".format(cache_prefix, field)
         # Check field type and data shape
-        ftype = s3utils.g3_dtype(data[fld])
-        flen = len(data[fld])
+        ftype = s3utils.g3_dtype(data[field])
+        flen = len(data[field])
         nnz = flen // frame_size
         if nnz * frame_size != flen:
-            msg = "frame {}, field {} has length {} which is not "\
-                "divisible by size {}".format(frame, fld, flen, frame_size)
+            msg = "field {} has length {} which is not "\
+                "divisible by size {}".format(field, flen, frame_size)
             raise RuntimeError(msg)
-        if not tod.cache.exists(cache_fld):
+        if not tod.cache.exists(cache_field):
             # The field does not yet exist in cache, so create it.
             # print("proc {}:  create cache field {}, {}, ({},
-            # {})".format(tod.mpicomm.rank, fld, ftype, tod.local_samples[1],
+            # {})".format(tod.mpicomm.rank, field, ftype, tod.local_samples[1],
             # nnz), flush=True)
             if nnz == 1:
-                rf = tod.cache.create(cache_fld, ftype,
+                tod.cache.create(cache_field, ftype,
                                       (tod.local_samples[1],))
             else:
-                rf = tod.cache.create(cache_fld, ftype,
+                tod.cache.create(cache_field, ftype,
                                       (tod.local_samples[1], nnz))
-            del rf
         # print("proc {}: get cache ref for {}".format(tod.mpicomm.rank,
-        # cache_fld), flush=True)
-        rf = tod.cache.reference(cache_fld)
+        # cache_field), flush=True)
+        ref = tod.cache.reference(cache_field)
         # Verify that the dimensions of the cache object are what we expect,
         # then copy the data.
         cache_samples = None
         cache_nnz = None
-        if (len(rf.shape) > 1) and (rf.shape[1] > 0):
+        if (len(ref.shape) > 1) and (ref.shape[1] > 0):
             # We have a packed 2D array
-            cache_samples = rf.shape[0]
-            cache_nnz = rf.shape[1]
+            cache_samples = ref.shape[0]
+            cache_nnz = ref.shape[1]
         else:
             cache_nnz = 1
-            cache_samples = len(rf)
+            cache_samples = len(ref)
 
         if cache_samples != tod.local_samples[1]:
-            msg = "frame {}, field {}: cache has {} samples, which is"
+            msg = "field {}: cache has {} samples, which is"
             " different from local TOD size {}"\
-                .format(frame, fld, cache_samples, tod.local_samples[1])
+                .format(field, cache_samples, tod.local_samples[1])
             raise RuntimeError(msg)
 
         if cache_nnz != nnz:
-            msg = "frame {}, field {}: cache has nnz = {}, which is"\
+            msg = "field {}: cache has nnz = {}, which is"\
                 " different from frame nnz {}"\
-                .format(frame, fld, cache_nnz, nnz)
+                .format(field, cache_nnz, nnz)
             raise RuntimeError(msg)
 
         if cache_nnz > 1:
             slc = \
-                np.array(data[fld][nnz*froff:nnz*(froff+nfr)],
+                np.array(data[field][nnz * froff : nnz * (froff + nfr)],
                          copy=False).reshape((-1, nnz))
-            # print("proc {}:  copy_slice field {}[{}:{},:] = \
-            # frame[{}:{},:]".format(tod.mpicomm.rank, fld, cacheoff,
-            # cacheoff+nfr, froff, froff+nfr), flush=True)
-            rf[cacheoff:cacheoff+nfr, :] = slc
+            if gain is not None:
+                slc /= gain
+            if offset is not None:
+                slc += offset
+            ref[cacheoff : cacheoff + nfr, :] = slc
         else:
-            slc = np.array(data[fld][froff:froff+nfr], copy=False)
-            # print("proc {}:  copy_slice field {}[{}:{}] = \
-            # frame[{}:{}]".format(tod.mpicomm.rank, fld, cacheoff,
-            # cacheoff+nfr, froff, froff+nfr), flush=True)
-            rf[cacheoff:cacheoff+nfr] = slc
-        del rf
+            slc = np.array(data[field][froff : froff + nfr], copy=False)
+            if gain is not None:
+                slc /= gain
+            if offset is not None:
+                slc += offset
+            ref[cacheoff : cacheoff + nfr] = slc
+        del ref
         return
 
-    def copy_flags(chunks, fld, cache_prefix):
-        ndata = np.zeros(froff+nfr, dtype=np.uint8)
+    def copy_flags(chunks, field, cache_prefix):
+        """ Translate flag intervals into sample ranges
+        and record them in the TOD cache
+
+        FIXME: uses sample indices instead of time stamps
+        """
+        ndata = np.zeros(froff + nfr, dtype=np.uint8)
         for beg, end in chunks.array():
-            ndata[beg:end] = 1
-        cache_fld = fld
-        if cache_prefix is not None:
-            cache_fld = "{}{}".format(cache_prefix, fld)
+            ndata[beg : end + 1] = 1
+        if cache_prefix is None:
+            if field in FIELD_TO_CACHE:
+                cache_field = FIELD_TO_CACHE[field]
+            else:
+                cache_field = field
+        else:
+            cache_field = "{}{}".format(cache_prefix, field)
         # Check field type and data shape
         ftype = np.dtype(np.uint8)
         flen = len(ndata)
         nnz = flen // frame_size
         if nnz * frame_size != flen:
-            msg = "frame {}, field {} has length {} which is not "\
-                "divisible by size {}".format(frame, fld, flen, frame_size)
+            msg = "field {} has length {} which is not "\
+                "divisible by size {}".format(field, flen, frame_size)
             raise RuntimeError(msg)
-        if not tod.cache.exists(cache_fld):
-            rf = tod.cache.create(cache_fld, ftype, (tod.local_samples[1],))
-            del rf
-        rf = tod.cache.reference(cache_fld)
+        if not tod.cache.exists(cache_field):
+            tod.cache.create(cache_field, ftype, (tod.local_samples[1],))
+        ref = tod.cache.reference(cache_field)
         # Verify that the dimensions of the cache object are what we expect,
         # then copy the data.
-        cache_samples = len(rf)
+        cache_samples = len(ref)
 
         if cache_samples != tod.local_samples[1]:
-            msg = "frame {}, field {}: cache has {} samples, which is"
+            msg = "field {}: cache has {} samples, which is"
             " different from local TOD size {}"\
-                .format(frame, fld, cache_samples, tod.local_samples[1])
+                .format(field, cache_samples, tod.local_samples[1])
             raise RuntimeError(msg)
 
-        slc = np.array(ndata[froff:froff+nfr], copy=False)
-        rf[cacheoff:cacheoff+nfr] = slc
-        del rf
+        slc = np.array(ndata[froff : froff + nfr], copy=False)
+        ref[cacheoff : cacheoff + nfr] = slc
+        del ref
         return
 
     if cacheoff is not None:
@@ -171,19 +315,20 @@ def frames_to_tod(
         # FIXME:  need to account for multiple timestream maps.
         for field, fieldval in frame_data.iteritems():
             # Skip over maps
-            if isinstance(fieldval, core3g.G3TimestreamMap):
-                continue
-            if isinstance(fieldval, core3g.G3MapVectorDouble):
-                continue
-            if isinstance(fieldval, core3g.G3MapVectorInt):
-                continue
-            if isinstance(fieldval, so3g.MapIntervalsInt):
+            if isinstance(fieldval, core3g.G3TimestreamMap) or \
+               isinstance(fieldval, core3g.G3MapVectorDouble) or \
+               isinstance(fieldval, core3g.G3MapVectorInt) or \
+               isinstance(fieldval, so3g.MapIntervalsInt) or \
+               isinstance(fieldval, core3g.G3MapDouble):
                 continue
             if isinstance(fieldval, so3g.IntervalsInt):
                 copy_flags(fieldval, field, None)
             else:
-                copy_slice(frame_data, field, None)
-
+                try:
+                    copy_slice(frame_data, field, None)
+                except TypeError:
+                    # scalar metadata instead of vector
+                    continue
         dpats = None
         if (detector_map is not None) or (flag_map is not None):
             # Build our list of regex matches
@@ -198,8 +343,32 @@ def frames_to_tod(
                         # print("proc {} copy frame {}, field
                         # {}".format(tod.mpicomm.rank, frame, field),
                         # flush=True)
-                        copy_slice(frame_data[detector_map], field, "signal_")
+                        gain, offset = get_gain_and_offset(
+                            frame_data, detector_map, field)
+                        copy_slice(frame_data[detector_map],
+                                   field,
+                                   TOD.SIGNAL_NAME + "_",
+                                   gain=gain, offset=offset,
+                        )
                         break
+            # Look for additional signal flavors and cache them as well
+            if all_flavors:
+                prefix = detector_map + "_"
+                for key in frame_data.keys():
+                    if prefix in key:
+                        flavor = key.replace(prefix, "")
+                        for field in frame_data[key].keys():
+                            for dp in dpats:
+                                if dp.match(field) is not None:
+                                    gain, offset = get_gain_and_offset(
+                                        frame_data, key, field)
+                                    copy_slice(frame_data[key],
+                                               field,
+                                               flavor + "_",
+                                               gain=gain, offset=offset,
+                                    )
+                                    break
+
         if flag_map is not None:
             # If the field name contains any of our local detectors,
             # then cache it.
@@ -207,7 +376,7 @@ def frames_to_tod(
                 for dp in dpats:
                     if dp.match(field) is not None:
                         chunks = frame_data[flag_map][field]
-                        copy_flags(chunks, field, "flags_")
+                        copy_flags(chunks, field, TOD.FLAG_NAME + "_")
                         break
     return
 
@@ -225,7 +394,10 @@ def tod_to_frames(
         copy_detector=None,
         mask_flag_common=255,
         mask_flag=255,
-        units=None):
+        units=None,
+        dets=None,
+        compress=False,
+):
     """Gather all data from the distributed TOD cache for a set of frames.
 
     Args:
@@ -248,6 +420,11 @@ def tod_to_frames(
         mask_flag_common (int):  Bitmask to apply to common flags.
         mask_flag (int):  Bitmask to apply to per-detector flags.
         units: G3 units of the detector data.
+        dets (list):  List of detectors to include in the frame.  If None,
+            use all of the detectors in the TOD object.
+        compress (bool or dict):  If True or a dictionary of compression parameters,
+            store the timestreams as FLAC-compressed, 24-bit integers instead of
+            uncompressed doubles.
 
     Returns:
         (list): List of frames on rank zero.  Other processes have a list of
@@ -261,7 +438,14 @@ def tod_to_frames(
     comm_row = tod.grid_comm_row
 
     # Detector names
-    detnames = tod.detectors
+    if dets is None:
+        detnames = tod.detectors
+    else:
+        detnames = []
+        use_dets = set(dets)
+        for det in tod.detectors:
+            if det in use_dets:
+                detnames.append(det)
 
     # Local sample range
     local_first = tod.local_samples[0]
@@ -271,14 +455,14 @@ def tod_to_frames(
     detranks, sampranks = tod.grid_size
     rankdet, ranksamp = tod.grid_ranks
 
-    def get_local_cache(prow, fld, cacheoff, ncache):
+    def get_local_cache(prow, field, cacheoff, ncache):
         """Read a local slice of a cache field.
         """
         mtype = None
         pdata = None
         nnz = 0
         if rankdet == prow:
-            ref = tod.cache.reference(fld)
+            ref = tod.cache.reference(field)
             nnz = 1
             if (len(ref.shape) > 1) and (ref.shape[1] > 0):
                 nnz = ref.shape[1]
@@ -292,10 +476,10 @@ def tod_to_frames(
                 mtype = MPI.UINT8_T
             else:
                 msg = "Cannot use cache field {} of type {}"\
-                    .format(fld, ref.dtype)
+                    .format(field, ref.dtype)
                 raise RuntimeError(msg)
             if cacheoff is not None:
-                pdata = ref.flatten()[nnz*cacheoff:nnz*(cacheoff+ncache)]
+                pdata = ref.flatten()[nnz * cacheoff : nnz * (cacheoff + ncache)]
             else:
                 pdata = np.zeros(0, dtype=ref.dtype)
         return (pdata, nnz, mtype)
@@ -386,7 +570,7 @@ def tod_to_frames(
     fdataoff = [0]
     for f in frame_sizes[:-1]:
         last = fdataoff[-1]
-        fdataoff.append(last+f)
+        fdataoff.append(last + f)
 
     # The list of frames- only on the root process.
     fdata = None
@@ -398,6 +582,8 @@ def tod_to_frames(
 
     def flags_to_intervals(flgs):
         """Convert a flag vector to an interval list.
+
+        FIXME: uses sample indices instead of time stamps
         """
         groups = [
             [i for i, value in it] for key, it in
@@ -405,7 +591,7 @@ def tod_to_frames(
             if key != 0]
         chunks = list()
         for grp in groups:
-            chunks.append([grp[0], grp[-1]])
+            chunks.append([grp[0], grp[-1] + 1])
         return chunks
 
     def split_field(data, g3t, framefield, mapfield=None, g3units=units,
@@ -436,7 +622,7 @@ def tod_to_frames(
                 ndata = frame_sizes[f]
                 datalast = dataoff + ndata
                 chunks = list()
-                idomain = (0, ndata-1)
+                idomain = (0, ndata - 1)
                 for intr in fint:
                     # Interval sample ranges are defined relative to the
                     # frame itself.
@@ -448,7 +634,7 @@ def tod_to_frames(
                             cfirst = 0
                         else:
                             cfirst = intr[0] - dataoff
-                        if intr[1] >= datalast:
+                        if intr[1] > datalast:
                             clast = ndata - 1
                         else:
                             clast = intr[1] - dataoff
@@ -480,25 +666,32 @@ def tod_to_frames(
             for f in range(n_frames):
                 dataoff = fdataoff[f]
                 ndata = frame_sizes[f]
+                timeslice = times[cacheoff + dataoff : cacheoff + dataoff + ndata]
+                tstart = timeslice[0] * 1e8
+                tstop = timeslice[-1] * 1e8
                 if mapfield is None:
                     if g3units is None:
                         fdata[f][framefield] = \
-                            g3t(data[dataoff:dataoff+ndata])
+                            g3t(data[dataoff : dataoff + ndata])
                     else:
                         fdata[f][framefield] = \
-                            g3t(data[dataoff:dataoff+ndata], g3units)
+                            g3t(data[dataoff : dataoff + ndata], g3units)
+                    fdata[f][framefield].start = core3g.G3Time(tstart)
+                    fdata[f][framefield].stop = core3g.G3Time(tstop)
                 else:
+                    # Individual detector data.  The only fields that
+                    # we (optionally) compress.
                     if g3units is None:
-                        fdata[f][framefield][mapfield] = \
-                            g3t(data[dataoff:dataoff+ndata])
+                        tstream = g3t(data[dataoff : dataoff + ndata])
                     else:
-                        fdata[f][framefield][mapfield] = \
-                            g3t(data[dataoff:dataoff+ndata], g3units)
-                timeslice = times[dataoff:dataoff + ndata]
-                tstart = timeslice[0] * 1e8
-                tstop = timeslice[-1] * 1e8
-                fdata[f][framefield][mapfield].start = core3g.G3Time(tstart)
-                fdata[f][framefield][mapfield].stop = core3g.G3Time(tstop)
+                        tstream = g3t(data[dataoff : dataoff + ndata], g3units)
+                    if compress and "compressor_gain_" + framefield in fdata[f]:
+                        (tstream, gain, offset) = recode_timestream(tstream, compress)
+                        fdata[f]["compressor_gain_" + framefield][mapfield] = gain
+                        fdata[f]["compressor_offset_" + framefield][mapfield] = offset
+                    fdata[f][framefield][mapfield] = tstream
+                    fdata[f][framefield][mapfield].start = core3g.G3Time(tstart)
+                    fdata[f][framefield][mapfield].stop = core3g.G3Time(tstop)
         else:
             # The bindings of G3Vector seem to only work with
             # lists.  This is probably horribly inefficient.
@@ -507,11 +700,11 @@ def tod_to_frames(
                 ndata = frame_sizes[f]
                 if len(data.shape) == 1:
                     fdata[f][framefield] = \
-                        g3t(data[dataoff:dataoff+ndata].tolist())
+                        g3t(data[dataoff : dataoff + ndata].tolist())
                 else:
                     # We have a 2D quantity
                     fdata[f][framefield] = \
-                        g3t(data[dataoff:dataoff+ndata, :].flatten()
+                        g3t(data[dataoff : dataoff + ndata, :].flatten()
                             .tolist())
         return
 
@@ -553,7 +746,7 @@ def tod_to_frames(
         bore = gather_field(0, bore, 4, MPI.DOUBLE, cacheoff, ncache, 0)
     if rank == 0:
         split_field(bore.reshape(-1, 4), core3g.G3VectorDouble,
-                    "qboresight_radec")
+                    "boresight_radec")
 
     bore = None
     if rankdet == 0:
@@ -563,7 +756,7 @@ def tod_to_frames(
         bore = gather_field(0, bore, 4, MPI.DOUBLE, cacheoff, ncache, 1)
     if rank == 0:
         split_field(bore.reshape(-1, 4), core3g.G3VectorDouble,
-                    "qboresight_azel")
+                    "boresight_azel")
 
     if rank == 0:
         for f in range(n_frames):
@@ -637,10 +830,16 @@ def tod_to_frames(
     if rank == 0:
         for f in range(n_frames):
             fdata[f]["signal"] = core3g.G3TimestreamMap()
+            if compress:
+                fdata[f]["compressor_gain_signal"] = core3g.G3MapDouble()
+                fdata[f]["compressor_offset_signal"] = core3g.G3MapDouble()
             fdata[f]["flags"] = so3g.MapIntervalsInt()
             if copy_detector is not None:
                 for cname, g3typ, g3maptyp, fnm in copy_detector:
                     fdata[f][fnm] = g3maptyp()
+                    if compress:
+                        fdata[f]["compressor_gain_" + fnm] = core3g.G3MapDouble()
+                        fdata[f]["compressor_offset_" + fnm] = core3g.G3MapDouble()
 
     for dindx, dname in enumerate(detnames):
         drow = -1
@@ -675,8 +874,7 @@ def tod_to_frames(
         nnz = 1
         if cache_signal is None:
             if rankdet == prow:
-                detdata = tod.read(detector=dname, local_start=cacheoff,
-                                   n=ncache)
+                detdata = tod.local_signal(dname)[cacheoff : cacheoff + ncache]
         else:
             cache_det = "{}_{}".format(cache_signal, dname)
             detdata, nnz, mtype = get_local_cache(prow, cache_det, cacheoff,
@@ -695,8 +893,7 @@ def tod_to_frames(
         nnz = 1
         if cache_flags is None:
             if rankdet == prow:
-                detdata = tod.read_flags(detector=dname, local_start=cacheoff,
-                                         n=ncache)
+                detdata = tod.local_flags(dname)[cacheoff : cacheoff + ncache]
                 detdata &= mask_flag
         else:
             cache_det = "{}_{}".format(cache_flags, dname)

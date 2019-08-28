@@ -19,17 +19,18 @@ import numpy as np
 import so3g
 from spt3g import core as core3g
 
-from toast.mpi import MPI
-
 from toast.dist import Data, distribute_discrete
 
 import toast.qarray as qa
 from toast.tod import TOD, Noise
 from toast.tod import spt3g_utils as s3utils
+from toast.utils import Logger, Environment, memreport
+from toast.timing import Timer
+from toast.mpi import MPI
 
 from ..hardware import Hardware
 
-from .toast_frame_utils import frames_to_tod
+from .toast_frame_utils import frame_to_tod
 
 
 # FIXME:  This CamelCase name is ridiculous in all caps...
@@ -45,8 +46,8 @@ class SOTOD(TOD):
         file_names:
         file_nframes:
         file_sample_offs:
-        file_frame_offs:
         frame_sizes:
+        frame_sizes_by_offset:
         frame_sample_offs:
         detquats:
         mpicomm (mpi4py.MPI.Comm): the MPI communicator over which this
@@ -54,11 +55,13 @@ class SOTOD(TOD):
         detranks (int):  The dimension of the process grid in the detector
             direction.  The MPI communicator size must be evenly divisible
             by this number.
+        all_flavors (bool):  Return all signal flavors
 
     """
     def __init__(self, path, file_names, file_nframes, file_sample_offs,
-                 file_frame_offs, frame_sizes, frame_sample_offs, detquats,
-                 mpicomm, detranks=1):
+                 frame_sizes, frame_sizes_by_offset,
+                 frame_sample_offs, detquats,
+                 mpicomm, detranks=1, all_flavors=False):
         self._path = path
         self._units = None
         self._detquats = detquats
@@ -67,15 +70,22 @@ class SOTOD(TOD):
         self._file_names = file_names
         self._file_nframes = file_nframes
         self._file_sample_offs = file_sample_offs
-        self._file_frame_offs = file_frame_offs
+        self._all_flavors = all_flavors
 
-        nsamp = np.sum(self._frame_sizes)
+        sampsizes = []
+        nsamp = 0
+        for sz in frame_sizes_by_offset.values():
+            sampsizes.append(sz)
+            nsamp += sz
 
         # We need to assign a unique integer index to each detector.  This
         # is used when seeding the streamed RNG in order to simulate
         # timestreams.  For simplicity, and assuming that detector names
         # are not too long, we can convert the detector name to bytes and
         # then to an integer.
+        # FIXME: these numbers will not agree with the ones synthesized
+        # FIXME:     in toast_so_sim.py.  Instead, they should be made
+        # FIXME:     part of the hardware model.
 
         self._detindx = {}
         for det in detquats.keys():
@@ -94,54 +104,91 @@ class SOTOD(TOD):
         super().__init__(
             mpicomm, list(sorted(detquats.keys())), nsamp,
             detindx=self._detindx, detranks=detranks,
-            sampsizes=self._frame_sizes, meta=dict())
+            sampsizes=sampsizes, meta=dict())
 
         # Now that the data distribution is set, read frames into memory.
         self.load_frames()
+
+        self.get_azel()
+        return
+
+    def get_azel(self):
+        """ Translate the boresight az/el quaternions into azimuth and
+        elevation
+        """
+        quats = self.cache.reference("boresight_azel")
+        theta, phi = qa.to_position(quats)
+        self._az = (-phi % (2 * np.pi))
+        self._el = np.pi / 2 - theta
+        if len(self._az) > 0:
+            azmin = np.amin(self._az)
+            azmax = np.amax(self._az)
+            elmin = np.amin(self._el)
+            elmax = np.amax(self._el)
+        else:
+            azmin = 1000
+            azmax = -1000
+            elmin = 1000
+            elmax = -1000
+        if self.mpicomm is not None:
+            azmin = self.mpicomm.allreduce(azmin, MPI.MIN)
+            azmax = self.mpicomm.allreduce(azmax, MPI.MAX)
+            elmin = self.mpicomm.allreduce(elmin, MPI.MIN)
+            elmax = self.mpicomm.allreduce(elmax, MPI.MAX)
+        self.scan_range = (azmin, azmax, elmin, elmax)
         return
 
     def load_frames(self):
+        log = Logger.get()
         rank = 0
         if self.mpicomm is not None:
             rank = self.mpicomm.rank
 
         # Timestamps
-        self.cache.create("timestamps", np.int64, (self.local_samples[1],))
+        self.cache.create(self.TIMESTAMP_NAME, np.float64,
+                          (self.local_samples[1],))
 
         # Boresight pointing
-        self.cache.create("qboresight_radec", np.float64,
+        self.cache.create("boresight_radec", np.float64,
                           (self.local_samples[1], 4))
-        self.cache.create("qboresight_azel", np.float64,
+        self.cache.create("boresight_azel", np.float64,
                           (self.local_samples[1], 4))
 
         # Common flags
-        self.cache.create("flags_common", np.uint8, (self.local_samples[1],))
+        self.cache.create(self.COMMON_FLAG_NAME, np.uint8,
+                          (self.local_samples[1],))
 
         # Telescope position and velocity
-        self.cache.create("site_position", np.float64,
+        self.cache.create(self.POSITION_NAME, np.float64,
                           (self.local_samples[1], 3))
-        self.cache.create("site_velocity", np.float64,
+        self.cache.create(self.VELOCITY_NAME, np.float64,
                           (self.local_samples[1], 3))
 
         # Detector data and flags
         for det in self.local_dets:
-            name = "{}_{}".format("signal", det)
+            name = "{}_{}".format(self.SIGNAL_NAME, det)
             self.cache.create(name, np.float64, (self.local_samples[1],))
-            name = "{}_{}".format("flags", det)
+            name = "{}_{}".format(self.FLAG_NAME, det)
             self.cache.create(name, np.uint8, (self.local_samples[1],))
 
-        for ifile, (ffile, fnf, foff) in enumerate(
-                zip(self._file_names, self._file_nframes,
-                    self._file_frame_offs)):
-
+        timer = Timer()
+        for ffile in self._file_names:
+            fnf = self._file_nframes[ffile]
+            frame_offsets = self._frame_sample_offs[ffile]
+            frame_sizes = self._frame_sizes[ffile]
+            if rank == 0:
+                log.debug("Loading {} frames from {}".format(fnf, ffile))
             # Loop over all frames- only the root process will actually
             # read data from disk.
-            gfile = [None for x in range(fnf)]
             if rank == 0:
                 gfile = core3g.G3File(ffile)
+            else:
+                gfile = [None] * fnf
 
-            scanframe = 0
-            for fileframe, fdata in enumerate(gfile):
+            timer.clear()
+            timer.start()
+            for fdata, frame_offset, frame_size in zip(
+                    gfile, frame_offsets, frame_sizes):
                 is_scan = True
                 if rank == 0:
                     if fdata.type != core3g.G3FrameType.Scan:
@@ -150,22 +197,19 @@ class SOTOD(TOD):
                     is_scan = self.mpicomm.bcast(is_scan, root=0)
                 if not is_scan:
                     continue
-                frame = foff + scanframe
-                frame_offset = self._frame_sample_offs[frame]
-                frame_size = self._frame_sizes[frame]
 
-                frames_to_tod(
+                frame_to_tod(
                     self,
-                    frame,
                     frame_offset,
                     frame_size,
                     frame_data=fdata,
-                    detector_map="signal",
-                    flag_map="flags")
-
-                scanframe += 1
+                    all_flavors=self._all_flavors,
+                )
                 if self.mpicomm is not None:
                     self.mpicomm.barrier()
+            timer.stop()
+            if rank == 0:
+                log.debug("Translated frames in {}s".format(timer.seconds()))
             del gfile
         return
 
@@ -173,21 +217,21 @@ class SOTOD(TOD):
         return dict(self._detquats)
 
     def _get_boresight(self, start, n):
-        ref = self.cache.reference("qboresight_radec")[start:start+n, :]
+        ref = self.cache.reference("boresight_radec")[start:start+n, :]
         return ref
 
     def _put_boresight(self, start, data):
-        ref = self.cache.reference("qboresight_radec")
+        ref = self.cache.reference("boresight_radec")
         ref[start:(start+data.shape[0]), :] = data
         del ref
         return
 
     def _get_boresight_azel(self, start, n):
-        ref = self.cache.reference("qboresight_azel")[start:start+n, :]
+        ref = self.cache.reference("boresight_azel")[start:start+n, :]
         return ref
 
     def _put_boresight_azel(self, start, data):
-        ref = self.cache.reference("qboresight_azel")
+        ref = self.cache.reference("boresight_azel")
         ref[start:(start+data.shape[0]), :] = data
         del ref
         return
@@ -270,8 +314,24 @@ class SOTOD(TOD):
         del ref
         return
 
+    def read_boresight_az(self, local_start=0, n=0):
+        if n == 0:
+            n = self.local_samples[1] - local_start
+        if self.local_samples[1] <= 0:
+            raise RuntimeError(
+                "cannot read boresight azimuth - process "
+                "has no assigned local samples"
+            )
+        if (local_start < 0) or (local_start + n > self.local_samples[1]):
+            raise ValueError(
+                "local sample range {} - {} is invalid".format(
+                    local_start, local_start + n - 1
+                )
+            )
+        return self._az[local_start : local_start + n]
 
-def parse_cal_frame(frm, dets):
+
+def parse_cal_frames(calframes, dets):
     detlist = None
     if isinstance(dets, Hardware):
         detlist = list(sorted(dets.data["detectors"].keys()))
@@ -279,35 +339,38 @@ def parse_cal_frame(frm, dets):
         detlist = dets
     qname = "detector_offset"
     detoffset = dict()
-    if detlist is None:
-        for d, q in frm[qname].iteritems():
-            detoffset[d] = np.array(q)
-    else:
-        for d, q in frm[qname].iteritems():
-            if d in detlist:
-                detoffset[d] = np.array(q)
     kfreq = "noise_stream_freq"
     kpsd = "noise_stream_psd"
     kindx = "noise_stream_index"
     dstr = "noise_detector_streams"
     dwt = "noise_detector_weights"
-    detnames = list(sorted(detoffset.keys()))
     noise_freq = dict()
-    for k, v in frm[kfreq].iteritems():
-        noise_freq[k] = np.array(v)
-    noise_psds = dict()
-    for k, v in frm[kpsd].iteritems():
-        noise_psds[k] = np.array(v)
     noise_index = dict()
-    for k, v in frm[kindx].iteritems():
-        noise_index[k] = int(v)
+    noise_psds = dict()
+    mixing = dict()
     detstrms = dict()
     detwghts = dict()
-    for k, v in frm[dstr].iteritems():
-        detstrms[k] = np.array(v)
-    for k, v in frm[dwt].iteritems():
-        detwghts[k] = np.array(v)
-    mixing = dict()
+    detnames = []
+    for calframe in calframes:
+        if detlist is None:
+            for d, q in calframe[qname].iteritems():
+                detoffset[d] = np.array(q)
+        else:
+            for d, q in calframe[qname].iteritems():
+                if d in detlist:
+                    detoffset[d] = np.array(q)
+        detnames += list(detoffset.keys())
+        for k, v in calframe[kfreq].iteritems():
+            noise_freq[k] = np.array(v)
+        for k, v in calframe[kpsd].iteritems():
+            noise_psds[k] = np.array(v)
+        for k, v in calframe[kindx].iteritems():
+            noise_index[k] = int(v)
+        for k, v in calframe[dstr].iteritems():
+            detstrms[k] = np.array(v)
+        for k, v in calframe[dwt].iteritems():
+            detwghts[k] = np.array(v)
+    detnames = sorted(detnames)
     for det in detnames:
         mixing[det] = dict()
         for st, wt in zip(detstrms[det], detwghts[det]):
@@ -341,20 +404,22 @@ def load_observation(path, dets=None, mpicomm=None, prefix=None, **kwargs):
         (dict):  The observation dictionary.
 
     """
+    log = Logger.get()
     rank = 0
     if mpicomm is not None:
         rank = mpicomm.rank
-    frame_sizes = list()
-    frame_sample_offs = list()
+    frame_sizes = {}
+    frame_sizes_by_offset = {}
+    frame_sample_offs = {}
     file_names = list()
-    file_sample_offs = list()
-    file_frame_offs = list()
-    nframes = list()
+    file_sample_offs = {}
+    nframes = {}
 
     obs = dict()
 
     latest_obs = None
-    latest_cal = None
+    latest_cal_frames = []
+    first_offset = None
 
     if rank == 0:
         pat = None
@@ -362,57 +427,66 @@ def load_observation(path, dets=None, mpicomm=None, prefix=None, **kwargs):
             pat = re.compile(r".*_(\d{8}).g3")
         else:
             pat = re.compile(r"{}_(\d{{8}}).g3".format(prefix))
-        frameoff = 0
-        checkoff = 0
         for root, dirs, files in os.walk(path, topdown=True):
             for f in sorted(files):
                 fmat = pat.match(f)
                 if fmat is not None:
                     ffile = os.path.join(path, f)
                     fsampoff = int(fmat.group(1))
-                    if fsampoff != checkoff:
-                        raise RuntimeError("frame file {} is at \
-                            sample offset {}, are some files\
-                            missing?".format(ffile, checkoff))
+                    if first_offset is None:
+                        first_offset = fsampoff
                     file_names.append(ffile)
                     allframes = 0
-                    file_sample_offs.append(fsampoff)
-                    file_frame_offs.append(frameoff)
+                    file_sample_offs[ffile] = fsampoff
+                    frame_sizes[ffile] = []
+                    frame_sample_offs[ffile] = []
                     for frame in core3g.G3File(ffile):
                         allframes += 1
-                        if frame.type == core3g.G3FrameType.Observation:
-                            latest_obs = frame
-                        elif frame.type == core3g.G3FrameType.Calibration:
-                            latest_cal = frame
-                        elif frame.type == core3g.G3FrameType.Scan:
+                        if frame.type == core3g.G3FrameType.Scan:
                             # This is a scan frame, process it.
                             fsz = len(frame["boresight"]["az"])
-                            frame_sample_offs.append(fsampoff)
+                            if fsampoff not in frame_sizes_by_offset:
+                                frame_sizes_by_offset[fsampoff] = fsz
+                            else:
+                                if frame_sizes_by_offset[fsampoff] != fsz:
+                                    raise RuntimeError(
+                                        "Frame size at {} changes. {} != {}"
+                                        "".format(
+                                            fsampoff,
+                                            frame_sizes_by_offset[fsampoff],
+                                            fsz))
+                            frame_sample_offs[ffile].append(fsampoff)
+                            frame_sizes[ffile].append(fsz)
                             fsampoff += fsz
-                            frame_sizes.append(fsz)
-                            frameoff += 1
-                            checkoff += fsz
                         else:
-                            # Unknown frame type- skip it.
-                            pass
-                    nframes.append(allframes)
+                            frame_sample_offs[ffile].append(0)
+                            frame_sizes[ffile].append(0)
+                            if frame.type == core3g.G3FrameType.Observation:
+                                latest_obs = frame
+                            elif frame.type == core3g.G3FrameType.Calibration:
+                                if fsampoff == first_offset:
+                                    latest_cal_frames.append(frame)
+                            else:
+                                # Unknown frame type- skip it.
+                                pass
+                    frame_sample_offs[ffile] = np.array(frame_sample_offs[ffile], dtype=np.int64)
+                    nframes[ffile] = allframes
+                    log.debug("{} starts at {} and has {} frames".format(
+                        ffile, file_sample_offs[ffile], nframes[ffile]))
             break
         if len(file_names) == 0:
             raise RuntimeError(
                 "No frames found at '{}' with prefix '{}'"
                 .format(path, prefix))
-        file_sample_offs = np.array(file_sample_offs, dtype=np.int64)
-        file_frame_offs = np.array(file_frame_offs, dtype=np.int64)
-        frame_sample_offs = np.array(frame_sample_offs, dtype=np.int64)
 
     if mpicomm is not None:
         latest_obs = mpicomm.bcast(latest_obs, root=0)
-        latest_cal = mpicomm.bcast(latest_cal, root=0)
+        latest_cal_frames = mpicomm.bcast(latest_cal_frames, root=0)
         nframes = mpicomm.bcast(nframes, root=0)
         file_names = mpicomm.bcast(file_names, root=0)
         file_sample_offs = mpicomm.bcast(file_sample_offs, root=0)
-        file_frame_offs = mpicomm.bcast(file_frame_offs, root=0)
         frame_sizes = mpicomm.bcast(frame_sizes, root=0)
+        frame_sizes_by_offset = mpicomm.bcast(frame_sizes_by_offset, root=0)
         frame_sample_offs = mpicomm.bcast(frame_sample_offs, root=0)
 
     if latest_obs is None:
@@ -420,15 +494,15 @@ def load_observation(path, dets=None, mpicomm=None, prefix=None, **kwargs):
     for k, v in latest_obs.iteritems():
         obs[k] = s3utils.from_g3_type(v)
 
-    if latest_cal is None:
+    if len(latest_cal_frames) == 0:
         raise RuntimeError("No calibration frame with detector offsets!")
-    detoffset, noise = parse_cal_frame(latest_cal, dets)
+    detoffset, noise = parse_cal_frames(latest_cal_frames, dets)
 
     obs["noise"] = noise
 
     obs["tod"] = SOTOD(path, file_names, nframes, file_sample_offs,
-                       file_frame_offs, frame_sizes, frame_sample_offs,
-                       detquats=detoffset,
+                       frame_sizes, frame_sizes_by_offset,
+                       frame_sample_offs, detquats=detoffset,
                        mpicomm=mpicomm, **kwargs)
     return obs
 
@@ -482,6 +556,7 @@ def load_data(dir, obs=None, comm=None, prefix=None, **kwargs):
         (toast.Data):  The distributed data object.
 
     """
+    log = Logger.get()
     # the global communicator
     cworld = comm.comm_world
     # the communicator within the group
@@ -529,10 +604,13 @@ def load_data(dir, obs=None, comm=None, prefix=None, **kwargs):
     nobs = distobs[comm.group][1]
     for ob in range(firstobs, firstobs+nobs):
         opath = os.path.join(dir, obslist[ob])
+        log.debug("Loading {}".format(opath))
         # In case something goes wrong on one process, make sure the job
         # is killed.
         try:
-            data.obs.append(load_observation(opath, mpicomm=cgroup, **kwargs))
+            data.obs.append(
+                load_observation(opath, mpicomm=cgroup, prefix=prefix, **kwargs)
+            )
         except:
             exc_type, exc_value, exc_traceback = sys.exc_info()
             lines = traceback.format_exception(exc_type, exc_value,
