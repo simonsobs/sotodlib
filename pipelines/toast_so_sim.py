@@ -3,6 +3,18 @@
 # Copyright (c) 2019 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
+
+import os
+if 'TOAST_STARTUP_DELAY' in os.environ:
+    import numpy as np
+    import time
+    delay = np.float(os.environ['TOAST_STARTUP_DELAY'])
+    wait = np.random.rand() * delay
+    #print('Sleeping for {} seconds before importing TOAST'.format(wait),
+    #      flush=True)
+    time.sleep(wait)
+
+
 # TOAST must be imported before numpy to ensure the right MKL is used
 import toast
 
@@ -120,7 +132,7 @@ def parse_arguments(comm):
     add_atmosphere_args(parser)
     add_noise_args(parser)
     add_gainscrambler_args(parser)
-    add_madam_args(parser, ground_data=True)
+    add_madam_args(parser)
     add_sky_map_args(parser)
     add_sss_args(parser)
     add_tidas_args(parser)
