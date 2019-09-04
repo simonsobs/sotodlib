@@ -50,7 +50,7 @@ def add_hw_args(parser):
     parser.add_argument(
         "--tubes",
         required=True,
-        help="Comma-separated list of  optics tubes: LT0 (UHF), LT1 (UHF), "
+        help="Comma-separated list of optics tubes: LT0 (UHF), LT1 (UHF), "
         " LT2 (MFF), LT3 (MFF), LT4 (MFS), LT5 (MFS), LT6 (LF). "
         "Length of list must equal --bands",
     )
@@ -158,7 +158,10 @@ def get_hardware(args, comm, verbose=False):
             det_index[det] = idet
         match = {"band": args.bands.replace(",", "|")}
         tubes = args.tubes.split(",")
-        hw = hw.select(telescopes=[telescope.name], tubes=tubes, match=match)
+        # If one provides both telescopes and tubes, the tubes matching *either*
+        # will be concatenated
+        #hw = hw.select(telescopes=[telescope.name], tubes=tubes, match=match)
+        hw = hw.select(tubes=tubes, match=match)
         if args.thinfp:
             # Only accept a fraction of the detectors for
             # testing and development
