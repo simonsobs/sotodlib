@@ -9,9 +9,12 @@ from toast.utils import Logger
 
 try:
     import pysm
-    import so_pysm_models
 except:
     pysm = None
+
+try:
+    import so_pysm_models
+except:
     so_pysm_models = None
 
 
@@ -68,7 +71,9 @@ def simulate_sky_signal(args, comm, data, focalplanes, subnpix, localsm, signaln
         if not model_tag.startswith("SO"):
             pysm_model.append(model_tag)
         else:
-
+            if so_pysm_models is None:
+                raise RuntimeError(
+                    "{} requires so_pysm_models".format(model_tag))
             if model_tag == "SO_x1_cib":
                 pysm_component_objects.append(
                     so_pysm_models.WebSkyCIB(
