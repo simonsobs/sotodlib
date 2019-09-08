@@ -14,7 +14,8 @@ except:
 
 try:
     import so_pysm_models
-except:
+except Exception as e:
+    print('Failed to load so_pysm_models: "{}"'.format(e))
     so_pysm_models = None
 
 
