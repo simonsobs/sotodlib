@@ -73,6 +73,9 @@ def create_observation(args, comm, telescope, ces, noise, verbose=True):
             coord=args.coord,
             sampsizes=None,
             report_timing=args.debug,
+            hwprpm=args.hwp_rpm,
+            hwpstep=args.hwp_step_deg,
+            hwpsteptime=args.hwp_step_time_s,
         )
     except RuntimeError as e:
         raise RuntimeError(
@@ -229,4 +232,4 @@ def load_observations(args, comm):
         #obs["mindist_sun"] = ces.mindist_sun
         #obs["mindist_moon"] = ces.mindist_moon
         #obs["el_sun"] = ces.el_sun
-    return data, telescope_data
+    return data, telescope_data, detweights

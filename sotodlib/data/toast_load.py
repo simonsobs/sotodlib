@@ -153,6 +153,8 @@ class SOTOD(TOD):
                           (self.local_samples[1], 4))
         self.cache.create("boresight_azel", np.float64,
                           (self.local_samples[1], 4))
+        self.cache.create(self.HWP_ANGLE_NAME, np.float64,
+                          (self.local_samples[1],))
 
         # Common flags
         self.cache.create(self.COMMON_FLAG_NAME, np.uint8,
@@ -267,6 +269,19 @@ class SOTOD(TOD):
     def _put_common_flags(self, start, flags):
         ref = self.cache.reference("flags_common")
         ref[start:(start+flags.shape[0])] = flags
+        del ref
+        return
+
+    def _get_hwp_angle(self, start, n):
+        if self.cache.exists(self.HWP_ANGLE_NAME):
+            hwpang = self.cache.reference(self.HWP_ANGLE_NAME)[start:start+n]
+        else:
+            hwpang = None
+        return hwpang
+
+    def _put_hwp_angle(self, start, hwpang):
+        ref = self.cache.reference(self.HWP_ANGLE_NAME)
+        ref[start:(start + hwpang.shape[0])] = hwpang
         del ref
         return
 

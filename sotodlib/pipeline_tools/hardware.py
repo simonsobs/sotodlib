@@ -10,7 +10,7 @@ from toast.utils import Logger
 from .. import hardware
 
 
-FOCALPLANE_RADII_DEG = {"LAT" : 8, "SAT0" : 30, "SAT1" : 30, "SAT2" : 30, "SAT3" : 30}
+FOCALPLANE_RADII_DEG = {"LAT" : 3.6, "SAT0" : 17.8, "SAT1" : 17.8, "SAT2" : 17.8, "SAT3" : 17.2}
 
 
 class SOTelescope(Telescope):
@@ -50,7 +50,7 @@ def add_hw_args(parser):
     parser.add_argument(
         "--tubes",
         required=True,
-        help="Comma-separated list of  optics tubes: LT0 (UHF), LT1 (UHF), "
+        help="Comma-separated list of optics tubes: LT0 (UHF), LT1 (UHF), "
         " LT2 (MFF), LT3 (MFF), LT4 (MFS), LT5 (MFS), LT6 (LF). "
         "Length of list must equal --bands",
     )
@@ -158,13 +158,16 @@ def get_hardware(args, comm, verbose=False):
             det_index[det] = idet
         match = {"band": args.bands.replace(",", "|")}
         tubes = args.tubes.split(",")
-        hw = hw.select(telescopes=[telescope.name], tubes=tubes, match=match)
+        # If one provides both telescopes and tubes, the tubes matching *either*
+        # will be concatenated
+        #hw = hw.select(telescopes=[telescope.name], tubes=tubes, match=match)
+        hw = hw.select(tubes=tubes, match=match)
         if args.thinfp:
             # Only accept a fraction of the detectors for
             # testing and development
             delete_detectors = []
             for det_name in hw.data["detectors"].keys():
-                if det_index[det_name] % args.thinfp != 0:
+                if (det_index[det_name] // 2) % args.thinfp != 0:
                     delete_detectors.append(det_name)
             for det_name in delete_detectors:
                 del hw.data["detectors"][det_name]
