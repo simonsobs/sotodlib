@@ -772,6 +772,14 @@ def tod_to_frames(
         split_field(ang_roll, core3g.G3Timestream, "boresight", "roll", None,
                     times=times)
 
+    hwp_angle = None
+    if rankdet == 0:
+        hwp_angle = tod.local_hwp_angle()
+    if comm is not None:
+        hwp_angle = gather_field(0, hwp_angle, 1, MPI.DOUBLE, cacheoff, ncache, 0)
+    if rank == 0:
+        split_field(hwp_angle, core3g.G3VectorDouble, "hwp_angle", times=times)
+
     # Now the position and velocity information
 
     pos = None

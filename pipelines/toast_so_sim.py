@@ -3,6 +3,21 @@
 # Copyright (c) 2019 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
+
+import os
+if 'TOAST_STARTUP_DELAY' in os.environ:
+    import numpy as np
+    import time
+    delay = np.float(os.environ['TOAST_STARTUP_DELAY'])
+    wait = np.random.rand() * delay
+    #print('Sleeping for {} seconds before importing TOAST'.format(wait),
+    #      flush=True)
+    time.sleep(wait)
+
+
+# TOAST must be imported before numpy to ensure the right MKL is used
+import toast
+
 # import so3g
 
 import copy
@@ -117,7 +132,7 @@ def parse_arguments(comm):
     add_atmosphere_args(parser)
     add_noise_args(parser)
     add_gainscrambler_args(parser)
-    add_madam_args(parser, ground_data=True)
+    add_madam_args(parser)
     add_sky_map_args(parser)
     add_sss_args(parser)
     add_tidas_args(parser)
@@ -198,7 +213,7 @@ def main():
 
     mpiworld, procs, rank, comm = get_comm()
 
-    memreport(comm.comm_world, "at the beginning of the pipeline")
+    memreport("at the beginning of the pipeline", comm.comm_world)
 
     args, comm = parse_arguments(comm)
 
@@ -208,8 +223,8 @@ def main():
 
     if args.import_dir is not None:
         schedules = None
-        data, telescope_data = load_observations(args, comm)
-        memreport(comm.comm_world, "after load")
+        data, telescope_data, detweights = load_observations(args, comm)
+        memreport("after load", comm.comm_world)
         totalname = "signal"
     else:
         # Load and broadcast the schedule file
@@ -229,7 +244,7 @@ def main():
 
         data, telescope_data = create_observations(args, comm, schedules)
 
-        memreport(comm.comm_world, "after creating observations")
+        memreport("after creating observations", comm.comm_world)
 
         # Optionally rewrite the noise PSD:s in each observation to include
         # elevation-dependence
@@ -257,13 +272,13 @@ def main():
                 # These TOD objects do not have RA/Dec quaternions
                 pass
 
-    memreport(comm.comm_world, "after pointing")
+    memreport("after pointing", comm.comm_world)
 
     # Prepare auxiliary information for distributed map objects
 
     _, localsm, subnpix = get_submaps(args, comm, data)
 
-    memreport(comm.comm_world, "after submaps")
+    memreport("after submaps", comm.comm_world)
 
     # Set up objects to take copies of the TOD at appropriate times
 
@@ -272,21 +287,18 @@ def main():
             focalplanes = [s.telescope.focalplane.detector_data for s in schedules]
         else:
             focalplanes = [telescope.focalplane.detector_data]
-        signalname = simulate_sky_signal(args, comm, data, focalplanes, subnpix, localsm)
+        signalname = simulate_sky_signal(
+            args, comm, data, focalplanes, subnpix, localsm
+        )
     else:
         signalname = scan_sky_signal(args, comm, data, localsm, subnpix)
 
-    memreport(comm.comm_world, "after PySM")
+    memreport("after PySM", comm.comm_world)
 
     # Loop over Monte Carlos
 
     firstmc = int(args.MC_start)
     nmc = int(args.MC_count)
-
-    if nmc == 1:
-        # When there is only one MC realization, we don't need to keep
-        # a copy of the sky signal
-        totalname = signalname
 
     for mc in range(firstmc, firstmc + nmc):
 
@@ -297,21 +309,23 @@ def main():
 
         scale_atmosphere_by_bandpass(args, comm, data, totalname, mc)
 
-        memreport(comm.comm_world, "after atmosphere")
+        memreport("after atmosphere", comm.comm_world)
 
         # update_atmospheric_noise_weights(args, comm, data, freq, mc)
 
-        add_signal(args, comm, data, totalname, signalname, purge=(nmc == 1))
+        add_signal(
+            args, comm, data, totalname, signalname, purge=(mc == firstmc + nmc - 1)
+        )
 
-        memreport(comm.comm_world, "after adding sky")
+        memreport("after adding sky", comm.comm_world)
 
         simulate_noise(args, comm, data, mc, totalname)
 
-        memreport(comm.comm_world, "after simulating noise")
+        memreport("after simulating noise", comm.comm_world)
 
         simulate_sss(args, comm, data, mc, totalname)
 
-        memreport(comm.comm_world, "after simulating SSS")
+        memreport("after simulating SSS", comm.comm_world)
 
         # DEBUG begin
         """
@@ -339,7 +353,7 @@ def main():
             # export_TOD(args, comm, data, totalname, other=[signalname])
             export_TOD(args, comm, data, totalname, schedules)
 
-            memreport(comm.comm_world, "after export")
+            memreport("after export", comm.comm_world)
 
         if args.no_maps:
             continue
@@ -361,7 +375,7 @@ def main():
             first_call=(mc == firstmc),
         )
 
-        memreport(comm.comm_world, "after madam")
+        memreport("after madam", comm.comm_world)
 
         if args.apply_polyfilter or args.apply_groundfilter:
 
@@ -371,7 +385,7 @@ def main():
 
             apply_groundfilter(args, comm, data, totalname)
 
-            memreport(comm.comm_world, "after filter")
+            memreport("after filter", comm.comm_world)
 
             # Bin maps
 
@@ -390,12 +404,12 @@ def main():
                 bin_only=True,
             )
 
-            memreport(comm.comm_world, "after filter & bin")
+            memreport("after filter & bin", comm.comm_world)
 
     if comm.comm_world is not None:
         comm.comm_world.barrier()
 
-    memreport(comm.comm_world, "at the end of the pipeline")
+    memreport("at the end of the pipeline", comm.comm_world)
 
     gt.stop_all()
     if mpiworld is not None:
