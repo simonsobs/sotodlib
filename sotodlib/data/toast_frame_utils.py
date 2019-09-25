@@ -487,6 +487,11 @@ def tod_to_frames(
     def gather_field(prow, pdata, nnz, mpitype, cacheoff, ncache, tag):
         """Gather a single timestream buffer to the root process.
         """
+        is_none = pdata is None
+        all_none = comm.allreduce(is_none, MPI.LAND)
+        if all_none:
+            # This situation arises at least when gathering HWP angle from LAT
+            return None
         gdata = None
         # We are going to allreduce this later, so that every process
         # knows the dimensions of the field.
@@ -598,6 +603,8 @@ def tod_to_frames(
                     times=None):
         """Split a gathered data buffer into frames- only on root process.
         """
+        if data is None:
+            return
         if g3t == core3g.G3VectorTime:
             # Special case for time values stored as int64_t, but
             # wrapped in a class.
@@ -622,7 +629,7 @@ def tod_to_frames(
                 ndata = frame_sizes[f]
                 datalast = dataoff + ndata
                 chunks = list()
-                idomain = (0, ndata - 1)
+                idomain = (0, int(ndata - 1))
                 for intr in fint:
                     # Interval sample ranges are defined relative to the
                     # frame itself.
