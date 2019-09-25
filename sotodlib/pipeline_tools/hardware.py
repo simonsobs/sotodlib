@@ -237,7 +237,7 @@ def get_focalplane(args, comm, hw, det_index, verbose=False):
             pass
         if fpradius is None:
             fpradius = 0
-        for idet, (det_name, det_data) in enumerate(hw.data["detectors"].items()):
+        for det_name, det_data in hw.data["detectors"].items():
             # RNG index for this detector
             index = det_index[det_name]
             wafer = det_data["wafer"]
@@ -284,7 +284,7 @@ def load_focalplanes(args, comm, schedules, verbose=False):
             detector across all focal planes. In [K_CMB^-2].
             They can be used to bin the TOD.
     """
-    log = Logger.get()
+    # log = Logger.get()
     timer = Timer()
     timer.start()
 
