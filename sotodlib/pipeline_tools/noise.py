@@ -27,7 +27,7 @@ def get_elevation_noise(args, comm, data, key="noise"):
     """
     timer = Timer()
     timer.start()
-    fsample = args.sample_rate
+    # fsample = args.sample_rate
     for obs in data.obs:
         tod = obs["tod"]
         fp = obs["focalplane"]
@@ -43,7 +43,7 @@ def get_elevation_noise(args, comm, data, key="noise"):
             try:
                 # Some TOD classes provide a shortcut to Az/El
                 _, el = tod.read_azel(detector=det)
-            except Exception as e:
+            except Exception:
                 azelquat = tod.read_pntg(detector=det, azel=True)
                 # Convert Az/El quaternion of the detector back into
                 # angles for the simulation.
