@@ -440,5 +440,7 @@ if __name__ == "__main__":
         lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
         lines = ["Proc {}: {}".format(rank, x) for x in lines]
         print("".join(lines), flush=True)
-        if mpiworld is not None:
+        if mpiworld is not None and procs > 1:
             mpiworld.Abort(6)
+        else:
+            raise
