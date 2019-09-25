@@ -7,7 +7,7 @@ from toast.timing import function_timer, Timer
 from toast.tod import AnalyticNoise
 from toast.utils import Logger
 import toast.qarray as qa
-
+from ..hardware import get_example
 
 def add_so_noise_args(parser):
     parser.add_argument(
@@ -89,7 +89,7 @@ def get_analytic_noise(args, comm, focalplane, verbose=True):
         fmin, fknee, alpha, net = np.array(args.common_mode_noise.split(",")).astype(
             np.float64
         )
-        hw = sotodlib.hardware.get_example()
+        hw = get_example()
         for itube, tube in enumerate(sorted(hw.data["tubes"].keys())):
             d = "common_mode_{}".format(tube)
             detectors.append(d)
