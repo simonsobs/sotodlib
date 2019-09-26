@@ -26,7 +26,7 @@ from toast.timing import Timer
 
 # Mapping between TOAST cache names and so3g fields
 
-FIELD_TO_CACHE= {
+FIELD_TO_CACHE = {
     #"timestamps" : TOD.TIMESTAMP_NAME,
     "flags_common" : TOD.COMMON_FLAG_NAME,
     "site_velocity" : TOD.VELOCITY_NAME,
@@ -487,6 +487,11 @@ def tod_to_frames(
     def gather_field(prow, pdata, nnz, mpitype, cacheoff, ncache, tag):
         """Gather a single timestream buffer to the root process.
         """
+        is_none = pdata is None
+        all_none = comm.allreduce(is_none, MPI.LAND)
+        if all_none:
+            # This situation arises at least when gathering HWP angle from LAT
+            return None
         gdata = None
         # We are going to allreduce this later, so that every process
         # knows the dimensions of the field.
@@ -580,24 +585,12 @@ def tod_to_frames(
     else:
         fdata = [None for f in range(n_frames)]
 
-    def flags_to_intervals(flgs):
-        """Convert a flag vector to an interval list.
-
-        FIXME: uses sample indices instead of time stamps
-        """
-        groups = [
-            [i for i, value in it] for key, it in
-            itertools.groupby(enumerate(flgs), key=operator.itemgetter(1))
-            if key != 0]
-        chunks = list()
-        for grp in groups:
-            chunks.append([grp[0], grp[-1] + 1])
-        return chunks
-
     def split_field(data, g3t, framefield, mapfield=None, g3units=units,
                     times=None):
         """Split a gathered data buffer into frames- only on root process.
         """
+        if data is None:
+            return
         if g3t == core3g.G3VectorTime:
             # Special case for time values stored as int64_t, but
             # wrapped in a class.
@@ -614,50 +607,18 @@ def tod_to_frames(
                         core3g.G3VectorTime(g3times)
                 del g3times
         elif g3t == so3g.IntervalsInt:
-            # This means that the data is actually flags
-            # and we should convert it into a list of intervals.
-            fint = flags_to_intervals(data)
+            # Flag vector is written as a simple boolean.
             for f in range(n_frames):
                 dataoff = fdataoff[f]
                 ndata = frame_sizes[f]
-                datalast = dataoff + ndata
-                chunks = list()
-                idomain = (0, ndata - 1)
-                for intr in fint:
-                    # Interval sample ranges are defined relative to the
-                    # frame itself.
-                    cfirst = None
-                    clast = None
-                    if (intr[0] < datalast) and (intr[1] >= dataoff):
-                        # there is some overlap...
-                        if intr[0] < dataoff:
-                            cfirst = 0
-                        else:
-                            cfirst = intr[0] - dataoff
-                        if intr[1] > datalast:
-                            clast = ndata - 1
-                        else:
-                            clast = intr[1] - dataoff
-                        chunks.append([cfirst, clast])
+                # Extract flag vector (0 or 1) for this frame
+                frame_flags = (data[dataoff : dataoff + ndata] != 0).astype(int)
+                # Convert bit 0 to an IntervalsInt.
+                ival = so3g.IntervalsInt.from_mask(frame_flags, 1)[0]
                 if mapfield is None:
-                    if len(chunks) == 0:
-                        fdata[f][framefield] = \
-                            so3g.IntervalsInt()
-                    else:
-                        fdata[f][framefield] = \
-                            so3g.IntervalsInt.from_array(
-                                np.array(chunks, dtype=np.int64))
-                    fdata[f][framefield].domain = idomain
+                    fdata[f][framefield] = ival
                 else:
-                    if len(chunks) == 0:
-                        fdata[f][framefield][mapfield] = \
-                            so3g.IntervalsInt()
-                    else:
-                        fdata[f][framefield][mapfield] = \
-                            so3g.IntervalsInt.from_array(
-                                np.array(chunks, dtype=np.int64))
-                        fdata[f][framefield][mapfield].domain = idomain
-            del fint
+                    fdata[f][framefield][mapfield] = ival
         elif g3t == core3g.G3Timestream:
             if times is None:
                 raise RuntimeError(
