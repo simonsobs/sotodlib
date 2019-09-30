@@ -17,6 +17,7 @@ from importlib import import_module
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 
 sys.path.insert(0, os.path.abspath('..'))
+import sotodlib
 
 # -- Project information -----------------------------------------------------
 
@@ -25,9 +26,9 @@ copyright = '2018-2019, Simons Observatory Collaboration'
 author = 'Simons Observatory Collaboration'
 
 # The short X.Y version
-version = '0.1'
+version = sotodlib.__version__
 # The full version, including alpha/beta/rc tags
-release = '0.1.0'
+release = sotodlib.__version__
 
 
 # -- General configuration ---------------------------------------------------
