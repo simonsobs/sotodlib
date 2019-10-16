@@ -7,7 +7,7 @@ import sys
 import numpy as np
 
 from toast.timing import function_timer, Timer
-from toast.tod import TODGround
+from toast.todmap import TODGround
 from toast.utils import Logger
 
 

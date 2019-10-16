@@ -4,7 +4,7 @@
 import numpy as np
 
 from toast.timing import function_timer, Timer
-from toast.tod import OpSimPySM
+from toast.todmap import OpSimPySM
 from toast.utils import Logger
 
 try:
