@@ -6,7 +6,7 @@ import numpy as np
 from toast.dist import distribute_uniform, Data
 from toast.pipeline_tools import get_breaks
 from toast.timing import function_timer, Timer
-from toast.tod import TODGround
+from toast.todmap import TODGround
 from toast.utils import Logger
 
 from .noise import get_analytic_noise
