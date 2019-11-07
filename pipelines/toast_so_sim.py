@@ -42,6 +42,8 @@ import toast.pipeline_tools as toast_tools
 
 import sotodlib.pipeline_tools as so_tools
 
+import sotodlib.observe
+
 import numpy as np
 
 import sotodlib.hardware
@@ -70,6 +72,7 @@ def parse_arguments(comm):
         fromfile_prefix_chars="@",
     )
 
+
     toast_tools.add_dist_args(parser)
     toast_tools.add_todground_args(parser)
     toast_tools.add_pointing_args(parser)
@@ -89,6 +92,7 @@ def parse_arguments(comm):
     so_tools.add_export_args(parser)
     toast_tools.add_debug_args(parser)
     so_tools.add_import_args(parser)
+    sotodlib.observe.add_sim_sso_args(parser)
 
     parser.add_argument(
         "--no-maps",
@@ -268,6 +272,8 @@ def main():
         toast_tools.simulate_sss(args, comm, data, mc, totalname)
 
         memreport("after simulating SSS", comm.comm_world)
+
+        sotodlib.observe.apply_sim_sso(args, comm, data, mc, totalname)
 
         # DEBUG begin
         """
