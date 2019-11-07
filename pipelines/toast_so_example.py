@@ -28,21 +28,11 @@ def binned_map(data, npix, subnpix, out="."):
     # The global MPI communicator
     cworld = data.comm.comm_world
 
-    # get locally hit pixels
-    lc = tm.OpLocalPixels()
-    localpix = lc.exec(data)
-
-    # find the locally hit submaps.
-    localsm = np.unique(np.floor_divide(localpix, subnpix))
-
     # construct distributed maps to store the covariance,
     # noise weighted map, and hits
-    invnpp = tm.DistPixels(comm=cworld, size=npix, nnz=6, dtype=np.float64,
-                           submap=subnpix, local=localsm)
-    hits = tm.DistPixels(comm=comm.comm_world, size=npix, nnz=1,
-                         dtype=np.int64, submap=subnpix, local=localsm)
-    zmap = tm.DistPixels(comm=comm.comm_world, size=npix, nnz=3,
-                         dtype=np.float64, submap=subnpix, local=localsm)
+    invnpp = tm.DistPixels(data, nnz=6, dtype=np.float64)
+    hits = tm.DistPixels(data, nnz=1, dtype=np.int64)
+    zmap = tm.DistPixels(data, nnz=3, dtype=np.float64)
 
     invnpp.data.fill(0.0)
     hits.data.fill(0)
