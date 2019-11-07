@@ -38,63 +38,9 @@ from toast.utils import Logger, Environment, memreport
 from toast.timing import function_timer, GlobalTimers, Timer, gather_timers
 from toast.timing import dump as dump_timing
 
+import toast.pipeline_tools as toast_tools
 
-from toast.pipeline_tools import (
-    add_dist_args,
-    add_debug_args,
-    get_time_communicators,
-    get_comm,
-    add_polyfilter_args,
-    apply_polyfilter,
-    add_groundfilter_args,
-    apply_groundfilter,
-    add_atmosphere_args,
-    simulate_atmosphere,
-    scale_atmosphere_by_frequency,
-    update_atmospheric_noise_weights,
-    add_noise_args,
-    simulate_noise,
-    # get_analytic_noise,
-    add_gainscrambler_args,
-    scramble_gains,
-    add_pointing_args,
-    expand_pointing,
-    get_submaps,
-    add_madam_args,
-    setup_madam,
-    apply_madam,
-    add_sky_map_args,
-    # add_pysm_args,
-    scan_sky_signal,
-    # simulate_sky_signal,
-    add_sss_args,
-    simulate_sss,
-    add_signal,
-    copy_signal,
-    add_tidas_args,
-    output_tidas,
-    # add_spt3g_args,
-    # output_spt3g,
-    add_todground_args,
-    load_schedule,
-    load_weather,
-    add_mc_args,
-)
-
-from sotodlib.pipeline_tools import (
-    add_hw_args,
-    add_so_noise_args,
-    get_elevation_noise,
-    add_pysm_args,
-    simulate_sky_signal,
-    create_observations,
-    load_focalplanes,
-    scale_atmosphere_by_bandpass,
-    add_export_args,
-    export_TOD,
-    add_import_args,
-    load_observations,
-)
+import sotodlib.pipeline_tools as so_tools
 
 import numpy as np
 
@@ -124,25 +70,25 @@ def parse_arguments(comm):
         fromfile_prefix_chars="@",
     )
 
-    add_dist_args(parser)
-    add_todground_args(parser)
-    add_pointing_args(parser)
-    add_polyfilter_args(parser)
-    add_groundfilter_args(parser)
-    add_atmosphere_args(parser)
-    add_noise_args(parser)
-    add_gainscrambler_args(parser)
-    add_madam_args(parser)
-    add_sky_map_args(parser)
-    add_sss_args(parser)
-    add_tidas_args(parser)
-    add_mc_args(parser)
-    add_hw_args(parser)
-    add_so_noise_args(parser)
-    add_pysm_args(parser)
-    add_export_args(parser)
-    add_debug_args(parser)
-    add_import_args(parser)
+    toast_tools.add_dist_args(parser)
+    toast_tools.add_todground_args(parser)
+    toast_tools.add_pointing_args(parser)
+    toast_tools.add_polyfilter_args(parser)
+    toast_tools.add_groundfilter_args(parser)
+    toast_tools.add_atmosphere_args(parser)
+    toast_tools.add_noise_args(parser)
+    toast_tools.add_gainscrambler_args(parser)
+    toast_tools.add_madam_args(parser)
+    toast_tools.add_sky_map_args(parser)
+    toast_tools.add_sss_args(parser)
+    toast_tools.add_tidas_args(parser)
+    toast_tools.add_mc_args(parser)
+    so_tools.add_hw_args(parser)
+    so_tools.add_so_noise_args(parser)
+    so_tools.add_pysm_args(parser)
+    so_tools.add_export_args(parser)
+    toast_tools.add_debug_args(parser)
+    so_tools.add_import_args(parser)
 
     parser.add_argument(
         "--no-maps",
@@ -211,7 +157,7 @@ def main():
     timer0 = Timer()
     timer0.start()
 
-    mpiworld, procs, rank, comm = get_comm()
+    mpiworld, procs, rank, comm = toast_tools.get_comm()
 
     memreport("at the beginning of the pipeline", comm.comm_world)
 
@@ -219,47 +165,47 @@ def main():
 
     # Initialize madam parameters
 
-    madampars = setup_madam(args)
+    madampars = toast_tools.setup_madam(args)
 
     if args.import_dir is not None:
         schedules = None
-        data, telescope_data, detweights = load_observations(args, comm)
+        data, telescope_data, detweights = so_tools.load_observations(args, comm)
         memreport("after load", comm.comm_world)
         totalname = "signal"
     else:
         # Load and broadcast the schedule file
 
-        schedules = load_schedule(args, comm)
+        schedules = toast_tools.load_schedule(args, comm)
 
         # Load the weather and append to schedules
 
-        load_weather(args, comm, schedules)
+        toast_tools.load_weather(args, comm, schedules)
 
         # load or simulate the focalplane
 
-        detweights = load_focalplanes(args, comm, schedules)
+        detweights = so_tools.load_focalplanes(args, comm, schedules)
 
         # Create the TOAST data object to match the schedule.  This will
         # include simulating the boresight pointing.
 
-        data, telescope_data = create_observations(args, comm, schedules)
+        data, telescope_data = so_tools.create_observations(args, comm, schedules)
 
         memreport("after creating observations", comm.comm_world)
 
         # Optionally rewrite the noise PSD:s in each observation to include
         # elevation-dependence
-        get_elevation_noise(args, comm, data)
+        so_tools.get_elevation_noise(args, comm, data)
 
         totalname = "total"
 
     # Split the communicator for day and season mapmaking
 
-    time_comms = get_time_communicators(args, comm, data)
+    time_comms = toast_tools.get_time_communicators(args, comm, data)
 
     # Expand boresight quaternions into detector pointing weights and
     # pixel numbers
 
-    expand_pointing(args, comm, data)
+    toast_tools.expand_pointing(args, comm, data)
 
     # Only purge the pointing if we are NOT going to export the
     # data to a TIDAS volume
@@ -276,8 +222,6 @@ def main():
 
     # Prepare auxiliary information for distributed map objects
 
-    _, localsm, subnpix = get_submaps(args, comm, data)
-
     memreport("after submaps", comm.comm_world)
 
     # Set up objects to take copies of the TOD at appropriate times
@@ -287,11 +231,9 @@ def main():
             focalplanes = [s.telescope.focalplane.detector_data for s in schedules]
         else:
             focalplanes = [telescope.focalplane.detector_data]
-        signalname = simulate_sky_signal(
-            args, comm, data, focalplanes, subnpix, localsm
-        )
+        signalname = so_tools.simulate_sky_signal(args, comm, data, focalplanes)
     else:
-        signalname = scan_sky_signal(args, comm, data, localsm, subnpix)
+        signalname = toast_tools.scan_sky_signal(args, comm, data)
 
     memreport("after PySM", comm.comm_world)
 
@@ -305,25 +247,25 @@ def main():
         if comm.world_rank == 0:
             log.info("Processing MC = {}".format(mc))
 
-        simulate_atmosphere(args, comm, data, mc, totalname)
+        toast_tools.simulate_atmosphere(args, comm, data, mc, totalname)
 
-        scale_atmosphere_by_bandpass(args, comm, data, totalname, mc)
+        so_tools.scale_atmosphere_by_bandpass(args, comm, data, totalname, mc)
 
         memreport("after atmosphere", comm.comm_world)
 
         # update_atmospheric_noise_weights(args, comm, data, freq, mc)
 
-        add_signal(
+        toast_tools.add_signal(
             args, comm, data, totalname, signalname, purge=(mc == firstmc + nmc - 1)
         )
 
         memreport("after adding sky", comm.comm_world)
 
-        simulate_noise(args, comm, data, mc, totalname)
+        toast_tools.simulate_noise(args, comm, data, mc, totalname)
 
         memreport("after simulating noise", comm.comm_world)
 
-        simulate_sss(args, comm, data, mc, totalname)
+        toast_tools.simulate_sss(args, comm, data, mc, totalname)
 
         memreport("after simulating SSS", comm.comm_world)
 
@@ -344,14 +286,13 @@ def main():
         """
         # DEBUG end
 
-        scramble_gains(args, comm, data, mc, totalname)
+        toast_tools.scramble_gains(args, comm, data, mc, totalname)
 
         if mc == firstmc:
             # For the first realization and frequency, optionally
             # export the timestream data.
-            output_tidas(args, comm, data, totalname)
-            # export_TOD(args, comm, data, totalname, other=[signalname])
-            export_TOD(args, comm, data, totalname, schedules)
+            toast_tools.output_tidas(args, comm, data, totalname)
+            so_tools.export_TOD(args, comm, data, totalname, schedules)
 
             memreport("after export", comm.comm_world)
 
@@ -362,7 +303,7 @@ def main():
 
         # Bin and destripe maps
 
-        apply_madam(
+        toast_tools.apply_madam(
             args,
             comm,
             data,
@@ -381,15 +322,15 @@ def main():
 
             # Filter signal
 
-            apply_polyfilter(args, comm, data, totalname)
+            toast_tools.apply_polyfilter(args, comm, data, totalname)
 
-            apply_groundfilter(args, comm, data, totalname)
+            toast_tools.apply_groundfilter(args, comm, data, totalname)
 
             memreport("after filter", comm.comm_world)
 
             # Bin maps
 
-            apply_madam(
+            toast_tools.apply_madam(
                 args,
                 comm,
                 data,
