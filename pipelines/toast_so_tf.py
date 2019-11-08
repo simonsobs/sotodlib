@@ -3,22 +3,13 @@
 # Copyright (c) 2019 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
+# This pipeline exists only to measure the filter&bin transfer function
+
 
 import os
-if 'TOAST_STARTUP_DELAY' in os.environ:
-    import numpy as np
-    import time
-    delay = np.float(os.environ['TOAST_STARTUP_DELAY'])
-    wait = np.random.rand() * delay
-    #print('Sleeping for {} seconds before importing TOAST'.format(wait),
-    #      flush=True)
-    time.sleep(wait)
-
 
 # TOAST must be imported before numpy to ensure the right MKL is used
 import toast
-
-# import so3g
 
 import copy
 from datetime import datetime
@@ -75,33 +66,24 @@ def parse_arguments(comm):
     toast_tools.add_pointing_args(parser)
     toast_tools.add_polyfilter_args(parser)
     toast_tools.add_groundfilter_args(parser)
-    toast_tools.add_atmosphere_args(parser)
     toast_tools.add_noise_args(parser)
-    toast_tools.add_gainscrambler_args(parser)
     toast_tools.add_madam_args(parser)
     toast_tools.add_sky_map_args(parser)
-    toast_tools.add_sss_args(parser)
-    toast_tools.add_tidas_args(parser)
     toast_tools.add_mc_args(parser)
     so_tools.add_hw_args(parser)
     so_tools.add_so_noise_args(parser)
     so_tools.add_pysm_args(parser)
     so_tools.add_export_args(parser)
     toast_tools.add_debug_args(parser)
-    so_tools.add_import_args(parser)
-
-    parser.add_argument(
-        "--no-maps",
-        required=False,
-        default=False,
-        action="store_true",
-        help="Disable all mapmaking.",
-    )
 
     parser.add_argument(
         "--outdir", required=False, default="out", help="Output directory"
     )
 
+    parser.add_argument(
+        "--map-prefix", required=False, default="toast", help="Output map prefix"
+    )
+    
     try:
         args = parser.parse_args()
     except SystemExit as e:
@@ -167,36 +149,30 @@ def main():
 
     madampars = toast_tools.setup_madam(args)
 
-    if args.import_dir is not None:
-        schedules = None
-        data, telescope_data, detweights = so_tools.load_observations(args, comm)
-        memreport("after load", comm.comm_world)
-        totalname = "signal"
-    else:
-        # Load and broadcast the schedule file
+    # Load and broadcast the schedule file
 
-        schedules = toast_tools.load_schedule(args, comm)
+    schedules = toast_tools.load_schedule(args, comm)
 
-        # Load the weather and append to schedules
+    # Load the weather and append to schedules
 
-        toast_tools.load_weather(args, comm, schedules)
+    toast_tools.load_weather(args, comm, schedules)
 
-        # load or simulate the focalplane
+    # load or simulate the focalplane
 
-        detweights = so_tools.load_focalplanes(args, comm, schedules)
+    detweights = so_tools.load_focalplanes(args, comm, schedules)
 
-        # Create the TOAST data object to match the schedule.  This will
-        # include simulating the boresight pointing.
+    # Create the TOAST data object to match the schedule.  This will
+    # include simulating the boresight pointing.
 
-        data, telescope_data = so_tools.create_observations(args, comm, schedules)
+    data, telescope_data = so_tools.create_observations(args, comm, schedules)
 
-        memreport("after creating observations", comm.comm_world)
+    memreport("after creating observations", comm.comm_world)
 
-        # Optionally rewrite the noise PSD:s in each observation to include
-        # elevation-dependence
-        so_tools.get_elevation_noise(args, comm, data)
+    # Optionally rewrite the noise PSD:s in each observation to include
+    # elevation-dependence
+    so_tools.get_elevation_noise(args, comm, data)
 
-        totalname = "total"
+    totalname = "total"
 
     # Split the communicator for day and season mapmaking
 
@@ -207,31 +183,7 @@ def main():
 
     toast_tools.expand_pointing(args, comm, data)
 
-    # Only purge the pointing if we are NOT going to export the
-    # data to a TIDAS volume
-    if (args.tidas is None) and (args.export is None):
-        for ob in data.obs:
-            tod = ob["tod"]
-            try:
-                tod.free_radec_quats()
-            except AttributeError:
-                # These TOD objects do not have RA/Dec quaternions
-                pass
-
     memreport("after pointing", comm.comm_world)
-
-    # Set up objects to take copies of the TOD at appropriate times
-
-    if args.pysm_model:
-        if schedules is not None:
-            focalplanes = [s.telescope.focalplane.detector_data for s in schedules]
-        else:
-            focalplanes = [telescope.focalplane.detector_data]
-        signalname = so_tools.simulate_sky_signal(args, comm, data, focalplanes)
-    else:
-        signalname = toast_tools.scan_sky_signal(args, comm, data)
-
-    memreport("after PySM", comm.comm_world)
 
     # Loop over Monte Carlos
 
@@ -243,11 +195,20 @@ def main():
         if comm.world_rank == 0:
             log.info("Processing MC = {}".format(mc))
 
-        toast_tools.simulate_atmosphere(args, comm, data, mc, totalname)
+        # Ensure there is no stale signal in the cache
+            
+        toast.tod.OpCacheClear(totalname).exec(data)
 
-        so_tools.scale_atmosphere_by_bandpass(args, comm, data, totalname, mc)
+        if args.pysm_model:
+            if schedules is not None:
+                focalplanes = [s.telescope.focalplane.detector_data for s in schedules]
+            else:
+                focalplanes = [telescope.focalplane.detector_data]
+            so_tools.simulate_sky_signal(args, comm, data, focalplanes, totalname, mc=mc)
+        else:
+            toast_tools.scan_sky_signal(args, comm, data, totalname, mc=mc)
 
-        memreport("after atmosphere", comm.comm_world)
+        memreport("after PySM", comm.comm_world)
 
         # update_atmospheric_noise_weights(args, comm, data, freq, mc)
 
@@ -257,62 +218,7 @@ def main():
 
         memreport("after adding sky", comm.comm_world)
 
-        toast_tools.simulate_noise(args, comm, data, mc, totalname)
-
-        memreport("after simulating noise", comm.comm_world)
-
-        toast_tools.simulate_sss(args, comm, data, mc, totalname)
-
-        memreport("after simulating SSS", comm.comm_world)
-
-        # DEBUG begin
-        """
-        import matplotlib.pyplot as plt
-        tod = data.obs[0]['tod']
-        times = tod.local_times()
-        for det in tod.local_dets:
-            sig = tod.local_signal(det, totalname)
-            plt.plot(times, sig, label=det)
-        plt.legend(loc='best')
-        fnplot = 'debug_{}.png'.format(args.madam_prefix)
-        plt.savefig(fnplot)
-        plt.close()
-        print('DEBUG plot saved in', fnplot)
-        return
-        """
-        # DEBUG end
-
-        toast_tools.scramble_gains(args, comm, data, mc, totalname)
-
-        if mc == firstmc:
-            # For the first realization and frequency, optionally
-            # export the timestream data.
-            toast_tools.output_tidas(args, comm, data, totalname)
-            so_tools.export_TOD(args, comm, data, totalname, schedules)
-
-            memreport("after export", comm.comm_world)
-
-        if args.no_maps:
-            continue
-
         outpath = setup_output(args, comm, mc)
-
-        # Bin and destripe maps
-
-        toast_tools.apply_madam(
-            args,
-            comm,
-            data,
-            madampars,
-            outpath,
-            detweights,
-            totalname,
-            time_comms=time_comms,
-            telescope_data=telescope_data,
-            first_call=(mc == firstmc),
-        )
-
-        memreport("after madam", comm.comm_world)
 
         if args.apply_polyfilter or args.apply_groundfilter:
 
@@ -326,20 +232,25 @@ def main():
 
             # Bin maps
 
-            toast_tools.apply_madam(
-                args,
-                comm,
-                data,
-                madampars,
-                outpath,
-                detweights,
-                totalname,
-                time_comms=time_comms,
-                telescope_data=telescope_data,
-                first_call=False,
-                extra_prefix="filtered",
-                bin_only=True,
+            mapmaker = toast.todmap.MapMaker(
+                nside=args.nside,
+                nnz=3,
+                name=totalname,
+                outdir=outpath,
+                outprefix=args.map_prefix + "_filtered",
+                write_hits=False,
+                zip_maps=False,
+                write_wcov_inv=False,
+                write_wcov=False,
+                write_binned=True,
+                write_destriped=False,
+                write_rcond=False,
+                rcond_limit=1e-3,
+                baseline_length=None,
+                common_flag_mask=args.common_flag_mask,
+                pixels=pixels,
             )
+            mapmaker.exec(data)
 
             memreport("after filter & bin", comm.comm_world)
 
