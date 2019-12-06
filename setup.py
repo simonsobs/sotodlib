@@ -27,7 +27,8 @@ setup_opts["entry_points"] = {
 
 pipes = [
     "pipelines/toast_so_sim.py",
-    "pipelines/toast_so_example.py"
+    "pipelines/toast_so_example.py",
+    "pipelines/toast_bin_so3g.py",
 ]
 
 setup_opts["name"] = "sotodlib"
