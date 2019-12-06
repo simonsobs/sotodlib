@@ -67,7 +67,6 @@ def parse_arguments(comm):
     toast_tools.add_polyfilter_args(parser)
     toast_tools.add_groundfilter_args(parser)
     toast_tools.add_noise_args(parser)
-    toast_tools.add_madam_args(parser)
     toast_tools.add_sky_map_args(parser)
     toast_tools.add_mc_args(parser)
     so_tools.add_hw_args(parser)
@@ -83,7 +82,7 @@ def parse_arguments(comm):
     parser.add_argument(
         "--map-prefix", required=False, default="toast", help="Output map prefix"
     )
-    
+
     try:
         args = parser.parse_args()
     except SystemExit as e:
@@ -96,9 +95,6 @@ def parse_arguments(comm):
             raise RuntimeError(
                 "Multiple frequencies are not supported when scanning from a map"
             )
-
-    if args.simulate_atmosphere and args.weather is None:
-        raise RuntimeError("Cannot simulate atmosphere without a TOAST weather file")
 
     if comm.world_rank == 0:
         log.info("\n")
@@ -145,10 +141,6 @@ def main():
 
     args, comm = parse_arguments(comm)
 
-    # Initialize madam parameters
-
-    madampars = toast_tools.setup_madam(args)
-
     # Load and broadcast the schedule file
 
     schedules = toast_tools.load_schedule(args, comm)
@@ -192,11 +184,23 @@ def main():
 
     for mc in range(firstmc, firstmc + nmc):
 
+        timer_mc = Timer()
+        timer_mc.start()
+
+        outpath = setup_output(args, comm, mc)
+        outprefix = args.map_prefix + "_filtered_"
+        outmap = os.path.join(outpath, outprefix + "binned.fits")
+
+        if os.path.isfile(outmap):
+            if comm.world_rank == 0:
+                log.info("{} exists, skipping".format(outmap))
+            continue
+
         if comm.world_rank == 0:
-            log.info("Processing MC = {}".format(mc))
+            log.info("Processing MC = {} into {}".format(mc, outmap))
 
         # Ensure there is no stale signal in the cache
-            
+
         toast.tod.OpCacheClear(totalname).exec(data)
 
         if args.pysm_model:
@@ -210,16 +214,6 @@ def main():
 
         memreport("after PySM", comm.comm_world)
 
-        # update_atmospheric_noise_weights(args, comm, data, freq, mc)
-
-        toast_tools.add_signal(
-            args, comm, data, totalname, signalname, purge=(mc == firstmc + nmc - 1)
-        )
-
-        memreport("after adding sky", comm.comm_world)
-
-        outpath = setup_output(args, comm, mc)
-
         if args.apply_polyfilter or args.apply_groundfilter:
 
             # Filter signal
@@ -232,12 +226,15 @@ def main():
 
             # Bin maps
 
-            mapmaker = toast.todmap.MapMaker(
+            timer_map = Timer()
+            timer_map.start()
+
+            mapmaker = toast.todmap.OpMapMaker(
                 nside=args.nside,
                 nnz=3,
                 name=totalname,
                 outdir=outpath,
-                outprefix=args.map_prefix + "_filtered",
+                outprefix=outprefix,
                 write_hits=False,
                 zip_maps=False,
                 write_wcov_inv=False,
@@ -248,11 +245,16 @@ def main():
                 rcond_limit=1e-3,
                 baseline_length=None,
                 common_flag_mask=args.common_flag_mask,
-                pixels=pixels,
             )
             mapmaker.exec(data)
 
+            if comm.world_rank == 0:
+                timer_map.report_clear("Bin map")
+
             memreport("after filter & bin", comm.comm_world)
+
+            if comm.world_rank == 0:
+                timer_mc.report_clear("Monte Carlo iteration # {:05}".format(mc))
 
     if comm.comm_world is not None:
         comm.comm_world.barrier()
@@ -268,11 +270,11 @@ def main():
     if rank == 0:
         out = os.path.join(args.outdir, "timing")
         dump_timing(alltimers, out)
-        timer.stop()
-        timer.report("Gather and dump timing info")
-    timer0.stop()
+        timer.report_clear("Gather and dump timing info")
+
     if comm.world_rank == 0:
-        timer0.report("toast_so_sim.py pipeline")
+        timer0.report_clear("toast_so_tf.py pipeline")
+
     return
 
 
