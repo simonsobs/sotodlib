@@ -20,11 +20,14 @@ LAT.
 """
 
 import so3g
-from spt3g import core
+from spt3g import core as g3core
 
 import numpy as np
 
 from collections import OrderedDict
+
+from .. import core
+
 
 class FieldGroup(list):
     """This is essentially a roadmap for decoding data from a
@@ -184,7 +187,7 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None):
             unpack_frame_object(target, item, streams[item.name], comp_info)
             if item.timestamp_field is not None:
                 t0, t1, ns = target.start, target.stop, target.n_samples
-                t0, t1 = t0.time / core.G3Units.sec, t1.time / core.G3Units.sec
+                t0, t1 = t0.time / g3core.G3Units.sec, t1.time / g3core.G3Units.sec
                 streams[item.timestamp_field].append(np.linspace(t0, t1, ns))
             continue
         # This is a simple field.
@@ -230,17 +233,17 @@ def unpack_frames(filename, field_request, streams):
         if len(frames) == 0:
             break
         frame = frames[0]
-        if frame.type == core.G3FrameType.Scan:
+        if frame.type == g3core.G3FrameType.Scan:
             unpack_frame_object(frame, field_request, streams)
     return streams
+
 
 def load_observation(db, obs_id, dets=None, prefix=None):
     """Load the data for some observation.  You can restrict to only some
     detectors. Coming soon: also restrict by time range / sample
     index.
 
-
-    This specifically targets the pipe-s0001 sim format.
+    This specifically targets the pipe-s0001/s0002 sim format.
 
     Arguments:
 
@@ -275,13 +278,13 @@ def load_observation(db, obs_id, dets=None, prefix=None):
         pairs_req = [p for p in pairs if p[1] in dets]
         # Use sets for this...
         dets_req = [p[1] for p in pairs_req]
-        unmatched = [d for d in dets if not d in dets_req]
+        unmatched = [d for d in dets if d not in dets_req]
         if len(unmatched):
             raise RuntimeError("User requested invalid dets (e.g. %s) "
                                "for obs_id=%s" % (unmatched[0], obs_id))
 
     # Group by detset.
-    dets_by_detset = OrderedDict([(p[0],[]) for p in pairs_req])
+    dets_by_detset = OrderedDict([(p[0], []) for p in pairs_req])
     for p in pairs_req:
         dets_by_detset[p[0]].append(p[1])
 
@@ -313,31 +316,53 @@ def load_observation(db, obs_id, dets=None, prefix=None):
     streams = OrderedDict()
     for request, s in stream_groups:
         request.merge_result(streams, s)
-        
+
     FieldGroup.hstack_result(streams)
 
-    # Re-pack into something plausibly standardizable.  In first sims,
-    # everything is co-sampled by design, and thus "primary".  But we
-    # return an object that includes a place for "secondary"
-    # (non-cosampled) timestreams.
+    # Re-pack into an AxisManager.  In these early sims, everything is
+    # co-sampled by design, and thus "primary".  Let's plan on burying
+    # "secondary" timestream at least one level deep (i.e. protected
+    # by at least one level of sub-manager..
 
-    streams_out = OrderedDict([
-        ('primary', {
-            'signal': streams['signal'],
-            'timestamps': streams['timestamps'],
-            'boresight': streams['boresight'],
-            'qboresight_azel': streams['boresight_azel'].reshape((-1, 4)),
-            'qboresight_radec': streams['boresight_radec'].reshape((-1, 4)),
-            'site': {'position': streams['site_position'].reshape((-1, 3)),
-                     'velocity': streams['site_velocity'].reshape((-1, 3))},
-            }
-         ),
-        ('secondary', {})
-        ])
+    streams_out = core.AxisManager(
+        core.LabelAxis('dets', list(streams['signal'].keys())),
+        core.OffsetAxis('samps', len(streams['timestamps']),
+                        0, obs_id),
+        )
 
-    # Optional fields.
+    # Tick tock.
+    streams_out.wrap('timestamps', streams['timestamps'], [(0, 'samps')])
+
+    # Boresight is a sub AxisManager.
+    boresight = core.AxisManager(
+        streams_out._axes['samps'].copy()
+        )
+    for k in ['az', 'el', 'roll']:
+        boresight.wrap(k, streams['boresight'][k], [(0, 'samps')])
+    streams_out.wrap('boresight', boresight)
+
+    # Promote signal to 2-d...
+    signal = np.zeros(streams_out.shape, float)
+    for i, k in enumerate(streams_out['dets'].vals):
+        signal[i, :] = streams['signal'].pop(k)
+    streams_out.wrap('signal', signal, [(0, 'dets'), (1, 'samps')])
+
+    # Simulation specials...
+    streams_out.wrap('qboresight_azel',
+                     streams['boresight_azel'].reshape((-1, 4)),
+                     [(0, 'samps')])
+    streams_out.wrap('qboresight_radec',
+                     streams['boresight_radec'].reshape((-1, 4)),
+                     [(0, 'samps')])
+
+    site = core.AxisManager(
+        streams_out._axes['samps'].copy()
+        )
+    for k in ['position', 'velocity']:
+        site.wrap(k, streams['site_' + k].reshape(-1, 3), [(0, 'samps')])
+    streams_out.wrap('site', site)
 
     if 'hwp_angle' in streams:
-        streams_out['primary']['hwp_angle'] = streams['hwp_angle']
+        streams_out.wrap('hwp_angle', streams['hwp_angle'], [(0, 'samps')])
 
     return streams_out
