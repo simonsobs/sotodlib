@@ -83,6 +83,70 @@ def parse_arguments(comm):
         "--map-prefix", required=False, default="toast", help="Output map prefix"
     )
 
+    parser.add_argument(
+        "--madam",
+        required=False,
+        action="store_true",
+        help="Use libmadam to bin the signal",
+        dest="madam",
+    )
+    parser.add_argument(
+        "--no-madam",
+        required=False,
+        action="store_false",
+        help="Do not use libMadam to bin the signal",
+        dest="madam",
+    )
+    parser.set_defaults(madam=False)
+
+    parser.add_argument(
+        "--madam-conserve-memory",
+        required=False,
+        action="store_true",
+        help="Stage the Madam buffer packing",
+        dest="madam_conserve_memory",
+    )
+    parser.add_argument(
+        "--no-madam-conserve-memory",
+        required=False,
+        action="store_false",
+        help="Do not stage the Madam buffer packing",
+        dest="madam_conserve_memory",
+    )
+    parser.set_defaults(madam_conserve_memory=True)
+
+    parser.add_argument(
+        "--madam-allreduce",
+        required=False,
+        action="store_true",
+        help="Use the allreduce communication pattern in Madam",
+        dest="madam_allreduce",
+    )
+    parser.add_argument(
+        "--no-madam-allreduce",
+        required=False,
+        action="store_false",
+        help="Do not use the allreduce communication pattern in Madam",
+        dest="madam_allreduce",
+    )
+    parser.set_defaults(madam_allreduce=False)
+
+    parser.add_argument(
+        "--madam-concatenate-messages",
+        required=False,
+        action="store_true",
+        help="Use the alltoallv commucation pattern in Madam",
+        dest="madam_concatenate_messages",
+    )
+    parser.add_argument(
+        "--no-madam-concatenate-messages",
+        required=False,
+        action="store_false",
+        help="Use the point-to-point communication pattern in Madam",
+        dest="madam_concatenate_messages",
+    )
+    parser.set_defaults(madam_concatenate_messages=True)
+
     try:
         args = parser.parse_args()
     except SystemExit as e:
@@ -182,14 +246,19 @@ def main():
     firstmc = int(args.MC_start)
     nmc = int(args.MC_count)
 
+    madam = None
+
     for mc in range(firstmc, firstmc + nmc):
 
         timer_mc = Timer()
         timer_mc.start()
 
         outpath = setup_output(args, comm, mc)
-        outprefix = args.map_prefix + "_filtered_"
-        outmap = os.path.join(outpath, outprefix + "binned.fits")
+        outprefix = args.map_prefix + "_filtered"
+        if args.madam:
+            outmap = os.path.join(outpath, outprefix + "_bmap.fits")
+        else:
+            outmap = os.path.join(outpath, outprefix + "_binned.fits")
 
         if os.path.isfile(outmap):
             if comm.world_rank == 0:
@@ -229,24 +298,80 @@ def main():
             timer_map = Timer()
             timer_map.start()
 
-            mapmaker = toast.todmap.OpMapMaker(
-                nside=args.nside,
-                nnz=3,
-                name=totalname,
-                outdir=outpath,
-                outprefix=outprefix,
-                write_hits=False,
-                zip_maps=False,
-                write_wcov_inv=False,
-                write_wcov=False,
-                write_binned=True,
-                write_destriped=False,
-                write_rcond=False,
-                rcond_limit=1e-3,
-                baseline_length=None,
-                common_flag_mask=args.common_flag_mask,
-            )
-            mapmaker.exec(data)
+            if args.madam:
+                if madam is None:
+                    madampars = {}
+                    madampars["temperature_only"] = False
+                    for name in [
+                            "kfirst",
+                            "write_map",
+                            "write_matrix",
+                            "write_wcov",
+                            "write_hits"
+                    ]:
+                        madampars[name] = False
+                    madampars["write_binmap"] = True
+                    madampars["concatenate_messages"] = True
+                    madampars["allreduce"] = True
+                    madampars["nside_submap"] = args.nside_submap
+                    madampars["reassign_submaps"] = True
+                    madampars["pixlim_map"] = 1e-2
+                    madampars["pixmode_map"] = 2
+                    # Instead of fixed detector weights, we'll want to use scaled noise
+                    # PSD:s that include the atmospheric noise
+                    madampars["radiometers"] = True
+                    madampars["noise_weights_from_psd"] = True
+                    madampars["nside_map"] = args.nside
+                    madampars["fsample"] = args.sample_rate
+                    madampars["path_output"] = outpath
+                    madampars["file_root"] = outprefix
+                    if args.madam_concatenate_messages:
+                        # Collective communication is fast but requires memory
+                        madampars["concatenate_messages"] = True
+                        if args.madam_allreduce:
+                            # Every process will allocate a copy of every observed submap.
+                            madampars["allreduce"] = True
+                        else:
+                            # Every process will allocate complete send and receive buffers
+                            madampars["allreduce"] = False
+                    else:
+                        # Slow but memory-efficient point-to-point communication.  Allocate
+                        # only enough memory to communicate with one process at a time.
+                        madampars["concatenate_messages"] = False
+                        madampars["allreduce"] = False
+                    madam = toast.todmap.OpMadam(
+                        params=madampars,
+                        detweights=detweights,
+                        name=totalname,
+                        common_flag_mask=args.common_flag_mask,
+                        purge_tod=True,
+                        mcmode=False,
+                        conserve_memory=args.madam_conserve_memory,
+                    )
+                else:
+                    madam.params["path_output"] = outpath
+                madam.exec(data)
+                del madam
+                madam = None
+            else:
+                mapmaker = toast.todmap.OpMapMaker(
+                    nside=args.nside,
+                    nnz=3,
+                    name=totalname,
+                    outdir=outpath,
+                    outprefix=outprefix + "_",
+                    write_hits=False,
+                    zip_maps=False,
+                    write_wcov_inv=False,
+                    write_wcov=False,
+                    write_binned=True,
+                    write_destriped=False,
+                    write_rcond=False,
+                    rcond_limit=1e-3,
+                    baseline_length=None,
+                    common_flag_mask=args.common_flag_mask,
+                )
+                mapmaker.exec(data)
 
             if comm.world_rank == 0:
                 timer_map.report_clear("Bin map")
