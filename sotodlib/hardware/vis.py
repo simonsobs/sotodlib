@@ -21,6 +21,10 @@ default_band_colors = {
 
 
 def set_matplotlib_pdf_backend():
+    """Set the matplotlib backend to PDF
+
+    This is necessary to render properly the focal plane plots"""
+
     import matplotlib
 
     matplotlib.use("pdf")
