@@ -4,12 +4,8 @@
 """
 
 import numpy as np
-
-import matplotlib
-matplotlib.use("pdf")
-import matplotlib.pyplot as plt
-
 import quaternionarray as qa
+import warnings
 
 
 default_band_colors = {
@@ -24,8 +20,18 @@ default_band_colors = {
 }
 
 
-def plot_detectors(dets, outfile, width=None, height=None, labels=False,
-                   bandcolor=None):
+def set_matplotlib_pdf_backend():
+    import matplotlib
+
+    matplotlib.use("pdf")
+    import matplotlib.pyplot as plt
+
+    return plt
+
+
+def plot_detectors(
+    dets, outfile, width=None, height=None, labels=False, bandcolor=None
+):
     """Visualize a dictionary of detectors.
 
     This makes a simple plot of the detector positions on the projected
@@ -45,6 +51,16 @@ def plot_detectors(dets, outfile, width=None, height=None, labels=False,
         None
 
     """
+    try:
+        plt = set_matplotlib_pdf_backend()
+    except:
+        warnings.warn(
+            """Couldn't set the PDF matplotlib backend,
+focal plane plots will not render properly,
+proceeding with the default matplotlib backend"""
+        )
+        import matplotlib.pyplot as plt
+
     xaxis = np.array([1.0, 0.0, 0.0], dtype=np.float64)
     zaxis = np.array([0.0, 0.0, 1.0], dtype=np.float64)
     wmin = 1.0
