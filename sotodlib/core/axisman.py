@@ -14,6 +14,9 @@ class AxisInterface:
     def __repr__(self):
         raise NotImplementedError
 
+    def _minirepr_(self):
+        return self.__repr__()
+
     def copy(self):
         raise NotImplementedError
 
@@ -152,6 +155,9 @@ class OffsetAxis(AxisInterface):
         return 'OffsetAxis(%s:%s%+i)' % (
             self.count, self.origin_tag, self.offset)
 
+    def _minirepr_(self):
+        return 'OffsetAxis(%s)' % (self.count)
+
     def resolve(self, src, axis_index=None):
         if self.count is None:
             return OffsetAxis(self.name, src.shape[axis_index])
@@ -214,6 +220,9 @@ class LabelAxis(AxisInterface):
             items = [repr(v) for v in self.vals]
         return 'LabelAxis(%s:' % self.count + ','.join(items) + ')'
 
+    def _minirepr_(self):
+        return 'LabelAxis(%s)' % (self.count)
+
     def copy(self):
         return LabelAxis(self.name, self.vals)
 
@@ -236,7 +245,10 @@ class LabelAxis(AxisInterface):
         _vals, i0, i1 = np.intersect1d(self.vals, friend.vals,
                                        return_indices=True)
         # Maintain the order of self.
-        i0, i1 = [np.array(_i) for _i in zip(*sorted(zip(i0, i1)))]
+        if len(_vals) == 0:
+            i0, i1 = np.zeros((2,0), int)
+        else:
+            i0, i1 = [np.array(_i) for _i in zip(*sorted(zip(i0, i1)))]
         ax = LabelAxis(self.name, self.vals[i0])
         if return_slices:
             return ax, i0, i1
@@ -245,8 +257,10 @@ class LabelAxis(AxisInterface):
 
 
 class AxisManager:
-    """A container for numpy arrays (and other AxisManager objects) that
-    knows about.
+    """A container for numpy arrays and other multi-dimensional
+    data-carrying objects (including other AxisManagers).  This object
+    keeps track of which dimensions of each object are concordant, and
+    allows one to slice all hosted data simultaneously.
 
     """
 
@@ -300,8 +314,16 @@ class AxisManager:
             raise KeyError(name)
 
     def move(self, name, new_name):
-        self._fields[new_name] = self._fields.pop(name)
-        self._assignments[new_name] = self._assignments.pop(name)
+        """Rename or remove a data field.  To delete the field, pass
+        new_name=None.
+
+        """
+        if new_name is None:
+            del self._fields[name]
+            del self._assignments[name]
+        else:
+            self._fields[new_name] = self._fields.pop(name)
+            self._assignments[new_name] = self._assignments.pop(name)
         return self
 
     def __getitem__(self, name):
@@ -334,8 +356,121 @@ class AxisManager:
             return '*' if isinstance(self._fields[name], AxisManager) else ''
         stuff = (['%s%s[%s]' % (k, branch_marker(k), self.shape_str(k))
                   for k in self._fields.keys()]
-                 + ['%s:%s' % (k, repr(v)) for k, v in self._axes.items()])
+                 + ['%s:%s' % (k, v._minirepr_()) for k, v in self._axes.items()])
         return ("AxisManager(" + ', '.join(stuff) + ")")
+
+    # constructors...
+    @classmethod
+    def from_resultset(cls, rset, detdb,
+                       axis_name='dets',
+                       prefix='dets:',
+                   ):
+        # Determine the dets axis columns
+        dets_cols = {}
+        for k in rset.keys:
+            if k.startswith(prefix):
+                dets_cols[k] = k[len(prefix):]
+        # Get the detector names for entry.
+        if prefix + 'name' in dets_cols:
+            dets = rset[prefix + 'name']
+            self = cls(LabelAxis(axis_name, dets))
+            for k in rset.keys:
+                if not k.startswith(prefix):
+                    self.wrap(k, rset[k], [(0, axis_name)])
+        else:
+            # Generate the expansion map...
+            dets = []
+            indices = []
+            for row_i, row in enumerate(rset.subset(keys=dets_cols.keys())):
+                props = {v: row[k] for k, v in dets_cols.items()}
+                dets_i = list(detdb.dets(props=props)['name'])
+                dets.extend(dets_i)
+                indices.extend([row_i] * len(dets_i))
+            indices = np.array(indices)
+            self = cls(LabelAxis(axis_name, dets))
+            for k in rset.keys:
+                if not k.startswith(prefix):
+                    self.wrap(k, rset[k][indices], [(0, axis_name)])
+        return self
+
+    def restrict_dets(self, restriction, detdb=None):
+        # Just convert the restriction to a list of dets, compare to
+        # what we have, and return the reduced result.
+        props = {k[len('dets:'):]: v for k, v in restriction.items()
+             if k.startswith('dets:')}
+        if len(props) == 0:
+            return self
+        restricted_dets = detdb.dets(props=props)
+        ax2 = LabelAxis('new_dets', restricted_dets['name'])
+        new_ax, i0, i1 = self._axes['dets'].intersection(ax2, True)
+        return self.restrict('dets', new_ax.vals)
+
+    @staticmethod
+    def concatenate(items, axis=0):
+        """Concatenate multiple AxisManagers along the specified axis, which
+        can be an integer (corresponding to the order in
+        items[0]._axes) or the string name of the axis.
+
+        This operation is difficult to sanity check so it's best to
+        use it only in simple, controlled cases!  The first item is
+        given significant privilege in defining what fields are
+        relevant.  Only fields actually referencing the target axis
+        will be propagated in this operation.
+
+        """
+        if not isinstance(axis, str):
+            axis = list(items[0]._axes.keys())[axis]
+        fields = []
+        for name in items[0]._fields.keys():
+            ax_dim = None
+            for i, ax in enumerate(items[0]._assignments[name]):
+                if ax == axis:
+                    if ax_dim is not None:
+                        raise ValueError('Entry %s has axis %s on more than '
+                                         '1 dimension.' % (name, axis))
+                    ax_dim = i
+            if ax_dim is not None:
+                fields.append((name, ax_dim))
+        # Design the new axis.
+        vals = np.hstack([item._axes[axis].vals for item in items])
+        new_ax = LabelAxis(axis, vals)
+        # Concatenate each entry.
+        new_data = {}
+        for name, ax_dim in fields:
+            shape0 = None
+            keepers = []
+            for item in items:
+                shape1 = list(item._fields[name].shape)
+                if 0 in shape1:
+                    continue
+                shape1[ax_dim] = -1 # This dim doesn't have to match.
+                if shape0 is None:
+                    shape0 = shape1
+                elif shape0 != shape1:
+                    raise ValueError('Field %s has incompatible shapes: ' % name +
+                                     '%s and %s' % (shape0, shape1))
+                keepers.append(item._fields[name])
+            if len(keepers) == 0:
+                # Well we tried.
+                keepers = [items[0]]
+            # Call class-specific concatenation.
+            if isinstance(keepers[0], np.ndarray):
+                new_data[name] = np.concatenate(keepers, axis=ax_dim)
+            else:
+                # The general compatible object should have a static
+                # method called concatenate.
+                new_data[name] = keepers[0].concatenate(keepers, axis=ax_dim)
+        # Construct.
+        new_axes = []
+        for ax_name, ax_def in items[0]._axes.items():
+            if ax_name == axis:
+                ax_def = new_ax
+            new_axes.append(ax_def)
+        output = AxisManager(*new_axes)
+        for k, v in items[0]._assignments.items():
+            axis_map = [(i,n) for i, n in enumerate(v) if n is not None]
+            output.wrap(k, new_data[k], axis_map)
+        return output
 
     # Add and remove data while maintaining internal consistency.
 
@@ -406,6 +541,7 @@ class AxisManager:
             if isinstance(v, AxisManager):
                 dest._fields[k] = v.restrict_axes(axes)
             else:
+                # I.e. an ndarray.
                 sslice = [sels.get(ax, slice(None))
                           for ax in self._assignments[k]]
                 sslice = self._broadcast_selector(sslice)
