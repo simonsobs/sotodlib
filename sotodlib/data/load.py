@@ -255,8 +255,7 @@ def load_observation(db, obs_id, dets=None, prefix=None):
       prefix (str): The root address of the data files.  If not
         specified, the prefix is taken from the ObsFileDB.
 
-    Returns:
-      (signal_streams, other_streams).
+    Returns an AxisManager with the data.
 
     """
     if prefix is None:
@@ -290,79 +289,83 @@ def load_observation(db, obs_id, dets=None, prefix=None):
 
     # Loop through relevant files, in sample order, and accumulate
     # lists of stream segments.
+    aman = None
 
-    stream_groups = []
     for detset, dets in dets_by_detset.items():
         c = db.conn.execute('select name from files '
                             'where obs_id=? and detset=? ' +
                             'order by sample_start', (obs_id, detset))
-        streams = None
-        request = FieldGroup('root', [
+        subreq = [
             FieldGroup('signal', dets, timestamp_field='timestamps',
                        compression=True),
-            FieldGroup('boresight', ['az', 'el', 'roll']),
-            Field('hwp_angle', optional=True),
-            'site_position',
-            'site_velocity',
-            'boresight_azel',
-            'boresight_radec',
-        ])
+            ]
+        if aman is None:
+            subreq.extend([
+                FieldGroup('boresight', ['az', 'el', 'roll']),
+                Field('hwp_angle', optional=True),
+                'site_position',
+                'site_velocity',
+                'boresight_azel',
+                'boresight_radec',
+            ])
+        request = FieldGroup('root', subreq)
+
+        streams = None
         for row in c:
             f = row[0]
             streams = unpack_frames(prefix+f, request, streams)
-        stream_groups.append((request, streams))
 
-    # Merge the groups.
-    streams = OrderedDict()
-    for request, s in stream_groups:
-        request.merge_result(streams, s)
+        if aman is None:
+            # Create AxisManager now that we know the sample count.
+            count = sum(map(len,streams['signal'][dets[0]]))
+            aman = core.AxisManager(
+                core.LabelAxis('dets', [p[1] for p in pairs_req]),
+                core.OffsetAxis('samps', count, 0, obs_id),
+            )
+            aman.wrap('signal', np.zeros(aman.shape, 'float32'),
+                      [(0, 'dets'), (1, 'samps')])
 
-    FieldGroup.hstack_result(streams)
+            # The non-signal fields are duplicated across files so you
+            # can just absorb them once.
+            aman.wrap('timestamps', hstack_into(None, streams['timestamps']),
+                          [(0, 'samps')])
+            bman = core.AxisManager(aman.samps.copy())
+            for k in ['az', 'el', 'roll']:
+                bman.wrap(k, hstack_into(None, streams['boresight'][k]),
+                          [(0, 'samps')])
+            aman.wrap('boresight', bman)
+            aman.wrap('qboresight_azel',
+                      hstack_into(None, streams['boresight_azel']).reshape((-1, 4)),
+                      [(0, 'samps')])
+            aman.wrap('qboresight_radec',
+                      hstack_into(None, streams['boresight_radec']).reshape((-1, 4)),
+                      [(0, 'samps')])
+            site = core.AxisManager(aman.samps.copy())
+            for k in ['position', 'velocity']:
+                site.wrap(k, hstack_into(None, streams['site_' + k]).reshape(-1, 3),
+                          [(0, 'samps')])
+            aman.wrap('site', site)
 
-    # Re-pack into an AxisManager.  In these early sims, everything is
-    # co-sampled by design, and thus "primary".  Let's plan on burying
-    # "secondary" timestream at least one level deep (i.e. protected
-    # by at least one level of sub-manager..
+            if 'hwp_angle' in streams:
+                aman.wrap('hwp_angle', hstack_into(None, streams['hwp_angle']),
+                          [(0, 'samps')])
 
-    streams_out = core.AxisManager(
-        core.LabelAxis('dets', list(streams['signal'].keys())),
-        core.OffsetAxis('samps', len(streams['timestamps']),
-                        0, obs_id),
-        )
+        # Copy in the signal, for each file.
+        for det_name, arrs in streams['signal'].items():
+            i = list(aman.dets.vals).index(det_name)
+            hstack_into(aman.signal[i], arrs)
 
-    # Tick tock.
-    streams_out.wrap('timestamps', streams['timestamps'], [(0, 'samps')])
+        del streams
 
-    # Boresight is a sub AxisManager.
-    boresight = core.AxisManager(
-        streams_out._axes['samps'].copy()
-        )
-    for k in ['az', 'el', 'roll']:
-        boresight.wrap(k, streams['boresight'][k], [(0, 'samps')])
-    streams_out.wrap('boresight', boresight)
+    return aman
 
-    # Promote signal to 2-d...
-    signal = np.zeros(streams_out.shape, float)
-    for i, k in enumerate(streams_out['dets'].vals):
-        signal[i, :] = streams['signal'].pop(k)
-    streams_out.wrap('signal', signal, [(0, 'dets'), (1, 'samps')])
 
-    # Simulation specials...
-    streams_out.wrap('qboresight_azel',
-                     streams['boresight_azel'].reshape((-1, 4)),
-                     [(0, 'samps')])
-    streams_out.wrap('qboresight_radec',
-                     streams['boresight_radec'].reshape((-1, 4)),
-                     [(0, 'samps')])
-
-    site = core.AxisManager(
-        streams_out._axes['samps'].copy()
-        )
-    for k in ['position', 'velocity']:
-        site.wrap(k, streams['site_' + k].reshape(-1, 3), [(0, 'samps')])
-    streams_out.wrap('site', site)
-
-    if 'hwp_angle' in streams:
-        streams_out.wrap('hwp_angle', streams['hwp_angle'], [(0, 'samps')])
-
-    return streams_out
+def hstack_into(dest, src_arrays):
+    if dest is None:
+        return np.hstack(src_arrays)
+    offset = 0
+    for ar in src_arrays:
+        n = len(ar)
+        dest[offset:offset+n] = ar
+        offset += n
+    return dest
