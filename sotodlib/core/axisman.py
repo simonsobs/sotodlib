@@ -233,23 +233,15 @@ class LabelAxis(AxisInterface):
         return super().resolve(src, axis_index)
 
     def restriction(self, selector):
-        # Selector should be list of vals.
-        _vals, i0, i1 = np.intersect1d(self.vals, selector,
-                                       return_indices=True)
-        assert len(i1) == len(selector)  # not a strict subset!
-        # Un-sort
-        i0 = i0[i1]
-        return LabelAxis(self.name, self.vals[i0]), i0
+        # Selector should be list of vals.  Returns new axis and the
+        # indices into self.vals that project out the elements.
+        _vals, i0, i1 = get_coindices(selector, self.vals)
+        assert len(i0) == len(selector)  # not a strict subset!
+        return LabelAxis(self.name, selector), i1
 
     def intersection(self, friend, return_slices=False):
-        _vals, i0, i1 = np.intersect1d(self.vals, friend.vals,
-                                       return_indices=True)
-        # Maintain the order of self.
-        if len(_vals) == 0:
-            i0, i1 = np.zeros((2,0), int)
-        else:
-            i0, i1 = [np.array(_i) for _i in zip(*sorted(zip(i0, i1)))]
-        ax = LabelAxis(self.name, self.vals[i0])
+        _vals, i0, i1 = get_coindices(self.vals, friend.vals)
+        ax = LabelAxis(self.name, _vals)
         if return_slices:
             return ax, i0, i1
         else:
@@ -326,6 +318,9 @@ class AxisManager:
             self._assignments[new_name] = self._assignments.pop(name)
         return self
 
+    def __contains__(self, name):
+        return name in self._fields or name in self._axes
+
     def __getitem__(self, name):
         if name in self._fields:
             return self._fields[name]
@@ -384,6 +379,7 @@ class AxisManager:
             for row_i, row in enumerate(rset.subset(keys=dets_cols.keys())):
                 props = {v: row[k] for k, v in dets_cols.items()}
                 dets_i = list(detdb.dets(props=props)['name'])
+                assert all(d not in dets for d in dets_i)  # Not disjoint!
                 dets.extend(dets_i)
                 indices.extend([row_i] * len(dets_i))
             indices = np.array(indices)
@@ -621,3 +617,42 @@ class AxisManager:
                 self._fields[k] = v
             self._assignments.update(aman._assignments)
         return self
+
+
+def get_coindices(v0, v1):
+    """Given vectors v0 and v1, each of which contains no duplicate
+    values, determine the elements that are found in both vectors.
+    Returns (vals, i0, i1), i.e. the vector of common elements and
+    the vectors of indices into v0 and v1 where those elements are
+    found.
+
+    This routine will use np.intersect1d if it can.  The ordering of
+    the results is different from intersect1d -- vals is not sorted,
+    but rather will the elements will appear in the same order that
+    they were found in v0 (so i0 is strictly increasing).
+
+    """
+    try:
+        vals, i0, i1 = np.intersect1d(v0, v1, return_indices=True)
+        order = np.argsort(i0)
+        return vals[order], i0[order], i1[order]
+    except TypeError:  # return_indices not implemented in numpy < 1.15
+        pass
+
+    # The old fashioned way
+    w0 = sorted([(j, i) for i, j in enumerate(v0)])
+    w1 = sorted([(j, i) for i, j in enumerate(v1)])
+    i0, i1 = 0, 0
+    pairs = []
+    while i0 < len(w0) and i1 < len(w1):
+        if w0[i0][0] == w1[i1][0]:
+            pairs.append((w0[i0][1],w1[i1][1]))
+            i0 += 1
+            i1 += 1
+        elif w0[i0][0] < w1[i1][0]:
+            i0 += 1
+        else:
+            i1 += 1
+    pairs.sort()
+    i0, i1 = np.transpose(pairs)
+    return v0[i0], i0, i1
