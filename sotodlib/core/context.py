@@ -2,10 +2,11 @@ from collections import OrderedDict as odict
 import yaml
 import os
 
-import sotodlib
+from sotodlib import metadata
 
 class Context(odict):
-    def __init__(self, filename=None, site_file=None, user_file=None):
+    def __init__(self, filename=None, site_file=None, user_file=None,
+                 load_list='all'):
         super().__init__()
         # Start with site and user config.
         site_ok, site_file, site_cfg = _read_cfg(
@@ -26,6 +27,31 @@ class Context(odict):
         self.user_file = user_file
         self.filename = filename
 
+        self._subst(self)
+
+        self.obsdb = None
+        self.detdb = None
+        self.obsfiledb = None
+
+        self.reload(load_list)
+
+    def _subst(self, dest, max_recursion=20):
+        # Do string substitution of all our tags into dest (in-place
+        # if dest is a dict).
+        assert(max_recursion > 0) # Too deep this dictionary.
+        if isinstance(dest, str):
+            # Keep subbing until it doesn't change any more...
+            new = dest.format(**self['tags'])
+            while dest != new:
+                dest = new
+                new = dest.format(**self['tags'])
+            return dest
+        if isinstance(dest, dict):
+            for k, v in dest.items():
+                dest[k] = self._subst(v, max_recursion-1)
+            return dest
+        return dest
+
     def update_context(self, new_stuff):
         appendable = ['metadata']
         mergeable = ['tags']
@@ -38,14 +64,73 @@ class Context(odict):
             else:
                 self[k] = v
 
-    def get_detdb(self):
-        filename = self['detdb'].format(depots=self['depots'])
-        return sotodlib.metadata.DetDB.from_file(filename)
+    def reload(self, load_list='all'):
+        """Load (or reload) certain databases associated with this dataset.
+        (Note we don't load any per-observation metadata here.)
 
-    def get_obsfiledb(self):
-        import sotoddb
-        filename = self['obsfiledb'].format(depots=self['depots'])
-        return sotodlib.metadata.ObsFileDB.from_file(filename)
+        """
+        if load_list == 'all' or 'detdb' in load_list:
+            self.detdb \
+                = metadata.DetDB.from_file(self['detdb'])
+        if load_list == 'all' or 'obsfiledb' in load_list:
+            self.obsfiledb \
+                = metadata.ObsFileDB.from_file(self['obsfiledb'])
+        if load_list == 'all' or 'loader' in load_list:
+            self.loader \
+                = metadata.SuperLoader(self)
+
+    def get_obs(self, obs_id=None, dets=None, detsets=None,
+                **kwargs):
+        """Load TOD and supporting metadata for a particular observation id.
+        The detectors to read can be specified through colon-coding in
+        obs_id, through dets, or through detsets.
+
+        """
+        detspec = {}
+        if ':' in obs_id:
+            tokens = obs_id.split(':')
+            obs_id = tokens[0]
+            allowed_fields = self.get('obs_colon_tags', [])
+            options = self.detdb.props(props=allowed_fields).distinct()
+            for f in allowed_fields:
+                field_options = list(set(options[f]))
+                for t in tokens:
+                    if t in field_options:
+                        detspec[f] = t
+
+        # Start the list of detector selectors.
+        dets_selection = [detspec]
+
+        # Did user give a list of dets (or detspec)?
+        if dets is not None:
+            dets_selection.append(dets)
+
+        # Intersect with detectors allowed by the detsets argument?
+        if detsets is not None:
+            ddets = []
+            for ds in detsets:
+                ddets.extend(self.obsfiledb.get_dets(ds))
+            dets_selection.append(ddets)
+
+        # Make the final list / detspec of dets.
+        dets = self.detdb.intersect(*dets_selection)
+
+        # The request to the metadata loader should include obs_id and
+        # the detector selection.
+        request = {'obs:obs_id': obs_id}
+        request.update(detspec)
+
+        # Load metadata.
+        meta = self.loader.load(self['metadata'][:], request)
+
+        # Load TOD.
+        from sotodlib.data.load import load_observation
+        aman = load_observation(self.obsfiledb, obs_id, dets)
+        if aman is None:
+            return meta
+        if meta is not None:
+            aman.merge(meta)
+        return aman
 
 
 def _read_cfg(filename=None, envvar=None, default=None):
