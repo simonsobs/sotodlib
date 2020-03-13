@@ -17,6 +17,9 @@ the very least some variations in the schema used on top of G3.
 Presently the loader targets the pipe-s0001 "1day" TOD sim for the
 LAT.
 
+To support different loaders, we will host (here) a registry of named
+loader functions.
+
 """
 
 import so3g
@@ -369,3 +372,20 @@ def hstack_into(dest, src_arrays):
         dest[offset:offset+n] = ar
         offset += n
     return dest
+
+
+#: OBSLOADER_REGISTRY will be accessed by the Context system to load
+#: TOD.  The signature of functions here is:
+#:
+#:  loader(db, obs_id, dets=None, prefix=None)
+#:
+#: Here db is an ObsFileDB, obs_id is a string, dets is a list of
+#: string names of readout channels, and prefix is a string that overrides
+#: the path prefix of ObsFileDB.
+#:
+#: "This is an interim solution and the API will change", he said in
+#: March 2020.
+OBSLOADER_REGISTRY = {
+    'pipe-s0001': load_observation,
+    'default': load_observation,
+    }
