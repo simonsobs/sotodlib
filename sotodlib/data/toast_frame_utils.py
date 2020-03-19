@@ -723,7 +723,9 @@ def tod_to_frames(
         for f in range(n_frames):
             fdata[f]["boresight"] = core3g.G3TimestreamMap()
         ang_theta, ang_phi, ang_psi = qa.to_angles(bore)
-        ang_az = ang_phi
+        # Astronomical convention for azimuth is opposite to spherical
+        # coordinate phi.
+        ang_az = -ang_phi
         ang_el = (np.pi / 2.0) - ang_theta
         ang_roll = ang_psi
         split_field(ang_az, core3g.G3Timestream, "boresight", "az", None,
