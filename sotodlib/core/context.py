@@ -2,7 +2,8 @@ from collections import OrderedDict as odict
 import yaml
 import os
 
-from sotodlib import metadata
+from ..  import metadata
+
 
 class Context(odict):
     def __init__(self, filename=None, site_file=None, user_file=None,
@@ -20,7 +21,9 @@ class Context(odict):
         self.update_context(user_cfg)
 
         ok, filename, context_cfg = _read_cfg(filename)
-
+        if not ok:
+            raise RuntimeError(
+                'Could not load requested context file %s' % filename)
         self.update_context(context_cfg)
 
         self.site_file = site_file
@@ -46,6 +49,10 @@ class Context(odict):
                 dest = new
                 new = dest.format(**self['tags'])
             return dest
+        if isinstance(dest, list):
+            return [self._subst(x) for x in dest]
+        if isinstance(dest, tuple):
+            return (self._subst(x) for x in dest)
         if isinstance(dest, dict):
             for k, v in dest.items():
                 dest[k] = self._subst(v, max_recursion-1)
@@ -115,8 +122,10 @@ class Context(odict):
                 ddets.extend(self.obsfiledb.get_dets(ds))
             dets_selection.append(ddets)
 
-        # Make the final list / detspec of dets.
-        dets = self.detdb.intersect(*dets_selection)
+        # Make the final list of dets -- force resolve it to a list,
+        # not a detspec.
+        dets = self.detdb.intersect(*dets_selection,
+                                    resolve=True)
 
         # The request to the metadata loader should include obs_id and
         # the detector selection.
@@ -140,6 +149,9 @@ class Context(odict):
         if meta is not None:
             aman.merge(meta)
         return aman
+
+    def get_meta(self, request):
+        return self.loader.load(self['metadata'][:], request)
 
 
 def _read_cfg(filename=None, envvar=None, default=None):

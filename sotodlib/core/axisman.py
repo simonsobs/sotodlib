@@ -653,6 +653,8 @@ def get_coindices(v0, v1):
             i0 += 1
         else:
             i1 += 1
+    if len(pairs) == 0:
+        return np.zeros((0,), v0.dtype), np.zeros((0,), int), np.zeros((0,), int)
     pairs.sort()
     i0, i1 = np.transpose(pairs)
     return v0[i0], i0, i1
