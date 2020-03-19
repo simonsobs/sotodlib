@@ -154,8 +154,9 @@ class FieldGroup(list):
                 dest[k] = src[k]
 
 class Field:
-    def __init__(self, name, optional=False):
+    def __init__(self, name, optional=False, wildcard=False):
         self.name = name
+        self.wildcard = wildcard
         self.opts = {'optional': optional}
 
     @staticmethod
@@ -178,6 +179,22 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None):
         compression (or None to disable).
 
     """
+    # Expand wildcards?
+    to_remove = []
+    to_add = []
+    for item in field_request:
+        if getattr(item, 'wildcard', False):
+            assert(item.name == '*')  # That's the only wildcard we allow right now...
+            to_remove.append(item)
+            del streams[item.name]
+            for k in fo.keys():
+                to_add.append(Field(k))
+                to_add[-1].opts = item.opts
+                streams[k] = []
+    for item in to_remove:
+        field_request.remove(item)
+    field_request.extend(to_add)
+
     for item in field_request:
         if isinstance(item, FieldGroup):
             if item.compression:
@@ -229,7 +246,7 @@ def unpack_frames(filename, field_request, streams):
     """
     if streams is None:
         streams = field_request.empty()
-    
+
     reader = so3g.G3IndexedReader(filename)
     while True:
         frames = reader.Process(None)
@@ -239,6 +256,87 @@ def unpack_frames(filename, field_request, streams):
         if frame.type == g3core.G3FrameType.Scan:
             unpack_frame_object(frame, field_request, streams)
     return streams
+
+
+def load_file(filename, dets=None, signal_only=False):
+    """Load data from file where there is no supporting obsfiledb.
+
+    Args:
+      filename (str or list): A filename or list of filenames (to be
+        loaded in order).
+      signal_only (bool): If set, then only 'signal' is collected and
+        other stuff is ignored.
+
+    """
+    if isinstance(filename, str):
+        filenames = [filename]
+    else:
+        filenames = filename
+
+    subreq = [
+        FieldGroup('signal', [Field('*', wildcard=True)],
+                   timestamp_field='timestamps', compression=True),
+        ]
+    subreq.extend([
+        FieldGroup('boresight', ['az', 'el', 'roll']),
+        Field('hwp_angle', optional=True),
+        'site_position',
+        'site_velocity',
+        'boresight_azel',
+        'boresight_radec',
+    ])
+    request = FieldGroup('root', subreq)
+
+    streams = None
+    for filename in filenames:
+        streams = unpack_frames(filename, request, streams)
+
+    # Do we need to update that dets list?
+    if dets is None:
+        dets = list(streams['signal'].keys())
+
+    # Create AxisManager now that we know the sample count. 
+    count = sum(map(len,streams['signal'][dets[0]]))
+    aman = core.AxisManager(
+        core.LabelAxis('dets', dets),
+        core.OffsetAxis('samps', count, 0),
+    )
+    aman.wrap('signal', np.zeros(aman.shape, 'float32'),
+              [(0, 'dets'), (1, 'samps')])
+
+    if not signal_only:
+        # The non-signal fields are duplicated across files so you
+        # can just absorb them once.
+        aman.wrap('timestamps', hstack_into(None, streams['timestamps']),
+                      [(0, 'samps')])
+        bman = core.AxisManager(aman.samps.copy())
+        for k in ['az', 'el', 'roll']:
+            bman.wrap(k, hstack_into(None, streams['boresight'][k]),
+                      [(0, 'samps')])
+        aman.wrap('boresight', bman)
+        aman.wrap('qboresight_azel',
+                  hstack_into(None, streams['boresight_azel']).reshape((-1, 4)),
+                  [(0, 'samps')])
+        aman.wrap('qboresight_radec',
+                  hstack_into(None, streams['boresight_radec']).reshape((-1, 4)),
+                  [(0, 'samps')])
+        site = core.AxisManager(aman.samps.copy())
+        for k in ['position', 'velocity']:
+            site.wrap(k, hstack_into(None, streams['site_' + k]).reshape(-1, 3),
+                      [(0, 'samps')])
+        aman.wrap('site', site)
+
+        if 'hwp_angle' in streams:
+            aman.wrap('hwp_angle', hstack_into(None, streams['hwp_angle']),
+                      [(0, 'samps')])
+
+    # Copy in the signal, for each file.
+    for det_name, arrs in streams['signal'].items():
+        i = list(aman.dets.vals).index(det_name)
+        hstack_into(aman.signal[i], arrs)
+
+    del streams
+    return aman
 
 
 def load_observation(db, obs_id, dets=None, prefix=None):
