@@ -79,6 +79,9 @@ class Context(odict):
         if load_list == 'all' or 'detdb' in load_list:
             self.detdb \
                 = metadata.DetDB.from_file(self['detdb'])
+        if load_list == 'all' or 'obsdb' in load_list:
+            self.obsdb \
+                = metadata.ObsDB.from_file(self['obsdb'])
         if load_list == 'all' or 'obsfiledb' in load_list:
             self.obsfiledb \
                 = metadata.ObsFileDB.from_file(self['obsfiledb'])
