@@ -295,7 +295,7 @@ def load_file(filename, dets=None, signal_only=False):
     if dets is None:
         dets = list(streams['signal'].keys())
 
-    # Create AxisManager now that we know the sample count. 
+    # Create AxisManager now that we know the sample count.
     count = sum(map(len,streams['signal'][dets[0]]))
     aman = core.AxisManager(
         core.LabelAxis('dets', dets),
