@@ -76,15 +76,15 @@ class Context(odict):
         (Note we don't load any per-observation metadata here.)
 
         """
-        if load_list == 'all' or 'detdb' in load_list:
-            self.detdb \
-                = metadata.DetDB.from_file(self['detdb'])
-        if load_list == 'all' or 'obsdb' in load_list:
-            self.obsdb \
-                = metadata.ObsDB.from_file(self['obsdb'])
-        if load_list == 'all' or 'obsfiledb' in load_list:
-            self.obsfiledb \
-                = metadata.ObsFileDB.from_file(self['obsfiledb'])
+        # Metadata support databases.
+        for key, cls in [('detdb', metadata.DetDB),
+                         ('obsdb', metadata.ObsDB),
+                         ('obsfiledb', metadata.ObsFileDB)]:
+            if (load_list == 'all' or key in load_list) and key in self:
+                # E.g. self.detdb = DetDB.from_file(self['detdb']
+                db = cls.from_file(self[key])
+                setattr(self, key, db)
+        # The metadata loader.
         if load_list == 'all' or 'loader' in load_list:
             self.loader \
                 = metadata.SuperLoader(self)
