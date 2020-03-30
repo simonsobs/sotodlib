@@ -4,7 +4,7 @@
 import numpy as np
 
 from toast.timing import function_timer, Timer
-from toast.tod import OpSimPySM
+from toast.todmap import OpSimPySM
 from toast.utils import Logger
 
 try:
@@ -116,6 +116,8 @@ def simulate_sky_signal(args, comm, data, focalplanes, subnpix, localsm, signaln
                     )
                 )
             else:
+                if not model_tag.endswith("s") and args.nside > 512:
+                    model_tag += "s"
                 pysm_component_objects.append(
                     so_pysm_models.get_so_models(
                         model_tag, args.nside, map_dist=map_dist

@@ -4,11 +4,11 @@
 import numpy as np
 
 from toast.timing import function_timer, Timer
-from toast.tod import atm_available_utils
+from toast.todmap import atm_available_utils
 from toast.utils import Logger
 
 if atm_available_utils:
-    from toast.tod.atm import (
+    from toast.todmap.atm import (
         atm_atmospheric_loading,
         atm_absorption_coefficient,
         atm_absorption_coefficient_vec,
