@@ -351,15 +351,15 @@ class AxisManager:
             return '*' if isinstance(self._fields[name], AxisManager) else ''
         stuff = (['%s%s[%s]' % (k, branch_marker(k), self.shape_str(k))
                   for k in self._fields.keys()]
-                 + ['%s:%s' % (k, v._minirepr_()) for k, v in self._axes.items()])
+                 + ['%s:%s' % (k, v._minirepr_())
+                    for k, v in self._axes.items()])
         return ("AxisManager(" + ', '.join(stuff) + ")")
 
     # constructors...
     @classmethod
     def from_resultset(cls, rset, detdb,
                        axis_name='dets',
-                       prefix='dets:',
-                   ):
+                       prefix='dets:'):
         # Determine the dets axis columns
         dets_cols = {}
         for k in rset.keys:
@@ -393,7 +393,7 @@ class AxisManager:
         # Just convert the restriction to a list of dets, compare to
         # what we have, and return the reduced result.
         props = {k[len('dets:'):]: v for k, v in restriction.items()
-             if k.startswith('dets:')}
+                 if k.startswith('dets:')}
         if len(props) == 0:
             return self
         restricted_dets = detdb.dets(props=props)
@@ -439,12 +439,13 @@ class AxisManager:
                 shape1 = list(item._fields[name].shape)
                 if 0 in shape1:
                     continue
-                shape1[ax_dim] = -1 # This dim doesn't have to match.
+                shape1[ax_dim] = -1  # This dim doesn't have to match.
                 if shape0 is None:
                     shape0 = shape1
                 elif shape0 != shape1:
-                    raise ValueError('Field %s has incompatible shapes: ' % name +
-                                     '%s and %s' % (shape0, shape1))
+                    raise ValueError('Field %s has incompatible shapes: '
+                                     % name
+                                     + '%s and %s' % (shape0, shape1))
                 keepers.append(item._fields[name])
             if len(keepers) == 0:
                 # Well we tried.
@@ -464,7 +465,7 @@ class AxisManager:
             new_axes.append(ax_def)
         output = AxisManager(*new_axes)
         for k, v in items[0]._assignments.items():
-            axis_map = [(i,n) for i, n in enumerate(v) if n is not None]
+            axis_map = [(i, n) for i, n in enumerate(v) if n is not None]
             output.wrap(k, new_data[k], axis_map)
         return output
 
@@ -646,7 +647,7 @@ def get_coindices(v0, v1):
     pairs = []
     while i0 < len(w0) and i1 < len(w1):
         if w0[i0][0] == w1[i1][0]:
-            pairs.append((w0[i0][1],w1[i1][1]))
+            pairs.append((w0[i0][1], w1[i1][1]))
             i0 += 1
             i1 += 1
         elif w0[i0][0] < w1[i1][0]:
@@ -654,7 +655,7 @@ def get_coindices(v0, v1):
         else:
             i1 += 1
     if len(pairs) == 0:
-        return np.zeros((0,), v0.dtype), np.zeros((0,), int), np.zeros((0,), int)
+        return (np.zeros(0, v0.dtype), np.zeros(0, int), np.zeros(0, int))
     pairs.sort()
     i0, i1 = np.transpose(pairs)
     return v0[i0], i0, i1

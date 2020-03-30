@@ -2,7 +2,7 @@ from collections import OrderedDict as odict
 import yaml
 import os
 
-from ..  import metadata
+from .. import metadata
 
 
 class Context(odict):
@@ -41,7 +41,7 @@ class Context(odict):
     def _subst(self, dest, max_recursion=20):
         # Do string substitution of all our tags into dest (in-place
         # if dest is a dict).
-        assert(max_recursion > 0) # Too deep this dictionary.
+        assert(max_recursion > 0)  # Too deep this dictionary.
         if isinstance(dest, str):
             # Keep subbing until it doesn't change any more...
             new = dest.format(**self['tags'])
@@ -62,7 +62,7 @@ class Context(odict):
     def update_context(self, new_stuff):
         appendable = ['metadata']
         mergeable = ['tags']
-        
+
         for k, v in new_stuff.items():
             if k in appendable and k in self:
                 self[k].extend(v)
@@ -144,7 +144,7 @@ class Context(odict):
 
         # Load TOD.
         from sotodlib.data.load import OBSLOADER_REGISTRY
-        loader_func = OBSLOADER_REGISTRY[loader_type]  # Did you register your loader?
+        loader_func = OBSLOADER_REGISTRY[loader_type]  # Register your loader?
         aman = loader_func(self.obsfiledb, obs_id, dets)
 
         if aman is None:
