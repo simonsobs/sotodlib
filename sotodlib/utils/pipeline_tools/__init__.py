@@ -10,3 +10,4 @@ from .hardware import add_hw_args, load_focalplanes
 from .noise import add_so_noise_args, get_analytic_noise, get_elevation_noise
 from .observation import create_observations, load_observations, add_import_args
 from .pysm import add_pysm_args, simulate_sky_signal
+from .transfer_function import add_transfer_function_args, convolve_transfer_function, deconvolve_transfer_function
