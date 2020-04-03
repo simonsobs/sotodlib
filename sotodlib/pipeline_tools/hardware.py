@@ -10,7 +10,13 @@ from toast.utils import Logger
 from .. import hardware
 
 
-FOCALPLANE_RADII_DEG = {"LAT" : 3.6, "SAT0" : 17.8, "SAT1" : 17.8, "SAT2" : 17.8, "SAT3" : 17.2}
+FOCALPLANE_RADII_DEG = {
+    "LAT" : 3.6,
+    "SAT0" : 17.8,
+    "SAT1" : 17.8,
+    "SAT2" : 17.8,
+    "SAT3" : 17.2,
+}
 
 
 class SOTelescope(Telescope):
@@ -141,16 +147,20 @@ def get_hardware(args, comm, verbose=False):
     """
     log = Logger.get()
     telescope = get_telescope(args, comm, verbose=verbose)
+    timer = Timer()
     if comm.world_rank == 0:
+        timer.start()
         if args.hardware:
             log.info(
                 "Loading hardware configuration from {}..." "".format(args.hardware)
             )
             hw = hardware.Hardware(args.hardware)
+            timer.report_clear("Load hardware map")
         else:
             log.info("Simulating default hardware configuration")
             hw = hardware.get_example()
             hw.data["detectors"] = hardware.sim_telescope_detectors(hw, telescope.name)
+            timer.report_clear("Simulate hardware map")
         # Construct a running index for all detectors across all
         # telescopes for independent noise realizations
         det_index = {}
@@ -181,12 +191,15 @@ def get_hardware(args, comm, verbose=False):
             "Telescope = {} tubes = {} bands = {}, thinfp = {} matches {} detectors"
             "".format(telescope.name, args.tubes, args.bands, args.thinfp, ndetector)
         )
+        timer.report_clear("Select detectors")
     else:
         hw = None
         det_index = None
     if comm.comm_world is not None:
         hw = comm.comm_world.bcast(hw)
         det_index = comm.comm_world.bcast(det_index)
+        if comm.world_rank == 0:
+            timer.report_clear("Broadcast hardware map")
     return hw, telescope, det_index
 
 

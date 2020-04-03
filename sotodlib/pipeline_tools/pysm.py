@@ -49,7 +49,7 @@ def add_pysm_args(parser):
 
 
 @function_timer
-def simulate_sky_signal(args, comm, data, focalplanes, subnpix, localsm, signalname=None):
+def simulate_sky_signal(args, comm, data, focalplanes, signalname=None, mc=0):
     """ Use PySM to simulate smoothed sky signal.
 
     """
@@ -127,14 +127,12 @@ def simulate_sky_signal(args, comm, data, focalplanes, subnpix, localsm, signaln
     if signalname is None:
         signalname = "pysmsignal"
     op_sim_pysm = OpSimPySM(
+        data,
         comm=comm.comm_rank,
         out=signalname,
         pysm_model=pysm_model,
         pysm_component_objects=pysm_component_objects,
         focalplanes=focalplanes,
-        nside=args.nside,
-        subnpix=subnpix,
-        localsm=localsm,
         apply_beam=args.pysm_apply_beam,
         coord="G",  # setting G doesn't perform any rotation
         map_dist=map_dist,
