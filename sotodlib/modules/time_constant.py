@@ -3,6 +3,8 @@
 
 import numpy as np
 
+import toast
+
 
 class OpTimeConst(toast.Operator):
     """ Simple time constant filtering without flag checks.
@@ -43,7 +45,7 @@ class OpTimeConst(toast.Operator):
                 continue
             
             # Get an approximate time step, even if the sampling is irregular
-            tstep = times[-1] - times[0] / (times.size - 1)
+            tstep = (times[-1] - times[0]) / (times.size - 1)
             freqs = np.fft.rfftfreq(times.size, tstep)
 
             for det in tod.local_dets:
@@ -54,7 +56,7 @@ class OpTimeConst(toast.Operator):
                     tau = self._tau
                 if self.inverse:
                     taufilter = (1 + 2.0j * np.pi * freqs * tau)
-                else
+                else:
                     taufilter = 1.0 / (1 + 2.0j * np.pi * freqs * tau)
                 # We filter the entire TOD buffer, even if the filter
                 # kernel would fit in a shorter buffer.  This implies a log(n)

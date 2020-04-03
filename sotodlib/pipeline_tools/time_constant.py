@@ -9,45 +9,44 @@ from toast.timing import function_timer, Timer
 from ..modules import OpTimeConst
 
 
-def add_transfer_function_args(parser):
+def add_time_constant_args(parser):
     parser.add_argument(
-        "--tf-convolve",
+        "--tau-convolve",
         required=False,
         action="store_true",
-        help="Convolve the data to simulate a transfer function",
-        dest="tf_convolve"
+        help="Convolve the data to simulate a time constant",
+        dest="tau_convolve"
     )
     parser.add_argument(
-        "--tf-deconvolve",
+        "--tau-deconvolve",
         required=False,
         action="store_true",
-        help="De-convolve the data to compensate for a transfer function",
-        dest="tf_deconvolve"
+        help="De-convolve the data to compensate for a time constant",
+        dest="tau_deconvolve"
     )
     parser.add_argument(
-        "--tf-tau",
+        "--tau-value",
         required=False,
         type=np.float,
-        help="Value of the transfer function time constant",
-        dest="tf_deconvolve"
+        help="Value of the time constant time constant",
     )
     return
 
 
-def convolve_transfer_function(args, comm, data, name, verbose=True):
-    if not args.tf_convolve:
+def convolve_time_constant(args, comm, data, name, verbose=True):
+    if not args.tau_convolve:
         return
     log = Logger.get()
     timer = Timer()
     timer.start()
-    tauop = OpTimeConst(name=name, tau=args.tf_tau, inverse=False)
+    tauop = OpTimeConst(name=name, tau=args.tau_value, inverse=False)
     tauop.exec(data)
-    timer.report_clear("Convolve transfer function")
+    timer.report_clear("Convolve time constant")
 
     return
 
 
-def deconvolve_transfer_function(args, comm, data, name, verbose=True):
+def deconvolve_time_constant(args, comm, data, name, verbose=True):
     if not args.tf_convolve:
         return
 
@@ -56,6 +55,6 @@ def deconvolve_transfer_function(args, comm, data, name, verbose=True):
     timer.start()
     tauop = OpTimeConst(name=name, tau=args.tf_tau, inverse=True)
     tauop.exec(data)
-    timer.report_clear("De-convolve transfer function")
+    timer.report_clear("De-convolve time constant")
 
     return
