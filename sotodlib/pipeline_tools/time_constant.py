@@ -47,13 +47,13 @@ def convolve_time_constant(args, comm, data, name, verbose=True):
 
 
 def deconvolve_time_constant(args, comm, data, name, verbose=True):
-    if not args.tf_convolve:
+    if not args.tau_convolve:
         return
 
     log = Logger.get()
     timer = Timer()
     timer.start()
-    tauop = OpTimeConst(name=name, tau=args.tf_tau, inverse=True)
+    tauop = OpTimeConst(name=name, tau=args.tau_value, inverse=True)
     tauop.exec(data)
     timer.report_clear("De-convolve time constant")
 
