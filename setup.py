@@ -29,6 +29,7 @@ pipes = [
     "pipelines/toast_so_sim.py",
     "pipelines/toast_so_example.py",
     "pipelines/toast_bin_so3g.py",
+    "pipelines/toast_so_tf.py",
 ]
 
 setup_opts["name"] = "sotodlib"

@@ -220,10 +220,6 @@ def main():
 
     memreport("after pointing", comm.comm_world)
 
-    # Prepare auxiliary information for distributed map objects
-
-    memreport("after submaps", comm.comm_world)
-
     # Set up objects to take copies of the TOD at appropriate times
 
     if args.pysm_model:
