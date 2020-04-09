@@ -17,14 +17,20 @@ the very least some variations in the schema used on top of G3.
 Presently the loader targets the pipe-s0001 "1day" TOD sim for the
 LAT.
 
+To support different loaders, we will host (here) a registry of named
+loader functions.
+
 """
 
 import so3g
-from spt3g import core
+from spt3g import core as g3core
 
 import numpy as np
 
 from collections import OrderedDict
+
+from .. import core
+
 
 class FieldGroup(list):
     """This is essentially a roadmap for decoding data from a
@@ -148,8 +154,9 @@ class FieldGroup(list):
                 dest[k] = src[k]
 
 class Field:
-    def __init__(self, name, optional=False):
+    def __init__(self, name, optional=False, wildcard=False):
         self.name = name
+        self.wildcard = wildcard
         self.opts = {'optional': optional}
 
     @staticmethod
@@ -172,6 +179,22 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None):
         compression (or None to disable).
 
     """
+    # Expand wildcards?
+    to_remove = []
+    to_add = []
+    for item in field_request:
+        if getattr(item, 'wildcard', False):
+            assert(item.name == '*')  # That's the only wildcard we allow right now...
+            to_remove.append(item)
+            del streams[item.name]
+            for k in fo.keys():
+                to_add.append(Field(k))
+                to_add[-1].opts = item.opts
+                streams[k] = []
+    for item in to_remove:
+        field_request.remove(item)
+    field_request.extend(to_add)
+
     for item in field_request:
         if isinstance(item, FieldGroup):
             if item.compression:
@@ -184,7 +207,7 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None):
             unpack_frame_object(target, item, streams[item.name], comp_info)
             if item.timestamp_field is not None:
                 t0, t1, ns = target.start, target.stop, target.n_samples
-                t0, t1 = t0.time / core.G3Units.sec, t1.time / core.G3Units.sec
+                t0, t1 = t0.time / g3core.G3Units.sec, t1.time / g3core.G3Units.sec
                 streams[item.timestamp_field].append(np.linspace(t0, t1, ns))
             continue
         # This is a simple field.
@@ -223,24 +246,105 @@ def unpack_frames(filename, field_request, streams):
     """
     if streams is None:
         streams = field_request.empty()
-    
+
     reader = so3g.G3IndexedReader(filename)
     while True:
         frames = reader.Process(None)
         if len(frames) == 0:
             break
         frame = frames[0]
-        if frame.type == core.G3FrameType.Scan:
+        if frame.type == g3core.G3FrameType.Scan:
             unpack_frame_object(frame, field_request, streams)
     return streams
+
+
+def load_file(filename, dets=None, signal_only=False):
+    """Load data from file where there is no supporting obsfiledb.
+
+    Args:
+      filename (str or list): A filename or list of filenames (to be
+        loaded in order).
+      signal_only (bool): If set, then only 'signal' is collected and
+        other stuff is ignored.
+
+    """
+    if isinstance(filename, str):
+        filenames = [filename]
+    else:
+        filenames = filename
+
+    subreq = [
+        FieldGroup('signal', [Field('*', wildcard=True)],
+                   timestamp_field='timestamps', compression=True),
+        ]
+    subreq.extend([
+        FieldGroup('boresight', ['az', 'el', 'roll']),
+        Field('hwp_angle', optional=True),
+        'site_position',
+        'site_velocity',
+        'boresight_azel',
+        'boresight_radec',
+    ])
+    request = FieldGroup('root', subreq)
+
+    streams = None
+    for filename in filenames:
+        streams = unpack_frames(filename, request, streams)
+
+    # Do we need to update that dets list?
+    if dets is None:
+        dets = list(streams['signal'].keys())
+
+    # Create AxisManager now that we know the sample count.
+    count = sum(map(len,streams['signal'][dets[0]]))
+    aman = core.AxisManager(
+        core.LabelAxis('dets', dets),
+        core.OffsetAxis('samps', count, 0),
+    )
+    aman.wrap('signal', np.zeros(aman.shape, 'float32'),
+              [(0, 'dets'), (1, 'samps')])
+
+    if not signal_only:
+        # The non-signal fields are duplicated across files so you
+        # can just absorb them once.
+        aman.wrap('timestamps', hstack_into(None, streams['timestamps']),
+                      [(0, 'samps')])
+        bman = core.AxisManager(aman.samps.copy())
+        for k in ['az', 'el', 'roll']:
+            bman.wrap(k, hstack_into(None, streams['boresight'][k]),
+                      [(0, 'samps')])
+        aman.wrap('boresight', bman)
+        aman.wrap('qboresight_azel',
+                  hstack_into(None, streams['boresight_azel']).reshape((-1, 4)),
+                  [(0, 'samps')])
+        aman.wrap('qboresight_radec',
+                  hstack_into(None, streams['boresight_radec']).reshape((-1, 4)),
+                  [(0, 'samps')])
+        site = core.AxisManager(aman.samps.copy())
+        for k in ['position', 'velocity']:
+            site.wrap(k, hstack_into(None, streams['site_' + k]).reshape(-1, 3),
+                      [(0, 'samps')])
+        aman.wrap('site', site)
+
+        if 'hwp_angle' in streams:
+            aman.wrap('hwp_angle', hstack_into(None, streams['hwp_angle']),
+                      [(0, 'samps')])
+
+    # Copy in the signal, for each file.
+    for det_name, arrs in streams['signal'].items():
+        i = list(aman.dets.vals).index(det_name)
+        hstack_into(aman.signal[i], arrs)
+
+    del streams
+    return aman
+
 
 def load_observation(db, obs_id, dets=None, prefix=None):
     """Load the data for some observation.  You can restrict to only some
     detectors. Coming soon: also restrict by time range / sample
     index.
 
-
-    This specifically targets the pipe-s0001 sim format.
+    This specifically targets the pipe-s0001/s0002 sim format.
 
     Arguments:
 
@@ -252,8 +356,7 @@ def load_observation(db, obs_id, dets=None, prefix=None):
       prefix (str): The root address of the data files.  If not
         specified, the prefix is taken from the ObsFileDB.
 
-    Returns:
-      (signal_streams, other_streams).
+    Returns an AxisManager with the data.
 
     """
     if prefix is None:
@@ -275,69 +378,112 @@ def load_observation(db, obs_id, dets=None, prefix=None):
         pairs_req = [p for p in pairs if p[1] in dets]
         # Use sets for this...
         dets_req = [p[1] for p in pairs_req]
-        unmatched = [d for d in dets if not d in dets_req]
+        unmatched = [d for d in dets if d not in dets_req]
         if len(unmatched):
             raise RuntimeError("User requested invalid dets (e.g. %s) "
                                "for obs_id=%s" % (unmatched[0], obs_id))
 
     # Group by detset.
-    dets_by_detset = OrderedDict([(p[0],[]) for p in pairs_req])
+    dets_by_detset = OrderedDict([(p[0], []) for p in pairs_req])
     for p in pairs_req:
         dets_by_detset[p[0]].append(p[1])
 
     # Loop through relevant files, in sample order, and accumulate
     # lists of stream segments.
+    aman = None
 
-    stream_groups = []
     for detset, dets in dets_by_detset.items():
         c = db.conn.execute('select name from files '
                             'where obs_id=? and detset=? ' +
                             'order by sample_start', (obs_id, detset))
-        streams = None
-        request = FieldGroup('root', [
+        subreq = [
             FieldGroup('signal', dets, timestamp_field='timestamps',
                        compression=True),
-            FieldGroup('boresight', ['az', 'el', 'roll']),
-            Field('hwp_angle', optional=True),
-            'site_position',
-            'site_velocity',
-            'boresight_azel',
-            'boresight_radec',
-        ])
+            ]
+        if aman is None:
+            subreq.extend([
+                FieldGroup('boresight', ['az', 'el', 'roll']),
+                Field('hwp_angle', optional=True),
+                'site_position',
+                'site_velocity',
+                'boresight_azel',
+                'boresight_radec',
+            ])
+        request = FieldGroup('root', subreq)
+
+        streams = None
         for row in c:
             f = row[0]
             streams = unpack_frames(prefix+f, request, streams)
-        stream_groups.append((request, streams))
 
-    # Merge the groups.
-    streams = OrderedDict()
-    for request, s in stream_groups:
-        request.merge_result(streams, s)
-        
-    FieldGroup.hstack_result(streams)
+        if aman is None:
+            # Create AxisManager now that we know the sample count.
+            count = sum(map(len,streams['signal'][dets[0]]))
+            aman = core.AxisManager(
+                core.LabelAxis('dets', [p[1] for p in pairs_req]),
+                core.OffsetAxis('samps', count, 0, obs_id),
+            )
+            aman.wrap('signal', np.zeros(aman.shape, 'float32'),
+                      [(0, 'dets'), (1, 'samps')])
 
-    # Re-pack into something plausibly standardizable.  In first sims,
-    # everything is co-sampled by design, and thus "primary".  But we
-    # return an object that includes a place for "secondary"
-    # (non-cosampled) timestreams.
+            # The non-signal fields are duplicated across files so you
+            # can just absorb them once.
+            aman.wrap('timestamps', hstack_into(None, streams['timestamps']),
+                          [(0, 'samps')])
+            bman = core.AxisManager(aman.samps.copy())
+            for k in ['az', 'el', 'roll']:
+                bman.wrap(k, hstack_into(None, streams['boresight'][k]),
+                          [(0, 'samps')])
+            aman.wrap('boresight', bman)
+            aman.wrap('qboresight_azel',
+                      hstack_into(None, streams['boresight_azel']).reshape((-1, 4)),
+                      [(0, 'samps')])
+            aman.wrap('qboresight_radec',
+                      hstack_into(None, streams['boresight_radec']).reshape((-1, 4)),
+                      [(0, 'samps')])
+            site = core.AxisManager(aman.samps.copy())
+            for k in ['position', 'velocity']:
+                site.wrap(k, hstack_into(None, streams['site_' + k]).reshape(-1, 3),
+                          [(0, 'samps')])
+            aman.wrap('site', site)
 
-    streams_out = OrderedDict([
-        ('primary', {
-            'signal': streams['signal'],
-            'timestamps': streams['timestamps'],
-            'boresight': streams['boresight'],
-            'qboresight_azel': streams['boresight_azel'].reshape((-1, 4)),
-            'qboresight_radec': streams['boresight_radec'].reshape((-1, 4)),
-            'site': {'position': streams['site_position'].reshape((-1, 3)),
-                     'velocity': streams['site_velocity'].reshape((-1, 3))},
-            }
-         ),
-        ('secondary', {})
-        ])
+            if 'hwp_angle' in streams:
+                aman.wrap('hwp_angle', hstack_into(None, streams['hwp_angle']),
+                          [(0, 'samps')])
 
-    # Optional fields.
+        # Copy in the signal, for each file.
+        for det_name, arrs in streams['signal'].items():
+            i = list(aman.dets.vals).index(det_name)
+            hstack_into(aman.signal[i], arrs)
 
-    if 'hwp_angle' in streams:
-        streams_out['primary']['hwp_angle'] = streams['hwp_angle']
+        del streams
 
-    return streams_out
+    return aman
+
+
+def hstack_into(dest, src_arrays):
+    if dest is None:
+        return np.hstack(src_arrays)
+    offset = 0
+    for ar in src_arrays:
+        n = len(ar)
+        dest[offset:offset+n] = ar
+        offset += n
+    return dest
+
+
+#: OBSLOADER_REGISTRY will be accessed by the Context system to load
+#: TOD.  The signature of functions here is:
+#:
+#:  loader(db, obs_id, dets=None, prefix=None)
+#:
+#: Here db is an ObsFileDB, obs_id is a string, dets is a list of
+#: string names of readout channels, and prefix is a string that overrides
+#: the path prefix of ObsFileDB.
+#:
+#: "This is an interim solution and the API will change", he said in
+#: March 2020.
+OBSLOADER_REGISTRY = {
+    'pipe-s0001': load_observation,
+    'default': load_observation,
+    }
