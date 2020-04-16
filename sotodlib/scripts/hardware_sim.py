@@ -8,7 +8,7 @@ import argparse
 
 from collections import OrderedDict
 
-from ..hardware import get_example, sim_telescope_detectors
+from ..sim_hardware import get_example, sim_telescope_detectors
 
 
 def main():

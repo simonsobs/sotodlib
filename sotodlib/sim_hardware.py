@@ -13,6 +13,8 @@ import numpy as np
 
 import quaternionarray as qa
 
+from .core import Hardware
+
 # FIXME:  much of this code is copy/pasted from the toast source, simply to
 # avoid a dependency.  Once we can "pip install toast", we should consider
 # just calling that package.
@@ -667,3 +669,354 @@ def sim_telescope_detectors(hw, tele, tubes=None):
                 windx += 1
             tindx += 1
     return alldets
+
+
+def get_example():
+    """Return an example Hardware config with the required sections.
+
+    The returned Hardware object has 4 fake detectors as an example.  These
+    detectors can be replaced by the results of other simulation functions.
+
+    Returns:
+        (Hardware): Hardware object with example parameters.
+
+    """
+    cnf = OrderedDict()
+
+    bands = OrderedDict()
+
+    bnd = OrderedDict()
+    bnd["center"] = 25.7
+    bnd["low"] = 21.7
+    bnd["high"] = 29.7
+    bnd["bandpass"] = ""
+    bnd["NET"] = 300.0
+    bnd["fknee"] = 50.0
+    bnd["fmin"] = 0.01
+    bnd["alpha"] = 3.5
+    # Noise elevation scaling fits from Carlos Sierra
+    # These numbers are for V3 LAT baseline
+    bnd["A"] = 0.09
+    bnd["C"] = 0.87
+    bands["LF1"] = bnd
+
+    bnd = OrderedDict()
+    bnd["center"] = 38.9
+    bnd["low"] = 30.9
+    bnd["high"] = 46.9
+    bnd["bandpass"] = ""
+    bnd["NET"] = 300.0
+    bnd["fknee"] = 50.0
+    bnd["fmin"] = 0.01
+    bnd["alpha"] = 3.5
+    bnd["A"] = 0.25
+    bnd["C"] = 0.64
+    bands["LF2"] = bnd
+
+    bnd = OrderedDict()
+    bnd["center"] = 92.0
+    bnd["low"] = 79.0
+    bnd["high"] = 105.0
+    bnd["bandpass"] = ""
+    bnd["NET"] = 300.0
+    bnd["fknee"] = 50.0
+    bnd["fmin"] = 0.01
+    bnd["alpha"] = 3.5
+    bnd["A"] = 0.14
+    bnd["C"] = 0.80
+    bands["MFF1"] = bnd
+
+    bnd = OrderedDict()
+    bnd["center"] = 147.5
+    bnd["low"] = 130.0
+    bnd["high"] = 165.0
+    bnd["bandpass"] = ""
+    bnd["NET"] = 400.0
+    bnd["fknee"] = 50.0
+    bnd["fmin"] = 0.01
+    bnd["alpha"] = 3.5
+    bnd["A"] = 0.17
+    bnd["C"] = 0.76
+    bands["MFF2"] = bnd
+
+    bnd = OrderedDict()
+    bnd["center"] = 88.6
+    bnd["low"] = 75.6
+    bnd["high"] = 101.6
+    bnd["bandpass"] = ""
+    bnd["NET"] = 300.0
+    bnd["fknee"] = 50.0
+    bnd["fmin"] = 0.01
+    bnd["alpha"] = 3.5
+    bnd["A"] = 0.19
+    bnd["C"] = 0.74
+    bands["MFS1"] = bnd
+
+    bnd = OrderedDict()
+    bnd["center"] = 146.5
+    bnd["low"] = 128.0
+    bnd["high"] = 165.0
+    bnd["bandpass"] = ""
+    bnd["NET"] = 400.0
+    bnd["fknee"] = 50.0
+    bnd["fmin"] = 0.01
+    bnd["alpha"] = 3.5
+    bnd["A"] = 0.19
+    bnd["C"] = 0.73
+    bands["MFS2"] = bnd
+
+    bnd = OrderedDict()
+    bnd["center"] = 225.7
+    bnd["low"] = 196.7
+    bnd["high"] = 254.7
+    bnd["bandpass"] = ""
+    bnd["NET"] = 400.0
+    bnd["fknee"] = 50.0
+    bnd["fmin"] = 0.01
+    bnd["alpha"] = 3.5
+    bnd["A"] = 0.30
+    bnd["C"] = 0.58
+    bands["UHF1"] = bnd
+
+    bnd = OrderedDict()
+    bnd["center"] = 285.4
+    bnd["low"] = 258.4
+    bnd["high"] = 312.4
+    bnd["bandpass"] = ""
+    bnd["NET"] = 400.0
+    bnd["fknee"] = 50.0
+    bnd["fmin"] = 0.01
+    bnd["alpha"] = 3.5
+    bnd["A"] = 0.36
+    bnd["C"] = 0.49
+    bands["UHF2"] = bnd
+
+    cnf["bands"] = bands
+
+    wafers = OrderedDict()
+
+    wtypes = ["UHF", "MFF", "MFS", "LF"]
+    wcnt = {
+        "LF": 1*7 + 1*3,
+        "MFF": 1*7 + 2*3,
+        "MFS": 1*7 + 2*3,
+        "UHF": 1*7 + 2*3
+    }
+    wnp = {
+        "LF": 37,
+        "MFF": 432,
+        "MFS": 397,
+        "UHF": 432
+    }
+    wpixmm = {
+        "LF": 18.0,
+        "MFF": 5.3,
+        "MFS": 5.6,
+        "UHF": 5.3
+    }
+    wrhombgap = {
+        "MFF": 0.71,
+        "UHF": 0.71,
+    }
+    wbd = {
+        "LF": ["LF1", "LF2"],
+        "MFF": ["MFF1", "MFF2"],
+        "MFS": ["MFS1", "MFS2"],
+        "UHF": ["UHF1", "UHF2"]
+    }
+    windx = 0
+    cardindx = 0
+    for wt in wtypes:
+        for ct in range(wcnt[wt]):
+            wn = "{:02d}".format(windx)
+            wf = OrderedDict()
+            wf["type"] = wt
+            if (wt == "LF") or (wt == "MFS"):
+                wf["packing"] = "S"
+            else:
+                wf["packing"] = "F"
+                wf["rhombusgap"] = wrhombgap[wt]
+            wf["npixel"] = wnp[wt]
+            wf["pixsize"] = wpixmm[wt]
+            wf["bands"] = wbd[wt]
+            wf["card"] = "{:02d}".format(cardindx)
+            cardindx += 1
+            wafers[wn] = wf
+            windx += 1
+
+    cnf["wafers"] = wafers
+
+    tubes = OrderedDict()
+
+    woff = {
+        "LF": 0,
+        "MFF": 0,
+        "MFS": 0,
+        "UHF": 0
+    }
+
+    ltubes = ["UHF", "UHF", "MFF", "MFF", "MFS", "MFS", "LF"]
+    ltubepos = [0, 1, 2, 3, 5, 6, 10]
+    for tindx in range(7):
+        nm = "LT{:d}".format(tindx)
+        ttyp = ltubes[tindx]
+        tb = OrderedDict()
+        tb["type"] = ttyp
+        tb["waferspace"] = 127.89
+        tb["wafers"] = list()
+        for tw in range(3):
+            off = 0
+            for w, props in cnf["wafers"].items():
+                if props["type"] == ttyp:
+                    if off == woff[ttyp]:
+                        tb["wafers"].append(w)
+                        woff[ttyp] += 1
+                        break
+                    off += 1
+        tb["location"] = ltubepos[tindx]
+        tubes[nm] = tb
+
+    stubes = ["UHF", "MFF", "MFS", "LF"]
+    for tindx in range(4):
+        nm = "ST{:d}".format(tindx)
+        ttyp = stubes[tindx]
+        tb = OrderedDict()
+        tb["type"] = ttyp
+        tb["waferspace"] = 127.89
+        tb["wafers"] = list()
+        for tw in range(7):
+            off = 0
+            for w, props in cnf["wafers"].items():
+                if props["type"] == ttyp:
+                    if off == woff[ttyp]:
+                        tb["wafers"].append(w)
+                        woff[ttyp] += 1
+                        break
+                    off += 1
+        tb["location"] = 0
+        tubes[nm] = tb
+
+    cnf["tubes"] = tubes
+
+    telescopes = OrderedDict()
+
+    tele = OrderedDict()
+    tele["tubes"] = ["LT0", "LT1", "LT2", "LT3", "LT4", "LT5", "LT6"]
+    tele["platescale"] = 0.00495
+    # This tube spacing in mm corresponds to 1.78 degrees projected on
+    # the sky at a plate scale of 0.00495 deg/mm.
+    tele["tubespace"] = 359.6
+    fwhm = OrderedDict()
+    fwhm["LF1"] = 7.4
+    fwhm["LF2"] = 5.1
+    fwhm["MFF1"] = 2.2
+    fwhm["MFF2"] = 1.4
+    fwhm["MFS1"] = 2.2
+    fwhm["MFS2"] = 1.4
+    fwhm["UHF1"] = 1.0
+    fwhm["UHF2"] = 0.9
+    tele["fwhm"] = fwhm
+    telescopes["LAT"] = tele
+
+    sfwhm = OrderedDict()
+    scale = 0.09668 / 0.00495
+    for k, v in fwhm.items():
+        sfwhm[k] = float(int(scale * v * 10.0) // 10)
+
+    tele = OrderedDict()
+    tele["tubes"] = ["ST0"]
+    tele["platescale"] = 0.09668
+    tele["fwhm"] = sfwhm
+    telescopes["SAT0"] = tele
+
+    tele = OrderedDict()
+    tele["tubes"] = ["ST1"]
+    tele["platescale"] = 0.09668
+    tele["fwhm"] = sfwhm
+    telescopes["SAT1"] = tele
+
+    tele = OrderedDict()
+    tele["tubes"] = ["ST2"]
+    tele["platescale"] = 0.09668
+    tele["fwhm"] = sfwhm
+    telescopes["SAT2"] = tele
+
+    tele = OrderedDict()
+    tele["tubes"] = ["ST3"]
+    tele["platescale"] = 0.09668
+    tele["fwhm"] = sfwhm
+    telescopes["SAT3"] = tele
+
+    cnf["telescopes"] = telescopes
+
+    cards = OrderedDict()
+    crates = OrderedDict()
+
+    crt_indx = 0
+
+    for tel in cnf["telescopes"]:
+        crn = "{:d}".format(crt_indx)
+        crt = OrderedDict()
+        crt["cards"] = list()
+        crt["telescope"] = tel
+
+        ## get all the wafer card numbers for a telescope
+        tb_wfrs = [cnf["tubes"][t]["wafers"] for t in cnf["telescopes"][tel]["tubes"]]
+        tl_wfrs = [i for sl in tb_wfrs for i in sl]
+        wafer_cards = [cnf["wafers"][w]["card"] for w in tl_wfrs]
+
+        # add all cards to the card table and assign to crates
+        for crd in wafer_cards:
+            cdprops = OrderedDict()
+            cdprops["nbias"] = 12
+            cdprops["ncoax"] = 2
+            cdprops["nchannel"] = 2000
+            cards[crd] = cdprops
+
+            crt["cards"].append(crd)
+
+            # name new crates when current one is full
+            if ('S' in tel and len(crt["cards"]) >=4) or len(crt["cards"]) >=6:
+                crates[crn] = crt
+                crt_indx += 1
+                crn = "{:d}".format(crt_indx)
+                crt = OrderedDict()
+                crt["cards"] = list()
+                crt["telescope"] = tel
+
+        # each telescope starts with a new crate
+        crates[crn] = crt
+        crt_indx += 1
+
+    cnf["cards"] = cards
+    cnf["crates"] = crates
+
+    pl = ["A", "B"]
+    hand = ["L", "R"]
+
+    dets = OrderedDict()
+    for d in range(4):
+        dprops = OrderedDict()
+        dprops["wafer"] = "42"
+        dprops["ID"] = d
+        dprops["pixel"] = "000"
+        bindx = d % 2
+        dprops["band"] = "LF{}".format(bindx)
+        dprops["fwhm"] = 1.0
+        dprops["pol"] = pl[bindx]
+        dprops["handed"] = hand[bindx]
+        dprops["card"] = "42"
+        dprops["channel"] = d
+        dprops["coax"] = 0
+        dprops["bias"] = 0
+        dprops["quat"] = np.array([0.0, 0.0, 0.0, 1.0])
+        dname = "{}_{}_{}_{}".format("42", "000", dprops["band"],
+                                     dprops["pol"])
+        dets[dname] = dprops
+
+    cnf["detectors"] = dets
+
+    hw = Hardware()
+    hw.data = cnf
+
+    return hw
