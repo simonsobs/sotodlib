@@ -5,7 +5,9 @@
 
 import argparse
 
-from ..hardware import Hardware, summary_text
+from ..core import Hardware
+
+from ..vis_hardware import summary_text
 
 
 def main():

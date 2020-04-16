@@ -5,7 +5,9 @@
 
 import argparse
 
-from ..hardware import Hardware, plot_detectors, summary_text
+from ..core import Hardware
+
+from ..vis_hardware import plot_detectors, summary_text
 
 
 def main():
