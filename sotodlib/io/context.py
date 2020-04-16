@@ -2,7 +2,7 @@ from collections import OrderedDict as odict
 import yaml
 import os
 
-from .. import metadata
+from . import metadata
 
 
 class Context(odict):
