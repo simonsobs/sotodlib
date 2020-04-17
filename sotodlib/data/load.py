@@ -264,6 +264,9 @@ def load_file(filename, dets=None, signal_only=False):
     Args:
       filename (str or list): A filename or list of filenames (to be
         loaded in order).
+      dets (list of str): The detector names of interest.  If None,
+        loads all dets present in this file.  To load only the
+        ancillary data, pass an empty list.
       signal_only (bool): If set, then only 'signal' is collected and
         other stuff is ignored.
 
@@ -296,7 +299,10 @@ def load_file(filename, dets=None, signal_only=False):
         dets = list(streams['signal'].keys())
 
     # Create AxisManager now that we know the sample count.
-    count = sum(map(len,streams['signal'][dets[0]]))
+    if len(dets) == 0:
+        count = sum(map(len,streams['timestamps']))
+    else:
+        count = sum(map(len,streams['signal'][dets[0]]))
     aman = core.AxisManager(
         core.LabelAxis('dets', dets),
         core.OffsetAxis('samps', count, 0),
@@ -332,8 +338,9 @@ def load_file(filename, dets=None, signal_only=False):
 
     # Copy in the signal, for each file.
     for det_name, arrs in streams['signal'].items():
-        i = list(aman.dets.vals).index(det_name)
-        hstack_into(aman.signal[i], arrs)
+        if dets is None or det_name in dets:
+            i = list(aman.dets.vals).index(det_name)
+            hstack_into(aman.signal[i], arrs)
 
     del streams
     return aman
@@ -352,7 +359,8 @@ def load_observation(db, obs_id, dets=None, prefix=None):
         set.
       obs_id (str): The identifier of the observation.
       dets (list of str): The detector names of interest.  If None,
-        loads all dets present in this observation.
+        loads all dets present in this observation.  To load
+        only the ancillary data, pass an empty list.
       prefix (str): The root address of the data files.  If not
         specified, the prefix is taken from the ObsFileDB.
 
@@ -388,6 +396,10 @@ def load_observation(db, obs_id, dets=None, prefix=None):
     for p in pairs_req:
         dets_by_detset[p[0]].append(p[1])
 
+    # If user requested no dets, include one detset to get ancil.
+    if len(dets_by_detset) == 0:
+        dets_by_detset[pairs[0][0]] = []
+
     # Loop through relevant files, in sample order, and accumulate
     # lists of stream segments.
     aman = None
@@ -418,7 +430,7 @@ def load_observation(db, obs_id, dets=None, prefix=None):
 
         if aman is None:
             # Create AxisManager now that we know the sample count.
-            count = sum(map(len,streams['signal'][dets[0]]))
+            count = sum(map(len,streams['timestamps']))
             aman = core.AxisManager(
                 core.LabelAxis('dets', [p[1] for p in pairs_req]),
                 core.OffsetAxis('samps', count, 0, obs_id),
