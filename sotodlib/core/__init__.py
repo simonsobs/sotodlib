@@ -5,6 +5,7 @@
 This module has containers and in-memory structures for data and metadata.
 
 """
+from .context import Context
 
 from .axisman import AxisManager
 from .axisman import IndexAxis, OffsetAxis, LabelAxis
