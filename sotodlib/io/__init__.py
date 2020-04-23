@@ -5,4 +5,3 @@
 This module contains code for reading and writing data and metadata.
 
 """
-from .context import Context
