@@ -8,7 +8,7 @@ import argparse
 
 from collections import OrderedDict
 
-from ..hardware import Hardware
+from ..core import Hardware
 
 
 def main():
