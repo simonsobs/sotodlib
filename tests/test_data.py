@@ -9,29 +9,29 @@ from unittest import TestCase
 import numpy as np
 from spt3g import core
 
-from sotodlib.data import DataG3Module
-from sotodlib.data.filter import Filter, LowPassButterworth
-from sotodlib.data.condition import (Detrend, Retrend, MeanSubtract,
+from sotodlib.g3_core import DataG3Module
+from sotodlib.g3_filter import Filter, LowPassButterworth
+from sotodlib.g3_condition import (Detrend, Retrend, MeanSubtract,
                                          MedianSubtract, Decimate, Resample)
 
-import sotodlib.data.sim as data_sim
+import sotodlib.g3_sim as data_sim
 
 class DataTest(TestCase):
-    
+
     def setUp(self):
         self.frames = data_sim.noise_scan_frames(input='signal')
-        
+
     def test_DataG3Module(self):
         ### Test that it works in a pipeline
         p = core.G3Pipeline()
         p.Add(data_sim.PipelineSeeder(self.frames))
         p.Add(DataG3Module, input='signal', output=None)
         p.Run()
-   
+
         ### test that it works on individual frames
         x = DataG3Module(input='signal', output=None)
         x.apply(self.frames[0])
-        
+
         ### Test that it works as an inline function
         p = core.G3Pipeline()
         p.Add(data_sim.PipelineSeeder(self.frames))
@@ -42,39 +42,39 @@ class DataTest(TestCase):
         ### Test general filter
         p = core.G3Pipeline()
         p.Add(data_sim.PipelineSeeder(self.frames))
-        p.Add(Filter, input='signal', output=None, 
+        p.Add(Filter, input='signal', output=None,
                  filter_function=lambda freqs:np.ones_like(freqs))
         p.Run()
-        
+
         p = core.G3Pipeline()
         p.Add(data_sim.PipelineSeeder(self.frames))
         p.Add(LowPassButterworth)
         p.Run()
-    
+
     def test_condition(self):
         p = core.G3Pipeline()
         p.Add(data_sim.PipelineSeeder(self.frames))
         p.Add(Detrend,input='signal', output=None)
         p.Add(Retrend,input='signal', output=None)
         p.Run()
-        
+
         p = core.G3Pipeline()
         p.Add(data_sim.PipelineSeeder(self.frames))
         p.Add(MeanSubtract,input='signal', output=None)
         p.Add(MedianSubtract,input='signal', output=None)
         p.Run()
-        
+
         p = core.G3Pipeline()
         p.Add(data_sim.PipelineSeeder(self.frames))
         p.Add(Decimate,input='signal', output=None)
         p.Run()
-        
+
         p = core.G3Pipeline()
         p.Add(data_sim.PipelineSeeder(self.frames))
         p.Add(Resample,input='signal', output=None)
         p.Run()
-        
-        
-        
+
+
+
 if __name__ == '__main__':
     unittest.main()

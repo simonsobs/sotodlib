@@ -16,7 +16,7 @@ import toast.todmap
 import toast.tod
 import toast.pipeline_tools as toast_tools
 
-from sotodlib.data.toast_load import load_data
+from sotodlib.io.toast_load import load_data
 
 
 def main():

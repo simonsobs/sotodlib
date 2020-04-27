@@ -15,9 +15,9 @@ from unittest import TestCase
 
 from ._helpers import create_outdir
 
-from sotodlib.hardware.config import get_example
+from sotodlib.sim_hardware import get_example
 
-from sotodlib.hardware.sim import sim_telescope_detectors
+from sotodlib.sim_hardware import sim_telescope_detectors
 
 # Import so3g first so that it can control the import and monkey-patching
 # of spt3g.  Then our import of spt3g_core will use whatever has been imported
@@ -33,8 +33,8 @@ if toast_available is None:
         from toast.mpi import MPI
         from toast.tod import TODGround
         from toast.tod import AnalyticNoise
-        from sotodlib.data.toast_export import ToastExport
-        from sotodlib.data.toast_load import load_data
+        from sotodlib.io.toast_export import ToastExport
+        from sotodlib.io.toast_load import load_data
         toast_available = True
     except ImportError:
         toast_available = False

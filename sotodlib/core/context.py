@@ -2,7 +2,7 @@ from collections import OrderedDict as odict
 import yaml
 import os
 
-from .. import metadata
+from . import metadata
 
 
 class Context(odict):
@@ -77,11 +77,11 @@ class Context(odict):
 
         """
         # Metadata support databases.
-        for key, cls in [('detdb', metadata.DetDB),
-                         ('obsdb', metadata.ObsDB),
-                         ('obsfiledb', metadata.ObsFileDB)]:
+        for key, cls in [('detdb', metadata.DetDb),
+                         ('obsdb', metadata.ObsDb),
+                         ('obsfiledb', metadata.ObsFileDb)]:
             if (load_list == 'all' or key in load_list) and key in self:
-                # E.g. self.detdb = DetDB.from_file(self['detdb']
+                # E.g. self.detdb = DetDb.from_file(self['detdb']
                 db = cls.from_file(self[key])
                 setattr(self, key, db)
         # The metadata loader.

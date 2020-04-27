@@ -11,12 +11,14 @@ from collections import OrderedDict
 
 from ._helpers import create_outdir
 
-from sotodlib.hardware.config import Hardware, get_example
+from sotodlib.core import Hardware
 
-from sotodlib.hardware.sim import (sim_wafer_detectors,
+from sotodlib.sim_hardware import get_example
+
+from sotodlib.sim_hardware import (sim_wafer_detectors,
                                    sim_telescope_detectors)
 
-from sotodlib.hardware.vis import plot_detectors
+from sotodlib.vis_hardware import plot_detectors
 
 
 class HardwareTest(TestCase):
