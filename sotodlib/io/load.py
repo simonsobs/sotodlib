@@ -6,9 +6,9 @@ objects.
 The basic routines here provide structures for automatically unpacking
 series of G3 frames into coherent data structures.
 
-Additional routines use an ObsFileDB (provided by the user) to
+Additional routines use an ObsFileDb (provided by the user) to
 optimize disk reads for loading particular data of interest to a user.
-These routines rely on the completeness and accuracy of the ObsFileDB,
+These routines rely on the completeness and accuracy of the ObsFileDb,
 and are appropriate for large archives of files that have been
 pre-scanned to log their contents.
 
@@ -355,14 +355,14 @@ def load_observation(db, obs_id, dets=None, prefix=None):
 
     Arguments:
 
-      db (ObsFileDB): The database describing this observation file
+      db (ObsFileDb): The database describing this observation file
         set.
       obs_id (str): The identifier of the observation.
       dets (list of str): The detector names of interest.  If None,
         loads all dets present in this observation.  To load
         only the ancillary data, pass an empty list.
       prefix (str): The root address of the data files.  If not
-        specified, the prefix is taken from the ObsFileDB.
+        specified, the prefix is taken from the ObsFileDb.
 
     Returns an AxisManager with the data.
 
@@ -489,9 +489,9 @@ def hstack_into(dest, src_arrays):
 #:
 #:  loader(db, obs_id, dets=None, prefix=None)
 #:
-#: Here db is an ObsFileDB, obs_id is a string, dets is a list of
+#: Here db is an ObsFileDb, obs_id is a string, dets is a list of
 #: string names of readout channels, and prefix is a string that overrides
-#: the path prefix of ObsFileDB.
+#: the path prefix of ObsFileDb.
 #:
 #: "This is an interim solution and the API will change", he said in
 #: March 2020.
