@@ -3,8 +3,5 @@
 """Metadata I/O.
 """
 
-from sotoddb import detdb
-from sotoddb import loader
-from sotoddb import obsdb
-from sotoddb import obsfiledb
-from sotoddb import proddb
+from sotoddb import simple, loader
+from sotoddb import SuperLoader
