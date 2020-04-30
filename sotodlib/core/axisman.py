@@ -641,6 +641,7 @@ def get_coindices(v0, v1):
         pass
 
     # The old fashioned way
+    v0 = np.asarray(v0)
     w0 = sorted([(j, i) for i, j in enumerate(v0)])
     w1 = sorted([(j, i) for i, j in enumerate(v1)])
     i0, i1 = 0, 0

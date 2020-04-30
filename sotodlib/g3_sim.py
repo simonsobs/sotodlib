@@ -9,7 +9,7 @@ This module contains code for simulating data.
 import numpy as np
 
 from spt3g import core
-from sotodlib.g3_core import DataG3Module
+from sotodlib.core.g3_core import DataG3Module
 
 
 class PipelineSeeder(list):
