@@ -9,7 +9,7 @@ from unittest import TestCase
 import numpy as np
 from spt3g import core
 
-from sotodlib.g3_core import DataG3Module
+from sotodlib.core.g3_core import DataG3Module
 from sotodlib.g3_filter import Filter, LowPassButterworth
 from sotodlib.g3_condition import (Detrend, Retrend, MeanSubtract,
                                          MedianSubtract, Decimate, Resample)
