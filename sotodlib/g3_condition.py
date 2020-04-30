@@ -12,7 +12,7 @@ import numpy as np
 import scipy.signal as signal
 
 from spt3g import core
-from sotodlib.g3_core import DataG3Module
+from sotodlib.core.g3_core import DataG3Module
 
 class MeanSubtract(DataG3Module):
     def process(self, data, det_name):
@@ -102,7 +102,7 @@ class Decimate(DataG3Module):
             kwargs: can include any of the optional parameters for
                 scipy.signal.decimate
         """
-        self.decimate_params = {'q':q}
+        self.decimate_params = {'q': q, 'zero_phase': True}
         self.decimate_params.update(kwargs)
 
         super().__init__(input, output)
