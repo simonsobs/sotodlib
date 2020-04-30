@@ -9,7 +9,7 @@ import numpy as np
 import scipy.signal as signal
 
 from spt3g import core
-from sotodlib.g3_core import DataG3Module
+from sotodlib.core.g3_core import DataG3Module
 
 class Filter(DataG3Module):
     """
