@@ -54,7 +54,7 @@ class OpTimeConst(toast.Operator):
                 # Cannot filter
                 continue
 
-            if self.tau_sigma:
+            if self._tau_sigma:
                 obsindx = 0
                 if "id" in obs:
                     obsindx = obs["id"]
@@ -71,13 +71,13 @@ class OpTimeConst(toast.Operator):
                     tau = obs["focalplane"][det][self._taus]
                 else:
                     tau = self._tau
-                if self.tau_sigma:
+                if self._tau_sigma:
                     # randomize tau in a reproducible manner
                     seed = 1000000 * self._realization
                     seed = 100000 * obsindx
                     seed += obs["focalplane"][det]["index"]
                     np.random.seed(seed)
-                    tau *= 1 + np.random.randn() * self.tau_sigma
+                    tau *= 1 + np.random.randn() * self._tau_sigma
                 if self.inverse:
                     taufilter = (1 + 2.0j * np.pi * freqs * tau)
                 else:

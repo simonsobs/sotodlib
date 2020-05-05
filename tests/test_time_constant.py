@@ -15,11 +15,9 @@ from unittest import TestCase
 
 from ._helpers import create_outdir
 
-from sotodlib.hardware.config import get_example
+from sotodlib.sim_hardware import get_example, sim_telescope_detectors
 
-from sotodlib.hardware.sim import sim_telescope_detectors
-
-from sotodlib.modules import OpTimeConst
+from sotodlib.modules.time_constant import OpTimeConst
 
 
 toast_available = None
