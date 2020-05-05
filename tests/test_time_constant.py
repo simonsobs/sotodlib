@@ -136,6 +136,12 @@ class TimeConstantTest(TestCase):
             obs["altitude"] = self.site_alt
             obs["name"] = "test_{:02}".format(ob)
 
+            # Add a focalplane dictionary with just the detector index
+            focalplane = {}
+            for idet, det in enumerate(detnames):
+                focalplane[det] = {"index" : idet}
+            obs["focalplane"] = focalplane
+
             # Add the observation to the dataset
             self.data.obs.append(obs)
 
@@ -169,19 +175,57 @@ class TimeConstantTest(TestCase):
 
         deconvolved = tod.local_signal(det).copy()
 
-        print("Initial RMS: {}, convolved RMS = {}, deconvolved RMS = {}, initial-deconvolved RMS = {}".format(
-            np.std(initial[ind]),
-            np.std(convolved[ind]),
-            np.std(deconvolved[ind]),
-            np.std((initial-deconvolved)[ind]),
-        ))
-
         # Check that convolution reduces the noise RMS
 
-        assert np.std(initial[ind]) > 1e1 * np.std(convolved[ind])
+        self.assertGreater(np.std(initial[ind]), 1e1 * np.std(convolved[ind]))
 
         # Check that de-convolved TOD is closer to the input
-        
-        assert np.std((initial - deconvolved)[ind]) < 1e-1 * np.std((initial - convolved)[ind])
+
+        self.assertLess(
+            np.std((initial - deconvolved)[ind]),
+            1e-1 * np.std((initial - convolved)[ind])
+        )
+
+        return
+
+    def test_convolve_with_error(self):
+        if not toast_available:
+            return
+
+        tod = self.data.obs[0]["tod"]
+        times = tod.local_times()
+        ind = slice(times.size // 4, times.size // 4 * 3)
+        det = tod.local_dets[0]
+
+        initial = tod.local_signal(det).copy()
+
+        tau = 1.0
+
+        tauop = OpTimeConst(name="signal", inverse=False, tau=tau)
+
+        tauop.exec(self.data)
+
+        convolved = tod.local_signal(det).copy()
+
+        tauop = OpTimeConst(name="signal", inverse=True, tau=tau)
+
+        tauop.exec(self.data)
+
+        deconvolved = tod.local_signal(det).copy()
+
+        tod.local_signal(det)[:] = convolved
+
+        tauop = OpTimeConst(name="signal", inverse=True, tau=tau, tau_sigma=0.1)
+
+        tauop.exec(self.data)
+
+        deconvolved_with_error = tod.local_signal(det).copy()
+
+        # Check that error-free de-convolved TOD is closer to the input
+
+        self.assertLess(
+            np.std((initial - deconvolved)[ind]),
+            np.std((initial - deconvolved_with_error)[ind])
+        )
 
         return
