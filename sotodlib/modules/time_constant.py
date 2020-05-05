@@ -12,13 +12,20 @@ class OpTimeConst(toast.Operator):
     No checks are made for TOAST data distribution: distributing the TOD
     in time domain will slightly affect the results.
     """
-    
+
     def __init__(
-            self, name="signal", tau_name="tau", out=None, inverse=True, tau=None
+            self,
+            name="signal",
+            tau_name="tau",
+            out=None,
+            inverse=True,
+            tau=None,
+            tau_sigma=0,
+            realization=0,
     ):
-        """ 
+        """
         A function to apply or remove a detector time constant to the data
-        
+
         Arguments:
         name(str) : Cache prefix to operate on
         tau_name(str) : Where to look in the focal plane for time
@@ -26,6 +33,7 @@ class OpTimeConst(toast.Operator):
         out(str) : Cache prefix to output. If None, use name
         tau(float) : Time constant (in seconds) to use for all detectors.
             If set, will override `tau_name`
+        realization(int) :  Realization ID, only used if tau_sigma is nonzero
         """
         self._name = name
         self._taus = tau_name
@@ -35,7 +43,9 @@ class OpTimeConst(toast.Operator):
         else:
             self._out = out
         self._tau = tau
-    
+        self._tau_sigma = tau_sigma
+        self._realization = realization
+
     def exec(self, data):
         for obs in data.obs:
             tod = obs["tod"]
@@ -43,7 +53,14 @@ class OpTimeConst(toast.Operator):
             if times.size < 2:
                 # Cannot filter
                 continue
-            
+
+            if self.tau_sigma:
+                obsindx = 0
+                if "id" in obs:
+                    obsindx = obs["id"]
+                else:
+                    print("Warning: observation ID is not set, using zero!")
+
             # Get an approximate time step, even if the sampling is irregular
             tstep = (times[-1] - times[0]) / (times.size - 1)
             freqs = np.fft.rfftfreq(times.size, tstep)
@@ -54,6 +71,13 @@ class OpTimeConst(toast.Operator):
                     tau = obs["focalplane"][det][self._taus]
                 else:
                     tau = self._tau
+                if self.tau_sigma:
+                    # randomize tau in a reproducible manner
+                    seed = 1000000 * self._realization
+                    seed = 100000 * obsindx
+                    seed += obs["focalplane"][det]["index"]
+                    np.random.seed(seed)
+                    tau *= 1 + np.random.randn() * self.tau_sigma
                 if self.inverse:
                     taufilter = (1 + 2.0j * np.pi * freqs * tau)
                 else:
@@ -63,5 +87,5 @@ class OpTimeConst(toast.Operator):
                 # performance penalty.
                 out = np.fft.irfft(taufilter * np.fft.rfft(signal), n=times.size)
                 tod.cache.put("{}_{}".format(self._out, det), out, replace=True)
-    
+
         return

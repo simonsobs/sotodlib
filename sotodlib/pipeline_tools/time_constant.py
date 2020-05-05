@@ -31,6 +31,13 @@ def add_time_constant_args(parser):
         type=np.float,
         help="Value of the time constant in seconds.",
     )
+    parser.add_argument(
+        "--tau-sigma",
+        required=False,
+        type=np.float,
+        help="Relative width of time constant errors applied in "
+        "deconvolution.  Randomized by detector and observation.",
+    )
     return
 
 
@@ -47,14 +54,20 @@ def convolve_time_constant(args, comm, data, name, verbose=True):
     return
 
 
-def deconvolve_time_constant(args, comm, data, name, verbose=True):
+def deconvolve_time_constant(args, comm, data, name, realization=0, verbose=True):
     if not args.tau_convolve:
         return
 
     log = Logger.get()
     timer = Timer()
     timer.start()
-    tauop = OpTimeConst(name=name, tau=args.tau_value, inverse=True)
+    tauop = OpTimeConst(
+        name=name,
+        tau=args.tau_value,
+        inverse=True,
+        tau_sigma=args.tau_sigma,
+        realization=realization,
+    )
     tauop.exec(data)
     timer.report_clear("De-convolve time constant")
 

@@ -287,7 +287,7 @@ def main():
 
         toast_tools.scramble_gains(args, comm, data, mc, totalname)
 
-        so_tools.deconvolve_time_constant(args, comm, data, totalname)
+        so_tools.deconvolve_time_constant(args, comm, data, totalname, realization=mc)
 
         memreport("after de-convolving with time constant", comm.comm_world)
 
