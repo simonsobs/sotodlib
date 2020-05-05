@@ -31,7 +31,7 @@ if toast_available is None:
     try:
         import toast
         from toast.mpi import MPI
-        from toast.tod import TODGround
+        from toast.todmap import TODGround
         from toast.tod import AnalyticNoise
         from sotodlib.io.toast_export import ToastExport
         from sotodlib.io.toast_load import load_data
