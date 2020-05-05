@@ -24,8 +24,8 @@ class OpTimeConst(toast.Operator):
         tau_name(str) : Where to look in the focal plane for time
             contants to apply / remove
         out(str) : Cache prefix to output. If None, use name
-        tau(float) : Time constant to use for all detectors.  If set,
-             will override `tau_name`
+        tau(float) : Time constant (in seconds) to use for all detectors.
+            If set, will override `tau_name`
         """
         self._name = name
         self._taus = tau_name

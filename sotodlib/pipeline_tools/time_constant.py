@@ -29,7 +29,7 @@ def add_time_constant_args(parser):
         "--tau-value",
         required=False,
         type=np.float,
-        help="Value of the time constant time constant",
+        help="Value of the time constant in seconds.",
     )
     return
 
