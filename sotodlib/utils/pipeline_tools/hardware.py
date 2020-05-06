@@ -7,8 +7,8 @@ from toast.pipeline_tools import Telescope, Focalplane, Site, Schedule, CES
 from toast.timing import function_timer, Timer
 from toast.utils import Logger
 
-from sotodlib.core import Hardware
-from sotodlib.sim_hardware import get_example, sim_telescope_detectors
+from ...core import Hardware
+from ...sim_hardware import get_example, sim_telescope_detectors
 
 
 FOCALPLANE_RADII_DEG = {

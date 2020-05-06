@@ -7,7 +7,8 @@ from toast.timing import function_timer, Timer
 from toast.tod import AnalyticNoise
 from toast.utils import Logger
 import toast.qarray as qa
-from sotodlib.sim_hardware import get_example
+
+from ...sim_hardware import get_example
 
 
 def add_so_noise_args(parser):
