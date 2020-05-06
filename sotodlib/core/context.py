@@ -143,7 +143,7 @@ class Context(odict):
             loader_type = self.get('obs_loader_type', 'default')
 
         # Load TOD.
-        from sotodlib.io.load import OBSLOADER_REGISTRY
+        from ..io.load import OBSLOADER_REGISTRY
         loader_func = OBSLOADER_REGISTRY[loader_type]  # Register your loader?
         aman = loader_func(self.obsfiledb, obs_id, dets)
 
