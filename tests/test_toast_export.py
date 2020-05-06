@@ -27,7 +27,7 @@ if toast_available is None:
     try:
         import toast
         from toast.mpi import MPI
-        from toast.tod import TODGround
+        from toast.todmap import TODGround
         from toast.tod import AnalyticNoise
         from sotodlib.io.toast_export import ToastExport
         toast_available = True
@@ -164,7 +164,7 @@ class ToastExportTest(TestCase):
             cache_name="signal",
             cache_copy=["component1", "component2"],
             mask_flag_common=tod.TURNAROUND,
-            filesize=500000,
+            filesize=5000000,
             units=core3g.G3TimestreamUnits.Tcmb)
         dumper.exec(self.data)
 
