@@ -49,7 +49,7 @@ def export_TOD(args, comm, data, totalname, schedules, other=None, verbose=True)
 
     # Only import spt3g if we are writing out so3g files
     from spt3g import core as core3g
-    from ..data.toast_export import ToastExport
+    from ...io.toast_export import ToastExport
 
     path = os.path.abspath(args.export)
 
