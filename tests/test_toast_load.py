@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2019 Simons Observatory.
+# Copyright (c) 2018-2020 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Test toast data loading.
 """
@@ -205,7 +205,7 @@ class ToastLoadTest(TestCase):
         for idet, det in enumerate(dets):
             detgroups["group{}".format(idet)] = [det]
 
-        outdir = self.outdir
+        outdir = self.outdir + "_split"
         prefix = "sat3"
 
         # Dump to disk
