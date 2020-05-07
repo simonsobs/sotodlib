@@ -183,7 +183,7 @@ def load_observations(args, comm):
     """
     # This import is not at the top of the file to avoid
     # loading spt3g through so3g unnecessarily
-    from ..data.toast_load import load_data
+    from ...io.toast_load import load_data
     log = Logger.get()
     if args.import_obs is not None:
         import_obs = args.import_obs.split(",")
