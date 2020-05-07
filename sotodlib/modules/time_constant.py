@@ -68,6 +68,11 @@ class OpTimeConst(toast.Operator):
             for det in tod.local_dets:
                 signal = tod.local_signal(det, self._name)
                 if self._tau is None:
+                    if self._taus not in obs["focalplane"][det]:
+                        raise RuntimeError(
+                            "Cannot apply time constant.  No value specified "
+                            "nor found in the focalplane database."
+                        )
                     tau = obs["focalplane"][det][self._taus]
                 else:
                     tau = self._tau
@@ -76,6 +81,7 @@ class OpTimeConst(toast.Operator):
                     seed = 1000000 * self._realization
                     seed = 100000 * obsindx
                     seed += obs["focalplane"][det]["index"]
+                    seed %= 2 ** 31
                     np.random.seed(seed)
                     tau *= 1 + np.random.randn() * self._tau_sigma
                 if self.inverse:
