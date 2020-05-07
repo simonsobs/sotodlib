@@ -7,7 +7,7 @@ import numpy as np
 from toast.timing import function_timer, Timer
 from toast.utils import Logger
 
-from ..modules import OpTimeConst
+from ...modules import OpTimeConst
 
 
 def add_time_constant_args(parser):
