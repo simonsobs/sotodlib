@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2019 Simons Observatory.
+# Copyright (c) 2018-2020 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Data simulation.
 
@@ -9,7 +9,7 @@ This module contains code for simulating data.
 import numpy as np
 
 from spt3g import core
-from sotodlib.core.g3_core import DataG3Module
+from .core.g3_core import DataG3Module
 
 
 class PipelineSeeder(list):

@@ -1,4 +1,4 @@
-# Copyright (c) 2019 Simons Observatory.
+# Copyright (c) 2019-2020 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import numpy as np
@@ -7,7 +7,8 @@ from toast.pipeline_tools import Telescope, Focalplane, Site, Schedule, CES
 from toast.timing import function_timer, Timer
 from toast.utils import Logger
 
-from .. import hardware
+from ...core import Hardware
+from ...sim_hardware import get_example, sim_telescope_detectors
 
 
 FOCALPLANE_RADII_DEG = {
@@ -154,12 +155,12 @@ def get_hardware(args, comm, verbose=False):
             log.info(
                 "Loading hardware configuration from {}..." "".format(args.hardware)
             )
-            hw = hardware.Hardware(args.hardware)
+            hw = Hardware(args.hardware)
             timer.report_clear("Load hardware map")
         else:
             log.info("Simulating default hardware configuration")
-            hw = hardware.get_example()
-            hw.data["detectors"] = hardware.sim_telescope_detectors(hw, telescope.name)
+            hw = get_example()
+            hw.data["detectors"] = sim_telescope_detectors(hw, telescope.name)
             timer.report_clear("Simulate hardware map")
         # Construct a running index for all detectors across all
         # telescopes for independent noise realizations
@@ -209,7 +210,7 @@ def get_telescope(args, comm, verbose=False):
     """
     telescope = None
     if comm.world_rank == 0:
-        hwexample = hardware.get_example()
+        hwexample = get_example()
         tubes = args.tubes.split(",")
         for tube in tubes:
             for telescope_name, telescope_data in hwexample.data[

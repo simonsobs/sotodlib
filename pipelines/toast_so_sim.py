@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright (c) 2019 Simons Observatory.
+# Copyright (c) 2019-2020 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 
@@ -40,7 +40,7 @@ from toast.timing import dump as dump_timing
 
 import toast.pipeline_tools as toast_tools
 
-import sotodlib.pipeline_tools as so_tools
+import sotodlib.utils.pipeline_tools as so_tools
 
 import numpy as np
 

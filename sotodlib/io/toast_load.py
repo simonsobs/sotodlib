@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2019 Simons Observatory.
+# Copyright (c) 2018-2020 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """TOAST interface tools.
 
@@ -28,7 +28,7 @@ from toast.utils import Logger, Environment, memreport
 from toast.timing import Timer
 from toast.mpi import MPI
 
-from ..hardware import Hardware
+from ..core import Hardware
 
 from .toast_frame_utils import frame_to_tod
 
