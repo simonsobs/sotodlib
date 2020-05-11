@@ -22,8 +22,10 @@ from spt3g import core as core3g
 from toast.dist import Data, distribute_discrete
 
 import toast.qarray as qa
-from toast.tod import TOD, Noise
+from toast.tod import TOD, Noise, Interval
 from toast.tod import spt3g_utils as s3utils
+from toast.tod.interval import Interval
+from toast.todmap import TODGround
 from toast.utils import Logger, Environment, memreport
 from toast.timing import Timer
 from toast.mpi import MPI
@@ -36,6 +38,15 @@ from .toast_frame_utils import frame_to_tod
 # FIXME:  This CamelCase name is ridiculous in all caps...
 
 class SOTOD(TOD):
+
+    TURNAROUND = TODGround.TURNAROUND
+    LEFTRIGHT_SCAN = TODGround.LEFTRIGHT_SCAN
+    RIGHTLEFT_SCAN = TODGround.RIGHTLEFT_SCAN
+    LEFTRIGHT_TURNAROUND = TODGround.LEFTRIGHT_TURNAROUND
+    RIGHTLEFT_TURNAROUND = TODGround.RIGHTLEFT_TURNAROUND
+    SUN_UP = TODGround.SUN_UP
+    SUN_CLOSE = TODGround.SUN_CLOSE
+
     """This class contains the timestream data.
 
     An instance of this class loads a directory of frame files into memory.
@@ -263,11 +274,11 @@ class SOTOD(TOD):
         return
 
     def _get_common_flags(self, start, n):
-        ref = self.cache.reference("flags_common")[start:start+n]
+        ref = self.cache.reference(self.COMMON_FLAG_NAME)[start:start+n]
         return ref
 
     def _put_common_flags(self, start, flags):
-        ref = self.cache.reference("flags_common")
+        ref = self.cache.reference(self.COMMON_FLAG_NAME)
         ref[start:(start+flags.shape[0])] = flags
         del ref
         return
@@ -298,9 +309,12 @@ class SOTOD(TOD):
         del ref
         return
 
-    def _get_pntg(self, detector, start, n):
+    def _get_pntg(self, detector, start, n, azel=False):
         # Get boresight pointing (from disk or cache)
-        bore = self._get_boresight(start, n)
+        if azel:
+            bore = self._get_boresight_azel(start, n)
+        else:
+            bore = self._get_boresight(start, n)
         # Apply detector quaternion and return
         return qa.mult(bore, self._detquats[detector])
 
@@ -310,21 +324,21 @@ class SOTOD(TOD):
         return
 
     def _get_position(self, start, n):
-        ref = self.cache.reference("site_position")[start:start+n, :]
+        ref = self.cache.reference(self.POSITION_NAME)[start:start+n, :]
         return ref
 
     def _put_position(self, start, pos):
-        ref = self.cache.reference("site_position")
+        ref = self.cache.reference(self.POSITION_NAME)
         ref[start:(start+pos.shape[0]), :] = pos
         del ref
         return
 
     def _get_velocity(self, start, n):
-        ref = self.cache.reference("site_velocity")[start:start+n, :]
+        ref = self.cache.reference(self.VELOCITY_NAME)[start:start+n, :]
         return ref
 
     def _put_velocity(self, start, vel):
-        ref = self.cache.reference("site_velocity")
+        ref = self.cache.reference(self.VELOCITY_NAME)
         ref[start:(start+vel.shape[0]), :] = vel
         del ref
         return
@@ -515,10 +529,26 @@ def load_observation(path, dets=None, mpicomm=None, prefix=None, **kwargs):
 
     obs["noise"] = noise
 
-    obs["tod"] = SOTOD(path, file_names, nframes, file_sample_offs,
-                       frame_sizes, frame_sizes_by_offset,
-                       frame_sample_offs, detquats=detoffset,
-                       mpicomm=mpicomm, **kwargs)
+    tod = SOTOD(path, file_names, nframes, file_sample_offs,
+                frame_sizes, frame_sizes_by_offset,
+                frame_sample_offs, detquats=detoffset,
+                mpicomm=mpicomm, **kwargs)
+    obs["tod"] = tod
+
+    intervals = []
+    times = tod.local_times()
+    local_offset, nsample = tod.local_samples
+    for offset, size in frame_sizes_by_offset.items():
+        if offset >= local_offset and offset + size <= local_offset + nsample:
+            start, stop = times[offset], times[offset + size - 1]
+        else:
+            start, stop = 0, 0
+        intervals.append(
+            Interval(start=start, stop=stop, first=offset, last=offset + size - 1)
+        )
+
+    obs["intervals"] = intervals
+
     return obs
 
 
