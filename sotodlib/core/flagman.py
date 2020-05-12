@@ -8,10 +8,10 @@ class FlagManager(AxisManager):
     """An extension of the AxisManager class to make functions 
     more specifically associated with cuts and flags.
     
-    FlagManager only expects to have items which are mapped to the 
-    detector axis the sample axis or both. 
+    FlagManager only expects to have items that are mapped to the 
+    detector axis, the sample axis, or both. 
     
-    Detector Flags are bitmasks or boolean arrays. To match with
+    Detector Flags can be passed as bitmasks or boolean arrays. To match with
     Ranges and RangesMatrix, the default is False and the exceptions
     are True
     """
@@ -25,7 +25,7 @@ class FlagManager(AxisManager):
             raise ValueError('FlagManagers require a samps axis')
             
     def wrap(self, name, data, axis_map=None, *kwargs):
-        """If axis_map is None, the data better be (dets,), (samps,)
+        """If axis_map is None, the data better be (dets,), (samps,),
             or (dets, samps)
         """
         
