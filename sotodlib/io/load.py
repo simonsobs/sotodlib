@@ -469,7 +469,8 @@ def load_observation(db, obs_id, dets=None, prefix=None):
             hstack_into(aman.signal[i], arrs)
 
         del streams
-
+    
+    aman.wrap('flags', core.FlagManager.for_tod(aman))
     return aman
 
 
