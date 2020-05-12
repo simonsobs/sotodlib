@@ -10,4 +10,6 @@ from .context import Context
 from .axisman import AxisManager
 from .axisman import IndexAxis, OffsetAxis, LabelAxis
 
+from .flagman import FlagManager
+
 from .hardware import Hardware
