@@ -328,6 +328,12 @@ class AxisManager:
             return self._axes[name]
         raise KeyError(name)
 
+    def __setitem__(self, name, val):
+        if name in self._fields:
+            self._fields[name] = val
+        else:
+            raise KeyError(name)
+            
     def __getattr__(self, name):
         return self[name]
 
