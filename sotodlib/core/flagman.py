@@ -127,6 +127,10 @@ class FlagManager(AxisManager):
         out = reduce(op, to_reduce)
         return out
     
+    def collapse_all(self, method='union'):
+        """same as collapse but for all fields, to be more verbose"""
+        return self.collapse(new_flag, list(self._fields.keys()), method)
+    
     def reduce(self, new_flag, flags, method='union', keep=False):
         """reduce multiple flags into a new flag by chosen method.
         

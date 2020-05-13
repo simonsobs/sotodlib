@@ -8,10 +8,19 @@ from so3g.proj import Ranges, RangesMatrix
 
 def add_random_glitches(tod, params={}, signal='glitches', flag='true_glitches',
                         overwrite=False, verbose=False):
-    """n_glitch is the expected number of glitches per detector per observation
-       sig_n_glitch is the width of the expected distribution
-       h_glitch is the expected higher of the glitches
-       sig_h_glitch is the expected higher of the glitches
+    """Add glitches (spikes that just effect one data point) to the data.
+    
+    Args:
+        tod (AxisManager): the tod 
+        params (dictionary): Use to overwrite the default values
+                n_glitch: the expected number of glitches per detector per observation
+                sig_n_glitch: the width of the expected distribution
+                h_glitch: the expected higher of the glitches
+                sig_h_glitch: the expected higher of the glitches
+        signal (string): name of the place to add the badness to the tod
+        flag (string): name of the flag to store where the glitches are
+        overwrite (bool): if true, write over signal. if false, add to signal
+        verbose (bool): print the number of glitches added
     """
     gparams = {'n_glitch' : 1, 'sig_n_glitch' : 0.1, 
                'h_glitch' : 10, 'sig_h_glitch' : 0.01}
@@ -51,11 +60,21 @@ def add_random_glitches(tod, params={}, signal='glitches', flag='true_glitches',
 
 def add_random_jumps(tod, params={}, signal='jumps', flag='true_jumps',
                         overwrite=False, verbose=False):
-    """n_jump is the expected number of jumps per detector per observation
-       sig_n_jump is the width of the expected distribution
-       h_jump is the expected higher of the jumps
-       sig_h_jump is the expected higher of the jumps
+    """Add jumps (changes in DC level) to the data.
+    
+    Args:
+        tod (AxisManager): the tod 
+        params (dictionary): Use to overwrite the default values
+                n_jump is the expected number of jumps per detector per observation
+               sig_n_jump is the width of the expected distribution
+               h_jump is the expected higher of the jumps
+               sig_h_jump is the expected higher of the jumps
+        signal (string): name of the place to add the badness to the tod
+        flag (string): name of the flag to store where the glitches are
+        overwrite (bool): if true, write over signal. if false, add to signal
+        verbose (bool): print the number of glitches added
     """
+  
     gparams = {'n_jump' : 0.2, 'sig_n_jump' : 0.05, 
                'h_jump' : 0.1, 'sig_h_jump' : 0.3}
     gparams.update(params)
@@ -96,7 +115,18 @@ def add_random_jumps(tod, params={}, signal='jumps', flag='true_jumps',
 
 def add_random_offsets( tod, params={}, signal='offset',
                         overwrite=False, verbose=False):
-    """Add uniformly distributed DC offsets to the data"""
+    """Add uniformly distributed DC offsets to the data
+    
+    Args:
+        tod (AxisManager): the tod 
+        params (dictionary): Use to overwrite the default values
+                offset_low: lowest possible offset
+                offset_high: highest possible offset
+        signal (string): name of the place to add the badness to the tod
+        overwrite (bool): if true, write over signal. if false, add to signal
+        verbose (bool): print that offsets are added
+    """
+    
     gparams = {'offset_low' : -20, 
                'offset_high':  20 }
     gparams.update(params)
@@ -121,7 +151,17 @@ def add_random_offsets( tod, params={}, signal='offset',
 
 def add_random_trends( tod, params={}, signal='trends',
                         overwrite=False, verbose=False):
-    """Add normally distributed trends offsets to the data"""
+    """Add normally distributed trends offsets to the data
+    
+    Args:
+        tod (AxisManager): the tod 
+        params (dictionary): Use to overwrite the default values
+                slope_mean: normal distribution mean
+                slope_sig: normal distribution offset
+        signal (string): name of the place to add the badness to the tod
+        overwrite (bool): if true, write over signal. if false, add to signal
+        verbose (bool): print that offsets are added
+    """
     gparams = {'slope_mean' : 0.1, 
                'slope_sig':  0.01 }
     gparams.update(params)
