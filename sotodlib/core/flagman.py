@@ -109,10 +109,14 @@ class FlagManager(AxisManager):
             flags = self._fields
 
         to_reduce = [self._fields[f] for f in flags]
+        if len(flags)==0:
+            raise ValueError('Found zero flags to combine')
+            
         out = RangesMatrix([Ranges(self.samps.count) for det in self.dets.vals])
         
         ## need to add out to prevent flag ordering from causing errors
-        to_reduce.insert(0, out)
+        ### (Ranges can't add to RangeMatrix, only other way around)
+        to_reduce[0] = out+to_reduce[0]
         
         if method == 'union': 
             op = lambda x, y: x+y
