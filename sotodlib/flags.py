@@ -32,11 +32,13 @@ def get_turnaround_flags(tod, qlim=1, merge=True, name='turnarounds'):
 
 
 def get_glitch_flags(tod, n_sig, t_glitch, hp_fc, buffer,
-                    merge=True, name='glitchs'):
+                    signal='signal', merge=True, overwrite=False, 
+                    name='glitches'):
     """Direct translation from moby2 for quick testing"""
     # f-space filtering
     filt = filters.high_pass_sine2(hp_fc) * filters.gaussian_filter(t_glitch)
-    fvec = fourier_filter(tod, filt, detrend='linear', resize='zero_pad')
+    fvec = fourier_filter(tod, filt, detrend='linear', 
+                          signal_name=signal, resize='zero_pad')
     # get the threshods based on n_sig x nlev = n_sig x iqu x 0.741
     fvec = np.abs(fvec)
     thres = 0.741 * stats.iqr(fvec, axis=1) * n_sig
@@ -46,5 +48,11 @@ def get_glitch_flags(tod, n_sig, t_glitch, hp_fc, buffer,
     flag.buffer(buffer)
     
     if merge:
-        tod.flags.wrap(name, flag)
+        if name in tod.flags and not overwrite:
+            raise ValueError('Flag name {} already exists in tod.flags'.format(name))
+        elif name in tod.flags:
+            tod.flags[name] = flag
+        else:
+            tod.flags.wrap(name, flag)
+        
     return flag

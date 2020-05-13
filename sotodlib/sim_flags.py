@@ -47,7 +47,99 @@ def add_random_glitches(tod, params={}, signal='glitches', flag='true_glitches',
         if overwrite:
             tod.flags[flag] = truth
         else:
-            tod.flags[flag] += truth
-        
-add_random_glitches(tod, verbose=True, overwrite=True)
+            tod.flags[flag] += truth    
+
+def add_random_jumps(tod, params={}, signal='jumps', flag='true_jumps',
+                        overwrite=False, verbose=False):
+    """n_jump is the expected number of jumps per detector per observation
+       sig_n_jump is the width of the expected distribution
+       h_jump is the expected higher of the jumps
+       sig_h_jump is the expected higher of the jumps
+    """
+    gparams = {'n_jump' : 0.2, 'sig_n_jump' : 0.05, 
+               'h_jump' : 0.1, 'sig_h_jump' : 0.3}
+    gparams.update(params)
+    params=gparams
     
+    n_tot = int(np.abs(params['sig_n_jump']*tod.dets.count*np.random.randn(1) 
+                       + params['n_jump']*tod.dets.count))
+    places = np.random.randint( tod.dets.count*tod.samps.count, size=(n_tot,))
+    heights = np.random.randn( n_tot)*params['sig_h_jump'] + params['h_jump']
+    jumps = np.zeros( (tod.dets.count*tod.samps.count,) )
+    jumps[places] = heights
+    
+    jumps = np.reshape( jumps, (tod.dets.count, tod.samps.count) )
+    truth = RangesMatrix( [Ranges.from_mask( g!=0) for g in jumps])
+    ## actually make these jumps and not glitches
+    jumps = np.cumsum(jumps, axis=1)    
+    
+    if verbose:
+        print('Adding {} jumps to {} detectors'.format(n_tot, 
+                                                          np.sum( [len(t.ranges())>0 for t in truth]),))
+                                                                      
+    if not signal in tod:
+        tod.wrap(signal, jumps,
+                 [(0,tod.dets), (1,(tod.samps))] )
+    else:
+        if overwrite:
+            tod[signal] = jumps
+        else:
+            tod[signal] += jumps
+            
+    if not flag in tod.flags:
+        tod.flags.wrap(flag, truth)
+    else:
+        if overwrite:
+            tod.flags[flag] = truth
+        else:
+            tod.flags[flag] += truth
+
+def add_random_offsets( tod, params={}, signal='offset',
+                        overwrite=False, verbose=False):
+    """Add uniformly distributed DC offsets to the data"""
+    gparams = {'offset_low' : -20, 
+               'offset_high':  20 }
+    gparams.update(params)
+    params=gparams
+    
+    offsets = params['offset_low'] + np.random.rand(tod.dets.count)*(params['offset_high']
+                                                                     -params['offset_low'])
+    offs = np.zeros( (tod.dets.count, tod.samps.count))
+    offs += offsets[:,None]
+    
+    if verbose:
+        print('Adding Offsets to detectors')
+                                                                      
+    if not signal in tod:
+        tod.wrap(signal, offs,
+                 [(0,tod.dets), (1,(tod.samps))] )
+    else:
+        if overwrite:
+            tod[signal] = offs
+        else:
+            tod[signal] += offs
+
+def add_random_trends( tod, params={}, signal='trends',
+                        overwrite=False, verbose=False):
+    """Add normally distributed trends offsets to the data"""
+    gparams = {'slope_mean' : 0.1, 
+               'slope_sig':  0.01 }
+    gparams.update(params)
+    params=gparams
+    
+    s = np.random.randn(tod.dets.count)*params['slope_sig']+params['slope_mean']
+    
+    slopes = np.zeros( (tod.dets.count, tod.samps.count))
+    slopes += s[:,None]*np.linspace(0,1,tod.samps.count)[None,:]
+    
+    if verbose:
+        print('Adding Trends to Detectors')
+                                                                      
+    if not signal in tod:
+        tod.wrap(signal, slopes,
+                 [(0,tod.dets), (1,(tod.samps))] )
+    else:
+        if overwrite:
+            tod[signal] = slopes
+        else:
+            tod[signal] +=slopes
