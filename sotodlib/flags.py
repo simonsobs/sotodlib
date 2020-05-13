@@ -6,7 +6,8 @@ from so3g.proj import Ranges, RangesMatrix
 from .tod_ops import filters
 from .tod_ops import fourier_filter
 
-def get_turnaround_flags(tod, qlim=1, merge=True, name='turnarounds'):
+def get_turnaround_flags(tod, qlim=1, merge=True, overwrite=False,
+                         name='turnarounds'):
     """Flag the scan turnaround times.
 
     Parameters:
@@ -26,26 +27,50 @@ def get_turnaround_flags(tod, qlim=1, merge=True, name='turnarounds'):
     m = np.logical_or(az < lo, az > hi)
     
     flag = Ranges.from_bitmask(m)
+    
     if merge:
-        tod.flags.wrap(name, flag)
-    return flag 
+        if name in tod.flags and not overwrite:
+            raise ValueError('Flag name {} already exists in tod.flags'.format(name))
+        elif name in tod.flags:
+            tod.flags[name] = flag
+        else:
+            tod.flags.wrap(name, flag)
 
 
-def get_glitch_flags(tod, n_sig, t_glitch, hp_fc, buffer,
-                    signal='signal', merge=True, overwrite=False, 
-                    name='glitches'):
-    """Direct translation from moby2 for quick testing"""
+def get_glitch_flags(tod, params={}, signal='signal', merge=True, 
+                     overwrite=False, name='glitches'):
+    """ Find glitches with fourier filtering
+    Translation from moby2 as starting point
+    
+    Args:
+        tod (AxisManager): the tod 
+        params (dictionary): Use to overwrite the default values
+                n_sig: significance of detection
+                t_glitch: Gaussian filter width
+                hp_fc: high pass filter cutoff
+                buffer: amount to buffer flags around found location
+        merge (bool): if true, add to tod.flags
+        name (string): name of flag to add to tod.flags
+        overwrite (bool): if true, write over flag. if false, don't
+    """
+    gparams = {'n_sig':10, 
+               't_glitch':0.002, 
+               'hp_fc':5.0, 
+               'buffer':200,}
+    gparams.update(params)
+    params=gparams
+    
     # f-space filtering
-    filt = filters.high_pass_sine2(hp_fc) * filters.gaussian_filter(t_glitch)
+    filt = filters.high_pass_sine2(params['hp_fc']) * filters.gaussian_filter(params['t_glitch'])
     fvec = fourier_filter(tod, filt, detrend='linear', 
                           signal_name=signal, resize='zero_pad')
     # get the threshods based on n_sig x nlev = n_sig x iqu x 0.741
     fvec = np.abs(fvec)
-    thres = 0.741 * stats.iqr(fvec, axis=1) * n_sig
+    thres = 0.741 * stats.iqr(fvec, axis=1) * params['n_sig']
     # get flags
     msk = fvec > thres[:,None]
     flag = RangesMatrix( [Ranges.from_bitmask(m) for m in msk])
-    flag.buffer(buffer)
+    flag.buffer(params['buffer'])
     
     if merge:
         if name in tod.flags and not overwrite:
