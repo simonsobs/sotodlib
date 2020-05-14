@@ -260,13 +260,13 @@ def main():
 
         memreport("after simulating SSS", comm.comm_world)
 
-        so_tools.convolve_time_constant(args, comm, data, totalname)
-
-        memreport("after convolving with time constant", comm.comm_world)
-
         toast_tools.simulate_noise(args, comm, data, mc, totalname)
 
         memreport("after simulating noise", comm.comm_world)
+
+        so_tools.convolve_time_constant(args, comm, data, totalname)
+
+        memreport("after convolving with time constant", comm.comm_world)
 
         # DEBUG begin
         """

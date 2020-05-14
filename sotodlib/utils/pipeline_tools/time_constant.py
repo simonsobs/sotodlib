@@ -55,7 +55,7 @@ def convolve_time_constant(args, comm, data, name, verbose=True):
 
 
 def deconvolve_time_constant(args, comm, data, name, realization=0, verbose=True):
-    if not args.tau_convolve:
+    if not args.tau_deconvolve:
         return
 
     log = Logger.get()
