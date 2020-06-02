@@ -8,6 +8,7 @@ from toast.pipeline_tools import get_breaks
 from toast.timing import function_timer, Timer
 from toast.todmap import TODGround
 from toast.utils import Logger
+from toast.weather import Weather
 
 from .noise import get_analytic_noise
 from .hardware import get_hardware, get_focalplane
@@ -211,6 +212,10 @@ def load_observations(args, comm):
     telescope_data = [("all", data)]
     site = telescope.site
     focalplane = telescope.focalplane
+    if args.weather is not None:
+        weather = Weather(args.weather)
+    else:
+        weather = None
     for obs in data.obs:
         #obs["baselines"] = None
         obs["noise"] = focalplane.noise
@@ -221,7 +226,7 @@ def load_observations(args, comm):
         obs["telescope"] = telescope.name
         obs["telescope_id"] = telescope.id
         obs["fpradius"] = focalplane.radius
-        #obs["weather"] = site.weather
+        obs["weather"] = weather
         #obs["start_time"] = ces.start_time
         obs["altitude"] = site.alt
         #obs["season"] = ces.season

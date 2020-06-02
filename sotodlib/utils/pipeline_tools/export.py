@@ -57,11 +57,8 @@ def export_TOD(args, comm, data, totalname, schedules, other=None, verbose=True)
     if key is not None:
         prefix = "{}_{}".format(args.bands, key)
         det_groups = {}
-        for schedule in schedules:
-            for (
-                det_name,
-                det_data,
-            ) in schedule.telescope.focalplane.detector_data.items():
+        for obs in data.obs:
+            for (det_name, det_data) in obs["focalplane"].items():
                 value = det_data[key]
                 if value not in det_groups:
                     det_groups[value] = []
