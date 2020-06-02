@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2019 Simons Observatory.
+# Copyright (c) 2018-2020 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """TOAST interface tools.
 
@@ -107,6 +107,9 @@ class ToastExport(toast.Operator):
         """
         f = core3g.G3Frame(core3g.G3FrameType.Observation)
         for k, v in props.items():
+            if k == "detector_uid":
+                # old indices loaded from so3g file
+                continue
             f[k] = s3utils.to_g3_type(v)
         indx = core3g.G3MapInt()
         for k, v in detindx.items():
