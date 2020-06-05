@@ -10,16 +10,14 @@ def get_turnaround_flags(tod, qlim=1, merge=True, overwrite=False,
                          name='turnarounds'):
     """Flag the scan turnaround times.
 
-    Parameters:
-    -----------
-    tod: AxisManager object
-    qlim: percentile used to find turnaround
-    merge: If true, merge into tod.flags
-    name: name of flag when merged into tod.flags
+    Args:
+        tod: AxisManager object
+        qlim: percentile used to find turnaround
+        merge: If true, merge into tod.flags
+        name: name of flag when merged into tod.flags
 
     Returns:
-    --------
-    Ranges object
+        flag: Ranges object of turn-arounds 
 
     """
     az = tod.boresight.az
@@ -35,6 +33,7 @@ def get_turnaround_flags(tod, qlim=1, merge=True, overwrite=False,
             tod.flags[name] = flag
         else:
             tod.flags.wrap(name, flag)
+    return flag
 
 
 def get_glitch_flags(tod, params={}, signal='signal', merge=True, 
@@ -52,6 +51,9 @@ def get_glitch_flags(tod, params={}, signal='signal', merge=True,
         merge (bool): if true, add to tod.flags
         name (string): name of flag to add to tod.flags
         overwrite (bool): if true, write over flag. if false, don't
+    
+    Returns:
+        flag: RangesMatrix object of glitches
     """
     gparams = {'n_sig':10, 
                't_glitch':0.002, 
