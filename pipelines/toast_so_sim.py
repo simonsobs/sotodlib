@@ -81,6 +81,7 @@ def parse_arguments(comm):
     toast_tools.add_sss_args(parser)
     toast_tools.add_tidas_args(parser)
     toast_tools.add_mc_args(parser)
+    so_tools.add_time_constant_args(parser)
     so_tools.add_hw_args(parser)
     so_tools.add_so_noise_args(parser)
     so_tools.add_pysm_args(parser)
@@ -255,13 +256,17 @@ def main():
 
         memreport("after adding sky", comm.comm_world)
 
+        toast_tools.simulate_sss(args, comm, data, mc, totalname)
+
+        memreport("after simulating SSS", comm.comm_world)
+
         toast_tools.simulate_noise(args, comm, data, mc, totalname)
 
         memreport("after simulating noise", comm.comm_world)
 
-        toast_tools.simulate_sss(args, comm, data, mc, totalname)
+        so_tools.convolve_time_constant(args, comm, data, totalname)
 
-        memreport("after simulating SSS", comm.comm_world)
+        memreport("after convolving with time constant", comm.comm_world)
 
         # DEBUG begin
         """
@@ -281,6 +286,10 @@ def main():
         # DEBUG end
 
         toast_tools.scramble_gains(args, comm, data, mc, totalname)
+
+        so_tools.deconvolve_time_constant(args, comm, data, totalname, realization=mc)
+
+        memreport("after de-convolving with time constant", comm.comm_world)
 
         if mc == firstmc:
             # For the first realization and frequency, optionally
