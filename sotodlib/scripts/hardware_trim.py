@@ -94,7 +94,7 @@ def main():
         tstr = ""
         for tube in tubes:
             tstr = "{}'{}', ".format(tstr, tube)
-        print("  tubes = {}".format(telstr.rstrip(", ")), flush=True)
+        print("  tubes = {}".format(tstr.rstrip(", ")), flush=True)
     for k, v in match.items():
         print("  {} = r'{}'".format(k, v), flush=True)
 
