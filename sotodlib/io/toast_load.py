@@ -46,6 +46,7 @@ class SOTOD(TOD):
     RIGHTLEFT_TURNAROUND = TODGround.RIGHTLEFT_TURNAROUND
     SUN_UP = TODGround.SUN_UP
     SUN_CLOSE = TODGround.SUN_CLOSE
+    ELNOD = 32
 
     """This class contains the timestream data.
 
