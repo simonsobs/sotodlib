@@ -248,7 +248,10 @@ def main():
 
         toast_tools.simulate_atmosphere(args, comm, data, mc, totalname)
 
-        so_tools.scale_atmosphere_by_bandpass(args, comm, data, totalname, mc)
+        #so_tools.scale_atmosphere_by_bandpass(args, comm, data, totalname, mc)
+        toast_tools.scale_atmosphere_by_frequency(
+            args, comm, data, cache_name=totalname, mc=mc,
+        )
 
         memreport("after atmosphere", comm.comm_world)
 
