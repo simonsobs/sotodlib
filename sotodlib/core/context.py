@@ -118,6 +118,10 @@ class Context(odict):
         if dets is not None:
             dets_selection.append(dets)
 
+        # Default detsets should be only those listed in obsfiledb
+        if detsets is None and self.obsfiledb is not None:
+            detsets = self.obsfiledb.get_detsets(obs_id)
+
         # Intersect with detectors allowed by the detsets argument?
         if detsets is not None:
             ddets = []
