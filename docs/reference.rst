@@ -10,6 +10,9 @@ and other operations needed for time domain data.
 Hardware Properties
 -----------------------
 
+.. Note this py:module is required for autoclass to work, below.
+.. py:module:: sotodlib.hardware_sim
+
 For the purpose of this package, "hardware" refers to all properties of the telescopes, detectors, readout, etc that are needed to simulate and analyze the data.  Initially this will be a fairly basic set of information, but that will expand as the instrument characterization progresses.
 
 Data Format
@@ -17,19 +20,19 @@ Data Format
 
 In memory, the hardware configuration is stored as a set of nested dictionaries.  This is wrapped by a simple "Hardware" class that has some methods for dumping / loading and selecting a subset of detectors.  Some parameters may eventually reference external data files in a format and location scheme that is yet to be determined.
 
-.. autoclass:: sotodlib.hardware.Hardware
+.. autoclass:: sotodlib.core.Hardware
     :members:
 
 To get an example hardware configuration as a starting point, you can use this function:
 
-.. autofunction:: sotodlib.hardware.get_example
+.. autofunction:: sotodlib.sim_hardware.get_example
 
 Simulated Detectors
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 Given a Hardware object loaded from disk or created in memory (for example using :func:`sotodlib.hardware.get_example`), detector properties can be simulated for an entire telescope with:
 
-.. autofunction:: sotodlib.hardware.sim_telescope_detectors
+.. autofunction:: sotodlib.sim_hardware.sim_telescope_detectors
 
 The resulting detector dictionary can be used independently or can be inserted into the existing Hardware object:
 
@@ -47,11 +50,11 @@ Visualization
 
 The detectors in a given Hardware model can be plotted with this function:
 
-.. autofunction:: sotodlib.hardware.plot_detectors
+.. autofunction:: plot_detectors
 
 To plot only a subset of detectors, first apply a selection to make a reduced hardware model and pass that to the plotting function.  You can also dump out to the console a pretty formatted summary of the hardware configuration:
 
-.. autofunction:: sotodlib.hardware.summary_text
+.. autofunction:: sotodlib.sim_hardware.summary_text
 
 
 Data Processing
@@ -60,18 +63,18 @@ These modules are used to process detector timestream data within a G3Pipeline. 
 
 DataG3Module
 ~~~~~~~~~~~~~~~~~~~~~~   
-.. autoclass:: sotodlib.data.DataG3Module
+.. autoclass:: sotodlib.core.g3_core.DataG3Module
     :members:
 
 
 Filters
 ~~~~~~~~~~~~~~~~~~~~~~   
 
-.. automodule:: sotodlib.data.filter
+.. automodule:: sotodlib.g3_filter
    :members:
    
 Conditioning
 ~~~~~~~~~~~~~~~~~~~~~~   
 
-.. automodule:: sotodlib.data.condition
+.. automodule:: sotodlib.g3_condition
    :members:
