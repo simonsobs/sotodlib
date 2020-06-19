@@ -31,81 +31,83 @@ client.switch_database('qds')
 context = core.Context('pipe_s0001_v2.yaml')
 observations = context.obsfiledb.get_obs()
 print('Found {} Observations'.format(len(observations)))
-o = 139 #np.random.randint(len(observations))
-obs_id = observations[o]
-print('Looking at observation #{} named {}'.format(o,obs_id))
+#o = 139 #np.random.randint(len(observations))
 
-c = context.obsfiledb.conn.execute('select distinct DS.name, DS.det from detsets DS '
-                        'join files on DS.name=files.detset '
-                        'where obs_id=?', (obs_id,))
-dets_in_obs = [tuple(r) for r in c.fetchall()]
-wafers = np.unique([x[0] for x in dets_in_obs])
-
-print('There are {} detectors on {} wafers in this observation'.format(len(dets_in_obs), len(wafers)))
-## if you want to load a random wafer
-# w_idx = np.random.randint(len(wafers))
-# wafer_name = wafers[w_idx]
-
-for wafer in wafers:
-
-    #wafer_name = 'MFF2_wafer_17'
-    wafer_name = wafer
-
-    # Check we haven't already processed this wafer    
-    query_where = f"select white_noise_level from \"obs_process_log\" WHERE wafer = '{wafer_name}' AND observation = '{obs_id}'"
-    result = client.query(query_where)
+for o in range(100,140):
+    obs_id = observations[o]
+    print('Looking at observation #{} named {}'.format(o,obs_id))
     
-    if list(result.get_points(measurement='obs_process_log')):
-        print(f'skipping wafer {wafer_name}, already processed')
-        continue
+    c = context.obsfiledb.conn.execute('select distinct DS.name, DS.det from detsets DS '
+                            'join files on DS.name=files.detset '
+                            'where obs_id=?', (obs_id,))
+    dets_in_obs = [tuple(r) for r in c.fetchall()]
+    wafers = np.unique([x[0] for x in dets_in_obs])
     
-    # Process Obs+Wafer
-    # Build detector list for this wafer
-    det_list = []
-    for det in dets_in_obs:
-        if det[0] == wafer_name:
-            det_list.append(det[1])
-    print('{} detectors on this wafer'.format(len(det_list)))
+    print('There are {} detectors on {} wafers in this observation'.format(len(dets_in_obs), len(wafers)))
+    ## if you want to load a random wafer
+    # w_idx = np.random.randint(len(wafers))
+    # wafer_name = wafers[w_idx]
     
-    tod = so_data_load.load_observation(context.obsfiledb, obs_id, dets=det_list )
+    for wafer in wafers:
     
-    print('This observation is {} minutes long. Has {} detectors and {} samples'.format(round((tod.timestamps[-1]-tod.timestamps[0])/60.,2),
-                                                                          tod.dets.count, tod.samps.count))
+        #wafer_name = 'MFF2_wafer_17'
+        wafer_name = wafer
     
-    print('This TOD AxisManager has Axes: ')
-    for k in tod._axes:
-        print('\t{} with {} entries'.format(tod[k].name, tod[k].count ) )
+        # Check we haven't already processed this wafer
+        query_where = f"select white_noise_level from \"obs_process_log\" WHERE wafer = '{wafer_name}' AND observation = '{obs_id}'"
+        result = client.query(query_where)
         
-    print('This TOD  AxisManager has fields : [axes]')
-    for k in tod._fields:
-        print('\t{} : {}'.format(k, tod._assignments[k]) )
-        if type(tod._fields[k]) is core.AxisManager:
-            for kk in tod[k]._fields:
-                print('\t\t {} : {}'.format(kk, tod[k]._assignments[kk] ))
-    
-    # Compute the FFT and detector white noise levels
-    ffts, freqs = rfft(tod)
-    ## This is using these default options:
-    # detrend='linear', resize='zero_pad', window=np.hanning, 
-    # axis_name='samps', signal_name='signal'
-    
-    tsamp = np.median(np.diff(tod.timestamps))
-    norm_fact = (1.0/tsamp)*np.sum(np.abs(np.hanning(tod.samps.count))**2)
-    
-    fmsk = freqs > 10
-    det_white_noise = 1e6*np.median(np.sqrt(np.abs(ffts[:,fmsk])**2/norm_fact), axis=1)
+        if list(result.get_points(measurement='obs_process_log')):
+            print(f'skipping wafer {wafer_name}, already processed')
+            continue
 
-    # Publish to InfluxDB    
-    time_ns = int(tod.timestamps[0]*1e9)
-    payload = []
-    for index, noise_level in enumerate(det_white_noise):
-        influxdata = f'detector_stats,wafer={wafer_name},telescope=LAT,detector={index} white_noise_level={noise_level} {time_ns}'
-        payload.append(influxdata)
+        # Process Obs+Wafer
+        # Build detector list for this wafer
+        det_list = []
+        for det in dets_in_obs:
+            if det[0] == wafer_name:
+                det_list.append(det[1])
+        print('{} detectors on this wafer'.format(len(det_list)))
 
-    # Log into obs_process_log measurement in InfluxDB 
-    log_msg = f'obs_process_log,observation={obs_id},wafer={wafer_name} white_noise_level=1'
-    payload.append(log_msg)
-    client.write_points(payload, protocol='line')
+        tod = so_data_load.load_observation(context.obsfiledb, obs_id, dets=det_list )
+
+        print('This observation is {} minutes long. Has {} detectors and {} samples'.format(round((tod.timestamps[-1]-tod.timestamps[0])/60.,2),
+                                                                              tod.dets.count, tod.samps.count))
+
+        print('This TOD AxisManager has Axes: ')
+        for k in tod._axes:
+            print('\t{} with {} entries'.format(tod[k].name, tod[k].count ) )
+
+        print('This TOD  AxisManager has fields : [axes]')
+        for k in tod._fields:
+            print('\t{} : {}'.format(k, tod._assignments[k]) )
+            if type(tod._fields[k]) is core.AxisManager:
+                for kk in tod[k]._fields:
+                    print('\t\t {} : {}'.format(kk, tod[k]._assignments[kk] ))
+
+        # Compute the FFT and detector white noise levels
+        ffts, freqs = rfft(tod)
+        ## This is using these default options:
+        # detrend='linear', resize='zero_pad', window=np.hanning,
+        # axis_name='samps', signal_name='signal'
+
+        tsamp = np.median(np.diff(tod.timestamps))
+        norm_fact = (1.0/tsamp)*np.sum(np.abs(np.hanning(tod.samps.count))**2)
+
+        fmsk = freqs > 10
+        det_white_noise = 1e6*np.median(np.sqrt(np.abs(ffts[:,fmsk])**2/norm_fact), axis=1)
+    
+        # Publish to InfluxDB
+        time_ns = int(tod.timestamps[0]*1e9)
+        payload = []
+        for index, noise_level in enumerate(det_white_noise):
+            influxdata = f'detector_stats,wafer={wafer_name},telescope=LAT,detector={index} white_noise_level={noise_level} {time_ns}'
+            payload.append(influxdata)
+    
+        # Log into obs_process_log measurement in InfluxDB
+        log_msg = f'obs_process_log,observation={obs_id},wafer={wafer_name} white_noise_level=1'
+        payload.append(log_msg)
+        client.write_points(payload, protocol='line')
 
 
 # TODO
