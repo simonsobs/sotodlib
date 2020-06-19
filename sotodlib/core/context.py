@@ -130,8 +130,12 @@ class Context(odict):
 
         # Intersect with detectors allowed by the detsets argument?
         if detsets is not None:
+            all_detsets = self.obsfiledb.get_detsets(obs_id)
             ddets = []
             for ds in detsets:
+                if isinstance(ds, int):
+                    # So user can pass in detsets=[0] as a shortcut.
+                    ds = all_detsets[ds]
                 ddets.extend(self.obsfiledb.get_dets(ds))
             dets_selection.append(ddets)
 
@@ -164,6 +168,13 @@ class Context(odict):
         return aman
 
     def get_meta(self, request):
+        """Load and return the supporting metadata for an observation.  The
+        request parameter can be a simple observation id as a string,
+        or else a request dict like the kind passed in from get_obs.
+
+        """
+        if isinstance(request, str):
+            request = {'obs:obs_id': request}
         return self.loader.load(self['metadata'][:], request)
 
 
