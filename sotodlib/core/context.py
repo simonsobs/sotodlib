@@ -100,6 +100,12 @@ class Context(odict):
 
         """
         detspec = {}
+
+        # Handle the case that this is a row from a obsdb query.
+        if isinstance(obs_id, dict):
+            obs_id = obs_id['obs_id']  # You passed in a dict.
+
+        # If the obs_id is colon-coded, decode them.
         if ':' in obs_id:
             tokens = obs_id.split(':')
             obs_id = tokens[0]
