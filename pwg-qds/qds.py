@@ -75,6 +75,11 @@ class Monitor:
         log : str
             Measurement name for the log within influxdb
 
+        Returns
+        -------
+        bool
+            True if calculation already performed, False otherwise
+
         """
         query_where = f"select {field} from \"{log}\" WHERE observation = '{observation}'"
 

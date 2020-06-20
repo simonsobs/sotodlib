@@ -17,23 +17,18 @@ import sotodlib.sim_flags as sim_flags
 import sotodlib.tod_ops.filters as filters
 from sotodlib.tod_ops import fourier_filter, rfft
 
-from influxdb import InfluxDBClient
+import qds
 
-# Connect to InfluxDB
-client = InfluxDBClient(host='localhost', port=56777)
-db_list = client.get_list_database()
-db_names = [x['name'] for x in db_list]
-if 'qds' not in db_names:
-    print("qds DB doesn't exist, creating DB")
-    client.create_database('qds')
-client.switch_database('qds')
+monitor = qds.Monitor('localhost', 56777, 'qds')
 
 context = core.Context('pipe_s0001_v2.yaml')
 observations = context.obsfiledb.get_obs()
 print('Found {} Observations'.format(len(observations)))
-#o = 139 #np.random.randint(len(observations))
+o_list = range(len(observations)) # all observations
+#o_list = [99] #np.random.randint(len(observations))
 
-for o in range(100,140):
+#for o in range(100,140):
+for o in o_list:
     obs_id = observations[o]
     print('Looking at observation #{} named {}'.format(o,obs_id))
     
@@ -49,23 +44,16 @@ for o in range(100,140):
     # wafer_name = wafers[w_idx]
     
     for wafer in wafers:
-    
-        #wafer_name = 'MFF2_wafer_17'
-        wafer_name = wafer
-    
-        # Check we haven't already processed this wafer
-        query_where = f"select white_noise_level from \"obs_process_log\" WHERE wafer = '{wafer_name}' AND observation = '{obs_id}'"
-        result = client.query(query_where)
-        
-        if list(result.get_points(measurement='obs_process_log')):
-            print(f'skipping wafer {wafer_name}, already processed')
+        # Check calculation completed for this wafer
+        check_tags = {'wafer': wafer} 
+        if monitor.check('white_noise_level', obs_id, check_tags):
             continue
 
         # Process Obs+Wafer
         # Build detector list for this wafer
         det_list = []
         for det in dets_in_obs:
-            if det[0] == wafer_name:
+            if det[0] == wafer:
                 det_list.append(det[1])
         print('{} detectors on this wafer'.format(len(det_list)))
 
@@ -96,22 +84,20 @@ for o in range(100,140):
 
         fmsk = freqs > 10
         det_white_noise = 1e6*np.median(np.sqrt(np.abs(ffts[:,fmsk])**2/norm_fact), axis=1)
-    
-        # Publish to InfluxDB
-        time_ns = int(tod.timestamps[0]*1e9)
-        payload = []
-        for index, noise_level in enumerate(det_white_noise):
-            influxdata = f'detector_stats,wafer={wafer_name},telescope=LAT,detector={index} white_noise_level={noise_level} {time_ns}'
-            payload.append(influxdata)
-    
-        # Log into obs_process_log measurement in InfluxDB
-        log_msg = f'obs_process_log,observation={obs_id},wafer={wafer_name} white_noise_level=1'
-        payload.append(log_msg)
-        client.write_points(payload, protocol='line')
+
+        # Publish to monitor
+        timestamps = np.ones(len(det_white_noise))*tod.timestamps[0]
+        base_tags = {'telescope': 'LAT', 'wafer': wafer}
+        tag_list = []
+        for det in det_list:
+            det_tag = dict(base_tags)
+            det_tag['detector'] = det
+            tag_list.append(det_tag)
+        log_tags = {'observation': obs_id, 'wafer': wafer}
+        monitor.record('white_noise_level', det_white_noise, timestamps, tag_list, 'detector_stats', log_tags=log_tags)
+        monitor.write()
 
 
-# TODO
-## Generalize so that we can compute and upload this for more observations/wafers/files
 ## push all sims to db!
 
 # notes
@@ -121,4 +107,3 @@ for o in range(100,140):
     
     # Alright, so I have the time stamp for pushing all the det_white_noise numbers in tod.timestamps[0]
     # let's just insert with a single tag for telescope=LAT, and one for detector=an index of the fft array
-    
