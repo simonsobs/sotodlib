@@ -44,16 +44,16 @@ class FlagManager(AxisManager):
             if len(s) == 1:
                 if s[0] == self.dets.count:
                     ## detector only flag. Turn into RangesMatrix
-                    axis_map=[(0,'dets')]
+                    axis_map=[(0,self.dets)]
                 elif s[0] == self.samps.count:
-                    axis_map=[(0,'samps')]
+                    axis_map=[(0, self.samps)]
                 else:
                     raise ValueError("FlagManager only takes data aligned with"
                                      " dets and/or samps. Data of shape {}"
                                      " is the wrong shape".format(s))
             elif len(s) == 2:
                 if s[0] == self.dets.count and s[1] == self.samps.count:
-                    axis_map=[(0,'dets'), (1,'samps')]
+                    axis_map=[(0,self.dets), (1,self.samps)]
                 elif s[1] == self.dets.count and s[0] == self.samps.count:
                     raise ValueError("FlagManager only takes 2D data aligned as"
                                      " (dets, samps). Data of shape {}"
@@ -72,7 +72,8 @@ class FlagManager(AxisManager):
             x = Ranges(self.samps.count)
             data = RangesMatrix([Ranges.ones_like(x) if Y 
                                  else Ranges.zeros_like(x) for Y in data])
-            axis_map = [(0,'dets'),(1,'samps')]
+            axis_map = [(0,self.dets),(1,self.samps)]
+
         super().wrap(name, data, axis_map, **kwargs)
 
     def wrap_dets(self, name, data):
@@ -103,6 +104,18 @@ class FlagManager(AxisManager):
                              "the (dets,samps) axss".format(s))
         self.wrap(name, data, axis_map=[(0,'samps'), (1,'samps')])
         
+    def copy(self, axes_only=False):
+        out = FlagManager(self.dets, self.samps)
+        for k, v in self._axes.items():
+            out._axes[k] = v
+        if axes_only:
+            return out
+        for k, v in self._fields.items():
+            out._fields[k] = v.copy()
+        for k, v in self._assignments.items():
+            out._assignments[k] = v.copy()
+        return out
+    
     def buffer(self, n_buffer, flags=None):
         """Buffer all the samps cuts by n_buffer
         Like with Ranges / Ranges Matrix, buffer changes everything in place        

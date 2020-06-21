@@ -359,7 +359,7 @@ class AxisManager:
                   for k in self._fields.keys()]
                  + ['%s:%s' % (k, v._minirepr_())
                     for k, v in self._axes.items()])
-        return ("AxisManager(" + ', '.join(stuff) + ")")
+        return ("{}(".format(type(self).__name__) + ', '.join(stuff) + ")")
 
     # constructors...
     @classmethod
