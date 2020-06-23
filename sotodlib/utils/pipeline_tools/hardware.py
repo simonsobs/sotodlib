@@ -178,7 +178,7 @@ def get_hardware(args, comm, verbose=False):
             # testing and development
             delete_detectors = []
             for det_name in hw.data["detectors"].keys():
-                if (det_index[det_name] // 2) % args.thinfp != 0:
+                if (det_index[det_name] // 4) % args.thinfp != 0:
                     delete_detectors.append(det_name)
             for det_name in delete_detectors:
                 del hw.data["detectors"][det_name]
