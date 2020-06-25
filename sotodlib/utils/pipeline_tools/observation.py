@@ -1,6 +1,8 @@
 # Copyright (c) 2019 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
+import copy
+
 import numpy as np
 
 from toast.dist import distribute_uniform, Data
@@ -35,7 +37,7 @@ def add_import_args(parser):
 
 
 @function_timer
-def create_observation(args, comm, telescope, ces, noise, verbose=True):
+def create_observation(args, comm, telescope, ces, verbose=True):
     """ Create a TOAST observation.
 
     Create an observation for the CES scan defined by all_ces_tot[ices].
@@ -103,7 +105,7 @@ def create_observation(args, comm, telescope, ces, noise, verbose=True):
     )
     obs["tod"] = tod
     obs["baselines"] = None
-    obs["noise"] = focalplane.noise
+    obs["noise"] = copy.deepcopy(focalplane.noise)
     obs["id"] = int(ces.mjdstart * 10000)
     obs["intervals"] = tod.subscans
     obs["site"] = site.name
@@ -146,7 +148,6 @@ def create_observations(args, comm, schedules):
     for schedule in schedules:
 
         telescope = schedule.telescope
-        noise = telescope.focalplane.noise
         all_ces = schedule.ceslist
         nces = len(all_ces)
 
@@ -157,8 +158,7 @@ def create_observations(args, comm, schedules):
         group_numobs = groupdist[comm.group][1]
 
         for ices in range(group_firstobs, group_firstobs + group_numobs):
-            # Noise model for this CES
-            obs = create_observation(args, comm, telescope, all_ces[ices], noise)
+            obs = create_observation(args, comm, telescope, all_ces[ices])
             data.obs.append(obs)
 
     if comm.comm_world is None or comm.comm_group.rank == 0:
