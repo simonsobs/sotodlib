@@ -1,0 +1,29 @@
+
+name:  Build and Test
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  so3g:
+    name: Latest so3g container
+    runs-on: ubuntu-latest
+    env:
+      SOTODLIB_TEST_DISABLE_PLOTS: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Pull so3g image
+        run: docker pull simonsobs/so3g:latest
+      - name: Install dependencies
+        run: docker run -v "$(pwd)":/home/sotodlib --name="test_runner" simonsobs/so3g:latest /home/sotodlib/.github/workflows/install_deps.sh && docker commit -m "dependencies" test_runner test_runner:so3g
+      - name: Run Serial Tests
+        run: docker run -v "$(pwd)":/home/sotodlib test_runner:so3g /home/sotodlib/.github/workflows/run_tests.sh
+
+# NOTE: eventually add test steps for documentation build and MPI tests.  If the
+# commands to run inside the container become too complicated they should be moved to
+# scripts.  We could also just modify the user permissions when volume mounting the
+# source checkout, rather than making a copy inside the container for running the tests.
