@@ -1,5 +1,5 @@
 """
-The purpose of proddb is to provide a layer of abstraction that
+The purpose of ManifestDb is to provide a layer of abstraction that
 assists code with identifying a file that contains some desired
 information, based on a piece of index information.  For example, a
 user might have a timestamp and an array name and want to know the
@@ -405,7 +405,7 @@ class ManifestDb:
         datas = cls.batch_from_loadspec(reqs)
 
         # Now for each returned object, project out only the intrinsic
-        # data subset deemed valid by the proddb.
+        # data subset deemed valid by the db.
         if 'dets' in cls.intrinsic_axes:
             reduced1 = []
             for m, d in zip(matches, datas):
