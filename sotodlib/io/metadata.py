@@ -122,8 +122,8 @@ class PerDetectorHdf5(ResultSet, _Hdf5Writer):
 
         Arguments:
           load_params: an index dictionary (see below).
-          detdb: a DetDB which may be used to resolve 'dets' indices.
-          obsdb: an ObsDB which may be used to resolve 'obs' indices.
+          detdb: a DetDb which may be used to resolve 'dets' indices.
+          obsdb: an ObsDb which may be used to resolve 'obs' indices.
 
         Returns an object of the present class.
 

@@ -4,9 +4,9 @@
 """
 
 from .resultset import ResultSet
-from .detdb import DetDB as DetDb
-from .obsdb import ObsDB as ObsDb
-from .obsfiledb import ObsFileDB as ObsFileDb
-from .proddb import ManifestDB as ManifestDb, ManifestScheme
+from .detdb import DetDb
+from .obsdb import ObsDb
+from .obsfiledb import ObsFileDb
+from .proddb import ManifestDb, ManifestScheme
 from .loader import SuperLoader
 
