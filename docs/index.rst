@@ -12,6 +12,7 @@ Welcome to SOTODLib's documentation!
 
    intro.rst
    cli.rst
+   context.rst
    reference.rst
    dev.rst
 
