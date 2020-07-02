@@ -7,6 +7,6 @@ from .resultset import ResultSet
 from .detdb import DetDb
 from .obsdb import ObsDb
 from .obsfiledb import ObsFileDb
-from .proddb import ManifestDb, ManifestScheme
+from .manifest import ManifestDb, ManifestScheme
 from .loader import SuperLoader
 
