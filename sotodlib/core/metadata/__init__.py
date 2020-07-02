@@ -10,3 +10,9 @@ from .obsfiledb import ObsFileDb
 from .manifest import ManifestDb, ManifestScheme
 from .loader import SuperLoader
 
+def get_example(db_type, *args, **kwargs):
+    if db_type == 'DetDb':
+        from .detdb import get_example
+        return get_example(*args, **kwargs)
+    else:
+        raise ValueError('Unknown db_type: %s' % db_type)
