@@ -14,7 +14,7 @@ Index Data
 Endpoint Data
   A set of (key,value) pairs returned by the Manifest.
 
-The ManifestDB is primarily responsible for transforming Index Data
+The ManifestDb is primarily responsible for transforming Index Data
 into Endpoint Data.  The implementation has the following features:
 
 * The rules and data for mapping Index Data to Endpoint Data are
@@ -23,16 +23,16 @@ into Endpoint Data.  The implementation has the following features:
 * It is assumed that a 'filename' will often be a piece of the
   Endpoint Data, so this is given a special status and table storage.
 
-If a ManifestDB is used as part of the interface to a large metadata
+If a ManifestDb is used as part of the interface to a large metadata
 archive, then minor updates to the metadata can be made by only
 providing a the changed data (in a separate archive file), with an
-updated ManifestDB that sends only the affected values of Index Data
+updated ManifestDb that sends only the affected values of Index Data
 to the new archive file.  When this approach is used, is suggests that
-metadata archive files and the ManifestDB should be stored in slightly
+metadata archive files and the ManifestDb should be stored in slightly
 different places, since there is a many-to-many relationship between
 them.
 
-When generating a ManifestDB, a ManifestScheme must first be defined.
+When generating a ManifestDb, a ManifestScheme must first be defined.
 The ManifestScheme includes:
 
 * a description of what values may be present in the Index Data, and
@@ -198,7 +198,7 @@ class ManifestScheme:
         return [c[0] for c in self.cols if c[1] == 'in']
 
 
-class ManifestDB:
+class ManifestDb:
     """
     Expose a map from Index Data to Endpoint Data, including a
     filename.
@@ -256,7 +256,7 @@ class ManifestDB:
         Duplicate the current database into a new database object, and
         return it.  If map_file is specified, the new database will be
         connected to that sqlite file on disk.  Note that a quick way
-        of writing a DB to disk to call copy(map_file=...) and then
+        of writing a Db to disk to call copy(map_file=...) and then
         simply discard the returned object.
         """
         if map_file is not None and os.path.exists(map_file):
@@ -265,7 +265,7 @@ class ManifestDB:
             else:
                 raise RuntimeError("Output file %s exists (overwrite=True "
                                    "to overwrite)." % map_file)
-        new_db = ManifestDB(map_file=map_file, init_db=False)
+        new_db = ManifestDb(map_file=map_file, init_db=False)
         script = ' '.join(self.conn.iterdump())
         new_db.conn.executescript(script)
         new_db.scheme = ManifestScheme.from_database(new_db.conn)

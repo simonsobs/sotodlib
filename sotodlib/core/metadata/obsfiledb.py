@@ -30,7 +30,7 @@ TABLE_DEFS = {
 }
 
 
-class ObsFileDB:
+class ObsFileDb:
     """sqlite3-based database for managing large archives of files.
 
     The data model here is that each distinct "Observation" comprises
@@ -56,7 +56,7 @@ class ObsFileDB:
     prefix = ''
 
     def __init__(self, map_file=None, prefix=None, init_db=True, readonly=False):
-        """Instantiate an ObsFileDB.
+        """Instantiate an ObsFileDb.
 
         Arguments:
           map_file (string): sqlite database file to map.  Defaults to
@@ -100,7 +100,7 @@ class ObsFileDB:
 
     @classmethod
     def from_file(cls, map_file, prefix=None):
-        """Returns an ObsFileDB that is initialized from map_file.  This is a
+        """Returns an ObsFileDb that is initialized from map_file.  This is a
         copy of the database; changes will not be written back to the
         file.
 
@@ -127,7 +127,7 @@ class ObsFileDB:
         Duplicate the current database into a new database object, and
         return it.  If map_file is specified, the new database will be
         connected to that sqlite file on disk.  Note that a quick way
-        of writing a DB to disk to call copy(map_file=...).
+        of writing a Db to disk to call copy(map_file=...).
         """
         if map_file is None:
             map_file = ':memory:'
@@ -137,7 +137,7 @@ class ObsFileDB:
                 raise RuntimeError("Output database '%s' exists -- remove or "
                                    "pass overwrite=True to copy." % map_file)
             os.remove(map_file)
-        new_db = ObsFileDB(map_file, init_db=False)
+        new_db = ObsFileDb(map_file, init_db=False)
         new_db.conn.executescript(script)
         new_db.prefix = self.prefix
         return new_db
@@ -362,7 +362,7 @@ class ObsFileDB:
         self.conn.execute('vacuum')
 
         # Return the full paths of only the existing files that have
-        # been dropped from the DB.
+        # been dropped from the Db.
         path_map = {r[2]: r[1] for r in scan['raw'] if r[0]}
         return [r[1] for r in scan['raw'] if r[2] in affected_files]
 
