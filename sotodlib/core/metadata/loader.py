@@ -1,11 +1,10 @@
 from sotodlib import core
-from .simple import PerDetectorHdf5
 
 import os
 
 REGISTRY = {
-    'PerDetectorHdf5': PerDetectorHdf5.loader_class(),
 }
+
 
 class SuperLoader:
     def __init__(self, context=None, detdb=None, obsdb=None):
@@ -16,6 +15,10 @@ class SuperLoader:
                 obsdb = context.obsdb
         self.detdb = detdb
         self.obsdb = obsdb
+
+    @classmethod
+    def register_metadata(cls, name, loader_class):
+        REGISTRY[name] = loader_class
 
     def load_raw(self, spec_list, request,
                  restrict_on_index=True,
