@@ -199,10 +199,6 @@ class PerDetectorHdf5(ResultSet, _Hdf5Writer):
         return results
 
     @classmethod
-    def from_proddb(cls, proddb, req):
-        proddb.match(req)
-
-    @classmethod
     def loader_class(cls):
         class _Loader:
             """(Temporary?) Loader class for PerDetectorHdf5..."""
