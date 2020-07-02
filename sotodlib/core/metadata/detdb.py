@@ -31,7 +31,7 @@ TABLE_DEFS = {
 SPECIAL_COLS = ['det_id', 'time0', 'time1']
 
 
-class DetDB(object):
+class DetDb(object):
     """
     Detector database.  The database stores data about a set of
     detectors.
@@ -71,7 +71,7 @@ class DetDB(object):
     ]
 
     def __init__(self, map_file=None, init_db=True):
-        """Instantiate a DetDB.  If map_file is provided, the database will
+        """Instantiate a DetDb.  If map_file is provided, the database will
         be connected to the indicated sqlite file on disk, and any
         changes made to this object be written back to the file.
 
@@ -182,7 +182,7 @@ class DetDB(object):
         Duplicate the current database into a new database object, and
         return it.  If map_file is specified, the new database will be
         connected to that sqlite file on disk.  Note that a quick way
-        of writing a DB to disk to call copy(map_file=...) and then
+        of writing a Db to disk to call copy(map_file=...) and then
         simply discard the returned object.
         """
         if map_file is not None and os.path.exists(map_file):
@@ -191,7 +191,7 @@ class DetDB(object):
             else:
                 raise RuntimeError("Output file %s exists (overwrite=True "
                                    "to overwrite)." % map_file)
-        new_db = DetDB(map_file=map_file, init_db=False)
+        new_db = DetDb(map_file=map_file, init_db=False)
         script = ' '.join(self.conn.iterdump())
         new_db.conn.executescript(script)
         return new_db
@@ -230,7 +230,7 @@ class DetDB(object):
 
     @classmethod
     def from_file(cls, filename, fmt=None):
-        """Instantiate a DetDB and return it, with the data copied in from the
+        """Instantiate a DetDb and return it, with the data copied in from the
         specified file.
 
         Args:
@@ -238,7 +238,7 @@ class DetDB(object):
           fmt (str): format of the input; see to_file for details.
 
         Note that if you want a `persistent` connection to the file,
-        you should instead pass the filename to the DetDB constructor
+        you should instead pass the filename to the DetDb constructor
         map_file argument.
 
         """
@@ -257,7 +257,7 @@ class DetDB(object):
                 data = fin.read().decode('utf-8')
         else:
             raise RuntimeError(f'Unknown format "{fmt}" requested.')
-        new_db = DetDB(map_file=None, init_db=False)
+        new_db = DetDb(map_file=None, init_db=False)
         new_db.conn.executescript(data)
         return new_db
 
@@ -538,12 +538,11 @@ class DetDB(object):
 
 def get_example():
     """
-    Returns an example DetDB, mapped to RAM, for the SO LAT-like
+    Returns an example DetDb, mapped to RAM, for the SO LAT-like
     array.  The two property tables are called "base" and "geometry".
     The geometry table is not currently populated.
     """
-    import sotoddb
-    db = sotoddb.DetDB()
+    db = DetDb()
 
     TABLES = [
         ('base', [

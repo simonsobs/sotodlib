@@ -20,7 +20,7 @@ TABLE_DEFS = {
 }
 
 
-class ObsDB(object):
+class ObsDb(object):
     """Observation database.
 
     """
@@ -32,7 +32,7 @@ class ObsDB(object):
     ]
 
     def __init__(self, map_file=None, init_db=True):
-        """Instantiate an ObsDB.  If map_file is provided, the database will
+        """Instantiate an ObsDb.  If map_file is provided, the database will
         be connected to the indicated sqlite file on disk, and any
         changes made to this object be written back to the file.
 
@@ -88,7 +88,7 @@ class ObsDB(object):
         Duplicate the current database into a new database object, and
         return it.  If map_file is specified, the new database will be
         connected to that sqlite file on disk.  Note that a quick way
-        of writing a DB to disk to call copy(map_file=...) and then
+        of writing a Db to disk to call copy(map_file=...) and then
         simply discard the returned object.
         """
         if map_file is not None and os.path.exists(map_file):
@@ -97,7 +97,7 @@ class ObsDB(object):
             else:
                 raise RuntimeError("Output file %s exists (overwrite=True "
                                    "to overwrite)." % map_file)
-        new_db = ObsDB(map_file=map_file, init_db=False)
+        new_db = ObsDb(map_file=map_file, init_db=False)
         script = ' '.join(self.conn.iterdump())
         new_db.conn.executescript(script)
         return new_db
@@ -136,7 +136,7 @@ class ObsDB(object):
 
     @classmethod
     def from_file(cls, filename, fmt=None):
-        """Instantiate an ObsDB and return it, with the data copied ain from the
+        """Instantiate an ObsDb and return it, with the data copied ain from the
         specified file.
 
         Args:
@@ -144,7 +144,7 @@ class ObsDB(object):
           fmt (str): format of the input; see to_file for details.
 
         Note that if you want a `persistent` connection to the file,
-        you should instead pass the filename to the ObsDB constructor
+        you should instead pass the filename to the ObsDb constructor
         map_file argument.
 
         """
