@@ -1,6 +1,6 @@
 import numpy as np
 import pyfftw
-
+import inspect
 import scipy.signal as signal
 
 from . import detrend_data
@@ -129,6 +129,11 @@ def fft_filter(fun):
             def fun_prod(freqs, tod):
                 return self(freqs, tod)*other(freqs, tod)
             return fun_prod
+    # get help from someone
+    filter_func.__doc__ = fun.__doc__
+    # get arguments from someone after removing the partial args (first 2)
+    args = [v for k, v in inspect.signature(fun).parameters.items()][2:]
+    filter_func.__signature__ = inspect.Signature(parameters=args)
     return filter_func
 
 #Example Filtering Functions
