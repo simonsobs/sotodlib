@@ -13,6 +13,7 @@ Welcome to SOTODLib's documentation!
    intro.rst
    cli.rst
    context.rst
+   tod_ops.rst
    reference.rst
    dev.rst
 
