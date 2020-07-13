@@ -257,7 +257,7 @@ def get_gap_fill_single(data, flags, nbuf=10, order=1, inplace=False):
     return sig_ex
 
 
-def get_gap_fill(tod, nbuf, order, inplace=False, signal=None, flags=None):
+def get_gap_fill(tod, nbuf=10, order=1, inplace=False, signal=None, flags=None):
     """See get_gap_fill_single for meaning of arguments not described here.
 
     Arguments:
