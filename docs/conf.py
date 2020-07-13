@@ -89,7 +89,7 @@ autoclass_content = 'both'
 # building process.
 autodoc_mock_imports = []
 for missing in ('numpy', 'matplotlib', 'healpy', 'astropy',
-                'quaternionarray'):
+                'quaternionarray', 'yaml', 'spt3g', 'pyfftw'):
     try:
         foo = import_module(missing)
     except ImportError:
