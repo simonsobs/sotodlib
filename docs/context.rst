@@ -301,6 +301,7 @@ DetDb auto-documentation
 Auto-generated documentation should appear here.
 
 .. autoclass:: sotodlib.core.metadata.DetDb
+   :special-members: __init__
    :members:
 
 
@@ -315,8 +316,8 @@ ResultSet
 Auto-generated documentation should appear here.
 
 .. autoclass:: sotodlib.core.metadata.ResultSet
+   :special-members: __init__
    :members:
-
 
 -------------------------------------
 Observation File Database (ObsFileDb)
@@ -476,9 +477,8 @@ Class Documentation
 *The class documentation of ObsFileDb should appear below.*
 
 .. autoclass:: sotodlib.core.metadata.ObsFileDb
+   :special-members: __init__
    :members:
-
-   .. automethod:: __init__
 
 
 ---------------------------------------
@@ -497,10 +497,12 @@ Class auto-documentation
 *The class documentation of ManifestScheme should appear below.*
 
 .. autoclass:: ManifestScheme
+   :special-members: __init__
    :members:
 
 *The class documentation of ManifestDb should appear below.*
 
 .. autoclass:: ManifestDb
+   :special-members: __init__
    :members:
 

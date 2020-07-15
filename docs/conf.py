@@ -21,8 +21,8 @@ import sotodlib
 
 # -- Project information -----------------------------------------------------
 
-project = 'SOTODLib'
-copyright = '2018-2019, Simons Observatory Collaboration'
+project = 'sotodlib'
+copyright = '2018-2020, Simons Observatory Collaboration'
 author = 'Simons Observatory Collaboration'
 
 # The short X.Y version
@@ -82,7 +82,13 @@ keep_warnings = True
 
 # -- Options for autodoc --------------------------------------------------
 
-autoclass_content = 'both'
+# Do not append __init__ docstring to class docstring.
+autoclass_content = 'class'
+
+autodoc_default_options = {
+    # Present class or module members in source order (rather than alphabetical).
+    'member-order': 'bysource',
+}
 
 # This value contains a list of modules to be mocked up. This is useful when
 # some external dependencies are not met at build time and break the
@@ -160,7 +166,7 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, 'SOTODLib.tex', 'SOTODLib Documentation',
+    (master_doc, 'sotodlib.tex', 'sotodlib Documentation',
      'Simons Observatory Collaboration', 'manual'),
 ]
 
@@ -170,7 +176,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    (master_doc, 'sotodlib', 'SOTODLib Documentation',
+    (master_doc, 'sotodlib', 'sotodlib Documentation',
      [author], 1)
 ]
 
@@ -181,8 +187,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'SOTODLib', 'SOTODLib Documentation',
-     author, 'SOTODLib', 'One line description of project.',
+    (master_doc, 'sotodlib', 'sotodlib Documentation',
+     author, 'sotodlib', 'Simons Observatory Time-Ordered Data processing Library',
      'Miscellaneous'),
 ]
 
