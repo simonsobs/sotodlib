@@ -34,6 +34,89 @@ be auto-documented here.
 .. autofunction:: high_pass_sine2
 
 
+tod_ops.gapfill
+===============
+
+Tutorial
+--------
+
+The gapfill submodule includes functions and classes for patching
+short segments of a TOD signal.  For example, after identifying
+glitches in a timestream, one might want to eliminate those
+pathological data points by simply interpolating between good data
+segments at each end of the bad sample range.
+
+The ``get_gap_fill`` function will fit low-order polynomial models to
+flagged data segments, and return vectors with modeled data that can
+be used to fill those gaps.  For example, suppose we have an
+AxisManager ``tod`` pre-populated with signal and flags of some kind::
+
+  >>> tod.signal.shape
+  (619, 165016)
+  >>> tod.source_flags
+  RangesMatrix(619,165016)
+  >>> gaps = tod_ops.get_gap_fill(tod, flags=tod.source_flags)
+  >>> gaps
+  ExtractMatrix(619,165016@2.0%)
+  >>> gaps.swap(tod)
+
+Note that by default the ``get_gap_fill`` function does not patch the
+signal data, and that is why we called ``gaps.swap(tod)``.  (See the
+``inplace`` argument, however.)  The object returned by
+``get_gap_fill`` is an ``ExtractMatrix`` (see reference below).  This
+contains only the gap-filled data -- i.e. new values for each sample
+marked in tod.source_flags.  The repr string tells us that the
+ExtractMatrix is compatible with a signal array of shape (619,
+165016), and that it is only actually storing data for 2.0% of the
+full 2d matrix.  The ExtractMatrix and Extract classes have several
+methods to help move data back and forth between compressed and
+expanded representation; see the full class reference below.
+
+Superior gap-filling can sometimes be achieved with a mode-based
+model.  For example, when there are large gaps in a single detector
+timestream, the signal common mode might be a better model for filling
+the gap than a polynomial interpolation based on only the single
+detector's good amples.  So if one has a model, such
+as the kind returned by the ``tod_ops.pca.get_pca_model`` function,
+the function ``get_gap_model`` can be used to lookup the values of the
+model at some set of flagged samples::
+
+  >>> model
+  AxisManager(weights[dets,eigen], modes[eigen,samps],
+      dets:LabelAxis(619), eigen:IndexAxis(10),
+      samps:OffsetAxis(165016))
+  >>> gaps = tod_ops.get_gap_model(tod, model, flags=tod.source_flags)
+  >>> gaps
+  ExtractMatrix(619,165016@2.0%)
+  >>> gaps.swap(tod)
+
+Note that ``get_gap_model`` returns the same sort of object as
+``get_gap_fill``, and again in this example we have swapped the model
+into the tod.
+
+
+Reference
+---------
+
+Class and function references should be auto-generated here.
+
+.. autofunction:: sotodlib.tod_ops.get_gap_fill
+
+.. autofunction:: sotodlib.tod_ops.get_gap_fill_single
+
+.. autofunction:: sotodlib.tod_ops.get_gap_model
+
+.. autofunction:: sotodlib.tod_ops.get_gap_model_single
+
+.. autoclass:: sotodlib.tod_ops.gapfill.ExtractMatrix
+   :special-members: __init__
+   :members:
+
+.. autoclass:: sotodlib.tod_ops.gapfill.Extract
+   :special-members: __init__
+   :members:
+
+
 tod_ops.pca
 ===========
 
