@@ -740,32 +740,6 @@ def get_example():
     bands["MFF2"] = bnd
 
     bnd = OrderedDict()
-    bnd["center"] = 88.6
-    bnd["low"] = 75.6
-    bnd["high"] = 101.6
-    bnd["bandpass"] = ""
-    bnd["NET"] = 300.0
-    bnd["fknee"] = 50.0
-    bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
-    bnd["A"] = 0.19
-    bnd["C"] = 0.74
-    bands["MFS1"] = bnd
-
-    bnd = OrderedDict()
-    bnd["center"] = 146.5
-    bnd["low"] = 128.0
-    bnd["high"] = 165.0
-    bnd["bandpass"] = ""
-    bnd["NET"] = 400.0
-    bnd["fknee"] = 50.0
-    bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
-    bnd["A"] = 0.19
-    bnd["C"] = 0.73
-    bands["MFS2"] = bnd
-
-    bnd = OrderedDict()
     bnd["center"] = 225.7
     bnd["low"] = 196.7
     bnd["high"] = 254.7
@@ -795,33 +769,29 @@ def get_example():
 
     wafers = OrderedDict()
 
-    wtypes = ["UHF", "MFF", "MFS", "LF"]
+    wtypes = ["UHF", "MF", "LF"]
     wcnt = {
         "LF": 1*7 + 1*3,
-        "MFF": 1*7 + 2*3,
-        "MFS": 1*7 + 2*3,
+        "MF": 2*7 + 2*2*3,
         "UHF": 1*7 + 2*3
     }
     wnp = {
         "LF": 37,
-        "MFF": 432,
-        "MFS": 397,
+        "MF": 432,
         "UHF": 432
     }
     wpixmm = {
         "LF": 18.0,
-        "MFF": 5.3,
-        "MFS": 5.6,
+        "MF": 5.3,
         "UHF": 5.3
     }
     wrhombgap = {
-        "MFF": 0.71,
+        "MF": 0.71,
         "UHF": 0.71,
     }
     wbd = {
         "LF": ["LF1", "LF2"],
-        "MFF": ["MFF1", "MFF2"],
-        "MFS": ["MFS1", "MFS2"],
+        "MF": ["MFF1", "MFF2"],
         "UHF": ["UHF1", "UHF2"]
     }
     windx = 0
@@ -831,7 +801,7 @@ def get_example():
             wn = "{:02d}".format(windx)
             wf = OrderedDict()
             wf["type"] = wt
-            if (wt == "LF") or (wt == "MFS"):
+            if (wt == "LF"):
                 wf["packing"] = "S"
             else:
                 wf["packing"] = "F"
@@ -850,12 +820,11 @@ def get_example():
 
     woff = {
         "LF": 0,
-        "MFF": 0,
-        "MFS": 0,
+        "MF": 0,
         "UHF": 0
     }
 
-    ltubes = ["UHF", "UHF", "MFF", "MFF", "MFS", "MFS", "LF"]
+    ltubes = ["UHF", "UHF", "MF", "MF", "MF", "MF", "LF"]
     ltubepos = [0, 1, 2, 3, 5, 6, 10]
     for tindx in range(7):
         nm = "LT{:d}".format(tindx)
@@ -876,9 +845,9 @@ def get_example():
         tb["location"] = ltubepos[tindx]
         tubes[nm] = tb
 
-    stubes = ["UHF", "MFF", "MFS", "LF"]
+    stubes = ["MF", "MF", "UHF","LF"]
     for tindx in range(4):
-        nm = "ST{:d}".format(tindx)
+        nm = "ST{:d}".format(tindx+1)
         ttyp = stubes[tindx]
         tb = OrderedDict()
         tb["type"] = ttyp
@@ -911,8 +880,6 @@ def get_example():
     fwhm["LF2"] = 5.1
     fwhm["MFF1"] = 2.2
     fwhm["MFF2"] = 1.4
-    fwhm["MFS1"] = 2.2
-    fwhm["MFS2"] = 1.4
     fwhm["UHF1"] = 1.0
     fwhm["UHF2"] = 0.9
     tele["fwhm"] = fwhm
@@ -922,12 +889,6 @@ def get_example():
     scale = 0.09668 / 0.00495
     for k, v in fwhm.items():
         sfwhm[k] = float(int(scale * v * 10.0) // 10)
-
-    tele = OrderedDict()
-    tele["tubes"] = ["ST0"]
-    tele["platescale"] = 0.09668
-    tele["fwhm"] = sfwhm
-    telescopes["SAT0"] = tele
 
     tele = OrderedDict()
     tele["tubes"] = ["ST1"]
@@ -946,6 +907,12 @@ def get_example():
     tele["platescale"] = 0.09668
     tele["fwhm"] = sfwhm
     telescopes["SAT3"] = tele
+
+    tele = OrderedDict()
+    tele["tubes"] = ["ST4"]
+    tele["platescale"] = 0.09668
+    tele["fwhm"] = sfwhm
+    telescopes["SAT4"] = tele
 
     cnf["telescopes"] = telescopes
 
