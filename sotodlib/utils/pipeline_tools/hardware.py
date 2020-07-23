@@ -14,10 +14,10 @@ from .noise import get_analytic_noise
 
 FOCALPLANE_RADII_DEG = {
     "LAT" : 3.6,
-    "SAT0" : 17.8,
     "SAT1" : 17.8,
     "SAT2" : 17.8,
-    "SAT3" : 17.2,
+    "SAT3" : 17.8,
+    "SAT4" : 17.2,
 }
 
 
@@ -30,10 +30,10 @@ class SOTelescope(Telescope):
             # atmospheric simulation
             #'LAT' : 0, 'SAT0' : 1, 'SAT1' : 2, 'SAT2' : 3, 'SAT3' : 4
             "LAT": 0,
-            "SAT0": 4,
             "SAT1": 4,
             "SAT2": 4,
             "SAT3": 4,
+            "SAT4": 4,
         }[name]
 
 
@@ -51,7 +51,7 @@ def add_hw_args(parser):
         "--bands",
         required=True,
         help="Comma-separated list of bands: LF1 (27GHz), LF2 (39GHz), "
-        "MFF1 (93GHz), MFF2 (145GHz), MFS1 (93GHz), MFS2 (145GHz), "
+        "MFF1 (93GHz), MFF2 (145GHz), "
         "UHF1 (225GHz), UHF2 (280GHz). "
         "Length of list must equal --tubes",
     )
@@ -59,7 +59,7 @@ def add_hw_args(parser):
         "--tubes",
         required=True,
         help="Comma-separated list of optics tubes: LT0 (UHF), LT1 (UHF), "
-        " LT2 (MFF), LT3 (MFF), LT4 (MFS), LT5 (MFS), LT6 (LF). "
+        " LT2 (MFF), LT3 (MFF), LT4 (MFF), LT5 (MFF), LT6 (LF). "
         "Length of list must equal --bands",
     )
     return
