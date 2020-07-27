@@ -543,9 +543,11 @@ def sim_wafer_detectors(hw, wafer, platescale, fwhm, band=None,
     # each band.
     dets = OrderedDict()
 
-    chan_per_coax = cardprops["nchannel"] // cardprops["ncoax"]
+    chan_per_AMC = cardprops["nchannel"] // cardprops["nAMC"]
     chan_per_bias = cardprops["nchannel"] // cardprops["nbias"]
-
+    readout_freq_range=np.linspace(4.,6.,chan_per_AMC)
+    readout_freq=np.append(readout_freq_range,readout_freq_range)
+    
     doff = 0
     p = 0
     idoff = int(wafer) * 10000
@@ -569,8 +571,10 @@ def sim_wafer_detectors(hw, wafer, platescale, fwhm, band=None,
                 # Made-up assignment to readout channels
                 dprops["card"] = card
                 dprops["channel"] = doff
-                dprops["coax"] = doff // chan_per_coax
+                dprops["AMC"] = doff // chan_per_AMC
                 dprops["bias"] = doff // chan_per_bias
+                dprops["reset_rate_kHz"] = 4.
+                dprops["readout_freq_GHz"] = readout_freq[doff]
                 # Layout quaternion offset is from the origin.  Now we apply
                 # the rotation of the wafer center.
                 dprops["quat"] = qa.mult(center, layout[p]).flatten()
@@ -938,7 +942,7 @@ def get_example():
         for crd in wafer_cards:
             cdprops = OrderedDict()
             cdprops["nbias"] = 12
-            cdprops["ncoax"] = 2
+            cdprops["nAMC"] = 2
             cdprops["nchannel"] = 2000
             cards[crd] = cdprops
 
@@ -976,8 +980,10 @@ def get_example():
         dprops["handed"] = hand[bindx]
         dprops["card"] = "42"
         dprops["channel"] = d
-        dprops["coax"] = 0
+        dprops["AMC"] = 0
         dprops["bias"] = 0
+        dprops["reset_rate_kHz"] = 4.
+        dprops["readout_freq_GHz"] = 4.
         dprops["quat"] = np.array([0.0, 0.0, 0.0, 1.0])
         dname = "{}_{}_{}_{}".format("42", "000", dprops["band"],
                                      dprops["pol"])
