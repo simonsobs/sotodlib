@@ -24,6 +24,8 @@ def sqlite_to_file(db, filename, overwrite=True, fmt=None):
         raise RuntimeError(f'File {filename} exists; remove or pass '
                            'overwrite=True.')
     if fmt == 'sqlite':
+        if os.path.exists(filename):
+            os.remove(filename)
         new_db = sqlite3.connect(filename)
         script = ' '.join(db.iterdump())
         new_db.executescript(script)
