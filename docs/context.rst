@@ -311,6 +311,9 @@ Auto-generated documentation should appear here.
 ObsDb: Observation Database
 ---------------------------
 
+Overview
+===========
+
 The purpose of the ``ObsDb`` is to help a user select observations
 based on high level criteria (such as the target field, the speed or
 elevation of the scan, whether the observation was done during the day
@@ -318,6 +321,12 @@ or night, etc.).  The ObsDb is also used, by the Context system, to
 select the appropriate metadata results from a metadata archive (for
 example, the timestamp associated with an observation could be used to
 find an appropriate pointing offset).
+
+The ObsDb is constructed from two tables.  The "obs table" contains
+one row per observation and is appropriate for storing basic
+descriptive data about the observation.  The "tags table" associates
+observations to particular labels (called tags) in a many-to-many
+relationship.
 
 The ObsDb code does not really require that any particular information
 be present; it does not insist that there is a "timestamp" field, for
@@ -327,12 +336,13 @@ information types are given in `Standardized ObsDb field names`_.
 
 .. note::
 
-   The difference between ObsDb and ObsFileDb is that the ObsFileDb
-   describes how data for a given ObsFileDb is organized on disk.  The
-   ObsFileDb is consulted when it is time to load data for an
-   observation.  The ObsDb is a repository of information about
-   Observations, independent of where on disk the data lives or how
-   the data files are organized.
+   The difference between ObsDb and ObsFileDb is that ObsDb contains
+   arbitrary high-level descriptions of Observations, while ObsFileDb
+   only contains information about how the Observation data is
+   organized into files on disk.  ObsFileDb is consulted when it is
+   time to load data for an observation into memory.  The ObsDb is a
+   repository of information about Observations, independent of where
+   on disk the data lives or how the data files are organized.
 
 Creating an ObsDb
 =================
@@ -358,6 +368,10 @@ observations::
                               'hwp_speed': 1.5,
                               'drift': 'setting'})
 
+  # Apply some tags (this could have been done in the calls above
+  obsdb.update_obs('myobs0', tags=['hwp_fast', 'cryo_problem'])
+  obsdb.update_obs('myobs1', tags=['hwp_slow'])
+
   # Save (in gzip format).
   obsdb.to_file('obsdb.gz')
 
@@ -375,8 +389,12 @@ Using an ObsDb
 ==============
 
 The :py:meth:`ObsDb.query` function is used to get a list of
-observations with particular properties.  The user must pass in an
-sqlite-compatible expression that refers to columns in the obs table.
+observations with particular properties.  The user may pass in an
+sqlite-compatible expression that refers to columns in the obs table,
+or to the names of tags.
+
+Basic queries
+-------------
 
 Using our example database from the preceding section, we can try a
 few queries::
@@ -400,15 +418,54 @@ which individual columns or rows can easily be extracted:
   OrderedDict([('obs_id', 'myobs0'), ('timestamp', 1900000000.0),
     ('hwp_speed', 2.0), ('drift', 'rising')])
 
-Each row of the result set describes an observation.  If you just want
-the obs table information for a particular obs_id, you can use the
-:py:meth:`ObsDb.get` function:
+
+Queries involving tags
+----------------------
+
+Information from the tags table will only show up in the output if
+explicitly requested.  For example, we can ask for the ``'hwp_fast'``
+and ``'hwp_slow'`` fields to be included::
+
+  >>> obsdb.query(tags=['hwp_fast', 'hwp_slow'])
+  ResultSet<[obs_id,timestamp,hwp_speed,drift,hwp_fast,hwp_slow], 2 rows>
+
+Tag columns will have value 1 if the tag has been applied to that
+observation, and 0 otherwise.  A query can be filtered based on tags;
+there are two ways to do this.  One is to append '=0' or '=1' to the
+end of some of the tag strings::
+
+  >>> obsdb.query(tags=['hwp_fast=1'])
+  ResultSet<[obs_id,timestamp,hwp_speed,drift,hwp_fast], 1 rows>
+
+Alternately, the values of tags can be used in query strings::
+
+  >>> obsdb.query('(hwp_fast==1 and drift=="rising") or (hwp_fast==0 and drift="setting")',
+    tags=['hwp_fast'])
+  ResultSet<[obs_id,timestamp,hwp_speed,drift,hwp_fast], 2 rows>
+    
+
+Getting a description of a single observation
+---------------------------------------------
+
+If you just want the basic information for an observation of known
+obs_id, use the get function :py:meth:`ObsDb.get` function::
 
   >>> obsdb.get('myobs0')
   OrderedDict([('obs_id', 'myobs0'), ('timestamp', 1900000000.0),
     ('hwp_speed', 2.0), ('drift', 'rising')])
 
+If you want a list of all tags for an observation, call get with
+tags=True::
 
+  >>> obsdb.get('myobs0', tags=True)
+  OrderedDict([('obs_id', 'myobs0'), ('timestamp', 1900000000.0),
+    ('hwp_speed', 2.0), ('drift', 'rising'),
+    ('tags', ['hwp_fast', 'cryo_problem'])])
+
+So here we see that the observation is associated with tags
+``'hwp_fast'`` and ``'cryo_problem'``.
+
+  
 Standardized ObsDb field names
 ==============================
 
