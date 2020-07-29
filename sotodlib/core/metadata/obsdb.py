@@ -1,84 +1,180 @@
 import sqlite3
-import gzip
 import os
 
 from .resultset import ResultSet
+from . import common
 
-# Design of observation database... certainly the main table contains
-# basic incontrovertible facts.  Like an obs_id and a timestamp.  But
-# there should be some nice way of supporting tags too -- such as
-# 'uranus', 'planet', 'daytime'.
-#
-# So much boilerplate...
-#
 
 TABLE_DEFS = {
     'obs': [
         "`obs_id` varchar(256) primary key",
         "`timestamp` float",
-        ],
+    ],
+    'tags': [
+        "`obs_id` varchar(256)",
+        "`tag` varchar(256)",
+    ],
 }
 
 
 class ObsDb(object):
     """Observation database.
 
+    The ObsDb helps to associate observations, indexed by an obs_id,
+    with properties of the observation that might be useful for
+    selecting data or for identifying metadata.
+
+    The main ObsDb table is called 'obs', and contains the columns
+    obs_id (string), plus any others deemed important for this context
+    (you will probably find timestamp (float representing a unix
+    timestamp)).  Additional columns may be added to this table as
+    needed.
+
+    The second ObsDb table is called 'tags', and facilitates grouping
+    observations together using string labels.
+
     """
 
-    #: Column definitions (a list of strings) that must appear in all
-    #: Property Tables.
     TABLE_TEMPLATE = [
         "`obs_id` varchar(256)",
     ]
 
     def __init__(self, map_file=None, init_db=True):
-        """Instantiate an ObsDb.  If map_file is provided, the database will
-        be connected to the indicated sqlite file on disk, and any
-        changes made to this object be written back to the file.
+        """Instantiate an ObsDb.
+
+        Args:
+          map_file (str or sqlite3.Connection): If this is a string,
+            it will be treated as the filename for the sqlite3
+            database, and opened as an sqlite3.Connection.  If this is
+            an sqlite3.Connection, it is cached and used.  If this
+            argument is None (the default), then the
+            sqlite3.Connection is opened on ':memory:'.
+          init_db (bool): If True, then any ObsDb tables that do not
+            already exist in the database will be created.
+
+        Notes:
+          If map_file is provided, the database will be connected to
+          the indicated sqlite file on disk, and any changes made to
+          this object be written back to the file.
 
         """
-        if map_file is None:
-            map_file = ':memory:'
-        self.conn = sqlite3.connect(map_file)
-        self.conn.row_factory = sqlite3.Row  # access columns by name
+        if isinstance(map_file, sqlite3.Connection):
+            self.conn = map_file
+        else:
+            if map_file is None:
+                map_file = ':memory:'
+            self.conn = sqlite3.connect(map_file)
 
+        self.conn.row_factory = sqlite3.Row  # access columns by name
         if init_db:
-            # Create dets table if not found.
             c = self.conn.cursor()
             c.execute("SELECT name FROM sqlite_master "
                       "WHERE type='table' and name not like 'sqlite_%';")
             tables = [r[0] for r in c]
-            if 'obs' not in tables:
-                self.create_table('obs', TABLE_DEFS['obs'], raw=True)
+            changes = False
+            for k, v in TABLE_DEFS.items():
+                if k not in tables:
+                    q = ('create table if not exists `%s` (' % k +
+                         ','.join(v) + ')')
+                    c.execute(q)
+                    changes = True
+            if changes:
+                self.conn.commit()
 
     def __len__(self):
         return self.conn.execute('select count(obs_id) from obs').fetchone()[0]
 
-    def create_table(self, table_name, column_defs, raw=False, commit=True):
-        """Add a table to the database.
+    def add_obs_columns(self, column_defs, ignore_duplicates=True, commit=True):
+        """Add columns to the obs table.
 
         Args:
-          table_name (str): The name of the new table.
-          column_defs (list): A list of sqlite column definition
-            strings.
-          raw (bool): See below.
-          commit (bool): Whether to commit the changes to the db.
+          column_defs (list of pairs of str): Column descriptions, see
+            notes.
+          ignore_duplicates (bool): If true, requests for new columns
+            will be ignored if the column name is already present in
+            the table.
 
-        An example of column_defs is::
+        Returns:
+          self.
 
-          column_defs=[
-            "`az` float",
-            "`el` float",
-          ]
+        Notes:
+          The input format for column_defs is somewhat flexible.
+          First of all, if a string is passed in, it will converted to
+          a list by splitting on ",".  Second, if the items in the
+          list are strings (rather than tuples), the string will be
+          broken into 2 components by splitting on whitespace.
+          Finally, each pair of items is interpreted as a (name, data
+          type) pair.  The name can be a simple string, or a string
+          inside backticks; so 'timestamp' and '`timestamp`' are
+          equivalent.  The data type can be any valid sqlite type
+          expression (e.g. 'float', 'varchar(256)', etc) or it can be
+          one of the three basic python type objects: str, float, int.
+          Here are some examples of valid column_defs arguments::
+
+            [('timestamp', float), ('drift', str)]
+            ['`timestamp` float', '`drift` varchar(32)']
+            'timestamp float, drift str'
+
+        """
+        current_cols = self.conn.execute('pragma table_info("obs")').fetchall()
+        current_cols = [r[1] for r in current_cols]
+        if isinstance(column_defs, str):
+            column_defs = column_defs.split(',')
+        for column_def in column_defs:
+            if isinstance(column_def, str):
+                column_def = column_def.split()
+            name, typestr = column_def
+            if typestr is float:
+                typestr = 'float'
+            elif typestr is int:
+                typestr = 'int'
+            elif typestr is str:
+                typestr = 'text'
+            check_name = name
+            if name.startswith('`'):
+                check_name = name[1:-1]
+            else:
+                name = '`' + name + '`'
+            if check_name in current_cols:
+                if ignore_duplicates:
+                    continue
+                raise ValueError("Column %s already exists in table obs" % check_name)
+            self.conn.execute('ALTER TABLE obs ADD COLUMN %s %s' % (name, typestr))
+            current_cols.append(check_name)
+        if commit:
+            self.conn.commit()
+        return self
+
+    def update_obs(self, obs_id, data={}, tags=[], commit=True):
+        """Update an entry in the obs table.
+
+        Arguments:
+          obs_id (str): The id of the obs to update.
+          data (dict): map from column_name to value.
+          tags (list of str): tags to apply to this observation (if a
+            tag name is prefxed with '!', then the tag name will be
+            un-applied, i.e. cleared from this observation.
+
+        Returns:
+            self.
 
         """
         c = self.conn.cursor()
-        pre_cols = self.TABLE_TEMPLATE
-        if raw:
-            pre_cols = []
-        q = ('create table if not exists `%s` (' % table_name +
-             ','.join(pre_cols + column_defs) + ')')
-        c.execute(q)
+        c.execute('INSERT OR IGNORE INTO obs (obs_id) VALUES (?)',
+                  (obs_id,))
+        if len(data.keys()):
+            settors = [f'{k}=?' for k in data.keys()]
+            c.execute('update obs set ' + ','.join(settors) + ' '
+                      'where obs_id=?',
+                      tuple(data.values()) + (obs_id, ))
+        for t in tags:
+            if t[0] == '!':
+                # Kill this tag.
+                c.execute('DELETE FROM tags WHERE obs_id=? AND tag=?',
+                          (obs_id, t[1:]))
+            else:
+                c.execute('INSERT OR REPLACE INTO tags (obs_id, tag) '
+                          'VALUES (?,?)', (obs_id, t))
         if commit:
             self.conn.commit()
         return self
@@ -113,68 +209,46 @@ class ObsDb(object):
             unless the filename ends with '.gz', in which it is 'gz'.
 
         """
-        if fmt is None:
-            if filename.endswith('.gz'):
-                fmt = 'gz'
-            else:
-                fmt = 'sqlite'
-        if os.path.exists(filename) and not overwrite:
-            raise RuntimeError(f'File {filename} exists; remove or pass '
-                               'overwrite=True.')
-        if fmt == 'sqlite':
-            self.copy(map_file=filename, overwrite=overwrite)
-        elif fmt == 'dump':
-            with open(filename, 'w') as fout:
-                for line in self.conn.iterdump():
-                    fout.write(line)
-        elif fmt == 'gz':
-            with gzip.GzipFile(filename, 'wb') as fout:
-                for line in self.conn.iterdump():
-                    fout.write(line.encode('utf-8'))
-        else:
-            raise RuntimeError(f'Unknown format "{fmt}" requested.')
+        return common.sqlite_to_file(self.conn, filename, overwrite=overwrite, fmt=fmt)
 
     @classmethod
     def from_file(cls, filename, fmt=None):
-        """Instantiate an ObsDb and return it, with the data copied ain from the
-        specified file.
+        """Instantiate an ObsDb and return it, with the data copied in from
+        the specified file.
 
         Args:
           filename (str): path to the file.
           fmt (str): format of the input; see to_file for details.
 
-        Note that if you want a `persistent` connection to the file,
-        you should instead pass the filename to the ObsDb constructor
-        map_file argument.
+        Returns:
+          ObsDb with an sqlite3 connection that is mapped to memory.
+
+        Notes:
+          Note that if you want a `persistent` connection to the file,
+          you should instead pass the filename to the ObsDb
+          constructor map_file argument.
 
         """
-        if fmt is None:
-            fmt = 'sqlite'
-            if filename.endswith('.gz'):
-                fmt = 'gz'
-        if fmt == 'sqlite':
-            db0 = cls(map_file=filename)
-            return db0.copy(map_file=None)
-        elif fmt == 'dump':
-            with open(filename, 'r') as fin:
-                data = fin.read()
-        elif fmt == 'gz':
-            with gzip.GzipFile(filename, 'r') as fin:
-                data = fin.read().decode('utf-8')
-        else:
-            raise RuntimeError(f'Unknown format "{fmt}" requested.')
-        new_db = cls(map_file=None, init_db=False)
-        new_db.conn.executescript(data)
-        return new_db
+        conn = common.sqlite_from_file(filename, fmt=fmt)
+        return cls(conn, init_db=False)
 
-    def get(self, obs_id=None, add_prefix=''):
-        """Returns the entry for obs_id, as an ordered dict.  If obs_id is
-        None, returns all entries, as a ResultSet.  Yup, those are the
-        options.
+    def get(self, obs_id=None, tags=None, add_prefix=''):
+        """Returns the entry for obs_id, as an ordered dict.
 
-        add_prefix is used to alter the names of fields; this is
-        mostly for constructing metadata selectors ('obs:obs_id' and
-        'obs:timestamp'), with add_prefix='obs:'.
+        If obs_id is None, returns all entries, as a ResultSet.
+        However, this usage is deprecated in favor of self.query().
+
+        Args:
+          obs_id (str): The observation id to get info for.
+          tags (bool): Whether or not to load and return the tags.
+          add_prefix (str): A string that will be prepended to each
+            field name.  This is for the lazy metadata system, because
+            obsdb selectors are prefixed with 'obs:'.
+
+        Returns:
+          An ordered dict with the obs table entries for this obs_id,
+          or None if the obs_id is not found.  If tags have been
+          requested, they will be stored in 'tags' as a list of strings.
 
         """
         if obs_id is None:
@@ -183,16 +257,75 @@ class ObsDb(object):
         if len(results) == 0:
             return None
         if len(results) > 1:
-            raise ValueError('Too many rows...') # or integrity error...
-        return results[0]
+            raise ValueError('Too many rows...')  # or integrity error...
+        output = results[0]
+        if tags:
+            c = self.conn.execute('select tag from tags where obs_id=?', (obs_id,))
+            output['tags'] = [r[0] for r in c]
+        return output
 
-    def query(self, query_text='1', tags=None, keys=None, add_prefix=''):
+    def query(self, query_text='1', tags=None, sort=['obs_id'], add_prefix=''):
         """Queries the ObsDb using user-provided text.  Returns a ResultSet.
 
+        Args:
+          query_text (str): The sqlite query string.  All fields
+            should refer to the obs table, or to tags explicitly
+            listed in the tags argument.
+          tags (list of str): Tags to include in the output; if they
+            are listed here then they can also be used in the query
+            string.  Filtering on tag value can be done here by
+            appending '=0' or '=1' to a tag name.
+
+        Returns:
+          A ResultSet with one row for each Observation matching the
+          criteria.
+
+        Notes:
+          Tags are added to the output on request.  For example,
+          passing tags=['planet','stare'] will cause the output to
+          include columns 'planet' and 'stare' in addition to all the
+          columns defined in the obs table.  The value of 'planet' and
+          'stare' in each row will be 0 or 1 depending on whether that
+          tag is set for that observation.  We can include expressions
+          involving planet and stare in the query, for example::
+
+            obsdb.query('planet=1 or stare=1', tags=['planet', 'stare'])
+
+          For simple filtering on tags, pass '=1' or '=0', like this::
+
+            obsdb.query(tags=['planet=1','hwp=1'])
+
+          When filtering is activated in this way, the returned
+          results must satisfy all the criteria (i.e. the individual
+          constraints are AND-ed).
+
         """
-        assert(keys is None)  # Not implemented, sry.
-        assert(tags is None)  # Not implemented, sry.
-        c = self.conn.execute('select * from obs where %s' % query_text)
+        sort_text = ''
+        if sort is not None and len(sort):
+            sort_text = ' ORDER BY ' + ','.join(sort)
+        joins = ''
+        extra_fields = []
+        if tags is not None and len(tags):
+            for tagi, t in enumerate(tags):
+                if '=' in t:
+                    t, val = t.split('=')
+                else:
+                    val = None
+                if val is None:
+                    join_type = 'left join'
+                    extra_fields.append(f'ifnull(tt{tagi}.obs_id,"") != "" as {t}')
+                elif val == '0':
+                    join_type = 'left join'
+                    extra_fields.append(f'ifnull(tt{tagi}.obs_id,"") != "" as {t}')
+                    query_text += f' and {t}==0'
+                else:
+                    join_type = 'join'
+                    extra_fields.append(f'1 as {t}')
+                joins += (f' {join_type} (select obs_id from tags where tag="{t}") as tt{tagi} on '
+                          f'obs.obs_id = tt{tagi}.obs_id')
+        extra_fields = ''.join([','+f for f in extra_fields])
+        q = 'select obs.* %s from obs %s where %s %s' % (extra_fields, joins, query_text, sort_text)
+        c = self.conn.execute(q)
         results = ResultSet.from_cursor(c)
         if add_prefix is not None:
             results.keys = [add_prefix + k for k in results.keys]

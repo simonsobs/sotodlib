@@ -15,9 +15,11 @@ documented at all.
 Context [empty]
 ---------------
 
---------------------------------------
- DetDb: Detector Information Database
---------------------------------------
+.. py:module:: sotodlib.core.metadata
+
+------------------------------------
+DetDb: Detector Information Database
+------------------------------------
 
 The purpose of the ``DetDb`` class is to give analysts access to
 quasi-static detector metadata.  Some good example of quasi-static
@@ -300,28 +302,200 @@ DetDb auto-documentation
 
 Auto-generated documentation should appear here.
 
-.. autoclass:: sotodlib.core.metadata.DetDb
+.. autoclass:: DetDb
+   :special-members: __init__
+   :members:
+
+
+---------------------------
+ObsDb: Observation Database
+---------------------------
+
+Overview
+===========
+
+The purpose of the ``ObsDb`` is to help a user select observations
+based on high level criteria (such as the target field, the speed or
+elevation of the scan, whether the observation was done during the day
+or night, etc.).  The ObsDb is also used, by the Context system, to
+select the appropriate metadata results from a metadata archive (for
+example, the timestamp associated with an observation could be used to
+find an appropriate pointing offset).
+
+The ObsDb is constructed from two tables.  The "obs table" contains
+one row per observation and is appropriate for storing basic
+descriptive data about the observation.  The "tags table" associates
+observations to particular labels (called tags) in a many-to-many
+relationship.
+
+The ObsDb code does not really require that any particular information
+be present; it does not insist that there is a "timestamp" field, for
+example.  Instead, the ObsDb can contain information that is needed in
+a specific context.  However, recommended field names for some typical
+information types are given in `Standardized ObsDb field names`_.
+
+.. note::
+
+   The difference between ObsDb and ObsFileDb is that ObsDb contains
+   arbitrary high-level descriptions of Observations, while ObsFileDb
+   only contains information about how the Observation data is
+   organized into files on disk.  ObsFileDb is consulted when it is
+   time to load data for an observation into memory.  The ObsDb is a
+   repository of information about Observations, independent of where
+   on disk the data lives or how the data files are organized.
+
+Creating an ObsDb
+=================
+
+To create an ObsDb, one must define columns for the obs table, and
+then add data for one or more observations, then write the results to
+a file.
+
+Here is a short program that creates an ObsDb with entries for two
+observations::
+
+  from sotodlib.core import metadata
+
+  # Create a new Db and add two columns.
+  obsdb = metadata.ObsDb()
+  obsdb.add_obs_columns(['timestamp float', 'hwp_speed float', 'drift string'])
+
+  # Add two rows.
+  obsdb.update_obs('myobs0', {'timestamp': 1900000000.,
+                              'hwp_speed': 2.0,
+                              'drift': 'rising'})
+  obsdb.update_obs('myobs1', {'timestamp': 1900010000.,
+                              'hwp_speed': 1.5,
+                              'drift': 'setting'})
+
+  # Apply some tags (this could have been done in the calls above
+  obsdb.update_obs('myobs0', tags=['hwp_fast', 'cryo_problem'])
+  obsdb.update_obs('myobs1', tags=['hwp_slow'])
+
+  # Save (in gzip format).
+  obsdb.to_file('obsdb.gz')
+
+
+The column definitions must be specified in a format compatible with
+sqlite; see :py:meth:`ObsDb.add_obs_columns`.  When the user adds data
+using :py:meth:`ObsDb.update_obs`, the first argument is the
+``obs_id``.  This is the primary key in the ObsDb and is also used to
+identify observations in the ObsFileDb.  When we write the database
+using :py:meth:`ObsDb.to_file`, using a .gz extension selects gzip
+output by default.
+
+
+Using an ObsDb
+==============
+
+The :py:meth:`ObsDb.query` function is used to get a list of
+observations with particular properties.  The user may pass in an
+sqlite-compatible expression that refers to columns in the obs table,
+or to the names of tags.
+
+Basic queries
+-------------
+
+Using our example database from the preceding section, we can try a
+few queries::
+
+  >>> obsdb.query()
+  ResultSet<[obs_id,timestamp,hwp_speed], 2 rows>
+
+  >>> obsdb.query('hwp_speed >= 2.')
+  ResultSet<[obs_id,timestamp,hwp_speed], 1 rows>
+
+  >>> obsdb.query('hwp_speed > 1. and drift=="rising"')
+  ResultSet<[obs_id,timestamp,hwp_speed], 1 rows>
+
+The object returned by obsdb.query is a :py:obj:`ResultSet`, from
+which individual columns or rows can easily be extracted:
+
+  >>> rs = obsdb.query()
+  >>> print(rs['obs_id'])
+  ['myobs0' 'myobs1']
+  >>> print(rs[0])
+  OrderedDict([('obs_id', 'myobs0'), ('timestamp', 1900000000.0),
+    ('hwp_speed', 2.0), ('drift', 'rising')])
+
+
+Queries involving tags
+----------------------
+
+Information from the tags table will only show up in the output if
+explicitly requested.  For example, we can ask for the ``'hwp_fast'``
+and ``'hwp_slow'`` fields to be included::
+
+  >>> obsdb.query(tags=['hwp_fast', 'hwp_slow'])
+  ResultSet<[obs_id,timestamp,hwp_speed,drift,hwp_fast,hwp_slow], 2 rows>
+
+Tag columns will have value 1 if the tag has been applied to that
+observation, and 0 otherwise.  A query can be filtered based on tags;
+there are two ways to do this.  One is to append '=0' or '=1' to the
+end of some of the tag strings::
+
+  >>> obsdb.query(tags=['hwp_fast=1'])
+  ResultSet<[obs_id,timestamp,hwp_speed,drift,hwp_fast], 1 rows>
+
+Alternately, the values of tags can be used in query strings::
+
+  >>> obsdb.query('(hwp_fast==1 and drift=="rising") or (hwp_fast==0 and drift="setting")',
+    tags=['hwp_fast'])
+  ResultSet<[obs_id,timestamp,hwp_speed,drift,hwp_fast], 2 rows>
+    
+
+Getting a description of a single observation
+---------------------------------------------
+
+If you just want the basic information for an observation of known
+obs_id, use the get function :py:meth:`ObsDb.get` function::
+
+  >>> obsdb.get('myobs0')
+  OrderedDict([('obs_id', 'myobs0'), ('timestamp', 1900000000.0),
+    ('hwp_speed', 2.0), ('drift', 'rising')])
+
+If you want a list of all tags for an observation, call get with
+tags=True::
+
+  >>> obsdb.get('myobs0', tags=True)
+  OrderedDict([('obs_id', 'myobs0'), ('timestamp', 1900000000.0),
+    ('hwp_speed', 2.0), ('drift', 'rising'),
+    ('tags', ['hwp_fast', 'cryo_problem'])])
+
+So here we see that the observation is associated with tags
+``'hwp_fast'`` and ``'cryo_problem'``.
+
+  
+Standardized ObsDb field names
+==============================
+
+Other than obs_id, specific field names are not enforced in code.
+However, there are certain typical bits of information for which it
+makes sense to strongly encourage standardized field names.  These are
+defined below.
+
+``timestamp``
+  A specific moment (as a Unix timestamp) that should be used to
+  represent the observation.  Best practice is to have this be fairly
+  close to the start time of the observation.
+
+``duration``
+  The approximate length of the observation in seconds.
+
+
+Class auto-documentation
+========================
+
+*The class documentation of ObsDb should appear below.*
+
+.. autoclass:: ObsDb
    :special-members: __init__
    :members:
 
 
 ------------------------------------
-Observation Database (ObsDb) [empty]
+ObsFileDb: Observation File Database
 ------------------------------------
-
----------
-ResultSet
----------
-
-Auto-generated documentation should appear here.
-
-.. autoclass:: sotodlib.core.metadata.ResultSet
-   :special-members: __init__
-   :members:
-
--------------------------------------
-Observation File Database (ObsFileDb)
--------------------------------------
 
 The purpose of ObsFileDb is to provide a map into a large set of TOD
 files, giving the names of the files and a compressed expression of
@@ -476,16 +650,14 @@ Class Documentation
 
 *The class documentation of ObsFileDb should appear below.*
 
-.. autoclass:: sotodlib.core.metadata.ObsFileDb
+.. autoclass:: ObsFileDb
    :special-members: __init__
    :members:
 
 
----------------------------------------
-Metadata Manifest Database (ManifestDb)
----------------------------------------
-
-.. py:module:: sotodlib.core.metadata
+--------------------------------------
+ManifestDb: Metadata Manifest Database
+--------------------------------------
 
 *This documentation is incomplete.  We will need to explain the role
 of ManifestDb and its relation to ObsDb and DetDb.*
@@ -503,6 +675,17 @@ Class auto-documentation
 *The class documentation of ManifestDb should appear below.*
 
 .. autoclass:: ManifestDb
+   :special-members: __init__
+   :members:
+
+
+---------
+ResultSet
+---------
+
+Auto-generated documentation should appear here.
+
+.. autoclass:: ResultSet
    :special-members: __init__
    :members:
 
