@@ -44,6 +44,21 @@ def add_demodulation_args(parser):
         default=3,
         help="Number of samples to skip in downsampling",
     )
+    parser.add_argument(
+        "--demod-2f",
+        required=False,
+        action="store_true",
+        help="Demodulate, downsample and cache 2f signal",
+        dest="demod_2f"
+    )
+    parser.add_argument(
+        "--no-demod-2f",
+        required=False,
+        action="store_false",
+        help="Do not demodulate 2f signal",
+        dest="demod_2f"
+    )
+    parser.set_defaults(demod_2f=False)
     return
 
 
@@ -71,7 +86,11 @@ def demodulate(args, comm, data, name, detweights=None, madampars=None, verbose=
         madampars["allow_decoupling"] = True
 
     demod = OpDemod(
-        name=name, wkernel=args.demod_wkernel, fmax=args.demod_fmax, nskip=args.demod_nskip,
+        name=name,
+        wkernel=args.demod_wkernel,
+        fmax=args.demod_fmax,
+        nskip=args.demod_nskip,
+        do_2f=args.demod_2f,
     )
     demod.exec(data)
 

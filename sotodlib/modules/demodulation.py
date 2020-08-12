@@ -46,6 +46,7 @@ class OpDemod(toast.Operator):
         intervals="intervals",
         window="hamming",
         purge=True,
+        do_2f=False,
     ):
         """ Arguments:
         name(str) : Cache prefix to operate on
@@ -55,6 +56,7 @@ class OpDemod(toast.Operator):
         intervals(string) : Name of the intervals in the observation dictionary
         window(string) : Window function name recognized by scipy.signal.firwin
         purge(bool) : Remove inputs after demodulation
+        do_2f(bool) : also cache the 2f-demodulated signal
         """
         self._name = name
         self._wkernel = wkernel
@@ -64,6 +66,7 @@ class OpDemod(toast.Operator):
         self._intervals = intervals
         self._window = window
         self._purge = purge
+        self._do_2f = do_2f
 
     def _get_fmax(self, tod):
         times = tod.local_times()
@@ -150,12 +153,43 @@ class OpDemod(toast.Operator):
         signal_demod0 = lowpass(signal)
         signal_demod4r = lowpass(signal * 2 * qweights * etainv)
         signal_demod4i = lowpass(signal * 2 * uweights * etainv)
+
+        if self._do_2f:
+            # Start by evaluating the 2f demodulation factors from the
+            # pointing matrix.  We use the half-angle formulas and some
+            # extra logic to identify the right branch
+            #
+            # |cos(psi/2)| and |sin(psi/2)|:
+            signal_demod2r = np.sqrt(0.5 * (1 + qweights * etainv))
+            signal_demod2i = np.sqrt(0.5 * (1 - qweights * etainv))
+            # inverse the sign for every second mode
+            for sig in signal_demod2r, signal_demod2i:
+                dsig = np.diff(sig)
+                dsig[sig[1:] > 0.5] = 0
+                starts = np.where(dsig[:-1] * dsig[1:] < 0)[0]
+                for start, stop in zip(starts[::2], starts[1::2]):
+                    sig[start + 1:stop + 2] *= -1
+                # handle some corner cases
+                dsig = np.diff(sig)
+                dstep = np.median(np.abs(dsig[sig[1:] < 0.5]))
+                bad = np.abs(dsig) > 2 * dstep
+                bad = np.hstack([bad, False])
+                sig[bad] *= -1
+            # Demodulate and lowpass for 2f
+            signal_demod2r = lowpass(signal * signal_demod2r)
+            signal_demod2i = lowpass(signal * signal_demod2i)
+
         signal_name_0 = "{}_demod0_{}".format(self._name, det)
         signal_name_4r = "{}_demod4r_{}".format(self._name, det)
         signal_name_4i = "{}_demod4i_{}".format(self._name, det)
         tod.cache.put(signal_name_0, signal_demod0, replace=True)
         tod.cache.put(signal_name_4r, signal_demod4r, replace=True)
         tod.cache.put(signal_name_4i, signal_demod4i, replace=True)
+        if self._do_2f:
+            signal_name_2r = "{}_demod2r_{}".format(self._name, det)
+            signal_name_2i = "{}_demod2i_{}".format(self._name, det)
+            tod.cache.put(signal_name_2r, signal_demod2r, replace=True)
+            tod.cache.put(signal_name_2i, signal_demod2i, replace=True)
         if self._purge:
             if self._name is None:
                 tod.cache.destroy("{}_{}".format(tod.SIGNAL_NAME, det))
