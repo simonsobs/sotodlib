@@ -1,0 +1,2 @@
+influxdb
+sphinx_rtd_theme
