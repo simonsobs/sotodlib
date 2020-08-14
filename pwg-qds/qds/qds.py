@@ -59,10 +59,10 @@ class Monitor:
         """Check if monitored measurement has been reacorded already.
 
         All recorded measurement fields within the Monitor are tracked in a log
-        within InfluxDB. This check will search this log with a search like:
+        within InfluxDB. This check will search this log with a search like::
 
-        > SELECT {field} FROM "log" WHERE observation = {observation} AND
-            {tag1} = '{value1}' AND {tag2} = '{value2}';
+            SELECT {field} FROM "log" WHERE observation = {observation} AND
+                {tag1} = '{value1}' AND {tag2} = '{value2}';
 
         Parameters
         ----------
@@ -142,7 +142,7 @@ class Monitor:
 
     def record(self, field, values, timestamps, tags, measurement, log='obs_process_log', log_tags=None):
         """Record a monitored statistic to the InfluxDB. Values not written to
-        DB until Monitor.write() is called.
+        DB until ``Monitor.write()`` is called.
 
         Parameters
         ----------
@@ -179,5 +179,6 @@ class Monitor:
         self.queue.append(log_msg)
 
     def write(self):
+        """Write points to InfluxDB, clearing the queue."""
         self.client.write_points(self.queue, protocol='line')
         self.queue = []
