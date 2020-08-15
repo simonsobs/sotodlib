@@ -1,21 +1,10 @@
 # Largely based on 20200514_FCT_Software_Example.ipynb from the pwg-fct
-import sys
 import numpy as np
-
-from so3g.proj import Ranges, RangesMatrix
-
-import scipy as sp
-from scipy import stats
 
 from sotodlib import core
 import sotodlib.io.load as so_data_load
-from sotodlib.core import FlagManager
 
-import sotodlib.flags as flags
-import sotodlib.sim_flags as sim_flags
-
-import sotodlib.tod_ops.filters as filters
-from sotodlib.tod_ops import fourier_filter, rfft
+from sotodlib.tod_ops import rfft
 
 import qds
 
@@ -27,8 +16,8 @@ print('Found {} Observations'.format(len(observations)))
 o_list = range(len(observations)) # all observations
 #o_list = [99] #np.random.randint(len(observations))
 
-#for o in range(100,140):
-for o in o_list:
+#for o in o_list:
+for o in range(100,140):
     obs_id = observations[o]
     print('Looking at observation #{} named {}'.format(o,obs_id))
     
@@ -45,7 +34,7 @@ for o in o_list:
     
     for wafer in wafers:
         # Check calculation completed for this wafer
-        check_tags = {'wafer': wafer} 
+        check_tags = {'wafer': wafer}
         if monitor.check('white_noise_level', obs_id, check_tags):
             continue
 
