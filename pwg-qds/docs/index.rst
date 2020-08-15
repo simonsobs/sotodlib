@@ -8,6 +8,7 @@ document supporting modules for this quality assurance and data selection.
    :maxdepth: 2
    :caption: Contents:
 
+   installation
    monitor
 
 Indices and tables
