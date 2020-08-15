@@ -1,7 +1,7 @@
 from influxdb import InfluxDBClient
 
 class Monitor:
-    def __init__(self, host, port, database='qds'):
+    def __init__(self, host, port, database='qds', username=u'root', password=u'root'):
         """QDS Monitor, an interface to monitoring data quality in InfluxDB.
 
         Parameters
@@ -13,6 +13,10 @@ class Monitor:
         database : str
             InfluxDB database. Will be created if it does not exist already.
             Defaults to 'qds'.
+        username : str
+            Username for the InfluxDB, defaults to 'root'.
+        password : str
+            Password for the InfluxDB, defaults to 'root'.
 
         Attributes
         ----------
@@ -23,11 +27,11 @@ class Monitor:
             entries are "queued" to this list and written with Monitor.write().
 
         """
-        self.client = Monitor._connect_to_db(host, port, database)
+        self.client = Monitor._connect_to_db(host, port, database, username, password)
         self.queue = []
 
     @staticmethod
-    def _connect_to_db(host, port, database):
+    def _connect_to_db(host, port, database, username, password):
         """Initailize the DB client.
 
         Parameters
@@ -38,6 +42,10 @@ class Monitor:
             InfluxDB port number
         database : str
             InfluxDB database. Will be created if it does not exist already.
+        username : str
+            Username for the InfluxDB.
+        password : str
+            Password for the InfluxDB.
 
         Returns
         ----------
@@ -45,7 +53,8 @@ class Monitor:
             InfluxDB client connected to specified database
 
         """
-        client = InfluxDBClient(host=host, port=port)
+        client = InfluxDBClient(host=host, port=port, username=username,
+                                password=password)
         db_list = client.get_list_database()
         db_names = [x['name'] for x in db_list]
         if database not in db_names:
