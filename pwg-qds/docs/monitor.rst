@@ -59,6 +59,17 @@ name of the database within InfluxDB that you want to write to.::
 
     monitor = qds.Monitor('localhost', 8086, 'qds')
 
+.. note::
+    Secure connection to a proxied InfluxDB is supported. To connect use to
+    https://grumpy.physics.yale.edu/influxdb/ use::
+
+        monitor = qds.Monitor(host='grumpy.physics.yale.edu',
+                              port=443,
+                              username=u'qdsuser',
+                              password=u'ENTER PASSWORD HERE',
+                              path='influxdb',
+                              ssl=True)
+
 Let's say we want to load some of the sims, we'll create our Context and get
 the observations with::
 

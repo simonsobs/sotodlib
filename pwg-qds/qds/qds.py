@@ -1,7 +1,7 @@
 from influxdb import InfluxDBClient
 
 class Monitor:
-    def __init__(self, host, port, database='qds', username=u'root', password=u'root'):
+    def __init__(self, host, port, database='qds', username=u'root', password=u'root', path='', ssl=False):
         """QDS Monitor, an interface to monitoring data quality in InfluxDB.
 
         Parameters
@@ -17,6 +17,10 @@ class Monitor:
             Username for the InfluxDB, defaults to 'root'.
         password : str
             Password for the InfluxDB, defaults to 'root'.
+        path : str
+            Path of InfluxDB on the server to connect to, defaults to ''
+        ssl : bool
+            Use https to connect, defaults to False
 
         Attributes
         ----------
@@ -27,11 +31,11 @@ class Monitor:
             entries are "queued" to this list and written with Monitor.write().
 
         """
-        self.client = Monitor._connect_to_db(host, port, database, username, password)
+        self.client = Monitor._connect_to_db(host, port, database, username, password, path, ssl)
         self.queue = []
 
     @staticmethod
-    def _connect_to_db(host, port, database, username, password):
+    def _connect_to_db(host, port, database, username, password, path, ssl):
         """Initailize the DB client.
 
         Parameters
@@ -46,6 +50,10 @@ class Monitor:
             Username for the InfluxDB.
         password : str
             Password for the InfluxDB.
+        path : str
+            Path of InfluxDB on the server to connect to
+        ssl : bool
+            Use https to connect
 
         Returns
         ----------
@@ -53,8 +61,14 @@ class Monitor:
             InfluxDB client connected to specified database
 
         """
+        if ssl:
+            verify_ssl=True
+        else:
+            verify_ssl=False
+
         client = InfluxDBClient(host=host, port=port, username=username,
-                                password=password)
+                                password=password, path=path, ssl=ssl,
+                                verify_ssl=verify_ssl)
         db_list = client.get_list_database()
         db_names = [x['name'] for x in db_list]
         if database not in db_names:
