@@ -12,7 +12,7 @@ import toast
 
 class Lowpass:
     """ A callable class that applies the low pass filter """
-    
+
     def __init__(self, wkernel, fmax, fsample, offset, nskip, window="hamming"):
         """ Arguments:
         wkernel(int) : width of the filter kernel
@@ -96,6 +96,7 @@ class OpDemod(toast.Operator):
         return
 
     def _demodulate_offsets(self, obs, tod):
+        tod._nsamp //= self._nskip
         dist_samples = tod._dist_samples
         dist_samples = np.array(dist_samples) // self._nskip
         tod._dist_samples = list(dist_samples)
@@ -261,7 +262,8 @@ class OpDemod(toast.Operator):
         freq_in = noise.freq(det)
         # psd
         psd_in = noise.psd(det)
-        for demodkey in ["demod0", "demod4r", "demod4i"]:
+        n_mode = len(["demod0", "demod4r", "demod4i"])
+        for indexoff, demodkey in enumerate(["demod0", "demod4r", "demod4i"]):
             demod_name = "{}_{}".format(demodkey, det)
             # Lowpass
             if demodkey == "demod0":
@@ -277,13 +279,22 @@ class OpDemod(toast.Operator):
             freq_out = freq_in[ind]
             psd_out = psd_out[ind] / self._nskip
             # Insert
+            if not demod_name in noise._keys:
+                noise._keys.append(demod_name)
+            if not demod_name in noise._dets:
+                noise._dets.append(demod_name)
             noise._rates[demod_name] = rate_out
             noise._freqs[demod_name] = freq_out
             noise._psds[demod_name] = psd_out
+            noise._indices[demod_name] = noise.index(det) * n_mode + indexoff
         if self._purge:
+            del noise._keys[noise._keys.index(det)]
+            if det in noise._dets: # _keys may be identical to _dets
+                del noise._dets[noise._dets.index(det)]
             del noise._rates[det]
             del noise._freqs[det]
             del noise._psds[det]
+            del noise._indices[det]
         return
 
     def exec(self, data):
