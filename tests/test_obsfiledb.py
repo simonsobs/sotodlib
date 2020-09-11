@@ -38,20 +38,22 @@ class TestObsFileDB(unittest.TestCase):
         return db
 
     def test_000_basic(self):
-        # Write database to disk.
+        # Get example database
         n_obs, n_detsets = 4, 3
         db = self.get_simple_db(n_obs, n_detsets)
-        db.copy(self.test_filename)
+        for fmt in ['sqlite', 'dump', 'gz']:
+            # Write database to disk.
+            db.to_file(self.test_filename, fmt=fmt)
 
-        # Load it up again.
-        db2 = metadata.ObsFileDb.from_file(self.test_filename)
+            # Load it up again.
+            db2 = metadata.ObsFileDb.from_file(self.test_filename, fmt=fmt)
 
-        # Check.
-        assert (sorted(db.get_obs()) == sorted(db2.get_obs()))
-        obs_id = db.get_obs()[0]
-        assert (sorted(db.get_detsets(obs_id)) ==
-                sorted(db2.get_detsets(obs_id)))
-        assert (db.get_detsets('not an obs') == [])
+            # Check.
+            assert (sorted(db.get_obs()) == sorted(db2.get_obs()))
+            obs_id = db.get_obs()[0]
+            assert (sorted(db.get_detsets(obs_id)) ==
+                    sorted(db2.get_detsets(obs_id)))
+            assert (db.get_detsets('not an obs') == [])
 
     def test_010_remove(self):
         db = self.get_simple_db(4, 3)

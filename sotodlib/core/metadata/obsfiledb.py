@@ -3,6 +3,9 @@ import os
 from collections import OrderedDict
 import numpy as np
 
+from . import common
+
+
 TABLE_DEFS = {
     'detsets': [
         "`name`    varchar(16)",
@@ -68,21 +71,24 @@ class ObsFileDb:
             in read-only mode.  Not valid on dbs held in :memory:.
 
         """
-        if map_file is None:
-            map_file = ':memory:'
+        if isinstance(map_file, sqlite3.Connection):
+            self.conn = map_file
+        else:
+            if map_file is None:
+                map_file = ':memory:'
+            self.conn = sqlite3.connect(map_file)
+            uri = False
+            if readonly:
+                if map_file == ':memory:':
+                    raise ValueError('Cannot honor request for readonly db '
+                                     'mapped to :memory:.')
+                map_file, uri = 'file:%s?mode=ro' % map_file, True
 
-        self.prefix = self._get_prefix(map_file, prefix)
+            self.conn = sqlite3.connect(map_file, uri=uri)
 
-        uri = False
-        if readonly:
-            if map_file == ':memory:':
-                raise ValueError('Cannot honor request for readonly db '
-                                 'mapped to :memory:.')
-            map_file, uri = 'file:%s?mode=ro' % map_file, True
-
-        self.conn = sqlite3.connect(map_file, uri=uri)
         self.conn.row_factory = sqlite3.Row  # access columns by name
 
+        self.prefix = self._get_prefix(map_file, prefix)
         if init_db and not readonly:
             self._create()
 
@@ -98,23 +104,39 @@ class ObsFileDb:
             return ''
         return os.path.split(os.path.abspath(map_file))[0] + '/'
 
-    @classmethod
-    def from_file(cls, map_file, prefix=None):
-        """Returns an ObsFileDb that is initialized from map_file.  This is a
-        copy of the database; changes will not be written back to the
-        file.
+    def to_file(self, filename, overwrite=True, fmt=None):
+        """Write the present database to the indicated filename.
 
-        Arguments:
-          map_file (str): Name of the file on disk.  If instead the
-            string is the name of an existing directory, the code will
-            try to find obsfildb.sqlite in that directory.
-          prefix (str): Prefix for the database (see object docs).
+        Args:
+          filename (str): the path to the output file.
+          overwrite (bool): whether an existing file should be
+            overwritten.
+          fmt (str): 'sqlite', 'dump', or 'gz'.  Defaults to 'sqlite'
+            unless the filename ends with '.gz', in which it is 'gz'.
 
         """
-        if os.path.isdir(map_file):
-            map_file = os.path.join(map_file, 'obsfiledb.sqlite')
-        source_db = cls(map_file, prefix=prefix, readonly=True)
-        return source_db.copy()
+        return common.sqlite_to_file(self.conn, filename, overwrite=overwrite, fmt=fmt)
+
+    @classmethod
+    def from_file(cls, filename, prefix=None, fmt=None):
+        """Instantiate an ObsFileDb and return it, with the data copied in
+        from the specified file.
+
+        Args:
+          filename (str): path to the file.
+          fmt (str): format of the input; see to_file for details.
+
+        Returns:
+          ObsFileDb with an sqlite3 connection that is mapped to memory.
+
+        Notes:
+          Note that if you want a `persistent` connection to the file,
+          you should instead pass the filename to the ObsFileDb
+          constructor map_file argument.
+
+        """
+        conn = common.sqlite_from_file(filename, fmt=fmt)
+        return cls(conn, init_db=False, prefix=filename)
 
     @classmethod
     def for_dir(cls, path, filename='obsfiledb.sqlite', readonly=True):
