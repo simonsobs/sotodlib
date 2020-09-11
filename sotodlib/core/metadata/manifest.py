@@ -44,6 +44,8 @@ import sqlite3
 import os
 import numpy as np
 
+from . import common
+
 TABLE_DEFS = {
     'input_scheme': [
         "`id`      integer primary key autoincrement",
@@ -203,29 +205,33 @@ class ManifestDb:
     Expose a map from Index Data to Endpoint Data, including a
     filename.
     """
-    @classmethod
-    def from_file(cls, filename, create=False):
-        if not create and not os.path.exists(filename):
-            raise RuntimeError('File %s not found (create?).' % filename)
-        db0 = cls(map_file=filename)
-        return db0
 
-    def __init__(self, map_file=None, scheme=None, init_db=True):
-        """
-        Instantiate a database.  If map_file is provided, the
+    def __init__(self, map_file=None, scheme=None):
+        """Instantiate a database.  If map_file is provided, the
         database will be connected to the indicated sqlite file on
         disk, and any changes made to this object be written back to
         the file.
+
+        If scheme is None, the scheme will be loaded from the
+        database; pass scheme=False to prevent that and leave the db
+        uninitialized.
+
         """
-        if map_file is None:
-            map_file = ':memory:'
-        self.conn = sqlite3.connect(map_file)
+        if isinstance(map_file, sqlite3.Connection):
+            self.conn = map_file
+        else:
+            if map_file is None:
+                map_file = ':memory:'
+            self.conn = sqlite3.connect(map_file)
+
         self.conn.row_factory = sqlite3.Row  # access columns by name
 
-        if scheme is not None:
-            self._create(scheme)
-        elif init_db:
+        if scheme is None:
             self.scheme = ManifestScheme.from_database(self.conn)
+        elif scheme is False:
+            pass
+        else:
+            self._create(scheme)
 
     def _create(self, manifest_scheme):
         """
@@ -265,11 +271,45 @@ class ManifestDb:
             else:
                 raise RuntimeError("Output file %s exists (overwrite=True "
                                    "to overwrite)." % map_file)
-        new_db = ManifestDb(map_file=map_file, init_db=False)
+        new_db = ManifestDb(map_file=map_file, scheme=False)
         script = ' '.join(self.conn.iterdump())
         new_db.conn.executescript(script)
         new_db.scheme = ManifestScheme.from_database(new_db.conn)
         return new_db
+
+    def to_file(self, filename, overwrite=True, fmt=None):
+        """Write the present database to the indicated filename.
+
+        Args:
+          filename (str): the path to the output file.
+          overwrite (bool): whether an existing file should be
+            overwritten.
+          fmt (str): 'sqlite', 'dump', or 'gz'.  Defaults to 'sqlite'
+            unless the filename ends with '.gz', in which it is 'gz'.
+
+        """
+        return common.sqlite_to_file(self.conn, filename, overwrite=overwrite, fmt=fmt)
+
+    @classmethod
+    def from_file(cls, filename, fmt=None):
+        """Instantiate an ManifestDb and return it, with the data copied in
+        from the specified file.
+
+        Args:
+          filename (str): path to the file.
+          fmt (str): format of the input; see to_file for details.
+
+        Returns:
+          ManifestDb with an sqlite3 connection that is mapped to memory.
+
+        Notes:
+          Note that if you want a `persistent` connection to the file,
+          you should instead pass the filename to the ManifestDb
+          constructor map_file argument.
+
+        """
+        conn = common.sqlite_from_file(filename, fmt=fmt)
+        return cls(conn)
 
     def _get_file_id(self, filename, create=False):
         """
