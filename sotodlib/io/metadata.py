@@ -15,7 +15,6 @@ http://docs.h5py.org/en/stable/strings.html for a little more info.
 
 import numpy as np
 import h5py
-import contextlib
 
 from sotodlib.core.metadata import ResultSet, SuperLoader
 
@@ -47,7 +46,7 @@ class _Hdf5Writer:
             # close the File on exit.
             fout = filename
             filename = fout.filename
-            context = contextlib.nullcontext(fout)
+            context = _nullcontext(fout)
 
         with context as fout:
             if address in fout:
@@ -209,6 +208,18 @@ class PerDetectorHdf5(ResultSet, _Hdf5Writer):
                 return cls.from_loadspec(
                     request, detdb=self.detdb, obsdb=self.obsdb)
         return _Loader
+
+
+# Starting in Python 3.7, this can be had from contextlib.
+class _nullcontext:
+    def __init__(self, enter_result=None):
+        self.enter_result = enter_result
+
+    def __enter__(self):
+        return self.enter_result
+
+    def __exit__(self, *excinfo):
+        pass
 
 
 SuperLoader.register_metadata('PerDetectorHdf5', PerDetectorHdf5.loader_class())
