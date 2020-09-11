@@ -380,6 +380,10 @@ class AxisManager:
                     self.wrap(k, rset[k], [(0, axis_name)])
         else:
             # Generate the expansion map...
+            if detdb is None:
+                raise RuntimeError(
+                    'Expansion to dets axes requires detdb '
+                    'but None was not passed in.')
             dets = []
             indices = []
             for row_i, row in enumerate(rset.subset(keys=dets_cols.keys())):

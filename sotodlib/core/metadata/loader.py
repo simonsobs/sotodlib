@@ -46,10 +46,18 @@ class SuperLoader:
                     missing_keys.remove(k)
             obs_keys = [k for k in missing_keys if k.startswith('obs:')]
             if len(obs_keys):
-                assert(self.obsdb is not None)
-                assert('obs:obs_id' in request)
-                request.update(self.obsdb.get(request['obs:obs_id'],
-                                              add_prefix='obs:'))
+                if self.obsdb is None:
+                    raise RuntimeError(
+                        'This metadata lookup requires obsdb, but it is not available.')
+                if 'obs:obs_id' not in request:
+                    raise RuntimeError(
+                        'This metadata lookup requires obs:obs_id to be specified in the request.')
+                obs_info = self.obsdb.get(request['obs:obs_id'], add_prefix='obs:')
+                if obs_info is None:
+                    raise RuntimeError(
+                        'This metadata lookup requires obsdb information but the '
+                        'obs_id was not found in the obsdb.')
+                request.update(obs_info)
             try:
                 index_lines = man.match(request, multi=True)
             except Exception as e:
