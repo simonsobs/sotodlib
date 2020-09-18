@@ -109,7 +109,7 @@ class Context(odict):
                 = metadata.SuperLoader(self)
 
     def get_obs(self, obs_id=None, dets=None, detsets=None,
-                loader_type=None):
+                loader_type=None, logic_only=False):
         """Load TOD and supporting metadata for a particular observation id.
         The detectors to read can be specified through colon-coding in
         obs_id, through dets, or through detsets.
@@ -168,12 +168,18 @@ class Context(odict):
         request = {'obs:obs_id': obs_id}
         request.update(detspec)
 
-        # Load metadata.
-        meta = self.loader.load(self['metadata'][:], request)
+        if logic_only:
+            # Return the results of detector and obs resolution.
+            return {'request': request,
+                    'detspec': detspec,
+                    'dets': dets}
 
         # How to load?
         if loader_type is None:
             loader_type = self.get('obs_loader_type', 'default')
+
+        # Load metadata.
+        meta = self.loader.load(self['metadata'][:], request)
 
         # Load TOD.
         from ..io.load import OBSLOADER_REGISTRY
