@@ -129,12 +129,20 @@ class Context(odict):
             tokens = obs_id.split(':')
             obs_id = tokens[0]
             allowed_fields = self.get('obs_colon_tags', [])
-            options = self.detdb.props(props=allowed_fields).distinct()
-            for f in allowed_fields:
-                field_options = list(set(options[f]))
-                for t in tokens:
-                    if t in field_options:
-                        detspec[f] = t
+            # Create a map from option value to option key.
+            prop_map = {}
+            for f in allowed_fields[::-1]:
+                for v in self.detdb.props(props=[f]).distinct()[f]:
+                    prop_map[v] = f
+            for t in tokens[1:]:
+                prop = prop_map.get(t)
+                if prop is None:
+                    raise ValueError('obs_id included tag "%s" but that is not '
+                                     'a value for any of DetDb.%s.' % (t, allowed_fields))
+                if prop in detspec:
+                    raise ValueError('obs_id included tag "%s" and that resulted '
+                                     'in re-restriction on property "%s"' % (t, prop))
+                detspec[prop] = t
 
         # Start the list of detector selectors.
         dets_selection = [detspec]
