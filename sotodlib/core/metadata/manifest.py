@@ -350,13 +350,14 @@ class ManifestDb:
                   'from map join files on map.file_id=files.id %s' % where_str, p)
         rows = c.fetchall()
         rp.insert(0, 'filename')
+        rows = [dict(zip(rp, r)) for r in rows]
         if multi:
-            return [dict(zip(rp, r)) for r in rows]
+            return rows
         if len(rows) == 0:
             return None
         if len(rows) > 1:
-            raise WTF()
-        return dict(zip(rp, rows[0]))
+            raise ValueError('Matched multiple rows with index data: %s' % rows)
+        return rows[0]
 
     def add_entry(self, params, filename=None, create=True, commit=True):
         """
