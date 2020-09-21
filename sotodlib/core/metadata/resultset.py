@@ -108,7 +108,6 @@ class ResultSet(object):
 
     @classmethod
     def from_cursor(cls, cursor, keys=None):
-
         """Create a ResultSet using the results stored in cursor, an
         sqlite.Cursor object.  The cursor must have be configured so
         that .description is populated.
@@ -120,18 +119,34 @@ class ResultSet(object):
         self.rows = [tuple(r) for r in cursor]
         return self
 
-    def asarray(self, simplify_keys=False):
-        """
-        Returns a numpy structured array containing a copy of this
-        ResultSet.  The names of the fields are taken from self.keys.
-        If simplify_keys=True, then the keys are stripped of any
-        prefix; an error is thrown if this yields duplicate key names.
+    def asarray(self, simplify_keys=False, hdf_compat=False):
+        """Get a numpy structured array containing a copy of this data.  The
+        names of the fields are taken from self.keys.
+
+        Args:
+          simplify_keys: If True, then the keys are stripped of any
+            prefix (such as 'base.').  This is mostly for DetDb, where
+            the table name can be annoying.  An error is thrown if
+            this results in duplicate field names.
+          hdf_compat: If True, then 'U'-type columns (Unicode strings)
+            are converted to 'S'-type (byte strings), so it can be
+            stored in an HDF5 dataset.
+
         """
         keys = [k for k in self.keys]
         if simplify_keys:  # remove prefixes
             keys = [k.split('.')[-1] for k in keys]
             assert(len(set(keys)) == len(keys))  # distinct.
         columns = tuple(map(np.array, zip(*self.rows)))
+        if hdf_compat:
+            # Translate any Unicode columns to strings.
+            new_cols = []
+            for c in columns:
+                if c.dtype.char == 'U':
+                    new_cols.append(c.astype('S'))
+                else:
+                    new_cols.append(c)
+            columns = new_cols
         dtype = [(k, c.dtype, c.shape[1:]) for k, c in zip(keys, columns)]
         output = np.ndarray(shape=len(columns[0]), dtype=dtype)
         for k, c in zip(keys, columns):
