@@ -11,7 +11,7 @@ import unittest
 import tempfile
 
 from sotodlib.core import metadata
-from sotodlib.io.metadata import PerDetectorHdf5
+from sotodlib.io.metadata import ResultSetHdfLoader, write_dataset, _decode_array
 
 import os
 import h5py
@@ -25,7 +25,25 @@ class MetadataTest(unittest.TestCase):
     def tearDown(self):
         self.tempdir.cleanup()
 
-    def test_000_hdf(self):
+    def test_000_support(self):
+        """Test some numpy-HDF5 conversion support functions.
+
+        """
+        rs = metadata.ResultSet(keys=['a_string', 'a_float', 'a_bad_string', 'a_bad_float'])
+        rs.rows.append(('hello', 1.2, 'yuck', 1.3))
+        aru = rs.asarray(hdf_compat=True)
+        self.assertTrue(aru.dtype['a_string'].char == 'S')
+        # Conversion code.
+        arx = _decode_array(aru, key_map={
+            'a_string': 'another_string',
+            'a_float': 'another_float',
+            'a_bad_string': None,
+            'a_bad_float': None,
+            })
+        self.assertCountEqual(arx.dtype.names, ['another_string', 'another_float'])
+        self.assertEqual(arx['another_string'].dtype.char, 'U')
+
+    def test_001_hdf(self):
         """Test metadata write/read to HDF5 datasets
 
         """
@@ -33,7 +51,7 @@ class MetadataTest(unittest.TestCase):
 
         # The reason we're here today is that this things works but is
         # going to be removed.
-        loader = PerDetectorHdf5.loader_class()()
+        loader = ResultSetHdfLoader()
         test_obs_id = 'testobs_1234'
 
         # Create an hdf5 dataset which is a structured array with only the
@@ -41,11 +59,11 @@ class MetadataTest(unittest.TestCase):
         # are no columns with names prefixed by 'dets:' or 'obs:', this value
         # will be broadcast to all observations and detectors that access it.
         TGOOD = 1e-3
-        rs = PerDetectorHdf5(keys=['timeconst'])
+        rs = metadata.ResultSet(keys=['timeconst'])
         rs.append({'timeconst': TGOOD})
         with h5py.File(hdf_fn, 'a') as fout:
             # Simple one...
-            rs.write_dataset(fout, 'timeconst_1ms', overwrite=True)
+            write_dataset(rs, fout, 'timeconst_1ms', overwrite=True)
 
         # Simple look-up:
         req = {'filename': hdf_fn,
@@ -81,10 +99,10 @@ class MetadataTest(unittest.TestCase):
             # First test.
             for label, tau1, tau2 in [('early', T090, TBAD),
                                       ('late', TBAD, T150)]:
-                rs = PerDetectorHdf5(keys=['dets:band', 'timeconst'])
+                rs = metadata.ResultSet(keys=['dets:band', 'timeconst'])
                 rs.append({'dets:band': 'f090', 'timeconst': tau1})
                 rs.append({'dets:band': 'f150', 'timeconst': tau2})
-                rs.write_dataset(fout, 'timeconst_%s' % label, overwrite=True)
+                write_dataset(rs, fout, 'timeconst_%s' % label, overwrite=True)
 
         # To match the early/late example we need DetDb and ObsDb.
         detdb = metadata.DetDb()
@@ -149,7 +167,6 @@ class MetadataTest(unittest.TestCase):
         mandb.to_file(mandb_fn)
 
         # Now we expect only f090 A and f150 B to resolve to non-bad vals.
-        loader = metadata.SuperLoader(obsdb=obsdb, detdb=detdb)
         mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00'})
         self.assertCountEqual(mtod['tau'], [T090, TBAD, TBAD, T150])
 
