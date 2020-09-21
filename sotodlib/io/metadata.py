@@ -17,114 +17,97 @@ import numpy as np
 import h5py
 
 from sotodlib.core.metadata import ResultSet, SuperLoader
+import warnings
 
+def write_dataset(data, filename, address, overwrite=False, mode='a'):
+    """Write a metadata object to an HDF5 file as a single dataset.
 
-class _Hdf5Writer:
-    """This class is a light extension for ResultSet that can write the
-    data to an HDF5 file as a dataset.
-
-    """
-    def write_dataset(self, filename, address, overwrite=False, mode='a'):
-        """Write self (a ResultSet or similar) to an HDF5 file as a single
+    Args:
+      data: The metadata object.  Currently only ResultSet and numpy
+        structured arrays are supported.
+      filename: The path to the HDF5 file, or an open h5py.File.
+      address: The path within the HDF5 file at which to create the
         dataset.
-
-        Arguments:
-          filename: The path to the HDF5 file.  Alternately, pass in an
-            open h5py.File.
-          address: The path within the HDF5 file at which to create the
-            dataset.
-          overwrite: If true, remove any existing group or dataset at
-            the specified address.
-          mode: The mode specification used for opening the file
-            (ignored if filename is an open file).
-
-        """
-        if isinstance(filename, str):
-            context = h5py.File(filename, mode)
-        else:
-            # Wrap in a nullcontext so that the block below doesn't
-            # close the File on exit.
-            fout = filename
-            filename = fout.filename
-            context = _nullcontext(fout)
-
-        with context as fout:
-            if address in fout:
-                if overwrite:
-                    del fout[address]
-                else:
-                    raise RuntimeError(
-                        f'Address {address} already exists in {filename}; '
-                        f'pass overwrite=True to clobber it.')
-            data = self.asarray()
-            # If there are "unicode" strings in there, convert to a
-            # numpy fixed-length 'S' type.  This will choke if the
-            # strings are not ascii-compatible.
-            new_dtype = []
-            for k in data.dtype.names:
-                if data.dtype[k].char == 'U':
-                    max_len = max(map(len, data[k]))
-                    new_dtype.append((k, 'S%i' % max_len))
-                else:
-                    new_dtype.append((k, data.dtype[k]))
-            data = data.astype(np.dtype(new_dtype))
-            fout.create_dataset(address, data=data)
-
-
-class PerDetectorHdf5(ResultSet, _Hdf5Writer):
-    """This class is designed to read and write metadata to HDF5.  It
-    treats 'obs' as an extrinsic axis, and 'dets' as an intrinsic
-    axis.  However, data for multiple 'obs' can be stored in a single
-    dataset (rather than in distinct datasets) if desired.
+      overwrite: If True, remove any existing group or dataset at the
+        specified address.  If False, raise a RuntimeError if the
+        write address is already occupied.
+      mode: The mode specification used for opening the file
+        (ignored if filename is an open file).
 
     """
-    intrinsic_axes = ['dets']
+    if isinstance(data, ResultSet):
+        data = data.asarray(hdf_compat=True)
+    elif isinstance(data, np.ndarray):
+        pass
+    else:
+        raise TypeError("I do not know how to write type %s" % data.__class__)
 
-    @classmethod
-    def _prefilter_data(cls, data_in, key_map={}):
-        """This function is called by the data loader, after loading a dataset
-        but before matching the indices.  It should always be called,
-        to convert numpy 'S'-type to numpy 'U'-type strings.
+    if isinstance(filename, str):
+        context = h5py.File(filename, mode)
+    else:
+        # Wrap in a nullcontext so that the block below doesn't
+        # close the File on exit.
+        fout = filename
+        filename = fout.filename
+        context = _nullcontext(fout)
 
-        Only the positional arguments are passed in by the data
-        loader.  The keyword arguments can be used by subclasses
-        (through super()._prefilter_data(...)).
+    with context as fout:
+        if address in fout:
+            if overwrite:
+                del fout[address]
+            else:
+                raise RuntimeError(
+                    f'Address {address} already exists in {filename}; '
+                    f'pass overwrite=True to clobber it.')
+        fout.create_dataset(address, data=data)
 
-        If key_map is passed in, it will be used to rename columns
-        (from key to value).
+
+class ResultSetHdfLoader:
+    def __init__(self, detdb=None, obsdb=None):
+        self.detdb = detdb
+        self.obsdb = obsdb
+
+    def _prefilter_data(self, data_in, key_map={}):
+        """When a dataset is loaded and converted to a structured numpy
+        array, this function is called before the data are returned to
+        the user.  The key_map can be used to rename fields, on load.
+
+        This function may be extended in subclasses, but you will
+        likely want to call the super() handler before doing
+        additional processing.  The loading functions do not pass in
+        key_map -- this is for the exclusive use of subclasses.
 
         """
-        new_dtype = []
-        columns = []
-        for i, k in enumerate(data_in.dtype.names):
-            if data_in.dtype[k].char == 'S':
-                # Convert to unicode.
-                columns.append(np.array([v.decode('ascii') for v in data_in[k]]))
-            else:
-                columns.append(data_in[k])
-            if len(data_in[k].shape) == 1:
-                new_dtype.append((key_map.get(k, k), columns[-1].dtype))
-            else:
-                new_dtype.append((key_map.get(k, k), columns[-1].dtype, data_in[k].shape[1:]))
-        new_dtype = np.dtype(new_dtype)
-        output = np.empty(data_in.shape, dtype=new_dtype)
-        for k, c in zip(new_dtype.names, columns):
-            output[k] = c
-        return output
+        return _decode_array(data_in, key_map=key_map)
 
-    @classmethod
-    def from_loadspec(cls, load_params,
-                      detdb=None,
-                      obsdb=None):
+    def _populate(self, data, keys=None, row_order=None):
+        """Process the structured numpy array "data" and return a ResultSet.
+        keys should be a list of field names to load from the data
+        (default is None, which will load all fields).  row_order
+        should be a list of indices into the desired rows of data
+        (default is None, which will load all rows, in order).
 
-        """Retrieve a metadata result.
+        (This function can be overridden in subclasses, without
+        calling the super.)
+
+        """
+        if keys is None:
+            keys = [k for k in data.dtype.names]
+        if row_order is None:
+            row_order = range(len(data))
+        rs = ResultSet(keys=keys)
+        for i in row_order:
+            rs.append({k: data[k][i] for k in rs.keys})
+        return rs
+
+    def from_loadspec(self, load_params):
+        """Retrieve a metadata result from an HDF5 file.
 
         Arguments:
           load_params: an index dictionary (see below).
-          detdb: a DetDb which may be used to resolve 'dets' indices.
-          obsdb: an ObsDb which may be used to resolve 'obs' indices.
 
-        Returns an object of the present class.
+        Returns a ResultSet (or, for subclasses, whatever sort of
+        thing is returned by self._populate).
 
         The "index dictionary", for the present case, may contain
         extrinsic and intrinsic selectors (for the 'obs' and 'dets'
@@ -136,14 +119,11 @@ class PerDetectorHdf5(ResultSet, _Hdf5Writer):
         Note that this just calls batch_from_loadspec.
 
         """
-        return cls.batch_from_loadspec(
-            [load_params], detdb=detdb, obsdb=obsdb)[0]
+        return self.batch_from_loadspec([load_params])[0]
 
-    @classmethod
-    def batch_from_loadspec(cls, load_params, detdb=None, obsdb=None):
-        """Retrieve a batch of metadata results.  The arguments here are the
-        same as for from_loadspec, expect that load_params must be a
-        /list/ of index dictionaries.  This function returns a list of
+    def batch_from_loadspec(self, load_params):
+        """Retrieves a batch of metadata results.  load_params should be a
+        list of valid index data specifications.  Returns a list of
         objects, corresponding to the elements of load_params.
 
         This function is relatively efficient in the case that many
@@ -167,7 +147,7 @@ class PerDetectorHdf5(ResultSet, _Hdf5Writer):
                     dataset = load_params[idx]['dataset']
                     if dataset is not last_dataset:
                         data = fin[dataset][()]
-                        data = cls._prefilter_data(data)
+                        data = self._prefilter_data(data)
                         last_dataset = dataset
 
                     # Dereference the extrinsic axis request.  Every
@@ -191,23 +171,85 @@ class PerDetectorHdf5(ResultSet, _Hdf5Writer):
                     # Output.
                     keys_out = [k for k in data.dtype.names
                                 if k not in ex_keys]
-                    self = cls(keys=keys_out)
-                    for i in mask.nonzero()[0]:
-                        self.append({k: data[k][i] for k in self.keys})
-                    results[idx] = self
+                    results[idx] = self._populate(data, keys=keys_out,
+                                                  row_order=mask.nonzero()[0])
         return results
+
+
+def _decode_array(data_in, key_map={}):
+    """Converts a structured numpy array to a structured numpy array,
+    rewriting any 'S'-type string fields as 'U'-type string fields.
+
+    Args:
+      data_in: A structure numpy array (i.e. an ndarray with a dtype
+        consisting of multiple named fields).
+      key_map: A dict specifying how to rename fields.  Any key=>value
+        pair here will cause data_in[key] to be written to
+        data_out[value].  If value is None, the specified field will
+        not be included in data_out.
+
+    Returns:
+        A new structured array, unless no changes are needed, in which
+        case data_in is returned unmodified.
+
+    """
+    changes = False
+    new_dtype = []
+    columns = []
+    for i, k in enumerate(data_in.dtype.names):
+        key_out = key_map.get(k, k)
+        changes = changes or (key_out != k)
+        if key_out is None:
+            continue
+        if data_in.dtype[k].char == 'S':
+            # Convert to unicode.
+            columns.append(np.array([v.decode('ascii') for v in data_in[k]]))
+            changes = True
+        else:
+            columns.append(data_in[k])
+        if len(data_in[k].shape) == 1:
+            new_dtype.append((key_out, columns[-1].dtype))
+        else:
+            new_dtype.append((key_out, columns[-1].dtype, data_in[k].shape[1:]))
+    new_dtype = np.dtype(new_dtype)
+    output = np.empty(data_in.shape, dtype=new_dtype)
+    for k, c in zip(new_dtype.names, columns):
+        output[k] = c
+    return output
+
+
+class _Hdf5Writer:
+    """Deprecated.
+
+    """
+    def write_dataset(self, filename, address, overwrite=False, mode='a'):
+        return write_dataset(self, filename, address, overwrite, mode)
+
+
+class PerDetectorHdf5(ResultSet, _Hdf5Writer):
+    """Deprecated; use ResultSet and the write_dataset function."""
+
+    intrinsic_axes = ['dets']
+
+    @classmethod
+    def _prefilter_data(cls, data_in, key_map={}):
+        return _decode_array(data_in, key_map=key_map)
+
+    @classmethod
+    def from_loadspec(cls, load_params,
+                      detdb=None,
+                      obsdb=None):
+        return cls.batch_from_loadspec(
+            [load_params], detdb=detdb, obsdb=obsdb)[0]
+
+    @classmethod
+    def batch_from_loadspec(cls, load_params, detdb=None, obsdb=None):
+        return ResultSetHdfLoader(detdb=detdb, obsdb=obsdb).batch_from_loadspec(load_params)
 
     @classmethod
     def loader_class(cls):
-        class _Loader:
-            """(Temporary?) Loader class for PerDetectorHdf5..."""
-            def __init__(self, detdb=None, obsdb=None):
-                self.detdb = detdb
-                self.obsdb = obsdb
-            def from_loadspec(self, request):
-                return cls.from_loadspec(
-                    request, detdb=self.detdb, obsdb=self.obsdb)
-        return _Loader
+        warnings.warn('PerDetectorHdf5 is deprecated.')
+        return ResultSetHdfLoader
 
 
 # Starting in Python 3.7, this can be had from contextlib.
@@ -222,4 +264,4 @@ class _nullcontext:
         pass
 
 
-SuperLoader.register_metadata('PerDetectorHdf5', PerDetectorHdf5.loader_class())
+SuperLoader.register_metadata('PerDetectorHdf5', ResultSetHdfLoader)
