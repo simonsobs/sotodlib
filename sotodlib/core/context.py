@@ -1,6 +1,7 @@
 from collections import OrderedDict as odict
 import yaml
 import os
+import importlib
 
 from . import metadata
 
@@ -35,6 +36,9 @@ class Context(odict):
         self.obsdb = None
         self.detdb = None
         self.obsfiledb = None
+
+        for to_import in self.get('imports', []):
+            importlib.import_module(to_import)
 
         self.reload(load_list)
 
