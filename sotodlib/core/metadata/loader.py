@@ -2,6 +2,7 @@ from sotodlib import core
 import os
 
 REGISTRY = {
+    '_default': 'ResultSetHdf'
 }
 
 
@@ -89,11 +90,13 @@ class SuperLoader:
                     continue
                 index_line.update(request)
                 if loader is None:
-                    # Pop?
                     loader = index_line.get('loader')
                 if loader is None:
-                    loader = 'PerDetectorHdf5'
-                loader_class = REGISTRY[loader]
+                    loader = REGISTRY['_default']
+                try:
+                    loader_class = REGISTRY[loader]
+                except KeyError:
+                    raise RuntimeError('No metadata loader registered under name "%s"' % loader)
                 loader_object = loader_class(detdb=self.detdb, obsdb=self.obsdb)
                 mi1 = loader_object.from_loadspec(index_line)
                 # restrict to index_line...
