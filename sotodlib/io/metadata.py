@@ -218,40 +218,6 @@ def _decode_array(data_in, key_map={}):
     return output
 
 
-class _Hdf5Writer:
-    """Deprecated.
-
-    """
-    def write_dataset(self, filename, address, overwrite=False, mode='a'):
-        return write_dataset(self, filename, address, overwrite, mode)
-
-
-class PerDetectorHdf5(ResultSet, _Hdf5Writer):
-    """Deprecated; use ResultSet and the write_dataset function."""
-
-    intrinsic_axes = ['dets']
-
-    @classmethod
-    def _prefilter_data(cls, data_in, key_map={}):
-        return _decode_array(data_in, key_map=key_map)
-
-    @classmethod
-    def from_loadspec(cls, load_params,
-                      detdb=None,
-                      obsdb=None):
-        return cls.batch_from_loadspec(
-            [load_params], detdb=detdb, obsdb=obsdb)[0]
-
-    @classmethod
-    def batch_from_loadspec(cls, load_params, detdb=None, obsdb=None):
-        return ResultSetHdfLoader(detdb=detdb, obsdb=obsdb).batch_from_loadspec(load_params)
-
-    @classmethod
-    def loader_class(cls):
-        warnings.warn('PerDetectorHdf5 is deprecated.')
-        return ResultSetHdfLoader
-
-
 # Starting in Python 3.7, this can be had from contextlib.
 class _nullcontext:
     def __init__(self, enter_result=None):
@@ -264,4 +230,7 @@ class _nullcontext:
         pass
 
 
+SuperLoader.register_metadata('ResultSetHdf', ResultSetHdfLoader)
+
+# The old name... remove some day.
 SuperLoader.register_metadata('PerDetectorHdf5', ResultSetHdfLoader)
