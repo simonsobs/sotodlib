@@ -9,6 +9,7 @@ from toast.utils import Logger
 
 from ...core import Hardware
 from ...sim_hardware import get_example, sim_telescope_detectors
+from .noise import get_analytic_noise
 
 
 FOCALPLANE_RADII_DEG = {
@@ -279,6 +280,8 @@ def get_focalplane(args, comm, hw, det_index, verbose=False):
             sample_rate=args.sample_rate,
             radius_deg=fpradius,
         )
+        # Update the noise model to include potential common modes
+        get_analytic_noise(args, comm, focalplane)
     else:
         focalplane = None
     if comm.comm_world is not None:

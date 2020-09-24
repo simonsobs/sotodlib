@@ -17,8 +17,26 @@ def add_so_noise_args(parser):
         required=False,
         help="String defining analytical parameters of a per-tube "
         "common mode that is co-added with every detector: "
-        "'fmin[Hz],fknee[Hz],alpha,NET[K]'",
+        "'fmin[Hz],fknee[Hz],alpha,NET[K]' OR "
+        "'fmin[Hz],fknee[Hz],alpha,NET[K],center,width' where the last two "
+        "define the coupling strenth distribution and default to (1, 0)"
+        "Multiple common modes can be separated with ';'.",
     )
+    parser.add_argument(
+        "--common-mode-only",
+        required=False,
+        action="store_true",
+        help="No individual detector noise",
+        dest="common_mode_only"
+    )
+    parser.add_argument(
+        "--no-common-mode-only",
+        required=False,
+        action="store_false",
+        help="Include individual detector noise",
+        dest="common_mode_only"
+    )
+    parser.set_defaults(common_mode_only=False)
     return
 
 
@@ -65,12 +83,13 @@ def get_analytic_noise(args, comm, focalplane, verbose=True):
     """ Create a TOAST noise object.
 
     Create a noise object from the 1/f noise parameters contained in the
-    focalplane database.
+    focalplane database.  Optionally add thermal common modes.
 
     """
     timer = Timer()
     timer.start()
-    detectors = sorted(focalplane.keys())
+
+    detectors = sorted(focalplane.detector_data.keys())
     fmins = {}
     fknees = {}
     alphas = {}
@@ -85,22 +104,35 @@ def get_analytic_noise(args, comm, focalplane, verbose=True):
         NETs[d] = focalplane[d]["NET"]
         indices[d] = focalplane[d]["index"]
 
+    ncommon = 0
+    coupling_strength_distributions = []
+    common_modes = []
     if args.common_mode_noise:
         # Add an extra "virtual" detector for common mode noise for
         # every optics tube
-        fmin, fknee, alpha, net = np.array(args.common_mode_noise.split(",")).astype(
-            np.float64
-        )
-        hw = get_example()
-        for itube, tube in enumerate(sorted(hw.data["tubes"].keys())):
-            d = "common_mode_{}".format(tube)
-            detectors.append(d)
-            rates[d] = args.sample_rate
-            fmins[d] = fmin
-            fknees[d] = fknee
-            alphas[d] = alpha
-            NETs[d] = net
-            indices[d] = 100000 + itube
+        for common_mode in args.common_mode_noise.split(";"):
+            ncommon += 1
+            try:
+                fmin, fknee, alpha, net, center, width = np.array(
+                    common_mode.split(",")
+                ).astype(np.float64)
+            except ValueError:
+                fmin, fknee, alpha, net = np.array(common_mode.split(",")).astype(
+                    np.float64
+                )
+                center, width = 1, 0
+            coupling_strength_distributions.append([center, width])
+            hw = get_example()
+            for itube, tube in enumerate(sorted(hw.data["tubes"].keys())):
+                d = "common_mode_{}_{}".format(ncommon - 1, tube)
+                detectors.append(d)
+                common_modes.append(d)
+                rates[d] = args.sample_rate
+                fmins[d] = fmin
+                fknees[d] = fknee
+                alphas[d] = alpha
+                NETs[d] = net
+                indices[d] = ncommon * 100000 + itube
 
     noise = AnalyticNoise(
         rate=rates,
@@ -113,15 +145,30 @@ def get_analytic_noise(args, comm, focalplane, verbose=True):
     )
 
     if args.common_mode_noise:
-        # Update the mixing matrix in the noise operator
         mixmatrix = {}
         keys = set()
-        for det in focalplane.keys():
-            tube = focalplane[det]["tube"]
-            common = "common_mode_{}".format(tube)
-            mixmatrix[det] = {det: 1, common: 1}
-            keys.add(det)
-            keys.add(common)
+        if args.common_mode_only:
+            detweight = 0
+        else:
+            detweight = 1
+        for icommon in range(ncommon):
+            # Update the mixing matrix in the noise operator
+            center, width = coupling_strength_distributions[icommon]
+            np.random.seed(1001 + icommon)
+            couplings = center + np.random.randn(1000000) * width
+            for det in focalplane.detector_data.keys():
+                if det not in mixmatrix:
+                    mixmatrix[det] = {det: detweight}
+                    keys.add(det)
+                tube = focalplane[det]["tube"]
+                common = "common_mode_{}_{}".format(icommon, tube)
+                index = focalplane[det]["index"]
+                mixmatrix[det][common] = couplings[index]
+                keys.add(common)
+        # Add a diagonal entries, even if we wouldn't usually ask for
+        # the common mode alone.
+        for common in common_modes:
+            mixmatrix[common] = {common : 1}
         # There should probably be an accessor method to update the
         # mixmatrix in the TOAST Noise object.
         if noise._mixmatrix is not None:
@@ -129,7 +176,8 @@ def get_analytic_noise(args, comm, focalplane, verbose=True):
         noise._mixmatrix = mixmatrix
         noise._keys = list(sorted(keys))
 
-    timer.stop()
+    focalplane._noise = noise
+
     if comm.world_rank == 0 and verbose:
-        timer.report("Creating noise model")
+        timer.report_clear("Creating noise model")
     return noise
