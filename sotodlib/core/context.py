@@ -9,6 +9,21 @@ from . import metadata
 class Context(odict):
     def __init__(self, filename=None, site_file=None, user_file=None,
                  load_list='all'):
+        """Construct a Context object.  Note this is an ordereddict with a few
+        attributes added on.
+
+        Args:
+          filename (str): Path to the dataset context file.
+          site_file (str): Path to the site file.  If None, then the
+            value of SOTODLIB_SITECONFIG environment variable is used;
+            unless that's unset in which case the file site.yaml in
+            the current directory will be used.
+          user_file (str): Path to the user file.  If None, then the
+            value of SOTODLIB_USERCONFIG environment variable is used;
+            unless that's unset in which case the file
+            ~/.sotodlib.yaml will be used.
+
+        """
         super().__init__()
         # Start with site and user config.
         site_ok, site_file, site_cfg = _read_cfg(
