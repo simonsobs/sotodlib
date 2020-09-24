@@ -12,7 +12,6 @@ from toast.todmap import TODGround
 from toast.utils import Logger
 from toast.weather import Weather
 
-from .noise import get_analytic_noise
 from .hardware import get_hardware, get_focalplane
 
 

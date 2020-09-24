@@ -157,7 +157,7 @@ class ToastExport(toast.Operator):
                 f[kindx][k] = int(noise.index(k))
                 for d in nse_dets:
                     wt = noise.weight(d, k)
-                    if wt > 0:
+                    if wt != 0:
                         st[d].append(noise.index(k))
                         wts[d].append(wt)
             for d in nse_dets:
