@@ -4,18 +4,340 @@
 Context and Metadata system
 ===========================
 
-This documentation is incomplete -- some key classes are not
-documented at all.
-
-
 .. contents:: Jump to:
    :local:
 
----------------
-Context [empty]
----------------
+--------
+Overview
+--------
+
+The Context and Metadata system is intended to provide easy
+programmatic access to combinations of time-ordered detector data and
+supporting data products ("metadata").  The sectionon on
+:ref:`context-section` deals with the configuration files that
+describe a dataset, and the use of the Context object to load data and
+metadata into sotodlib containers; the section on
+:ref:`metadata-section` describes how to store and index metadata
+information for use with this system.  Information on TOD indexing and
+loading can be found in the section on :ref:`ObsFileDb
+<obsfiledb-section>`.
+
+
+.. _context-section:
+
+-------
+Context
+-------
+
+.. py:module:: sotodlib.core
+
+Assuming someone has set up a Context for a particular dataset, you
+would instantiate it like this::
+
+  from sotodlib.core import Context
+  ctx = Context('path/to/the/context.yaml')
+
+This will cause the specified ``context.yaml`` file to be parsed, as
+well as user and site configuration files, if those have been set up.
+Once the Context is loaded, you will probably have access to the
+various databases (``detdb``, ``obsdb``, ``obsfiledb``) and you'll be
+able to load TOD and metadata using ``get_obs(...)``.
+
+
+Dataset, User, and Site Context files
+=====================================
+
+The three configuration files are:
+
+Dataset Context File
+  This will often be called ``context.yaml`` and will contain a
+  description of how to access a particular TOD data set (for example
+  a set of observations output from a particular simulation run) and
+  supporting metadata (including databases listing the observations,
+  detector properties, and intermediate analysis products such as cuts
+  or pointing offsets).  When instantiating a Context object, the path
+  to this file will normally be the only argument.
+
+Site Context File
+  This file contains settings that are common to a particular
+  computing site but are likely to differ from one site to the next.
+  It is expected that a single file will be made available to all
+  sotodlib users on a system.  The main purpose of this is to describe
+  file locations, so that the Dataset Context File can be written in a
+  way that is portable between computing sites.
+
+User Context File
+  This is a yaml file contains user-specific settings, and is loaded
+  after the Site Context File but before the Dataset Context File.
+  This plays the same role as Site Context but allows for per-user
+  tweaking of parameters.
+
+The User and Site Context Files will be looked for in certain places
+if not specified explicitly; see :class:`Context` for details.
+
+
+Annotated Example
+=================
+
+The Dataset Context File is yaml, that decodes to a dict.  Here is an
+annotated example.
+
+.. code-block:: yaml
+
+  # Define some "tags".  These are string variables that are eligible
+  # for substitution into other settings.  The most common use is to
+  # establish base paths for data and metadata products.
+  tags:
+    actpol_shared:   /mnt/so1/shared/data/actpol/depots/scratch
+    depot_scratch:  /mnt/so1/shared/data/actpol/depots/scratch
+    metadata_lib:   /mnt/so1/shared/data/actpol/depots/scratch/uranus_200327/metadata
+
+  # List of modules to import.  Importing modules such as
+  # moby2.analysis.socompat or sotodlib.io.metadata causes certain IO
+  # functions to be registered for the metadata system to use.
+  imports:
+    - moby2.analysis.socompat
+
+  # The basic databases.  The sotodlib TOD loading system uses an
+  # ObsFileDb to determine what files to read.  The metadata association
+  # and loading system uses a DetDb and an ObsDb to find and read
+  # different kinds of metadata.
+  obsfiledb: '{metadata_lib}/obsfiledb_200407.sqlite'
+  detdb:     '{metadata_lib}/detdb_200109.sqlite'
+  obsdb:     '{metadata_lib}/obsdb_200618.sqlite'
+
+  # Additional settings related to TOD loading.
+  obs_colon_tags: ['band']
+  obs_loader_type: actpol_moby2
+
+  # A list of metadata products that should be loaded along with the
+  # TOD.  Each entry in the list points to a metadata database (an
+  # sqlite file) and specifies the name under which that information
+  # should be associated in the loaded data structure.  In some
+  # cases a "loader" name is also given, but usually this is
+  # specified in the database.
+  metadata:
+    - db: "{metadata_lib}/cuts_s17_c11_200327_cuts.sqlite"
+      name: "glitch_flags&flags"
+    - db: "{metadata_lib}/cuts_s17_c11_200327_planet_cuts.sqlite"
+      name: "source_flags&flags"
+    - db: "{metadata_lib}/cal_s17_c11_200327.sqlite"
+      name: "relcal&cal"
+    - db: "{metadata_lib}/timeconst_200327.sqlite"
+      name: "timeconst&"
+      loader: "PerDetectorHdf5"
+    - db: "{metadata_lib}/abscal_190126.sqlite"
+      name: "abscal&cal"
+    - db: "{metadata_lib}/detofs_200218.sqlite"
+      name: "focal_plane"
+    - db: "{metadata_lib}/pointofs_200218.sqlite"
+      name: "pointofs"
+
+
+With a context like the one above, a user can load a TOD and its
+supporting data very simply::
+
+  from sotodlib.core import Context
+  from moby2.analysis import socompat   # For special ACT loader functions
+
+  context = Context('context.yaml')
+
+  # Get a random obs_id from the ObsDb we loaded:
+  context.obsdb.get()[10]
+  # output is: OrderedDict([('obs_id', '1500022312.1500087647.ar6'), ('timestamp', 1500022313.0)])
+
+  # Load the TOD and metadata for that obs_id:
+  tod = context.get_obs('1500022312.1500087647.ar6')
+
+  # The result is an AxisManager with members [axes]:
+  # - signal ['dets', 'samps']
+  # - timestamps ['samps']
+  # - flags ['samps']
+  # - boresight ['samps']
+  # - array_data ['dets']
+  # - glitch_flags ['dets', 'samps']
+  # - source_flags ['dets', 'samps']
+  # - relcal ['dets']
+  # - timeconst ['dets']
+  # - abscal ['dets']
+  # - focal_plane ['dets']
+  # - pointofs ['dets']
+
+
+Context Schema
+==============
+
+Here are all of the top-level entries with special meanings in the
+Context system:
+
+
+``tags``
+    A map from string to string.  This entry is treated in a special
+    way when the Site, User, and Dataset context files are evalauted
+    in series; see below.
+
+``imports``
+    A list of modules that should be imported prior to attempting any
+    metadata operations.  The purpose of this is to allow IO functions
+    to register themselves for use by the Metadata system.  This list
+    will usually need to include at least ``sotodlib.io.metadata``.
+
+``obsfiledb``, ``obsdb``, ``detdb``
+    Each of these should provide a string.  The string represents the
+    path to files carrying an ObsFileDb, ObsDb, and DetDb,
+    respectively.  These are all technically optional but it will be
+    difficult to load TOD data with the ObsFileDb and it will be
+    difficult to load metadata without the ObsDb and DetDb.
+
+``obs_colon_tags``
+    A list of strings.  The strings in this list must refer to columns
+    from the DetDb.  When a string appears in this list, then the
+    values appearing in that column of the DetDb may be used to modify
+    an obs_id when requestion TOD data.  For example, suppose DetDb
+    has a column 'band' with values ['f027', 'f039', ...].  Suppose
+    that ``'obs201230'`` is an observation ID for an array that has
+    detectors in bands 'f027' and 'f039'.  Then passing
+    ``'obs201230:f027'`` to Context.get_obs will read and return only
+    the timestream and metadata for the 'f027' detectors.
+
+``obs_loader_type``
+    A string, giving the name of a loader function that should be used
+    to load the TOD.  The functions are registered in the module
+    variable ``sotodlib.io.load.OBSLOADER_REGISTRY``.
+
+
+``metadata``
+    A list of metadata specs.  Each metadata spec has the following entries:
+
+    ``db``
+        The path to the ManifestDb for this metadata spec.
+
+    ``name``
+        A string giving instructions for what the loaded thing should
+        be called, in the AxisManager.  There is a bit of a
+        complicated syntax here, to support renaming things on load
+        and stuff like that.  Find more details in the `Metadata`
+        section, if you're lucky.
+
+    ``loader``
+        The name of the metadata loader function to use; these
+        functions must be registered in module variable
+        sotodlib.core.metadata.REGISTRY.  This is optional; if absent
+        it will default to 'HdfPerDetector' or (more likely) to
+        whatever is specified in the ManifestDb.
+
+
+Context object API
+==================
+
+The Context object should be documented below.
+
+.. autoclass:: Context
+   :special-members: __init__
+   :members:
+
 
 .. py:module:: sotodlib.core.metadata
+.. _metadata-section:
+
+--------
+Metadata
+--------
+
+The purpose of the "metadata system" in sotodlib is to help identify,
+load, and correctly label supporting ancillary data for a particular
+observation and set of detectors.
+
+The "metadata" we are talking about here consists of things like
+detector pointing offsets, calibration factors, detector time
+constants, and so on.  It may also include more complicated or
+voluminous data, such as per-sample flags, or signal modes.
+
+When the Context system processes a metadata entry, it will make use
+of the DetDb and ObsDb in its interactions with the loaded ManifestDb.
+
+This process has 5 stages.
+
+1. Promote Request.
+
+   The metadata request is likely to include information about what
+   observation and what detectors are of interest.  But the ManifestDb
+   may desire a slightly different form for this information.  For
+   example, an ``obs_id`` might be provided in the request, but the
+   ManifestDb might index its results using timestamps
+   (``obs:timestamp``).  In the *Promote Request* step, the ManifestDb
+   is interrogated for what ``obs`` and ``dets`` fields it requires as
+   Index Data.  If those fields are not already in the request, then
+   the request is enrichened to include them; this typically requires
+   interaction with the ObsDb and/or DetDb.  The enriched request is
+   the result fo the Promotion Step.
+
+2. Get Endpoints.
+
+   Once the enriched request is computed, the ManifestDb can be
+   queried to see what endpoints match the request.  The ManifestDb
+   will return a list of Endpoint results.  Each Endpoint result
+   describes the location of some metadata (i.e. a filename and
+   possibly some address within that file), as well as any limitations
+   on the applicability of that data (e.g. it may specify that
+   although the results include values for 90 GHz and 150 GHz
+   detectors, only the results for 150 GHz detectors should be kept).
+   The metadata results are not yet loaded.
+
+3. Read Metadata.
+
+4. Combine Metadata.
+
+5. Wrap Metadata.
+
+
+Metadata Archives
+=================
+
+A "Metadata Archive" is a set of files that hold metadata to be
+accessed by the Context/Metadata system.  The metadata system is
+designed to be flexible with respect to how such archives are
+structured, at least in terms of the numbers and formats of the files.
+
+One possible form for an archive is a set of HDF5 files, where simple
+tabular data are stored in datasets.  This type of archive is used for
+the reference implementation of the Metadata system interface,
+discussed in the next section.
+
+ResultSet over HDF5
+-------------------
+
+This is enabled by sotodlib.metadata.io.  In particular:
+
+- The function ``write_dataset`` knows how to write a ResultSet to an
+  HDF5 dataset.
+- The ResultSetHdfLoader class is used by the Context/Metadata system
+  to load populate ResultSet objects from HDF5 datasets.
+
+Here's an example that creates a compatible dataset, and writes it to
+an HDF5 file::
+
+  import h5py
+  import numpy as np
+
+  obs_id = 'obs123456'
+  timeconst = np.array([('obs123456', 0.001)], dtype=[('obs:obs_id', 'S20'),
+                                                      ('timeconst', float)])
+  with h5py.File('test.h5', 'w') as fout:
+      fout.create_dataset('timeconst_for_obs123456', data=timeconst)
+
+Here's the nearly equivalent operation, using ResultSet and
+write_dataset::
+
+  import h5py
+  from sotodlib.core import metadata
+  from sotodlib.io.metadata import write_dataset
+
+  timeconst = ResultSet(keys=['obs:obs_id', 'timeconst'])
+  timeconst.rows.append(('obs123456', 0.001))
+
+  write_dataset(timeconst, 'test2.h5', 'timeconst_for_obs123456', overwrite=True)
+
 
 ------------------------------------
 DetDb: Detector Information Database
@@ -492,6 +814,8 @@ Class auto-documentation
    :special-members: __init__
    :members:
 
+
+.. _obsfiledb-section:
 
 ------------------------------------
 ObsFileDb: Observation File Database
