@@ -83,6 +83,7 @@ def parse_arguments(comm):
     toast_tools.add_mc_args(parser)
     so_tools.add_time_constant_args(parser)
     so_tools.add_demodulation_args(parser)
+    so_tools.add_h_n_args(parser)
     so_tools.add_hw_args(parser)
     so_tools.add_so_noise_args(parser)
     so_tools.add_pysm_args(parser)
@@ -206,6 +207,10 @@ def main():
     # pixel numbers
 
     toast_tools.expand_pointing(args, comm, data)
+
+    # Optionally, output h_n maps
+
+    so_tools.compute_h_n(args, comm, data)
 
     # Only purge the pointing if we are NOT going to export the
     # data to a TIDAS volume

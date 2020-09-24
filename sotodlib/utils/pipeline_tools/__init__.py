@@ -13,3 +13,4 @@ from .pysm import add_pysm_args, simulate_sky_signal
 from .time_constant import (
     add_time_constant_args, convolve_time_constant, deconvolve_time_constant)
 from .demodulation import add_demodulation_args, demodulate
+from .h_n import add_h_n_args, compute_h_n
