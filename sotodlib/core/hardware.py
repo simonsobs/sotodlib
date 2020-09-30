@@ -109,7 +109,7 @@ class Hardware(object):
 
         wafer_to_tube = dict()
         for tb, props in self.data["tubes"].items():
-            for wf in props["wafers"]:
+            for wf in props["wafer_slots"]:
                 wafer_to_tube[wf] = tb
 
         crate_to_card = dict()
@@ -118,14 +118,14 @@ class Hardware(object):
                 crate_to_card[card] = crate
 
         result["cards"] = {x: y["card"]
-                           for x, y in self.data["wafers"].items()}
+                           for x, y in self.data["wafer_slots"].items()}
         result["crates"] = {x: crate_to_card[y["card"]]
-                            for x, y in self.data["wafers"].items()}
+                            for x, y in self.data["wafer_slots"].items()}
         result["bands"] = {x: y["bands"]
-                           for x, y in self.data["wafers"].items()}
+                           for x, y in self.data["wafer_slots"].items()}
         result["tubes"] = wafer_to_tube
         result["telescopes"] = {x: tube_to_tele[wafer_to_tube[x]] for x in
-                                list(self.data["wafers"].keys())}
+                                list(self.data["wafer_slots"].keys())}
         return result
 
     def select(self, telescopes=None, tubes=None, match=dict()):
@@ -151,7 +151,7 @@ class Hardware(object):
             26 which have "A" polarization and are located in pixels 20-29
             (recall the "." matches a single character)::
 
-                new = hw.select(match={"wafer": ["25", "26"],
+                new = hw.select(match={"wafer_slot": ["25", "26"],
                                 "band": "MF.1",
                                 "pol": "A",
                                 "pixel": "02."})
@@ -182,16 +182,16 @@ class Hardware(object):
         if tbselect is not None:
             wselect = list()
             for tb in tbselect:
-                wselect.extend(self.data["tubes"][tb]["wafers"])
+                wselect.extend(self.data["tubes"][tb]["wafer_slots"])
 
         dets = self.data["detectors"]
 
         # Build regex matches for each property
         reg = dict()
-        if "wafer" in match:
+        if "wafer_slot" in match:
             # Handle wafer case separately, since we need to merge any
             # match with our telescope / tube selection of wafers above.
-            k = "wafer"
+            k = "wafer_slot"
             v = match[k]
             if wselect is None:
                 # Just the regular behavior
@@ -210,10 +210,10 @@ class Hardware(object):
         elif wselect is not None:
             # No pattern in the match dictionary, just our list from the
             # telescope / tube selection.
-            reg["wafer"] = re.compile(r"("+"|".join(wselect)+r")")
+            reg["wafer_slot"] = re.compile(r"("+"|".join(wselect)+r")")
 
         for k, v in match.items():
-            if (k == "wafer"):
+            if (k == "wafer_slot"):
                 # Already handled above
                 continue
             else:
@@ -234,7 +234,7 @@ class Hardware(object):
                         keep = False
                         break
             if keep:
-                newwafers.add(props["wafer"])
+                newwafers.add(props["wafer_slot"])
                 newdets[d] = copy.deepcopy(props)
 
         # Now compute the reduced set of auxilliary data needed for these
@@ -257,9 +257,9 @@ class Hardware(object):
                 hw.data[k][elem] = copy.deepcopy(self.data[k][elem])
 
         # Copy over the wafer data
-        hw.data["wafers"] = OrderedDict()
+        hw.data["wafer_slots"] = OrderedDict()
         for wf in newwafers:
-            hw.data["wafers"][wf] = copy.deepcopy(self.data["wafers"][wf])
+            hw.data["wafer_slots"][wf] = copy.deepcopy(self.data["wafer_slots"][wf])
 
         # And the detectors...
         hw.data["detectors"] = newdets

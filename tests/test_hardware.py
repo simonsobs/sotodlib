@@ -47,7 +47,7 @@ class HardwareTest(TestCase):
             fwhm = teleprops["fwhm"]
             for tube in teleprops["tubes"]:
                 tubeprops = hw.data["tubes"][tube]
-                for wafer in tubeprops["wafers"]:
+                for wafer in tubeprops["wafer_slots"]:
                     outpath = os.path.join(
                         self.outdir, "wafer_{}.toml.gz".format(wafer))
                     dets = sim_wafer_detectors(hw, wafer, platescale, fwhm)
@@ -86,7 +86,7 @@ class HardwareTest(TestCase):
         # Test selection of 90GHz detectors on wafers 25 and 26 which have
         # "A" polarization configuration and are located in pixels 20-29.
         wbhw = hw.select(
-            match={"wafer": ["25", "26"],
+            match={"wafer_slot": ["25", "26"],
                    "band": "MF.1",
                    "pol": "A",
                    "pixel": "02."})
@@ -101,7 +101,7 @@ class HardwareTest(TestCase):
 
         # Test selection of pixels on 27GHz wafer 44.
         lfhw = hw.select(
-            match={"wafer": ["44"],
+            match={"wafer_slot": ["44"],
                    "pixel": "00."})
         dbpath = os.path.join(self.outdir, "w44_bLF1_p000-009.toml.gz")
         lfhw.dump(dbpath, overwrite=True, compress=True)
