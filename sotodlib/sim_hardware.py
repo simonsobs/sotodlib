@@ -437,7 +437,7 @@ def rhombus_hex_layout(rhombus_npos, rhombus_width, gap, rhombus_rotate=None,
     return result
 
 
-def sim_wafer_detectors(hw, wafer, platescale, fwhm, band=None,
+def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
                         center=np.array([0, 0, 0, 1], dtype=np.float64)):
     """Generate detector properties for a wafer.
 
@@ -446,7 +446,7 @@ def sim_wafer_detectors(hw, wafer, platescale, fwhm, band=None,
 
     Args:
         hw (Hardware): The hardware properties.
-        wafer (str): The wafer name.
+        wafer_slot (str): The wafer slot name.
         platescale (float): The plate scale in degrees / mm.
         fwhm (dict): Dictionary of nominal FWHM values in arcminutes for
             each band.
@@ -458,7 +458,7 @@ def sim_wafer_detectors(hw, wafer, platescale, fwhm, band=None,
 
     """
     # The properties of this wafer
-    wprops = hw.data["wafers"][wafer]
+    wprops = hw.data["wafer_slots"][wafer_slot]
     # The readout card and its properties
     card = wprops["card"]
     cardprops = hw.data["cards"][card]
@@ -469,7 +469,7 @@ def sim_wafer_detectors(hw, wafer, platescale, fwhm, band=None,
             bands = [band]
         else:
             raise RuntimeError("band '{}' not valid for wafer '{}'"
-                               .format(band, wafer))
+                               .format(band, wafer_slot))
 
     # Lay out the pixel locations depending on the wafer type.  Also
     # compute the polarization orientation rotation, as well as the A/B
@@ -550,7 +550,7 @@ def sim_wafer_detectors(hw, wafer, platescale, fwhm, band=None,
     
     doff = 0
     p = 0
-    idoff = int(wafer) * 10000
+    idoff = int(wafer_slot) * 10000
     for px in range(npix):
         if px in kill:
             continue
@@ -558,7 +558,7 @@ def sim_wafer_detectors(hw, wafer, platescale, fwhm, band=None,
         for b in bands:
             for pl, layout in zip(["A", "B"], [layout_A, layout_B]):
                 dprops = OrderedDict()
-                dprops["wafer"] = wafer
+                dprops["wafer_slot"] = wafer_slot
                 dprops["ID"] = idoff + doff
                 dprops["pixel"] = pstr
                 dprops["band"] = b
@@ -576,7 +576,7 @@ def sim_wafer_detectors(hw, wafer, platescale, fwhm, band=None,
                 # Layout quaternion offset is from the origin.  Now we apply
                 # the rotation of the wafer center.
                 dprops["quat"] = qa.mult(center, layout[p]).flatten()
-                dname = "{}_{}_{}_{}".format(wafer, pstr, b, pl)
+                dname = "{}_{}_{}_{}".format(wafer_slot, pstr, b, pl)
                 dets[dname] = dprops
                 doff += 1
         p += 1
@@ -636,8 +636,8 @@ def sim_telescope_detectors(hw, tele, tubes=None):
         centers = ang_to_quat(wcenters)
 
         windx = 0
-        for wafer in tubeprops["wafers"]:
-            dets = sim_wafer_detectors(hw, wafer, platescale, fwhm,
+        for wafer_slot in tubeprops["wafer_slots"]:
+            dets = sim_wafer_detectors(hw, wafer_slot, platescale, fwhm,
                                        center=centers[windx])
             alldets.update(dets)
             windx += 1
@@ -666,8 +666,8 @@ def sim_telescope_detectors(hw, tele, tubes=None):
                 centers.append(qa.mult(tcenters[location], qwc))
 
             windx = 0
-            for wafer in tubeprops["wafers"]:
-                dets = sim_wafer_detectors(hw, wafer, platescale, fwhm,
+            for wafer_slot in tubeprops["wafer_slots"]:
+                dets = sim_wafer_detectors(hw, wafer_slot, platescale, fwhm,
                                            center=centers[windx])
                 alldets.update(dets)
                 windx += 1
@@ -771,7 +771,7 @@ def get_example():
 
     cnf["bands"] = bands
 
-    wafers = OrderedDict()
+    wafer_slots = OrderedDict()
 
     wtypes = ["UHF", "MF", "LF"]
     wcnt = {
@@ -814,11 +814,12 @@ def get_example():
             wf["pixsize"] = wpixmm[wt]
             wf["bands"] = wbd[wt]
             wf["card"] = "{:02d}".format(cardindx)
+            wf["wafer_name"] = ""
             cardindx += 1
-            wafers[wn] = wf
+            wafer_slots[wn] = wf
             windx += 1
 
-    cnf["wafers"] = wafers
+    cnf["wafer_slots"] = wafer_slots
 
     tubes = OrderedDict()
 
@@ -836,13 +837,13 @@ def get_example():
         tb = OrderedDict()
         tb["type"] = ttyp
         tb["waferspace"] = 127.89
-        tb["wafers"] = list()
+        tb["wafer_slots"] = list()
         for tw in range(3):
             off = 0
-            for w, props in cnf["wafers"].items():
+            for w, props in cnf["wafer_slots"].items():
                 if props["type"] == ttyp:
                     if off == woff[ttyp]:
-                        tb["wafers"].append(w)
+                        tb["wafer_slots"].append(w)
                         woff[ttyp] += 1
                         break
                     off += 1
@@ -856,13 +857,13 @@ def get_example():
         tb = OrderedDict()
         tb["type"] = ttyp
         tb["waferspace"] = 127.89
-        tb["wafers"] = list()
+        tb["wafer_slots"] = list()
         for tw in range(7):
             off = 0
-            for w, props in cnf["wafers"].items():
+            for w, props in cnf["wafer_slots"].items():
                 if props["type"] == ttyp:
                     if off == woff[ttyp]:
-                        tb["wafers"].append(w)
+                        tb["wafer_slots"].append(w)
                         woff[ttyp] += 1
                         break
                     off += 1
@@ -932,9 +933,9 @@ def get_example():
         crt["telescope"] = tel
 
         ## get all the wafer card numbers for a telescope
-        tb_wfrs = [cnf["tubes"][t]["wafers"] for t in cnf["telescopes"][tel]["tubes"]]
+        tb_wfrs = [cnf["tubes"][t]["wafer_slots"] for t in cnf["telescopes"][tel]["tubes"]]
         tl_wfrs = [i for sl in tb_wfrs for i in sl]
-        wafer_cards = [cnf["wafers"][w]["card"] for w in tl_wfrs]
+        wafer_cards = [cnf["wafer_slots"][w]["card"] for w in tl_wfrs]
 
         # add all cards to the card table and assign to crates
         for crd in wafer_cards:
@@ -968,7 +969,7 @@ def get_example():
     dets = OrderedDict()
     for d in range(4):
         dprops = OrderedDict()
-        dprops["wafer"] = "42"
+        dprops["wafer_slot"] = "42"
         dprops["ID"] = d
         dprops["pixel"] = "000"
         bindx = d % 2
