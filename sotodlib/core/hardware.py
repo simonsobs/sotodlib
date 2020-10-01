@@ -91,8 +91,8 @@ class Hardware(object):
     def wafer_map(self):
         """Construct wafer mapping to other auxilliary data.
 
-        Given the current data state, build dictionaries to go from wafers
-        to all other non-detector info:  telescopes, tubes, cards, crates,
+        Given the current data state, build dictionaries to go from wafer_slots
+        to all other non-detector info:  telescopes, tubes, card_slots, crate_slots,
         and bands.  This is a convenient mapping when pruning the hardware
         information or doing other kinds of lookups.
 
@@ -113,13 +113,13 @@ class Hardware(object):
                 wafer_to_tube[wf] = tb
 
         crate_to_card = dict()
-        for crate, props in self.data["crates"].items():
-            for card in props["cards"]:
+        for crate, props in self.data["crate_slots"].items():
+            for card in props["card_slots"]:
                 crate_to_card[card] = crate
 
-        result["cards"] = {x: y["card"]
+        result["card_slots"] = {x: y["card_slot"]
                            for x, y in self.data["wafer_slots"].items()}
-        result["crates"] = {x: crate_to_card[y["card"]]
+        result["crate_slots"] = {x: crate_to_card[y["card_slot"]]
                             for x, y in self.data["wafer_slots"].items()}
         result["bands"] = {x: y["bands"]
                            for x, y in self.data["wafer_slots"].items()}

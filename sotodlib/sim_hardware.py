@@ -460,8 +460,8 @@ def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
     # The properties of this wafer
     wprops = hw.data["wafer_slots"][wafer_slot]
     # The readout card and its properties
-    card = wprops["card"]
-    cardprops = hw.data["cards"][card]
+    card_slot = wprops["card_slot"]
+    cardprops = hw.data["card_slots"][card_slot]
     # The bands
     bands = wprops["bands"]
     if band is not None:
@@ -569,7 +569,7 @@ def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
                 if handed is not None:
                     dprops["handed"] = handed[p]
                 # Made-up assignment to readout channels
-                dprops["card"] = card
+                dprops["card_slot"] = card_slot
                 dprops["channel"] = doff
                 dprops["AMC"] = doff // chan_per_AMC
                 dprops["bias"] = doff // chan_per_bias
@@ -578,6 +578,7 @@ def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
                 # Layout quaternion offset is from the origin.  Now we apply
                 # the rotation of the wafer center.
                 dprops["quat"] = qa.mult(center, layout[p]).flatten()
+                dprops["detector_name"]= ""
                 dname = "{}_{}_{}_{}".format(wafer_slot, pstr, b, pl)
                 dets[dname] = dprops
                 doff += 1
@@ -815,7 +816,7 @@ def get_example():
             wf["npixel"] = wnp[wt]
             wf["pixsize"] = wpixmm[wt]
             wf["bands"] = wbd[wt]
-            wf["card"] = "{:02d}".format(cardindx)
+            wf["card_slot"] = "{:02d}".format(cardindx)
             wf["wafer_name"] = ""
             cardindx += 1
             wafer_slots[wn] = wf
@@ -923,21 +924,22 @@ def get_example():
 
     cnf["telescopes"] = telescopes
 
-    cards = OrderedDict()
-    crates = OrderedDict()
+    card_slots = OrderedDict()
+    crate_slots = OrderedDict()
 
     crt_indx = 0
 
     for tel in cnf["telescopes"]:
-        crn = "{:d}".format(crt_indx)
+        crn = "{:02d}".format(crt_indx)
         crt = OrderedDict()
-        crt["cards"] = list()
+        crt["card_slots"] = list()
         crt["telescope"] = tel
+        crt["crate_name"] = ""
 
         ## get all the wafer card numbers for a telescope
         tb_wfrs = [cnf["tubes"][t]["wafer_slots"] for t in cnf["telescopes"][tel]["tubes"]]
         tl_wfrs = [i for sl in tb_wfrs for i in sl]
-        wafer_cards = [cnf["wafer_slots"][w]["card"] for w in tl_wfrs]
+        wafer_cards = [cnf["wafer_slots"][w]["card_slot"] for w in tl_wfrs]
 
         # add all cards to the card table and assign to crates
         for crd in wafer_cards:
@@ -945,25 +947,27 @@ def get_example():
             cdprops["nbias"] = 12
             cdprops["nAMC"] = 2
             cdprops["nchannel"] = 2000
-            cards[crd] = cdprops
+            cdprops["card_name"] = ""
+            card_slots[crd] = cdprops
 
-            crt["cards"].append(crd)
+            crt["card_slots"].append(crd)
 
             # name new crates when current one is full
-            if ('S' in tel and len(crt["cards"]) >=4) or len(crt["cards"]) >=6:
-                crates[crn] = crt
+            if ('S' in tel and len(crt["card_slots"]) >=4) or len(crt["card_slots"]) >=6:
+                crate_slots[crn] = crt
                 crt_indx += 1
-                crn = "{:d}".format(crt_indx)
+                crn = "{:02d}".format(crt_indx)
                 crt = OrderedDict()
-                crt["cards"] = list()
+                crt["card_slots"] = list()
                 crt["telescope"] = tel
+                crt["crate_name"] = ""
 
         # each telescope starts with a new crate
-        crates[crn] = crt
+        crate_slots[crn] = crt
         crt_indx += 1
 
-    cnf["cards"] = cards
-    cnf["crates"] = crates
+    cnf["card_slots"] = card_slots
+    cnf["crate_slots"] = crate_slots
 
     pl = ["A", "B"]
     hand = ["L", "R"]
@@ -979,13 +983,14 @@ def get_example():
         dprops["fwhm"] = 1.0
         dprops["pol"] = pl[bindx]
         dprops["handed"] = hand[bindx]
-        dprops["card"] = "42"
+        dprops["card_slot"] = "42"
         dprops["channel"] = d
         dprops["AMC"] = 0
         dprops["bias"] = 0
         dprops["reset_rate_kHz"] = 4.
         dprops["readout_freq_GHz"] = 4.
         dprops["quat"] = np.array([0.0, 0.0, 0.0, 1.0])
+        dprops["detector_name"] = ""
         dname = "{}_{}_{}_{}".format("42", "000", dprops["band"],
                                      dprops["pol"])
         dets[dname] = dprops
