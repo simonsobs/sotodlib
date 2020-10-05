@@ -73,15 +73,21 @@ def get_wcs_kernel(proj, ra, dec, res):
     return wcs
 
 def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
-                  focal_plane=None):
+                  focal_plane=None, sight=None):
     """Find a geometry (in the sense of enmap) based on wcs_kernel that is
     big enough to contain all data from tod.  Returns (shape, wcs).
 
     """
     dets = _find_field(tod, tod.dets.vals, dets)
-    timestamps = _find_field(tod, 'timestamps', timestamps)
-    boresight = _find_field(tod, 'boresight', boresight)
     fp0 = _find_field(tod, 'focal_plane', focal_plane)
+    if sight is None:
+        # Let's try to either require a sightline or boresight info.
+        timestamps = _find_field(tod, 'timestamps', timestamps)
+        boresight = _find_field(tod, 'boresight', boresight)
+        sight = so3g.proj.CelestialSightLine.az_el(
+            timestamps, boresight.az, boresight.el, roll=boresight.roll,
+            site='so', weather='typical')
+    n_samp = len(sight.Q)
 
     # Do a simplest convex hull...
     q = so3g.proj.quat.rotation_xieta(fp0.xi, fp0.eta)
@@ -97,11 +103,8 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     fake_dets = ['hull%i' % i for i in range(n_circ)]
     fp1 = so3g.proj.FocalPlane.from_xieta(fake_dets, xi, eta, 0*xi)
 
-    sight = so3g.proj.CelestialSightLine.az_el(
-        timestamps, boresight.az, boresight.el, roll=boresight.roll,
-        site='so', weather='typical')
     asm = so3g.proj.Assembly.attach(sight, fp1)
-    output = np.zeros((len(fake_dets), len(timestamps), 4))
+    output = np.zeros((len(fake_dets), n_samp, 4))
     proj = so3g.proj.Projectionist.for_geom((1,1), wcs_kernel)
     proj.get_planar(asm, output=output)
 
