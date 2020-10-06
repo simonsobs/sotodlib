@@ -673,11 +673,14 @@ def get_coindices(v0, v1):
     return v0[i0], i0, i1
 
 def simplify_slice(sslice, shape):
+    """Given a tuple of slices, such as what __getitem__ might produce, and the
+    shape of the array it would be applied to, return a new tuple of slices that
+    accomplices the same thing, but while avoiding costly general slices if possible."""
+    res = []
     for n, s in zip(shape, sslice):
-        if isinstance(s, slice):
-            if (s.start is not None and s.start != 0) or (s.stop is not None and s.stop != n) or (s.step is not None and s.step != 1):
-                return sslice
-        else:
-            if not np.all(s == np.arange(n)):
-                return sslice
-    return tuple([slice(None) for n in shape])
+        os = slice(None)
+        # Normal slices are OK, since they don't cause copies
+        if not isinstance(s, slice) and not np.all(s == np.arange(n)):
+            os = s
+        res.append(os)
+    return tuple(res)
