@@ -333,8 +333,18 @@ class AxisManager:
             self._fields[name] = val
         else:
             raise KeyError(name)
-            
+
+    def __setattr__(self, name, value):
+        # Assignment to members update those members
+        if "_fields" in self.__dict__ and name in self._fields.keys():
+            self._fields[name] = value
+        else:
+            # Other assignments update this object
+            self.__dict__[name] = value
+
     def __getattr__(self, name):
+        # Prevent members from override special class members.
+        if name.startswith("__"): raise AttributeError(name)
         return self[name]
 
     def __dir__(self):
