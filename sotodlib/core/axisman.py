@@ -561,8 +561,8 @@ class AxisManager:
                 # I.e. an ndarray.
                 sslice = [sels.get(ax, slice(None))
                           for ax in self._assignments[k]]
-                sslice = self._broadcast_selector(sslice)
-                sslice = simplify_slice(tuple(sslice), v.shape)
+                sslice = tuple(self._broadcast_selector(sslice))
+                sslice = simplify_slice(sslice, v.shape)
                 dest._fields[k] = v[sslice]
         return dest
 
@@ -688,9 +688,15 @@ def simplify_slice(sslice, shape):
     accomplices the same thing, but while avoiding costly general slices if possible."""
     res = []
     for n, s in zip(shape, sslice):
-        os = slice(None)
-        # Normal slices are OK, since they don't cause copies
-        if not isinstance(s, slice) and not np.all(s == np.arange(n)):
-            os = s
-        res.append(os)
+        # Numpy arrays slicing is expensive, and unnecessary if they just select
+        # the same elemnts in the same order
+        if isinstance(s, np.ndarray):
+            # Is this a trivial numpy slice? If so, replace it
+            if s.size == n and np.all(s == np.arange(n)):
+                res.append(slice(None))
+            # Otherwise bail, and keep the whole original
+            else:
+                return sslice
+        # For anything else just pass it through. This includes normal slices
+        else: res.append(s)
     return tuple(res)
