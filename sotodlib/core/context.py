@@ -109,7 +109,7 @@ class Context(odict):
                 = metadata.SuperLoader(self)
 
     def get_obs(self, obs_id=None, dets=None, detsets=None,
-                loader_type=None):
+                loader_type=None, logic_only=False):
         """Load TOD and supporting metadata for a particular observation id.
         The detectors to read can be specified through colon-coding in
         obs_id, through dets, or through detsets.
@@ -129,12 +129,20 @@ class Context(odict):
             tokens = obs_id.split(':')
             obs_id = tokens[0]
             allowed_fields = self.get('obs_colon_tags', [])
-            options = self.detdb.props(props=allowed_fields).distinct()
-            for f in allowed_fields:
-                field_options = list(set(options[f]))
-                for t in tokens:
-                    if t in field_options:
-                        detspec[f] = t
+            # Create a map from option value to option key.
+            prop_map = {}
+            for f in allowed_fields[::-1]:
+                for v in self.detdb.props(props=[f]).distinct()[f]:
+                    prop_map[v] = f
+            for t in tokens[1:]:
+                prop = prop_map.get(t)
+                if prop is None:
+                    raise ValueError('obs_id included tag "%s" but that is not '
+                                     'a value for any of DetDb.%s.' % (t, allowed_fields))
+                if prop in detspec:
+                    raise ValueError('obs_id included tag "%s" and that resulted '
+                                     'in re-restriction on property "%s"' % (t, prop))
+                detspec[prop] = t
 
         # Start the list of detector selectors.
         dets_selection = [detspec]
@@ -168,12 +176,18 @@ class Context(odict):
         request = {'obs:obs_id': obs_id}
         request.update(detspec)
 
-        # Load metadata.
-        meta = self.loader.load(self['metadata'][:], request)
+        if logic_only:
+            # Return the results of detector and obs resolution.
+            return {'request': request,
+                    'detspec': detspec,
+                    'dets': dets}
 
         # How to load?
         if loader_type is None:
             loader_type = self.get('obs_loader_type', 'default')
+
+        # Load metadata.
+        meta = self.loader.load(self['metadata'][:], request)
 
         # Load TOD.
         from ..io.load import OBSLOADER_REGISTRY
