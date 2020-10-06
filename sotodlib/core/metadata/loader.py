@@ -8,6 +8,14 @@ REGISTRY = {
 
 class SuperLoader:
     def __init__(self, context=None, detdb=None, obsdb=None):
+        """
+        Args:
+          context (Context): context, from which detdb and obsdb will
+            be pulled unless they are specified explicitly.
+          detdb (DetDb): detdb to use when resolving detector axis.
+          obsdb (ObsDb): obsdb to use when resolving obs axis.
+
+        """
         if context is not None:
             if detdb is None:
                 detdb = context.detdb
@@ -16,8 +24,17 @@ class SuperLoader:
         self.detdb = detdb
         self.obsdb = obsdb
 
-    @classmethod
-    def register_metadata(cls, name, loader_class):
+    @staticmethod
+    def register_metadata(name, loader_class):
+        """Static method to register a loader function.
+
+        Args:
+          name (str): Name under which to register the loader.
+            Metadata archives will request the loader function using
+            this name.
+          loader_class: Metadata loader class.
+
+        """
         REGISTRY[name] = loader_class
 
     def load_raw(self, spec_list, request,
@@ -168,8 +185,49 @@ class SuperLoader:
 
 
 class Unpacker:
+    """Encapsulation of instructions for what information to extract from
+    some source container, and what to call it in the destination
+    container.
+
+    The classmethod :ref:method:``decode`` is used populate Unpacker
+    objects from metadata instructions; see docstring.
+
+    Attributes:
+      dest (str): The field name in the destination container.
+      src (str): The field name in the source container.  If this is
+        None, then the entire source container (or whatever it may be)
+        should be stored in the destination container under the dest
+        name.
+
+    """
     @classmethod
     def decode(cls, coded, wildcard=[]):
+        """
+        Args:
+          coded (list of str or str): Each entry of the string is a
+            "coded request" which is converted to an Unpacker, as
+            described below.  Passing a string here yields the same
+            results as passing a single-element list containing that
+            string.
+          wildcard (list of str): source names from which to draw, in
+            the case that the coded request contains a wildcard.
+            Wildcard decoding, if requested, will fail unless the list
+            has exactly 1 entry.
+
+        Returns:
+          A list of Unpacker objects, one per entry in coded.
+
+        Notes:
+          Each coded request must be in one of 4 possible forms, shown
+          below, to the left of the :.  The resulting assignment
+          operation is shown to the right of the :.
+
+            'dest_name&source_name'  : dest[dest_name] = source['source_name']
+            'dest_name&'             : dest[dest_name] = source['dest_name']
+            'dest_name&*'            : dest[dest_name] = source[wildcard[0]]
+            'dest_name'              : dest[dest_name] = source
+
+        """
         if isinstance(coded, str):
             coded = [coded]
         # Make a plan based on the name list.
