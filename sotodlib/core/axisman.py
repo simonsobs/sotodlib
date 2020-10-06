@@ -552,7 +552,8 @@ class AxisManager:
                 sslice = [sels.get(ax, slice(None))
                           for ax in self._assignments[k]]
                 sslice = self._broadcast_selector(sslice)
-                dest._fields[k] = v[tuple(sslice)]
+                sslice = simplify_slice(tuple(sslice), v.shape)
+                dest._fields[k] = v[sslice]
         return dest
 
     @staticmethod
@@ -670,3 +671,13 @@ def get_coindices(v0, v1):
     pairs.sort()
     i0, i1 = np.transpose(pairs)
     return v0[i0], i0, i1
+
+def simplify_slice(sslice, shape):
+    for n, s in zip(shape, sslice):
+        if isinstance(s, slice):
+            if (s.start is not None and s.start != 0) or (s.stop is not None and s.stop != n) or (s.step is not None and s.step != 1):
+                return sslice
+        else:
+            if not np.all(s == np.arange(n)):
+                return sslice
+    return tuple([slice(None) for n in shape])
