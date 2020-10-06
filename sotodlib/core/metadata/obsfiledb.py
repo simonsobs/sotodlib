@@ -136,7 +136,9 @@ class ObsFileDb:
 
         """
         conn = common.sqlite_from_file(filename, fmt=fmt)
-        return cls(conn, init_db=False, prefix=filename)
+        if prefix is None:
+            prefix = os.path.split(filename)[0] + '/'
+        return cls(conn, init_db=False, prefix=prefix)
 
     @classmethod
     def for_dir(cls, path, filename='obsfiledb.sqlite', readonly=True):
