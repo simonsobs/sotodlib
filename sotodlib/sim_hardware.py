@@ -705,7 +705,7 @@ def get_example():
     # These numbers are for V3 LAT baseline
     bnd["A"] = 0.09
     bnd["C"] = 0.87
-    bands["LF1"] = bnd
+    bands["f030"] = bnd
 
     bnd = OrderedDict()
     bnd["center"] = 38.9
@@ -718,7 +718,7 @@ def get_example():
     bnd["alpha"] = 3.5
     bnd["A"] = 0.25
     bnd["C"] = 0.64
-    bands["LF2"] = bnd
+    bands["f040"] = bnd
 
     bnd = OrderedDict()
     bnd["center"] = 92.0
@@ -731,7 +731,7 @@ def get_example():
     bnd["alpha"] = 3.5
     bnd["A"] = 0.14
     bnd["C"] = 0.80
-    bands["MFF1"] = bnd
+    bands["f090"] = bnd
 
     bnd = OrderedDict()
     bnd["center"] = 147.5
@@ -744,7 +744,7 @@ def get_example():
     bnd["alpha"] = 3.5
     bnd["A"] = 0.17
     bnd["C"] = 0.76
-    bands["MFF2"] = bnd
+    bands["f150"] = bnd
 
     bnd = OrderedDict()
     bnd["center"] = 225.7
@@ -757,7 +757,7 @@ def get_example():
     bnd["alpha"] = 3.5
     bnd["A"] = 0.30
     bnd["C"] = 0.58
-    bands["UHF1"] = bnd
+    bands["f230"] = bnd
 
     bnd = OrderedDict()
     bnd["center"] = 285.4
@@ -770,7 +770,7 @@ def get_example():
     bnd["alpha"] = 3.5
     bnd["A"] = 0.36
     bnd["C"] = 0.49
-    bands["UHF2"] = bnd
+    bands["f290"] = bnd
 
     cnf["bands"] = bands
 
@@ -797,9 +797,9 @@ def get_example():
         "UHF": 0.71,
     }
     wbd = {
-        "LF": ["LF1", "LF2"],
-        "MF": ["MFF1", "MFF2"],
-        "UHF": ["UHF1", "UHF2"]
+        "LF": ["f030", "f040"],
+        "MF": ["f090", "f150"],
+        "UHF": ["f230", "f290"]
     }
     windx = 0
     cardindx = 0
@@ -884,12 +884,12 @@ def get_example():
     # the sky at a plate scale of 0.00495 deg/mm.
     tele["tubespace"] = 359.6
     fwhm = OrderedDict()
-    fwhm["LF1"] = 7.4
-    fwhm["LF2"] = 5.1
-    fwhm["MFF1"] = 2.2
-    fwhm["MFF2"] = 1.4
-    fwhm["UHF1"] = 1.0
-    fwhm["UHF2"] = 0.9
+    fwhm["f030"] = 7.4
+    fwhm["f040"] = 5.1
+    fwhm["f090"] = 2.2
+    fwhm["f150"] = 1.4
+    fwhm["f230"] = 1.0
+    fwhm["f290"] = 0.9
     tele["fwhm"] = fwhm
     telescopes["LAT"] = tele
 

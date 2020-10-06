@@ -50,16 +50,16 @@ def add_hw_args(parser):
     parser.add_argument(
         "--bands",
         required=True,
-        help="Comma-separated list of bands: LF1 (27GHz), LF2 (39GHz), "
-        "MFF1 (93GHz), MFF2 (145GHz), "
-        "UHF1 (225GHz), UHF2 (280GHz). "
+        help="Comma-separated list of bands: f030 (27GHz), f040 (39GHz), "
+        "f090 (93GHz), f150 (145GHz), "
+        "f230 (225GHz), f290 (285GHz). "
         "Length of list must equal --tubes",
     )
     parser.add_argument(
         "--tubes",
         required=True,
         help="Comma-separated list of optics tubes: LT0 (UHF), LT1 (UHF), "
-        " LT2 (MFF), LT3 (MFF), LT4 (MFF), LT5 (MFF), LT6 (LF). "
+        " LT2 (MF), LT3 (MF), LT4 (MF), LT5 (MF), LT6 (LF). "
         "Length of list must equal --bands",
     )
     return
@@ -82,13 +82,13 @@ class BandParams:
 
 
 class DetectorParams:
-    def __init__(self, det_data, band, wafer, tube, telescope, index):
+    def __init__(self, det_data, band, wafer_slot, tube, telescope, index):
         """
         Args:
             det_data (dict) :  Dictionary of detector parameters
                 from sotodlib.hardware
             band (BandParams) :  band parameters act as defaults
-            wafer (int) :  wafer number
+            wafer_slot (int) :  wafer slot number
             tube (str) :  tube name
             telescope (str) :  telescope name
             index (int) :  RNG index
@@ -114,7 +114,7 @@ class DetectorParams:
         self.upper = get_par("high", band.upper)  # GHz
         self.center = 0.5 * (self.lower + self.upper)
         self.width = self.upper - self.lower
-        self.wafer = wafer
+        self.wafer_slot = wafer_slot
         self.tube = tube
         self.telescope = telescope
         self.index = index
@@ -136,7 +136,7 @@ class DetectorParams:
             "index": self.index,
             "telescope": self.telescope,
             "tube": self.tube,
-            "wafer": self.wafer,
+            "wafer_slot": self.wafer_slot,
             "band": self.band,
         }
         return det_dict
@@ -255,10 +255,10 @@ def get_focalplane(args, comm, hw, det_index, verbose=False):
         for det_name, det_data in hw.data["detectors"].items():
             # RNG index for this detector
             index = det_index[det_name]
-            wafer = det_data["wafer"]
+            wafer_slot = det_data["wafer_slot"]
             # Determine which tube has this wafer
             for tube_name, tube_data in hw.data["tubes"].items():
-                if wafer in tube_data["wafers"]:
+                if wafer_slot in tube_data["wafer_slots"]:
                     break
             # Determine which telescope has this tube
             for telescope_name, telescope_data in hw.data["telescopes"].items():
@@ -268,7 +268,7 @@ def get_focalplane(args, comm, hw, det_index, verbose=False):
             det_params = DetectorParams(
                 det_data,
                 band_params[det_data["band"]],
-                wafer,
+                wafer_slot,
                 tube_name,
                 telescope_name,
                 index,
