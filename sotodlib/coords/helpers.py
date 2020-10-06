@@ -1,6 +1,6 @@
 import so3g.proj
 import numpy as np
-from pixell import enmap
+from pixell import enmap, wcsutils
 
 
 DEG = np.pi/180
@@ -118,11 +118,34 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     del output
     
     # Start a new WCS and set the lower left corner.
-    w = wcs_kernel.copy()
+    w = wcs_kernel.deepcopy()
     corner = [int(np.floor(min(r)+.5)) for r in ranges]
     w.wcs.crpix = [1 - corner[0], 1 - corner[1]]
 
     # The other corner helps us with the shape...
     far_corner = [int(np.floor(max(r)+.5)) for r in ranges]
-    shape = tuple([fc - c + 1 for fc, c in zip(far_corner, corner)][::-1])
+    shape = tuple([int(fc - c + 1) for fc, c in zip(far_corner, corner)][::-1])
     return (shape, w)
+
+def get_supergeom(*geoms):
+    """Given a set of compatible geometries [(shape0, wcs0), (shape1,
+    wcs1), ...], return a geometry (shape, wcs) that includes all of
+    them as a subset.
+    """
+    s0, w0 = geoms[0]
+    w0 = w0.deepcopy()
+    for s, w in geoms[1:]:
+        if not wcsutils.is_compatible(w0, w):
+            raise ValueError('Incompatible wcs: %s <- %s' % (w0, w))
+        # Position of s in w0?
+        d = (w0.wcs.crpix - w.wcs.crpix)[::-1]
+        assert(np.all(w0.wcs.crval == w.wcs.crval))
+        corner_a = d + [0, 0]
+        corner_b = d + s
+        # Super footprint, in w0.
+        corner_a = np.min([corner_a, [0, 0]], axis=0)
+        corner_b = np.max([corner_b, s0], axis=0)
+        # Boost the WCS
+        w0.wcs.crpix -= corner_a[::-1]
+        s0 = corner_b - corner_a
+    return tuple(map(int, s0)), w0
