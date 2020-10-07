@@ -207,3 +207,38 @@ def high_pass_sine2(freqs, tod, hp_fc=1.0, df=0.1):
     sel = (f > hp_fc - df/2)*(f < hp_fc + df/2)
     filt[sel] = np.sin(np.pi/2/df*(f[sel] - hp_fc + df/2))**2
     return filt
+
+@fft_filter
+def iir_filter(freqs, tod, iir_params=None, a=None, b=None, fscale=1., invert=False):
+    """Infinite impulse response (IIR) filter.  This sort of filter is
+    used in digital applications as a low-pass filter prior to
+    decimation.  The Smurf and MCE readout filters can both be
+    expressed in this form.
+
+    Args:
+      iir_params: IIR filter params as described below; or a string
+        name under which to look up those params in tod; defaults to
+        'iir_params'.  Note that if `a` and `b` are passed explicitly
+        then no attempt is made to resolve this argument.
+      a: denominator polynomial filter coefficients (z^0,z^1, ...)
+      b: numerator coefficients
+      fscale: scalar used to compute z = exp(-2j*pi*freqs*fscale).
+      invert: If true, returns denom/num instead of num/denom.
+
+    Notes:
+      If iir_params=None, then
+
+    """
+    if a is None:
+        # Get params from TOD?
+        if iir_params is None:
+            iir_params = 'iir_params'
+        if isinstance(iir_params, str):
+            iir_params = tod[iir_params]
+        a, b, fscale = iir_params  # must be (3, n)
+        fscale = fscale[0]
+    z = np.exp(-2j*np.pi*freqs * fscale)
+    B, A = np.polyval(b[::-1], z), np.polyval(a[::-1], z)
+    if invert:
+        return A / B
+    return B / A
