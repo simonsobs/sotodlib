@@ -59,7 +59,7 @@ def add_crosslinking_args(parser):
     return
 
 
-def compute_crosslinking(args, comm, data, verbose=True):
+def compute_crosslinking(args, comm, data, detweights=None, verbose=True):
     if not args.write_crosslinking:
         return
     log = Logger.get()
@@ -72,6 +72,7 @@ def compute_crosslinking(args, comm, data, verbose=True):
         flag_mask=255,
         zip_maps=args.hn_zip,
         rcond_limit=1e-3,
+        detweights=detweights,
     )
     crosslinking.exec(data)
     timer.report_clear("Compute crosslinking map")

@@ -215,7 +215,7 @@ def main():
 
     # Optionally, output crosslinking map
 
-    so_tools.compute_crosslinking(args, comm, data)
+    so_tools.compute_crosslinking(args, comm, data, detweights)
 
     # Only purge the pointing if we are NOT going to export the
     # data to a TIDAS volume

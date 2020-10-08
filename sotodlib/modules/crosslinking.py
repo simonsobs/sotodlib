@@ -29,6 +29,7 @@ class OpCrossLinking(toast.Operator):
             flag_mask=1,
             zip_maps=True,
             rcond_limit=1e-3,
+            detweights=None,
     ):
         """
         An operator that computes and writes out ACT-style cross-linking
@@ -53,6 +54,7 @@ class OpCrossLinking(toast.Operator):
         self._flag_mask = flag_mask
         self._zip_maps = zip_maps
         self._rcond_limit = rcond_limit
+        self._detweights = detweights
 
     def _get_weights(self, obs):
         """ Evaluate the special pointing matrix
@@ -122,13 +124,14 @@ class OpCrossLinking(toast.Operator):
         
         dist_map = DistPixels(data, comm=comm, nnz=3, dtype=np.float64)
         dist_map.data.fill(0)
-        # FIXME:  no detector weights applied yet.
+        # FIXME:  no detector weights are fixed, not per observation.
         OpAccumDiag(
             zmap=dist_map,
             common_flag_mask=self._common_flag_mask,
             flag_mask=self._flag_mask,
             weights=self.weight_name,
             name=self.signal_name,
+            detweights=self._detweights,
         ).exec(data)
         dist_map.allreduce()
 
