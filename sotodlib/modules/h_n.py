@@ -45,7 +45,7 @@ class OpHn(toast.Operator):
         nmin(int) : Minimum `n` to evaluate.
         nmax(int) : Maximum `n` to evaluate.
         common_flag_mask(uint8) : Which common flag bits to check
-        flag_mask(uint8) : Which detector flag bits to checke
+        flag_mask(uint8) : Which detector flag bits to check
         """
         self._weights = weights
         self._outdir = outdir

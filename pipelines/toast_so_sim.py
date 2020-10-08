@@ -84,6 +84,7 @@ def parse_arguments(comm):
     so_tools.add_time_constant_args(parser)
     so_tools.add_demodulation_args(parser)
     so_tools.add_h_n_args(parser)
+    so_tools.add_crosslinking_args(parser)
     so_tools.add_hw_args(parser)
     so_tools.add_so_noise_args(parser)
     so_tools.add_pysm_args(parser)
@@ -212,9 +213,13 @@ def main():
 
     so_tools.compute_h_n(args, comm, data)
 
+    # Optionally, output crosslinking map
+
+    so_tools.compute_crosslinking(args, comm, data)
+
     # Only purge the pointing if we are NOT going to export the
     # data to a TIDAS volume
-    if (args.tidas is None) and (args.export is None):
+    if not (args.tidas is None) and (args.export is None):
         for ob in data.obs:
             tod = ob["tod"]
             try:
