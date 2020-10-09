@@ -59,7 +59,7 @@ class OpHn(toast.Operator):
         self._flag_mask = flag_mask
         self._zip_maps = zip_maps
 
-    def _get_h_n(self, data, n):
+    def _get_h_n(self, data, n, detector):
         """ Compute and store the next order of h_n
         """
         for obs in data.obs:
@@ -75,6 +75,8 @@ class OpHn(toast.Operator):
                 hweight = np.ones(nsample, dtype=np.float64)
                 tod.cache.put(self.hweight_name, hweight, replace=True)
             for det in tod.local_dets:
+                if det != detector:
+                    continue
                 cos_1_name = "{}_{}".format(self.cos_1_prefix, det)
                 sin_1_name = "{}_{}".format(self.sin_1_prefix, det)
                 cos_n_name = "{}_{}".format(self.cos_n_prefix, det)
@@ -101,7 +103,7 @@ class OpHn(toast.Operator):
                 tod.cache.put(sin_n_name, sin_n_new, replace=True)
         return
 
-    def _save_h_n(self, data, dist_map, inv_hits, n):
+    def _save_h_n(self, data, dist_map, inv_hits, n, detector):
         """ Accumulate and save the next order of h_n
         """
         for name, prefix in ("cos", self.cos_n_prefix), ("sin", self.sin_n_prefix):
@@ -112,11 +114,13 @@ class OpHn(toast.Operator):
                 weights=self.hweight_name,
                 common_flag_mask=self._common_flag_mask,
                 flag_mask=self._flag_mask,
+                detectors=[detector],
             ).exec(data)
             dist_map.allreduce()
             covariance_apply(inv_hits, dist_map)
             fname = os.path.join(
-                self._outdir, self._outprefix + "{}_{}.fits".format(name, n),
+                self._outdir,
+                self._outprefix + "{}_{}_{}.fits".format(detector, name, n),
             )
             if self._zip_maps:
                 fname += ".gz"
@@ -125,40 +129,63 @@ class OpHn(toast.Operator):
         return
 
 
-    def exec(self, data):
-        comm = data.comm.comm_world
-
+    def _get_detectors(self, data, comm):
+        """ Find a super set of detectors across all processes in the
+        communicator.
+        """
+        my_detectors = set()
+        for obs in data.obs:
+            tod = obs["tod"]
+            my_detectors.update(tod.local_dets)
+        all_detectors = comm.gather(my_detectors)
         if comm.rank == 0:
+            for detectors in all_detectors:
+                my_detectors = my_detectors.union(detectors)
+        all_detectors = comm.bcast(my_detectors)
+        return all_detectors
+
+    def exec(self, data):
+        if data.comm.comm_world.rank == 0:
             os.makedirs(self._outdir, exist_ok=True)
-        
+
+        # We use the rank communicator to allow parallel processing.
+        # If different observations have different detectors, this
+        # will not work.
+        comm = data.comm.comm_rank
+
         dist_map = DistPixels(data, comm=comm, nnz=1, dtype=np.float64)
         hits = DistPixels(data, comm=comm, nnz=1, dtype=np.int64)
         inv_hits = DistPixels(data, comm=comm, nnz=1, dtype=np.float64)
-        hits.data.fill(0)
-        OpAccumDiag(
-            hits=hits,
-            common_flag_mask=self._common_flag_mask,
-            flag_mask=self._flag_mask,
-        ).exec(data)
-        hits.allreduce()
-        inv_hits.data[:] = hits.data[:]
+
+        detectors = self._get_detectors(data, comm)
+
+        for det in detectors:
+            hits.data.fill(0)
+            OpAccumDiag(
+                hits=hits,
+                common_flag_mask=self._common_flag_mask,
+                flag_mask=self._flag_mask,
+                detectors=[det],
+            ).exec(data)
+            hits.allreduce()
+            inv_hits.data[:] = hits.data[:]
+            #covariance_invert(inv_hits, 0)
+            good = inv_hits.data != 0
+            inv_hits.data[good] = 1 / inv_hits.data[good]
+
+            for n in range(1, self._nmax + 1):
+                self._get_h_n(data, n, det)
+                if n >= self._nmin:
+                    self._save_h_n(data, dist_map, inv_hits, n, det)
+
+            for obs in data.obs:
+                tod = obs["tod"]
+                for prefix in (
+                        self.hweight_name, self.cos_1_prefix, self.sin_1_prefix,
+                        self.cos_n_prefix, self.sin_n_prefix):
+                    tod.cache.clear(prefix + "_.*")
+
         del hits
-        #covariance_invert(inv_hits, 0)
-        good = inv_hits.data != 0
-        inv_hits.data[good] = 1 / inv_hits.data[good]
-
-        for n in range(1, self._nmax + 1):
-            self._get_h_n(data, n)
-            if n >= self._nmin:
-                self._save_h_n(data, dist_map, inv_hits, n)
-
-        for obs in data.obs:
-            tod = obs["tod"]
-            for prefix in (
-                    self.hweight_name, self.cos_1_prefix, self.sin_1_prefix,
-                    self.cos_n_prefix, self.sin_n_prefix):
-                tod.cache.clear(prefix + "_.*")
-
         del inv_hits
         del dist_map
 
