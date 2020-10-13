@@ -26,22 +26,51 @@ class SuperLoader:
 
     @staticmethod
     def register_metadata(name, loader_class):
-        """Static method to register a loader function.
+        """Globally register a metadata "Loader Class".
 
         Args:
           name (str): Name under which to register the loader.
-            Metadata archives will request the loader function using
+            Metadata archives will request the loader class using
             this name.
           loader_class: Metadata loader class.
 
         """
         REGISTRY[name] = loader_class
 
-    def load_raw(self, spec_list, request,
-                 restrict_on_index=True,
-                 restrict_on_request=True):
+    def load_raw(self, spec_list, request):
         """Loads metadata objects and returns them in their Natural
         containers.
+
+        Args:
+          spec_list (list of dict): A list of metadata specification
+            dictionaries.
+          request (dict): A metadata request dictionary.
+
+        Notes:
+          Each entry in spec_list must be a dictionary with the
+          following keys:
+
+            `db` (str)
+                The path to a ManifestDb file.
+
+            `name` (str)
+                Naively, the name to give to the extracted data.  But
+                the string may encode more complicated instructions,
+                which are understood by the Unpacker class in this
+                module.
+
+            `loader` (str, optional)
+                The name of the loader class to use when loading the
+                data.  This is normally unnecessary, and will override
+                any value declared in the ManifestDb.
+
+        Returns:
+          A list of tuples (unpacker, item), corresponding to ecah
+          entry in spec_list.  The unpacker is an Unpacker object
+          created based on the 'name' field.  The item is the metadata
+          in its native format (which could be a ResultSet or
+          AxisManager), with all restrictions specified in request
+          already applied.
 
         """
         items = []
@@ -220,7 +249,7 @@ class Unpacker:
         Notes:
           Each coded request must be in one of 4 possible forms, shown
           below, to the left of the :.  The resulting assignment
-          operation is shown to the right of the :.
+          operation is shown to the right of the colon::
 
             'dest_name&source_name'  : dest[dest_name] = source['source_name']
             'dest_name&'             : dest[dest_name] = source['dest_name']
@@ -257,3 +286,43 @@ class Unpacker:
         if self.src is None:
             return f'<Unpacker:{self.dest}>'
         return f'<Unpacker:{self.dest}<-{self.src}>'
+
+
+class LoaderInterface:
+    """Base class for "Loader" classes.  Subclasses must define, at least,
+    the from_loadspec method.
+
+    """
+    def __init__(self, detdb=None, obsdb=None):
+        """Args:
+          detdb (DetDb): db against which to reconcile dets: index data.
+          obsdb (ObsDb): db against which to reconcile obs: index data.
+
+        References to the input database are cached for later use.
+
+        """
+        self.detdb = detdb
+        self.obsdb = obsdb
+
+    def from_loadspec(self, load_params):
+        """Retrieve a metadata result.
+
+        Arguments:
+          load_params: an index dictionary.
+
+        Returns:
+          A ResultSet or similar metadata object.
+
+        """
+        raise NotImplementedError
+
+    def batch_from_loadspec(self, load_params):
+        """Retrieves a batch of metadata results.  load_params should be a
+        list of valid index data specifications.  Returns a list of
+        objects, corresponding to the elements of load_params.
+
+        The default implementation simply calls self.from_loadspec
+        repeatedly; but subclasses are free to do something more optimized.
+
+        """
+        return [self.from_loadspec(p) for p in load_params]
