@@ -16,7 +16,7 @@ http://docs.h5py.org/en/stable/strings.html for a little more info.
 import numpy as np
 import h5py
 
-from sotodlib.core.metadata import ResultSet, SuperLoader
+from sotodlib.core.metadata import ResultSet, SuperLoader, LoaderInterface
 import warnings
 
 def write_dataset(data, filename, address, overwrite=False, mode='a'):
@@ -62,11 +62,29 @@ def write_dataset(data, filename, address, overwrite=False, mode='a'):
         fout.create_dataset(address, data=data)
 
 
-class ResultSetHdfLoader:
-    def __init__(self, detdb=None, obsdb=None):
-        self.detdb = detdb
-        self.obsdb = obsdb
+def read_dataset(fin, dataset):
+    """Read a dataset from an HDF5 file and return it as a ResultSet.
 
+    Args:
+      fin: Filename or h5py.File open for reading.
+      dataset: Dataset path.
+
+    Returns:
+      ResultSet populated from the dataset.  Note this is passed
+      through _decode_array, so byte strings are converted to unicode.
+
+    """
+    if isinstance(fin, str):
+        fin = h5py.File(fin, 'r')
+    data = fin[dataset][()]
+    data = _decode_array(data)
+    rs = ResultSet(keys=list(data.dtype.names))
+    for row in data:
+        rs.rows.append(tuple(row))
+    return rs
+
+
+class ResultSetHdfLoader(LoaderInterface):
     def _prefilter_data(self, data_in, key_map={}):
         """When a dataset is loaded and converted to a structured numpy
         array, this function is called before the data are returned to
