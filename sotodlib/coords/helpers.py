@@ -1,6 +1,5 @@
 import so3g.proj
 import numpy as np
-from so3g.proj import quat
 from pixell import enmap, wcsutils
 
 DEG = np.pi/180
