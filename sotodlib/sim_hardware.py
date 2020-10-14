@@ -587,16 +587,16 @@ def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
     return dets
 
 
-def sim_telescope_detectors(hw, tele, tubes=None):
+def sim_telescope_detectors(hw, tele, tube_slots=None):
     """Generate detector properties for a telescope.
 
     Given a Hardware model, generate all detector properties for the specified
-    telescope and optionally a subset of optics tubes (for the LAT).
+    telescope and optionally a subset of optics tube slots (for the LAT).
 
     Args:
         hw (Hardware): The hardware object to use.
         tele (str): The telescope name.
-        tubes (list, optional): The optional list of tubes to include.
+        tube_slots (list, optional): The optional list of tube slots to include.
 
     Returns:
         (OrderedDict): The properties of all selected detectors.
@@ -610,20 +610,20 @@ def sim_telescope_detectors(hw, tele, tubes=None):
     fwhm = teleprops["fwhm"]
 
     # The tubes
-    alltubes = teleprops["tubes"]
+    alltubes = teleprops["tube_slots"]
     ntube = len(alltubes)
-    if tubes is None:
-        tubes = alltubes
+    if tube_slots is None:
+        tube_slots = alltubes
     else:
-        for t in tubes:
+        for t in tube_slots:
             if t not in alltubes:
-                raise RuntimeError("Invalid tube '{}' for telescope '{}'"
+                raise RuntimeError("Invalid tube_slot '{}' for telescope '{}'"
                                    .format(t, tele))
 
     alldets = OrderedDict()
     if ntube == 1:
         # This is a SAT.  We have one tube at the center.
-        tubeprops = hw.data["tubes"][tubes[0]]
+        tubeprops = hw.data["tube_slots"][tube_slots[0]]
         waferspace = tubeprops["waferspace"]
 
         shift = waferspace * platescale * np.pi / 180.0
@@ -652,8 +652,8 @@ def sim_telescope_detectors(hw, tele, tubes=None):
         tcenters = hex_layout(19, 4 * (tubespace * platescale), rotate=tuberot)
 
         tindx = 0
-        for tube in tubes:
-            tubeprops = hw.data["tubes"][tube]
+        for tube_slot in tube_slots:
+            tubeprops = hw.data["tube_slots"][tube_slot]
             waferspace = tubeprops["waferspace"]
             location = tubeprops["location"]
 
@@ -824,7 +824,7 @@ def get_example():
 
     cnf["wafer_slots"] = wafer_slots
 
-    tubes = OrderedDict()
+    tube_slots = OrderedDict()
 
     woff = {
         "LF": 0,
@@ -851,7 +851,9 @@ def get_example():
                         break
                     off += 1
         tb["location"] = ltubepos[tindx]
-        tubes[nm] = tb
+        tb["tube_name"] = ""
+        tb["receiver_name"] = ""
+        tube_slots[nm] = tb
 
     stubes = ["MF", "MF", "UHF","LF"]
     for tindx in range(4):
@@ -871,14 +873,16 @@ def get_example():
                         break
                     off += 1
         tb["location"] = 0
-        tubes[nm] = tb
+        tb["tube_name"] = ""
+        tb["receiver_name"] = ""
+        tube_slots[nm] = tb
 
-    cnf["tubes"] = tubes
+    cnf["tube_slots"] = tube_slots
 
     telescopes = OrderedDict()
 
     tele = OrderedDict()
-    tele["tubes"] = ["LT0", "LT1", "LT2", "LT3", "LT4", "LT5", "LT6"]
+    tele["tube_slots"] = ["LT0", "LT1", "LT2", "LT3", "LT4", "LT5", "LT6"]
     tele["platescale"] = 0.00495
     # This tube spacing in mm corresponds to 1.78 degrees projected on
     # the sky at a plate scale of 0.00495 deg/mm.
@@ -899,25 +903,25 @@ def get_example():
         sfwhm[k] = float(int(scale * v * 10.0) // 10)
 
     tele = OrderedDict()
-    tele["tubes"] = ["ST1"]
+    tele["tube_slots"] = ["ST1"]
     tele["platescale"] = 0.09668
     tele["fwhm"] = sfwhm
     telescopes["SAT1"] = tele
 
     tele = OrderedDict()
-    tele["tubes"] = ["ST2"]
+    tele["tube_slots"] = ["ST2"]
     tele["platescale"] = 0.09668
     tele["fwhm"] = sfwhm
     telescopes["SAT2"] = tele
 
     tele = OrderedDict()
-    tele["tubes"] = ["ST3"]
+    tele["tube_slots"] = ["ST3"]
     tele["platescale"] = 0.09668
     tele["fwhm"] = sfwhm
     telescopes["SAT3"] = tele
 
     tele = OrderedDict()
-    tele["tubes"] = ["ST4"]
+    tele["tube_slots"] = ["ST4"]
     tele["platescale"] = 0.09668
     tele["fwhm"] = sfwhm
     telescopes["SAT4"] = tele
@@ -937,7 +941,7 @@ def get_example():
         crt["crate_name"] = ""
 
         ## get all the wafer card numbers for a telescope
-        tb_wfrs = [cnf["tubes"][t]["wafer_slots"] for t in cnf["telescopes"][tel]["tubes"]]
+        tb_wfrs = [cnf["tube_slots"][t]["wafer_slots"] for t in cnf["telescopes"][tel]["tube_slots"]]
         tl_wfrs = [i for sl in tb_wfrs for i in sl]
         wafer_cards = [cnf["wafer_slots"][w]["card_slot"] for w in tl_wfrs]
 
@@ -971,6 +975,7 @@ def get_example():
 
     pl = ["A", "B"]
     hand = ["L", "R"]
+    bandarr=["f030","f040"]
 
     dets = OrderedDict()
     for d in range(4):
@@ -979,7 +984,7 @@ def get_example():
         dprops["ID"] = d
         dprops["pixel"] = "000"
         bindx = d % 2
-        dprops["band"] = "LF{}".format(bindx)
+        dprops["band"] = bandarr[bindx]
         dprops["fwhm"] = 1.0
         dprops["pol"] = pl[bindx]
         dprops["handed"] = hand[bindx]
