@@ -27,7 +27,7 @@ def add_export_args(parser):
         "--export-key",
         required=False,
         default=None,
-        help="Group exported TOD by a detector trait: wafer_slot, card_slot, crate_slot or tube",
+        help="Group exported TOD by a detector trait: wafer_slot, card_slot, crate_slot or tube_slot",
     )
     parser.add_argument(
         "--export-compress",
