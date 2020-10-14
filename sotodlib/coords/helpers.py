@@ -1,7 +1,7 @@
 import so3g.proj
 import numpy as np
+from so3g.proj import quat
 from pixell import enmap, wcsutils
-
 
 DEG = np.pi/180
 
@@ -73,7 +73,7 @@ def get_wcs_kernel(proj, ra, dec, res):
     return wcs
 
 def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
-                  focal_plane=None, sight=None):
+                  focal_plane=None, sight=None, rot=None):
     """Find a geometry (in the sense of enmap) based on wcs_kernel that is
     big enough to contain all data from tod.  Returns (shape, wcs).
 
@@ -106,6 +106,7 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     asm = so3g.proj.Assembly.attach(sight, fp1)
     output = np.zeros((len(fake_dets), n_samp, 4))
     proj = so3g.proj.Projectionist.for_geom((1,1), wcs_kernel)
+    if rot: proj.q_celestial_to_native *= rot
     proj.get_planar(asm, output=output)
 
     output2 = output*0
