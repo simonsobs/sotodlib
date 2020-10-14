@@ -550,7 +550,7 @@ def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
     
     doff = 0
     p = 0
-    idoff = int(wafer_slot) * 10000
+    idoff = int(wafer_slot[-2:]) * 10000
     for px in range(npix):
         if px in kill:
             continue
@@ -579,7 +579,7 @@ def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
                 # the rotation of the wafer center.
                 dprops["quat"] = qa.mult(center, layout[p]).flatten()
                 dprops["detector_name"]= ""
-                dname = "w{}_p{}_{}_{}".format(wafer_slot, pstr, b, pl)
+                dname = "{}_p{}_{}_{}".format(wafer_slot, pstr, b, pl)
                 dets[dname] = dprops
                 doff += 1
         p += 1
@@ -805,7 +805,7 @@ def get_example():
     cardindx = 0
     for wt in wtypes:
         for ct in range(wcnt[wt]):
-            wn = "{:02d}".format(windx)
+            wn = "w{:02d}".format(windx)
             wf = OrderedDict()
             wf["type"] = wt
             if (wt == "LF"):
@@ -816,7 +816,7 @@ def get_example():
             wf["npixel"] = wnp[wt]
             wf["pixsize"] = wpixmm[wt]
             wf["bands"] = wbd[wt]
-            wf["card_slot"] = "{:02d}".format(cardindx)
+            wf["card_slot"] = "card_slot{:02d}".format(cardindx)
             wf["wafer_name"] = ""
             cardindx += 1
             wafer_slots[wn] = wf
@@ -930,7 +930,7 @@ def get_example():
     crt_indx = 0
 
     for tel in cnf["telescopes"]:
-        crn = "{:02d}".format(crt_indx)
+        crn = "crate_slot{:02d}".format(crt_indx)
         crt = OrderedDict()
         crt["card_slots"] = list()
         crt["telescope"] = tel
@@ -956,7 +956,7 @@ def get_example():
             if ('S' in tel and len(crt["card_slots"]) >=4) or len(crt["card_slots"]) >=6:
                 crate_slots[crn] = crt
                 crt_indx += 1
-                crn = "{:02d}".format(crt_indx)
+                crn = "crate_slot{:02d}".format(crt_indx)
                 crt = OrderedDict()
                 crt["card_slots"] = list()
                 crt["telescope"] = tel
@@ -975,7 +975,7 @@ def get_example():
     dets = OrderedDict()
     for d in range(4):
         dprops = OrderedDict()
-        dprops["wafer_slot"] = "42"
+        dprops["wafer_slot"] = "w42"
         dprops["ID"] = d
         dprops["pixel"] = "000"
         bindx = d % 2
@@ -983,7 +983,7 @@ def get_example():
         dprops["fwhm"] = 1.0
         dprops["pol"] = pl[bindx]
         dprops["handed"] = hand[bindx]
-        dprops["card_slot"] = "42"
+        dprops["card_slot"] = "card_slot42"
         dprops["channel"] = d
         dprops["AMC"] = 0
         dprops["bias"] = 0
