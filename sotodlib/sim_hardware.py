@@ -579,7 +579,7 @@ def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
                 # the rotation of the wafer center.
                 dprops["quat"] = qa.mult(center, layout[p]).flatten()
                 dprops["detector_name"]= ""
-                dname = "{}_{}_{}_{}".format(wafer_slot, pstr, b, pl)
+                dname = "w{}_p{}_{}_{}".format(wafer_slot, pstr, b, pl)
                 dets[dname] = dprops
                 doff += 1
         p += 1
@@ -991,7 +991,7 @@ def get_example():
         dprops["readout_freq_GHz"] = 4.
         dprops["quat"] = np.array([0.0, 0.0, 0.0, 1.0])
         dprops["detector_name"] = ""
-        dname = "{}_{}_{}_{}".format("42", "000", dprops["band"],
+        dname = "w{}_p{}_{}_{}".format("42", "000", dprops["band"],
                                      dprops["pol"])
         dets[dname] = dprops
 
