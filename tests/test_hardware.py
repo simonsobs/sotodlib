@@ -45,8 +45,8 @@ class HardwareTest(TestCase):
         for tele, teleprops in hw.data["telescopes"].items():
             platescale = teleprops["platescale"]
             fwhm = teleprops["fwhm"]
-            for tube in teleprops["tubes"]:
-                tubeprops = hw.data["tubes"][tube]
+            for tube_slot in teleprops["tube_slots"]:
+                tubeprops = hw.data["tube_slots"][tube_slot]
                 for wafer in tubeprops["wafer_slots"]:
                     outpath = os.path.join(
                         self.outdir, "wafer_{}.toml.gz".format(wafer))
@@ -86,28 +86,28 @@ class HardwareTest(TestCase):
         # Test selection of 90GHz detectors on wafers 25 and 26 which have
         # "A" polarization configuration and are located in pixels 20-29.
         wbhw = hw.select(
-            match={"wafer_slot": ["25", "26"],
-                   "band": "MF.1",
+            match={"wafer_slot": ["w25", "w26"],
+                   "band": "f090",
                    "pol": "A",
                    "pixel": "02."})
-        dbpath = os.path.join(self.outdir, "w25-26_b1_p20-29_A.toml.gz")
+        dbpath = os.path.join(self.outdir, "w25-26_p20-29_f090_A.toml.gz")
         wbhw.dump(dbpath, overwrite=True, compress=True)
         check = Hardware(dbpath)
         self.assertTrue(len(check.data["detectors"]) == 20)
-        chkpath = os.path.join(self.outdir, "w25-26_b1_p20-29_A.txt")
+        chkpath = os.path.join(self.outdir, "w25-26_p20-29_f090_A.txt")
         with open(chkpath, "w") as f:
             for d in check.data["detectors"]:
                 f.write("{}\n".format(d))
 
         # Test selection of pixels on 27GHz wafer 44.
         lfhw = hw.select(
-            match={"wafer_slot": ["44"],
+            match={"wafer_slot": ["w44"],
                    "pixel": "00."})
-        dbpath = os.path.join(self.outdir, "w44_bLF1_p000-009.toml.gz")
+        dbpath = os.path.join(self.outdir, "w44_p000-009_f030.toml.gz")
         lfhw.dump(dbpath, overwrite=True, compress=True)
         check = Hardware(dbpath)
         self.assertTrue(len(check.data["detectors"]) == 40)
-        chkpath = os.path.join(self.outdir, "w44_bLF1_p000-009.txt")
+        chkpath = os.path.join(self.outdir, "w44_p000-009_f030.txt")
         with open(chkpath, "w") as f:
             for d in check.data["detectors"]:
                 f.write("{}\n".format(d))
