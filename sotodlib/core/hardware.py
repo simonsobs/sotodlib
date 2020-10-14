@@ -92,7 +92,7 @@ class Hardware(object):
         """Construct wafer mapping to other auxilliary data.
 
         Given the current data state, build dictionaries to go from wafer_slots
-        to all other non-detector info:  telescopes, tubes, card_slots, crate_slots,
+        to all other non-detector info:  telescopes, tube_slots, card_slots, crate_slots,
         and bands.  This is a convenient mapping when pruning the hardware
         information or doing other kinds of lookups.
 
@@ -104,11 +104,11 @@ class Hardware(object):
 
         tube_to_tele = dict()
         for tele, props in self.data["telescopes"].items():
-            for tb in props["tubes"]:
+            for tb in props["tube_slots"]:
                 tube_to_tele[tb] = tele
 
         wafer_to_tube = dict()
-        for tb, props in self.data["tubes"].items():
+        for tb, props in self.data["tube_slots"].items():
             for wf in props["wafer_slots"]:
                 wafer_to_tube[wf] = tb
 
@@ -123,12 +123,12 @@ class Hardware(object):
                             for x, y in self.data["wafer_slots"].items()}
         result["bands"] = {x: y["bands"]
                            for x, y in self.data["wafer_slots"].items()}
-        result["tubes"] = wafer_to_tube
+        result["tube_slots"] = wafer_to_tube
         result["telescopes"] = {x: tube_to_tele[wafer_to_tube[x]] for x in
                                 list(self.data["wafer_slots"].keys())}
         return result
 
-    def select(self, telescopes=None, tubes=None, match=dict()):
+    def select(self, telescopes=None, tube_slots=None, match=dict()):
         """Select a subset of detectors.
 
         Select detectors whose properties match some criteria.  A new Hardware
@@ -136,7 +136,7 @@ class Hardware(object):
         specified for a given property name, then this is equivalent to
         selecting all values of that property.
 
-        Before selecting on detector properties, any telescope / tube filtering
+        Before selecting on detector properties, any telescope / tube_slot filtering
         criteria are first applied.
 
         Each key of the "match" dictionary should be the name of a detector
@@ -159,7 +159,7 @@ class Hardware(object):
         Args:
             telescopes (str): A regex string to apply to telescope names or a
                 list of explicit names.
-            tubes (str): A regex string to apply to tube names or a list of
+            tube_slots (str): A regex string to apply to tube_slot names or a list of
                 explicit names.
             match (dict): The dictionary of property names and their matching
                 expressions.
@@ -168,21 +168,21 @@ class Hardware(object):
             (Hardware): A new Hardware instance with the selected detectors.
 
         """
-        # First parse any telescope and tube options into a list of wafers
+        # First parse any telescope and tube_slot options into a list of wafers
         wselect = None
         tbselect = None
         if telescopes is not None:
             tbselect = list()
             for tele in telescopes:
-                tbselect.extend(self.data["telescopes"][tele]["tubes"])
-        if tubes is not None:
+                tbselect.extend(self.data["telescopes"][tele]["tube_slots"])
+        if tube_slots is not None:
             if tbselect is None:
                 tbselect = list()
-            tbselect.extend(tubes)
+            tbselect.extend(tube_slots)
         if tbselect is not None:
             wselect = list()
             for tb in tbselect:
-                wselect.extend(self.data["tubes"][tb]["wafer_slots"])
+                wselect.extend(self.data["tube_slots"][tb]["wafer_slots"])
 
         dets = self.data["detectors"]
 
@@ -190,7 +190,7 @@ class Hardware(object):
         reg = dict()
         if "wafer_slot" in match:
             # Handle wafer case separately, since we need to merge any
-            # match with our telescope / tube selection of wafers above.
+            # match with our telescope / tube_slot selection of wafers above.
             k = "wafer_slot"
             v = match[k]
             if wselect is None:
