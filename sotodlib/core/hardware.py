@@ -151,7 +151,7 @@ class Hardware(object):
             26 which have "A" polarization and are located in pixels 20-29
             (recall the "." matches a single character)::
 
-                new = hw.select(match={"wafer_slot": ["25", "26"],
+                new = hw.select(match={"wafer_slot": ["w25", "w26"],
                                 "band": "f090",
                                 "pol": "A",
                                 "pixel": "02."})
