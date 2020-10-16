@@ -311,6 +311,21 @@ class ManifestDb:
         conn = common.sqlite_from_file(filename, fmt=fmt)
         return cls(conn)
 
+    @classmethod
+    def readonly(cls, filename):
+        """Instantiate an ManifestDb connected to an sqlite database on disk,
+        and return it.  The database remains mapped to disk, in readonly mode.
+
+        Args:
+          filename (str): path to the file.
+
+        Returns:
+          ManifestDb.
+
+        """
+        conn = sqlite3.connect('file:%s?mode=ro' % filename, uri=True)
+        return cls(conn)
+
     def _get_file_id(self, filename, create=False):
         """
         Lookup a file_id in the file table, or create it if `create` and not found.

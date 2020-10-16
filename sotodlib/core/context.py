@@ -174,7 +174,7 @@ class Context(odict):
         # The request to the metadata loader should include obs_id and
         # the detector selection.
         request = {'obs:obs_id': obs_id}
-        request.update(detspec)
+        request.update({'dets:'+k: v for k, v in detspec.items()})
 
         if logic_only:
             # Return the results of detector and obs resolution.
