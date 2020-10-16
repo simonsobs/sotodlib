@@ -23,6 +23,7 @@ class SuperLoader:
                 obsdb = context.obsdb
         self.detdb = detdb
         self.obsdb = obsdb
+        self.manifest_cache = {}
 
     @staticmethod
     def register_metadata(name, loader_class):
@@ -81,30 +82,41 @@ class SuperLoader:
             loader = spec_dict.get('loader', None)
 
             # Load the database, match the request,
-            man = core.metadata.ManifestDb.from_file(dbfile)
-            # Provide any extrinsic boosting.
-            ### This is tricky.  Do you look up _everything_, if you
-            ### have an obsdb abd obs:obs_id is given?  Do you inspect
-            ### the scheme and only provide what is missing?  That is
-            ### possible.
+            if dbfile not in self.manifest_cache:
+                if dbfile.endswith('sqlite'):
+                    man = core.metadata.ManifestDb.readonly(dbfile)
+                else:
+                    man = core.metadata.ManifestDb.from_file(dbfile)
+                self.manifest_cache[dbfile] = man
+            man = self.manifest_cache[dbfile]
+
+            # Provide any extrinsic boosting.  Downstream products
+            # (like an HDF5 table) might require some parameters from
+            # the ObsDb, and we can't tell that from here.  So query
+            # what you can, and pass it along.
+            if self.obsdb is not None and 'obs:obs_id' in request:
+                obs_info = self.obsdb.get(request['obs:obs_id'], add_prefix='obs:')
+                if obs_info is not None:
+                    obs_info.update(request)
+                    request = obs_info
+
             missing_keys = man.scheme.get_required_params()
             for k in request.keys():
                 if k in missing_keys:
                     missing_keys.remove(k)
             obs_keys = [k for k in missing_keys if k.startswith('obs:')]
             if len(obs_keys):
-                if self.obsdb is None:
-                    raise RuntimeError(
-                        'This metadata lookup requires obsdb, but it is not available.')
-                if 'obs:obs_id' not in request:
-                    raise RuntimeError(
-                        'This metadata lookup requires obs:obs_id to be specified in the request.')
-                obs_info = self.obsdb.get(request['obs:obs_id'], add_prefix='obs:')
-                if obs_info is None:
-                    raise RuntimeError(
-                        'This metadata lookup requires obsdb information but the '
-                        'obs_id was not found in the obsdb.')
-                request.update(obs_info)
+                if self.obs_db is None:
+                    reason = 'no ObsDb was passed in'
+                elif 'obs:obs_id' not in request:
+                    reason = 'obs_id was not specified in the request'
+                elif obs_info is None:
+                    reason = 'ObsDb has no info on %s' % request['obs:obs_id']
+                else:
+                    reason = 'ObsDb does not provide a value for %s' % obs_keys
+                raise RuntimeError(
+                    'Metadata request could not be constructed because: %s' % reason)
+
             try:
                 index_lines = man.match(request, multi=True)
             except Exception as e:
