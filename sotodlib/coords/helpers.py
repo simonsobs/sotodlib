@@ -1,6 +1,6 @@
 import so3g.proj
 import numpy as np
-from pixell import enmap, wcsutils
+from pixell import enmap, wcsutils, utils
 
 DEG = np.pi/180
 
@@ -97,6 +97,8 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     n_circ = 16
     dphi = 2*np.pi/n_circ
     phi = np.arange(n_circ) * dphi
+    # cos(dphi/2) is the largest underestimate in radius one can make when
+    # replacing a circle with an n_circ-sided polygon, as we do here.
     L = 1.01 * R / np.cos(dphi/2)
     xi, eta = L * np.cos(phi) + xi0, L * np.sin(phi) + eta0
     fake_dets = ['hull%i' % i for i in range(n_circ)]
@@ -111,20 +113,17 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     output2 = output*0
     proj.get_coords(asm, output=output2)
 
-    delts = wcs_kernel.wcs.cdelt * DEG
-    planar = [output[:,:,0], output[:,:,1]]
-    # Get the extrema..
-    ranges = [(p.min()/d, p.max()/d) for p, d in zip(planar, delts)]
+    # Get the pixel extrema in the form [{xmin,ymin},{xmax,ymax}]
+    delts  = wcs_kernel.wcs.cdelt * DEG
+    planar = output[:,:,:2]
+    ranges = utils.minmax(planar/delts,(0,1))
     del output
-    
+
     # Start a new WCS and set the lower left corner.
     w = wcs_kernel.deepcopy()
-    corner = [int(np.floor(min(r)+.5)) for r in ranges]
-    w.wcs.crpix = [1 - corner[0], 1 - corner[1]]
-
-    # The other corner helps us with the shape...
-    far_corner = [int(np.floor(max(r)+.5)) for r in ranges]
-    shape = tuple([int(fc - c + 1) for fc, c in zip(far_corner, corner)][::-1])
+    corners     = utils.nint(ranges)
+    w.wcs.crpix = 1-corners[0]
+    shape       = tuple(corners[1]-corners[0]+1)[::-1]
     return (shape, w)
 
 def get_supergeom(*geoms):
