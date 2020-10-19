@@ -14,7 +14,7 @@ class P:
     routines.
 
     """
-    def __init__(self, tod, geom=None, comps='TQU', dets=None, timestamps=None, focal_plane=None, boresight=None, rot=None):
+    def __init__(self, tod, geom=None, comps='TQU', dets=None, timestamps=None, focal_plane=None, boresight=None, rot=None, cuts=None):
         # Set up boresight
         timestamps = _find_field(tod, 'timestamps',  timestamps)
         boresight  = _find_field(tod, 'boresight',   boresight)
@@ -25,15 +25,22 @@ class P:
         fp         = so3g.proj.FocalPlane.from_xieta(dets, fp.xi, fp.eta, fp.gamma)
         self.asm   = so3g.proj.Assembly.attach(self.sight, fp)
         self.rot   = rot
+        self.cuts  = cuts
         self.set_geom(geom)
         self.default_comps = comps
 
     @classmethod
     def for_geom(cls, tod, geom, comps='TQU', dets=None, timestamps=None, focal_plane=None, boresight=None, rot=None):
-        return cls(tod, geom=geom, comps=comps, dets=dets, timestamps=timestamps, focal_plane=focal_plane, boresight=boresight, rot=rot)
+        return cls(tod, geom=geom, comps=comps, dets=dets, timestamps=timestamps, focal_plane=focal_plane, boresight=boresight, rot=rot, cuts=cuts)
 
     def set_geom(self, geom, lazy=True):
         self.geom    = geom
+        self.proj    = None
+        self.threads = None
+        if not lazy: self._get_proj_threads()
+
+    def set_cuts(self, cuts, lazy=True):
+        self.cuts    = cuts
         self.proj    = None
         self.threads = None
         if not lazy: self._get_proj_threads()
@@ -128,4 +135,6 @@ class P:
                 if self.rot:
                     self.proj.q_celestial_to_native *= self.rot
                 self.threads = self.proj.assign_threads(self.asm)
+                if self.cuts:
+                    self.threads *= self.cuts
         return self.proj, self.threads
