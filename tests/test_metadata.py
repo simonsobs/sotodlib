@@ -167,6 +167,8 @@ class MetadataTest(unittest.TestCase):
         mandb.to_file(mandb_fn)
 
         # Now we expect only f090 A and f150 B to resolve to non-bad vals.
+        # Make sure you reinit the loader, to avoid cached dbs.
+        loader = metadata.SuperLoader(obsdb=obsdb, detdb=detdb)
         mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00'})
         self.assertCountEqual(mtod['tau'], [T090, TBAD, TBAD, T150])
 
