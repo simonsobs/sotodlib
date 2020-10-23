@@ -67,7 +67,8 @@ class SOTestCommand(TestCommand):
         runner = unittest.TextTestRunner(verbosity=2)
         suite = loader.discover("tests", pattern="test_*.py",
                                 top_level_dir=".")
-        runner.run(suite)
+        ret = not runner.run(suite).wasSuccessful()
+        sys.exit(ret)
 
 # Add our custom test runner
 cmdcls["test"] = SOTestCommand
