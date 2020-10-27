@@ -265,7 +265,7 @@ class AxisManager:
                 # merge in the axes and copy in the values.
                 self.merge(a)
             elif isinstance(a, AxisInterface):
-                self._axes[a.name] = a
+                self._axes[a.name] = a.copy()
             else:
                 raise ValueError("Cannot handle type %s in constructor." % a)
 
@@ -539,29 +539,44 @@ class AxisManager:
         return self.merge(helper)
 
     def restrict_axes(self, axes, in_place=True):
+        """Restrict this AxisManager by intersecting it with a set of Axis
+        definitions.
+
+        Arguments:
+          axes (list or dict of Axis):
+          in_place (bool): If in_place == True, the intersection is
+            applied to self.  Otherwise, a new object is returned,
+            with data copied out.
+
+        Returns:
+          The restricted AxisManager.
+        """
         if in_place:
             dest = self
         else:
             dest = AxisManager(*self._axes.values())
             dest._assignments.update(self._assignments)
         sels = {}
-        for ax in axes.values():
-            if ax.name not in self._axes:
+        # If simple list/tuple of Axes is passed in, convert to dict
+        if not isinstance(axes, dict):
+            axes = {ax.name: ax for ax in axes}
+        for name, ax in axes.items():
+            if name not in dest._axes:
                 continue
-            if self._axes[ax.name].count is None:
-                self._axes[ax.name] = ax
+            if dest._axes[name].count is None:
+                dest._axes[name] = ax
                 continue
-            _, sel0, sel1 = ax.intersection(self._axes[ax.name], True)
-            sels[ax.name] = sel1
-            self._axes[ax.name] = ax
+            _, sel0, sel1 = ax.intersection(dest._axes[name], True)
+            sels[name] = sel1
+            dest._axes[ax.name] = ax
         for k, v in self._fields.items():
             if isinstance(v, AxisManager):
-                dest._fields[k] = v.restrict_axes(axes)
+                dest._fields[k] = v.restrict_axes(axes, in_place=in_place)
             else:
                 # I.e. an ndarray.
                 sslice = [sels.get(ax, slice(None))
-                          for ax in self._assignments[k]]
-                sslice = tuple(self._broadcast_selector(sslice))
+                          for ax in dest._assignments[k]]
+                sslice = tuple(dest._broadcast_selector(sslice))
                 sslice = simplify_slice(sslice, v.shape)
                 dest._fields[k] = v[sslice]
         return dest
@@ -595,21 +610,48 @@ class AxisManager:
         return tuple(output)
 
     def restrict(self, axis_name, selector, in_place=True):
-        new_ax, sl = self._axes[axis_name].restriction(selector)
+        """Restrict the AxisManager by selecting a subset of items in some
+        Axis.  The Axis definition and all data fields mapped to that
+        axis will be modified.
+
+        Arugments:
+          axis_name (str): The name of the Axis.
+          selector (slice or special): Selector, in a form understood
+            by the underlying Axis class (see the .restriction method
+            for the Axis).
+          in_place (bool): If True, modifications are made to this
+            object.  Otherwise, a new object with the restriction
+            applied is returned.
+
+        Returns:
+          The AxisManager with restrictions applied.
+
+        """
+        if in_place:
+            dest = self
+        else:
+            dest = AxisManager(*self._axes.values())
+            dest._assignments.update(self._assignments)
+        new_ax, sl = dest._axes[axis_name].restriction(selector)
         for k, v in self._fields.items():
             if isinstance(v, AxisManager):
                 if axis_name in v._axes:
-                    self._fields[k] = v.copy().restrict(axis_name, selector)
+                    dest._fields[k] = v.copy().restrict(axis_name, selector)
             else:
                 sslice = [sl if n == axis_name else slice(None)
-                          for n in self._assignments[k]]
-                sslice = self._broadcast_selector(sslice)
-                self._fields[k] = v[sslice]
-        self._axes[axis_name] = new_ax
-        return self
+                          for n in dest._assignments[k]]
+                sslice = dest._broadcast_selector(sslice)
+                dest._fields[k] = v[sslice]
+        dest._axes[axis_name] = new_ax
+        return dest
 
     @staticmethod
     def intersection_info(*items):
+        """Given a list of AxisManagers, scan the axes and combine (intersect)
+        any common axes.  Returns a dict that maps axis name to
+        restricted Axis object.
+
+        """
         # Get the strictest intersection of each axis.
         axes_out = odict()
         for aman in items:
@@ -624,6 +666,10 @@ class AxisManager:
         return axes_out
 
     def merge(self, *amans):
+        """Merge the data from other AxisMangers into this one.  Axes with the
+        same name will be intersected.
+
+        """
         # Get the intersected axis descriptions.
         axes_out = self.intersection_info(self, *amans)
         # Reduce the data in self, update our axes.
