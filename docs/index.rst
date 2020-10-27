@@ -12,6 +12,7 @@ Welcome to SOTODLib's documentation!
 
    intro.rst
    cli.rst
+   axisman.rst
    context.rst
    tod_ops.rst
    reference.rst
