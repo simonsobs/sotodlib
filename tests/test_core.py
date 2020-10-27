@@ -38,6 +38,40 @@ class TestAxisManager(unittest.TestCase):
         aman.restrict('dets', ['det1'])
         self.assertNotEqual(aman.a1[0], 0.)
 
+    def test_130_not_inplace(self):
+        a1 = np.zeros(100)
+        a1[10] = 1.
+        aman = core.AxisManager(core.IndexAxis('samps', len(a1)))
+        aman.wrap('a1', a1, [(0, 'samps')])
+        # This should return a separate thing.
+        rman = aman.restrict('samps', (10, 30), in_place=False)
+        #self.assertNotEqual(aman.a1[0], 0.)
+        self.assertEqual(len(aman.a1), 100)
+        self.assertEqual(len(rman.a1), 20)
+        self.assertNotEqual(aman.a1[10], 0.)
+        self.assertNotEqual(rman.a1[0], 0.)
+
+    def test_140_restrict_axes(self):
+        dets = ['det0', 'det1', 'det2']
+        a1 = np.zeros((len(dets), 100))
+        a1[1, 10] = 1.
+        aman = core.AxisManager(core.LabelAxis('dets', dets),
+                                core.OffsetAxis('samps', a1.shape[1]))
+        aman.wrap('a1', a1, [(0, 'dets'), (1, 'samps')])
+
+        r_axes = {'dets': core.LabelAxis('dets', dets[1:2]),
+                  'samps': core.OffsetAxis('samps', 20, 10)}
+        # Not-in-place...
+        rman = aman.restrict_axes(r_axes, in_place=False)
+        self.assertCountEqual(aman.a1.shape, (3, 100))
+        self.assertCountEqual(rman.a1.shape, (1, 20))
+        self.assertNotEqual(aman.a1[1, 10], 0.)
+        self.assertNotEqual(rman.a1[0, 0], 0.)
+        # In-place.
+        aman.restrict_axes(r_axes, in_place=True)
+        self.assertCountEqual(aman.a1.shape, (1, 20))
+        self.assertNotEqual(aman.a1[0, 0], 0.)
+
     # Multi-dimensional restrictions.
 
     def test_200_multid(self):
