@@ -333,8 +333,18 @@ class AxisManager:
             self._fields[name] = val
         else:
             raise KeyError(name)
-            
+
+    def __setattr__(self, name, value):
+        # Assignment to members update those members
+        if "_fields" in self.__dict__ and name in self._fields.keys():
+            self._fields[name] = value
+        else:
+            # Other assignments update this object
+            self.__dict__[name] = value
+
     def __getattr__(self, name):
+        # Prevent members from override special class members.
+        if name.startswith("__"): raise AttributeError(name)
         return self[name]
 
     def __dir__(self):
@@ -380,6 +390,10 @@ class AxisManager:
                     self.wrap(k, rset[k], [(0, axis_name)])
         else:
             # Generate the expansion map...
+            if detdb is None:
+                raise RuntimeError(
+                    'Expansion to dets axes requires detdb '
+                    'but None was not passed in.')
             dets = []
             indices = []
             for row_i, row in enumerate(rset.subset(keys=dets_cols.keys())):
@@ -547,8 +561,9 @@ class AxisManager:
                 # I.e. an ndarray.
                 sslice = [sels.get(ax, slice(None))
                           for ax in self._assignments[k]]
-                sslice = self._broadcast_selector(sslice)
-                dest._fields[k] = v[tuple(sslice)]
+                sslice = tuple(self._broadcast_selector(sslice))
+                sslice = simplify_slice(sslice, v.shape)
+                dest._fields[k] = v[sslice]
         return dest
 
     @staticmethod
@@ -666,3 +681,22 @@ def get_coindices(v0, v1):
     pairs.sort()
     i0, i1 = np.transpose(pairs)
     return v0[i0], i0, i1
+
+def simplify_slice(sslice, shape):
+    """Given a tuple of slices, such as what __getitem__ might produce, and the
+    shape of the array it would be applied to, return a new tuple of slices that
+    accomplices the same thing, but while avoiding costly general slices if possible."""
+    res = []
+    for n, s in zip(shape, sslice):
+        # Numpy arrays slicing is expensive, and unnecessary if they just select
+        # the same elemnts in the same order
+        if isinstance(s, np.ndarray):
+            # Is this a trivial numpy slice? If so, replace it
+            if s.size == n and np.all(s == np.arange(n)):
+                res.append(slice(None))
+            # Otherwise bail, and keep the whole original
+            else:
+                return sslice
+        # For anything else just pass it through. This includes normal slices
+        else: res.append(s)
+    return tuple(res)

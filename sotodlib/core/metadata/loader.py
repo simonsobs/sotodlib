@@ -2,11 +2,20 @@ from sotodlib import core
 import os
 
 REGISTRY = {
+    '_default': 'ResultSetHdf'
 }
 
 
 class SuperLoader:
     def __init__(self, context=None, detdb=None, obsdb=None):
+        """
+        Args:
+          context (Context): context, from which detdb and obsdb will
+            be pulled unless they are specified explicitly.
+          detdb (DetDb): detdb to use when resolving detector axis.
+          obsdb (ObsDb): obsdb to use when resolving obs axis.
+
+        """
         if context is not None:
             if detdb is None:
                 detdb = context.detdb
@@ -14,16 +23,55 @@ class SuperLoader:
                 obsdb = context.obsdb
         self.detdb = detdb
         self.obsdb = obsdb
+        self.manifest_cache = {}
 
-    @classmethod
-    def register_metadata(cls, name, loader_class):
+    @staticmethod
+    def register_metadata(name, loader_class):
+        """Globally register a metadata "Loader Class".
+
+        Args:
+          name (str): Name under which to register the loader.
+            Metadata archives will request the loader class using
+            this name.
+          loader_class: Metadata loader class.
+
+        """
         REGISTRY[name] = loader_class
 
-    def load_raw(self, spec_list, request,
-                 restrict_on_index=True,
-                 restrict_on_request=True):
+    def load_raw(self, spec_list, request):
         """Loads metadata objects and returns them in their Natural
         containers.
+
+        Args:
+          spec_list (list of dict): A list of metadata specification
+            dictionaries.
+          request (dict): A metadata request dictionary.
+
+        Notes:
+          Each entry in spec_list must be a dictionary with the
+          following keys:
+
+            `db` (str)
+                The path to a ManifestDb file.
+
+            `name` (str)
+                Naively, the name to give to the extracted data.  But
+                the string may encode more complicated instructions,
+                which are understood by the Unpacker class in this
+                module.
+
+            `loader` (str, optional)
+                The name of the loader class to use when loading the
+                data.  This is normally unnecessary, and will override
+                any value declared in the ManifestDb.
+
+        Returns:
+          A list of tuples (unpacker, item), corresponding to ecah
+          entry in spec_list.  The unpacker is an Unpacker object
+          created based on the 'name' field.  The item is the metadata
+          in its native format (which could be a ResultSet or
+          AxisManager), with all restrictions specified in request
+          already applied.
 
         """
         items = []
@@ -34,22 +82,41 @@ class SuperLoader:
             loader = spec_dict.get('loader', None)
 
             # Load the database, match the request,
-            man = core.metadata.ManifestDb.from_file(dbfile)
-            # Provide any extrinsic boosting.
-            ### This is tricky.  Do you look up _everything_, if you
-            ### have an obsdb abd obs:obs_id is given?  Do you inspect
-            ### the scheme and only provide what is missing?  That is
-            ### possible.
+            if dbfile not in self.manifest_cache:
+                if dbfile.endswith('sqlite'):
+                    man = core.metadata.ManifestDb.readonly(dbfile)
+                else:
+                    man = core.metadata.ManifestDb.from_file(dbfile)
+                self.manifest_cache[dbfile] = man
+            man = self.manifest_cache[dbfile]
+
+            # Provide any extrinsic boosting.  Downstream products
+            # (like an HDF5 table) might require some parameters from
+            # the ObsDb, and we can't tell that from here.  So query
+            # what you can, and pass it along.
+            if self.obsdb is not None and 'obs:obs_id' in request:
+                obs_info = self.obsdb.get(request['obs:obs_id'], add_prefix='obs:')
+                if obs_info is not None:
+                    obs_info.update(request)
+                    request = obs_info
+
             missing_keys = man.scheme.get_required_params()
             for k in request.keys():
                 if k in missing_keys:
                     missing_keys.remove(k)
             obs_keys = [k for k in missing_keys if k.startswith('obs:')]
             if len(obs_keys):
-                assert(self.obsdb is not None)
-                assert('obs:obs_id' in request)
-                request.update(self.obsdb.get(request['obs:obs_id'],
-                                              add_prefix='obs:'))
+                if self.obs_db is None:
+                    reason = 'no ObsDb was passed in'
+                elif 'obs:obs_id' not in request:
+                    reason = 'obs_id was not specified in the request'
+                elif obs_info is None:
+                    reason = 'ObsDb has no info on %s' % request['obs:obs_id']
+                else:
+                    reason = 'ObsDb does not provide a value for %s' % obs_keys
+                raise RuntimeError(
+                    'Metadata request could not be constructed because: %s' % reason)
+
             try:
                 index_lines = man.match(request, multi=True)
             except Exception as e:
@@ -81,11 +148,13 @@ class SuperLoader:
                     continue
                 index_line.update(request)
                 if loader is None:
-                    # Pop?
                     loader = index_line.get('loader')
                 if loader is None:
-                    loader = 'PerDetectorHdf5'
-                loader_class = REGISTRY[loader]
+                    loader = REGISTRY['_default']
+                try:
+                    loader_class = REGISTRY[loader]
+                except KeyError:
+                    raise RuntimeError('No metadata loader registered under name "%s"' % loader)
                 loader_object = loader_class(detdb=self.detdb, obsdb=self.obsdb)
                 mi1 = loader_object.from_loadspec(index_line)
                 # restrict to index_line...
@@ -157,8 +226,49 @@ class SuperLoader:
 
 
 class Unpacker:
+    """Encapsulation of instructions for what information to extract from
+    some source container, and what to call it in the destination
+    container.
+
+    The classmethod :ref:method:``decode`` is used populate Unpacker
+    objects from metadata instructions; see docstring.
+
+    Attributes:
+      dest (str): The field name in the destination container.
+      src (str): The field name in the source container.  If this is
+        None, then the entire source container (or whatever it may be)
+        should be stored in the destination container under the dest
+        name.
+
+    """
     @classmethod
     def decode(cls, coded, wildcard=[]):
+        """
+        Args:
+          coded (list of str or str): Each entry of the string is a
+            "coded request" which is converted to an Unpacker, as
+            described below.  Passing a string here yields the same
+            results as passing a single-element list containing that
+            string.
+          wildcard (list of str): source names from which to draw, in
+            the case that the coded request contains a wildcard.
+            Wildcard decoding, if requested, will fail unless the list
+            has exactly 1 entry.
+
+        Returns:
+          A list of Unpacker objects, one per entry in coded.
+
+        Notes:
+          Each coded request must be in one of 4 possible forms, shown
+          below, to the left of the :.  The resulting assignment
+          operation is shown to the right of the colon::
+
+            'dest_name&source_name'  : dest[dest_name] = source['source_name']
+            'dest_name&'             : dest[dest_name] = source['dest_name']
+            'dest_name&*'            : dest[dest_name] = source[wildcard[0]]
+            'dest_name'              : dest[dest_name] = source
+
+        """
         if isinstance(coded, str):
             coded = [coded]
         # Make a plan based on the name list.
@@ -188,3 +298,43 @@ class Unpacker:
         if self.src is None:
             return f'<Unpacker:{self.dest}>'
         return f'<Unpacker:{self.dest}<-{self.src}>'
+
+
+class LoaderInterface:
+    """Base class for "Loader" classes.  Subclasses must define, at least,
+    the from_loadspec method.
+
+    """
+    def __init__(self, detdb=None, obsdb=None):
+        """Args:
+          detdb (DetDb): db against which to reconcile dets: index data.
+          obsdb (ObsDb): db against which to reconcile obs: index data.
+
+        References to the input database are cached for later use.
+
+        """
+        self.detdb = detdb
+        self.obsdb = obsdb
+
+    def from_loadspec(self, load_params):
+        """Retrieve a metadata result.
+
+        Arguments:
+          load_params: an index dictionary.
+
+        Returns:
+          A ResultSet or similar metadata object.
+
+        """
+        raise NotImplementedError
+
+    def batch_from_loadspec(self, load_params):
+        """Retrieves a batch of metadata results.  load_params should be a
+        list of valid index data specifications.  Returns a list of
+        objects, corresponding to the elements of load_params.
+
+        The default implementation simply calls self.from_loadspec
+        repeatedly; but subclasses are free to do something more optimized.
+
+        """
+        return [self.from_loadspec(p) for p in load_params]
