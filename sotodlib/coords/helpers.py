@@ -117,13 +117,20 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     delts  = wcs_kernel.wcs.cdelt * DEG
     planar = output[:,:,:2]
     ranges = utils.minmax(planar/delts,(0,1))
+    # These are in units of pixel *offsets* from crval. crval
+    # might not correspond to a pixel center, though. So the
+    # thing that should be integer-valued to preserve pixel compatibility
+    # is crpix + ranges, not just ranges. Let's add crpix to transform this
+    # into offsets from the bottom-left pixel to make it easier to reason
+    # about integers
+    ranges += wcs_kernel.wcs.crpix
     del output
 
     # Start a new WCS and set the lower left corner.
     w = wcs_kernel.deepcopy()
-    corners     = utils.nint(ranges)
-    w.wcs.crpix = 1-corners[0]
-    shape       = tuple(corners[1]-corners[0]+1)[::-1]
+    corners      = utils.nint(ranges)
+    w.wcs.crpix -= corners[0]
+    shape        = tuple(corners[1]-corners[0]+1)[::-1]
     return (shape, w)
 
 def get_supergeom(*geoms):
