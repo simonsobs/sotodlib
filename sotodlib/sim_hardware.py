@@ -893,6 +893,7 @@ def get_example():
     fwhm["f230"] = 1.0
     fwhm["f290"] = 0.9
     tele["fwhm"] = fwhm
+    tele["platform_name"] = ""
     telescopes["LAT"] = tele
 
     sfwhm = OrderedDict()
@@ -904,24 +905,28 @@ def get_example():
     tele["tube_slots"] = ["ST1"]
     tele["platescale"] = 0.09668
     tele["fwhm"] = sfwhm
+    tele["platform_name"] = ""
     telescopes["SAT1"] = tele
 
     tele = OrderedDict()
     tele["tube_slots"] = ["ST2"]
     tele["platescale"] = 0.09668
     tele["fwhm"] = sfwhm
+    tele["platform_name"] = ""
     telescopes["SAT2"] = tele
 
     tele = OrderedDict()
     tele["tube_slots"] = ["ST3"]
     tele["platescale"] = 0.09668
     tele["fwhm"] = sfwhm
+    tele["platform_name"] = ""
     telescopes["SAT3"] = tele
 
     tele = OrderedDict()
     tele["tube_slots"] = ["ST4"]
     tele["platescale"] = 0.09668
     tele["fwhm"] = sfwhm
+    tele["platform_name"] = ""
     telescopes["SAT4"] = tele
 
     cnf["telescopes"] = telescopes
