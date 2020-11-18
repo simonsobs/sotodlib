@@ -834,8 +834,9 @@ def get_example():
 
     ltubes = ["UHF", "UHF", "MF", "MF", "MF", "MF", "LF"]
     ltubepos = [0, 1, 2, 3, 5, 6, 10]
+    ltube_cryonames=["c1", "i5", "i6", "i1", "i3", "i4", "o6"]
     for tindx in range(7):
-        nm = "LT{:d}".format(tindx)
+        nm = ltube_cryonames[tindx]
         ttyp = ltubes[tindx]
         tb = OrderedDict()
         tb["type"] = ttyp
@@ -882,7 +883,7 @@ def get_example():
     telescopes = OrderedDict()
 
     tele = OrderedDict()
-    tele["tube_slots"] = ["LT0", "LT1", "LT2", "LT3", "LT4", "LT5", "LT6"]
+    tele["tube_slots"] = ["c1", "i5", "i6", "i1", "i3", "i4", "o6"]
     tele["platescale"] = 0.00495
     # This tube spacing in mm corresponds to 1.78 degrees projected on
     # the sky at a plate scale of 0.00495 deg/mm.
