@@ -58,8 +58,8 @@ def add_hw_args(parser):
     parser.add_argument(
         "--tube_slots",
         required=True,
-        help="Comma-separated list of optics tube slots: LT0 (UHF), LT1 (UHF), "
-        " LT2 (MF), LT3 (MF), LT4 (MF), LT5 (MF), LT6 (LF). "
+        help="Comma-separated list of optics tube slots: c1 (UHF), i5 (UHF), "
+        " i6 (MF), i1 (MF), i3 (MF), i4 (MF), o6 (LF). "
         "Length of list must equal --bands",
     )
     return
