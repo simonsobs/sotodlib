@@ -554,7 +554,9 @@ def sim_wafer_detectors(hw, wafer, platescale, fwhm, band=None,
             continue
         pstr = "{:03d}".format(p)
         for b in bands:
-            for pl, layout in zip(["A", "B"], [layout_A, layout_B]):
+            for pl, layout, pol in zip(
+                    ["A", "B"], [layout_A, layout_B], [pol_A, pol_B],
+            ):
                 dprops = OrderedDict()
                 dprops["wafer"] = wafer
                 dprops["ID"] = idoff + doff
