@@ -16,6 +16,14 @@ def add_export_args(parser):
         "--export", required=False, default=None, help="Output TOD export path"
     )
     parser.add_argument(
+        "--no-export",
+        required=False,
+        action="store_const",
+        const=None,
+        help="Disable TOD export",
+        dest="export",
+    )
+    parser.add_argument(
         "--export-key",
         required=False,
         default=None,

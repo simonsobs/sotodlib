@@ -5,3 +5,4 @@
 """
 
 from .time_constant import OpTimeConst
+from .demodulation import OpDemod

@@ -768,7 +768,7 @@ def tod_to_frames(
     nnz = 1
     if cache_common_flags is None:
         if rankdet == 0:
-            cflags = tod.read_common_flags(local_start=cacheoff, n=ncache)
+            cflags = np.array(tod.read_common_flags(local_start=cacheoff, n=ncache))
             cflags &= mask_flag_common
     else:
         cflags, nnz, mtype = get_local_cache(0, cache_common_flags, cacheoff,
@@ -814,8 +814,13 @@ def tod_to_frames(
 
     for dindx, dname in enumerate(detnames):
         drow = -1
-        if dname in tod.local_dets:
+        dnames = []
+        for x in tod.local_dets:
+            if x.endswith(dname):
+                dnames.append(x)
+        if dnames:
             drow = rankdet
+
         # As a sanity check, verify that every process which
         # has this detector is in the same process row.
         rowcheck = None
@@ -841,55 +846,58 @@ def tod_to_frames(
 
         # "signal"
 
-        detdata = None
-        nnz = 1
-        if cache_signal is None:
-            if rankdet == prow:
-                detdata = tod.local_signal(dname)[cacheoff : cacheoff + ncache]
-        else:
-            cache_det = "{}_{}".format(cache_signal, dname)
-            detdata, nnz, mtype = get_local_cache(prow, cache_det, cacheoff,
-                                                  ncache)
-        if comm is not None:
-            mtype = MPI.DOUBLE
-            detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
-                                   ncache, dindx)
-        if rank == 0:
-            split_field(detdata, core3g.G3Timestream, "signal",
-                        mapfield=dname, times=times)
+        for dname in dnames:
+            detdata = None
+            nnz = 1
+            if cache_signal is None:
+                if rankdet == prow:
+                    detdata = tod.local_signal(dname)[cacheoff : cacheoff + ncache]
+            else:
+                cache_det = "{}_{}".format(cache_signal, dname)
+                detdata, nnz, mtype = get_local_cache(prow, cache_det, cacheoff,
+                                                      ncache)
+            if comm is not None:
+                mtype = MPI.DOUBLE
+                detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
+                                       ncache, dindx)
+            if rank == 0:
+                split_field(detdata, core3g.G3Timestream, "signal",
+                            mapfield=dname, times=times)
 
         # "flags"
 
-        detdata = None
-        nnz = 1
-        if cache_flags is None:
-            if rankdet == prow:
-                detdata = tod.local_flags(dname)[cacheoff : cacheoff + ncache]
-                detdata &= mask_flag
-        else:
-            cache_det = "{}_{}".format(cache_flags, dname)
-            detdata, nnz, mtype = get_local_cache(prow, cache_det, cacheoff,
-                                                  ncache)
-            if detdata is not None:
-                detdata &= mask_flag
-        if comm is not None:
-            mtype = MPI.UINT8_T
-            detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
-                                   ncache, dindx)
-        if rank == 0:
-            split_field(detdata, so3g.IntervalsInt, "flags", mapfield=dname)
+        for dname in dnames:
+            detdata = None
+            nnz = 1
+            if cache_flags is None:
+                if rankdet == prow:
+                    detdata = tod.local_flags(dname)[cacheoff : cacheoff + ncache]
+                    detdata &= mask_flag
+            else:
+                cache_det = "{}_{}".format(cache_flags, dname)
+                detdata, nnz, mtype = get_local_cache(prow, cache_det, cacheoff,
+                                                      ncache)
+                if detdata is not None:
+                    detdata &= mask_flag
+            if comm is not None:
+                mtype = MPI.UINT8_T
+                detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
+                                       ncache, dindx)
+            if rank == 0:
+                split_field(detdata, so3g.IntervalsInt, "flags", mapfield=dname)
 
         # Now copy any additional fields.
 
-        if copy_detector is not None:
-            for cname, g3typ, g3maptyp, fnm in copy_detector:
-                cache_det = "{}_{}".format(cname, dname)
-                detdata, nnz, mtype = get_local_cache(prow, cache_det,
-                                                      cacheoff, ncache)
-                detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
-                                       ncache, dindx)
-                if rank == 0:
-                    split_field(detdata, g3typ, fnm, mapfield=dname,
-                                times=times)
+        for dname in dnames:
+            if copy_detector is not None:
+                for cname, g3typ, g3maptyp, fnm in copy_detector:
+                    cache_det = "{}_{}".format(cname, dname)
+                    detdata, nnz, mtype = get_local_cache(prow, cache_det,
+                                                          cacheoff, ncache)
+                    detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
+                                           ncache, dindx)
+                    if rank == 0:
+                        split_field(detdata, g3typ, fnm, mapfield=dname,
+                                    times=times)
 
     return fdata

@@ -12,3 +12,4 @@ from .observation import create_observations, load_observations, add_import_args
 from .pysm import add_pysm_args, simulate_sky_signal
 from .time_constant import (
     add_time_constant_args, convolve_time_constant, deconvolve_time_constant)
+from .demodulation import add_demodulation_args, demodulate
