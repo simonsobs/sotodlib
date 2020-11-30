@@ -6,3 +6,5 @@
 
 from .time_constant import OpTimeConst
 from .demodulation import OpDemod
+from .h_n import OpHn
+from .crosslinking import OpCrossLinking
