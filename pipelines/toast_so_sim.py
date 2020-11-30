@@ -82,6 +82,7 @@ def parse_arguments(comm):
     toast_tools.add_tidas_args(parser)
     toast_tools.add_mc_args(parser)
     so_tools.add_time_constant_args(parser)
+    so_tools.add_demodulation_args(parser)
     so_tools.add_hw_args(parser)
     so_tools.add_so_noise_args(parser)
     so_tools.add_pysm_args(parser)
@@ -292,7 +293,7 @@ def main():
 
         so_tools.deconvolve_time_constant(args, comm, data, totalname, realization=mc)
 
-        memreport("after de-convolving with time constant", comm.comm_world)
+        memreport("after deconvolving time constant", comm.comm_world)
 
         if mc == firstmc:
             # For the first realization and frequency, optionally
@@ -324,15 +325,25 @@ def main():
 
         memreport("after madam", comm.comm_world)
 
-        if args.apply_polyfilter or args.apply_groundfilter:
+        if args.apply_polyfilter or args.apply_groundfilter or args.demodulate:
 
             # Filter signal
 
             toast_tools.apply_polyfilter(args, comm, data, totalname)
 
+            memreport("after polyfilter", comm.comm_world)
+
+            # Optionally demodulate signal
+
+            so_tools.demodulate(args, comm, data, totalname, detweights, madampars)
+
+            # Ground filter after demodulation
+
+            memreport("after demodulation", comm.comm_world)
+
             toast_tools.apply_groundfilter(args, comm, data, totalname)
 
-            memreport("after filter", comm.comm_world)
+            memreport("after groundfilter", comm.comm_world)
 
             # Bin maps
 
@@ -346,12 +357,20 @@ def main():
                 totalname,
                 time_comms=time_comms,
                 telescope_data=telescope_data,
-                first_call=False,
+                first_call=args.demodulate,
                 extra_prefix="filtered",
                 bin_only=True,
             )
 
             memreport("after filter & bin", comm.comm_world)
+
+            if args.demodulate and args.MC_count > 1:
+                if comm.world_rank == 0:
+                    log.info(
+                        "WARNING: demodulation and MC iterations are "
+                        "incompatible.  Terminating after first MC."
+                    )
+                break
 
     if comm.comm_world is not None:
         comm.comm_world.barrier()
