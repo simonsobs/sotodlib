@@ -55,7 +55,7 @@ class TimeConstantTest(TestCase):
 
         # Focalplane
         hwfull = get_example()
-        dets = sim_telescope_detectors(hwfull, "SAT3")
+        dets = sim_telescope_detectors(hwfull, "SAT4")
         hwfull.data["detectors"] = dets
         hw = hwfull.select(
             match={"wafer_slot": "42", "band": "LF1", "pixel": "00[01]"})
@@ -128,7 +128,7 @@ class TimeConstantTest(TestCase):
             obs["id"] = 12345
             obs["intervals"] = tod.subscans
             obs["site"] = "SimonsObs"
-            obs["telescope"] = "SAT3"
+            obs["telescope"] = "SAT4"
             obs["site_id"] = 1
             obs["telescope_id"] = 4
             obs["fpradius"] = 5.0
