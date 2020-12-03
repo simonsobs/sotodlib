@@ -14,7 +14,7 @@ import toast.map as tm
 import toast.tod as tt
 
 from sotodlib.sim_hardware import get_example, sim_telescope_detectors
-from sotodlib.io.toast_load import load_data
+from sotodlib.toast.load import load_data
 
 
 def binned_map(data, npix, subnpix, out="."):
