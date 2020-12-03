@@ -174,7 +174,7 @@ def main():
     else:
         # Load and broadcast the schedule file
 
-        schedules = toast_tools.load_schedule(args, comm)
+        schedules = so_tools.load_so_schedule(args, comm)
 
         # Load the weather and append to schedules
 
