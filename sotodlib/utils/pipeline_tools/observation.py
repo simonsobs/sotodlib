@@ -6,7 +6,7 @@ import copy
 import numpy as np
 
 from toast.dist import distribute_uniform, Data
-from toast.pipeline_tools import get_breaks
+from toast.pipeline_tools import get_breaks, load_schedule
 from toast.timing import function_timer, Timer
 from toast.todmap import TODGround
 from toast.utils import Logger
@@ -34,6 +34,16 @@ def add_import_args(parser):
     )
     return
 
+
+@function_timer
+def load_so_schedule(args, comm):
+    schedules = load_schedule(args, comm)
+    # For LAT, we must rotate the boresight according to observing elevation
+    for schedule in schedules:
+        if schedule.telescope.name == "LAT":
+            for ces in schedule.ceslist:
+                ces.boresight_angle += 30 + ces.el
+    return schedules
 
 @function_timer
 def create_observation(args, comm, telescope, ces, verbose=True):
