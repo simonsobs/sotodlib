@@ -17,7 +17,7 @@ from ._helpers import create_outdir
 
 from sotodlib.sim_hardware import get_example, sim_telescope_detectors
 
-from sotodlib.modules.time_constant import OpTimeConst
+from sotodlib.toast.time_constant import OpTimeConst
 
 
 toast_available = None

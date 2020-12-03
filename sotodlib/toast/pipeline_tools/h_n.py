@@ -7,7 +7,7 @@ import numpy as np
 from toast.timing import function_timer, Timer
 from toast.utils import Logger
 
-from ...modules import OpHn
+from ..h_n import OpHn
 
 
 def add_h_n_args(parser):
