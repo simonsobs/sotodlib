@@ -45,8 +45,8 @@ def main():
     )
 
     parser.add_argument(
-        "--tubes", required=False, default=None,
-        help="Select only detectors on these tubes.  This should be either a\
+        "--tube_slots", required=False, default=None,
+        help="Select only detectors on these tube slots.  This should be either a\
             regex string or a comma-separated list of names."
     )
 
@@ -56,7 +56,7 @@ def main():
             have the format '<property>:<regex or list>'.  The regex\
             expression should be valid to pass to the 're' module.  If \
             passing a list, this should be comma-separated.  For example, \
-            --match 'band:MF.*' 'wafer:25,26' 'pol:A' "
+            --match 'band:MF.*' 'wafer_slot:w25,w26' 'pol:A' "
     )
 
     args = parser.parse_args()
@@ -64,9 +64,9 @@ def main():
     telescopes = args.telescopes
     if telescopes is not None:
         telescopes = telescopes.split(",")
-    tubes = args.tubes
-    if tubes is not None:
-        tubes = tubes.split(",")
+    tube_slots = args.tube_slots
+    if tube_slots is not None:
+        tube_slots = tube_slots.split(",")
 
     match = dict()
     if args.match is not None:
@@ -90,15 +90,15 @@ def main():
         for tele in telescopes:
             telstr = "{}'{}', ".format(telstr, tele)
         print("  telescopes = {}".format(telstr.rstrip(", ")), flush=True)
-    if tubes is not None:
+    if tube_slots is not None:
         tstr = ""
-        for tube in tubes:
-            tstr = "{}'{}', ".format(tstr, tube)
-        print("  tubes = {}".format(tstr.rstrip(", ")), flush=True)
+        for tube_slot in tube_slots:
+            tstr = "{}'{}', ".format(tstr, tube_slot)
+        print("  tube_slots = {}".format(tstr.rstrip(", ")), flush=True)
     for k, v in match.items():
         print("  {} = r'{}'".format(k, v), flush=True)
 
-    newhw = hw.select(telescopes=telescopes, tubes=tubes, match=match)
+    newhw = hw.select(telescopes=telescopes, tube_slots=tube_slots, match=match)
 
     if args.plain:
         outpath = "{}.toml".format(args.out)

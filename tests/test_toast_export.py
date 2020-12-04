@@ -53,10 +53,10 @@ class ToastExportTest(TestCase):
 
         # Focalplane
         hwfull = get_example()
-        dets = sim_telescope_detectors(hwfull, "SAT3")
+        dets = sim_telescope_detectors(hwfull, "SAT4")
         hwfull.data["detectors"] = dets
         hw = hwfull.select(
-            match={"wafer": "42", "band": "LF1", "pixel": "00[01]"})
+            match={"wafer_slot": "w42", "band": "f030", "pixel": "00[01]"})
         print(hw.data["detectors"], flush=True)
         detquats = {k: v["quat"] for k, v in hw.data["detectors"].items()}
 
@@ -129,7 +129,7 @@ class ToastExportTest(TestCase):
         obs["id"] = 12345
         obs["intervals"] = tod.subscans
         obs["site"] = "SimonsObs"
-        obs["telescope"] = "SAT3"
+        obs["telescope"] = "SAT4"
         obs["site_id"] = 1
         obs["telescope_id"] = 4
         obs["fpradius"] = 5.0
@@ -159,7 +159,7 @@ class ToastExportTest(TestCase):
         # Dump to disk
         dumper = ToastExport(
             self.outdir,
-            prefix="sat3",
+            prefix="sat4",
             use_intervals=True,
             cache_name="signal",
             cache_copy=["component1", "component2"],

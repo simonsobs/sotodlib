@@ -14,10 +14,10 @@ from .noise import get_analytic_noise
 
 FOCALPLANE_RADII_DEG = {
     "LAT" : 3.6,
-    "SAT0" : 17.8,
     "SAT1" : 17.8,
     "SAT2" : 17.8,
-    "SAT3" : 17.2,
+    "SAT3" : 17.8,
+    "SAT4" : 17.2,
 }
 
 
@@ -30,10 +30,10 @@ class SOTelescope(Telescope):
             # atmospheric simulation
             #'LAT' : 0, 'SAT0' : 1, 'SAT1' : 2, 'SAT2' : 3, 'SAT3' : 4
             "LAT": 0,
-            "SAT0": 4,
             "SAT1": 4,
             "SAT2": 4,
             "SAT3": 4,
+            "SAT4": 4,
         }[name]
 
 
@@ -50,16 +50,16 @@ def add_hw_args(parser):
     parser.add_argument(
         "--bands",
         required=True,
-        help="Comma-separated list of bands: LF1 (27GHz), LF2 (39GHz), "
-        "MFF1 (93GHz), MFF2 (145GHz), MFS1 (93GHz), MFS2 (145GHz), "
-        "UHF1 (225GHz), UHF2 (280GHz). "
-        "Length of list must equal --tubes",
+        help="Comma-separated list of bands: f030 (27GHz), f040 (39GHz), "
+        "f090 (93GHz), f150 (145GHz), "
+        "f230 (225GHz), f290 (285GHz). "
+        "Length of list must equal --tube_slots",
     )
     parser.add_argument(
-        "--tubes",
+        "--tube_slots",
         required=True,
-        help="Comma-separated list of optics tubes: LT0 (UHF), LT1 (UHF), "
-        " LT2 (MFF), LT3 (MFF), LT4 (MFS), LT5 (MFS), LT6 (LF). "
+        help="Comma-separated list of optics tube slots: c1 (UHF), i5 (UHF), "
+        " i6 (MF), i1 (MF), i3 (MF), i4 (MF), o6 (LF). "
         "Length of list must equal --bands",
     )
     return
@@ -82,14 +82,14 @@ class BandParams:
 
 
 class DetectorParams:
-    def __init__(self, det_data, band, wafer, tube, telescope, index):
+    def __init__(self, det_data, band, wafer_slot, tube_slot, telescope, index):
         """
         Args:
             det_data (dict) :  Dictionary of detector parameters
                 from sotodlib.hardware
             band (BandParams) :  band parameters act as defaults
-            wafer (int) :  wafer number
-            tube (str) :  tube name
+            wafer_slot (int) :  wafer slot number
+            tube_slot (str) :  tube slot name
             telescope (str) :  telescope name
             index (int) :  RNG index
         """
@@ -114,8 +114,8 @@ class DetectorParams:
         self.upper = get_par("high", band.upper)  # GHz
         self.center = 0.5 * (self.lower + self.upper)
         self.width = self.upper - self.lower
-        self.wafer = wafer
-        self.tube = tube
+        self.wafer_slot = wafer_slot
+        self.tube_slot = tube_slot
         self.telescope = telescope
         self.index = index
         return
@@ -135,8 +135,8 @@ class DetectorParams:
             "bandwidth_ghz": self.width,
             "index": self.index,
             "telescope": self.telescope,
-            "tube": self.tube,
-            "wafer": self.wafer,
+            "tube_slot": self.tube_slot,
+            "wafer_slot": self.wafer_slot,
             "band": self.band,
         }
         return det_dict
@@ -169,11 +169,11 @@ def get_hardware(args, comm, verbose=False):
         for idet, det in enumerate(sorted(hw.data["detectors"])):
             det_index[det] = idet
         match = {"band": args.bands.replace(",", "|")}
-        tubes = args.tubes.split(",")
-        # If one provides both telescopes and tubes, the tubes matching *either*
+        tube_slots = args.tube_slots.split(",")
+        # If one provides both telescopes and tube_slots, the tube_slots matching *either*
         # will be concatenated
-        #hw = hw.select(telescopes=[telescope.name], tubes=tubes, match=match)
-        hw = hw.select(tubes=tubes, match=match)
+        #hw = hw.select(telescopes=[telescope.name], tube_slots=tube_slots, match=match)
+        hw = hw.select(tube_slots=tube_slots, match=match)
         if args.thinfp:
             # Only accept a fraction of the detectors for
             # testing and development
@@ -187,11 +187,11 @@ def get_hardware(args, comm, verbose=False):
         if ndetector == 0:
             raise RuntimeError(
                 "No detectors match query: telescope={}, "
-                "tubes={}, match={}".format(telescope, tubes, match)
+                "tube_slots={}, match={}".format(telescope, tube_slots, match)
             )
         log.info(
-            "Telescope = {} tubes = {} bands = {}, thinfp = {} matches {} detectors"
-            "".format(telescope.name, args.tubes, args.bands, args.thinfp, ndetector)
+            "Telescope = {} tube_slots = {} bands = {}, thinfp = {} matches {} detectors"
+            "".format(telescope.name, args.tube_slots, args.bands, args.thinfp, ndetector)
         )
         timer.report_clear("Select detectors")
     else:
@@ -212,22 +212,22 @@ def get_telescope(args, comm, verbose=False):
     telescope = None
     if comm.world_rank == 0:
         hwexample = get_example()
-        tubes = args.tubes.split(",")
-        for tube in tubes:
+        tube_slots = args.tube_slots.split(",")
+        for tube_slot in tube_slots:
             for telescope_name, telescope_data in hwexample.data[
                 "telescopes"
             ].items():
-                if tube in telescope_data["tubes"]:
+                if tube_slot in telescope_data["tube_slots"]:
                     if telescope is None:
                         telescope = SOTelescope(telescope_name)
                     elif telescope.name != telescope_name:
                         raise RuntimeError(
-                            "Tubes '{}' span more than one telescope".format(tubes)
+                            "Tubes '{}' span more than one telescope".format(tube_slots)
                         )
                     break
             if telescope is None:
                 raise RuntimeError(
-                    "Failed to match tube = '{}' with a telescope".format(tube)
+                    "Failed to match tube_slot = '{}' with a telescope".format(tube_slot)
                 )
     if comm.comm_world is not None:
         telescope = comm.comm_world.bcast(telescope)
@@ -255,20 +255,20 @@ def get_focalplane(args, comm, hw, det_index, verbose=False):
         for det_name, det_data in hw.data["detectors"].items():
             # RNG index for this detector
             index = det_index[det_name]
-            wafer = det_data["wafer"]
-            # Determine which tube has this wafer
-            for tube_name, tube_data in hw.data["tubes"].items():
-                if wafer in tube_data["wafers"]:
+            wafer_slot = det_data["wafer_slot"]
+            # Determine which tube_slot has this wafer
+            for tube_name, tube_data in hw.data["tube_slots"].items():
+                if wafer_slot in tube_data["wafer_slots"]:
                     break
-            # Determine which telescope has this tube
+            # Determine which telescope has this tube slot
             for telescope_name, telescope_data in hw.data["telescopes"].items():
-                if tube_name in telescope_data["tubes"]:
+                if tube_name in telescope_data["tube_slots"]:
                     break
             fpradius = max(fpradius, FOCALPLANE_RADII_DEG[telescope_name])
             det_params = DetectorParams(
                 det_data,
                 band_params[det_data["band"]],
-                wafer,
+                wafer_slot,
                 tube_name,
                 telescope_name,
                 index,
