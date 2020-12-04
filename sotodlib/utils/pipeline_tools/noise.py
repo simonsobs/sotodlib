@@ -123,8 +123,8 @@ def get_analytic_noise(args, comm, focalplane, verbose=True):
                 center, width = 1, 0
             coupling_strength_distributions.append([center, width])
             hw = get_example()
-            for itube, tube in enumerate(sorted(hw.data["tubes"].keys())):
-                d = "common_mode_{}_{}".format(ncommon - 1, tube)
+            for itube, tube_slot in enumerate(sorted(hw.data["tube_slots"].keys())):
+                d = "common_mode_{}_{}".format(ncommon - 1, tube_slot)
                 detectors.append(d)
                 common_modes.append(d)
                 rates[d] = args.sample_rate
@@ -160,8 +160,8 @@ def get_analytic_noise(args, comm, focalplane, verbose=True):
                 if det not in mixmatrix:
                     mixmatrix[det] = {det: detweight}
                     keys.add(det)
-                tube = focalplane[det]["tube"]
-                common = "common_mode_{}_{}".format(icommon, tube)
+                tube_slot = focalplane[det]["tube_slot"]
+                common = "common_mode_{}_{}".format(icommon, tube_slot)
                 index = focalplane[det]["index"]
                 mixmatrix[det][common] = couplings[index]
                 keys.add(common)

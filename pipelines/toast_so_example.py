@@ -130,9 +130,9 @@ hw.data["detectors"] = dets
 if comm.world_rank == 0:
     print("Selecting detectors...", flush=True)
 # Downselect to just 10 pixels on one wafer
-#small_hw = hw.select(match={"wafer": "41", "pixel": "00."})
-#small_hw = hw.select(match={"wafer": "41"})
-small_hw = hw.select(match={"wafer": "40"})
+#small_hw = hw.select(match={"wafer_slot": "41", "pixel": "00."})
+#small_hw = hw.select(match={"wafer_slot": "41"})
+small_hw = hw.select(match={"wafer_slot": "40"})
 #small_hw = hw.select(match={"band": "LF1"})
 if comm.world_rank == 0:
     small_hw.dump("selected.toml", overwrite=True)
