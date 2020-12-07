@@ -7,7 +7,7 @@ import numpy as np
 from toast.timing import function_timer, Timer
 from toast.utils import Logger
 
-from ...modules import OpDemod
+from ..demodulation import OpDemod
 
 
 def add_demodulation_args(parser):

@@ -40,7 +40,7 @@ from toast.timing import dump as dump_timing
 
 import toast.pipeline_tools as toast_tools
 
-import sotodlib.utils.pipeline_tools as so_tools
+import sotodlib.toast.pipeline_tools as so_tools
 
 import numpy as np
 

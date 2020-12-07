@@ -29,7 +29,7 @@ if toast_available is None:
         from toast.mpi import MPI
         from toast.todmap import TODGround
         from toast.tod import AnalyticNoise
-        from sotodlib.io.toast_export import ToastExport
+        from sotodlib.toast.export import ToastExport
         toast_available = True
     except ImportError:
         toast_available = False
