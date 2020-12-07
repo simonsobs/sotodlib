@@ -7,7 +7,7 @@ import numpy as np
 from toast.timing import function_timer, Timer
 from toast.utils import Logger
 
-from ...modules import OpCrossLinking
+from ..crosslinking import OpCrossLinking
 
 
 def add_crosslinking_args(parser):
