@@ -25,7 +25,7 @@ def add_crosslinking_args(parser):
         help="Do not write crosslinking map",
         dest="write_crosslinking",
     )
-    parser.set_defaults(write_crosslinking=True)
+    parser.set_defaults(write_crosslinking=False)
     parser.add_argument(
         "--crosslinking-prefix",
         required=False,
