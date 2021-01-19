@@ -13,5 +13,4 @@ python3 -m pip install --upgrade scipy
 python3 -m pip install nose toml mpi4py toast-cmb quaternionarray
 
 # Install S.O. dependencies
-
-python3 -m pip install https://github.com/simonsobs/sotoddb/archive/master.zip
+python3 -m pip install pixell

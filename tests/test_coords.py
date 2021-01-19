@@ -10,7 +10,7 @@ import numpy as np
 
 from sotodlib import coords, core
 import so3g
-from pixell import enmap, wcsutils
+from pixell import enmap
 
 DEG = np.pi/180
 CRVAL = [34.0*DEG, -20.9*DEG]
