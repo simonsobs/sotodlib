@@ -133,19 +133,47 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     shape        = tuple(corners[1]-corners[0]+1)[::-1]
     return (shape, w)
 
-def get_supergeom(*geoms):
+def get_supergeom(*geoms, tol=1e-3):
     """Given a set of compatible geometries [(shape0, wcs0), (shape1,
     wcs1), ...], return a geometry (shape, wcs) that includes all of
     them as a subset.
+
     """
     s0, w0 = geoms[0]
     w0 = w0.deepcopy()
+
     for s, w in geoms[1:]:
+        # is_compatible is necessary but not sufficient.
         if not wcsutils.is_compatible(w0, w):
             raise ValueError('Incompatible wcs: %s <- %s' % (w0, w))
+
+        # Depending on the projection, it may be possible to translate
+        # crval and crpix along each dimension and maintain exact
+        # pixel center correspondence.
+        translate = (False, False)
+        if wcsutils.is_plain(w0):
+            translate = (True, True)
+        elif wcsutils.is_cyl(w0) and w0.wcs.crval[1] == 0.:
+            translate = (True, False)
+
+        cdelt = w0.wcs.cdelt
+        if np.any(abs(w.wcs.cdelt - cdelt) / cdelt > tol):
+            raise ValueError("CDELT not the same.")
+
+        # Determine what shift in w.crpix would make the crval the same.
+        d_crpix = w.wcs.crpix - w0.wcs.crpix
+        d_crval = w.wcs.crval - w0.wcs.crval
+        tweak_crpix = [0, 0]
+        for axis in [0, 1]:
+            if d_crval[axis] != 0 and not translate[axis]:
+                raise ValueError(f"Incompatible CRVAL in axis {axis}")
+            d = d_crval[axis] / cdelt[axis] - d_crpix[axis]
+            if abs((d + 0.5) % 1 - 0.5) > tol:
+                raise ValueError(f"CRVAL not separated by integer pix in axis {axis}.")
+            tweak_crpix[axis] = int(np.round(d))
+
+        d = np.array(tweak_crpix[::-1])
         # Position of s in w0?
-        d = (w0.wcs.crpix - w.wcs.crpix)[::-1]
-        assert(np.all(w0.wcs.crval == w.wcs.crval))
         corner_a = d + [0, 0]
         corner_b = d + s
         # Super footprint, in w0.
