@@ -278,7 +278,7 @@ def get_gap_fill(tod, nbuf=10, order=1, inplace=False, signal=None, flags=None):
         signal = tod.signal
     if flags is None:
         flags = tod.flags
-    return ExtractMatrix([get_gap_fill_single(d, f, order, inplace)
+    return ExtractMatrix([get_gap_fill_single(d, f, order=order, nbuf=nbuf, inplace=inplace)
                           for d, f in zip(signal, flags)])
 
 
