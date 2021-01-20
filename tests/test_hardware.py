@@ -41,13 +41,19 @@ class HardwareTest(TestCase):
 
     def test_sim_wafer(self):
         hw = get_example()
-        # Simulate all wafers
+        # Simulate some wafers
         for tele, teleprops in hw.data["telescopes"].items():
+            if tele != "SAT1":
+                continue
             platescale = teleprops["platescale"]
             fwhm = teleprops["fwhm"]
             for tube_slot in teleprops["tube_slots"]:
+                if tube_slot != "ST1":
+                    continue
                 tubeprops = hw.data["tube_slots"][tube_slot]
                 for wafer in tubeprops["wafer_slots"]:
+                    if wafer != "w25":
+                        continue
                     outpath = os.path.join(
                         self.outdir, "wafer_{}.toml.gz".format(wafer))
                     dets = sim_wafer_detectors(hw, wafer, platescale, fwhm)
@@ -61,25 +67,25 @@ class HardwareTest(TestCase):
             return
 
     def test_sim_telescope(self):
-        hw = get_example()
-        for tele, teleprops in hw.data["telescopes"].items():
-            hw.data["detectors"] = sim_telescope_detectors(hw, tele)
-            outpath = os.path.join(self.outdir,
-                                   "telescope_{}.toml.gz".format(tele))
-            hw.dump(outpath, overwrite=True, compress=True)
-            if not self.skip_plots:
-                outpath = os.path.join(self.outdir,
-                                       "telescope_{}.pdf".format(tele))
-                plot_detectors(hw.data["detectors"], outpath, labels=False)
+        fullhw = get_example()
+        fullhw.data["detectors"] = sim_telescope_detectors(fullhw, "SAT1")
+        hw = fullhw.select(match={"wafer_slot": ["w25",],})
+        outpath = os.path.join(self.outdir, "telescope_SAT1_w25.toml.gz")
+        hw.dump(outpath, overwrite=True, compress=True)
+        if not self.skip_plots:
+            outpath = os.path.join(self.outdir, "telescope_SAT1_w25.pdf")
+            plot_detectors(hw.data["detectors"], outpath, labels=False)
         return
 
     def test_sim_full(self):
         hw = get_example()
         hw.data["detectors"] = OrderedDict()
         for tele, teleprops in hw.data["telescopes"].items():
+            if tele != "SAT1":
+                continue
             dets = sim_telescope_detectors(hw, tele)
             hw.data["detectors"].update(dets)
-        dbpath = os.path.join(self.outdir, "hardware.toml.gz")
+        dbpath = os.path.join(self.outdir, "hardware_SAT1.toml.gz")
         hw.dump(dbpath, overwrite=True, compress=True)
         check = Hardware(dbpath)
 
@@ -95,19 +101,6 @@ class HardwareTest(TestCase):
         check = Hardware(dbpath)
         self.assertTrue(len(check.data["detectors"]) == 20)
         chkpath = os.path.join(self.outdir, "w25-26_p20-29_f090_A.txt")
-        with open(chkpath, "w") as f:
-            for d in check.data["detectors"]:
-                f.write("{}\n".format(d))
-
-        # Test selection of pixels on 27GHz wafer 44.
-        lfhw = hw.select(
-            match={"wafer_slot": ["w44"],
-                   "pixel": "00."})
-        dbpath = os.path.join(self.outdir, "w44_p000-009_f030.toml.gz")
-        lfhw.dump(dbpath, overwrite=True, compress=True)
-        check = Hardware(dbpath)
-        self.assertTrue(len(check.data["detectors"]) == 40)
-        chkpath = os.path.join(self.outdir, "w44_p000-009_f030.txt")
         with open(chkpath, "w") as f:
             for d in check.data["detectors"]:
                 f.write("{}\n".format(d))
