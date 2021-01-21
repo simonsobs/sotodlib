@@ -3,6 +3,7 @@ from sotodlib.core import metadata
 
 import os
 import time
+import numpy as np
 
 # Global Announcement: I know, but I hate slow tests.
 example = None
@@ -66,6 +67,22 @@ class TestDetDb(unittest.TestCase):
             combos + [1, 2, 3]
         with self.assertRaises(ValueError):
             combos + dets
+
+        # Check indexing
+        # ... with int
+        self.assertIsInstance(dets[1], dict)
+        self.assertIsInstance(dets[np.int(1)], dict)
+        self.assertIsInstance(dets[np.arange(3)[1]], dict)
+
+        # ... with slice
+        dets_subset = dets[1:3]
+        self.assertIsInstance(dets_subset, metadata.ResultSet)
+        self.assertEqual(len(dets_subset), 2)
+
+        # ... Check that string index returns field
+        names = dets['name']
+        self.assertIsInstance(names, np.ndarray)
+        self.assertEqual(len(names), len(dets))
 
     def test_io(self):
         """Check to_file and from_file."""

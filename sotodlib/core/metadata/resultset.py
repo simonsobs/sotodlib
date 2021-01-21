@@ -236,7 +236,7 @@ class ResultSet(object):
 
     def __getitem__(self, item):
         # Simple row look-up... convert to dict.
-        if isinstance(item, int):
+        if isinstance(item, int) or isinstance(item, np.integer):
             return OrderedDict([(k,v) for k, v in
                                 zip(self.keys, self.rows[item])])
         # Look-up by column...
