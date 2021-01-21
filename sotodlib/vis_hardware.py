@@ -103,6 +103,27 @@ proceeding with the default matplotlib backend"""
         hmin = -half_height
         hmax = half_height
 
+    wafer_centers = dict()
+    if labels:
+        # We are plotting labels and will want to plot a wafer_slot label for each
+        # wafer.  To decide where to place the label, we find the average location
+        # of all detectors from each wafer and put the label there.
+        for d, props in dets.items():
+            dwslot = props["wafer_slot"]
+            if dwslot not in wafer_centers:
+                wafer_centers[dwslot] = dict()
+                wafer_centers[dwslot]["x"] = 0.0
+                wafer_centers[dwslot]["y"] = 0.0
+                wafer_centers[dwslot]["n"] = 0
+            quat = np.array(props["quat"]).astype(np.float64)
+            dir = qa.rotate(quat, zaxis).flatten()
+            wafer_centers[dwslot]["x"] += np.arcsin(dir[0]) * 180.0 / np.pi
+            wafer_centers[dwslot]["y"] += np.arcsin(dir[1]) * 180.0 / np.pi
+            wafer_centers[dwslot]["n"] += 1
+        for k in wafer_centers.keys():
+            wafer_centers[k]["x"] /= wafer_centers[k]["n"]
+            wafer_centers[k]["y"] /= wafer_centers[k]["n"]
+
     if bandcolor is None:
         bandcolor = default_band_colors
     xfigsize = 10.0
@@ -118,6 +139,16 @@ proceeding with the default matplotlib backend"""
     ax.set_ylabel("Degrees", fontsize="large")
     ax.set_xlim([wmin, wmax])
     ax.set_ylim([hmin, hmax])
+
+    # Draw wafer labels in the background
+    if labels:
+        # Compute the font size to use for detector labels
+        fontpix = 0.2 * ypixperdeg
+        for k, v in wafer_centers.items():
+            ax.text(v["x"] + 0.2, v["y"], k,
+                    color='k', fontsize=fontpix, horizontalalignment='center',
+                    verticalalignment='center',
+                    bbox=dict(fc='white', ec='none', pad=0.2, alpha=1.0))
 
     for d, props in dets.items():
         band = props["band"]
