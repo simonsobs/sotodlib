@@ -17,3 +17,4 @@ from .time_constant import (
 from .demodulation import add_demodulation_args, demodulate
 from .h_n import add_h_n_args, compute_h_n
 from .crosslinking import add_crosslinking_args, compute_crosslinking
+from .vib_pickup import add_vib_pickup_args, add_vib_pickup

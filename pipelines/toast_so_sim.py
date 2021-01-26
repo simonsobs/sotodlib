@@ -91,6 +91,7 @@ def parse_arguments(comm):
     so_tools.add_export_args(parser)
     toast_tools.add_debug_args(parser)
     so_tools.add_import_args(parser)
+    so_tools.add_vib_pickup_args(parser)
 
     parser.add_argument(
         "--no-maps",
@@ -281,6 +282,10 @@ def main():
         so_tools.convolve_time_constant(args, comm, data, totalname)
 
         memreport("after convolving with time constant", comm.comm_world)
+
+        so_tools.add_vib_pickup(args, comm, data, totalname)
+
+        memreport("after adding vibrational pickup", comm.comm_world)
 
         # DEBUG begin
         """
