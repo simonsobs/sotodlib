@@ -14,6 +14,7 @@ from scipy.constants import au as AU
 from scipy.interpolate import RectBivariateSpline
 import pickle
 
+
 def to_JD(t):
     # Unix time stamp to Julian date
     # (days since -4712-01-01 12:00:00 UTC)
@@ -31,43 +32,6 @@ def to_DJD(t):
     # (days since 1899-12-31 12:00:00)
     # This is the time format used by PyEphem
     return to_JD(t) - 2415020
-
-
-def add_sim_sso_args(parser):
-    parser.add_argument(
-        "--simulate-sso",
-        required=False,
-        help="Comma-separated list of solar system objects (SSOs) to simulate",
-    )
-    parser.add_argument(
-        "--beam-file",
-        required=False,
-        help="Pickle file containing instrumental beam",
-    )
-    return
-
-
-def apply_sim_sso(args, comm, data, mc, totalname, verbose=True):
-    if args.simulate_sso is None:
-        return
-
-    if args.beam_file is None:
-        raise RuntimeError("Cannot simulate SSOs without a beam file")
-
-    timer = Timer()
-    timer.start()
-
-    for sso_name in args.simulate_sso.split(","):
-        if comm.world_rank == 0 and verbose:
-            print("Simulating {}".format(sso_name), flush=True)
-
-        sim_sso = OpSimSSO(sso_name, args.beam_file, out=totalname)
-        sim_sso.exec(data)
-
-        if comm.world_rank == 0 and verbose:
-            timer.report_clear("Simulate {}".format(sso_name))
-
-    return
 
 
 class OpSimSSO(Operator):
@@ -152,7 +116,7 @@ class OpSimSSO(Operator):
                 comm.Barrier()
             if rank == 0:
                 tmr.stop()
-                tmr.report("{}Simulated and observed SSO signal" "".format(prefix))
+                tmr.report("{}Simulated and observed SSO signal".format(prefix))
         return
 
     def _get_beam_map(self, det, sso_dia):

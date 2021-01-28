@@ -8,4 +8,4 @@ from .time_constant import OpTimeConst
 from .demodulation import OpDemod
 from .h_n import OpHn
 from .crosslinking import OpCrossLinking
-from .sim_sso import OpSimSSO, add_sim_sso_args, apply_sim_sso
+from .sim_sso import OpSimSSO

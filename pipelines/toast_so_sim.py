@@ -286,7 +286,7 @@ def main():
 
         memreport("after convolving with time constant", comm.comm_world)
 
-        sotodlib.observe.apply_sim_sso(args, comm, data, mc, totalname)
+        so_tools.apply_sim_sso(args, comm, data, mc, totalname)
 
         # DEBUG begin
         """
