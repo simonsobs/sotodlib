@@ -20,7 +20,7 @@ import toast
 from toast.tod.interval import intervals_to_chunklist
 from toast.tod import spt3g_utils as s3utils
 
-from .toast_frame_utils import tod_to_frames
+from .frame_utils import tod_to_frames
 
 
 class ToastExport(toast.Operator):
