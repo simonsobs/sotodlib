@@ -91,6 +91,7 @@ def parse_arguments(comm):
     so_tools.add_export_args(parser)
     toast_tools.add_debug_args(parser)
     so_tools.add_import_args(parser)
+    so_tools.add_sim_hwpss_args(parser)
 
     parser.add_argument(
         "--no-maps",
@@ -261,6 +262,8 @@ def main():
         )
 
         memreport("after atmosphere", comm.comm_world)
+
+        so_tools.simulate_hwpss(args, comm, data, mc, totalname)
 
         # update_atmospheric_noise_weights(args, comm, data, freq, mc)
 
