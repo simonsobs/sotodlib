@@ -1,0 +1,181 @@
+===========
+AxisManager
+===========
+
+The AxisManager is a container class for numpy arrays and similar
+structures, that tracks relationships between axes.  The object can be
+made aware, for example, that the 2nd axis of an array called "data"
+is tied to the 1st axis of an array called "azimuth"; slices /
+sub-selection operations can be performed on a named
+on that axis and the entire object will be modified self-consistently.
+
+The data model here is similar to what is provided by the `xarray`_
+library.  However, AxisManager makes it possible to store objects
+other than numpy ndarrays, if the classes expose a suitable interface.
+
+.. _`xarray`: http://xarray.pydata.org/en/stable/
+
+------------------------
+Internal data structures
+------------------------
+
+If you're debugging or trying to understand how AxisManager works,
+know that the entire state is stored in the following private data
+members:
+
+    ``_axes``
+        An odict that maps axis name to an Axis-type object (such as
+        an instance of LabelAxis or IndexAxis).
+
+    ``_assignments``
+        An odict that maps field name to a tuple, where each entry in
+        the tuple gives the name of the axis to which that dimension
+        of the underlying data is associated (or None, for a dimension
+        that is unassociated).  For example an array with shape (100,
+        2, 20000) might have an axis assignment of ``('dets', None,
+        'samps')``.
+
+    ``_fields``
+        An odict that maps field name to the data object.
+
+Consistency of the internal state requires:
+
+- The key under which an Axis-type object in ``_axes`` must match that
+  object's ``.name`` attribute.  (I.e. ``_axes[k].name == k``.)
+- The ``_assignments`` and ``_fields`` odicts should have the same
+  keys, and the dimensionality must agree.
+  (I.e. ``len(_assignments[k]) == len(_fields[k].shape)``.)
+
+--------
+Tutorial
+--------
+
+Here we demonstrate some usage patterns for AxisManager.  For these to
+work, you need these imports::
+
+    from sotodlib import core
+    import numpy as np
+
+Suppose you have an array of detector readings. It’s 2d, with the first
+axis representing some particular detectors and the second axis
+representing a time index.
+
+.. code-block:: python
+
+    dets = ['det10', 'det11', 'det12']
+    tod = np.zeros((3, 10000)) + [[10],[11],[12]]
+
+AxisManager is a container that can hold numpy arrays (and also it can
+hold other AxisManagers, and some other stuff too).
+
+.. code-block:: python
+
+    dset = core.AxisManager().wrap('tod', tod)
+
+Inspecting::
+
+    >>> print(dset)
+    AxisManager(tod[3,10000])
+    >>> print(dset.tod)
+    [[10. 10. 10. ... 10. 10. 10.]
+     [11. 11. 11. ... 11. 11. 11.]
+     [12. 12. 12. ... 12. 12. 12.]]
+
+
+The value that AxisManager adds is an ability to relate an axis in one
+child array to an axis in another child. This time, when we add
+``'tod'``, we describe the two dimensions of that array with LabelAxis
+and IndexAxis objects.
+
+.. code:: python
+
+    dset = core.AxisManager().wrap('tod', tod, [(0, core.LabelAxis('dets', dets)),
+                                                (1, core.IndexAxis('samps'))])
+
+Inspecting::
+
+    >>> print(dset)
+    AxisManager(tod[dets,samps], dets:LabelAxis(3), samps:IndexAxis(10000))
+
+Now if we add other arrays, we can assign their axes to these existing
+ones::
+
+    hwp_angle = np.arange(tod.shape[1]) * 2. / 400 % 360.
+    dset.wrap('hwp_angle', hwp_angle, [(0, 'samps')])
+
+The output of the ``wrap`` cal is::
+
+    AxisManager(tod[dets,samps], hwp_angle[samps], dets:LabelAxis(3),
+      samps:IndexAxis(10000))
+
+We can also embed related AxisManagers within the existing one, to
+establish a hierarchical structure::
+
+    boresight = core.AxisManager(core.IndexAxis('samps'))
+    for k in ['el', 'az', 'roll']:
+        boresight.wrap(k, np.zeros(tod.shape[1]), [(0,'samps')])
+
+    dset.wrap('boresight', boresight)
+
+The output of the ``wrap`` cal should be::
+
+    AxisManager(tod[dets,samps], hwp_angle[samps], boresight*[samps],
+      dets:LabelAxis(3), samps:IndexAxis(10000))
+
+Note the boresight entry is marked with a ``*``, indicating that it's
+an AxisManager rather than a numpy array.
+
+To slice this object, use the restrict() method.  First, let's
+restrict in the 'dets' axis.  Since it's an Axis of type LabelAxis,
+the restriction selector must be a list of strings::
+
+    dset.restrict('dets', ['det11', 'det12'])
+
+Similarly, restricting in the samps axis::
+
+    dset.restrict('samps', (10, 300))
+
+After those two restrictions, inspect the shapes of contained
+objects::
+
+    >>> print(dset.tod.shape)
+    (2, 290)
+    >>> print(dset.boresight.az.shape)
+    (290,)
+
+
+---------
+Reference
+---------
+
+The class documentation for AxisManager and the basic Axis types
+should be rendered here.
+
+AxisManager
+===========
+
+.. autoclass:: sotodlib.core.AxisManager
+   :special-members: __init__
+   :members:
+
+IndexAxis
+=========
+
+.. autoclass:: sotodlib.core.IndexAxis
+   :special-members: __init__
+   :members:
+
+OffsetAxis
+==========
+
+.. autoclass:: sotodlib.core.OffsetAxis
+   :special-members: __init__
+   :members:
+
+LabelAxis
+=========
+
+.. autoclass:: sotodlib.core.LabelAxis
+   :special-members: __init__
+   :members:
+
