@@ -3,6 +3,9 @@
 Developer Guidelines
 ==============================
 
+Contributing
+------------
+
 Here are some basic guidelines for contributing:
 
 - This is a public repo.  Do not put any real or proprietary data files in this
@@ -30,3 +33,33 @@ Here are some basic guidelines for contributing:
 - Scripts (a.k.a. "entry points") should have their main function defined in a
   file in the scripts directory (see existing tools there).  Then add an entry
   point to setup.py.  This allows running the script as part of the unit tests.
+
+
+Logging
+-------
+
+The standard Python logging library provides a nice solution for
+propagating textual messages of various kinds to the user.  In
+sotodlib we use the logging library's standard patterns appropriate
+for a library.  In modules that will write log messages, get a logger
+object near the top of the source file (at global scope)::
+
+  import logging
+  logger = logging.getLogger(__name__)
+
+  ...
+  def useful_func():
+      ...
+      logger.warning('insufficiently useful.')
+
+Default logging behavior is configured in the base module of sotodlib.
+During debugging, or when it makes sense to control the verbosity in
+some script or application that uses the library, you can increase or
+decrease the verbosity like this::
+
+  import sotodlib
+  import logging
+
+  logging.getLogger('sotodlib').setLevel(logging.INFO)
+
+See :mod:`logging` for more details.
