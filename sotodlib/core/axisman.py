@@ -538,6 +538,29 @@ class AxisManager:
         helper._assignments[name] = assign
         return self.merge(helper)
 
+    def wrap_new(self, name, shape=None, cls=None, **kwargs):
+        """Create a new object and wrap it, with axes mapped."""
+        if cls is None:
+            cls = np.zeros
+        # Turn the shape into a tuple of ints and an axis map.
+        shape_ints, axis_map = [], []
+        for dim, s in enumerate(shape):
+            if isinstance(s, int):
+                shape_ints.append(s)
+            elif isinstance(s, str):
+                if s in self._axes:
+                    shape_ints.append(self._axes[s].count)
+                    axis_map.append((dim, self._axes[s]))
+                else:
+                    raise ValueError(f'shape includes axis "{s}" which is '
+                                     f'not in _axes: {self._axes}')
+            elif isinstance(s, AxisInterface):
+                # Sure, why not.
+                shape_ints.append(s.count)
+                axis_map.append((dim, s.copy()))
+        data = cls(shape=shape_ints, **kwargs)
+        return self.wrap(name, data, axis_map=axis_map)[name]
+
     def restrict_axes(self, axes, in_place=True):
         """Restrict this AxisManager by intersecting it with a set of Axis
         definitions.
@@ -681,6 +704,8 @@ class AxisManager:
                 if k not in self._axes:
                     self._axes[k] = v
             for k, v in aman._fields.items():
+                if k in self._fields:
+                    raise ValueError(f'Key: {k} found in {self} and {aman}')
                 assert(k not in self._fields)
                 self._fields[k] = v
             self._assignments.update(aman._assignments)

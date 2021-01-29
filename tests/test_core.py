@@ -2,6 +2,7 @@ import unittest
 
 import numpy as np
 from sotodlib import core
+import so3g
 
 
 class TestAxisManager(unittest.TestCase):
@@ -71,6 +72,21 @@ class TestAxisManager(unittest.TestCase):
         aman.restrict_axes(r_axes, in_place=True)
         self.assertCountEqual(aman.a1.shape, (1, 20))
         self.assertNotEqual(aman.a1[0, 0], 0.)
+
+    def test_150_wrap_new(self):
+        dets = ['det0', 'det1', 'det2']
+        a1 = np.zeros((len(dets), 100))
+        a1[1, 10] = 1.
+        aman = core.AxisManager(core.LabelAxis('dets', dets),
+                                core.OffsetAxis('samps', a1.shape[1]))
+        x = aman.wrap_new('x', shape=('dets', 'samps'))
+        y = aman.wrap_new('y', shape=('dets', 'samps'), dtype='float32')
+        self.assertCountEqual(aman.x.shape, aman.y.shape)
+        if hasattr(so3g.proj.RangesMatrix, 'zeros'):
+            # Jan 2021 -- some so3g might not have this method yet...
+            f = aman.wrap_new('f', shape=('dets', 'samps'),
+                              cls=so3g.proj.RangesMatrix.zeros)
+            self.assertCountEqual(aman.x.shape, aman.f.shape)
 
     # Multi-dimensional restrictions.
 
