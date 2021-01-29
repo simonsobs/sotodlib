@@ -32,6 +32,7 @@ be auto-documented here.
 .. autofunction:: gaussian_filter
 .. autofunction:: low_pass_sine2
 .. autofunction:: high_pass_sine2
+.. autofunction:: iir_filter
 
 
 tod_ops.gapfill

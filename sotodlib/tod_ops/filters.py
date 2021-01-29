@@ -209,24 +209,32 @@ def high_pass_sine2(freqs, tod, hp_fc=1.0, df=0.1):
     return filt
 
 @fft_filter
-def iir_filter(freqs, tod, iir_params=None, a=None, b=None, fscale=1., invert=False):
+def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None, invert=False):
     """Infinite impulse response (IIR) filter.  This sort of filter is
     used in digital applications as a low-pass filter prior to
     decimation.  The Smurf and MCE readout filters can both be
     expressed in this form.
 
     Args:
+      b: numerator polynomial filter coefficients (z^0,z^1, ...)
+      a: denominator coefficients
+      fscale: scalar used to compute z = exp(-2j*pi*freqs*fscale).
+        This will generally correspond to the sampling frequency of
+        the original signal (before decimation).
       iir_params: IIR filter params as described below; or a string
         name under which to look up those params in tod; defaults to
         'iir_params'.  Note that if `a` and `b` are passed explicitly
         then no attempt is made to resolve this argument.
-      a: denominator polynomial filter coefficients (z^0,z^1, ...)
-      b: numerator coefficients
-      fscale: scalar used to compute z = exp(-2j*pi*freqs*fscale).
       invert: If true, returns denom/num instead of num/denom.
 
     Notes:
-      If iir_params=None, then
+      The `b` and `a` coefficients are as implemented in
+      scipy.signal.freqs, scipy.signal.butter, etc.  The "angular
+      frequencies", `w`, are computed as 2*pi*freqs*fscale.
+
+      To pass in all parameters at once, set iir_params (or
+      tod[iir_params]) to a (3, n) array.  This will be expanded to
+      a=P[0,:], b=P[1,:], fscale=P[2,0].
 
     """
     if a is None:
