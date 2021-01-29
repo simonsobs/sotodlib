@@ -539,7 +539,37 @@ class AxisManager:
         return self.merge(helper)
 
     def wrap_new(self, name, shape=None, cls=None, **kwargs):
-        """Create a new object and wrap it, with axes mapped."""
+        """Create a new object and wrap it, with axes mapped.  The shape can
+        include axis names instead of ints, and that will cause the
+        new object to be dimensioned properly and its axes mapped.
+
+        Args:
+
+          name (str): name of the new data.
+
+          shape (tuple of int and std): shape in the same sense as
+            numpy, except that instead of int it is allowed to pass
+            the name of a managed axis.
+
+          cls (callable): Constructor that should be used to construct
+            the object; it will be called with all kwargs passed to
+            this function, and with the resolved shape as described
+            here.  Defaults to numpy.ndarray.
+
+        Examples:
+
+            Construct a 2d array and assign it the name
+            'boresight_quat', with its first axis mapped to the
+            AxisManager tod's "samps" axis:
+
+            >>> tod.wrap_new('boresight_quat', shape=('samps', 4), dtype='float64')
+
+            Create a new empty RangesMatrix, carrying a per-det, per-samp flags:
+
+            >>> tod.wrap_new('glitch_flags', shape=('dets', 'samps'),
+                             cls=so3g.proj.RangesMatrix.zeros)
+
+        """
         if cls is None:
             cls = np.zeros
         # Turn the shape into a tuple of ints and an axis map.
