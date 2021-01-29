@@ -206,7 +206,6 @@ Context system:
     to load the TOD.  The functions are registered in the module
     variable ``sotodlib.io.load.OBSLOADER_REGISTRY``.
 
-
 ``metadata``
 
     A list of metadata specs.  For more detailed description, see the
@@ -231,6 +230,17 @@ Context system:
         sotodlib.core.metadata.REGISTRY.  This is optional; if absent
         it will default to 'HdfPerDetector' or (more likely) to
         whatever is specified in the ManifestDb.
+
+``context_hooks``
+
+    A string that identifies a set of functions to hook into
+    particular parts of the Context system.  See uses of _call_hook()
+    in the Context code, for any implemented hook function names and
+    their signatures.  To use this feature, an imported module must
+    register the hook set in Context.hook_sets (a dict),
+    e.g. ``Context.hook_sets["my_sim_hooks"] = {"on-context-ready":
+    ...}``, and then also set ``context_hooks: "my_sim_hooks"`` in the
+    context.yaml.
 
 
 Context system APIs

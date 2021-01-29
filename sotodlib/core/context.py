@@ -9,6 +9,10 @@ from . import metadata
 logger = logging.getLogger(__name__)
 
 class Context(odict):
+    # Sets of special handlers may be registered in this class variable, then
+    # requested by name in the context.yaml key "context_hooks".
+    hook_sets = {}
+
     def __init__(self, filename=None, site_file=None, user_file=None,
                  data=None, load_list='all'):
         """Construct a Context object.  Note this is an ordereddict with a few
@@ -71,6 +75,12 @@ class Context(odict):
         for to_import in self.get('imports', []):
             importlib.import_module(to_import)
 
+        # Activate the requested hook set
+        if self.get('context_hooks'):
+            self._hooks = self.hook_sets[self['context_hooks']]
+        else:
+            self._hooks = {}
+
         # Check-default 'tags' dict.
         self['tags'] = self._get_warn_missing('tags', {})
 
@@ -79,6 +89,16 @@ class Context(odict):
 
         # Load basic databases.
         self.reload(load_list)
+
+        # Call a post-processing hook before returning to user?
+        self._call_hook('on-context-ready')
+
+    def _call_hook(self, hook_key, *args, **kwargs):
+        hook_func = self._hooks.get(hook_key)
+        if hook_func is None:
+            return
+        logger.info('Calling hook for %s: %s' % (hook_key, hook_func))
+        hook_func(self, *args, **kwargs)
 
     def _subst(self, dest, max_recursion=20):
         # Do string substitution of all our tags into dest (in-place
