@@ -103,10 +103,20 @@ ones::
     hwp_angle = np.arange(tod.shape[1]) * 2. / 400 % 360.
     dset.wrap('hwp_angle', hwp_angle, [(0, 'samps')])
 
-The output of the ``wrap`` cal is::
+The output of the ``wrap`` call is::
 
     AxisManager(tod[dets,samps], hwp_angle[samps], dets:LabelAxis(3),
       samps:IndexAxis(10000))
+
+To create new arrays in the AxisManager, and have certain dimensions
+automatically matched to a particular named axis, use the ``wrap_new``
+method::
+
+    events = dset.wrap_new('event_count', shape=('samps', 3), dtype='int')
+
+This object returned by this call is a numpy array of ints with shape
+(10000, 3).  It is wrapped into dset under the name ``'event_count'``.
+Its first axis is tied to the ``'dets'`` axis.
 
 We can also embed related AxisManagers within the existing one, to
 establish a hierarchical structure::
