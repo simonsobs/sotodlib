@@ -9,7 +9,7 @@ from .export import add_export_args, export_TOD
 from .hardware import add_hw_args, load_focalplanes
 from .noise import add_so_noise_args, get_analytic_noise, get_elevation_noise
 from .observation import (
-    create_observations, load_observations, add_import_args, load_so_schedule
+    create_observations, load_observations, add_import_args,
 )
 from .pysm import add_pysm_args, simulate_sky_signal
 from .time_constant import (
@@ -17,3 +17,4 @@ from .time_constant import (
 from .demodulation import add_demodulation_args, demodulate
 from .h_n import add_h_n_args, compute_h_n
 from .crosslinking import add_crosslinking_args, compute_crosslinking
+from .corotator import rotate_focalplane

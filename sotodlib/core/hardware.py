@@ -15,6 +15,11 @@ import numpy as np
 
 import toml
 
+# The orientation of the projected LAT focalplane on the sky is
+#   `LAT_COROTATOR_OFFSET_DEG` + observing elevation
+
+LAT_COROTATOR_OFFSET_DEG = 30
+
 
 class Hardware(object):
     """Class representing a specific hardware configuration.

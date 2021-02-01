@@ -177,7 +177,7 @@ def main():
     else:
         # Load and broadcast the schedule file
 
-        schedules = so_tools.load_so_schedule(args, comm)
+        schedules = toast_tools.load_schedule(args, comm)
 
         # Load the weather and append to schedules
 
@@ -203,6 +203,10 @@ def main():
     # Split the communicator for day and season mapmaking
 
     time_comms = toast_tools.get_time_communicators(args, comm, data)
+
+    # Rotate the LAT focalplane around the boresight based on co-rotator position
+
+    so_tools.rotate_focalplane(data)
 
     # Expand boresight quaternions into detector pointing weights and
     # pixel numbers
