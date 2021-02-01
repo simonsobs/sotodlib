@@ -42,8 +42,6 @@ import toast.pipeline_tools as toast_tools
 
 import sotodlib.toast.pipeline_tools as so_tools
 
-import sotodlib.observe
-
 import numpy as np
 
 import warnings
@@ -94,7 +92,7 @@ def parse_arguments(comm):
     so_tools.add_export_args(parser)
     toast_tools.add_debug_args(parser)
     so_tools.add_import_args(parser)
-    sotodlib.observe.add_sim_sso_args(parser)
+    so_tools.add_sim_sso_args(parser)
 
     parser.add_argument(
         "--no-maps",
@@ -282,11 +280,13 @@ def main():
 
         memreport("after simulating noise", comm.comm_world)
 
+        so_tools.apply_sim_sso(args, comm, data, mc, totalname)
+
+        memreport("after simulating SSO", comm.comm_world)
+
         so_tools.convolve_time_constant(args, comm, data, totalname)
 
         memreport("after convolving with time constant", comm.comm_world)
-
-        so_tools.apply_sim_sso(args, comm, data, mc, totalname)
 
         # DEBUG begin
         """
