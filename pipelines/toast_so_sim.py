@@ -68,6 +68,7 @@ def parse_arguments(comm):
         fromfile_prefix_chars="@",
     )
 
+
     toast_tools.add_dist_args(parser)
     toast_tools.add_todground_args(parser)
     toast_tools.add_pointing_args(parser)
@@ -93,6 +94,7 @@ def parse_arguments(comm):
     so_tools.add_export_args(parser)
     toast_tools.add_debug_args(parser)
     so_tools.add_import_args(parser)
+    so_tools.add_sim_sso_args(parser)
     so_tools.add_sim_hwpss_args(parser)
 
     parser.add_argument(
@@ -302,6 +304,10 @@ def main():
         toast_tools.simulate_noise(args, comm, data, mc, totalname)
 
         memreport("after simulating noise", comm.comm_world)
+
+        so_tools.apply_sim_sso(args, comm, data, mc, totalname)
+
+        memreport("after simulating SSO", comm.comm_world)
 
         so_tools.convolve_time_constant(args, comm, data, totalname)
 

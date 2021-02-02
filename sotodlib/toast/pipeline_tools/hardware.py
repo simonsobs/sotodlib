@@ -53,15 +53,18 @@ def add_hw_args(parser):
         help="Comma-separated list of bands: f030 (27GHz), f040 (39GHz), "
         "f090 (93GHz), f150 (145GHz), "
         "f230 (225GHz), f290 (285GHz). "
-        "Length of list must equal --tube_slots",
     )
-    parser.add_argument(
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
         "--tube_slots",
-        required=True,
         help="Comma-separated list of optics tube slots: c1 (UHF), i5 (UHF), "
         " i6 (MF), i1 (MF), i3 (MF), i4 (MF), o6 (LF),"
         " ST1 (MF), ST2 (MF), ST3 (UHF), ST4 (LF)."
-        "Length of list must equal --bands",
+
+    )
+    group.add_argument(
+        "--wafer_slots",
+        help="Comma-separated list of optics tube slots. "
     )
     return
 
@@ -170,7 +173,11 @@ def get_hardware(args, comm, verbose=False):
         for idet, det in enumerate(sorted(hw.data["detectors"])):
             det_index[det] = idet
         match = {"band": args.bands.replace(",", "|")}
-        tube_slots = args.tube_slots.split(",")
+        tube_slots = None
+        if args.wafer_slots is not None:
+            match["wafer_slot"]  = args.wafer_slots.split(",")
+        elif args.tube_slots is not None:
+            tube_slots = args.tube_slots.split(",")
         # If one provides both telescopes and tube_slots, the tube_slots matching *either*
         # will be concatenated
         #hw = hw.select(telescopes=[telescope.name], tube_slots=tube_slots, match=match)
@@ -188,11 +195,12 @@ def get_hardware(args, comm, verbose=False):
         if ndetector == 0:
             raise RuntimeError(
                 "No detectors match query: telescope={}, "
-                "tube_slots={}, match={}".format(telescope, tube_slots, match)
+                "tube_slots={}, match={}".format(telescope.name, tube_slots, match)
             )
         log.info(
-            "Telescope = {} tube_slots = {} bands = {}, thinfp = {} matches {} detectors"
-            "".format(telescope.name, args.tube_slots, args.bands, args.thinfp, ndetector)
+            f"Telescope = {telescope.name} tube_slots = {args.tube_slots}, "
+            f"wafer_slots = {args.wafer_slots}, bands = {args.bands}, "
+            f"thinfp = {args.thinfp} matches {ndetector} detectors"
         )
         timer.report_clear("Select detectors")
     else:
@@ -213,7 +221,12 @@ def get_telescope(args, comm, verbose=False):
     telescope = None
     if comm.world_rank == 0:
         hwexample = get_example()
-        tube_slots = args.tube_slots.split(",")
+        if args.wafer_slots is not None:
+            wafer_slots = args.wafer_slots.split(",")
+            wafer_map = hwexample.wafer_map()
+            tube_slots = [wafer_map["tube_slots"][ws] for ws in wafer_slots]
+        else:
+            tube_slots = args.tube_slots.split(",")
         for tube_slot in tube_slots:
             for telescope_name, telescope_data in hwexample.data[
                 "telescopes"
