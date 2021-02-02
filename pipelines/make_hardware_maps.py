@@ -11,7 +11,7 @@ from collections import OrderedDict
 import numpy as np
 from numpy.random import randn
 
-import sotodlib.hardware as hardware
+import sotodlib.sim_hardware as hardware
 
 
 def write_hw(out, hw, plain=False, overwrite=True):
