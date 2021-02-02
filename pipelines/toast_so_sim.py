@@ -77,6 +77,8 @@ def parse_arguments(comm):
     toast_tools.add_noise_args(parser)
     toast_tools.add_gainscrambler_args(parser)
     toast_tools.add_madam_args(parser)
+    toast_tools.add_mapmaker_args(parser)
+    toast_tools.add_filterbin_args(parser)
     toast_tools.add_sky_map_args(parser)
     toast_tools.add_sss_args(parser)
     toast_tools.add_tidas_args(parser)
@@ -103,6 +105,22 @@ def parse_arguments(comm):
     parser.add_argument(
         "--outdir", required=False, default="out", help="Output directory"
     )
+
+    parser.add_argument(
+        "--madam",
+        required=False,
+        action="store_true",
+        help="Use libmadam for map-making",
+        dest="use_madam",
+    )
+    parser.add_argument(
+        "--no-madam",
+        required=False,
+        action="store_false",
+        help="Do not use libmadam for map-making [default]",
+        dest="use_madam",
+    )
+    parser.set_defaults(use_madam=True)
 
     try:
         args = parser.parse_args()
@@ -165,9 +183,9 @@ def main():
 
     args, comm = parse_arguments(comm)
 
-    # Initialize madam parameters
-
-    madampars = toast_tools.setup_madam(args)
+    if args.use_madam:
+        # Initialize madam parameters
+        madampars = toast_tools.setup_madam(args)
 
     if args.import_dir is not None:
         schedules = None
@@ -324,20 +342,47 @@ def main():
 
         # Bin and destripe maps
 
-        toast_tools.apply_madam(
-            args,
-            comm,
-            data,
-            madampars,
-            outpath,
-            detweights,
-            totalname,
-            time_comms=time_comms,
-            telescope_data=telescope_data,
-            first_call=(mc == firstmc),
-        )
+        if args.use_madam:
+            toast_tools.apply_madam(
+                args,
+                comm,
+                data,
+                madampars,
+                outpath,
+                detweights,
+                totalname,
+                time_comms=time_comms,
+                telescope_data=telescope_data,
+                first_call=(mc == firstmc),
+            )
+        else:
+            toast_tools.apply_mapmaker(
+                args,
+                comm,
+                data,
+                outpath,
+                totalname,
+                time_comms=time_comms,
+                telescope_data=telescope_data,
+                first_call=(mc == firstmc),
+            )
 
-        memreport("after madam", comm.comm_world)
+        memreport("after destriper", comm.comm_world)
+
+        if (
+                args.filterbin_ground_order is not None
+                or args.filterbin_poly_order is not None
+        ):
+            toast_tools.apply_filterbin(
+                args,
+                comm,
+                data,
+                outpath,
+                totalname,
+                time_comms=time_comms,
+                telescope_data=telescope_data,
+                first_call=(mc == firstmc),
+            )
 
         if args.apply_polyfilter or args.apply_groundfilter or args.demodulate:
 
@@ -361,20 +406,34 @@ def main():
 
             # Bin maps
 
-            toast_tools.apply_madam(
-                args,
-                comm,
-                data,
-                madampars,
-                outpath,
-                detweights,
-                totalname,
-                time_comms=time_comms,
-                telescope_data=telescope_data,
-                first_call=args.demodulate,
-                extra_prefix="filtered",
-                bin_only=True,
-            )
+            if args.use_madam:
+                toast_tools.apply_madam(
+                    args,
+                    comm,
+                    data,
+                    madampars,
+                    outpath,
+                    detweights,
+                    totalname,
+                    time_comms=time_comms,
+                    telescope_data=telescope_data,
+                    first_call=args.demodulate,
+                    extra_prefix="filtered",
+                    bin_only=True,
+                )
+            else:
+                toast_tools.apply_mapmaker(
+                    args,
+                    comm,
+                    data,
+                    outpath,
+                    totalname,
+                    time_comms=time_comms,
+                    telescope_data=telescope_data,
+                    first_call=False,
+                    extra_prefix="filtered",
+                    bin_only=True,
+                )
 
             memreport("after filter & bin", comm.comm_world)
 
