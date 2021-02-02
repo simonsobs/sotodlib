@@ -109,6 +109,7 @@ def create_observation(args, comm, telescope, ces, verbose=True):
     obs["intervals"] = tod.subscans
     obs["site"] = site
     obs["site_id"] = site.id
+    obs["altitude"] = site.alt
     obs["telescope"] = telescope.name
     obs["telescope_id"] = telescope.id
     obs["fpradius"] = focalplane.radius
