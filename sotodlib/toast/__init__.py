@@ -9,3 +9,4 @@ from .demodulation import OpDemod
 from .h_n import OpHn
 from .crosslinking import OpCrossLinking
 from .sim_sso import OpSimSSO
+from .sim_hwpss import OpSimHWPSS
