@@ -58,7 +58,9 @@ def add_hw_args(parser):
     group.add_argument(
         "--tube_slots",
         help="Comma-separated list of optics tube slots: c1 (UHF), i5 (UHF), "
-        " i6 (MF), i1 (MF), i3 (MF), i4 (MF), o6 (LF).  "
+        " i6 (MF), i1 (MF), i3 (MF), i4 (MF), o6 (LF),"
+        " ST1 (MF), ST2 (MF), ST3 (UHF), ST4 (LF)."
+
     )
     group.add_argument(
         "--wafer_slots",
