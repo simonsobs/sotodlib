@@ -814,6 +814,7 @@ def tod_to_frames(
 
     for dindx, dname in enumerate(detnames):
         drow = -1
+        # Demodulation may have synthesized new detector names
         dnames = []
         for x in tod.local_dets:
             if x.endswith(dname):
@@ -843,6 +844,8 @@ def tod_to_frames(
         # Every process finds out which process row is participating.
         if comm is not None:
             prow = comm.bcast(prow, root=0)
+            all_dnames = comm.allgather(dnames)
+            dnames = list(set(np.concatenate(all_dnames).flat))
 
         # "signal"
 
@@ -856,6 +859,7 @@ def tod_to_frames(
                 cache_det = "{}_{}".format(cache_signal, dname)
                 detdata, nnz, mtype = get_local_cache(prow, cache_det, cacheoff,
                                                       ncache)
+
             if comm is not None:
                 mtype = MPI.DOUBLE
                 detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
