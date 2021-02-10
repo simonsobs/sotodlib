@@ -81,21 +81,34 @@ def main():
     # Average detector offset
 
     vec_mean = np.zeros(3)
-    zaxis = np.array([0, 0, 1.])
+    zaxis = np.array([0, 0, 1])
     for det_name, det_data in hw.data["detectors"].items():
         quat = det_data["quat"]
         vec = qa.rotate(quat, zaxis)
         vec_mean += vec
     vec_mean /= ndet
+
+    # Radius
+
+    all_dist = []
+    for det_name, det_data in hw.data["detectors"].items():
+        quat = det_data["quat"]
+        vec = qa.rotate(quat, zaxis)
+        all_dist.append(np.degrees(np.arccos(np.dot(vec_mean, vec))))
+    dist_max = np.amax(all_dist)
+
+    # Translate into Az/El offsets at el=0
+
     rot = hp.Rotator(rot=[0, 90, 0])
     vec_mean = rot(vec_mean)
-    el_offset, az_offset = hp.vec2dir(vec_mean, lonlat=True)
-    az_offset *= -1
+    az_offset, el_offset = hp.vec2dir(vec_mean, lonlat=True)
+
+    el_offset *= -1
     if args.reverse:
         az_offset *= -1
         el_offset *= -1
 
-    print(f"{az_offset:.3f} {el_offset:.3f}")
+    print(f"{az_offset:.3f} {el_offset:.3f} {dist_max:.3f}")
 
     return
 
