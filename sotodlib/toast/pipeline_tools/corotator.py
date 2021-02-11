@@ -37,8 +37,9 @@ def rotate_focalplane(args, data, comm):
             corotator_angle = obs["corotator_angle_deg"]
             offset, nsample = tod.local_samples
             tod.cache.put(cache_name, np.zeros(nsample) + corotator_angle)
-        corotator_angle += LAT_COROTATOR_OFFSET_DEG
-        rot = qa.rotation(ZAXIS, np.radians(corotator_angle))
+        rot = qa.rotation(
+            ZAXIS, np.radians(corotator_angle + LAT_COROTATOR_OFFSET_DEG)
+        )
         quats = tod.read_boresight()
         quats[:] = qa.mult(quats, rot)
         try:
