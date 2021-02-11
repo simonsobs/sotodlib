@@ -227,7 +227,7 @@ def main():
 
     # Rotate the LAT focalplane around the boresight based on co-rotator position
 
-    so_tools.rotate_focalplane(data)
+    so_tools.rotate_focalplane(args, data, comm)
 
     # Expand boresight quaternions into detector pointing weights and
     # pixel numbers

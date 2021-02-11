@@ -13,7 +13,7 @@ from ...core.hardware import LAT_COROTATOR_OFFSET_DEG
 XAXIS, YAXIS, ZAXIS = np.eye(3)
 
 
-def rotate_focalplane(data):
+def rotate_focalplane(args, data, comm):
     """ The LAT focalplane projected on the sky rotates as the cryostat
     (co-rotator) tilts.  Usually the tilt is the same as the observing
     elevation to maintain constant angle between the mirror and the cryostat.
@@ -27,10 +27,16 @@ def rotate_focalplane(data):
     timer.start()
 
     for obs in data.obs:
-        if obs["telescope"] is not "LAT":
+        if obs["telescope"] != "LAT":
             continue
         tod = obs["tod"]
-        corotator_angle = obs["corotator_angle_deg"]
+        cache_name = "corotator_angle_deg"
+        if tod.cache.exists(cache_name):
+            corotator_angle = tod.cache.reference(cache_name)
+        else:
+            corotator_angle = obs["corotator_angle_deg"]
+            offset, nsample = tod.local_samples
+            tod.cache.put(cache_name, np.zeros(nsample) + corotator_angle)
         corotator_angle += LAT_COROTATOR_OFFSET_DEG
         rot = qa.rotation(ZAXIS, np.radians(corotator_angle))
         quats = tod.read_boresight()
@@ -43,6 +49,7 @@ def rotate_focalplane(data):
         except Exception as e:
             pass
 
-    timer.report_clear("Rotate focalplane")
+    if comm is None or comm.comm_world.rank == 0:
+        timer.report_clear("Rotate focalplane")
 
     return
