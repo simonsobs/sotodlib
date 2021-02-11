@@ -12,6 +12,24 @@ from ...core.hardware import LAT_COROTATOR_OFFSET_DEG
 
 XAXIS, YAXIS, ZAXIS = np.eye(3)
 
+def add_corotator_args(parser):
+    parser.add_argument(
+        "--corotate-lat",
+        required=False,
+        action="store_true",
+        help="Rotate LAT receiver to maintain focalplane orientation",
+        dest="corotate_lat",
+    )
+    parser.add_argument(
+        "--no-corotate-lat",
+        required=False,
+        action="store_false",
+        help="Do not Rotate LAT receiver to maintain focalplane orientation",
+        dest="corotate_lat",
+    )
+    parser.set_defaults(corotate_lat=True)
+    return
+
 
 def rotate_focalplane(args, data, comm):
     """ The LAT focalplane projected on the sky rotates as the cryostat
@@ -37,8 +55,9 @@ def rotate_focalplane(args, data, comm):
             corotator_angle = obs["corotator_angle_deg"]
             offset, nsample = tod.local_samples
             tod.cache.put(cache_name, np.zeros(nsample) + corotator_angle)
+        el = np.degrees(tod.read_boresight_el())
         rot = qa.rotation(
-            ZAXIS, np.radians(corotator_angle + LAT_COROTATOR_OFFSET_DEG)
+            ZAXIS, np.radians(corotator_angle + el + LAT_COROTATOR_OFFSET_DEG)
         )
         quats = tod.read_boresight()
         quats[:] = qa.mult(quats, rot)

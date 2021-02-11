@@ -84,6 +84,7 @@ def parse_arguments(comm):
     toast_tools.add_sss_args(parser)
     toast_tools.add_tidas_args(parser)
     toast_tools.add_mc_args(parser)
+    so_tools.add_corotator_args(parser)
     so_tools.add_time_constant_args(parser)
     so_tools.add_demodulation_args(parser)
     so_tools.add_h_n_args(parser)

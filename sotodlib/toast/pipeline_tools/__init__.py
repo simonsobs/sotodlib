@@ -20,4 +20,4 @@ from .crosslinking import add_crosslinking_args, compute_crosslinking
 from .corotator import rotate_focalplane
 from .sim_sso import add_sim_sso_args, apply_sim_sso
 from .sim_hwpss import add_sim_hwpss_args, simulate_hwpss
-from .corotator import rotate_focalplane
+from .corotator import rotate_focalplane, add_corotator_args

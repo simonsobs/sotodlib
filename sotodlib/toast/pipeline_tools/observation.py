@@ -124,7 +124,10 @@ def create_observation(args, comm, telescope, ces, verbose=True):
     obs["mindist_moon"] = ces.mindist_moon
     obs["el_sun"] = ces.el_sun
     if telescope.name == "LAT":
-        obs["corotator_angle_deg"] = ces.el
+        if args.corotate_lat:
+            obs["corotator_angle_deg"] = -ces.el
+        else:
+            obs["corotator_angle_deg"] = 0
     return obs
 
 
