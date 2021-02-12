@@ -127,7 +127,7 @@ def create_observation(args, comm, telescope, ces, verbose=True):
         if args.corotate_lat:
             obs["corotator_angle_deg"] = -ces.el
         else:
-            obs["corotator_angle_deg"] = 0
+            obs["corotator_angle_deg"] = -60
     return obs
 
 

@@ -52,6 +52,9 @@ def rotate_focalplane(args, data, comm):
         if tod.cache.exists(cache_name):
             corotator_angle = tod.cache.reference(cache_name)
         else:
+            # If a vector of co-rotator angles isn't already cached,
+            # make one now from the observation metadata.  This will
+            # ensure they get recorded in the so3g files.
             corotator_angle = obs["corotator_angle_deg"]
             offset, nsample = tod.local_samples
             tod.cache.put(cache_name, np.zeros(nsample) + corotator_angle)
