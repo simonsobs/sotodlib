@@ -32,7 +32,7 @@ from toast.mpi import MPI
 
 from ..core import Hardware
 
-from .toast_frame_utils import frame_to_tod
+from .frame_utils import frame_to_tod
 
 
 # FIXME:  This CamelCase name is ridiculous in all caps...

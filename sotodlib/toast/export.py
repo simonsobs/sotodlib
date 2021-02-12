@@ -166,7 +166,7 @@ class ToastExport(toast.Operator):
         writer(f)
         return
 
-    def _bytes_per_sample(self, ndet, nflavor):
+    def _bytes_per_sample(self, ndet, nflavor, telescope_name):
         # For each sample we have:
         #   - 1 x 8 bytes for timestamp
         #   - 1 x 1 bytes for common flags
@@ -176,7 +176,10 @@ class ToastExport(toast.Operator):
         #   - 3 x 8 bytes for telescope position
         #   - 3 x 8 bytes for telescope velocity
         #   - 1 x 8 bytes x number of dets x number of flavors
+        #   - 1 x 8 bytes for corotator angle (LAT only)
         persample = 8 + 1 + 32 + 48 + 24 + 24 + 8 * ndet * nflavor
+        if telescope_name == "LAT":
+            persample += 8
         return persample
 
     def _get_framesizes(self, tod, obs, nsamp, keep_offsets):
@@ -250,7 +253,10 @@ class ToastExport(toast.Operator):
 
         return flavors, flavor_type, flavor_maptype, copy_flavors
 
-    def _get_offsets(self, cgroup, grouprank, keep_offsets, ndet, nflavor, framesizes):
+    def _get_offsets(
+            self, cgroup, grouprank, keep_offsets, ndet, nflavor, framesizes,
+            telescope_name,
+    ):
         """Given the dimensions of this observation, compute the frame
         file sizes and all relevant offsets.
         """
@@ -266,7 +272,9 @@ class ToastExport(toast.Operator):
                 file_frame_offs = self._file_frame_offs
                 frame_sample_offs = self._frame_sample_offs
             else:
-                sampbytes = self._bytes_per_sample(ndet, nflavor + 1)
+                sampbytes = self._bytes_per_sample(
+                    ndet, nflavor + 1, telescope_name
+                )
                 file_sample_offs, file_frame_offs, frame_sample_offs = \
                     s3utils.compute_file_frames(
                         sampbytes, framesizes,
@@ -299,6 +307,9 @@ class ToastExport(toast.Operator):
 
         # Every observation must have a name...
         obsname = obs["name"]
+
+        # Some fields are specific to telescope
+        telescope_name = obs["telescope"]
 
         # The TOD
         tod = obs["tod"]
@@ -341,7 +352,7 @@ class ToastExport(toast.Operator):
 
         (frame_sample_offs, file_sample_offs, file_frame_offs
         ) = self._get_offsets(cgroup, grouprank, keep_offsets, len(detquat),
-                              len(copy_flavors), framesizes)
+                              len(copy_flavors), framesizes, telescope_name)
 
         if detgroup is None:
             prefix = self._prefix

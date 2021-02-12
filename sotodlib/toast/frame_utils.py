@@ -33,6 +33,7 @@ FIELD_TO_CACHE = {
     "site_position" : TOD.POSITION_NAME,
     "flags" : TOD.FLAG_NAME,
     "signal" : TOD.SIGNAL_NAME,
+    "corotator_angle" : "corotator_angle_deg",
 }
 
 
@@ -718,6 +719,18 @@ def tod_to_frames(
     if rank == 0:
         split_field(bore.reshape(-1, 4), core3g.G3VectorDouble,
                     "boresight_azel")
+
+    corotator_angle = None
+    if rankdet == 0:
+        cache_name = "corotator_angle_deg"
+        if tod.cache.exists(cache_name):
+            corotator_angle = np.radians(tod.cache.reference(cache_name))
+    if comm is not None:
+        corotator_angle = gather_field(0, corotator_angle, 1, MPI.DOUBLE,
+                                       cacheoff, ncache, 0)
+    if rank == 0:
+        split_field(corotator_angle, core3g.G3VectorDouble, "corotator_angle",
+                    times=times)
 
     if rank == 0:
         for f in range(n_frames):

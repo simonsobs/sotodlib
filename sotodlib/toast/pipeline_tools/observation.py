@@ -36,16 +36,6 @@ def add_import_args(parser):
 
 
 @function_timer
-def load_so_schedule(args, comm):
-    schedules = load_schedule(args, comm)
-    # For LAT, we must rotate the boresight according to observing elevation
-    for schedule in schedules:
-        if schedule.telescope.name == "LAT":
-            for ces in schedule.ceslist:
-                ces.boresight_angle += 30 + ces.el
-    return schedules
-
-@function_timer
 def create_observation(args, comm, telescope, ces, verbose=True):
     """ Create a TOAST observation.
 
@@ -133,6 +123,11 @@ def create_observation(args, comm, telescope, ces, verbose=True):
     obs["mindist_sun"] = ces.mindist_sun
     obs["mindist_moon"] = ces.mindist_moon
     obs["el_sun"] = ces.el_sun
+    if telescope.name == "LAT":
+        if args.corotate_lat:
+            obs["corotator_angle_deg"] = -ces.el
+        else:
+            obs["corotator_angle_deg"] = -60
     return obs
 
 
