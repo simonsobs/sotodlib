@@ -33,6 +33,7 @@ FIELD_TO_CACHE = {
     "site_position" : TOD.POSITION_NAME,
     "flags" : TOD.FLAG_NAME,
     "signal" : TOD.SIGNAL_NAME,
+    "corotator_angle" : "corotator_angle_deg",
 }
 
 
