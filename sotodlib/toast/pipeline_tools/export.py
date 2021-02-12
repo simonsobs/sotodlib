@@ -11,6 +11,9 @@ from toast.todmap import TODGround
 from toast.utils import Logger
 
 
+ALLOWED_KEYS = "wafer_slot", "card_slot", "crate_slot", "tube_slot"
+
+
 def add_export_args(parser):
     parser.add_argument(
         "--export", required=False, default=None, help="Output TOD export path"
@@ -27,7 +30,7 @@ def add_export_args(parser):
         "--export-key",
         required=False,
         default=None,
-        help="Group exported TOD by a detector trait: wafer_slot, card_slot, crate_slot or tube_slot",
+        help="Group exported TOD by a detector traits.  One of {ALLOWED_KEYS}",
     )
     parser.add_argument(
         "--export-compress",
@@ -63,6 +66,10 @@ def export_TOD(args, comm, data, totalname, schedules, other=None, verbose=True)
 
     key = args.export_key
     if key is not None:
+        if key not in ALLOWED_KEYS:
+            raise RuntimeError(
+                f"Cannot export data, --export-key='{key}' not in {ALLOWED_KEYS}"
+            )
         prefix = "{}_{}".format(args.bands, key)
         det_groups = {}
         for obs in data.obs:

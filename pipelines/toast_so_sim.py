@@ -84,6 +84,7 @@ def parse_arguments(comm):
     toast_tools.add_sss_args(parser)
     toast_tools.add_tidas_args(parser)
     toast_tools.add_mc_args(parser)
+    so_tools.add_corotator_args(parser)
     so_tools.add_time_constant_args(parser)
     so_tools.add_demodulation_args(parser)
     so_tools.add_h_n_args(parser)
@@ -198,7 +199,7 @@ def main():
     else:
         # Load and broadcast the schedule file
 
-        schedules = so_tools.load_so_schedule(args, comm)
+        schedules = toast_tools.load_schedule(args, comm)
 
         # Load the weather and append to schedules
 
@@ -224,6 +225,10 @@ def main():
     # Split the communicator for day and season mapmaking
 
     time_comms = toast_tools.get_time_communicators(args, comm, data)
+
+    # Rotate the LAT focalplane around the boresight based on co-rotator position
+
+    so_tools.rotate_focalplane(args, data, comm)
 
     # Expand boresight quaternions into detector pointing weights and
     # pixel numbers

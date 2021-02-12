@@ -283,6 +283,7 @@ def load_file(filename, dets=None, signal_only=False):
     subreq.extend([
         FieldGroup('boresight', ['az', 'el', 'roll']),
         Field('hwp_angle', optional=True),
+        Field('corotator_angle', optional=True),
         'site_position',
         'site_velocity',
         'boresight_azel',
@@ -334,6 +335,10 @@ def load_file(filename, dets=None, signal_only=False):
 
         if 'hwp_angle' in streams:
             aman.wrap('hwp_angle', hstack_into(None, streams['hwp_angle']),
+                      [(0, 'samps')])
+
+        if 'corotator_angle' in streams:
+            aman.wrap('corotator_angle', hstack_into(None, streams['corotator_angle']),
                       [(0, 'samps')])
 
     # Copy in the signal, for each file.
@@ -416,6 +421,7 @@ def load_observation(db, obs_id, dets=None, prefix=None):
             subreq.extend([
                 FieldGroup('boresight', ['az', 'el', 'roll']),
                 Field('hwp_angle', optional=True),
+                Field('corotator_angle', optional=True),
                 'site_position',
                 'site_velocity',
                 'boresight_azel',
@@ -461,6 +467,10 @@ def load_observation(db, obs_id, dets=None, prefix=None):
 
             if 'hwp_angle' in streams:
                 aman.wrap('hwp_angle', hstack_into(None, streams['hwp_angle']),
+                          [(0, 'samps')])
+
+            if 'corotator_angle' in streams:
+                aman.wrap('corotator_angle', hstack_into(None, streams['corotator_angle']),
                           [(0, 'samps')])
 
         # Copy in the signal, for each file.
