@@ -136,6 +136,17 @@ class FootprintTest(unittest.TestCase):
                 with self.assertRaises(ValueError, msg=msg):
                     sg = coords.get_supergeom((m1.shape, m1.wcs), (m2.shape, m2.wcs))
 
+class CoordsUtilsTest(unittest.TestCase):
+    def test_valid_arg(self):
+        from sotodlib.coords.helpers import _valid_arg
+        tod = core.AxisManager()
+        tod.wrap('a', np.array([1,2,3]))
+        self.assertIs(_valid_arg(None, 'a', src=tod), tod.a)
+        self.assertIs(_valid_arg('a', None, src=tod), tod.a)
+        self.assertIs(_valid_arg(None, tod.a), tod.a)
+        self.assertIs(_valid_arg(tod.get('b')), None)
+        self.assertIs(_valid_arg(tod.get('b'), 'a', src=tod), tod.a)
+
 
 if __name__ == '__main__':
     unittest.main()
