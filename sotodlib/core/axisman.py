@@ -353,6 +353,11 @@ class AxisManager:
     def keys(self):
         return list(self._fields.keys()) + list(self._axes.keys())
 
+    def get(self, key, default=None):
+        if key in self:
+            return self[key]
+        return default
+
     def shape_str(self, name):
         s = []
         for n, ax in zip(self._fields[name].shape, self._assignments[name]):
