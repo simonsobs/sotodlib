@@ -2,7 +2,7 @@ import so3g.proj
 import numpy as np
 import scipy
 
-from .helpers import _find_field
+from .helpers import _find_field, _get_csl, _valid_arg
 
 
 class P:
@@ -73,12 +73,21 @@ class P:
                  sight=None, rot=None, cuts=None):
         if sight is None:
             timestamps = _find_field(tod, 'timestamps',  timestamps)
-            boresight  = _find_field(tod, 'boresight',   boresight)
-            sight = so3g.proj.CelestialSightLine.az_el(
-                timestamps, boresight.az, boresight.el, roll=boresight.roll,
-                site='so', weather='typical')
+            boresight_cel = tod.get('boresight_cel')
+            if boresight_cel is not None:
+                roll = 0.
+                if 'roll' in boresight_cel:
+                    roll = boresight_cel.roll
+                sight = so3g.proj.CelestialSightLine.for_lonlat(
+                    boresight_cel.ra, boresight_cel.dec, roll)
+            else:
+                boresight = _valid_arg(boresight, 'boresight', src=tod)
+                assert(boresight is not None)
+                sight = so3g.proj.CelestialSightLine.az_el(
+                    timestamps, boresight.az, boresight.el, roll=boresight.roll,
+                    site='so', weather='typical')
         else:
-            sight = so3g.proj.quat.G3VectorQuat(sight)
+            sight = _get_csl(sight)
         # Set up the detectors in the focalplane
         dets       = _find_field(tod, tod.dets.vals, dets)
         fp         = _find_field(tod, 'focal_plane', focal_plane)
@@ -332,5 +341,6 @@ class P:
                     self.proj.q_celestial_to_native *= self.rot
                 self.threads = self.proj.assign_threads(self.asm)
                 if self.cuts:
+                    # This is wrong, threads are postive and cuts are negative.
                     self.threads *= self.cuts
         return self.proj, self.threads
