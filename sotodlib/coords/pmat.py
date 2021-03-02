@@ -82,12 +82,11 @@ class P:
 
     """
     def __init__(self, sight=None, fp=None, geom=None, comps='T',
-                 rot=None, cuts=None, threads=None, det_weights=None):
+                 cuts=None, threads=None, det_weights=None):
         self.sight = sight
         self.fp = fp
         self.geom = geom
         self.comps = comps
-        self.rot = rot
         self.cuts = cuts
         self.threads = threads
         self.det_weights = det_weights
@@ -113,12 +112,16 @@ class P:
                     site='so', weather='typical')
         else:
             sight = _get_csl(sight)
+        # Apply an out-going rotation?
+        if rot is not None:
+            sight.Q = rot * sight.Q
+
         # Set up the detectors in the focalplane
         fp = _find_field(tod, 'focal_plane', focal_plane)
         fp = so3g.proj.quat.rotation_xieta(fp.xi, fp.eta, fp.get('gamma'))
 
         return cls(sight=sight, fp=fp, geom=geom, comps=comps,
-                   rot=rot, cuts=cuts, threads=threads, det_weights=det_weights)
+                   cuts=cuts, threads=threads, det_weights=det_weights)
 
     @classmethod
     def for_geom(cls, tod, geom, comps='TQU', timestamps=None,
@@ -326,10 +329,7 @@ class P:
     def _get_proj(self):
         if self.geom is None:
             raise ValueError("Can't project without a geometry!")
-        proj = so3g.proj.Projectionist.for_geom(*self.geom)
-        if self.rot:
-            proj.q_celestial_to_native *= self.rot
-        return proj
+        return so3g.proj.Projectionist.for_geom(*self.geom)
 
     def _get_proj_threads(self):
         """Return the Projectionist and thread assignment for the present
