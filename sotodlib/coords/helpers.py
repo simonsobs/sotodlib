@@ -66,10 +66,12 @@ def _valid_arg(*args, src=None):
             return a
     return None
 
-def _find_field(axisman, default, provided):
-    """Temporary wrapper for _valid_arg..."""
-    return _valid_arg(provided, default, src=axisman)
-
+def _not_both(a, b, name='{item}'):
+    if a is not None:
+        if b is not None:
+            raise ValueError('self.%s and kwarg %s both not None!' % (name, name))
+        return a
+    return b
 
 def get_radec(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
               boresight=None, sight=None):
