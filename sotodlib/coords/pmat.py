@@ -3,7 +3,7 @@ import numpy as np
 import scipy
 from pixell import enmap
 
-from .helpers import _find_field, _get_csl, _valid_arg
+from .helpers import _get_csl, _valid_arg, _not_both
 
 
 class P:
@@ -40,11 +40,18 @@ class P:
       it will be looked up in tod.  Defaults to 'signal'.
     - det_weights: A vector of floats representing the inverse
       variance of each detector, under the assumption of white noise.
+    - cuts: A RangesMatrix that identifies samples that should be
+      excluded from projection operations.
     - comps: the component code (e.g. 'T', 'TQU', 'QU', ...) that
       specifies the spin-components being modeled in the map.
     - dest: the appropriately shaped array in which to place the
       computed result (as an alternative to allocating a new object to
       store the result).
+
+    Note that in the case of det_weights and cuts, the Projection
+    Matrix may also have cached values for those.  It is an error to
+    pass either of these as a keyword argument to a projection routine
+    if a value has been cached for it.
 
     Objects of this class cache certain pre-computed information (such
     as the rotation taking boresight coordinates to celestial
@@ -97,7 +104,6 @@ class P:
                 rot=None, cuts=None, threads=None, det_weights=None,
                 timestamps=None, focal_plane=None, boresight=None):
         if sight is None:
-            timestamps = _find_field(tod, 'timestamps',  timestamps)
             boresight_cel = tod.get('boresight_cel')
             if boresight_cel is not None:
                 roll = 0.
@@ -106,6 +112,7 @@ class P:
                 sight = so3g.proj.CelestialSightLine.for_lonlat(
                     boresight_cel.ra, boresight_cel.dec, roll)
             else:
+                timestamps = _valid_arg(timestamps, 'timestamps',  src=tod)
                 boresight = _valid_arg(boresight, 'boresight', src=tod)
                 assert(boresight is not None)
                 sight = so3g.proj.CelestialSightLine.az_el(
@@ -118,7 +125,7 @@ class P:
             sight.Q = rot * sight.Q
 
         # Set up the detectors in the focalplane
-        fp = _find_field(tod, 'focal_plane', focal_plane)
+        fp = _valid_arg(focal_plane, 'focal_plane', src=tod)
         fp = so3g.proj.quat.rotation_xieta(fp.xi, fp.eta, fp.get('gamma'))
 
         return cls(sight=sight, fp=fp, geom=geom, comps=comps,
@@ -158,7 +165,8 @@ class P:
         proj = self._get_proj()
         return self._enmapify(proj.zeros(super_shape))
 
-    def to_map(self, tod=None, dest=None, comps=None, signal=None, det_weights=None):
+    def to_map(self, tod=None, dest=None, comps=None, signal=None,
+               det_weights=None, cuts=None):
         """Project time-ordered signal into a map.  This performs the operation
 
             m += P d
@@ -172,21 +180,25 @@ class P:
             initialized to zero.)
           signal: The time-ordered data, d.  If None, tod.signal is used.
           det_weights: The per-detector weight vector.  If None,
-            tod.det_weights will be used; if that is not set then
+            self.det_weights will be used; if that is not set then
             uniform weights of 1 are applied.
+          cuts: Sample cuts to exclude from processing.  If None,
+            self.cuts is used.
 
         """
-        signal      = _find_field(tod, 'signal', signal)
-        det_weights = _find_field(tod, None, det_weights)  # note defaults to None
+        signal = _valid_arg(signal, 'signal', src=tod)
+        det_weights = _not_both(det_weights, self.det_weights, 'det_weights')
+        cuts = _not_both(cuts, self.cuts, 'cuts')
 
         if comps is None: comps = self.comps
         if dest is None:  dest  = self.zeros(comps=comps)
 
-        proj, threads = self._get_proj_threads()
+        proj, threads = self._get_proj_threads(cuts=cuts)
         proj.to_map(signal, self._get_asm(), output=dest, det_weights=det_weights, comps=comps, threads=threads)
         return dest
 
-    def to_weights(self, tod=None, dest=None, comps=None, signal=None, det_weights=None):
+    def to_weights(self, tod=None, dest=None, comps=None, signal=None,
+                   det_weights=None, cuts=None):
         """Computes the weights matrix for the uncorrelated noise model and
         returns it.  I.e.:
 
@@ -204,9 +216,12 @@ class P:
           det_weights: The per-detector weight vector.  If None,
             tod.det_weights will be used; if that is not set then
             uniform weights of 1 are applied.
+          cuts: Sample cuts to exclude from processing.  If None,
+            self.cuts is used.
 
         """
-        det_weights = _find_field(tod, None, det_weights)  # note defaults to None
+        det_weights = _not_both(det_weights, self.det_weights, 'det_weights')
+        cuts = _not_both(cuts, self.cuts, 'cuts')
 
         if comps is None:
             comps = self.comps
@@ -214,19 +229,20 @@ class P:
             _n   = self.comp_count(comps)
             dest = self.zeros((_n, _n))
 
-        proj, threads = self._get_proj_threads()
+        proj, threads = self._get_proj_threads(cuts=cuts)
         proj.to_weights(self._get_asm(), output=dest, det_weights=det_weights, comps=comps, threads=threads)
         return dest
 
     def to_inverse_weights(self, weights_map=None, tod=None, dest=None,
-                           comps=None, signal=None, det_weights=None):
+                           comps=None, signal=None, det_weights=None, cuts=None):
         """Compute an inverse weights map, W^-1, from a weights map.  If no
         weights_map is passed in, it will be computed by calling
         to_weights, passing through all other arguments.
 
         """
         if weights_map is None:
-            weights_map = self.to_weights(tod=tod, comps=comps, signal=signal, det_weights=det_weights)
+            weights_map = self.to_weights(
+                tod=tod, comps=comps, signal=signal, det_weights=det_weights, cuts=cuts)
         # Invert in each pixel.
         if dest is None:
             dest = weights_map * 0
@@ -332,7 +348,7 @@ class P:
             raise ValueError("Can't project without a geometry!")
         return so3g.proj.Projectionist.for_geom(*self.geom)
 
-    def _get_proj_threads(self):
+    def _get_proj_threads(self, cuts=None):
         """Return the Projectionist and thread assignment for the present
         geometry.  If these have not yet been computed and cached, it
         is done now.
@@ -341,8 +357,10 @@ class P:
         proj = self._get_proj()
         if self.threads is None:
             self.threads = proj.assign_threads(self._get_asm())
-        if self.cuts:
-            return self.threads * ~self.cuts
+        if cuts is None:
+            cuts = self.cuts
+        if cuts:
+            return proj, self.threads * ~cuts
         return proj, self.threads
 
     def _get_asm(self):
