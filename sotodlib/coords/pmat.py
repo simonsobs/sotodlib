@@ -50,27 +50,52 @@ class P:
     coordinates) and certain context-dependent settings (such as a map
     shape, WCS, and spin-component configuration).  You may want to
     inspect or borrow these results, perhaps to reuse them when
-    constructing new instances with slight modifications.  Some of
-    those attributes are:
+    constructing new instances with slight modifications.  The cached
+    attributes are:
 
     - sight: A CelestialSightLine, representing the boresight pointing
-      in celestial coordinates.
-    - focal_plane: A FocalPlane, representing positions of detectors
-      in the focal plane.
+      in celestial coordinates. [samps]
+    - fp: G3VectorQuat representing the focal plane offsets of each
+      detector. [dets]
     - geom: The target map geometry (shape, wcs).
-    - comps: The spin-components being mapped, e.g. "T" or "TQU'.
-      This sets the leading dimension(s) of output maps.
-    - cuts: RangesMatrix indicating what samples to exclude from
-      projection operations (the indicated samples have projection
-      matrix element 0 in all components).
-    - threads: RangesMatrix that assigns ranges of samples to specific
-      threads.  This is necessary for TOD-to-map operations that use
-      OpenMP.
+    - comps: String indicating the spin-components to include in maps.
+      E.g., 'T', 'QU', 'TQU'.
+    - rot: quat giving an additional fixed rotation to apply to get
+      from boresight to celestial coordinates.  Not for long...
+    - cuts (optional): RangesMatrix indicating what samples to exclude
+      from projection operations (the indicated samples have
+      projection matrix element 0 in all components). [dets, samps]
+    - threads (optional): RangesMatrix that assigns ranges of samples
+      to specific threads.  This is necessary for TOD-to-map
+      operations that use OpenMP. [dets, samps]
+    - det_weights (optional): weights (one per detector) to apply to
+      time-ordered data when binning a map (and also when binning a
+      weights matrix).  [dets]
+
+    These things can be updated freely, with the following caveats:
+
+    - If the number of "samples" or "detectors" is changed in one
+      attribute, it will need to be changed in the others to match.
+    - The threads attribute, if in use, needs to be recomputed if
+      anything about the pointing changes (this includes map geometry
+      but does not include map components).
 
     """
-    def __init__(self, tod, geom=None, comps='TQU', dets=None,
-                 timestamps=None, focal_plane=None, boresight=None,
-                 sight=None, rot=None, cuts=None):
+    def __init__(self, sight=None, fp=None, geom=None, comps='T',
+                 rot=None, cuts=None, threads=None, det_weights=None):
+        self.sight = sight
+        self.fp = fp
+        self.geom = geom
+        self.comps = comps
+        self.rot = rot
+        self.cuts = cuts
+        self.threads = threads
+        self.det_weights = det_weights
+
+    @classmethod
+    def for_tod(cls, tod, sight=None, fp=None, geom=None, comps='T',
+                rot=None, cuts=None, threads=None, det_weights=None,
+                timestamps=None, focal_plane=None, boresight=None):
         if sight is None:
             timestamps = _find_field(tod, 'timestamps',  timestamps)
             boresight_cel = tod.get('boresight_cel')
@@ -89,54 +114,26 @@ class P:
         else:
             sight = _get_csl(sight)
         # Set up the detectors in the focalplane
-        dets       = _find_field(tod, tod.dets.vals, dets)
-        fp         = _find_field(tod, 'focal_plane', focal_plane)
-        fp         = so3g.proj.FocalPlane.from_xieta(dets, fp.xi, fp.eta, fp.gamma)
-        self.asm   = so3g.proj.Assembly.attach(sight, fp)
-        self.rot   = rot
-        self.cuts  = cuts
-        self.set_geom(geom)
-        self.default_comps = comps
+        fp = _find_field(tod, 'focal_plane', focal_plane)
+        fp = so3g.proj.quat.rotation_xieta(fp.xi, fp.eta, fp.get('gamma'))
+
+        return cls(sight=sight, fp=fp, geom=geom, comps=comps,
+                   rot=rot, cuts=cuts, threads=threads, det_weights=det_weights)
 
     @classmethod
-    def for_geom(cls, tod, geom, comps='TQU', dets=None, timestamps=None,
+    def for_geom(cls, tod, geom, comps='TQU', timestamps=None,
                  focal_plane=None, boresight=None, rot=None, cuts=None):
-        """This just passes all arguments to __init__, so perhaps we don't
-        need it.
-
-        """
-        return cls(tod, geom=geom, comps=comps, dets=dets,
-                   timestamps=timestamps, focal_plane=focal_plane,
-                   boresight=boresight, rot=rot, cuts=cuts)
-
-    def set_geom(self, geom, lazy=True):
-        """Set the geometry, self.geom.  If not lazy, then re-estimation of
-        proj threads is performed immediately (potentially expensive).
-
-        """
-        self.geom    = geom
-        self.proj    = None
-        self.threads = None
-        if not lazy:
-            self._get_proj_threads()
-
-    def set_cuts(self, cuts, lazy=True):
-        """Updates self.cuts.  If not lazy, then re-estimation of proj threads
-        is performed immediately (potentially expensive).
-
-        """
-        self.cuts    = cuts
-        self.proj    = None
-        self.threads = None
-        if not lazy:
-            self._get_proj_threads()
+        """Deprecated, use .for_tod."""
+        return cls.for_tod(tod, geom=geom, comps=comps,
+                           timestamps=timestamps, focal_plane=focal_plane,
+                           boresight=boresight, rot=rot, cuts=cuts)
 
     def comp_count(self, comps=None):
         """Returns the number of spin components for component code comps.
 
         """
         if comps is None:
-            comps = self.default_comps
+            comps = self.comps
         return len(comps)
 
     def zeros(self, super_shape=None, comps=None):
@@ -146,7 +143,7 @@ class P:
         Args:
           super_shape (tuple): The leading dimensions of the array.
             If None, self.comp_count(comps) is used.
-          comps: The component list, to override self.default_comps.
+          comps: The component list, to override self.comps.
 
         Returns:
           An enmap with shape super_shape + self.geom[0].
@@ -154,7 +151,7 @@ class P:
         """
         if super_shape is None:
             super_shape = (self.comp_count(comps), )
-        proj, _ = self._get_proj_threads()
+        proj = self._get_proj()
         return proj.zeros(super_shape)
 
     def to_map(self, tod=None, dest=None, comps=None, signal=None, det_weights=None):
@@ -178,11 +175,11 @@ class P:
         signal      = _find_field(tod, 'signal', signal)
         det_weights = _find_field(tod, None, det_weights)  # note defaults to None
 
-        if comps is None: comps = self.default_comps
+        if comps is None: comps = self.comps
         if dest is None:  dest  = self.zeros(comps=comps)
 
         proj, threads = self._get_proj_threads()
-        proj.to_map(signal, self.asm, output=dest, det_weights=det_weights, comps=comps, threads=threads)
+        proj.to_map(signal, self._get_asm(), output=dest, det_weights=det_weights, comps=comps, threads=threads)
         return dest
 
     def to_weights(self, tod=None, dest=None, comps=None, signal=None, det_weights=None):
@@ -208,13 +205,13 @@ class P:
         det_weights = _find_field(tod, None, det_weights)  # note defaults to None
 
         if comps is None:
-            comps = self.default_comps
+            comps = self.comps
         if dest is None:
             _n   = self.comp_count(comps)
             dest = self.zeros((_n, _n))
 
         proj, threads = self._get_proj_threads()
-        proj.to_weights(self.asm, output=dest, det_weights=det_weights, comps=comps, threads=threads)
+        proj.to_weights(self._get_asm(), output=dest, det_weights=det_weights, comps=comps, threads=threads)
         return dest
 
     def to_inverse_weights(self, weights_map=None, tod=None, dest=None,
@@ -310,14 +307,14 @@ class P:
         """
         assert cuts is None  # whoops, not implemented.
 
-        proj, _ = self._get_proj_threads()
+        proj = self._get_proj()
         if comps is None:
-            comps = self.default_comps
-        tod_shape = (len(self.asm.dets), len(self.asm.Q))
+            comps = self.comps
+        tod_shape = (len(self.fp), len(self.sight.Q))
         if dest is None:
             dest = np.zeros(tod_shape, np.float32)
-        assert(dest.shape == tod_shape)  # P.asm and dest argument disagree
-        proj.from_map(signal_map, self.asm, signal=dest, comps=comps)
+        assert(dest.shape == tod_shape)  # P.fp/P.sight and dest argument disagree
+        proj.from_map(signal_map, self._get_asm(), signal=dest, comps=comps)
 
         if wrap is not None:
             if wrap in tod:
@@ -326,21 +323,31 @@ class P:
 
         return dest
 
+    def _get_proj(self):
+        if self.geom is None:
+            raise ValueError("Can't project without a geometry!")
+        proj = so3g.proj.Projectionist.for_geom(*self.geom)
+        if self.rot:
+            proj.q_celestial_to_native *= self.rot
+        return proj
+
     def _get_proj_threads(self):
         """Return the Projectionist and thread assignment for the present
         geometry.  If these have not yet been computed and cached, it
         is done now.
 
         """
-        if self.proj is None:
-            if self.geom is None:
-                raise ValueError("Can't project without a geometry!")
-            else:
-                self.proj    = so3g.proj.Projectionist.for_geom(*self.geom)
-                if self.rot:
-                    self.proj.q_celestial_to_native *= self.rot
-                self.threads = self.proj.assign_threads(self.asm)
-                if self.cuts:
-                    # This is wrong, threads are postive and cuts are negative.
-                    self.threads *= self.cuts
-        return self.proj, self.threads
+        proj = self._get_proj()
+        if self.threads is None:
+            self.threads = proj.assign_threads(self._get_asm())
+        if self.cuts:
+            return self.threads * ~self.cuts
+        return proj, self.threads
+
+    def _get_asm(self):
+        """Bundles self.fp and self.sight into an "Assembly" for calling
+        so3g.proj routines."""
+        so3g_fp = so3g.proj.FocalPlane()
+        for i, q in enumerate(self.fp):
+            so3g_fp[f'a{i}'] = q
+        return so3g.proj.Assembly.attach(self.sight, so3g_fp)
