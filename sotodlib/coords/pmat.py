@@ -1,6 +1,7 @@
 import so3g.proj
 import numpy as np
 import scipy
+from pixell import enmap
 
 from .helpers import _find_field, _get_csl, _valid_arg
 
@@ -155,7 +156,7 @@ class P:
         if super_shape is None:
             super_shape = (self.comp_count(comps), )
         proj = self._get_proj()
-        return proj.zeros(super_shape)
+        return self._enmapify(proj.zeros(super_shape))
 
     def to_map(self, tod=None, dest=None, comps=None, signal=None, det_weights=None):
         """Project time-ordered signal into a map.  This performs the operation
@@ -270,7 +271,7 @@ class P:
         if signal_map is None:
             signal_map = self.to_map(**kwargs)
         if dest is None:
-            dest = np.empty(signal_map.shape, signal_map.dtype)
+            dest = self._enmapify(np.empty(signal_map.shape, signal_map.dtype))
         # Is there really no way to avoid looping over pixels?
         iw = inverse_weights_map.reshape(inverse_weights_map.shape[:2] + (-1,))
         sm = signal_map.reshape(signal_map.shape[:1] + (-1,))
@@ -351,3 +352,12 @@ class P:
         for i, q in enumerate(self.fp):
             so3g_fp[f'a{i}'] = q
         return so3g.proj.Assembly.attach(self.sight, so3g_fp)
+
+    def _enmapify(self, data):
+        """Promote a numpy.ndarray to an enmap.ndmap by attaching
+        wcs=self.geom[1].  In sensible cases (e.g. data is an ndarray
+        or ndmap) this will not cause a copy of the underlying data
+        array.
+
+        """
+        return enmap.ndmap(data, wcs=self.geom[1])
