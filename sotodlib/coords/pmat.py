@@ -108,6 +108,15 @@ class P:
                 rot=None, cuts=None, threads=None, det_weights=None,
                 timestamps=None, focal_plane=None, boresight=None,
                 wcs_kernel=None):
+        """Set up a Projection Matrix for a TOD.  This will ultimately call
+        the main P constructor, but some missing arguments will be
+        extracted from tod and computed along the way.
+
+        If sight is not included, it is computed from boresight.  If
+        geom is not specified, but a wcs_kernel is provided, then
+        get_footprint will be run to determine the geom.
+
+        """
         if sight is None:
             boresight_cel = tod.get('boresight_cel')
             if boresight_cel is not None:
@@ -147,21 +156,13 @@ class P:
                            timestamps=timestamps, focal_plane=focal_plane,
                            boresight=boresight, rot=rot, cuts=cuts)
 
-    def comp_count(self, comps=None):
-        """Returns the number of spin components for component code comps.
-
-        """
-        if comps is None:
-            comps = self.comps
-        return len(comps)
-
     def zeros(self, super_shape=None, comps=None):
         """Returns an enmap concordant with this object's configured geometry
         and component count.
 
         Args:
           super_shape (tuple): The leading dimensions of the array.
-            If None, self.comp_count(comps) is used.
+            If None, self._comp_count(comps) is used.
           comps: The component list, to override self.comps.
 
         Returns:
@@ -169,7 +170,7 @@ class P:
 
         """
         if super_shape is None:
-            super_shape = (self.comp_count(comps), )
+            super_shape = (self._comp_count(comps), )
         proj = self._get_proj()
         return self._enmapify(proj.zeros(super_shape))
 
@@ -234,7 +235,7 @@ class P:
         if comps is None:
             comps = self.comps
         if dest is None:
-            _n   = self.comp_count(comps)
+            _n   = self._comp_count(comps)
             dest = self.zeros((_n, _n))
 
         proj, threads = self._get_proj_threads(cuts=cuts)
@@ -342,6 +343,14 @@ class P:
             tod.wrap(wrap, dest, [(0, 'dets'), (1, 'samps')])
 
         return dest
+
+    def _comp_count(self, comps=None):
+        """Returns the number of spin components for component code comps.
+
+        """
+        if comps is None:
+            comps = self.comps
+        return len(comps)
 
     def _get_proj(self):
         if self.geom is None:
