@@ -21,6 +21,12 @@ def add_sim_sso_args(parser):
         required=False,
         help="Pickle file containing instrumental beam",
     )
+    parser.add_argument(
+        "--sso-freq",
+        required=False,
+        help="Frequency at which to calculate sso temperature",
+    )
+
     return
 
 
@@ -38,7 +44,7 @@ def apply_sim_sso(args, comm, data, mc, totalname, verbose=True):
         if comm.world_rank == 0 and verbose:
             print("Simulating {}".format(sso_name), flush=True)
 
-        sim_sso = OpSimSSO(sso_name, args.beam_file, out=totalname)
+        sim_sso = OpSimSSO(sso_name, args.beam_file, args.sso_freq, out=totalname)
         sim_sso.exec(data)
 
         if comm.world_rank == 0 and verbose:
