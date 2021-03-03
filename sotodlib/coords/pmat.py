@@ -4,6 +4,10 @@ import scipy
 from pixell import enmap
 
 from .helpers import _get_csl, _valid_arg, _not_both
+from . import helpers
+
+import logging
+logger = logging.getLogger(__name__)
 
 
 class P:
@@ -241,6 +245,7 @@ class P:
 
         """
         if weights_map is None:
+            logger.info('to_inverse_weights: calling .to_weights')
             weights_map = self.to_weights(
                 tod=tod, comps=comps, signal=signal, det_weights=det_weights, cuts=cuts)
         # Invert in each pixel.
@@ -250,13 +255,8 @@ class P:
             s = weights_map[0,0] != 0
             dest[0,0][s] = 1./weights_map[0,0][s]
         else:
-            temp_shape = weights_map.shape[:2] + (-1,)
-            w_reshaped = weights_map.reshape(temp_shape)
-            dest.shape = temp_shape
-            # This is a strong candidate for C-ification.
-            for i in range(dest.shape[2]):
-                dest[:,:,i] = scipy.linalg.pinvh(w_reshaped[:,:,i], lower=False)
-            dest.shape = weights_map.shape
+            logger.info('to_inverse_weights: _invert_weights_map')
+            dest[:] = helpers._invert_weights_map(weights_map, UPLO='U')
         return dest
 
     def remove_weights(self, signal_map=None, weights_map=None, inverse_weights_map=None,
@@ -288,13 +288,9 @@ class P:
             signal_map = self.to_map(**kwargs)
         if dest is None:
             dest = self._enmapify(np.empty(signal_map.shape, signal_map.dtype))
-        # Is there really no way to avoid looping over pixels?
-        iw = inverse_weights_map.reshape(inverse_weights_map.shape[:2] + (-1,))
-        sm = signal_map.reshape(signal_map.shape[:1] + (-1,))
-        dest.shape = sm.shape
-        for i in range(sm.shape[1]):
-            dest[:,i] = np.dot(iw[:,:,i], sm[:,i])
-        dest.shape = signal_map.shape
+
+        dest[:] = helpers._apply_inverse_weights_map(
+            inverse_weights_map, signal_map)
         return dest
 
     def from_map(self, signal_map, dest=None, comps=None, wrap=None,
