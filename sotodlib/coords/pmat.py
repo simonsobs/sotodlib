@@ -106,7 +106,8 @@ class P:
     @classmethod
     def for_tod(cls, tod, sight=None, fp=None, geom=None, comps='T',
                 rot=None, cuts=None, threads=None, det_weights=None,
-                timestamps=None, focal_plane=None, boresight=None):
+                timestamps=None, focal_plane=None, boresight=None,
+                wcs_kernel=None):
         if sight is None:
             boresight_cel = tod.get('boresight_cel')
             if boresight_cel is not None:
@@ -131,6 +132,9 @@ class P:
         # Set up the detectors in the focalplane
         fp = _valid_arg(focal_plane, 'focal_plane', src=tod)
         fp = so3g.proj.quat.rotation_xieta(fp.xi, fp.eta, fp.get('gamma'))
+
+        if geom is None and wcs_kernel is not None:
+            geom = helpers.get_footprint(tod, wcs_kernel, sight=sight)
 
         return cls(sight=sight, fp=fp, geom=geom, comps=comps,
                    cuts=cuts, threads=threads, det_weights=det_weights)
