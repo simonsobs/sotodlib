@@ -47,13 +47,14 @@ class OpSimSSO(Operator):
              simulate and observe
     """
 
-    def __init__(self, sso_name,  beam_file, out="sso", report_timing=False):
+    def __init__(self, sso_name,  beam_file, sso_freq, out="sso", report_timing=False):
         # Call the parent class constructor
         super().__init__()
 
         self.sso_name = sso_name
         self.sso = getattr(ephem, sso_name)()
         self._beam_file = beam_file
+        self.sso_freq = sso_freq
         self._out = out
         self._report_timing = report_timing
         return
@@ -118,6 +119,29 @@ class OpSimSSO(Operator):
                 tmr.stop()
                 tmr.report("{}Simulated and observed SSO signal".format(prefix))
         return
+    
+    def _get_planet_temp(self,sso_name,freq):
+        """
+        Get the thermodynamic planet temperature given
+        the frequency
+        """
+        freqs = [30,44,70,100,143,217,353]
+
+        t_jupyter = [144.5, 159.1, 171.9, 172.6, 174.1, 175.8, 167.4]
+        t_saturn = [138.9, 147.3, 150.6, 145.7, 147.1, 145.1, 141.6]
+        t_mars = [183, 187, 183, 194.3, 198.4, 201.9, 209.9]
+        t_uranus = [190, 230, 138, 120.5, 108.4, 120.5, 98.5, 86.2]
+
+        if sso_name == 'Jupiter':
+            temp = scipy.interpolate.interp1d(freqs,t_jupyter)(freq)
+        elif sso_name == 'Saturn':
+            temp = scipy.interpolate.interp1d(freqs,t_saturn)(freq)
+        elif sso_name == 'Mars':
+            temp = scipy.interpolate.interp1d(freqs,t_mars)(freq)
+        elif sso_name == 'Uranus':
+            temp = scipy.interpolate.interp1d(freqs,t_uranus)(freq)
+
+        self.ttemp = temp
 
     def _get_beam_map(self, det, sso_dia):
         """
@@ -135,7 +159,8 @@ class OpSimSSO(Operator):
         size = description[0][0]
         sso_radius_avg = np.average(sso_dia)/2. # in arcsed
         sso_solid_angle = np.pi*np.radians(sso_radius_avg/3600)**2
-        amp = 165 * sso_solid_angle/beam_solid_angle #Information for Mars from Wiki
+        self._get_planet_temp(self.sso_name, self.sso_freq)
+        amp = self.ttemp * sso_solid_angle/beam_solid_angle
         w = np.radians(size/2)
         x = np.linspace(-w, w, n)
         y = np.linspace(-w, w, n)
