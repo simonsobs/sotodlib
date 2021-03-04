@@ -117,24 +117,34 @@ class P:
     def for_tod(cls, tod, sight=None, fp=None, geom=None, comps='T',
                 rot=None, cuts=None, threads=None, det_weights=None,
                 timestamps=None, focal_plane=None, boresight=None,
-                wcs_kernel=None):
+                boresight_equ=None, wcs_kernel=None):
         """Set up a Projection Matrix for a TOD.  This will ultimately call
         the main P constructor, but some missing arguments will be
         extracted from tod and computed along the way.
 
-        If sight is not included, it is computed from boresight.  If
-        geom is not specified, but a wcs_kernel is provided, then
-        get_footprint will be run to determine the geom.
+        To determine the boresight pointing in celestial coordinates
+        (ultimately passed to constructor as sight=), the first
+        non-None item in the following list is used:
+
+        - the sight= keyword argument.
+        - the boresight_equ= keyword argument.
+        - the boresight= keyword argument
+        - tod.get('boresight_equ')
+        - tod.get('boresight')
+
+        If the map geometry geom is not specified, but the wcs_kernel
+        is provided, then get_footprint will be called to determine
+        the geom.
 
         """
+
         if sight is None:
-            boresight_cel = tod.get('boresight_cel')
-            if boresight_cel is not None:
-                roll = 0.
-                if 'roll' in boresight_cel:
-                    roll = boresight_cel.roll
+            if boresight_equ is None:
+                if boresight is None:
+                    boresight_equ = tod.get('boresight_equ')
+            if boresight_equ is not None:
                 sight = so3g.proj.CelestialSightLine.for_lonlat(
-                    boresight_cel.ra, boresight_cel.dec, roll)
+                    boresight_equ.ra, boresight_equ.dec, boresight_equ.get('psi'))
             else:
                 timestamps = _valid_arg(timestamps, 'timestamps',  src=tod)
                 boresight = _valid_arg(boresight, 'boresight', src=tod)
@@ -144,7 +154,8 @@ class P:
                     site='so', weather='typical')
         else:
             sight = _get_csl(sight)
-        # Apply an out-going rotation?
+
+        # Apply a rotation from equatorial to map WCS coordinates.
         if rot is not None:
             sight.Q = rot * sight.Q
 
