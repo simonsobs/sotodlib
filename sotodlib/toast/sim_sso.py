@@ -11,7 +11,7 @@ from toast.mpi import MPI
 import toast.qarray as qa
 import healpy as hp
 from scipy.constants import au as AU
-from scipy.interpolate import RectBivariateSpline
+from scipy.interpolate import RectBivariateSpline, interp1d
 import pickle
 
 
@@ -120,12 +120,12 @@ class OpSimSSO(Operator):
                 tmr.report("{}Simulated and observed SSO signal".format(prefix))
         return
     
-    def _get_planet_temp(self,sso_name,freq):
+    def _get_planet_temp(self, sso_name, freq):
         """
         Get the thermodynamic planet temperature given
         the frequency
         """
-        freqs = [30,44,70,100,143,217,353]
+        freqs = [30, 44, 70, 100, 143, 217, 353]
 
         t_jupyter = [144.5, 159.1, 171.9, 172.6, 174.1, 175.8, 167.4]
         t_saturn = [138.9, 147.3, 150.6, 145.7, 147.1, 145.1, 141.6]
@@ -133,13 +133,15 @@ class OpSimSSO(Operator):
         t_uranus = [129.43, 133.66, 135.87, 120.5, 108.4, 98.5, 86.2]
 
         if sso_name == 'Jupiter':
-            temp = scipy.interpolate.interp1d(freqs,t_jupyter)(freq)
+            temp = scipy.interpolate.interp1d(freqs, t_jupyter)(freq)
         elif sso_name == 'Saturn':
-            temp = scipy.interpolate.interp1d(freqs,t_saturn)(freq)
+            temp = scipy.interpolate.interp1d(freqs, t_saturn)(freq)
         elif sso_name == 'Mars':
-            temp = scipy.interpolate.interp1d(freqs,t_mars)(freq)
+            temp = scipy.interpolate.interp1d(freqs, t_mars)(freq)
         elif sso_name == 'Uranus':
-            temp = scipy.interpolate.interp1d(freqs,t_uranus)(freq)
+            temp = scipy.interpolate.interp1d(freqs, t_uranus)(freq)
+        else:
+            raise ValueError('Unknown planet name')
 
         self.ttemp = temp
 
