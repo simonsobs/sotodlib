@@ -92,6 +92,16 @@ class P:
       anything about the pointing changes (this includes map geometry
       but does not include map components).
 
+    Setting the "threads" argument to certain special values will
+    activate different threading computation algorithms:
+
+    - False: do not use threading; to_map projections will be
+      single-threaded.
+    - 'simple' (or None): compute self.threads using simple map-stripe
+      algorithm.
+    - 'domdir': compute self.threads using dominant-direction
+      algorithm.
+
     """
     def __init__(self, sight=None, fp=None, geom=None, comps='T',
                  cuts=None, threads=None, det_weights=None):
@@ -359,15 +369,26 @@ class P:
 
     def _get_proj_threads(self, cuts=None):
         """Return the Projectionist and thread assignment for the present
-        geometry.  If these have not yet been computed and cached, it
-        is done now.
+        geometry.  If self.threads has not yet been computed, it is
+        done now.
 
         """
         proj = self._get_proj()
-        if self.threads is None:
-            self.threads = proj.assign_threads(self._get_asm())
         if cuts is None:
             cuts = self.cuts
+        if self.threads is False:
+            return proj, cuts
+        if self.threads is None:
+            self.threads = 'simple'
+        if isinstance(self.threads, str):
+            if self.threads == 'simple':
+                self.threads = proj.assign_threads(self._get_asm())
+            elif self.threads == 'domdir':
+                asm = self._get_asm()
+                self.threads = so3g.proj.mapthreads.get_threads_domdir(
+                    asm, asm.dets, *self.geom)
+            else:
+                raise ValueError('Request for unknown algo threads="%s"' % self.threads)
         if cuts:
             return proj, self.threads * ~cuts
         return proj, self.threads
