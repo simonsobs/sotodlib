@@ -353,6 +353,11 @@ class AxisManager:
     def keys(self):
         return list(self._fields.keys()) + list(self._axes.keys())
 
+    def get(self, key, default=None):
+        if key in self:
+            return self[key]
+        return default
+
     def shape_str(self, name):
         s = []
         for n, ax in zip(self._fields[name].shape, self._assignments[name]):
@@ -538,6 +543,59 @@ class AxisManager:
         helper._assignments[name] = assign
         return self.merge(helper)
 
+    def wrap_new(self, name, shape=None, cls=None, **kwargs):
+        """Create a new object and wrap it, with axes mapped.  The shape can
+        include axis names instead of ints, and that will cause the
+        new object to be dimensioned properly and its axes mapped.
+
+        Args:
+
+          name (str): name of the new data.
+
+          shape (tuple of int and std): shape in the same sense as
+            numpy, except that instead of int it is allowed to pass
+            the name of a managed axis.
+
+          cls (callable): Constructor that should be used to construct
+            the object; it will be called with all kwargs passed to
+            this function, and with the resolved shape as described
+            here.  Defaults to numpy.ndarray.
+
+        Examples:
+
+            Construct a 2d array and assign it the name
+            'boresight_quat', with its first axis mapped to the
+            AxisManager tod's "samps" axis:
+
+            >>> tod.wrap_new('boresight_quat', shape=('samps', 4), dtype='float64')
+
+            Create a new empty RangesMatrix, carrying a per-det, per-samp flags:
+
+            >>> tod.wrap_new('glitch_flags', shape=('dets', 'samps'),
+                             cls=so3g.proj.RangesMatrix.zeros)
+
+        """
+        if cls is None:
+            cls = np.zeros
+        # Turn the shape into a tuple of ints and an axis map.
+        shape_ints, axis_map = [], []
+        for dim, s in enumerate(shape):
+            if isinstance(s, int):
+                shape_ints.append(s)
+            elif isinstance(s, str):
+                if s in self._axes:
+                    shape_ints.append(self._axes[s].count)
+                    axis_map.append((dim, self._axes[s]))
+                else:
+                    raise ValueError(f'shape includes axis "{s}" which is '
+                                     f'not in _axes: {self._axes}')
+            elif isinstance(s, AxisInterface):
+                # Sure, why not.
+                shape_ints.append(s.count)
+                axis_map.append((dim, s.copy()))
+        data = cls(shape=shape_ints, **kwargs)
+        return self.wrap(name, data, axis_map=axis_map)[name]
+
     def restrict_axes(self, axes, in_place=True):
         """Restrict this AxisManager by intersecting it with a set of Axis
         definitions.
@@ -681,6 +739,8 @@ class AxisManager:
                 if k not in self._axes:
                     self._axes[k] = v
             for k, v in aman._fields.items():
+                if k in self._fields:
+                    raise ValueError(f'Key: {k} found in {self} and {aman}')
                 assert(k not in self._fields)
                 self._fields[k] = v
             self._assignments.update(aman._assignments)

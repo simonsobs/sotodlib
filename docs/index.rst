@@ -15,6 +15,7 @@ Welcome to SOTODLib's documentation!
    axisman.rst
    context.rst
    tod_ops.rst
+   coords.rst
    reference.rst
    dev.rst
 

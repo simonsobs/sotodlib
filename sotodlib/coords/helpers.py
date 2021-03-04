@@ -4,30 +4,107 @@ from pixell import enmap, wcsutils, utils
 
 DEG = np.pi/180
 
-def _find_field(axisman, default, provided):
-    """This is a utility function for the pattern where a default should
-    be extracted from an AxisManager, unless an alternative key name
-    has been passed in, or simply an alternative array of values.
+
+def _get_csl(sight):
+    """Return the CelestialSightLine equivalent of sight.  If sight is
+    already of that class, it is returned.  If it's a G3VectorQuat or
+    an array [n,4], those coordinates are wrapped and returned (note a
+    reference may be taken rather than a copy made).
 
     """
-    if provided is None:
-        provided = default
-    if isinstance(provided, str):
-        return axisman[provided]
-    return provided
+    if isinstance(sight, so3g.proj.CelestialSightLine):
+        return sight
+    if isinstance(sight, so3g.proj.quat.G3VectorQuat):
+        c = so3g.proj.CelestialSightLine()
+        c.Q = sight
+        return c
+    qa = np.asarray(sight, dtype='float')
+    c = so3g.proj.CelestialSightLine()
+    c.Q = so3g.proj.quat.G3VectorQuat(qa)
+    return c
+
+def _valid_arg(*args, src=None):
+    """Return some data, possibly extracted from an AxisManager (or
+    dict...), based on the arguments args.  This is to help with
+    processing function arguments that override a default behavior
+    which is to look up a thing in axisman.  For example::
+
+      signal = _valid_arg(signal, 'signal', src=axisman)
+
+    is equivalent to::
+
+      if signal is None:
+          signal = 'signal'
+      if isinstance(signal, str):
+          signal = axisman[signal]
+
+    Similarly::
+
+        sight = _valid_arg(sight, src=axisman)
+
+    is a shorthand for::
+
+        if sight is not None:
+           if isinstance(sight, string):
+               sight = axisman[sight]
+
+    Each element of args should be either a data vector (non string),
+    a string, or None.  The arguments are processed in order.  The
+    first argument that is not None will cause the function to return;
+    if that argument k is a string, then axisman[k] is returned;
+    otherwise k is returned directly.  If all arguments are None, then
+    None is returned.
+
+    """
+    for a in args:
+        if a is not None:
+            if isinstance(a, str):
+                try:
+                    a = src[a]
+                except TypeError:
+                    raise TypeError(f"Tried to look up '{a}' in axisman={axisman}")
+            return a
+    return None
+
+def _find_field(axisman, default, provided):
+    """Temporary wrapper for _valid_arg..."""
+    return _valid_arg(provided, default, src=axisman)
+
 
 def get_radec(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
-              boresight=None):
-    dets = _find_field(tod, tod.dets.vals, dets)
-    timestamps = _find_field(tod, 'timestamps', timestamps)
-    boresight = _find_field(tod, 'boresight', boresight)
-    fp = _find_field(tod, 'focal_plane', focal_plane)
-    sight = so3g.proj.CelestialSightLine.az_el(
-        timestamps, boresight.az, boresight.el, roll=boresight.roll,
-        site='so', weather='typical')
+              boresight=None, sight=None):
+    """Get the celestial coordinates of all detectors at all times.
+
+    Args:
+      wrap (bool): If True, the output is stored into tod['radec'].
+        This can also be a string, in which case the result is stored
+        in tod[wrap].
+      dets (list of str): If set, then coordinates are only computed
+        for the requested detectors.  Note you probably can't wrap the
+        result, in this case, as the dets axis is non-concordant.
+
+    Returns:
+      The returned array has shape (n_det, n_samp, 4).  The four
+      components in the last dimension correspond to (lon, lat,
+      cos(psi), sin(psi)).  The lon and lat are in radians and
+      correspond to RA and dec of equatorial coordinates.  Psi is is
+      the parallactic rotation, measured from North towards West
+      (opposite the direction of standard Position Angle).
+
+    """
+    dets = _valid_arg(dets, tod.dets.vals, src=tod)
+    fp = _valid_arg(focal_plane, 'focal_plane', src=tod)
+    if sight is None:
+        timestamps = _valid_arg(timestamps, 'timestamps', src=tod)
+        boresight = _valid_arg(boresight, 'boresight', src=tod)
+        sight = so3g.proj.CelestialSightLine.az_el(
+            timestamps, boresight.az, boresight.el, roll=boresight.roll,
+            site='so', weather='typical')
+    else:
+        sight = _get_csl(_valid_arg(sight, 'sight', src=tod))
     fp = so3g.proj.FocalPlane.from_xieta(dets, fp.xi, fp.eta, fp.gamma)
     asm = so3g.proj.Assembly.attach(sight, fp)
-    output = np.zeros((len(dets), len(timestamps), 4))
+    output = np.zeros((len(dets), len(sight.Q), 4))
     proj = so3g.proj.Projectionist()
     proj.get_coords(asm, output=output)
     if wrap is True:
@@ -38,10 +115,29 @@ def get_radec(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
 
 def get_horiz(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
               boresight=None):
-    dets = _find_field(tod, tod.dets.vals, dets)
-    timestamps = _find_field(tod, 'timestamps', timestamps)
-    boresight = _find_field(tod, 'boresight', boresight)
-    fp = _find_field(tod, 'focal_plane', focal_plane)
+    """Get the horizon coordinates of all detectors at all times.
+
+    Args:
+      wrap (bool): If True, the output is stored into tod['horiz'].
+        This can also be a string, in which case the result is stored
+        in tod[wrap].
+      dets (list of str): If set, then coordinates are only computed
+        for the requested detectors.  Note you probably can't wrap the
+        result, in this case, as the dets axis is non-concordant.
+
+    Returns:
+      The returned array has shape (n_det, n_samp, 4).  The four
+      components in the last dimension correspond to (-lon, lat,
+      cos(psi), sin(psi)).  The -lon and lat are in radians and
+      correspond to horizon azimuth and elevation.  Psi is is
+      the parallactic rotation, measured from North towards West
+      (opposite the direction of standard Position Angle).
+
+    """
+    dets = _valid_arg(dets, tod.dets.vals, src=tod)
+    timestamps = _valid_arg(timestamps, 'timestamps', src=tod)
+    boresight = _valid_arg(boresight, 'boresight', src=tod)
+    fp = _valid_arg(focal_plane, 'focal_plane', src=tod)
 
     sight = so3g.proj.CelestialSightLine.for_horizon(
         timestamps, boresight.az, boresight.el, roll=boresight.roll)
@@ -60,10 +156,22 @@ def get_horiz(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
     return output
 
 def get_wcs_kernel(proj, ra, dec, res):
-    """Get a WCS "kernel" -- this is a WCS holding a single pixel
-    centered on CRVAL.
+    """Construct a WCS.  This fixes the projection type (e.g. CAR, TAN),
+    reference point (the special ra, dec), and resolution of a
+    pixelization, without specifying a particular grid of pixels.
 
-    This interface _will_ change.
+    This interface is subject to change.
+
+    Args:
+      proj (str): Name of the projection to use, as processed by
+        pixell.  E.g. 'car', 'cea', 'tan'.
+      ra: Right Ascension (longitude) of the reference position, in
+        radians.
+      dec: Declination (latitude) of the reference position, in
+        radians.
+      res: Resolution, in radians.
+
+    Returns a WCS object that captures the requested pixelization.
 
     """
     assert np.isscalar(res)  # This ain't enlib.
@@ -77,15 +185,19 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     big enough to contain all data from tod.  Returns (shape, wcs).
 
     """
-    dets = _find_field(tod, tod.dets.vals, dets)
-    fp0 = _find_field(tod, 'focal_plane', focal_plane)
+    dets = _valid_arg(dets, tod.dets.vals, src=tod)
+    fp0 = _valid_arg(focal_plane, 'focal_plane', src=tod)
+    if sight is None and 'sight' in tod:
+        sight = tod.sight
+    sight = _valid_arg(sight, tod.get('sight'), src=tod)
     if sight is None:
         # Let's try to either require a sightline or boresight info.
-        timestamps = _find_field(tod, 'timestamps', timestamps)
-        boresight = _find_field(tod, 'boresight', boresight)
+        timestamps = _valid_arg(timestamps, 'timestamps', src=tod)
+        boresight = _valid_arg(boresight, 'boresight', src=tod)
         sight = so3g.proj.CelestialSightLine.az_el(
             timestamps, boresight.az, boresight.el, roll=boresight.roll,
-            site='so', weather='typical')
+            site='so', weather='typical').Q
+    sight = _get_csl(sight)
     n_samp = len(sight.Q)
 
     # Do a simplest convex hull...

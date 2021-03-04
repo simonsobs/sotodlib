@@ -1,5 +1,6 @@
-# Copyright (c) 2018-2020 Simons Observatory.
+# Copyright (c) 2018-2021 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
+
 """Simons Observatory TOD Simulation and Processing.
 
 This package contains tools for simulating and analyzing data from the
@@ -19,3 +20,12 @@ Contents:
 from ._version import get_versions
 __version__ = get_versions()['version']
 del get_versions
+
+
+import logging
+logger = logging.getLogger(__name__)
+_log_fmt = '%(levelname)s: %(name)s: %(message)s'
+_ch = logging.StreamHandler()
+_ch.setLevel(logging.DEBUG)
+_ch.setFormatter(logging.Formatter(_log_fmt))
+logger.addHandler(_ch)
