@@ -1,2 +1,3 @@
 include versioneer.py
 include sotodlib/_version.py
+include sotodlib/toast/data/planet_data.h5
