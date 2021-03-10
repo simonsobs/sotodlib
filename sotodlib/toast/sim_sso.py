@@ -127,7 +127,8 @@ class OpSimSSO(Operator):
         the frequency
         """
 
-        hf = h5py.File('planet_data.h5', 'r')
+        dir_path = os.path.dirname(os.path.realpath(__file__))
+        hf = h5py.File(os.path.join(dir_path, 'data/planet_data.h5'), 'r')
         if sso_name in hf.keys():
             self.ttemp = np.array(hf.get(sso_name))
             self.t_freqs = np.array(hf.get('freqs'))
