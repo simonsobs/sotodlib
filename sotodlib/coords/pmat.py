@@ -1,8 +1,13 @@
 import so3g.proj
 import numpy as np
 import scipy
+from pixell import enmap
 
-from .helpers import _find_field
+from .helpers import _get_csl, _valid_arg, _not_both
+from . import helpers
+
+import logging
+logger = logging.getLogger(__name__)
 
 
 class P:
@@ -39,96 +44,138 @@ class P:
       it will be looked up in tod.  Defaults to 'signal'.
     - det_weights: A vector of floats representing the inverse
       variance of each detector, under the assumption of white noise.
+    - cuts: A RangesMatrix that identifies samples that should be
+      excluded from projection operations.
     - comps: the component code (e.g. 'T', 'TQU', 'QU', ...) that
       specifies the spin-components being modeled in the map.
     - dest: the appropriately shaped array in which to place the
       computed result (as an alternative to allocating a new object to
       store the result).
 
+    Note that in the case of det_weights and cuts, the Projection
+    Matrix may also have cached values for those.  It is an error to
+    pass either of these as a keyword argument to a projection routine
+    if a value has been cached for it.
+
     Objects of this class cache certain pre-computed information (such
     as the rotation taking boresight coordinates to celestial
     coordinates) and certain context-dependent settings (such as a map
     shape, WCS, and spin-component configuration).  You may want to
     inspect or borrow these results, perhaps to reuse them when
-    constructing new instances with slight modifications.  Some of
-    those attributes are:
+    constructing new instances with slight modifications.  The cached
+    attributes are:
 
     - sight: A CelestialSightLine, representing the boresight pointing
-      in celestial coordinates.
-    - focal_plane: A FocalPlane, representing positions of detectors
-      in the focal plane.
+      in celestial coordinates. [samps]
+    - fp: G3VectorQuat representing the focal plane offsets of each
+      detector. [dets]
     - geom: The target map geometry (shape, wcs).
-    - comps: The spin-components being mapped, e.g. "T" or "TQU'.
-      This sets the leading dimension(s) of output maps.
-    - cuts: RangesMatrix indicating what samples to exclude from
-      projection operations (the indicated samples have projection
-      matrix element 0 in all components).
-    - threads: RangesMatrix that assigns ranges of samples to specific
-      threads.  This is necessary for TOD-to-map operations that use
-      OpenMP.
+    - comps: String indicating the spin-components to include in maps.
+      E.g., 'T', 'QU', 'TQU'.
+    - rot: quat giving an additional fixed rotation to apply to get
+      from boresight to celestial coordinates.  Not for long...
+    - cuts (optional): RangesMatrix indicating what samples to exclude
+      from projection operations (the indicated samples have
+      projection matrix element 0 in all components). [dets, samps]
+    - threads (optional): RangesMatrix that assigns ranges of samples
+      to specific threads.  This is necessary for TOD-to-map
+      operations that use OpenMP. [dets, samps]
+    - det_weights (optional): weights (one per detector) to apply to
+      time-ordered data when binning a map (and also when binning a
+      weights matrix).  [dets]
+
+    These things can be updated freely, with the following caveats:
+
+    - If the number of "samples" or "detectors" is changed in one
+      attribute, it will need to be changed in the others to match.
+    - The threads attribute, if in use, needs to be recomputed if
+      anything about the pointing changes (this includes map geometry
+      but does not include map components).
+
+    Setting the "threads" argument to certain special values will
+    activate different threading computation algorithms:
+
+    - False: do not use threading; to_map projections will be
+      single-threaded.
+    - 'simple' (or None): compute self.threads using simple map-stripe
+      algorithm.
+    - 'domdir': compute self.threads using dominant-direction
+      algorithm.
 
     """
-    def __init__(self, tod, geom=None, comps='TQU', dets=None,
-                 timestamps=None, focal_plane=None, boresight=None,
-                 sight=None, rot=None, cuts=None):
-        if sight is None:
-            timestamps = _find_field(tod, 'timestamps',  timestamps)
-            boresight  = _find_field(tod, 'boresight',   boresight)
-            sight = so3g.proj.CelestialSightLine.az_el(
-                timestamps, boresight.az, boresight.el, roll=boresight.roll,
-                site='so', weather='typical')
-        else:
-            sight = so3g.proj.quat.G3VectorQuat(sight)
-        # Set up the detectors in the focalplane
-        dets       = _find_field(tod, tod.dets.vals, dets)
-        fp         = _find_field(tod, 'focal_plane', focal_plane)
-        fp         = so3g.proj.FocalPlane.from_xieta(dets, fp.xi, fp.eta, fp.gamma)
-        self.asm   = so3g.proj.Assembly.attach(sight, fp)
-        self.rot   = rot
-        self.cuts  = cuts
-        self.set_geom(geom)
-        self.default_comps = comps
+    def __init__(self, sight=None, fp=None, geom=None, comps='T',
+                 cuts=None, threads=None, det_weights=None):
+        self.sight = sight
+        self.fp = fp
+        self.geom = geom
+        self.comps = comps
+        self.cuts = cuts
+        self.threads = threads
+        self.det_weights = det_weights
 
     @classmethod
-    def for_geom(cls, tod, geom, comps='TQU', dets=None, timestamps=None,
+    def for_tod(cls, tod, sight=None, fp=None, geom=None, comps='T',
+                rot=None, cuts=None, threads=None, det_weights=None,
+                timestamps=None, focal_plane=None, boresight=None,
+                boresight_equ=None, wcs_kernel=None):
+        """Set up a Projection Matrix for a TOD.  This will ultimately call
+        the main P constructor, but some missing arguments will be
+        extracted from tod and computed along the way.
+
+        To determine the boresight pointing in celestial coordinates
+        (ultimately passed to constructor as sight=), the first
+        non-None item in the following list is used:
+
+        - the sight= keyword argument.
+        - the boresight_equ= keyword argument.
+        - the boresight= keyword argument
+        - tod.get('boresight_equ')
+        - tod.get('boresight')
+
+        If the map geometry geom is not specified, but the wcs_kernel
+        is provided, then get_footprint will be called to determine
+        the geom.
+
+        """
+
+        if sight is None:
+            if boresight_equ is None:
+                if boresight is None:
+                    boresight_equ = tod.get('boresight_equ')
+            if boresight_equ is not None:
+                sight = so3g.proj.CelestialSightLine.for_lonlat(
+                    boresight_equ.ra, boresight_equ.dec, boresight_equ.get('psi'))
+            else:
+                timestamps = _valid_arg(timestamps, 'timestamps',  src=tod)
+                boresight = _valid_arg(boresight, 'boresight', src=tod)
+                assert(boresight is not None)
+                sight = so3g.proj.CelestialSightLine.az_el(
+                    timestamps, boresight.az, boresight.el, roll=boresight.roll,
+                    site='so', weather='typical')
+        else:
+            sight = _get_csl(sight)
+
+        # Apply a rotation from equatorial to map WCS coordinates.
+        if rot is not None:
+            sight.Q = rot * sight.Q
+
+        # Set up the detectors in the focalplane
+        fp = _valid_arg(focal_plane, 'focal_plane', src=tod)
+        fp = so3g.proj.quat.rotation_xieta(fp.xi, fp.eta, fp.get('gamma'))
+
+        if geom is None and wcs_kernel is not None:
+            geom = helpers.get_footprint(tod, wcs_kernel, sight=sight)
+
+        return cls(sight=sight, fp=fp, geom=geom, comps=comps,
+                   cuts=cuts, threads=threads, det_weights=det_weights)
+
+    @classmethod
+    def for_geom(cls, tod, geom, comps='TQU', timestamps=None,
                  focal_plane=None, boresight=None, rot=None, cuts=None):
-        """This just passes all arguments to __init__, so perhaps we don't
-        need it.
-
-        """
-        return cls(tod, geom=geom, comps=comps, dets=dets,
-                   timestamps=timestamps, focal_plane=focal_plane,
-                   boresight=boresight, rot=rot, cuts=cuts)
-
-    def set_geom(self, geom, lazy=True):
-        """Set the geometry, self.geom.  If not lazy, then re-estimation of
-        proj threads is performed immediately (potentially expensive).
-
-        """
-        self.geom    = geom
-        self.proj    = None
-        self.threads = None
-        if not lazy:
-            self._get_proj_threads()
-
-    def set_cuts(self, cuts, lazy=True):
-        """Updates self.cuts.  If not lazy, then re-estimation of proj threads
-        is performed immediately (potentially expensive).
-
-        """
-        self.cuts    = cuts
-        self.proj    = None
-        self.threads = None
-        if not lazy:
-            self._get_proj_threads()
-
-    def comp_count(self, comps=None):
-        """Returns the number of spin components for component code comps.
-
-        """
-        if comps is None:
-            comps = self.default_comps
-        return len(comps)
+        """Deprecated, use .for_tod."""
+        return cls.for_tod(tod, geom=geom, comps=comps,
+                           timestamps=timestamps, focal_plane=focal_plane,
+                           boresight=boresight, rot=rot, cuts=cuts)
 
     def zeros(self, super_shape=None, comps=None):
         """Returns an enmap concordant with this object's configured geometry
@@ -136,19 +183,20 @@ class P:
 
         Args:
           super_shape (tuple): The leading dimensions of the array.
-            If None, self.comp_count(comps) is used.
-          comps: The component list, to override self.default_comps.
+            If None, self._comp_count(comps) is used.
+          comps: The component list, to override self.comps.
 
         Returns:
           An enmap with shape super_shape + self.geom[0].
 
         """
         if super_shape is None:
-            super_shape = (self.comp_count(comps), )
-        proj, _ = self._get_proj_threads()
-        return proj.zeros(super_shape)
+            super_shape = (self._comp_count(comps), )
+        proj = self._get_proj()
+        return self._enmapify(proj.zeros(super_shape))
 
-    def to_map(self, tod=None, dest=None, comps=None, signal=None, det_weights=None):
+    def to_map(self, tod=None, dest=None, comps=None, signal=None,
+               det_weights=None, cuts=None):
         """Project time-ordered signal into a map.  This performs the operation
 
             m += P d
@@ -162,21 +210,25 @@ class P:
             initialized to zero.)
           signal: The time-ordered data, d.  If None, tod.signal is used.
           det_weights: The per-detector weight vector.  If None,
-            tod.det_weights will be used; if that is not set then
+            self.det_weights will be used; if that is not set then
             uniform weights of 1 are applied.
+          cuts: Sample cuts to exclude from processing.  If None,
+            self.cuts is used.
 
         """
-        signal      = _find_field(tod, 'signal', signal)
-        det_weights = _find_field(tod, None, det_weights)  # note defaults to None
+        signal = _valid_arg(signal, 'signal', src=tod)
+        det_weights = _not_both(det_weights, self.det_weights, 'det_weights')
+        cuts = _not_both(cuts, self.cuts, 'cuts')
 
-        if comps is None: comps = self.default_comps
+        if comps is None: comps = self.comps
         if dest is None:  dest  = self.zeros(comps=comps)
 
-        proj, threads = self._get_proj_threads()
-        proj.to_map(signal, self.asm, output=dest, det_weights=det_weights, comps=comps, threads=threads)
+        proj, threads = self._get_proj_threads(cuts=cuts)
+        proj.to_map(signal, self._get_asm(), output=dest, det_weights=det_weights, comps=comps, threads=threads)
         return dest
 
-    def to_weights(self, tod=None, dest=None, comps=None, signal=None, det_weights=None):
+    def to_weights(self, tod=None, dest=None, comps=None, signal=None,
+                   det_weights=None, cuts=None):
         """Computes the weights matrix for the uncorrelated noise model and
         returns it.  I.e.:
 
@@ -194,29 +246,34 @@ class P:
           det_weights: The per-detector weight vector.  If None,
             tod.det_weights will be used; if that is not set then
             uniform weights of 1 are applied.
+          cuts: Sample cuts to exclude from processing.  If None,
+            self.cuts is used.
 
         """
-        det_weights = _find_field(tod, None, det_weights)  # note defaults to None
+        det_weights = _not_both(det_weights, self.det_weights, 'det_weights')
+        cuts = _not_both(cuts, self.cuts, 'cuts')
 
         if comps is None:
-            comps = self.default_comps
+            comps = self.comps
         if dest is None:
-            _n   = self.comp_count(comps)
+            _n   = self._comp_count(comps)
             dest = self.zeros((_n, _n))
 
-        proj, threads = self._get_proj_threads()
-        proj.to_weights(self.asm, output=dest, det_weights=det_weights, comps=comps, threads=threads)
+        proj, threads = self._get_proj_threads(cuts=cuts)
+        proj.to_weights(self._get_asm(), output=dest, det_weights=det_weights, comps=comps, threads=threads)
         return dest
 
     def to_inverse_weights(self, weights_map=None, tod=None, dest=None,
-                           comps=None, signal=None, det_weights=None):
+                           comps=None, signal=None, det_weights=None, cuts=None):
         """Compute an inverse weights map, W^-1, from a weights map.  If no
         weights_map is passed in, it will be computed by calling
         to_weights, passing through all other arguments.
 
         """
         if weights_map is None:
-            weights_map = self.to_weights(tod=tod, comps=comps, signal=signal, det_weights=det_weights)
+            logger.info('to_inverse_weights: calling .to_weights')
+            weights_map = self.to_weights(
+                tod=tod, comps=comps, signal=signal, det_weights=det_weights, cuts=cuts)
         # Invert in each pixel.
         if dest is None:
             dest = weights_map * 0
@@ -224,13 +281,8 @@ class P:
             s = weights_map[0,0] != 0
             dest[0,0][s] = 1./weights_map[0,0][s]
         else:
-            temp_shape = weights_map.shape[:2] + (-1,)
-            w_reshaped = weights_map.reshape(temp_shape)
-            dest.shape = temp_shape
-            # This is a strong candidate for C-ification.
-            for i in range(dest.shape[2]):
-                dest[:,:,i] = scipy.linalg.pinvh(w_reshaped[:,:,i], lower=False)
-            dest.shape = weights_map.shape
+            logger.info('to_inverse_weights: _invert_weights_map')
+            dest[:] = helpers._invert_weights_map(weights_map, UPLO='U')
         return dest
 
     def remove_weights(self, signal_map=None, weights_map=None, inverse_weights_map=None,
@@ -261,14 +313,10 @@ class P:
         if signal_map is None:
             signal_map = self.to_map(**kwargs)
         if dest is None:
-            dest = np.empty(signal_map.shape, signal_map.dtype)
-        # Is there really no way to avoid looping over pixels?
-        iw = inverse_weights_map.reshape(inverse_weights_map.shape[:2] + (-1,))
-        sm = signal_map.reshape(signal_map.shape[:1] + (-1,))
-        dest.shape = sm.shape
-        for i in range(sm.shape[1]):
-            dest[:,i] = np.dot(iw[:,:,i], sm[:,i])
-        dest.shape = signal_map.shape
+            dest = self._enmapify(np.empty(signal_map.shape, signal_map.dtype))
+
+        dest[:] = helpers._apply_inverse_weights_map(
+            inverse_weights_map, signal_map)
         return dest
 
     def from_map(self, signal_map, dest=None, comps=None, wrap=None,
@@ -301,14 +349,14 @@ class P:
         """
         assert cuts is None  # whoops, not implemented.
 
-        proj, _ = self._get_proj_threads()
+        proj = self._get_proj()
         if comps is None:
-            comps = self.default_comps
-        tod_shape = (len(self.asm.dets), len(self.asm.Q))
+            comps = self.comps
+        tod_shape = (len(self.fp), len(self.sight.Q))
         if dest is None:
             dest = np.zeros(tod_shape, np.float32)
-        assert(dest.shape == tod_shape)  # P.asm and dest argument disagree
-        proj.from_map(signal_map, self.asm, signal=dest, comps=comps)
+        assert(dest.shape == tod_shape)  # P.fp/P.sight and dest argument disagree
+        proj.from_map(signal_map, self._get_asm(), signal=dest, comps=comps)
 
         if wrap is not None:
             if wrap in tod:
@@ -317,20 +365,58 @@ class P:
 
         return dest
 
-    def _get_proj_threads(self):
-        """Return the Projectionist and thread assignment for the present
-        geometry.  If these have not yet been computed and cached, it
-        is done now.
+    def _comp_count(self, comps=None):
+        """Returns the number of spin components for component code comps.
 
         """
-        if self.proj is None:
-            if self.geom is None:
-                raise ValueError("Can't project without a geometry!")
+        if comps is None:
+            comps = self.comps
+        return len(comps)
+
+    def _get_proj(self):
+        if self.geom is None:
+            raise ValueError("Can't project without a geometry!")
+        return so3g.proj.Projectionist.for_geom(*self.geom)
+
+    def _get_proj_threads(self, cuts=None):
+        """Return the Projectionist and thread assignment for the present
+        geometry.  If self.threads has not yet been computed, it is
+        done now.
+
+        """
+        proj = self._get_proj()
+        if cuts is None:
+            cuts = self.cuts
+        if self.threads is False:
+            return proj, cuts
+        if self.threads is None:
+            self.threads = 'simple'
+        if isinstance(self.threads, str):
+            if self.threads == 'simple':
+                self.threads = proj.assign_threads(self._get_asm())
+            elif self.threads == 'domdir':
+                asm = self._get_asm()
+                self.threads = so3g.proj.mapthreads.get_threads_domdir(
+                    asm, asm.dets, *self.geom)
             else:
-                self.proj    = so3g.proj.Projectionist.for_geom(*self.geom)
-                if self.rot:
-                    self.proj.q_celestial_to_native *= self.rot
-                self.threads = self.proj.assign_threads(self.asm)
-                if self.cuts:
-                    self.threads *= self.cuts
-        return self.proj, self.threads
+                raise ValueError('Request for unknown algo threads="%s"' % self.threads)
+        if cuts:
+            return proj, self.threads * ~cuts
+        return proj, self.threads
+
+    def _get_asm(self):
+        """Bundles self.fp and self.sight into an "Assembly" for calling
+        so3g.proj routines."""
+        so3g_fp = so3g.proj.FocalPlane()
+        for i, q in enumerate(self.fp):
+            so3g_fp[f'a{i}'] = q
+        return so3g.proj.Assembly.attach(self.sight, so3g_fp)
+
+    def _enmapify(self, data):
+        """Promote a numpy.ndarray to an enmap.ndmap by attaching
+        wcs=self.geom[1].  In sensible cases (e.g. data is an ndarray
+        or ndmap) this will not cause a copy of the underlying data
+        array.
+
+        """
+        return enmap.ndmap(data, wcs=self.geom[1])

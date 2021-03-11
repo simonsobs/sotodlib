@@ -66,10 +66,12 @@ def _valid_arg(*args, src=None):
             return a
     return None
 
-def _find_field(axisman, default, provided):
-    """Temporary wrapper for _valid_arg..."""
-    return _valid_arg(provided, default, src=axisman)
-
+def _not_both(a, b, name='{item}'):
+    if a is not None:
+        if b is not None:
+            raise ValueError('self.%s and kwarg %s both not None!' % (name, name))
+        return a
+    return b
 
 def get_radec(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
               boresight=None, sight=None):
@@ -219,7 +221,9 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     asm = so3g.proj.Assembly.attach(sight, fp1)
     output = np.zeros((len(fake_dets), n_samp, 4))
     proj = so3g.proj.Projectionist.for_geom((1,1), wcs_kernel)
-    if rot: proj.q_celestial_to_native *= rot
+    if rot:
+        # Works whether rot is a quat or a vector of them.
+        asm.Q = rot * asm.Q
     proj.get_planar(asm, output=output)
 
     output2 = output*0
@@ -295,3 +299,67 @@ def get_supergeom(*geoms, tol=1e-3):
         w0.wcs.crpix -= corner_a[::-1]
         s0 = corner_b - corner_a
     return tuple(map(int, s0)), w0
+
+def _invert_weights_map(weights, eigentol=1e-6, UPLO='U'):
+    """Compute an inverse weights matrix, using eigendecomposition methods
+    that are safe against singular matrices.  This is similar to
+    scipy.linalg.pinvh, but applied to each pixel in a map in an
+    efficient way.
+
+    Args:
+      weights: an array with at least 2 dimensions, where the leading
+        two dimensions are the same.  For example, shape (3, 3, 200,
+        100) or (3, 3, 10231230).
+      eigentol: sets the threshold for keeping eigenvectors.  In each
+        matrix inversion, any eigenvectors whose absolute values are
+        less than eigentol times the largest absolute eigenvalue are
+        set to zero (and thus excluded from inclusion in the inverse).
+      UPLO (str): this can be 'U' or 'L' signifying that only the
+        upper diagonal or lower diagonal (respectively) elements of
+        each weights sub-matrix should be considered.  (This argument
+        is passed through to np.linalg.eigh.)
+
+    Returns:
+      The inverse of weights, computed for the square submatrices
+      defined by the first two axes.  In cases where the inverse does
+      not formally exist, the non-trivial eigenmodes of the matrix
+      will be exactly inverted, and singular or near-singular modes
+      form the null space.
+
+    """
+    # Collapse and reindex weights map so it is (npix, n, n).
+    w = weights.reshape(weights.shape[:2] + (-1,)).transpose(2, 0, 1)
+
+    # Get eigendecomposition of each (n, n) sub-matrix
+    v, U = np.linalg.eigh(w, UPLO)
+
+    # Identify acceptable eigenvalues -- reject ones that too small
+    # relative to max eigenvalue in their pixel.
+    eig_ok = (abs(v) > abs(v).max(axis=-1)[:,None] * eigentol)
+
+    # Force each unacceptable eigenmode to 0.
+    U *= eig_ok[:,None,:]
+
+    # Set bad eigenvalues to 1, to avoid the divide-by-zero.
+    v[~eig_ok] = 1.
+
+    # Compute the effective inverse, U (1/diag(v)) U.T.
+    A = (U / v[:,None,:])
+    B = U.transpose(0,2,1)
+    iw = np.matmul(A, B)
+
+    # Reshape the output to match what was passed in.
+    return iw.transpose(1,2,0).reshape(weights.shape)
+
+def _apply_inverse_weights_map(inverse_weights, target):
+    """Apply a map of matrices to a map of vectors.
+
+    Assumes inverse_weights.shape = (a, b, ny, nx) and target.shape =
+    (b, nx, ny); the result has shape (a, nx, ny).
+
+    """
+    iw = inverse_weights.transpose((2,3,0,1))
+    m = target.transpose((1,2,0)).reshape(
+        target.shape[1], target.shape[2], target.shape[0], 1)
+    m1 = np.matmul(iw, m)
+    return m1.transpose(2,3,0,1).reshape(target.shape)

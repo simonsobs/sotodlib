@@ -36,8 +36,6 @@ conventions:
 - ``tod['timestamps']``: timestamps (as unix timestamps).
 - ``tod['boresight']``: child AxisManager with boresight pointing in
   horizon coordinates.
-- ``tod['sight']``: G3VectorQuat, of length samps, representing the
-  rotation from focal plane coordinates to equatorial coordinates.
 - ``tod['focal_plane']``: child AxisManager, with shape (dets) and
   fields ``xi``, ``eta``, ``gamma`` representing detector position and
   orientation in the focal plane.  See ``coord_sys`` documentation for
@@ -46,10 +44,17 @@ conventions:
   - ``'xi'``: position of the detector, measured "to the right" of the
     boresight, i.e. parallel to increasing azimuth.
   - ``'eta'``: position of the detector, measured "up" from the
-    boresight, i.e. parallel to increasing elevationn.
+    boresight, i.e. parallel to increasing elevation.
   - ``'gamma'``: orientation of the detector, measured clockwise from
     North, i.e. 0 degrees is parall to the eta axis, and 90 degrees is
     parallel to the xi axis.
+
+The following item is supported, as an alternative to
+``tod['boresight']`` and ``tod['timestamps']``:
+
+- ``tod['boresight_equ']``: child AxisManager giving the boresight
+  pointing in equatorial coordinates (``'ra'``, ``'dec'``, ``'psi'``,
+  forming a lonlat triple, with ``'psi'`` optional but recommended).
 
 Many functions require an AxisManager ``tod`` as the main
 argument, and extract the above fields from that object by default.
@@ -67,7 +72,7 @@ To compute the RA and dec of all detectors at all times, use
 
   # Plot RA and dec for detector at index 10.
   det_idx = 10
-  ra, dec = coords[det_idx,:,0], coords[det_idx,:,1]
+  ra, dec = radec[det_idx,:,0], radec[det_idx,:,1]
   plt.plot(ra, dec)
 
 If want the horizon coordinates, use :func:`get_horizon`.
@@ -111,6 +116,27 @@ call :func:`get_supergeom` on the set of footprints.
 
 Projection Matrix
 =================
+
+Usage
+-----
+
+Assuming that you have an AxisManager "tod" with "signal",
+"timestamps", "boresight", and "focal_plane" elements, then this
+should work::
+
+  from sotodlib import coords
+
+  wcsk = coords.get_wcs_kernel('car', 0., 0., 0.01*coords.DEG)
+  P = coords.P.for_tod(tod, wcs_kernel=wcsk)
+
+  map1 = P.remove_weights(tod)
+  map1.write('output_car.fits')
+
+
+For more advice, see :class:`P` in the module reference.  See also the
+`pwg-tutorials`_ repository (this may be private to SO members),
+especially so_pipeline_pt2_20200623.ipynb.
+
 
 Background
 ----------
@@ -212,13 +238,6 @@ In fact, .remove_weights can perform steps (1), (2), and (3).  But it
 is worth mentioning the full series, because although step (2) is the
 most expensive it does not depend on the input data and so its output
 map can be re-used for different filters or input signals.
-
-Usage
------
-
-See :class:`P` in the module reference.  See also the `pwg-tutorials`_
-repository (this may be private to SO members), especially
-so_pipeline_pt2_20200623.ipynb.
 
 .. _`pwg-tutorials`: https://github.com/simonsobs/pwg-tutorials/
 
