@@ -6,6 +6,7 @@ import numpy as np
 from scipy.optimize import fmin
 
 from astropy import units
+from astropy.utils import data as au_data
 from skyfield.api import load, wgs84, utc
 
 import so3g
@@ -14,6 +15,12 @@ from pixell import enmap
 from .. import tod_ops, coords
 
 logger = logging.getLogger(__name__)
+
+# Files that we might want to download and cache using
+# astropy.utils.data
+RESOURCE_URLS = {
+    'de421.bsp': 'ftp://ssd.jpl.nasa.gov/pub/eph/planets/bsp/de421.bsp',
+}
 
 
 class SlowSource:
@@ -90,10 +97,11 @@ def get_scan_q(tod, planet, refq=None):
             'planet': planet}
 
 def get_scan_P(tod, planet, refq=None, res=0.01*coords.DEG, comps='TQU'):
-    """ Get a standard Projection Matrix targeting a planet (or some
+    """Get a standard Projection Matrix targeting a planet (or some
     interesting fixed position), in source-scan coordinates.
 
     Returns a Projection Matrix and the output from get_scan_q.
+
     """
     X = get_scan_q(tod, planet)
     rot = so3g.proj.quat.rotation_lonlat(0, 0) * X['rot']
@@ -152,7 +160,11 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
     return signal
 
 def get_source_pos(src, timestamp):
-    planets = load('de421.bsp')
+    # Get the ephemeris -- this will trigger a 16M download on first use.
+    de_url = RESOURCE_URLS['de421.bsp']
+    de_filename = au_data.download_file(de_url, cache=True)
+
+    planets = load(de_filename)
     try:
         target = planets[src]
     except KeyError:
