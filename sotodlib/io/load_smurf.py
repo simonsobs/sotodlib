@@ -845,8 +845,11 @@ class G3tSmurf:
             status = self.load_status(timestamps[0])
         else:
             status = None
-        ########### will status ever be None? ###################
-
+            
+        if status is None:
+            print('Trying a later status, why is the status not at the beginning?')
+            self.load_status(timestamps[-1])
+            
         #### Get Info for channels in this observation
         if detset is None:
             print('Did not find detector set, hopefully this is old data')
@@ -862,26 +865,35 @@ class G3tSmurf:
         channel_freqs = []
 
         for ch in range( channels ):
-            sch = status.readout_to_smurf(ch)
+            try:
+                sch = status.readout_to_smurf(ch)
 
-            x = np.where(np.all([bnd_assign == sch[0],
-                                 ch_assign  == sch[1]], axis=0))[0]
+                x = np.where(np.all([bnd_assign == sch[0],
+                                     ch_assign  == sch[1]], axis=0))[0]
 
-            if len(x) == 0:
-                ########################################
-                ## There appear to be a non-trivial number of these
-                ## SMuRF Error or Indexing Error?
-                ########################################
-                name = 'sch_NONE_{}_{:03d}'.format(sch[0],sch[1])
-                freq = status.freq_map[sch[0], sch[1]]
-            else:
-                channel = detset.channels[x[0]]
-                name = channel.name
-                ########################################
-                ## Related to above, freq != status.freq for many of these
-                ########################################
-                freq = channel.frequency
+                if len(x) == 0:
+                    ########################################
+                    ## There appear to be a non-trivial number of these
+                    ## SMuRF Error or Indexing Error?
+                    ########################################
+                    name = 'sch_NONE_{}_{:03d}'.format(sch[0],sch[1])
+                    freq = status.freq_map[sch[0], sch[1]]
+                else:
+                    channel = detset.channels[x[0]]
+                    name = channel.name
+                    ########################################
+                    ## Related to above, freq != status.freq for many of these
+                    ########################################
+                    freq = channel.frequency
 
+            except:
+                ## in case the detector information isn't in the data
+                ## load 'readout channel' as a backup
+                name='rch_{:04d}'.format(ch)
+                sch = (-1,-1)
+                freq=-1
+                
+                
             channel_names.append(name)
             channel_bands.append(sch[0])
             channel_channels.append(sch[1])
