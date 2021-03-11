@@ -561,10 +561,12 @@ class G3tSmurf:
                     dset.channels.append(ch)
         session.commit()  
     
-    def add_new_observation(self, stream_id, ctime, obs_data, session, max_wait=10):
+    def add_new_observation(self, stream_id, ctime, obs_data, session, max_early=5,max_wait=10):
         """
             ctime    -- ctime the action is called
 
+            max_early -- buffer time to allow the g3 file to be earlier than the smurf
+                        action
             max_wait -- maximum amount of time between the streaming start action 
                         and the making of .g3 files that belong to an observation
         """
@@ -595,7 +597,7 @@ class G3tSmurf:
             ## Here is where we will put logic if we need to go backwards 
             pass
 
-        x=session.query(Files.name).filter(Files.start >= dt.datetime.fromtimestamp(ctime)).order_by(Files.start).first()[0]
+        x=session.query(Files.name).filter(Files.start >= dt.datetime.fromtimestamp(ctime-max_early)).order_by(Files.start).first()[0]
         f_start, f_num = (x[:-3]).split('_')
         if int(f_start)-ctime > max_wait:
             ## we don't have .g3 files for some reason
