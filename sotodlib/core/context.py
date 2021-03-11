@@ -2,18 +2,26 @@ from collections import OrderedDict as odict
 import yaml
 import os
 import importlib
+import logging
 
 from . import metadata
 
+logger = logging.getLogger(__name__)
 
 class Context(odict):
+    # Sets of special handlers may be registered in this class variable, then
+    # requested by name in the context.yaml key "context_hooks".
+    hook_sets = {}
+
     def __init__(self, filename=None, site_file=None, user_file=None,
-                 load_list='all'):
+                 data=None, load_list='all'):
         """Construct a Context object.  Note this is an ordereddict with a few
         attributes added on.
 
         Args:
-          filename (str): Path to the dataset context file.
+
+          filename (str): Path to the dataset context file.  If None,
+            that's fine.
           site_file (str): Path to the site file.  If None, then the
             value of SOTODLIB_SITECONFIG environment variable is used;
             unless that's unset in which case the file site.yaml in
@@ -22,6 +30,13 @@ class Context(odict):
             value of SOTODLIB_USERCONFIG environment variable is used;
             unless that's unset in which case the file
             ~/.sotodlib.yaml will be used.
+          data (dict or None): Optional dict of context data to merge
+            in, after loading the site, user and main context files.
+            Note the data are merged in with the usual rules (so items
+            in data['tags'] will me merged into self['tags'].)
+          load_list (str or list): A list of databases to load; some
+            combination of 'obsdb', 'detdb', 'obsfiledb', or the
+            string 'all' to load all of them (default).
 
         """
         super().__init__()
@@ -29,24 +44,29 @@ class Context(odict):
         site_ok, site_file, site_cfg = _read_cfg(
             site_file, 'SOTODLIB_SITECONFIG',
             os.path.join(os.getcwd(), 'site.yaml'))
+        logger.info(f'Using site_file={site_file}.')
         user_ok, user_file, user_cfg = _read_cfg(
             user_file, 'SOTODLIB_USERCONFIG',
             os.path.expanduser('~/.sotodlib.yaml'))
+        logger.info(f'Using user_file={user_file}.')
 
         self.update(site_cfg)
         self.update_context(user_cfg)
 
-        ok, filename, context_cfg = _read_cfg(filename)
-        if not ok:
+        ok, full_filename, context_cfg = _read_cfg(filename)
+        if filename is not None and not ok:
             raise RuntimeError(
                 'Could not load requested context file %s' % filename)
+        logger.info(f'Using context_file={full_filename}.')
         self.update_context(context_cfg)
+
+        # Update with anything the user passed in.
+        if data is not None:
+            self.update_context(data)
 
         self.site_file = site_file
         self.user_file = user_file
-        self.filename = filename
-
-        self._subst(self)
+        self.filename = full_filename
 
         self.obsdb = None
         self.detdb = None
@@ -55,7 +75,30 @@ class Context(odict):
         for to_import in self.get('imports', []):
             importlib.import_module(to_import)
 
+        # Activate the requested hook set
+        if self.get('context_hooks'):
+            self._hooks = self.hook_sets[self['context_hooks']]
+        else:
+            self._hooks = {}
+
+        # Check-default 'tags' dict.
+        self['tags'] = self._get_warn_missing('tags', {})
+
+        # Perform recursive substitution on strings defined in tags.
+        self._subst(self)
+
+        # Load basic databases.
         self.reload(load_list)
+
+        # Call a post-processing hook before returning to user?
+        self._call_hook('on-context-ready')
+
+    def _call_hook(self, hook_key, *args, **kwargs):
+        hook_func = self._hooks.get(hook_key)
+        if hook_func is None:
+            return
+        logger.info('Calling hook for %s: %s' % (hook_key, hook_func))
+        hook_func(self, *args, **kwargs)
 
     def _subst(self, dest, max_recursion=20):
         # Do string substitution of all our tags into dest (in-place
@@ -77,6 +120,12 @@ class Context(odict):
                 dest[k] = self._subst(v, max_recursion-1)
             return dest
         return dest
+
+    def _get_warn_missing(self, k, default=None):
+        if not k in self:
+            logger.warning(f'Key "{k}" not present in context.')
+            return default
+        return self[k]
 
     def update_context(self, new_stuff):
         appendable = ['metadata']
@@ -187,7 +236,8 @@ class Context(odict):
             loader_type = self.get('obs_loader_type', 'default')
 
         # Load metadata.
-        meta = self.loader.load(self['metadata'][:], request)
+        metadata_list = self._get_warn_missing('metadata', [])
+        meta = self.loader.load(metadata_list, request)
 
         # Load TOD.
         from ..io.load import OBSLOADER_REGISTRY
@@ -208,7 +258,8 @@ class Context(odict):
         """
         if isinstance(request, str):
             request = {'obs:obs_id': request}
-        return self.loader.load(self['metadata'][:], request)
+        metadata_list = self._get_warn_missing('metadata', [])
+        return self.loader.load(metadata_list, request)
 
 
 def _read_cfg(filename=None, envvar=None, default=None):
