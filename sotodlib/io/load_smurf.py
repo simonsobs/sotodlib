@@ -330,6 +330,13 @@ class G3tSmurf:
                 session.add(ft)
             session.commit()
 
+    @staticmethod
+    def _make_datetime(x):
+        if isinstance(x,float) or isinstance(x,int):
+            return dt.datetime.fromtimestamp(x)
+        return x
+
+
     def add_file(self, path, session):
         """
         Indexes a single file and adds it to the sqlite database.
@@ -754,14 +761,17 @@ class G3tSmurf:
         ####################################
         ## Edit Query here to deal with different stream ids
         ####################################
+        start = self._make_datetime(start)
+        end = self._make_datetime(end)
+
         frames = session.query(Frames).filter(
             Frames.type_name == 'Scan',
-            Frames.stop >= dt.datetime.fromtimestamp(start),
-            Frames.start < dt.datetime.fromtimestamp(end)
+            Frames.stop >= start,
+            Frames.start < end
         ).order_by(Frames.time)
 
         if detset is None:
-            detset = session.query(Detsets).filter(Detsets.start <= dt.datetime.fromtimestamp(start))
+            detset = session.query(Detsets).filter(Detsets.start <= start)
             detset = detset.order_by( db.desc(Detsets.start) ).first() 
         else:
             detset = session.query(Detsets).filter(Detsets.name==detset).one()
