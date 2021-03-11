@@ -43,6 +43,7 @@ SMURF_ACTIONS = {
     'observations':[
         'take_stream_data',
         'stream_data_on',
+        'take_noise_psd'
     ],
     'channel_assignments':[
         'setup_notches',
@@ -73,7 +74,14 @@ class Observations(Base):
     ## many to many
     detsets = relationship("Detsets", 
                            secondary=association_table_obs,
-                           back_populates='observations') 
+                           back_populates='observations')
+
+    def __repr__(self):
+        try:
+            return f"{self.obs_id}: {self.start} -> {self.stop} [{self.stop-self.start}] ({self.tag})"
+        except:
+            return f"{self.obs_id}: {self.start} -> {self.stop} ({self.tag})"
+
     
 
 class Files(Base):
@@ -919,16 +927,17 @@ class G3tSmurf:
         Returns:
             status (dict): Dictionary of rogue variables at specified time.
         """
+        time = self._make_datetime(time)
         session = self.Session()
         session_start,  = session.query(Frames.time).filter(
             Frames.type_name == 'Observation',
-            Frames.time <= dt.datetime.fromtimestamp(time)
+            Frames.time <= time
         ).order_by(Frames.time.desc()).first()
 
         status_frames = session.query(Frames).filter(
             Frames.type_name == 'Wiring',
             Frames.time >= session_start,
-            Frames.time <= dt.datetime.fromtimestamp(time)
+            Frames.time <= time
         ).order_by(Frames.time)
 
         status = {}
