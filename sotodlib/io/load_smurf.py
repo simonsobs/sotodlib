@@ -848,7 +848,7 @@ class G3tSmurf:
         else:
             status = None
             
-        if status is None:
+        if status is None and len(timestamps)>0:
             print('Trying a later status, why is the status not at the beginning?')
             self.load_status(timestamps[-1])
             
