@@ -21,6 +21,7 @@ def add_sim_sso_args(parser):
         required=False,
         help="Pickle file containing instrumental beam",
     )
+
     return
 
 
