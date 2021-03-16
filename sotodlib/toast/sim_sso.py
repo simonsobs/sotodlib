@@ -131,7 +131,7 @@ class OpSimSSO(Operator):
         hf = h5py.File(os.path.join(dir_path, 'data/planet_data.h5'), 'r')
         if sso_name in hf.keys():
             self.ttemp = np.array(hf.get(sso_name))
-            self.t_freqs = np.array(hf.get('freqs'))
+            self.t_freqs = np.array(hf.get('freqs_ghz'))
         else:
             raise ValueError('Unknown planet name')
 
