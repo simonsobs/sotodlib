@@ -350,42 +350,60 @@ def get_supergeom(*geoms, tol=1e-3):
         s0 = corner_b - corner_a
     return tuple(map(int, s0)), w0
 
-def _invert_weights_map(weights, eigentol=1e-6, UPLO='U'):
+def _invert_weights_map(weights, eigentol=1e-6, kill_partials=True,
+                        UPLO='U'):
     """Compute an inverse weights matrix, using eigendecomposition methods
     that are safe against singular matrices.  This is similar to
     scipy.linalg.pinvh, but applied to each pixel in a map in an
     efficient way.
 
     Args:
-      weights: an array with at least 2 dimensions, where the leading
-        two dimensions are the same.  For example, shape (3, 3, 200,
-        100) or (3, 3, 10231230).
-      eigentol: sets the threshold for keeping eigenvectors.  In each
-        matrix inversion, any eigenvectors whose absolute values are
-        less than eigentol times the largest absolute eigenvalue are
-        set to zero (and thus excluded from inclusion in the inverse).
-      UPLO (str): this can be 'U' or 'L' signifying that only the
+      weights (array): an array (or ndarray) with at least 2
+        dimensions, where the leading two dimensions represent
+        submatrices that are to be inverted; the other dimensions
+        index "the pixel".  Valid shapes would be, for example, (3, 3,
+        200, 100) or (3, 3, 10231230).
+      eigentol (float): sets the threshold for keeping eigenvectors.
+        In each sub-matrix inversion, any eigenvectors whose absolute
+        values are less than eigentol times the largest absolute
+        eigenvalue are set to zero (and thus excluded from inclusion
+        in the inverse).
+      kill_partials (bool): if True, then pixels where any
+        eigenvectors are zero (or have been forced to zero) will have
+        all their eigenvectors forced to zero.  Stated another way,
+        all pixels with singular or nearly singular weights
+        sub-matrices will be treated as having no weight at all.
+      UPLO (str): this can be 'U' or 'L', signifying that only the
         upper diagonal or lower diagonal (respectively) elements of
         each weights sub-matrix should be considered.  (This argument
         is passed through to np.linalg.eigh.)
 
     Returns:
-      The inverse of weights, computed for the square submatrices
-      defined by the first two axes.  In cases where the inverse does
-      not formally exist, the non-trivial eigenmodes of the matrix
-      will be exactly inverted, and singular or near-singular modes
-      form the null space.
+      A matrix with the same shape as weights, but where the submatrix
+      carried in the first two dimensions is the inverse of the
+      corresponding submatrix of weights; or possibly a pseudo-inverse
+      or the zero matrix depending on arguments described above.
 
     """
+    # Quick short circuit in trivial case...
+    if weights.shape[:2] == (1, 1):
+        iw = np.zeros_like(weights)  # yes, this preserves wcs
+        iw[weights!=0] = 1./weights[weights!=0]
+        return iw
+
     # Collapse and reindex weights map so it is (npix, n, n).
     w = weights.reshape(weights.shape[:2] + (-1,)).transpose(2, 0, 1)
 
     # Get eigendecomposition of each (n, n) sub-matrix
     v, U = np.linalg.eigh(w, UPLO)
 
-    # Identify acceptable eigenvalues -- reject ones that too small
-    # relative to max eigenvalue in their pixel.
-    eig_ok = (abs(v) > abs(v).max(axis=-1)[:,None] * eigentol)
+    # Identify acceptable eigenvalues -- reject ones that are non-positive or too
+    # small relative to max eigenvalue in their pixel.
+    eig_ok = (v > 0) * (v > v[:,-1:] * eigentol)
+
+    # Does one bad eig spoil the basket?
+    if kill_partials:
+        eig_ok *= np.all(eig_ok, axis=1)[:,None]
 
     # Force each unacceptable eigenmode to 0.
     U *= eig_ok[:,None,:]
