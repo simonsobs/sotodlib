@@ -13,7 +13,7 @@ import healpy as hp
 from scipy.constants import au as AU
 from scipy.interpolate import RectBivariateSpline
 import pickle
-
+import h5py
 
 def to_JD(t):
     # Unix time stamp to Julian date
@@ -72,8 +72,10 @@ class OpSimSSO(Operator):
         for obs in data.obs:
             try:
                 obsname = obs["name"]
+                focalplane = obs["focalplane"]
             except Exception:
                 obsname = "observation"
+                focalplane = None
 
             observer = ephem.Observer()
             observer.lon = obs['site'].lon
@@ -107,7 +109,7 @@ class OpSimSSO(Operator):
                     comm.Barrier()
                 tmr.start()
 
-            self._observe_sso(sso_az, sso_el, sso_dist, sso_dia, tod, comm, prefix)
+            self._observe_sso(sso_az, sso_el, sso_dist, sso_dia, tod, comm, prefix, focalplane)
 
             del sso_az, sso_el, sso_dist
 
@@ -118,8 +120,23 @@ class OpSimSSO(Operator):
                 tmr.stop()
                 tmr.report("{}Simulated and observed SSO signal".format(prefix))
         return
+    
+    def _get_planet_temp(self, sso_name):
+        """
+        Get the thermodynamic planet temperature given
+        the frequency
+        """
 
-    def _get_beam_map(self, det, sso_dia):
+        dir_path = os.path.dirname(os.path.realpath(__file__))
+        hf = h5py.File(os.path.join(dir_path, 'data/planet_data.h5'), 'r')
+        if sso_name in hf.keys():
+            self.ttemp = np.array(hf.get(sso_name))
+            self.t_freqs = np.array(hf.get('freqs_ghz'))
+        else:
+            raise ValueError('Unknown planet name')
+
+
+    def _get_beam_map(self, det, sso_dia, ttemp_det):
         """
         Construct a 2-dimensional interpolator for the beam
         """
@@ -135,7 +152,7 @@ class OpSimSSO(Operator):
         size = description[0][0]
         sso_radius_avg = np.average(sso_dia)/2. # in arcsed
         sso_solid_angle = np.pi*np.radians(sso_radius_avg/3600)**2
-        amp = 165 * sso_solid_angle/beam_solid_angle #Information for Mars from Wiki
+        amp = ttemp_det * sso_solid_angle/beam_solid_angle
         w = np.radians(size/2)
         x = np.linspace(-w, w, n)
         y = np.linspace(-w, w, n)
@@ -174,7 +191,7 @@ class OpSimSSO(Operator):
         return sso_az, sso_el, sso_dist, sso_dia
 
     @function_timer
-    def _observe_sso(self, sso_az, sso_el, sso_dist, sso_dia, tod, comm, prefix):
+    def _observe_sso(self, sso_az, sso_el, sso_dist, sso_dia, tod, comm, prefix, focalplane):
         """
         Observe the SSO with each detector in tod
         """
@@ -192,6 +209,14 @@ class OpSimSSO(Operator):
 
         if rank == 0:
             log.info("{}Observing the SSO signal".format(prefix))
+        
+        band_dict = {'f030' : 27, 'f040': 39, 'f090': 93,
+             '150': 145 , 'f230': 225, 'f290': 285}
+
+        for band in band_dict.keys():
+            if band in prefix:
+               freq = band_dict[band]
+               break
 
         for det in tod.local_dets:
             # Cache the output signal
@@ -214,7 +239,37 @@ class OpSimSSO(Operator):
                 az = 2 * np.pi - phi
                 el = np.pi / 2 - theta
 
-            beam, radius = self._get_beam_map(det, sso_dia)
+            if "bandpass_transmission" in focalplane[det]:
+                # We have full bandpasses for the detector
+                bandpass_freqs = focalplane[det]["bandpass_freq_ghz"]
+                bandpass = focalplane[det]["bandpass_transmission"]
+            else:
+                if "bandcenter_ghz" in focalplane[det]:
+                    # Use detector bandpass from the focalplane
+                    center = focalplane[det]["bandcenter_ghz"]
+                    width = focalplane[det]["bandwidth_ghz"]
+                else:
+                    # Use default values for the entire focalplane
+                    if freq is None:
+                        raise RuntimeError(
+                            "You must supply the nominal frequency if bandpasses "
+                            "are not available"
+                        )
+                    center = freq
+                    width = 0.2 * freq
+                bandpass_freqs = np.array([center - width / 2, center + width / 2])
+                bandpass = np.ones(2)   
+        
+            nstep = 1001
+            fmin, fmax = bandpass_freqs[0], bandpass_freqs[-1]
+            det_freqs = np.linspace(fmin, fmax, nstep)
+            det_bandpass = np.interp(det_freqs, bandpass_freqs, bandpass)
+            det_bandpass /= np.sum(det_bandpass)
+
+            self._get_planet_temp(self.sso_name)
+            ttemp_det = np.interp(det_freqs, self.t_freqs, self.ttemp)
+            ttemp_det = np.sum(ttemp_det * det_bandpass)
+            beam, radius = self._get_beam_map(det, sso_dia, ttemp_det)
 
             # Interpolate the beam map at appropriate locations
             x = (az - sso_az) * np.cos(el)
