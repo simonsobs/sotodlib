@@ -2,6 +2,8 @@ import so3g.proj
 import numpy as np
 from pixell import enmap, wcsutils, utils
 
+import time
+
 DEG = np.pi/180
 
 
@@ -72,6 +74,54 @@ def _not_both(a, b, name='{item}'):
             raise ValueError('self.%s and kwarg %s both not None!' % (name, name))
         return a
     return b
+
+class Timer:
+    """Context manager that prints elapsed time to terminal or a log or
+    whatever.  For example::
+
+        with Timer('tod-to-map projection', logger.info):
+            P.to_map(tod)
+
+    Should log a message of the form::
+
+        INFO:tod-to-map projection:            3.212 seconds
+
+    Use the fmt keyword argument to enter your own format string,
+    which can include references to {msg}, {start_time}, {end_time},
+    {elapsed}.
+
+    To avoid repeating the same arguments, subclass this and set
+    FORMAT and PRINT_FUNC for your use cases::
+
+       class MyTimer(Timer):
+           FORMAT = 'mapmaker7: {msg} took {elapsed:10.3f} seconds'
+           PRINT_FUNC = lambda x: (logger.info(x), print(x))
+
+    """
+    FMT = '{msg:40}: {elapsed:10.3f} seconds'
+    PRINT_FUNC = print
+
+    def __init__(self, msg=None, print_func=None, fmt=None):
+        if msg is None:
+            msg = 'timed operation'
+        if fmt is None:
+            fmt = self.FMT
+        if print_func is None:
+            print_func = self.PRINT_FUNC
+        self.msg = msg
+        self.fmt = fmt
+        self.print_func = print_func
+        self.start_time = time.time()
+    def __enter__(self):
+        return self
+    def __exit__(self, *args, **kw):
+        self.end_time = time.time()
+        self.elapsed = self.end_time - self.start_time
+        self.text = self.fmt.format(
+            msg=self.msg, start_time=self.start_time, end_time=self.end_time,
+            elapsed=self.elapsed)
+        self.print_func(self.text)
+
 
 def get_radec(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
               boresight=None, sight=None):
