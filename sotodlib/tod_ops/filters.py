@@ -98,9 +98,8 @@ def fourier_filter(tod, filt_function,
     
     ## Get Filter
     freqs = np.fft.rfftfreq(n, delta_t)
-    filt = filt_function(freqs, tod, **kwargs)
-    b[:] *= filt
-    
+    filt_function.apply(freqs, tod, b, **kwargs)
+
     ## FFT Back
     t_2();
     
@@ -116,27 +115,116 @@ def fourier_filter(tod, filt_function,
 
 ################################################################
 
-# Useful decorator: get rid of freqs and tod declare
-# when using the filter and make them well-behave under multiplication
-def fft_filter(fun):
-    class filter_func:
-        def __init__(self, *args, **kwargs):
-            self.args = args
-            self.kwargs = kwargs
-        def __call__(self, freqs, tod):
-            return fun(freqs, tod, *self.args, **self.kwargs)
-        def __mul__(self, other):
-            def fun_prod(freqs, tod):
-                return self(freqs, tod)*other(freqs, tod)
-            return fun_prod
-    # get help from someone
-    filter_func.__doc__ = fun.__doc__
-    # get arguments from someone after removing the partial args (first 2)
-    args = [v for k, v in inspect.signature(fun).parameters.items()][2:]
-    filter_func.__signature__ = inspect.Signature(parameters=args)
-    return filter_func
+# Base class... provides that a * b always returns a FilterChain.
+class _chainable:
+    @staticmethod
+    def _preference(f):
+        return getattr(f, 'preference', 'compose')
+    def __mul__(self, other):
+        return FilterChain([self, other])
 
-#Example Filtering Functions
+class FilterFunc(_chainable):
+    """Class to support chaining of Fourier filters.
+
+    FilterFunc.deco may be used to decorate functions with signatures
+    like::
+
+       function_name(freqs, tod, *args, **kwargs)
+
+    """
+    # Note self._fun is set in the subclass, as a class variable,
+    # e.g.: _fun = staticmethod(gaussian_filter)
+    _fun_nargs = 2
+    preference = 'compose'
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.args = args
+        self.kwargs = kwargs
+    def __call__(self, freqs, tod):
+        return self._fun(freqs, tod, *self.args, **self.kwargs)
+    def apply(self, freqs, tod, target):
+        target *= self(freqs, tod)
+    @classmethod
+    def deco(cls, fun):
+        class filter_func(cls):
+            _fun = staticmethod(fun)
+        # get help from someone
+        filter_func.__doc__ = fun.__doc__
+        # get arguments from someone after removing the partial args
+        args = list(inspect.signature(fun).parameters.values())[cls._fun_nargs:]
+        filter_func.__signature__ = inspect.Signature(parameters=args)
+        return filter_func
+
+class FilterApplyFunc(FilterFunc):
+    """Class to support chaining of Fourier filters.
+
+    @FilterApplyFunc.deco may be used to decorate functions with signatures
+    like:
+
+       function_name(target, freqs, tod, *, **)
+
+    Such filter functions must return a transfer function array, if
+    target=None.  But if target is a fourier transform array, the
+    function must apply the transfer function to that array and return
+    None.
+
+    """
+    _fun_nargs = 3
+    preference = 'apply'
+    def __call__(self, freqs, tod):
+        return self._fun(None, freqs, tod, *self.args, **self.kwargs)
+    def apply(self, freqs, tod, target):
+        return self._fun(target, freqs, tod, *self.args, **self.kwargs)
+
+class FilterChain(_chainable):
+    """A chain of Fourier filters."""
+    def __init__(self, items):
+        super().__init__()
+        self.links = []
+        for a in items:
+            if isinstance(a, FilterChain):
+                self.links.extend(a.links)
+            else:
+                self.links.append(a)
+
+    def __call__(self, freqs, tod):
+        # We could do better by handling self.links out of order.
+        filt = self.links[0](freqs, tod)
+        for f in self.links[1:]:
+            if self._preference(f) == 'apply' and filt.ndim == 2:
+                f.apply(freqs, tod, filt)
+            else:
+                _filt = f(freqs, tod)
+                # Swap those to help broadcasting work...
+                if _filt.ndim > filt.ndim:
+                    filt, _filt = _filt, filt
+                filt *= _filt
+                del _filt
+        return filt
+
+    def apply(self, freqs, tod, target):
+        filt = None
+        for f in self.links:
+            if self._preference(f) == 'apply':
+                f.apply(freqs, tod, target)
+            elif filt is None:
+                filt = f(freqs, tod)
+            else:
+                _filt = f(freqs, tod)
+                # Swap those to help broadcasting work...
+                if _filt.ndim > filt.ndim:
+                    filt, _filt = _filt, filt
+                filt *= _filt
+                del _filt
+        if filt is not None:
+            target *= filt
+
+# Alias the decorators...
+fft_filter = FilterFunc.deco
+fft_apply_filter = FilterApplyFunc.deco
+
+
+# Filtering Functions
 #################
 @fft_filter
 def low_pass_butter4(freqs, tod, lp_fc=1):
@@ -154,17 +242,75 @@ def high_pass_butter4(freqs, tod, hp_fc=1):
 
 @fft_filter
 def tau_filter(freqs, tod, tau_name='timeconst', do_inverse=True):
-    """Time constant filter for fourier filter. 
-    
-    Builds filter for removing time constants from data
-    Example Use: fourier_filter(tod, tau_filter, detrend=None, resize='zero_pad')
-    """
+    """tau_filter is deprecated, use timeconst_filter."""
+    logging.warning('tau_filter is deprecated; use timeconst_filter.')
     taus = getattr(tod, tau_name)
     
     filt = 1 + 2.0j*np.pi*taus[:,None]*freqs[None,:]
     if not do_inverse:
         return 1.0/filt
     return filt
+
+@fft_apply_filter
+def timeconst_filter(target, freqs, tod, timeconst=None, invert=False):
+    """One-pole time constant filter for fourier_filter.
+
+    Builds filter for applying or removing time constants from signal
+    data.
+
+    Args:
+
+      timeconst: Array of time constant values (one per detector).
+        Alternately, a string indicating what member of tod to use for
+        the time constants array.  Defaults to 'timeconst'.
+      invert (bool): If true, returns the inverse transfer function,
+        to deconvolve the time constants.
+
+    Example::
+
+      # Deconvolve time constants.
+      fourier_filter(tod, timeconst_filter(invert=True),
+                     detrend='linear', resize='zero_pad')
+
+    """
+    if timeconst is None:
+        timeconst = 'timeconst'
+    if isinstance(timeconst, str):
+        timeconst = tod[timeconst]
+
+    if target is None:
+        filt = 1 + 2.0j*np.pi*timeconst[:,None]*freqs[None,:]
+        if invert:
+            return filt
+        return 1.0/filt
+
+    # Apply filter directly to FFT in target.
+    assert(len(timeconst) == len(target))  # safe zip.
+    if invert:
+        for tau, dest in zip(timeconst, target):
+            dest *= 1.+ 2.j*np.pi*tau*freqs
+    else:
+        for tau, dest in zip(timeconst, target):
+            dest /= 1.+ 2.j*np.pi*tau*freqs
+
+@fft_filter
+def timeconst_filter_single(freqs, tod, timeconst, invert=False):
+    """One-pole time constant filter for fourier_filter.
+
+    This version accepts a single time constant value, in seconds.  To
+    use different time constants for each detector, see
+    timeconst_filter.
+
+    Example::
+
+      # Apply a 1ms time constant.
+      fourier_filter(tod, timeconst_filter_single(timeconst=0.001),
+                     detrend=None, resize='zero_pad')
+
+    """
+    if invert:
+        return 1. + 2.j * np.pi * timeconst * freqs
+    return 1. / (1. + 2.j * np.pi * timeconst * freqs)
 
 @fft_filter
 def gaussian_filter(freqs, tod, t_sigma=None, f_sigma=None, gain=1.0, fc=0.):
