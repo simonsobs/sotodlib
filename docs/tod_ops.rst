@@ -11,9 +11,23 @@ including time and Fourier domain filtering, PCA.
 Fourier space filters
 =====================
 
-Applying Fourier space filters is facilitated by the ``fourier_filter`` function:
+Applying Fourier space filters is facilitated by the
+``fourier_filter`` function:
 
 .. autofunction:: fourier_filter
+
+
+Here's an example, assuming you have time-ordered data in an
+AxisManager ``tod``.  Note how we combine two Fourier space filters
+using the multiplication operator::
+
+  # Filter with a smooth-edged band, passing 1 Hz to 10 Hz.
+  filt = tod_ops.filters.high_pass_sine(1.) * tod_ops.filters.low_pass_sine2(10.)
+  tod_ops.filters.fourier_filter(tod, filt)
+
+Several filters are described in :mod:`sotodlib.tod_ops.filters`.  See the
+source code for conventions on defining and wrapping new filters to be
+compatible with this system.
 
 
 tod_ops.filters
@@ -28,6 +42,8 @@ be auto-documented here.
 
 .. autofunction:: low_pass_butter4
 .. autofunction:: high_pass_butter4
+.. autofunction:: timeconst_filter
+.. autofunction:: timeconst_filter_single
 .. autofunction:: tau_filter
 .. autofunction:: gaussian_filter
 .. autofunction:: low_pass_sine2
