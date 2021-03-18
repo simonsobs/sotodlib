@@ -279,6 +279,8 @@ def main():
         if comm.world_rank == 0:
             log.info("Processing MC = {}".format(mc))
 
+        toast_tools.draw_weather(args, comm, data, mc)
+
         toast_tools.simulate_atmosphere(args, comm, data, mc, totalname)
 
         #so_tools.scale_atmosphere_by_bandpass(args, comm, data, totalname, mc)
