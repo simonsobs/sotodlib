@@ -249,7 +249,7 @@ class Frames(Base):
     stop = db.Column(db.DateTime)
 
     def __repr__(self):
-        return f"Frame({self.type_name})<{self.location}>"
+        return f"Frame({self.type_name})<{self.frame_idx}>"
 
 
 class TimingParadigm(Enum):
