@@ -7,6 +7,7 @@ from toast.utils import Logger
 from toast.timing import function_timer, Timer
 from toast.op import Operator
 import ephem
+from astropy import constants
 from toast.mpi import MPI
 import toast.qarray as qa
 import healpy as hp
@@ -20,12 +21,10 @@ def to_JD(t):
     # (days since -4712-01-01 12:00:00 UTC)
     return t / 86400.0 + 2440587.5
 
-
 def to_MJD(t):
     # Convert Unix time stamp to modified Julian date
     # (days since 1858-11-17 00:00:00 UTC)
     return to_JD(t) - 2400000.5
-
 
 def to_DJD(t):
     # Convert Unix time stamp to Dublin Julian date
@@ -33,6 +32,78 @@ def to_DJD(t):
     # This is the time format used by PyEphem
     return to_JD(t) - 2415020
 
+def tb2s(tb, nu):
+    ''' Convert thermal dynamic (blackbody) temperature to spectral
+    radiance s_nu at frequency nu
+    
+    Input
+    ------
+    tb: float or array
+        thermal dynamic temperature, unit: Kelvin
+    nu: float or array (with same dimension as tb)
+        frequency where the spectral radiance is evaluated, unit: Hz
+        
+    Return
+    ------
+    s_nu: same dimension as tb
+        spectral radiance s_nu, unit: W*sr−1*m−2*Hz−1
+    '''
+    h = constants.h.value
+    c = constants.c.value
+    k_b = constants.k_B.value
+    
+    x = h*nu/(k_b*tb)
+    
+    return 2*h*nu**3/c**2/(np.exp(x) - 1)
+
+def s2tcmb(s_nu, nu):
+    ''' Convert spectral radiance s_nu at frequency nu to t_cmb
+    t_cmb is defined in the CMB community as the offset from the 
+    mean CMB temperature assuming the t_cmb/s_nu slope as the one 
+    evalutate at the mean CMB temperature.
+    
+    Input
+    ------
+    s_nu: float or array
+        spectral radiance s_nu, unit: W*sr−1*m−2*Hz−1
+    nu: float or array (with same dimension as s_nu)
+        frequency where the evaluation is perfomed, unit: Hz
+        
+    Return
+    ------
+    t_cmb: same dimension as s_nu
+        t_cmb, unit: Kelvin_cmb
+    '''
+    T_cmb = 2.72548 #K from Fixsen, 2009, ApJ 707 (2): 916–920
+    h = constants.h.value
+    c = constants.c.value
+    k_b = constants.k_B.value
+    
+    x = h*nu/(k_b*T_cmb)
+    
+    slope = 2*k_b*nu**2/c**2*((x/2)/np.sinh(x/2))**2
+    
+    return s_nu/slope
+
+def tb2tcmb(tb, nu):
+    '''Conver thermal dynamic (blackbody) temperature to t_cmb
+    as defined above
+    
+    Input
+    ------
+    tb: float or array
+        thermal dynamic temperature, unit: Kelvin
+    nu: float or array (with same dimension as tb)
+        frequency where the spectral radiance is evaluated, unit: Hz
+        
+    Return
+    ------
+    t_cmb: same dimension as tb
+        t_cmb, unit: Kelvin_cmb
+    '''
+    s_nu = tb2s(tb, nu)
+    return s2tcmb(s_nu, nu)
+    
 
 class OpSimSSO(Operator):
     """Operator which generates Solar System Object timestreams.
@@ -130,8 +201,9 @@ class OpSimSSO(Operator):
         dir_path = os.path.dirname(os.path.realpath(__file__))
         hf = h5py.File(os.path.join(dir_path, 'data/planet_data.h5'), 'r')
         if sso_name in hf.keys():
-            self.ttemp = np.array(hf.get(sso_name))
+            self.tb = np.array(hf.get(sso_name))
             self.t_freqs = np.array(hf.get('freqs_ghz'))
+            self.ttemp = tb2tcmb(self.tb, self.t_freqs*1e9)
         else:
             raise ValueError('Unknown planet name')
 
