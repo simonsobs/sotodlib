@@ -33,13 +33,13 @@ def to_DJD(t):
     return to_JD(t) - 2415020
 
 def tb2s(tb, nu):
-    ''' Convert thermal dynamic (blackbody) temperature to spectral
+    ''' Convert blackbody temperature to spectral
     radiance s_nu at frequency nu
     
     Input
     ------
     tb: float or array
-        thermal dynamic temperature, unit: Kelvin
+        blackbody temperature, unit: Kelvin
     nu: float or array (with same dimension as tb)
         frequency where the spectral radiance is evaluated, unit: Hz
         
@@ -57,10 +57,11 @@ def tb2s(tb, nu):
     return 2*h*nu**3/c**2/(np.exp(x) - 1)
 
 def s2tcmb(s_nu, nu):
-    ''' Convert spectral radiance s_nu at frequency nu to t_cmb
+    ''' Convert spectral radiance s_nu at frequency nu to t_cmb,
     t_cmb is defined in the CMB community as the offset from the 
-    mean CMB temperature assuming the t_cmb/s_nu slope as the one 
-    evalutate at the mean CMB temperature.
+    mean CMB temperature assuming a linear relation between t_cmb
+    and s_nu, the t_cmb/s_nu slope is evalutated at the mean CMB 
+    temperature.
     
     Input
     ------
@@ -86,13 +87,13 @@ def s2tcmb(s_nu, nu):
     return s_nu/slope
 
 def tb2tcmb(tb, nu):
-    '''Conver thermal dynamic (blackbody) temperature to t_cmb
+    '''Convert blackbody temperature to t_cmb
     as defined above
     
     Input
     ------
     tb: float or array
-        thermal dynamic temperature, unit: Kelvin
+        blackbody temperature, unit: Kelvin
     nu: float or array (with same dimension as tb)
         frequency where the spectral radiance is evaluated, unit: Hz
         
