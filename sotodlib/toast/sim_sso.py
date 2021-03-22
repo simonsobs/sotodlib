@@ -36,17 +36,15 @@ def tb2s(tb, nu):
     ''' Convert blackbody temperature to spectral
     radiance s_nu at frequency nu
     
-    Input
-    ------
-    tb: float or array
-        blackbody temperature, unit: Kelvin
-    nu: float or array (with same dimension as tb)
-        frequency where the spectral radiance is evaluated, unit: Hz
+    Args:
+        tb: float or array
+            blackbody temperature, unit: Kelvin
+        nu: float or array (with same dimension as tb)
+            frequency where the spectral radiance is evaluated, unit: Hz
         
-    Return
-    ------
-    s_nu: same dimension as tb
-        spectral radiance s_nu, unit: W*sr−1*m−2*Hz−1
+    Return:
+        s_nu: same dimension as tb
+            spectral radiance s_nu, unit: W*sr−1*m−2*Hz−1
     '''
     h = constants.h.value
     c = constants.c.value
@@ -63,17 +61,15 @@ def s2tcmb(s_nu, nu):
     and s_nu, the t_cmb/s_nu slope is evalutated at the mean CMB 
     temperature.
     
-    Input
-    ------
-    s_nu: float or array
-        spectral radiance s_nu, unit: W*sr−1*m−2*Hz−1
-    nu: float or array (with same dimension as s_nu)
-        frequency where the evaluation is perfomed, unit: Hz
+    Args:
+        s_nu: float or array
+            spectral radiance s_nu, unit: W*sr−1*m−2*Hz−1
+        nu: float or array (with same dimension as s_nu)
+            frequency where the evaluation is perfomed, unit: Hz
         
-    Return
-    ------
-    t_cmb: same dimension as s_nu
-        t_cmb, unit: Kelvin_cmb
+    Return:
+        t_cmb: same dimension as s_nu
+            t_cmb, unit: Kelvin_cmb
     '''
     T_cmb = 2.72548 #K from Fixsen, 2009, ApJ 707 (2): 916–920
     h = constants.h.value
@@ -90,17 +86,15 @@ def tb2tcmb(tb, nu):
     '''Convert blackbody temperature to t_cmb
     as defined above
     
-    Input
-    ------
-    tb: float or array
-        blackbody temperature, unit: Kelvin
-    nu: float or array (with same dimension as tb)
-        frequency where the spectral radiance is evaluated, unit: Hz
+    Args:
+        tb: float or array
+            blackbody temperature, unit: Kelvin
+        nu: float or array (with same dimension as tb)
+            frequency where the spectral radiance is evaluated, unit: Hz
         
     Return
-    ------
-    t_cmb: same dimension as tb
-        t_cmb, unit: Kelvin_cmb
+        t_cmb: same dimension as tb
+            t_cmb, unit: Kelvin_cmb
     '''
     s_nu = tb2s(tb, nu)
     return s2tcmb(s_nu, nu)
