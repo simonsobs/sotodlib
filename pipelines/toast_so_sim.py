@@ -190,6 +190,8 @@ def main():
     if args.use_madam:
         # Initialize madam parameters
         madampars = toast_tools.setup_madam(args)
+    else:
+        madampars = None
 
     if args.import_dir is not None:
         schedules = None
