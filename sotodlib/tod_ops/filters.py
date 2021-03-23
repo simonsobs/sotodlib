@@ -71,16 +71,6 @@ def fourier_filter(tod, filt_function,
         other_axis = getattr(tod, tod._assignments[signal_name][other_idx])
         n_det = other_axis.count
     
-    if detrend is None:
-        signal = np.atleast_2d(getattr(tod, signal_name))
-    else:
-        signal = detrend_data(tod, detrend, axis_name=axis_name, 
-                             signal_name=signal_name)
-    
-    if other_idx is not None and other_idx != 0:
-        ## so that code can be written always along axis 1
-        signal = signal.transpose()
-    
     if resize == 'zero_pad':
         n = fft_ops.find_superior_integer(axis.count)
         logger.info('fourier_filter: padding %i -> %i' % (axis.count, n))
@@ -93,13 +83,20 @@ def fourier_filter(tod, filt_function,
         raise ValueError('resize must be "zero_pad", "trim", or None')
 
     a, b, t_1, t_2 = fft_ops.build_rfft_object(n_det, n, 'BOTH')
-    if resize == 'zero_pad':
-        a[:,:axis.count] = signal
-        a[:,axis.count:] = 0
-    elif resize == 'trim':
-        a[:] = signal[:,:n]
+
+    if detrend is None:
+        signal = np.atleast_2d(getattr(tod, signal_name))
     else:
-        a[:] = signal[:]
+        signal = detrend_data(tod, detrend, axis_name=axis_name,
+                             signal_name=signal_name)
+
+    if other_idx is not None and other_idx != 0:
+        ## so that code can be written always along axis 1
+        signal = signal.transpose()
+
+    # This copy is valid for all modes of "resize"
+    a[:,:min(n, axis.count)] = signal[:,:min(n, axis.count)]
+    a[:,min(n, axis.count):] = 0
     
     ## FFT Signal
     t_1();
@@ -111,10 +108,8 @@ def fourier_filter(tod, filt_function,
     ## FFT Back
     t_2();
     
-    if resize == 'zero_pad':
-        signal = a[:,:axis.count]
-    else:
-        signal = a[:]   
+    # Un-pad?
+    signal = a[:,:min(n, axis.count)]
         
     if other_idx is not None and other_idx != 0:
         return signal.transpose()
