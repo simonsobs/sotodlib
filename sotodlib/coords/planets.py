@@ -138,7 +138,7 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         signal = tod.signal
 
     # Get a reasonable gap fill.
-    gaps = tod_ops.get_gap_fill(tod, signal=tod.signal, flags=source_flags)
+    gaps = tod_ops.get_gap_fill(tod, signal=signal, flags=source_flags)
     gaps.swap(tod, signal=signal)
 
     # Measure TOD means (after gap fill).
@@ -186,8 +186,9 @@ def get_source_pos(src, timestamp, site='_default'):
 
 def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
              res=0.01*coords.DEG, wcs_kernel=None, comps='TQU',
+             signal=None,
              filename=None, source_flags=None, cuts=None,
-             eigentol=1e-3, inplace=False, info={}):
+             eigentol=1e-3, info={}):
     """Make a compact source map from the TOD.  Specify filename to write
     things to disk; this should be a format string, for example
     '{obs_id}_{map}.fits', where 'map' will be given values of
@@ -209,11 +210,10 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
         PRINT_FUNC = logger.info
         FMT = 'make_map: {msg}: {elapsed:.3f} seconds'
 
+    if signal is None:
+        signal = tod.signal
+
     with MmTimer('filter for sources'):
-        if inplace:
-            signal = tod.signal
-        else:
-            signal = tod.signal.copy()
         filter_for_sources(tod, signal=signal, source_flags=source_flags)
 
     if thread_algo == 'none':
