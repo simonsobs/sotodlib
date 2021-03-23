@@ -3,8 +3,13 @@ import pyfftw
 import inspect
 import scipy.signal as signal
 
+import logging
+
 from . import detrend_data
-from .fft_ops import build_rfft_object
+from . import fft_ops
+
+logger = logging.getLogger(__name__)
+
 
 def fourier_filter(tod, filt_function,
                    detrend='linear', resize='zero_pad',
@@ -26,12 +31,14 @@ def fourier_filter(tod, filt_function,
         detrend: Method of detrending to be done before ffting. Can
             be 'linear', 'mean', or None.
             
-        resize: How to resize the axis to increase fft speed. 'zero_pad' 
-            will increase to the next 2**N. 'trim' will cut out so the 
-            factorization of N contains only low primes. None will not 
-            change the axis length and might be quite slow. Trim will be 
-            kinda weird here, because signal will not be returned as the same
-            size as it is input
+        resize: How to resize the axis to increase fft
+            speed. 'zero_pad' will increase to the next nice number (a
+            product of small primes compatible with the FFT
+            implementation).  'trim' will eliminate samples from the
+            end so that axis has a nice length for FFTs.  None will not
+            change the axis length and might be quite slow. Trim will
+            be kinda weird here, because signal will not be returned
+            as the same size as it is input
 
         axis_name: name of axis you would like to fft along
         
@@ -75,16 +82,17 @@ def fourier_filter(tod, filt_function,
         signal = signal.transpose()
     
     if resize == 'zero_pad':
-        k = int(np.ceil(np.log(axis.count)/np.log(2)))
-        n = 2**k 
+        n = fft_ops.find_superior_integer(axis.count)
+        logger.info('fourier_filter: padding %i -> %i' % (axis.count, n))
     elif resize == 'trim':
         n = fft.find_inferior_integer(axis.count)
+        logger.info('fourier_filter: trimming %i -> %i' % (axis.count, n))
     elif resize is None:
         n = axis.count
     else:
         raise ValueError('resize must be "zero_pad", "trim", or None')
 
-    a, b, t_1, t_2 = build_rfft_object(n_det, n, 'BOTH')
+    a, b, t_1, t_2 = fft_ops.build_rfft_object(n_det, n, 'BOTH')
     if resize == 'zero_pad':
         a[:,:axis.count] = signal
         a[:,axis.count:] = 0
