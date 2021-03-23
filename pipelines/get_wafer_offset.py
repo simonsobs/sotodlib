@@ -13,6 +13,10 @@ import numpy as np
 import toast.qarray as qa
 
 import sotodlib.sim_hardware as hardware
+from sotodlib.core.hardware import LAT_COROTATOR_OFFSET_DEG
+
+
+XAXIS, YAXIS, ZAXIS = np.eye(3)
 
 
 def main():
@@ -33,6 +37,28 @@ def main():
     )
     parser.add_argument(
         "--reverse", action="store_true", help="Reverse offsets")
+    # LAT specific params
+    parser.add_argument(
+        "--corotate-lat",
+        required=False,
+        action="store_true",
+        help="Rotate LAT receiver to maintain focalplane orientation",
+        dest="corotate_lat",
+    )
+    parser.add_argument(
+        "--no-corotate-lat",
+        required=False,
+        action="store_false",
+        help="Do not Rotate LAT receiver to maintain focalplane orientation",
+        dest="corotate_lat",
+    )
+    parser.set_defaults(corotate_lat=True)
+    parser.add_argument(
+        "--elevation-deg",
+        required=False,
+        type=np.float,
+        help="Observing elevation",
+    )
 
     args = parser.parse_args()
 
@@ -78,13 +104,33 @@ def main():
 
     # print(f"tube_slots = {tube_slots}, match = {match} leaves {ndet} detectors")
 
+    # Optional corotator rotation
+
+    if telescope == "LAT":
+        if args.corotate_lat:
+            rot = qa.rotation(ZAXIS, np.radians(LAT_COROTATOR_OFFSET_DEG))
+        else:
+            if args.elevation_deg is None:
+                raise RuntimeError(
+                    "You must set the observing elevation when not co-rotating."
+                )
+            rot = qa.rotation(
+                ZAXIS,
+                np.radians(args.elevation_deg - 60 + LAT_COROTATOR_OFFSET_DEG)
+            )
+    else:
+        if args.elevation_deg is not None:
+            raise RuntimeError("Observing elevation does not matter for SAT")
+        rot = None
+
     # Average detector offset
 
     vec_mean = np.zeros(3)
-    zaxis = np.array([0, 0, 1])
     for det_name, det_data in hw.data["detectors"].items():
         quat = det_data["quat"]
-        vec = qa.rotate(quat, zaxis)
+        if rot is not None:
+            quat = qa.mult(rot, quat)
+        vec = qa.rotate(quat, ZAXIS)
         vec_mean += vec
     vec_mean /= ndet
 
@@ -93,7 +139,9 @@ def main():
     all_dist = []
     for det_name, det_data in hw.data["detectors"].items():
         quat = det_data["quat"]
-        vec = qa.rotate(quat, zaxis)
+        if rot is not None:
+            quat = qa.mult(rot, quat)
+        vec = qa.rotate(quat, ZAXIS)
         all_dist.append(np.degrees(np.arccos(np.dot(vec_mean, vec))))
     dist_max = np.amax(all_dist)
 

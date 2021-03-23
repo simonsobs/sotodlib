@@ -148,7 +148,7 @@ class OpSimSSO(Operator):
         res = description[0][1]
         beam_solid_angle = np.sum(model)*np.radians(res)**2
 
-        n = description[1][0]
+        n = int(description[1][0])
         size = description[0][0]
         sso_radius_avg = np.average(sso_dia)/2. # in arcsed
         sso_solid_angle = np.pi*np.radians(sso_radius_avg/3600)**2
