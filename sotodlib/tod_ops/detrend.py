@@ -1,7 +1,7 @@
 import numpy as np
 
 def detrend_data(tod, method='linear', axis_name='samps', 
-            signal_name='signal'):
+                 signal_name='signal', count=10):
     
     """Returns detrended data. Decide for yourself if it goes
         into the axis manager. Generally intended for use before filter.
@@ -18,11 +18,16 @@ def detrend_data(tod, method='linear', axis_name='samps',
         
         signal_name: the name of the signal to detrend. defaults to 'signal'
             if it isn't 2D it is made to be.
-        
+
+        count: Number of samples to use, on each end, when measuring
+            mean level for 'linear' detrend.  Values larger than 1
+            suppress the influence of white noise.
+
     Returns:
         
         detrended signal: does not actually detrend the data in the axis
             manager, let's you decide if you want to do that.
+
     """
     assert len(tod._assignments[signal_name]) <= 2
         
@@ -46,7 +51,8 @@ def detrend_data(tod, method='linear', axis_name='samps',
         signal = signal - np.mean(signal, axis=1)[:,None]
     elif method == 'linear':
         x = np.linspace(0,1, axis.count)
-        slopes = signal[:,-1]-signal[:,0]
+        count = max(1, min(count, signal.shape[-1] // 2))
+        slopes = signal[:,-count:].mean(axis=-1)-signal[:,:count].mean(axis=-1)
         signal = signal - slopes[:,None]*x 
         signal -= np.mean(signal, axis=1)[:,None]
     else:
