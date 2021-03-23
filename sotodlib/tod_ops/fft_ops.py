@@ -161,3 +161,21 @@ def find_inferior_integer(target, primes=[2,3,5,7,11,13]):
         if (best_friend * base) >= best:
             best = best_friend * base
     return int(best)
+
+def find_superior_integer(target, primes=[2,3,5,7,11,13]):
+    """Find the smallest integer less than or equal to target whose prime
+    factorization contains only the integers listed in primes.
+
+    """
+    p = primes[0]
+    n = np.ceil(np.log(target) / np.log(p))
+    best = p**n
+    if len(primes) == 1:
+        return int(best)
+    while n > 0:
+        n -= 1
+        base = p**n
+        best_friend = find_superior_integer(target / base, primes[1:])
+        if (best_friend * base) <= best:
+            best = best_friend * base
+    return int(best)
