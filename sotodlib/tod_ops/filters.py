@@ -45,7 +45,7 @@ def fourier_filter(tod, filt_function,
         
     """
     if len(tod._assignments[signal_name]) >2:
-        raise ValueError('fouier_filter only works for 1D or 2D data streams')
+        raise ValueError('fourier_filter only works for 1D or 2D data streams')
         
     axis = getattr(tod, axis_name)
     times = getattr(tod, time_name)
@@ -227,22 +227,24 @@ fft_apply_filter = FilterApplyFunc.deco
 # Filtering Functions
 #################
 @fft_filter
-def low_pass_butter4(freqs, tod, lp_fc=1):
-    """ 4th order lowpass filter at with cutoff lp_fc
-        """
-    b, a = signal.butter(4, 2*np.pi*lp_fc, 'lowpass', analog=True)
+def low_pass_butter4(freqs, tod, fc):
+    """4th-order low-pass filter with f3db at fc (Hz).
+
+    """
+    b, a = signal.butter(4, 2*np.pi*fc, 'lowpass', analog=True)
     return np.abs(signal.freqs(b, a, 2*np.pi*freqs)[1])
 
 @fft_filter
-def high_pass_butter4(freqs, tod, hp_fc=1):
-    """ 4th order lowpass filter at with cutoff hp_fc
+def high_pass_butter4(freqs, tod, fc):
+    """4th-order high-pass filter with f3db at fc (Hz).
+
     """
-    b, a = signal.butter(4, 2*np.pi*hp_fc, 'highpass', analog=True)
+    b, a = signal.butter(4, 2*np.pi*fc, 'highpass', analog=True)
     return np.abs(signal.freqs(b, a, 2*np.pi*freqs)[1])
 
 @fft_filter
 def tau_filter(freqs, tod, tau_name='timeconst', do_inverse=True):
-    """tau_filter is deprecated, use timeconst_filter."""
+    """tau_filter is deprecated; use timeconst_filter."""
     logging.warning('tau_filter is deprecated; use timeconst_filter.')
     taus = getattr(tod, tau_name)
     
@@ -313,46 +315,51 @@ def timeconst_filter_single(freqs, tod, timeconst, invert=False):
     return 1. / (1. + 2.j * np.pi * timeconst * freqs)
 
 @fft_filter
-def gaussian_filter(freqs, tod, t_sigma=None, f_sigma=None, gain=1.0, fc=0.):
-    """Gaussian filter
+def gaussian_filter(freqs, tod, fc=0., f_sigma=None, gain=1.0, t_sigma=None):
+    """Gaussian bandpass filter
 
-    Borrowed from moby2.tod.filters
+    Parameters:
+        fc (float0): Central frequency of the filter (peak of
+            passband), in Hz.
+        f_sigma (float): Standard deviation of the filter kernel, in
+            Hz.
+        gain (float): Gain of the filter.
+        t_sigma (float): Instead of f_sigma, set t_sigma and f_sigma =
+            1/(2 pi t_sigma) will be used.
+
+    The filter kernel has the shape of a normal distribution, centered
+    on fc with standard deviation f_sigma, and peak height gain.
+
     """
     if t_sigma is not None and f_sigma is not None:
-        raise ValueError("cannot specify both time and frec sigmas. Using t_sigma.")
+        raise ValueError("User must not specify both f_sigma and t_sigma.")
     if t_sigma is not None:
-        sigma = 1.0 / (2*np.pi*t_sigma)
-    elif f_sigma is not None:
-        sigma = f_sigma
-    else:
-        sigma = 1.0
-    return gain * np.exp(-0.5*(np.abs(freqs)-fc)**2/sigma**2)
+        f_sigma = 1.0 / (2*np.pi*t_sigma)
+    if f_sigma is None:
+        raise ValueError('User must specify either f_sigma or t_sigma.')
+    return gain * np.exp(-0.5*(np.abs(freqs)-fc)**2/f_sigma**2)
 
 @fft_filter
-def low_pass_sine2(freqs, tod, lp_fc=1.0, df=0.1):
-    """low-pass by sine squared
+def low_pass_sine2(freqs, tod, cutoff, width=None):
+    """Low-pass filter.  Response falls from 1 to 0 between frequencies
+    (cutoff - width/2, cutoff + width/2), with a sine-squared shape.
 
-    Borrowed from moby2.tod.filters
     """
-    f = np.abs(freqs)
-    filt = np.zeros_like(f)
-    filt[f < lp_fc - df/2] = 1.0
-    sel = (f > lp_fc - df/2)*(f < lp_fc + df/2)
-    filt[sel] = np.sin(np.pi/2*(1 - 1/df*(f[sel] - hp_fc + df/2)))**2
-    return filt
+    if width is None:
+        width = cutoff * 2
+    phase = np.pi * np.clip((abs(freqs) - cutoff) / width, -0.5, 0.5)
+    return 0.5 - 0.5 * np.sin(phase)
 
 @fft_filter
-def high_pass_sine2(freqs, tod, hp_fc=1.0, df=0.1):
-    """high-pass by sine-squared
+def high_pass_sine2(freqs, tod, cutoff, width=None):
+    """High-pass filter.  Response rises from 0 to 1 between frequencies
+    (cutoff - width/2, cutoff + width/2), with a sine-squared shape.
 
-    Borrowed from moby2.tod.filters
     """
-    f = np.abs(freqs)
-    filt = np.zeros_like(f)
-    filt[f > hp_fc + df/2] = 1.0
-    sel = (f > hp_fc - df/2)*(f < hp_fc + df/2)
-    filt[sel] = np.sin(np.pi/2/df*(f[sel] - hp_fc + df/2))**2
-    return filt
+    if width is None:
+        width = cutoff * 2
+    phase = np.pi * np.clip((abs(freqs) - cutoff) / width, -0.5, 0.5)
+    return -0.5 + 0.5 * np.sin(phase)
 
 @fft_filter
 def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None, invert=False):
