@@ -585,7 +585,12 @@ class G3tSmurf:
         ## For now assume we just use the most recent tuning file.
         ################################################################################################
 
-        dset = session.query(Detsets).filter(Detsets.start <= dt.datetime.fromtimestamp(ctime))
+        self.update_observation_files(obs, session, max_early=max_early,
+                    max_wait=max_wait)
+
+    def update_observation_files(self, obs, session, max_early=5, max_wait=10):
+
+        dset = session.query(Detsets).filter(Detsets.start <= obs.start)
         dset = dset.order_by(db.desc(Detsets.start)).first()
         already_have = [ds.id for ds in obs.detsets]
 
@@ -597,9 +602,14 @@ class G3tSmurf:
             ## Here is where we will put logic if we need to go backwards 
             pass
 
-        x=session.query(Files.name).filter(Files.start >= dt.datetime.fromtimestamp(ctime-max_early)).order_by(Files.start).first()[0]
+        x=session.query(Files.name).filter(Files.start >= obs.start-dt.timedelta(seconds=max_early)).order_by(Files.start).first()
+        if x is None:
+            ## no files to add at this point
+            session.commit()
+            return
+        x = x[0]
         f_start, f_num = (x[:-3]).split('_')
-        if int(f_start)-ctime > max_wait:
+        if int(f_start)-obs.start.timestamp() > max_wait:
             ## we don't have .g3 files for some reason
             pass
         else:
