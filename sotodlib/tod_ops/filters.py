@@ -3,8 +3,13 @@ import pyfftw
 import inspect
 import scipy.signal as signal
 
+import logging
+
 from . import detrend_data
-from .fft_ops import build_rfft_object
+from . import fft_ops
+
+logger = logging.getLogger(__name__)
+
 
 def fourier_filter(tod, filt_function,
                    detrend='linear', resize='zero_pad',
@@ -26,12 +31,14 @@ def fourier_filter(tod, filt_function,
         detrend: Method of detrending to be done before ffting. Can
             be 'linear', 'mean', or None.
             
-        resize: How to resize the axis to increase fft speed. 'zero_pad' 
-            will increase to the next 2**N. 'trim' will cut out so the 
-            factorization of N contains only low primes. None will not 
-            change the axis length and might be quite slow. Trim will be 
-            kinda weird here, because signal will not be returned as the same
-            size as it is input
+        resize: How to resize the axis to increase fft
+            speed. 'zero_pad' will increase to the next nice number (a
+            product of small primes compatible with the FFT
+            implementation).  'trim' will eliminate samples from the
+            end so that axis has a nice length for FFTs.  None will not
+            change the axis length and might be quite slow. Trim will
+            be kinda weird here, because signal will not be returned
+            as the same size as it is input
 
         axis_name: name of axis you would like to fft along
         
@@ -45,7 +52,7 @@ def fourier_filter(tod, filt_function,
         
     """
     if len(tod._assignments[signal_name]) >2:
-        raise ValueError('fouier_filter only works for 1D or 2D data streams')
+        raise ValueError('fourier_filter only works for 1D or 2D data streams')
         
     axis = getattr(tod, axis_name)
     times = getattr(tod, time_name)
@@ -64,50 +71,45 @@ def fourier_filter(tod, filt_function,
         other_axis = getattr(tod, tod._assignments[signal_name][other_idx])
         n_det = other_axis.count
     
-    if detrend is None:
-        signal = np.atleast_2d(getattr(tod, signal_name))
-    else:
-        signal = detrend_data(tod, detrend, axis_name=axis_name, 
-                             signal_name=signal_name)
-    
-    if other_idx is not None and other_idx != 0:
-        ## so that code can be written always along axis 1
-        signal = signal.transpose()
-    
     if resize == 'zero_pad':
-        k = int(np.ceil(np.log(axis.count)/np.log(2)))
-        n = 2**k 
+        n = fft_ops.find_superior_integer(axis.count)
+        logger.info('fourier_filter: padding %i -> %i' % (axis.count, n))
     elif resize == 'trim':
         n = fft.find_inferior_integer(axis.count)
+        logger.info('fourier_filter: trimming %i -> %i' % (axis.count, n))
     elif resize is None:
         n = axis.count
     else:
         raise ValueError('resize must be "zero_pad", "trim", or None')
 
-    a, b, t_1, t_2 = build_rfft_object(n_det, n, 'BOTH')
-    if resize == 'zero_pad':
-        a[:,:axis.count] = signal
-        a[:,axis.count:] = 0
-    elif resize == 'trim':
-        a[:] = signal[:,:n]
+    a, b, t_1, t_2 = fft_ops.build_rfft_object(n_det, n, 'BOTH')
+
+    if detrend is None:
+        signal = np.atleast_2d(getattr(tod, signal_name))
     else:
-        a[:] = signal[:]
+        signal = detrend_data(tod, detrend, axis_name=axis_name,
+                             signal_name=signal_name)
+
+    if other_idx is not None and other_idx != 0:
+        ## so that code can be written always along axis 1
+        signal = signal.transpose()
+
+    # This copy is valid for all modes of "resize"
+    a[:,:min(n, axis.count)] = signal[:,:min(n, axis.count)]
+    a[:,min(n, axis.count):] = 0
     
     ## FFT Signal
     t_1();
     
     ## Get Filter
     freqs = np.fft.rfftfreq(n, delta_t)
-    filt = filt_function(freqs, tod, **kwargs)
-    b[:] *= filt
-    
+    filt_function.apply(freqs, tod, b, **kwargs)
+
     ## FFT Back
     t_2();
     
-    if resize == 'zero_pad':
-        signal = a[:,:axis.count]
-    else:
-        signal = a[:]   
+    # Un-pad?
+    signal = a[:,:min(n, axis.count)]
         
     if other_idx is not None and other_idx != 0:
         return signal.transpose()
@@ -116,49 +118,137 @@ def fourier_filter(tod, filt_function,
 
 ################################################################
 
-# Useful decorator: get rid of freqs and tod declare
-# when using the filter and make them well-behave under multiplication
-def fft_filter(fun):
-    class filter_func:
-        def __init__(self, *args, **kwargs):
-            self.args = args
-            self.kwargs = kwargs
-        def __call__(self, freqs, tod):
-            return fun(freqs, tod, *self.args, **self.kwargs)
-        def __mul__(self, other):
-            def fun_prod(freqs, tod):
-                return self(freqs, tod)*other(freqs, tod)
-            return fun_prod
-    # get help from someone
-    filter_func.__doc__ = fun.__doc__
-    # get arguments from someone after removing the partial args (first 2)
-    args = [v for k, v in inspect.signature(fun).parameters.items()][2:]
-    filter_func.__signature__ = inspect.Signature(parameters=args)
-    return filter_func
+# Base class... provides that a * b always returns a FilterChain.
+class _chainable:
+    @staticmethod
+    def _preference(f):
+        return getattr(f, 'preference', 'compose')
+    def __mul__(self, other):
+        return FilterChain([self, other])
 
-#Example Filtering Functions
+class FilterFunc(_chainable):
+    """Class to support chaining of Fourier filters.
+
+    FilterFunc.deco may be used to decorate functions with signatures
+    like::
+
+       function_name(freqs, tod, *args, **kwargs)
+
+    """
+    # Note self._fun is set in the subclass, as a class variable,
+    # e.g.: _fun = staticmethod(gaussian_filter)
+    _fun_nargs = 2
+    preference = 'compose'
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.args = args
+        self.kwargs = kwargs
+    def __call__(self, freqs, tod):
+        return self._fun(freqs, tod, *self.args, **self.kwargs)
+    def apply(self, freqs, tod, target):
+        target *= self(freqs, tod)
+    @classmethod
+    def deco(cls, fun):
+        class filter_func(cls):
+            _fun = staticmethod(fun)
+        # get help from someone
+        filter_func.__doc__ = fun.__doc__
+        # get arguments from someone after removing the partial args
+        args = list(inspect.signature(fun).parameters.values())[cls._fun_nargs:]
+        filter_func.__signature__ = inspect.Signature(parameters=args)
+        return filter_func
+
+class FilterApplyFunc(FilterFunc):
+    """Class to support chaining of Fourier filters.
+
+    @FilterApplyFunc.deco may be used to decorate functions with signatures
+    like:
+
+       function_name(target, freqs, tod, *, **)
+
+    Such filter functions must return a transfer function array, if
+    target=None.  But if target is a fourier transform array, the
+    function must apply the transfer function to that array and return
+    None.
+
+    """
+    _fun_nargs = 3
+    preference = 'apply'
+    def __call__(self, freqs, tod):
+        return self._fun(None, freqs, tod, *self.args, **self.kwargs)
+    def apply(self, freqs, tod, target):
+        return self._fun(target, freqs, tod, *self.args, **self.kwargs)
+
+class FilterChain(_chainable):
+    """A chain of Fourier filters."""
+    def __init__(self, items):
+        super().__init__()
+        self.links = []
+        for a in items:
+            if isinstance(a, FilterChain):
+                self.links.extend(a.links)
+            else:
+                self.links.append(a)
+
+    def __call__(self, freqs, tod):
+        # We could do better by handling self.links out of order.
+        filt = self.links[0](freqs, tod)
+        for f in self.links[1:]:
+            if self._preference(f) == 'apply' and filt.ndim == 2:
+                f.apply(freqs, tod, filt)
+            else:
+                _filt = f(freqs, tod)
+                # Swap those to help broadcasting work...
+                if _filt.ndim > filt.ndim:
+                    filt, _filt = _filt, filt
+                filt *= _filt
+                del _filt
+        return filt
+
+    def apply(self, freqs, tod, target):
+        filt = None
+        for f in self.links:
+            if self._preference(f) == 'apply':
+                f.apply(freqs, tod, target)
+            elif filt is None:
+                filt = f(freqs, tod)
+            else:
+                _filt = f(freqs, tod)
+                # Swap those to help broadcasting work...
+                if _filt.ndim > filt.ndim:
+                    filt, _filt = _filt, filt
+                filt *= _filt
+                del _filt
+        if filt is not None:
+            target *= filt
+
+# Alias the decorators...
+fft_filter = FilterFunc.deco
+fft_apply_filter = FilterApplyFunc.deco
+
+
+# Filtering Functions
 #################
 @fft_filter
-def low_pass_butter4(freqs, tod, lp_fc=1):
-    """ 4th order lowpass filter at with cutoff lp_fc
-        """
-    b, a = signal.butter(4, 2*np.pi*lp_fc, 'lowpass', analog=True)
+def low_pass_butter4(freqs, tod, fc):
+    """4th-order low-pass filter with f3db at fc (Hz).
+
+    """
+    b, a = signal.butter(4, 2*np.pi*fc, 'lowpass', analog=True)
     return np.abs(signal.freqs(b, a, 2*np.pi*freqs)[1])
 
 @fft_filter
-def high_pass_butter4(freqs, tod, hp_fc=1):
-    """ 4th order lowpass filter at with cutoff hp_fc
+def high_pass_butter4(freqs, tod, fc):
+    """4th-order high-pass filter with f3db at fc (Hz).
+
     """
-    b, a = signal.butter(4, 2*np.pi*hp_fc, 'highpass', analog=True)
+    b, a = signal.butter(4, 2*np.pi*fc, 'highpass', analog=True)
     return np.abs(signal.freqs(b, a, 2*np.pi*freqs)[1])
 
 @fft_filter
 def tau_filter(freqs, tod, tau_name='timeconst', do_inverse=True):
-    """Time constant filter for fourier filter. 
-    
-    Builds filter for removing time constants from data
-    Example Use: fourier_filter(tod, tau_filter, detrend=None, resize='zero_pad')
-    """
+    """tau_filter is deprecated; use timeconst_filter."""
+    logging.warning('tau_filter is deprecated; use timeconst_filter.')
     taus = getattr(tod, tau_name)
     
     filt = 1 + 2.0j*np.pi*taus[:,None]*freqs[None,:]
@@ -166,47 +256,113 @@ def tau_filter(freqs, tod, tau_name='timeconst', do_inverse=True):
         return 1.0/filt
     return filt
 
-@fft_filter
-def gaussian_filter(freqs, tod, t_sigma=None, f_sigma=None, gain=1.0, fc=0.):
-    """Gaussian filter
+@fft_apply_filter
+def timeconst_filter(target, freqs, tod, timeconst=None, invert=False):
+    """One-pole time constant filter for fourier_filter.
 
-    Borrowed from moby2.tod.filters
+    Builds filter for applying or removing time constants from signal
+    data.
+
+    Args:
+
+      timeconst: Array of time constant values (one per detector).
+        Alternately, a string indicating what member of tod to use for
+        the time constants array.  Defaults to 'timeconst'.
+      invert (bool): If true, returns the inverse transfer function,
+        to deconvolve the time constants.
+
+    Example::
+
+      # Deconvolve time constants.
+      fourier_filter(tod, timeconst_filter(invert=True),
+                     detrend='linear', resize='zero_pad')
+
+    """
+    if timeconst is None:
+        timeconst = 'timeconst'
+    if isinstance(timeconst, str):
+        timeconst = tod[timeconst]
+
+    if target is None:
+        filt = 1 + 2.0j*np.pi*timeconst[:,None]*freqs[None,:]
+        if invert:
+            return filt
+        return 1.0/filt
+
+    # Apply filter directly to FFT in target.
+    assert(len(timeconst) == len(target))  # safe zip.
+    if invert:
+        for tau, dest in zip(timeconst, target):
+            dest *= 1.+ 2.j*np.pi*tau*freqs
+    else:
+        for tau, dest in zip(timeconst, target):
+            dest /= 1.+ 2.j*np.pi*tau*freqs
+
+@fft_filter
+def timeconst_filter_single(freqs, tod, timeconst, invert=False):
+    """One-pole time constant filter for fourier_filter.
+
+    This version accepts a single time constant value, in seconds.  To
+    use different time constants for each detector, see
+    timeconst_filter.
+
+    Example::
+
+      # Apply a 1ms time constant.
+      fourier_filter(tod, timeconst_filter_single(timeconst=0.001),
+                     detrend=None, resize='zero_pad')
+
+    """
+    if invert:
+        return 1. + 2.j * np.pi * timeconst * freqs
+    return 1. / (1. + 2.j * np.pi * timeconst * freqs)
+
+@fft_filter
+def gaussian_filter(freqs, tod, fc=0., f_sigma=None, gain=1.0, t_sigma=None):
+    """Gaussian bandpass filter
+
+    Parameters:
+        fc (float0): Central frequency of the filter (peak of
+            passband), in Hz.
+        f_sigma (float): Standard deviation of the filter kernel, in
+            Hz.
+        gain (float): Gain of the filter.
+        t_sigma (float): Instead of f_sigma, set t_sigma and f_sigma =
+            1/(2 pi t_sigma) will be used.
+
+    The filter kernel has the shape of a normal distribution, centered
+    on fc with standard deviation f_sigma, and peak height gain.
+
     """
     if t_sigma is not None and f_sigma is not None:
-        raise ValueError("cannot specify both time and frec sigmas. Using t_sigma.")
+        raise ValueError("User must not specify both f_sigma and t_sigma.")
     if t_sigma is not None:
-        sigma = 1.0 / (2*np.pi*t_sigma)
-    elif f_sigma is not None:
-        sigma = f_sigma
-    else:
-        sigma = 1.0
-    return gain * np.exp(-0.5*(np.abs(freqs)-fc)**2/sigma**2)
+        f_sigma = 1.0 / (2*np.pi*t_sigma)
+    if f_sigma is None:
+        raise ValueError('User must specify either f_sigma or t_sigma.')
+    return gain * np.exp(-0.5*(np.abs(freqs)-fc)**2/f_sigma**2)
 
 @fft_filter
-def low_pass_sine2(freqs, tod, lp_fc=1.0, df=0.1):
-    """low-pass by sine squared
+def low_pass_sine2(freqs, tod, cutoff, width=None):
+    """Low-pass filter.  Response falls from 1 to 0 between frequencies
+    (cutoff - width/2, cutoff + width/2), with a sine-squared shape.
 
-    Borrowed from moby2.tod.filters
     """
-    f = np.abs(freqs)
-    filt = np.zeros_like(f)
-    filt[f < lp_fc - df/2] = 1.0
-    sel = (f > lp_fc - df/2)*(f < lp_fc + df/2)
-    filt[sel] = np.sin(np.pi/2*(1 - 1/df*(f[sel] - hp_fc + df/2)))**2
-    return filt
+    if width is None:
+        width = cutoff * 2
+    phase = np.pi * np.clip((abs(freqs) - cutoff) / width, -0.5, 0.5)
+    return 0.5 - 0.5 * np.sin(phase)
 
 @fft_filter
-def high_pass_sine2(freqs, tod, hp_fc=1.0, df=0.1):
-    """high-pass by sine-squared
+def high_pass_sine2(freqs, tod, cutoff, width=None):
+    """High-pass filter.  Response rises from 0 to 1 between frequencies
+    (cutoff - width/2, cutoff + width/2), with a sine-squared shape.
 
-    Borrowed from moby2.tod.filters
     """
-    f = np.abs(freqs)
-    filt = np.zeros_like(f)
-    filt[f > hp_fc + df/2] = 1.0
-    sel = (f > hp_fc - df/2)*(f < hp_fc + df/2)
-    filt[sel] = np.sin(np.pi/2/df*(f[sel] - hp_fc + df/2))**2
-    return filt
+    if width is None:
+        width = cutoff * 2
+    phase = np.pi * np.clip((abs(freqs) - cutoff) / width, -0.5, 0.5)
+    return -0.5 + 0.5 * np.sin(phase)
 
 @fft_filter
 def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None, invert=False):
