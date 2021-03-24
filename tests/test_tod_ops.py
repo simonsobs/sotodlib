@@ -71,6 +71,7 @@ class FilterTest(unittest.TestCase):
     def test_basic(self):
         """Test that fourier filters reduce RMS of white noise."""
         tod = get_tod('white')
+        tod.wrap('sig1d', tod.signal[0], [(0, 'samps')])
         sigma0 = tod.signal.std(axis=1)
         f0 = SAMPLE_FREQ_HZ
         fc = f0 / 4
@@ -87,6 +88,12 @@ class FilterTest(unittest.TestCase):
             sig_filt = tod_ops.fourier_filter(tod, filt)
             sigma1 = sig_filt.std(axis=1)
             self.assertTrue(np.all(sigma1 < sigma0))
+            print(f'Filter takes sigma from {sigma0} to {sigma1}')
+
+        # Check 1d
+        sig1f = tod_ops.fourier_filter(tod, filt, signal_name='sig1d',
+                                       detrend='linear')
+        self.assertEqual(sig1f.shape, tod['sig1d'].shape)
 
 if __name__ == '__main__':
     unittest.main()
