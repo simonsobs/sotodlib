@@ -54,6 +54,19 @@ class PcaTest(unittest.TestCase):
         print(f'Amplitudes from {amps0} to {amps1}.')
         self.assertTrue(np.all(amps1 < amps0 * 1e-6))
 
+    def test_detrend(self):
+        tod = get_tod('trendy')
+        tod.wrap('sig1d', tod.signal[0], [(0, 'samps')])
+        tod.wrap('sig1e', tod.signal[:,0], [(0, 'dets')])
+        tod.wrap('sig3d', tod.signal[None], [(1, 'dets'), (2, 'samps')])
+        tod_ops.detrend_data(tod)
+        tod_ops.detrend_data(tod, signal_name='sig1d')
+        tod_ops.detrend_data(tod, signal_name='sig1e', axis_name='dets')
+        tod_ops.detrend_data(tod, signal_name='sig3d')
+        tod_ops.detrend_data(tod, signal_name='sig3d', axis_name='dets')
+        with self.assertRaises(ValueError):
+            tod_ops.detrend_data(tod, signal_name='sig1e')
+
 class FilterTest(unittest.TestCase):
     def test_basic(self):
         """Test that fourier filters reduce RMS of white noise."""
