@@ -365,7 +365,7 @@ def high_pass_sine2(freqs, tod, cutoff, width=None):
     if width is None:
         width = cutoff * 2
     phase = np.pi * np.clip((abs(freqs) - cutoff) / width, -0.5, 0.5)
-    return -0.5 + 0.5 * np.sin(phase)
+    return 0.5 + 0.5 * np.sin(phase)
 
 @fft_filter
 def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None, invert=False):
