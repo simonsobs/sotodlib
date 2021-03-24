@@ -77,7 +77,7 @@ class FilterTest(unittest.TestCase):
         fc = f0 / 4
         for filt in [
                 tod_ops.filters.high_pass_butter4(fc),
-                tod_ops.filters.low_pass_sine2(fc),
+                tod_ops.filters.high_pass_sine2(fc),
                 tod_ops.filters.low_pass_butter4(fc),
                 tod_ops.filters.low_pass_sine2(fc),
                 tod_ops.filters.gaussian_filter(fc, f_sigma=f0 / 10),
