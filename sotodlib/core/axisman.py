@@ -612,7 +612,7 @@ class AxisManager:
         if in_place:
             dest = self
         else:
-            dest = AxisManager(*self._axes.values())
+            dest = self.copy(axes_only=True)
             dest._assignments.update(self._assignments)
         sels = {}
         # If simple list/tuple of Axes is passed in, convert to dict
@@ -688,7 +688,7 @@ class AxisManager:
         if in_place:
             dest = self
         else:
-            dest = AxisManager(*self._axes.values())
+            dest = self.copy(axes_only=True)
             dest._assignments.update(self._assignments)
         new_ax, sl = dest._axes[axis_name].restriction(selector)
         for k, v in self._fields.items():
@@ -734,8 +734,7 @@ class AxisManager:
         self.restrict_axes(axes_out)
         # Import the other ones.
         for aman in amans:
-            ### is this enough?
-            aman = aman.restrict_axes(axes_out, in_place=True)
+            aman = aman.restrict_axes(axes_out, in_place=False)
             for k, v in aman._axes.items():
                 if k not in self._axes:
                     self._axes[k] = v
