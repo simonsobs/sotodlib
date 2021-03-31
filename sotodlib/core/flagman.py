@@ -29,9 +29,6 @@ class FlagManager(AxisManager):
             raise ValueError('FlagManagers require a dets axis')
         if not self._samp_name in self._axes:
             raise ValueError('FlagManagers require a samps axis')
-            
-    def __repr__(self):
-        return 'FlagManager ' + super().__repr__()
     
     def wrap(self, name, data, axis_map=None, **kwargs):
         """See core.AxisManager for basic usage
