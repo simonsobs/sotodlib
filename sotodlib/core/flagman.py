@@ -106,7 +106,7 @@ class FlagManager(AxisManager):
                s[1] != self[self._samp_name].count):
             raise ValueError("Data of shape {} is cannot be aligned with"
                              "the (dets,samps) axss".format(s))
-        self.wrap(name, data, axis_map=[(0,self._samp_name), (1,self._samp_name)])
+        self.wrap(name, data, axis_map=[(0,self._det_name), (1,self._samp_name)])
         
     def copy(self, axes_only=False):
         out = FlagManager(self[self._det_name], self[self._samp_name])
@@ -120,6 +120,12 @@ class FlagManager(AxisManager):
             out._assignments[k] = v.copy()
         return out
     
+    def get_zeros(self):
+        """
+        Return a correctly sized RangesMatrix for building cuts for the FlagManager
+        """
+        return RangesMatrix([Ranges(self[self._samp_name].count) for det in self[self._det_name].vals])
+        
     def buffer(self, n_buffer, flags=None):
         """Buffer all the samps cuts by n_buffer
         Like with Ranges / Ranges Matrix, buffer changes everything in place        
@@ -173,7 +179,7 @@ class FlagManager(AxisManager):
         if len(flags)==0:
             raise ValueError('Found zero flags to combine')
             
-        out = RangesMatrix([Ranges(self.samps.count) for det in self.dets.vals])
+        out = self.get_zeros()
         
         ## need to add out to prevent flag ordering from causing errors
         ### (Ranges can't add to RangeMatrix, only other way around)
@@ -198,7 +204,19 @@ class FlagManager(AxisManager):
             self.wrap(new_flag, out)
             
         return out        
-                
+    
+    def has_cuts(self, flags=None):
+        '''
+        Return list of detector ids that have cuts
+        
+        Args: 
+            flags: [optional] If not none it is the list of flags to combine to see
+                    if cuts exist
+        '''
+        c = self.reduce(flags=flags)
+        idx = np.where( [len(x.ranges())>0 for x in c])[0]
+        return self[self._det_name].vals[idx]
+
     @classmethod
     def for_tod(cls, tod, det_name='dets', samp_name='samps'):
         """Assumes tod is an AxisManager with dets and samps axes defined
