@@ -84,7 +84,7 @@ def get_glitch_flags(tod, params={}, signal='signal', merge=True,
         
     return flag
 
-def get_trending_flags(aman, max_trend=np.pi, n_pieces=4, signal_name='signal',
+def get_trending_flags(aman, max_trend=np.pi, n_pieces=1, signal_name='signal',
                  flag_name='trends', overwrite=True):
     """ Flag Detectors with trends larger than max_trend.
     
@@ -92,6 +92,8 @@ def get_trending_flags(aman, max_trend=np.pi, n_pieces=4, signal_name='signal',
         aman (AxisManager): the tod 
         max_trend: maxmium amount to always the detectors to change by
                    default is pi for use in phase units.
+        n_pieces: number of pieces to cut the timestream in to to look for 
+                    trends
         flag_name (string): name of flag to add to aman.flags
         overwrite (bool): if true, write over flag. if false, don't
     
