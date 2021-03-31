@@ -734,7 +734,8 @@ class AxisManager:
         self.restrict_axes(axes_out)
         # Import the other ones.
         for aman in amans:
-            aman = aman.restrict_axes(axes_out, in_place=False)
+            ### is this enough?
+            aman = aman.restrict_axes(axes_out, in_place=True)
             for k, v in aman._axes.items():
                 if k not in self._axes:
                     self._axes[k] = v
