@@ -938,6 +938,8 @@ class G3tSmurf:
         temp.wrap('frequency', np.array(channel_freqs), ([(0,'channels')]) )
         aman.wrap('ch_info', temp)
 
+        aman.wrap('flags', core.FlagManager.for_tod(aman, 'channels', 'samps'))
+
         return aman
 
     def load_status(self, time, show_pb=False):
