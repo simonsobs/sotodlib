@@ -19,15 +19,11 @@ class FlagManager(AxisManager):
     """
     
     def __init__(self, det_axis, samp_axis):
-        self._det_name = det_axis.name
-        self._samp_name = samp_axis.name
-        
         super().__init__(det_axis, samp_axis)
-        
-        ## are these checks required anymore?
-        if not self._det_name in self._axes:
+                
+        if not 'dets' in self._axes:
             raise ValueError('FlagManagers require a dets axis')
-        if not self._samp_name in self._axes:
+        if not 'samps' in self._axes:
             raise ValueError('FlagManagers require a samps axis')
             
     def wrap(self, name, data, axis_map=None, **kwargs):
@@ -71,7 +67,7 @@ class FlagManager(AxisManager):
                                      " dets and/or samps. Data of shape {}"
                                      " is the wrong shape".format(s))
         
-        if len(axis_map)==1 and axis_map[0][1]== self._det_name:
+        if len(axis_map)==1 and axis_map[0][1]=='dets':
             ### Change detector flags to RangesMatrix in the backend
             x = Ranges(self.samps.count)
             data = RangesMatrix([Ranges.ones_like(x) if Y 
@@ -87,7 +83,7 @@ class FlagManager(AxisManager):
         if not len(s) == 1 or s[0] != self.dets.count:
             raise ValueError("Data of shape {} is cannot be aligned with"
                              "the detector axis".format(s))
-        self.wrap(name, data, axis_map=[(0,self._det_name)])
+        self.wrap(name, data, axis_map=[(0,'dets')])
         
     def wrap_samps(self, name, data):
         """Adding flag with just (samps,) axis.
@@ -96,7 +92,7 @@ class FlagManager(AxisManager):
         if not len(s) == 1 or s[0] != self.samps.count:
             raise ValueError("Data of shape {} is cannot be aligned with"
                              "the samps axis".format(s))
-        self.wrap(name, data, axis_map=[(0,self._samp_name)])
+        self.wrap(name, data, axis_map=[(0,'samps')])
         
     def wrap_dets_samps(self, name, data):
         """Adding flag with (dets, samps) axes.
@@ -106,7 +102,7 @@ class FlagManager(AxisManager):
                s[1] != self.samps.count):
             raise ValueError("Data of shape {} is cannot be aligned with"
                              "the (dets,samps) axss".format(s))
-        self.wrap(name, data, axis_map=[(0,self._samp_name), (1,self._samp_name)])
+        self.wrap(name, data, axis_map=[(0,'samps'), (1,'samps')])
         
     def copy(self, axes_only=False):
         out = FlagManager(self.dets, self.samps)
@@ -200,10 +196,10 @@ class FlagManager(AxisManager):
         return out        
                 
     @classmethod
-    def for_tod(cls, tod, det_name='dets', samp_name='samps'):
+    def for_tod(cls, tod):
         """Assumes tod is an AxisManager with dets and samps axes defined
         """
-        return cls(tod[det_name], tod[samp_name])
+        return cls(tod.dets, tod.samps)
 
 def _get_shape(data):
     try:
