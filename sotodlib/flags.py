@@ -83,3 +83,44 @@ def get_glitch_flags(tod, params={}, signal='signal', merge=True,
             tod.flags.wrap(name, flag)
         
     return flag
+
+def get_trending_flags(aman, max_trend=np.pi, n_pieces=4, signal_name='signal',
+                 flag_name='trends', overwrite=True):
+    """ Flag Detectors with trends larger than max_trend.
+    
+    Args:
+        aman (AxisManager): the tod 
+        max_trend: maxmium amount to always the detectors to change by
+                   default is pi for use in phase units.
+        flag_name (string): name of flag to add to aman.flags
+        overwrite (bool): if true, write over flag. if false, don't
+    
+    Returns:
+        flag: RangesMatrix object of glitches
+    """
+    if overwrite and flag_name in aman.flags:
+        aman.flags.move(flag_name, None)
+    signal = np.atleast_2d( aman[signal_name] )
+    signal = signal[:,:aman.samps.count//n_pieces*n_pieces].reshape((signal.shape[0], n_pieces,-1))
+
+    piece_size = signal.shape[2]
+    slopes = signal[:,:,-1]-signal[:,:,0]
+
+    bad_slopes = np.abs(slopes)>max_trend
+
+    if n_pieces == 1:
+        aman.flags.wrap_dets(flag_name, bad_slopes[:,0])
+
+    else:
+        cut = aman.flags.get_zeros()
+        dets = np.unique(np.where(bad_slopes)[0])
+        for d in dets:
+            clear = np.where(bad_slopes[d])[0]
+            for c in clear:
+                if c == n_pieces-1:
+                    cut[d].add_interval(int(c*piece_size), cut.ranges[d].count-1)
+                else:
+                    cut[d].add_interval(int(c*piece_size), int((c+1)*piece_size))
+        aman.flags.wrap_dets_samps(flag_name, cut)
+    return aman.flags[flag_name]
+
