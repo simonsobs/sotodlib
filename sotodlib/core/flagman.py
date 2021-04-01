@@ -83,7 +83,7 @@ class FlagManager(AxisManager):
         if not len(s) == 1 or s[0] != self[self._det_name].count:
             raise ValueError("Data of shape {} is cannot be aligned with"
                              "the detector axis".format(s))
-        self.wrap(name, data, axis_map=[(0,'dets')])
+        self.wrap(name, data, axis_map=[(0,self._det_name)])
         
     def wrap_samps(self, name, data):
         """Adding flag with just (samps,) axis.
@@ -92,7 +92,7 @@ class FlagManager(AxisManager):
         if not len(s) == 1 or s[0] != self[self._samp_name].count:
             raise ValueError("Data of shape {} is cannot be aligned with"
                              "the samps axis".format(s))
-        self.wrap(name, data, axis_map=[(0,'samps')])
+        self.wrap(name, data, axis_map=[(0,self._samp_name)])
         
     def wrap_dets_samps(self, name, data):
         """Adding flag with (dets, samps) axes.
@@ -102,11 +102,8 @@ class FlagManager(AxisManager):
                s[1] != self[self._samp_name].count):
             raise ValueError("Data of shape {} is cannot be aligned with"
                              "the (dets,samps) axss".format(s))
-<<<<<<< HEAD
         self.wrap(name, data, axis_map=[(0,self._det_name), (1,self._samp_name)])
-=======
-        self.wrap(name, data, axis_map=[(0,'samps'), (1,'samps')])
->>>>>>> e41d85cdc37407f6e0c560ab43f4d95f0c0d41a2
+
         
     def copy(self, axes_only=False):
         out = FlagManager(self[self._det_name], self[self._samp_name])
