@@ -671,7 +671,7 @@ class AxisManager:
         """Restrict the AxisManager by selecting a subset of items in some
         Axis.  The Axis definition and all data fields mapped to that
         axis will be modified.
-
+        
         Arugments:
           axis_name (str): The name of the Axis.
           selector (slice or special): Selector, in a form understood
@@ -680,10 +680,10 @@ class AxisManager:
           in_place (bool): If True, modifications are made to this
             object.  Otherwise, a new object with the restriction
             applied is returned.
-
+        
         Returns:
           The AxisManager with restrictions applied.
-
+        
         """
         if in_place:
             dest = self
