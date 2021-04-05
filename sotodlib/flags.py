@@ -6,21 +6,25 @@ from so3g.proj import Ranges, RangesMatrix
 from .tod_ops import filters
 from .tod_ops import fourier_filter
 
-def get_turnaround_flags(tod, qlim=1, merge=True, overwrite=False,
-                         name='turnarounds'):
+def get_turnaround_flags(tod, qlim=1, az=None, merge=True, 
+                         overwrite=False,name='turnarounds'):
     """Flag the scan turnaround times.
 
     Args:
         tod: AxisManager object
         qlim: percentile used to find turnaround
+        az: The azimuth signal to look for turnarounds. If None it defaults to
+            tod.boresight.az
         merge: If true, merge into tod.flags
+        overwrite: If true and merge is True, write over existing flag
         name: name of flag when merged into tod.flags
 
     Returns:
         flag: Ranges object of turn-arounds 
 
     """
-    az = tod.boresight.az
+    if az is None:
+        az = tod.boresight.az
     lo, hi = np.percentile(az, [qlim,100-qlim])
     m = np.logical_or(az < lo, az > hi)
     
@@ -36,7 +40,7 @@ def get_turnaround_flags(tod, qlim=1, merge=True, overwrite=False,
     return flag
 
 
-def get_glitch_flags(tod, params={}, signal='signal', merge=True, 
+def get_glitch_flags(tod, params={}, signal=None, merge=True, 
                      overwrite=False, name='glitches'):
     """ Find glitches with fourier filtering
     Translation from moby2 as starting point
@@ -48,6 +52,7 @@ def get_glitch_flags(tod, params={}, signal='signal', merge=True,
                 t_glitch: Gaussian filter width
                 hp_fc: high pass filter cutoff
                 buffer: amount to buffer flags around found location
+        signal (str): if None, defaults to tod.signal
         merge (bool): if true, add to tod.flags
         name (string): name of flag to add to tod.flags
         overwrite (bool): if true, write over flag. if false, don't
@@ -62,6 +67,8 @@ def get_glitch_flags(tod, params={}, signal='signal', merge=True,
     gparams.update(params)
     params=gparams
     
+    if signal is None:
+        signal = 'signal'
     # f-space filtering
     filt = filters.high_pass_sine2(params['hp_fc']) * filters.gaussian_filter(params['t_glitch'])
     fvec = fourier_filter(tod, filt, detrend='linear', 
@@ -84,25 +91,31 @@ def get_glitch_flags(tod, params={}, signal='signal', merge=True,
         
     return flag
 
-def get_trending_flags(aman, max_trend=np.pi, n_pieces=1, signal_name='signal',
-                 flag_name='trends', overwrite=True):
+def get_trending_flags(aman, max_trend=np.pi, n_pieces=1, signal=None,
+                 merge=True, overwrite=True, name='trends'):
     """ Flag Detectors with trends larger than max_trend.
     
     Args:
         aman (AxisManager): the tod 
-        max_trend: maxmium amount to always the detectors to change by
-                   default is pi for use in phase units.
+        max_trend: maxmimum amount to always the detectors to change by. 
+            The default is pi for use in phase units.
         n_pieces: number of pieces to cut the timestream in to to look for 
                     trends
-        flag_name (string): name of flag to add to aman.flags
+        signal: Signal to use to generate flags, default is aman.signal.
+        merge (bool): if true, merges the generated flag into aman
         overwrite (bool): if true, write over flag. if false, don't
+        name (string): name of flag to add to aman.flags if merge is True
     
     Returns:
         flag: RangesMatrix object of glitches
     """
-    if overwrite and flag_name in aman.flags:
-        aman.flags.move(flag_name, None)
-    signal = np.atleast_2d( aman[signal_name] )
+    if overwrite and name in aman.flags:
+        aman.flags.move(name, None)
+    
+    if signal is None:
+        signal = aman.signal
+        
+    signal = np.atleast_2d( signal )
     signal = signal[:,:aman.samps.count//n_pieces*n_pieces].reshape((signal.shape[0], n_pieces,-1))
 
     piece_size = signal.shape[2]
@@ -110,9 +123,9 @@ def get_trending_flags(aman, max_trend=np.pi, n_pieces=1, signal_name='signal',
 
     bad_slopes = np.abs(slopes)>max_trend
 
+    
     if n_pieces == 1:
-        aman.flags.wrap_dets(flag_name, bad_slopes[:,0])
-
+        cut = bad_slopes[:,0]
     else:
         cut = aman.flags.get_zeros()
         dets = np.unique(np.where(bad_slopes)[0])
@@ -123,6 +136,10 @@ def get_trending_flags(aman, max_trend=np.pi, n_pieces=1, signal_name='signal',
                     cut[d].add_interval(int(c*piece_size), cut.ranges[d].count-1)
                 else:
                     cut[d].add_interval(int(c*piece_size), int((c+1)*piece_size))
-        aman.flags.wrap_dets_samps(flag_name, cut)
-    return aman.flags[flag_name]
-
+    if merge:
+        if name in aman.flags and not overwrite:
+            raise ValueError('Flag name {} already exists in aman.flags'.format(name))
+        elif name in aman.flags:
+            aman.flags[name] = cut
+        else:
+            aman.flags.wrap(name, cut)
