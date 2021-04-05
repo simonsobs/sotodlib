@@ -55,7 +55,8 @@ SMURF_ACTIONS = {
 
 
 class Observations(Base):
-    """Times on continuous detector readout"""
+    """Times on continuous detector readout
+    """
     __tablename__ = 'observations'
     ## ctime of beginning of the observation
         
@@ -119,8 +120,9 @@ class Files(Base):
     
 
 class Detsets(Base):
-    """Indexing of detector sets seen during observations"""
-    """These should effectively match to tuning files"""
+    """Indexing of 'detector sets' available during observations. Should
+    correspond to the tune files. 
+    """
     __tablename__ = 'detsets'
     id = db.Column( db.Integer, primary_key=True)
     
@@ -152,6 +154,9 @@ class Detsets(Base):
                         back_populates='detset')
     
 class Bands(Base):
+    """
+    Indexing Table (may be removed). One row per SMuRF band per slot.
+    """
     __tablename__ = 'bands'
     __table_args__ = (
         db.UniqueConstraint('number', 'stream_id'),
@@ -167,6 +172,9 @@ class Bands(Base):
     channels = relationship("Channels", back_populates='band')
     
 class ChanAssignments(Base):
+    """The available channel assignments. Tune files are made of up to eight of
+    these assignments. 
+    """
     __tablename__ = 'chan_assignments'
     id = db.Column(db.Integer, primary_key=True)
     
@@ -189,6 +197,10 @@ class ChanAssignments(Base):
     channels = relationship("Channels", back_populates='chan_assignment')
     
 class Channels(Base):
+    """All the channels tracked by SMuRF indexed by the ctime of the channel
+    assignment file, SMuRF band and channel number. Many channels will map to
+    one detector on a UFM.
+    """
     __tablename__ = 'channels'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String)
@@ -307,14 +319,14 @@ class G3tSmurf:
 
         Args
         -----
-            archive_path (path):
+            archive_path: path
                 Path to the data directory
-            db_path (path, optional):
+            db_path: path, optional
                 Path to the sqlite file. Defaults to ``<archive_path>/frames.db``
-            meta_path (path, optional):
+            meta_path: path, optional
                 Path of directory containing smurf related metadata (ie. channel
                 assignments). Required for full functionality.
-            echo (bool, optional):
+            echo: bool, optional
                 If true, all sql statements will print to stdout.
         """
         if db_path is None:
@@ -347,11 +359,16 @@ class G3tSmurf:
 
     def add_file(self, path, session):
         """
-        Indexes a single file and adds it to the sqlite database.
+        Indexes a single file and adds it to the sqlite database. Creates a
+        single entry in Files and as many Frame entries as there are frames in
+        the file.
 
         Args
         ----
-            path (path): Path of the file to index
+            path: path 
+                Path of the file to index
+            session : SQLAlchemy session
+                Current, active sqlalchemy session
         """
 
         frame_types = {
@@ -421,7 +438,8 @@ class G3tSmurf:
     def index_archive(self, verbose=False, stop_at_error=False,
                      skip_old_format=True):
         """
-        Adds all files from an archive to the sqlite database.
+        Adds all files from an archive to the File and Frame sqlite tables.
+        Files must be indexed before the metadata entries can be made.
 
         Args
         ----
@@ -429,6 +447,9 @@ class G3tSmurf:
             Verbose mode
         stop_at_error: bool
             If True, will stop if there is an error indexing a file.
+        skip_old_format: bool
+            If True, will skip over indexing files before the name convention
+            was changed to be ctime_###.g3. 
         """
         session = self.Session()
         indexed_files = [f[0] for f in session.query(Files.path).all()]
@@ -469,6 +490,23 @@ class G3tSmurf:
         session.close()
 
     def add_new_channel_assignment(self, stream_id, ctime, cha, cha_path, session):   
+        """Add new entry to the Channel Assignments table. Called by the
+        index_metadata function.
+        
+        Args
+        -------
+        stream_id : string
+            The stream id for the particular SMuRF slot
+        ctime : int
+            The ctime of the SMuRF action called to create the channel
+            assignemnt
+        cha : string
+            The file name of the channel assignment
+        cha_path : path
+            The absolute path to the channel assignment
+        session : SQLAlchemy Session
+            The active session
+        """
         band_number = int(re.findall('b\d.txt', cha)[0][1])   
         band = session.query(Bands).filter(Bands.number == band_number,
                                            Bands.stream_id == stream_id).one_or_none()
@@ -506,6 +544,20 @@ class G3tSmurf:
         session.commit()   
         
     def add_new_tuning(self, stream_id, ctime, tune_path, session):    
+        """Add new entry to the Detsets table. Called by the
+        index_metadata function.
+        
+        Args
+        -------
+        stream_id : string
+            The stream id for the particular SMuRF slot
+        ctime : int
+            The ctime of the SMuRF action called to create the tuning file.
+        tune_path : path
+            The absolute path to the tune file
+        session : SQLAlchemy Session
+            The active session
+        """
         name = tune_path.split('/')[-1]
         dset = session.query(Detsets).filter(Detsets.name == name).one_or_none()
         if dset is None:
@@ -562,16 +614,27 @@ class G3tSmurf:
         session.commit()  
     
     def add_new_observation(self, stream_id, ctime, obs_data, session, max_early=5,max_wait=10):
+        """Add new entry to the observation table. Called by the
+        index_metadata function.
+        
+        Args
+        -------
+        stream_id : string
+            The stream id for the particular SMuRF slot
+        ctime : int
+            The ctime of the SMuRF action called to create the tuning file.
+        obs_data: list
+            List of files that come with the observation. Currently un-used
+        session : SQLAlchemy Session
+            The active session
+        max_early : int     
+            Buffer time to allow the g3 file to be earlier than the smurf action
+        max_wait : int  
+            Maximum amount of time between the streaming start action and the 
+            making of .g3 files that belong to an observation
+        
+        TODO: how will simultaneous streaming with two stream_ids work?
         """
-            ctime    -- ctime the action is called
-
-            max_early -- buffer time to allow the g3 file to be earlier than the smurf
-                        action
-            max_wait -- maximum amount of time between the streaming start action 
-                        and the making of .g3 files that belong to an observation
-        """
-        ## TODO: how will simultaneous streaming with two stream_ids work?
-
         obs = session.query(Observations).filter(Observations.obs_id == str(ctime)).one_or_none()
         if obs is None:
             obs = Observations(obs_id = str(ctime),
@@ -589,6 +652,8 @@ class G3tSmurf:
                     max_wait=max_wait)
 
     def update_observation_files(self, obs, session, max_early=5, max_wait=10):
+        """ Update existing observation. A separate function to make it easier
+        to deal with partial data transfers. See add_new_observation for args"""
 
         dset = session.query(Detsets).filter(Detsets.start <= obs.start)
         dset = dset.order_by(db.desc(Detsets.start)).first()
@@ -625,7 +690,7 @@ class G3tSmurf:
     def index_metadata(self, verbose = False, stop_at_error=False):
         """
             Adds all channel assignments, detsets, and observations in archive to database. 
-            Adding relavent entries to Bands and Files as well.
+            Adding relevant entries to Bands and Files as well.
 
             Args
             ----
@@ -723,39 +788,48 @@ class G3tSmurf:
         Loads smurf G3 data for a given time range. For the specified time range
         this will return a chunk of data that includes that time range.
 
+        This function returns an AxisManager with the following properties    
+            * Axes:
+                * samps : samples 
+                * channels : resonator channels reading out
+                * bias_lines (optional) : bias lines
+
+            * Fields:
+                * timestamps : (samps,) 
+                    unix timestamps for loaded data
+                * signal : (channels, samps) 
+                    Array of the squid phase in units of radians for each channel
+                * primary : AxisManager (samps,)
+                    "primary" data included in the packet headers
+                    'AveragingResetBits', 'Counter0', 'Counter1', 'Counter2', 
+                    'FluxRampIncrement', 'FluxRampOffset', 'FrameCounter', 
+                    'TESRelaySetting', 'UnixTime'
+                * biases (optional): (bias_lines, samps)
+                    Bias values during the data
+                * ch_info : AxisManager (channels,)
+                    Information about channels, including SMuRF band, channel, 
+                    frequency.
+        
         Args
         -----
-            start (timestamp): start timestamp
-            end   (timestamp): end timestamp
-            stream_id (string): stream_id to load, in case there are multiple
-            detset (string): the name of the detector set (tuning file) to load
-            show_pb (bool, optional): If True, will show progress bar.
-            load_biases (bool, optional): If True, will return biases.
+            start : timestamp or DateTime
+                start time for data
+            end :  timestamp or DateTime
+                end time for data
+            stream_id : String 
+                stream_id to load, in case there are multiple
+            detset : string
+                the name of the detector set (tuning file) to load
+            show_pb : bool, optional: 
+                If True, will show progress bar.
+            load_biases : bool, optional 
+                If True, will return biases.
 
         Returns
         --------
-            An AxisManager for the data
-                Axes:
-                    samps : samples 
-                    channels : resonator channels reading out
-                    bias_lines (optional) : bias lines
+            aman : AxisManager
+                AxisManager for the data
 
-                Fields:
-                    timestamps : (samps,) unix timestamps for loaded data
-                    signal : (channels, samps) Array of the squid phase in units of 
-                        radians for each channel
-
-                    primary : AxisManager (samps,)
-                        "primary" data included in the packet headers
-                        'AveragingResetBits', 'Counter0', 'Counter1', 'Counter2', 
-                        'FluxRampIncrement', 'FluxRampOffset', 'FrameCounter', 
-                        'TESRelaySetting', 'UnixTime'
-
-                    biases (optional): (bias_lines, samps)
-
-                    ch_info : AxisManager (channels,)
-                        Information about channels:
-                            band, channel, frequency
 
         TODO: What to do with:
                 1) status (SmurfStatus):
