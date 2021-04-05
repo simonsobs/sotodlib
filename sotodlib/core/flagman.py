@@ -43,7 +43,7 @@ class FlagManager(AxisManager):
             if len(s) == 1:
                 if s[0] == self[self._dets_name].count:
                     ## detector only flag. Turn into RangesMatrix
-                    axis_map=[(0,self[self._dets_name])]
+                    axis_map=[(0,self._dets_name)]
                 elif s[0] == self[self._samps_name].count:
                     axis_map=[(0, self.samps)]
                 else:
@@ -52,7 +52,7 @@ class FlagManager(AxisManager):
                                      " is the wrong shape".format(s))
             elif len(s) == 2:
                 if s[0] == self[self._dets_name].count and s[1] == self[self._samps_name].count:
-                    axis_map=[(0,self[self._dets_name]), (1,self.samps)]
+                    axis_map=[(0,self._dets_name), (1,self._samps_name)]
                 elif s[1] == self[self._dets_name].count and s[0] == self[self._samps_name].count:
                     raise ValueError("FlagManager only takes 2D data aligned as"
                                      " (dets, samps). Data of shape {}"
@@ -71,7 +71,7 @@ class FlagManager(AxisManager):
             x = Ranges(self.samps.count)
             data = RangesMatrix([Ranges.ones_like(x) if Y 
                                  else Ranges.zeros_like(x) for Y in data])
-            axis_map = [(0,self[self._dets_name]),(1,self[self._samps_name])]
+            axis_map = [(0,self._dets_name),(1,self._samps_name)]
 
         super().wrap(name, data, axis_map, **kwargs)
 
@@ -116,11 +116,18 @@ class FlagManager(AxisManager):
             out._assignments[k] = v.copy()
         return out
     
-    def get_zeros(self):
+    def get_zeros(self, wrap=None):
         """
         Return a correctly sized RangesMatrix for building cuts for the FlagManager
+        
+        Args:
+            wrap: if not None, it is a string with which to add to the FlagManager
         """
-        return RangesMatrix([Ranges(self[self._samps_name].count) for det in self[self._dets_name].vals])
+        out = RangesMatrix([Ranges(self[self._samps_name].count) for det in self[self._dets_name].vals])
+        if not wrap is None:
+            self.wrap_dets_samps( wrap, out)
+            return self[wrap]
+        return out
         
     def buffer(self, n_buffer, flags=None):
         """Buffer all the samps cuts by n_buffer
@@ -202,23 +209,28 @@ class FlagManager(AxisManager):
         return out        
     
     def has_cuts(self, flags=None):
-        '''
-        Return list of detector ids that have cuts
+        """Return list of detector ids that have cuts
         
         Args: 
             flags: [optional] If not none it is the list of flags to combine to see
                     if cuts exist
-        '''
+        """
         c = self.reduce(flags=flags)
-        idx = np.where( [len(x.ranges())>0 for x in c])[0]
+        idx = [len(x.ranges())>0 for x in c]
         return self[self._dets_name].vals[idx]
 
     @classmethod
-    def for_tod(cls, tod, dets_name='dets', samp_name='samps'):
-        """Assumes tod is an AxisManager with dets and samps axes defined
+    def for_tod(cls, tod, dets_name='dets', samps_name='samps'):
+        """Create a Flag manager for an AxisManager tod which has axes for detectors
+        and samples.
+        
+        Args:
+            tod: AxisManager for the specific data
+            dets_name: name of the axis that should be treated as detectors
+            samps_name: name of the axis that should be treated as samples
         """
         
-        return cls(tod[dets_name], tod[samp_name])
+        return cls(tod[dets_name], tod[samps_name])
 
 def _get_shape(data):
     try:
