@@ -94,7 +94,7 @@ autodoc_default_options = {
 # some external dependencies are not met at build time and break the
 # building process.
 autodoc_mock_imports = []
-for missing in ('numpy', 'matplotlib', 'healpy', 'astropy',
+for missing in ('numpy', 'matplotlib', 'healpy', 'astropy','sqlalchemy',
                 'quaternionarray', 'yaml', 'toml', 'sqlite3',
                 'pyfftw', 'toast', 'spt3g', 'so3g', 'pixell'):
     try:
