@@ -106,7 +106,7 @@ class SuperLoader:
                     missing_keys.remove(k)
             obs_keys = [k for k in missing_keys if k.startswith('obs:')]
             if len(obs_keys):
-                if self.obs_db is None:
+                if self.obsdb is None:
                     reason = 'no ObsDb was passed in'
                 elif 'obs:obs_id' not in request:
                     reason = 'obs_id was not specified in the request'
