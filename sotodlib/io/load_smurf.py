@@ -868,8 +868,6 @@ class G3tSmurf:
                     Tells you the method used to extract timestamps from the
                     frame data.
                     
-        TODO: Loading for Multiple Stream IDs
-
         TODO: Track down differences between detector sets (tune files) and 
                 information in status object
                 
