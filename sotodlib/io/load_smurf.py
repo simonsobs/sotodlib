@@ -783,6 +783,34 @@ class G3tSmurf:
                         raise(e)
 
 
+    def _stream_ids_in_range(self, start, end):
+        """
+        Returns a list of all stream-id's present in a given time range.
+        Skips 'None' because those only contain G3PipelineInfo frames.
+
+        Args
+        -----
+            start : timestamp or DateTime
+                start time for data
+            end :  timestamp or DateTime
+                end time for data
+        Returns
+        --------
+            stream_ids: List of stream ids.
+        """
+        session = self.Session()
+        start = self._make_datetime(start)
+        end = self._make_datetime(end)
+        all_ids = session.query(Files.stream_id).filter(
+            Files.start < end,
+            Files.stop >= start
+        ).all()
+        sids = []
+        for sid, in all_ids:
+            if sid not in sids and sid != 'None':
+                sids.append(sid)
+        return sids
+
     def load_data(self, start, end, stream_id=None, detset=None, show_pb=True, load_biases=True):
         """
         Loads smurf G3 data for a given time range. For the specified time range
@@ -858,11 +886,26 @@ class G3tSmurf:
         start = self._make_datetime(start)
         end = self._make_datetime(end)
 
-        frames = session.query(Frames).filter(
-            Frames.type_name == 'Scan',
-            Frames.stop >= start,
-            Frames.start < end
-        ).order_by(Frames.time)
+        if stream_id is None:
+            sids = self._stream_ids_in_range(start, end)
+            if len(sids) > 1:
+                raise ValueError(
+                    "Multiple stream_ids exist in the given range! "
+                    "Must choose one.\n"
+                    f"stream_ids: {sids}"
+                )
+            frames = session.query(Frames).filter(
+                Frames.type_name == 'Scan',
+                Frames.stop >= start,
+                Frames.start < end
+            ).order_by(Frames.time)
+        else:
+            frames = session.query(Frames).join(Files).filter(
+                Frames.type_name == 'Scan',
+                Frames.stop >= start,
+                Frames.start < end,
+                Files.stream_id == stream_id
+            ).order_by(Frames.time)
 
         if detset is None:
             detset = session.query(Detsets).filter(Detsets.start <= start)
