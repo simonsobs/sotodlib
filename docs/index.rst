@@ -13,7 +13,9 @@ Welcome to SOTODLib's documentation!
    intro.rst
    cli.rst
    axisman.rst
+   flagman.rst
    context.rst
+   g3tsmurf.rst
    tod_ops.rst
    coords.rst
    reference.rst

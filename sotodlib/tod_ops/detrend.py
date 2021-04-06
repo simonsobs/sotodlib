@@ -62,7 +62,15 @@ def detrend_data(tod, method='linear', axis_name='samps',
         signal = signal.transpose()
     return signal
 
-def detrend_tod(tod, method='linear'):
+def detrend_tod(tod, method='linear', signal_name='signal', axis_name='samps', out_name=None):
     """simple wrapper: to be more verbose"""
-    tod.signal = detrend_data(tod, method='linear')
+    if out_name is None:
+        out_name = signal_name
+        
+    signal = detrend_data(tod, method=method, 
+                          axis_name=axis_name, 
+                          signal_name=signal_name)
+
+    tod[out_name] = signal
+    
     return tod
