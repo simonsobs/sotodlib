@@ -160,6 +160,15 @@ class TestAxisManager(unittest.TestCase):
         tod.merge(cal, cuts)
         self.assertEqual(tod.shape, (2, 800))
 
+class TestFlagManager(unittest.TestCase):
+    
+    def test_100_inheritance(self):
+        tod = core.AxisManager(
+            core.LabelAxis('dets', list('abcdef')),
+            core.OffsetAxis('samps', 1000))
+        flags = core.FlagManager.for_tod(tod, 'dets', 'samps')
+        tod.wrap('flags', flags)
+        self.assertTrue( type(tod.flags) == core.FlagManager )
 
 if __name__ == '__main__':
     unittest.main()
