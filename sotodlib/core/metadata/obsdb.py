@@ -212,24 +212,26 @@ class ObsDb(object):
         return common.sqlite_to_file(self.conn, filename, overwrite=overwrite, fmt=fmt)
 
     @classmethod
-    def from_file(cls, filename, fmt=None):
+    def from_file(cls, filename, fmt=None, force_new_db=True):
         """Instantiate an ObsDb and return it, with the data copied in from
         the specified file.
 
         Args:
           filename (str): path to the file.
           fmt (str): format of the input; see to_file for details.
+          force_new_db (bool): whether or not the database is mapped into 
+              memory or read from disk
 
         Returns:
-          ObsDb with an sqlite3 connection that is mapped to memory.
+          ObsDb with an sqlite3 connection, if read_only it links directly to
+            the file, otherwise it is mapped to memory.
 
         Notes:
           Note that if you want a `persistent` connection to the file,
-          you should instead pass the filename to the ObsDb
-          constructor map_file argument.
+          you should use force_new_db = False
 
         """
-        conn = common.sqlite_from_file(filename, fmt=fmt)
+        conn = common.sqlite_from_file(filename, fmt=fmt, force_new_db=force_new_db)
         return cls(conn, init_db=False)
 
     def get(self, obs_id=None, tags=None, add_prefix=''):
