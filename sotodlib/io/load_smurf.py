@@ -34,7 +34,7 @@ association_table = db.Table('association_chan_assign', Base.metadata,
 
 association_table_obs = db.Table('association_obs', Base.metadata,
     db.Column('detsets', db.Integer, db.ForeignKey('detsets.id')),
-    db.Column('observations', db.Integer, db.ForeignKey('observations.obs_id'))
+    db.Column('observations', db.Integer, db.ForeignKey('obs.obs_id'))
 )
 
 association_table_dets = db.Table('association_dets', Base.metadata,
@@ -63,7 +63,7 @@ SMURF_ACTIONS = {
 class Observations(Base):
     """Times on continuous detector readout
     """
-    __tablename__ = 'observations'
+    __tablename__ = 'obs'
     ## ctime of beginning of the observation
         
     obs_id = db.Column(db.String, primary_key=True)
@@ -108,7 +108,7 @@ class Files(Base):
     sample_stop = db.Column(db.Integer)
     
     ## this is a string for compatibility with sotodlib, not because it makes sense here
-    obs_id = db.Column(db.String, db.ForeignKey('observations.obs_id'))
+    obs_id = db.Column(db.String, db.ForeignKey('obs.obs_id'))
     observation = relationship("Observations", back_populates='files')
     
     stream_id = db.Column(db.String)
