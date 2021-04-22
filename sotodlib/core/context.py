@@ -150,7 +150,7 @@ class Context(odict):
                          ('obsfiledb', metadata.ObsFileDb)]:
             if (load_list == 'all' or key in load_list) and key in self:
                 # E.g. self.detdb = DetDb.from_file(self['detdb']
-                db = cls.from_file(self[key])
+                db = cls.from_file(self[key], force_new_db=False)
                 setattr(self, key, db)
         # The metadata loader.
         if load_list == 'all' or 'loader' in load_list:
