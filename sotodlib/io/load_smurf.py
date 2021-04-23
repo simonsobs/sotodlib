@@ -591,6 +591,8 @@ class G3tSmurf:
                 db_cha = session.query(ChanAssignments).filter(ChanAssignments.band_id == db_Band.id,
                                                                ChanAssignments.ctime <= ctime )
                 db_cha = db_cha.order_by(db.desc(ChanAssignments.ctime)).first()
+                if db_cha is None:
+                    raise ValueError("Unable to find Channel Assignment that should exist")
                 in_cha_db = [sorted( [ch.channel for ch in db_cha.channels])]              
                 in_tune_file =[sorted( [data[band]['resonances'][x]['channel'] for x in  data[band]['resonances'].keys()])]
 
@@ -705,7 +707,7 @@ class G3tSmurf:
         session = self.Session()
 
 
-        for ct_dir in os.listdir(self.meta_path):
+        for ct_dir in sorted(os.listdir(self.meta_path)):
             ### ignore old things
             if int(ct_dir) < 16000:
                 continue
@@ -780,6 +782,8 @@ class G3tSmurf:
                     #    if stop_at_error:
                     #        raise(e)
                     except Exception as e:
+                        if verbose:
+                            print(stream_id, ctime)
                         raise(e)
 
 
