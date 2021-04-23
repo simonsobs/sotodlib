@@ -712,9 +712,9 @@ class G3tSmurf:
             if int(ct_dir) < 16000:
                 continue
 
-            for stream_id in os.listdir( os.path.join(self.meta_path, ct_dir)):
+            for stream_id in sorted(os.listdir( os.path.join(self.meta_path, ct_dir))):
                 action_path = os.path.join(self.meta_path, ct_dir, stream_id)
-                actions = os.listdir( action_path )
+                actions = sorted(os.listdir( action_path ))
 
                 for action in actions:
                     try:
