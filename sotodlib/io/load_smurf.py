@@ -1070,33 +1070,9 @@ class G3tSmurf:
             time (timestamp): Time at which you want the rogue status
 
         Returns:
-            status (dict): Dictionary of rogue variables at specified time.
+            status (SmurfStatus instance): object indexing of rogue variables at specified time.
         """
-        time = self._make_datetime(time)
-        session = self.Session()
-        session_start,  = session.query(Frames.time).filter(
-            Frames.type_name == 'Observation',
-            Frames.time <= time
-        ).order_by(Frames.time.desc()).first()
-
-        status_frames = session.query(Frames).filter(
-            Frames.type_name == 'Wiring',
-            Frames.time >= session_start,
-            Frames.time <= time
-        ).order_by(Frames.time)
-
-        status = {}
-        cur_file = None
-        for frame_info in tqdm(status_frames.all(), disable=(not show_pb)):
-            file = frame_info.file.path
-            if file != cur_file:
-                reader = so3g.G3IndexedReader(file)
-                cur_file = file
-            reader.Seek(frame_info.offset)
-            frame = reader.Process(None)[0]
-            status.update(yaml.safe_load(frame['status']))
-
-        return SmurfStatus(status)
+        return SmurfStatus.from_time(time, self, show_pb=show_pb)
 
 
 class SmurfStatus:
@@ -1151,7 +1127,9 @@ class SmurfStatus:
 
     def __init__(self, status):
         self.status = status
-
+        self.start = self.status.get('start')
+        self.stop = self.status.get('stop')
+        
         # Reads in useful status values as attributes
         mapper_root = 'AMCc.SmurfProcessor.ChannelMapper'
         self.num_chans = self.status.get(f'{mapper_root}.NumChannels')
@@ -1213,6 +1191,83 @@ class SmurfStatus:
             ramp_max_cnt_rate_hz = 1.e6*digitizer_freq_mhz / 2.
             self.flux_ramp_rate_hz = ramp_max_cnt_rate_hz / (ramp_max_cnt + 1)
 
+    @classmethod
+    def from_file(cls, filename):
+        """Generates a Smurf Status from a .g3 file.
+    
+        Args
+        ----
+            filename : str or list
+        """
+        if isinstance(filename, str):
+            filenames = [filename]
+        else:
+            filenames = filename
+        status = {}
+        for file in filenames:
+            reader = so3g.G3IndexedReader(file)
+            while True:
+                frames = reader.Process(None)
+                if len(frames) == 0:
+                    break
+                frame = frames[0]
+                if str(frame.type) == 'Wiring':
+                    if status.get('start') is None:
+                        status['start'] = frame['time'].time/spt3g_core.G3Units.s
+                        status['stop'] = frame['time'].time/spt3g_core.G3Units.s
+                    else:
+                        status['stop'] = frame['time'].time/spt3g_core.G3Units.s
+                    status.update(yaml.safe_load(frame['status']))
+        return cls(status)
+    
+    @classmethod
+    def from_time(cls, time, archive, show_pb=False):
+        """Generates a Smurf Status at specified unix timestamp.
+        Loads all status frames between session start frame and specified time.
+
+        Args
+        -------
+            time : (timestamp) 
+                Time at which you want the rogue status
+            archive : (G3tSmurf instance)
+                The G3tSmurf archive to use to find the status
+            show_pb : (bool)
+                Turn on or off loading progress bar
+
+        Returns
+        --------
+            status : (SmurfStatus instance)
+                object indexing of rogue variables at specified time.
+        """
+        time = archive._make_datetime(time)
+        session = archive.Session()
+        session_start,  = session.query(Frames.time).filter(
+            Frames.type_name == 'Observation',
+            Frames.time <= time
+        ).order_by(Frames.time.desc()).first()
+
+        status_frames = session.query(Frames).filter(
+            Frames.type_name == 'Wiring',
+            Frames.time >= session_start,
+            Frames.time <= time
+        ).order_by(Frames.time)
+
+        status = {
+            'start':status_frames[0].time.timestamp(),
+            'stop':status_frames[-1].time.timestamp(),
+        }
+        cur_file = None
+        for frame_info in tqdm(status_frames.all(), disable=(not show_pb)):
+            file = frame_info.file.path
+            if file != cur_file:
+                reader = so3g.G3IndexedReader(file)
+                cur_file = file
+            reader.Seek(frame_info.offset)
+            frame = reader.Process(None)[0]
+            status.update(yaml.safe_load(frame['status']))
+
+        return cls(status)
+        
     def readout_to_smurf(self, rchan):
         """
         Converts from a readout channel number to (band, channel).
