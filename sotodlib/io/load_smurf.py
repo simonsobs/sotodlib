@@ -876,9 +876,6 @@ class G3tSmurf:
                 information in status object
                 
         TODO: Track down "Lazy-loaded attribute for Channels.band"
-        
-        TODO: Data loaded here has some strange extra points. Likely due to frame indexing
-            or some other error. Track down.
         """
         session = self.Session()
 
