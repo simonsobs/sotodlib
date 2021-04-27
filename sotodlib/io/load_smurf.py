@@ -1301,3 +1301,92 @@ class SmurfStatus:
                 Channel number or list of channel numbers.
         """
         return self.mask_inv[band, chan]
+
+def get_channel_mask(ch_list, status, archive=None, ignore_missing=True):
+    """Take a list of desired channels and parse them so the different
+    data loading functions can load them.
+    
+    Args
+    ------
+    ch_list : list
+        List of desired channels the type of each list element is used
+        to determine what it is:
+        int : absolute readout channel
+        (int, int) : band, channel
+        string : channel name (archive can not be None)
+        float : frequency in the smurf status (or should we use channel assignment?)
+    status : SmurfStatus instance
+        Status to use to generate channel loading mask
+    archive : G3tSmurf instance
+        Archive used to search for channel names / frequencies
+    ignore_missing : bool
+        If true, will not raise errors if a requested channel is not found
+    
+    Returns
+    -------
+    mask : bool array
+        Mask for the channels in the SmurfStatus
+        
+    TODO: When loading from name, need to check tune file in use during file. 
+    """
+    if status.mask is None:
+        raise ValueError("Status Mask not set")
+    
+    session = None
+    if archive is not None:
+        session = archive.Session()
+        
+    msk = np.zeros( (status.num_chans,), dtype='bool')
+    for ch in ch_list:
+        if np.isscalar(ch):
+            if np.issubdtype( type(ch), np.integer):
+                #### this is an absolute readout channel
+                if not ignore_missing and ~np.any(status.mask == ch):
+                    raise ValueError(f"channel {ch} not found")
+                msk[ status.mask == ch] = True
+            
+            elif np.issubdtype( type(ch), np.floating):
+                #### this is a resonator frequency
+                b,c = np.where( np.isclose(status.freq_map, ch, rtol=1e-7) )
+                if len(b)==0:
+                    if not ignore_missing:
+                        raise ValueError(f"channel {ch} not found")
+                    continue
+                elif status.mask_inv[b,c][0]==-1:
+                    if not ignore_missing:
+                        raise ValueError(f"channel {ch} not streaming")
+                    continue
+                msk[status.mask_inv[b,c][0]] = True
+                
+            elif type(ch) == str:
+                #### this is a channel name
+                if session is None:
+                    raise ValueError("Need G3tSmurf Archive to pass channel names")
+                channel = session.query(Channels).filter(Channels.name==ch).one_or_none()
+                if channel is None:
+                    if not ignore_mission:
+                        raise ValueError(f"channel {ch} not found in database")
+                    continue
+                idx = status.mask_inv[channel.band_number, channel.channel]
+                if idx == -1:
+                    if not ignore_missing:
+                        raise ValueError(f"channel {ch} not streaming")
+                    continue
+                msk[idx] = True
+                
+            else:
+                raise TypeError(f"type for channel {ch} not understood")
+        else:
+            if len(ch) == 2:
+                ### this is a band, channel pair
+                idx = status.mask_inv[ch[0], ch[1]]
+                if idx == -1:
+                    if not ignore_missing:
+                        raise ValueError(f"channel {ch} not streaming")
+                    continue
+                msk[idx] = True
+            else:
+                raise TypeError(f"type for channel {ch} not understood")
+    if session is not None:
+        session.close()
+    return msk
