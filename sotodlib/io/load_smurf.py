@@ -981,63 +981,15 @@ class G3tSmurf:
             print('Trying a later status, why is the status not at the beginning?')
             self.load_status(timestamps[-1])
             
-        #### Get Info for channels in this observation
-        if detset is None:
-            print('Did not find detector set, hopefully this is old data')
-            bnd_assign=[]
-            ch_assign=[]
-        else:
-            bnd_assign = [ ch.band.number for ch in detset.channels ]
-            ch_assign =  [ ch.channel for ch in detset.channels     ]
-
-        channel_names = []
-        channel_bands = []
-        channel_channels = []
-        channel_freqs = []
-
-        for ch in range( channels ):
-            try:
-                sch = status.readout_to_smurf(ch)
-
-                x = np.where(np.all([bnd_assign == sch[0],
-                                     ch_assign  == sch[1]], axis=0))[0]
-
-                if len(x) == 0:
-                    ########################################
-                    ## There appear to be a non-trivial number of these
-                    ## SMuRF Error or Indexing Error?
-                    ########################################
-                    name = 'sch_NONE_{}_{:03d}'.format(sch[0],sch[1])
-                    freq = status.freq_map[sch[0], sch[1]]
-                else:
-                    channel = detset.channels[x[0]]
-                    name = channel.name
-                    ########################################
-                    ## Related to above, freq != status.freq for many of these
-                    ########################################
-                    freq = channel.frequency
-
-            except:
-                ## in case the detector information isn't in the data
-                ## load 'readout channel' as a backup
-                name='rch_{:04d}'.format(ch)
-                sch = (-1,-1)
-                freq=-1
-                
-                
-            channel_names.append(name)
-            channel_bands.append(sch[0])
-            channel_channels.append(sch[1])
-            channel_freqs.append(freq)
-
+        ch_info = get_channel_info(status, mask=None, detset=detset, ch_name_type='sch')
         session.close()
 
         ## Build AxisManager
         aman = core.AxisManager(
-            core.LabelAxis('channels', channel_names),
+            ch_info.channels.copy(),
             core.OffsetAxis('samps', len(timestamps), 0)
         )
-
+        aman.wrap('ch_info', ch_info)
         aman.wrap( 'signal', data, ([(0, 'channels'), (1, 'samps')]) )
         aman.wrap( 'timestamps', timestamps, ([(0,'samps')]))
 
@@ -1050,12 +1002,6 @@ class G3tSmurf:
             aman.wrap('biases', biases, 
                       [ (0,core.LabelAxis('bias_lines', np.arange(biases.shape[0]))), 
                         (1,'samps')])
-
-        temp = core.AxisManager( aman.channels.copy() )
-        temp.wrap('band', np.array(channel_bands), ([(0,'channels')]) )
-        temp.wrap('channel', np.array(channel_channels), ([(0,'channels')]) )
-        temp.wrap('frequency', np.array(channel_freqs), ([(0,'channels')]) )
-        aman.wrap('ch_info', temp)
 
         aman.wrap('flags', core.FlagManager.for_tod(aman, 'channels', 'samps'))
 
@@ -1390,3 +1336,96 @@ def get_channel_mask(ch_list, status, archive=None, ignore_missing=True):
     if session is not None:
         session.close()
     return msk
+
+def get_channel_info(status, mask=None, detset=None, ch_name_type='sch'):
+    """Create the Channel Info Section of a G3tSmurf AxisManager
+    
+    This function returns an AxisManager with the following properties    
+        * Axes:
+            * channels : resonator channels reading out
+
+        * Fields:
+            * band : Smurf Band
+            * channel : Smurf Channel
+            * frequency : resonator frequency
+    
+    Args
+    -----
+    status : SmurfStatus instance
+    mask : bool array
+        mask of which channels to use
+    detset : DetSet instance (optionl)
+        detector set for the data
+    ch_name_type : string
+        if 'sch' the channel names will be in the for sch_TUNEFILE_BAND_CHANNEL and
+        TUNEFILE will be None if unavaliable. Use 'rch' to simply list names by 
+        absolute readout channel.
+        
+    Returns
+    --------
+    ch_info : AxisManager
+    
+    """
+    #### Get Info for channels in this observation
+    if detset is None:
+        bnd_assign=[]
+        ch_assign=[]
+    else:
+        bnd_assign = [ ch.band.number for ch in detset.channels ]
+        ch_assign =  [ ch.channel for ch in detset.channels     ]
+    
+    channel_names = []
+    channel_bands = []
+    channel_channels = []
+    channel_freqs = []
+   
+    ch_list = np.arange( status.num_chans)
+    if mask is not None:
+        ch_list = ch_list[mask]
+        
+    for ch in ch_list:
+        if ch_name_type == 'sch':
+            try:
+                sch = status.readout_to_smurf(ch)
+
+                x = np.where(np.all([bnd_assign == sch[0],
+                                     ch_assign  == sch[1]], axis=0))[0]
+
+                if len(x) == 0:
+                    ########################################
+                    ## There appear to be a non-trivial number of these when
+                    ## using DetSets SMuRF Error or Indexing Error?
+                    ########################################
+                    name = 'sch_NONE_{}_{:03d}'.format(sch[0],sch[1])
+                    freq = status.freq_map[sch[0], sch[1]]
+                else:
+                    channel = detset.channels[x[0]]
+                    name = channel.name
+                    ########################################
+                    ## Related to above, freq != status.freq for many of these
+                    ########################################
+                    freq = channel.frequency
+
+            except:
+                ## load 'readout channel' as a backup
+                name='rch_{:04d}'.format(ch)
+                sch = (-1,-1)
+                freq=-1
+        elif ch_name_type == 'rch':
+            name='rch_{:04d}'.format(ch)
+            sch = (-1,-1)
+            freq=-1
+        else:
+            raise ValueError(f"Channel name type {ch_name_type} not understood")
+
+        channel_names.append(name)
+        channel_bands.append(sch[0])
+        channel_channels.append(sch[1])
+        channel_freqs.append(freq)
+        
+    
+    ch_info = core.AxisManager( core.LabelAxis('channels', channel_names),)
+    ch_info.wrap('band', np.array(channel_bands), ([(0,'channels')]) )
+    ch_info.wrap('channel', np.array(channel_channels), ([(0,'channels')]) )
+    ch_info.wrap('frequency', np.array(channel_freqs), ([(0,'channels')]) )
+    return ch_info
