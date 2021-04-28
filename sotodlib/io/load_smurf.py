@@ -857,7 +857,7 @@ class G3tSmurf:
             show_pb : bool, optional: 
                 If True, will show progress bar.
             load_biases : bool, optional 
-                If T'darue, will return biases.
+                If True, will return biases.
 
         Returns
         --------
