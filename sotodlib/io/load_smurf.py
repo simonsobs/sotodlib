@@ -15,6 +15,9 @@ import ast
 from collections import namedtuple
 from enum import Enum
 
+import logging
+logger = logging.getLogger(__name__)
+
 from .. import core
 from . import load as io_load
 
@@ -1015,7 +1018,8 @@ class G3tSmurf:
             time (timestamp): Time at which you want the rogue status
 
         Returns:
-            status (SmurfStatus instance): object indexing of rogue variables at specified time.
+            status (SmurfStatus instance): object indexing of rogue variables 
+            at specified time.
         """
         return SmurfStatus.from_time(time, self, show_pb=show_pb)
 
@@ -1463,9 +1467,13 @@ def load_file(filename, dets=None, archive=None, ignore_missing=True,
 
     request = io_load.FieldGroup('root', subreq)
     streams = None
-    for filename in filenames:
-        streams = io_load.unpack_frames(filename, request, streams=streams)
-
+    try:
+        for filename in filenames:
+            streams = io_load.unpack_frames(filename, request, streams=streams)
+    except KeyError:
+        logger.error("Frames do not contain expected fields. Did Channel Mask change during the file?")
+        raise
+        
     count = sum(map(len,streams['time']))
 
     ## Build AxisManager
