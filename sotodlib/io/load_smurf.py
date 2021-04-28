@@ -816,7 +816,8 @@ class G3tSmurf:
                 sids.append(sid)
         return sids
 
-    def load_data(self, start, end, stream_id=None, detset=None, show_pb=True, load_biases=True):
+    def load_data(self, start, end, stream_id=None, detset=None, show_pb=True, 
+                    load_biases=True):
         """
         Loads smurf G3 data for a given time range. For the specified time range
         this will return a chunk of data that includes that time range.
@@ -979,7 +980,7 @@ class G3tSmurf:
             print('Trying a later status, why is the status not at the beginning?')
             self.load_status(timestamps[-1])
             
-        ch_info = get_channel_info(status, mask=None, detset=detset, ch_name_type='sch')
+        ch_info = get_channel_info(status, mask=None, detset=detset)
         session.close()
 
         ## Build AxisManager
