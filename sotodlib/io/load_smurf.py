@@ -16,6 +16,7 @@ from collections import namedtuple
 from enum import Enum
 
 from .. import core
+from . import load as io_load
 
 
 Base = declarative_base()
@@ -855,7 +856,7 @@ class G3tSmurf:
             show_pb : bool, optional: 
                 If True, will show progress bar.
             load_biases : bool, optional 
-                If True, will return biases.
+                If T'darue, will return biases.
 
         Returns
         --------
@@ -1334,7 +1335,7 @@ def get_channel_mask(ch_list, status, archive=None, ignore_missing=True):
         session.close()
     return msk
 
-def get_channel_info(status, mask=None, detset=None, ch_name_type='sch'):
+def get_channel_info(status, mask=None, detset=None):
     """Create the Channel Info Section of a G3tSmurf AxisManager
     
     This function returns an AxisManager with the following properties    
@@ -1345,6 +1346,7 @@ def get_channel_info(status, mask=None, detset=None, ch_name_type='sch'):
             * band : Smurf Band
             * channel : Smurf Channel
             * frequency : resonator frequency
+            * rchannel : readout channel
     
     Args
     -----
@@ -1353,10 +1355,6 @@ def get_channel_info(status, mask=None, detset=None, ch_name_type='sch'):
         mask of which channels to use
     detset : DetSet instance (optionl)
         detector set for the data
-    ch_name_type : string
-        if 'sch' the channel names will be in the for sch_TUNEFILE_BAND_CHANNEL and
-        TUNEFILE will be None if unavaliable. Use 'rch' to simply list names by 
-        absolute readout channel.
         
     Returns
     --------
@@ -1375,54 +1373,131 @@ def get_channel_info(status, mask=None, detset=None, ch_name_type='sch'):
     channel_bands = []
     channel_channels = []
     channel_freqs = []
+    channel_rch = []
    
     ch_list = np.arange( status.num_chans)
     if mask is not None:
         ch_list = ch_list[mask]
         
     for ch in ch_list:
-        if ch_name_type == 'sch':
-            try:
-                sch = status.readout_to_smurf(ch)
+        try:
+            sch = status.readout_to_smurf(ch)
 
-                x = np.where(np.all([bnd_assign == sch[0],
-                                     ch_assign  == sch[1]], axis=0))[0]
+            x = np.where(np.all([bnd_assign == sch[0],
+                                 ch_assign  == sch[1]], axis=0))[0]
 
-                if len(x) == 0:
-                    ########################################
-                    ## There appear to be a non-trivial number of these when
-                    ## using DetSets SMuRF Error or Indexing Error?
-                    ########################################
-                    name = 'sch_NONE_{}_{:03d}'.format(sch[0],sch[1])
-                    freq = status.freq_map[sch[0], sch[1]]
-                else:
-                    channel = detset.channels[x[0]]
-                    name = channel.name
-                    ########################################
-                    ## Related to above, freq != status.freq for many of these
-                    ########################################
-                    freq = channel.frequency
+            if len(x) == 0:
+                ########################################
+                ## There appear to be a non-trivial number of these when
+                ## using DetSets SMuRF Error or Indexing Error?
+                ########################################
+                name = 'sch_NONE_{}_{:03d}'.format(sch[0],sch[1])
+                freq = status.freq_map[sch[0], sch[1]]
+            else:
+                channel = detset.channels[x[0]]
+                name = channel.name
+                ########################################
+                ## Related to above, freq != status.freq for many of these
+                ########################################
+                freq = channel.frequency
 
-            except:
-                ## load 'readout channel' as a backup
-                name='rch_{:04d}'.format(ch)
-                sch = (-1,-1)
-                freq=-1
-        elif ch_name_type == 'rch':
+        except:
+            ## load 'readout channel' as a backup
             name='rch_{:04d}'.format(ch)
             sch = (-1,-1)
             freq=-1
-        else:
-            raise ValueError(f"Channel name type {ch_name_type} not understood")
 
         channel_names.append(name)
         channel_bands.append(sch[0])
         channel_channels.append(sch[1])
         channel_freqs.append(freq)
-        
+        channel_rch.append('r{:04d}'.format(ch)) 
     
     ch_info = core.AxisManager( core.LabelAxis('channels', channel_names),)
     ch_info.wrap('band', np.array(channel_bands), ([(0,'channels')]) )
     ch_info.wrap('channel', np.array(channel_channels), ([(0,'channels')]) )
     ch_info.wrap('frequency', np.array(channel_freqs), ([(0,'channels')]) )
+    ch_info.wrap('rchannel', np.array(channel_rch), ([(0,'channels')]) )
     return ch_info
+
+def load_file(filename, dets=None, archive=None, ignore_missing=True, 
+             load_biases=True):
+    """Load data from file where there may not be a connected.
+
+    Args
+    ----
+      filename : str or list 
+          A filename or list of filenames (to be loaded in order).
+          Note that SmurfStatus is only loaded from the first file
+      dets: list or None
+          If not None, it should be a list that can be sent to get_channel_mask.
+          Called dets for sotodlib compatibility. This function only looks at 
+          SMuRF channels.
+      archive : a G3tSmurf instance (optional)
+      ignore_missing : bool
+          If true, will not raise errors if a requested channel is not found
+      load_biases : bool
+          If true, will load the bias lines for each detector
+    """   
+    
+    if isinstance(filename, str):
+        filenames = [filename]
+    else:
+        filenames = filename
+    status = SmurfStatus.from_file(filenames[0])
+
+    if dets is not None:
+        ch_mask = get_channel_mask(dets, status, archive=archive, 
+                               ignore_missing=ignore_missing)
+    else:
+        ch_mask = None
+
+    ch_info = get_channel_info(status, ch_mask )
+
+    subreq = [io_load.FieldGroup('data', ch_info.rchannel, 
+                                 timestamp_field='time'),
+          io_load.FieldGroup('primary', [io_load.Field('*', wildcard=True)])]
+    if load_biases:
+        subreq.extend( [io_load.FieldGroup('tes_biases', [io_load.Field('*', wildcard=True)]),])
+
+    request = io_load.FieldGroup('root', subreq)
+    streams = None
+    for filename in filenames:
+        streams = io_load.unpack_frames(filename, request, streams=streams)
+
+    count = sum(map(len,streams['time']))
+
+    ## Build AxisManager
+    aman = core.AxisManager(
+        ch_info.channels.copy(),
+        core.OffsetAxis('samps', count, 0)
+    )
+    aman.wrap( 'timestamps', io_load.hstack_into(None, streams['time']), ([(0,'samps')]))
+
+    # Conversion from DAC counts to squid phase
+    aman.wrap( 'signal', np.zeros(aman.shape, 'float32'),
+                 [(0, 'channels'), (1, 'samps')])
+    for idx in range(aman.channels.count):
+        io_load.hstack_into(aman.signal[idx], streams['data'][ch_info.rchannel[idx]])
+
+    rad_per_count = np.pi / 2**15
+    aman.signal *= rad_per_count
+
+    aman.wrap('ch_info', ch_info)
+
+    temp = core.AxisManager( aman.samps.copy() )
+    for k in streams['primary'].keys():
+        temp.wrap( k, io_load.hstack_into(None, streams['primary'][k]), ([(0,'samps')]) )
+    aman.wrap('primary', temp)
+
+    if load_biases:
+        bias_axis = core.LabelAxis('bias_lines', np.arange(len(streams['tes_biases'].keys())))
+        aman.wrap('biases', np.zeros((bias_axis.count, aman.samps.count)), 
+                          [ (0,bias_axis), 
+                            (1,'samps')])
+        for k in streams['tes_biases'].keys():
+            i = int(k[4:])
+            io_load.hstack_into(aman.biases[i], streams['tes_biases'][k])
+    aman.wrap('flags', core.FlagManager.for_tod(aman, 'channels', 'samps'))
+
+    return aman
