@@ -14,10 +14,10 @@ class _HKBlockBundle(object):
 
     def add(self, b):
         self.times.extend([int(t) for t in b.times])
-        self.data.extend(b['Azimuth_current_velocity'])
+        self.data.extend(b['Azimuth'])
 
     def ready(self):
-        return len(locate_sign_changes(self.data)) > 0
+        return len(locate_sign_changes(np.ediff1d(self.data))) > 0
 
     def rebundle(self, flush_time):
         if len(self.times) == 0:
@@ -103,7 +103,7 @@ if __name__ == '__main__':
     B = Bookbinder()
 
     hkframes = [h for h in core.G3File(args.hkfile)]
-    acu_summary = [h for h in hkframes if h['hkagg_type'] == 2 and h['block_names'][0] == 'ACU_summary_output']
+    acu_pos = [h for h in hkframes if h['hkagg_type'] == 2 and h['block_names'][0] == 'ACU_position']
 
     """
     Main loop
@@ -114,14 +114,14 @@ if __name__ == '__main__':
        emit new frame; truncate HK and SMuRF frames
     3. Repeat Step 2 until len(sign_changes) == 0, then go back to Step 1
     """
-    while len(acu_summary) > 0:
+    while len(acu_pos) > 0:
         while not B.ready():
             # If there are no more HK frames, terminate program by ending loop
-            if len(acu_summary) == 0:
+            if len(acu_pos) == 0:
                 break
-            B(acu_summary.pop(0))
+            B(acu_pos.pop(0))
 
-        sc = locate_sign_changes(B.hkbundle.data)
+        sc = locate_sign_changes(np.ediff1d(B.hkbundle.data))
         tc = [B.hkbundle.times[i] for i in sc]
         while len(tc) > 0:
             B.flush_time = tc.pop(0)
@@ -132,6 +132,6 @@ if __name__ == '__main__':
                 if len(scanframes) == 0:
                     output = B.sdbundle.rebundle(B.flush_time)
                     tc = []
-                    acu_summary = []
+                    acu_pos = []
                     break
                 output = B(scanframes.pop(0))
