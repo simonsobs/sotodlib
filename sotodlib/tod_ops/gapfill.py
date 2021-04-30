@@ -246,7 +246,7 @@ def get_gap_fill_single(data, flags, nbuf=10, order=1, inplace=False):
             else:
                 # Only fit as many terms as you plausibly constrain --
                 # 10 data points per term.
-                n_keep = max(1, int(min(order + 1, contrib_count / 10 - 1)))
+                n_keep = 1 + max(0, min(order, contrib_count // 10))
                 model = np.dot(np.linalg.inv(A[:n_keep, :n_keep]),
                                b[:n_keep])[::-1]
 
