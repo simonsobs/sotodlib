@@ -857,7 +857,9 @@ class G3tSmurf:
             stream_id : String 
                 stream_id to load, in case there are multiple
             dets : list or None
-                list of detectors to load, uses get_channel_mask options
+                If not None, it should be a list that can be sent to get_channel_mask.
+                Called dets for sotodlib compatibility. This function only looks at 
+                SMuRF channels.
             detset : string
                 the name of the detector set (tuning file) to load
             show_pb : bool, optional: 
@@ -1187,10 +1189,12 @@ def get_channel_mask(ch_list, status, archive=None, ignore_missing=True):
     ch_list : list
         List of desired channels the type of each list element is used
         to determine what it is:
-        int : absolute readout channel
-        (int, int) : band, channel
-        string : channel name (archive can not be None)
-        float : frequency in the smurf status (or should we use channel assignment?)
+
+        * int : absolute readout channel
+        * (int, int) : band, channel
+        * string : channel name (archive can not be None)
+        * float : frequency in the smurf status (or should we use channel assignment?)
+
     status : SmurfStatus instance
         Status to use to generate channel loading mask
     archive : G3tSmurf instance
