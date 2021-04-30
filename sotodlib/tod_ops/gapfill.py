@@ -329,3 +329,43 @@ def get_gap_model(tod, model, flags=None, weights=None, modes=None):
         modes = model.modes
     return ExtractMatrix([get_gap_model_single(w, modes, f)
                           for w, f in zip(weights, flags)])
+
+def get_contaminated_ranges(good_flags, bad_flags):
+    """Determine what intervals in good_flags are contaminated (overlap
+    with) intervals in bad_flags.  Note this isn't as simple as
+    good_flags * bad_flags, because any contiguous region in
+    good_flags is considered contaminated if even one sample of it is
+    touched by bad_flags.
+
+    Args:
+      good_flags (RangesMatrix): The flags to check for contamination.
+        Must have shape (dets, samps).
+      bad_flags (RangesMatrix): The flags marking bad data, which
+        should be considered as a contaminant to good_flags.  Same
+        shape as good_flags.
+
+    Returns:
+      RangesMatrix with same shape as inputs, indicating the intervals
+      from good_flags that overlap at all with some interval of
+      bad_flags.
+
+    Example:
+      Move contaminated intervals into bad_flags::
+
+        contam = get_contaminated_ranges(source_flags, glitch_flags)
+        source_flags *= ~contam
+        glitch_flags += contam
+
+    """
+    contam = good_flags.zeros_like()
+    for r0, r1, rs in zip(good_flags.ranges, bad_flags.ranges,
+                          contam.ranges):
+        overlap = (r0 * r1).ranges()
+        if len(overlap) == 0:
+            continue
+        # Any interval in r0 that overlaps must be moved
+        for i0, i1 in r0.ranges():
+            if np.any((i0 <= overlap[:,0]) * (overlap[:,0] < i1)):
+                rs.add_interval(int(i0), int(i1))
+    return contam
+
