@@ -217,7 +217,8 @@ class P:
 
         """
         signal = _valid_arg(signal, 'signal', src=tod)
-        det_weights = _not_both(det_weights, self.det_weights, 'det_weights')
+        det_weights = _not_both(det_weights, self.det_weights,
+                                'det_weights', dtype='float32')
         cuts = _not_both(cuts, self.cuts, 'cuts')
 
         if comps is None: comps = self.comps
@@ -250,7 +251,8 @@ class P:
             self.cuts is used.
 
         """
-        det_weights = _not_both(det_weights, self.det_weights, 'det_weights')
+        det_weights = _not_both(det_weights, self.det_weights,
+                                'det_weights', dtype='float32')
         cuts = _not_both(cuts, self.cuts, 'cuts')
 
         if comps is None:

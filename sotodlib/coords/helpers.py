@@ -68,11 +68,13 @@ def _valid_arg(*args, src=None):
             return a
     return None
 
-def _not_both(a, b, name='{item}'):
+def _not_both(a, b, name='{item}', dtype=None):
     if a is not None:
         if b is not None:
             raise ValueError('self.%s and kwarg %s both not None!' % (name, name))
-        return a
+        b = a
+    if b is not None and dtype is not None:
+        b = b.astype(dtype)
     return b
 
 class Timer:
