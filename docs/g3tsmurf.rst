@@ -1,3 +1,5 @@
+.. py:module:: sotodlib.io.load_smurf
+
 =========
 G3tSMuRF 
 =========
@@ -14,22 +16,31 @@ Eventually the databasing part will be separated out and migrated to work within
 the Context system and the loading data functions will be altered to load data
 through a Context object. 
 
-.. autoclass:: sotodlib.io.load_smurf.G3tSmurf
-   :special-members: __init__
+
+.. autofunction:: load_file
+.. autofunction:: get_channel_mask
+.. autofunction:: get_channel_info
+
+
+.. autoclass:: G3tSmurf
+   :special-members: __init__, load_data
    :members:
+
+.. autoclass:: SmurfStatus
+   :special-members: from_file, from_time
 
 Database Tables
 ---------------
-.. autoclass:: sotodlib.io.load_smurf.Observations
+.. autoclass:: Observations
    :members:
-.. autoclass:: sotodlib.io.load_smurf.Detsets
+.. autoclass:: Detsets
    :members:
-.. autoclass:: sotodlib.io.load_smurf.ChanAssignments
+.. autoclass:: ChanAssignments
    :members:
-.. autoclass:: sotodlib.io.load_smurf.Bands
+.. autoclass:: Bands
    :members:
 
-.. autoclass:: sotodlib.io.load_smurf.Files
+.. autoclass:: Files
    :members:
-.. autoclass:: sotodlib.io.load_smurf.Frames
+.. autoclass:: Frames
    :members:
