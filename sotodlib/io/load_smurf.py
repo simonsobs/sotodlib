@@ -926,7 +926,7 @@ class G3tSmurf:
             status = None
         
         aman = load_file( flist, status=status, dets=dets,
-                         archive=self, detset=detset)
+                         archive=self, detset=detset, show_pb=show_pb)
         msk = np.all([aman.timestamps >= start.timestamp(),
                       aman.timestamps < end.timestamp()], axis=0)
         idx = np.where(msk)[0]
@@ -1384,7 +1384,7 @@ def _get_timestamps(streams, load_type=None):
         
 def load_file(filename, dets=None, ignore_missing=True, 
              load_biases=True, load_primary=True, 
-             status=None, archive=None, detset=None):
+             status=None, archive=None, detset=None, show_pb=True):
     """Load data from file where there may not be a connected archive.
 
     Args
@@ -1436,7 +1436,7 @@ def load_file(filename, dets=None, ignore_missing=True,
     request = io_load.FieldGroup('root', subreq)
     streams = None
     try:
-        for filename in filenames:
+        for filename in tqdm( filenames , total=len(filenames), disable=(not show_pb)):
             streams = io_load.unpack_frames(filename, request, streams=streams)
     except KeyError:
         logger.error("Frames do not contain expected fields. Did Channel Mask change during the file?")
