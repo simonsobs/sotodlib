@@ -15,7 +15,11 @@ import ast
 from collections import namedtuple
 from enum import Enum
 
+import logging
+logger = logging.getLogger(__name__)
+
 from .. import core
+from . import load as io_load
 
 
 Base = declarative_base()
@@ -287,6 +291,7 @@ def get_sample_timestamps(frame):
         paradigm (TimingParadigm):
             Paradigm used to calculate timestamps.
     """
+    logger.warning("get_sample_timestamps is deprecated, how did you get here?")
     if 'primary' in frame.keys():
         if False:
             # Do high precision timing calculation here when we have real data
@@ -815,7 +820,8 @@ class G3tSmurf:
                 sids.append(sid)
         return sids
 
-    def load_data(self, start, end, stream_id=None, detset=None, show_pb=True, load_biases=True):
+    def load_data(self, start, end, stream_id=None, dets=None, detset=None, 
+                  show_pb=True, load_biases=True):
         """
         Loads smurf G3 data for a given time range. For the specified time range
         this will return a chunk of data that includes that time range.
@@ -850,6 +856,10 @@ class G3tSmurf:
                 end time for data
             stream_id : String 
                 stream_id to load, in case there are multiple
+            dets : list or None
+                If not None, it should be a list that can be sent to get_channel_mask.
+                Called dets for sotodlib compatibility. This function only looks at 
+                SMuRF channels.
             detset : string
                 the name of the detector set (tuning file) to load
             show_pb : bool, optional: 
@@ -876,18 +886,11 @@ class G3tSmurf:
                 information in status object
                 
         TODO: Track down "Lazy-loaded attribute for Channels.band"
-        
-        TODO: Data loaded here has some strange extra points. Likely due to frame indexing
-            or some other error. Track down.
         """
         session = self.Session()
-
-        ####################################
-        ## Edit Query here to deal with different stream ids
-        ####################################
         start = self._make_datetime(start)
         end = self._make_datetime(end)
-
+        
         if stream_id is None:
             sids = self._stream_ids_in_range(start, end)
             if len(sids) > 1:
@@ -896,169 +899,43 @@ class G3tSmurf:
                     "Must choose one.\n"
                     f"stream_ids: {sids}"
                 )
-            frames = session.query(Frames).filter(
-                Frames.type_name == 'Scan',
-                Frames.stop >= start,
-                Frames.start < end
-            ).order_by(Frames.time)
-        else:
-            frames = session.query(Frames).join(Files).filter(
-                Frames.type_name == 'Scan',
-                Frames.stop >= start,
-                Frames.start < end,
-                Files.stream_id == stream_id
-            ).order_by(Frames.time)
+
+        q = session.query(Files.path).join(Frames).filter(Frames.stop >= start,
+                                                  Frames.start < end,
+                                                  Frames.type_name=='Scan')
+        if stream_id is not None:
+            q.filter(Files.stream_id == stream_id)
+
+        q = q.order_by(Files.start).distinct()
+        flist = [x[0] for x in q.all()]
 
         if detset is None:
             detset = session.query(Detsets).filter(Detsets.start <= start)
             detset = detset.order_by( db.desc(Detsets.start) ).first() 
         else:
             detset = session.query(Detsets).filter(Detsets.name==detset).one()
-
-        samples, channels = 0, 0
-        num_frames = 0
-        for f in frames:
-            num_frames += 1
-            samples += f.n_samples
-            channels = max(f.n_channels, channels)
-
-        timestamps = np.full((samples,), np.nan, dtype=np.float64)
-        data = np.full((channels, samples), 0, dtype=np.int32)
-        if load_biases:
-            biases = np.full((num_bias_lines, samples), 0, dtype=np.int32)
-        else:
-            biases = None
-
-        primary = {}
-
-        cur_sample = 0
-        cur_file = None
-        timing_paradigm = None
-        for frame_info in tqdm(frames, total=num_frames, disable=(not show_pb)):
-            file = frame_info.file.path
-            if file != cur_file:
-                reader = so3g.G3IndexedReader(file)
-                cur_file = file
-
-            reader.Seek(frame_info.offset)
-            frame = reader.Process(None)[0]
-            nsamp = frame['data'].n_samples
-
-            key_order = [int(k[1:]) for k in frame['data'].keys()]
-            data[key_order, cur_sample:cur_sample + nsamp] = frame['data']
-
-            if load_biases:
-                bias_order = [int(k[-2:]) for k in frame['tes_biases'].keys()]
-                biases[bias_order, cur_sample:cur_sample + nsamp] = frame['tes_biases']
-
-            # Loads primary data
-            if 'primary' in frame.keys():
-                for k, v in frame['primary'].items():
-                    if k not in primary:
-                        primary[k] = np.zeros(samples, dtype=np.int64)
-                    primary[k][cur_sample:cur_sample + nsamp] = v
-
-            ts, paradigm = get_sample_timestamps(frame)
-            if timing_paradigm is None:
-                timing_paradigm = paradigm
-            elif timing_paradigm != paradigm:
-                timing_paradigm = TimingParadigm.Mixed
-
-            timestamps[cur_sample:cur_sample + nsamp] = ts
-
-            cur_sample += nsamp
-
-        # Conversion from DAC counts to squid phase
-        rad_per_count = np.pi / 2**15
-        data = data * rad_per_count
-
-        if len(timestamps) > 0:
-            status = self.load_status(timestamps[0])
-        else:
+        
+        scan_start = session.query(Frames.start).filter(Frames.start > start,
+                                                        Frames.type_name=='Scan')
+        scan_start = scan_start.order_by(Frames.start).first()
+        
+        try:
+            status = self.load_status(scan_start[0])
+        except:
+            logger.info("Status load from database failed, using file load")
             status = None
-            
-        if status is None and len(timestamps)>0:
-            print('Trying a later status, why is the status not at the beginning?')
-            self.load_status(timestamps[-1])
-            
-        #### Get Info for channels in this observation
-        if detset is None:
-            print('Did not find detector set, hopefully this is old data')
-            bnd_assign=[]
-            ch_assign=[]
+        
+        aman = load_file( flist, status=status, dets=dets,
+                         archive=self, detset=detset, show_pb=show_pb)
+        msk = np.all([aman.timestamps >= start.timestamp(),
+                      aman.timestamps < end.timestamp()], axis=0)
+        idx = np.where(msk)[0]
+        if len(idx) == 0:
+            logger.warning("No samples returned in time range")
+            aman.restrict('samps', (0, 0))
         else:
-            bnd_assign = [ ch.band.number for ch in detset.channels ]
-            ch_assign =  [ ch.channel for ch in detset.channels     ]
-
-        channel_names = []
-        channel_bands = []
-        channel_channels = []
-        channel_freqs = []
-
-        for ch in range( channels ):
-            try:
-                sch = status.readout_to_smurf(ch)
-
-                x = np.where(np.all([bnd_assign == sch[0],
-                                     ch_assign  == sch[1]], axis=0))[0]
-
-                if len(x) == 0:
-                    ########################################
-                    ## There appear to be a non-trivial number of these
-                    ## SMuRF Error or Indexing Error?
-                    ########################################
-                    name = 'sch_NONE_{}_{:03d}'.format(sch[0],sch[1])
-                    freq = status.freq_map[sch[0], sch[1]]
-                else:
-                    channel = detset.channels[x[0]]
-                    name = channel.name
-                    ########################################
-                    ## Related to above, freq != status.freq for many of these
-                    ########################################
-                    freq = channel.frequency
-
-            except:
-                ## in case the detector information isn't in the data
-                ## load 'readout channel' as a backup
-                name='rch_{:04d}'.format(ch)
-                sch = (-1,-1)
-                freq=-1
-                
-                
-            channel_names.append(name)
-            channel_bands.append(sch[0])
-            channel_channels.append(sch[1])
-            channel_freqs.append(freq)
-
+            aman.restrict('samps', (idx[0], idx[-1]))
         session.close()
-
-        ## Build AxisManager
-        aman = core.AxisManager(
-            core.LabelAxis('channels', channel_names),
-            core.OffsetAxis('samps', len(timestamps), 0)
-        )
-
-        aman.wrap( 'signal', data, ([(0, 'channels'), (1, 'samps')]) )
-        aman.wrap( 'timestamps', timestamps, ([(0,'samps')]))
-
-        temp = core.AxisManager( aman.samps.copy() )
-        for k in primary:
-            temp.wrap( k, primary[k], ([(0,'samps')]) )
-
-        aman.wrap('primary', temp)
-        if load_biases:
-            aman.wrap('biases', biases, 
-                      [ (0,core.LabelAxis('bias_lines', np.arange(biases.shape[0]))), 
-                        (1,'samps')])
-
-        temp = core.AxisManager( aman.channels.copy() )
-        temp.wrap('band', np.array(channel_bands), ([(0,'channels')]) )
-        temp.wrap('channel', np.array(channel_channels), ([(0,'channels')]) )
-        temp.wrap('frequency', np.array(channel_freqs), ([(0,'channels')]) )
-        aman.wrap('ch_info', temp)
-
-        aman.wrap('flags', core.FlagManager.for_tod(aman, 'channels', 'samps'))
-
         return aman
 
     def load_status(self, time, show_pb=False):
@@ -1070,33 +947,10 @@ class G3tSmurf:
             time (timestamp): Time at which you want the rogue status
 
         Returns:
-            status (dict): Dictionary of rogue variables at specified time.
+            status (SmurfStatus instance): object indexing of rogue variables 
+            at specified time.
         """
-        time = self._make_datetime(time)
-        session = self.Session()
-        session_start,  = session.query(Frames.time).filter(
-            Frames.type_name == 'Observation',
-            Frames.time <= time
-        ).order_by(Frames.time.desc()).first()
-
-        status_frames = session.query(Frames).filter(
-            Frames.type_name == 'Wiring',
-            Frames.time >= session_start,
-            Frames.time <= time
-        ).order_by(Frames.time)
-
-        status = {}
-        cur_file = None
-        for frame_info in tqdm(status_frames.all(), disable=(not show_pb)):
-            file = frame_info.file.path
-            if file != cur_file:
-                reader = so3g.G3IndexedReader(file)
-                cur_file = file
-            reader.Seek(frame_info.offset)
-            frame = reader.Process(None)[0]
-            status.update(yaml.safe_load(frame['status']))
-
-        return SmurfStatus(status)
+        return SmurfStatus.from_time(time, self, show_pb=show_pb)
 
 
 class SmurfStatus:
@@ -1151,7 +1005,9 @@ class SmurfStatus:
 
     def __init__(self, status):
         self.status = status
-
+        self.start = self.status.get('start')
+        self.stop = self.status.get('stop')
+        
         # Reads in useful status values as attributes
         mapper_root = 'AMCc.SmurfProcessor.ChannelMapper'
         self.num_chans = self.status.get(f'{mapper_root}.NumChannels')
@@ -1213,6 +1069,83 @@ class SmurfStatus:
             ramp_max_cnt_rate_hz = 1.e6*digitizer_freq_mhz / 2.
             self.flux_ramp_rate_hz = ramp_max_cnt_rate_hz / (ramp_max_cnt + 1)
 
+    @classmethod
+    def from_file(cls, filename):
+        """Generates a Smurf Status from a .g3 file.
+    
+        Args
+        ----
+            filename : str or list
+        """
+        if isinstance(filename, str):
+            filenames = [filename]
+        else:
+            filenames = filename
+        status = {}
+        for file in filenames:
+            reader = so3g.G3IndexedReader(file)
+            while True:
+                frames = reader.Process(None)
+                if len(frames) == 0:
+                    break
+                frame = frames[0]
+                if str(frame.type) == 'Wiring':
+                    if status.get('start') is None:
+                        status['start'] = frame['time'].time/spt3g_core.G3Units.s
+                        status['stop'] = frame['time'].time/spt3g_core.G3Units.s
+                    else:
+                        status['stop'] = frame['time'].time/spt3g_core.G3Units.s
+                    status.update(yaml.safe_load(frame['status']))
+        return cls(status)
+    
+    @classmethod
+    def from_time(cls, time, archive, show_pb=False):
+        """Generates a Smurf Status at specified unix timestamp.
+        Loads all status frames between session start frame and specified time.
+
+        Args
+        -------
+            time : (timestamp) 
+                Time at which you want the rogue status
+            archive : (G3tSmurf instance)
+                The G3tSmurf archive to use to find the status
+            show_pb : (bool)
+                Turn on or off loading progress bar
+
+        Returns
+        --------
+            status : (SmurfStatus instance)
+                object indexing of rogue variables at specified time.
+        """
+        time = archive._make_datetime(time)
+        session = archive.Session()
+        session_start,  = session.query(Frames.time).filter(
+            Frames.type_name == 'Observation',
+            Frames.time <= time
+        ).order_by(Frames.time.desc()).first()
+
+        status_frames = session.query(Frames).filter(
+            Frames.type_name == 'Wiring',
+            Frames.time >= session_start,
+            Frames.time <= time
+        ).order_by(Frames.time)
+
+        status = {
+            'start':status_frames[0].time.timestamp(),
+            'stop':status_frames[-1].time.timestamp(),
+        }
+        cur_file = None
+        for frame_info in tqdm(status_frames.all(), disable=(not show_pb)):
+            file = frame_info.file.path
+            if file != cur_file:
+                reader = so3g.G3IndexedReader(file)
+                cur_file = file
+            reader.Seek(frame_info.offset)
+            frame = reader.Process(None)[0]
+            status.update(yaml.safe_load(frame['status']))
+
+        return cls(status)
+        
     def readout_to_smurf(self, rchan):
         """
         Converts from a readout channel number to (band, channel).
@@ -1246,3 +1179,302 @@ class SmurfStatus:
                 Channel number or list of channel numbers.
         """
         return self.mask_inv[band, chan]
+
+def get_channel_mask(ch_list, status, archive=None, ignore_missing=True):
+    """Take a list of desired channels and parse them so the different
+    data loading functions can load them.
+    
+    Args
+    ------
+    ch_list : list
+        List of desired channels the type of each list element is used
+        to determine what it is:
+
+        * int : absolute readout channel
+        * (int, int) : band, channel
+        * string : channel name (archive can not be None)
+        * float : frequency in the smurf status (or should we use channel assignment?)
+
+    status : SmurfStatus instance
+        Status to use to generate channel loading mask
+    archive : G3tSmurf instance
+        Archive used to search for channel names / frequencies
+    ignore_missing : bool
+        If true, will not raise errors if a requested channel is not found
+    
+    Returns
+    -------
+    mask : bool array
+        Mask for the channels in the SmurfStatus
+        
+    TODO: When loading from name, need to check tune file in use during file. 
+    """
+    if status.mask is None:
+        raise ValueError("Status Mask not set")
+    
+    session = None
+    if archive is not None:
+        session = archive.Session()
+        
+    msk = np.zeros( (status.num_chans,), dtype='bool')
+    for ch in ch_list:
+        if np.isscalar(ch):
+            if np.issubdtype( type(ch), np.integer):
+                #### this is an absolute readout channel
+                if not ignore_missing and ~np.any(status.mask == ch):
+                    raise ValueError(f"channel {ch} not found")
+                msk[ status.mask == ch] = True
+            
+            elif np.issubdtype( type(ch), np.floating):
+                #### this is a resonator frequency
+                b,c = np.where( np.isclose(status.freq_map, ch, rtol=1e-7) )
+                if len(b)==0:
+                    if not ignore_missing:
+                        raise ValueError(f"channel {ch} not found")
+                    continue
+                elif status.mask_inv[b,c][0]==-1:
+                    if not ignore_missing:
+                        raise ValueError(f"channel {ch} not streaming")
+                    continue
+                msk[status.mask_inv[b,c][0]] = True
+                
+            elif type(ch) == str:
+                #### this is a channel name
+                if session is None:
+                    raise ValueError("Need G3tSmurf Archive to pass channel names")
+                channel = session.query(Channels).filter(Channels.name==ch).one_or_none()
+                if channel is None:
+                    if not ignore_mission:
+                        raise ValueError(f"channel {ch} not found in database")
+                    continue
+                idx = status.mask_inv[channel.band_number, channel.channel]
+                if idx == -1:
+                    if not ignore_missing:
+                        raise ValueError(f"channel {ch} not streaming")
+                    continue
+                msk[idx] = True
+                
+            else:
+                raise TypeError(f"type for channel {ch} not understood")
+        else:
+            if len(ch) == 2:
+                ### this is a band, channel pair
+                idx = status.mask_inv[ch[0], ch[1]]
+                if idx == -1:
+                    if not ignore_missing:
+                        raise ValueError(f"channel {ch} not streaming")
+                    continue
+                msk[idx] = True
+            else:
+                raise TypeError(f"type for channel {ch} not understood")
+    if session is not None:
+        session.close()
+    return msk
+
+def get_channel_info(status, mask=None, detset=None):
+    """Create the Channel Info Section of a G3tSmurf AxisManager
+    
+    This function returns an AxisManager with the following properties    
+        * Axes:
+            * channels : resonator channels reading out
+
+        * Fields:
+            * band : Smurf Band
+            * channel : Smurf Channel
+            * frequency : resonator frequency
+            * rchannel : readout channel
+    
+    Args
+    -----
+    status : SmurfStatus instance
+    mask : bool array
+        mask of which channels to use
+    detset : DetSet instance (optionl)
+        detector set for the data
+        
+    Returns
+    --------
+    ch_info : AxisManager
+    
+    """
+    #### Get Info for channels in this observation
+    if detset is None:
+        bnd_assign=[]
+        ch_assign=[]
+    else:
+        bnd_assign = [ ch.band.number for ch in detset.channels ]
+        ch_assign =  [ ch.channel for ch in detset.channels     ]
+    
+    channel_names = []
+    channel_bands = []
+    channel_channels = []
+    channel_freqs = []
+    channel_rch = []
+   
+    ch_list = np.arange( status.num_chans)
+    if mask is not None:
+        ch_list = ch_list[mask]
+        
+    for ch in ch_list:
+        try:
+            sch = status.readout_to_smurf(ch)
+
+            x = np.where(np.all([bnd_assign == sch[0],
+                                 ch_assign  == sch[1]], axis=0))[0]
+
+            if len(x) == 0:
+                ########################################
+                ## There appear to be a non-trivial number of these when
+                ## using DetSets SMuRF Error or Indexing Error?
+                ########################################
+                name = 'sch_NONE_{}_{:03d}'.format(sch[0],sch[1])
+                freq = status.freq_map[sch[0], sch[1]]
+            else:
+                channel = detset.channels[x[0]]
+                name = channel.name
+                ########################################
+                ## Related to above, freq != status.freq for many of these
+                ########################################
+                freq = channel.frequency
+
+        except:
+            ## load 'readout channel' as a backup
+            name='rch_{:04d}'.format(ch)
+            sch = (-1,-1)
+            freq=-1
+
+        channel_names.append(name)
+        channel_bands.append(sch[0])
+        channel_channels.append(sch[1])
+        channel_freqs.append(freq)
+        channel_rch.append('r{:04d}'.format(ch)) 
+    
+    ch_info = core.AxisManager( core.LabelAxis('channels', channel_names),)
+    ch_info.wrap('band', np.array(channel_bands), ([(0,'channels')]) )
+    ch_info.wrap('channel', np.array(channel_channels), ([(0,'channels')]) )
+    ch_info.wrap('frequency', np.array(channel_freqs), ([(0,'channels')]) )
+    ch_info.wrap('rchannel', np.array(channel_rch), ([(0,'channels')]) )
+    return ch_info
+
+def _get_timestamps(streams, load_type=None):
+    """Calculate the timestamp field for loaded data
+    
+    Args
+    -----
+        streams : dictionary
+            result from unpacking the desired data frames
+        load_type : None or int
+            if None, uses highest precision version possible. integer values will
+            use the TimingParadigm class for indexing
+    """
+    if load_type is None:
+        ## determine the desired loading type. Expand as logic as
+        ## data fields develop
+        if 'primary' in streams and 'UnixTime' in 'primary':
+            load_type = TimingParadigm.SmurfUnixTime
+        else:
+            load_type = TimingParadigm.G3Timestream
+    
+    if load_type == TimingParadigm.SmurfUnixTime:
+        return io_load.hstack_into(None, streams['primary']['UnixTime'])/1e9
+    if load_type == TimingParadigm.G3Timestream:
+        return io_load.hstack_into(None, streams['time'])
+    logger.error("Timing System could not be determined")
+            
+        
+def load_file(filename, dets=None, ignore_missing=True, 
+             load_biases=True, load_primary=True, 
+             status=None, archive=None, detset=None, show_pb=True):
+    """Load data from file where there may not be a connected archive.
+
+    Args
+    ----
+      filename : str or list 
+          A filename or list of filenames (to be loaded in order).
+          Note that SmurfStatus is only loaded from the first file
+      dets: list or None
+          If not None, it should be a list that can be sent to get_channel_mask.
+          Called dets for sotodlib compatibility. This function only looks at 
+          SMuRF channels.
+      ignore_missing : bool
+          If true, will not raise errors if a requested channel is not found
+      load_biases : bool
+          If true, will load the bias lines for each detector
+      load_primary : bool
+          If true, loads the primary data fields, old .g3 files may not have 
+          these fields. 
+      archive : a G3tSmurf instance (optional)
+      status : a SmurfStatus Instance we don't want to use the one from the 
+          first file
+      detset : Detset database entry, used for channel names in channel info
+    """   
+    
+    if isinstance(filename, str):
+        filenames = [filename]
+    else:
+        filenames = filename
+    
+    if status is None:
+        status = SmurfStatus.from_file(filenames[0])
+
+    if dets is not None:
+        ch_mask = get_channel_mask(dets, status, archive=archive, 
+                               ignore_missing=ignore_missing)
+    else:
+        ch_mask = None
+
+    ch_info = get_channel_info(status, ch_mask, detset=detset)
+
+    subreq = [
+        io_load.FieldGroup('data', ch_info.rchannel, timestamp_field='time'),
+    ]
+    if load_primary:
+        subreq.extend( [io_load.FieldGroup('primary', [io_load.Field('*', wildcard=True)])] )
+    if load_biases:
+        subreq.extend( [io_load.FieldGroup('tes_biases', [io_load.Field('*', wildcard=True)]),])
+
+    request = io_load.FieldGroup('root', subreq)
+    streams = None
+    try:
+        for filename in tqdm( filenames , total=len(filenames), disable=(not show_pb)):
+            streams = io_load.unpack_frames(filename, request, streams=streams)
+    except KeyError:
+        logger.error("Frames do not contain expected fields. Did Channel Mask change during the file?")
+        raise
+        
+    count = sum(map(len,streams['time']))
+
+    ## Build AxisManager
+    aman = core.AxisManager(
+        ch_info.channels.copy(),
+        core.OffsetAxis('samps', count, 0)
+    )
+    aman.wrap( 'timestamps', _get_timestamps(streams), ([(0,'samps')]))
+
+    # Conversion from DAC counts to squid phase
+    aman.wrap( 'signal', np.zeros(aman.shape, 'float32'),
+                 [(0, 'channels'), (1, 'samps')])
+    for idx in range(aman.channels.count):
+        io_load.hstack_into(aman.signal[idx], streams['data'][ch_info.rchannel[idx]])
+
+    rad_per_count = np.pi / 2**15
+    aman.signal *= rad_per_count
+
+    aman.wrap('ch_info', ch_info)
+
+    temp = core.AxisManager( aman.samps.copy() )
+    for k in streams['primary'].keys():
+        temp.wrap( k, io_load.hstack_into(None, streams['primary'][k]), ([(0,'samps')]) )
+    aman.wrap('primary', temp)
+
+    if load_biases:
+        bias_axis = core.LabelAxis('bias_lines', np.arange(len(streams['tes_biases'].keys())))
+        aman.wrap('biases', np.zeros((bias_axis.count, aman.samps.count)), 
+                          [ (0,bias_axis), 
+                            (1,'samps')])
+        for k in streams['tes_biases'].keys():
+            i = int(k[4:])
+            io_load.hstack_into(aman.biases[i], streams['tes_biases'][k])
+    aman.wrap('flags', core.FlagManager.for_tod(aman, 'channels', 'samps'))
+
+    return aman
