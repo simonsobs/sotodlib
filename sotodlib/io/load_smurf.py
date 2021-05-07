@@ -37,9 +37,9 @@ association_table_obs = db.Table('association_obs', Base.metadata,
     db.Column('observations', db.Integer, db.ForeignKey('obs.obs_id'))
 )
 
-association_table_dets = db.Table('association_dets', Base.metadata,
-    db.Column('detsets', db.Integer, db.ForeignKey('tunes.id')),
-    db.Column('channels', db.Integer, db.ForeignKey('channels.id'))
+association_table_dets = db.Table('detsets', Base.metadata,
+    db.Column('name', db.Integer, db.ForeignKey('tunes.name')),
+    db.Column('det', db.Integer, db.ForeignKey('channels.name'))
 )
 
 
@@ -155,9 +155,13 @@ class Tunes(Base):
                                     back_populates='tunes')
     
     ## many to many
-    channels = relationship('Channels', 
+    dets = relationship('Channels', 
                         secondary=association_table_dets,
                         back_populates='detsets')
+    
+    @property
+    def channels(self):
+        return self.dets
     
 class Bands(Base):
     """
@@ -227,7 +231,7 @@ class Channels(Base):
     ## many to many
     detsets = relationship('Tunes',
                          secondary=association_table_dets,
-                         back_populates='channels')
+                         back_populates='dets')
     
     
 type_key = ['Observation', 'Wiring', 'Scan']
@@ -1287,7 +1291,7 @@ def get_channel_mask(ch_list, status, archive=None, ignore_missing=True):
                 msk[idx] = True
                 
             else:
-                raise TypeError(f"type for channel {ch} not understood")
+                raise TypeError(f"type {type(ch)} for channel {ch} not understood")
         else:
             if len(ch) == 2:
                 ### this is a band, channel pair
