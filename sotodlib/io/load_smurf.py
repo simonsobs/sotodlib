@@ -28,17 +28,17 @@ num_bias_lines = 16
 
 
 association_table = db.Table('association_chan_assign', Base.metadata,
-    db.Column('detsets', db.Integer, db.ForeignKey('detsets.id')),
+    db.Column('tunes', db.Integer, db.ForeignKey('tunes.id')),
     db.Column('chan_assignments', db.Integer, db.ForeignKey('chan_assignments.id'))
 )
 
 association_table_obs = db.Table('association_obs', Base.metadata,
-    db.Column('detsets', db.Integer, db.ForeignKey('detsets.id')),
+    db.Column('tunes', db.Integer, db.ForeignKey('tunes.id')),
     db.Column('observations', db.Integer, db.ForeignKey('obs.obs_id'))
 )
 
 association_table_dets = db.Table('association_dets', Base.metadata,
-    db.Column('detsets', db.Integer, db.ForeignKey('detsets.id')),
+    db.Column('detsets', db.Integer, db.ForeignKey('tunes.id')),
     db.Column('channels', db.Integer, db.ForeignKey('channels.id'))
 )
 
@@ -79,7 +79,7 @@ class Observations(Base):
     files = relationship("Files", back_populates='observation') 
     
     ## many to many
-    detsets = relationship("Detsets", 
+    tunes = relationship("Tunes", 
                            secondary=association_table_obs,
                            back_populates='observations')
 
@@ -121,15 +121,15 @@ class Files(Base):
     
     # breaking from linked table convention to match with obsfiledb requirements
     ## many to one
-    detset = db.Column(db.String, db.ForeignKey('detsets.name'))
-    detset_info = relationship("Detsets", back_populates='files')
+    detset = db.Column(db.String, db.ForeignKey('tunes.name'))
+    tune = relationship("Tunes", back_populates='files')
     
 
-class Detsets(Base):
+class Tunes(Base):
     """Indexing of 'detector sets' available during observations. Should
     correspond to the tune files. 
     """
-    __tablename__ = 'detsets'
+    __tablename__ = 'tunes'
     id = db.Column( db.Integer, primary_key=True)
     
     name = db.Column(db.String, unique=True)
@@ -142,22 +142,22 @@ class Detsets(Base):
     
     ## files that use this detset
     ## one to many
-    files = relationship("Files", back_populates='detset_info')
+    files = relationship("Files", back_populates='tune')
     
     ## many to many
     observations = relationship("Observations", 
                                 secondary=association_table_obs,
-                                back_populates='detsets')
+                                back_populates='tunes')
     
     ## many to many
     chan_assignments = relationship('ChanAssignments', 
                                     secondary=association_table,
-                                    back_populates='detsets')
+                                    back_populates='tunes')
     
     ## many to many
     channels = relationship('Channels', 
                         secondary=association_table_dets,
-                        back_populates='detset')
+                        back_populates='detsets')
     
 class Bands(Base):
     """
@@ -194,7 +194,7 @@ class ChanAssignments(Base):
     
     ## Channel Assignments are put into detector sets
     ## many to many bidirectional 
-    detsets = relationship('Detsets', 
+    tunes = relationship('Tunes', 
                            secondary=association_table,
                            back_populates='chan_assignments')
 
@@ -225,7 +225,7 @@ class Channels(Base):
     band_number = db.Column(db.Integer, db.ForeignKey('bands.number'))
     
     ## many to many
-    detset = relationship('Detsets',
+    detsets = relationship('Tunes',
                          secondary=association_table_dets,
                          back_populates='channels')
     
@@ -551,7 +551,7 @@ class G3tSmurf:
         session.commit()   
         
     def add_new_tuning(self, stream_id, ctime, tune_path, session):    
-        """Add new entry to the Detsets table. Called by the
+        """Add new entry to the Tuness table. Called by the
         index_metadata function.
         
         Args
@@ -566,17 +566,17 @@ class G3tSmurf:
             The active session
         """
         name = tune_path.split('/')[-1]
-        dset = session.query(Detsets).filter(Detsets.name == name).one_or_none()
-        if dset is None:
-            dset = Detsets(name=name, start=dt.datetime.fromtimestamp(ctime),
+        tune = session.query(Tunes).filter(Tunes.name == name).one_or_none()
+        if tune is None:
+            tune = Tunes(name=name, start=dt.datetime.fromtimestamp(ctime),
                            path=tune_path, stream_id=stream_id)
-            session.add(dset)
+            session.add(tune)
             session.commit()
 
         data = np.load(tune_path, allow_pickle=True).item()
-        if len(dset.chan_assignments) != len(data):
+        if len(tune.chan_assignments) != len(data):
             ## we are missing channel assignments for at least one band
-            have_already = [cha.band.number for cha in dset.chan_assignments]
+            have_already = [cha.band.number for cha in tune.chan_assignments]
 
             for band in data.keys():
                 if band in have_already:
@@ -617,9 +617,9 @@ class G3tSmurf:
                             break
 
                 ## add a the assignments and channels to the detector set
-                dset.chan_assignments.append(db_cha)
+                tune.chan_assignments.append(db_cha)
                 for ch in db_cha.channels:
-                    dset.channels.append(ch)
+                    tune.channels.append(ch)
         session.commit()  
     
     def add_new_observation(self, stream_id, ctime, obs_data, session, max_early=5,max_wait=10):
@@ -664,13 +664,13 @@ class G3tSmurf:
         """ Update existing observation. A separate function to make it easier
         to deal with partial data transfers. See add_new_observation for args"""
 
-        dset = session.query(Detsets).filter(Detsets.start <= obs.start)
-        dset = dset.order_by(db.desc(Detsets.start)).first()
-        already_have = [ds.id for ds in obs.detsets]
+        tune = session.query(Tunes).filter(Tunes.start <= obs.start)
+        tune = tune.order_by(db.desc(Tunes.start)).first()
+        already_have = [ds.id for ds in obs.tunes]
 
-        if dset is not None:
-            if not dset.id in already_have:
-                obs.detsets.append(dset)
+        if tune is not None:
+            if not tune.id in already_have:
+                obs.tunes.append(tune)
         else:
             # print('no tuning file found. should I build one?')
             ## Here is where we will put logic if we need to go backwards 
@@ -690,15 +690,15 @@ class G3tSmurf:
             flist = session.query(Files).filter(Files.name.like(f_start+'%')).order_by(Files.start).all()
             for f in flist:
                 f.obs_id = obs.obs_id
-                if dset is not None:
-                    f.detset = dset.name
+                if tune is not None:
+                    f.detset = tune.name
             obs.duration = flist[-1].stop.timestamp() - obs.timestamp
             obs.stop = flist[-1].stop
         session.commit()
 
     def index_metadata(self, verbose = False, stop_at_error=False):
         """
-            Adds all channel assignments, detsets, and observations in archive to database. 
+            Adds all channel assignments, tunefiles, and observations in archive to database. 
             Adding relevant entries to Bands and Files as well.
 
             Args
@@ -912,10 +912,10 @@ class G3tSmurf:
         flist = [x[0] for x in q.all()]
 
         if detset is None:
-            detset = session.query(Detsets).filter(Detsets.start <= start)
-            detset = detset.order_by( db.desc(Detsets.start) ).first() 
+            detset = session.query(Tunes).filter(Tunes.start <= start)
+            detset = detset.order_by( db.desc(Tunes.start) ).first() 
         else:
-            detset = session.query(Detsets).filter(Detsets.name==detset).one()
+            detset = session.query(Tunes).filter(Tunes.name==detset).one()
         
         scan_start = session.query(Frames.start).filter(Frames.start > start,
                                                         Frames.type_name=='Scan')
@@ -1357,7 +1357,7 @@ def get_channel_info(status, mask=None, detset=None):
             if len(x) == 0:
                 ########################################
                 ## There appear to be a non-trivial number of these when
-                ## using DetSets SMuRF Error or Indexing Error?
+                ## using Tunes SMuRF Error or Indexing Error?
                 ########################################
                 name = 'sch_NONE_{}_{:03d}'.format(sch[0],sch[1])
                 freq = status.freq_map[sch[0], sch[1]]
