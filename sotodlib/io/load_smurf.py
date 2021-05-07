@@ -690,7 +690,6 @@ class G3tSmurf:
         to deal with partial data transfers. See add_new_observation for args"""
 
         # TODO: Update Tune File Assignment to Use Status Information
-        
         tune = session.query(Tunes).filter(Tunes.start <= obs.start)
         tune = tune.order_by(db.desc(Tunes.start)).first()
         already_have = [ds.id for ds in obs.tunes]
