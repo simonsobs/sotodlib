@@ -139,8 +139,8 @@ def parse_arguments(comm):
                 "Multiple frequencies are not supported when scanning from a map"
             )
 
-    if args.simulate_atmosphere and args.weather is None:
-        raise RuntimeError("Cannot simulate atmosphere without a TOAST weather file")
+    if args.weather is None:
+        raise RuntimeError("You must provide a TOAST weather file")
 
     if comm.world_rank == 0:
         log.info("\n")
