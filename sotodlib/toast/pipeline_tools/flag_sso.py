@@ -32,6 +32,9 @@ def apply_flag_sso(args, comm, data, verbose=True):
     if args.flag_sso is None:
         return
 
+    if comm.world_rank == 0 and verbose:
+        print(f"Flagging SSO:s", flush=True)
+
     timer = Timer()
     timer.start()
 
