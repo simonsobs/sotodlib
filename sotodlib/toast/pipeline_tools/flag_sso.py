@@ -16,7 +16,13 @@ def add_flag_sso_args(parser):
         required=False,
         action="append",
         help="SSO name and flagging radius as <name>,<radius-arcmin>. "
-        "There can be multiple --flag-sso flags",
+        "There can be multiple --flag-sso arguments",
+    )
+    parser.add_argument(
+        "--flag-sso-mask",
+        default=1,
+        type=np.uint8,
+        help="Bitmask to apply when masking SSOs",
     )
 
     return
@@ -29,16 +35,21 @@ def apply_flag_sso(args, comm, data, verbose=True):
     timer = Timer()
     timer.start()
 
+    sso_names = []
+    sso_radii = []
     for arg in args.flag_sso:
         sso_name, sso_radius = arg.split(",")
         sso_radius = np.radians(float(sso_radius) / 60)
-        if comm.world_rank == 0 and verbose:
-            print("Flagging {}".format(sso_name), flush=True)
+        sso_names.append(sso_name)
+        sso_radii.append(sso_radius)
 
-        flag_sso = OpFlagSSO(sso_name, sso_radius)
-        flag_sso.exec(data)
+    if comm.world_rank == 0 and verbose:
+        print("Flagging {}".format(sso_name), flush=True)
 
-        if comm.world_rank == 0 and verbose:
-            timer.report_clear("Flag {}".format(sso_name))
+    flag_sso = OpFlagSSO(sso_names, sso_radii, flag_mask=args.flag_sso_mask)
+    flag_sso.exec(data)
+
+    if comm.world_rank == 0 and verbose:
+        timer.report_clear(f"Flag {sso_names}")
 
     return

@@ -34,8 +34,9 @@ class OpFlagSSO(Operator):
     """Operator which flags detector data in the vicinity of solar system objects
 
     Args:
-        sso_name (str):  Name of the SSO, must be recognized by pyEphem
-        sso_radius (float):  Radius around the source to flag [radians]
+        sso_names (iterable of str):  Names of the SSOs, must be
+            recognized by pyEphem
+        sso_radii (iterable of float):  Radii around the sources to flag [radians]
         flag_name (str):  Detector flags to modify
         flag_mask (str):  Flag bits to raise
         out (str): accumulate data to the cache with name
@@ -45,13 +46,18 @@ class OpFlagSSO(Operator):
              simulate and observe
     """
 
-    def __init__(self, sso_name, sso_radius, flag_name="flags", flag_mask=1):
+    def __init__(self, sso_names, sso_radii, flag_name="flags", flag_mask=1):
         # Call the parent class constructor
         super().__init__()
 
-        self.sso_name = sso_name
-        self.sso = getattr(ephem, sso_name)()
-        self.sso_radius = sso_radius
+        if len(sso_names) != len(sso_radii):
+            raise RuntimeError("Each SSO must have a radius")
+        self.sso_names = sso_names
+        self.ssos = []
+        for sso_name in sso_names:
+            self.ssos.append(getattr(ephem, sso_name)())
+        self.nsso = len(self.ssos)
+        self.sso_radii = sso_radii
         self.flag_name = flag_name
         self.flag_mask = flag_mask
         return
@@ -88,30 +94,41 @@ class OpFlagSSO(Operator):
             # Get the observation time span and compute the horizontal
             # position of the SSO
             times = tod.local_times()
-            sso_az, sso_el = self._get_sso_position(times, observer)
+            sso_azs, sso_els = self._get_sso_positions(times, observer)
 
-            self._flag_sso(sso_az, sso_el, tod, focalplane)
+            self._flag_ssos(sso_azs, sso_els, tod, focalplane)
 
-            del sso_az, sso_el
+            del sso_azs, sso_els
 
         return
     
     @function_timer
-    def _get_sso_position(self, times, observer):
+    def _get_sso_positions(self, times, observer):
         """
         Calculate the SSO horizontal position
         """
-        sso_az = np.zeros(times.size)
-        sso_el = np.zeros(times.size)
-        for i, t in enumerate(times):
-            observer.date = to_DJD(t)
-            self.sso.compute(observer)
-            sso_az[i] = self.sso.az
-            sso_el[i] = self.sso.alt
-        return sso_az, sso_el
+        sso_azs = np.zeros([self.nsso, times.size])
+        sso_els = np.zeros([self.nsso, times.size])
+        # Only evaluate the position every second and interpolate
+        # in between
+        # FIXME : could use some clever logic when the SSO crosses
+        # the zero azimuth
+        n = min(int(times[-1] - times[0]), 2)
+        tvec = np.linspace(times[0], times[-1], n)
+        for isso, sso in enumerate(self.ssos):
+            azvec = np.zeros(n)
+            elvec = np.zeros(n)
+            for i, t in enumerate(tvec):
+                observer.date = to_DJD(t)
+                sso.compute(observer)
+                azvec[i] = sso.az
+                elvec[i] = sso.alt
+            sso_azs[isso] = np.interp(times, tvec, azvec)
+            sso_els[isso] = np.interp(times, tvec, elvec)
+        return sso_azs, sso_els
 
     @function_timer
-    def _flag_sso(self, sso_az, sso_el, tod, focalplane):
+    def _flag_ssos(self, sso_azs, sso_els, tod, focalplane):
         """
         Flag the SSO for each detector in tod
         """
@@ -139,12 +156,16 @@ class OpFlagSSO(Operator):
                 az = 2 * np.pi - phi
                 el = np.pi / 2 - theta
 
-            # Flag samples within search radius
-            x = (az - sso_az) * np.cos(el)
-            y = el - sso_el
-            r = np.sqrt(x ** 2 + y ** 2)
-            good = r < self.sso_radius
-            ref[good] |= self.flag_mask
+            cosel = np.cos(el)
+            for sso_az, sso_el, sso_radius in zip(
+                    sso_azs, sso_els, self.sso_radii
+            ):
+                # Flag samples within search radius
+                x = (az - sso_az) * cosel
+                y = el - sso_el
+                rsquared = x ** 2 + y ** 2
+                good = rsquared < sso_radius ** 2
+                ref[good] |= self.flag_mask
 
             del ref
 
