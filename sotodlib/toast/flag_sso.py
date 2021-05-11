@@ -111,8 +111,6 @@ class OpFlagSSO(Operator):
         sso_els = np.zeros([self.nsso, times.size])
         # Only evaluate the position every second and interpolate
         # in between
-        # FIXME : could use some clever logic when the SSO crosses
-        # the zero azimuth
         n = min(int(times[-1] - times[0]), 2)
         tvec = np.linspace(times[0], times[-1], n)
         for isso, sso in enumerate(self.ssos):
@@ -123,6 +121,19 @@ class OpFlagSSO(Operator):
                 sso.compute(observer)
                 azvec[i] = sso.az
                 elvec[i] = sso.alt
+                # Did the SSO cross zero azimuth?
+                if i > 0 and np.abs(azvec[i - 1] - azvec[i]) > np.pi:
+                    # yes
+                    az1, az2 = azvec[i - 1], azvec[i]
+                    # unwind the angle
+                    if az1 < az2:
+                        az2 -= 2 * np.pi
+                    else:
+                        az2 += 2 * np.pi
+                    # Shift the second to last time stamp
+                    tvec[i - 1] = t
+                    azvec[i - 1] = az2
+                    elvec[i - 1] = sso.alt
             sso_azs[isso] = np.interp(times, tvec, azvec)
             sso_els[isso] = np.interp(times, tvec, elvec)
         return sso_azs, sso_els
