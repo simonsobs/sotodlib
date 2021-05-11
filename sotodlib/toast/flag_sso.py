@@ -143,7 +143,7 @@ class OpFlagSSO(Operator):
             x = (az - sso_az) * np.cos(el)
             y = el - sso_el
             r = np.sqrt(x ** 2 + y ** 2)
-            good = r < self.radius
+            good = r < self.sso_radius
             ref[good] |= self.flag_mask
 
             del ref
