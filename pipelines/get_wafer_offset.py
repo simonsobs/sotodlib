@@ -145,6 +145,18 @@ def main():
         all_dist.append(np.degrees(np.arccos(np.dot(vec_mean, vec))))
     dist_max = np.amax(all_dist)
 
+    # Wafers
+
+    if args.tube_slots is None:
+        wafer_slots = set(wafer_slots)
+    else:
+        wafer_slots = set()
+        for tube_slot in tube_slots:
+            wafer_slots.update(hw.data["tube_slots"][tube_slot]["wafer_slots"])
+    waferstring = ""
+    for wafer_slot in sorted(wafer_slots):
+        waferstring += f" {wafer_slot}"
+
     # Translate into Az/El offsets at el=0
 
     rot = hp.Rotator(rot=[0, 90, 0])
@@ -156,7 +168,7 @@ def main():
         az_offset *= -1
         el_offset *= -1
 
-    print(f"{az_offset:.3f} {el_offset:.3f} {dist_max:.3f}")
+    print(f"{az_offset:.3f} {el_offset:.3f} {dist_max:.3f}" + waferstring)
 
     return
 
