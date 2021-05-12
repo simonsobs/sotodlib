@@ -19,5 +19,6 @@ from .h_n import add_h_n_args, compute_h_n
 from .crosslinking import add_crosslinking_args, compute_crosslinking
 from .corotator import rotate_focalplane
 from .sim_sso import add_sim_sso_args, apply_sim_sso
+from .flag_sso import add_flag_sso_args, apply_flag_sso
 from .sim_hwpss import add_sim_hwpss_args, simulate_hwpss
 from .corotator import rotate_focalplane, add_corotator_args

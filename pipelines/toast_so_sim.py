@@ -96,6 +96,7 @@ def parse_arguments(comm):
     toast_tools.add_debug_args(parser)
     so_tools.add_import_args(parser)
     so_tools.add_sim_sso_args(parser)
+    so_tools.add_flag_sso_args(parser)
     so_tools.add_sim_hwpss_args(parser)
 
     parser.add_argument(
@@ -268,6 +269,8 @@ def main():
         signalname = so_tools.simulate_sky_signal(args, comm, data, focalplanes)
     else:
         signalname = toast_tools.scan_sky_signal(args, comm, data)
+
+    so_tools.apply_flag_sso(args, comm, data)
 
     memreport("after PySM", comm.comm_world)
 
