@@ -494,15 +494,6 @@ def hstack_into(dest, src_arrays):
     return dest
 
 
-def load_g3tsmurf_obs(db, obs_id, dets=None):
-    from .load_smurf import load_file
-    c = db.conn.execute('select path from files '
-                    'where obs_id=?' +
-                    'order by start', (obs_id,))
-    
-    flist = [row[0] for row in c]
-    return load_file(flist, dets)
-
 #: OBSLOADER_REGISTRY will be accessed by the Context system to load
 #: TOD.  The signature of functions here is:
 #:
@@ -517,5 +508,4 @@ def load_g3tsmurf_obs(db, obs_id, dets=None):
 OBSLOADER_REGISTRY = {
     'pipe-s0001': load_observation,
     'default': load_observation,
-    'g3tsmurf' :load_g3tsmurf_obs,
     }
