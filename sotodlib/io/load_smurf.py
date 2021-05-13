@@ -668,6 +668,8 @@ class G3tSmurf:
         """ Update existing observation. A separate function to make it easier
         to deal with partial data transfers. See add_new_observation for args"""
 
+        # TODO: Update Tune File Assignment to Use Status Information
+        
         tune = session.query(Tunes).filter(Tunes.start <= obs.start)
         tune = tune.order_by(db.desc(Tunes.start)).first()
         already_have = [ds.id for ds in obs.tunes]
@@ -933,6 +935,7 @@ class G3tSmurf:
         
         aman = load_file( flist, status=status, dets=dets,
                          archive=self, detset=detset, show_pb=show_pb)
+        
         msk = np.all([aman.timestamps >= start.timestamp(),
                       aman.timestamps < end.timestamp()], axis=0)
         idx = np.where(msk)[0]
@@ -942,6 +945,7 @@ class G3tSmurf:
         else:
             aman.restrict('samps', (idx[0], idx[-1]))
         session.close()
+        
         return aman
 
     def load_status(self, time, show_pb=False):
@@ -1216,7 +1220,8 @@ class SmurfStatus:
         """
         return self.mask_inv[band, chan]
 
-def get_channel_mask(ch_list, status, archive=None, ignore_missing=True):
+def get_channel_mask(ch_list, status, archive=None, obsfiledb=None,
+                     ignore_missing=True):
     """Take a list of desired channels and parse them so the different
     data loading functions can load them.
     
@@ -1235,6 +1240,8 @@ def get_channel_mask(ch_list, status, archive=None, ignore_missing=True):
         Status to use to generate channel loading mask
     archive : G3tSmurf instance
         Archive used to search for channel names / frequencies
+    obsfiledb : ObsFileDb instance
+        ObsFileDb used to search for channel names if archive is None
     ignore_missing : bool
         If true, will not raise errors if a requested channel is not found
     
@@ -1274,16 +1281,27 @@ def get_channel_mask(ch_list, status, archive=None, ignore_missing=True):
                     continue
                 msk[status.mask_inv[b,c][0]] = True
                 
-            elif type(ch) == str:
+            elif np.issubdtype( type(ch), np.str_):
                 #### this is a channel name
-                if session is None:
-                    raise ValueError("Need G3tSmurf Archive to pass channel names")
-                channel = session.query(Channels).filter(Channels.name==ch).one_or_none()
-                if channel is None:
-                    if not ignore_mission:
-                        raise ValueError(f"channel {ch} not found in database")
-                    continue
-                idx = status.mask_inv[channel.band_number, channel.channel]
+                if session is not None:
+                    channel = session.query(Channels).filter(Channels.name==ch).one_or_none()
+                    if channel is None:
+                        if not ignore_mission:
+                            raise ValueError(f"channel {ch} not found in G3tSmurf Archive")
+                        continue
+                    b,c = channel.band_number, channel.channel
+                elif obsfiledb is not None:
+                    c = obsfiledb.conn.execute('select band_number,channel from channels where name=?',(ch,))
+                    c = [(r[0],r[1]) for r in c]
+                    if len(c) == 0:
+                        if not ignore_mission:
+                            raise ValueError(f"channel {ch} not found in obsfiledb")
+                        continue
+                    b,c = c[0]
+                else:
+                    raise ValueError("Need G3tSmurf Archive or Obsfiledb to pass channel names")
+                
+                idx = status.mask_inv[b,c]
                 if idx == -1:
                     if not ignore_missing:
                         raise ValueError(f"channel {ch} not streaming")
@@ -1325,7 +1343,7 @@ def get_channel_info(status, mask=None, detset=None):
     status : SmurfStatus instance
     mask : bool array
         mask of which channels to use
-    detset : DetSet instance (optionl)
+    detset : Tune instance or string (optionl)
         detector set for the data
         
     Returns
@@ -1347,7 +1365,7 @@ def get_channel_info(status, mask=None, detset=None):
     channel_freqs = []
     channel_rch = []
    
-    ch_list = np.arange( status.num_chans)
+    ch_list = np.arange( status.num_chans )
     if mask is not None:
         ch_list = ch_list[mask]
         
@@ -1361,7 +1379,7 @@ def get_channel_info(status, mask=None, detset=None):
             if len(x) == 0:
                 ########################################
                 ## There appear to be a non-trivial number of these when
-                ## using Tunes SMuRF Error or Indexing Error?
+                ## using Tunes. SMuRF Error or Indexing Error?
                 ########################################
                 name = 'sch_NONE_{}_{:03d}'.format(sch[0],sch[1])
                 freq = status.freq_map[sch[0], sch[1]]
@@ -1384,6 +1402,7 @@ def get_channel_info(status, mask=None, detset=None):
         channel_channels.append(sch[1])
         channel_freqs.append(freq)
         channel_rch.append('r{:04d}'.format(ch)) 
+    
     
     ch_info = core.AxisManager( core.LabelAxis('channels', channel_names),)
     ch_info.wrap('band', np.array(channel_bands), ([(0,'channels')]) )
@@ -1419,8 +1438,8 @@ def _get_timestamps(streams, load_type=None):
             
         
 def load_file(filename, dets=None, ignore_missing=True, 
-             load_biases=True, load_primary=True, 
-             status=None, archive=None, detset=None, show_pb=True):
+             load_biases=True, load_primary=True, status=None,
+             archive=None, obsfiledb=None, detset=None, show_pb=True):
     """Load data from file where there may not be a connected archive.
 
     Args
@@ -1440,6 +1459,7 @@ def load_file(filename, dets=None, ignore_missing=True,
           If true, loads the primary data fields, old .g3 files may not have 
           these fields. 
       archive : a G3tSmurf instance (optional)
+      obsfiledb : a ObsFileDb instance (optional, used when loading from context)
       status : a SmurfStatus Instance we don't want to use the one from the 
           first file
       detset : Detset database entry, used for channel names in channel info
@@ -1454,7 +1474,7 @@ def load_file(filename, dets=None, ignore_missing=True,
         status = SmurfStatus.from_file(filenames[0])
 
     if dets is not None:
-        ch_mask = get_channel_mask(dets, status, archive=archive, 
+        ch_mask = get_channel_mask(dets, status, archive=archive, obsfiledb=obsfiledb,
                                ignore_missing=ignore_missing)
     else:
         ch_mask = None
@@ -1514,3 +1534,14 @@ def load_file(filename, dets=None, ignore_missing=True,
     aman.wrap('flags', core.FlagManager.for_tod(aman, 'channels', 'samps'))
 
     return aman
+
+def load_g3tsmurf_obs(db, obs_id, dets=None):
+    c = db.conn.execute('select path from files '
+                    'where obs_id=?' +
+                    'order by start', (obs_id,))
+    print(dets)
+    flist = [row[0] for row in c]
+    return load_file(flist, dets, obsfiledb=db)
+
+
+io_load.OBSLOADER_REGISTRY['g3tsmurf'] = load_g3tsmurf_obs
