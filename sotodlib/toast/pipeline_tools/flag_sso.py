@@ -46,9 +46,6 @@ def apply_flag_sso(args, comm, data, verbose=True):
         sso_names.append(sso_name)
         sso_radii.append(sso_radius)
 
-    if comm.world_rank == 0 and verbose:
-        print("Flagging {}".format(sso_name), flush=True)
-
     flag_sso = OpFlagSSO(sso_names, sso_radii, flag_mask=args.flag_sso_mask)
     flag_sso.exec(data)
 
