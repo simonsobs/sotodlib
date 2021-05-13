@@ -1051,7 +1051,7 @@ class SmurfStatus:
         # Reads in useful status values as attributes
         mapper_root = 'AMCc.SmurfProcessor.ChannelMapper'
         self.num_chans = self.status.get(f'{mapper_root}.NumChannels')
-
+        
         # Tries to set values based on expected rogue tree
         self.mask = self.status.get(f'{mapper_root}.Mask')
         self.mask_inv = np.full((self.NUM_BANDS, self.CHANS_PER_BAND), -1)
@@ -1064,6 +1064,11 @@ class SmurfStatus:
                 c = chan % self.CHANS_PER_BAND
                 self.mask_inv[b, c] = i
 
+        tune_root = 'AMCc.FpgaTopLevel.AppTop.AppCore.SysgenCryo.tuneFilePath'        
+        self.tune = self.status.get(tune_root)
+        if self.tune is not None and len(self.tune)>0:
+            self.tune = self.tune.split('/')[-1]
+        
         filter_root = 'AMCc.SmurfProcessor.Filter'
         self.filter_a = self.status.get(f'{filter_root}.A')
         if self.filter_a is not None:
