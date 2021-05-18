@@ -175,11 +175,6 @@ class Bands(Base):
     number = db.Column( db.Integer )
     stream_id = db.Column( db.String)
     
-    ## one to many
-    chan_assignments = relationship("ChanAssignments", back_populates='band')
-    
-    ## one to many
-    channels = relationship("Channels", back_populates='band')
     
 class ChanAssignments(Base):
     """The available channel assignments. Tune files are made of up to eight of
@@ -190,11 +185,9 @@ class ChanAssignments(Base):
     
     ctime = db.Column(db.Integer)
     path = db.Column(db.String, unique=True)
-    
-    ## Each channel assignment is done for one band
-    ## many to one
-    band = relationship("Bands", back_populates='chan_assignments')
-    band_id = db.Column(db.Integer, db.ForeignKey('bands.id'))
+    name = db.Column(db.String)
+    stream_id = db.Column(db.String)
+    band = db.Column(db.Integer)
     
     ## Channel Assignments are put into detector sets
     ## many to many bidirectional 
@@ -214,19 +207,19 @@ class Channels(Base):
     __tablename__ = 'channels'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String)
+    stream_id = db.Column(db.String)
     
     ## smurf channels
     subband = db.Column(db.Integer)
     channel = db.Column(db.Integer)
     frequency = db.Column(db.Float)
-    
+
+    band = db.Column(db.Integer)
+
     ## many to one
     ca_id = db.Column(db.Integer, db.ForeignKey('chan_assignments.id'))
     chan_assignment = relationship("ChanAssignments", back_populates='channels')
 
-    ## many to one
-    band = relationship('Bands', back_populates='channels')
-    band_number = db.Column(db.Integer, db.ForeignKey('bands.number'))
     
     ## many to many
     detsets = relationship('Tunes',
@@ -1442,7 +1435,7 @@ def _get_timestamps(streams, load_type=None):
     logger.error("Timing System could not be determined")
             
         
-def load_file(filename, dets=None, ignore_missing=True, 
+def load_file(filename, channels=None, ignore_missing=True, 
              load_biases=True, load_primary=True, status=None,
              archive=None, obsfiledb=None, detset=None, show_pb=True):
     """Load data from file where there may not be a connected archive.
@@ -1452,10 +1445,8 @@ def load_file(filename, dets=None, ignore_missing=True,
       filename : str or list 
           A filename or list of filenames (to be loaded in order).
           Note that SmurfStatus is only loaded from the first file
-      dets: list or None
+      channels: list or None
           If not None, it should be a list that can be sent to get_channel_mask.
-          Called dets for sotodlib compatibility. This function only looks at 
-          SMuRF channels.
       ignore_missing : bool
           If true, will not raise errors if a requested channel is not found
       load_biases : bool
@@ -1478,9 +1469,10 @@ def load_file(filename, dets=None, ignore_missing=True,
     if status is None:
         status = SmurfStatus.from_file(filenames[0])
 
-    if dets is not None:
-        ch_mask = get_channel_mask(dets, status, archive=archive, obsfiledb=obsfiledb,
-                               ignore_missing=ignore_missing)
+    if channels is not None:
+        ch_mask = get_channel_mask(channels, status, archive=archive, 
+                                   obsfiledb=obsfiledb,
+                                   ignore_missing=ignore_missing)
     else:
         ch_mask = None
 
