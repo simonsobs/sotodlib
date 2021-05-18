@@ -47,7 +47,9 @@ SMURF_ACTIONS = {
     'observations':[
         'take_stream_data',
         'stream_data_on',
-        'take_noise_psd'
+        'take_noise_psd',
+        'take_g3_data',
+        'stream_g3_on',         
     ],
     'channel_assignments':[
         'setup_notches',
