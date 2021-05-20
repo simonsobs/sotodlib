@@ -124,6 +124,8 @@ class Files(Base):
     ## many to one
     detset = db.Column(db.String, db.ForeignKey('tunesets.name'))
     tuneset = relationship("TuneSets", back_populates='files')
+    
+    tune_id = db.Column(db.Integer, db.ForeignKey('tunes.id'))
     tune = relationship("Tunes", back_populates='files')
     
 class Tunes(Base):
@@ -141,15 +143,15 @@ class Tunes(Base):
     stream_id = db.Column(db.String)
     
     ## should stop exist? tune file use does not need to be continguous
-    ctime = db.Column(db.DateTime)
+    start = db.Column(db.DateTime)
     
     ## files that use this tune file
     ## one to many
     files = relationship("Files", back_populates='tune')
     
-    ## files that use this detset
     ## one to many
-    tune = relationship("TuneSets", back_populates='tunes')
+    tuneset_id = db.Column(db.Integer, db.ForeignKey('tunesets.id'))
+    tuneset = relationship("TuneSets", back_populates='tunes')
 
 class TuneSets(Base):
     """Indexing of 'tunes sets' available during observations. Should
@@ -172,6 +174,7 @@ class TuneSets(Base):
     ## files that use this detset
     ## one to many
     files = relationship("Files", back_populates='tuneset')
+    tunes = relationship("Tunes", back_populates='tuneset')
     ## many to many
     observations = relationship("Observations", 
                                 secondary=association_table_obs,
