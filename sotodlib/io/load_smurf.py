@@ -28,17 +28,17 @@ num_bias_lines = 16
 
 
 association_table = db.Table('association_chan_assign', Base.metadata,
-    db.Column('tunes', db.Integer, db.ForeignKey('tunes.id')),
+    db.Column('tunesets', db.Integer, db.ForeignKey('tunesets.id')),
     db.Column('chan_assignments', db.Integer, db.ForeignKey('chan_assignments.id'))
 )
 
 association_table_obs = db.Table('association_obs', Base.metadata,
-    db.Column('tunes', db.Integer, db.ForeignKey('tunes.id')),
+    db.Column('tunesets', db.Integer, db.ForeignKey('tunesets.id')),
     db.Column('observations', db.Integer, db.ForeignKey('obs.obs_id'))
 )
 
 association_table_dets = db.Table('detsets', Base.metadata,
-    db.Column('name', db.Integer, db.ForeignKey('tunes.name')),
+    db.Column('name', db.Integer, db.ForeignKey('tunesets.name')),
     db.Column('det', db.Integer, db.ForeignKey('channels.name'))
 )
 
@@ -55,7 +55,8 @@ SMURF_ACTIONS = {
         'setup_notches',
     ],
     'tuning':[
-        'setup_notches'
+        'setup_notches',
+        'save_tune',
     ]
 }
 
@@ -79,7 +80,7 @@ class Observations(Base):
     files = relationship("Files", back_populates='observation') 
     
     ## many to many
-    tunes = relationship("Tunes", 
+    tunesets = relationship("TuneSets", 
                            secondary=association_table_obs,
                            back_populates='observations')
 
@@ -121,18 +122,46 @@ class Files(Base):
     
     # breaking from linked table convention to match with obsfiledb requirements
     ## many to one
-    detset = db.Column(db.String, db.ForeignKey('tunes.name'))
+    detset = db.Column(db.String, db.ForeignKey('tunesets.name'))
+    tuneset = relationship("TuneSets", back_populates='files')
     tune = relationship("Tunes", back_populates='files')
     
-
 class Tunes(Base):
-    """Indexing of 'detector sets' available during observations. Should
-    correspond to the tune files. 
+    """Indexing of 'tunes' available during observations. Should
+    correspond to all tune files. 
     """
     __tablename__ = 'tunes'
+    __table_args__ = (
+        db.UniqueConstraint('name', 'stream_id'),
+    )
     id = db.Column( db.Integer, primary_key=True)
     
-    name = db.Column(db.String, unique=True)
+    name = db.Column(db.String)
+    path = db.Column(db.String)
+    stream_id = db.Column(db.String)
+    
+    ## should stop exist? tune file use does not need to be continguous
+    ctime = db.Column(db.DateTime)
+    
+    ## files that use this tune file
+    ## one to many
+    files = relationship("Files", back_populates='tune')
+    
+    ## files that use this detset
+    ## one to many
+    tune = relationship("TuneSets", back_populates='tunes')
+
+class TuneSets(Base):
+    """Indexing of 'tunes sets' available during observations. Should
+    correspond to the tune files where new_master_assignment=True. 
+    """
+    __tablename__ = 'tunesets'
+    __table_args__ = (
+        db.UniqueConstraint('name', 'stream_id'),
+    )
+    id = db.Column( db.Integer, primary_key=True)
+    
+    name = db.Column(db.String)
     path = db.Column(db.String)
     stream_id = db.Column(db.String)
     
@@ -142,17 +171,16 @@ class Tunes(Base):
     
     ## files that use this detset
     ## one to many
-    files = relationship("Files", back_populates='tune')
-    
+    files = relationship("Files", back_populates='tuneset')
     ## many to many
     observations = relationship("Observations", 
                                 secondary=association_table_obs,
-                                back_populates='tunes')
+                                back_populates='tunesets')
     
     ## many to many
     chan_assignments = relationship('ChanAssignments', 
                                     secondary=association_table,
-                                    back_populates='tunes')
+                                    back_populates='tunesets')
     
     ## many to many
     dets = relationship('Channels', 
@@ -191,7 +219,7 @@ class ChanAssignments(Base):
     
     ## Channel Assignments are put into detector sets
     ## many to many bidirectional 
-    tunes = relationship('Tunes', 
+    tunesets = relationship('TuneSets', 
                            secondary=association_table,
                            back_populates='chan_assignments')
 
@@ -222,7 +250,7 @@ class Channels(Base):
 
     
     ## many to many
-    detsets = relationship('Tunes',
+    detsets = relationship('TuneSets',
                          secondary=association_table_dets,
                          back_populates='dets')
     
@@ -885,8 +913,6 @@ class G3tSmurf:
                     
         TODO: Track down differences between detector sets (tune files) and 
                 information in status object
-                
-        TODO: Track down "Lazy-loaded attribute for Channels.band"
         """
         session = self.Session()
         start = self._make_datetime(start)
