@@ -359,8 +359,22 @@ class G3tSmurf:
 
     @staticmethod
     def _make_datetime(x):
+        """
+        Takes an input (either a timestamp or datetime), and returns a datetime.
+        Intended to allow flexibility in inputs for various other functions
+
+        Args
+        ----
+            x: input datetime of timestamp
+
+        Returns
+        ----
+            datetime: datetime of x if x is a timestamp
+        """
         if isinstance(x,float) or isinstance(x,int):
             return dt.datetime.fromtimestamp(x)
+        elif isinstance(x,str):
+            raise(Exception("Input not a datetime or timestamp"))
         return x
 
 
