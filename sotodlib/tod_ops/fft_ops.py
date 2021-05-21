@@ -198,9 +198,9 @@ def calc_psd(aman, data=None, times=None, **kwargs):
             Pxx:
                 array of PSD values 
     """
-    if data == None:
+    if data is None:
         data = aman.signal
-    if times == None:
+    if times is None:
         times = aman.timestamps
         
     freqs, Pxx = signal.welch( data, 1/np.median(np.diff(times)), **kwargs)
