@@ -1372,8 +1372,11 @@ def _get_timestamps(streams, load_type=None):
     if load_type is None:
         ## determine the desired loading type. Expand as logic as
         ## data fields develop
-        if 'primary' in streams and 'UnixTime' in streams['primary']:
-            load_type = TimingParadigm.SmurfUnixTime
+        if 'primary' in streams:
+            if 'UnixTime' in streams['primary']:
+                load_type = TimingParadigm.SmurfUnixTime
+            else:
+                load_type = TimingParadigm.G3Timestream
         else:
             load_type = TimingParadigm.G3Timestream
     
