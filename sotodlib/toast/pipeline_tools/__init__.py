@@ -17,6 +17,7 @@ from .time_constant import (
 from .demodulation import add_demodulation_args, demodulate
 from .h_n import add_h_n_args, compute_h_n
 from .crosslinking import add_crosslinking_args, compute_crosslinking
+from .cadence_map import add_cadence_map_args, compute_cadence_map
 from .corotator import rotate_focalplane
 from .sim_sso import add_sim_sso_args, apply_sim_sso
 from .flag_sso import add_flag_sso_args, apply_flag_sso
