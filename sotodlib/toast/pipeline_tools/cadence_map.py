@@ -46,6 +46,8 @@ def compute_cadence_map(args, comm, data, verbose=True):
     if not args.write_cadence_map:
         return
     log = Logger.get()
+    if comm.world_rank == 0:
+        log.info("Computing cadence map")
     timer = Timer()
     timer.start()
     cadence = OpCadenceMap(
@@ -55,6 +57,7 @@ def compute_cadence_map(args, comm, data, verbose=True):
         flag_mask=255,
     )
     cadence.exec(data)
-    timer.report_clear("Compute cadence map")
+    if comm.world_rank == 0:
+        timer.report_clear("Compute cadence map")
 
     return

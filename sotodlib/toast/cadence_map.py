@@ -3,6 +3,7 @@
 
 import os
 
+import h5py
 import healpy as hp
 import numpy as np
 
@@ -79,10 +80,15 @@ class OpCadenceMap(toast.Operator):
             all_hit = np.zeros([nday, npix], dtype=bool)
 
         buflen = 10  # Number of days to process at once
+        buf = np.zeros([buflen, npix], dtype=bool)
         day_start = MJD_start
         while day_start < MJD_stop:
             day_stop = min(MJD_stop, day_start + buflen)
-            buf = np.zeros([day_stop - day_start, npix], dtype=bool)
+            if rank == 0:
+                print(
+                    f"Processing {MJD_start} <= {day_start} - {day_stop} <= {MJD_stop}"
+                )
+            buf[:, :] = False
             for obs in data.obs:
                 tod = obs["tod"]
                 times = tod.local_times()
@@ -104,8 +110,8 @@ class OpCadenceMap(toast.Operator):
             if comm is not None:
                 comm.Allreduce(MPI.IN_PLACE, buf, op=MPI.LOR)
             if rank == 0:
-                ind = slice(day_start - MJD_start, day_stop - MJD_start)
-                all_hit[ind] = buf
+                for i in range(day_start, day_stop):
+                    all_hit[i - MJD_start] = buf[i - day_start]
             day_start = day_stop
 
         if rank == 0:
@@ -115,17 +121,26 @@ class OpCadenceMap(toast.Operator):
                 outprefix = self.outprefix
                 if not outprefix.endswith("_"):
                     outprefix += "_"
-            fname = os.path.join(self.outdir, outprefix + "cadence.fits")
-            header = [
-                ("MJDSTART", MJD_start, "First MJD"),
-                ("MJDSTOP", MJD_stop, "Last MJD"),
-            ]
-            hp.write_map(
-                fname,
-                all_hit,
-                nest=self.nest,
-                dtype=bool,
-                extra_header=header,
-                overwrite=True,
-            )
+            if False:
+                # FITS output (exhausts memory)
+                fname = os.path.join(self.outdir, outprefix + "cadence.fits")
+                header = [
+                    ("MJDSTART", MJD_start, "First MJD"),
+                    ("MJDSTOP", MJD_stop, "Last MJD"),
+                ]
+                hp.write_map(
+                    fname,
+                    all_hit,
+                    nest=self.nest,
+                    dtype=bool,
+                    extra_header=header,
+                    overwrite=True,
+                )
+            else:
+                fname = os.path.join(self.outdir, outprefix + "cadence.h5")
+                with h5py.File(fname, "w") as f:
+                    dset = f.create_dataset("cadence", data=all_hit)
+                    dset.attrs["MJDSTART"] = MJD_start
+                    dset.attrs["MJDSTOP"] = MJD_stop
+                    dset.attrs["NESTED"] = self.nest
             print(f"Wrote cadence map to {fname}.", flush=True)
