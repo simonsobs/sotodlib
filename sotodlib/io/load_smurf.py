@@ -527,7 +527,7 @@ class G3tSmurf:
     def add_new_channel_assignment(self, stream_id, ctime, cha, cha_path, session):   
         """Add new entry to the Channel Assignments table. Called by the
         index_metadata function.
-        
+
         Args
         -------
         stream_id : string
@@ -542,36 +542,35 @@ class G3tSmurf:
         session : SQLAlchemy Session
             The active session
         """
-        band_number = int(re.findall('b\d.txt', cha)[0][1])   
-        band = session.query(Bands).filter(Bands.number == band_number,
-                                           Bands.stream_id == stream_id).one_or_none()
-        if band is None:
-            band = Bands(number = band_number,
-                         stream_id = stream_id)
-            session.add(band)
+        band = int(re.findall('b\d.txt', cha)[0][1])   
 
         ch_assign = session.query(ChanAssignments).filter(ChanAssignments.ctime == ctime,
-                                                      ChanAssignments.band_id == band.id)
+                                                          ChanAssignments.stream_id == stream_id,
+                                                          ChanAssignments.band == band)
         ch_assign = ch_assign.one_or_none()
         if ch_assign is None:
             ch_assign = ChanAssignments(ctime=ctime,
                                         path=cha_path,
+                                        name=cha,
+                                        stream_id=stream_id,
                                         band=band)
             session.add(ch_assign)
 
         notches = np.atleast_2d(np.genfromtxt(ch_assign.path, delimiter=','))
         if len(notches) != len(ch_assign.channels):
             for notch in notches:
-                ch_name = 'sch_{:10d}_{:01d}_{:03d}'.format(ctime, band.number, int(notch[2]))
+                ## smurf did not assign a channel
+                if notch[2] == -1:
+                    continue
+
+                ch_name = 'sch_{:10d}_{:01d}_{:03d}'.format(ctime, band, int(notch[2]))
                 ch = Channels(subband=notch[1],
                               channel=notch[2],
                               frequency=notch[0],
                               name=ch_name,
                               chan_assignment=ch_assign,
                               band=band)
-                ## smurf did not assign a channel
-                if ch.channel == -1:
-                    continue
+
                 check = session.query(Channels).filter( Channels.ca_id == ch_assign.id,
                                            Channels.channel == ch.channel).one_or_none()
                 if check is None:
