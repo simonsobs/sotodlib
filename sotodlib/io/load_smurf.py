@@ -1185,6 +1185,8 @@ class SmurfStatus:
                     else:
                         status['stop'] = frame['time'].time/spt3g_core.G3Units.s
                     status.update(yaml.safe_load(frame['status']))
+                    if frame['dump']:
+                        break
         return cls(status)
     
     @classmethod
