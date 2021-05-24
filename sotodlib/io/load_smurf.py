@@ -557,15 +557,15 @@ class G3tSmurf:
             session.add(ch_assign)
 
         notches = np.atleast_2d(np.genfromtxt(ch_assign.path, delimiter=','))
-        if len(notches) != len(ch_assign.channels):
+        if np.sum([notches[:,2]!=-1]) != len(ch_assign.channels):
             for notch in notches:
                 ## smurf did not assign a channel
                 if notch[2] == -1:
                     continue
 
                 ch_name = 'sch_{:10d}_{:01d}_{:03d}'.format(ctime, band, int(notch[2]))
-                ch = Channels(subband=notch[1],
-                              channel=notch[2],
+                ch = Channels(subband=int(notch[1]),
+                              channel=int(notch[2]),
                               frequency=notch[0],
                               name=ch_name,
                               chan_assignment=ch_assign,
@@ -577,10 +577,53 @@ class G3tSmurf:
                     session.add(ch)
         session.commit()   
         
+    def _assign_set_from_file(self, tune_path, stream_id=None, session=None):
+        """Build set of Channel Assignments that are (or should be) in the 
+        tune file.
+
+        Args
+        -------
+        tune_path : path
+            The absolute path to the tune file
+        stream_id : string
+            The stream id for the particular SMuRF slot
+        session : SQLAlchemy Session
+            The active session
+        """
+
+        if session is None:
+            session = self.Session()
+        if stream_id is None:
+            stream_id = tune_path.split('/')[-4]
+
+        data = np.load(tune_path, allow_pickle=True).item()
+        assign_set = []
+
+        ### Determine the TuneSet
+        for band in data.keys():
+            if 'resonances' not in data[band]:
+                ### tune file doesn't have info for this band
+                continue
+            ## try to use tune file to find channel assignment before just assuming "most recent"
+            if 'channel_assignment' in data[band]:
+                cha_name = data[band]['channel_assignment'].split('/')[-1]
+                cha = session.query(ChanAssignments).filter(ChanAssignments.stream_id==stream_id,
+                                                      ChanAssignments.name==cha_name).one_or_none()
+            else:
+                cha = session.query(ChanAssignments).filter(ChanAssignments.stream_id==stream_id,
+                                                           ChanAssignments.ctime <= ctime,
+                                                           ChanAssignments.band==band)
+                cha = cha.order_by(db.desc(ChanAssignments.ctime)).first()
+            if cha is None:
+                logger.error(f"Missing Channel Assignment for tune file {tune_path}")
+            assign_set.append(cha)
+        return assign_set
+
+
     def add_new_tuning(self, stream_id, ctime, tune_path, session):    
-        """Add new entry to the Tuness table. Called by the
+        """Add new entry to the TunesSet table. Called by the
         index_metadata function.
-        
+
         Args
         -------
         stream_id : string
@@ -593,63 +636,48 @@ class G3tSmurf:
             The active session
         """
         name = tune_path.split('/')[-1]
-        tune = session.query(Tunes).filter(Tunes.name == name).one_or_none()
+        tune = session.query(Tunes).filter(Tunes.name == name,
+                                          Tunes.stream_id == stream_id).one_or_none()
         if tune is None:
+            print('Tune was none')
             tune = Tunes(name=name, start=dt.datetime.fromtimestamp(ctime),
                            path=tune_path, stream_id=stream_id)
             session.add(tune)
             session.commit()
 
-        data = np.load(tune_path, allow_pickle=True).item()
-        if len(tune.chan_assignments) != len(data):
-            ## we are missing channel assignments for at least one band
-            have_already = [cha.band.number for cha in tune.chan_assignments]
+        ## assign set is the set of channel assignments that make up this tune file
+        assign_set = self._assign_set_from_file(tune_path, 
+                                           stream_id=stream_id, session=session)
 
-            for band in data.keys():
-                if band in have_already:
-                    continue
-                if 'resonances' not in data[band]:
-                    ### tune file doesn't have info for this band
-                    continue
+        tuneset = None
+        tunesets = session.query(TuneSets)
+        ## tunesets with any channel assignments matching list
+        tunesets = tunesets.filter( TuneSets.chan_assignments.any(
+                    ChanAssignments.id.in_([a.id for a in assign_set]))).all()
 
-                db_Band = session.query(Bands).filter(Bands.stream_id == stream_id, 
-                                  Bands.number==band).one_or_none()
-                if db_Band is None:
-                    raise ValueError("Unable to find Band that should exist")
+        if len(tunesets)>0:
+            for ts in tunesets:
+                if np.all( sorted([ca.id for ca in ts.chan_assignments]) == sorted([a.id for a in assign_set]) ):
+                    tuneset = ts
 
-                ##################################################################################
-                ## Section waiting on Pysmurf Upgrade tracking channel assignments in tuning files
-                ##################################################################################
-                ## For now we assume the most recent channel assignment for the band
+        if tuneset is None:
+            logger.debug(f"New Tuneset Detected {stream_id}, {ctime}, {[[a.name for a in assign_set]]}")
+            tuneset = TuneSets(name=name, path=tune_path, stream_id=stream_id,
+                               start=dt.datetime.fromtimestamp(ctime))
+            session.add(tuneset)
+            session.commit()
 
-                db_cha = session.query(ChanAssignments).filter(ChanAssignments.band_id == db_Band.id,
-                                                               ChanAssignments.ctime <= ctime )
-                db_cha = db_cha.order_by(db.desc(ChanAssignments.ctime)).first()
-                if db_cha is None:
-                    raise ValueError("Unable to find Channel Assignment that should exist")
-                in_cha_db = [sorted( [ch.channel for ch in db_cha.channels])]              
-                in_tune_file =[sorted( [data[band]['resonances'][x]['channel'] for x in  data[band]['resonances'].keys()])]
-
-                ## Check to make sure the most recent channel assignment matches the tuning file
-                if not np.all( in_cha_db == in_tune_file ):
-                    ### logic left in just in case. If the first channel assignment doesn't match, try the 
-                    ### later ones
-                    db_cha = session.query(ChanAssignments).filter(ChanAssignments.band_id == db_Band.id,
-                                                                   ChanAssignments.ctime <= ctime )
-                    db_chas = db_cha.order_by(db.desc(ChanAssignments.ctime)).all()[1:]
-                    for db_cha in db_chas:
-                        in_cha_db = sorted( [ch.channel for ch in db_cha.channels])
-                        in_tune_file = sorted( [data[band]['resonances'][x]['channel'] for x in data[band]['resonances'].keys()])
-                        if np.all( in_cha_db == in_tune_file):
-                            break
-
-                ## add a the assignments and channels to the detector set
-                tune.chan_assignments.append(db_cha)
+            ## add a the assignments and channels to the detector set
+            for db_cha in assign_set:
+                tuneset.chan_assignments.append(db_cha)
                 for ch in db_cha.channels:
-                    tune.channels.append(ch)
-        session.commit()  
+                    tuneset.channels.append(ch)
+            session.commit()
+
+        tune.tuneset = tuneset
+        session.commit()
     
-    def add_new_observation(self, stream_id, ctime, obs_data, session, max_early=5,max_wait=10):
+    def add_new_observation(self, stream_id, ctime, obs_data, session, max_early=5,max_wait=100):
         """Add new entry to the observation table. Called by the
         index_metadata function.
         
@@ -687,7 +715,7 @@ class G3tSmurf:
         self.update_observation_files(obs, session, max_early=max_early,
                     max_wait=max_wait)
 
-    def update_observation_files(self, obs, session, max_early=5, max_wait=10):
+    def update_observation_files(self, obs, session, max_early=5, max_wait=100):
         """ Update existing observation. A separate function to make it easier
         to deal with partial data transfers. See add_new_observation for args"""
 
@@ -725,27 +753,27 @@ class G3tSmurf:
             obs.stop = flist[-1].stop
         session.commit()
 
-    def index_metadata(self, verbose = False, stop_at_error=False):
+    def index_metadata(self, min_ctime=16000*1e5, stop_at_error=False):
         """
             Adds all channel assignments, tunefiles, and observations in archive to database. 
             Adding relevant entries to Bands and Files as well.
 
             Args
             ----
-            verbose: bool
-                Verbose mode
+            min_ctime : int
+                Lowest ctime to start looking for new metadata
             stop_at_error: bool
                 If True, will stop if there is an error indexing a file.
         """
+
         if self.meta_path is None:
             raise ValueError('Archiver needs meta_path attribute to index channel assignments')
 
         session = self.Session()
 
-
-        for ct_dir in sorted(os.listdir(self.meta_path)):
-            ### ignore old things
-            if int(ct_dir) < 16000:
+        logger.info(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
+        for ct_dir in sorted(os.listdir(self.meta_path)):        
+            if int(ct_dir) < int(min_ctime//1e5):
                 continue
 
             for stream_id in sorted(os.listdir( os.path.join(self.meta_path, ct_dir))):
@@ -756,71 +784,66 @@ class G3tSmurf:
                     try:
                         ctime = int( action.split('_')[0] )
                         astring = '_'.join(action.split('_')[1:])
+                        logger.debug(f"Found action {astring} at ctime {ctime}")
 
                         ### Look for channel assignments before tuning files
                         if astring in SMURF_ACTIONS['channel_assignments']:
 
-                            cha_path = os.listdir(os.path.join(action_path, action, 'outputs'))
-                            if len(cha_path) == 0:
+                            cha = os.listdir(os.path.join(action_path, action, 'outputs'))
+                            if len(cha) == 0:
                                 raise ValueError("found action {} with no output".format(action))
-                            cha = None; 
-                            for f in cha_path:
-                                ##################################################################################
-                                ## Needs to account for multiple channel assignments per setup notches.
-                                ## Error in pysmurf 4.2 pre-release
-                                ## Currently just tracking all of them
-                                ##################################################################################
-                                match = re.findall('channel_assignment_b\d.txt', f)
-                                if len(match)==1:
-                                    cha = f
-                                    cha_ctime = int(cha.split('_')[0])
-                                    cha_path = os.path.join(action_path, action, 'outputs', cha)
-                                    self.add_new_channel_assignment(stream_id, cha_ctime, cha, cha_path, session)
 
-                            if cha is None:
-                                raise ValueError("found action {}. unable to find channel assignment".format(action))
+                            ## find last channel assignment in directory
+                            cha= [f for f in cha if 'channel_assignment' in f]
+                            if len(cha) == 0:
+                                logger.debug(f"{action} run with no new channel assignment")
+                                continue
+
+                            cha = sorted(cha)[-1]
+                            cha_path = os.path.join(action_path, action, 'outputs', cha)
+                            cha_ctime = int(cha.split('_')[0])
+
+                            logger.debug(f"Add new channel assignment: {stream_id}, {cha_ctime}, {cha_path}")
+                            self.add_new_channel_assignment(stream_id, cha_ctime, cha, cha_path, session)     
+
 
                         ### Look for tuning files before observations
-                        ### Assumes only one tuning file per setup_notches
                         if astring in SMURF_ACTIONS['tuning']:
-                            tune_path = os.listdir(os.path.join(action_path, action, 'outputs'))
-                            if len(tune_path) == 0:
+                            tune = os.listdir(os.path.join(action_path, action, 'outputs'))
+                            if len(tune) == 0:
                                 raise ValueError("found action {} with no output".format(action))
-                            tune = None
-                            for f in tune_path:
-                                match = re.findall('\d_tune.npy', f)
-                                if len(match)==1:
-                                    tune=f
-                                    tune_ctime = int(tune.split('_')[0])
-                                    tune_path = os.path.join(action_path, action, 'outputs', tune)
-                                    break
-                            if tune is None:
-                                raise ValueError("found action {}. unable to find tune file".format(action))
 
+                            ## find last tune in directory
+                            tune = [f for f in tune if 'tune' in f]
+                            if len(tune) > 1:
+                                logger.warning(f"found multiple tune files in {stream_id}, {ctime}, {action}")
+                            if len(tune) == 0:
+                                logger.warning(f"found no tune files in {stream_id}, {ctime}, {action}")
+                                continue
+
+                            tune = sorted(tune)[-1]
+                            tune_ctime = int(tune.split('_')[0])
+                            tune_path = os.path.join(action_path, action, 'outputs', tune)
+
+                            logger.debug(f"Add new Tune: {stream_id}, {ctime}, {tune_path}")
                             self.add_new_tuning(stream_id, tune_ctime, tune_path, session)
 
+                        ### Add Observations
                         if astring in SMURF_ACTIONS['observations']:
-                            ### Sometimes there are just mask files. Sometimes there are mask and freq files.
                             obs_path = os.listdir(os.path.join(action_path, action, 'outputs'))
                             if len(obs_path) == 0:
                                 raise ValueError("found action {} with no output".format(action))
-
+                            logger.debug(f"Add new Observation: {stream_id}, {ctime}, {obs_path}")
                             self.add_new_observation(stream_id, ctime, obs_path, session)
 
                     except ValueError as e:
-                        if verbose:
-                            print(e, stream_id, ctime)
+                        logging.info(e, stream_id, ctime)
                         if stop_at_error:
                             raise(e)
-                    #except KeyError as e:
-                    #    if verbose:
-                    #        print(e, stream_id, ctime)
-                    #    if stop_at_error:
-                    #        raise(e)
                     except Exception as e:
-                        if verbose:
-                            print(stream_id, ctime)
+                        logging.info(stream_id, ctime)
                         raise(e)
+        session.close()
 
 
     def _stream_ids_in_range(self, start, end):
