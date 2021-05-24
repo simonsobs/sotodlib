@@ -558,11 +558,14 @@ class G3tSmurf:
 
         notches = np.atleast_2d(np.genfromtxt(ch_assign.path, delimiter=','))
         if np.sum([notches[:,2]!=-1]) != len(ch_assign.channels):
+            ch_made = [c.channel for c in ch_assign.channels]
             for notch in notches:
                 ## smurf did not assign a channel
                 if notch[2] == -1:
                     continue
-
+                if int(notch[2]) in ch_made:
+                    continue
+                    
                 ch_name = 'sch_{:10d}_{:01d}_{:03d}'.format(ctime, band, int(notch[2]))
                 ch = Channels(subband=int(notch[1]),
                               channel=int(notch[2]),
@@ -570,14 +573,17 @@ class G3tSmurf:
                               name=ch_name,
                               chan_assignment=ch_assign,
                               band=band)
-
+                
+                if ch.channel == -1:
+                    logger.warning(f"Un-assigned channel made in Channel Assignment {ch_assign.name}")
+                    continue
                 check = session.query(Channels).filter( Channels.ca_id == ch_assign.id,
                                            Channels.channel == ch.channel).one_or_none()
                 if check is None:
                     session.add(ch)
         session.commit()   
         
-    def _assign_set_from_file(self, tune_path, stream_id=None, session=None):
+    def _assign_set_from_file(self, tune_path, ctime=None, stream_id=None, session=None):
         """Build set of Channel Assignments that are (or should be) in the 
         tune file.
 
@@ -585,6 +591,8 @@ class G3tSmurf:
         -------
         tune_path : path
             The absolute path to the tune file
+        ctime : int
+            ctime of SMuRF Action
         stream_id : string
             The stream id for the particular SMuRF slot
         session : SQLAlchemy Session
@@ -595,7 +603,9 @@ class G3tSmurf:
             session = self.Session()
         if stream_id is None:
             stream_id = tune_path.split('/')[-4]
-
+        if ctime is None:
+            ctime = int( tune_path.split('/')[-1].split('_')[0] )
+            
         data = np.load(tune_path, allow_pickle=True).item()
         assign_set = []
 
@@ -639,14 +649,13 @@ class G3tSmurf:
         tune = session.query(Tunes).filter(Tunes.name == name,
                                           Tunes.stream_id == stream_id).one_or_none()
         if tune is None:
-            print('Tune was none')
             tune = Tunes(name=name, start=dt.datetime.fromtimestamp(ctime),
                            path=tune_path, stream_id=stream_id)
             session.add(tune)
             session.commit()
 
         ## assign set is the set of channel assignments that make up this tune file
-        assign_set = self._assign_set_from_file(tune_path, 
+        assign_set = self._assign_set_from_file(tune_path, ctime=ctime,
                                            stream_id=stream_id, session=session)
 
         tuneset = None
@@ -706,34 +715,33 @@ class G3tSmurf:
                                start = dt.datetime.fromtimestamp(ctime))
             session.add(obs)
             session.commit()
-            
-        ################################################################################################
-        ## Section waiting on tuning files being added to the data stream at the start of observations
-        ## For now assume we just use the most recent tuning file.
-        ################################################################################################
 
         self.update_observation_files(obs, session, max_early=max_early,
                     max_wait=max_wait)
 
-    def update_observation_files(self, obs, session, max_early=5, max_wait=100):
+    def update_observation_files(self, obs, session, max_early=5, max_wait=100, force=False):
         """ Update existing observation. A separate function to make it easier
-        to deal with partial data transfers. See add_new_observation for args"""
+        to deal with partial data transfers. See add_new_observation for args
+        
+        Args
+        -----
+        max_early : int     
+            Buffer time to allow the g3 file to be earlier than the smurf action
+        max_wait : int  
+            Maximum amount of time between the streaming start action and the 
+            making of .g3 files that belong to an observation
+        session : SQLAlchemy Session
+            The active session
+        force : bool
+            If true, will recalculate file/tune information even if observation 
+            appears complete
+        """
+        
+        if not force and obs.duration is not None and len(obs.tunesets) >= 1:
+            return
 
-        # TODO: Update Tune File Assignment to Use Status Information
-
-        tune = session.query(Tunes).filter(Tunes.start <= obs.start)
-        tune = tune.order_by(db.desc(Tunes.start)).first()
-        already_have = [ds.id for ds in obs.tunes]
-
-        if tune is not None:
-            if not tune.id in already_have:
-                obs.tunes.append(tune)
-        else:
-            # print('no tuning file found. should I build one?')
-            ## Here is where we will put logic if we need to go backwards 
-            pass
-
-        x=session.query(Files.name).filter(Files.start >= obs.start-dt.timedelta(seconds=max_early)).order_by(Files.start).first()
+        x=session.query(Files.name).filter(Files.start >= obs.start-dt.timedelta(seconds=max_early))
+        x = x.order_by(Files.start).first()
         if x is None:
             ## no files to add at this point
             session.commit()
@@ -744,11 +752,42 @@ class G3tSmurf:
             ## we don't have .g3 files for some reason
             pass
         else:
-            flist = session.query(Files).filter(Files.name.like(f_start+'%')).order_by(Files.start).all()
+            flist = session.query(Files).filter(Files.name.like(f_start+'%'))
+            flist = flist.order_by(Files.start).all()
+            
+            ## Use Status information to set Tuneset
+            status = SmurfStatus.from_file(flist[0].path)
+            if status.action is not None:
+                if status.action not in SMURF_ACTIONS['observations']:
+                    logger.warning(f"Status Action {status.action} from file does not \
+                                    match accepted observation types")
+                if status.action_timestamp != obs.timestamp:
+                    logger.error(f"Status timestamp {status.action_timestamp} from file does \
+                                not match observation timestamp {obs.timestamp}")
+                    return
+                                   
+            
+            if status.tune is not None:
+                tune = session.query(Tunes).filter( Tunes.name == status.tune).one_or_none()
+                if tune is None:
+                    logger.warning(f"Tune {status.tune} not found in database, update error?")
+                    tuneset = None
+                else:
+                    tuneset = tune.tuneset
+            else:
+                tuneset = session.query(TuneSets).filter(Tunesets.start <= obs.start)
+                tuneset = tuneset.order_by(db.desc(Tuneset.start)).first()
+                
+            already_have = [ts.id for ts in obs.tunesets]
+            if tuneset is not None:
+                if not tuneset.id in already_have:
+                    obs.tunesets.append(tuneset)
+
+            ## Update file entries
             for f in flist:
                 f.obs_id = obs.obs_id
-                if tune is not None:
-                    f.detset = tune.name
+                if tuneset is not None:
+                    f.detset = tuneset.name
             obs.duration = flist[-1].stop.timestamp() - obs.timestamp
             obs.stop = flist[-1].stop
         session.commit()
@@ -1112,6 +1151,14 @@ class SmurfStatus:
         self.tune = self.status.get(tune_root)
         if self.tune is not None and len(self.tune)>0:
             self.tune = self.tune.split('/')[-1]
+        
+        pysmurf_root = 'AMCc.SmurfProcessor.SOStream'
+        self.action = self.status.get(f'{pysmurf_root}.pysmurf_action')
+        if self.action == '':
+            self.action = None
+        self.action_timestamp = self.status.get(f'{pysmurf_root}.pysmurf_action_timestamp')
+        if self.action_timestamp == 0:
+            self.action_timestamp = None
         
         filter_root = 'AMCc.SmurfProcessor.Filter'
         self.filter_a = self.status.get(f'{filter_root}.A')
