@@ -13,24 +13,24 @@ logger = logging.getLogger(__name__)
 
 def fourier_filter(tod, filt_function,
                    detrend='linear', resize='zero_pad',
-                   axis_name='samps', signal_name='signal', 
+                   axis_name='samps', signal_name='signal',
                    time_name='timestamps',
                    **kwargs):
-    
-    """Return a filtered tod.signal_name along the axis axis_name. 
+
+    """Return a filtered tod.signal_name along the axis axis_name.
         Does not change the data in the axis manager.
-    
+
     Arguments:
-    
+
         tod: axis manager
-        
-        filt_function: function( freqs, tod ) function that takes a set of 
-            frequencies and the axis manager and returns the filter in 
+
+        filt_function: function( freqs, tod ) function that takes a set of
+            frequencies and the axis manager and returns the filter in
             fouier space
-        
+
         detrend: Method of detrending to be done before ffting. Can
             be 'linear', 'mean', or None.
-            
+
         resize: How to resize the axis to increase fft
             speed. 'zero_pad' will increase to the next nice number (a
             product of small primes compatible with the FFT
@@ -41,36 +41,36 @@ def fourier_filter(tod, filt_function,
             as the same size as it is input
 
         axis_name: name of axis you would like to fft along
-        
+
         signal_name: name of the variable in tod to fft
-        
+
         time_name: name for getting time of data (in seconds) from tod
-        
+
     Returns:
-    
-        signal: filtered tod.signal_name 
-        
+
+        signal: filtered tod.signal_name
+
     """
     if len(tod._assignments[signal_name]) >2:
         raise ValueError('fourier_filter only works for 1D or 2D data streams')
-        
+
     axis = getattr(tod, axis_name)
     times = getattr(tod, time_name)
     delta_t = (times[-1]-times[0])/axis.count
-    
+
     if len(tod._assignments[signal_name])==1:
         n_det = 1
         ## signal will be at least 2D
         main_idx = 1
         other_idx = None
-        
+
     elif len(tod._assignments[signal_name])==2:
         checks = np.array([x==axis_name for x in tod._assignments[signal_name]],dtype='bool')
         main_idx = np.where(checks)[0][0]
         other_idx = np.where(~checks)[0][0]
         other_axis = getattr(tod, tod._assignments[signal_name][other_idx])
         n_det = other_axis.count
-    
+
     if resize == 'zero_pad':
         n = fft_ops.find_superior_integer(axis.count)
         logger.info('fourier_filter: padding %i -> %i' % (axis.count, n))
@@ -97,23 +97,23 @@ def fourier_filter(tod, filt_function,
     # This copy is valid for all modes of "resize"
     a[:,:min(n, axis.count)] = signal[:,:min(n, axis.count)]
     a[:,min(n, axis.count):] = 0
-    
+
     ## FFT Signal
     t_1();
-    
+
     ## Get Filter
     freqs = np.fft.rfftfreq(n, delta_t)
     filt_function.apply(freqs, tod, b, **kwargs)
 
     ## FFT Back
     t_2();
-    
+
     # Un-pad?
     signal = a[:,:min(n, axis.count)]
-        
+
     if other_idx is not None and other_idx != 0:
         return signal.transpose()
-    
+
     return signal
 
 ################################################################
@@ -250,7 +250,7 @@ def tau_filter(freqs, tod, tau_name='timeconst', do_inverse=True):
     """tau_filter is deprecated; use timeconst_filter."""
     logging.warning('tau_filter is deprecated; use timeconst_filter.')
     taus = getattr(tod, tau_name)
-    
+
     filt = 1 + 2.0j*np.pi*taus[:,None]*freqs[None,:]
     if not do_inverse:
         return 1.0/filt
@@ -406,3 +406,25 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None, invert=Fa
     if invert:
         return A / B
     return B / A
+
+
+def downsample(aman, df, h=[1]):
+    """downsample the timestamps and signal of an Axismanager, using scipy.signal.upfirdn
+    Arguments:
+        aman: axis manager
+
+        df: int
+            downsampling factor
+
+        h: array_like
+            1-D FIR (finite-impulse response) filter coefficients.
+    Returns:
+        ds_timestamps:
+            downsampled timestamps
+        ds_signal:
+            downsampled signal
+    """
+    ds_timestamps = signal.upfirdn(h, aman.timestamps, down=df)
+    ds_signal = signal.upfirdn(h, aman.signal, down=df)
+
+    return ds_timestamps, ds_signal
