@@ -340,6 +340,7 @@ class G3tSmurf:
             db_path = os.path.join(archive_path, 'frames.db')
         self.archive_path = archive_path
         self.meta_path = meta_path
+        self.db_path = db_path
         self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo)
         Session.configure(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine)
@@ -696,6 +697,7 @@ class G3tSmurf:
             obs.stop = flist[-1].stop
         session.commit()
 
+        
     def index_metadata(self, verbose = False, stop_at_error=False):
         """
             Adds all channel assignments, detsets, and observations in archive to database. 
