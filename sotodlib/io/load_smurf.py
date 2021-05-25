@@ -371,11 +371,13 @@ class G3tSmurf:
         ----
             datetime: datetime of x if x is a timestamp
         """
-        if isinstance(x,float) or isinstance(x,int):
+        if np.issubdtype(type(x),np.floating) or np.issubdtype(type(x),np.integer):
             return dt.datetime.fromtimestamp(x)
-        elif isinstance(x,str):
-            raise(Exception("Input not a datetime or timestamp"))
-        return x
+        elif isinstance(x,np.datetime64):
+            return x.astype(dt.datetime)
+        elif isinstance(x,dt.datetime) or isinstance(x,dt.date):
+            return x
+        raise(Exception("Input not a datetime or timestamp"))
 
 
     def add_file(self, path, session):
