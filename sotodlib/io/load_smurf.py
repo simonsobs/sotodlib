@@ -368,6 +368,7 @@ class G3tSmurf:
             db_path = os.path.join(archive_path, 'frames.db')
         self.archive_path = archive_path
         self.meta_path = meta_path
+        self.db_path = db_path
         self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo)
         Session.configure(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine)
@@ -1571,8 +1572,11 @@ def _get_timestamps(streams, load_type=None):
     if load_type is None:
         ## determine the desired loading type. Expand as logic as
         ## data fields develop
-        if 'primary' in streams and 'UnixTime' in 'primary':
-            load_type = TimingParadigm.SmurfUnixTime
+        if 'primary' in streams:
+            if 'UnixTime' in streams['primary']:
+                load_type = TimingParadigm.SmurfUnixTime
+            else:
+                load_type = TimingParadigm.G3Timestream
         else:
             load_type = TimingParadigm.G3Timestream
     
