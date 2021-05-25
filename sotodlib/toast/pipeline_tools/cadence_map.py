@@ -20,7 +20,7 @@ def add_cadence_map_args(parser):
         dest="write_cadence_map",
     )
     parser.add_argument(
-        "--no-cadence_map",
+        "--no-cadence-map",
         required=False,
         action="store_false",
         help="Do not write cadence map",
