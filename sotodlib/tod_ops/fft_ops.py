@@ -204,4 +204,4 @@ def calc_psd(aman, data=None, times=None, **kwargs):
         times = aman.timestamps
         
     freqs, Pxx = signal.welch( data, 1/np.median(np.diff(times)), **kwargs)
-    return Pxx, freqs
+    return freqs, Pxx
