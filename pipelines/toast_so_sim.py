@@ -89,6 +89,7 @@ def parse_arguments(comm):
     so_tools.add_demodulation_args(parser)
     so_tools.add_h_n_args(parser)
     so_tools.add_crosslinking_args(parser)
+    so_tools.add_cadence_map_args(parser)
     so_tools.add_hw_args(parser)
     so_tools.add_so_noise_args(parser)
     so_tools.add_pysm_args(parser)
@@ -245,6 +246,10 @@ def main():
     # Optionally, output crosslinking map
 
     so_tools.compute_crosslinking(args, comm, data, detweights)
+
+    # Optionally, output cadence map
+
+    so_tools.compute_cadence_map(args, comm, data)
 
     # Only purge the pointing if we are NOT going to export the
     # data to a TIDAS volume
