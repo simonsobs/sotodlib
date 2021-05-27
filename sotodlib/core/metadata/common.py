@@ -43,14 +43,16 @@ def sqlite_to_file(db, filename, overwrite=True, fmt=None):
 
 def sqlite_from_file(filename, fmt=None, force_new_db=True):
     """Instantiate an sqlite3.Connection and return it, with the data
-    copied in from the specified file.  The sqlite3 connection is
-    mapped in memory, not to the source file.
+    copied in from the specified file. The function can either map the database
+    file directly, or map a copy of the database in memory (see force_new_db
+    parameter).
 
     Args:
       filename (str): path to the file.
       fmt (str): format of the input; see to_file for details.
-      force_new_db (bool): if connecting to an sqlite database, if false
-        returns a connection to the database without reading it into memory
+      force_new_db (bool): Used if connecting to an sqlite database. If True the
+        databas is copied into memory and if False returns a connection to the 
+        database without reading it into memory
 
     """
     if fmt is None:

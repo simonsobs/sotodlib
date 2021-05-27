@@ -234,18 +234,8 @@ class DetDb(object):
 
     @classmethod
     def from_file(cls, filename, fmt=None, force_new_db=True):
-        """Instantiate a DetDb and return it, with the data copied in from the
-        specified file.
-
-        Args:
-          filename (str): path to the file.
-          fmt (str): format of the input; see to_file for details.
-          force_new_db (bool): whether or not the database is mapped into 
-              memory or read from disk
-
-        Note that if you want a `persistent` connection to the file,
-          you should use force_new_db = False
-
+        """This method calls
+            :func:`sotodlib.core.metadata.common.sqlite_from_file`
         """
         conn = common.sqlite_from_file(filename, fmt=fmt, 
                                        force_new_db=force_new_db)
