@@ -1787,6 +1787,13 @@ def load_file(filename, channels=None, ignore_missing=True,
       obsfiledb : a ObsFileDb instance (optional, used when loading from context)
       status : a SmurfStatus Instance we don't want to use the one from the 
           first file
+    
+    Returns
+    ---------
+      aman : AxisManager
+        AxisManager with the data with axes for `channels` and `samps`. It will
+        always have fields `timestamps`, `signal`, `flags`(FlagManager),
+        `ch_info` (AxisManager with `bands`, `channels`, `frequency`, etc).
     """   
     
     if isinstance(filename, str):
