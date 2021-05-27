@@ -62,7 +62,34 @@ SMURF_ACTIONS = {
 
 
 class Observations(Base):
-    """Times on continuous detector readout
+    """Times on continuous detector readout. This table is named obs and serves
+    as the ObsDb table when loading via Context.
+
+    Attributes 
+    -----------
+    obs_id : string
+        The "session_id" of the observation which is usually the integer ctime
+        of the pysmurf action called to start the readout. (The first part of
+        the .g3 file name).
+    timestamp : integer
+        Generally int(obs_id). Here to make relative querying easier
+    duration : float
+        The total observation time in seconds
+    start : datetime.datetime
+        The start of the observation as a datetime object
+    stop : datetime.datetime
+        The end of the observation as a datetime object
+    tag : string
+        Tags for this observation. These are planned to be populated through
+        tags set while running sodetlib's stream data functions. Not implemented
+        yet.
+    files : list of SQLAlchemy instances of Files
+        The list of .g3 files in this observation built through a relationship
+        to the Files table. [f.path for f in Observation.files] will return
+        paths to all the files.
+    tunesets : list of SQLAlchemy instances of TuneSets 
+        The TuneSets used in this observation. There is expected to be
+        one per stream_id (SMuRF crate slot). 
     """
     __tablename__ = 'obs'
     ## ctime of beginning of the observation
@@ -93,7 +120,46 @@ class Observations(Base):
     
 
 class Files(Base):
-    """Table to store file indexing info"""
+    """Table to store file indexing info. This table is named files in sql and
+    serves as the ObsFileDb when loading via Context.
+
+    Attributes
+    ------------
+    id : integer
+        auto-incremented primary key
+    path : string
+        complete absolute path to file
+    name : string
+        the file name
+    start : datetime.datetime
+        the start time for the file
+    stop : datetime.datetime
+        the stop time for the file
+    sample_start : integer
+        Not Implemented Yet
+    sample_stop : integer
+        Not Implemented Yet
+    obs_id : String 
+        observation id linking Files table to the Observation table
+    observation : SQLAlchemy Observation Instance
+    stream_id : The stream_id for the file. Generally of the form crateXslotY.
+        These are expected to map one per UXM.
+    n_frames : Integer
+        Number of frames in the .g3 file
+    frames : list of SQLALchemy Frame Instances
+        List of database entries for the frames in this file
+    n_channels : Integer
+        The number of channels read out in this file
+    detset : string
+        TuneSet.name for this file. Used to map the TuneSet table to the Files
+        table. Called detset to serve duel-purpose and map files to detsets
+        while loading through Context. 
+    tuneset : SQLAlchemy TuneSet Instance
+    tune_id : integer 
+        id of the tune file used in this file. Used to map Tune table to the
+        Files table.
+    tune : SQLAlchemy Tune Instance
+    """
     __tablename__ = 'files'
     id = db.Column(db.Integer, primary_key=True)
 
@@ -131,6 +197,25 @@ class Files(Base):
 class Tunes(Base):
     """Indexing of 'tunes' available during observations. Should
     correspond to all tune files. 
+
+    Attributes 
+    -----------
+    id : integer 
+        primary key
+    name : string
+        name of tune file
+    path : string
+        absolute path of tune file
+    stream_id : string
+        stream_id for file
+    start : datetime.datetime
+        The time the tune file is made
+    files : list of SQLAlchemy File instances
+        All file using this tune file
+    tuneset_id : integer
+        id of tuneset this tune belongs to. Used to link Tunes table to TuneSets
+        table
+    tuneset : SQLAlchemy TuneSet instance
     """
     __tablename__ = 'tunes'
     __table_args__ = (
@@ -155,7 +240,33 @@ class Tunes(Base):
 
 class TuneSets(Base):
     """Indexing of 'tunes sets' available during observations. Should
-    correspond to the tune files where new_master_assignment=True. 
+    correspond to the tune files where new_master_assignment=True. TuneSets
+    exist to combine sets of <=8 Channel Assignments since SMuRF tuning and
+    setup is run "per smurf band" while channel readout reads all tuned bands.
+    Every TuneSet is a Tune file but not all Tunes are a Tuneset. This is
+    because new Tunes can be made for the same set of channel assignments as the
+    cryostat / readout environments evolve.
+    
+    Attributes
+    ----------
+    id : integer 
+        primary key
+    name : string
+        name of tune file
+    path : string
+        absolute path of tune file
+    stream_id : string
+        stream_id for file
+    start : datetime.datetime
+        The time the tune file is made
+    stop : datetime.datetine
+        Not Implemented Yet
+    files : list of SQLAlchemy File instances.
+    tunes : list of Tunes that are part of the TuneSet
+    observations : list of observations that have this TuneSet
+    chan_assignments : list of Channel Assignments that are part of the this
+        tuneset 
+    channels : list of Channels that are part of this TuneSet
     """
     __tablename__ = 'tunesets'
     __table_args__ = (
@@ -208,8 +319,27 @@ class Bands(Base):
     
     
 class ChanAssignments(Base):
-    """The available channel assignments. Tune files are made of up to eight of
+    """The available channel assignments. TuneSets are made of up to eight of
     these assignments. 
+
+    Attributes
+    ----------
+    id : integer 
+        primary key
+    ctime : integer
+        ctime where the channel assignment was made
+    name : string
+        name of the channel assignment file
+    path : string
+        absolute path of channel assignment file
+    stream_id : string
+        stream_id for file
+    band : integer
+        Smurf band for this channel assignment
+    tunesets : list of SQLAlchemy tunesets
+        The Tunesets the channel assignment is in
+    channels : list of SQLAlchemy channels
+        The channels in the channel assignment
     """
     __tablename__ = 'chan_assignments'
     id = db.Column(db.Integer, primary_key=True)
@@ -234,6 +364,29 @@ class Channels(Base):
     """All the channels tracked by SMuRF indexed by the ctime of the channel
     assignment file, SMuRF band and channel number. Many channels will map to
     one detector on a UFM.
+
+    
+    Attributes
+    ----------
+    id : integer 
+        primary key
+    name : string
+        name of of channel. In the form of sch_<ctime>_<band>_<channel>
+    stream_id : string
+        stream_id for file
+    subband : integer
+        The subband of the channel
+    channel : integer
+        The assigned smurf channel
+    frequency : float
+        The frequency of the resonator when the channel assigments were made
+    band : integer
+        The smurf band for the channel
+    ca_id : integer
+        The id of the channel assignment for the channel. Used for SQL mapping
+    chan_assignment : SQLAlchemy ChanAssignments Instance
+    detsets : List of SQLAlchemy Tunesets
+        The tunesets the channel can be found in
     """
     __tablename__ = 'channels'
     id = db.Column(db.Integer, primary_key=True)
@@ -269,7 +422,31 @@ class FrameType(Base):
 
     
 class Frames(Base):
-    """Table to store frame indexing info"""
+    """Table to store frame indexing info
+    Attributes
+    ----------
+    id : Integer
+        Primary Key
+    file_id : integer
+        id of the file the frame is part of, used for SQL mapping
+    file : SQLAlchemy instance
+    frame_idx : integer
+        frame index in the file
+    offset : integer
+        frame offset used by so3g indexed reader
+    type_name : string
+        frame types, use Observation, Wiring, and Scan frames
+    time : datetime.datetime
+        The start of the frame
+    n_samples : integer
+        the number of samples in the frame
+    n_channels : integer
+        the number of channels in the frame
+    start : datetime.datetime
+        the start of the frame
+    stop : datetime.datetime
+        the end of the frame
+    """
     __tablename__ = 'frame_offsets'
     __table_args__ = (
         db.UniqueConstraint('file_id', 'frame_idx', name='_frame_loc'),

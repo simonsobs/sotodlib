@@ -91,9 +91,8 @@ Database Tables
    :width: 600
 
 .. autoclass:: Observations
-   :members:
 .. autoclass:: Tunes
-   :members
+   :members:
 .. autoclass:: TuneSets
    :members:
 .. autoclass:: ChanAssignments
