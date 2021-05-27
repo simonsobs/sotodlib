@@ -1054,11 +1054,15 @@ class G3tSmurf:
                             self.add_new_observation(stream_id, ctime, obs_path, session)
 
                     except ValueError as e:
-                        logging.info(e, stream_id, ctime)
+                        logger.info(e, stream_id, ctime)
                         if stop_at_error:
                             raise(e)
+                    except IntegrityError as e:
+                        # Database Integrity Errors, such as duplicate entries
+                        session.rollback()
+                        logger.info(f"Integrity Error at {stream_id}, {ctime}")
                     except Exception as e:
-                        logging.info(stream_id, ctime)
+                        logger.info(stream_id, ctime)
                         raise(e)
         session.close()
 
