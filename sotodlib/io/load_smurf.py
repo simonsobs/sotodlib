@@ -1692,7 +1692,8 @@ def _get_channel_mapping(status, ch_map):
             ch_map[i]['channel'] = -1        
     return ch_map
 
-def get_channel_info(status, mask=None, archive=None, obsfiledb=None):
+def get_channel_info(status, mask=None, archive=None, obsfiledb=None, 
+                    det_axis='dets'):
     """Create the Channel Info Section of a G3tSmurf AxisManager
     
     This function returns an AxisManager with the following properties    
@@ -1736,11 +1737,11 @@ def get_channel_info(status, mask=None, archive=None, obsfiledb=None):
     elif obsfiledb is not None:
         ch_map = _get_detset_channel_names(status, ch_map, obsfiledb)
         
-    ch_info = core.AxisManager( core.LabelAxis('channels', ch_map['name']),)
-    ch_info.wrap('band', ch_map['band'], ([(0,'channels')]) )
-    ch_info.wrap('channel', ch_map['channel'], ([(0,'channels')]) )
-    ch_info.wrap('frequency', ch_map['freqs'], ([(0,'channels')]) )
-    ch_info.wrap('rchannel', ch_map['rchannel'], ([(0,'channels')]) )
+    ch_info = core.AxisManager( core.LabelAxis(det_axis, ch_map['name']),)
+    ch_info.wrap('band', ch_map['band'], ([(0,det_axis)]) )
+    ch_info.wrap('channel', ch_map['channel'], ([(0,det_axis)]) )
+    ch_info.wrap('frequency', ch_map['freqs'], ([(0,det_axis)]) )
+    ch_info.wrap('rchannel', ch_map['rchannel'], ([(0,det_axis)]) )
     
     return ch_info
 
@@ -1775,7 +1776,7 @@ def _get_timestamps(streams, load_type=None):
         
 def load_file(filename, channels=None, ignore_missing=True, 
              load_biases=True, load_primary=True, status=None,
-             archive=None, obsfiledb=None, show_pb=True):
+             archive=None, obsfiledb=None, show_pb=True, det_axis='dets'):
     """Load data from file where there may not be a connected archive.
 
     Args
@@ -1822,7 +1823,7 @@ def load_file(filename, channels=None, ignore_missing=True,
         ch_mask = None
 
     ch_info = get_channel_info(status, ch_mask, archive=archive, 
-                                   obsfiledb=obsfiledb)
+                                   obsfiledb=obsfiledb, det_axis=det_axis)
 
     subreq = [
         io_load.FieldGroup('data', ch_info.rchannel, timestamp_field='time'),
@@ -1845,15 +1846,15 @@ def load_file(filename, channels=None, ignore_missing=True,
 
     ## Build AxisManager
     aman = core.AxisManager(
-        ch_info.channels.copy(),
+        ch_info[det_axis].copy(),
         core.OffsetAxis('samps', count, 0)
     )
     aman.wrap( 'timestamps', _get_timestamps(streams), ([(0,'samps')]))
 
     # Conversion from DAC counts to squid phase
     aman.wrap( 'signal', np.zeros(aman.shape, 'float32'),
-                 [(0, 'channels'), (1, 'samps')])
-    for idx in range(aman.channels.count):
+                 [(0, det_axis), (1, 'samps')])
+    for idx in range(aman[det_axis].count):
         io_load.hstack_into(aman.signal[idx], streams['data'][ch_info.rchannel[idx]])
 
     rad_per_count = np.pi / 2**15
@@ -1874,7 +1875,7 @@ def load_file(filename, channels=None, ignore_missing=True,
         for k in streams['tes_biases'].keys():
             i = int(k[4:])
             io_load.hstack_into(aman.biases[i], streams['tes_biases'][k])
-    aman.wrap('flags', core.FlagManager.for_tod(aman, 'channels', 'samps'))
+    aman.wrap('flags', core.FlagManager.for_tod(aman, det_axis, 'samps'))
 
     return aman
 
