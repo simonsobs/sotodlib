@@ -77,22 +77,23 @@ class OpCrossLinking(toast.Operator):
             theta, phi = qa.to_position(quat)
             theta = np.pi / 2 - theta
             # scan direction across the reference sample
-            dphi = (np.roll(phi, -1) - np.roll(phi, 1)) * np.cos(theta)
+            dphi = (np.roll(phi, -1) - np.roll(phi, 1))
             dtheta = np.roll(theta, -1) - np.roll(theta, 1)
             # except first and last sample
-            dphi[0] = (phi[1] - phi[0]) * np.cos(theta[0])
-            dphi[-1] = (phi[-1] - phi[-2]) * np.cos(theta[-1])
-            dtheta[0] = theta[1] - theta[0]
-            dtheta[-1] = theta[-1] - theta[-2]
+            for dx, x in (dphi, phi), (dtheta, theta):
+                dx[0] = x[1] - x[0]
+                dx[-1] = x[-1] - x[-2]
+            # scale dphi to on-sky
+            dphi *= np.cos(theta)
             # Avoid overflows
-            tiny = np.abs(dtheta) < 1e-30
+            tiny = np.abs(dphi) < 1e-30
             if np.any(tiny):
                 ang = np.zeros(nsample)
                 ang[tiny] = np.sign(dtheta) * np.sign(dphi) * np.pi / 2
                 not_tiny = np.logical_not(tiny)
-                ang[not_tiny] = np.arctan(dphi[not_tiny] / dtheta[not_tiny])
+                ang[not_tiny] = np.arctan(dtheta[not_tiny] / dphi[not_tiny])
             else:
-                ang = np.arctan(dphi / dtheta)
+                ang = np.arctan(dtheta / dphi)
 
             weights_out = np.vstack(
                 [np.ones(nsample), np.cos(2 * ang), np.sin(2 * ang)]
