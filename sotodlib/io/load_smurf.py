@@ -605,10 +605,15 @@ class G3tSmurf:
         frame_idx = 0
         while True:
             
-            db_frame_offset = reader.Tell()
-            frames = reader.Process(None)
-            if not frames:
-                break
+            try: 
+                db_frame_offset = reader.Tell()
+                frames = reader.Process(None)
+                if not frames:
+                    break
+            except RuntimeError as e:
+                logger.warning(f"Failed to add {path}: file likely corrupted")
+                session.rollback()
+                return
                 
             frame = frames[0]
             frame_idx += 1
@@ -1561,7 +1566,7 @@ def get_channel_mask(ch_list, status, archive=None, obsfiledb=None,
                         if not ignore_mission:
                             raise ValueError(f"channel {ch} not found in G3tSmurf Archive")
                         continue
-                    b,c = channel.band_number, channel.channel
+                    b,c = channel.band, channel.channel
                 elif obsfiledb is not None:
                     c = obsfiledb.conn.execute('select band,channel from channels where name=?',(ch,))
                     c = [(r[0],r[1]) for r in c]
@@ -1791,7 +1796,8 @@ def load_file(filename, channels=None, ignore_missing=True,
       obsfiledb : a ObsFileDb instance (optional, used when loading from context)
       status : a SmurfStatus Instance we don't want to use the one from the 
           first file
-    
+      det_axis : name of the axis used for channels / detectors
+
     Returns
     ---------
       aman : AxisManager
