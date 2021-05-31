@@ -1,6 +1,6 @@
 """FFTs and related operations
 """
-from scipy import signal
+from scipy.signal import welch
 import numpy as np
 import pyfftw
 
@@ -180,15 +180,15 @@ def find_superior_integer(target, primes=[2,3,5,7,11,13]):
             best = best_friend * base
     return int(best)
 
-def calc_psd(aman, data=None, times=None, **kwargs):
+def calc_psd(aman, signal=None, timestamps=None, **kwargs):
     """Calculates the power spectrum density of an input signal using signal.welch()
     Data defaults to aman.signal and times defaults to aman.timestamps
         Arguments:
             aman: AxisManager with (dets, samps) OR (channels, samps)axes.
 
-            data: data signal to pass to scipy.signal.welch()
+            signal: data signal to pass to scipy.signal.welch()
             
-            times: timestamps associated with the data signal
+            timestamps: timestamps associated with the data signal
             
             **kwargs: keyword args to be passed to signal.welch()
 
@@ -198,10 +198,10 @@ def calc_psd(aman, data=None, times=None, **kwargs):
             Pxx:
                 array of PSD values 
     """
-    if data is None:
-        data = aman.signal
-    if times is None:
-        times = aman.timestamps
+    if signal is None:
+        signal = aman.signal
+    if timestamps is None:
+        timestamps = aman.timestamps
         
-    freqs, Pxx = signal.welch( data, 1/np.median(np.diff(times)), **kwargs)
+    freqs, Pxx = welch( signal, 1/np.median(np.diff(timestamps)), **kwargs)
     return freqs, Pxx
