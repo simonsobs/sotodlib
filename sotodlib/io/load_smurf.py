@@ -17,6 +17,7 @@ from enum import Enum
 
 import logging
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 from .. import core
 from . import load as io_load
@@ -1806,7 +1807,8 @@ def load_file(filename, channels=None, ignore_missing=True,
         always have fields `timestamps`, `signal`, `flags`(FlagManager),
         `ch_info` (AxisManager with `bands`, `channels`, `frequency`, etc).
     """   
-    
+    logger.info(f"Axis Manager will have {det_axis} and samps axes")
+ 
     if isinstance(filename, str):
         filenames = [filename]
     else:
