@@ -463,7 +463,8 @@ class Frames(Base):
 
     type_name = db.Column(db.String, db.ForeignKey('frame_type.type_name'))
     frame_type = relationship('FrameType')
-
+    
+    status_dump = db.Column(db.Boolean, nullable=False, default=False)
     time = db.Column(db.DateTime, nullable=False)
 
     # Specific to data frames
@@ -627,11 +628,13 @@ class G3tSmurf:
             timestamp = frame['time'].time / spt3g_core.G3Units.s
             db_frame_time = dt.datetime.fromtimestamp(timestamp)
             
+            
             ## only make Frame once the non-nullable fields are known
             db_frame = Frames(frame_idx=frame_idx, file=db_file,
                              offset = db_frame_offset,
                              frame_type = db_frame_frame_type,
-                             time = db_frame_time 
+                             time = db_frame_time,
+                             status_dump = 'dump' in frame
                              )
         
             data = frame.get('data')
@@ -1438,22 +1441,33 @@ class SmurfStatus:
         time = archive._make_datetime(time)
         session = archive.Session()
         session_start,  = session.query(Frames.time).filter(
-            Frames.type_name == 'Observation',
-            Frames.time <= time
-        ).order_by(Frames.time.desc()).first()
+                Frames.type_name == 'Observation',
+                Frames.time <= time
+            ).order_by(Frames.time.desc()).first()
 
         status_frames = session.query(Frames).filter(
-            Frames.type_name == 'Wiring',
-            Frames.time >= session_start,
-            Frames.time <= time
-        ).order_by(Frames.time)
+                Frames.type_name == 'Wiring',
+                Frames.time >= session_start,
+                Frames.time <= time
+            ).order_by(Frames.time)
 
+        ## Look for the last dump frame if avaliable
+        dump_frame = status_frames.filter(
+                Frames.status_dump
+                ).order_by(Frames.time.desc()).first()
+        
+        if dump_frame is not None:
+            status_frames = [dump_frame]
+        else:
+            logger.info("Status dump frame not found, reading all frames")
+            status_frames = status_frames.all()
+            
         status = {
             'start':status_frames[0].time.timestamp(),
             'stop':status_frames[-1].time.timestamp(),
         }
         cur_file = None
-        for frame_info in tqdm(status_frames.all(), disable=(not show_pb)):
+        for frame_info in tqdm(status_frames, disable=(not show_pb)):
             file = frame_info.file.path
             if file != cur_file:
                 reader = so3g.G3IndexedReader(file)
@@ -1461,7 +1475,8 @@ class SmurfStatus:
             reader.Seek(frame_info.offset)
             frame = reader.Process(None)[0]
             status.update(yaml.safe_load(frame['status']))
-
+        
+        session.close()
         return cls(status)
         
     def readout_to_smurf(self, rchan):
