@@ -391,7 +391,7 @@ class Channels(Base):
     """
     __tablename__ = 'channels'
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String)
+    name = db.Column(db.String, unique=True)
     stream_id = db.Column(db.String)
     
     ## smurf channels
@@ -907,7 +907,7 @@ class G3tSmurf:
                     max_wait=max_wait)
 
     def update_observation_files(self, obs, session, max_early=5, max_wait=100, force=False):
-        """ Update existing observation. A separate function to make it easier
+        """Update existing observation. A separate function to make it easier
         to deal with partial data transfers. See add_new_observation for args
         
         Args
@@ -1459,7 +1459,7 @@ class SmurfStatus:
         if dump_frame is not None:
             status_frames = [dump_frame]
         else:
-            logger.info("Status dump frame not found, reading all frames")
+            logger.info("Status dump frame not found, reading all status frames")
             status_frames = status_frames.all()
             
         status = {
@@ -1641,15 +1641,16 @@ def _get_tuneset_channel_names(status, ch_map, archive):
             logger.info(f"Tune file {tune.name} has no TuneSet in G3tSmurf archive")
             return ch_map
     
-    for ch in tune.tuneset.channels:
+    bands, channels, names = zip(*[(ch.band, ch.channel, ch.name) for ch in tune.tuneset.channels])
+    for i in range(len(ch_map)):
         try:
-            band, channel = ch.band, ch.channel
-            msk = np.all( [ch_map['band']== band, ch_map['channel']==channel], axis=0)
-            i = np.where(msk)[0][0]
-            ch_map[i]['name'] = ch.name
+            msk = np.all( [ch_map['band'][i]== bands, ch_map['channel'][i]==channels], axis=0)
+            j = np.where(msk)[0][0]
+            ch_map[i]['name'] = names[j]
         except:
-            logger.info(f"Information retrival error for Detector {ch.name}")
-            continue    
+            logger.info(f"Information retrival error for Detector {ch_map[i]}")
+            continue 
+
     session.close()
     return ch_map
 
@@ -1675,18 +1676,22 @@ def _get_detset_channel_names(status, ch_map, obsfiledb):
         c = obsfiledb.conn.execute('select det from detsets '
                             'where name=?', (tuneset,))
         detsets = [r[0] for r in c]
-        
-    for det in detsets:
+    
+    sql="select band,channel,name from channels where name in ({seq})".format(
+                seq=','.join(['?']*len(detsets)))
+    c = obsfiledb.conn.execute(sql,detsets)
+
+    bands, channels, names = zip(*[(r[0],r[1],r[2]) for r in c])
+
+    for i in range(len(ch_map)):
         try:
-            c = obsfiledb.conn.execute('select band,channel from channels '
-                                      'where name=?', (det,))
-            band, channel = [(r[0], r[1]) for r in c][0]
-            msk = np.all( [ch_map['band']== band, ch_map['channel']==channel], axis=0)
-            i = np.where(msk)[0][0]
-            ch_map[i]['name'] = det
+            msk = np.all( [ch_map['band'][i]== bands, ch_map['channel'][i]==channels], axis=0)
+            j = np.where(msk)[0][0]
+            ch_map[i]['name'] = names[j]
         except:
-            logger.info(f"Information retrival error for Detector {det}")
-            continue        
+            logger.info(f"Information retrival error for Detector {ch_map[i]}")
+            continue 
+            
     return ch_map
 
 def _get_channel_mapping(status, ch_map):
