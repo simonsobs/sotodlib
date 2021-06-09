@@ -1105,7 +1105,7 @@ class G3tSmurf:
         return sids
 
     def load_data(self, start, end, stream_id=None, channels=None,
-                  show_pb=True, load_biases=True):
+                  show_pb=True, load_biases=True, status=None):
         """
         Loads smurf G3 data for a given time range. For the specified time range
         this will return a chunk of data that includes that time range.
@@ -1148,6 +1148,8 @@ class G3tSmurf:
                 If True, will show progress bar.
             load_biases : bool, optional 
                 If True, will return biases.
+            status : SmurfStatus, optional
+                If note none, will use this Status on the data load
 
         Returns
         --------
@@ -1189,15 +1191,16 @@ class G3tSmurf:
         q = q.order_by(Files.start).distinct()
         flist = [x[0] for x in q.all()]
         
-        scan_start = session.query(Frames.start).filter(Frames.start > start,
-                                                        Frames.type_name=='Scan')
-        scan_start = scan_start.order_by(Frames.start).first()
-        
-        try:
-            status = self.load_status(scan_start[0])
-        except:
-            logger.info("Status load from database failed, using file load")
-            status = None
+        if status is None:
+            scan_start = session.query(Frames.start).filter(Frames.start > start,
+                                                            Frames.type_name=='Scan')
+            scan_start = scan_start.order_by(Frames.start).first()
+
+            try:
+                status = self.load_status(scan_start[0])
+            except:
+                logger.info("Status load from database failed, using file load")
+                status = None
         
         aman = load_file( flist, status=status, channels=channels,
                          archive=self, show_pb=show_pb)
