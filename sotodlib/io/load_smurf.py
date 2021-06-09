@@ -1063,7 +1063,7 @@ class G3tSmurf:
                             self.add_new_observation(stream_id, ctime, obs_path, session)
 
                     except ValueError as e:
-                        logger.info(e, stream_id, ctime)
+                        logger.info(f"Value Error at {stream_id}, {ctime}")
                         if stop_at_error:
                             raise(e)
                     except IntegrityError as e:
