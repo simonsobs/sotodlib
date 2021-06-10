@@ -61,7 +61,7 @@ class ToastLoadTest(TestCase):
         dets = sim_telescope_detectors(hwfull, "SAT4")
         hwfull.data["detectors"] = dets
         hw = hwfull.select(
-            match={"wafer_slot": "w42", "band": "f030", "pixel": "00[01]"})
+            match={"wafer_slot": "w42", "band": "SAT_f030", "pixel": "00[01]"})
         # print(hw.data["detectors"], flush=True)
         detquats = {k: v["quat"] for k, v in hw.data["detectors"].items()}
 
@@ -391,6 +391,7 @@ class ToastLoadTest(TestCase):
         uncompressed_size = sizes["uncompressed"] - sizes["uncompressed_all_but_one"]
         compressed_size = sizes["compressed"] - sizes["compressed_all_but_one"]
         very_compressed_size = sizes["very_compressed"] - sizes["very_compressed_all_but_one"]
+
         ratio1 = compressed_size / uncompressed_size
         assert ratio1 < 1
         ratio2 = very_compressed_size / uncompressed_size
