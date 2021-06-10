@@ -58,7 +58,7 @@ class TimeConstantTest(TestCase):
         dets = sim_telescope_detectors(hwfull, "SAT4")
         hwfull.data["detectors"] = dets
         hw = hwfull.select(
-            match={"wafer_slot": "w42", "band": "f030", "pixel": "00[01]"})
+            match={"wafer_slot": "w42", "band": "SAT_f030", "pixel": "00[01]"})
         # print(hw.data["detectors"], flush=True)
         detquats = {k: v["quat"] for k, v in hw.data["detectors"].items()}
 
