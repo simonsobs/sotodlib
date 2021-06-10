@@ -362,6 +362,10 @@ def main():
 
         outpath = setup_output(args, comm, mc)
 
+        # Optionally demodulate signal
+
+        so_tools.demodulate(args, comm, data, totalname, detweights, madampars)
+
         # Bin and destripe maps
 
         if args.use_madam:
@@ -406,7 +410,7 @@ def main():
                 first_call=(mc == firstmc),
             )
 
-        if args.apply_polyfilter or args.apply_groundfilter or args.demodulate:
+        if args.apply_polyfilter or args.apply_groundfilter:
 
             # Filter signal
 
@@ -414,11 +418,7 @@ def main():
 
             memreport("after polyfilter", comm.comm_world)
 
-            # Optionally demodulate signal
-
-            so_tools.demodulate(args, comm, data, totalname, detweights, madampars)
-
-            # Ground filter after demodulation
+            # Ground filter
 
             memreport("after demodulation", comm.comm_world)
 
