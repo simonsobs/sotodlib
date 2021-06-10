@@ -8,6 +8,7 @@ import numpy as np
 from scipy.signal import firwin, fftconvolve
 
 import toast
+from toast.tod import Noise
 
 
 class Lowpass:
@@ -89,6 +90,8 @@ class OpDemod(toast.Operator):
 
     def _demodulate_times(self, tod, offset):
         """ Downsample timestamps and adjust sampling rate """
+        if self._nskip == 1:
+            return
         times = tod.local_times()
         times = times[offset % self._nskip :: self._nskip]
         tod.cache.put(tod.TIMESTAMP_NAME, times, replace=True)
@@ -96,10 +99,16 @@ class OpDemod(toast.Operator):
         return
 
     def _demodulate_offsets(self, obs, tod):
-        tod._nsamp //= self._nskip
-        dist_samples = tod._dist_samples
-        dist_samples = np.array(dist_samples) // self._nskip
-        tod._dist_samples = list(dist_samples)
+        if self._nskip == 1:
+            return
+        # Modulate sample distribution
+        old_offsets, old_nsamples = np.vstack(tod._dist_samples).T
+        new_offsets = old_offsets // self._nskip
+        new_nsamples = np.roll(np.cumsum(new_offsets), -1)
+        new_total = (tod.total_samples - 1) // self._nskip + 1
+        new_nsamples[-1] = new_total - new_offsets[-1]
+        tod._dist_samples = list(np.vstack([new_offsets, new_nsamples]).T)
+        tod._nsamp = new_total
         offset, nsample = tod.local_samples
         times = tod.local_times()
         for ival in obs[self._intervals]:
@@ -249,7 +258,18 @@ class OpDemod(toast.Operator):
             tod.cache.destroy("{}_{}".format("pixels", det))
         return
 
-    def _demodulate_noise(self, noise, det, fsample, hwp_rate, lowpass):
+    def _demodulate_noise(
+            self,
+            noise,
+            det,
+            fsample,
+            hwp_rate,
+            lowpass,
+            new_detectors,
+            new_freqs,
+            new_psds,
+            new_indices,
+    ):
         """ Add Noise objects for the new detectors """
         lpf = lowpass.lpf
         lpf_freq = np.fft.rfftfreq(lpf.size, 1/fsample)
@@ -277,16 +297,18 @@ class OpDemod(toast.Operator):
             rate_out = rate_in / self._nskip
             ind = freq_in <= rate_out / 2
             freq_out = freq_in[ind]
+            # Last bin must equal the new Nyquist frequency
+            freq_out[-1] = rate_out / 2
             psd_out = psd_out[ind] / self._nskip
             # Insert
             if not demod_name in noise._keys:
                 noise._keys.append(demod_name)
             if not demod_name in noise._dets:
                 noise._dets.append(demod_name)
-            noise._rates[demod_name] = rate_out
-            noise._freqs[demod_name] = freq_out
-            noise._psds[demod_name] = psd_out
-            noise._indices[demod_name] = noise.index(det) * n_mode + indexoff
+            new_detectors.append(demod_name)
+            new_freqs[demod_name] = freq_out
+            new_psds[demod_name] = psd_out
+            new_indices[demod_name] = noise.index(det) * n_mode + indexoff
         if self._purge:
             del noise._keys[noise._keys.index(det)]
             if det in noise._dets: # _keys may be identical to _dets
@@ -313,6 +335,11 @@ class OpDemod(toast.Operator):
             wkernel = self._get_wkernel(tod, fmax, fsample)
             lowpass = Lowpass(wkernel, fmax, fsample, offset, self._nskip, self._window)
 
+            new_detectors = []
+            new_freqs = {}
+            new_psds = {}
+            new_indices = {}
+
             for det in tod.local_dets:
                 if det.startswith("demod"):
                     continue
@@ -320,7 +347,23 @@ class OpDemod(toast.Operator):
                 self._demodulate_flags(tod, det, wkernel, offset)
                 self._demodulate_signal(tod, det, lowpass)
                 self._demodulate_pointing(tod, det, lowpass, offset)
-                self._demodulate_noise(noise, det, fsample, hwp_rate, lowpass)
+                self._demodulate_noise(
+                    noise,
+                    det,
+                    fsample,
+                    hwp_rate,
+                    lowpass,
+                    new_detectors,
+                    new_freqs,
+                    new_psds,
+                    new_indices,
+                )
+            obs["noise"] = Noise(
+                detectors=new_detectors,
+                freqs=new_freqs,
+                psds=new_psds,
+                indices=new_indices,
+            )
 
             self._demodulate_times(tod, offset)
             self._demodulate_common_flags(tod, wkernel, offset)
