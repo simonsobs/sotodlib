@@ -56,7 +56,7 @@ def main():
             have the format '<property>:<regex or list>'.  The regex\
             expression should be valid to pass to the 're' module.  If \
             passing a list, this should be comma-separated.  For example, \
-            --match 'band:LAT_MF.*' 'wafer_slot:w25,w26' 'pol:A' "
+            --match 'band:SAT_MF.*' 'wafer_slot:w25,w26' 'pol:A' "
     )
 
     args = parser.parse_args()
