@@ -697,7 +697,7 @@ def get_example():
     bnd["low"] = 21.7
     bnd["high"] = 29.7
     bnd["bandpass"] = ""
-    bnd["NET"] = 300.0
+    bnd["NET"] = 501.1
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
@@ -712,7 +712,7 @@ def get_example():
     bnd["low"] = 30.9
     bnd["high"] = 46.9
     bnd["bandpass"] = ""
-    bnd["NET"] = 300.0
+    bnd["NET"] = 309.9
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
@@ -725,7 +725,7 @@ def get_example():
     bnd["low"] = 79.0
     bnd["high"] = 105.0
     bnd["bandpass"] = ""
-    bnd["NET"] = 300.0
+    bnd["NET"] = 337.4
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
@@ -738,7 +738,7 @@ def get_example():
     bnd["low"] = 130.0
     bnd["high"] = 165.0
     bnd["bandpass"] = ""
-    bnd["NET"] = 400.0
+    bnd["NET"] = 445.5
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
@@ -751,7 +751,7 @@ def get_example():
     bnd["low"] = 196.7
     bnd["high"] = 254.7
     bnd["bandpass"] = ""
-    bnd["NET"] = 400.0
+    bnd["NET"] = 953.2
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
@@ -764,7 +764,7 @@ def get_example():
     bnd["low"] = 258.4
     bnd["high"] = 312.4
     bnd["bandpass"] = ""
-    bnd["NET"] = 400.0
+    bnd["NET"] = 2333.0
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
@@ -777,13 +777,13 @@ def get_example():
     bnd["low"] = 21.7
     bnd["high"] = 29.7
     bnd["bandpass"] = ""
-    bnd["NET"] = 300.0
+    bnd["NET"] = 386.1
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
     # Noise elevation scaling fits from Carlos Sierra
-    # These numbers are for V3 LAT baseline
-    bnd["A"] = 0.09
+    # These numbers are for V3 SAT baseline
+    bnd["A"] = 0.10
     bnd["C"] = 0.87
     bands["SAT_f030"] = bnd
     
@@ -792,12 +792,12 @@ def get_example():
     bnd["low"] = 30.9
     bnd["high"] = 46.9
     bnd["bandpass"] = ""
-    bnd["NET"] = 300.0
+    bnd["NET"] = 258.8
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.25
-    bnd["C"] = 0.64
+    bnd["A"] = 0.26
+    bnd["C"] = 0.66
     bands["SAT_f040"] = bnd
     
     bnd = OrderedDict()
@@ -805,12 +805,12 @@ def get_example():
     bnd["low"] = 79.0
     bnd["high"] = 105.0
     bnd["bandpass"] = ""
-    bnd["NET"] = 300.0
+    bnd["NET"] = 248.8
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.14
-    bnd["C"] = 0.80
+    bnd["A"] = 0.17
+    bnd["C"] = 0.78
     bands["SAT_f090"] = bnd
     
     bnd = OrderedDict()
@@ -818,12 +818,12 @@ def get_example():
     bnd["low"] = 130.0
     bnd["high"] = 165.0
     bnd["bandpass"] = ""
-    bnd["NET"] = 400.0
+    bnd["NET"] = 311.1
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.17
-    bnd["C"] = 0.76
+    bnd["A"] = 0.23
+    bnd["C"] = 0.71
     bands["SAT_f150"] = bnd
     
     bnd = OrderedDict()
@@ -831,12 +831,12 @@ def get_example():
     bnd["low"] = 196.7
     bnd["high"] = 254.7
     bnd["bandpass"] = ""
-    bnd["NET"] = 400.0
+    bnd["NET"] = 614.4
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.30
-    bnd["C"] = 0.58
+    bnd["A"] = 0.43
+    bnd["C"] = 0.44
     bands["SAT_f230"] = bnd
     
     bnd = OrderedDict()
@@ -844,12 +844,12 @@ def get_example():
     bnd["low"] = 258.4
     bnd["high"] = 312.4
     bnd["bandpass"] = ""
-    bnd["NET"] = 400.0
+    bnd["NET"] = 1524.7
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.36
-    bnd["C"] = 0.49
+    bnd["A"] = 0.48
+    bnd["C"] = 0.38
     bands["SAT_f290"] = bnd
 
     cnf["bands"] = bands
