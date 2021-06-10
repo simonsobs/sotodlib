@@ -856,7 +856,7 @@ def get_example():
 
     wafer_slots = OrderedDict()
 
-    wtypes = ["LAT_UHF", "LAT_MF", "LAT_LF", "SAT_UHF", "SAT_MF", "SAT_LF"]
+    wtypes = ["LAT_UHF", "SAT_UHF", "LAT_MF", "SAT_MF", "LAT_LF", "SAT_LF"]
     wcnt = {
         "LAT_LF": 1*3,
         "LAT_MF": 4*3,
