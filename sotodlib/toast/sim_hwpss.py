@@ -45,12 +45,12 @@ class OpSimHWPSS(toast.Operator):
                 signal = tod.local_signal(det, self._name)
                 band = focalplane[det]["band"]
                 freq = {
-                    "f030" : "027",
-                    "f040" : "039",
-                    "f090" : "093",
-                    "f150" : "145",
-                    "f230" : "225",
-                    "f290" : "278",
+                    "SAT_f030" : "027",
+                    "SAT_f040" : "039",
+                    "SAT_f090" : "093",
+                    "SAT_f150" : "145",
+                    "SAT_f230" : "225",
+                    "SAT_f290" : "278",
                 }[band]
 
                 # Get incident angle

@@ -93,14 +93,14 @@ class HardwareTest(TestCase):
         # "A" polarization configuration and are located in pixels 20-29.
         wbhw = hw.select(
             match={"wafer_slot": ["w25", "w26"],
-                   "band": "f090",
+                   "band": "SAT_f090",
                    "pol": "A",
                    "pixel": "02."})
-        dbpath = os.path.join(self.outdir, "w25-26_p20-29_f090_A.toml.gz")
+        dbpath = os.path.join(self.outdir, "w25-26_p20-29_SAT_f090_A.toml.gz")
         wbhw.dump(dbpath, overwrite=True, compress=True)
         check = Hardware(dbpath)
         self.assertTrue(len(check.data["detectors"]) == 20)
-        chkpath = os.path.join(self.outdir, "w25-26_p20-29_f090_A.txt")
+        chkpath = os.path.join(self.outdir, "w25-26_p20-29_SAT_f090_A.txt")
         with open(chkpath, "w") as f:
             for d in check.data["detectors"]:
                 f.write("{}\n".format(d))
