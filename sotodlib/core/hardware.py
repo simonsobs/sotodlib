@@ -158,7 +158,7 @@ class Hardware(object):
             (recall the "." matches a single character)::
 
                 new = hw.select(match={"wafer_slot": ["w25", "w26"],
-                                "band": "f090",
+                                "band": "SAT_f090",
                                 "pol": "A",
                                 "pixel": "02."})
 

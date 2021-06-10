@@ -50,16 +50,19 @@ def add_hw_args(parser):
     parser.add_argument(
         "--bands",
         required=True,
-        help="Comma-separated list of bands: f030 (27GHz), f040 (39GHz), "
-        "f090 (93GHz), f150 (145GHz), "
-        "f230 (225GHz), f290 (285GHz). "
+        help="Comma-separated list of bands: LAT_f030 (27GHz), LAT_f040 (39GHz), "
+        "LAT_f090 (93GHz), LAT_f150 (145GHz), "
+        "LAT_f230 (225GHz), LAT_f290 (285GHz), "
+        "SAT_f030 (27GHz), SAT_f040 (39GHz), "
+        "SAT_f090 (93GHz), SAT_f150 (145GHz), "
+        "SAT_f230 (225GHz), SAT_f290 (285GHz). "
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
         "--tube_slots",
-        help="Comma-separated list of optics tube slots: c1 (UHF), i5 (UHF), "
-        " i6 (MF), i1 (MF), i3 (MF), i4 (MF), o6 (LF),"
-        " ST1 (MF), ST2 (MF), ST3 (UHF), ST4 (LF)."
+        help="Comma-separated list of optics tube slots: c1 (LAT_UHF), i5 (LAT_UHF), "
+        " i6 (LAT_MF), i1 (LAT_MF), i3 (LAT_MF), i4 (LAT_MF), o6 (LAT_LF),"
+        " ST1 (SAT_MF), ST2 (SAT_MF), ST3 (SAT_UHF), ST4 (SAT_LF)."
 
     )
     group.add_argument(
