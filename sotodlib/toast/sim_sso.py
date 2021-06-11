@@ -279,7 +279,7 @@ class OpSimSSO(Operator):
 
         # FIXME: we should get the center frequency from the bandpass
         band_dict = {'f030' : 27, 'f040': 39, 'f090': 93,
-             '150': 145 , 'f230': 225, 'f290': 285}
+             'f150': 145 , 'f230': 225, 'f290': 285}
 
         for band in band_dict.keys():
             if band in prefix:
