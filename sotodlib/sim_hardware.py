@@ -697,7 +697,7 @@ def get_example():
     bnd["low"] = 21.7
     bnd["high"] = 29.7
     bnd["bandpass"] = ""
-    bnd["NET"] = 300.0
+    bnd["NET"] = 501.1
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
@@ -705,101 +705,195 @@ def get_example():
     # These numbers are for V3 LAT baseline
     bnd["A"] = 0.09
     bnd["C"] = 0.87
-    bands["f030"] = bnd
+    bands["LAT_f030"] = bnd
 
     bnd = OrderedDict()
     bnd["center"] = 38.9
     bnd["low"] = 30.9
     bnd["high"] = 46.9
     bnd["bandpass"] = ""
-    bnd["NET"] = 300.0
+    bnd["NET"] = 309.9
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
     bnd["A"] = 0.25
     bnd["C"] = 0.64
-    bands["f040"] = bnd
+    bands["LAT_f040"] = bnd
 
     bnd = OrderedDict()
     bnd["center"] = 92.0
     bnd["low"] = 79.0
     bnd["high"] = 105.0
     bnd["bandpass"] = ""
-    bnd["NET"] = 300.0
+    bnd["NET"] = 337.4
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
     bnd["A"] = 0.14
     bnd["C"] = 0.80
-    bands["f090"] = bnd
+    bands["LAT_f090"] = bnd
 
     bnd = OrderedDict()
     bnd["center"] = 147.5
     bnd["low"] = 130.0
     bnd["high"] = 165.0
     bnd["bandpass"] = ""
-    bnd["NET"] = 400.0
+    bnd["NET"] = 445.5
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
     bnd["A"] = 0.17
     bnd["C"] = 0.76
-    bands["f150"] = bnd
+    bands["LAT_f150"] = bnd
 
     bnd = OrderedDict()
     bnd["center"] = 225.7
     bnd["low"] = 196.7
     bnd["high"] = 254.7
     bnd["bandpass"] = ""
-    bnd["NET"] = 400.0
+    bnd["NET"] = 953.2
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
     bnd["A"] = 0.30
     bnd["C"] = 0.58
-    bands["f230"] = bnd
+    bands["LAT_f230"] = bnd
 
     bnd = OrderedDict()
     bnd["center"] = 285.4
     bnd["low"] = 258.4
     bnd["high"] = 312.4
     bnd["bandpass"] = ""
-    bnd["NET"] = 400.0
+    bnd["NET"] = 2333.0
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
     bnd["A"] = 0.36
     bnd["C"] = 0.49
-    bands["f290"] = bnd
+    bands["LAT_f290"] = bnd
+    
+    bnd = OrderedDict()
+    bnd["center"] = 25.7
+    bnd["low"] = 21.7
+    bnd["high"] = 29.7
+    bnd["bandpass"] = ""
+    bnd["NET"] = 386.1
+    bnd["fknee"] = 50.0
+    bnd["fmin"] = 0.01
+    bnd["alpha"] = 3.5
+    # Noise elevation scaling fits from Carlos Sierra
+    # These numbers are for V3 SAT baseline
+    bnd["A"] = 0.10
+    bnd["C"] = 0.87
+    bands["SAT_f030"] = bnd
+    
+    bnd = OrderedDict()
+    bnd["center"] = 38.9
+    bnd["low"] = 30.9
+    bnd["high"] = 46.9
+    bnd["bandpass"] = ""
+    bnd["NET"] = 258.8
+    bnd["fknee"] = 50.0
+    bnd["fmin"] = 0.01
+    bnd["alpha"] = 3.5
+    bnd["A"] = 0.26
+    bnd["C"] = 0.66
+    bands["SAT_f040"] = bnd
+    
+    bnd = OrderedDict()
+    bnd["center"] = 92.0
+    bnd["low"] = 79.0
+    bnd["high"] = 105.0
+    bnd["bandpass"] = ""
+    bnd["NET"] = 248.8
+    bnd["fknee"] = 50.0
+    bnd["fmin"] = 0.01
+    bnd["alpha"] = 3.5
+    bnd["A"] = 0.17
+    bnd["C"] = 0.78
+    bands["SAT_f090"] = bnd
+    
+    bnd = OrderedDict()
+    bnd["center"] = 147.5
+    bnd["low"] = 130.0
+    bnd["high"] = 165.0
+    bnd["bandpass"] = ""
+    bnd["NET"] = 311.1
+    bnd["fknee"] = 50.0
+    bnd["fmin"] = 0.01
+    bnd["alpha"] = 3.5
+    bnd["A"] = 0.23
+    bnd["C"] = 0.71
+    bands["SAT_f150"] = bnd
+    
+    bnd = OrderedDict()
+    bnd["center"] = 225.7
+    bnd["low"] = 196.7
+    bnd["high"] = 254.7
+    bnd["bandpass"] = ""
+    bnd["NET"] = 614.4
+    bnd["fknee"] = 50.0
+    bnd["fmin"] = 0.01
+    bnd["alpha"] = 3.5
+    bnd["A"] = 0.43
+    bnd["C"] = 0.44
+    bands["SAT_f230"] = bnd
+    
+    bnd = OrderedDict()
+    bnd["center"] = 285.4
+    bnd["low"] = 258.4
+    bnd["high"] = 312.4
+    bnd["bandpass"] = ""
+    bnd["NET"] = 1524.7
+    bnd["fknee"] = 50.0
+    bnd["fmin"] = 0.01
+    bnd["alpha"] = 3.5
+    bnd["A"] = 0.48
+    bnd["C"] = 0.38
+    bands["SAT_f290"] = bnd
 
     cnf["bands"] = bands
 
     wafer_slots = OrderedDict()
 
-    wtypes = ["UHF", "MF", "LF"]
+    wtypes = ["LAT_UHF", "SAT_UHF", "LAT_MF", "SAT_MF", "LAT_LF", "SAT_LF"]
     wcnt = {
-        "LF": 1*7 + 1*3,
-        "MF": 2*7 + 2*2*3,
-        "UHF": 1*7 + 2*3
+        "LAT_LF": 1*3,
+        "LAT_MF": 4*3,
+        "LAT_UHF": 2*3,
+        "SAT_LF": 1*7,
+        "SAT_MF": 2*7,
+        "SAT_UHF": 1*7
     }
     wnp = {
-        "LF": 37,
-        "MF": 432,
-        "UHF": 432
+        "LAT_LF": 37,
+        "LAT_MF": 432,
+        "LAT_UHF": 432,
+        "SAT_LF": 37,
+        "SAT_MF": 432,
+        "SAT_UHF": 432
     }
     wpixmm = {
-        "LF": 18.0,
-        "MF": 5.3,
-        "UHF": 5.3
+        "LAT_LF": 18.0,
+        "LAT_MF": 5.3,
+        "LAT_UHF": 5.3,
+        "SAT_LF": 18.0,
+        "SAT_MF": 5.3,
+        "SAT_UHF": 5.3
     }
     wrhombgap = {
-        "MF": 0.71,
-        "UHF": 0.71,
+        "LAT_MF": 0.71,
+        "LAT_UHF": 0.71,
+        "SAT_MF": 0.71,
+        "SAT_UHF": 0.71
     }
     wbd = {
-        "LF": ["f030", "f040"],
-        "MF": ["f090", "f150"],
-        "UHF": ["f230", "f290"]
+        "LAT_LF": ["LAT_f030", "LAT_f040"],
+        "LAT_MF": ["LAT_f090", "LAT_f150"],
+        "LAT_UHF": ["LAT_f230", "LAT_f290"],
+        "SAT_LF": ["SAT_f030", "SAT_f040"],
+        "SAT_MF": ["SAT_f090", "SAT_f150"],
+        "SAT_UHF": ["SAT_f230", "SAT_f290"]
     }
     windx = 0
     cardindx = 0
@@ -808,7 +902,7 @@ def get_example():
             wn = "w{:02d}".format(windx)
             wf = OrderedDict()
             wf["type"] = wt
-            if (wt == "LF"):
+            if ((wt == "LAT_LF") or (wt == "SAT_LF")):
                 wf["packing"] = "S"
             else:
                 wf["packing"] = "F"
@@ -827,12 +921,15 @@ def get_example():
     tube_slots = OrderedDict()
 
     woff = {
-        "LF": 0,
-        "MF": 0,
-        "UHF": 0
+        "LAT_LF": 0,
+        "LAT_MF": 0,
+        "LAT_UHF": 0,
+        "SAT_LF": 0,
+        "SAT_MF": 0,
+        "SAT_UHF": 0
     }
 
-    ltubes = ["UHF", "UHF", "MF", "MF", "MF", "MF", "LF"]
+    ltubes = ["LAT_UHF", "LAT_UHF", "LAT_MF", "LAT_MF", "LAT_MF", "LAT_MF", "LAT_LF"]
     ltubepos = [0, 1, 2, 3, 5, 6, 10]
     ltube_cryonames=["c1", "i5", "i6", "i1", "i3", "i4", "o6"]
     for tindx in range(7):
@@ -856,7 +953,7 @@ def get_example():
         tb["receiver_name"] = ""
         tube_slots[nm] = tb
 
-    stubes = ["MF", "MF", "UHF","LF"]
+    stubes = ["SAT_MF", "SAT_MF", "SAT_UHF","SAT_LF"]
     for tindx in range(4):
         nm = "ST{:d}".format(tindx+1)
         ttyp = stubes[tindx]
@@ -889,19 +986,26 @@ def get_example():
     # the sky at a plate scale of 0.00495 deg/mm.
     tele["tubespace"] = 359.6
     fwhm = OrderedDict()
-    fwhm["f030"] = 7.4
-    fwhm["f040"] = 5.1
-    fwhm["f090"] = 2.2
-    fwhm["f150"] = 1.4
-    fwhm["f230"] = 1.0
-    fwhm["f290"] = 0.9
+    fwhm["LAT_f030"] = 7.4
+    fwhm["LAT_f040"] = 5.1
+    fwhm["LAT_f090"] = 2.2
+    fwhm["LAT_f150"] = 1.4
+    fwhm["LAT_f230"] = 1.0
+    fwhm["LAT_f290"] = 0.9
     tele["fwhm"] = fwhm
     tele["platform_name"] = ""
     telescopes["LAT"] = tele
 
+    fwhm_sat = OrderedDict()
+    fwhm_sat["SAT_f030"] = 7.4
+    fwhm_sat["SAT_f040"] = 5.1
+    fwhm_sat["SAT_f090"] = 2.2
+    fwhm_sat["SAT_f150"] = 1.4
+    fwhm_sat["SAT_f230"] = 1.0
+    fwhm_sat["SAT_f290"] = 0.9
     sfwhm = OrderedDict()
     scale = 0.09668 / 0.00495
-    for k, v in fwhm.items():
+    for k, v in fwhm_sat.items():
         sfwhm[k] = float(int(scale * v * 10.0) // 10)
 
     tele = OrderedDict()
@@ -981,7 +1085,7 @@ def get_example():
 
     pl = ["A", "B"]
     hand = ["L", "R"]
-    bandarr=["f030","f040"]
+    bandarr=["SAT_f030","SAT_f040"]
 
     dets = OrderedDict()
     for d in range(4):
