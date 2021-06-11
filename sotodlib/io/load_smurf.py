@@ -17,6 +17,7 @@ from enum import Enum
 
 import logging
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 from .. import core
 from . import load as io_load
@@ -28,18 +29,18 @@ num_bias_lines = 16
 
 
 association_table = db.Table('association_chan_assign', Base.metadata,
-    db.Column('detsets', db.Integer, db.ForeignKey('detsets.id')),
+    db.Column('tunesets', db.Integer, db.ForeignKey('tunesets.id')),
     db.Column('chan_assignments', db.Integer, db.ForeignKey('chan_assignments.id'))
 )
 
 association_table_obs = db.Table('association_obs', Base.metadata,
-    db.Column('detsets', db.Integer, db.ForeignKey('detsets.id')),
-    db.Column('observations', db.Integer, db.ForeignKey('observations.obs_id'))
+    db.Column('tunesets', db.Integer, db.ForeignKey('tunesets.id')),
+    db.Column('observations', db.Integer, db.ForeignKey('obs.obs_id'))
 )
 
-association_table_dets = db.Table('association_dets', Base.metadata,
-    db.Column('detsets', db.Integer, db.ForeignKey('detsets.id')),
-    db.Column('channels', db.Integer, db.ForeignKey('channels.id'))
+association_table_dets = db.Table('detsets', Base.metadata,
+    db.Column('name', db.Integer, db.ForeignKey('tunesets.name')),
+    db.Column('det', db.Integer, db.ForeignKey('channels.name'))
 )
 
 
@@ -55,15 +56,43 @@ SMURF_ACTIONS = {
         'setup_notches',
     ],
     'tuning':[
-        'setup_notches'
+        'setup_notches',
+        'save_tune',
     ]
 }
 
 
 class Observations(Base):
-    """Times on continuous detector readout
+    """Times on continuous detector readout. This table is named obs and serves
+    as the ObsDb table when loading via Context.
+
+    Attributes 
+    -----------
+    obs_id : string
+        The "session_id" of the observation which is usually the integer ctime
+        of the pysmurf action called to start the readout. (The first part of
+        the .g3 file name).
+    timestamp : integer
+        Generally int(obs_id). Here to make relative querying easier
+    duration : float
+        The total observation time in seconds
+    start : datetime.datetime
+        The start of the observation as a datetime object
+    stop : datetime.datetime
+        The end of the observation as a datetime object
+    tag : string
+        Tags for this observation. These are planned to be populated through
+        tags set while running sodetlib's stream data functions. Not implemented
+        yet.
+    files : list of SQLAlchemy instances of Files
+        The list of .g3 files in this observation built through a relationship
+        to the Files table. [f.path for f in Observation.files] will return
+        paths to all the files.
+    tunesets : list of SQLAlchemy instances of TuneSets 
+        The TuneSets used in this observation. There is expected to be
+        one per stream_id (SMuRF crate slot). 
     """
-    __tablename__ = 'observations'
+    __tablename__ = 'obs'
     ## ctime of beginning of the observation
         
     obs_id = db.Column(db.String, primary_key=True)
@@ -79,7 +108,7 @@ class Observations(Base):
     files = relationship("Files", back_populates='observation') 
     
     ## many to many
-    detsets = relationship("Detsets", 
+    tunesets = relationship("TuneSets", 
                            secondary=association_table_obs,
                            back_populates='observations')
 
@@ -92,7 +121,46 @@ class Observations(Base):
     
 
 class Files(Base):
-    """Table to store file indexing info"""
+    """Table to store file indexing info. This table is named files in sql and
+    serves as the ObsFileDb when loading via Context.
+
+    Attributes
+    ------------
+    id : integer
+        auto-incremented primary key
+    path : string
+        complete absolute path to file
+    name : string
+        the file name
+    start : datetime.datetime
+        the start time for the file
+    stop : datetime.datetime
+        the stop time for the file
+    sample_start : integer
+        Not Implemented Yet
+    sample_stop : integer
+        Not Implemented Yet
+    obs_id : String 
+        observation id linking Files table to the Observation table
+    observation : SQLAlchemy Observation Instance
+    stream_id : The stream_id for the file. Generally of the form crateXslotY.
+        These are expected to map one per UXM.
+    n_frames : Integer
+        Number of frames in the .g3 file
+    frames : list of SQLALchemy Frame Instances
+        List of database entries for the frames in this file
+    n_channels : Integer
+        The number of channels read out in this file
+    detset : string
+        TuneSet.name for this file. Used to map the TuneSet table to the Files
+        table. Called detset to serve duel-purpose and map files to detsets
+        while loading through Context. 
+    tuneset : SQLAlchemy TuneSet Instance
+    tune_id : integer 
+        id of the tune file used in this file. Used to map Tune table to the
+        Files table.
+    tune : SQLAlchemy Tune Instance
+    """
     __tablename__ = 'files'
     id = db.Column(db.Integer, primary_key=True)
 
@@ -108,7 +176,7 @@ class Files(Base):
     sample_stop = db.Column(db.Integer)
     
     ## this is a string for compatibility with sotodlib, not because it makes sense here
-    obs_id = db.Column(db.String, db.ForeignKey('observations.obs_id'))
+    obs_id = db.Column(db.String, db.ForeignKey('obs.obs_id'))
     observation = relationship("Observations", back_populates='files')
     
     stream_id = db.Column(db.String)
@@ -121,18 +189,93 @@ class Files(Base):
     
     # breaking from linked table convention to match with obsfiledb requirements
     ## many to one
-    detset = db.Column(db.String, db.ForeignKey('detsets.name'))
-    detset_info = relationship("Detsets", back_populates='files')
+    detset = db.Column(db.String, db.ForeignKey('tunesets.name'))
+    tuneset = relationship("TuneSets", back_populates='files')
     
+    tune_id = db.Column(db.Integer, db.ForeignKey('tunes.id'))
+    tune = relationship("Tunes", back_populates='files')
+    
+class Tunes(Base):
+    """Indexing of 'tunes' available during observations. Should
+    correspond to all tune files. 
 
-class Detsets(Base):
-    """Indexing of 'detector sets' available during observations. Should
-    correspond to the tune files. 
+    Attributes 
+    -----------
+    id : integer 
+        primary key
+    name : string
+        name of tune file
+    path : string
+        absolute path of tune file
+    stream_id : string
+        stream_id for file
+    start : datetime.datetime
+        The time the tune file is made
+    files : list of SQLAlchemy File instances
+        All file using this tune file
+    tuneset_id : integer
+        id of tuneset this tune belongs to. Used to link Tunes table to TuneSets
+        table
+    tuneset : SQLAlchemy TuneSet instance
     """
-    __tablename__ = 'detsets'
+    __tablename__ = 'tunes'
+    __table_args__ = (
+        db.UniqueConstraint('name', 'stream_id'),
+    )
     id = db.Column( db.Integer, primary_key=True)
     
-    name = db.Column(db.String, unique=True)
+    name = db.Column(db.String)
+    path = db.Column(db.String)
+    stream_id = db.Column(db.String)
+    
+    ## should stop exist? tune file use does not need to be continguous
+    start = db.Column(db.DateTime)
+    
+    ## files that use this tune file
+    ## one to many
+    files = relationship("Files", back_populates='tune')
+    
+    ## one to many
+    tuneset_id = db.Column(db.Integer, db.ForeignKey('tunesets.id'))
+    tuneset = relationship("TuneSets", back_populates='tunes')
+
+class TuneSets(Base):
+    """Indexing of 'tunes sets' available during observations. Should
+    correspond to the tune files where new_master_assignment=True. TuneSets
+    exist to combine sets of <=8 Channel Assignments since SMuRF tuning and
+    setup is run "per smurf band" while channel readout reads all tuned bands.
+    Every TuneSet is a Tune file but not all Tunes are a Tuneset. This is
+    because new Tunes can be made for the same set of channel assignments as the
+    cryostat / readout environments evolve.
+    
+    Attributes
+    ----------
+    id : integer 
+        primary key
+    name : string
+        name of tune file
+    path : string
+        absolute path of tune file
+    stream_id : string
+        stream_id for file
+    start : datetime.datetime
+        The time the tune file is made
+    stop : datetime.datetine
+        Not Implemented Yet
+    files : list of SQLAlchemy File instances.
+    tunes : list of Tunes that are part of the TuneSet
+    observations : list of observations that have this TuneSet
+    chan_assignments : list of Channel Assignments that are part of the this
+        tuneset 
+    channels : list of Channels that are part of this TuneSet
+    """
+    __tablename__ = 'tunesets'
+    __table_args__ = (
+        db.UniqueConstraint('name', 'stream_id'),
+    )
+    id = db.Column( db.Integer, primary_key=True)
+    
+    name = db.Column(db.String)
     path = db.Column(db.String)
     stream_id = db.Column(db.String)
     
@@ -142,22 +285,26 @@ class Detsets(Base):
     
     ## files that use this detset
     ## one to many
-    files = relationship("Files", back_populates='detset_info')
-    
+    files = relationship("Files", back_populates='tuneset')
+    tunes = relationship("Tunes", back_populates='tuneset')
     ## many to many
     observations = relationship("Observations", 
                                 secondary=association_table_obs,
-                                back_populates='detsets')
+                                back_populates='tunesets')
     
     ## many to many
     chan_assignments = relationship('ChanAssignments', 
                                     secondary=association_table,
-                                    back_populates='detsets')
+                                    back_populates='tunesets')
     
     ## many to many
-    channels = relationship('Channels', 
+    dets = relationship('Channels', 
                         secondary=association_table_dets,
-                        back_populates='detset')
+                        back_populates='detsets')
+    
+    @property
+    def channels(self):
+        return self.dets
     
 class Bands(Base):
     """
@@ -171,30 +318,42 @@ class Bands(Base):
     number = db.Column( db.Integer )
     stream_id = db.Column( db.String)
     
-    ## one to many
-    chan_assignments = relationship("ChanAssignments", back_populates='band')
-    
-    ## one to many
-    channels = relationship("Channels", back_populates='band')
     
 class ChanAssignments(Base):
-    """The available channel assignments. Tune files are made of up to eight of
+    """The available channel assignments. TuneSets are made of up to eight of
     these assignments. 
+
+    Attributes
+    ----------
+    id : integer 
+        primary key
+    ctime : integer
+        ctime where the channel assignment was made
+    name : string
+        name of the channel assignment file
+    path : string
+        absolute path of channel assignment file
+    stream_id : string
+        stream_id for file
+    band : integer
+        Smurf band for this channel assignment
+    tunesets : list of SQLAlchemy tunesets
+        The Tunesets the channel assignment is in
+    channels : list of SQLAlchemy channels
+        The channels in the channel assignment
     """
     __tablename__ = 'chan_assignments'
     id = db.Column(db.Integer, primary_key=True)
     
     ctime = db.Column(db.Integer)
     path = db.Column(db.String, unique=True)
-    
-    ## Each channel assignment is done for one band
-    ## many to one
-    band = relationship("Bands", back_populates='chan_assignments')
-    band_id = db.Column(db.Integer, db.ForeignKey('bands.id'))
+    name = db.Column(db.String)
+    stream_id = db.Column(db.String)
+    band = db.Column(db.Integer)
     
     ## Channel Assignments are put into detector sets
     ## many to many bidirectional 
-    detsets = relationship('Detsets', 
+    tunesets = relationship('TuneSets', 
                            secondary=association_table,
                            back_populates='chan_assignments')
 
@@ -206,28 +365,51 @@ class Channels(Base):
     """All the channels tracked by SMuRF indexed by the ctime of the channel
     assignment file, SMuRF band and channel number. Many channels will map to
     one detector on a UFM.
+
+    
+    Attributes
+    ----------
+    id : integer 
+        primary key
+    name : string
+        name of of channel. In the form of sch_<ctime>_<band>_<channel>
+    stream_id : string
+        stream_id for file
+    subband : integer
+        The subband of the channel
+    channel : integer
+        The assigned smurf channel
+    frequency : float
+        The frequency of the resonator when the channel assigments were made
+    band : integer
+        The smurf band for the channel
+    ca_id : integer
+        The id of the channel assignment for the channel. Used for SQL mapping
+    chan_assignment : SQLAlchemy ChanAssignments Instance
+    detsets : List of SQLAlchemy Tunesets
+        The tunesets the channel can be found in
     """
     __tablename__ = 'channels'
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String)
+    name = db.Column(db.String, unique=True)
+    stream_id = db.Column(db.String)
     
     ## smurf channels
     subband = db.Column(db.Integer)
     channel = db.Column(db.Integer)
     frequency = db.Column(db.Float)
-    
+
+    band = db.Column(db.Integer)
+
     ## many to one
     ca_id = db.Column(db.Integer, db.ForeignKey('chan_assignments.id'))
     chan_assignment = relationship("ChanAssignments", back_populates='channels')
 
-    ## many to one
-    band = relationship('Bands', back_populates='channels')
-    band_number = db.Column(db.Integer, db.ForeignKey('bands.number'))
     
     ## many to many
-    detset = relationship('Detsets',
+    detsets = relationship('TuneSets',
                          secondary=association_table_dets,
-                         back_populates='channels')
+                         back_populates='dets')
     
     
 type_key = ['Observation', 'Wiring', 'Scan']
@@ -241,7 +423,31 @@ class FrameType(Base):
 
     
 class Frames(Base):
-    """Table to store frame indexing info"""
+    """Table to store frame indexing info
+    Attributes
+    ----------
+    id : Integer
+        Primary Key
+    file_id : integer
+        id of the file the frame is part of, used for SQL mapping
+    file : SQLAlchemy instance
+    frame_idx : integer
+        frame index in the file
+    offset : integer
+        frame offset used by so3g indexed reader
+    type_name : string
+        frame types, use Observation, Wiring, and Scan frames
+    time : datetime.datetime
+        The start of the frame
+    n_samples : integer
+        the number of samples in the frame
+    n_channels : integer
+        the number of channels in the frame
+    start : datetime.datetime
+        the start of the frame
+    stop : datetime.datetime
+        the end of the frame
+    """
     __tablename__ = 'frame_offsets'
     __table_args__ = (
         db.UniqueConstraint('file_id', 'frame_idx', name='_frame_loc'),
@@ -257,7 +463,8 @@ class Frames(Base):
 
     type_name = db.Column(db.String, db.ForeignKey('frame_type.type_name'))
     frame_type = relationship('FrameType')
-
+    
+    status_dump = db.Column(db.Boolean, nullable=False, default=False)
     time = db.Column(db.DateTime, nullable=False)
 
     # Specific to data frames
@@ -416,10 +623,15 @@ class G3tSmurf:
         frame_idx = 0
         while True:
             
-            db_frame_offset = reader.Tell()
-            frames = reader.Process(None)
-            if not frames:
-                break
+            try: 
+                db_frame_offset = reader.Tell()
+                frames = reader.Process(None)
+                if not frames:
+                    break
+            except RuntimeError as e:
+                logger.warning(f"Failed to add {path}: file likely corrupted")
+                session.rollback()
+                return
                 
             frame = frames[0]
             frame_idx += 1
@@ -432,11 +644,13 @@ class G3tSmurf:
             timestamp = frame['time'].time / spt3g_core.G3Units.s
             db_frame_time = dt.datetime.fromtimestamp(timestamp)
             
+            
             ## only make Frame once the non-nullable fields are known
             db_frame = Frames(frame_idx=frame_idx, file=db_file,
                              offset = db_frame_offset,
                              frame_type = db_frame_frame_type,
-                             time = db_frame_time 
+                             time = db_frame_time,
+                             status_dump = 'dump' in frame
                              )
         
             data = frame.get('data')
@@ -516,7 +730,7 @@ class G3tSmurf:
     def add_new_channel_assignment(self, stream_id, ctime, cha, cha_path, session):   
         """Add new entry to the Channel Assignments table. Called by the
         index_metadata function.
-        
+
         Args
         -------
         stream_id : string
@@ -531,35 +745,40 @@ class G3tSmurf:
         session : SQLAlchemy Session
             The active session
         """
-        band_number = int(re.findall('b\d.txt', cha)[0][1])   
-        band = session.query(Bands).filter(Bands.number == band_number,
-                                           Bands.stream_id == stream_id).one_or_none()
-        if band is None:
-            band = Bands(number = band_number,
-                         stream_id = stream_id)
-            session.add(band)
+        band = int(re.findall('b\d.txt', cha)[0][1])   
 
         ch_assign = session.query(ChanAssignments).filter(ChanAssignments.ctime == ctime,
-                                                      ChanAssignments.band_id == band.id)
+                                                          ChanAssignments.stream_id == stream_id,
+                                                          ChanAssignments.band == band)
         ch_assign = ch_assign.one_or_none()
         if ch_assign is None:
             ch_assign = ChanAssignments(ctime=ctime,
                                         path=cha_path,
+                                        name=cha,
+                                        stream_id=stream_id,
                                         band=band)
             session.add(ch_assign)
 
         notches = np.atleast_2d(np.genfromtxt(ch_assign.path, delimiter=','))
-        if len(notches) != len(ch_assign.channels):
+        if np.sum([notches[:,2]!=-1]) != len(ch_assign.channels):
+            ch_made = [c.channel for c in ch_assign.channels]
             for notch in notches:
-                ch_name = 'sch_{:10d}_{:01d}_{:03d}'.format(ctime, band.number, int(notch[2]))
-                ch = Channels(subband=notch[1],
-                              channel=notch[2],
+                ## smurf did not assign a channel
+                if notch[2] == -1:
+                    continue
+                if int(notch[2]) in ch_made:
+                    continue
+                    
+                ch_name = 'sch_{:10d}_{:01d}_{:03d}'.format(ctime, band, int(notch[2]))
+                ch = Channels(subband=int(notch[1]),
+                              channel=int(notch[2]),
                               frequency=notch[0],
                               name=ch_name,
                               chan_assignment=ch_assign,
                               band=band)
-                ## smurf did not assign a channel
+                
                 if ch.channel == -1:
+                    logger.warning(f"Un-assigned channel made in Channel Assignment {ch_assign.name}")
                     continue
                 check = session.query(Channels).filter( Channels.ca_id == ch_assign.id,
                                            Channels.channel == ch.channel).one_or_none()
@@ -567,10 +786,57 @@ class G3tSmurf:
                     session.add(ch)
         session.commit()   
         
+    def _assign_set_from_file(self, tune_path, ctime=None, stream_id=None, session=None):
+        """Build set of Channel Assignments that are (or should be) in the 
+        tune file.
+
+        Args
+        -------
+        tune_path : path
+            The absolute path to the tune file
+        ctime : int
+            ctime of SMuRF Action
+        stream_id : string
+            The stream id for the particular SMuRF slot
+        session : SQLAlchemy Session
+            The active session
+        """
+
+        if session is None:
+            session = self.Session()
+        if stream_id is None:
+            stream_id = tune_path.split('/')[-4]
+        if ctime is None:
+            ctime = int( tune_path.split('/')[-1].split('_')[0] )
+            
+        data = np.load(tune_path, allow_pickle=True).item()
+        assign_set = []
+
+        ### Determine the TuneSet
+        for band in data.keys():
+            if 'resonances' not in data[band]:
+                ### tune file doesn't have info for this band
+                continue
+            ## try to use tune file to find channel assignment before just assuming "most recent"
+            if 'channel_assignment' in data[band]:
+                cha_name = data[band]['channel_assignment'].split('/')[-1]
+                cha = session.query(ChanAssignments).filter(ChanAssignments.stream_id==stream_id,
+                                                      ChanAssignments.name==cha_name).one_or_none()
+            else:
+                cha = session.query(ChanAssignments).filter(ChanAssignments.stream_id==stream_id,
+                                                           ChanAssignments.ctime <= ctime,
+                                                           ChanAssignments.band==band)
+                cha = cha.order_by(db.desc(ChanAssignments.ctime)).first()
+            if cha is None:
+                logger.error(f"Missing Channel Assignment for tune file {tune_path}")
+            assign_set.append(cha)
+        return assign_set
+
+
     def add_new_tuning(self, stream_id, ctime, tune_path, session):    
-        """Add new entry to the Detsets table. Called by the
+        """Add new entry to the TunesSet table. Called by the
         index_metadata function.
-        
+
         Args
         -------
         stream_id : string
@@ -583,63 +849,47 @@ class G3tSmurf:
             The active session
         """
         name = tune_path.split('/')[-1]
-        dset = session.query(Detsets).filter(Detsets.name == name).one_or_none()
-        if dset is None:
-            dset = Detsets(name=name, start=dt.datetime.fromtimestamp(ctime),
+        tune = session.query(Tunes).filter(Tunes.name == name,
+                                          Tunes.stream_id == stream_id).one_or_none()
+        if tune is None:
+            tune = Tunes(name=name, start=dt.datetime.fromtimestamp(ctime),
                            path=tune_path, stream_id=stream_id)
-            session.add(dset)
+            session.add(tune)
             session.commit()
 
-        data = np.load(tune_path, allow_pickle=True).item()
-        if len(dset.chan_assignments) != len(data):
-            ## we are missing channel assignments for at least one band
-            have_already = [cha.band.number for cha in dset.chan_assignments]
+        ## assign set is the set of channel assignments that make up this tune file
+        assign_set = self._assign_set_from_file(tune_path, ctime=ctime,
+                                           stream_id=stream_id, session=session)
 
-            for band in data.keys():
-                if band in have_already:
-                    continue
-                if 'resonances' not in data[band]:
-                    ### tune file doesn't have info for this band
-                    continue
+        tuneset = None
+        tunesets = session.query(TuneSets)
+        ## tunesets with any channel assignments matching list
+        tunesets = tunesets.filter( TuneSets.chan_assignments.any(
+                    ChanAssignments.id.in_([a.id for a in assign_set]))).all()
 
-                db_Band = session.query(Bands).filter(Bands.stream_id == stream_id, 
-                                  Bands.number==band).one_or_none()
-                if db_Band is None:
-                    raise ValueError("Unable to find Band that should exist")
+        if len(tunesets)>0:
+            for ts in tunesets:
+                if np.all( sorted([ca.id for ca in ts.chan_assignments]) == sorted([a.id for a in assign_set]) ):
+                    tuneset = ts
 
-                ##################################################################################
-                ## Section waiting on Pysmurf Upgrade tracking channel assignments in tuning files
-                ##################################################################################
-                ## For now we assume the most recent channel assignment for the band
+        if tuneset is None:
+            logger.debug(f"New Tuneset Detected {stream_id}, {ctime}, {[[a.name for a in assign_set]]}")
+            tuneset = TuneSets(name=name, path=tune_path, stream_id=stream_id,
+                               start=dt.datetime.fromtimestamp(ctime))
+            session.add(tuneset)
+            session.commit()
 
-                db_cha = session.query(ChanAssignments).filter(ChanAssignments.band_id == db_Band.id,
-                                                               ChanAssignments.ctime <= ctime )
-                db_cha = db_cha.order_by(db.desc(ChanAssignments.ctime)).first()
-                if db_cha is None:
-                    raise ValueError("Unable to find Channel Assignment that should exist")
-                in_cha_db = [sorted( [ch.channel for ch in db_cha.channels])]              
-                in_tune_file =[sorted( [data[band]['resonances'][x]['channel'] for x in  data[band]['resonances'].keys()])]
-
-                ## Check to make sure the most recent channel assignment matches the tuning file
-                if not np.all( in_cha_db == in_tune_file ):
-                    ### logic left in just in case. If the first channel assignment doesn't match, try the 
-                    ### later ones
-                    db_cha = session.query(ChanAssignments).filter(ChanAssignments.band_id == db_Band.id,
-                                                                   ChanAssignments.ctime <= ctime )
-                    db_chas = db_cha.order_by(db.desc(ChanAssignments.ctime)).all()[1:]
-                    for db_cha in db_chas:
-                        in_cha_db = sorted( [ch.channel for ch in db_cha.channels])
-                        in_tune_file = sorted( [data[band]['resonances'][x]['channel'] for x in data[band]['resonances'].keys()])
-                        if np.all( in_cha_db == in_tune_file):
-                            break
-
-                ## add a the assignments and channels to the detector set
-                dset.chan_assignments.append(db_cha)
+            ## add a the assignments and channels to the detector set
+            for db_cha in assign_set:
+                tuneset.chan_assignments.append(db_cha)
                 for ch in db_cha.channels:
-                    dset.channels.append(ch)
-        session.commit()  
+                    tuneset.channels.append(ch)
+            session.commit()
+
+        tune.tuneset = tuneset
+        session.commit()
     
-    def add_new_observation(self, stream_id, ctime, obs_data, session, max_early=5,max_wait=10):
+    def add_new_observation(self, stream_id, ctime, obs_data, session, max_early=5,max_wait=100):
         """Add new entry to the observation table. Called by the
         index_metadata function.
         
@@ -668,32 +918,33 @@ class G3tSmurf:
                                start = dt.datetime.fromtimestamp(ctime))
             session.add(obs)
             session.commit()
-            
-        ################################################################################################
-        ## Section waiting on tuning files being added to the data stream at the start of observations
-        ## For now assume we just use the most recent tuning file.
-        ################################################################################################
 
         self.update_observation_files(obs, session, max_early=max_early,
                     max_wait=max_wait)
 
-    def update_observation_files(self, obs, session, max_early=5, max_wait=10):
-        """ Update existing observation. A separate function to make it easier
-        to deal with partial data transfers. See add_new_observation for args"""
+    def update_observation_files(self, obs, session, max_early=5, max_wait=100, force=False):
+        """Update existing observation. A separate function to make it easier
+        to deal with partial data transfers. See add_new_observation for args
+        
+        Args
+        -----
+        max_early : int     
+            Buffer time to allow the g3 file to be earlier than the smurf action
+        max_wait : int  
+            Maximum amount of time between the streaming start action and the 
+            making of .g3 files that belong to an observation
+        session : SQLAlchemy Session
+            The active session
+        force : bool
+            If true, will recalculate file/tune information even if observation 
+            appears complete
+        """
+        
+        if not force and obs.duration is not None and len(obs.tunesets) >= 1:
+            return
 
-        dset = session.query(Detsets).filter(Detsets.start <= obs.start)
-        dset = dset.order_by(db.desc(Detsets.start)).first()
-        already_have = [ds.id for ds in obs.detsets]
-
-        if dset is not None:
-            if not dset.id in already_have:
-                obs.detsets.append(dset)
-        else:
-            # print('no tuning file found. should I build one?')
-            ## Here is where we will put logic if we need to go backwards 
-            pass
-
-        x=session.query(Files.name).filter(Files.start >= obs.start-dt.timedelta(seconds=max_early)).order_by(Files.start).first()
+        x=session.query(Files.name).filter(Files.start >= obs.start-dt.timedelta(seconds=max_early))
+        x = x.order_by(Files.start).first()
         if x is None:
             ## no files to add at this point
             session.commit()
@@ -704,37 +955,67 @@ class G3tSmurf:
             ## we don't have .g3 files for some reason
             pass
         else:
-            flist = session.query(Files).filter(Files.name.like(f_start+'%')).order_by(Files.start).all()
+            flist = session.query(Files).filter(Files.name.like(f_start+'%'))
+            flist = flist.order_by(Files.start).all()
+            
+            ## Use Status information to set Tuneset
+            status = SmurfStatus.from_file(flist[0].path)
+            if status.action is not None:
+                if status.action not in SMURF_ACTIONS['observations']:
+                    logger.warning(f"Status Action {status.action} from file does not \
+                                    match accepted observation types")
+                if status.action_timestamp != obs.timestamp:
+                    logger.error(f"Status timestamp {status.action_timestamp} from file does \
+                                not match observation timestamp {obs.timestamp}")
+                    return
+                                   
+            
+            if status.tune is not None:
+                tune = session.query(Tunes).filter( Tunes.name == status.tune).one_or_none()
+                if tune is None:
+                    logger.warning(f"Tune {status.tune} not found in database, update error?")
+                    tuneset = None
+                else:
+                    tuneset = tune.tuneset
+            else:
+                tuneset = session.query(TuneSets).filter(TuneSets.start <= obs.start)
+                tuneset = tuneset.order_by(db.desc(TuneSets.start)).first()
+                
+            already_have = [ts.id for ts in obs.tunesets]
+            if tuneset is not None:
+                if not tuneset.id in already_have:
+                    obs.tunesets.append(tuneset)
+
+            ## Update file entries
             for f in flist:
                 f.obs_id = obs.obs_id
-                if dset is not None:
-                    f.detset = dset.name
+                if tuneset is not None:
+                    f.detset = tuneset.name
             obs.duration = flist[-1].stop.timestamp() - obs.timestamp
             obs.stop = flist[-1].stop
         session.commit()
 
-        
-    def index_metadata(self, verbose = False, stop_at_error=False):
+    def index_metadata(self, min_ctime=16000*1e5, stop_at_error=False):
         """
-            Adds all channel assignments, detsets, and observations in archive to database. 
+            Adds all channel assignments, tunefiles, and observations in archive to database. 
             Adding relevant entries to Bands and Files as well.
 
             Args
             ----
-            verbose: bool
-                Verbose mode
+            min_ctime : int
+                Lowest ctime to start looking for new metadata
             stop_at_error: bool
                 If True, will stop if there is an error indexing a file.
         """
+
         if self.meta_path is None:
             raise ValueError('Archiver needs meta_path attribute to index channel assignments')
 
         session = self.Session()
 
-
-        for ct_dir in sorted(os.listdir(self.meta_path)):
-            ### ignore old things
-            if int(ct_dir) < 16000:
+        logger.info(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
+        for ct_dir in sorted(os.listdir(self.meta_path)):        
+            if int(ct_dir) < int(min_ctime//1e5):
                 continue
 
             for stream_id in sorted(os.listdir( os.path.join(self.meta_path, ct_dir))):
@@ -745,71 +1026,70 @@ class G3tSmurf:
                     try:
                         ctime = int( action.split('_')[0] )
                         astring = '_'.join(action.split('_')[1:])
+                        logger.debug(f"Found action {astring} at ctime {ctime}")
 
                         ### Look for channel assignments before tuning files
                         if astring in SMURF_ACTIONS['channel_assignments']:
 
-                            cha_path = os.listdir(os.path.join(action_path, action, 'outputs'))
-                            if len(cha_path) == 0:
+                            cha = os.listdir(os.path.join(action_path, action, 'outputs'))
+                            if len(cha) == 0:
                                 raise ValueError("found action {} with no output".format(action))
-                            cha = None; 
-                            for f in cha_path:
-                                ##################################################################################
-                                ## Needs to account for multiple channel assignments per setup notches.
-                                ## Error in pysmurf 4.2 pre-release
-                                ## Currently just tracking all of them
-                                ##################################################################################
-                                match = re.findall('channel_assignment_b\d.txt', f)
-                                if len(match)==1:
-                                    cha = f
-                                    cha_ctime = int(cha.split('_')[0])
-                                    cha_path = os.path.join(action_path, action, 'outputs', cha)
-                                    self.add_new_channel_assignment(stream_id, cha_ctime, cha, cha_path, session)
 
-                            if cha is None:
-                                raise ValueError("found action {}. unable to find channel assignment".format(action))
+                            ## find last channel assignment in directory
+                            cha= [f for f in cha if 'channel_assignment' in f]
+                            if len(cha) == 0:
+                                logger.debug(f"{action} run with no new channel assignment")
+                                continue
+
+                            cha = sorted(cha)[-1]
+                            cha_path = os.path.join(action_path, action, 'outputs', cha)
+                            cha_ctime = int(cha.split('_')[0])
+
+                            logger.debug(f"Add new channel assignment: {stream_id}, {cha_ctime}, {cha_path}")
+                            self.add_new_channel_assignment(stream_id, cha_ctime, cha, cha_path, session)     
+
 
                         ### Look for tuning files before observations
-                        ### Assumes only one tuning file per setup_notches
                         if astring in SMURF_ACTIONS['tuning']:
-                            tune_path = os.listdir(os.path.join(action_path, action, 'outputs'))
-                            if len(tune_path) == 0:
+                            tune = os.listdir(os.path.join(action_path, action, 'outputs'))
+                            if len(tune) == 0:
                                 raise ValueError("found action {} with no output".format(action))
-                            tune = None
-                            for f in tune_path:
-                                match = re.findall('\d_tune.npy', f)
-                                if len(match)==1:
-                                    tune=f
-                                    tune_ctime = int(tune.split('_')[0])
-                                    tune_path = os.path.join(action_path, action, 'outputs', tune)
-                                    break
-                            if tune is None:
-                                raise ValueError("found action {}. unable to find tune file".format(action))
 
+                            ## find last tune in directory
+                            tune = [f for f in tune if 'tune' in f]
+                            if len(tune) > 1:
+                                logger.warning(f"found multiple tune files in {stream_id}, {ctime}, {action}")
+                            if len(tune) == 0:
+                                logger.warning(f"found no tune files in {stream_id}, {ctime}, {action}")
+                                continue
+
+                            tune = sorted(tune)[-1]
+                            tune_ctime = int(tune.split('_')[0])
+                            tune_path = os.path.join(action_path, action, 'outputs', tune)
+
+                            logger.debug(f"Add new Tune: {stream_id}, {ctime}, {tune_path}")
                             self.add_new_tuning(stream_id, tune_ctime, tune_path, session)
 
+                        ### Add Observations
                         if astring in SMURF_ACTIONS['observations']:
-                            ### Sometimes there are just mask files. Sometimes there are mask and freq files.
                             obs_path = os.listdir(os.path.join(action_path, action, 'outputs'))
                             if len(obs_path) == 0:
                                 raise ValueError("found action {} with no output".format(action))
-
+                            logger.debug(f"Add new Observation: {stream_id}, {ctime}, {obs_path}")
                             self.add_new_observation(stream_id, ctime, obs_path, session)
 
                     except ValueError as e:
-                        if verbose:
-                            print(e, stream_id, ctime)
+                        logger.info(f"Value Error at {stream_id}, {ctime}")
                         if stop_at_error:
                             raise(e)
-                    #except KeyError as e:
-                    #    if verbose:
-                    #        print(e, stream_id, ctime)
-                    #    if stop_at_error:
-                    #        raise(e)
+                    except IntegrityError as e:
+                        # Database Integrity Errors, such as duplicate entries
+                        session.rollback()
+                        logger.info(f"Integrity Error at {stream_id}, {ctime}")
                     except Exception as e:
-                        if verbose:
-                            print(stream_id, ctime)
+                        logger.info(stream_id, ctime)
                         raise(e)
+        session.close()
 
 
     def _stream_ids_in_range(self, start, end):
@@ -840,8 +1120,8 @@ class G3tSmurf:
                 sids.append(sid)
         return sids
 
-    def load_data(self, start, end, stream_id=None, dets=None, detset=None, 
-                  show_pb=True, load_biases=True):
+    def load_data(self, start, end, stream_id=None, channels=None,
+                  show_pb=True, load_biases=True, status=None):
         """
         Loads smurf G3 data for a given time range. For the specified time range
         this will return a chunk of data that includes that time range.
@@ -876,16 +1156,16 @@ class G3tSmurf:
                 end time for data
             stream_id : String 
                 stream_id to load, in case there are multiple
-            dets : list or None
+            channels : list or None
                 If not None, it should be a list that can be sent to get_channel_mask.
-                Called dets for sotodlib compatibility. This function only looks at 
-                SMuRF channels.
             detset : string
                 the name of the detector set (tuning file) to load
             show_pb : bool, optional: 
                 If True, will show progress bar.
             load_biases : bool, optional 
                 If True, will return biases.
+            status : SmurfStatus, optional
+                If note none, will use this Status on the data load
 
         Returns
         --------
@@ -904,8 +1184,6 @@ class G3tSmurf:
                     
         TODO: Track down differences between detector sets (tune files) and 
                 information in status object
-                
-        TODO: Track down "Lazy-loaded attribute for Channels.band"
         """
         session = self.Session()
         start = self._make_datetime(start)
@@ -928,25 +1206,21 @@ class G3tSmurf:
 
         q = q.order_by(Files.start).distinct()
         flist = [x[0] for x in q.all()]
+        
+        if status is None:
+            scan_start = session.query(Frames.start).filter(Frames.start > start,
+                                                            Frames.type_name=='Scan')
+            scan_start = scan_start.order_by(Frames.start).first()
 
-        if detset is None:
-            detset = session.query(Detsets).filter(Detsets.start <= start)
-            detset = detset.order_by( db.desc(Detsets.start) ).first() 
-        else:
-            detset = session.query(Detsets).filter(Detsets.name==detset).one()
+            try:
+                status = self.load_status(scan_start[0])
+            except:
+                logger.info("Status load from database failed, using file load")
+                status = None
         
-        scan_start = session.query(Frames.start).filter(Frames.start > start,
-                                                        Frames.type_name=='Scan')
-        scan_start = scan_start.order_by(Frames.start).first()
+        aman = load_file( flist, status=status, channels=channels,
+                         archive=self, show_pb=show_pb)
         
-        try:
-            status = self.load_status(scan_start[0])
-        except:
-            logger.info("Status load from database failed, using file load")
-            status = None
-        
-        aman = load_file( flist, status=status, dets=dets,
-                         archive=self, detset=detset, show_pb=show_pb)
         msk = np.all([aman.timestamps >= start.timestamp(),
                       aman.timestamps < end.timestamp()], axis=0)
         idx = np.where(msk)[0]
@@ -956,6 +1230,7 @@ class G3tSmurf:
         else:
             aman.restrict('samps', (idx[0], idx[-1]))
         session.close()
+        
         return aman
 
     def load_status(self, time, show_pb=False):
@@ -972,6 +1247,36 @@ class G3tSmurf:
         """
         return SmurfStatus.from_time(time, self, show_pb=show_pb)
 
+def dump_DetDb(archive, detdb_file):
+    """
+    Take a G3tSmurf archive and create a a DetDb of the type used with Context
+    
+    Args
+    -----
+        archive : G3tSmurf instance
+        detdb_file : filename
+    """
+    my_db = core.metadata.DetDb(map_file=detdb_file)
+    my_db.create_table('base', column_defs=[])
+    column_defs = [
+        "'band' int",
+        "'channel' int",
+        "'frequency' float",
+        "'chan_assignment' int",
+    ]
+    my_db.create_table('smurf', column_defs=column_defs)
+    
+    ddb_list = my_db.dets()['name']
+    session = archive.Session()
+    channels = session.query(Channels).all()
+    msk = np.where([ch.name not in ddb_list for ch in channels])[0].astype(int)
+    for ch in tqdm(np.array(channels)[msk]):
+        my_db.get_id( name=ch.name )
+        my_db.add_props('smurf', ch.name, band=ch.band, 
+                        channel=ch.channel, frequency=ch.frequency,
+                        chan_assignment=ch.chan_assignment.ctime)
+    session.close()
+    return my_db
 
 class SmurfStatus:
     """
@@ -1031,7 +1336,7 @@ class SmurfStatus:
         # Reads in useful status values as attributes
         mapper_root = 'AMCc.SmurfProcessor.ChannelMapper'
         self.num_chans = self.status.get(f'{mapper_root}.NumChannels')
-
+        
         # Tries to set values based on expected rogue tree
         self.mask = self.status.get(f'{mapper_root}.Mask')
         self.mask_inv = np.full((self.NUM_BANDS, self.CHANS_PER_BAND), -1)
@@ -1044,6 +1349,19 @@ class SmurfStatus:
                 c = chan % self.CHANS_PER_BAND
                 self.mask_inv[b, c] = i
 
+        tune_root = 'AMCc.FpgaTopLevel.AppTop.AppCore.SysgenCryo.tuneFilePath'        
+        self.tune = self.status.get(tune_root)
+        if self.tune is not None and len(self.tune)>0:
+            self.tune = self.tune.split('/')[-1]
+        
+        pysmurf_root = 'AMCc.SmurfProcessor.SOStream'
+        self.action = self.status.get(f'{pysmurf_root}.pysmurf_action')
+        if self.action == '':
+            self.action = None
+        self.action_timestamp = self.status.get(f'{pysmurf_root}.pysmurf_action_timestamp')
+        if self.action_timestamp == 0:
+            self.action_timestamp = None
+        
         filter_root = 'AMCc.SmurfProcessor.Filter'
         self.filter_a = self.status.get(f'{filter_root}.A')
         if self.filter_a is not None:
@@ -1116,6 +1434,8 @@ class SmurfStatus:
                     else:
                         status['stop'] = frame['time'].time/spt3g_core.G3Units.s
                     status.update(yaml.safe_load(frame['status']))
+                    if frame['dump']:
+                        break
         return cls(status)
     
     @classmethod
@@ -1140,22 +1460,33 @@ class SmurfStatus:
         time = archive._make_datetime(time)
         session = archive.Session()
         session_start,  = session.query(Frames.time).filter(
-            Frames.type_name == 'Observation',
-            Frames.time <= time
-        ).order_by(Frames.time.desc()).first()
+                Frames.type_name == 'Observation',
+                Frames.time <= time
+            ).order_by(Frames.time.desc()).first()
 
         status_frames = session.query(Frames).filter(
-            Frames.type_name == 'Wiring',
-            Frames.time >= session_start,
-            Frames.time <= time
-        ).order_by(Frames.time)
+                Frames.type_name == 'Wiring',
+                Frames.time >= session_start,
+                Frames.time <= time
+            ).order_by(Frames.time)
 
+        ## Look for the last dump frame if avaliable
+        dump_frame = status_frames.filter(
+                Frames.status_dump
+                ).order_by(Frames.time.desc()).first()
+        
+        if dump_frame is not None:
+            status_frames = [dump_frame]
+        else:
+            logger.info("Status dump frame not found, reading all status frames")
+            status_frames = status_frames.all()
+            
         status = {
             'start':status_frames[0].time.timestamp(),
             'stop':status_frames[-1].time.timestamp(),
         }
         cur_file = None
-        for frame_info in tqdm(status_frames.all(), disable=(not show_pb)):
+        for frame_info in tqdm(status_frames, disable=(not show_pb)):
             file = frame_info.file.path
             if file != cur_file:
                 reader = so3g.G3IndexedReader(file)
@@ -1163,7 +1494,8 @@ class SmurfStatus:
             reader.Seek(frame_info.offset)
             frame = reader.Process(None)[0]
             status.update(yaml.safe_load(frame['status']))
-
+        
+        session.close()
         return cls(status)
         
     def readout_to_smurf(self, rchan):
@@ -1200,7 +1532,8 @@ class SmurfStatus:
         """
         return self.mask_inv[band, chan]
 
-def get_channel_mask(ch_list, status, archive=None, ignore_missing=True):
+def get_channel_mask(ch_list, status, archive=None, obsfiledb=None,
+                     ignore_missing=True):
     """Take a list of desired channels and parse them so the different
     data loading functions can load them.
     
@@ -1219,6 +1552,8 @@ def get_channel_mask(ch_list, status, archive=None, ignore_missing=True):
         Status to use to generate channel loading mask
     archive : G3tSmurf instance
         Archive used to search for channel names / frequencies
+    obsfiledb : ObsFileDb instance
+        ObsFileDb used to search for channel names if archive is None
     ignore_missing : bool
         If true, will not raise errors if a requested channel is not found
     
@@ -1258,16 +1593,27 @@ def get_channel_mask(ch_list, status, archive=None, ignore_missing=True):
                     continue
                 msk[status.mask_inv[b,c][0]] = True
                 
-            elif type(ch) == str:
+            elif np.issubdtype( type(ch), np.str_):
                 #### this is a channel name
-                if session is None:
-                    raise ValueError("Need G3tSmurf Archive to pass channel names")
-                channel = session.query(Channels).filter(Channels.name==ch).one_or_none()
-                if channel is None:
-                    if not ignore_mission:
-                        raise ValueError(f"channel {ch} not found in database")
-                    continue
-                idx = status.mask_inv[channel.band_number, channel.channel]
+                if session is not None:
+                    channel = session.query(Channels).filter(Channels.name==ch).one_or_none()
+                    if channel is None:
+                        if not ignore_mission:
+                            raise ValueError(f"channel {ch} not found in G3tSmurf Archive")
+                        continue
+                    b,c = channel.band, channel.channel
+                elif obsfiledb is not None:
+                    c = obsfiledb.conn.execute('select band,channel from channels where name=?',(ch,))
+                    c = [(r[0],r[1]) for r in c]
+                    if len(c) == 0:
+                        if not ignore_mission:
+                            raise ValueError(f"channel {ch} not found in obsfiledb")
+                        continue
+                    b,c = c[0]
+                else:
+                    raise ValueError("Need G3tSmurf Archive or Obsfiledb to pass channel names")
+                
+                idx = status.mask_inv[b,c]
                 if idx == -1:
                     if not ignore_missing:
                         raise ValueError(f"channel {ch} not streaming")
@@ -1275,7 +1621,7 @@ def get_channel_mask(ch_list, status, archive=None, ignore_missing=True):
                 msk[idx] = True
                 
             else:
-                raise TypeError(f"type for channel {ch} not understood")
+                raise TypeError(f"type {type(ch)} for channel {ch} not understood")
         else:
             if len(ch) == 2:
                 ### this is a band, channel pair
@@ -1291,7 +1637,103 @@ def get_channel_mask(ch_list, status, archive=None, ignore_missing=True):
         session.close()
     return msk
 
-def get_channel_info(status, mask=None, detset=None):
+def _get_tuneset_channel_names(status, ch_map, archive):
+    """Update channel maps with name from Tuneset
+    """
+    session = archive.Session()
+    
+    ## tune file in status
+    if status.tune is not None and len(status.tune) > 0:
+        tune_file = status.tune.split('/')[-1]
+        tune = session.query(Tunes).filter(Tunes.name == tune_file).one_or_none()
+        if tune is None :
+            logger.info(f"Tune file {tune_file} not found in G3tSmurf archive")
+            return ch_map
+        if tune.tuneset is None:
+            logger.info(f"Tune file {tune_file} has no TuneSet in G3tSmurf archive")
+            return ch_map
+    else:
+        logger.info("Tune information not in SmurfStatus, using most recent Tune")
+        tune = session.query(Tunes).filter(Tunes.start <= dt.datetime.utcfromtimestamp(status.start))
+        tune = tune.order_by(db.desc(Tunes.start)).first()
+        if tune.tuneset is None:
+            logger.info(f"Tune file {tune.name} has no TuneSet in G3tSmurf archive")
+            return ch_map
+    
+    bands, channels, names = zip(*[(ch.band, ch.channel, ch.name) for ch in tune.tuneset.channels])
+    for i in range(len(ch_map)):
+        try:
+            msk = np.all( [ch_map['band'][i]== bands, ch_map['channel'][i]==channels], axis=0)
+            j = np.where(msk)[0][0]
+            ch_map[i]['name'] = names[j]
+        except:
+            logger.info(f"Information retrival error for Detector {ch_map[i]}")
+            continue 
+
+    session.close()
+    return ch_map
+
+def _get_detset_channel_names(status, ch_map, obsfiledb):
+    """Update channel maps with name from obsfiledb
+    """
+    ## tune file in status
+    if status.tune is not None and len(status.tune) > 0:
+        c =  obsfiledb.conn.execute('select det from detsets '
+                    'where name=?', (status.tune,))
+        detsets = [r[0] for r in c]
+    else:
+        logger.info("Tune information not in SmurfStatus, using most recent Tune")
+        c = obsfiledb.conn.execute('select tuneset_id from tunes '
+                            'where start<=? '
+                            'order by start desc', (dt.datetime.utcfromtimestamp(status.start),))
+        tuneset_id = [r[0] for r in c][0]
+
+        c = obsfiledb.conn.execute('select name from tunesets '
+                                   'where id=?', (tuneset_id,))
+        tuneset = [r[0] for r in c][0]
+
+        c = obsfiledb.conn.execute('select det from detsets '
+                            'where name=?', (tuneset,))
+        detsets = [r[0] for r in c]
+    
+    sql="select band,channel,name from channels where name in ({seq})".format(
+                seq=','.join(['?']*len(detsets)))
+    c = obsfiledb.conn.execute(sql,detsets)
+
+    bands, channels, names = zip(*[(r[0],r[1],r[2]) for r in c])
+
+    for i in range(len(ch_map)):
+        try:
+            msk = np.all( [ch_map['band'][i]== bands, ch_map['channel'][i]==channels], axis=0)
+            j = np.where(msk)[0][0]
+            ch_map[i]['name'] = names[j]
+        except:
+            logger.info(f"Information retrival error for Detector {ch_map[i]}")
+            continue 
+            
+    return ch_map
+
+def _get_channel_mapping(status, ch_map):
+    """Generate baseline channel map from status object
+    """
+    for i, ch in enumerate(ch_map['idx']):
+        try:
+            sch = status.readout_to_smurf( ch )
+            ch_map[i]['rchannel'] = 'r{:04d}'.format(ch)
+            ch_map[i]['name'] = 'sch_NONE_{}_{:03d}'.format(sch[0],sch[1])
+            ch_map[i]['freqs']= status.freq_map[sch[0], sch[1]]
+            ch_map[i]['band'] = sch[0]
+            ch_map[i]['channel'] = sch[1]
+        except:
+            ch_map[i]['rchannel'] = 'r{:04d}'.format(ch)
+            ch_map[i]['name'] = 'rch_{:04d}'.format(ch)
+            ch_map[i]['freqs']= -1
+            ch_map[i]['band'] = -1
+            ch_map[i]['channel'] = -1        
+    return ch_map
+
+def get_channel_info(status, mask=None, archive=None, obsfiledb=None, 
+                    det_axis='dets'):
     """Create the Channel Info Section of a G3tSmurf AxisManager
     
     This function returns an AxisManager with the following properties    
@@ -1309,71 +1751,38 @@ def get_channel_info(status, mask=None, detset=None):
     status : SmurfStatus instance
     mask : bool array
         mask of which channels to use
-    detset : DetSet instance (optionl)
-        detector set for the data
+    archive : G3tSmurf instance (optionl)
+        G3tSmurf instance for looking for tunes/tunesets
+    obsfiledb : ObsfileDb instance (optional)
+        ObsfileDb instance for det names / band / channel
         
     Returns
     --------
     ch_info : AxisManager
     
     """
-    #### Get Info for channels in this observation
-    if detset is None:
-        bnd_assign=[]
-        ch_assign=[]
-    else:
-        bnd_assign = [ ch.band.number for ch in detset.channels ]
-        ch_assign =  [ ch.channel for ch in detset.channels     ]
-    
-    channel_names = []
-    channel_bands = []
-    channel_channels = []
-    channel_freqs = []
-    channel_rch = []
-   
-    ch_list = np.arange( status.num_chans)
+    ch_list = np.arange( status.num_chans )
     if mask is not None:
         ch_list = ch_list[mask]
-        
-    for ch in ch_list:
-        try:
-            sch = status.readout_to_smurf(ch)
-
-            x = np.where(np.all([bnd_assign == sch[0],
-                                 ch_assign  == sch[1]], axis=0))[0]
-
-            if len(x) == 0:
-                ########################################
-                ## There appear to be a non-trivial number of these when
-                ## using DetSets SMuRF Error or Indexing Error?
-                ########################################
-                name = 'sch_NONE_{}_{:03d}'.format(sch[0],sch[1])
-                freq = status.freq_map[sch[0], sch[1]]
-            else:
-                channel = detset.channels[x[0]]
-                name = channel.name
-                ########################################
-                ## Related to above, freq != status.freq for many of these
-                ########################################
-                freq = channel.frequency
-
-        except:
-            ## load 'readout channel' as a backup
-            name='rch_{:04d}'.format(ch)
-            sch = (-1,-1)
-            freq=-1
-
-        channel_names.append(name)
-        channel_bands.append(sch[0])
-        channel_channels.append(sch[1])
-        channel_freqs.append(freq)
-        channel_rch.append('r{:04d}'.format(ch)) 
     
-    ch_info = core.AxisManager( core.LabelAxis('channels', channel_names),)
-    ch_info.wrap('band', np.array(channel_bands), ([(0,'channels')]) )
-    ch_info.wrap('channel', np.array(channel_channels), ([(0,'channels')]) )
-    ch_info.wrap('frequency', np.array(channel_freqs), ([(0,'channels')]) )
-    ch_info.wrap('rchannel', np.array(channel_rch), ([(0,'channels')]) )
+    ch_map = np.zeros( len(ch_list), dtype = [('idx', int), ('name', np.unicode_,30), 
+                                              ('rchannel', np.unicode_,30), ('band', int),
+                                             ('channel', int), ('freqs', float)])
+    ch_map['idx'] = ch_list
+    
+    ch_map = _get_channel_mapping(status, ch_map)
+    
+    if archive is not None:
+        ch_map = _get_tuneset_channel_names(status, ch_map, archive)
+    elif obsfiledb is not None:
+        ch_map = _get_detset_channel_names(status, ch_map, obsfiledb)
+        
+    ch_info = core.AxisManager( core.LabelAxis(det_axis, ch_map['name']),)
+    ch_info.wrap('band', ch_map['band'], ([(0,det_axis)]) )
+    ch_info.wrap('channel', ch_map['channel'], ([(0,det_axis)]) )
+    ch_info.wrap('frequency', ch_map['freqs'], ([(0,det_axis)]) )
+    ch_info.wrap('rchannel', ch_map['rchannel'], ([(0,det_axis)]) )
+    
     return ch_info
 
 def _get_timestamps(streams, load_type=None):
@@ -1405,9 +1814,9 @@ def _get_timestamps(streams, load_type=None):
     logger.error("Timing System could not be determined")
             
         
-def load_file(filename, dets=None, ignore_missing=True, 
-             load_biases=True, load_primary=True, 
-             status=None, archive=None, detset=None, show_pb=True):
+def load_file(filename, channels=None, ignore_missing=True, 
+             load_biases=True, load_primary=True, status=None,
+             archive=None, obsfiledb=None, show_pb=True, det_axis='dets'):
     """Load data from file where there may not be a connected archive.
 
     Args
@@ -1415,10 +1824,8 @@ def load_file(filename, dets=None, ignore_missing=True,
       filename : str or list 
           A filename or list of filenames (to be loaded in order).
           Note that SmurfStatus is only loaded from the first file
-      dets: list or None
+      channels: list or None
           If not None, it should be a list that can be sent to get_channel_mask.
-          Called dets for sotodlib compatibility. This function only looks at 
-          SMuRF channels.
       ignore_missing : bool
           If true, will not raise errors if a requested channel is not found
       load_biases : bool
@@ -1427,11 +1834,20 @@ def load_file(filename, dets=None, ignore_missing=True,
           If true, loads the primary data fields, old .g3 files may not have 
           these fields. 
       archive : a G3tSmurf instance (optional)
+      obsfiledb : a ObsFileDb instance (optional, used when loading from context)
       status : a SmurfStatus Instance we don't want to use the one from the 
           first file
-      detset : Detset database entry, used for channel names in channel info
+      det_axis : name of the axis used for channels / detectors
+
+    Returns
+    ---------
+      aman : AxisManager
+        AxisManager with the data with axes for `channels` and `samps`. It will
+        always have fields `timestamps`, `signal`, `flags`(FlagManager),
+        `ch_info` (AxisManager with `bands`, `channels`, `frequency`, etc).
     """   
-    
+    logger.info(f"Axis Manager will have {det_axis} and samps axes")
+ 
     if isinstance(filename, str):
         filenames = [filename]
     else:
@@ -1440,13 +1856,15 @@ def load_file(filename, dets=None, ignore_missing=True,
     if status is None:
         status = SmurfStatus.from_file(filenames[0])
 
-    if dets is not None:
-        ch_mask = get_channel_mask(dets, status, archive=archive, 
-                               ignore_missing=ignore_missing)
+    if channels is not None:
+        ch_mask = get_channel_mask(channels, status, archive=archive, 
+                                   obsfiledb=obsfiledb,
+                                   ignore_missing=ignore_missing)
     else:
         ch_mask = None
 
-    ch_info = get_channel_info(status, ch_mask, detset=detset)
+    ch_info = get_channel_info(status, ch_mask, archive=archive, 
+                                   obsfiledb=obsfiledb, det_axis=det_axis)
 
     subreq = [
         io_load.FieldGroup('data', ch_info.rchannel, timestamp_field='time'),
@@ -1469,15 +1887,15 @@ def load_file(filename, dets=None, ignore_missing=True,
 
     ## Build AxisManager
     aman = core.AxisManager(
-        ch_info.channels.copy(),
+        ch_info[det_axis].copy(),
         core.OffsetAxis('samps', count, 0)
     )
     aman.wrap( 'timestamps', _get_timestamps(streams), ([(0,'samps')]))
 
     # Conversion from DAC counts to squid phase
     aman.wrap( 'signal', np.zeros(aman.shape, 'float32'),
-                 [(0, 'channels'), (1, 'samps')])
-    for idx in range(aman.channels.count):
+                 [(0, det_axis), (1, 'samps')])
+    for idx in range(aman[det_axis].count):
         io_load.hstack_into(aman.signal[idx], streams['data'][ch_info.rchannel[idx]])
 
     rad_per_count = np.pi / 2**15
@@ -1498,6 +1916,16 @@ def load_file(filename, dets=None, ignore_missing=True,
         for k in streams['tes_biases'].keys():
             i = int(k[4:])
             io_load.hstack_into(aman.biases[i], streams['tes_biases'][k])
-    aman.wrap('flags', core.FlagManager.for_tod(aman, 'channels', 'samps'))
+    aman.wrap('flags', core.FlagManager.for_tod(aman, det_axis, 'samps'))
 
     return aman
+
+def load_g3tsmurf_obs(db, obs_id, dets=None):
+    c = db.conn.execute('select path from files '
+                    'where obs_id=?' +
+                    'order by start', (obs_id,))
+    flist = [row[0] for row in c]
+    return load_file(flist, dets, obsfiledb=db)
+
+
+io_load.OBSLOADER_REGISTRY['g3tsmurf'] = load_g3tsmurf_obs
