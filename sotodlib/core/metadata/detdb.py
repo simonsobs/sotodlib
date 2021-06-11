@@ -3,6 +3,7 @@ import gzip
 import os
 
 from .resultset import ResultSet
+from . import common
 
 
 class SchemaError(Exception):
@@ -76,9 +77,12 @@ class DetDb(object):
         changes made to this object be written back to the file.
 
         """
-        if map_file is None:
-            map_file = ':memory:'
-        self.conn = sqlite3.connect(map_file)
+        if isinstance(map_file, sqlite3.Connection):
+            self.conn = map_file
+        else:
+            if map_file is None:
+                map_file = ':memory:'
+            self.conn = sqlite3.connect(map_file)
         self.conn.row_factory = sqlite3.Row  # access columns by name
 
         if init_db:
@@ -229,37 +233,14 @@ class DetDb(object):
             raise RuntimeError(f'Unknown format "{fmt}" requested.')
 
     @classmethod
-    def from_file(cls, filename, fmt=None):
-        """Instantiate a DetDb and return it, with the data copied in from the
-        specified file.
-
-        Args:
-          filename (str): path to the file.
-          fmt (str): format of the input; see to_file for details.
-
-        Note that if you want a `persistent` connection to the file,
-        you should instead pass the filename to the DetDb constructor
-        map_file argument.
-
+    def from_file(cls, filename, fmt=None, force_new_db=True):
+        """This method calls
+            :func:`sotodlib.core.metadata.common.sqlite_from_file`
         """
-        if fmt is None:
-            fmt = 'sqlite'
-            if filename.endswith('.gz'):
-                fmt = 'gz'
-        if fmt == 'sqlite':
-            db0 = cls(map_file=filename)
-            return db0.copy(map_file=None)
-        elif fmt == 'dump':
-            with open(filename, 'r') as fin:
-                data = fin.read()
-        elif fmt == 'gz':
-            with gzip.GzipFile(filename, 'r') as fin:
-                data = fin.read().decode('utf-8')
-        else:
-            raise RuntimeError(f'Unknown format "{fmt}" requested.')
-        new_db = DetDb(map_file=None, init_db=False)
-        new_db.conn.executescript(data)
-        return new_db
+        conn = common.sqlite_from_file(filename, fmt=fmt, 
+                                       force_new_db=force_new_db)
+        return cls(conn, init_db=False)
+        
 
     def reduce(self, dets=None, time0=None, time1=None,
                inplace=False):

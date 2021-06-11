@@ -31,7 +31,6 @@ from collections import OrderedDict
 
 from .. import core
 
-
 class FieldGroup(list):
     """This is essentially a roadmap for decoding data from a
     G3FrameObject.  Each entry in this list is either a string, giving

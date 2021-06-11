@@ -118,27 +118,15 @@ class ObsFileDb:
         return common.sqlite_to_file(self.conn, filename, overwrite=overwrite, fmt=fmt)
 
     @classmethod
-    def from_file(cls, filename, prefix=None, fmt=None):
-        """Instantiate an ObsFileDb and return it, with the data copied in
-        from the specified file.
-
-        Args:
-          filename (str): path to the file.
-          fmt (str): format of the input; see to_file for details.
-
-        Returns:
-          ObsFileDb with an sqlite3 connection that is mapped to memory.
-
-        Notes:
-          Note that if you want a `persistent` connection to the file,
-          you should instead pass the filename to the ObsFileDb
-          constructor map_file argument.
-
+    def from_file(cls, filename, prefix=None, fmt=None, force_new_db=True):
+        """This method calls
+            :func:`sotodlib.core.metadata.common.sqlite_from_file`
         """
-        conn = common.sqlite_from_file(filename, fmt=fmt)
+        conn = common.sqlite_from_file(filename, fmt=fmt,
+                                       force_new_db=force_new_db)
         if prefix is None:
             prefix = os.path.split(filename)[0] + '/'
-        return cls(conn, init_db=False, prefix=prefix)
+        return cls(conn, init_db=False, prefix=prefix, )
 
     @classmethod
     def for_dir(cls, path, filename='obsfiledb.sqlite', readonly=True):
