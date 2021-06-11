@@ -276,14 +276,17 @@ class OpSimSSO(Operator):
 
         if rank == 0:
             log.info("{}Observing the SSO signal".format(prefix))
-        
+
+        # FIXME: we should get the center frequency from the bandpass
         band_dict = {'f030' : 27, 'f040': 39, 'f090': 93,
-             '150': 145 , 'f230': 225, 'f290': 285}
+             'f150': 145 , 'f230': 225, 'f290': 285}
 
         for band in band_dict.keys():
             if band in prefix:
-               freq = band_dict[band]
-               break
+                # FIXME we use the same, approximate center frequency for
+                # SAT and LAT
+                freq = band_dict[band[4:]]
+                break
 
         for det in tod.local_dets:
             # Cache the output signal
