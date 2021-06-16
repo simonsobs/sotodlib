@@ -937,7 +937,7 @@ def get_example():
         ttyp = ltubes[tindx]
         tb = OrderedDict()
         tb["type"] = ttyp
-        tb["waferspace"] = 127.89
+        tb["waferspace"] = 128.4
         tb["wafer_slots"] = list()
         for tw in range(3):
             off = 0
@@ -959,7 +959,7 @@ def get_example():
         ttyp = stubes[tindx]
         tb = OrderedDict()
         tb["type"] = ttyp
-        tb["waferspace"] = 127.89
+        tb["waferspace"] = 128.4
         tb["wafer_slots"] = list()
         for tw in range(7):
             off = 0
