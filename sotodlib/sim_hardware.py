@@ -705,6 +705,7 @@ def get_example():
     # These numbers are for V3 LAT baseline
     bnd["A"] = 0.09
     bnd["C"] = 0.87
+    bnd["NET_corr"] = 1.19
     bands["LAT_f030"] = bnd
 
     bnd = OrderedDict()
@@ -718,6 +719,7 @@ def get_example():
     bnd["alpha"] = 3.5
     bnd["A"] = 0.25
     bnd["C"] = 0.64
+    bnd["NET_corr"] = 1.03
     bands["LAT_f040"] = bnd
 
     bnd = OrderedDict()
@@ -731,6 +733,7 @@ def get_example():
     bnd["alpha"] = 3.5
     bnd["A"] = 0.14
     bnd["C"] = 0.80
+    bnd["NET_corr"] = 1.07
     bands["LAT_f090"] = bnd
 
     bnd = OrderedDict()
@@ -744,6 +747,7 @@ def get_example():
     bnd["alpha"] = 3.5
     bnd["A"] = 0.17
     bnd["C"] = 0.76
+    bnd["NET_corr"] = 1.02
     bands["LAT_f150"] = bnd
 
     bnd = OrderedDict()
@@ -757,6 +761,7 @@ def get_example():
     bnd["alpha"] = 3.5
     bnd["A"] = 0.30
     bnd["C"] = 0.58
+    bnd["NET_corr"] = 1.03
     bands["LAT_f230"] = bnd
 
     bnd = OrderedDict()
@@ -770,6 +775,7 @@ def get_example():
     bnd["alpha"] = 3.5
     bnd["A"] = 0.36
     bnd["C"] = 0.49
+    bnd["NET_corr"] = 1.0
     bands["LAT_f290"] = bnd
     
     bnd = OrderedDict()
@@ -785,6 +791,7 @@ def get_example():
     # These numbers are for V3 SAT baseline
     bnd["A"] = 0.10
     bnd["C"] = 0.87
+    bnd["NET_corr"] = 1.09
     bands["SAT_f030"] = bnd
     
     bnd = OrderedDict()
@@ -798,6 +805,7 @@ def get_example():
     bnd["alpha"] = 3.5
     bnd["A"] = 0.26
     bnd["C"] = 0.66
+    bnd["NET_corr"] = 1.02
     bands["SAT_f040"] = bnd
     
     bnd = OrderedDict()
@@ -811,6 +819,7 @@ def get_example():
     bnd["alpha"] = 3.5
     bnd["A"] = 0.17
     bnd["C"] = 0.78
+    bnd["NET_corr"] = 1.00
     bands["SAT_f090"] = bnd
     
     bnd = OrderedDict()
@@ -824,6 +833,7 @@ def get_example():
     bnd["alpha"] = 3.5
     bnd["A"] = 0.23
     bnd["C"] = 0.71
+    bnd["NET_corr"] = 1.01
     bands["SAT_f150"] = bnd
     
     bnd = OrderedDict()
@@ -837,6 +847,7 @@ def get_example():
     bnd["alpha"] = 3.5
     bnd["A"] = 0.43
     bnd["C"] = 0.44
+    bnd["NET_corr"] = 1.00
     bands["SAT_f230"] = bnd
     
     bnd = OrderedDict()
@@ -850,6 +861,7 @@ def get_example():
     bnd["alpha"] = 3.5
     bnd["A"] = 0.48
     bnd["C"] = 0.38
+    bnd["NET_corr"] = 1.01
     bands["SAT_f290"] = bnd
 
     cnf["bands"] = bands
