@@ -239,6 +239,10 @@ def main():
 
     toast_tools.expand_pointing(args, comm, data)
 
+    # Flag Solar system objects
+
+    so_tools.apply_flag_sso(args, comm, data)
+
     # Optionally, output h_n maps
 
     so_tools.compute_h_n(args, comm, data)
@@ -274,8 +278,6 @@ def main():
         signalname = so_tools.simulate_sky_signal(args, comm, data, focalplanes)
     else:
         signalname = toast_tools.scan_sky_signal(args, comm, data)
-
-    so_tools.apply_flag_sso(args, comm, data)
 
     memreport("after PySM", comm.comm_world)
 
