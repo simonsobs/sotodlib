@@ -506,7 +506,7 @@ def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
             pol_B[p] = 90.0 + pol_A[p]
         # We are going to remove 2 pixels for mechanical reasons
         kf = dim * (dim - 1) // 2
-        kill = [kf, kf + dim - 2]
+        kill = [(dim*dim+kf), (dim*dim+kf) + dim - 2]
         layout_A = rhombus_hex_layout(nrhombus, width, gap,
                                       rhombus_rotate=pol_A, killpix=kill)
         layout_B = rhombus_hex_layout(nrhombus, width, gap,
