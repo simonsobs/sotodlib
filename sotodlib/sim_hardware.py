@@ -519,20 +519,28 @@ def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
         # same nominal orientation but trail each other along the
         # vertex-vertex axis of the hexagon.  The polarization orientation
         # changes every other column
-        handed = list()
-        pol_A = np.zeros(npix, dtype=np.float64)
-        pol_B = np.zeros(npix, dtype=np.float64)
-        for p in range(npix):
-            row, col = hex_row_col(npix, p)
-            if np.mod(col, 2) == 0:
-                handed.append("L")
-            else:
-                handed.append("R")
-            if np.mod(col, 4) < 2:
-                pol_A[p] = 0.0
-            else:
-                pol_A[p] = 45.0
-            pol_B[p] = 90.0 + pol_A[p]
+
+        if npix==37:
+            pol_A=np.array([45.,0.,45.,45.,45.,45.,0.,0.,0.,45.,45.,0.,0.,0.,45.,45.,0.,0.,0.,
+                            45.,0.,0.,45.,45.,0.,0.,0.,0.,0.,0.,45.,45.,0.,0.,45.,45.,45.])
+            handed=["R","L","R","L","L","R","L","R","L","R","L","R","R","R","L","R","L","R","R",
+                    "L","R","L","R","L","R","L","L","L","L","R","L","R","L","R","L","L","L"]
+            pol_B=90.0+pol_A
+        else:
+            handed = list()
+            pol_A = np.zeros(npix, dtype=np.float64)
+            pol_B = np.zeros(npix, dtype=np.float64)
+            for p in range(npix):
+                row, col = hex_row_col(npix, p)
+                if np.mod(col, 2) == 0:
+                    handed.append("L")
+                else:
+                    handed.append("R")
+                if np.mod(col, 4) < 2:
+                    pol_A[p] = 0.0
+                else:
+                    pol_A[p] = 45.0
+                pol_B[p] = 90.0 + pol_A[p]
         layout_A = hex_layout(npix, width, rotate=pol_A)
         layout_B = hex_layout(npix, width, rotate=pol_B)
     else:
