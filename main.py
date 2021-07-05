@@ -10,41 +10,63 @@ def locate_sign_changes(t):
 class _HKBlockBundle(object):
     def __init__(self):
         self.times = []
-        self.data = []
+        self.data = None
 
     def add(self, b):
-        self.times.extend([int(t) for t in b.times])
-        self.data.extend(b['Azimuth'])
+        self.times.extend(b.times)
+        if self.data is None:
+            self.data = {c: [] for c in b.keys()}
+        for c in b.keys():
+            self.data[c].extend(b[c])
 
     def ready(self):
-        return len(locate_sign_changes(np.ediff1d(self.data))) > 0
+        return len(locate_sign_changes(np.ediff1d(self.data['channel_00']))) > 0
 
     def rebundle(self, flush_time):
         if len(self.times) == 0:
             return None
 
+        output = core.G3TimesampleMap()
+        output.times = core.G3VectorTime([t for t in self.times if t < flush_time])
         self.times = [t for t in self.times if t >= flush_time]
-        self.data = self.data[-len(self.times):]
+
+        for c in self.data.keys():
+            output[c] = core.G3Timestream(np.array(self.data[c][:-len(self.times)]))
+
+        self.data = {c: self.data[c][-len(self.times):] for c in self.data.keys()}
+
+        return output
 
 class _ScanDataBundle(object):
     def __init__(self):
         self.times = []
+        self.data = None
 
     def add(self, b):
         self.times.extend(b.times())
+        if self.data is None:
+            self.data = {c: [] for c in b.keys()}
+        for c in b.keys():
+            self.data[c].extend(b[c])
 
     def ready(self, flush_time):
         """
         Returns True if the current frame has crossed the flush_time
         """
-        return len(self.times) > 0 and self.times[-1].time >= flush_time
+        return len(self.times) > 0 and self.times[-1] >= flush_time
 
     def rebundle(self, flush_time):
         if len(self.times) == 0:
             return None
-        # For now, just return the times as output
-        output = [t for t in self.times if t.time < flush_time]
-        self.times = [t for t in self.times if t.time >= flush_time]
+
+        output = core.G3TimesampleMap()
+        output.times = core.G3VectorTime([t for t in self.times if t < flush_time])
+        self.times = [t for t in self.times if t >= flush_time]
+
+        for c in self.data.keys():
+            output[c] = core.G3Timestream(np.array(self.data[c][:-len(self.times)]))
+
+        self.data = {c: self.data[c][-len(self.times):] for c in self.data.keys()}
 
         return output
 
@@ -85,8 +107,9 @@ class Bookbinder(object):
             self.sdbundle.add(f['data'])
 
             if self.sdbundle.ready(self.flush_time):
-                self.hkbundle.rebundle(self.flush_time)
-                output = self.sdbundle.rebundle(self.flush_time)
+                output = core.G3Frame(core.G3FrameType.Scan)
+                output['data'] = self.sdbundle.rebundle(self.flush_time)
+                output['hk'] = self.hkbundle.rebundle(self.flush_time)
 
             return output
 
@@ -103,7 +126,7 @@ if __name__ == '__main__':
     B = Bookbinder()
 
     hkframes = [h for h in core.G3File(args.hkfile)]
-    acu_pos = [h for h in hkframes if h['hkagg_type'] == 2 and h['block_names'][0] == 'ACU_position']
+    acu_pos = [h for h in hkframes if h['hkagg_type'] == 2 and h['prov_id'] == 12]
 
     """
     Main loop
@@ -114,6 +137,8 @@ if __name__ == '__main__':
        emit new frame; truncate HK and SMuRF frames
     3. Repeat Step 2 until len(sign_changes) == 0, then go back to Step 1
     """
+    output_frames = []
+
     while len(acu_pos) > 0:
         while not B.ready():
             # If there are no more HK frames, terminate program by ending loop
@@ -121,7 +146,7 @@ if __name__ == '__main__':
                 break
             B(acu_pos.pop(0))
 
-        sc = locate_sign_changes(np.ediff1d(B.hkbundle.data))
+        sc = locate_sign_changes(np.ediff1d(B.hkbundle.data['channel_00']))
         tc = [B.hkbundle.times[i] for i in sc]
         while len(tc) > 0:
             B.flush_time = tc.pop(0)
@@ -135,3 +160,20 @@ if __name__ == '__main__':
                     acu_pos = []
                     break
                 output = B(scanframes.pop(0))
+                if len(output) > 0:
+                    output_frames.append(output)
+
+    pipe = core.G3Pipeline()
+
+    sent = False
+    def framesource(fr):
+        global sent
+        if not sent:
+            sent = True
+            return output_frames
+        else:
+            return []
+    pipe.Add(framesource)
+
+    pipe.Add(core.G3Writer, filename='out.g3')
+    pipe.Run()
