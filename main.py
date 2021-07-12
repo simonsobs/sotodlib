@@ -111,6 +111,9 @@ class Bookbinder(object):
                 output['data'] = self.sdbundle.rebundle(self.flush_time)
                 output['hk'] = self.hkbundle.rebundle(self.flush_time)
 
+                # Co-sampled (interpolated) azimuth encoder data
+                output['data']['Azimuth'] = core.G3Timestream(np.interp(output['data'].times, output['hk'].times, output['hk']['channel_00'], left=np.nan, right=np.nan))
+
             return output
 
 if __name__ == '__main__':
