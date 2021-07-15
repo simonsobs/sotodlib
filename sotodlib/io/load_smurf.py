@@ -834,7 +834,7 @@ class G3tSmurf:
 
 
     def add_new_tuning(self, stream_id, ctime, tune_path, session):    
-        """Add new entry to the TunesSet table. Called by the
+        """Add new entry to the Tune table, check if needed to add to the TunesSet table. Called by the
         index_metadata function.
 
         Args
@@ -1039,14 +1039,14 @@ class G3tSmurf:
                             cha= [f for f in cha if 'channel_assignment' in f]
                             if len(cha) == 0:
                                 logger.debug(f"{action} run with no new channel assignment")
-                                continue
+                                
+                            else:
+                                cha = sorted(cha)[-1]
+                                cha_path = os.path.join(action_path, action, 'outputs', cha)
+                                cha_ctime = int(cha.split('_')[0])
 
-                            cha = sorted(cha)[-1]
-                            cha_path = os.path.join(action_path, action, 'outputs', cha)
-                            cha_ctime = int(cha.split('_')[0])
-
-                            logger.debug(f"Add new channel assignment: {stream_id}, {cha_ctime}, {cha_path}")
-                            self.add_new_channel_assignment(stream_id, cha_ctime, cha, cha_path, session)     
+                                logger.debug(f"Add new channel assignment: {stream_id}, {cha_ctime}, {cha_path}")
+                                self.add_new_channel_assignment(stream_id, cha_ctime, cha, cha_path, session)     
 
 
                         ### Look for tuning files before observations
@@ -1061,14 +1061,13 @@ class G3tSmurf:
                                 logger.warning(f"found multiple tune files in {stream_id}, {ctime}, {action}")
                             if len(tune) == 0:
                                 logger.warning(f"found no tune files in {stream_id}, {ctime}, {action}")
-                                continue
+                            else:
+                                tune = sorted(tune)[-1]
+                                tune_ctime = int(tune.split('_')[0])
+                                tune_path = os.path.join(action_path, action, 'outputs', tune)
 
-                            tune = sorted(tune)[-1]
-                            tune_ctime = int(tune.split('_')[0])
-                            tune_path = os.path.join(action_path, action, 'outputs', tune)
-
-                            logger.debug(f"Add new Tune: {stream_id}, {ctime}, {tune_path}")
-                            self.add_new_tuning(stream_id, tune_ctime, tune_path, session)
+                                logger.debug(f"Add new Tune: {stream_id}, {ctime}, {tune_path}")
+                                self.add_new_tuning(stream_id, tune_ctime, tune_path, session)
 
                         ### Add Observations
                         if astring in SMURF_ACTIONS['observations']:
