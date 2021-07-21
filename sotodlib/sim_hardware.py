@@ -581,7 +581,6 @@ def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
                 dprops["channel"] = doff
                 dprops["AMC"] = doff // chan_per_AMC
                 dprops["bias"] = doff // chan_per_bias
-                dprops["reset_rate_kHz"] = 4.
                 dprops["readout_freq_GHz"] = readout_freq[doff]
                 # Layout quaternion offset is from the origin.  Now we apply
                 # the rotation of the wafer center.
@@ -1122,7 +1121,6 @@ def get_example():
         dprops["channel"] = d
         dprops["AMC"] = 0
         dprops["bias"] = 0
-        dprops["reset_rate_kHz"] = 4.
         dprops["readout_freq_GHz"] = 4.
         dprops["quat"] = np.array([0.0, 0.0, 0.0, 1.0])
         dprops["detector_name"] = ""
