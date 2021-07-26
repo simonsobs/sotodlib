@@ -205,3 +205,35 @@ def calc_psd(aman, signal=None, timestamps=None, **kwargs):
         
     freqs, Pxx = welch( signal, 1/np.median(np.diff(timestamps)), **kwargs)
     return freqs, Pxx
+
+def calc_wn(aman, pxx, freqs=None, low_f=5, high_f=10):
+    """
+    Function that calculates the white noise level as a median PSD value between two frequencies.
+    Defaults to calculation of white noise between 5 and 10Hz.
+    Defaults frequency information to a wrapped "freqs" field in aman.
+    Args:
+    - aman: Axis manager 
+        Uses aman.freq as frequency information associated with the PSD, pxx.
+    - pxx: Float array
+        Psd information to calculate white noise.
+    - freqs: 1d Float array
+        frequency information related to the psd. Defaults to aman.freqs
+    - low_f: Floating point number
+        low frequency cutoff to calculate median psd value. Defaults to 5Hz
+    - high_f: Floating point number
+        high frequency cutoff to calculate median psd value. Defaults to 10Hz
+    Returns:
+    wn: Float array 
+        array of white noise levels for each psd passed into argument.
+    """
+    if freqs is None:
+        freqs = aman.freqs
+    
+    fmsk = np.all([freqs >= low_f, freqs <= high_f], axis=0 )
+    if pxx.ndim == 1:
+        wn2 = np.median(pxx[fmsk])
+    else:
+        wn2 = np.median(pxx[:,fmsk], axis=1)
+    wn = np.sqrt(wn2)
+    
+    return wn
