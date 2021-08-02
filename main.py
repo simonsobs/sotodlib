@@ -124,12 +124,9 @@ if __name__ == '__main__':
     parser.add_argument('--hk', dest='hkfile', type=str, required=True, help='full path to HK file')
     args = parser.parse_args()
 
-    scanframes = [f for f in core.G3File(args.g3file) if f.type == core.G3FrameType.Scan]
-
     B = Bookbinder()
 
-    hkframes = [h for h in core.G3File(args.hkfile)]
-    acu_pos = [h for h in hkframes if h['hkagg_type'] == 2 and h['prov_id'] == 12]
+    smurfiter = core.G3File(args.g3file)
 
     """
     Main loop
@@ -141,13 +138,13 @@ if __name__ == '__main__':
     3. Repeat Step 2 until len(sign_changes) == 0, then go back to Step 1
     """
     output_frames = []
+    for h in core.G3File(args.hkfile):
+        if h['hkagg_type'] != 2 or h['prov_id'] != 12:
+            continue
 
-    while len(acu_pos) > 0:
-        while not B.ready():
-            # If there are no more HK frames, terminate program by ending loop
-            if len(acu_pos) == 0:
-                break
-            B(acu_pos.pop(0))
+        B(h)
+        if not B.ready():
+            continue
 
         sc = locate_sign_changes(np.ediff1d(B.hkbundle.data['channel_00']))
         tc = [B.hkbundle.times[i] for i in sc]
@@ -155,14 +152,18 @@ if __name__ == '__main__':
             B.flush_time = tc.pop(0)
 
             while B.sdbundle is None or not B.sdbundle.ready(B.flush_time):
-                # If there are no more SMuRF frames, output remaining SMuRF data
-                # and terminate program by ending loop
-                if len(scanframes) == 0:
+                try:
+                    f = next(smurfiter)
+                except StopIteration:
+                    # If there are no more SMuRF frames, output remaining SMuRF data
+                    # and terminate program by ending loop
                     output = B.sdbundle.rebundle(B.flush_time)
                     tc = []
-                    acu_pos = []
                     break
-                output = B(scanframes.pop(0))
+
+                if f.type != core.G3FrameType.Scan:
+                    continue
+                output = B(f)
                 if len(output) > 0:
                     output_frames.append(output)
 
