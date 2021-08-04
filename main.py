@@ -137,14 +137,19 @@ if __name__ == '__main__':
        emit new frame; truncate HK and SMuRF frames
     3. Repeat Step 2 until len(sign_changes) == 0, then go back to Step 1
     """
-    output_frames = []
-    for h in core.G3File(args.hkfile):
-        if h['hkagg_type'] != 2 or h['prov_id'] != 12:
-            continue
+    def framesource(fr):
+        if fr.type == core.G3FrameType.EndProcessing:
+            return None
 
-        B(h)
+        if fr.type != core.G3FrameType.Housekeeping:
+            return []
+
+        if fr['hkagg_type'] != 2 or fr['prov_id'] != 12:
+            return []
+
+        B(fr)
         if not B.ready():
-            continue
+            return []
 
         sc = locate_sign_changes(np.ediff1d(B.hkbundle.data['channel_00']))
         tc = [B.hkbundle.times[i] for i in sc]
@@ -158,26 +163,16 @@ if __name__ == '__main__':
                     # If there are no more SMuRF frames, output remaining SMuRF data
                     # and terminate program by ending loop
                     output = B.sdbundle.rebundle(B.flush_time)
-                    tc = []
-                    break
+                    return output
 
                 if f.type != core.G3FrameType.Scan:
                     continue
                 output = B(f)
                 if len(output) > 0:
-                    output_frames.append(output)
+                    return output
 
     pipe = core.G3Pipeline()
-
-    sent = False
-    def framesource(fr):
-        global sent
-        if not sent:
-            sent = True
-            return output_frames
-        else:
-            return []
+    pipe.Add(core.G3Reader, filename=args.hkfile)
     pipe.Add(framesource)
-
     pipe.Add(core.G3Writer, filename='out.g3')
     pipe.Run()
