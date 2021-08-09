@@ -2,7 +2,7 @@
 Useful tools for statistical analyses
 """
 from scipy.stats import skewnorm, binned_statistic
-
+import numpy as np
 
 
 def gauss(x, mean, sigma, A):
