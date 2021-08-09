@@ -1856,6 +1856,9 @@ def load_file(filename, channels=None, ignore_missing=True,
     else:
         filenames = filename
     
+    if len(filenames) == 0:
+        logger.error("No files provided to load")
+    
     if status is None:
         status = SmurfStatus.from_file(filenames[0])
 
