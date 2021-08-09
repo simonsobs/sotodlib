@@ -1656,6 +1656,9 @@ def _get_tuneset_channel_names(status, ch_map, archive):
         logger.info("Tune information not in SmurfStatus, using most recent Tune")
         tune = session.query(Tunes).filter(Tunes.start <= dt.datetime.utcfromtimestamp(status.start))
         tune = tune.order_by(db.desc(Tunes.start)).first()
+        if tune is None:
+            logger.info("Most recent Tune does not exist")
+            return ch_map
         if tune.tuneset is None:
             logger.info(f"Tune file {tune.name} has no TuneSet in G3tSmurf archive")
             return ch_map
