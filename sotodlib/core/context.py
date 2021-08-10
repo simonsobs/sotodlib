@@ -220,7 +220,7 @@ class Context(odict):
                                      'in re-restriction on property "%s"' % (t, prop))
                 detspec[prop] = t
 
-        # Start the list of detector selectors.
+        # Start a list of det specs ... see DetDb.intersect.
         dets_selection = [detspec]
 
         # Did user give a list of dets (or detspec)?
@@ -244,8 +244,24 @@ class Context(odict):
 
         # Make the final list of dets -- force resolve it to a list,
         # not a detspec.
-        dets = self.detdb.intersect(*dets_selection,
-                                    resolve=True)
+        if self.detdb is None:
+            # Try to resolve this without a DetDb (if you do this
+            # better, maybe make it a static method of DetDb.
+            dets = None
+            for ds in dets_selection:
+                if isinstance(ds, dict):
+                    if len(ds) != 0:
+                        raise ValueError("Complex det request can't be processed "
+                                         "without a detdb; spec=f{dets_selection}")
+                else:
+                    if dets is None:
+                        dets = set(ds)
+                    else:
+                        dets.intersection_update(ds)
+            dets = list(dets)
+        else:
+            dets = self.detdb.intersect(*dets_selection,
+                                        resolve=True)
 
         # The request to the metadata loader should include obs_id and
         # the detector selection.
