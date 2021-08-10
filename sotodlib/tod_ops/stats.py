@@ -6,6 +6,35 @@ import numpy as np
 from .. import core
 
 
+def sine(aman, A, freq, phase, offset, timestamps=None):
+    """
+    Sine function to fit against
+
+    Arguments:
+
+        aman: AxisManager with timestamps
+
+        A: Amplitude of sine function
+
+        freq: Frequency of sine function
+
+        phase: Phase of sine function
+
+        offset: Offset to add to sine function
+
+        timestamps: Timestamps, if None then aman.timestamps is used
+
+    Returns:
+
+        sine: the values of the sine function at each timestamp
+    """
+
+    if timestamps is None:
+        timestamps = aman.timestamps
+
+    return A * np.sin(freq * timestamps + phase) + offset
+
+
 def gauss(x, mean, sigma, A):
     """
     Gaussian curve defined mean, sigma, and scaled by an amplitude A.
