@@ -172,6 +172,9 @@ class SuperLoader:
                 loader_object = loader_class(detdb=self.detdb, obsdb=self.obsdb)
                 mi1 = loader_object.from_loadspec(index_line)
                 # restrict to index_line...
+                if (self.detdb is None and
+                    len([k for k in index_line if k.startswith('dets:')])):
+                    raise ValueError(f"Metadata not loadable without detdb: {index_line}")
                 mi2 = mi1.restrict_dets(index_line, detdb=self.detdb)
                 results.append(mi2)
 
