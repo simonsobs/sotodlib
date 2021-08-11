@@ -1,4 +1,5 @@
 import numpy as np
+import so3g
 
 
 class Extract:
@@ -181,7 +182,7 @@ class ExtractMatrix:
         return signal
 
 
-def get_gap_fill_single(data, flags, nbuf=10, order=1, inplace=False):
+def get_gap_fill_single(data, flags, nbuf=10, order=1, swap=False):
     """Computes samples to fill the gaps in data identified by flags.
     Each flagged segment is modeled with a polynomial of the order
     specified, based on up to nbuf points on each side of the segment.
@@ -200,11 +201,11 @@ def get_gap_fill_single(data, flags, nbuf=10, order=1, inplace=False):
             linear (order=1); this will tend to be unstable unless the
             gaps are much smaller than the anchors used to constrain
             the poly on each end.
-        inplace: If False, do not modify the input data vector.  If
+        swap: If False, do not modify the input data vector.  If
             True, patch the data with the model.
 
     Returns:
-        An Extract object containing the modeled data.  If inplace is
+        An Extract object containing the modeled data.  If swap is
         True, then the input data vector is patched with the model and
         the returned object, instead, contains the samples from data
         that were changed.
@@ -247,27 +248,25 @@ def get_gap_fill_single(data, flags, nbuf=10, order=1, inplace=False):
                 # Only fit as many terms as you plausibly constrain --
                 # 10 data points per term.
                 n_keep = 1 + max(0, min(order, contrib_count // 10))
-                model = np.dot(np.linalg.inv(A[:n_keep, :n_keep]),
-                               b[:n_keep])[::-1]
+                model = np.linalg.solve(A[:n_keep,:n_keep], b[:n_keep])[::-1]
 
         t = np.arange(lo, hi) - t0
         sig_ex.data[elo:ehi] = np.polyval(model, t) + y0
-    if inplace:
+    if swap:
         sig_ex.swap(data)
     return sig_ex
 
 
-def get_gap_fill(tod, nbuf=10, order=1, inplace=False, signal=None, flags=None):
+def get_gap_fill(tod, nbuf=10, order=1, swap=False, signal=None, flags=None,
+                 _method='fast'):
     """See get_gap_fill_single for meaning of arguments not described here.
 
     Arguments:
         tod: AxisManager with (dets, samps) axes.
-
         signal: signal to pass to get_gap_fill_single as data
             argument; defaults to tod.signal
-
         flags: flags to pass to get_gap_fill_single; defaults to
-        tod.flags.
+            tod.flags.
 
     Returns:
         The ExtractMatrix object with per-detector Extracts from
@@ -278,8 +277,20 @@ def get_gap_fill(tod, nbuf=10, order=1, inplace=False, signal=None, flags=None):
         signal = tod.signal
     if flags is None:
         flags = tod.flags
-    return ExtractMatrix([get_gap_fill_single(d, f, order=order, nbuf=nbuf, inplace=inplace)
-                          for d, f in zip(signal, flags)])
+    if _method is None:
+        _method = 'fast' if hasattr(so3g, 'get_gap_fill_poly') else 'slow'
+
+    if _method == 'fast':
+        sample_counts = [np.dot(r.ranges(), [-1, 1]).sum()
+                         for r in flags]
+        dest = np.empty(sum(sample_counts), dtype='float32')
+        so3g.get_gap_fill_poly(flags, signal, nbuf, order, swap, dest)
+        sample_idx = np.cumsum([0] + sample_counts)
+        return ExtractMatrix([Extract(r, dest[i:j])
+                              for r, i, j in zip(flags, sample_idx[:-1], sample_idx[1:])])
+    else:
+        return ExtractMatrix([get_gap_fill_single(d, f, order=order, nbuf=nbuf, swap=swap)
+                              for d, f in zip(signal, flags)])
 
 
 def get_gap_model_single(weights, modes, flags):
