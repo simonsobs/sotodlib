@@ -24,6 +24,21 @@ RESOURCE_URLS = {
 
 
 class SlowSource:
+    """Class to track the time-dependent position of a slow-moving source,
+    such as a Solar System planet in equatorial coordinates.
+    "Slow-moving" is in relation to the time range of interest.  A
+    linear approximation is good enough for Solar System, arcsecond
+    accuracy, on time scales of a few hours.
+
+    Args:
+      timestamp (float): reference time, as a unix timestamp.
+      ra (float): Right Ascension at reference time, in radians.
+      dec (float): Declination at reference time, in radians.
+      v_ra (float): rate of change of RA, in radians.
+      v_dec (float): rate of change of dec, in radians.
+      precision: not implemented, don't worry about it.
+
+    """
     def __init__(self, timestamp, ra, dec, v_ra=0., v_dec=0.,
                  precision=.0001 * coords.DEG):
         self.timestamp = timestamp
@@ -34,22 +49,29 @@ class SlowSource:
 
     @classmethod
     def for_named_source(cls, name, timestamp):
+        """Returns a SlowSource for planet ``source_name``, with position and
+        peculiar velocity measured at time timestamp.
+
+        """
         dt = 3600
         ra0, dec0, distance = get_source_pos(name, timestamp)
         ra1, dec1, distance = get_source_pos(name, timestamp + dt)
         return cls(timestamp, ra0, dec0, ((ra1-ra0+180) % 360 - 180)/dt, (dec1-dec0)/dt)
 
-    def pos(self, times):
-        if not isinstance(times, np.ndarray):
-            ra, dec = self.pos(np.array([times]))
-            return ra[0], dec[0]
-        dt = times - self.timestamp
-        return self.ra + self.v_ra * dt, self.dec + self.v_dec * dt
+    def pos(self, timestamps):
+        """Get the (approximate) source position at the times given by the
+        array of unix timestamps.
 
-def model(t, az, el, planet):
-    csl = so3g.proj.CelestialSightLine.az_el(t, az, el, weather='typical', site='so')
-    ra0, dec0 = planet.pos(t)
-    return csl.Q, ~so3g.proj.quat.rotation_lonlat(ra0, dec0) * csl.Q
+        Returns two arrays (RA, dec), the same shape as timestamps,
+        both in radians.  The RA are not corrected into any particular
+        branch (the mapping from timestamp to RA is continuous).
+
+        """
+        if not isinstance(timestamps, np.ndarray):
+            ra, dec = self.pos(np.array([timestamps]))
+            return ra[0], dec[0]
+        dt = timestamps - self.timestamp
+        return self.ra + self.v_ra * dt, self.dec + self.v_dec * dt
 
 def get_scan_q(tod, planet, refq=None):
     """Identify the point (in time and azimuth space) at which the
@@ -73,18 +95,25 @@ def get_scan_q(tod, planet, refq=None):
     t = (tod.timestamps[0] + tod.timestamps[-1]) / 2
     if isinstance(planet, str):
         planet = SlowSource.for_named_source(planet, t)
+
+    def scan_q_model(t, az, el, planet):
+        csl = so3g.proj.CelestialSightLine.az_el(t, az, el, weather='typical', site='so')
+        ra0, dec0 = planet.pos(t)
+        return csl.Q, ~so3g.proj.quat.rotation_lonlat(ra0, dec0) * csl.Q
+
     def distance(p):
         dt, daz = p
-        q, qnet = model(t + dt, az + daz, el, planet)
+        q, qnet = scan_q_model(t + dt, az + daz, el, planet)
         lon, lat, phi = so3g.proj.quat.decompose_lonlat(qnet)
         return 90 * coords.DEG - lat
+
     p0 = np.array([0, 0])
     X = fmin(distance, p0, disp=0, full_output=1)
     p, fopt, n_iter, n_calls, warnflag = X
     if warnflag != 0:
         logger.warning('Source-scan solver failed to converge or otherwise '
                        f'complained!  warnflag={warnflag}')
-    q, qnet = model(t+p[0], az+p[1], el, planet)
+    q, qnet = scan_q_model(t+p[0], az+p[1], el, planet)
     psi = so3g.proj.quat.decompose_xieta(qnet)[2][0]
     ra, dec = planet.pos(t+p[0])
     rot = ~so3g.proj.quat.rotation_lonlat(ra, dec, psi)
@@ -197,16 +226,43 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         tod.wrap(wrap, signal, [(0, 'dets'), (1, 'samps')])
     return signal
 
-def get_source_pos(src, timestamp, site='_default'):
+def get_source_pos(source_name, timestamp, site='_default'):
+    """Get the equatorial coordinates of a planet at some time.  Returns
+    the apparent position, accounting for geographical position on
+    earth, but assuming no atmospheric refraction.
+
+    Note that this will download a 16M ephemeris file on first use.
+
+    Args:
+      source_name: Planet name; in capitalized format, e.g. "Jupiter"
+      timestamp: unix timestamp.
+      site (str or so3g.proj.EarthlySite): if this is a string, the
+        site will be looked up in so3g.proj.SITES dict.
+
+    Returns:
+      ra (float): in radians.
+      dec (float): in radians.
+      distance (float): in AU.
+
+    """
     # Get the ephemeris -- this will trigger a 16M download on first use.
     de_url = RESOURCE_URLS['de421.bsp']
     de_filename = au_data.download_file(de_url, cache=True)
 
     planets = jpllib.SpiceKernel(de_filename)
-    try:
-        target = planets[src]
-    except KeyError:
-        target = planets[src + ' barycenter']
+    for k in [
+            source_name,
+            source_name + ' barycenter',
+    ]:
+        try:
+            target = planets[k]
+            break
+        except (ValueError, KeyError):
+            pass
+    else:
+        options = list(planets.names().values())
+        raise ValueError(f'Failed to find a match for "{source_name}" in '
+                         f'ephemeris: {options}')
 
     if isinstance(site, str):
         site = so3g.proj.SITES[site]
@@ -224,7 +280,23 @@ def get_source_pos(src, timestamp, site='_default'):
 def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
                          center_on=None, res=None):
     """Process masking instructions and create RangesMatrix that flags
-    samples in the TOD that are within the mask.
+    samples in the TOD that are within the masked region.  This
+    masking makes use of a map with the footprint encoded in P, so
+    flagging boundaries will correspond to pixel edges.
+
+    The interface for "mask" is subject to change -- use of a simple
+    text file is interim.
+
+    Args:
+      tod (AxisManager): the observation.
+      P (Projection Matrix): if passed in, must include a map geom
+        (shape and WCS).  If None, will be created from get_scan_P
+        using center_on and res parameters.
+      mask: source masking instructions (see note).
+      wrap: key in tod at which to store the result.
+
+    Returns:
+      RangesMatrix marking the samples inside the masked region.
 
     """
     if P is None:
@@ -242,7 +314,8 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
                                     [[dy * coords.DEG],[dx * coords.DEG]])
             mask_map += 1.* (d < radius * coords.DEG)
         a = P.from_map(mask_map)
-        source_flags = so3g.proj.RangesMatrix([so3g.proj.Ranges.from_mask(r==1) for r in a])
+        source_flags = so3g.proj.RangesMatrix(
+            [so3g.proj.Ranges.from_mask(r!=0) for r in a])
     else:
         raise ValueError("Argument 'mask' must be a filename.")
 
@@ -281,11 +354,11 @@ def write_det_weights(tod, filename, dataset, det_weights=None):
     Args:
       tod (AxisManager): provides the dets axis, and det_weights if
         not passed explicitly.
-      filename: HDF5 filename to write.
-      dataset: dataset address in the HDF5 file to put the result (it
+      filename (str or h5py.File): destination filename (or open File)
+      dataset (str): address in the HDF5 file to put the result (it
         will be overwritten if exists already).
-      det_weights: The det_weights; must be in correspondence with
-        tod.dets.
+      det_weights (array): the weights to write; must be in
+        correspondence with tod.dets.  Defaults to tod.det_weights.
 
     Returns:
       ResultSet with the info that was written.
@@ -296,9 +369,7 @@ def write_det_weights(tod, filename, dataset, det_weights=None):
         det_weights = tod.det_weights
     rs = core.metadata.ResultSet(['dets:name', 'det_weights'])
     rs.rows.extend(list(zip(tod.dets.vals, det_weights)))
-    metadata.write_dataset(
-        rs, filename, dataset,
-        overwrite=True)
+    metadata.write_dataset(rs, filename, dataset, overwrite=True)
     return rs
 
 
@@ -349,6 +420,7 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
                                  cuts=cuts,
                                  threads=thread_algo,
                                  wcs_kernel=wcsk)
+    with MmTimer('get_proj_threads'):
         P._get_proj_threads()
 
     with MmTimer('filter for sources'):
