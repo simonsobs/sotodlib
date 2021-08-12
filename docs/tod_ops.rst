@@ -5,7 +5,7 @@ tod_ops submodule
 =================
 
 This submodule includes functions for processing time-ordered signals,
-including time and Fourier domain filtering, PCA.
+including time and Fourier domain filtering, PCA, gap-filling, etc.
 
 
 Fourier space filters
@@ -79,7 +79,7 @@ AxisManager ``tod`` pre-populated with signal and flags of some kind::
 
 Note that by default the ``get_gap_fill`` function does not patch the
 signal data, and that is why we called ``gaps.swap(tod)``.  (See the
-``inplace`` argument, however.)  The object returned by
+``swap`` argument, however.)  The object returned by
 ``get_gap_fill`` is an ``ExtractMatrix`` (see reference below).  This
 contains only the gap-filled data -- i.e. new values for each sample
 marked in tod.source_flags.  The repr string tells us that the
@@ -133,6 +133,8 @@ Class and function references should be auto-generated here.
    :special-members: __init__
    :members:
 
+.. autofunction:: sotodlib.tod_ops.gapfill.get_contaminated_ranges
+
 
 tod_ops.pca
 ===========
@@ -143,3 +145,13 @@ signal-processing context, is provided in this submodule.
 .. automodule:: sotodlib.tod_ops.pca
    :members:
 
+
+tod_ops.detrend
+===============
+
+Here are some detrending functions.  Note detrending is applied
+automatically by :func:`sotodlib.tod_ops.fourier_filter`, by default,
+using this submodule.
+
+.. automodule:: sotodlib.tod_ops.detrend
+   :members:
