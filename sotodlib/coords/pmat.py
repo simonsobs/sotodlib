@@ -400,7 +400,8 @@ class P:
             elif self.threads == 'domdir':
                 asm = self._get_asm()
                 self.threads = so3g.proj.mapthreads.get_threads_domdir(
-                    asm, asm.dets, *self.geom)
+                    asm, asm.dets, shape=self.geom[0], wcs=self.geom[1],
+                    offs_rep=asm.dets[::100])
             else:
                 raise ValueError('Request for unknown algo threads="%s"' % self.threads)
         if cuts:
