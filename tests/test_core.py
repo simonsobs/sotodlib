@@ -64,13 +64,13 @@ class TestAxisManager(unittest.TestCase):
                   'samps': core.OffsetAxis('samps', 20, 10)}
         # Not-in-place...
         rman = aman.restrict_axes(r_axes, in_place=False)
-        self.assertCountEqual(aman.a1.shape, (3, 100))
-        self.assertCountEqual(rman.a1.shape, (1, 20))
+        self.assertEqual(aman.a1.shape, (3, 100))
+        self.assertEqual(rman.a1.shape, (1, 20))
         self.assertNotEqual(aman.a1[1, 10], 0.)
         self.assertNotEqual(rman.a1[0, 0], 0.)
         # In-place.
         aman.restrict_axes(r_axes, in_place=True)
-        self.assertCountEqual(aman.a1.shape, (1, 20))
+        self.assertEqual(aman.a1.shape, (1, 20))
         self.assertNotEqual(aman.a1[0, 0], 0.)
 
     def test_150_wrap_new(self):
@@ -81,12 +81,12 @@ class TestAxisManager(unittest.TestCase):
                                 core.OffsetAxis('samps', a1.shape[1]))
         x = aman.wrap_new('x', shape=('dets', 'samps'))
         y = aman.wrap_new('y', shape=('dets', 'samps'), dtype='float32')
-        self.assertCountEqual(aman.x.shape, aman.y.shape)
+        self.assertEqual(aman.x.shape, aman.y.shape)
         if hasattr(so3g.proj.RangesMatrix, 'zeros'):
             # Jan 2021 -- some so3g might not have this method yet...
             f = aman.wrap_new('f', shape=('dets', 'samps'),
                               cls=so3g.proj.RangesMatrix.zeros)
-            self.assertCountEqual(aman.x.shape, aman.f.shape)
+            self.assertEqual(aman.x.shape, aman.f.shape)
 
     # Multi-dimensional restrictions.
 
