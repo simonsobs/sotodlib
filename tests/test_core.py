@@ -131,6 +131,47 @@ class TestAxisManager(unittest.TestCase):
         self.assertEqual(aman.shape, (3, n//2))
         self.assertEqual(aman._axes['samps'].offset, ofs)
 
+    def test_401_restrict(self):
+        # Test AxisManager.restrict when it has AxisManager members.
+        dets = ['det0', 'det1', 'det2']
+        n, ofs = 1000, 0
+        for in_place in [True, False]:
+            aman = core.AxisManager(
+                core.LabelAxis('dets', dets),
+                core.OffsetAxis('samps', n, ofs))
+            child = core.AxisManager(aman.dets, aman.samps)
+            child2 = core.AxisManager(
+                core.LabelAxis('not_dets', ['x', 'y', 'z']))
+            aman.wrap('child', child)
+            aman.wrap('rebel_child', child2)
+            aout = aman.restrict('dets', ['det1'], in_place=in_place)
+            msg = f'Note restrict was with in_place={in_place}'
+            self.assertTrue(aout is aman or not in_place, msg=msg)
+            self.assertEqual(aout['child'].shape, (1, n), msg=msg)
+            self.assertIn('rebel_child', aout, msg=msg)
+            self.assertEqual(aout['rebel_child'].shape, (3,), msg=msg)
+
+    def test_402_restrict_axes(self):
+        # Test AxisManager.restrict_axes when it has AxisManager members.
+        dets = ['det0', 'det1', 'det2']
+        n, ofs = 1000, 0
+        for in_place in [True, False]:
+            aman = core.AxisManager(
+                core.LabelAxis('dets', dets),
+                core.OffsetAxis('samps', n, ofs))
+            child = core.AxisManager(aman.dets, aman.samps)
+            child2 = core.AxisManager(
+                core.LabelAxis('not_dets', ['x', 'y', 'z']))
+            aman.wrap('child', child)
+            aman.wrap('rebel_child', child2)
+            new_dets = core.LabelAxis('dets', ['det1'])
+            aout = aman.restrict_axes([new_dets], in_place=in_place)
+            msg = f'Note restrict was with in_place={in_place}'
+            self.assertTrue(aout is aman or not in_place, msg=msg)
+            self.assertEqual(aout['child'].shape, (1, n), msg=msg)
+            self.assertIn('rebel_child', aout, msg=msg)
+            self.assertEqual(aout['rebel_child'].shape, (3,), msg=msg)
+
     def test_410_merge(self):
         dets = ['det0', 'det1', 'det2']
         n, ofs = 1000, 0
