@@ -668,8 +668,8 @@ def sim_telescope_detectors(hw, tele, tube_slots=None):
 
             wradius = 0.5 * (waferspace * platescale * np.pi / 180.0)
             wcenters = [
-                np.array([np.tan(thirty) * wradius, wradius, 0.0]),
-                np.array([-wradius / np.cos(thirty), 0.0, 0.0]),
+                np.array([np.tan(thirty) * wradius, wradius, thirty*4]),
+                np.array([-wradius / np.cos(thirty), 0.0, thirty*8]),
                 np.array([np.tan(thirty) * wradius, -wradius, 0.0])
             ]
             qwcenters = ang_to_quat(wcenters)
