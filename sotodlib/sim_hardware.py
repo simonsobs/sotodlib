@@ -551,7 +551,8 @@ def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
     # each band.
     dets = OrderedDict()
 
-    chan_per_AMC = cardprops["nchannel"] // cardprops["nAMC"]
+    #chan_per_AMC = cardprops["nchannel"] // cardprops["nAMC"]
+    chan_per_AMC = 910
     chan_per_bias = cardprops["nchannel"] // cardprops["nbias"]
     readout_freq_range=np.linspace(4.,6.,chan_per_AMC)
     readout_freq=np.append(readout_freq_range,readout_freq_range)
@@ -1081,7 +1082,7 @@ def get_example():
             cdprops = OrderedDict()
             cdprops["nbias"] = 12
             cdprops["nAMC"] = 2
-            cdprops["nchannel"] = 2000
+            cdprops["nchannel"] = 1764
             cdprops["card_name"] = ""
             card_slots[crd] = cdprops
 
