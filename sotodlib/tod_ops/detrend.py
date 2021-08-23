@@ -16,8 +16,8 @@ def detrend_data(tod, method='linear', axis_name='samps',
         
         axis_name: the axis along which to detrend. default is 'samps'
         
-        signal_name: the name of the signal to detrend. defaults to 'signal'
-            if it isn't 2D it is made to be.
+        signal_name: the name of the signal to detrend. defaults to 'signal'.
+            Can have any shape as long as axis_name can be resolved.
 
         count: Number of samples to use, on each end, when measuring
             mean level for 'linear' detrend.  Values larger than 1
@@ -29,37 +29,30 @@ def detrend_data(tod, method='linear', axis_name='samps',
             manager, let's you decide if you want to do that.
 
     """
-    assert len(tod._assignments[signal_name]) <= 2
-        
-    signal = np.atleast_2d(getattr(tod, signal_name))
-    axis = getattr(tod, axis_name)
+    signal = tod[signal_name]
+    axis_idx = list(tod._assignments[signal_name]).index(axis_name)
+    n_samps = signal.shape[axis_idx]
     
-    if len(tod._assignments[signal_name])==1:
-        ## will have gotten caught by atleast_2d
-        idx = 1
-        other_idx = None
-        
-    elif len(tod._assignments[signal_name])==2:
-        checks = np.array([x==axis_name for x in tod._assignments[signal_name]],dtype='bool')
-        idx = np.where(checks)[0][0]
-        other_idx = np.where(~checks)[0][0]
-    
-    if other_idx is not None and other_idx == 1:
-        signal = signal.transpose()
+    # Ensure last axis is the one to detrend.
+    if axis_idx != signal.ndim - 1:
+        # Note this reordering is its own inverse; e.g. [0, 1, -1, 3, 4, 2]
+        axis_reorder = list(range(signal.ndim))
+        axis_reorder[axis_idx], axis_reorder[-1] = -1, axis_idx
+        signal = signal.transpose(tuple(axis_reorder))
         
     if method == 'mean':
-        signal = signal - np.mean(signal, axis=1)[:,None]
+        signal = signal - np.mean(signal, axis=-1)[...,None]
     elif method == 'linear':
-        x = np.linspace(0,1, axis.count)
+        x = np.linspace(0, 1, n_samps)
         count = max(1, min(count, signal.shape[-1] // 2))
-        slopes = signal[:,-count:].mean(axis=-1)-signal[:,:count].mean(axis=-1)
-        signal = signal - slopes[:,None]*x 
-        signal -= np.mean(signal, axis=1)[:,None]
+        slopes = signal[...,-count:].mean(axis=-1)-signal[...,:count].mean(axis=-1)
+        signal = signal - slopes[...,None] * x
+        signal -= np.mean(signal, axis=-1)[...,None]
     else:
         raise ValueError("method flag must be linear or mean")
 
-    if other_idx is not None and other_idx == 1:
-        signal = signal.transpose()
+    if axis_idx != signal.ndim - 1:
+        signal = signal.transpose(tuple(axis_reorder))
     return signal
 
 def detrend_tod(tod, method='linear', signal_name='signal', axis_name='samps', out_name=None):

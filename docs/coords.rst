@@ -265,3 +265,9 @@ Map and Geometry helpers
 .. autofunction:: get_footprint
 .. autofunction:: get_wcs_kernel
 .. autofunction:: get_supergeom
+
+Planet Mapmaking support
+------------------------
+
+.. automodule:: sotodlib.coords.planets
+   :members:

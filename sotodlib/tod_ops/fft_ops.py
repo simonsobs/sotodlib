@@ -4,8 +4,14 @@ from scipy.signal import welch
 import numpy as np
 import pyfftw
 
+import so3g
+
 from . import detrend_data
-        
+
+def _get_num_threads():
+    # Guess how many threads we should be using in FFT ops...
+    return so3g.useful_info().get('omp_num_threads', 4)
+
 def rfft(aman, detrend='linear', resize='zero_pad', window=np.hanning,
          axis_name='samps', signal_name='signal', delta_t=None):
     """Return the real fft of aman.signal_name along the axis axis_name. 
@@ -126,7 +132,7 @@ def build_rfft_object(n_det, n, direction='FFTW_FORWARD', **kwargs):
         
         t_fun: function for performing FFT (two are returned if direction=='BOTH')
     """
-    fftargs = {'threads': 4, 'flags': ['FFTW_ESTIMATE']}
+    fftargs = {'threads': _get_num_threads(), 'flags': ['FFTW_ESTIMATE']}
     fftargs.update(kwargs)
     
     a = pyfftw.empty_aligned((n_det,n), dtype='float32')

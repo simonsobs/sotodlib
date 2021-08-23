@@ -106,7 +106,7 @@ class SuperLoader:
                     missing_keys.remove(k)
             obs_keys = [k for k in missing_keys if k.startswith('obs:')]
             if len(obs_keys):
-                if self.obs_db is None:
+                if self.obsdb is None:
                     reason = 'no ObsDb was passed in'
                 elif 'obs:obs_id' not in request:
                     reason = 'obs_id was not specified in the request'
@@ -204,12 +204,27 @@ class SuperLoader:
                 dest.merge(child_axes)
         return dest
 
-    def load(self, spec_list, request, dest=None):
+    def load(self, spec_list, request, dest=None, check=False):
         """Loads metadata objects and processes them into a single
         AxisManager.  This is equivalent to running load_raw and then
         unpack, though the two are intermingled.
 
+        If check=True, this won't store and return the loaded
+        metadata; it will instead return a list of the same length as
+        spec_list, with either None (if the entry loaded successful)
+        or the Exception raised when trying to load that entry.
+
         """
+        if check:
+            errors = []
+            for spec in spec_list:
+                try:
+                    item = self.load_raw([spec], request)
+                    errors.append((spec, None))
+                except Exception as e:
+                    errors.append((spec, e))
+            return errors
+
         for spec in spec_list:
             try:
                 item = self.load_raw([spec], request)
@@ -223,6 +238,25 @@ class SuperLoader:
                     "Does your database expose this product for this observation?",)
                 raise e
         return dest
+
+    def check(self, spec_list, request):
+        """Runs the same loading code as self.load, but does not keep the
+        results, and will not raise an error due to missing metadata.
+
+        Instead, this function returns information about whether
+        metadata caused any trouble.
+
+        """
+        errors = []
+        ok = True
+        for spec in spec_list:
+            try:
+                item = self.load_raw([spec], request)
+                errors.append((spec, None))
+            except Exception as e:
+                errors.append((spec, e))
+                ok = False
+        return ok, errors
 
 
 class Unpacker:
