@@ -217,7 +217,8 @@ class P:
 
         """
         signal = _valid_arg(signal, 'signal', src=tod)
-        det_weights = _not_both(det_weights, self.det_weights, 'det_weights')
+        det_weights = _not_both(det_weights, self.det_weights,
+                                'det_weights', dtype='float32')
         cuts = _not_both(cuts, self.cuts, 'cuts')
 
         if comps is None: comps = self.comps
@@ -250,7 +251,8 @@ class P:
             self.cuts is used.
 
         """
-        det_weights = _not_both(det_weights, self.det_weights, 'det_weights')
+        det_weights = _not_both(det_weights, self.det_weights,
+                                'det_weights', dtype='float32')
         cuts = _not_both(cuts, self.cuts, 'cuts')
 
         if comps is None:
@@ -264,7 +266,9 @@ class P:
         return dest
 
     def to_inverse_weights(self, weights_map=None, tod=None, dest=None,
-                           comps=None, signal=None, det_weights=None, cuts=None):
+                           comps=None, signal=None, det_weights=None, cuts=None,
+                           eigentol=1e-4,
+                           ):
         """Compute an inverse weights map, W^-1, from a weights map.  If no
         weights_map is passed in, it will be computed by calling
         to_weights, passing through all other arguments.
@@ -274,15 +278,14 @@ class P:
             logger.info('to_inverse_weights: calling .to_weights')
             weights_map = self.to_weights(
                 tod=tod, comps=comps, signal=signal, det_weights=det_weights, cuts=cuts)
-        # Invert in each pixel.
+
         if dest is None:
-            dest = weights_map * 0
-        if weights_map.shape[0] == 1:
-            s = weights_map[0,0] != 0
-            dest[0,0][s] = 1./weights_map[0,0][s]
-        else:
-            logger.info('to_inverse_weights: _invert_weights_map')
-            dest[:] = helpers._invert_weights_map(weights_map, UPLO='U')
+            dest = self._enmapify(np.zeros_like(weights_map))
+
+        logger.info('to_inverse_weights: calling _invert_weights_map')
+        dest[:] = helpers._invert_weights_map(
+            weights_map, eigentol=eigentol, UPLO='U')
+
         return dest
 
     def remove_weights(self, signal_map=None, weights_map=None, inverse_weights_map=None,
@@ -397,7 +400,8 @@ class P:
             elif self.threads == 'domdir':
                 asm = self._get_asm()
                 self.threads = so3g.proj.mapthreads.get_threads_domdir(
-                    asm, asm.dets, *self.geom)
+                    asm, asm.dets, shape=self.geom[0], wcs=self.geom[1],
+                    offs_rep=asm.dets[::100])
             else:
                 raise ValueError('Request for unknown algo threads="%s"' % self.threads)
         if cuts:

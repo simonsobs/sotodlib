@@ -261,6 +261,15 @@ class Context(odict):
         metadata_list = self._get_warn_missing('metadata', [])
         return self.loader.load(metadata_list, request)
 
+    def check_meta(self, request):
+        """Check for existence of required metadata.
+
+        """
+        if isinstance(request, str):
+            request = {'obs:obs_id': request}
+        metadata_list = self._get_warn_missing('metadata', [])
+        return self.loader.check(metadata_list, request)
+
 
 def _read_cfg(filename=None, envvar=None, default=None):
     """Load a YAML file.  If filename is None, use the filename specified

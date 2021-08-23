@@ -84,11 +84,12 @@ def fourier_filter(tod, filt_function,
 
     a, b, t_1, t_2 = fft_ops.build_rfft_object(n_det, n, 'BOTH')
 
-    if detrend is None:
-        signal = np.atleast_2d(getattr(tod, signal_name))
-    else:
+    if detrend is not None:
         signal = detrend_data(tod, detrend, axis_name=axis_name,
                              signal_name=signal_name)
+    else:
+        signal = tod[signal_name]
+    signal = np.atleast_2d(signal)
 
     if other_idx is not None and other_idx != 0:
         ## so that code can be written always along axis 1
@@ -111,7 +112,9 @@ def fourier_filter(tod, filt_function,
     # Un-pad?
     signal = a[:,:min(n, axis.count)]
         
-    if other_idx is not None and other_idx != 0:
+    if other_idx is None:
+        return signal[0]
+    if other_idx != 0:
         return signal.transpose()
     
     return signal
@@ -362,7 +365,7 @@ def high_pass_sine2(freqs, tod, cutoff, width=None):
     if width is None:
         width = cutoff * 2
     phase = np.pi * np.clip((abs(freqs) - cutoff) / width, -0.5, 0.5)
-    return -0.5 + 0.5 * np.sin(phase)
+    return 0.5 + 0.5 * np.sin(phase)
 
 @fft_filter
 def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None, invert=False):
