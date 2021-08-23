@@ -64,13 +64,13 @@ class TestAxisManager(unittest.TestCase):
                   'samps': core.OffsetAxis('samps', 20, 10)}
         # Not-in-place...
         rman = aman.restrict_axes(r_axes, in_place=False)
-        self.assertCountEqual(aman.a1.shape, (3, 100))
-        self.assertCountEqual(rman.a1.shape, (1, 20))
+        self.assertEqual(aman.a1.shape, (3, 100))
+        self.assertEqual(rman.a1.shape, (1, 20))
         self.assertNotEqual(aman.a1[1, 10], 0.)
         self.assertNotEqual(rman.a1[0, 0], 0.)
         # In-place.
         aman.restrict_axes(r_axes, in_place=True)
-        self.assertCountEqual(aman.a1.shape, (1, 20))
+        self.assertEqual(aman.a1.shape, (1, 20))
         self.assertNotEqual(aman.a1[0, 0], 0.)
 
     def test_150_wrap_new(self):
@@ -81,12 +81,12 @@ class TestAxisManager(unittest.TestCase):
                                 core.OffsetAxis('samps', a1.shape[1]))
         x = aman.wrap_new('x', shape=('dets', 'samps'))
         y = aman.wrap_new('y', shape=('dets', 'samps'), dtype='float32')
-        self.assertCountEqual(aman.x.shape, aman.y.shape)
+        self.assertEqual(aman.x.shape, aman.y.shape)
         if hasattr(so3g.proj.RangesMatrix, 'zeros'):
             # Jan 2021 -- some so3g might not have this method yet...
             f = aman.wrap_new('f', shape=('dets', 'samps'),
                               cls=so3g.proj.RangesMatrix.zeros)
-            self.assertCountEqual(aman.x.shape, aman.f.shape)
+            self.assertEqual(aman.x.shape, aman.f.shape)
 
     # Multi-dimensional restrictions.
 
@@ -130,6 +130,47 @@ class TestAxisManager(unittest.TestCase):
         aman.wrap('child', child)
         self.assertEqual(aman.shape, (3, n//2))
         self.assertEqual(aman._axes['samps'].offset, ofs)
+
+    def test_401_restrict(self):
+        # Test AxisManager.restrict when it has AxisManager members.
+        dets = ['det0', 'det1', 'det2']
+        n, ofs = 1000, 0
+        for in_place in [True, False]:
+            aman = core.AxisManager(
+                core.LabelAxis('dets', dets),
+                core.OffsetAxis('samps', n, ofs))
+            child = core.AxisManager(aman.dets, aman.samps)
+            child2 = core.AxisManager(
+                core.LabelAxis('not_dets', ['x', 'y', 'z']))
+            aman.wrap('child', child)
+            aman.wrap('rebel_child', child2)
+            aout = aman.restrict('dets', ['det1'], in_place=in_place)
+            msg = f'Note restrict was with in_place={in_place}'
+            self.assertTrue(aout is aman or not in_place, msg=msg)
+            self.assertEqual(aout['child'].shape, (1, n), msg=msg)
+            self.assertIn('rebel_child', aout, msg=msg)
+            self.assertEqual(aout['rebel_child'].shape, (3,), msg=msg)
+
+    def test_402_restrict_axes(self):
+        # Test AxisManager.restrict_axes when it has AxisManager members.
+        dets = ['det0', 'det1', 'det2']
+        n, ofs = 1000, 0
+        for in_place in [True, False]:
+            aman = core.AxisManager(
+                core.LabelAxis('dets', dets),
+                core.OffsetAxis('samps', n, ofs))
+            child = core.AxisManager(aman.dets, aman.samps)
+            child2 = core.AxisManager(
+                core.LabelAxis('not_dets', ['x', 'y', 'z']))
+            aman.wrap('child', child)
+            aman.wrap('rebel_child', child2)
+            new_dets = core.LabelAxis('dets', ['det1'])
+            aout = aman.restrict_axes([new_dets], in_place=in_place)
+            msg = f'Note restrict was with in_place={in_place}'
+            self.assertTrue(aout is aman or not in_place, msg=msg)
+            self.assertEqual(aout['child'].shape, (1, n), msg=msg)
+            self.assertIn('rebel_child', aout, msg=msg)
+            self.assertEqual(aout['rebel_child'].shape, (3,), msg=msg)
 
     def test_410_merge(self):
         dets = ['det0', 'det1', 'det2']

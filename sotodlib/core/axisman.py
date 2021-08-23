@@ -693,8 +693,9 @@ class AxisManager:
         new_ax, sl = dest._axes[axis_name].restriction(selector)
         for k, v in self._fields.items():
             if isinstance(v, AxisManager):
+                dest._fields[k] = v.copy()
                 if axis_name in v._axes:
-                    dest._fields[k] = v.copy().restrict(axis_name, selector)
+                    dest._fields[k].restrict(axis_name, selector)
             else:
                 sslice = [sl if n == axis_name else slice(None)
                           for n in dest._assignments[k]]
