@@ -553,6 +553,7 @@ def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
 
     #chan_per_AMC = cardprops["nchannel"] // cardprops["nAMC"]
     chan_per_AMC = 910
+    chan_per_mux = 64
     chan_per_bias = cardprops["nchannel"] // cardprops["nbias"]
     readout_freq_range=np.linspace(4.,6.,chan_per_AMC)
     readout_freq=np.append(readout_freq_range,readout_freq_range)
@@ -583,8 +584,8 @@ def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
                 dprops["AMC"] = doff // chan_per_AMC
                 dprops["bias"] = doff // chan_per_bias
                 dprops["readout_freq_GHz"] = readout_freq[doff]
-                dprops["bondpad"] = doff-(doff//64)*64
-                dprops["mux_position"] = doff//64
+                dprops["bondpad"] = doff-(doff//chan_per_mux)*chan_per_mux
+                dprops["mux_position"] = doff//chan_per_mux
                 # Layout quaternion offset is from the origin.  Now we apply
                 # the rotation of the wafer center.
                 dprops["quat"] = qa.mult(center, layout[p]).flatten()
