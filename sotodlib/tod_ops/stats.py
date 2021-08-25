@@ -7,6 +7,52 @@ import numpy as np
 from .. import core
 
 
+def fit_hist(
+    aman, data=None, hist=None, bins=None, field="signal", skew=True, **hist_params
+):
+    """
+    Fit gaussian function to histogram of some data
+
+        aman: AxisManager with data
+
+        data: The data to make histogram from, if None then field of aman specified in field var is used
+
+        hist: The histogram to fit, if None then histogram of data is used
+        bins: The histogram bin edges expected length is (len(hist)+1), if None is provided but hist is provided then range(len(hist)+1) is used
+
+        field: The field from aman to fit, defaults to signal
+
+        skew: If True fit with skewgauss, if False fit with gauss. Defaults to True
+    Returns:
+        fit_params: Array containing the following fit params:
+           mean: mean of distribution
+
+           sigma: sd of distribution
+
+           A: amplitude by which to scale distribution
+
+           sk: skew parameter.  When sk is 0, this becomes a normal distribution. Only returned if skew is True.
+
+        hist: The histogram that was fit
+
+        bins: The bins of the histogram
+    """
+    if hist is None:
+        if data is None:
+            data = getattr(aman, field)
+        hist, _bins = np.histogram(data, **hist_params)
+    if bins is None:
+        bins = range(len(hist) + 1)
+    bins = (_bins[:-1] + _bins[1:]) / 2
+
+    if skew:
+        popt, pcov = opt.curve_fit(skewgauss, bins, hist)
+    else:
+        popt, pcov = opt.curve_fit(gauss, bins, hist)
+
+    return popt, hist, _bins
+
+
 def fit_sine(aman, data=None, timestamps=None, field="signal"):
     """
     Fit sine function to some data, if data is 2d then each row is fit individually
@@ -18,6 +64,7 @@ def fit_sine(aman, data=None, timestamps=None, field="signal"):
 
         timestamps: The timestamps to fit against, if None than aman.timestamps is usfit_params        field: The field of the aman to fit if data is None, by default signal is used
 
+        field: The field from aman to fit, defaults to signal
     Returns:
         fit_params: 2d array where each row contains the following fit params:
             A: Amplitude of the fit sine function
