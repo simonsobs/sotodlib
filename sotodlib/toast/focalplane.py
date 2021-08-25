@@ -69,8 +69,6 @@ class SOFocalplane(Focalplane):
             tube_slots=None,
             thinfp=None,
     ):
-        if thinfp is not None:
-            raise RuntimeError("Focalplane thinning not implemented")
         log = Logger.get()
         telescope = get_telescope(telescope, wafer_slots, tube_slots)
         if hwfile is not None:
@@ -90,13 +88,26 @@ class SOFocalplane(Focalplane):
         if tube_slots is not None:
             tube_slots = tube_slots.split(",")
         hw = hw.select(tube_slots=tube_slots, match=match)
+
+        if thinfp is not None:
+            dets = list(hw.data["detectors"].keys())
+            for det in dets:
+                pixel = hw.data["detectors"][det]["pixel"]
+                if int(pixel) % thinfp != 0:
+                    del hw.data["detectors"][det]
+
         ndet = len(hw.data["detectors"])
         if ndet == 0:
             raise RuntimeError(
                 f"No detectors match query: telescope={telescope}, "
                 f"tube_slots={tube_slots}, wafer_slots={wafer_slots}, "
-                f"bands={bands}"
+                f"bands={bands}, thinfp={thinfp}"
             )
+        log.info(
+                f"{ndet} detectors match query: telescope={telescope}, "
+                f"tube_slots={tube_slots}, wafer_slots={wafer_slots}, "
+                f"bands={bands}, thinfp={thinfp}"
+        )
 
         def get_par(key, default):
             if key in det_data:
@@ -173,7 +184,7 @@ class SOFocalplane(Focalplane):
                 "bandcenter", "bandwidth", "pixel", "pol", "channel", "AMC", "bias",
                 "readout_freq", "bondpad", "mux_position",
             ])
-        
+
         super().__init__(
             detector_data=detdata,
             field_of_view=field_of_view,
