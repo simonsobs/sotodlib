@@ -68,15 +68,22 @@ def parse_config(operators, templates, comm):
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
+        "--telescope",
+        help="Telescope to simulate: LAT, SAT1, SAT2, SAT3, SAT4.",
+    )
+    group.add_argument(
         "--tube_slots",
         help="Comma-separated list of optics tube slots: c1 (LAT_UHF), i5 (LAT_UHF), "
         " i6 (LAT_MF), i1 (LAT_MF), i3 (LAT_MF), i4 (LAT_MF), o6 (LAT_LF),"
         " ST1 (SAT_MF), ST2 (SAT_MF), ST3 (SAT_UHF), ST4 (SAT_LF)."
-
     )
     group.add_argument(
         "--wafer_slots",
         help="Comma-separated list of optics tube slots. "
+    )
+
+    parser.add_argument(
+        "--sample_rate", required=False, default=10, help="Sampling rate"
     )
 
     parser.add_argument(
@@ -114,10 +121,11 @@ def parse_config(operators, templates, comm):
 
 
 def load_instrument_and_schedule(args, comm):
-    focalplane = sotoast.Focalplane(
+    focalplane = sotoast.SOFocalplane(
         hwfile=args.hardware,
         telescope=args.telescope,
         sample_rate=args.sample_rate * u.Hz,
+        bands=args.bands,
         wafer_slots=args.wafer_slots,
         tube_slots=args.tube_slots,
         thinfp=args.thinfp,

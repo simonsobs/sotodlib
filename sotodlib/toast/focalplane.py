@@ -5,6 +5,7 @@ import os
 import sys
 
 import astropy.units as u
+from astropy.table import QTable
 from toast.instrument import Focalplane
 from toast.utils import Logger
 
@@ -23,13 +24,19 @@ FOCALPLANE_RADII = {
 def get_telescope(telescope, wafer_slots, tube_slots):
     """ Determine which telescope matches the detector selections
     """
+    if telescope is not None:
+        return telescope
+    # User did not set telescope so we infer it from the
+    # tube and wafer slots
     hwexample = get_example()
     if wafer_slots is not None:
         wafer_slots = wafer_slots.split(",")
         wafer_map = hwexample.wafer_map()
         tube_slots = [wafer_map["tube_slots"][ws] for ws in wafer_slots]
-    else:
+    elif tube_slots is not None:
         tube_slots = tube_slots.split(",")
+    else:
+        raise RuntimeError("Must set telescope, wafer_slots or tube_slots.")
     for tube_slot in tube_slots:
         for telescope_name, telescope_data in hwexample.data[
             "telescopes"
@@ -52,7 +59,16 @@ class SOFocalplane(Focalplane):
     """ SO Focalplane class
     """
 
-    def __init__(self, hwfile=None, telescope=None, sample_rate=10 * u.Hz, bands=None, wafer_slots=None, tube_slots=None, thinfp=None):
+    def __init__(
+            self,
+            hwfile=None,
+            telescope=None,
+            sample_rate=10 * u.Hz,
+            bands=None,
+            wafer_slots=None,
+            tube_slots=None,
+            thinfp=None,
+    ):
         if thinfp is not None:
             raise RuntimeError("Focalplane thinning not implemented")
         log = Logger.get()
@@ -69,15 +85,18 @@ class SOFocalplane(Focalplane):
 
         field_of_view = FOCALPLANE_RADII[telescope]
         match = {"band": bands.replace(",", "|")}
-        tube_slots = None
         if wafer_slots is not None:
-            match["wafer_slot"]  = args.wafer_slots.split(",")
-        elif tube_slots is not None:
-            tube_slots = args.tube_slots.split(",")
-        # If one provides both telescopes and tube_slots, the tube_slots matching *either*
-        # will be concatenated
-        #hw = hw.select(telescopes=[telescope.name], tube_slots=tube_slots, match=match)
+            match["wafer_slot"]  = wafer_slots.split(",")
+        if tube_slots is not None:
+            tube_slots = tube_slots.split(",")
         hw = hw.select(tube_slots=tube_slots, match=match)
+        ndet = len(hw.data["detectors"])
+        if ndet == 0:
+            raise RuntimeError(
+                f"No detectors match query: telescope={telescope}, "
+                f"tube_slots={tube_slots}, wafer_slots={wafer_slots}, "
+                f"bands={bands}"
+            )
 
         def get_par(key, default):
             if key in det_data:
@@ -86,17 +105,33 @@ class SOFocalplane(Focalplane):
                 return default
 
         (
-            names, quats, bands, wafer_slots, tube_slots, nets, fknees, fmins,
-            alphas, As, Cs, bandcenters, bandwidths
+            names, quats, bands, wafer_slots, tube_slots, nets, net_corrs,
+            fknees, fmins, alphas, As, Cs, bandcenters, bandwidths,
+            ids, pixels, fwhms, pols, card_slots, channels, AMCs, biases,
+            readout_freqs, bondpads, mux_positions,
          ) = (
-             [], [], [], [], [], [], [], [], [], [], [], [], []
+             [], [], [], [], [], [], [], [], [], [], [], [], [], [],
+             [], [], [], [], [], [], [], [], [], [], [],
          )
         for det_name, det_data in hw.data["detectors"].items():
             names.append(det_name)
             quats.append(det_data["quat"])
+            ids.append(det_data["ID"])
+            pixels.append(det_data["pixel"])
+            fwhms.append(det_data["fwhm"] * u.arcmin)
+            pols.append(det_data["pol"])
+            card_slots.append(det_data["card_slot"])
+            channels.append(det_data["channel"])
+            AMCs.append(det_data["AMC"])
+            biases.append(det_data["bias"])
+            readout_freqs.append(det_data["readout_freq_GHz"] * u.GHz)
+            bondpads.append(det_data["bondpad"])
+            mux_positions.append(det_data["mux_position"])
+            # Band is used to retrieve band-averaged values
             band = det_data["band"]
             band_data = hw.data["bands"][band]
             bands.append(band)
+            # Get the wafer slot and translate into tube slot
             wafer_slot = det_data["wafer_slot"]
             wafer_slots.append(wafer_slot)
             # Determine which tube_slot has this wafer
@@ -106,32 +141,40 @@ class SOFocalplane(Focalplane):
             else:
                 raise RuntimeError(f"{wafer_slot} is not in any tube_slot")
             tube_slots.append(tube_slot)
-            # Extract parameters from detector data object, add units
-            nets.append(get_par("NET", band_data.net) * u.uK)
-            fknee.append(get_par("fknee", band_data.fknee)) * u.mHz
-            fmins.append(get_par("fmin", band_data.fmin)) * u.mHz
-            #alphas.append(get_par("alpha", band.alpha))
+            # Get noise parameters.  If detector-specific entries are
+            # absent, use band averages
+            nets.append(get_par("NET", band_data["NET"]) * u.uK * u.s ** .5)
+            net_corrs.append(get_par("NET_corr", band_data["NET_corr"]))
+            fknees.append(get_par("fknee", band_data["fknee"]) * u.mHz)
+            fmins.append(get_par("fmin", band_data["fmin"]) * u.mHz)
+            #alphas.append(get_par("alpha", band_data["alpha"]))
             alphas.append(1)  # hardwire a sensible number. 3.5 is not realistic.
-            As.append(get_par("A", band_data.A))
-            Cs.append(get_par("C", band_data.C))
+            As.append(get_par("A", band_data["A"]))
+            Cs.append(get_par("C", band_data["C"]))
             # bandpass
-            lower = get_par("low", band.lower) * u.GHz
-            #center = get_par("center", band.center) * u.GHz
-            upper = get_par("high", band.upper) * u.GHz
-            bandcenters.append(0.5 * (self.lower + self.upper))
-            bandwidths.append(self.upper - self.lower)
+            lower = get_par("low", band_data["low"]) * u.GHz
+            #center = get_par("center", band_data["center"]) * u.GHz
+            upper = get_par("high", band_data["high"]) * u.GHz
+            bandcenters.append(0.5 * (lower + upper))
+            bandwidths.append(upper - lower)
 
         detdata = QTable(
             [
-                names, quats, bands, wafer_slots, tube_slots, nets, fknees,
-                fmins, alphas, As, Cs, bandcenters, bandwidths,
+                names, ids, quats, bands, card_slots, wafer_slots, tube_slots,
+                fwhms, nets, net_corrs, fknees, fmins, alphas,
+                As, Cs,
+                bandcenters, bandwidths, pixels, pols, channels, AMCs, biases,
+                readout_freqs, bondpads, mux_positions
             ],
             names=[
-                "name", "quat", "wafer_slot", "tube_slot", "NET", "fknee",
-                "fmin", "alpha", "A", "C", "bandcenter", "bandwidth",
+                "name", "uid", "quat", "band", "card_slot", "wafer_slot", "tube_slot",
+                "FWHM", "psd_net", "NET_corr", "psd_fknee", "psd_fmin", "psd_alpha",
+                "elevation_noise_a", "elevation_noise_c",
+                "bandcenter", "bandwidth", "pixel", "pol", "channel", "AMC", "bias",
+                "readout_freq", "bondpad", "mux_position",
             ])
         
-        super.__init__(
+        super().__init__(
             detector_data=detdata,
             field_of_view=field_of_view,
             sample_rate=sample_rate,
