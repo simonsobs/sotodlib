@@ -2,17 +2,54 @@
 Useful tools for statistical analyses
 """
 from scipy.stats import skewnorm, binned_statistic
+import scipy.optimize as opt
 import numpy as np
 from .. import core
 
 
-def sine(aman, A, freq, phase, offset, timestamps=None):
+def fit_sine(aman, data=None, timestamps=None, field="signal"):
+    """
+    Fit sine function to some data, if data is 2d then each row is fit individually
+
+    Arguments:
+        aman: AxisManager with data and timestamps
+
+        data: The data to fit, if None then field of aman specified in field var is used
+
+        timestamps: The timestamps to fit against, if None than aman.timestamps is usfit_params        field: The field of the aman to fit if data is None, by default signal is used
+
+    Returns:
+        fit_params: 2d array where each row contains the following fit params:
+            A: Amplitude of the fit sine function
+
+            freq: Frequency of the fit sine function
+
+            phase: Phase of the fit sine function
+
+            offset: Offset to add to the fit sine function
+    """
+    if data is None:
+        data = getattr(aman, field)
+    if timestamps is None:
+        timestamps = aman.timestamps
+    if len(data.shape) == 1:
+        data = np.array([data])
+
+    fit_params = np.zeros((len(data), 4))
+    for i, dat in enumerate(data):
+        popt, pcov = opt.curve_fit(sine, timestamps, dat)
+        fit_params[i] = popt
+
+    return fit_params
+
+
+def sine(timestamps, A, freq, phase, offset):
     """
     Sine function to fit against
 
     Arguments:
 
-        aman: AxisManager with timestamps
+        timestamps: times to be input into the sine function
 
         A: Amplitude of sine function
 
@@ -21,8 +58,6 @@ def sine(aman, A, freq, phase, offset, timestamps=None):
         phase: Phase of sine function
 
         offset: Offset to add to sine function
-
-        timestamps: Timestamps, if None then aman.timestamps is used
 
     Returns:
 
