@@ -104,16 +104,21 @@ def fit_psd(
     if freqs is None:
         freqs = aman.freqs
 
-    nm_args = [aman, Pxx, freqs] + nm_args
+    nm_args = [aman, Pxx[1:], freqs[1:]] + nm_args
 
     def _noise_model(nm_args, *fit_params):
         return noise_model(*nm_args, *fit_params)
-
+    
     if p0 is None:
         from inspect import signature
-
         p0 = np.ones(len(signature(noise_model).parameters) - len(nm_args))
-    popt, pcov = opt.curve_fit(noise_model, nm_args, Pxx[1:], bounds=bounds, p0=p0)
+    
+    if bounds is None:
+        from inspect import signature
+        b = np.ones(len(signature(noise_model).parameters) - len(nm_args))
+        bounds = (-np.inf*b, np.inf*b)
+
+    popt, pcov = opt.curve_fit(noise_model, nm_args, Pxx[1:], bounds=bounds, p0=p0, check_finite=False)
 
     return popt, _noise_model(nm_args, *popt), Pxx, freqs
 
