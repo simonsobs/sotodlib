@@ -3,9 +3,55 @@ Useful tools for statistical analyses
 """
 from scipy.stats import skewnorm, binned_statistic
 import scipy.optimize as opt
+import scipy.signal as signal
 import numpy as np
 from .. import core
 from . import fft_ops
+
+
+def noise_model(
+    aman, Pxx, freqs, filter_b, filter_a, flux_ramp_freq, tf_fix, wl, n, f_knee
+):
+    """
+    Crude noise model
+
+    Arguments:
+        aman: AxisManager
+
+        Pxx: PSD
+
+        freqs: Frequency information associated with the PSD
+
+        filter_b: Numerator of linear filter
+
+        filter_a: Denominator of linear filter
+
+        flux_ramp_freq: The flux ramp frequency
+
+        tf_fix: Function to calculates adjustment to transfer function, if None then function that always returns 1 is used
+
+        wl: The  white noise level
+
+        n: Exponent of 1/f^n component
+
+        f_knee: Frequency at which white noise = 1/f^n component
+
+    returns:
+        noise: The computed noise model
+    """
+    if tf_fix is None:
+
+        def tf_fix(freq):
+            return 1
+
+    A = wl * (f_knee ** n)
+
+    # The downsample filter is at the flux ramp frequency
+    w, h = signal.freqz(filter_b, filter_a, worN=freqs, fs=flux_ramp_freq)
+
+    tf = np.absolute(h)  # filter transfer function
+
+    return (A / (freqs ** n) + wl) * tf * tf_fix(freqs)
 
 
 def fit_psd(
