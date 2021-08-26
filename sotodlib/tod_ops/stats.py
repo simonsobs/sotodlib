@@ -5,6 +5,70 @@ from scipy.stats import skewnorm, binned_statistic
 import scipy.optimize as opt
 import numpy as np
 from .. import core
+from . import fft_ops
+
+
+def fit_psd(
+    aman,
+    signal=None,
+    timestamps=None,
+    Pxx=None,
+    freqs=None,
+    noise_model=noise_model,
+    bounds=None,
+    p0=None,
+    nm_args=[],
+    **psd_args,
+):
+    """
+    Fits PSD to noise model
+
+        aman: AxisManager with signal and timestamps
+
+        signal: The signal to make PSD from, if None then aman.signal is used
+
+        timestamps: The timestamps to mak PSD from, if None then aman.timestamps is used
+
+        Pxx: The PSD to fit, if None then PSD is generated with fft_ops.calc_psd
+
+        freqs: The freqs associated with the PSD if None then aman.freqs is used
+
+        noise_model: The function used to fit the PSD.
+            The signature of this function is assumed to be:
+                noise_model(aman, Pxx, freqs, *nm_args, *fit_params)
+
+        bounds: Bounds to pass to the fitting function
+
+        p0: Initial guess to pass to the fitting function
+
+        nm_args: Array containing the arguments to be passed to the noise_model that arent aman, Pxx, freqs, or the fitting parameters
+
+        **psd_args: kwargs to be passed to fft_ops.calc_psd
+    Returns:
+        fit_params: Array containing the fit params of the fit noise_model
+        fit_pxx: The fit of the PSD
+
+        Pxx: The PSD
+
+        freqs: The freqs associated with the PSD
+    """
+    if Pxx is None:
+        freqs, Pxx = fft_ops.calc_psd(aman, signal, timestamps, **psd_args)
+    if freqs is None:
+        freqs = aman.freqs
+
+    nm_args = [aman, Pxx, freqs] + nm_args
+
+    def _noise_model(nm_args, *fit_params):
+        return noise_model(*nm_args, *fit_params)
+
+    if p0 is None:
+        from inspect import signature
+
+        p0 = np.ones(len(signature(noise_model).parameters) - len(nm_args))
+    popt, pcov = opt.curve_fit(noise_model, nm_args, Pxx[1:], bounds=bounds, p0=p0)
+
+    return popt, _noise_model(nm_args, *popt), Pxx, freqs
 
 
 def fit_hist(
