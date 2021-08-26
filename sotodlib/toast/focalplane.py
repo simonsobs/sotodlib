@@ -81,7 +81,7 @@ class SOFocalplane(Focalplane):
         else:
             raise RuntimeError("Must provide a path to file or a valid telescope name")
 
-        field_of_view = FOCALPLANE_RADII[telescope]
+        field_of_view = 2 * FOCALPLANE_RADII[telescope]
         match = {"band": bands.replace(",", "|")}
         if wafer_slots is not None:
             match["wafer_slot"]  = wafer_slots.split(",")
