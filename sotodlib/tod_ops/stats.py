@@ -23,6 +23,7 @@ def fit_psd(
     """
     Fits PSD to noise model
 
+    Arguments:
         aman: AxisManager with signal and timestamps
 
         signal: The signal to make PSD from, if None then aman.signal is used
@@ -77,6 +78,7 @@ def fit_hist(
     """
     Fit gaussian function to histogram of some data
 
+    Arguments:
         aman: AxisManager with data
 
         data: The data to make histogram from, if None then field of aman specified in field var is used
