@@ -30,10 +30,12 @@ import numpy as np
 from astropy import units as u
 
 import toast
+import toast.ops
 
 from toast.mpi import MPI
 
 import sotodlib.toast as sotoast
+import sotodlib.toast.ops as so_ops
 
 
 def parse_config(operators, templates, comm):
@@ -145,7 +147,7 @@ def load_instrument_and_schedule(args, comm):
     )
 
     telescope = toast.instrument.Telescope(
-        schedule.telescope_name, focalplane=focalplane, site=site
+        focalplane.telescope, focalplane=focalplane, site=site
     )
     return telescope, schedule
 
@@ -201,6 +203,9 @@ def simulate_data(job, toast_comm, telescope, schedule):
         ops.sim_ground.weather = telescope.site.name
     ops.sim_ground.apply(data)
     log.info_rank("Simulated telescope pointing in", comm=world_comm, timer=timer)
+
+    # Apply LAT co-rotation
+    ops.corotate_lat.apply(data)
 
     # Construct a "perfect" noise model just from the focalplane parameters
 
@@ -342,6 +347,7 @@ def main():
 
     operators = [
         toast.ops.SimGround(name="sim_ground", weather="atacama"),
+        so_ops.CoRotator(name="corotate_lat"),
         toast.ops.DefaultNoiseModel(name="default_model"),
         toast.ops.ElevationNoise(
             name="elevation_model",
