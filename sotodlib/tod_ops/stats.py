@@ -228,10 +228,6 @@ def sine(timestamps, A, freq, phase, offset):
 
         sine: the values of the sine function at each timestamp
     """
-
-    if timestamps is None:
-        timestamps = aman.timestamps
-
     return A * np.sin(freq * timestamps + phase) + offset
 
 
