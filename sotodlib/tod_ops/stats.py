@@ -283,8 +283,8 @@ def average_to(
     aman, DT, signal=None, timestamps=None, tmin=None, tmax=None, append_aman=False
 ):
     """
-        Bins and averages input signal and timestamps to a new (regular) sample rate.
-        This is most useful for downsampling (paricularly non-regularly sapmled) data.
+    Bins and averages input signal and timestamps to a new (regular) sample rate.
+    This is most useful for downsampling (paricularly non-regularly sapmled) data.
 
     Arguments:
 
