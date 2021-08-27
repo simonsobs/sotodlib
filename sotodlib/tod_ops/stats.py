@@ -2,6 +2,7 @@
 Useful tools for statistical analyses
 """
 from scipy.stats import skewnorm, binned_statistic
+from scipy.interpolate import interp1d
 import scipy.optimize as opt
 import scipy.signal as signal
 import numpy as np
@@ -337,3 +338,47 @@ def average_to(
         return t, d, aman
 
     return t, d
+
+
+def interpolate_nans(
+    aman,
+    signal=None,
+    timestamps=None,
+    signal_field="signal",
+    timestamp_field="timestamps",
+):
+    """
+    Interpolate over nans in place
+
+    Arguments:
+
+        aman: AxisManager with timestamps and data to resample.
+
+        signal: 1- or 2-d array of data to interpolate over. If None, uses the field of aman specified in signal_field.
+
+        timestamps: 1-d array of timestamps. If None, uses the field of aman specified in timestamp_field. Cannot have nans present.
+            If you want to interpolate over timestamps pass them as the signal argument and set this argument to something like np.arange(len(timestamps)
+
+        signal_field: The field of aman to use as the signal
+
+        timestamp_field: The field of aman to use as the timestamps
+    """
+    if signal is None:
+        signal = getattr(aman, signal_field)
+    if timestamps is None:
+        timestamps = getattr(aman, timestamp_field)
+
+    def _interpolate_nans(y, x):
+        if len(x) == 0:
+            return
+        if len(x) != len(y):  # or
+            return
+        nans = np.isnan(y)
+        if any(np.isnan(x)) or all(nans) or not any(nans):
+            return
+        nansi = np.where(nans)[0]
+        goodi = np.where(~nans)[0]
+        interp = interp1d(x[goodi], y[goodi], fill_value="extrapolate")
+        y[nansi] = interp(nansi)
+
+    np.apply_along_axis(_interpolate_nans, -1, signal, timestamps)
