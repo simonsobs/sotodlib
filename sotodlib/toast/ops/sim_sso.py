@@ -108,6 +108,7 @@ def s2tcmb(s_nu, nu):
 
     return s_nu/slope
 
+
 def tb2tcmb(tb, nu):
     """Convert blackbody temperature to t_cmb
     as defined above
@@ -241,7 +242,7 @@ class SimSSO(Operator):
                 # position of the SSO
                 times = obs.shared[self.times].data
                 sso_az, sso_el, sso_dist, sso_diameter = self._get_sso_position(
-                    sso, times, observer
+                    data, sso, times, observer
                 )
 
                 # Make sure detector data output exists
@@ -316,6 +317,7 @@ class SimSSO(Operator):
         """
         log = Logger.get()
         timer = Timer()
+        timer.start()
         sso_az = np.zeros(times.size)
         sso_el = np.zeros(times.size)
         sso_dist = np.zeros(times.size)
@@ -334,7 +336,7 @@ class SimSSO(Operator):
         if data.comm.group_rank == 0:
             timer.stop()
             log.verbose(
-                f"{data.comm.group} : Computed {sso_name} position in "
+                f"{data.comm.group} : Computed {sso.name} position in "
                 f"{timer.seconds():.1f} seconds"
             )
         return sso_az, sso_el, sso_dist, sso_diameter
