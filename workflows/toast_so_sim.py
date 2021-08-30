@@ -131,6 +131,7 @@ def load_instrument_and_schedule(args, comm):
         wafer_slots=args.wafer_slots,
         tube_slots=args.tube_slots,
         thinfp=args.thinfp,
+        comm=comm,
     )
 
     # Load the schedule file
@@ -272,6 +273,16 @@ def simulate_data(job, toast_comm, telescope, schedule):
     ops.sim_atmosphere.apply(data)
     log.info_rank("Simulated and observed atmosphere in", comm=world_comm, timer=timer)
 
+    # Simulate Solar System Objects
+
+    ops.sim_sso.detector_pointing = ops.det_pointing_azel
+    ops.sim_sso.apply(data)
+    log.info_rank(
+        "Simulated and observed solar system objects",
+        comm=world_comm,
+        timer=timer,
+    )
+
     return data
 
 
@@ -365,6 +376,7 @@ def main():
         toast.ops.ScanHealpix(name="scan_map", enabled=False),
         toast.ops.SimNoise(name="sim_noise"),
         toast.ops.SimAtmosphere(name="sim_atmosphere"),
+        so_ops.SimSSO(name="sim_sso", enabled=False),
         toast.ops.PointingHealpix(name="pointing", mode="IQU"),
         toast.ops.Statistics(name="raw_statistics", enabled=False),
         toast.ops.Statistics(name="filtered_statistics", enabled=False),

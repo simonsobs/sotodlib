@@ -68,48 +68,59 @@ class SOFocalplane(Focalplane):
             wafer_slots=None,
             tube_slots=None,
             thinfp=None,
+            comm=None,
     ):
         log = Logger.get()
         self.telescope = get_telescope(telescope, wafer_slots, tube_slots)
-        if hwfile is not None:
-            log.info(f"Loading hardware configuration from {hwfile}...")
-            hw = Hardware(args.hardware)
-        elif telescope in ["LAT", "SAT1", "SAT2", "SAT3"]:
-            log.info("Simulating default hardware configuration")
-            hw = get_example()
-            hw.data["detectors"] = sim_telescope_detectors(hw, self.telescope)
-        else:
-            raise RuntimeError(
-                "Must provide a path to file or a valid telescope name"
-            )
-
         field_of_view = 2 * FOCALPLANE_RADII[self.telescope]
-        match = {"band": bands.replace(",", "|")}
-        if wafer_slots is not None:
-            match["wafer_slot"]  = wafer_slots.split(",")
-        if tube_slots is not None:
-            tube_slots = tube_slots.split(",")
-        hw = hw.select(tube_slots=tube_slots, match=match)
 
-        if thinfp is not None:
-            dets = list(hw.data["detectors"].keys())
-            for det in dets:
-                pixel = hw.data["detectors"][det]["pixel"]
-                if int(pixel) % thinfp != 0:
-                    del hw.data["detectors"][det]
+        if comm is None or comm.rank == 0:
+            if hwfile is not None:
+                log.info(f"Loading hardware configuration from {hwfile}...")
+                hw = Hardware(args.hardware)
+            elif self.telescope in ["LAT", "SAT1", "SAT2", "SAT3"]:
+                log.info("Simulating default hardware configuration")
+                hw = get_example()
+                hw.data["detectors"] = sim_telescope_detectors(
+                    hw, self.telescope,
+                )
+            else:
+                raise RuntimeError(
+                    "Must provide a path to file or a valid telescope name"
+                )
 
-        ndet = len(hw.data["detectors"])
-        if ndet == 0:
-            raise RuntimeError(
-                f"No detectors match query: telescope={self.telescope}, "
-                f"tube_slots={tube_slots}, wafer_slots={wafer_slots}, "
-                f"bands={bands}, thinfp={thinfp}"
-            )
-        log.info(
-                f"{ndet} detectors match query: telescope={self.telescope}, "
-                f"tube_slots={tube_slots}, wafer_slots={wafer_slots}, "
-                f"bands={bands}, thinfp={thinfp}"
-        )
+            match = {"band": bands.replace(",", "|")}
+            if wafer_slots is not None:
+                match["wafer_slot"]  = wafer_slots.split(",")
+            if tube_slots is not None:
+                tube_slots = tube_slots.split(",")
+            hw = hw.select(tube_slots=tube_slots, match=match)
+
+            if thinfp is not None:
+                dets = list(hw.data["detectors"].keys())
+                for det in dets:
+                    pixel = hw.data["detectors"][det]["pixel"]
+                    if int(pixel) % thinfp != 0:
+                        del hw.data["detectors"][det]
+
+            ndet = len(hw.data["detectors"])
+            if ndet == 0:
+                raise RuntimeError(
+                    f"No detectors match query: telescope={self.telescope}, "
+                    f"tube_slots={tube_slots}, wafer_slots={wafer_slots}, "
+                    f"bands={bands}, thinfp={thinfp}"
+                )
+            else:
+                log.info(
+                    f"{ndet} detectors match query: telescope={self.telescope}, "
+                    f"tube_slots={tube_slots}, wafer_slots={wafer_slots}, "
+                    f"bands={bands}, thinfp={thinfp}"
+                )
+        else:
+            hw = None
+
+        if comm is not None:
+            hw = comm.bcast(hw)
 
         def get_par(key, default):
             if key in det_data:
