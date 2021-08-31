@@ -714,8 +714,8 @@ def get_example():
     bnd["alpha"] = 3.5
     # Noise elevation scaling fits from Carlos Sierra
     # These numbers are for V3 LAT baseline
-    bnd["A"] = 0.09
-    bnd["C"] = 0.87
+    bnd["A"] = 0.06
+    bnd["C"] = 0.92
     bnd["NET_corr"] = 1.10
     bands["LAT_f030"] = bnd
 
@@ -728,8 +728,8 @@ def get_example():
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.25
-    bnd["C"] = 0.64
+    bnd["A"] = 0.16
+    bnd["C"] = 0.79
     bnd["NET_corr"] = 1.02
     bands["LAT_f040"] = bnd
 
@@ -742,7 +742,7 @@ def get_example():
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.14
+    bnd["A"] = 0.16
     bnd["C"] = 0.80
     bnd["NET_corr"] = 1.09
     bands["LAT_f090"] = bnd
@@ -757,7 +757,7 @@ def get_example():
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
     bnd["A"] = 0.17
-    bnd["C"] = 0.76
+    bnd["C"] = 0.78
     bnd["NET_corr"] = 1.01
     bands["LAT_f150"] = bnd
 
@@ -770,8 +770,8 @@ def get_example():
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.30
-    bnd["C"] = 0.58
+    bnd["A"] = 0.29
+    bnd["C"] = 0.62
     bnd["NET_corr"] = 1.02
     bands["LAT_f230"] = bnd
 
@@ -785,7 +785,7 @@ def get_example():
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
     bnd["A"] = 0.36
-    bnd["C"] = 0.49
+    bnd["C"] = 0.53
     bnd["NET_corr"] = 1.00
     bands["LAT_f290"] = bnd
     
@@ -800,8 +800,8 @@ def get_example():
     bnd["alpha"] = 3.5
     # Noise elevation scaling fits from Carlos Sierra
     # These numbers are for V3 SAT baseline
-    bnd["A"] = 0.10
-    bnd["C"] = 0.87
+    bnd["A"] = 0.06
+    bnd["C"] = 0.92
     bnd["NET_corr"] = 1.06
     bands["SAT_f030"] = bnd
     
@@ -814,8 +814,8 @@ def get_example():
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.26
-    bnd["C"] = 0.66
+    bnd["A"] = 0.19
+    bnd["C"] = 0.76
     bnd["NET_corr"] = 1.01
     bands["SAT_f040"] = bnd
     
@@ -828,8 +828,8 @@ def get_example():
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.17
-    bnd["C"] = 0.78
+    bnd["A"] = 0.19
+    bnd["C"] = 0.76
     bnd["NET_corr"] = 1.04
     bands["SAT_f090"] = bnd
     
@@ -843,7 +843,7 @@ def get_example():
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
     bnd["A"] = 0.23
-    bnd["C"] = 0.71
+    bnd["C"] = 0.70
     bnd["NET_corr"] = 1.02
     bands["SAT_f150"] = bnd
     
@@ -856,8 +856,8 @@ def get_example():
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.43
-    bnd["C"] = 0.44
+    bnd["A"] = 0.35
+    bnd["C"] = 0.54
     bnd["NET_corr"] = 1.00
     bands["SAT_f230"] = bnd
     
@@ -870,8 +870,8 @@ def get_example():
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.48
-    bnd["C"] = 0.38
+    bnd["A"] = 0.42
+    bnd["C"] = 0.45
     bnd["NET_corr"] = 1.00
     bands["SAT_f290"] = bnd
 
