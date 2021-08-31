@@ -149,8 +149,17 @@ class Context(odict):
                          ('obsdb', metadata.ObsDb),
                          ('obsfiledb', metadata.ObsFileDb)]:
             if (load_list == 'all' or key in load_list) and key in self:
-                # E.g. self.detdb = DetDb.from_file(self['detdb']
-                db = cls.from_file(self[key], force_new_db=False)
+                db_file = self[key]
+                if not db_file.startswith('/'):
+                    # Relative to context file.
+                    db_file = os.path.join(os.path.split(self.filename)[0], db_file)
+                db_file = os.path.abspath(db_file)
+                logger.info(f'Loading {key} from {self[key]} -> {db_file}.')
+                try:
+                    db = cls.from_file(db_file, force_new_db=False)
+                except Exception as e:
+                    logger.error(f'DB failure when loading {key} from {self[key]} -> {db_file}\n')
+                    raise e
                 setattr(self, key, db)
         # The metadata loader.
         if load_list == 'all' or 'loader' in load_list:
