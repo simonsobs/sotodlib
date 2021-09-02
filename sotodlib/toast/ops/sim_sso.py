@@ -368,16 +368,12 @@ class SimSSO(Operator):
 
             # Compute detector quaternions
 
-            pipe_data = Data(comm=data.comm)
-            pipe_data._internal = data._internal
-            pipe_data.obs = [obs]
-            pipe = Pipeline(
-                operators=[self.detector_pointing],
-                detector_sets=[[det]],
-            )
-            pipe.apply(pipe_data)
-            pipe_data.obs.clear()
-            del pipe_data
+            obs_data = Data(comm=data.comm)
+            obs_data._internal = data._internal
+            obs_data.obs = [obs]
+            self.detector_pointing.apply(obs_data, detectors=[det])
+            obs_data.obs.clear()
+            del obs_data
 
             azel_quat = obs.detdata[self.detector_pointing.quats][det]
 
