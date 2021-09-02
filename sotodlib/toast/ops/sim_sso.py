@@ -215,7 +215,9 @@ class SimSSO(Operator):
         for trait in "sso_name", "beam_file", "detector_pointing":
             value = getattr(self, trait)
             if value is None:
-                raise RuntimeError(f"You must set `{trait}` before running SimSSO")
+                raise RuntimeError(
+                    f"You must set `{trait}` before running SimSSO"
+                )
 
         for sso_name in self.sso_name.split(","):
             sso = getattr(ephem, sso_name)()
