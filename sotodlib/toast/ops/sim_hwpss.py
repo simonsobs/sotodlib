@@ -62,15 +62,40 @@ class SimHWPSS(Operator):
         help="Operator that translates boresight Az/El pointing into detector frame",
     )
 
-    weights = Unicode(
-        obs_names.weights, help="Observation detdata key for Stokes weights"
+    detector_weights = Instance(
+        klass=Operator,
+        allow_none=True,
+        help="This must be an instance of a pointing operator.  "
+        "Used for Stokes weights and detector quaternions.",
     )
 
     fname_hwpss = Unicode(
-        None,
-        allow_none=True,
+        os.path.join(
+            os.path.dirname(os.path.realpath(__file__)),
+            "data/hwpss_per_chi.pck",
+        ),
         help="File containing measured or estimated HWPSS profiles",
     )
+
+    @traitlets.validate("detector_weights")
+    def _check_detector_weights(self, proposal):
+        pntg = proposal["value"]
+        if pntg is not None:
+            if not isinstance(pntg, Operator):
+                raise traitlets.TraitError("pointing should be an Operator instance")
+            # Check that this operator has the traits we expect
+            for trt in [
+                    "pixels", "weights", "create_dist",
+                    "view", "detector_pointing", "mode",
+            ]:
+                if not pntg.has_trait(trt):
+                    msg = "pointing operator should have a '{}' trait".format(trt)
+                    raise traitlets.TraitError(msg)
+            if pntg.mode != "IQU":
+                raise traitlets.TraitError(
+                    "detector weights must be calculated for IQU"
+                )
+        return pntg
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -78,8 +103,8 @@ class SimHWPSS(Operator):
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
-        
-        for trait in "fname_hwpss", :
+
+        for trait in "detector_weights", :
             value = getattr(self, trait)
             if value is None:
                 raise RuntimeError(
@@ -95,7 +120,7 @@ class SimHWPSS(Operator):
         for obs in data.obs:
             dets = obs.select_local_detectors(detectors)
             obs.detdata.ensure(self.det_data, detectors=dets)
-            focalplane = obs.data.telescope.focalplane
+            focalplane = obs.telescope.focalplane
             # Get HWP angle
             chi = obs.shared[self.hwp_angle].data
             for det in dets:
@@ -111,34 +136,36 @@ class SimHWPSS(Operator):
                 }[band]
 
                 # Get incident angle
-                
+
                 det_quat = focalplane[det]["quat"]
-                theta, phi = qa.to_position(det_quat)
-                
-                # Compute observing elevation
+                det_theta, det_phi = qa.to_position(det_quat)
+
+                # Compute Stokes weights (and quaternions as a by-product)
 
                 obs_data = Data(comm=data.comm)
                 obs_data._internal = data._internal
                 obs_data.obs = [obs]
-                self.detector_pointing.apply(obs_data, detectors=[det])
+                self.detector_weights.apply(obs_data, detectors=[det])
                 obs_data.obs.clear()
                 del obs_data
 
-                azel_quat = obs.detdata[self.detector_pointing.quats][det]
+                # Convert Az/El quaternion of the detector into elevation
 
-                # Convert Az/El quaternion of the detector into angles
+                azel_quat = obs.detdata[
+                    self.detector_weights.detector_pointing.quats
+                ][det]
                 theta, phi = qa.to_position(azel_quat)
-
                 el = np.pi / 2 - theta
 
                 # Get polarization weights
 
-                weights = obs.detdata[self.weights][det]
+                weights = obs.detdata[self.detector_weights.weights][det]
                 iweights, qweights, uweights = weights.T
-        
-                # Interpolate HWPSS to incident angle
 
-                theta_deg = np.degrees(theta)
+                # Interpolate HWPSS to incident angle equal to the
+                # radial distance from the focalplane (HWP) center
+
+                theta_deg = np.degrees(det_theta)
                 itheta_high = np.searchsorted(self.thetas, theta_deg)
                 itheta_low = itheta_high - 1
 
@@ -158,12 +185,12 @@ class SimHWPSS(Operator):
                     (1 - r) * self.all_stokes[freq]["emission"][itheta_low]
                     + r * self.all_stokes[freq]["emission"][itheta_high]
                 )
-                
+
                 # Scale HWPSS for observing elevation
 
                 el_ref = np.radians(50)
                 scale = np.sin(el_ref) / np.sin(el)
-                
+
                 # Observe HWPSS with the detector
 
                 iquv = (transmission + reflection).T

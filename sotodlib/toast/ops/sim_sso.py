@@ -104,9 +104,9 @@ def s2tcmb(s_nu, nu):
 
     x = h * nu / (k_b * T_cmb)
 
-    slope = 2*k_b*nu**2/c**2*((x/2)/np.sinh(x/2))**2
+    slope = 2 * k_b * nu ** 2 / c ** 2 * ((x / 2) / np.sinh(x / 2)) ** 2
 
-    return s_nu/slope
+    return s_nu / slope
 
 
 def tb2tcmb(tb, nu):

@@ -283,6 +283,17 @@ def simulate_data(job, toast_comm, telescope, schedule):
         timer=timer,
     )
 
+    # Simulate HWP-synchronous signal
+
+    #ops.sim_hwpss.detector_pointing = ops.det_pointing_azel
+    ops.sim_hwpss.detector_weights = ops.det_weights_azel
+    ops.sim_hwpss.apply(data)
+    log.info_rank(
+        "Simulated HWP-synchronous signal",
+        comm=world_comm,
+        timer=timer,
+    )
+
     return data
 
 
@@ -377,6 +388,7 @@ def main():
         toast.ops.SimNoise(name="sim_noise"),
         toast.ops.SimAtmosphere(name="sim_atmosphere"),
         so_ops.SimSSO(name="sim_sso", enabled=False),
+        so_ops.SimHWPSS(name="sim_hwpss", enabled=False),
         toast.ops.PointingHealpix(name="pointing", mode="IQU"),
         toast.ops.Statistics(name="raw_statistics", enabled=False),
         toast.ops.Statistics(name="filtered_statistics", enabled=False),
