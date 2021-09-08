@@ -14,6 +14,6 @@ export SOTODLIB_TEST_DISABLE_PLOTS=1
 MPI_DISABLE=1 python3 setup.py test
 
 # Run with 2 MPI processes
-mpirun -np 2 python3 setup.py test
+mpirun --allow-run-as-root -np 2 python3 setup.py test
 
 popd >/dev/null 2>&1
