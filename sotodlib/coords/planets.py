@@ -135,7 +135,7 @@ def get_scan_P(tod, planet, refq=None, res=None, size=None, **kw):
     Returns a Projection Matrix and the output from get_scan_q.
 
     """
-    logger.debug('get_scan_P: init for {planet}')
+    logger.debug(f'get_scan_P: init for {planet}')
 
     if res is None:
         res = 0.01 * coords.DEG
@@ -447,6 +447,67 @@ def _add_to_mask(req, mask_map):
     else:
         raise ValueError(f'Weird mask request: {req}')
 
+def load_detector_splits(tod=None, filename=None, dataset=None,
+                         source=None, wrap=None):
+    """Convert a partition of detectors into a dict of disjoint
+    RangesMatrix objects; such an object can be passed to make_map()
+    to efficiently make detector-split maps.
+
+    The "detector split" data can be read from an HDF5 dataset, or
+    passed in directly as an AxisManager.
+
+    Args:
+
+      tod (AxisManager): This is required, to get the list of dets and
+        the samps count.
+      filename (str): The HDF filename, or filename:dataset.
+      dataset (str): The HDF dataset (if not passed in with filename).
+      source (ResultSet or AxisManager): If not None, then filename
+        and dataset are ignored and this object is processed (as
+        though it had just been loaded from HDF).
+      wrap (str): If not None, the address in tod where to store the
+        loaded split data.
+
+    The format of detector splits, in an HDF5 dataset, is as one would
+    write from a ResultSet with columns ['dets:name', 'group'] (both
+    str).  All detectors sharing a value in the group column will
+    grouped together and the group label will be that value.
+
+    If passing in "source" directly as a ResultSet, it should have
+    columns 'dets:name' and 'group'; if as an AxisManager then it
+    should have a 'dets' axis and a vector 'group' with shape
+    ('dets',) providing the group name for each detector.
+
+    Returns:
+      data_splits (dict of RangesMatrix): Each entry of the dict is a
+        RangesMatrix that can be interpreted as cuts to apply during
+        mapmaking.  In this case the RangesMatrix will simply mark
+        each detector as either fully cut (flagged) or fully uncut.
+
+    """
+    from sotodlib.io import metadata
+
+    if source is None:
+        if dataset is None:
+            filename, dataset = filename.split(':')
+        source = metadata.read_dataset(filename, dataset).axismanager()
+    elif isinstance(source, metadata.ResultSet):
+        source = source.axismanager()
+    else:
+        source = source.copy()
+    source.restrict_axes([tod.dets])
+    if wrap:
+        tod.wrap(wrap, source)
+    yes = so3g.proj.RangesMatrix.zeros(tod.signal.shape[1])
+    flags = {}
+    for group in source['group']:
+        if group in flags:
+            continue
+        flags[group] = so3g.proj.RangesMatrix.ones((tod.signal.shape))
+        for i in (source['group']==group).nonzero()[0]:
+            flags[group].ranges[i] = yes
+    return flags
+
 def get_det_weights(tod, signal=None, wrap=None,
                     outlier_clip=None):
     """Compute detector weights, based on variance of signal.  If
@@ -501,6 +562,7 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
              signal=None,
              det_weights=None,
              filename=None, source_flags=None, cuts=None,
+             data_splits=None,
              low_pass=None, n_modes=10,
              eigentol=1e-3, info={}):
     """Make a compact source map from the TOD.  Specify filename to write
@@ -552,6 +614,25 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
 
     if det_weights is None:
         det_weights = get_det_weights(tod, signal=signal, outlier_clip=2.)
+
+    if data_splits is not None:
+        # Clear P's internal cuts as we'll be modifying those to pass
+        # in directly.
+        base_cuts, P.cuts = P.cuts, None
+        # Write out _map and _weights for each group.
+        for group_label, group_cuts in data_splits.items():
+            logger.info(f'Mapping split "{group_label}"')
+            if base_cuts is not None:
+                group_cuts = group_cuts + base_cuts
+            w = P.to_weights(cuts=group_cuts, det_weights=det_weights)
+            m = P.remove_weights(
+                tod=tod, signal=signal, weights_map=w, cuts=group_cuts,
+                det_weights=det_weights, eigentol=eigentol)
+            m.astype('float32').write(
+                filename.format(map=f'{group_label}_map', **info))
+            w.astype('float32').write(
+                filename.format(map=f'{group_label}_weights', **info))
+        return None
 
     with MmTimer('project signal and weight maps'):
         map1 = P.to_map(tod, signal=signal, det_weights=det_weights)
