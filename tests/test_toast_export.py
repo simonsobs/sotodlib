@@ -26,7 +26,7 @@ toast_available = None
 if toast_available is None:
     try:
         import toast
-        from toast.mpi import MPI
+        from toast.mpi import MPI, get_world
         from toast.todmap import TODGround
         from toast.tod import AnalyticNoise
         from sotodlib.toast.export import ToastExport
@@ -43,10 +43,9 @@ class ToastExportTest(TestCase):
             print("toast cannot be imported- skipping unit tests", flush=True)
             return
 
-        self.outdir = None
-        if MPI.COMM_WORLD.rank == 0:
-            self.outdir = create_outdir(fixture_name)
-        self.outdir = MPI.COMM_WORLD.bcast(self.outdir, root=0)
+        self.comm, self.procs, self.rank = get_world()
+
+        self.outdir = create_outdir(fixture_name, comm=self.comm)
 
         toastcomm = toast.Comm()
         self.data = toast.Data(toastcomm)

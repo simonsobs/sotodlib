@@ -2,9 +2,12 @@ import unittest
 
 from sotodlib.core import metadata
 
+from ._helpers import create_outdir, mpi_world
+
 
 class TestProdDb(unittest.TestCase):
     def setUp(self):
+        self.comm, self.procs, self.rank = mpi_world()
         # Init.
         scheme = metadata.ManifestScheme()
         scheme.add_exact_match('array')
@@ -39,7 +42,7 @@ class TestProdDb(unittest.TestCase):
         print('\nCONSTRUCTED   :', self.scheme.cols)
         print('\nRECONSTRUCTED :', self.manifest.scheme.cols)
         assert (self.manifest.scheme.cols == self.scheme.cols)
-            
+
 
 if __name__ == '__main__':
     unittest.main()

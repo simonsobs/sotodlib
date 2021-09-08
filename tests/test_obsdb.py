@@ -4,6 +4,9 @@ from sotodlib.core import metadata
 import os
 import time
 
+from ._helpers import mpi_world
+
+
 def get_example():
     # Create a new Db and add two columns.
     obsdb = metadata.ObsDb()
@@ -26,6 +29,10 @@ def get_example():
 
 
 class TestObsDb(unittest.TestCase):
+
+    def setUp(self):
+        self.comm, self.procs, self.rank = mpi_world()
+
     def test_smoke(self):
         """Basic functionality."""
         db = get_example()
@@ -55,9 +62,9 @@ class TestObsDb(unittest.TestCase):
     def test_io(self):
         """Check to_file and from_file."""
         db0 = get_example()
-        dump_list = [('test.sqlite', None),
-                     ('test.txt', 'dump'),
-                     ('test.gz', None)]
+        dump_list = [(f'test_{self.rank}.sqlite', None),
+                     (f'test_{self.rank}.txt', 'dump'),
+                     (f'test_{self.rank}.gz', None)]
         # Save.
         for fn, fmt in dump_list:
             print(f'Writing {fn}')

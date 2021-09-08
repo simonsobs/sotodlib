@@ -5,12 +5,16 @@ import os
 import time
 import numpy as np
 
+from ._helpers import mpi_world
+
 # Global Announcement: I know, but I hate slow tests.
 example = None
 
 
 class TestDetDb(unittest.TestCase):
     def setUp(self):
+        self.comm, self.procs, self.rank = mpi_world()
+
         global example
         if example is None:
             print('Creating example database...')
@@ -86,10 +90,11 @@ class TestDetDb(unittest.TestCase):
 
     def test_io(self):
         """Check to_file and from_file."""
+
         db0 = example.copy()
-        dump_list = [('test.sqlite', None),
-                     ('test.txt', 'dump'),
-                     ('test.gz', None)]
+        dump_list = [(f'test_{self.rank}.sqlite', None),
+                     (f'test_{self.rank}.txt', 'dump'),
+                     (f'test_{self.rank}.gz', None)]
         # Save.
         for fn, fmt in dump_list:
             print(f'Writing {fn}')
