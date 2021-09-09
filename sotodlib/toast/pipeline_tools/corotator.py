@@ -72,7 +72,7 @@ def rotate_focalplane(args, data, comm):
         except Exception as e:
             pass
 
-    if comm is None or comm.comm_world.rank == 0:
+    if comm.comm_world is None or comm.comm_world.rank == 0:
         timer.report_clear("Rotate focalplane")
 
     return
