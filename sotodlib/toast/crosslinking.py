@@ -118,7 +118,7 @@ class OpCrossLinking(toast.Operator):
     def exec(self, data):
         comm = data.comm.comm_world
 
-        if comm.rank == 0:
+        if comm is None or comm.rank == 0:
             os.makedirs(self._outdir, exist_ok=True)
 
         for obs in data.obs:
