@@ -24,6 +24,16 @@ def mpi_world():
     return comm, procs, rank
 
 
+def mpi_multi():
+    """Return True if we have more than one MPI process in our environment.
+    """
+    comm, procs, rank = mpi_world()
+    if procs > 1:
+        return True
+    else:
+        return False
+
+
 def create_outdir(subdir=None, comm=None):
     """Create the top level output directory and per-test subdir.
 

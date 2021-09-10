@@ -16,13 +16,13 @@ from sotodlib.io.metadata import ResultSetHdfLoader, write_dataset, _decode_arra
 import os
 import h5py
 
-from ._helpers import mpi_world
+from ._helpers import mpi_multi
 
 
+@unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
 class MetadataTest(unittest.TestCase):
 
     def setUp(self):
-        self.comm, self.procs, self.rank = mpi_world()
         self.tempdir = tempfile.TemporaryDirectory()
 
     def tearDown(self):

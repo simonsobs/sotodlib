@@ -2,12 +2,12 @@ import unittest
 
 from sotodlib.core import metadata
 
-from ._helpers import create_outdir, mpi_world
+from ._helpers import create_outdir, mpi_multi
 
 
+@unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
 class TestProdDb(unittest.TestCase):
     def setUp(self):
-        self.comm, self.procs, self.rank = mpi_world()
         # Init.
         scheme = metadata.ManifestScheme()
         scheme.add_exact_match('array')
