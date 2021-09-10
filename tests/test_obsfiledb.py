@@ -5,15 +5,15 @@ import tempfile
 
 from sotodlib.core import metadata
 
-from ._helpers import create_outdir, mpi_world
+from ._helpers import create_outdir, mpi_multi
 
 
+@unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
 class TestObsFileDB(unittest.TestCase):
 
     def setUp(self):
-        self.comm, self.procs, self.rank = mpi_world()
-        self.test_filename = f'test_obsfiledb_{self.rank}.sqlite'
-        self.test_datatree = f'test_datatree_{self.rank}'
+        self.test_filename = 'test_obsfiledb.sqlite'
+        self.test_datatree = 'test_datatree'
         if os.path.exists(self.test_filename):
             os.remove(self.test_filename)
         self.test_dir = tempfile.mkdtemp()
