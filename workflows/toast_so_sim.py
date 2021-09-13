@@ -259,6 +259,12 @@ def simulate_data(job, toast_comm, telescope, schedule):
     ops.scan_map.apply(data)
     log.info_rank("Simulated sky signal in", comm=world_comm, timer=timer)
 
+    # Simulate scan-synchronous signal
+
+    ops.sim_sss.detector_pointing = ops.det_pointing_azel
+    ops.sim_sss.apply(data)
+    log.info_rank("Simulated Scan-synchronous signal", comm=world_comm, timer=timer)
+
     # Simulate atmosphere
 
     ops.sim_atmosphere.detector_pointing = ops.det_pointing_azel
@@ -419,6 +425,8 @@ def main():
         toast.ops.ScanHealpix(name="scan_map", enabled=False),
         toast.ops.SimNoise(name="sim_noise"),
         toast.ops.SimAtmosphere(name="sim_atmosphere"),
+        toast.ops.SimScanSynchronousSignal(name="sim_sss", enabled=False),
+        toast.ops.TimeConstant(
         so_ops.SimSSO(name="sim_sso", enabled=False),
         so_ops.SimHWPSS(name="sim_hwpss", enabled=False),
         toast.ops.TimeConstant(
