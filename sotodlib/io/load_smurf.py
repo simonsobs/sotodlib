@@ -54,10 +54,12 @@ SMURF_ACTIONS = {
     ],
     'channel_assignments':[
         'setup_notches',
+        'optimize_attens',
     ],
     'tuning':[
         'setup_notches',
         'save_tune',
+        'optimize_attens',
     ]
 }
 
@@ -829,6 +831,7 @@ class G3tSmurf:
                 cha = cha.order_by(db.desc(ChanAssignments.ctime)).first()
             if cha is None:
                 logger.error(f"Missing Channel Assignment for tune file {tune_path}")
+                continue
             assign_set.append(cha)
         return assign_set
 
@@ -1086,7 +1089,7 @@ class G3tSmurf:
                         session.rollback()
                         logger.info(f"Integrity Error at {stream_id}, {ctime}")
                     except Exception as e:
-                        logger.info(stream_id, ctime)
+                        logger.info(f"Unexplained Error at {stream_id}, {ctime}")
                         raise(e)
         session.close()
 
