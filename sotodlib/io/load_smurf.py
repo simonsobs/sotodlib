@@ -1373,11 +1373,11 @@ class SmurfStatus:
             self.filter_b = np.array(ast.literal_eval(self.filter_b))
         self.filter_gain = self.status.get(f'{filter_root}.Gain')
         self.filter_order = self.status.get(f'{filter_root}.Order')
-        self.filter_enabled = not self.status.get('{filter_root}.Disabled')
+        self.filter_enabled = not self.status.get('{filter_root}.Disable')
 
         ds_root = 'AMCc.SmurfProcessor.Downsampler'
         self.downsample_factor = self.status.get(f'{ds_root}.Factor')
-        self.downsample_enabled = not self.status.get(f'{ds_root}.Disabled')
+        self.downsample_enabled = not self.status.get(f'{ds_root}.Disable')
 
         # Tries to make resonator frequency map
         self.freq_map = np.full((self.NUM_BANDS, self.CHANS_PER_BAND), np.nan)
