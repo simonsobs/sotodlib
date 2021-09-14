@@ -327,6 +327,12 @@ def reduce_data(job, args, data):
 
     # Optional geometric factors
 
+    ops.h_n.pointing = ops.pointing_final
+    ops.h_n.pixel_dist = ops.binner_final.pixel_dist
+    ops.h_n.output_dir = args.out_dir
+    ops.h_n.apply(data)
+    log.info_rank("Calculated h_n in", comm=world_comm, timer=timer)
+
     ops.cadence_map.pointing = ops.pointing_final
     ops.cadence_map.pixel_dist = ops.binner_final.pixel_dist
     ops.cadence_map.output_dir = args.out_dir
@@ -426,7 +432,6 @@ def main():
         toast.ops.SimNoise(name="sim_noise"),
         toast.ops.SimAtmosphere(name="sim_atmosphere"),
         toast.ops.SimScanSynchronousSignal(name="sim_sss", enabled=False),
-        toast.ops.TimeConstant(
         so_ops.SimSSO(name="sim_sso", enabled=False),
         so_ops.SimHWPSS(name="sim_hwpss", enabled=False),
         toast.ops.TimeConstant(
@@ -434,6 +439,7 @@ def main():
         ),
         toast.ops.PointingHealpix(name="pointing", mode="IQU"),
         toast.ops.FlagSSO(name="flag_sso", enabled=False),
+        so_ops.Hn(name="h_n", enabled=False),
         toast.ops.CadenceMap(name="cadence_map", enabled=False),
         toast.ops.CrossLinking(name="crosslinking", enabled=False),
         toast.ops.Statistics(name="raw_statistics", enabled=False),
