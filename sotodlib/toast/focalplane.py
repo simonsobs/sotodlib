@@ -133,10 +133,10 @@ class SOFocalplane(Focalplane):
             fknees, fmins, alphas, As, Cs, bandcenters, bandwidths,
             ids, pixels, fwhms, pols, card_slots, channels, AMCs, biases,
             readout_freqs, bondpads, mux_positions,
-         ) = (
-             [], [], [], [], [], [], [], [], [], [], [], [], [], [],
-             [], [], [], [], [], [], [], [], [], [], [],
-         )
+        ) = (
+            [], [], [], [], [], [], [], [], [], [], [], [], [], [],
+            [], [], [], [], [], [], [], [], [], [], [],
+        )
         for det_name, det_data in hw.data["detectors"].items():
             names.append(det_name)
             quats.append(det_data["quat"])
