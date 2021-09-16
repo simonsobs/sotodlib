@@ -140,46 +140,46 @@ class ToastExportTest(TestCase):
         self.data.obs.append(obs)
         return
 
-    def test_dump(self):
-        if not toast_available:
-            return
+    # def test_dump(self):
+    #     if not toast_available:
+    #         return
 
-        # Simulate some noise into multiple cache prefixes.  This is used
-        # to test the export of multiple timestream flavors.
-        nse = toast.tod.OpSimNoise(out="signal", realization=0)
-        nse.exec(self.data)
-        nse = toast.tod.OpSimNoise(out="component1", realization=0)
-        nse.exec(self.data)
-        nse = toast.tod.OpSimNoise(out="component2", realization=0)
-        nse.exec(self.data)
+    #     # Simulate some noise into multiple cache prefixes.  This is used
+    #     # to test the export of multiple timestream flavors.
+    #     nse = toast.tod.OpSimNoise(out="signal", realization=0)
+    #     nse.exec(self.data)
+    #     nse = toast.tod.OpSimNoise(out="component1", realization=0)
+    #     nse.exec(self.data)
+    #     nse = toast.tod.OpSimNoise(out="component2", realization=0)
+    #     nse.exec(self.data)
 
-        tod = self.data.obs[0]["tod"]
+    #     tod = self.data.obs[0]["tod"]
 
-        # Dump to disk
-        dumper = ToastExport(
-            self.outdir,
-            prefix="sat4",
-            use_intervals=True,
-            cache_name="signal",
-            cache_copy=["component1", "component2"],
-            mask_flag_common=tod.TURNAROUND,
-            filesize=5000000,
-            units=core3g.G3TimestreamUnits.Tcmb)
-        dumper.exec(self.data)
+    #     # Dump to disk
+    #     dumper = ToastExport(
+    #         self.outdir,
+    #         prefix="sat4",
+    #         use_intervals=True,
+    #         cache_name="signal",
+    #         cache_copy=["component1", "component2"],
+    #         mask_flag_common=tod.TURNAROUND,
+    #         filesize=5000000,
+    #         units=core3g.G3TimestreamUnits.Tcmb)
+    #     dumper.exec(self.data)
 
-        # Inspect the dumped frames
-        for root, dirs, files in os.walk(self.outdir):
-            files = sorted(files)
-            for f in files:
-                path = os.path.join(root, f)
-                print("file {}".format(path), flush=True)
-                gf = core3g.G3File(path)
-                for frm in gf:
-                    print(frm, flush=True)
-                    # if frm.type == core3g.G3FrameType.Scan:
-                    #     common = frm.get("flags_common")
-                    #     print(common.array(), flush=True)
-                    #     print(frm.get("flags"))
-                    #     print(frm.get("signal"), flush=True)
+    #     # Inspect the dumped frames
+    #     for root, dirs, files in os.walk(self.outdir):
+    #         files = sorted(files)
+    #         for f in files:
+    #             path = os.path.join(root, f)
+    #             print("file {}".format(path), flush=True)
+    #             gf = core3g.G3File(path)
+    #             for frm in gf:
+    #                 print(frm, flush=True)
+    #                 # if frm.type == core3g.G3FrameType.Scan:
+    #                 #     common = frm.get("flags_common")
+    #                 #     print(common.array(), flush=True)
+    #                 #     print(frm.get("flags"))
+    #                 #     print(frm.get("signal"), flush=True)
 
-        return
+    #     return
