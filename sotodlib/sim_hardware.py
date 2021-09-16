@@ -504,3 +504,24 @@ def sim_nominal():
     hw.data = cnf
 
     return hw
+
+
+def telescope_tube_wafer():
+    """Global mapping of telescopes, tubes, and wafers used in simulations.
+
+    This mapping is here rather than core.hardware, so that we could put
+    alternate definitions there for actual fielded configurations.
+
+    Returns:
+        (dict):  The mapping
+
+    """
+    hw = sim_nominal()
+    result = dict()
+    for tele_name, tele_props in hw.data["telescopes"].items():
+        tb = dict()
+        for tube_name in tele_props["tube_slots"]:
+            tube_props = hw.data["tube_slots"][tube_name]
+            tb[tube_name] = list(tube_props["wafer_slots"])
+        result[tele_name] = tb
+    return result

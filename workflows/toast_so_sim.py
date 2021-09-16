@@ -117,6 +117,22 @@ def parse_config(operators, templates, comm):
     )
 
     parser.add_argument(
+        "--save_books",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Save simulated data to L3 book format.",
+    )
+
+    parser.add_argument(
+        "--save_hdf5",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Save simulated data to TOAST native HDF5 format.",
+    )
+
+    parser.add_argument(
         "--obsmaps",
         required=False,
         default=False,
@@ -157,9 +173,9 @@ def load_instrument_and_schedule(args, comm):
     timer = toast.timing.Timer()
     timer.start()
 
-    focalplane = sotoast.SOFocalplane(
+    telescope = sotoast.simulated_telescope(
         hwfile=args.hardware,
-        telescope=args.telescope,
+        telescope_name=args.telescope,
         sample_rate=args.sample_rate * u.Hz,
         bands=args.bands,
         wafer_slots=args.wafer_slots,
@@ -178,17 +194,6 @@ def load_instrument_and_schedule(args, comm):
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"After loading schedule:  {mem}", comm)
 
-    # FIXME : hardcode site parameters?
-    site = toast.instrument.GroundSite(
-        schedule.site_name,
-        schedule.site_lat,
-        schedule.site_lon,
-        schedule.site_alt,
-        weather=None,
-    )
-    telescope = toast.instrument.Telescope(
-        schedule.telescope_name, focalplane=focalplane, site=site
-    )
     return telescope, schedule
 
 
@@ -770,7 +775,12 @@ def main():
     # operator is disabled by default.
 
     operators = [
-        toast.ops.SimGround(name="sim_ground", weather="atacama", detset_key="pixel"),
+        toast.ops.SimGround(
+            name="sim_ground",
+            weather="atacama",
+            detset_key="pixel",
+            session_split_key="tube_slot",
+        ),
         so_ops.CoRotator(name="corotate_lat"),
         toast.ops.PerturbHWP(name="perturb_hwp", enabled=False),
         toast.ops.DefaultNoiseModel(name="default_model", noise_model="noise_model"),
