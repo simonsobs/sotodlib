@@ -26,7 +26,7 @@ toast_available = None
 if toast_available is None:
     try:
         import toast
-        from toast.mpi import MPI
+        from toast.mpi import MPI, get_world
         from toast.todmap import TODGround
         from toast.tod import AnalyticNoise
         from sotodlib.toast.export import ToastExport
@@ -43,10 +43,9 @@ class ToastExportTest(TestCase):
             print("toast cannot be imported- skipping unit tests", flush=True)
             return
 
-        self.outdir = None
-        if MPI.COMM_WORLD.rank == 0:
-            self.outdir = create_outdir(fixture_name)
-        self.outdir = MPI.COMM_WORLD.bcast(self.outdir, root=0)
+        self.comm, self.procs, self.rank = get_world()
+
+        self.outdir = create_outdir(fixture_name, comm=self.comm)
 
         toastcomm = toast.Comm()
         self.data = toast.Data(toastcomm)
@@ -141,46 +140,46 @@ class ToastExportTest(TestCase):
         self.data.obs.append(obs)
         return
 
-    def test_dump(self):
-        if not toast_available:
-            return
+    # def test_dump(self):
+    #     if not toast_available:
+    #         return
 
-        # Simulate some noise into multiple cache prefixes.  This is used
-        # to test the export of multiple timestream flavors.
-        nse = toast.tod.OpSimNoise(out="signal", realization=0)
-        nse.exec(self.data)
-        nse = toast.tod.OpSimNoise(out="component1", realization=0)
-        nse.exec(self.data)
-        nse = toast.tod.OpSimNoise(out="component2", realization=0)
-        nse.exec(self.data)
+    #     # Simulate some noise into multiple cache prefixes.  This is used
+    #     # to test the export of multiple timestream flavors.
+    #     nse = toast.tod.OpSimNoise(out="signal", realization=0)
+    #     nse.exec(self.data)
+    #     nse = toast.tod.OpSimNoise(out="component1", realization=0)
+    #     nse.exec(self.data)
+    #     nse = toast.tod.OpSimNoise(out="component2", realization=0)
+    #     nse.exec(self.data)
 
-        tod = self.data.obs[0]["tod"]
+    #     tod = self.data.obs[0]["tod"]
 
-        # Dump to disk
-        dumper = ToastExport(
-            self.outdir,
-            prefix="sat4",
-            use_intervals=True,
-            cache_name="signal",
-            cache_copy=["component1", "component2"],
-            mask_flag_common=tod.TURNAROUND,
-            filesize=5000000,
-            units=core3g.G3TimestreamUnits.Tcmb)
-        dumper.exec(self.data)
+    #     # Dump to disk
+    #     dumper = ToastExport(
+    #         self.outdir,
+    #         prefix="sat4",
+    #         use_intervals=True,
+    #         cache_name="signal",
+    #         cache_copy=["component1", "component2"],
+    #         mask_flag_common=tod.TURNAROUND,
+    #         filesize=5000000,
+    #         units=core3g.G3TimestreamUnits.Tcmb)
+    #     dumper.exec(self.data)
 
-        # Inspect the dumped frames
-        for root, dirs, files in os.walk(self.outdir):
-            files = sorted(files)
-            for f in files:
-                path = os.path.join(root, f)
-                print("file {}".format(path), flush=True)
-                gf = core3g.G3File(path)
-                for frm in gf:
-                    print(frm, flush=True)
-                    # if frm.type == core3g.G3FrameType.Scan:
-                    #     common = frm.get("flags_common")
-                    #     print(common.array(), flush=True)
-                    #     print(frm.get("flags"))
-                    #     print(frm.get("signal"), flush=True)
+    #     # Inspect the dumped frames
+    #     for root, dirs, files in os.walk(self.outdir):
+    #         files = sorted(files)
+    #         for f in files:
+    #             path = os.path.join(root, f)
+    #             print("file {}".format(path), flush=True)
+    #             gf = core3g.G3File(path)
+    #             for frm in gf:
+    #                 print(frm, flush=True)
+    #                 # if frm.type == core3g.G3FrameType.Scan:
+    #                 #     common = frm.get("flags_common")
+    #                 #     print(common.array(), flush=True)
+    #                 #     print(frm.get("flags"))
+    #                 #     print(frm.get("signal"), flush=True)
 
-        return
+    #     return
