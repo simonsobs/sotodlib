@@ -20,7 +20,7 @@ class _HKBlockBundle(object):
             self.data[c].extend(b[c])
 
     def ready(self):
-        return len(locate_sign_changes(np.ediff1d(self.data['channel_00']))) > 0
+        return len(locate_sign_changes(np.ediff1d(self.data['Azimuth_Corrected']))) > 0
 
     def rebundle(self, flush_time):
         if len(self.times) == 0:
@@ -43,7 +43,7 @@ class _ScanDataBundle(object):
         self.data = None
 
     def add(self, b):
-        self.times.extend(b.times())
+        self.times.extend(b.times)
         if self.data is None:
             self.data = {c: [] for c in b.keys()}
         for c in b.keys():
@@ -112,7 +112,7 @@ class Bookbinder(object):
                 output['hk'] = self.hkbundle.rebundle(self.flush_time)
 
                 # Co-sampled (interpolated) azimuth encoder data
-                output['data']['Azimuth'] = core.G3Timestream(np.interp(output['data'].times, output['hk'].times, output['hk']['channel_00'], left=np.nan, right=np.nan))
+                output['data']['Azimuth'] = core.G3Timestream(np.interp(output['data'].times, output['hk'].times, output['hk']['Azimuth_Corrected'], left=np.nan, right=np.nan))
 
             return output
 
@@ -144,14 +144,14 @@ if __name__ == '__main__':
         if fr.type != core.G3FrameType.Housekeeping:
             return []
 
-        if fr['hkagg_type'] != 2 or fr['prov_id'] != 12:
+        if fr['hkagg_type'] != 2:
             return []
 
         B(fr)
         if not B.ready():
             return []
 
-        sc = locate_sign_changes(np.ediff1d(B.hkbundle.data['channel_00']))
+        sc = locate_sign_changes(np.ediff1d(B.hkbundle.data['Azimuth_Corrected']))
         tc = [B.hkbundle.times[i] for i in sc]
         while len(tc) > 0:
             B.flush_time = tc.pop(0)
