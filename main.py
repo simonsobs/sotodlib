@@ -31,9 +31,9 @@ class _HKBlockBundle(object):
         self.times = [t for t in self.times if t >= flush_time]
 
         for c in self.data.keys():
-            output[c] = core.G3Timestream(np.array(self.data[c][:-len(self.times)]))
+            output[c] = core.G3Timestream(np.array(self.data[c][:len(output.times)]))
 
-        self.data = {c: self.data[c][-len(self.times):] for c in self.data.keys()}
+        self.data = {c: self.data[c][len(output.times):] for c in self.data.keys()}
 
         return output
 
@@ -64,9 +64,9 @@ class _ScanDataBundle(object):
         self.times = [t for t in self.times if t >= flush_time]
 
         for c in self.data.keys():
-            output[c] = core.G3Timestream(np.array(self.data[c][:-len(self.times)]))
+            output[c] = core.G3Timestream(np.array(self.data[c][:len(output.times)]))
 
-        self.data = {c: self.data[c][-len(self.times):] for c in self.data.keys()}
+        self.data = {c: self.data[c][len(output.times):] for c in self.data.keys()}
 
         return output
 
@@ -81,6 +81,16 @@ class Bookbinder(object):
         Check if criterion passed in HK (for now, sign change in Az scan velocity data)
         """
         return self.hkbundle.ready() if (self.hkbundle is not None) else False
+
+    def flush(self):
+        output = core.G3Frame(core.G3FrameType.Scan)
+        output['data'] = self.sdbundle.rebundle(self.flush_time)
+        output['hk'] = self.hkbundle.rebundle(self.flush_time)
+
+        # Co-sampled (interpolated) azimuth encoder data
+        output['data']['Azimuth'] = core.G3Timestream(np.interp(output['data'].times, output['hk'].times, output['hk']['Azimuth_Corrected'], left=np.nan, right=np.nan))
+
+        return output
 
     def __call__(self, f):
         """
@@ -107,12 +117,7 @@ class Bookbinder(object):
             self.sdbundle.add(f['data'])
 
             if self.sdbundle.ready(self.flush_time):
-                output = core.G3Frame(core.G3FrameType.Scan)
-                output['data'] = self.sdbundle.rebundle(self.flush_time)
-                output['hk'] = self.hkbundle.rebundle(self.flush_time)
-
-                # Co-sampled (interpolated) azimuth encoder data
-                output['data']['Azimuth'] = core.G3Timestream(np.interp(output['data'].times, output['hk'].times, output['hk']['Azimuth_Corrected'], left=np.nan, right=np.nan))
+                output = self.flush()
 
             return output
 
@@ -153,6 +158,7 @@ if __name__ == '__main__':
 
         sc = locate_sign_changes(np.ediff1d(B.hkbundle.data['Azimuth_Corrected']))
         tc = [B.hkbundle.times[i] for i in sc]
+        output = []
         while len(tc) > 0:
             B.flush_time = tc.pop(0)
 
@@ -162,14 +168,17 @@ if __name__ == '__main__':
                 except StopIteration:
                     # If there are no more SMuRF frames, output remaining SMuRF data
                     # and terminate program by ending loop
-                    output = B.sdbundle.rebundle(B.flush_time)
+                    if len(B.sdbundle.times):
+                        B.flush_time = B.sdbundle.times[-1] + 1  # +1 to ensure last sample gets included (= 1e-8 sec << sampling cadence)
+                        output.append(B.flush())
                     return output
 
                 if f.type != core.G3FrameType.Scan:
                     continue
-                output = B(f)
-                if len(output) > 0:
-                    return output
+                bookframe = B(f)
+                if len(bookframe) > 0:
+                   output.append(bookframe)
+        return output
 
     pipe = core.G3Pipeline()
     pipe.Add(core.G3Reader, filename=args.hkfile)
