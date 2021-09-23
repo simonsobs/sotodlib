@@ -121,7 +121,7 @@ def fit_psd(
 
     popt, pcov = opt.curve_fit(_noise_model, 0, Pxx[1:], bounds=bounds, p0=p0)
 
-    return popt, _noise_model(nm_args, *popt), Pxx, freqs
+    return popt, _noise_model(0, *popt), Pxx, freqs
 
 
 def fit_hist(
