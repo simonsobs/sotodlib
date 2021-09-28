@@ -83,12 +83,16 @@ class Bookbinder(object):
         return self.hkbundle.ready() if (self.hkbundle is not None) else False
 
     def flush(self):
-        output = core.G3Frame(core.G3FrameType.Scan)
-        output['data'] = self.sdbundle.rebundle(self.flush_time)
-        output['hk'] = self.hkbundle.rebundle(self.flush_time)
+        output = []
+
+        f = core.G3Frame(core.G3FrameType.Scan)
+        f['data'] = self.sdbundle.rebundle(self.flush_time)
+        f['hk'] = self.hkbundle.rebundle(self.flush_time)
 
         # Co-sampled (interpolated) azimuth encoder data
-        output['data']['Azimuth'] = core.G3Timestream(np.interp(output['data'].times, output['hk'].times, output['hk']['Azimuth_Corrected'], left=np.nan, right=np.nan))
+        f['data']['Azimuth'] = core.G3Timestream(np.interp(f['data'].times, f['hk'].times, f['hk']['Azimuth_Corrected'], left=np.nan, right=np.nan))
+
+        output += [f]
 
         return output
 
@@ -117,7 +121,7 @@ class Bookbinder(object):
             self.sdbundle.add(f['data'])
 
             if self.sdbundle.ready(self.flush_time):
-                output = self.flush()
+                output += self.flush()
 
             return output
 
@@ -170,14 +174,14 @@ if __name__ == '__main__':
                     # and terminate program by ending loop
                     if len(B.sdbundle.times):
                         B.flush_time = B.sdbundle.times[-1] + 1  # +1 to ensure last sample gets included (= 1e-8 sec << sampling cadence)
-                        output.append(B.flush())
+                        output += B.flush()
                     return output
 
                 if f.type != core.G3FrameType.Scan:
                     continue
-                bookframe = B(f)
-                if len(bookframe) > 0:
-                   output.append(bookframe)
+                bookframes = B(f)  # returns a list of frames
+                if len(bookframes) > 0:
+                    output += bookframes
         return output
 
     pipe = core.G3Pipeline()
