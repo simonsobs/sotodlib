@@ -164,7 +164,12 @@ if __name__ == '__main__':
         tc = [B.hkbundle.times[i] for i in sc]
         output = []
         while len(tc) > 0:
-            B.flush_time = tc.pop(0)
+            if B.sdbundle is not None and len(B.sdbundle.times) > 0:
+                dt = 30 * core.G3Units.s  # set max frame length (in seconds)
+                t = B.sdbundle.times[0].time + dt
+                B.flush_time = core.G3Time(t) if (t < tc[0].time) else tc.pop(0)
+            else:
+                B.flush_time = tc.pop(0)
 
             while B.sdbundle is None or not B.sdbundle.ready(B.flush_time):
                 try:
