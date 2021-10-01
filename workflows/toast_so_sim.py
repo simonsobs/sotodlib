@@ -218,8 +218,8 @@ def simulate_data(job, toast_comm, telescope, schedule):
     ops.det_pointing_azel.boresight = ops.sim_ground.boresight_azel
     ops.det_pointing_radec.boresight = ops.sim_ground.boresight_radec
 
-    ops.det_weights_azel.detector_pointing = ops.det_pointing_azel
-    ops.det_weights_azel.hwp_angle = ops.sim_ground.hwp_angle
+    ops.weights_azel.detector_pointing = ops.det_pointing_azel
+    ops.weights_azel.hwp_angle = ops.sim_ground.hwp_angle
 
     # Create the Elevation modulated noise model
 
@@ -231,19 +231,21 @@ def simulate_data(job, toast_comm, telescope, schedule):
 
     # Set up the pointing.  Each pointing matrix operator requires a detector pointing
     # operator, and each binning operator requires a pointing matrix operator.
-    ops.pointing.detector_pointing = ops.det_pointing_radec
-    ops.pointing.hwp_angle = ops.sim_ground.hwp_angle
-    ops.pointing_final.detector_pointing = ops.det_pointing_radec
-    ops.pointing_final.hwp_angle = ops.sim_ground.hwp_angle
+    ops.pixels_radec.detector_pointing = ops.det_pointing_radec
+    ops.weights_radec.detector_pointing = ops.det_pointing_radec
+    ops.weights_radec.hwp_angle = ops.sim_ground.hwp_angle
+    ops.pixels_radec_final.detector_pointing = ops.det_pointing_radec
 
-    ops.binner.pointing = ops.pointing
+    ops.binner.pixel_pointing = ops.pixels_radec
+    ops.binner.stokes_weights = ops.weights_radec
 
     # If we are not using a different pointing matrix for our final binning, then
     # use the same one as the solve.
-    if not ops.pointing_final.enabled:
-        ops.pointing_final = ops.pointing
+    if not ops.pixels_radec_final.enabled:
+        ops.pixels_radec_final = ops.pixels_radec
 
-    ops.binner_final.pointing = ops.pointing_final
+    ops.binner_final.pixel_pointing = ops.pixels_radec_final
+    ops.binner_final.stokes_weights = ops.weights_radec
 
     # If we are not using a different binner for our final binning, use the same one
     # as the solve.
@@ -254,7 +256,8 @@ def simulate_data(job, toast_comm, telescope, schedule):
     # in case that is different from the solver pointing model.
 
     ops.scan_map.pixel_dist = ops.binner_final.pixel_dist
-    ops.scan_map.pointing = ops.pointing_final
+    ops.scan_map.pixel_pointing = ops.pixels_radec_final
+    ops.scan_map.stokes_weights = ops.weights_radec
     ops.scan_map.save_pointing = use_full_pointing(job)
     ops.scan_map.apply(data)
     log.info_rank("Simulated sky signal in", comm=world_comm, timer=timer)
@@ -269,7 +272,7 @@ def simulate_data(job, toast_comm, telescope, schedule):
 
     ops.sim_atmosphere.detector_pointing = ops.det_pointing_azel
     if ops.sim_atmosphere.polarization_fraction != 0:
-        ops.sim_atmosphere.detector_weights = ops.det_weights_azel
+        ops.sim_atmosphere.detector_weights = ops.weights_azel
     ops.sim_atmosphere.apply(data)
     log.info_rank("Simulated and observed atmosphere in", comm=world_comm, timer=timer)
 
@@ -296,8 +299,7 @@ def simulate_data(job, toast_comm, telescope, schedule):
 
     # Simulate HWP-synchronous signal
 
-    #ops.sim_hwpss.detector_pointing = ops.det_pointing_azel
-    ops.sim_hwpss.detector_weights = ops.det_weights_azel
+    ops.sim_hwpss.stokes_weights = ops.weights_azel
     ops.sim_hwpss.apply(data)
     log.info_rank(
         "Simulated HWP-synchronous signal",
@@ -327,19 +329,19 @@ def reduce_data(job, args, data):
 
     # Optional geometric factors
 
-    ops.h_n.pointing = ops.pointing_final
+    ops.h_n.pixel_pointing = ops.pixels_radec_final
     ops.h_n.pixel_dist = ops.binner_final.pixel_dist
     ops.h_n.output_dir = args.out_dir
     ops.h_n.apply(data)
     log.info_rank("Calculated h_n in", comm=world_comm, timer=timer)
 
-    ops.cadence_map.pointing = ops.pointing_final
+    ops.cadence_map.pixel_pointing = ops.pixels_radec_final
     ops.cadence_map.pixel_dist = ops.binner_final.pixel_dist
     ops.cadence_map.output_dir = args.out_dir
     ops.cadence_map.apply(data)
     log.info_rank("Calculated cadence map in", comm=world_comm, timer=timer)
 
-    ops.crosslinking.pointing = ops.pointing_final
+    ops.crosslinking.pixel_pointing = ops.pixels_radec_final
     ops.crosslinking.pixel_dist = ops.binner_final.pixel_dist
     ops.crosslinking.output_dir = args.out_dir
     ops.crosslinking.apply(data)
@@ -420,10 +422,8 @@ def main():
             out_model="el_noise_model",
         ),
         toast.ops.PointingDetectorSimple(name="det_pointing_azel", quats="quats_azel"),
-        # In the future, `det_weights_azel` may be a dedicated operator that does not
-        # expand pixel numbers but just Stokes weights
-        toast.ops.PointingHealpix(
-            name="det_weights_azel", weights="weights_azel", mode="IQU"
+        toast.ops.StokesWeights(
+            name="weights_azel", weights="weights_azel", mode="IQU"
         ),
         toast.ops.PointingDetectorSimple(
             name="det_pointing_radec", quats="quats_radec"
@@ -437,7 +437,8 @@ def main():
         toast.ops.TimeConstant(
             name="convolve_time_constant", deconvolve=False, enabled=False
         ),
-        toast.ops.PointingHealpix(name="pointing", mode="IQU"),
+        toast.ops.PixelsHealpix(name="pixels_radec"),
+        toast.ops.StokesWeights(name="weights_radec", mode="IQU"),
         toast.ops.FlagSSO(name="flag_sso", enabled=False),
         so_ops.Hn(name="h_n", enabled=False),
         toast.ops.CadenceMap(name="cadence_map", enabled=False),
@@ -453,7 +454,7 @@ def main():
         toast.ops.Statistics(name="filtered_statistics", enabled=False),
         toast.ops.BinMap(name="binner", pixel_dist="pix_dist"),
         toast.ops.MapMaker(name="mapmaker"),
-        toast.ops.PointingHealpix(name="pointing_final", enabled=False, mode="IQU"),
+        toast.ops.PixelsHealpix(name="pixels_radec_final", enabled=False),
         toast.ops.BinMap(
             name="binner_final", enabled=False, pixel_dist="pix_dist_final"
         ),
