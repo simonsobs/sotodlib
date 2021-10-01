@@ -20,8 +20,12 @@ from toast.ops import Operator
 from toast.utils import Logger, Environment, rate_from_times
 from toast.timing import function_timer, Timer
 from toast.observation import default_names as obs_names
+from toast.fft import FFTPlanReal1DStore
 
 from ... import mapmaking as mm
+
+
+
 
 
 @trait_docs
@@ -279,3 +283,51 @@ class MLMapmaker(Operator):
 
     def _accelerators(self):
         return list()
+
+
+# class NmatToast(mm.Nmat):
+#     """Noise matrix class that uses a TOAST noise model.
+
+#     This takes an existing TOAST noise model and uses it for a MLMapmaker compatible
+#     noise matrix.
+
+#     Args:
+#         model (toast.Noise):  The toast noise model.
+#         det_order (dict):  The mapping from detector order in the AxisManager
+#             to name in the Noise object.
+
+#     """
+#     def __init__(self, model, n_sample, det_order):
+#         self.model = model
+#         self.det_order = det_order
+#         self.n_sample = n_sample
+
+#         # Compute the radix-2 FFT length to use
+#         self.fftlen = 2
+#         while self.fftlen <= self.n_sample:
+#             self.fftlen *= 2
+#         self.npsd = self.fftlen // 2 + 1
+
+#         # Compute the time domain offset that centers our data within the
+#         # buffer
+#         self.padded_start = (self.fftlen - self.n_sample) // 2
+
+#         # Compute the common frequency values
+#         self.nyquist = model.freq(model.keys[0])[-1].to_value(u.Hz)
+#         self.rate = 2 * self.nyquist
+#         self.freqs = np.fft.rfftfreq(self.fftlen, 1 / self.rate))
+
+#         # Interpolate the PSDs to desired spacing and store for later
+#         # application.
+
+#     def build(self, tod, **kwargs):
+#         """Build method is a no-op, we do all set up in the constructor."""
+#         return self
+
+#     def apply(self, tod, inplace=False):
+#         """Apply our noise filter to the TOD.
+
+#         We use our pre-built Fourier domain kernels.
+
+#         """
+#         return tod
