@@ -62,7 +62,7 @@ class MLMapmaker:
         # Ideally we would include cuts in the pmat. It would slightly simplify PmatCut, which
         # would skip the "clear" step, and it would make the map_div calculation simpler.
         # However, doing so changes the result, which should be investigated.
-        pmat    = coords.pmat.P.for_tod(obs, comps=self.comps, geom=(self.shape, self.wcs), rot=rot)
+        pmat    = coords.pmat.P.for_tod(obs, comps=self.comps, geom=(self.shape, self.wcs), rot=rot, threads="domdir")
         t2 = time.time()
         # Build the noise model
         if noise_model is None: noise_model = self.noise_model
@@ -103,7 +103,7 @@ class MLMapmaker:
         data = bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime), dets=obs.dets.vals,
                 shape=self.shape, wcs=self.wcs, pmat=pmat, pcut=pcut, nmat=nmat, map_rhs=map_rhs,
                 map_div=map_div, junk_rhs=junk_rhs, junk_div=junk_div)
-        #L.debug("build %-70s : Pbuild %8.3f Nbuild %8.3f Pw' %8.3f N %8.3f Pm' %8.3f  %3d %6d" % (id, t2-t1, t3-t2, t6-t5, t4-t3, t5-t4, data.ndet, data.nsamp))
+        print("build %-70s : Pbuild %8.3f Nbuild %8.3f Pw' %8.3f N %8.3f Pm' %8.3f  %3d %6d" % (id, t2-t1, t3-t2, t6-t5, t4-t3, t5-t4, data.ndet, data.nsamp))
         return data
     def add_obs(self, data):
         assert not self.ready, "Adding more data after preparing to solve is not supported"
@@ -192,7 +192,7 @@ class MLMapmaker:
             data.pmat.to_map(signal=tod, dest=wmap)
             t4 = time.time()
             omap.insert(wmap, op=np.ndarray.__iadd__)
-            #L.debug("A %-70s P %8.3f N %8.3f P' %8.3f  %3d %6d" % (data.id, t2-t1, t3-t2, t4-t3, data.ndet, data.nsamp))
+            print("A %-70s P %8.3f N %8.3f P' %8.3f  %3d %6d" % (data.id, t2-t1, t3-t2, t4-t3, data.ndet, data.nsamp))
         omap = utils.allreduce(omap,self.comm)
         return self.dof.zip(omap, ojunk)
     def M(self, x):
@@ -281,7 +281,7 @@ def inject_map(obs, map, recenter=None):
         rot    = recentering_to_quat_lonlat(*evaluate_recentering(recenter, ctime=ctime[len(ctime)//2], geom=(map.shape, map.wcs), site=SITE))
     else: rot = None
     # Set up our pointing matrix for the map
-    pmat  = coords.pmat.P.for_tod(obs, comps=comps, geom=(map.shape, map.wcs), rot=rot)
+    pmat  = coords.pmat.P.for_tod(obs, comps=comps, geom=(map.shape, map.wcs), rot=rot, threads="domdir")
     # And perform the actual injection
     pmat.from_map(map.extract(shape, wcs), dest=obs.signal)
 
@@ -749,6 +749,6 @@ def fix_boresight_glitches(obs, ang_tol=0.1*utils.degree, t_tol=1):
     bad |= find_boresight_jumps(obs.timestamps,   tol=t_tol)
     bcut = so3g.RangesInt32.from_mask(bad)
     obs.boresight.az[:] = az
-    tod_ops.get_gap_fill_single(obs.timestamps,   bcut, inplace=True)
-    tod_ops.get_gap_fill_single(obs.boresight.az, bcut, inplace=True)
-    tod_ops.get_gap_fill_single(obs.boresight.el, bcut, inplace=True)
+    tod_ops.get_gap_fill_single(obs.timestamps,   bcut, swap=True)
+    tod_ops.get_gap_fill_single(obs.boresight.az, bcut, swap=True)
+    tod_ops.get_gap_fill_single(obs.boresight.el, bcut, swap=True)
