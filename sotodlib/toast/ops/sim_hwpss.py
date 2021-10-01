@@ -62,11 +62,10 @@ class SimHWPSS(Operator):
         help="Operator that translates boresight Az/El pointing into detector frame",
     )
 
-    detector_weights = Instance(
+    stokes_weights = Instance(
         klass=Operator,
         allow_none=True,
-        help="This must be an instance of a pointing operator.  "
-        "Used for Stokes weights and detector quaternions.",
+        help="This must be an instance of a Stokes weights operator",
     )
 
     fname_hwpss = Unicode(
@@ -77,25 +76,20 @@ class SimHWPSS(Operator):
         help="File containing measured or estimated HWPSS profiles",
     )
 
-    @traitlets.validate("detector_weights")
-    def _check_detector_weights(self, proposal):
-        pntg = proposal["value"]
-        if pntg is not None:
-            if not isinstance(pntg, Operator):
-                raise traitlets.TraitError("pointing should be an Operator instance")
-            # Check that this operator has the traits we expect
-            for trt in [
-                    "pixels", "weights", "create_dist",
-                    "view", "detector_pointing", "mode",
-            ]:
-                if not pntg.has_trait(trt):
-                    msg = "pointing operator should have a '{}' trait".format(trt)
-                    raise traitlets.TraitError(msg)
-            if pntg.mode != "IQU":
+    @traitlets.validate("stokes_weights")
+    def _check_stokes_weights(self, proposal):
+        weights = proposal["value"]
+        if weights is not None:
+            if not isinstance(weights, Operator):
                 raise traitlets.TraitError(
-                    "detector weights must be calculated for IQU"
+                    "stokes_weights should be an Operator instance"
                 )
-        return pntg
+            # Check that this operator has the traits we expect
+            for trt in ["weights", "view"]:
+                if not weights.has_trait(trt):
+                    msg = f"stokes_weights operator should have a '{trt}' trait"
+                    raise traitlets.TraitError(msg)
+        return weights
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -104,7 +98,7 @@ class SimHWPSS(Operator):
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
 
-        for trait in "detector_weights", :
+        for trait in "stokes_weights", :
             value = getattr(self, trait)
             if value is None:
                 raise RuntimeError(
@@ -145,21 +139,21 @@ class SimHWPSS(Operator):
                 obs_data = Data(comm=data.comm)
                 obs_data._internal = data._internal
                 obs_data.obs = [obs]
-                self.detector_weights.apply(obs_data, detectors=[det])
+                self.stokes_weights.apply(obs_data, detectors=[det])
                 obs_data.obs.clear()
                 del obs_data
 
                 # Convert Az/El quaternion of the detector into elevation
 
                 azel_quat = obs.detdata[
-                    self.detector_weights.detector_pointing.quats
+                    self.stokes_weights.detector_pointing.quats
                 ][det]
                 theta, phi = qa.to_position(azel_quat)
                 el = np.pi / 2 - theta
 
                 # Get polarization weights
 
-                weights = obs.detdata[self.detector_weights.weights][det]
+                weights = obs.detdata[self.stokes_weights.weights][det]
                 iweights, qweights, uweights = weights.T
 
                 # Interpolate HWPSS to incident angle equal to the
