@@ -29,12 +29,15 @@ import numpy as np
 
 from astropy import units as u
 
+# Import sotodlib.toast first, since that sets default object names
+# to use in toast.
+import sotodlib.toast as sotoast
+
 import toast
 import toast.ops
 
 from toast.mpi import MPI
 
-import sotodlib.toast as sotoast
 import sotodlib.toast.ops as so_ops
 
 
@@ -388,7 +391,10 @@ def reduce_data(job, args, data):
     ops.mapmaker.output_dir = args.out_dir
 
     ops.mapmaker.apply(data)
-    log.info_rank("Finished map-making in", comm=world_comm, timer=timer)
+    log.info_rank("Finished Toast map-making in", comm=world_comm, timer=timer)
+
+    ops.mlmapmaker.apply(data)
+    log.info_rank("Finished ML map-making in", comm=world_comm, timer=timer)
 
     # Optionally run Madam
     if toast.ops.madam.available():
@@ -458,6 +464,7 @@ def main():
         toast.ops.BinMap(
             name="binner_final", enabled=False, pixel_dist="pix_dist_final"
         ),
+        so_ops.MLMapmaker(name="mlmapmaker", enabled=False, comps="TQU")
     ]
     if toast.ops.madam.available():
         operators.append(toast.ops.Madam(name="madam", enabled=False))
