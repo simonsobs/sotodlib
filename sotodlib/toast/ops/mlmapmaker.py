@@ -22,10 +22,10 @@ from toast.timing import function_timer, Timer
 from toast.observation import default_names as obs_names
 from toast.fft import FFTPlanReal1DStore
 
+import so3g
+
 from ... import mapmaking as mm
-
-
-
+from ...core import AxisManager, IndexAxis, OffsetAxis, LabelAxis
 
 
 @trait_docs
@@ -85,10 +85,10 @@ class MLMapmaker(Operator):
         help="If True, clear all observation detector data after accumulating",
     )
 
-    verbose = Bool(
+    verbose = Int(
         None,
         allow_none=True,
-        help="If True enable verbose flag in MLMapmaker.  If None, use toast loglevel",
+        help="Set verbosity in MLMapmaker.  If None, use toast loglevel",
     )
 
     @traitlets.validate("comps")
@@ -119,10 +119,12 @@ class MLMapmaker(Operator):
             # Set verbosity from the toast loglevel
             env = Environment.get()
             level = env.log_level()
-            if level == "DEBUG" or level == "VERBOSE":
-                check = True
+            if level == "VERBOSE":
+                check = 3
+            elif level == "DEBUG":
+                check = 2
             else:
-                check = False
+                check = 1
         return check
 
     def __init__(self, **kwargs):
@@ -147,15 +149,15 @@ class MLMapmaker(Operator):
             if self.center_at is not None:
                 self._recenter = mm.parse_recentering(self.center_at)
 
-            # Question / FIXME:  We have an estimate of the noise for each observation
-            # on the toast side.  Should we use that somewhere?  Can we pass a different
-            # "Nmat" when we accumulate per-observation data?
-
             self._mapmaker = mm.MLMapmaker(
                 self._shape,
                 self._wcs,
-                comps="T",
-                noise_model=self.Nmat,
+                comps=self.comps,
+                noise_model=mm.NmatDetvecs(
+                    verbose=(self.verbose > 1),
+                    downweight=[1e-4, 0.25, 0.50],
+                    window=0,
+                ),
                 dtype_tod=self._dtype_tod,
                 dtype_map=self.dtype_map,
                 comm=data.comm.world_comm,
@@ -176,14 +178,62 @@ class MLMapmaker(Operator):
                 ob.shared[self.times].data
             )
 
-            # Prepare data for the mapmaker.  Flag detector samples and set up
-            # the ranges based on our data views.  Also extract our noise
-            # properties.
+            # Get the focalplane for this observation
+            fp = ob.telescope.focalplane
 
-            inputs = None
+            # Prepare data for the mapmaker.
+
+            axdets = LabelAxis("dets", fp.detectors)
+            axsamps = OffsetAxis("samps", count=ob.n_local_samples, offset=ob.local_index_offset)
+
+            # Convert the data view into a RangesMatrix
+            det_ranges = list()
+            for d in dets:
+                if self.view is None:
+                    # One range with all samples
+                    det_ranges.append(
+                        so3g.proj.ranges.Ranges.from_array(
+                            np.array(
+                                [[0, ob.n_local_samples],],
+                                dtype=np.int32
+                            )
+                        )
+                    )
+                else:
+                    det_ranges.append(
+                        so3g.proj.ranges.Ranges.from_array(
+                            np.array(
+                                [
+                                    [x.first, x.last + 1] for x in ob.intervals[self.view]
+                                ],
+                                dtype=np.int32
+                            )
+                        )
+                    )
+            axranges = so3g.proj.ranges.RangesMatrix(items=det_ranges)
+
+            # Convert the focalplane offsets into the expected form
+            xi = list()
+
+
+
+            # Store the valid data
+
+            axobs = AxisManager()
+
+
+
+            # >>> tod
+            # AxisManager(signal[dets,samps], timestamps[samps], readout_filter_cal[dets], mce_filter_params[6], iir_params[3,5], flags*[samps], boresight*[samps], array_data*[dets], pointofs*[dets], focal_plane*[dets], abscal[dets], timeconst[dets], glitch_flags[dets,samps], source_flags[dets,samps], relcal[dets], dets:LabelAxis(63), samps:OffsetAxis(372680))
+            # >>> tod.focal_plane
+            # AxisManager(xi[dets], eta[dets], gamma[dets], dets:LabelAxis(63))
+
+            # >>> tod.boresight
+            # AxisManager(az[samps], el[samps], roll[samps], samps:OffsetAxis(372680))
+
 
             # Accumulate data to mapmaker
-            work = self._mapmaker.build_obs_toast(inputs)
+            work = self._mapmaker.build_obs(ob.uid, axobs)
             self._mapmaker.add_obs(work)
 
             # Optionally delete the input detector data to save memory, if
