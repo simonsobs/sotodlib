@@ -184,7 +184,11 @@ class MLMapmaker(Operator):
             # Prepare data for the mapmaker.
 
             axdets = LabelAxis("dets", fp.detectors)
+
+            origin_tag --> string
             axsamps = OffsetAxis("samps", count=ob.n_local_samples, offset=ob.local_index_offset)
+
+
 
             # Convert the data view into a RangesMatrix
             det_ranges = list()
@@ -219,7 +223,7 @@ class MLMapmaker(Operator):
 
             # Store the valid data
 
-
+            # boresight is az / el / roll
             axbore = AxisManager("boresight", ob.shared["boresight_radec"])
 
             axobs = AxisManager()
@@ -228,7 +232,11 @@ class MLMapmaker(Operator):
             # Expected contents:
 
             # >>> tod
-            # AxisManager(signal[dets,samps], timestamps[samps], readout_filter_cal[dets], mce_filter_params[6], iir_params[3,5], flags*[samps], boresight*[samps], array_data*[dets], pointofs*[dets], focal_plane*[dets], abscal[dets], timeconst[dets], glitch_flags[dets,samps], source_flags[dets,samps], relcal[dets], dets:LabelAxis(63), samps:OffsetAxis(372680))
+            # AxisManager(signal[dets,samps], timestamps[samps], readout_filter_cal[dets],
+            # mce_filter_params[6], iir_params[3,5], flags*[samps], boresight*[samps],
+            # array_data*[dets], pointofs*[dets], focal_plane*[dets], abscal[dets],
+            # timeconst[dets], glitch_flags[dets,samps], source_flags[dets,samps],
+            # relcal[dets], dets:LabelAxis(63), samps:OffsetAxis(372680))
 
             # >>> tod.focal_plane
             # AxisManager(xi[dets], eta[dets], gamma[dets], dets:LabelAxis(63))
@@ -238,7 +246,7 @@ class MLMapmaker(Operator):
 
 
             # Accumulate data to mapmaker
-            work = self._mapmaker.build_obs(ob.uid, axobs)
+            work = self._mapmaker.build_obs(ob.name, axobs)
             self._mapmaker.add_obs(work)
 
             # Optionally delete the input detector data to save memory, if
