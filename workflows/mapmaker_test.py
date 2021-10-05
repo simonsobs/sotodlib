@@ -29,16 +29,6 @@ from toast.mpi import MPI
 import sotodlib.toast.ops as so_ops
 
 
-# Small patch 10x10 at zero / zero
-# >= 50 dets
-
-# Point source with S/N 20
-# random field
-# Noise
-# Atmosphere last
-
-
-
 def parse_args(operators, comm):
     """Parse command line arguments
     """
@@ -75,10 +65,9 @@ def load_schedule(comm, path):
             # Already exists, use it
             schedule.read(path)
         else:
-            # Create it
+            # Create it.  We use a single 10x10 degree patch centered at RA=0, DEC=0.
             patches = [
-                "RISING_SCAN_35,HORIZONTAL,1.00,30.00,150.00,35.00,1500",
-                "SETTING_SCAN_35,HORIZONTAL,1.00,210.00,330.00,35.00,1500",
+                "TEST,1.00,0.0,0.0,10.0",
             ]
             sch_opts = [
                 "--site-name", "atacama",
@@ -294,7 +283,7 @@ def main():
     )
     crosslinking.enabled = True # Toggle to False to disable
     crosslinking.apply(data)
-    log.info_rank("Calculated crosslinking in", comm=world_comm, timer=timer)
+    log.info_rank("Calculated crosslinking in", comm=wcomm, timer=timer)
 
     # Ground (scan synchronous signal) filter.  Remove modes that are poorly
     # constrained by the scanning.  Disable this if the MLMapmaker does

@@ -56,6 +56,10 @@ class MLMapmaker(Operator):
 
     times = Unicode(obs_names.times, help="Observation shared key for timestamps")
 
+    boresight = Unicode(
+        obs_names.boresight_azel, help="Observation shared key for boresight Az/El"
+    )
+
     det_data = Unicode(
         obs_names.det_data, help="Observation detdata key for the timestream data"
     )
@@ -185,10 +189,12 @@ class MLMapmaker(Operator):
 
             axdets = LabelAxis("dets", fp.detectors)
 
-            origin_tag --> string
-            axsamps = OffsetAxis("samps", count=ob.n_local_samples, offset=ob.local_index_offset)
-
-
+            axsamps = OffsetAxis(
+                "samps",
+                count=ob.n_local_samples,
+                offset=ob.local_index_offset,
+                origin_tag=ob.name,
+            )
 
             # Convert the data view into a RangesMatrix
             det_ranges = list()
@@ -198,8 +204,10 @@ class MLMapmaker(Operator):
                     det_ranges.append(
                         so3g.proj.ranges.Ranges.from_array(
                             np.array(
-                                [[0, ob.n_local_samples],],
-                                dtype=np.int32
+                                [
+                                    [0, ob.n_local_samples],
+                                ],
+                                dtype=np.int32,
                             )
                         )
                     )
@@ -208,46 +216,70 @@ class MLMapmaker(Operator):
                         so3g.proj.ranges.Ranges.from_array(
                             np.array(
                                 [
-                                    [x.first, x.last + 1] for x in ob.intervals[self.view]
+                                    [x.first, x.last + 1]
+                                    for x in ob.intervals[self.view]
                                 ],
-                                dtype=np.int32
+                                dtype=np.int32,
                             )
                         )
                     )
-            axranges = so3g.proj.ranges.RangesMatrix(items=det_ranges)
+            ranges = so3g.proj.ranges.RangesMatrix(items=det_ranges)
 
             # Convert the focalplane offsets into the expected form
-            xi = list()
+            det_quat = np.array([x for x in fp.det_data["quat"]])
+            det_theta, det_phi, det_pa = toast.qarray.to_angles(det_quat)
 
+            # FIXME:  I am sure this will take some iterations to get right...
+            xi = det_phi
+            eta = np.pi / 2 - det_theta
+            gamma = det_pa
 
+            axfp = AxisManager()
+            axfp.wrap("xi", xi, axis_map=[(0, axdets)])
+            axfp.wrap("eta", eta, axis_map=[(0, axdets)])
+            axfp.wrap("gamma", gamma, axis_map=[(0, axdets)])
 
-            # Store the valid data
+            # Convert Az/El quaternion of the detector back into
+            # angles from the simulation.
+            theta, phi, pa = toast.qarray.to_angles(ob.shared[self.boresight])
 
-            # boresight is az / el / roll
-            axbore = AxisManager("boresight", ob.shared["boresight_radec"])
+            # Azimuth is measured in the opposite direction from longitude
+            az = 2 * np.pi - phi
+            el = np.pi / 2 - theta
+            roll = pa  # FIXME: double check this...
+
+            axbore = AxisManager()
+            axbore.wrap("az", az, axis_map=[(0, axsamps)])
+            axbore.wrap("el", el, axis_map=[(0, axsamps)])
+            axbore.wrap("roll", roll, axis_map=[(0, axsamps)])
 
             axobs = AxisManager()
+            axobs.wrap("focal_plane", axfp)
+            axobs.wrap("timestamps", ob.shared[self.times], axis_map=[(0, axsamps)])
+            axobs.wrap(
+                "signal",
+                ob.detdata[self.det_data][:],
+                axis_map=[(0, axdets), (1, axsamps)],
+            )
+            axobs.wrap("boresight", axbore)
+            axobs.wrap("glitch_flags", ranges, axis_map=[(0, axdets), (1, axsamps)])
 
-
-            # Expected contents:
-
+            # NOTE:  Expected contents look like:
             # >>> tod
             # AxisManager(signal[dets,samps], timestamps[samps], readout_filter_cal[dets],
             # mce_filter_params[6], iir_params[3,5], flags*[samps], boresight*[samps],
             # array_data*[dets], pointofs*[dets], focal_plane*[dets], abscal[dets],
             # timeconst[dets], glitch_flags[dets,samps], source_flags[dets,samps],
             # relcal[dets], dets:LabelAxis(63), samps:OffsetAxis(372680))
-
             # >>> tod.focal_plane
             # AxisManager(xi[dets], eta[dets], gamma[dets], dets:LabelAxis(63))
-
             # >>> tod.boresight
             # AxisManager(az[samps], el[samps], roll[samps], samps:OffsetAxis(372680))
-
 
             # Accumulate data to mapmaker
             work = self._mapmaker.build_obs(ob.name, axobs)
             self._mapmaker.add_obs(work)
+            del axobs
 
             # Optionally delete the input detector data to save memory, if
             # the calling code knows that no additional operators will be
@@ -277,7 +309,10 @@ class MLMapmaker(Operator):
         if comm.rank == 0:
             enmap.write_map(f"{prefix}rhs.fits", self._mapmaker.map_rhs)
             enmap.write_map(f"{prefix}div.fits", self._mapmaker.map_div)
-            enmap.write_map(f"{prefix}bin.fits", enmap.map_mul(self._mapmaker.map_idiv, self._mapmaker.map_rhs))
+            enmap.write_map(
+                f"{prefix}bin.fits",
+                enmap.map_mul(self._mapmaker.map_idiv, self._mapmaker.map_rhs),
+            )
 
         if comm is not None:
             comm.barrier()
