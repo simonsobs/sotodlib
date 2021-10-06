@@ -26,23 +26,28 @@ import toast.ops
 
 from toast.mpi import MPI
 
+from toast.schedule_sim_ground import run_scheduler
+
 import sotodlib.toast.ops as so_ops
 
 
-def parse_args(operators, comm):
+def parse_args():
     """Parse command line arguments
     """
     # Argument parsing
     parser = argparse.ArgumentParser(description="SO mapmaker test")
 
     parser.add_argument(
-        "--hardware", required=False, default=None, help="Input hardware file, trimmed to desired detectors."
+        "--hardware", required=True, default=None, help="Input hardware file, trimmed to desired detectors."
+    )
+    parser.add_argument(
+        "--schedule", required=True, default=None, help="Input schedule file."
     )
     parser.add_argument(
         "--sample_rate", required=False, default=100, help="Sampling rate"
     )
     parser.add_argument(
-        "--sky_file", required=False, default=None, help="Input NSIDE=4096 TQU file to scan from."
+        "--sky_file", required=True, default=None, help="Input NSIDE=4096 TQU file to scan from."
     )
     parser.add_argument(
         "--out_dir",
@@ -61,40 +66,9 @@ def load_schedule(comm, path):
     """Create and load a schedule file."""
     schedule = toast.schedule.GroundSchedule()
     if comm is None or comm.rank == 0:
-        if os.path.isfile(path):
-            # Already exists, use it
-            schedule.read(path)
-        else:
-            # Create it.  We use a single 10x10 degree patch centered at RA=0, DEC=0.
-            patches = [
-                "TEST,1.00,0.0,0.0,10.0",
-            ]
-            sch_opts = [
-                "--site-name", "atacama",
-                "--telescope", "LAT",
-                "--site-lon", " -67:47:10",
-                "--site-lat", " -22:57:30",
-                "--site-alt", "5200.0",
-                "--patch-coord", "C",
-                "--el-min", "30.0",
-                "--el-max", "70.0",
-                "--sun-el-max", "90.0",
-                "--sun-avoidance-angle", "0.0",
-                "--moon-avoidance-angle", "0.0",
-                "--gap-s", "60.0",
-                "--gap-small-s", "0.0",
-                "--ces-max-time", "1200.0",
-                "--boresight-angle-step", "180.0",
-                "--boresight-angle-time", "1440.0",
-                "--start", "2027-01-01 00:00:00",
-                "--stop", "2027-01-01 00:04:00",
-                "--out", path,
-            ]
-            for patch in patches:
-                sch_opts.extend(["--patch", patch])
-            toast.schedule_sim_ground.run_scheduler(opts=sch_opts)
-            # Now load it
-            schedule.read(path)
+        if not os.path.isfile(path):
+            raise RuntimeError(f"Schedule file {path} does not exist")
+        schedule.read(path)
     if comm is not None:
         schedule = comm.bcast(schedule, root=0)
     return schedule
@@ -135,8 +109,7 @@ def main():
     comm, procs, rank = toast.get_world()
 
     # Load (and optionally create) our schedule file in the output directory
-    schedule_file = os.path.join(args.out_dir, "schedule.txt")
-    schedule = load_schedule(comm, schedule_file)
+    schedule = load_schedule(comm, args.schedule)
 
     # Load our instrument model
     telescope = load_instrument(comm, args, schedule)
@@ -150,7 +123,7 @@ def main():
     timer.start()
 
     # Shortcut for the world communicator
-    wcomm = toast_comm.world_comm
+    wcomm = toast_comm.comm_world
 
     # Note on toast operators:  Operators are configured by "traits" from
     # the python traitlets package.  These can be set at construction time

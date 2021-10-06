@@ -48,11 +48,11 @@ class MLMapmaker(Operator):
 
     comps = Unicode("T", help="Components (must be 'T', 'QU' or 'TQU')")
 
-    # FIXME: I think we don't want this as a trait, but rather as something
-    # passed into every per-observation accumulation which uses our noise model.
-    Nmat = Instance(None, klass=mm.Nmat, help="The noise matrix to use")
+    Nmat = Instance(allow_none=True, klass=mm.Nmat, help="The noise matrix to use")
 
-    dtype_map = Instance(np.dtype(np.float64), help="Numpy dtype of map products")
+    dtype_map = Instance(
+        klass=np.dtype, args=(np.float64,), help="Numpy dtype of map products"
+    )
 
     times = Unicode(obs_names.times, help="Observation shared key for timestamps")
 
