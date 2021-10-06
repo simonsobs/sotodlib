@@ -75,12 +75,39 @@ class Bookbinder(object):
         self.hkbundle = None
         self.sdbundle = None
         self.flush_time = None
+        self.maxlength = 10000
 
     def ready(self):
         """
         Check if criterion passed in HK (for now, sign change in Az scan velocity data)
         """
         return self.hkbundle.ready() if (self.hkbundle is not None) else False
+
+    def split_frame(self, f, maxlength=10000):
+        output = []
+
+        sdb = _ScanDataBundle()
+        sdb.add(f['data'])
+
+        hkb = _HKBlockBundle()
+        hkb.add(f['hk'])
+
+        while len(sdb.times) > maxlength:
+            t = sdb.times[maxlength]
+
+            g = core.G3Frame(core.G3FrameType.Scan)
+            g['data'] = sdb.rebundle(t)
+            g['hk'] = hkb.rebundle(t)
+
+            output += [g]
+
+        g = core.G3Frame(core.G3FrameType.Scan)
+        g['data'] = sdb.rebundle(sdb.times[-1] + 1)
+        g['hk'] = hkb.rebundle(hkb.times[-1] + 1)
+
+        output += [g]
+
+        return output
 
     def flush(self):
         output = []
@@ -92,7 +119,10 @@ class Bookbinder(object):
         # Co-sampled (interpolated) azimuth encoder data
         f['data']['Azimuth'] = core.G3Timestream(np.interp(f['data'].times, f['hk'].times, f['hk']['Azimuth_Corrected'], left=np.nan, right=np.nan))
 
-        output += [f]
+        if len(f['data'].times) > self.maxlength:
+            output += self.split_frame(f, maxlength=self.maxlength)
+        else:
+            output += [f]
 
         return output
 
@@ -164,12 +194,7 @@ if __name__ == '__main__':
         tc = [B.hkbundle.times[i] for i in sc]
         output = []
         while len(tc) > 0:
-            if B.sdbundle is not None and len(B.sdbundle.times) > 0:
-                dt = 30 * core.G3Units.s  # set max frame length (in seconds)
-                t = B.sdbundle.times[0].time + dt
-                B.flush_time = core.G3Time(t) if (t < tc[0].time) else tc.pop(0)
-            else:
-                B.flush_time = tc.pop(0)
+            B.flush_time = tc.pop(0)
 
             while B.sdbundle is None or not B.sdbundle.ready(B.flush_time):
                 try:
