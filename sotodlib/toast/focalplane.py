@@ -4,6 +4,8 @@
 import os
 import sys
 
+import numpy as np
+
 import astropy.units as u
 from astropy.table import QTable
 from toast.instrument import Focalplane
@@ -141,7 +143,7 @@ class SOFocalplane(Focalplane):
 
         for det_name, det_data in hw.data["detectors"].items():
             names.append(det_name)
-            quats.append(det_data["quat"])
+            quats.append(np.array([float(x) for x in det_data["quat"]]))
             ids.append(det_data["ID"])
             pixels.append(det_data["pixel"])
             fwhms.append(det_data["fwhm"] * u.arcmin)
@@ -199,6 +201,8 @@ class SOFocalplane(Focalplane):
                 "bandcenter", "bandwidth", "pixel", "pol", "channel", "AMC", "bias",
                 "readout_freq", "bondpad", "mux_position",
             ])
+
+        print(detdata)
 
         super().__init__(
             detector_data=detdata,
