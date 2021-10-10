@@ -1204,7 +1204,7 @@ class G3tSmurf:
                                                   Frames.start < end,
                                                   Frames.type_name=='Scan')
         if stream_id is not None:
-            q.filter(Files.stream_id == stream_id)
+            q = q.filter(Files.stream_id == stream_id)
 
         q = q.order_by(Files.start).distinct()
         flist = [x[0] for x in q.all()]
