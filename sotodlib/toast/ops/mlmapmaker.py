@@ -305,7 +305,7 @@ class MLMapmaker(Operator):
         # After multiple calls to exec, the finalize step will solve for the map.
         log = Logger.get()
         timer = Timer()
-        comm = data.comm.world_comm
+        comm = data.comm.comm_world
         timer.start()
 
         self._mapmaker.prepare()
