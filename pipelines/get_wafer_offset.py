@@ -11,9 +11,11 @@ from collections import OrderedDict
 import healpy as hp
 import numpy as np
 import toast.qarray as qa
+from astropy import units as u
 
 import sotodlib.sim_hardware as hardware
-from sotodlib.core.hardware import LAT_COROTATOR_OFFSET_DEG
+from sotodlib.core.hardware import LAT_COROTATOR_OFFSET
+LAT_COROTATOR_OFFSET_DEG = LAT_COROTATOR_OFFSET / u.deg
 
 
 XAXIS, YAXIS, ZAXIS = np.eye(3)

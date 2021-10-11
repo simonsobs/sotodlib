@@ -206,6 +206,7 @@ def main():
     # Scan input map.  This will create the pixel distribution as well, since
     # it does not yet exist.
     scan_map = toast.ops.ScanHealpix(file=args.sky_file)
+    scan_map.enabled = False
     scan_map.pixel_pointing = pixels_radec
     scan_map.stokes_weights = weights_radec
     scan_map.apply(data)
@@ -241,6 +242,7 @@ def main():
     # Simulate detector noise
     sim_noise = toast.ops.SimNoise()
     sim_noise.noise_model = elevation_noise.out_model
+    sim_noise.serial = False
     sim_noise.apply(data)
     log.info_rank("Simulated detector noise in", comm=wcomm, timer=timer)
 
