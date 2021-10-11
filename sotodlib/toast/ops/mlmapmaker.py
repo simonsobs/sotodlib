@@ -228,7 +228,8 @@ class MLMapmaker(Operator):
             ranges = so3g.proj.ranges.RangesMatrix(items=det_ranges)
 
             # Convert the focalplane offsets into the expected form
-            det_quat = np.array([x for x in fp.detector_data["quat"]])
+            det_to_row = {y["name"]: x for x, y in enumerate(fp.detector_data)}
+            det_quat = np.array([fp.detector_data["quat"][det_to_row[x]] for x in dets])
             det_theta, det_phi, det_pa = toast.qarray.to_angles(det_quat)
 
             # FIXME:  I am sure this will take some iterations to get right...
