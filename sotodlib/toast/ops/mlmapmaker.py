@@ -187,7 +187,7 @@ class MLMapmaker(Operator):
 
             # Prepare data for the mapmaker.
 
-            axdets = LabelAxis("dets", fp.detectors)
+            axdets = LabelAxis("dets", dets)
 
             axsamps = OffsetAxis(
                 "samps",
@@ -267,7 +267,7 @@ class MLMapmaker(Operator):
             axobs.wrap("timestamps", ob.shared[self.times], axis_map=[(0, axsamps)])
             axobs.wrap(
                 "signal",
-                ob.detdata[self.det_data][:, :],
+                ob.detdata[self.det_data][dets, :],
                 axis_map=[(0, axdets), (1, axsamps)],
             )
             axobs.wrap("boresight", axbore)
