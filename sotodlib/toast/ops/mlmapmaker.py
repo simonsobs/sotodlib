@@ -208,7 +208,7 @@ class MLMapmaker(Operator):
                                     [0, ob.n_local_samples],
                                 ],
                                 dtype=np.int32,
-                            )
+                            ), ob.n_local_samples
                         )
                     )
                 else:
@@ -220,19 +220,28 @@ class MLMapmaker(Operator):
                                     for x in ob.intervals[self.view]
                                 ],
                                 dtype=np.int32,
-                            )
+                            ), ob.n_local_samples
                         )
                     )
             ranges = so3g.proj.ranges.RangesMatrix(items=det_ranges)
 
             # Convert the focalplane offsets into the expected form
-            det_quat = np.array([x for x in fp.det_data["quat"]])
+            det_quat = np.array([x for x in fp.detector_data["quat"]])
             det_theta, det_phi, det_pa = toast.qarray.to_angles(det_quat)
 
             # FIXME:  I am sure this will take some iterations to get right...
-            xi = det_phi
-            eta = np.pi / 2 - det_theta
+            radius = np.sin(det_theta)
+            xi = - radius * np.cos(det_phi)
+            eta = - radius * np.sin(np.pi / 2 - det_theta)
             gamma = det_pa
+            for d in range(len(det_quat)):
+                print(f"{d:03d}: {det_quat[d]}")
+                print(f"  theta = {det_theta[d]}")
+                print(f"  phi   = {det_phi[d]}")
+                print(f"  pa    = {det_pa[d]}")
+                print(f"  xi    = {xi[d]}")
+                print(f"  eta   = {eta[d]}")
+                print(f"  gamma = {gamma[d]}")
 
             axfp = AxisManager()
             axfp.wrap("xi", xi, axis_map=[(0, axdets)])
@@ -258,7 +267,7 @@ class MLMapmaker(Operator):
             axobs.wrap("timestamps", ob.shared[self.times], axis_map=[(0, axsamps)])
             axobs.wrap(
                 "signal",
-                ob.detdata[self.det_data][:],
+                ob.detdata[self.det_data][:, :],
                 axis_map=[(0, axdets), (1, axsamps)],
             )
             axobs.wrap("boresight", axbore)
