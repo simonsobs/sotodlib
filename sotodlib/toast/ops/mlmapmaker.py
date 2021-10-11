@@ -90,7 +90,7 @@ class MLMapmaker(Operator):
     )
 
     verbose = Int(
-        None,
+        1,
         allow_none=True,
         help="Set verbosity in MLMapmaker.  If None, use toast loglevel",
     )
@@ -164,7 +164,7 @@ class MLMapmaker(Operator):
                 ),
                 dtype_tod=self._dtype_tod,
                 dtype_map=self.dtype_map,
-                comm=data.comm.world_comm,
+                comm=data.comm.comm_world,
                 recenter=self._recenter,
                 verbose=self.verbose,
             )

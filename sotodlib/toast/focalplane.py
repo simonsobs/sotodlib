@@ -16,17 +16,16 @@ from ..sim_hardware import get_example, sim_telescope_detectors
 
 
 FOCALPLANE_RADII = {
-    "LAT" : 3.6 * u.deg,
-    "SAT1" : 17.8 * u.deg,
-    "SAT2" : 17.8 * u.deg,
-    "SAT3" : 17.8 * u.deg,
-    "SAT4" : 17.2 * u.deg,
+    "LAT": 3.6 * u.deg,
+    "SAT1": 17.8 * u.deg,
+    "SAT2": 17.8 * u.deg,
+    "SAT3": 17.8 * u.deg,
+    "SAT4": 17.2 * u.deg,
 }
 
 
 def get_telescope(telescope, wafer_slots, tube_slots):
-    """ Determine which telescope matches the detector selections
-    """
+    """Determine which telescope matches the detector selections"""
     if telescope is not None:
         return telescope
     # User did not set telescope so we infer it from the
@@ -41,9 +40,7 @@ def get_telescope(telescope, wafer_slots, tube_slots):
     else:
         raise RuntimeError("Must set telescope, wafer_slots or tube_slots.")
     for tube_slot in tube_slots:
-        for telescope_name, telescope_data in hwexample.data[
-            "telescopes"
-        ].items():
+        for telescope_name, telescope_data in hwexample.data["telescopes"].items():
             if tube_slot in telescope_data["tube_slots"]:
                 if telescope is None:
                     telescope = telescope_name
@@ -59,8 +56,7 @@ def get_telescope(telescope, wafer_slots, tube_slots):
 
 
 class SOFocalplane(Focalplane):
-    """ SO Focalplane class
-    """
+    """SO Focalplane class"""
 
     def __init__(
         self,
@@ -86,7 +82,8 @@ class SOFocalplane(Focalplane):
                 log.info("Simulating default hardware configuration")
                 hw = get_example()
                 hw.data["detectors"] = sim_telescope_detectors(
-                    hw, self.telescope,
+                    hw,
+                    self.telescope,
                 )
             else:
                 raise RuntimeError(
@@ -96,7 +93,7 @@ class SOFocalplane(Focalplane):
             if bands is not None or wafer_slots is not None or tube_slots is not None:
                 match = {"band": bands.replace(",", "|")}
                 if wafer_slots is not None:
-                    match["wafer_slot"]  = wafer_slots.split(",")
+                    match["wafer_slot"] = wafer_slots.split(",")
                 if tube_slots is not None:
                     tube_slots = tube_slots.split(",")
                 hw = hw.select(tube_slots=tube_slots, match=match)
@@ -125,34 +122,78 @@ class SOFocalplane(Focalplane):
         if comm is not None:
             hw = comm.bcast(hw)
 
-        def get_par(ddata, key, default):
+        def get_par_float(ddata, key, default):
             if key in ddata:
-                return ddata[key]
+                return float(ddata[key])
             else:
-                return default
+                return float(default)
 
         (
-            names, quats, bands, wafer_slots, tube_slots, nets, net_corrs,
-            fknees, fmins, alphas, As, Cs, bandcenters, bandwidths,
-            ids, pixels, fwhms, pols, card_slots, channels, AMCs, biases,
-            readout_freqs, bondpads, mux_positions,
+            names,
+            quats,
+            bands,
+            wafer_slots,
+            tube_slots,
+            nets,
+            net_corrs,
+            fknees,
+            fmins,
+            alphas,
+            As,
+            Cs,
+            bandcenters,
+            bandwidths,
+            ids,
+            pixels,
+            fwhms,
+            pols,
+            card_slots,
+            channels,
+            AMCs,
+            biases,
+            readout_freqs,
+            bondpads,
+            mux_positions,
         ) = (
-            [], [], [], [], [], [], [], [], [], [], [], [], [], [],
-            [], [], [], [], [], [], [], [], [], [], [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
         )
 
         for det_name, det_data in hw.data["detectors"].items():
             names.append(det_name)
             quats.append(np.array([float(x) for x in det_data["quat"]]))
-            ids.append(det_data["ID"])
-            pixels.append(det_data["pixel"])
-            fwhms.append(det_data["fwhm"] * u.arcmin)
+            ids.append(int(det_data["ID"]))
+            pixels.append(int(det_data["pixel"]))
+            fwhms.append(float(det_data["fwhm"]) * u.arcmin)
             pols.append(det_data["pol"])
             card_slots.append(det_data["card_slot"])
             channels.append(det_data["channel"])
             AMCs.append(det_data["AMC"])
             biases.append(det_data["bias"])
-            readout_freqs.append(det_data["readout_freq_GHz"] * u.GHz)
+            readout_freqs.append(float(det_data["readout_freq_GHz"]) * u.GHz)
             bondpads.append(det_data["bondpad"])
             mux_positions.append(det_data["mux_position"])
             # Band is used to retrieve band-averaged values
@@ -171,38 +212,79 @@ class SOFocalplane(Focalplane):
             tube_slots.append(tube_slot)
             # Get noise parameters.  If detector-specific entries are
             # absent, use band averages
-            nets.append(get_par(det_data, "NET", band_data["NET"]) * u.uK * u.s ** .5)
-            net_corrs.append(get_par(det_data, "NET_corr", band_data["NET_corr"]))
-            fknees.append(get_par(det_data, "fknee", band_data["fknee"]) * u.mHz)
-            fmins.append(get_par(det_data, "fmin", band_data["fmin"]) * u.mHz)
-            #alphas.append(get_par(det_data, "alpha", band_data["alpha"]))
+            nets.append(
+                get_par_float(det_data, "NET", band_data["NET"]) * u.uK * u.s ** 0.5
+            )
+            net_corrs.append(get_par_float(det_data, "NET_corr", band_data["NET_corr"]))
+            fknees.append(get_par_float(det_data, "fknee", band_data["fknee"]) * u.mHz)
+            fmins.append(get_par_float(det_data, "fmin", band_data["fmin"]) * u.mHz)
+            # alphas.append(get_par(det_data, "alpha", band_data["alpha"]))
             alphas.append(1)  # hardwire a sensible number. 3.5 is not realistic.
-            As.append(get_par(det_data, "A", band_data["A"]))
-            Cs.append(get_par(det_data, "C", band_data["C"]))
+            As.append(get_par_float(det_data, "A", band_data["A"]))
+            Cs.append(get_par_float(det_data, "C", band_data["C"]))
             # bandpass
-            lower = get_par(det_data, "low", band_data["low"]) * u.GHz
-            #center = get_par(det_data, "center", band_data["center"]) * u.GHz
-            upper = get_par(det_data, "high", band_data["high"]) * u.GHz
+            lower = get_par_float(det_data, "low", band_data["low"]) * u.GHz
+            # center = get_par_float(det_data, "center", band_data["center"]) * u.GHz
+            upper = get_par_float(det_data, "high", band_data["high"]) * u.GHz
             bandcenters.append(0.5 * (lower + upper))
             bandwidths.append(upper - lower)
 
         detdata = QTable(
             [
-                names, ids, quats, bands, card_slots, wafer_slots, tube_slots,
-                fwhms, nets, net_corrs, fknees, fmins, alphas,
-                As, Cs,
-                bandcenters, bandwidths, pixels, pols, channels, AMCs, biases,
-                readout_freqs, bondpads, mux_positions
+                names,
+                ids,
+                quats,
+                bands,
+                card_slots,
+                wafer_slots,
+                tube_slots,
+                fwhms,
+                nets,
+                net_corrs,
+                fknees,
+                fmins,
+                alphas,
+                As,
+                Cs,
+                bandcenters,
+                bandwidths,
+                pixels,
+                pols,
+                channels,
+                AMCs,
+                biases,
+                readout_freqs,
+                bondpads,
+                mux_positions,
             ],
             names=[
-                "name", "uid", "quat", "band", "card_slot", "wafer_slot", "tube_slot",
-                "FWHM", "psd_net", "NET_corr", "psd_fknee", "psd_fmin", "psd_alpha",
-                "elevation_noise_a", "elevation_noise_c",
-                "bandcenter", "bandwidth", "pixel", "pol", "channel", "AMC", "bias",
-                "readout_freq", "bondpad", "mux_position",
-            ])
-
-        print(detdata)
+                "name",
+                "uid",
+                "quat",
+                "band",
+                "card_slot",
+                "wafer_slot",
+                "tube_slot",
+                "FWHM",
+                "psd_net",
+                "NET_corr",
+                "psd_fknee",
+                "psd_fmin",
+                "psd_alpha",
+                "elevation_noise_a",
+                "elevation_noise_c",
+                "bandcenter",
+                "bandwidth",
+                "pixel",
+                "pol",
+                "channel",
+                "AMC",
+                "bias",
+                "readout_freq",
+                "bondpad",
+                "mux_position",
+            ],
+        )
 
         super().__init__(
             detector_data=detdata,
