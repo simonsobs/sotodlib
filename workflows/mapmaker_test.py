@@ -133,9 +133,10 @@ def main():
     # Load our instrument model
     telescope = load_instrument(comm, args, schedule)
 
-    # Create the toast communicator.  Use the default of one process
-    # group for this test.
-    toast_comm = toast.Comm(world=comm)
+    # Create the toast communicator.  The ML mapmaker currently requires
+    # a single process to have all data in an observation.  So we create
+    # groups of one process.
+    toast_comm = toast.Comm(world=comm, groupsize=1)
 
     # Timer for reporting the progress
     timer = toast.timing.Timer()
