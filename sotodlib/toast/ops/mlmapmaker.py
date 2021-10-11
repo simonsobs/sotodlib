@@ -234,14 +234,14 @@ class MLMapmaker(Operator):
             xi = - radius * np.cos(det_phi)
             eta = - radius * np.sin(np.pi / 2 - det_theta)
             gamma = det_pa
-            for d in range(len(det_quat)):
-                print(f"{d:03d}: {det_quat[d]}")
-                print(f"  theta = {det_theta[d]}")
-                print(f"  phi   = {det_phi[d]}")
-                print(f"  pa    = {det_pa[d]}")
-                print(f"  xi    = {xi[d]}")
-                print(f"  eta   = {eta[d]}")
-                print(f"  gamma = {gamma[d]}")
+            # for d in range(len(det_quat)):
+            #     print(f"{d:03d}: {det_quat[d]}")
+            #     print(f"  theta = {det_theta[d]}")
+            #     print(f"  phi   = {det_phi[d]}")
+            #     print(f"  pa    = {det_pa[d]}")
+            #     print(f"  xi    = {xi[d]}")
+            #     print(f"  eta   = {eta[d]}")
+            #     print(f"  gamma = {gamma[d]}")
 
             axfp = AxisManager()
             axfp.wrap("xi", xi, axis_map=[(0, axdets)])
