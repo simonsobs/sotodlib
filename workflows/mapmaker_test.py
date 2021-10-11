@@ -32,22 +32,37 @@ import sotodlib.toast.ops as so_ops
 
 
 def parse_args():
-    """Parse command line arguments
-    """
+    """Parse command line arguments"""
     # Argument parsing
     parser = argparse.ArgumentParser(description="SO mapmaker test")
 
     parser.add_argument(
-        "--hardware", required=True, default=None, help="Input hardware file, trimmed to desired detectors."
+        "--hardware",
+        required=True,
+        default=None,
+        help="Input hardware file, trimmed to desired detectors.",
     )
     parser.add_argument(
         "--schedule", required=True, default=None, help="Input schedule file."
     )
     parser.add_argument(
-        "--sample_rate", required=False, default=100, help="Sampling rate"
+        "--sample_rate",
+        required=False,
+        default=100.0,
+        type=float,
+        help="Sampling rate.",
     )
     parser.add_argument(
-        "--sky_file", required=True, default=None, help="Input NSIDE=4096 TQU file to scan from."
+        "--sky_file",
+        required=True,
+        default=None,
+        help="Input NSIDE=4096 TQU file to scan from.",
+    )
+    parser.add_argument(
+        "--area_file",
+        required=True,
+        default=None,
+        help="Input FITS file with WCS information.",
     )
     parser.add_argument(
         "--out_dir",
@@ -108,6 +123,10 @@ def main():
     # Get optional MPI parameters
     comm, procs, rank = toast.get_world()
 
+    # Make the output directory
+    if rank == 0:
+        os.makedirs(args.out_dir, exist_ok=True)
+
     # Load (and optionally create) our schedule file in the output directory
     schedule = load_schedule(comm, args.schedule)
 
@@ -142,9 +161,7 @@ def main():
     data = toast.Data(comm=toast_comm)
 
     # Simulate the telescope pointing
-    sim_ground = toast.ops.SimGround(
-        weather="atacama"
-    )
+    sim_ground = toast.ops.SimGround(weather="atacama")
     sim_ground.telescope = telescope
     sim_ground.schedule = schedule
     sim_ground.apply(data)
@@ -181,12 +198,10 @@ def main():
         detector_pointing=det_pointing_radec,
         nside=4096,
     )
-    weights_radec = toast.ops.StokesWeights(
-        weights="weights_radec", mode="IQU"
-    )
-    weights_azel = toast.ops.StokesWeights(
-        weights="weights_azel", mode="IQU"
-    )
+    weights_radec = toast.ops.StokesWeights(weights="weights_radec", mode="IQU")
+    weights_radec.detector_pointing = det_pointing_radec
+    weights_azel = toast.ops.StokesWeights(weights="weights_azel", mode="IQU")
+    weights_azel.detector_pointing = det_pointing_azel
 
     # Scan input map.  This will create the pixel distribution as well, since
     # it does not yet exist.
@@ -217,8 +232,9 @@ def main():
     sim_atmosphere.detector_pointing = det_pointing_azel
     # Here is where we could enable a small polarization fraction, in which
     # case we need to specify the Stokes weights in Az/El.
-    #sim_atmosphere.polarization_fraction = 0.01
-    #sim_atmosphere.detector_weights = weights_azel
+    # sim_atmosphere.polarization_fraction = 0.01
+    # sim_atmosphere.detector_weights = weights_azel
+    sim_atmosphere.enabled = True  # Toggle to False to disable
     sim_atmosphere.apply(data)
     log.info_rank("Simulated and observed atmosphere in", comm=wcomm, timer=timer)
 
@@ -234,27 +250,22 @@ def main():
 
     # Various geometric factors
 
-    h_n = so_ops.Hn(
-        pixel_pointing=pixels_radec,
-        output_dir=args.out_dir
-    )
-    h_n.enabled = True # Toggle to False to disable
+    h_n = so_ops.Hn(pixel_pointing=pixels_radec, output_dir=args.out_dir)
+    h_n.enabled = False  # Toggle to False to disable
     h_n.apply(data)
     log.info_rank("Calculated h_n in", comm=wcomm, timer=timer)
 
     cadence_map = toast.ops.CadenceMap(
-        pixel_pointing=pixels_radec,
-        output_dir=args.out_dir
+        pixel_pointing=pixels_radec, output_dir=args.out_dir
     )
-    cadence_map.enabled = True # Toggle to False to disable
+    cadence_map.enabled = False  # Toggle to False to disable
     cadence_map.apply(data)
     log.info_rank("Calculated cadence map in", comm=wcomm, timer=timer)
 
     crosslinking = toast.ops.CrossLinking(
-        pixel_pointing=pixels_radec,
-        output_dir=args.out_dir
+        pixel_pointing=pixels_radec, output_dir=args.out_dir
     )
-    crosslinking.enabled = True # Toggle to False to disable
+    crosslinking.enabled = False  # Toggle to False to disable
     crosslinking.apply(data)
     log.info_rank("Calculated crosslinking in", comm=wcomm, timer=timer)
 
@@ -263,12 +274,14 @@ def main():
     # something similar internally.
 
     ground_filter = toast.ops.GroundFilter()
-    ground_filter.enabled = True # Toggle to False to disable
+    ground_filter.enabled = True  # Toggle to False to disable
     ground_filter.apply(data)
     log.info_rank("Finished ground-filtering in", comm=wcomm, timer=timer)
 
     # Run ML mapmaker
     mlmapmaker = so_ops.MLMapmaker(comps="TQU")
+    mlmapmaker.area = args.area_file
+    mlmapmaker.enabled = True  # Toggle to False to disable
     mlmapmaker.apply(data)
     log.info_rank("Finished ML map-making in", comm=wcomm, timer=timer)
 
@@ -277,6 +290,7 @@ def main():
     # that for now.
 
     polyfilter2D = toast.ops.PolyFilter2D()
+    polyfilter2D.enabled = False  # Toggle to False to disable
     polyfilter2D.apply(data)
     log.info_rank("Finished 2D-poly-filtering in", comm=wcomm, timer=timer)
 
@@ -285,11 +299,13 @@ def main():
     binner.pixel_pointing = pixels_radec
     binner.stokes_weights = weights_radec
 
-    mapmaker = toast.ops.MapMaker()
+    mapmaker = toast.ops.MapMaker(name="mapmaker")
+    mapmaker.write_hdf5 = True
     mapmaker.binning = binner
     # No templates for now (will just do the binning)
     mapmaker.template_matrix = toast.ops.TemplateMatrix(templates=[])
     mapmaker.output_dir = args.out_dir
+    mapmaker.enabled = False  # Toggle to False to disable
     mapmaker.apply(data)
     log.info_rank("Finished Toast map-making in", comm=wcomm, timer=timer)
 
