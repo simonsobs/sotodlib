@@ -199,43 +199,19 @@ class MLMapmaker(Operator):
             )
 
             # Convert the data view into a RangesMatrix
-            det_ranges = list()
-            for d in dets:
-                if self.view is None:
-                    # One range with all samples
-                    det_ranges.append(
-                        so3g.proj.ranges.Ranges.from_array(
-                            np.array(
-                                [
-                                    [0, ob.n_local_samples],
-                                ],
-                                dtype=np.int32,
-                            ), ob.n_local_samples
-                        )
-                    )
-                else:
-                    det_ranges.append(
-                        so3g.proj.ranges.Ranges.from_array(
-                            np.array(
-                                [
-                                    [x.first, x.last + 1]
-                                    for x in ob.intervals[self.view]
-                                ],
-                                dtype=np.int32,
-                            ), ob.n_local_samples
-                        )
-                    )
-            ranges = so3g.proj.ranges.RangesMatrix(items=det_ranges)
+            ranges = so3g.proj.ranges.RangesMatrix.zeros((len(dets), int(ob.n_local_samples)))
+            if self.view is not None:
+                 view_ranges = np.array([[x.first, x.last + 1] for x in ob.intervals[self.view]])
+                 ranges += so3g.proj.ranges.Ranges.from_array(view_ranges, ob.n_local_samples)
 
             # Convert the focalplane offsets into the expected form
             det_to_row = {y["name"]: x for x, y in enumerate(fp.detector_data)}
             det_quat = np.array([fp.detector_data["quat"][det_to_row[x]] for x in dets])
             det_theta, det_phi, det_pa = toast.qarray.to_angles(det_quat)
 
-            # FIXME:  I am sure this will take some iterations to get right...
             radius = np.sin(det_theta)
             xi = - radius * np.cos(det_phi)
-            eta = - radius * np.sin(np.pi / 2 - det_theta)
+            eta = - radius * np.sin(det_phi)
             gamma = det_pa
             # for d in range(len(det_quat)):
             #     print(f"{d:03d}: {det_quat[d]}")

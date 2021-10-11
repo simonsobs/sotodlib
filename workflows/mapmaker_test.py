@@ -276,7 +276,7 @@ def main():
     # something similar internally.
 
     ground_filter = toast.ops.GroundFilter()
-    ground_filter.enabled = True  # Toggle to False to disable
+    ground_filter.enabled = False  # Toggle to False to disable
     ground_filter.apply(data)
     log.info_rank("Finished ground-filtering in", comm=wcomm, timer=timer)
 
