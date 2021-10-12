@@ -676,7 +676,7 @@ class G3tSmurf:
 
 
     def index_archive(self, verbose=False, stop_at_error=False,
-                      skip_old_format=True, min_session_id=None):
+                      skip_old_format=True, min_ctime=None):
         """
         Adds all files from an archive to the File and Frame sqlite tables.
         Files must be indexed before the metadata entries can be made.
@@ -690,6 +690,9 @@ class G3tSmurf:
         skip_old_format: bool
             If True, will skip over indexing files before the name convention
             was changed to be ctime_###.g3. 
+        min_ctime: float
+            If set, files with session-ids less than this ctime will be
+            skipped.
         """
         session = self.Session()
         indexed_files = [f[0] for f in session.query(Files.path).all()]
@@ -702,10 +705,10 @@ class G3tSmurf:
                     if skip_old_format and '2020-' in path:
                         continue
 
-                    if '-' not in f and (min_session_id is not None):
+                    if '-' not in f and (min_ctime is not None):
                         # We know the filename is <ctime>_###.g3
                         session_id = int(f.split('_')[0])
-                        if session_id < min_session_id:
+                        if session_id < min_ctime:
                             continue
 
                     files.append(path)
