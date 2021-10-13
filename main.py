@@ -209,9 +209,7 @@ if __name__ == '__main__':
 
                 if f.type != core.G3FrameType.Scan:
                     continue
-                bookframes = B(f)  # returns a list of frames
-                if len(bookframes) > 0:
-                    output += bookframes
+                output += B(f)  # returns a list of frames (can be empty)
         return output
 
     pipe = core.G3Pipeline()
