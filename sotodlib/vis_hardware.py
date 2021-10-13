@@ -134,16 +134,12 @@ proceeding with the default matplotlib backend"""
         for d, props in dets.items():
             dwslot = props["wafer_slot"]
             if dwslot not in wafer_centers:
-                wafer_centers[dwslot] = dict()
-                wafer_centers[dwslot]["x"] = 0.0
-                wafer_centers[dwslot]["y"] = 0.0
-                wafer_centers[dwslot]["n"] = 0
-            wafer_centers[dwslot]["x"] += detx[d]
-            wafer_centers[dwslot]["y"] += dety[d]
-            wafer_centers[dwslot]["n"] += 1
+                wafer_centers[dwslot] = []
+            wafer_centers[dwslot].append((detx[d], dety[d]))
         for k in wafer_centers.keys():
-            wafer_centers[k]["x"] /= wafer_centers[k]["n"]
-            wafer_centers[k]["y"] /= wafer_centers[k]["n"]
+            center = np.mean(wafer_centers[k], axis=0)
+            size = (np.array(wafer_centers[k]) - center).std()
+            wafer_centers[k] = (center, size)
 
     if bandcolor is None:
         bandcolor = default_band_colors
@@ -163,12 +159,13 @@ proceeding with the default matplotlib backend"""
 
     # Draw wafer labels in the background
     if labels:
-        # Compute the font size to use for detector labels
-        fontpix = 0.2 * hpixperdeg
-        for k, v in wafer_centers.items():
-            ax.text(v["y"] + 0.2, v["x"], k,
+        # The font size depends on the wafer size ... but keep it
+        # between (0.01 and 0.1) times the size of the figure.
+        for k, (center, size) in wafer_centers.items():
+            fontpix = np.clip(0.7 * size * hpixperdeg, 0.01 * hfigpix, 0.10 * hfigpix)
+            ax.text(center[1] + fontpix/hpixperdeg, center[0], k,
                     color='k', fontsize=fontpix, horizontalalignment='center',
-                    verticalalignment='center',
+                    verticalalignment='center', zorder=100,
                     bbox=dict(fc='white', ec='none', pad=0.2, alpha=1.0))
 
     for d, props in dets.items():
