@@ -433,3 +433,67 @@ def _apply_inverse_weights_map(inverse_weights, target):
         target.shape[1], target.shape[2], target.shape[0], 1)
     m1 = np.matmul(iw, m)
     return m1.transpose(2,3,0,1).reshape(target.shape)
+
+
+class ToastishQuat(np.ndarray):
+    """Wrapper class for numpy arrays carrying quaternions with the ijk1
+    signature.
+
+    The practice in TOAST and quaternionarray is to store quaternions
+    in numpy arrays with shape (..., 4), with the real part of the
+    quaternion at index [..., 3].  In contrast, spt3g_software uses
+    signature 1ijk.
+
+    This class serves two main purposes:
+
+    - It can be used to annotate numpy arrays as carrying quaternions
+      in the ijk1 signature (without disturbing their behavior as
+      numpy arrays).
+    - It provides conversion to and from G3 quaternion containers,
+      including signature correction.
+
+    When instantiating an object of this class with a numpy array as
+    an argument, the object will wrap a view of the array (not a
+    copy).
+
+    When instantiating an object of this class with a G3 quat as an
+    argument, the object will store a copy of the G3 quat, translated
+    to ijk1 signature::
+
+      q_g3 = spt3g.core.quat(1.,2.,3.,4.)
+      q_tq = ToastishQuat(q_g3)
+      q_g3_again = q_tq.to_g3()
+
+      print(q_g3, q_tq, q_g3_again)
+      =>  (1,2,3,4) [2. 3. 4. 1.] (1,2,3,4)
+
+    """
+    def __new__(cls, arr):
+        if isinstance(arr, so3g.proj.quat.G3VectorQuat):
+            arr = np.asarray(arr)
+            obj = np.empty(arr.shape)
+            obj[:,:3] = arr[:,1:]
+            obj[:,3] = arr[:,0]
+        elif isinstance(arr, so3g.proj.quat.quat):
+            obj = np.array((arr.b, arr.c, arr.d, arr.a))
+        else:
+            obj = np.asarray(arr)
+        return obj.view(cls)
+
+    def to_g3(self):
+        """Return the ijk1-signature equivalent of the enclosed quaternion
+        array, as a spt3g.core.quat (if 1-d) or a G3VectorQuat (if
+        2-d).
+
+        """
+        if self.shape[-1] != 4:
+            raise ValueError("Last axis must have 4 elements.")
+        if self.ndim == 1:
+            b, c, d, a = self[:].astype(float)
+            return so3g.proj.quat.quat(a, b, c, d)
+        if self.ndim == 2:
+            temp = np.zeros(self.shape, float)
+            temp[..., 0] = self[..., 3]
+            temp[..., 1:] = self[..., :3]
+            return so3g.proj.quat.G3VectorQuat(temp)
+        raise ValueError("Can only convert 1- or 2-d arrays to G3.")
