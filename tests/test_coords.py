@@ -147,6 +147,27 @@ class CoordsUtilsTest(unittest.TestCase):
         self.assertIs(_valid_arg(tod.get('b')), None)
         self.assertIs(_valid_arg(tod.get('b'), 'a', src=tod), tod.a)
 
+    def test_toastish_quat(self):
+        test_array = np.array([[2,3,4,1],[90,100,23,14]])
+
+        # Convert one quat
+        qa = coords.ToastishQuat(test_array[0])
+        self.assertIsInstance(qa, np.ndarray)
+        q3 = qa.to_g3()
+        self.assertIsInstance(q3, so3g.proj.quat.quat)
+        self.assertEqual(q3.a, 1)
+        qb = coords.ToastishQuat(q3)
+        np.testing.assert_array_equal(qa, qb)
+
+        # Convert a vector of quats
+        qa = coords.ToastishQuat(test_array)
+        v3 = qa.to_g3()
+        self.assertIsInstance(v3, so3g.proj.quat.G3VectorQuat)
+        self.assertEqual(v3[0].a, 1)
+        self.assertEqual(v3[1].a, 14)
+        qb = coords.ToastishQuat(v3)
+        np.testing.assert_array_equal(qa, qb)
+
 
 if __name__ == '__main__':
     unittest.main()

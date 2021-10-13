@@ -258,6 +258,8 @@ Coordinate Conversions
 
 .. autofunction:: get_radec
 .. autofunction:: get_horiz
+.. autoclass:: ToastishQuat
+   :members:
 
 Map and Geometry helpers
 ------------------------
