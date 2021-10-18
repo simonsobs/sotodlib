@@ -9,6 +9,32 @@ from . import helpers
 import logging
 logger = logging.getLogger(__name__)
 
+class TiledGeom:
+    """Place-hodler."""
+    def __init__(self, shape, wcs, tiling):
+        self.stuff = shape, wcs, tiling
+
+class TiledMap(list):
+    """Place-holder."""
+    def __init__(self, items, geom):
+        super().__init__(items)
+        self.geom = geom
+
+    @classmethod
+    def zeros_like(cls, src):
+        items = [np.zeros_like(s) if s is not None else None
+                 for s in src]
+        return cls(items, src.geom)
+
+    @staticmethod
+    def zip_active(*args):
+        for _tup in zip(*args):
+            nones = [item is None for item in _tup]
+            if all(nones):
+                continue
+            if any(nones):
+                raise ValueError('Cannot zip TiledMaps with different active tiles.')
+            yield _tup
 
 class P:
     """Projection Matrix.
@@ -111,6 +137,7 @@ class P:
         self.comps = comps
         self.cuts = cuts
         self.threads = threads
+        self.tile_list = None
         self.det_weights = det_weights
 
     @classmethod
@@ -192,6 +219,10 @@ class P:
         """
         if super_shape is None:
             super_shape = (self._comp_count(comps), )
+        if isinstance(self.geom, TiledGeom):
+            # Need to fully resolve tiling to get occupied tiles.
+            proj, _ = self._get_proj_threads()
+            return TiledMap(proj.zeros(super_shape), self.geom)
         proj = self._get_proj()
         return self._enmapify(proj.zeros(super_shape))
 
@@ -279,12 +310,18 @@ class P:
             weights_map = self.to_weights(
                 tod=tod, comps=comps, signal=signal, det_weights=det_weights, cuts=cuts)
 
-        if dest is None:
-            dest = self._enmapify(np.zeros_like(weights_map))
-
-        logger.info('to_inverse_weights: calling _invert_weights_map')
-        dest[:] = helpers._invert_weights_map(
-            weights_map, eigentol=eigentol, UPLO='U')
+        if isinstance(weights_map, TiledMap):
+            if dest is None:
+                dest = TiledMap.zeros_like(weights_map)
+            logger.info('to_inverse_weights: calling _invert_weights_map a bunch')
+            for d, w in TiledMap.zip_active(dest, weights_map):
+                d[:] = helpers._invert_weights_map(w, eigentol=eigentol, UPLO='U')
+        else:
+            if dest is None:
+                dest = self._enmapify(np.zeros_like(weights_map))
+            logger.info('to_inverse_weights: calling _invert_weights_map')
+            dest[:] = helpers._invert_weights_map(
+                weights_map, eigentol=eigentol, UPLO='U')
 
         return dest
 
@@ -315,11 +352,17 @@ class P:
             inverse_weights_map = self.to_inverse_weights(weights_map=weights_map, **kwargs)
         if signal_map is None:
             signal_map = self.to_map(**kwargs)
-        if dest is None:
-            dest = self._enmapify(np.empty(signal_map.shape, signal_map.dtype))
 
-        dest[:] = helpers._apply_inverse_weights_map(
-            inverse_weights_map, signal_map)
+        if isinstance(signal_map, TiledMap):
+            if dest is None:
+                dest = TiledMap.zeros_like(signal_map)
+            for d, iw, sm in TiledMap.zip_active(dest, inverse_weights_map, signal_map):
+                d[:] = helpers._apply_inverse_weights_map(iw, sm)
+        else:
+            if dest is None:
+                dest = self._enmapify(np.empty(signal_map.shape, signal_map.dtype))
+            dest[:] = helpers._apply_inverse_weights_map(
+                inverse_weights_map, signal_map)
         return dest
 
     def from_map(self, signal_map, dest=None, comps=None, wrap=None,
@@ -379,6 +422,10 @@ class P:
     def _get_proj(self):
         if self.geom is None:
             raise ValueError("Can't project without a geometry!")
+        if isinstance(self.geom, TiledGeom):
+            return so3g.proj.Projectionist.for_tiled(
+                self.geom.stuff[0], self.geom.stuff[1], self.geom.stuff[2],
+                pop_opts=self.tile_list)
         return so3g.proj.Projectionist.for_geom(*self.geom)
 
     def _get_proj_threads(self, cuts=None):
@@ -405,8 +452,14 @@ class P:
             else:
                 raise ValueError('Request for unknown algo threads="%s"' % self.threads)
         if cuts:
-            return proj, self.threads * ~cuts
-        return proj, self.threads
+            threads = self.threads * ~cuts
+        else:
+            threads = self.threads
+        if isinstance(self.geom, TiledGeom) and self.tile_list is None:
+            # Re-get proj after setting tile_list.
+            self.tile_list = proj.get_active_tiles(self._get_asm())
+            proj = self._get_proj()
+        return proj, threads
 
     def _get_asm(self):
         """Bundles self.fp and self.sight into an "Assembly" for calling
@@ -423,4 +476,8 @@ class P:
         array.
 
         """
+        if isinstance(data, TiledMap):
+            import warnings
+            warnings.warn('FIXME: do the WCS properly?!')
+            return TiledMap(d, wcs=self.geom.stuff[1])
         return enmap.ndmap(data, wcs=self.geom[1])
