@@ -258,7 +258,7 @@ Coordinate Conversions
 
 .. autofunction:: get_radec
 .. autofunction:: get_horiz
-.. autoclass:: ToastishQuat
+.. autoclass:: ScalarLastQuat
    :members:
 
 Map and Geometry helpers

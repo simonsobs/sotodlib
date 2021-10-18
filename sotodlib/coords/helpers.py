@@ -435,14 +435,14 @@ def _apply_inverse_weights_map(inverse_weights, target):
     return m1.transpose(2,3,0,1).reshape(target.shape)
 
 
-class ToastishQuat(np.ndarray):
+class ScalarLastQuat(np.ndarray):
     """Wrapper class for numpy arrays carrying quaternions with the ijk1
     signature.
 
-    The practice in TOAST and quaternionarray is to store quaternions
-    in numpy arrays with shape (..., 4), with the real part of the
-    quaternion at index [..., 3].  In contrast, spt3g_software uses
-    signature 1ijk.
+    The practice in many codes, including TOAST, quaternionarray, and
+    scipy is to store quaternions in numpy arrays with shape (..., 4),
+    with the real part of the quaternion at index [..., 3].  In
+    contrast, spt3g_software inherits the 1ijk from boost.
 
     This class serves two main purposes:
 
@@ -461,7 +461,7 @@ class ToastishQuat(np.ndarray):
     to ijk1 signature::
 
       q_g3 = spt3g.core.quat(1.,2.,3.,4.)
-      q_tq = ToastishQuat(q_g3)
+      q_tq = ScalarLastQuat(q_g3)
       q_g3_again = q_tq.to_g3()
 
       print(q_g3, q_tq, q_g3_again)
