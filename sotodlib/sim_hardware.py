@@ -15,7 +15,7 @@ import quaternionarray as qa
 
 import so3g.proj.quat as so3q
 
-from .coords import ToastishQuat
+from .coords import ScalarLastQuat
 
 from .core import Hardware
 
@@ -744,11 +744,11 @@ def sim_telescope_detectors(hw, tele, tube_slots=None):
 
     # Transform quats from left-handed layout coordinates to
     # right-handed TOAST-compatible coordintes -- see note at top of
-    # this file.  Note the ToastishQuat is just helping us convert to
+    # this file.  Note the ScalarLastQuat is just helping us convert to
     # and from 3g quats.
-    quats_in = ToastishQuat([d['quat'] for d in alldets.values()])  # shape (n, 4)
+    quats_in = ScalarLastQuat([d['quat'] for d in alldets.values()])  # shape (n, 4)
     xi, eta, gamma = so3q.decompose_xieta(quats_in.to_g3())
-    quats_out = ToastishQuat(so3q.rotation_xieta(eta, xi, np.pi/2 - gamma))
+    quats_out = ScalarLastQuat(so3q.rotation_xieta(eta, xi, np.pi/2 - gamma))
     for d, q in zip(alldets.values(), quats_out):
         d['quat'] = q
 
