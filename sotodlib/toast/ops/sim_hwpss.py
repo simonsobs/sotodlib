@@ -35,7 +35,7 @@ from toast.utils import Environment, Logger, Timer
 
 from toast._libtoast import bin_templates, add_templates, legendre
 
-from toast.observation import default_names as obs_names
+from toast.observation import default_values as defaults
 
 
 XAXIS, YAXIS, ZAXIS = np.eye(3)
@@ -48,11 +48,11 @@ class SimHWPSS(Operator):
     API = Int(0, help="Internal interface version for this operator")
 
     hwp_angle = Unicode(
-        obs_names.hwp_angle, help="Observation shared key for HWP angle"
+        defaults.hwp_angle, help="Observation shared key for HWP angle"
     )
 
     det_data = Unicode(
-        obs_names.det_data,
+        defaults.det_data,
         help="Observation detdata key for simulated signal",
     )
 

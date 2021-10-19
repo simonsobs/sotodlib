@@ -27,7 +27,7 @@ from toast.utils import Environment, Logger, Timer
 
 from toast._libtoast import bin_templates, add_templates, legendre
 
-from toast.observation import default_names as obs_names
+from toast.observation import default_values as defaults
 
 from ...core.hardware import LAT_COROTATOR_OFFSET
 
@@ -49,13 +49,13 @@ class CoRotator(Operator):
     API = Int(0, help="Internal interface version for this operator")
 
     boresight_azel = Unicode(
-        obs_names.boresight_azel,
+        defaults.boresight_azel,
         allow_none=True,
         help="Observation shared key for boresight Az/El",
     )
 
     boresight_radec = Unicode(
-        obs_names.boresight_radec,
+        defaults.boresight_radec,
         allow_none=True,
         help="Observation shared key for boresight RA/Dec",
     )
@@ -67,7 +67,7 @@ class CoRotator(Operator):
     )
 
     elevation = Unicode(
-        obs_names.elevation,
+        defaults.elevation,
         allow_none=True,
         help="Observation shared key for boresight elevation",
     )
