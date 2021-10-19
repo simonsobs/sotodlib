@@ -19,7 +19,7 @@ from toast.traits import trait_docs, Unicode, Int, Instance, Bool
 from toast.ops import Operator
 from toast.utils import Logger, Environment, rate_from_times
 from toast.timing import function_timer, Timer
-from toast.observation import default_names as obs_names
+from toast.observation import default_values as defaults
 from toast.fft import FFTPlanReal1DStore
 
 import so3g
@@ -54,27 +54,31 @@ class MLMapmaker(Operator):
         klass=np.dtype, args=(np.float64,), help="Numpy dtype of map products"
     )
 
-    times = Unicode(obs_names.times, help="Observation shared key for timestamps")
+    times = Unicode(defaults.times, help="Observation shared key for timestamps")
 
     boresight = Unicode(
-        obs_names.boresight_azel, help="Observation shared key for boresight Az/El"
+        defaults.boresight_azel, help="Observation shared key for boresight Az/El"
     )
 
     det_data = Unicode(
-        obs_names.det_data, help="Observation detdata key for the timestream data"
+        defaults.det_data, help="Observation detdata key for the timestream data"
     )
 
     det_flags = Unicode(
         None, allow_none=True, help="Observation detdata key for flags to use"
     )
 
-    det_flag_mask = Int(0, help="Bit mask value for optional detector flagging")
+    det_flag_mask = Int(
+        defaults.det_mask_invalid, help="Bit mask value for optional detector flagging"
+    )
 
     shared_flags = Unicode(
         None, allow_none=True, help="Observation shared key for telescope flags to use"
     )
 
-    shared_flag_mask = Int(0, help="Bit mask value for optional shared flagging")
+    shared_flag_mask = Int(
+        defaults.shared_mask_invalid, help="Bit mask value for optional shared flagging"
+    )
 
     view = Unicode(
         None, allow_none=True, help="Use this view of the data in all observations"

@@ -35,7 +35,7 @@ from toast.utils import Environment, Logger, Timer
 
 from toast._libtoast import bin_templates, add_templates, legendre
 
-from toast.observation import default_names as obs_names
+from toast.observation import default_values as defaults
 
 
 def to_JD(t):
@@ -137,7 +137,7 @@ class SimSSO(Operator):
     API = Int(0, help="Internal interface version for this operator")
 
     times = Unicode(
-        obs_names.times,
+        defaults.times,
         help="Observation shared key for timestamps",
     )
 
@@ -154,7 +154,7 @@ class SimSSO(Operator):
     )
 
     det_data = Unicode(
-        obs_names.det_data,
+        defaults.det_data,
         help="Observation detdata key for simulated signal",
     )
 

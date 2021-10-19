@@ -23,7 +23,7 @@ from toast.pixels_io import write_healpix_fits
 
 from toast.covariance import covariance_invert, covariance_apply
 
-from toast.observation import default_names as obs_names
+from toast.observation import default_values as defaults
 
 from toast.ops import (
     Operator, BuildPixelDistribution, BuildInverseCovariance, BuildNoiseWeighted
@@ -55,20 +55,25 @@ class Hn(Operator):
     )
 
     det_flags = Unicode(
-        obs_names.det_flags,
+        defaults.det_flags,
         allow_none=True,
         help="Observation detdata key for flags to use",
     )
 
-    det_flag_mask = Int(255, help="Bit mask value for optional detector flagging")
+    det_flag_mask = Int(
+        defaults.det_mask_invalid, help="Bit mask value for optional detector flagging"
+    )
 
     shared_flags = Unicode(
-        obs_names.shared_flags,
+        defaults.shared_flags,
         allow_none=True,
         help="Observation shared key for telescope flags to use",
     )
 
-    shared_flag_mask = Int(0, help="Bit mask value for optional telescope flagging")
+    shared_flag_mask = Int(
+        defaults.shared_mask_invalid,
+        help="Bit mask value for optional telescope flagging",
+    )
 
     output_dir = Unicode(
         ".",
