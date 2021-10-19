@@ -207,7 +207,7 @@ def main():
     # Scan input map.  This will create the pixel distribution as well, since
     # it does not yet exist.
     scan_map = toast.ops.ScanHealpix(file=args.sky_file)
-    scan_map.enabled = False
+    scan_map.enabled = True
     scan_map.pixel_pointing = pixels_radec
     scan_map.stokes_weights = weights_radec
     scan_map.apply(data)
@@ -237,6 +237,7 @@ def main():
     # sim_atmosphere.polarization_fraction = 0.01
     # sim_atmosphere.detector_weights = weights_azel
     sim_atmosphere.enabled = False  # Toggle to False to disable
+    sim_atmosphere.serial = False
     sim_atmosphere.apply(data)
     log.info_rank("Simulated and observed atmosphere in", comm=wcomm, timer=timer)
 
@@ -303,6 +304,7 @@ def main():
     binner.stokes_weights = weights_radec
 
     mapmaker = toast.ops.MapMaker(name="mapmaker")
+    mapmaker.weather = "vacuum"
     mapmaker.write_hdf5 = True
     mapmaker.binning = binner
     # No templates for now (will just do the binning)

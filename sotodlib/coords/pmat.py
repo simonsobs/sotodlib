@@ -144,7 +144,7 @@ class P:
     def for_tod(cls, tod, sight=None, fp=None, geom=None, comps='T',
                 rot=None, cuts=None, threads=None, det_weights=None,
                 timestamps=None, focal_plane=None, boresight=None,
-                boresight_equ=None, wcs_kernel=None):
+                boresight_equ=None, wcs_kernel=None, weather='typical', site='so'):
         """Set up a Projection Matrix for a TOD.  This will ultimately call
         the main P constructor, but some missing arguments will be
         extracted from tod and computed along the way.
@@ -178,7 +178,7 @@ class P:
                 assert(boresight is not None)
                 sight = so3g.proj.CelestialSightLine.az_el(
                     timestamps, boresight.az, boresight.el, roll=boresight.roll,
-                    site='so', weather='typical')
+                    site=site, weather=weather)
         else:
             sight = _get_csl(sight)
 

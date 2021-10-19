@@ -99,6 +99,9 @@ class MLMapmaker(Operator):
         help="Set verbosity in MLMapmaker.  If None, use toast loglevel",
     )
 
+    weather = Unicode("typical", help="Weather to assume when making maps")
+    site    = Unicode("so",      help="Site to use when making maps")
+
     @traitlets.validate("comps")
     def _check_mode(self, proposal):
         check = proposal["value"]
@@ -161,12 +164,13 @@ class MLMapmaker(Operator):
                 self._shape,
                 self._wcs,
                 comps=self.comps,
-                noise_model=mm.NmatDetvecs(
-                    verbose=(self.verbose > 1),
-                    downweight=[1e-4, 0.25, 0.50],
-                    window=0,
-                ),
+                #noise_model=mm.NmatDetvecs(
+                #    verbose=(self.verbose > 1),
+                #    downweight=[1e-4, 0.25, 0.50],
+                #    window=0,
+                #),
                 #noise_model=mm.NmatUncorr(),
+                noise_model=mm.Nmat(),
                 #dtype_tod=self._dtype_tod,
                 dtype_tod=np.float32,
                 dtype_map=self.dtype_map,
@@ -214,9 +218,9 @@ class MLMapmaker(Operator):
             det_theta, det_phi, det_pa = toast.qarray.to_angles(det_quat)
 
             radius = np.sin(det_theta)
-            xi = - radius * np.cos(det_phi)
-            eta = - radius * np.sin(det_phi)
-            gamma = det_pa
+            xi  = radius * np.sin(det_phi)
+            eta = radius * np.cos(det_phi)
+            gamma = np.pi/2 - det_pa
             # for d in range(len(det_quat)):
             #     print(f"{d:03d}: {det_quat[d]}")
             #     print(f"  theta = {det_theta[d]}")
@@ -269,7 +273,7 @@ class MLMapmaker(Operator):
             # AxisManager(az[samps], el[samps], roll[samps], samps:OffsetAxis(372680))
 
             # Accumulate data to mapmaker
-            work = self._mapmaker.build_obs(ob.name, axobs)
+            work = self._mapmaker.build_obs(ob.name, axobs, weather=self.weather, site=self.site)
             self._mapmaker.add_obs(work)
             del axobs
 
