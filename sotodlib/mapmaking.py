@@ -47,10 +47,11 @@ class MLMapmaker:
         #self.dof.add(MapZipper(self.map_rhs.shape, self.map_rhs.wcs))
         self.ready    = False
         self.recenter = recenter
-    def build_obs(self, id, obs, noise_model=None):
+    def build_obs(self, id, obs, noise_model=None, weather="typical", site="so"):
         # Signal must have the right dtype, or the pmat we build will break later
         t1     = time.time()
         tod    = obs.signal.astype(self.dtype_tod, copy=False)
+        utils.deslope(tod, w=5, inplace=True)
         ctime  = obs.timestamps
         # Set up cuts handling
         pcut   = PmatCut(obs.glitch_flags)
@@ -62,7 +63,7 @@ class MLMapmaker:
         # Ideally we would include cuts in the pmat. It would slightly simplify PmatCut, which
         # would skip the "clear" step, and it would make the map_div calculation simpler.
         # However, doing so changes the result, which should be investigated.
-        pmat    = coords.pmat.P.for_tod(obs, comps=self.comps, geom=(self.shape, self.wcs), rot=rot, threads="domdir")
+        pmat    = coords.pmat.P.for_tod(obs, comps=self.comps, geom=(self.shape, self.wcs), rot=rot, threads="domdir", weather=weather, site=site)
         t2 = time.time()
         # Build the noise model
         if noise_model is None: noise_model = self.noise_model
@@ -310,8 +311,8 @@ def safe_invert_div(div, lim=1e-2):
 ################################
 
 class Nmat:
-    def __init__(self): self.ivar = 1.0
-    def build(self, tod, **kwargs): pass
+    def __init__(self): self.ivar = np.full(1, 1.0)
+    def build(self, tod, **kwargs): return self
     def apply(self, tod): return tod
 
 class NmatUncorr(Nmat):
@@ -432,6 +433,7 @@ class NmatDetvecs(Nmat):
         return NmatDetvecs(bin_edges=self.bin_edges, eig_lim=self.eig_lim, single_lim=self.single_lim,
                 window=self.window, nwin=nwin, downweight=self.downweight, verbose=self.verbose,
                 bins=bins, D=D, V=V, iD=iD, iV=iV, s=s, ivar=ivar)
+
     def apply(self, tod, inplace=False, slow=False):
         if inplace: tod = np.array(tod)
         apply_window(tod, self.nwin)
