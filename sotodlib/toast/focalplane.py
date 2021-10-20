@@ -186,7 +186,11 @@ class SOFocalplane(Focalplane):
             names.append(det_name)
             quats.append(np.array([float(x) for x in det_data["quat"]]))
             ids.append(int(det_data["ID"]))
-            pixels.append(int(det_data["pixel"]))
+            # Replace pixel index on the wafer with a unique identifier that
+            # combines telescope, wafer and pixel index
+            pixels.append(
+                f"{self.telescope}_{det_data['wafer_slot']}_p{det_data['pixel']}"
+            )
             fwhms.append(float(det_data["fwhm"]) * u.arcmin)
             pols.append(det_data["pol"])
             card_slots.append(det_data["card_slot"])
@@ -290,4 +294,5 @@ class SOFocalplane(Focalplane):
             detector_data=detdata,
             field_of_view=field_of_view,
             sample_rate=sample_rate,
+            comm=comm,
         )
