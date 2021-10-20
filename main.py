@@ -70,7 +70,7 @@ class _ScanDataBundle(object):
 
         return output
 
-class Bookbinder(object):
+class FrameProcessor(object):
     def __init__(self):
         self.hkbundle = None
         self.sdbundle = None
@@ -130,11 +130,8 @@ class Bookbinder(object):
         """
         Process a frame
         """
-        if f.type == core.G3FrameType.EndProcessing:
-            return self.sdbundle.rebundle(self.flush_time) + [f]
-
         if f.type != core.G3FrameType.Housekeeping and f.type != core.G3FrameType.Scan:
-            return f
+            return [f]
 
         if f.type == core.G3FrameType.Housekeeping:
             if self.hkbundle is None:
@@ -155,65 +152,90 @@ class Bookbinder(object):
 
             return output
 
+class Bookbinder(object):
+    """
+    Bookbinder
+    """
+    def __init__(self, smurf_files, out_files):
+        self._smurf_files = smurf_files
+        self._out_files = out_files
+
+        self.frameproc = FrameProcessor()
+        self.smurf_iter = core.G3File(self._smurf_files.pop(0))
+        self.writer = core.G3Writer(self._out_files.pop(0))
+
+    def write_frames(self, frames_list):
+        """
+        Write frames to file
+        """
+        if not isinstance(frames_list, list):
+            frames_list = list(frames_list)
+
+        for f in frames_list:
+            self.writer.Process(f)
+
+    def __call__(self, fr):
+        """
+        Main loop
+
+        Strategy:
+        1. Add HK frames until sign change detected - get list of (timestamps of) sign changes
+        2. While len(sign_changes) > 0, pop the first sign change, add SMuRF frames until that time;
+        emit new frame; truncate HK and SMuRF frames
+        3. Repeat Step 2 until len(sign_changes) == 0, then go back to Step 1
+        """
+        if fr.type != core.G3FrameType.Housekeeping:
+            return
+
+        if fr['hkagg_type'] != 2:
+            return
+
+        self.frameproc(fr)
+        if not self.frameproc.ready():
+            return
+
+        sc = locate_sign_changes(np.ediff1d(self.frameproc.hkbundle.data['Azimuth_Corrected']))
+        tc = [self.frameproc.hkbundle.times[i] for i in sc]
+        output = []
+        while len(tc) > 0:
+            self.frameproc.flush_time = tc.pop(0)
+
+            while self.frameproc.sdbundle is None or not self.frameproc.sdbundle.ready(self.frameproc.flush_time):
+                try:
+                    f = next(self.smurf_iter)
+                except StopIteration:
+                    # If there are no more SMuRF frames, output remaining SMuRF data
+                    if len(self.frameproc.sdbundle.times) > 0:
+                        self.frameproc.flush_time = self.frameproc.sdbundle.times[-1] + 1  # +1 to ensure last sample gets included (= 1e-8 sec << sampling cadence)
+                        output += self.frameproc.flush()
+                    self.write_frames(output)
+
+                    # If there are remaining files, update the
+                    # SMuRF source iterator and G3 file writer
+                    if len(self._smurf_files) > 0:
+                        self.smurf_iter = core.G3File(self._smurf_files.pop(0))
+                    if len(self._out_files) > 0:
+                        self.writer = core.G3Writer(self._out_files.pop(0))
+
+                    return
+
+                if f.type != core.G3FrameType.Scan:
+                    continue
+                output += self.frameproc(f)  # FrameProcessor returns a list of frames (can be empty)
+
+        self.write_frames(output)
+        return
+
 if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--g3', dest='g3file', type=str, required=True, help='full path to G3 file')
-    parser.add_argument('--hk', dest='hkfile', type=str, required=True, help='full path to HK file')
+    parser.add_argument('--g3', dest='g3file', nargs='+', type=str, required=True,
+                        help='full path to G3 file')
+    parser.add_argument('--hk', dest='hkfile', nargs='+', type=str, required=True,
+                        help='full path to HK file')
     args = parser.parse_args()
 
-    B = Bookbinder()
-
-    smurfiter = core.G3File(args.g3file)
-
-    """
-    Main loop
-
-    Strategy:
-    1. Add HK frames until sign change detected - get list of (timestamps of) sign changes
-    2. While len(sign_changes) > 0, pop the first sign change, add SMuRF frames until that time;
-       emit new frame; truncate HK and SMuRF frames
-    3. Repeat Step 2 until len(sign_changes) == 0, then go back to Step 1
-    """
-    def framesource(fr):
-        if fr.type == core.G3FrameType.EndProcessing:
-            return None
-
-        if fr.type != core.G3FrameType.Housekeeping:
-            return []
-
-        if fr['hkagg_type'] != 2:
-            return []
-
-        B(fr)
-        if not B.ready():
-            return []
-
-        sc = locate_sign_changes(np.ediff1d(B.hkbundle.data['Azimuth_Corrected']))
-        tc = [B.hkbundle.times[i] for i in sc]
-        output = []
-        while len(tc) > 0:
-            B.flush_time = tc.pop(0)
-
-            while B.sdbundle is None or not B.sdbundle.ready(B.flush_time):
-                try:
-                    f = next(smurfiter)
-                except StopIteration:
-                    # If there are no more SMuRF frames, output remaining SMuRF data
-                    # and terminate program by ending loop
-                    if len(B.sdbundle.times):
-                        B.flush_time = B.sdbundle.times[-1] + 1  # +1 to ensure last sample gets included (= 1e-8 sec << sampling cadence)
-                        output += B.flush()
-                    return output
-
-                if f.type != core.G3FrameType.Scan:
-                    continue
-                output += B(f)  # returns a list of frames (can be empty)
-        return output
-
-    pipe = core.G3Pipeline()
-    pipe.Add(core.G3Reader, filename=args.hkfile)
-    pipe.Add(framesource)
-    pipe.Add(core.G3Writer, filename='out.g3')
-    pipe.Run()
+    B = Bookbinder(args.g3file, ['out{:03d}.g3'.format(i) for i in range(len(args.g3file))])
+    for h in core.G3File(args.hkfile):
+        B(h)
