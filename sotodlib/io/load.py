@@ -186,13 +186,22 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None):
             assert(item.name == '*')  # That's the only wildcard we allow right now...
             to_remove.append(item)
             del streams[item.name]
-            for k in fo.keys():
-                to_add.append(Field(k))
-                to_add[-1].opts = item.opts
-                streams[k] = []
+            if isinstance(fo, so3g.G3SuperTimestream):
+                for k in fo.names:
+                    to_add.append(Field(k))
+                    to_add[-1].opts = item.opts
+                    streams[k] = []
+            else:
+                for k in fo.keys():
+                    to_add.append(Field(k))
+                    to_add[-1].opts = item.opts
+                    streams[k] = []
     for item in to_remove:
         field_request.remove(item)
     field_request.extend(to_add)
+
+    if isinstance(fo, so3g.G3SuperTimestream):
+        key_map = {k: i for i, k in enumerate(fo.names)}
 
     for item in field_request:
         if isinstance(item, FieldGroup):
@@ -205,9 +214,13 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None):
             target = fo[item.name]
             unpack_frame_object(target, item, streams[item.name], comp_info)
             if item.timestamp_field is not None:
-                t0, t1, ns = target.start, target.stop, target.n_samples
-                t0, t1 = t0.time / g3core.G3Units.sec, t1.time / g3core.G3Units.sec
-                streams[item.timestamp_field].append(np.linspace(t0, t1, ns))
+                if isinstance(target, so3g.G3SuperTimestream):
+                    streams[item.timestamp_field].append(
+                        np.array(target.times) / g3core.G3Units.sec)
+                else:
+                    t0, t1, ns = target.start, target.stop, target.n_samples
+                    t0, t1 = t0.time / g3core.G3Units.sec, t1.time / g3core.G3Units.sec
+                    streams[item.timestamp_field].append(np.linspace(t0, t1, ns))
             continue
         # This is a simple field.
         item = Field.as_field(item)
@@ -224,7 +237,10 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None):
             m, b = gain.get(key, 1.), offset.get(key, 0.)
             v = np.array(fo[key], dtype='float32') / m + b
         else:
-            v = np.array(fo[key])
+            if isinstance(fo, so3g.G3SuperTimestream):
+                v = fo.data[key_map[key]]
+            else:
+                v = np.array(fo[key])
         streams[key].append(v)
 
 def unpack_frames(filename, field_request, streams):
