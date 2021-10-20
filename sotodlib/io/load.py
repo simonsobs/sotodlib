@@ -31,6 +31,16 @@ from collections import OrderedDict
 
 from .. import core
 
+
+# Interim, Oct. 2021.  Wait a year, remove this caution.
+if hasattr(so3g, 'G3SuperTimestream'):
+    from so3g import G3SuperTimestream
+else:
+    class MockG3SuperTimestream(object):
+        pass
+    G3SuperTimestream = MockG3SuperTimestream
+
+
 class FieldGroup(list):
     """This is essentially a roadmap for decoding data from a
     G3FrameObject.  Each entry in this list is either a string, giving
@@ -186,7 +196,7 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None):
             assert(item.name == '*')  # That's the only wildcard we allow right now...
             to_remove.append(item)
             del streams[item.name]
-            if isinstance(fo, so3g.G3SuperTimestream):
+            if isinstance(fo, G3SuperTimestream):
                 for k in fo.names:
                     to_add.append(Field(k))
                     to_add[-1].opts = item.opts
@@ -200,7 +210,7 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None):
         field_request.remove(item)
     field_request.extend(to_add)
 
-    if isinstance(fo, so3g.G3SuperTimestream):
+    if isinstance(fo, G3SuperTimestream):
         key_map = {k: i for i, k in enumerate(fo.names)}
 
     for item in field_request:
@@ -214,7 +224,7 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None):
             target = fo[item.name]
             unpack_frame_object(target, item, streams[item.name], comp_info)
             if item.timestamp_field is not None:
-                if isinstance(target, so3g.G3SuperTimestream):
+                if isinstance(target, G3SuperTimestream):
                     streams[item.timestamp_field].append(
                         np.array(target.times) / g3core.G3Units.sec)
                 else:
@@ -237,7 +247,7 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None):
             m, b = gain.get(key, 1.), offset.get(key, 0.)
             v = np.array(fo[key], dtype='float32') / m + b
         else:
-            if isinstance(fo, so3g.G3SuperTimestream):
+            if isinstance(fo, G3SuperTimestream):
                 v = fo.data[key_map[key]]
             else:
                 v = np.array(fo[key])
