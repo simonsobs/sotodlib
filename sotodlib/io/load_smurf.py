@@ -130,10 +130,8 @@ class Files(Base):
     ------------
     id : integer
         auto-incremented primary key
-    path : string
-        complete absolute path to file
     name : string
-        the file name
+        complete absolute path to file
     start : datetime.datetime
         the start time for the file
     stop : datetime.datetime
