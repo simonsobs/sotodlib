@@ -968,7 +968,7 @@ class G3tSmurf:
             flist = flist.order_by(Files.start).all()
             
             ## Use Status information to set Tuneset
-            status = SmurfStatus.from_file(flist[0].path)
+            status = SmurfStatus.from_file(flist[0].name)
             if status.action is not None:
                 if status.action not in SMURF_ACTIONS['observations']:
                     logger.warning(f"Status Action {status.action} from file does not \
