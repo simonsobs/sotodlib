@@ -1107,7 +1107,7 @@ class G3tSmurf:
                                 ctime = int(name.split('_')[0])
                             except ValueError:
                                 ctime = actime
-                            fname = ('_'.join(name.split('_')[1:])).split('.')[0]
+                            fname = '_'.join(name.split('_')[1:])
                             yield (fname, stream_id, ctime, os.path.join(root, name))
                         except GeneratorExit:
                             return
