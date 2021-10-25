@@ -609,7 +609,6 @@ class G3tSmurf:
         try:
             splits = path.split('/')
             db_file.stream_id = splits[-2]
-            db_file.name = splits[-1]
         except:
             ## should this fail silently?
             pass
