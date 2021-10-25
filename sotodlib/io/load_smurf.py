@@ -43,7 +43,12 @@ association_table_dets = db.Table('detsets', Base.metadata,
     db.Column('det', db.Integer, db.ForeignKey('channels.name'))
 )
 
-
+"""
+Actions used to define when observations happen
+Could be expanded to other Action Based Indexing as well
+Strings must be unique, in that they must only show up when they should be used
+as observations
+"""
 SMURF_ACTIONS = {
     'observations':[
         'take_stream_data',
@@ -52,14 +57,18 @@ SMURF_ACTIONS = {
         'take_g3_data',
         'stream_g3_on',         
     ],
+}
+"""
+Files used to define when specific metadata should be made. 
+These string patterns may not show up in other file names archived by the 
+pysmurf archiver. 
+"""
+SMURF_FILES = {
     'channel_assignments':[
-        'setup_notches',
-        'optimize_attens',
+        'channel_assignment', 
     ],
     'tuning':[
-        'setup_notches',
-        'save_tune',
-        'optimize_attens',
+        'tune',
     ]
 }
 
@@ -1005,10 +1014,108 @@ class G3tSmurf:
             obs.stop = flist[-1].stop
         session.commit()
 
+    def search_metadata_actions(self,  min_ctime=16000*1e5, max_ctime=None, reverse=False):
+        """Generator used to page through smurf folder returning each action formatted for
+        easy use.
+        
+        Args
+        -----
+        min_ctime : lowest timestamped action to return
+        max_ctime : highest timestamped action to return
+        reverse : if true, goes backward
+        
+        Yields
+        -------
+        tuple (action, stream_id, ctime, path)
+        action : Smurf Action string with ctime removed for easy comparison
+        stream_id : stream_id of Action
+        ctime : ctime of Action folder
+        path : absolute path to action folder
+        """
+        if max_ctime is None:
+            max_ctime = dt.datetime.now().timestamp()
+
+        if self.meta_path is None:
+            raise ValueError('Archiver needs meta_path attribute to index channel assignments')
+
+        logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
+
+        for ct_dir in sorted(os.listdir(self.meta_path), reverse=reverse):        
+            if int(ct_dir) < int(min_ctime//1e5):
+                continue
+            elif int(ct_dir) > int(max_ctime//1e5):
+                continue
+
+            for stream_id in sorted(os.listdir( os.path.join(self.meta_path, ct_dir)), reverse=reverse):
+                    action_path = os.path.join(self.meta_path, ct_dir, stream_id)
+                    actions = sorted(os.listdir( action_path ), reverse=reverse)
+
+                    for action in actions:
+                        try:
+                            ctime = int( action.split('_')[0] )
+                            if ctime < min_ctime or ctime > max_ctime:
+                                continue
+                            astring = '_'.join(action.split('_')[1:])
+
+                            yield (astring, stream_id, ctime, os.path.join(action_path, action))
+                        except GeneratorExit:
+                            return
+                        except:
+                            continue
+
+    def search_metadata_files(self,  min_ctime=16000*1e5, max_ctime=None, reverse=False,
+                          skip_plots=True, skip_configs=True):
+        """Generator used to page through smurf folder returning each file formatted for
+            easy use. 
+
+        Args
+        -----
+        min_ctime : int or float
+            Lowest timestamped action to return
+        max_ctime : int or float
+            highest timestamped action to return
+        reverse   : bool
+            if true, goes backward 
+        skip_plots : bool
+            if true, skips all the plots folders because we probably don't want to look through them
+        skip_configs : bool
+            if true, skips all the config folders because we probably don't want to look through them
+
+        Yields
+        -------
+        tuple (fname, ctime, abs_path)
+        fname : string
+            file name with ctime removed
+        ctime : int
+            file ctime
+        abs_path : string
+            absolute path to file
+        """
+        for action, stream_id, actime, path in self.search_metadata_actions(min_ctime=min_ctime,
+                                                                            max_ctime=max_ctime,
+                                                                            reverse=reverse):
+            if skip_configs and action == 'config':
+                continue
+            adirs = os.listdir(path)
+            for adir in adirs:
+                if skip_plots and adir == 'plots':
+                    continue
+                for root, dirs, files in os.walk(os.path.join(path, adir), topdown=False):
+                    for name in files:
+                        try:
+                            try:
+                                ctime = int(name.split('_')[0])
+                            except ValueError:
+                                ctime = actime
+                            fname = ('_'.join(name.split('_')[1:])).split('.')[0]
+                            yield (fname, stream_id, ctime, os.path.join(root, name))
+                        except GeneratorExit:
+                            return
+                    
     def index_metadata(self, min_ctime=16000*1e5, stop_at_error=False):
         """
             Adds all channel assignments, tunefiles, and observations in archive to database. 
-            Adding relevant entries to Bands and Files as well.
+            Adding relevant entries to Files as well.
 
             Args
             ----
@@ -1024,6 +1131,7 @@ class G3tSmurf:
         session = self.Session()
 
         logger.info(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
+        
         for ct_dir in sorted(os.listdir(self.meta_path)):        
             if int(ct_dir) < int(min_ctime//1e5):
                 continue
