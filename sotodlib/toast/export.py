@@ -338,10 +338,11 @@ class ToastExport(toast.Operator):
 
         # First process in the group makes the output directory
         obsdir = os.path.join(self._outdir, obsname)
-        if cgroup.rank == 0:
+        if grouprank == 0:
             if not os.path.isdir(obsdir):
                 os.makedirs(obsdir)
-        cgroup.barrier()
+        if cgroup is not None:
+            cgroup.barrier()
 
         detranks, sampranks = tod.grid_size
 
@@ -453,7 +454,8 @@ class ToastExport(toast.Operator):
         if worldrank == 0:
             if not os.path.isdir(self._outdir):
                 os.makedirs(self._outdir)
-        cworld.barrier()
+        if cworld is not None:
+            cworld.barrier()
 
         for obs in data.obs:
             if self._detgroups is None:

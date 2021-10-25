@@ -13,7 +13,62 @@ import numpy as np
 
 import quaternionarray as qa
 
+import so3g.proj.quat as so3q
+
+from .coords import ScalarLastQuat
+
 from .core import Hardware
+
+# Important note on coordinate systems
+#
+# The functions in this module help to lay out the detectors in the
+# focal plane by combining various components, such as assembling
+# rhombi into wafers and wafers into optical tubes.  This is done in a
+# cartesian projection plane with axes oriented like this:
+#
+#        Layout coordinates here
+#        -----------------------
+#
+#      Y^                   O
+#       |                  O O
+#       |                   O O
+#       |                  O + O
+#       +-----> X           O O O
+#
+#   (Z into the page)     Some dets
+#
+# with the idea being that the detectors are sensitive to radiation
+# coming from some point on the sphere (x, y, z) near z=1.  In the
+# final layout, that one would want to rigidly attach to the
+# boresight, the X-axis points in the direction of increasing azimuth
+# and the Y-axis in the direction of increasing elevation.  The
+# encoded quaternion is the rotation that takes vectors in detector
+# coordinates to vectors in this system.
+#
+# However, this XYZ cartesian system is left-handed, and thus does not
+# naturally connect with the pointing codes used in TOAST (and so3g).
+# What is needed for TOAST is illustrated here:
+#
+#     TOAST focal plane coordinates
+#     -----------------------------
+#
+#      X^                   O
+#       |                  O O
+#       |                   O O
+#       |                  O + O
+#       +-----> Y           O O O
+#
+#   (Z into the page)   Those same dets
+#
+# Here's how this discrepancy is dealt with.  In this module, the
+# final quaternion stored in each detector's info dict is transformed,
+# right at the end, from the left-handed layout system into the
+# right-handed TOAST focal plane system.  When decoding the "quat"
+# property of detectors for plotting, the "X" and "Y" coordinates so
+# extracted must not be naively plotted as pylab.scatter(x, y)!  To
+# show the layout "as it would project onto the sky", you want
+# pylab.scatter(y, x).  (See vis_hardware, for example.)
+
 
 # FIXME:  much of this code is copy/pasted from the toast source, simply to
 # avoid a dependency.  Once we can "pip install toast", we should consider
@@ -686,8 +741,18 @@ def sim_telescope_detectors(hw, tele, tube_slots=None):
                 alldets.update(dets)
                 windx += 1
             tindx += 1
-    return alldets
 
+    # Transform quats from left-handed layout coordinates to
+    # right-handed TOAST-compatible coordintes -- see note at top of
+    # this file.  Note the ScalarLastQuat is just helping us convert to
+    # and from 3g quats.
+    quats_in = ScalarLastQuat([d['quat'] for d in alldets.values()])  # shape (n, 4)
+    xi, eta, gamma = so3q.decompose_xieta(quats_in.to_g3())
+    quats_out = ScalarLastQuat(so3q.rotation_xieta(eta, xi, np.pi/2 - gamma))
+    for d, q in zip(alldets.values(), quats_out):
+        d['quat'] = q
+
+    return alldets
 
 def get_example():
     """Return an example Hardware config with the required sections.
