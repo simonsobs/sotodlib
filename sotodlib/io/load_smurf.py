@@ -604,7 +604,7 @@ class G3tSmurf:
             ft.type_name: ft for ft in session.query(FrameType).all()
         }
 
-        db_file = Files(name=name)
+        db_file = Files(name=path)
         session.add(db_file)
         try:
             splits = path.split('/')
