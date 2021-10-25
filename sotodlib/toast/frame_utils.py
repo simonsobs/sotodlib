@@ -467,18 +467,19 @@ def tod_to_frames(
             nnz = 1
             if (len(ref.shape) > 1) and (ref.shape[1] > 0):
                 nnz = ref.shape[1]
-            if ref.dtype == np.dtype(np.float64):
-                mtype = MPI.DOUBLE
-            elif ref.dtype == np.dtype(np.int64):
-                mtype = MPI.INT64_T
-            elif ref.dtype == np.dtype(np.int32):
-                mtype = MPI.INT32_T
-            elif ref.dtype == np.dtype(np.uint8):
-                mtype = MPI.UINT8_T
-            else:
-                msg = "Cannot use cache field {} of type {}"\
-                    .format(field, ref.dtype)
-                raise RuntimeError(msg)
+            if comm is not None:
+                if ref.dtype == np.dtype(np.float64):
+                    mtype = MPI.DOUBLE
+                elif ref.dtype == np.dtype(np.int64):
+                    mtype = MPI.INT64_T
+                elif ref.dtype == np.dtype(np.int32):
+                    mtype = MPI.INT32_T
+                elif ref.dtype == np.dtype(np.uint8):
+                    mtype = MPI.UINT8_T
+                else:
+                    msg = "Cannot use cache field {} of type {}"\
+                        .format(field, ref.dtype)
+                    raise RuntimeError(msg)
             if cacheoff is not None:
                 pdata = ref.flatten()[nnz * cacheoff : nnz * (cacheoff + ncache)]
             else:
@@ -911,8 +912,11 @@ def tod_to_frames(
                     cache_det = "{}_{}".format(cname, dname)
                     detdata, nnz, mtype = get_local_cache(prow, cache_det,
                                                           cacheoff, ncache)
-                    detdata = gather_field(prow, detdata, nnz, mtype, cacheoff,
-                                           ncache, dindx)
+                    if comm is not None:
+                        detdata = gather_field(
+                            prow, detdata, nnz, mtype, cacheoff,
+                            ncache, dindx
+                        )
                     if rank == 0:
                         split_field(detdata, g3typ, fnm, mapfield=dname,
                                     times=times)

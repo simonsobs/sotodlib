@@ -54,10 +54,12 @@ SMURF_ACTIONS = {
     ],
     'channel_assignments':[
         'setup_notches',
+        'optimize_attens',
     ],
     'tuning':[
         'setup_notches',
         'save_tune',
+        'optimize_attens',
     ]
 }
 
@@ -674,7 +676,7 @@ class G3tSmurf:
 
 
     def index_archive(self, verbose=False, stop_at_error=False,
-                     skip_old_format=True):
+                      skip_old_format=True, min_ctime=None):
         """
         Adds all files from an archive to the File and Frame sqlite tables.
         Files must be indexed before the metadata entries can be made.
@@ -688,6 +690,9 @@ class G3tSmurf:
         skip_old_format: bool
             If True, will skip over indexing files before the name convention
             was changed to be ctime_###.g3. 
+        min_ctime: float
+            If set, files with session-ids less than this ctime will be
+            skipped.
         """
         session = self.Session()
         indexed_files = [f[0] for f in session.query(Files.path).all()]
@@ -699,6 +704,13 @@ class G3tSmurf:
                 if path.endswith('.g3') and path not in indexed_files:
                     if skip_old_format and '2020-' in path:
                         continue
+
+                    if '-' not in f and (min_ctime is not None):
+                        # We know the filename is <ctime>_###.g3
+                        session_id = int(f.split('_')[0])
+                        if session_id < min_ctime:
+                            continue
+
                     files.append(path)
 
         if verbose:
@@ -829,6 +841,7 @@ class G3tSmurf:
                 cha = cha.order_by(db.desc(ChanAssignments.ctime)).first()
             if cha is None:
                 logger.error(f"Missing Channel Assignment for tune file {tune_path}")
+                continue
             assign_set.append(cha)
         return assign_set
 
@@ -1086,7 +1099,7 @@ class G3tSmurf:
                         session.rollback()
                         logger.info(f"Integrity Error at {stream_id}, {ctime}")
                     except Exception as e:
-                        logger.info(stream_id, ctime)
+                        logger.info(f"Unexplained Error at {stream_id}, {ctime}")
                         raise(e)
         session.close()
 
@@ -1201,7 +1214,7 @@ class G3tSmurf:
                                                   Frames.start < end,
                                                   Frames.type_name=='Scan')
         if stream_id is not None:
-            q.filter(Files.stream_id == stream_id)
+            q = q.filter(Files.stream_id == stream_id)
 
         q = q.order_by(Files.start).distinct()
         flist = [x[0] for x in q.all()]

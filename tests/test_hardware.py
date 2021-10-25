@@ -5,11 +5,12 @@
 
 import os
 
+import unittest
 from unittest import TestCase
 
 from collections import OrderedDict
 
-from ._helpers import create_outdir
+from ._helpers import create_outdir, mpi_multi
 
 from sotodlib.core import Hardware
 
@@ -21,6 +22,7 @@ from sotodlib.sim_hardware import (sim_wafer_detectors,
 from sotodlib.vis_hardware import plot_detectors
 
 
+@unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
 class HardwareTest(TestCase):
 
     def setUp(self):
@@ -62,9 +64,9 @@ class HardwareTest(TestCase):
                     hw.dump(outpath, overwrite=True, compress=True)
                     if not self.skip_plots:
                         outpath = os.path.join(self.outdir,
-                                               "wafer_{}.pdf".format(wafer))
+                                            "wafer_{}.pdf".format(wafer))
                         plot_detectors(dets, outpath, labels=True)
-            return
+        return
 
     def test_sim_telescope(self):
         fullhw = get_example()
@@ -93,9 +95,9 @@ class HardwareTest(TestCase):
         # "A" polarization configuration and are located in pixels 20-29.
         wbhw = hw.select(
             match={"wafer_slot": ["w25", "w26"],
-                   "band": "SAT_f090",
-                   "pol": "A",
-                   "pixel": "02."})
+                "band": "SAT_f090",
+                "pol": "A",
+                "pixel": "02."})
         dbpath = os.path.join(self.outdir, "w25-26_p20-29_SAT_f090_A.toml.gz")
         wbhw.dump(dbpath, overwrite=True, compress=True)
         check = Hardware(dbpath)
