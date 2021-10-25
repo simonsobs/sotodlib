@@ -166,9 +166,7 @@ class Files(Base):
     __tablename__ = 'files'
     id = db.Column(db.Integer, primary_key=True)
 
-    path = db.Column(db.String, nullable=False, unique=True)
-    ## name is just the end file name
-    name = db.Column(db.String, unique=True)
+    name = db.Column(db.String, nullable=False, unique=True)
     
     start = db.Column(db.DateTime)
     stop = db.Column(db.DateTime)
@@ -608,7 +606,7 @@ class G3tSmurf:
             ft.type_name: ft for ft in session.query(FrameType).all()
         }
 
-        db_file = Files(path=path)
+        db_file = Files(name=name)
         session.add(db_file)
         try:
             splits = path.split('/')
@@ -695,7 +693,7 @@ class G3tSmurf:
             skipped.
         """
         session = self.Session()
-        indexed_files = [f[0] for f in session.query(Files.path).all()]
+        indexed_files = [f[0] for f in session.query(Files.name).all()]
 
         files = []
         for root, _, fs in os.walk(self.archive_path):
@@ -1210,7 +1208,7 @@ class G3tSmurf:
                     f"stream_ids: {sids}"
                 )
 
-        q = session.query(Files.path).join(Frames).filter(Frames.stop >= start,
+        q = session.query(Files.name).join(Frames).filter(Frames.stop >= start,
                                                   Frames.start < end,
                                                   Frames.type_name=='Scan')
         if stream_id is not None:
@@ -1939,7 +1937,7 @@ def load_file(filename, channels=None, ignore_missing=True,
     return aman
 
 def load_g3tsmurf_obs(db, obs_id, dets=None):
-    c = db.conn.execute('select path from files '
+    c = db.conn.execute('select name from files '
                     'where obs_id=?' +
                     'order by start', (obs_id,))
     flist = [row[0] for row in c]
