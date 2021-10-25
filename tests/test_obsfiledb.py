@@ -24,7 +24,8 @@ class TestObsFileDB(unittest.TestCase):
         if os.path.exists(self.test_dir):
             shutil.rmtree(self.test_dir)
 
-    def get_simple_db(self, n_obs=2, n_detsets=2, n_dets=3, n_segs=3):
+    def get_simple_db(self, n_obs=2, n_detsets=2, n_dets=3, n_segs=3,
+                      prepath=''):
         # Create database in RAM
         db = metadata.ObsFileDb()
         obs_ids = ['obs%i' % i for i in range(n_obs)]
@@ -35,7 +36,7 @@ class TestObsFileDB(unittest.TestCase):
             for detset in detsets:
                 for file_index in range(n_segs):
                     sample_index = file_index * 1000
-                    filename = f'{obs_id}_{detset}_{sample_index:04d}.g3'
+                    filename = f'{prepath}{obs_id}_{detset}_{sample_index:04d}.g3'
                     db.add_obsfile(filename, obs_id, detset, sample_index)
         db.prefix = self.test_dir
         return db
@@ -107,9 +108,11 @@ class TestObsFileDB(unittest.TestCase):
         results = db.verify()
         assert(all([r[0] for r in results['raw']]))
 
-        # Now re-instantiate the DB a few different ways to confirm
-        # that it sets prefix properly.
-
+        # Absolute paths should override db.prefix.
+        db = self.get_simple_db(prepath=self.test_dir + '/')
+        db.prefix = '/whatever'
+        results = db.verify()
+        assert(all([r[0] for r in results['raw']]))
 
 if __name__ == '__main__':
     unittest.main()
