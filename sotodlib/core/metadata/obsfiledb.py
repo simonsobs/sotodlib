@@ -257,10 +257,10 @@ class ObsFileDb:
         for r in c:
             if not r[0] in output:
                 output[r[0]] = []
-            output[r[0]].append((prefix + r[1], r[2], r[3]))
+            output[r[0]].append((os.path.join(prefix, r[1]), r[2], r[3]))
         return output
 
-    def verify(self):
+    def verify(self, prefix=None):
         """Check the filesystem for the presence of files described in the
         database.  Returns a dictionary containing this information in
         various forms; see code for details.
@@ -270,12 +270,15 @@ class ObsFileDb:
         problems.
 
         """
+        if prefix is None:
+            prefix = self.prefix
+
         # Check for the presence of each listed file.
         c = self.conn.execute('select name, obs_id, detset, sample_start '
                               'from files')
         rows = []
         for r in c:
-            fp = self.prefix + r[0]
+            fp = os.path.join(prefix, r[0])
             rows.append((os.path.exists(fp), fp) + tuple(r))
 
         obs = OrderedDict()
@@ -308,13 +311,13 @@ class ObsFileDb:
 
     def drop_obs(self, obs_id):
         """Delete the specified obs_id from the database.  Returns a list of
-        files that are no longer covered by the databse (with prefix).
+        files that are no longer covered by the database (with prefix).
 
         """
         # What files does this affect?
         c = self.conn.execute('select name from files where obs_id=?',
                               (obs_id,))
-        affected_files = [self.prefix + r[0] for r in c]
+        affected_files = [os.path.join(self.prefix, r[0]) for r in c]
         # Drop them.
         self.conn.execute('delete from frame_offsets where file_name in '
                           '(select name from files where obs_id=?)',
@@ -333,7 +336,7 @@ class ObsFileDb:
         # What files does this affect?
         c = self.conn.execute('select name from files where detset=?',
                               (detset,))
-        affected_files = [self.prefix + r[0] for r in c]
+        affected_files = [os.path.join(self.prefix, r[0]) for r in c]
         # Drop them.
         self.conn.execute('delete from frame_offsets where file_name in '
                           '(select name from files where detset=?)',
