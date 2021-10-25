@@ -1607,7 +1607,7 @@ def get_channel_mask(ch_list, status, archive=None, obsfiledb=None,
                 if session is not None:
                     channel = session.query(Channels).filter(Channels.name==ch).one_or_none()
                     if channel is None:
-                        if not ignore_mission:
+                        if not ignore_missing:
                             raise ValueError(f"channel {ch} not found in G3tSmurf Archive")
                         continue
                     b,c = channel.band, channel.channel
@@ -1615,7 +1615,7 @@ def get_channel_mask(ch_list, status, archive=None, obsfiledb=None,
                     c = obsfiledb.conn.execute('select band,channel from channels where name=?',(ch,))
                     c = [(r[0],r[1]) for r in c]
                     if len(c) == 0:
-                        if not ignore_mission:
+                        if not ignore_missing:
                             raise ValueError(f"channel {ch} not found in obsfiledb")
                         continue
                     b,c = c[0]
