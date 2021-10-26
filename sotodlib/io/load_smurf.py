@@ -121,9 +121,9 @@ class Tags(Base):
     """Tags used to mark Observations.
     
     To have these automatically added, use
-    stream_g3_on( S, tag= 'tag1,tag2')
+    sodetlib.smurf_funct.smurf_ops.stream_g3_on( S, tag= 'tag1,tag2')
     or 
-    take_g3_data(S, dur, tag='tag1,tag2')
+    sodetlib.smurf_funct.smurf_ops.take_g3_data(S, dur, tag='tag1,tag2')
     
     Note, this table is not relationally mapped to the Observation.tag column.
         It is set up to match the Context design
