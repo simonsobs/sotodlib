@@ -117,7 +117,23 @@ class Observations(Base):
             return f"{self.obs_id}: {self.start} -> {self.stop} ({self.tag})"
 
     
-
+class Tags(Base):
+    """Tags used to mark Observations.
+    
+    To have these automatically added, use
+    stream_g3_on( S, tag= 'tag1,tag2')
+    or 
+    take_g3_data(S, dur, tag='tag1,tag2')
+    
+    Note, this table is not relationally mapped to the Observation.tag column.
+        It is set up to match the Context design
+    """
+    __tablename__ = 'tags'
+    id = db.Column(db.Integer, primary_key=True)
+    
+    obs_id = db.Column(db.String)
+    tag = db.Column(db.String)
+    
 class Files(Base):
     """Table to store file indexing info. This table is named files in sql and
     serves as the ObsFileDb when loading via Context.
@@ -974,7 +990,12 @@ class G3tSmurf:
                     logger.error(f"Status timestamp {status.action_timestamp} from file does \
                                 not match observation timestamp {obs.timestamp}")
                     return
-                                   
+            ## Add any tags from the status
+            if len(status.tags)>0:
+                for tag in status.tags:
+                    new_tag = Tags(obs_id = obs.obs_id, tag=tag)
+                obs.tag = ','.join(status.tags)
+                session.add(new_tag)
             
             if status.tune is not None:
                 tune = session.query(Tunes).filter( Tunes.name == status.tune).one_or_none()
@@ -1530,7 +1551,10 @@ class SmurfStatus:
     def _make_tags(self, delimiters=',|/|\\t| '):
         """Build list of tags from SMuRF status
         """
-        tags = self.status['AMCc.SmurfProcessor.SOStream.stream_tag']
+        tags = self.status.get('AMCc.SmurfProcessor.SOStream.stream_tag')
+        if tags is None:
+            self.tags = []
+            return
         self.tags = re.split(delimiters, tags)
         if len(self.tags) == 1 and self.tags[0] == '':
             self.tags = []
