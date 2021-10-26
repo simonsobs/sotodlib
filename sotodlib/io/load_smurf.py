@@ -959,11 +959,13 @@ class G3tSmurf:
             return
         x = x[0]
         f_start, f_num = (x[:-3].split('/')[-1]).split('_')
+        prefix = '/'.join(x.split('/')[:-1])+'/'
+
         if int(f_start)-obs.start.timestamp() > max_wait:
             ## we don't have .g3 files for some reason
             pass
         else:
-            flist = session.query(Files).filter(Files.name.like(f_start+'%'))
+            flist = session.query(Files).filter(Files.name.like(prefix+f_start+'%'))
             flist = flist.order_by(Files.start).all()
             
             ## Use Status information to set Tuneset
