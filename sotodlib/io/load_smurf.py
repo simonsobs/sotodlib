@@ -58,21 +58,8 @@ SMURF_ACTIONS = {
         'stream_g3_on',         
     ],
 }
-"""
-Files used to define when specific metadata should be made. 
-These string patterns may not show up in other file names archived by the 
-pysmurf archiver. 
-"""
-SMURF_FILES = {
-    'channel_assignments':[
-        'channel_assignment', 
-    ],
-    'tuning':[
-        'tune',
-    ]
-}
-
-
+ 
+    
 class Observations(Base):
     """Times on continuous detector readout. This table is named obs and serves
     as the ObsDb table when loading via Context.
@@ -1111,10 +1098,91 @@ class G3tSmurf:
                             yield (fname, stream_id, ctime, os.path.join(root, name))
                         except GeneratorExit:
                             return
+    
+    def _processes_index_error(self, session, e, stream_id, ctime, path, stop_at_error):
+        if type(e) == ValueError:
+            logger.info(f"Value Error at {stream_id}, {ctime}, {path}")
+        elif type(e) == IntegrityError:
+            # Database Integrity Errors, such as duplicate entries
+            session.rollback()
+            logger.info(f"Integrity Error at {stream_id}, {ctime}, {path}")
+        else: 
+            logger.info(f"Unexplained Error at {stream_id}, {ctime}, {path}")
+        if stop_at_error:
+            raise(e)
+            
+    def index_channel_assignments(self, session, min_ctime=16000*1e5, pattern = 'channel_assignment',
+                                 stop_at_error=False):
+        """ Index all channel assignments newer than a minimum ctime
+
+        Args
+        -----
+        session : G3tSmurf session connection
+        min_time : int of float
+            minimum time for for indexing
+        pattern : string
+            string pattern to look for channel assignments
+        """
+        for fpattern, stream_id, ctime, path in self.search_metadata_files(min_ctime=min_ctime):
+            if pattern in fpattern:
+                try:
+                    ## decide if this is the last channel assignment in the directory
+                    ## needed because we often get multiple channel assignments in the same folder
+                    root = os.path.join('/',*path.split('/')[:-1])            
+                    cha_times = [int(f.split('_')[0]) for f in os.listdir(root) if pattern in f]
+                    if ctime != np.max(cha_times):
+                        continue
+                    fname = path.split('/')[-1]
+                    logger.debug(f"Add new channel assignment: {stream_id}, {ctime}, {path}")
+                    self.add_new_channel_assignment(stream_id, ctime, fname, path, session)  
+                except Exception as e:
+                    _self.process_index_error(session, e, stream_id, ctime, path, stop_at_error)
                     
+    def index_tunes(self, session, min_ctime=16000*1e5, pattern = 'tune.npy', stop_at_error=False):
+        """ Index all tune files newer than a minimum ctime
+
+        Args
+        -----
+        session : G3tSmurf session connection
+        min_time : int of float
+            minimum time for for indexing
+        pattern : string
+            string pattern to look for tune files
+        """
+        for fname, stream_id, ctime, path in self.search_metadata_files(min_ctime=min_ctime):
+            if pattern in fname:
+                try:
+                    logger.debug(f"Add new Tune: {stream_id}, {ctime}, {path}")
+                    self.add_new_tuning(stream_id, ctime, path, session)
+                except Exception as e:
+                    _self.process_index_error(session, e, stream_id, ctime, path, stop_at_error)
+
+        
+    def index_observations(self, session, min_ctime=16000*1e5, stop_at_error=False):
+        """ Index all observations newer than a minimum ctime. Uses SMURF_ACTIONS to 
+        define which actions are observations.
+
+        Args
+        -----
+        session : G3tSmurf session connection
+        min_time : int of float
+            minimum time for for indexing
+
+        """
+
+        for action, stream_id, ctime, path in self.search_metadata_actions(min_ctime=min_ctime):
+            if action in SMURF_ACTIONS['observations']:       
+                try:
+                    obs_path = os.listdir( os.path.join(path, 'outputs'))
+                    logger.debug(f"Add new Observation: {stream_id}, {ctime}, {obs_path}")
+                    self.add_new_observation(stream_id, ctime, obs_path, session)
+                except Exception as e:
+                    _self.process_index_error(session, e, stream_id, ctime, path, stop_at_error)
+                    
+
     def index_metadata(self, min_ctime=16000*1e5, stop_at_error=False):
         """
-            Adds all channel assignments, tunefiles, and observations in archive to database. 
+            Adds all channel assignments, tunes, and observations in archive to database. 
             Adding relevant entries to Files as well.
 
             Args
@@ -1130,82 +1198,15 @@ class G3tSmurf:
 
         session = self.Session()
 
-        logger.info(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
+        logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
         
-        for ct_dir in sorted(os.listdir(self.meta_path)):        
-            if int(ct_dir) < int(min_ctime//1e5):
-                continue
-
-            for stream_id in sorted(os.listdir( os.path.join(self.meta_path, ct_dir))):
-                action_path = os.path.join(self.meta_path, ct_dir, stream_id)
-                actions = sorted(os.listdir( action_path ))
-
-                for action in actions:
-                    try:
-                        ctime = int( action.split('_')[0] )
-                        astring = '_'.join(action.split('_')[1:])
-                        logger.debug(f"Found action {astring} at ctime {ctime}")
-
-                        ### Look for channel assignments before tuning files
-                        if astring in SMURF_ACTIONS['channel_assignments']:
-
-                            cha = os.listdir(os.path.join(action_path, action, 'outputs'))
-                            if len(cha) == 0:
-                                raise ValueError("found action {} with no output".format(action))
-
-                            ## find last channel assignment in directory
-                            cha= [f for f in cha if 'channel_assignment' in f]
-                            if len(cha) == 0:
-                                logger.debug(f"{action} run with no new channel assignment")
-                                
-                            else:
-                                cha = sorted(cha)[-1]
-                                cha_path = os.path.join(action_path, action, 'outputs', cha)
-                                cha_ctime = int(cha.split('_')[0])
-
-                                logger.debug(f"Add new channel assignment: {stream_id}, {cha_ctime}, {cha_path}")
-                                self.add_new_channel_assignment(stream_id, cha_ctime, cha, cha_path, session)     
-
-
-                        ### Look for tuning files before observations
-                        if astring in SMURF_ACTIONS['tuning']:
-                            tune = os.listdir(os.path.join(action_path, action, 'outputs'))
-                            if len(tune) == 0:
-                                raise ValueError("found action {} with no output".format(action))
-
-                            ## find last tune in directory
-                            tune = [f for f in tune if 'tune' in f]
-                            if len(tune) > 1:
-                                logger.warning(f"found multiple tune files in {stream_id}, {ctime}, {action}")
-                            if len(tune) == 0:
-                                logger.warning(f"found no tune files in {stream_id}, {ctime}, {action}")
-                            else:
-                                tune = sorted(tune)[-1]
-                                tune_ctime = int(tune.split('_')[0])
-                                tune_path = os.path.join(action_path, action, 'outputs', tune)
-
-                                logger.debug(f"Add new Tune: {stream_id}, {ctime}, {tune_path}")
-                                self.add_new_tuning(stream_id, tune_ctime, tune_path, session)
-
-                        ### Add Observations
-                        if astring in SMURF_ACTIONS['observations']:
-                            obs_path = os.listdir(os.path.join(action_path, action, 'outputs'))
-                            if len(obs_path) == 0:
-                                raise ValueError("found action {} with no output".format(action))
-                            logger.debug(f"Add new Observation: {stream_id}, {ctime}, {obs_path}")
-                            self.add_new_observation(stream_id, ctime, obs_path, session)
-
-                    except ValueError as e:
-                        logger.info(f"Value Error at {stream_id}, {ctime}")
-                        if stop_at_error:
-                            raise(e)
-                    except IntegrityError as e:
-                        # Database Integrity Errors, such as duplicate entries
-                        session.rollback()
-                        logger.info(f"Integrity Error at {stream_id}, {ctime}")
-                    except Exception as e:
-                        logger.info(f"Unexplained Error at {stream_id}, {ctime}")
-                        raise(e)
+        logger.debug("Indexing Channel Assignments")
+        self.index_channel_assignments(session, min_ctime=min_ctime, stop_at_error=stop_at_error)
+        logger.debug("Indexing Tune Files")
+        self.index_tunes(session, min_ctime=min_ctime, stop_at_error=stop_at_error)
+        logger.debug("Indexing Observations")
+        self.index_observations(session, min_ctime=min_ctime, stop_at_error=stop_at_error)
+            
         session.close()
 
 
@@ -1523,6 +1524,16 @@ class SmurfStatus:
                 f'{band_roots[0]}.digitizerFrequencyMHz', 614.4))
             ramp_max_cnt_rate_hz = 1.e6*digitizer_freq_mhz / 2.
             self.flux_ramp_rate_hz = ramp_max_cnt_rate_hz / (ramp_max_cnt + 1)
+        
+        self._make_tags()
+        
+    def _make_tags(self, delimiters=',|/|\\t| '):
+        """Build list of tags from SMuRF status
+        """
+        tags = self.status['AMCc.SmurfProcessor.SOStream.stream_tag']
+        self.tags = re.split(delimiters, tags)
+        if len(self.tags) == 1 and self.tags[0] == '':
+            self.tags = []
 
     @classmethod
     def from_file(cls, filename):
