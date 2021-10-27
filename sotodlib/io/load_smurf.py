@@ -88,8 +88,8 @@ class Observations(Base):
         yet.
     files : list of SQLAlchemy instances of Files
         The list of .g3 files in this observation built through a relationship
-        to the Files table. [f.path for f in Observation.files] will return
-        paths to all the files.
+        to the Files table. [f.name for f in Observation.files] will return
+        absolute paths to all the files.
     tunesets : list of SQLAlchemy instances of TuneSets 
         The TuneSets used in this observation. There is expected to be
         one per stream_id (SMuRF crate slot). 
@@ -1496,7 +1496,7 @@ class SmurfStatus:
         }
         cur_file = None
         for frame_info in tqdm(status_frames, disable=(not show_pb)):
-            file = frame_info.file.path
+            file = frame_info.file.name
             if file != cur_file:
                 reader = so3g.G3IndexedReader(file)
                 cur_file = file
