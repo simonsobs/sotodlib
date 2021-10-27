@@ -4,6 +4,9 @@ import so3g
 from spt3g import core
 import numpy as np
 
+def pos2vel(p):
+    return np.ediff1d(p)
+
 def locate_sign_changes(t):
     return np.where(np.sign(t[:-1]) != np.sign(t[1:]))[0] + 1
 
@@ -19,8 +22,15 @@ class _HKBlockBundle(object):
         for c in b.keys():
             self.data[c].extend(b[c])
 
+    def set_turnaround_times(self):
+        self.turnaround_times = [self.times[i] for i in
+                    locate_sign_changes(pos2vel(self.data['Azimuth_Corrected']))]
+
     def ready(self):
-        return len(locate_sign_changes(np.ediff1d(self.data['Azimuth_Corrected']))) > 0
+        try:
+            return len(self.turnaround_times) > 0
+        except AttributeError:
+            return False
 
     def rebundle(self, flush_time):
         if len(self.times) == 0:
@@ -138,6 +148,7 @@ class FrameProcessor(object):
                 self.hkbundle = _HKBlockBundle()
 
             self.hkbundle.add(f['blocks'][0])   # 0th block for now
+            self.hkbundle.set_turnaround_times()
 
         if f.type == core.G3FrameType.Scan:
             if self.sdbundle is None:
@@ -194,11 +205,10 @@ class Bookbinder(object):
         if not self.frameproc.ready():
             return
 
-        sc = locate_sign_changes(np.ediff1d(self.frameproc.hkbundle.data['Azimuth_Corrected']))
-        tc = [self.frameproc.hkbundle.times[i] for i in sc]
+        tt = self.frameproc.hkbundle.turnaround_times
         output = []
-        while len(tc) > 0:
-            self.frameproc.flush_time = tc.pop(0)
+        while len(tt) > 0:
+            self.frameproc.flush_time = tt.pop(0)
 
             while self.frameproc.sdbundle is None or not self.frameproc.sdbundle.ready(self.frameproc.flush_time):
                 try:
