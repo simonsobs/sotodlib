@@ -1337,22 +1337,25 @@ class G3tSmurf:
                     f"stream_ids: {sids}"
                 )
 
-        q = session.query(Files.name).join(Frames).filter(Frames.stop >= start,
+        q = session.query(Files).join(Frames).filter(Frames.stop >= start,
                                                   Frames.start < end,
                                                   Frames.type_name=='Scan')
         if stream_id is not None:
             q = q.filter(Files.stream_id == stream_id)
 
-        q = q.order_by(Files.start).distinct()
-        flist = [x[0] for x in q.all()]
-        
+        q = q.order_by(Files.start)
+        flist = np.unique([x.name for x in q.all()])
+        if stream_id is None:
+            stream_id = q[0].stream_id
+            
         if status is None:
             scan_start = session.query(Frames.start).filter(Frames.start > start,
                                                             Frames.type_name=='Scan')
             scan_start = scan_start.order_by(Frames.start).first()
+                
 
             try:
-                status = self.load_status(scan_start[0])
+                status = self.load_status(scan_start[0], stream_id=stream_id)
             except:
                 logger.info("Status load from database failed, using file load")
                 status = None
@@ -1372,7 +1375,7 @@ class G3tSmurf:
         
         return aman
 
-    def load_status(self, time, show_pb=False):
+    def load_status(self, time, stream_id=None, show_pb=False):
         """
         Returns the status dict at specified unix timestamp.
         Loads all status frames between session start frame and specified time.
@@ -1384,7 +1387,7 @@ class G3tSmurf:
             status (SmurfStatus instance): object indexing of rogue variables 
             at specified time.
         """
-        return SmurfStatus.from_time(time, self, show_pb=show_pb)
+        return SmurfStatus.from_time(time, self, stream_id=stream_id,show_pb=show_pb)
 
 def dump_DetDb(archive, detdb_file):
     """
@@ -1591,7 +1594,7 @@ class SmurfStatus:
         return cls(status)
     
     @classmethod
-    def from_time(cls, time, archive, show_pb=False):
+    def from_time(cls, time, archive, stream_id=None, show_pb=False):
         """Generates a Smurf Status at specified unix timestamp.
         Loads all status frames between session start frame and specified time.
 
@@ -1603,6 +1606,8 @@ class SmurfStatus:
                 The G3tSmurf archive to use to find the status
             show_pb : (bool)
                 Turn on or off loading progress bar
+            stream_id : (string)
+                stream_id to look for status
 
         Returns
         --------
@@ -1611,12 +1616,25 @@ class SmurfStatus:
         """
         time = archive._make_datetime(time)
         session = archive.Session()
-        session_start,  = session.query(Frames.time).filter(
+        q  = session.query(Frames).filter(
                 Frames.type_name == 'Observation',
                 Frames.time <= time
-            ).order_by(Frames.time.desc()).first()
+            ).order_by(Frames.time.desc())
 
-        status_frames = session.query(Frames).filter(
+        if stream_id is not None:
+            q = q.join(Files).filter(Files.stream_id==stream_id)
+        else:
+            logger.warning(f"No stream_id given for finding status, not checking for one")
+        if q.count()==0:
+            logger.error(f"No Frames found before time: {time}, stream_id: {stream_id}")
+        
+        start_frame = q.first()
+        session_start = start_frame.time
+        if stream_id is None:
+            stream_id == start_frame.file.stream_id
+            
+        status_frames = session.query(Frames).join(Files).filter(
+                Files.stream_id == stream_id,
                 Frames.type_name == 'Wiring',
                 Frames.time >= session_start,
                 Frames.time <= time
