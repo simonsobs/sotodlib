@@ -88,8 +88,8 @@ class Observations(Base):
         yet.
     files : list of SQLAlchemy instances of Files
         The list of .g3 files in this observation built through a relationship
-        to the Files table. [f.path for f in Observation.files] will return
-        paths to all the files.
+        to the Files table. [f.name for f in Observation.files] will return
+        absolute paths to all the files.
     tunesets : list of SQLAlchemy instances of TuneSets 
         The TuneSets used in this observation. There is expected to be
         one per stream_id (SMuRF crate slot). 
@@ -130,10 +130,8 @@ class Files(Base):
     ------------
     id : integer
         auto-incremented primary key
-    path : string
-        complete absolute path to file
     name : string
-        the file name
+        complete absolute path to file
     start : datetime.datetime
         the start time for the file
     stop : datetime.datetime
@@ -166,9 +164,7 @@ class Files(Base):
     __tablename__ = 'files'
     id = db.Column(db.Integer, primary_key=True)
 
-    path = db.Column(db.String, nullable=False, unique=True)
-    ## name is just the end file name
-    name = db.Column(db.String, unique=True)
+    name = db.Column(db.String, nullable=False, unique=True)
     
     start = db.Column(db.DateTime)
     stop = db.Column(db.DateTime)
@@ -608,12 +604,11 @@ class G3tSmurf:
             ft.type_name: ft for ft in session.query(FrameType).all()
         }
 
-        db_file = Files(path=path)
+        db_file = Files(name=path)
         session.add(db_file)
         try:
             splits = path.split('/')
             db_file.stream_id = splits[-2]
-            db_file.name = splits[-1]
         except:
             ## should this fail silently?
             pass
@@ -695,7 +690,7 @@ class G3tSmurf:
             skipped.
         """
         session = self.Session()
-        indexed_files = [f[0] for f in session.query(Files.path).all()]
+        indexed_files = [f[0] for f in session.query(Files.name).all()]
 
         files = []
         for root, _, fs in os.walk(self.archive_path):
@@ -963,16 +958,18 @@ class G3tSmurf:
             session.commit()
             return
         x = x[0]
-        f_start, f_num = (x[:-3]).split('_')
+        f_start, f_num = (x[:-3].split('/')[-1]).split('_')
+        prefix = '/'.join(x.split('/')[:-1])+'/'
+
         if int(f_start)-obs.start.timestamp() > max_wait:
             ## we don't have .g3 files for some reason
             pass
         else:
-            flist = session.query(Files).filter(Files.name.like(f_start+'%'))
+            flist = session.query(Files).filter(Files.name.like(prefix+f_start+'%'))
             flist = flist.order_by(Files.start).all()
             
             ## Use Status information to set Tuneset
-            status = SmurfStatus.from_file(flist[0].path)
+            status = SmurfStatus.from_file(flist[0].name)
             if status.action is not None:
                 if status.action not in SMURF_ACTIONS['observations']:
                     logger.warning(f"Status Action {status.action} from file does not \
@@ -1210,7 +1207,7 @@ class G3tSmurf:
                     f"stream_ids: {sids}"
                 )
 
-        q = session.query(Files.path).join(Frames).filter(Frames.stop >= start,
+        q = session.query(Files.name).join(Frames).filter(Frames.stop >= start,
                                                   Frames.start < end,
                                                   Frames.type_name=='Scan')
         if stream_id is not None:
@@ -1499,7 +1496,7 @@ class SmurfStatus:
         }
         cur_file = None
         for frame_info in tqdm(status_frames, disable=(not show_pb)):
-            file = frame_info.file.path
+            file = frame_info.file.name
             if file != cur_file:
                 reader = so3g.G3IndexedReader(file)
                 cur_file = file
@@ -1939,7 +1936,7 @@ def load_file(filename, channels=None, ignore_missing=True,
     return aman
 
 def load_g3tsmurf_obs(db, obs_id, dets=None):
-    c = db.conn.execute('select path from files '
+    c = db.conn.execute('select name from files '
                     'where obs_id=?' +
                     'order by start', (obs_id,))
     flist = [row[0] for row in c]
