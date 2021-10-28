@@ -2019,7 +2019,7 @@ def load_file(filename, channels=None, ignore_missing=True,
         always have fields `timestamps`, `signal`, `flags`(FlagManager),
         `ch_info` (AxisManager with `bands`, `channels`, `frequency`, etc).
     """   
-    logger.info(f"Axis Manager will have {det_axis} and samps axes")
+    logger.debug(f"Axis Manager will have {det_axis} and samps axes")
  
     if isinstance(filename, str):
         filenames = [filename]

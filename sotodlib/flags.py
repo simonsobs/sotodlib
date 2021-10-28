@@ -40,19 +40,19 @@ def get_turnaround_flags(tod, qlim=1, az=None, merge=True,
     return flag
 
 
-def get_glitch_flags(tod, params={}, signal=None, merge=True, 
+def get_glitch_flags(tod, t_glitch=0.002, hp_fc=0.5, n_sig=10, buffer=200, 
+                     signal=None, merge=True, 
                      overwrite=False, name='glitches'):
     """ Find glitches with fourier filtering
     Translation from moby2 as starting point
     
     Args:
         tod (AxisManager): the tod 
-        params (dictionary): Use to overwrite the default values
-                n_sig: significance of detection
-                t_glitch: Gaussian filter width
-                hp_fc: high pass filter cutoff
-                buffer: amount to buffer flags around found location
-        signal (str): if None, defaults to tod.signal
+        t_glitch (float): Gaussian filter width
+        hp_fc: high pass filter cutoff
+        n_sig (int or float): significance of detection
+        buffer (int): amount to buffer flags around found location
+        signal (str): if None, defaults to 'signal'
         merge (bool): if true, add to tod.flags
         name (string): name of flag to add to tod.flags
         overwrite (bool): if true, write over flag. if false, don't
@@ -60,26 +60,20 @@ def get_glitch_flags(tod, params={}, signal=None, merge=True,
     Returns:
         flag: RangesMatrix object of glitches
     """
-    gparams = {'n_sig':10, 
-               't_glitch':0.002, 
-               'hp_fc':5.0, 
-               'buffer':200,}
-    gparams.update(params)
-    params=gparams
     
     if signal is None:
         signal = 'signal'
     # f-space filtering
-    filt = filters.high_pass_sine2(params['hp_fc']) * filters.gaussian_filter(params['t_glitch'])
+    filt = filters.high_pass_sine2(cutoff=hp_fc) * filters.gaussian_filter(t_sigma=0.002)
     fvec = fourier_filter(tod, filt, detrend='linear', 
                           signal_name=signal, resize='zero_pad')
     # get the threshods based on n_sig x nlev = n_sig x iqu x 0.741
     fvec = np.abs(fvec)
-    thres = 0.741 * stats.iqr(fvec, axis=1) * params['n_sig']
+    thres = 0.741 * stats.iqr(fvec, axis=1) * n_sig
     # get flags
     msk = fvec > thres[:,None]
     flag = RangesMatrix( [Ranges.from_bitmask(m) for m in msk])
-    flag.buffer(params['buffer'])
+    flag.buffer(buffer)
     
     if merge:
         if name in tod.flags and not overwrite:
@@ -91,7 +85,7 @@ def get_glitch_flags(tod, params={}, signal=None, merge=True,
         
     return flag
 
-def get_trending_flags(aman, max_trend=np.pi, n_pieces=1, signal=None,
+def get_trending_flags(aman, max_trend=5*np.pi, n_pieces=1, signal=None,
                  merge=True, overwrite=True, name='trends'):
     """ Flag Detectors with trends larger than max_trend.
     
