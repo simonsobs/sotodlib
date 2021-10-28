@@ -10,7 +10,7 @@ def pos2vel(p):
 def locate_sign_changes(t):
     return np.where(np.sign(t[:-1]) != np.sign(t[1:]))[0] + 1
 
-class _HKBlockBundle(object):
+class _DataBundle():
     def __init__(self):
         self.times = []
         self.data = None
@@ -21,16 +21,6 @@ class _HKBlockBundle(object):
             self.data = {c: [] for c in b.keys()}
         for c in b.keys():
             self.data[c].extend(b[c])
-
-    def set_turnaround_times(self):
-        self.turnaround_times = [self.times[i] for i in
-                    locate_sign_changes(pos2vel(self.data['Azimuth_Corrected']))]
-
-    def ready(self):
-        try:
-            return len(self.turnaround_times) > 0
-        except AttributeError:
-            return False
 
     def rebundle(self, flush_time):
         if len(self.times) == 0:
@@ -47,43 +37,29 @@ class _HKBlockBundle(object):
 
         return output
 
-class _ScanDataBundle(object):
+class _HKBundle(_DataBundle):
     def __init__(self):
-        self.times = []
-        self.data = None
+        super().__init__()
+        self.turnaround_times = []
 
-    def add(self, b):
-        self.times.extend(b.times)
-        if self.data is None:
-            self.data = {c: [] for c in b.keys()}
-        for c in b.keys():
-            self.data[c].extend(b[c])
+    def set_turnaround_times(self):
+        self.turnaround_times = [self.times[i] for i in
+                                 locate_sign_changes(pos2vel(self.data['Azimuth_Corrected']))]
 
+    def ready(self):
+        return len(self.turnaround_times) > 0
+
+class _SmurfBundle(_DataBundle):
     def ready(self, flush_time):
         """
         Returns True if the current frame has crossed the flush_time
         """
         return len(self.times) > 0 and self.times[-1] >= flush_time
 
-    def rebundle(self, flush_time):
-        if len(self.times) == 0:
-            return None
-
-        output = core.G3TimesampleMap()
-        output.times = core.G3VectorTime([t for t in self.times if t < flush_time])
-        self.times = [t for t in self.times if t >= flush_time]
-
-        for c in self.data.keys():
-            output[c] = core.G3Timestream(np.array(self.data[c][:len(output.times)]))
-
-        self.data = {c: self.data[c][len(output.times):] for c in self.data.keys()}
-
-        return output
-
 class FrameProcessor(object):
     def __init__(self):
         self.hkbundle = None
-        self.sdbundle = None
+        self.smbundle = None
         self.flush_time = None
         self.maxlength = 10000
 
@@ -96,23 +72,23 @@ class FrameProcessor(object):
     def split_frame(self, f, maxlength=10000):
         output = []
 
-        sdb = _ScanDataBundle()
-        sdb.add(f['data'])
+        smb = _SmurfBundle()
+        smb.add(f['data'])
 
-        hkb = _HKBlockBundle()
+        hkb = _HKBundle()
         hkb.add(f['hk'])
 
-        while len(sdb.times) > maxlength:
-            t = sdb.times[maxlength]
+        while len(smb.times) > maxlength:
+            t = smb.times[maxlength]
 
             g = core.G3Frame(core.G3FrameType.Scan)
-            g['data'] = sdb.rebundle(t)
+            g['data'] = smb.rebundle(t)
             g['hk'] = hkb.rebundle(t)
 
             output += [g]
 
         g = core.G3Frame(core.G3FrameType.Scan)
-        g['data'] = sdb.rebundle(sdb.times[-1] + 1)
+        g['data'] = smb.rebundle(smb.times[-1] + 1)
         g['hk'] = hkb.rebundle(hkb.times[-1] + 1)
 
         output += [g]
@@ -123,7 +99,7 @@ class FrameProcessor(object):
         output = []
 
         f = core.G3Frame(core.G3FrameType.Scan)
-        f['data'] = self.sdbundle.rebundle(self.flush_time)
+        f['data'] = self.smbundle.rebundle(self.flush_time)
         f['hk'] = self.hkbundle.rebundle(self.flush_time)
 
         # Co-sampled (interpolated) azimuth encoder data
@@ -145,20 +121,20 @@ class FrameProcessor(object):
 
         if f.type == core.G3FrameType.Housekeeping:
             if self.hkbundle is None:
-                self.hkbundle = _HKBlockBundle()
+                self.hkbundle = _HKBundle()
 
             self.hkbundle.add(f['blocks'][0])   # 0th block for now
             self.hkbundle.set_turnaround_times()
 
         if f.type == core.G3FrameType.Scan:
-            if self.sdbundle is None:
-                self.sdbundle = _ScanDataBundle()
+            if self.smbundle is None:
+                self.smbundle = _SmurfBundle()
 
             output = []
 
-            self.sdbundle.add(f['data'])
+            self.smbundle.add(f['data'])
 
-            if self.sdbundle.ready(self.flush_time):
+            if self.smbundle.ready(self.flush_time):
                 output += self.flush()
 
             return output
@@ -210,13 +186,13 @@ class Bookbinder(object):
         while len(tt) > 0:
             self.frameproc.flush_time = tt.pop(0)
 
-            while self.frameproc.sdbundle is None or not self.frameproc.sdbundle.ready(self.frameproc.flush_time):
+            while self.frameproc.smbundle is None or not self.frameproc.smbundle.ready(self.frameproc.flush_time):
                 try:
                     f = next(self.smurf_iter)
                 except StopIteration:
                     # If there are no more SMuRF frames, output remaining SMuRF data
-                    if len(self.frameproc.sdbundle.times) > 0:
-                        self.frameproc.flush_time = self.frameproc.sdbundle.times[-1] + 1  # +1 to ensure last sample gets included (= 1e-8 sec << sampling cadence)
+                    if len(self.frameproc.smbundle.times) > 0:
+                        self.frameproc.flush_time = self.frameproc.smbundle.times[-1] + 1  # +1 to ensure last sample gets included (= 1e-8 sec << sampling cadence)
                         output += self.frameproc.flush()
                     self.write_frames(output)
 
