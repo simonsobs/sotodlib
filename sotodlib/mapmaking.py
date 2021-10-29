@@ -6,234 +6,311 @@ import numpy as np, sys, time, warnings
 import so3g
 from . import coords
 from . import tod_ops
-from pixell import enmap, utils, fft, bunch, wcsutils, mpi
+from pixell import enmap, utils, fft, bunch, wcsutils, mpi, tilemap
 
 ##########################################
 ##### Maximum likelihood mapmaking #######
 ##########################################
 
 class MLMapmaker:
-    def __init__(self, shape, wcs, comps="T", noise_model=None, dtype_tod=np.float32,
-            dtype_map=np.float64, comm=mpi.COMM_WORLD, recenter=None, verbose=False):
-        if shape is not None:
-            shape = shape[-2:]
+    def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False):
         if noise_model is None:
             noise_model = NmatUncorr()
-        self.shape = shape
-        self.wcs   = wcs
-        self.comm  = comm
-        self.comps = comps
-        self.ncomp = len(comps)
-        self.dtype_tod = dtype_tod
-        self.dtype_map = dtype_map
-        self.verbose   = verbose
-        if shape is None:
-            self.map_rhs   = None
-            self.map_div   = None
-            self.auto_grow = True
-        else:
-            self.map_rhs   = enmap.zeros((self.ncomp,)          +self.shape, self.wcs, self.dtype_map)
-            self.map_div   = enmap.zeros((self.ncomp,self.ncomp)+self.shape, self.wcs, self.dtype_map)
-            self.auto_grow = False
-        self.map_idiv  = None
-        self.noise_model = noise_model
-        self.observations = []
-        # Cut-related stuff
-        self.junk_offs= None
-        self.junk_rhs = []
-        self.junk_div = []
-        # Set up the degrees of freedom we will solve for
-        self.dof   = MultiZipper(comm=comm)
-        #self.dof.add(MapZipper(self.map_rhs.shape, self.map_rhs.wcs))
-        self.ready    = False
-        self.recenter = recenter
-    def build_obs(self, id, obs, noise_model=None, weather="typical", site="so"):
-        # Signal must have the right dtype, or the pmat we build will break later
-        t1     = time.time()
-        tod    = obs.signal.astype(self.dtype_tod, copy=False)
+        self.signals      = signals
+        self.dtype        = dtype
+        self.verbose      = verbose
+        self.noise_model  = noise_model
+        self.data         = []
+        self.dof          = MultiZipper()
+        self.ready        = False
+    def add_obs(self, id, obs, noise_model=None):
+        # Prepare our tod
+        tod    = obs.signal.astype(self.dtype, copy=False)
         utils.deslope(tod, w=5, inplace=True)
-        ctime  = obs.timestamps
-        # Set up cuts handling
-        pcut   = PmatCut(obs.glitch_flags)
-        # Build the local geometry and pointing matrix for this observation
-        if self.recenter:
-            rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter,
-                ctime=ctime[len(ctime)//2], geom=(self.shape, self.wcs), site=SITE))
-        else: rot = None
-        # Ideally we would include cuts in the pmat. It would slightly simplify PmatCut, which
-        # would skip the "clear" step, and it would make the map_div calculation simpler.
-        # However, doing so changes the result, which should be investigated.
-        pmat    = coords.pmat.P.for_tod(obs, comps=self.comps, geom=(self.shape, self.wcs), rot=rot, threads="domdir", weather=weather, site=site)
-        t2 = time.time()
-        # Build the noise model
+        # Build the noise model and apply it
         if noise_model is None: noise_model = self.noise_model
+        ctime  = obs.timestamps
         srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
         nmat   = self.noise_model.build(tod, srate=srate)
-        t3 = time.time()
-        tod      = nmat.apply(tod)
-        t4 = time.time()
-        map_rhs  = enmap.zeros((self.ncomp,)+self.shape, self.wcs, self.dtype_map)
-        junk_rhs = np.zeros(pcut.njunk, self.dtype_tod)
-        ## FIXME
-        #so3g.test_cuts(pcut.cuts.ranges)
-        pcut.backward(tod, junk_rhs)
-        pmat.to_map(dest=map_rhs, signal=tod)
-        t5 = time.time()
-        # After this we don't need the tod values any more, so we are free to mess with them.
-        map_div    = enmap.zeros((self.ncomp,self.ncomp)+self.shape, self.wcs, self.dtype_map)
-        junk_div   = np.ones(pcut.njunk, self.dtype_tod)
-        tod[:]     = 0
-        pcut.forward(tod, junk_div)
-        tod       *= nmat.ivar[:,None]
-        pcut.backward(tod, junk_div)
-        #pmat.to_weights(dest=map_div, det_weights=nmat.ivar.astype(self.dtype_tod))
-        # Full manual build of map_div
-        for i in range(self.ncomp):
-            map_div[i]   = 0
-            map_div[i,i] = 1
-            tod[:]       = 0
-            pmat.from_map(map_div[i], dest=tod)
-            pcut.clear(tod)
-            tod *= nmat.ivar[:,None]
-            map_div[i]   = 0
-            pmat.to_map(signal=tod, dest=map_div[i])
-        t6 = time.time()
-        if np.any(map_div[0,0,0,:]!=0) or np.any(map_div[0,0,-1,:] != 0) or np.any(map_div[0,0,:,0] != 0) or np.any(map_div[0,0,:,-1] != 0):
-            warnings.warn("Local work space was too small - data truncated")
-        # And return the ML data for this observation
-        data = bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime), dets=obs.dets.vals,
-                shape=self.shape, wcs=self.wcs, pmat=pmat, pcut=pcut, nmat=nmat, map_rhs=map_rhs,
-                map_div=map_div, junk_rhs=junk_rhs, junk_div=junk_div)
-        print("build %-70s : Pbuild %8.3f Nbuild %8.3f Pw' %8.3f N %8.3f Pm' %8.3f  %3d %6d" % (id, t2-t1, t3-t2, t6-t5, t4-t3, t5-t4, data.ndet, data.nsamp))
-        return data
-    def add_obs(self, data):
-        assert not self.ready, "Adding more data after preparing to solve is not supported"
-        if self.auto_grow:
-            # Grow rhs and div to hold new obs?
-            if self.shape is None:
-                self.shape, self.wcs = data.shape, data.wcs
-                self.map_rhs, self.map_div = data.map_rhs.copy(), data.map_div.copy()
-            else:
-                new_shape, new_wcs = coords.get_supergeom((self.shape, self.wcs), (data.shape, data.wcs))
-                if (new_shape != self.shape):
-                    for attr in ['map_rhs', 'map_div']:
-                        submap = getattr(self, attr)
-                        lead_shape = submap.shape[:-2]
-                        newmap = enmap.zeros(lead_shape + new_shape, dtype=submap.dtype, wcs=new_wcs)
-                        newmap.insert(submap)
-                        setattr(self, attr, newmap)
-                    self.shape, self.wcs = new_shape, new_wcs
-                # Add data.rhs and data.div to our full rhs and div
-                self.map_rhs.insert(data.map_rhs, op=np.ndarray.__iadd__)
-                self.map_div.insert(data.map_div, op=np.ndarray.__iadd__)
-            # Add the rest to self.observations
-            data = data.copy(); del data.map_rhs; del data.map_div
-        else:
-            self.map_rhs.insert(data.map_rhs, op=np.ndarray.__iadd__)
-            self.map_div.insert(data.map_div, op=np.ndarray.__iadd__)
-        # Handle the cut samples
-        self.junk_rhs.append(data.junk_rhs)
-        self.junk_div.append(data.junk_div)
-        del data.junk_rhs, data.junk_div
-        self.observations.append(data)
+        tod    = nmat.apply(tod)
+        # Add the observation to each of our signals
+        for signal in self.signals:
+            signal.add_obs(id, obs, nmat, tod)
+        # Save what we need about this observation
+        self.data.append(bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime),
+            dets=obs.dets.vals, nmat=nmat))
     def prepare(self):
         if self.ready: return
-        if self.auto_grow:
-            # Promote everything to full-size maps.
-            all_geoms = self.comm.gather((self.shape, self.wcs), root=0)
-            if self.comm.rank == 0:
-                new_shape, new_wcs = coords.get_supergeom(*all_geoms)
-            else:
-                new_shape, new_wcs = None, None
-            new_shape, new_wcs = self.comm.bcast((new_shape, new_wcs), root=0)
-            for attr in ['map_rhs', 'map_div']:
-                submap = getattr(self, attr)
-                lead_shape = submap.shape[:-2]
-                newmap = enmap.zeros(lead_shape + new_shape, dtype=submap.dtype, wcs=new_wcs)
-                newmap.insert(submap)
-                setattr(self, attr, newmap)
-                del submap
-            self.shape, self.wcs = new_shape, new_wcs
-
-        print("rank %3d ntod %2d" % (self.comm.rank, len(self.junk_rhs)))
-        self.comm.Barrier()
-
-        self.map_rhs  = utils.allreduce(self.map_rhs, self.comm)
-        self.map_div  = utils.allreduce(self.map_div, self.comm)
-        self.map_idiv = safe_invert_div(self.map_div)
-
-        self.junk_offs= utils.cumsum([r.size for r in self.junk_rhs], endpoint=True)
-        self.junk_rhs = np.concatenate(self.junk_rhs)
-        self.junk_div = np.concatenate(self.junk_div)
-
-        # Add the RHS now that the shape is finalized.
-        self.dof.add(MapZipper(self.map_rhs.shape, self.map_rhs.wcs))
-        self.dof.add(ArrayZipper(self.junk_rhs.shape), distributed=True)
-
+        for signal in self.signals:
+            signal.prepare()
+            self.dof.add(signal.dof)
         self.ready = True
-
     def A(self, x):
-        imap, ijunk = self.dof.unzip(x)
-        # This is necessary because multizipper reduces everything to a single array, and
-        # hence can't maintain the separation between map_dtype and tod_dtype
-        ijunk = ijunk.astype(self.dtype_tod)
-        omap, ojunk = imap*0, ijunk*0
-        for di, data in enumerate(self.observations):
-            j1, j2 = self.junk_offs[di:di+2]
-            tod = np.zeros([data.ndet, data.nsamp], self.dtype_tod)
-            wmap = imap.extract(data.shape, data.wcs)*1
-            t1 = time.time()
-            data.pmat.from_map(wmap, dest=tod)
-            data.pcut.forward(tod, ijunk[j1:j2])
-            t2 = time.time()
+        # unzip goes from flat array of all the degrees of freedom to individual maps, cuts etc.
+        # to_work makes a scratch copy and does any redistribution needed
+        iwork = [signal.to_work(w) for signal,w in zip(self.signals,self.dof.unzip(x))]
+        owork = [w*0 for w in iwork]
+        for di, data in enumerate(self.data):
+            tod = np.zeros([data.ndet, data.nsamp], self.dtype)
+            for si, signal in enumerate(self.signals):
+                signal.forward(data.id, tod, iwork[si])
             data.nmat.apply(tod)
-            t3 = time.time()
-            wmap[:] = 0
-            data.pcut.backward(tod, ojunk[j1:j2])
-            data.pmat.to_map(signal=tod, dest=wmap)
-            t4 = time.time()
-            omap.insert(wmap, op=np.ndarray.__iadd__)
-            print("A %-70s P %8.3f N %8.3f P' %8.3f  %3d %6d" % (data.id, t2-t1, t3-t2, t4-t3, data.ndet, data.nsamp))
-        omap = utils.allreduce(omap,self.comm)
-        return self.dof.zip(omap, ojunk)
+            for si, signal in reversed(list(enumerate(self.signals))):
+                signal.backward(data.id, tod, owork[si])
+        return self.dof.zip(*[signal.to_work(w) for signal,w in zip(self.signals,owork)])
     def M(self, x):
-        map, junk = self.dof.unzip(x)
-        map = enmap.map_mul(self.map_idiv, map)
-        return self.dof.zip(map, junk/self.junk_div)
+        iwork = self.dof.unzip(x)
+        return self.dof.zip(*[signal.precon(w) for signal, w in zip(self.signals, iwork)])
     def solve(self, maxiter=500, maxerr=1e-6):
         self.prepare()
-        rhs    = self.dof.zip(self.map_rhs, self.junk_rhs)
+        rhs    = self.dof.zip(*[signal.rhs for signal in self.signals])
         solver = utils.CG(self.A, rhs, M=self.M, dot=self.dof.dot)
         while True or solver.i < maxiter and solver.err > maxerr:
             solver.step()
-            yield bunch.Bunch(i=solver.i, err=solver.err, x=self.dof.unzip(solver.x)[0])
+            yield bunch.Bunch(i=solver.i, err=solver.err, x=self.dof.unzip(solver.x))
+
+class Signal:
+    """This class represents a thing we want to solve for, e.g. the sky, ground, cut samples, etc."""
+    def __init__(self, name, ofmt, output, ext):
+        """Initialize a Signal. It probably doesn't make sense to construct a generic signal
+        directly, though. Use one of the subclasses.
+        Arguments:
+        * name: The name of this signal, e.g. "sky", "cut", etc.
+        * ofmt: The format used when constructing output file prefix
+        * output: Whether this signal should be part of the output or not.
+        * ext: The extension used for the files.
+        """
+        self.name   = name
+        self.ofmt   = ofmt
+        self.output = output
+        self.ext    = ext
+        self.dof    = None
+        self.ready  = False
+    def add_obs(self, id, obs, nmat, Nd): pass
+    def prepare(self): self.ready = True
+    def forward (self, id, tod, x): pass
+    def backward(self, id, tod, x): pass
+    def precon(self, x): return x
+    def to_work  (self, x): return x.copy()
+    def from_work(self, x): return x
+    def write   (self, prefix, tag, x): pass
+
+class SignalMap(Signal):
+    """Signal describing a non-distributed sky map."""
+    def __init__(self, shape, wcs, comm, comps="TQU", name="sky", ofmt="{name}", output=True,
+            ext="fits", dtype=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False):
+        """Signal describing a sky map in the coordinate system given by "sys", which defaults
+        to equatorial coordinates. If tiled==True, then this will be a distributed map with
+        the given tile_shape, otherwise it will be a plain enmap."""
+        Signal.__init__(self, name, ofmt, output, ext)
+        self.comm  = comm
+        self.comps = comps
+        self.sys   = sys
+        self.recenter = recenter
+        self.dtype = dtype
+        self.tiled = tiled
+        self.data  = {}
+        ncomp      = len(comps)
+        shape      = tuple(shape[-2:])
+        if tiled:
+            geo = tilemap.geometry(shape, wcs, tile_shape=tile_shape)
+            self.rhs = tilemap.zeros(geo.copy(pre=(ncomp,)),      dtype=dtype)
+            self.div = tilemap.zeros(geo.copy(pre=(ncomp,ncomp)), dtype=dtype)
+        else:
+            self.rhs = enmap.zeros((ncomp,)     +shape, wcs, dtype=dtype)
+            self.div = enmap.zeros((ncomp,ncomp)+shape, wcs, dtype=dtype)
+    def add_obs(self, id, obs, nmat, Nd):
+        """Add and process an observation, building the pointing matrix
+        and our part of the RHS. "obs" should be an Observation axis manager,
+        nmat a noise model, representing the inverse noise covariance matrix,
+        and Nd the result of applying the noise model to the detector time-ordered data.
+        """
+        Nd     = Nd.copy() # This copy can be avoided if build_obs is split into two parts
+        ctime  = obs.timestamps
+        pcut   = PmatCut(obs.glitch_flags) # could pass this in, but fast to construct
+        # Build the local geometry and pointing matrix for this observation
+        if self.recenter:
+            rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter,
+                ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
+        else: rot = None
+        print("weather", unarr(obs.weather))
+        pmap = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry,
+            rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site))
+        # Build the RHS for this observation
+        pcut.clear(Nd)
+        obs_rhs = pmap.zeros()
+        pmap.to_map(dest=obs_rhs, signal=Nd)
+        # Build the per-pixel inverse covmat for this observation
+        obs_div    = pmap.zeros(super_shape=(self.ncomp,self.ncomp))
+        for i in range(self.ncomp):
+            obs_div[i]   = 0
+            obs_div[i,i] = 1
+            Nd[:]        = 0
+            pmap.from_map(obs_div[i], dest=Nd)
+            pcut.clear(Nd)
+            Nd *= nmat.ivar[:,None]
+            obs_div[i]   = 0
+            pmap.to_map(signal=Nd, dest=obs_div[i])
+        del Nd
+        # Update our full rhs and div. This works for both plain and distributed maps
+        self.rhs = self.rhs.insert(obs_rhs, op=np.ndarray.__iadd__)
+        self.div = self.div.insert(obs_div, op=np.ndarray.__iadd__)
+        # Save the per-obs things we need. Just the pointing matrix in our case.
+        # Nmat and other non-Signal-specific things are handled in the mapmaker itself.
+        self.data[id] = bunch.Bunch(pmap=pmap, obs_geo=obs_rhs.geometry)
+    def prepare(self):
+        """Called when we're done adding everything. Sets up the map distribution,
+        degrees of freedom and preconditioner."""
+        if self.ready: return
+        if self.tiled:
+            self.geo_work = self.rhs.geometry
+            self.rhs  = tilemap.redistribute(self.rhs, self.comm)
+            self.div  = tilemap.redistribute(self.div, self.comm)
+            self.dof  = TileMapZipper(self.rhs.geometry, dtype=self.dtype, comm=self.comm)
+        else:
+            self.rhs  = utils.allreduce(self.rhs, self.comm)
+            self.div  = utils.allreduce(self.div, self.comm)
+            self.dof  = MapZipper(*self.rhs.geometry, dtype=self.dtype)
+        self.idiv  = safe_invert_div(self.div)
+        self.ready = True
+    @property
+    def ncomp(self): return len(self.comps)
+    def forward(self, id, tod, map, tmul=1, mmul=1):
+        """map2tod operation. For tiled maps, the map should be in work distribution,
+        as returned by unzip. Adds into tod."""
+        if id not in self.data: return # Should this really skip silently like this?
+        if tmul != 1: tod *= tmul
+        if mmul != 1: map = map*mmul
+        self.data[id].pmap.from_map(dest=tod, signal_map=map, comps=self.comps)
+    def backward(self, id, tod, map, tmul=1, mmul=1):
+        """tod2map operation. For tiled maps, the map should be in work distribution,
+        as returned by unzip. Adds into map"""
+        if id not in self.data: return
+        if tmul != 1: tod  = tod*tmul
+        if mmul != 1: map *= mmul
+        self.data[id].pmap.to_map(signal=tod, dest=map, comps=self.comps)
+    def precon(self, map):
+        if self.tiled: raise NotImplementedError
+        else: return enmap.map_mul(self.idiv, map)
+    def to_work(self, map):
+        if self.tiled: return tilemap.redistribute(map, self.comm, self.geo_work.active)
+        else: return map.copy()
+    def from_work(self, map):
+        if self.tiled: return tilemap.redistribute(map, self.comm, self.rhs.geometry.active)
+        else: return map
+    def write(self, prefix, tag, m):
+        if not self.output: return
+        oname = self.ofmt.format(name=self.name)
+        oname = "%s%s_%s.%s" % (prefix, oname, tag, self.ext)
+        if self.tiled:
+            raise NotImplementedError
+        else:
+            if self.comm.rank == 0:
+                enmap.write_map(oname, m)
+
+class SignalCut(Signal):
+    def __init__(self, comm, name="cut", ofmt="{name}_{rank:02}", dtype=np.float32,
+            output=False, cut_type=None):
+        """Signal for handling the ML solution for the values of the cut samples."""
+        Signal.__init__(self, name, ofmt, output, ext="hdf")
+        self.comm  = comm
+        self.data  = {}
+        self.dtype = dtype
+        self.cut_type = cut_type
+        self.off   = 0
+        self.rhs   = []
+        self.div   = []
+    def add_obs(self, id, obs, nmat, Nd):
+        """Add and process an observation. "obs" should be an Observation axis manager,
+        nmat a noise model, representing the inverse noise covariance matrix,
+        and Nd the result of applying the noise model to the detector time-ordered data."""
+        Nd      = Nd.copy() # This copy can be avoided if build_obs is split into two parts
+        pcut    = PmatCut(obs.glitch_flags, model=self.cut_type)
+        # Build our RHS
+        obs_rhs = np.zeros(pcut.njunk, self.dtype)
+        pcut.backward(Nd, obs_rhs)
+        # Build our per-pixel inverse covmat
+        obs_div = np.ones(pcut.njunk, self.dtype)
+        Nd[:]     = 0
+        pcut.forward(Nd, obs_div)
+        Nd       *= nmat.ivar[:,None]
+        pcut.backward(Nd, obs_div)
+        self.data[id] = bunch.Bunch(pcut=pcut, i1=self.off, i2=self.off+pcut.njunk)
+        self.off += pcut.njunk
+        self.rhs.append(obs_rhs)
+        self.div.append(obs_div)
+    def prepare(self):
+        """Process the added observations, determining our degrees of freedom etc.
+        Should be done before calling forward and backward."""
+        if self.ready: return
+        self.rhs = np.concatenate(self.rhs)
+        self.div = np.concatenate(self.div)
+        self.dof = ArrayZipper(self.rhs.shape, dtype=self.dtype, comm=self.comm)
+        self.ready = True
+    def forward(self, id, tod, junk):
+        if id not in self.data: return
+        d = self.data[id]
+        d.pcut.forward(tod, junk[d.i1:d.i2])
+    def precon(self, junk):
+        return junk/self.div
+    def backward(self, id, tod, junk):
+        if id not in self.data: return
+        d = self.data[id]
+        d.pcut.backward(tod, junk[d.i1:d.i2])
+    def write(self, prefix, tag, m):
+        if not self.output: return
+        oname = self.ofmt.format(name=self.name, rank=self.comm.rank)
+        oname = "%s%s_%s.%s" % (prefix, oname, tag, self.ext)
+        with h5py.File(oname, "w") as hfile:
+            hfile["data"] = m
 
 class ArrayZipper:
-    def __init__(self, shape):
+    def __init__(self, shape, dtype, comm=None):
         self.shape = shape
         self.ndof  = int(np.product(shape))
+        self.dtype = dtype
+        self.comm  = comm
     def zip(self, arr):  return arr.reshape(-1)
-    def unzip(self, x):  return x.reshape(self.shape)
-    def dot(self, a, b): return np.sum(a*b)
+    def unzip(self, x):  return x.reshape(self.shape).astype(self.dtype, copy=False)
+    def dot(self, a, b):
+        return np.sum(a*b) if self.comm is None else self.comm.allreduce(np.sum(a*b))
 
 class MapZipper:
-    def __init__(self, shape, wcs):
+    def __init__(self, shape, wcs, dtype, comm=None):
         self.shape, self.wcs = shape, wcs
         self.ndof  = int(np.product(shape))
+        self.dtype = dtype
+        self.comm  = comm
     def zip(self, map): return np.asarray(map.reshape(-1))
-    def unzip(self, x): return enmap.ndmap(x.reshape(self.shape), self.wcs)
-    def dot(self, a, b): return np.sum(a*b)
+    def unzip(self, x): return enmap.ndmap(x.reshape(self.shape), self.wcs).astype(self.dtype, copy=False)
+    def dot(self, a, b):
+        return np.sum(a*b) if self.comm is None else utils.allreduce(np.sum(a*b),self.comm)
+
+class TileMapZipper:
+    def __init__(self, geo_work, geo_own, dtype, comm):
+        self.geo_own  = geo_own
+        self.geo_work = geo_work
+        self.comm     = comm
+        self.dtype    = dtype
+        self.ndof     = geo.own.size
+    def zip(self, map):
+        # work -> own -> flat
+        omap = tilemap.redistribute(map, self.comm, self.geo_own.active)
+        return np.asarray(omap.reshape(-1))
+    def unzip(self, x):
+        # flat -> own -> work
+        omap = tilemap.TileMap(x.reshape(self.geo_own.pre+(-1,)).astype(self.dtype, copy=False), self.geo_own)
+        return tilemap.redistribute(omap, self.comm, self.geo_work.active)
+    def dot(self, a, b):
+        return utils.allreduce(np.sum(a*b),self.comm)
 
 class MultiZipper:
-    def __init__(self, comm=mpi.COMM_WORLD):
-        self.comm    = comm
+    def __init__(self):
         self.zippers = []
-        self.dist    = []
         self.ndof    = 0
         self.bins    = []
-    def add(self, zipper, distributed=False):
+    def add(self, zipper):
         self.zippers.append(zipper)
-        self.dist.append(distributed)
         self.bins.append([self.ndof, self.ndof+zipper.ndof])
         self.ndof += zipper.ndof
     def zip(self, *objs):
@@ -244,19 +321,16 @@ class MultiZipper:
             res.append(zipper.unzip(x[b1:b2]))
         return res
     def dot(self, a, b):
-        res_dist, res_undist = 0,0
-        for (b1,b2), dist in zip(self.bins, self.dist):
-            work = np.sum(a[b1:b2]*b[b1:b2])
-            if dist: res_dist   += work
-            else:    res_undist += work
-        res_dist = self.comm.allreduce(res_dist)
-        return res_dist + res_undist
+        res = 0
+        for (b1,b2), dof in zip(self.bins, self.zippers):
+            res += dof.dot(a[b1:b2],b[b1:b2])
+        return res
 
 class PmatCut:
     """Implementation of cuts-as-extra-degrees-of-freedom for a single obs."""
-    def __init__(self, cuts, model="full", params={"resolution":100, "nmax":100}):
+    def __init__(self, cuts, model=None, params={"resolution":100, "nmax":100}):
         self.cuts   = cuts
-        self.model  = model
+        self.model  = model or "full"
         self.params = params
         self.njunk  = so3g.process_cuts(self.cuts.ranges, "measure", self.model, self.params, None, None)
     def forward(self, tod, junk):
@@ -279,7 +353,7 @@ def inject_map(obs, map, recenter=None):
     # Support recentering the coordinate system
     if recenter is not None:
         ctime  = obs.timestamps
-        rot    = recentering_to_quat_lonlat(*evaluate_recentering(recenter, ctime=ctime[len(ctime)//2], geom=(map.shape, map.wcs), site=SITE))
+        rot    = recentering_to_quat_lonlat(*evaluate_recentering(recenter, ctime=ctime[len(ctime)//2], geom=(map.shape, map.wcs), site=unarr(obs.site)))
     else: rot = None
     # Set up our pointing matrix for the map
     pmat  = coords.pmat.P.for_tod(obs, comps=comps, geom=(map.shape, map.wcs), rot=rot, threads="domdir")
@@ -754,3 +828,5 @@ def fix_boresight_glitches(obs, ang_tol=0.1*utils.degree, t_tol=1):
     tod_ops.get_gap_fill_single(obs.timestamps,   bcut, swap=True)
     tod_ops.get_gap_fill_single(obs.boresight.az, bcut, swap=True)
     tod_ops.get_gap_fill_single(obs.boresight.el, bcut, swap=True)
+
+def unarr(a): return np.array(a).reshape(-1)[0]
