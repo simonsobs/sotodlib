@@ -6,7 +6,7 @@ import numpy as np, sys, time, warnings
 import so3g
 from . import coords
 from . import tod_ops
-from pixell import enmap, utils, fft, bunch, wcsutils, mpi, tilemap
+from pixell import enmap, utils, fft, bunch, wcsutils, mpi, tilemap, memory
 
 ##########################################
 ##### Maximum likelihood mapmaking #######
@@ -48,7 +48,7 @@ class MLMapmaker:
     def A(self, x):
         # unzip goes from flat array of all the degrees of freedom to individual maps, cuts etc.
         # to_work makes a scratch copy and does any redistribution needed
-        iwork = [signal.to_work(w) for signal,w in zip(self.signals,self.dof.unzip(x))]
+        iwork = [signal.to_work(m) for signal,m in zip(self.signals,self.dof.unzip(x))]
         owork = [w*0 for w in iwork]
         for di, data in enumerate(self.data):
             tod = np.zeros([data.ndet, data.nsamp], self.dtype)
@@ -57,7 +57,7 @@ class MLMapmaker:
             data.nmat.apply(tod)
             for si, signal in reversed(list(enumerate(self.signals))):
                 signal.backward(data.id, tod, owork[si])
-        return self.dof.zip(*[signal.to_work(w) for signal,w in zip(self.signals,owork)])
+        return self.dof.zip(*[signal.from_work(w) for signal,w in zip(self.signals,owork)])
     def M(self, x):
         iwork = self.dof.unzip(x)
         return self.dof.zip(*[signal.precon(w) for signal, w in zip(self.signals, iwork)])
@@ -134,14 +134,19 @@ class SignalMap(Signal):
                 ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
         else: rot = None
         print("weather", unarr(obs.weather))
+        print("A cur %8.3f max %8.3f" % (memory.current()/1024**3, memory.max()/1024**3))
         pmap = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry,
             rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site))
+        print("B cur %8.3f max %8.3f" % (memory.current()/1024**3, memory.max()/1024**3))
         # Build the RHS for this observation
         pcut.clear(Nd)
         obs_rhs = pmap.zeros()
+        print("C cur %8.3f max %8.3f" % (memory.current()/1024**3, memory.max()/1024**3))
         pmap.to_map(dest=obs_rhs, signal=Nd)
+        print("D cur %8.3f max %8.3f" % (memory.current()/1024**3, memory.max()/1024**3))
         # Build the per-pixel inverse covmat for this observation
         obs_div    = pmap.zeros(super_shape=(self.ncomp,self.ncomp))
+        print("E cur %8.3f max %8.3f" % (memory.current()/1024**3, memory.max()/1024**3))
         for i in range(self.ncomp):
             obs_div[i]   = 0
             obs_div[i,i] = 1
@@ -152,9 +157,12 @@ class SignalMap(Signal):
             obs_div[i]   = 0
             pmap.to_map(signal=Nd, dest=obs_div[i])
         del Nd
+        print("F cur %8.3f max %8.3f" % (memory.current()/1024**3, memory.max()/1024**3))
         # Update our full rhs and div. This works for both plain and distributed maps
         self.rhs = self.rhs.insert(obs_rhs, op=np.ndarray.__iadd__)
+        print("G cur %8.3f max %8.3f" % (memory.current()/1024**3, memory.max()/1024**3))
         self.div = self.div.insert(obs_div, op=np.ndarray.__iadd__)
+        print("H cur %8.3f max %8.3f" % (memory.current()/1024**3, memory.max()/1024**3))
         # Save the per-obs things we need. Just the pointing matrix in our case.
         # Nmat and other non-Signal-specific things are handled in the mapmaker itself.
         self.data[id] = bunch.Bunch(pmap=pmap, obs_geo=obs_rhs.geometry)
@@ -190,20 +198,20 @@ class SignalMap(Signal):
         if mmul != 1: map *= mmul
         self.data[id].pmap.to_map(signal=tod, dest=map, comps=self.comps)
     def precon(self, map):
-        if self.tiled: raise NotImplementedError
+        if self.tiled: return tilemap.map_mul(self.idiv, map)
         else: return enmap.map_mul(self.idiv, map)
     def to_work(self, map):
         if self.tiled: return tilemap.redistribute(map, self.comm, self.geo_work.active)
         else: return map.copy()
     def from_work(self, map):
         if self.tiled: return tilemap.redistribute(map, self.comm, self.rhs.geometry.active)
-        else: return map
+        else: return utils.allreduce(map, self.comm)
     def write(self, prefix, tag, m):
         if not self.output: return
         oname = self.ofmt.format(name=self.name)
         oname = "%s%s_%s.%s" % (prefix, oname, tag, self.ext)
         if self.tiled:
-            raise NotImplementedError
+            tilemap.write_map(oname, m, self.comm)
         else:
             if self.comm.rank == 0:
                 enmap.write_map(oname, m)
@@ -287,22 +295,17 @@ class MapZipper:
         return np.sum(a*b) if self.comm is None else utils.allreduce(np.sum(a*b),self.comm)
 
 class TileMapZipper:
-    def __init__(self, geo_work, geo_own, dtype, comm):
-        self.geo_own  = geo_own
-        self.geo_work = geo_work
-        self.comm     = comm
-        self.dtype    = dtype
-        self.ndof     = geo.own.size
+    def __init__(self, geo, dtype, comm):
+        self.geo   = geo
+        self.comm  = comm
+        self.dtype = dtype
+        self.ndof  = geo.size
     def zip(self, map):
-        # work -> own -> flat
-        omap = tilemap.redistribute(map, self.comm, self.geo_own.active)
-        return np.asarray(omap.reshape(-1))
+        return np.asarray(map.reshape(-1))
     def unzip(self, x):
-        # flat -> own -> work
-        omap = tilemap.TileMap(x.reshape(self.geo_own.pre+(-1,)).astype(self.dtype, copy=False), self.geo_own)
-        return tilemap.redistribute(omap, self.comm, self.geo_work.active)
+        return tilemap.TileMap(x.reshape(self.geo.pre+(-1,)).astype(self.dtype, copy=False), self.geo)
     def dot(self, a, b):
-        return utils.allreduce(np.sum(a*b),self.comm)
+        return self.comm.allreduce(np.sum(a*b))
 
 class MultiZipper:
     def __init__(self):
