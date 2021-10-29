@@ -381,6 +381,11 @@ def simulate_data(job, toast_comm, telescope, schedule):
         timer=timer,
     )
 
+    # Add calibration error
+
+    ops.gainscrambler.apply(data)
+    log.info_rank("Simulated gain errors in", comm=world_comm, timer=timer)
+
     return data
 
 
@@ -692,6 +697,7 @@ def main():
         toast.ops.TimeConstant(
             name="convolve_time_constant", deconvolve=False, enabled=False
         ),
+        toast.ops.GainScrambler(name="gainscrambler", enabled=False),
         toast.ops.SimNoise(name="sim_noise"),
         toast.ops.PixelsHealpix(name="pixels_radec"),
         toast.ops.StokesWeights(name="weights_radec", mode="IQU"),
