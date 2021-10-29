@@ -303,15 +303,17 @@ def simulate_data(job, toast_comm, telescope, schedule):
 
     # Simulate atmosphere
 
-    ops.sim_atmosphere.detector_pointing = ops.det_pointing_azel
-    if ops.sim_atmosphere.polarization_fraction != 0:
-        ops.sim_atmosphere.detector_weights = ops.weights_azel
-    log.info_rank("Simulating and observing atmosphere", comm=world_comm)
-    ops.sim_atmosphere.apply(data)
-    log.info_rank("Simulated and observed atmosphere in", comm=world_comm, timer=timer)
-
-    ops.mem_count.prefix = "After simulating atmosphere"
-    ops.mem_count.apply(data)
+    for sim_atm in ops.sim_atmosphere_coarse, ops.sim_atmosphere:
+        if not sim_atm.enabled:
+            continue
+        sim_atm.detector_pointing = ops.det_pointing_azel
+        if sim_atm.polarization_fraction != 0:
+            sim_atm.detector_weights = ops.weights_azel
+        log.info_rank(f"Applying {sim_atm.name}", comm=world_comm)
+        sim_atm.apply(data)
+        log.info_rank(f"Applied {sim_atm.name} in", comm=world_comm, timer=timer)
+        ops.mem_count.prefix = f"After {sim_atm.name}"
+        ops.mem_count.apply(data)
 
     # Shortcut if we are only caching the atmosphere.  If this job is only caching
     # (not observing) the atmosphere, then return at this point.
@@ -654,7 +656,36 @@ def main():
             name="det_pointing_radec", quats="quats_radec"
         ),
         toast.ops.ScanHealpix(name="scan_map", enabled=False),
-        toast.ops.SimAtmosphere(name="sim_atmosphere"),
+        toast.ops.SimAtmosphere(
+            name="sim_atmosphere_coarse",
+            lmin_center=300 * u.m,
+            lmin_sigma=30 * u.m,
+            lmax_center=10000 * u.m,
+            lmax_sigma=1000 * u.m,
+            xstep=50 * u.m,
+            ystep=50 * u.m,
+            zstep=50 * u.m,
+            zmax=2000 * u.m,
+            nelem_sim_max=30000,
+            gain=6e-4,
+            realization=1000000,
+            wind_dist=10000 * u.m,
+            enabled=False,
+        ),
+        toast.ops.SimAtmosphere(
+            name="sim_atmosphere",
+            lmin_center=0.001 * u.m,
+            lmin_sigma=0.0001 * u.m,
+            lmax_center=1 * u.m,
+            lmax_sigma=0.1 * u.m,
+            xstep=5 * u.m,
+            ystep=5 * u.m,
+            zstep=5 * u.m,
+            zmax=200 * u.m,
+            gain=6e-5,
+            wind_dist=3000 * u.m,
+            enabled=False,
+        ),
         toast.ops.SimScanSynchronousSignal(name="sim_sss", enabled=False),
         so_ops.SimSSO(name="sim_sso", enabled=False),
         so_ops.SimHWPSS(name="sim_hwpss", enabled=False),
