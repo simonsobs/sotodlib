@@ -21,11 +21,7 @@ from toast.traits import trait_docs, Int, Unicode, Bool, Quantity, Float, Instan
 
 from toast.ops.operator import Operator
 
-from toast.ops.pipeline import Pipeline
-
 from toast.utils import Environment, Logger, Timer
-
-from toast._libtoast import bin_templates, add_templates, legendre
 
 from toast.observation import default_values as defaults
 
@@ -78,7 +74,7 @@ class CoRotator(Operator):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        
+
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
@@ -93,7 +89,7 @@ class CoRotator(Operator):
                 obs["corotator_angle"] = -obs["scan_el"]
             else:
                 obs["corotator_angle"] = -60 * u.deg
-                
+
             obs.shared.create(
                 self.corotator_angle,
                 shape=(obs.n_local_samples,),
@@ -107,7 +103,7 @@ class CoRotator(Operator):
                 offset=(0,),
                 fromrank=0,
             )
-            
+
             el = obs.shared[self.elevation]  # In radians
             rot = qa.rotation(
                 ZAXIS,

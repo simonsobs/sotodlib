@@ -29,11 +29,7 @@ from toast.traits import trait_docs, Int, Unicode, Bool, Quantity, Float, Instan
 
 from toast.ops.operator import Operator
 
-from toast.ops.pipeline import Pipeline
-
 from toast.utils import Environment, Logger, Timer
-
-from toast._libtoast import bin_templates, add_templates, legendre
 
 from toast.observation import default_values as defaults
 
