@@ -663,11 +663,22 @@ class G3tSmurf:
                              )
         
             data = frame.get('data')
+            sostream_version = frame.get('sostream_version', 0)
             if data is not None:
-                db_frame.n_samples = data.n_samples
-                db_frame.n_channels = len(data)
-                db_frame.start = dt.datetime.fromtimestamp(data.start.time / spt3g_core.G3Units.s)
-                db_frame.stop = dt.datetime.fromtimestamp(data.stop.time / spt3g_core.G3Units.s)
+                if sostream_version >= 2:  # Using SuperTimestreams
+                    db_frame.n_channels = len(data.names)
+                    db_frame.n_samples = len(data.times)
+                    db_frame.start = dt.datetime.fromtimestamp(
+                        data.times[0].time / spt3g_core.G3Units.s
+                    )
+                    db_frame.stop = dt.datetime.fromtimestamp(
+                        data.times[-1].time / spt3g_core.G3Units.s
+                    )
+                else:
+                    db_frame.n_samples = data.n_samples
+                    db_frame.n_channels = len(data)
+                    db_frame.start = dt.datetime.fromtimestamp(data.start.time / spt3g_core.G3Units.s)
+                    db_frame.stop = dt.datetime.fromtimestamp(data.stop.time / spt3g_core.G3Units.s)
 
                 if file_start is None:
                     file_start = db_frame.start
