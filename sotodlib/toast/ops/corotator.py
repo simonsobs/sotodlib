@@ -90,11 +90,10 @@ class CoRotator(Operator):
             else:
                 obs["corotator_angle"] = -60 * u.deg
 
-            obs.shared.create(
+            obs.shared.create_column(
                 self.corotator_angle,
                 shape=(obs.n_local_samples,),
                 dtype=np.float64,
-                comm=obs.comm_col,
             )
             corotator_angle = obs.shared[self.corotator_angle]
             corotator_angle.set(

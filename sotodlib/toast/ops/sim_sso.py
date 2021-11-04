@@ -398,7 +398,7 @@ class SimSSO(Operator):
             signal[good] += sig
 
             timer.stop()
-            if obs.comm.rank == 0:
+            if data.comm.world_rank == 0:
                 log.verbose(
                     f"{prefix} : Simulated and observed {sso_name} in {det} in "
                     f"{timer.seconds():.1f} seconds"
