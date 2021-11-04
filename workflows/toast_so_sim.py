@@ -400,6 +400,16 @@ def reduce_data(job, args, data):
     timer = toast.timing.Timer()
     timer.start()
 
+    # Apply noise estimation
+
+    ops.noise_estim.detector_pointing = ops.det_pointing_radec
+    ops.noise_estim.pixel_pointing = ops.pixels_radec_final
+    ops.noise_estim.stokes_weights = ops.weights_radec
+    ops.noise_estim.pixel_dist = ops.binner_final.pixel_dist
+    ops.noise_estim.output_dir = args.out_dir
+    ops.noise_estim.apply(data)
+    log.info_rank("Estimated noise in", comm=world_comm, timer=timer)
+
     # Flag Sun, Moon and the planets
 
     ops.flag_sso.detector_pointing = ops.det_pointing_azel
@@ -660,7 +670,7 @@ def main():
         toast.ops.PointingDetectorSimple(
             name="det_pointing_radec", quats="quats_radec"
         ),
-        toast.ops.ScanHealpix(name="scan_map", enabled=False),
+        toast.ops.ScanHealpixMap(name="scan_map", enabled=False),
         toast.ops.SimAtmosphere(
             name="sim_atmosphere_coarse",
             lmin_center=300 * u.m,
@@ -701,6 +711,7 @@ def main():
         toast.ops.SimNoise(name="sim_noise"),
         toast.ops.PixelsHealpix(name="pixels_radec"),
         toast.ops.StokesWeights(name="weights_radec", mode="IQU"),
+        toast.ops.NoiseEstim(name="noise_estim", enabled=False),
         toast.ops.FlagSSO(name="flag_sso", enabled=False),
         so_ops.Hn(name="h_n", enabled=False),
         toast.ops.CadenceMap(name="cadence_map", enabled=False),
