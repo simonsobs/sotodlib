@@ -48,10 +48,6 @@ def tb2s(tb, nu):
 
     x = h * nu / (k_b * tb)
 
-    print('X_value', x)
-    print('NU', nu)
-    print('EXP', np.exp(x))
-
     return 2 * h * nu ** 3 / c ** 2 / (np.exp(x) - 1)
 
 
@@ -355,11 +351,11 @@ class SimSource(Operator):
         timer.start()
 
         if self.source_init_dist != 0 :
-            az_init = float(np.random.choice(obs.shared[self.azimuth], 1))
-            el_init = float(np.random.choice(obs.shared[self.elevation], 1))
+            az_init = float(np.random.choice(obs.shared[self.azimuth], 1))*u.rad
+            el_init = float(np.random.choice(obs.shared[self.elevation], 1))*u.rad
 
             E, N, U = hor2enu(az_init, el_init, self.source_init_dist)
-            X, Y, Z = enu2ecef(E, N, U, observer.lon, observer.lat, observer.elevation, ell='WGS84')
+            X, Y, Z = enu2ecef(E, N, U, observer.lat, observer.lon, observer.elevation, ell='WGS84')
 
             if self.source_err_flag:
                 X = X+np.random.normal(0, self.source_err[0], size=(len(times)))*X.unit
@@ -381,15 +377,16 @@ class SimSource(Operator):
                     "Select one between the source distance and the source ECEF position"
                 )
 
-        X_tel, Y_tel, Z_tel, _, _, _  = lonlat2ecef(observer.lon, observer.lat, observer.elevation)
+        X_tel, Y_tel, Z_tel, _, _, _  = lonlat2ecef(observer.lat, observer.lon, observer.elevation)
         
         E, N, U, delta_E, delta_N, delta_U = ecef2enu(X_tel, Y_tel, Z_tel, \
                                                       X, Y, Z, \
                                                       0, 0, 0, \
                                                       self.source_err[0], self.source_err[1], self.source_err[2], \
-                                                      observer.lon, observer.lat)
-        
+                                                      observer.lat, observer.lon)
+
         source_az, source_el, source_distance, delta_az, delta_el, delta_srange = enu2hor(E, N, U, delta_E, delta_N, delta_U)
+
 
 
         if np.any(delta_az != 0) or np.any(delta_el != 0) or np.any(delta_srange != 0):
@@ -435,8 +432,9 @@ class SimSource(Operator):
                 size = np.interp(times, self.source_pos[:,0], size.value)*size.unit
             else:
                 size = np.ones_like(times)*size
-        
-        
+
+        obs['source_az'] = source_az
+        obs['source_el'] = source_el
 
         if data.comm.group_rank == 0:
             timer.stop()
@@ -576,7 +574,7 @@ class SimSource(Operator):
             angle = np.radians(self.source_pol_angle + np.random.normal(0, self.source_pol_angle_error, size=(len(sig))))
 
             sig *= weights_I + pfrac * (np.cos(angle)*weights_Q + np.sin(angle)*weights_U)
-
+            
             signal[good] += sig
 
             timer.stop()
