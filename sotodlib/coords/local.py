@@ -190,7 +190,7 @@ def enu2ecef(E, N, U, lat, lon, alt, ell='WGS84', deg=True):
 
     return x0 + dx, y0 + dy, z0 + dz
 
-def lonlat2ecef(lon, lat, alt, ell='WGS84', deg=True, uncertainty=False, \
+def lonlat2ecef(lat, lon, alt, ell='WGS84', deg=True, uncertainty=False, \
                 delta_lon=0, delta_lat=0, delta_alt=0):
     '''
     convert geodetic coordinates to ECEF 
@@ -308,7 +308,7 @@ def ecef2enu(ecef_obs_x, ecef_obs_y, ecef_obs_z, \
              ecef_target_x, ecef_target_y, ecef_target_z, \
              delta_obs_x, delta_obs_y, delta_obs_z, \
              delta_target_x, delta_target_y, delta_target_z, \
-             lon, lat, deg=True):
+             lat, lon, deg=True):
     
     '''
     Return the position relative to a refence point in a ENU system. If one of delta_obs or delta_target 
