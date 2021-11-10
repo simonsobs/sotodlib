@@ -186,6 +186,9 @@ class Bookbinder(object):
         while len(tt) > 0:
             self.frameproc.flush_time = tt.pop(0)
 
+            if self.frameproc.smbundle is not None and self.frameproc.smbundle.ready(self.frameproc.flush_time):
+                output += self.frameproc.flush()
+
             while self.frameproc.smbundle is None or not self.frameproc.smbundle.ready(self.frameproc.flush_time):
                 try:
                     f = next(self.smurf_iter)
