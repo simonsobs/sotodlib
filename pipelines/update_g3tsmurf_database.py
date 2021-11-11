@@ -21,11 +21,11 @@ if __name__ == '__main__':
     
     parser.add_argument('--update-delay', help="Days to subtract from now to set as minimum ctime",
                                default=2, type=float)
-    parser.add_argument('--from_scratch', action="store_true")
+    parser.add_argument('--from-scratch', help="Builds or updates database from scratch",
+                        action="store_true")
     
     args = parser.parse_args()
     
-    print(args.__dict__)
     if args.timestream_folder is None:
         args.timestream_folder = os.path.join( args.data_prefix, 'timestreams/')
        
