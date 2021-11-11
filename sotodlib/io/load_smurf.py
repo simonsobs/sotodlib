@@ -1562,7 +1562,7 @@ class SmurfStatus:
         
         self._make_tags()
         
-    def _make_tags(self, delimiters=',|/|\\t| '):
+    def _make_tags(self, delimiters=',|\\t| '):
         """Build list of tags from SMuRF status
         """
         tags = self.status.get('AMCc.SmurfProcessor.SOStream.stream_tag')
@@ -1635,7 +1635,14 @@ class SmurfStatus:
         if stream_id is not None:
             q = q.join(Files).filter(Files.stream_id==stream_id)
         else:
-            logger.warning(f"No stream_id given for finding status, not checking for one")
+            sids = archive._stream_ids_in_range(q[0].time, time)
+            if len(sids) > 1:
+                raise ValueError(
+                    "Multiple stream_ids exist in the given range! "
+                    "Must choose one to load SmurfStatus.\n"
+                    f"stream_ids: {sids}"
+                )
+        
         if q.count()==0:
             logger.error(f"No Frames found before time: {time}, stream_id: {stream_id}")
         
