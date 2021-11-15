@@ -42,9 +42,14 @@ class _HKBundle(_DataBundle):
         super().__init__()
         self.turnaround_times = []
 
+    def set_azimuth_velocity(self):
+        self.data['Azimuth_Velocity'] = pos2vel(self.data['Azimuth_Corrected'])
+
     def set_turnaround_times(self):
+        if 'Azimuth_Velocity' not in self.data.keys():
+            self.set_azimuth_velocity()
         self.turnaround_times = [self.times[i] for i in
-                                 locate_sign_changes(pos2vel(self.data['Azimuth_Corrected']))]
+                                 locate_sign_changes(self.data['Azimuth_Velocity'])]
 
     def ready(self):
         return len(self.turnaround_times) > 0
@@ -124,6 +129,7 @@ class FrameProcessor(object):
                 self.hkbundle = _HKBundle()
 
             self.hkbundle.add(f['blocks'][0])   # 0th block for now
+            self.hkbundle.set_azimuth_velocity()
             self.hkbundle.set_turnaround_times()
 
         if f.type == core.G3FrameType.Scan:
