@@ -96,13 +96,13 @@ def s2tcmb(s_nu, nu):
 a = 6378137.0 #semiaxis major
 b = 6356752.31424518 #semiaxis minor
 
-def spectrum(amp, fc, sigma, base, err_fc, noise, az_size, el_size, dist):
+def spectrum(power, fc, sigma, base, err_fc, noise, az_size, el_size, dist):
 
     '''
     Generate a power spectrum in W/m^2/sr/Hz for a source with a delta-like emission and 
     a top-hat beam in 2D 
     Parameters:
-    - amp: amplitude of the signal in dBm
+    - power: total power of the signal in dBm
     - fc: frequency of the signal in GHz
     - sigma: width of the signal in kHz
     - base: base level of the signal in dBm
@@ -115,17 +115,32 @@ def spectrum(amp, fc, sigma, base, err_fc, noise, az_size, el_size, dist):
     fc *= 1e9 ### Conversion to Hz
     err_fc *= 1e3
 
-    fc = fc+np.random.normal(fc, err_fc)
+    fc = fc+np.random.normal(0, err_fc)
     
-
     sigma *= 1e3 ### Conversion to Hz
 
-    freq = np.arange(0.5,400,10)*1e9
-    central = np.arange(-10*sigma, 10*sigma, sigma)+fc
+    factor = 10 #Increase by a factor the width of the signal
+    freq_step = 10
 
-    freq = np.sort(np.unique(np.append(freq, central)))
+    freq = np.arange(0.5,400,freq_step)*1e9
+    central = np.arange(-factor*sigma, factor*sigma, sigma)+fc
 
-    signal = amp*np.exp(-(freq-fc)**2/2/np.sqrt(sigma))+base
+    #Add edges to fill the gap for future interpolations
+    nstep = 20 
+    edge_l = np.linspace(fc-freq_step*1e9, fc-factor*sigma, nstep)
+    edge_u = np.linspace(fc+factor*sigma, fc+freq_step*1e9, nstep)
+
+    edges = np.append(edge_l, edge_u)
+    freq = np.append(freq, central)
+
+    freq = np.sort(np.unique(np.append(freq, edges)))
+
+    mask = np.in1d(freq, central)
+
+    signal = np.zeros_like(freq)
+    
+    signal[mask] = power-10*np.log10(sigma)
+    signal[~mask] = base
 
     signal = 10**(signal/10)/1000 ### Conversion from dBm to W
 
@@ -455,7 +470,8 @@ class SimSource(Operator):
         base = self.source_baseline
         noise = self.source_noise
 
-        freq, spec = spectrum(amp, fc, sigma, base, sigma, noise, self.source_beam_az, self.source_beam_el, dist)
+        freq, spec = spectrum(amp, fc, sigma, base, sigma, noise, \
+                              self.source_beam_az, self.source_beam_el, dist)
 
         freq = freq *u.Hz
 
@@ -509,6 +525,8 @@ class SimSource(Operator):
         log = Logger.get()
         timer = Timer()
 
+        source_freq, source_temp = self._get_source_temp(source_dist)
+
         for det in dets:
             timer.clear()
             timer.start()
@@ -535,7 +553,6 @@ class SimSource(Operator):
             el = np.pi / 2 - theta
 
             # Convolve the planet SED with the detector bandpass
-            source_freq, source_temp = self._get_source_temp(source_dist)
             det_temp = bandpass.convolve(det, source_freq, source_temp)
 
             beam, radius = self._get_beam_map(det, source_diameter, det_temp)
@@ -574,7 +591,7 @@ class SimSource(Operator):
             angle = np.radians(self.source_pol_angle + np.random.normal(0, self.source_pol_angle_error, size=(len(sig))))
 
             sig *= weights_I + pfrac * (np.cos(angle)*weights_Q + np.sin(angle)*weights_U)
-            
+
             signal[good] += sig
 
             timer.stop()
