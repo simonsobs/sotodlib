@@ -30,8 +30,7 @@ num_bias_lines = 16
 
 association_table = db.Table('association_chan_assign', Base.metadata,
     db.Column('tunesets', db.Integer, db.ForeignKey('tunesets.id')),
-    db.Column('chan_assignments', db.Integer,
-db.ForeignKey('chan_assignments.id'))
+    db.Column('chan_assignments', db.Integer, db.ForeignKey('chan_assignments.id'))
 )
 
 association_table_obs = db.Table('association_obs', Base.metadata,
@@ -112,8 +111,7 @@ class Observations(Base):
 
     def __repr__(self):
         try:
-            return f"{self.obs_id}: {self.start} -> {self.stop}
-[{self.stop-self.start}] ({self.tag})"
+            return f"{self.obs_id}: {self.start} -> {self.stop} [{self.stop-self.start}] ({self.tag})"
         except:
             return f"{self.obs_id}: {self.start} -> {self.stop} ({self.tag})"
 
@@ -186,8 +184,8 @@ class Files(Base):
     sample_start = db.Column(db.Integer)
     sample_stop = db.Column(db.Integer)
     
-    ## this is a string for compatibility with sotodlib, not because it makes
-sense here
+    ## this is a string for compatibility with sotodlib, not because it makes 
+    ## sense here
     obs_id = db.Column(db.String, db.ForeignKey('obs.obs_id'))
     observation = relationship("Observations", back_populates='files')
     
@@ -548,8 +546,8 @@ class G3tSmurf:
             archive_path: path
                 Path to the data directory
             db_path: path, optional
-                Path to the sqlite file. Defaults to
-``<archive_path>/frames.db``
+                Path to the sqlite file. Defaults to 
+                ``<archive_path>/frames.db``
             meta_path: path, optional
                 Path of directory containing smurf related metadata (ie. channel
                 assignments). Required for full functionality.
@@ -592,8 +590,7 @@ class G3tSmurf:
         ----
             datetime: datetime of x if x is a timestamp
         """
-        if np.issubdtype(type(x),np.floating) or
-np.issubdtype(type(x),np.integer):
+        if np.issubdtype(type(x),np.floating) or np.issubdtype(type(x),np.integer):
             return dt.datetime.fromtimestamp(x)
         elif isinstance(x,np.datetime64):
             return x.astype(dt.datetime)
@@ -681,10 +678,8 @@ np.issubdtype(type(x),np.integer):
                 else:
                     db_frame.n_samples = data.n_samples
                     db_frame.n_channels = len(data)
-                    db_frame.start = dt.datetime.fromtimestamp(data.start.time /
-spt3g_core.G3Units.s)
-                    db_frame.stop = dt.datetime.fromtimestamp(data.stop.time /
-spt3g_core.G3Units.s)
+                    db_frame.start = dt.datetime.fromtimestamp(data.start.time /spt3g_core.G3Units.s)
+                    db_frame.stop = dt.datetime.fromtimestamp(data.stop.time /spt3g_core.G3Units.s)
 
                 if file_start is None:
                     file_start = db_frame.start
@@ -763,8 +758,8 @@ spt3g_core.G3Units.s)
                     print(f"Failed on file {f}:\n{e}") 
         session.close()
 
-    def add_new_channel_assignment(self, stream_id, ctime, cha, cha_path,
-session):   
+    def add_new_channel_assignment(self, stream_id, ctime, cha, 
+                                    cha_path, session):   
         """Add new entry to the Channel Assignments table. Called by the
         index_metadata function.
         Args
@@ -783,12 +778,11 @@ session):
         """
         band = int(re.findall('b\d.txt', cha)[0][1])   
 
-        ch_assign = session.query(ChanAssignments).filter(ChanAssignments.ctime
-== ctime,
-                                                          ChanAssignments.stream_id
-== stream_id,
-                                                          ChanAssignments.band
-== band)
+        ch_assign = session.query(ChanAssignments).filter(
+                            ChanAssignments.ctime== ctime,
+                            ChanAssignments.stream_id== stream_id,
+                            ChanAssignments.band== band
+                            )
         ch_assign = ch_assign.one_or_none()
         if ch_assign is None:
             ch_assign = ChanAssignments(ctime=ctime,
@@ -808,8 +802,7 @@ session):
                 if int(notch[2]) in ch_made:
                     continue
                     
-                ch_name = 'sch_{:10d}_{:01d}_{:03d}'.format(ctime, band,
-int(notch[2]))
+                ch_name = 'sch_{:10d}_{:01d}_{:03d}'.format(ctime, band, int(notch[2]))
                 ch = Channels(subband=int(notch[1]),
                               channel=int(notch[2]),
                               frequency=notch[0],
@@ -818,19 +811,17 @@ int(notch[2]))
                               band=band)
                 
                 if ch.channel == -1:
-                    logger.warning(f"Un-assigned channel made in Channel
-Assignment {ch_assign.name}")
+                    logger.warning(f"Un-assigned channel made in Channel Assignment {ch_assign.name}")
                     continue
-                check = session.query(Channels).filter( Channels.ca_id ==
-ch_assign.id,
-                                           Channels.channel ==
-ch.channel).one_or_none()
+                check = session.query(Channels).filter( 
+                                    Channels.ca_id == ch_assign.id,
+                                    Channels.channel == ch.channel).one_or_none()
                 if check is None:
                     session.add(ch)
         session.commit()   
         
     def _assign_set_from_file(self, tune_path, ctime=None, stream_id=None,
-session=None):
+                                session=None):
         """Build set of Channel Assignments that are (or should be) in the 
         tune file.
 
@@ -862,22 +853,21 @@ session=None):
                 ### tune file doesn't have info for this band
                 continue
             ## try to use tune file to find channel assignment befoe just
-assuming "most recent"
+            ## assuming "most recent"
             if 'channel_assignment' in data[band]:
                 cha_name = data[band]['channel_assignment'].split('/')[-1]
-                cha =
-session.query(ChanAssignments).filter(ChanAssignments.stream_id==stream_id,
-                                                      ChanAssignments.name==cha_name).one_or_none()
+                cha = session.query(ChanAssignments).filter(
+                            ChanAssignments.stream_id==stream_id,
+                            ChanAssignments.name==cha_name).one_or_none()
             else:
-                cha =
-session.query(ChanAssignments).filter(ChanAssignments.stream_id==stream_id,
-                                                           ChanAssignments.ctime
-<= ctime,
-                                                           ChanAssignments.band==band)
+                cha = session.query(ChanAssignments).filter(
+                            ChanAssignments.stream_id==stream_id,
+                            ChanAssignments.ctime<= ctime,
+                            ChanAssignments.band==band)
+
                 cha = cha.order_by(db.desc(ChanAssignments.ctime)).first()
             if cha is None:
-                logger.error(f"Missing Channel Assignment for tune file
-{tune_path}")
+                logger.error(f"Missing Channel Assignment for tune file {tune_path}")
                 continue
             assign_set.append(cha)
         return assign_set
@@ -885,8 +875,7 @@ session.query(ChanAssignments).filter(ChanAssignments.stream_id==stream_id,
 
     def add_new_tuning(self, stream_id, ctime, tune_path, session):    
         """Add new entry to the Tune table, check if needed to add to the
-TunesSet table. Called by the
-        index_metadata function.
+        TunesSet table. Called by the index_metadata function.
 
         Args
         -------
@@ -901,8 +890,7 @@ TunesSet table. Called by the
         """
         name = tune_path.split('/')[-1]
         tune = session.query(Tunes).filter(Tunes.name == name,
-                                          Tunes.stream_id ==
-stream_id).one_or_none()
+                                          Tunes.stream_id == stream_id).one_or_none()
         if tune is None:
             tune = Tunes(name=name, start=dt.datetime.fromtimestamp(ctime),
                            path=tune_path, stream_id=stream_id)
@@ -910,7 +898,7 @@ stream_id).one_or_none()
             session.commit()
 
         ## assign set is the set of channel assignments that make up this tune
-file
+        ## file
         assign_set = self._assign_set_from_file(tune_path, ctime=ctime,
                                            stream_id=stream_id, session=session)
 
@@ -923,12 +911,11 @@ file
         if len(tunesets)>0:
             for ts in tunesets:
                 if np.all( sorted([ca.id for ca in ts.chan_assignments]) ==
-sorted([a.id for a in assign_set]) ):
+                            sorted([a.id for a in assign_set]) ):
                     tuneset = ts
 
         if tuneset is None:
-            logger.debug(f"New Tuneset Detected {stream_id}, {ctime}, {[[a.name
-for a in assign_set]]}")
+            logger.debug(f"New Tuneset Detected {stream_id}, {ctime}, {[[a.name for a in assign_set]]}")
             tuneset = TuneSets(name=name, path=tune_path, stream_id=stream_id,
                                start=dt.datetime.fromtimestamp(ctime))
             session.add(tuneset)
@@ -945,7 +932,7 @@ for a in assign_set]]}")
         session.commit()
     
     def add_new_observation(self, stream_id, ctime, obs_data, session,
-max_early=5,max_wait=100):
+                            max_early=5,max_wait=100):
         """Add new entry to the observation table. Called by the
         index_metadata function.
         
@@ -962,13 +949,13 @@ max_early=5,max_wait=100):
         max_early : int     
             Buffer time to allow the g3 file to be earlier than the smurf action
         max_wait : int  
-            Maximum amount of time between the streaming sart action and the 
+            Maximum amount of time between the streaming start action and the 
             making of .g3 files that belong to an observation
         
         TODO: how will simultaneous streaming with two stream_ids work?
         """
-        obs = session.query(Observations).filter(Observations.obs_id ==
-str(ctime)).one_or_none()
+        obs = session.query(Observations).filter(
+                        Observations.obs_id == str(ctime)).one_or_none()
         if obs is None:
             obs = Observations(obs_id = str(ctime),
                                timestamp = ctime,
@@ -979,8 +966,8 @@ str(ctime)).one_or_none()
         self.update_observation_files(obs, session, max_early=max_early,
                     max_wait=max_wait)
 
-    def update_observation_files(self, obs, session, max_early=5, max_wait=100,
-force=False):
+    def update_observation_files(self, obs, session, max_early=5, 
+                                max_wait=100,force=False):
         """Update existing observation. A separate function to make it easier
         to deal with partial data transfers. See add_new_observation for args
         
@@ -1001,8 +988,8 @@ force=False):
         if not force and obs.duration is not None and len(obs.tunesets) >= 1:
             return
 
-        x=session.query(Files.name).filter(Files.start >=
-obs.start-dt.timedelta(seconds=max_early))
+        x=session.query(Files.name).filter(
+                            Files.start >= obs.start-dt.timedelta(seconds=max_early))
         x = x.order_by(Files.start).first()
         if x is None:
             ## no files to add at this point
@@ -1016,22 +1003,18 @@ obs.start-dt.timedelta(seconds=max_early))
             ## we don't have .g3 files for some reason
             pass
         else:
-            flist =
-session.query(Files).filter(Files.name.like(prefix+f_start+'%'))
+            flist = session.query(Files).filter(Files.name.like(prefix+f_start+'%'))
             flist = flist.order_by(Files.start).all()
             
             ## Use Status information to set Tuneset
             status = SmurfStatus.from_file(flist[0].name)
             if status.action is not None:
                 if status.action not in SMURF_ACTIONS['observations']:
-                    logger.warning(f"Status Action {status.action} from file
-does not \
+                    logger.warning(f"Status Action {status.action} from file does not \
                                     match accepted observation types")
                 if status.action_timestamp != obs.timestamp:
-                    logger.error(f"Status timestamp {status.action_timestamp}
-from file does \
-                                not match observation timestamp
-{obs.timestamp}")
+                    logger.error(f"Status timestamp {status.action_timestamp} from file does \
+                                not match observation timestamp {obs.timestamp}")
                     return
             ## Add any tags from the status
             if len(status.tags)>0:
@@ -1041,17 +1024,15 @@ from file does \
                 session.add(new_tag)
             
             if status.tune is not None:
-                tune = session.query(Tunes).filter( Tunes.name ==
-status.tune).one_or_none()
+                tune = session.query(Tunes).filter( 
+                            Tunes.name == status.tune).one_or_none()
                 if tune is None:
-                    logger.warning(f"Tune {status.tune} not found in database,
-update error?")
+                    logger.warning(f"Tune {status.tune} not found in database, update error?")
                     tuneset = None
                 else:
                     tuneset = tune.tuneset
             else:
-                tuneset = session.query(TuneSets).filter(TuneSets.strt <=
-obs.start)
+                tuneset = session.query(TuneSets).filter(TuneSets.strt <= obs.start)
                 tuneset = tuneset.order_by(db.desc(TuneSets.start)).first()
                 
             already_have = [ts.id for ts in obs.tunesets]
@@ -1069,10 +1050,9 @@ obs.start)
         session.commit()
 
     def search_metadata_actions(self,  min_ctime=16000*1e5, max_ctime=None,
-reverse=False):
+                                reverse=False):
         """Generator used to page through smurf folder returning each action
-formatted for
-        easy use.
+        formatted for easy use.
         
         Args
         -----
@@ -1092,8 +1072,7 @@ formatted for
             max_ctime = dt.datetime.now().timestamp()
 
         if self.meta_path is None:
-            raise ValueError('Archiver needs meta_path attribute to index
-channel assignments')
+            raise ValueError('Archiver needs meta_path attribute to index channel assignments')
 
         logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
 
@@ -1103,10 +1082,8 @@ channel assignments')
             elif int(ct_dir) > int(max_ctime//1e5):
                 continue
 
-            for stream_id in sorted(os.listdir( os.path.join(self.meta_path,
-ct_dir)), reverse=reverse):
-                    action_path = os.path.join(self.meta_path, ct_dir,
-stream_id)
+            for stream_id in sorted(os.listdir( os.path.join(self.meta_path,ct_dir)), reverse=reverse):
+                    action_path = os.path.join(self.meta_path, ct_dir, stream_id)
                     actions = sorted(os.listdir( action_path ), reverse=reverse)
 
                     for action in actions:
@@ -1116,19 +1093,16 @@ stream_id)
                                 continue
                             astring = '_'.join(action.split('_')[1:])
 
-                            yield (astring, stream_id, ctime,
-os.path.join(action_path, action))
+                            yield (astring, stream_id, ctime, os.path.join(action_path, action))
                         except GeneratorExit:
                             return
                         except:
                             continue
 
     def search_metadata_files(self,  min_ctime=16000*1e5, max_ctime=None,
-reverse=False,
-                          skip_plots=True, skip_configs=True):
+                               reverse=False, skip_plots=True, skip_configs=True):
         """Generator used to page through smurf folder returning each file
-formatted for
-            easy use. 
+        formatted for easy use. 
 
         Args
         -----
@@ -1140,33 +1114,31 @@ formatted for
             if true, goes backward 
         skip_plots : bool
             if true, skips all the plots folders because we probably don't want
-to look through them
+            to look through them
         skip_configs : bool
             if true, skips all the config folders because we probably don't want
-to look through them
+            to look through them
 
         Yields
         -------
         tuple (fname, ctime, abs_path)
         fname : string
-            file name with ctime remved
+            file name with ctime removed
         ctime : int
             file ctime
         abs_path : string
             absolute path to file
         """
-        for action, stream_id, actime, path in
-self.search_metadata_actions(min_ctime=min_ctime,
-                                                                            max_ctime=max_ctime,
-                                                                            reverse=reverse):
+        for action, stream_id, actime, path in self.search_metadata_actions(
+                                       min_ctime=min_ctime, max_ctime=max_ctime,
+                                       reverse=reverse):
             if skip_configs and action == 'config':
                 continue
             adirs = os.listdir(path)
             for adir in adirs:
                 if skip_plots and adir == 'plots':
                     continue
-                for root, dirs, files in os.walk(os.path.join(path, adir),
-topdown=False):
+                for root, dirs, files in os.walk(os.path.join(path, adir), topdown=False):
                     for name in files:
                         try:
                             try:
@@ -1174,13 +1146,11 @@ topdown=False):
                             except ValueError:
                                 ctime = actime
                             fname = '_'.join(name.split('_')[1:])
-                            yield (fname, stream_id, ctime, os.path.join(root,
-name))
+                            yield (fname, stream_id, ctime, os.path.join(root,name))
                         except GeneratorExit:
                             return
     
-    def _processes_index_error(self, session, e, stream_id, ctime, path,
-stop_at_error):
+    def _processes_index_error(self, session, e, stream_id, ctime, path, stop_at_error):
         if type(e) == ValueError:
             logger.info(f"Value Error at {stream_id}, {ctime}, {path}")
         elif type(e) == IntegrityError:
@@ -1192,8 +1162,8 @@ stop_at_error):
         if stop_at_error:
             raise(e)
             
-    def index_channel_assignments(self, session, min_ctime=16000*1e5, pattern =
-'channel_assignment',
+    def index_channel_assignments(self, session, min_ctime=16000*1e5, 
+                                pattern = 'channel_assignment',
                                  stop_at_error=False):
         """ Index all channel assignments newer than a minimum ctime
 
@@ -1205,30 +1175,24 @@ stop_at_error):
         pattern : string
             string pattern to look for channel assignments
         """
-        for fpattern, stream_id, ctime, path in
-self.search_metadata_files(min_ctime=min_ctime):
+        for fpattern, stream_id, ctime, path in self.search_metadata_files(min_ctime=min_ctime):
             if pattern in fpattern:
                 try:
-                    ## decide if this is the last channel assignment in the
-directory
-                    ## needed because we often get multiple channel assignments
-in the same folder
+                    ## decide if this is the last channel assignment in the directory
+                    ## needed because we often get multiple channel assignments in the same folder
                     root = os.path.join('/',*path.split('/')[:-1])            
-                    cha_times = [int(f.split('_')[0]) for f in os.listdir(root)
-if pattern in f]
+                    cha_times = [int(f.split('_')[0]) for f in os.listdir(root) if pattern in f]
                     if ctime != np.max(cha_times):
                         continue
                     fname = path.split('/')[-1]
-                    logger.debug(f"Add new channel assignment: {stream_id},
-{ctime}, {path}")
-                    self.add_new_channel_assignment(stream_id, ctime, fname,
-path, session)  
+                    logger.debug(f"Add new channel assignment: {stream_id},{ctime}, {path}")
+                    self.add_new_channel_assignment(stream_id, ctime, 
+                                                    fname, path, session)  
                 except Exception as e:
-                    _self.process_index_error(session, e, stream_id, ctime,
-path, stop_at_error)
+                    _self.process_index_error(session, e, stream_id, ctime, path, stop_at_error)
                     
     def index_tunes(self, session, min_ctime=16000*1e5, pattern = 'tune.npy',
-stop_at_error=False):
+                    stop_at_error=False):
         """ Index all tune files newer than a minimum ctime
 
         Args
@@ -1239,22 +1203,20 @@ stop_at_error=False):
         pattern : string
            string pattern to look for tune files
         """
-        for fname, stream_id, ctime, path in
-self.search_metadata_files(min_ctime=min_ctime):
+        for fname, stream_id, ctime, path in self.search_metadata_files(min_ctime=min_ctime):
             if pattern in fname:
                 try:
                     logger.debug(f"Add new Tune: {stream_id}, {ctime}, {path}")
                     self.add_new_tuning(stream_id, ctime, path, session)
                 except Exception as e:
-                    _self.process_index_error(session, e, stream_id, ctime,
-path, stop_at_error)
+                    _self.process_index_error(session, e, stream_id, ctime, 
+                                                path, stop_at_error)
 
         
     def index_observations(self, session, min_ctime=16000*1e5,
-stop_at_error=False):
+                           stop_at_error=False):
         """ Index all observations newer than a minimum ctime. Uses
-SMURF_ACTIONS to 
-        define which actions are observations.
+        SMURF_ACTIONS to define which actions are observations.
 
         Args
         -----
@@ -1264,37 +1226,30 @@ SMURF_ACTIONS to
 
         """
 
-        for action, stream_id, ctime, path in
-self.search_metadata_actions(min_ctime=min_ctime):
+        for action, stream_id, ctime, path in self.search_metadata_actions(min_ctime=min_ctime):
             if action in SMURF_ACTIONS['observations']:       
                 try:
                     obs_path = os.listdir( os.path.join(path, 'outputs'))
-                    logger.debug(f"Add new Observation: {stream_id}, {ctime},
-{obs_path}")
-                    self.add_new_observation(stream_id, ctime, obs_path,
-session)
+                    logger.debug(f"Add new Observation: {stream_id}, {ctime}, {obs_path}")
+                    self.add_new_observation(stream_id, ctime, obs_path, session)
                 except Exception as e:
-                    _self.process_index_error(session, e, stream_id, ctime,
-path, stop_at_error)
+                    _self.process_index_error(session, e, stream_id, ctime, path, stop_at_error)
                     
 
     def index_metadata(self, min_ctime=16000*1e5, stop_at_error=False):
-        """
-            Adds all channel assignments, tunes, and observations in archive to
-database. 
-            Adding relevant entries to Files as well.
+        """Adds all channel assignments, tunes, and observations in archive to
+        database. Adding relevant entries to Files as well.
 
-            Args
-            ----
-            min_ctime : int
-                Lowest ctime to start looking for new metadata
-            stop_at_error: bool
-                If True, will stop if there is an error indexing a file.
+        Args
+        ----
+        min_ctime : int
+            Lowest ctime to start looking for new metadata
+        stop_at_error: bool
+           If True, will stop if there is an error indexing a file.
         """
 
         if self.meta_path is None:
-            raise ValueError('Archiver needs meta_path attribute to index
-channel assignments')
+            raise ValueError('Archiver needs meta_path attribute to index channel assignments')
 
         session = self.Session()
 
@@ -1302,13 +1257,13 @@ channel assignments')
         
         logger.debug("Indexing Channel Assignments")
         self.index_channel_assignments(session, min_ctime=min_ctime,
-stop_at_error=stop_at_error)
+                                        stop_at_error=stop_at_error)
         logger.debug("Indexing Tune Files")
         self.index_tunes(session, min_ctime=min_ctime,
-stop_at_error=stop_at_error)
+                                        stop_at_error=stop_at_error)
         logger.debug("Indexing Observations")
         self.index_observations(session, min_ctime=min_ctime,
-stop_at_error=stop_at_error)
+                                        stop_at_error=stop_at_error)
             
         session.close()
 
@@ -1358,8 +1313,7 @@ stop_at_error=stop_at_error)
                * timestamps : (samps,) 
                     unix timestamps for loaded data
                 * signal : (channels, samps) 
-                    Array of the squid phase in units of radians for each
-channel
+                    Array of the squid phase in units of radians for each channel
                 * primary : AxisManager (samps,)
                     "primary" data included in the packet headers
                     'AveragingResetBits', 'Counter0', 'Counter1', 'Counter2', 
@@ -1380,8 +1334,7 @@ channel
             stream_id : String 
                 stream_id to load, in case there are multiple
             channels : list or None
-                If not None, it should be a list that can be sent to
-get_channel_mask.
+                If not None, it should be a list that can be sent to get_channel_mask.
             detset : string
                 the name of the detector set (tuning file) to load
             show_pb : bool, optional: 
@@ -1422,8 +1375,7 @@ get_channel_mask.
             stream_id = q[0].stream_id
             
         if status is None:
-            scan_start = session.query(Frames.start).filter(Frames.start >
-start,
+            scan_start = session.query(Frames.start).filter(Frames.start > start,
                                                             Frames.type_name=='Scan')
             scan_start = scan_start.order_by(Frames.start).first()
                 
@@ -1460,8 +1412,7 @@ start,
             status (SmurfStatus instance): object indexing of rogue variables 
             at specified time.
         """
-        return SmurfStatus.from_time(time, self,
-stream_id=stream_id,show_pb=show_pb)
+        return SmurfStatus.from_time(time, self, stream_id=stream_id,show_pb=show_pb)
 
 def dump_DetDb(archive, detdb_file):
     """
@@ -1540,7 +1491,8 @@ class SmurfStatus:
         flux_ramp_rate_hz : float
             Flux Ramp Rate calculated from the RampMaxCnt and the digitizer
             frequency.
-    """    NUM_BANDS = 8
+    """    
+    NUM_BANDS = 8
     CHANS_PER_BAND = 512
 
     def __init__(self, status):
@@ -1573,8 +1525,7 @@ class SmurfStatus:
         self.action = self.status.get(f'{pysmurf_root}.pysmurf_action')
         if self.action == '':
             self.action = None
-        self.action_timestamp =
-self.status.get(f'{pysmurf_root}.pysmurf_action_timestamp')
+        self.action_timestamp = self.status.get(f'{pysmurf_root}.pysmurf_action_timestamp')
         if self.action_timestamp == 0:
             self.action_timestamp = None
         
@@ -1601,10 +1552,8 @@ self.status.get(f'{pysmurf_root}.pysmurf_action_timestamp')
         for band in range(self.NUM_BANDS):
             band_root = band_roots[band]
             band_center = self.status.get(f'{band_root}.bandCenterMHz')
-            subband_offset =
-self.status.get(f'{band_root}.toneFrequencyOffsetMHz')
-            channel_offset =
-self.status.get(f'{band_root}.CryoChannels.centerFrequencyArray')
+            subband_offset = self.status.get(f'{band_root}.toneFrequencyOffsetMHz')
+            channel_offset = self.status.get(f'{band_root}.CryoChannels.centerFrequencyArray')
 
             # Skip band if one of these fields is None
             if None in [band_center, subband_offset, channel_offset]:
@@ -1619,7 +1568,7 @@ self.status.get(f'{band_root}.CryoChannels.centerFrequencyArray')
         ramp_max_cnt = self.status.get(f'{rtm_root}.RampMaxCnt')
         if ramp_max_cnt is None:
             self.flux_ramp_rate_hz = None
-        lse:
+        else:
             digitizer_freq_mhz = float(self.status.get(
                 f'{band_roots[0]}.digitizerFrequencyMHz', 614.4))
             ramp_max_cnt_rate_hz = 1.e6*digitizer_freq_mhz / 2.
@@ -1660,8 +1609,7 @@ self.status.get(f'{band_root}.CryoChannels.centerFrequencyArray')
                 frame = frames[0]
                 if str(frame.type) == 'Wiring':
                     if status.get('start') is None:
-                        status['start'] =
-frame['time'].time/spt3g_core.G3Units.s
+                        status['start'] = frame['time'].time/spt3g_core.G3Units.s
                         status['stop'] = frame['time'].time/spt3g_core.G3Units.s
                     else:
                         status['stop'] = frame['time'].time/spt3g_core.G3Units.s
@@ -1693,7 +1641,7 @@ frame['time'].time/spt3g_core.G3Units.s
         """
         time = archive._make_datetime(time)
         session = archive.Session()
-        q  = session.query(Frames).filter(
+        q = session.query(Frames).filter(
                 Frames.type_name == 'Observation',
                 Frames.time <= time
             ).order_by(Frames.time.desc())
@@ -1710,15 +1658,14 @@ frame['time'].time/spt3g_core.G3Units.s
                 )
         
         if q.count()==0:
-            logger.error(f"No Frames found before time: {time}, stream_id:
-{stream_id}")
+            logger.error(f"No Frames found before time: {time}, stream_id: {stream_id}")
         
         start_frame = q.first()
         session_start = start_frame.time
         if stream_id is None:
             stream_id == start_frame.file.stream_id
-            
-        status_frames  session.query(Frames).join(Files).filter(
+         
+        status_frames = session.query(Frames).join(Files).filter(
                 Files.stream_id == stream_id,
                 Frames.type_name == 'Wiring',
                 Frames.time >= session_start,
@@ -1733,8 +1680,7 @@ frame['time'].time/spt3g_core.G3Units.s
         if dump_frame is not None:
             status_frames = [dump_frame]
         else:
-            logger.info("Status dump frame not found, reading all status
-frames")
+            logger.info("Status dump frame not found, reading all status frames")
             status_frames = status_frames.all()
             
         status = {
@@ -1853,27 +1799,22 @@ def get_channel_mask(ch_list, status, archive=None, obsfiledb=None,
             elif np.issubdtype( type(ch), np.str_):
                 #### this is a channel name
                 if session is not None:
-                    channel =
-session.query(Channels).filter(Channels.name==ch).one_or_none()
+                    channel = session.query(Channels).filter(Channels.name==ch).one_or_none()
                     if channel is None:
                         if not ignore_missing:
-                            raise ValueError(f"channel {ch} not found in
-G3tSmurf Archive")
+                            raise ValueError(f"channel {ch} not found in G3tSmurf Archive")
                         continue
                     b,c = channel.band, channel.channel
                 elif obsfiledb is not None:
-                    c = obsfiledb.conn.execute('select band,channel from
-channels where name=?',(ch,))
+                    c = obsfiledb.conn.execute('select band,channel from channels where name=?',(ch,))
                     c = [(r[0],r[1]) for r in c]
                     if len(c) == 0:
                         if not ignore_missing:
-                            raise ValueError(f"channel {ch} not found in
-obsfiledb")
+                            raise ValueError(f"channel {ch} not found in obsfiledb")
                         continue
                     b,c = c[0]
                 else:
-                    raise ValueError("Need G3tSmurf Archive or Obsfiledb to pass
-channel names")
+                    raise ValueError("Need G3tSmurf Archive or Obsfiledb to pass channel names")
                 
                 idx = status.mask_inv[b,c]
                 if idx == -1:
@@ -1883,8 +1824,7 @@ channel names")
                 msk[idx] = True
                 
             else:
-                raise TypeError(f"type {type(ch)} for channel {ch} not
-understood")
+                raise TypeError(f"type {type(ch)} for channel {ch} not understood")
         else:
             if len(ch) == 2:
                 ### this is a band, channel pair
@@ -1908,35 +1848,28 @@ def _get_tuneset_channel_names(status, ch_map, archive):
     ## tune file in status
     if status.tune is not None and len(status.tune) > 0:
         tune_file = status.tune.split('/')[-1]
-        tune = session.query(Tunes).filter(Tunes.name ==
-tune_file).one_or_none()
-       if tune is None :
+        tune = session.query(Tunes).filter(Tunes.name == tune_file).one_or_none()
+        if tune is None :
             logger.info(f"Tune file {tune_file} not found in G3tSmurf archive")
             return ch_map
         if tune.tuneset is None:
-            logger.info(f"Tune file {tune_file} has no TuneSet in G3tSmurf
-archive")
+            logger.info(f"Tune file {tune_file} has no TuneSet in G3tSmurf archive")
             return ch_map
     else:
-        logger.info("Tune information not in SmurfStatus, using most recent
-Tune")
-        tune = session.query(Tunes).filter(Tunes.start <=
-dt.datetime.utcfromtimestamp(status.start))
+        logger.info("Tune information not in SmurfStatus, using most recent Tune")
+        tune = session.query(Tunes).filter(Tunes.start <= dt.datetime.utcfromtimestamp(status.start))
         tune = tune.order_by(db.desc(Tunes.start)).first()
         if tune is None:
             logger.info("Most recent Tune does not exist")
             return ch_map
         if tune.tuneset is None:
-            logger.info(f"Tune file {tune.name} has no TuneSet in G3tSmurf
-archive")
+            logger.info(f"Tune file {tune.name} has no TuneSet in G3tSmurf archive")
             return ch_map
     
-    bands, channels, names = zip(*[(ch.band, ch.channel, ch.name) for ch in
-tune.tuneset.channels])
+    bands, channels, names = zip(*[(ch.band, ch.channel, ch.name) for ch in tune.tuneset.channels])
     for i in range(len(ch_map)):
         try:
-            msk = np.all( [ch_map['band'][i]== bands,
-ch_map['channel'][i]==channels], axis=0)
+            msk = np.all( [ch_map['band'][i]== bands, ch_map['channel'][i]==channels], axis=0)
             j = np.where(msk)[0][0]
             ch_map[i]['name'] = names[j]
         except:
@@ -1955,12 +1888,10 @@ def _get_detset_channel_names(status, ch_map, obsfiledb):
                     'where name=?', (status.tune,))
         detsets = [r[0] for r in c]
     else:
-        logger.info("Tune information not in SmurfStatus, using most recent
-Tune")
+        logger.info("Tune information not in SmurfStatus, using most recent Tune")
         c = obsfiledb.conn.execute('select tuneset_id from tunes '
                             'where start<=? '
-                            'order by start desc',
-(dt.datetime.utcfromtimestamp(status.start),))
+                            'order by start desc', (dt.datetime.utcfromtimestamp(status.start),))
         tuneset_id = [r[0] for r in c][0]
 
         c = obsfiledb.conn.execute('select name from tunesets '
@@ -1979,8 +1910,7 @@ Tune")
 
     for i in range(len(ch_map)):
         try:
-            msk = np.all( [ch_map['band'][i]== bands,
-ch_map['channel'][i]==channels], axis=0)
+            msk = np.all( [ch_map['band'][i]== bands, ch_map['channel'][i]==channels], axis=0)
             j = np.where(msk)[0][0]
             ch_map[i]['name'] = names[j]
         except:
@@ -2005,7 +1935,7 @@ def _get_channel_mapping(status, ch_map):
             ch_map[i]['name'] = 'rch_{:04d}'.format(ch)
             ch_map[i]['freqs']= -1
             ch_map[i]['band'] = -1
-           ch_map[i]['channel'] = -1        
+            ch_map[i]['channel'] = -1        
     return ch_map
 
 def get_channel_info(status, mask=None, archive=None, obsfiledb=None, 
@@ -2042,12 +1972,9 @@ def get_channel_info(status, mask=None, archive=None, obsfiledb=None,
     if mask is not None:
         ch_list = ch_list[mask]
     
-    ch_map = np.zeros( len(ch_list), dtype = [('idx', int), ('name',
-np.unicode_,30), 
-                                              ('rchannel', np.unicode_,30),
-('band', int),
-                                             ('channel', int), ('freqs',
-float)])
+    ch_map = np.zeros( len(ch_list), dtype = [('idx', int), ('name', np.unicode_,30), 
+                                              ('rchannel', np.unicode_,30), ('band', int),
+                                             ('channel', int), ('freqs', float)])
     ch_map['idx'] = ch_list
     
     ch_map = _get_channel_mapping(status, ch_map)
@@ -2074,8 +2001,7 @@ def _get_timestamps(streams, load_type=None):
             result from unpacking the desired data frames
         load_type : None or int
             if None, uses highest precision version possible. integer values
-will
-            use the TimingParadigm class for indexing
+            will use the TimingParadigm class for indexing
     """
     if load_type is None:
         ## determine the desired loading type. Expand as logic as
@@ -2115,8 +2041,7 @@ def load_file(filename, channels=None, ignore_missing=True,
           If true, loads the primary data fields, old .g3 files may not have 
           these fields. 
       archive : a G3tSmurf instance (optional)
-      obsfiledb : a ObsFileDb instance (optional, used when loading from
-context)
+      obsfiledb : a ObsFileDb instance (optional, used when loading from context)
       status : a SmurfStatus Instance we don't want to use the one from the 
           first file
       det_axis : name of the axis used for channels / detectors
@@ -2155,21 +2080,17 @@ context)
         io_load.FieldGroup('data', ch_info.rchannel, timestamp_field='time'),
     ]
     if load_primary:
-        subreq.extend( [io_load.FieldGroup('primary', [io_load.Field('*',
-wildcard=True)])] )
+        subreq.extend( [io_load.FieldGroup('primary', [io_load.Field('*', wildcard=True)])] )
     if load_biases:
-        subreq.extend( [io_load.FieldGroup('tes_biases', [io_load.Field('*',
-wildcard=True)]),])
+        subreq.extend( [io_load.FieldGroup('tes_biases', [io_load.Field('*', wildcard=True)]),])
 
     request = io_load.FieldGroup('root', subreq)
     streams = None
     try:
-        for filename in tqdm( filenames , total=len(filenames), disable=(not
-show_pb)):
+        for filename in tqdm( filenames , total=len(filenames), disable=(not show_pb)):
             streams = io_load.unpack_frames(filename, request, streams=streams)
     except KeyError:
-        logger.error("Frames do not contain expected fields. Did Channel Mask
-change during the file?")
+        logger.error("Frames do not contain expected fields. Did Channel Mask change during the file?")
         raise
         
     count = sum(map(len,streams['time']))
@@ -2185,8 +2106,7 @@ change during the file?")
     aman.wrap( 'signal', np.zeros(aman.shape, 'float32'),
                  [(0, det_axis), (1, 'samps')])
     for idx in range(aman[det_axis].count):
-        io_load.hstack_into(aman.signal[idx],
-streams['data'][ch_info.rchannel[idx]])
+        io_load.hstack_into(aman.signal[idx], streams['data'][ch_info.rchannel[idx]])
 
     rad_per_count = np.pi / 2**15
     aman.signal *= rad_per_count
@@ -2195,13 +2115,11 @@ streams['data'][ch_info.rchannel[idx]])
 
     temp = core.AxisManager( aman.samps.copy() )
     for k in streams['primary'].keys():
-        temp.wrap( k, io_load.hstack_into(None, streams['primary'][k]),
-([(0,'samps')]) )
+        temp.wrap( k, io_load.hstack_into(None, streams['primary'][k]), ([(0,'samps')]) )
     aman.wrap('primary', temp)
 
     if load_biases:
-        bias_axis = core.LabelAxis('bias_lines',
-np.arange(len(streams['tes_biases'].keys())))
+        bias_axis = core.LabelAxis('bias_lines', np.arange(len(streams['tes_biases'].keys())))
         aman.wrap('biases', np.zeros((bias_axis.count, aman.samps.count)), 
                           [ (0,bias_axis), 
                             (1,'samps')])
