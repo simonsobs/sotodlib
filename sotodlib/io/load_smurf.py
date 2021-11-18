@@ -762,6 +762,7 @@ class G3tSmurf:
                                     cha_path, session):   
         """Add new entry to the Channel Assignments table. Called by the
         index_metadata function.
+        
         Args
         -------
         stream_id : string
@@ -776,6 +777,7 @@ class G3tSmurf:
         session : SQLAlchemy Session
             The active session
         """
+        
         band = int(re.findall('b\d.txt', cha)[0][1])   
 
         ch_assign = session.query(ChanAssignments).filter(
@@ -1166,7 +1168,7 @@ class G3tSmurf:
                                 pattern = 'channel_assignment',
                                  stop_at_error=False):
         """ Index all channel assignments newer than a minimum ctime
-
+        
         Args
         -----
         session : G3tSmurf session connection
@@ -1175,6 +1177,7 @@ class G3tSmurf:
         pattern : string
             string pattern to look for channel assignments
         """
+        
         for fpattern, stream_id, ctime, path in self.search_metadata_files(min_ctime=min_ctime):
             if pattern in fpattern:
                 try:
@@ -1312,7 +1315,7 @@ class G3tSmurf:
             * Fields:
                * timestamps : (samps,) 
                     unix timestamps for loaded data
-                * signal : (channels, samps) 
+                * signal : (dets, samps) 
                     Array of the squid phase in units of radians for each channel
                 * primary : AxisManager (samps,)
                     "primary" data included in the packet headers
@@ -1321,7 +1324,7 @@ class G3tSmurf:
                     'TESRelaySetting', 'UnixTime'
                 * biases (optional): (bias_lines, samps)
                     Bias values during the data
-                * ch_info : AxisManager (channels,)
+                * ch_info : AxisManager (dets,)
                     Information about channels, including SMuRF band, channel, 
                     frequency.
         
