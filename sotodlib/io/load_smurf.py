@@ -1032,7 +1032,7 @@ class G3tSmurf:
                 else:
                     tuneset = tune.tuneset
             else:
-                tuneset = session.query(TuneSets).filter(TuneSets.strt <= obs.start)
+                tuneset = session.query(TuneSets).filter(TuneSets.start <= obs.start)
                 tuneset = tuneset.order_by(db.desc(TuneSets.start)).first()
                 
             already_have = [ts.id for ts in obs.tunesets]
@@ -1765,7 +1765,7 @@ def get_channel_mask(ch_list, status, archive=None, obsfiledb=None,
     mask : bool array
         Mask for the channels in the SmurfStatus
         
-    TODO: hen loading from name, need to check tune file in use during file. 
+    TODO: When loading from name, need to check tune file in use during file. 
     """
     if status.mask is None:
         raise ValueError("Status Mask not set")
@@ -2032,7 +2032,7 @@ def load_file(filename, channels=None, ignore_missing=True,
           A filename or list of filenames (to be loaded in order).
           Note that SmurfStatus is only loaded from the first file
       channels: list or None
-          If notNone, it should be a list that can be sent to get_channel_mask.
+          If not None, it should be a list that can be sent to get_channel_mask.
       ignore_missing : bool
           If true, will not raise errors if a requested channel is not found
       load_biases : bool
@@ -2123,7 +2123,7 @@ def load_file(filename, channels=None, ignore_missing=True,
         aman.wrap('biases', np.zeros((bias_axis.count, aman.samps.count)), 
                           [ (0,bias_axis), 
                             (1,'samps')])
-        for k in stream['tes_biases'].keys():
+        for k in streams['tes_biases'].keys():
             i = int(k[4:])
             io_load.hstack_into(aman.biases[i], streams['tes_biases'][k])
     aman.wrap('flags', core.FlagManager.for_tod(aman, det_axis, 'samps'))
