@@ -1751,8 +1751,7 @@ def get_channel_mask(ch_list, status, archive=None, obsfiledb=None,
         * int : absolute readout channel
         * (int, int) : band, channel
         * string : channel name (requires archive or obsfiledb)
-        * float : frequency in the smurf status (or should we use channel
-        * assignment?)
+        * float : frequency in the smurf status (or should we use channel assignment?)
 
     status : SmurfStatus instance
         Status to use to generate channel loading mask

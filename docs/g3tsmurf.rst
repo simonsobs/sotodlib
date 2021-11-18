@@ -7,10 +7,10 @@ G3tSMuRF
 G3tSmurf is primarily a database building system for indexing the smurf
 timestreams and ancillary smurf data to produce the tables necessary for Context
 and the rest of sotodlib. It also includes data loading functionality. The most
-general SO user will not interact much with G3tSmurf, it will build ObsDb,
-ObsFileDb, and DetDb in the background that will used to load data through
+general SO user will not interact much with G3tSmurf, it will build the ObsDb,
+ObsFileDb, and DetDb databases in the background. These will used to load data through
 Context. Those working closely with laboratory, level 1, or level 2 site data
-will likely be interacting with the databases more directly or using the
+will likely be interacting with the databases more directly and/or using the
 G3tSmurf loaders. 
 
 
@@ -40,7 +40,7 @@ loads<g3tsmurf-load-section>` be used instead.
 Loading with G3tSmurf
 =====================
 
-To load data with database information we first have to instanciate
+To load data with database information we first have to instantiate
 our G3tSmurf object:: 
     
     SMURF = G3tSmurf(archive_path='/path/to/data/timestreams/',
