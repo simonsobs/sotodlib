@@ -109,7 +109,7 @@ AxisManagers loaded with G3tSmurf will all have the form::
     Fields:
         timestamps : (samps,)
             ctime timestamps for the loaded data
-        signal : (channels, samps)
+        signal : (dets, samps)
             Array of the squid phase in units of radians for each channel
         primary : AxisManager (samps,)
             "primary" data included in the packet headers
@@ -118,7 +118,7 @@ AxisManagers loaded with G3tSmurf will all have the form::
             'TESRelaySetting', 'UnixTime'
         biases (optional): (bias_lines, samps)
             Bias values during the data
-        ch_info : AxisManager (channels,)
+        ch_info : AxisManager (dets,)
             Information about channels, including SMuRF band, channel,
              frequency.
 
