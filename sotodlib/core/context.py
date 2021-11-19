@@ -247,8 +247,9 @@ class Context(odict):
         # Load metadata.
         metadata_list = self._get_warn_missing('metadata', [])
         # edge case when only one entry in metadata
-        if type(metadata_list) == dict:
-            metadata_list=[metadata_list]
+        if not isinstance(metadata_list, list):
+            raise ValueError(f"Expected metadata list not {type(metadata_list)}."
+                             " Check .yaml Formatting")
         meta = self.loader.load(metadata_list, request)
 
         # Load TOD.
