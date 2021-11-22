@@ -246,6 +246,9 @@ class Context(odict):
 
         # Load metadata.
         metadata_list = self._get_warn_missing('metadata', [])
+        if not isinstance(metadata_list, list):
+            raise ValueError(f"Context metadata entry has type {type(metadata_list)} "
+                            "but should be a list. Check .yaml formatting")
         meta = self.loader.load(metadata_list, request)
 
         # Load TOD.
