@@ -1,5 +1,6 @@
 import datetime
 import logging
+import re
 import time
 
 import numpy as np
@@ -231,14 +232,16 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
     return signal
 
 def get_source_pos(source_name, timestamp, site='_default'):
-    """Get the equatorial coordinates of a planet at some time.  Returns
-    the apparent position, accounting for geographical position on
-    earth, but assuming no atmospheric refraction.
+    """Get the equatorial coordinates of a planet (or fixed-position
+    source, see note) at some time.  Returns the apparent position,
+    accounting for geographical position on earth, but assuming no
+    atmospheric refraction.
 
     Note that this will download a 16M ephemeris file on first use.
 
     Args:
-      source_name: Planet name; in capitalized format, e.g. "Jupiter"
+      source_name: Planet name; in capitalized format, e.g. "Jupiter",
+        or fixed source specification.
       timestamp: unix timestamp.
       site (str or so3g.proj.EarthlySite): if this is a string, the
         site will be looked up in so3g.proj.SITES dict.
@@ -248,7 +251,21 @@ def get_source_pos(source_name, timestamp, site='_default'):
       dec (float): in radians.
       distance (float): in AU.
 
+    Note:
+
+      Before checking in the ephemeris, the source_name will be
+      matched against a regular expression and if it has the format
+      'Jxxx[+-]yyy', where xxx and yyy are decimal numbers, then a
+      fixed-position source at RA,Dec = xxx,yyy in degrees will be
+      processed.  In that case, the distance is returned as Inf.
+
     """
+    # Check against fixed-position template...
+    m = re.match(r'J(?P<ra_deg>\d+(\.\d*)?)(?P<dec_deg>[+-]\d+(\.\d*)?)', source_name)
+    if m:
+        ra, dec = float(m['ra_deg']) * coords.DEG, float(m['dec_deg']) * coords.DEG
+        return ra, dec, float('inf')
+
     # Get the ephemeris -- this will trigger a 16M download on first use.
     de_url = RESOURCE_URLS['de421.bsp']
     de_filename = au_data.download_file(de_url, cache=True)
@@ -351,7 +368,7 @@ def get_nearby_sources(tod=None, source_list=None, distance=1.):
     return positions
 
 def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
-                         center_on=None, res=None):
+                         center_on=None, res=None, max_pix=4e6):
     """Process masking instructions and create RangesMatrix that flags
     samples in the TOD that are within the masked region.  This
     masking makes use of a map with the footprint encoded in P, so
@@ -367,6 +384,12 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
         using center_on and res parameters.
       mask: source masking instructions (see note).
       wrap: key in tod at which to store the result.
+      res: If P is None, sets the target mask map resolution
+        (radians).
+      max_pix: If P is None, this sets the maximum acceptable number
+        of pixels for the mask map.  This is to catch cases where an
+        incorrect source has been passed in, for example, leading to a
+        weird map footprint
 
     Returns:
       RangesMatrix marking the samples inside the masked region.
@@ -385,6 +408,8 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
     if P is None:
         logger.info('Getting Projection Matrix ...')
         P, X = get_scan_P(tod, center_on, res=res, comps='T')
+        if P.geom[0][0] * P.geom[0][1] > max_pix:
+            raise ValueError(f'Mask map too large: {P.geom}')
 
     if isinstance(mask, str):
         # Assume it's a filename, and file is simple columns of (x, y,
