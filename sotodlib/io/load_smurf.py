@@ -673,6 +673,7 @@ class G3tSmurf:
                 dump = False
             else:
                 dump = bool(frame['dump'])
+                
             ## only make Frame once the non-nullable fields are known
             db_frame = Frames(frame_idx=frame_idx, file=db_file,
                              offset = db_frame_offset,
@@ -1396,9 +1397,9 @@ class G3tSmurf:
             stream_id = q[0].stream_id
             
         if status is None:
-            scan_start = session.query(Frames.start).filter(Frames.start > start,
+            scan_start = session.query(Frames.time).filter(Frames.time >= start,
                                                             Frames.type_name=='Scan')
-            scan_start = scan_start.order_by(Frames.start).first()
+            scan_start = scan_start.order_by(Frames.time).first()
                 
 
             try:
