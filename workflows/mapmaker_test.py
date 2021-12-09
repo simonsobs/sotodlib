@@ -206,7 +206,7 @@ def main():
 
     # Scan input map.  This will create the pixel distribution as well, since
     # it does not yet exist.
-    scan_map = toast.ops.ScanHealpix(file=args.sky_file)
+    scan_map = toast.ops.ScanHealpixMap(file=args.sky_file)
     scan_map.enabled = True
     scan_map.pixel_pointing = pixels_radec
     scan_map.stokes_weights = weights_radec
