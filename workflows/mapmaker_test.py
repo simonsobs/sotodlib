@@ -20,6 +20,7 @@ from astropy import units as u
 # Import sotodlib.toast first before toast, since that sets default object names
 # to use in toast.
 import sotodlib.toast as sotoast
+from sotodlib import mapmaking as mm
 
 import toast
 import toast.ops
@@ -206,7 +207,7 @@ def main():
 
     # Scan input map.  This will create the pixel distribution as well, since
     # it does not yet exist.
-    scan_map = toast.ops.ScanHealpix(file=args.sky_file)
+    scan_map = toast.ops.ScanHealpixMap(file=args.sky_file)
     scan_map.enabled = True
     scan_map.pixel_pointing = pixels_radec
     scan_map.stokes_weights = weights_radec
@@ -286,6 +287,11 @@ def main():
     mlmapmaker = so_ops.MLMapmaker(comps="TQU")
     mlmapmaker.area = args.area_file
     mlmapmaker.enabled = True  # Toggle to False to disable
+    # this should be mm.NmatDetvecs() for serious runs, but that one doesn't handle
+    # too low sample rate or too few detectors, so it's not good for test runs as
+    # long as the toast simulation steps are so slow.
+    mlmapmaker.Nmat = mm.NmatUncorr()
+    mlmapmaker.out_dir = args.out_dir
     mlmapmaker.apply(data)
     log.info_rank("Finished ML map-making in", comm=wcomm, timer=timer)
 
