@@ -133,20 +133,14 @@ class SignalMap(Signal):
             rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter,
                 ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
         else: rot = None
-        print("weather", unarr(obs.weather))
-        print("A cur %8.3f max %8.3f" % (memory.current()/1024**3, memory.max()/1024**3))
         pmap = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry,
             rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site))
-        print("B cur %8.3f max %8.3f" % (memory.current()/1024**3, memory.max()/1024**3))
         # Build the RHS for this observation
         pcut.clear(Nd)
         obs_rhs = pmap.zeros()
-        print("C cur %8.3f max %8.3f" % (memory.current()/1024**3, memory.max()/1024**3))
         pmap.to_map(dest=obs_rhs, signal=Nd)
-        print("D cur %8.3f max %8.3f" % (memory.current()/1024**3, memory.max()/1024**3))
         # Build the per-pixel inverse covmat for this observation
         obs_div    = pmap.zeros(super_shape=(self.ncomp,self.ncomp))
-        print("E cur %8.3f max %8.3f" % (memory.current()/1024**3, memory.max()/1024**3))
         for i in range(self.ncomp):
             obs_div[i]   = 0
             obs_div[i,i] = 1
@@ -157,12 +151,9 @@ class SignalMap(Signal):
             obs_div[i]   = 0
             pmap.to_map(signal=Nd, dest=obs_div[i])
         del Nd
-        print("F cur %8.3f max %8.3f" % (memory.current()/1024**3, memory.max()/1024**3))
         # Update our full rhs and div. This works for both plain and distributed maps
         self.rhs = self.rhs.insert(obs_rhs, op=np.ndarray.__iadd__)
-        print("G cur %8.3f max %8.3f" % (memory.current()/1024**3, memory.max()/1024**3))
         self.div = self.div.insert(obs_div, op=np.ndarray.__iadd__)
-        print("H cur %8.3f max %8.3f" % (memory.current()/1024**3, memory.max()/1024**3))
         # Save the per-obs things we need. Just the pointing matrix in our case.
         # Nmat and other non-Signal-specific things are handled in the mapmaker itself.
         self.data[id] = bunch.Bunch(pmap=pmap, obs_geo=obs_rhs.geometry)
@@ -391,6 +382,10 @@ class Nmat:
     def __init__(self): self.ivar = np.full(1, 1.0)
     def build(self, tod, **kwargs): return self
     def apply(self, tod): return tod
+    def write(self, fname):
+        bunch.write(fname, bunch.Bunch(type="Nmat"))
+    @staticmethod
+    def from_bunch(data): return Nmat()
 
 class NmatUncorr(Nmat):
     def __init__(self, spacing="exp", nbin=100, nmin=10, bins=None, ips_binned=None, ivar=None):
@@ -425,6 +420,14 @@ class NmatUncorr(Nmat):
         # here to reduce the number of operations needed
         fft.irfft(ftod, tod)
         return tod
+    def write(self, fname):
+        data = bunch.Bunch(type="NmatUncorr")
+        for field in ["spacing", "nbin", "nmin", "bins", "ips_binned", "ivar"]:
+            data[field] = getattr(self, field)
+        bunch.write(fname, data)
+    @staticmethod
+    def from_bunch(data):
+        return NmatUncorr(spacing=data.spacing, nbin=data.nbin, nmin=data.nmin, bins=data.bins, ips_binned=data.ips_binned, ivar=data.ivar)
 
 class NmatDetvecs(Nmat):
     def __init__(self, bin_edges=None, eig_lim=16, single_lim=0.55, mode_bins=[0.25,4.0,20],
@@ -510,7 +513,6 @@ class NmatDetvecs(Nmat):
         return NmatDetvecs(bin_edges=self.bin_edges, eig_lim=self.eig_lim, single_lim=self.single_lim,
                 window=self.window, nwin=nwin, downweight=self.downweight, verbose=self.verbose,
                 bins=bins, D=D, V=V, iD=iD, iV=iV, s=s, ivar=ivar)
-
     def apply(self, tod, inplace=False, slow=False):
         if inplace: tod = np.array(tod)
         apply_window(tod, self.nwin)
@@ -530,6 +532,27 @@ class NmatDetvecs(Nmat):
         fft.irfft(ftod, tod)
         apply_window(tod, self.nwin)
         return tod
+    def write(self, fname):
+        data = bunch.Bunch(type="NmatDetvecs")
+        for field in ["bin_edges", "eig_lim", "single_lim", "window", "nwin", "downweight",
+                "bins", "D", "V", "iD", "iV", "s", "ivar"]:
+            data[field] = getattr(self, field)
+        bunch.write(fname, data)
+    @staticmethod
+    def from_bunch(data):
+        return NmatDetvecs(bin_edges=data.bin_edges, eig_lim=data.eig_lim, single_lim=data.single_lim,
+                window=data.window, nwin=data.nwin, downweight=data.downweight,
+                bins=data.bins, D=data.D, V=data.V, iD=data.iD, iV=data.iV, s=data.s, ivar=data.ivar)
+
+def write_nmat(fname, nmat):
+    nmat.write(fname)
+
+def read_nmat(fname):
+    data = bunch.read(fname)
+    if   data.type == "NmatDetvecs": return NmatDetvecs.from_bunch(data)
+    elif data.type == "NmatUncorr":  return NmatUncorr .from_bunch(data)
+    elif data.type == "Nmat":        return Nmat       .from_bunch(data)
+    else: raise IOError("Unrecognized noise matrix type '%s' in '%s'" % (str(data.type), fname))
 
 def measure_cov(d, nmax=10000):
     d = d[:,::max(1,d.shape[1]//nmax)]
