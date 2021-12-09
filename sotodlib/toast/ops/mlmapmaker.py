@@ -72,7 +72,7 @@ class MLMapmaker(Operator):
 
     comps = Unicode("T", help="Components (must be 'T', 'QU' or 'TQU')")
 
-    Nmat = Instance(allow_none=True, klass=mm.Nmat, help="The noise matrix to use")
+    Nmat = Instance(klass=mm.Nmat, help="The noise matrix to use")
 
     dtype_map = Instance(
         klass=np.dtype, args=(np.float64,), help="Numpy dtype of map products"
@@ -194,10 +194,7 @@ class MLMapmaker(Operator):
             signal_map   = mm.SignalMap(self._shape, self._wcs, data.comm.comm_world, comps=self.comps,
                                dtype=self.dtype_map, recenter=self._recenter, tiled=self.tiled)
             signals      = [signal_cut, signal_map]
-            noise_model  = mm.NmatDetvecs(verbose=(self.verbose > 1), downweight=[1e-4, 0.25, 0.50], window=0)
-            #noise_model  = mm.NmatUncorr()
-            #noise_model  = mm.Nmat()
-            self._mapmaker = mm.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=self.verbose)
+            self._mapmaker = mm.MLMapmaker(signals, noise_model=self.Nmat, dtype=dtype_tod, verbose=self.verbose)
             # Store this to be able to output rhs and div later
             self._signal_map = signal_map
 
