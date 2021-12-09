@@ -236,7 +236,7 @@ def main():
     # case we need to specify the Stokes weights in Az/El.
     # sim_atmosphere.polarization_fraction = 0.01
     # sim_atmosphere.detector_weights = weights_azel
-    sim_atmosphere.enabled = False  # Toggle to False to disable
+    sim_atmosphere.enabled = True  # Toggle to False to disable
     sim_atmosphere.serial = False
     sim_atmosphere.apply(data)
     log.info_rank("Simulated and observed atmosphere in", comm=wcomm, timer=timer)

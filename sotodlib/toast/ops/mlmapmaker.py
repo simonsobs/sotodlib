@@ -12,7 +12,7 @@ import traitlets
 
 from astropy import units as u
 
-from pixell import enmap
+from pixell import enmap, tilemap
 
 import toast
 from toast.traits import trait_docs, Unicode, Int, Instance, Bool
@@ -33,6 +33,30 @@ class MLMapmaker(Operator):
     """Operator which accumulates data to the Maximum Likelihood Mapmaker."""
 
     # Class traits
+
+    # SKN note: I think this style is *much* more readable, but I won't change it for now
+    #API       = Int(0, help="Internal interface version for this operator")
+    #out_dir   = Unicode(".", help="The output directory")
+    #area      = Unicode(None, allow_none=True, help="Load the enmap geometry from this file")
+    #center_at = Unicode(None, allow_none=True, help="The format is [from=](ra:dec|name),[to=(ra:dec|name)],[up=(ra:dec|name|system)]")
+    #comps     = Unicode("T", help="Components (must be 'T', 'QU' or 'TQU')")
+    #Nmat      = Instance(allow_none=True, klass=mm.Nmat, help="The noise matrix to use")
+    #dtype_map = Instance(klass=np.dtype, args=(np.float64,), help="Numpy dtype of map products")
+    #times     = Unicode(obs_names.times, help="Observation shared key for timestamps")
+    #boresight = Unicode(obs_names.boresight_azel, help="Observation shared key for boresight Az/El")
+    #det_data  = Unicode(obs_names.det_data, help="Observation detdata key for the timestream data")
+    #det_flags = Unicode(None, allow_none=True, help="Observation detdata key for flags to use")
+    #det_flag_mask = Int(0, help="Bit mask value for optional detector flagging")
+    #shared_flags  = Unicode(None, allow_none=True, help="Observation shared key for telescope flags to use")
+    #shared_flag_mask = Int(0, help="Bit mask value for optional shared flagging")
+    #view      = Unicode(None, allow_none=True, help="Use this view of the data in all observations")
+    #noise_model  = Unicode("noise_model", help="Observation key containing the noise model")
+    #purge_det_data = Bool(False, help="If True, clear all observation detector data after accumulating")
+    #tiled     = Bool(False, help="If True, the map will be represented as distributed tiles in memory. For large maps this is faster and more memory efficient, but for small maps it has some overhead due to extra communication.")
+    #verbose   = Int(1, allow_none=True, help="Set verbosity in MLMapmaker.  If None, use toast loglevel")
+    #weather   = Unicode("typical", help="Weather to assume when making maps")
+    #site      = Unicode("so",      help="Site to use when making maps")
+
 
     API = Int(0, help="Internal interface version for this operator")
 
@@ -93,14 +117,19 @@ class MLMapmaker(Operator):
         help="If True, clear all observation detector data after accumulating",
     )
 
+    tiled = Bool(
+        False,
+        help="If True, the map will be represented as distributed tiles in memory. For large maps this is faster and more memory efficient, but for small maps it has some overhead due to extra communication."
+    )
+
     verbose = Int(
         1,
         allow_none=True,
         help="Set verbosity in MLMapmaker.  If None, use toast loglevel",
     )
 
-    weather = Unicode("typical", help="Weather to assume when making maps")
-    site    = Unicode("so",      help="Site to use when making maps")
+    weather = Unicode("vacuum", help="Weather to assume when making maps")
+    site    = Unicode("so",     help="Site to use when making maps")
 
     @traitlets.validate("comps")
     def _check_mode(self, proposal):
@@ -160,24 +189,17 @@ class MLMapmaker(Operator):
             if self.center_at is not None:
                 self._recenter = mm.parse_recentering(self.center_at)
 
-            self._mapmaker = mm.MLMapmaker(
-                self._shape,
-                self._wcs,
-                comps=self.comps,
-                #noise_model=mm.NmatDetvecs(
-                #    verbose=(self.verbose > 1),
-                #    downweight=[1e-4, 0.25, 0.50],
-                #    window=0,
-                #),
-                #noise_model=mm.NmatUncorr(),
-                noise_model=mm.Nmat(),
-                #dtype_tod=self._dtype_tod,
-                dtype_tod=np.float32,
-                dtype_map=self.dtype_map,
-                comm=data.comm.comm_world,
-                recenter=self._recenter,
-                verbose=self.verbose,
-            )
+            dtype_tod    = np.float32
+            signal_cut   = mm.SignalCut(data.comm.comm_world, dtype=dtype_tod)
+            signal_map   = mm.SignalMap(self._shape, self._wcs, data.comm.comm_world, comps=self.comps,
+                               dtype=self.dtype_map, recenter=self._recenter, tiled=self.tiled)
+            signals      = [signal_cut, signal_map]
+            noise_model  = mm.NmatDetvecs(verbose=(self.verbose > 1), downweight=[1e-4, 0.25, 0.50], window=0)
+            #noise_model  = mm.NmatUncorr()
+            #noise_model  = mm.Nmat()
+            self._mapmaker = mm.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=self.verbose)
+            # Store this to be able to output rhs and div later
+            self._signal_map = signal_map
 
         for ob in data.obs:
             # Get the detectors we are using locally for this observation
@@ -259,6 +281,8 @@ class MLMapmaker(Operator):
             )
             axobs.wrap("boresight", axbore)
             axobs.wrap("glitch_flags", ranges, axis_map=[(0, axdets), (1, axsamps)])
+            axobs.wrap("weather", np.full(1, "vacuum"))
+            axobs.wrap("site",    np.full(1, "so"))
 
             # NOTE:  Expected contents look like:
             # >>> tod
@@ -272,9 +296,7 @@ class MLMapmaker(Operator):
             # >>> tod.boresight
             # AxisManager(az[samps], el[samps], roll[samps], samps:OffsetAxis(372680))
 
-            # Accumulate data to mapmaker
-            work = self._mapmaker.build_obs(ob.name, axobs, weather=self.weather, site=self.site)
-            self._mapmaker.add_obs(work)
+            self._mapmaker.add_obs(ob.name, axobs)
             del axobs
 
             # Optionally delete the input detector data to save memory, if
@@ -302,21 +324,17 @@ class MLMapmaker(Operator):
 
         prefix = os.path.join(self.out_dir, f"{self.name}_")
 
-        if comm.rank == 0:
-            enmap.write_map(f"{prefix}rhs.fits", self._mapmaker.map_rhs)
-            enmap.write_map(f"{prefix}div.fits", self._mapmaker.map_div)
-            enmap.write_map(
-                f"{prefix}bin.fits",
-                enmap.map_mul(self._mapmaker.map_idiv, self._mapmaker.map_rhs),
-            )
+        # This will need to be modified for more general cases where we don't solve for
+        # a sky map, or where we solve for multiple sky maps. The mapmaker itself supports it,
+        # the problem is the direct access to the rhs, div and idiv members
+        self._signal_map.write(prefix, "rhs", self._signal_map.rhs)
+        self._signal_map.write(prefix, "div", self._signal_map.div)
+        mmul = tilemap.map_mul if self.tiled else enmap.map_mul
+        self._signal_map.write(prefix, "bin", mmul(self._signal_map.idiv, self._signal_map.rhs))
 
         if comm is not None:
             comm.barrier()
-        log.info_rank(
-            f"MLMapmaker finished writing rhs, div, bin in",
-            comm=comm,
-            timer=timer,
-        )
+        log.info_rank(f"MLMapmaker finished writing rhs, div, bin in", comm=comm, timer=timer)
 
         tstep = Timer()
         tstep.start()
@@ -327,30 +345,21 @@ class MLMapmaker(Operator):
             if dump:
                 dstr = "(write)"
             msg = f"CG step {step.i:4d} {step.err:15.7e} {dstr}"
-            log.info_rank(
-                f"MLMapmaker   {msg} ",
-                comm=comm,
-                timer=tstep,
-            )
-            if dump and comm.rank == 0:
-                enmap.write_map(f"{prefix}map{step.i:04d}.fits", step.x)
+            log.info_rank(f"MLMapmaker   {msg} ", comm=comm, timer=tstep)
+            if dump:
+                for signal, val in zip(self._mapmaker.signals, step.x):
+                    if signal.output:
+                        signal.write(prefix, "map%04d" % step.i, val)
 
-        log.info_rank(
-            f"MLMapmaker finished solve in",
-            comm=comm,
-            timer=timer,
-        )
+        log.info_rank(f"MLMapmaker finished solve in", comm=comm, timer=timer)
 
-        if comm.rank == 0:
-            enmap.write_map(f"{prefix}map.fits", step.x)
+        for signal, val in zip(signals, step.x):
+            if signal.output:
+                signal.write(prefix, "map", val)
 
         if comm is not None:
             comm.barrier()
-        log.info_rank(
-            f"MLMapmaker wrote map in",
-            comm=comm,
-            timer=timer,
-        )
+        log.info_rank(f"MLMapmaker wrote map in", comm=comm, timer=timer)
 
     def _requires(self):
         req = {
