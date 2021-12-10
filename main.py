@@ -7,8 +7,78 @@ import numpy as np
 def pos2vel(p):
     return np.ediff1d(p)
 
-def locate_sign_changes(t):
-    return np.where(np.sign(t[:-1]) != np.sign(t[1:]))[0] + 1
+def locate_sign_changes(t, dy=0.001, min_gap=200):
+    tmin = np.min(t)
+    tmax = np.max(t)
+
+    if len(t) == 0:
+        return []
+
+    if np.sign(tmax) == np.sign(tmin):
+        return []
+
+    # If the data does not entirely cross the threshold region,
+    # do not consider it a sign change
+    if tmin > -dy and tmax < dy:
+        return []
+
+    # Find where the data crosses the lower and upper boundaries of the threshold region
+    c_lower = (np.where(np.sign(t[:-1]+dy) != np.sign(t[1:]+dy))[0] + 1)
+    c_upper = (np.where(np.sign(t[:-1]-dy) != np.sign(t[1:]-dy))[0] + 1)
+
+    # Noise handling:
+    # If there are multiple crossings of the same boundary (upper or lower) in quick
+    # succession (i.e., less than min_gap), it is mostly likely due to noise. In this case,
+    # take the average of each group of crossings.
+    if len(c_lower) > 0:
+        spl = np.array_split(c_lower, np.where(np.ediff1d(c_lower) > min_gap)[0] + 1)
+        c_lower = np.array([int(np.ceil(np.mean(s))) for s in spl])
+    if len(c_upper) > 0:
+        spu = np.array_split(c_upper, np.where(np.ediff1d(c_upper) > min_gap)[0] + 1)
+        c_upper = np.array([int(np.ceil(np.mean(s))) for s in spu])
+
+    events = np.sort(np.concatenate((c_lower, c_upper)))
+
+    # Look for zero-crossings
+    zc = []
+    while len(c_lower) > 0 and len(c_upper) > 0:
+        # Crossing from -ve to +ve
+        if c_lower[0] < c_upper[0]:
+            b = c_lower[c_lower < c_upper[0]]
+            zc.append(int( np.ceil(np.mean([b[-1], c_upper[0]])) ))
+            c_lower = c_lower[len(b):]
+        # Crossing from +ve to -ve
+        elif c_upper[0] < c_lower[0]:
+            b = c_upper[c_upper < c_lower[0]]
+            zc.append(int( np.ceil(np.mean([b[-1], c_lower[0]])) ))
+            c_upper = c_upper[len(b):]
+
+    # Replace all upper and lower crossings that contain a zero-crossing in between with the
+    # zero-crossing itself, but ONLY if those three events happen in quick succession (i.e.,
+    # shorter than min_gap). Otherwise, they are separate events -- there is likely a stop
+    # state in between; in this case, do NOT perform the replacement.
+    for z in zc:
+        before_z = events[events < z]
+        after_z  = events[events > z]
+        if (after_z[0] - before_z[-1]) < min_gap:
+            events = np.concatenate((before_z[:-1], [z], after_z[1:]))
+
+    # If the last event is close to the end, a crossing of the upper or lower threshold
+    # boundaries may or may not be a significant event -- there is not enough remaining data
+    # to determine whether it is stopping or not. This will be clarified in the next iteration
+    # of the loop, when more HK data will have been added. (Or if there is no more HK data to
+    # follow, the loss in information by removing the last crossing is negligible.)
+    # On the other hand, if the last event is a zero-crossing, then that is unambiguous and
+    # should not be removed.
+    if (len(t) - events[-1] < min_gap) and events[-1] not in zc:
+        events = events[:-1]
+
+    # A similar problem occurs when the first boundary-crossing event is close to the
+    # beginning -- it could either be following a zero-crossing OR be exiting a stopped state.
+    # In this case, we use previous data to disambiguate the two cases, and is deferred to
+    # another function.
+
+    return events
 
 class _DataBundle():
     def __init__(self):
@@ -67,12 +137,17 @@ class FrameProcessor(object):
         self.smbundle = None
         self.flush_time = None
         self.maxlength = 10000
+        self.current_state = 0  # default to scan state
 
     def ready(self):
         """
         Check if criterion passed in HK (for now, sign change in Az scan velocity data)
         """
         return self.hkbundle.ready() if (self.hkbundle is not None) else False
+
+    def determine_state(self, v, dy=0.001):
+        # If the velocity lies entirely in the threshold region, the telescope is stopped
+        self.current_state = int(np.min(v) > -dy and np.max(v) < dy)
 
     def split_frame(self, f, maxlength=10000):
         output = []
@@ -89,12 +164,14 @@ class FrameProcessor(object):
             g = core.G3Frame(core.G3FrameType.Scan)
             g['data'] = smb.rebundle(t)
             g['hk'] = hkb.rebundle(t)
+            g['state'] = self.current_state
 
             output += [g]
 
         g = core.G3Frame(core.G3FrameType.Scan)
         g['data'] = smb.rebundle(smb.times[-1] + 1)
         g['hk'] = hkb.rebundle(hkb.times[-1] + 1)
+        g['state'] = self.current_state
 
         output += [g]
 
@@ -109,6 +186,9 @@ class FrameProcessor(object):
 
         # Co-sampled (interpolated) azimuth encoder data
         f['data']['Azimuth'] = core.G3Timestream(np.interp(f['data'].times, f['hk'].times, f['hk']['Azimuth_Corrected'], left=np.nan, right=np.nan))
+
+        self.determine_state(f['hk']['Azimuth_Velocity'])
+        f['state'] = self.current_state
 
         if len(f['data'].times) > self.maxlength:
             output += self.split_frame(f, maxlength=self.maxlength)
@@ -131,6 +211,20 @@ class FrameProcessor(object):
             self.hkbundle.add(f['blocks'][0])   # 0th block for now
             self.hkbundle.set_azimuth_velocity()
             self.hkbundle.set_turnaround_times()
+
+            # If the first detected turnaround (threshold crossing) event occurs near the
+            # beginning of the frame, it is usually because it directly follows a sign-change
+            # event and therefore NOT a significant event and should be ignored.
+            # The exception is when the telescope is stopped: a threshold crossing after a stop
+            # state IS a significant event, since it means the telescope is no longer stopped
+            # -- in this case do NOT ignore it.
+            if len(self.hkbundle.turnaround_times) > 0 and len(self.hkbundle.times) > 0:
+                # G3Time is in units of 10 nanoseconds; 1 second = 1e8 units of time
+                if int(self.hkbundle.turnaround_times[0]) - int(self.hkbundle.times[0]) < 1e8:
+                    # This check occurs BEFORE the new state is determined, so current_state
+                    # refers to the state at the end of the previous frame
+                    if self.current_state == 0:
+                        self.hkbundle.turnaround_times.pop(0)
 
         if f.type == core.G3FrameType.Scan:
             if self.smbundle is None:
