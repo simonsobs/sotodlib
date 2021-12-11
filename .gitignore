@@ -1,2 +1,3 @@
 *.pyc
 *.g3
+*.egg-info

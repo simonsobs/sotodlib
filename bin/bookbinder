@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+
+import os, os.path as op
+import argparse
+from bookbinder import Bookbinder
+from spt3g import core
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--g3', dest='g3file', nargs='+', type=str, required=True,
+                        help='full path to G3 file')
+    parser.add_argument('--hk', dest='hkfile', nargs='+', type=str, required=True,
+                        help='full path to HK file')
+    parser.add_argument('--odir', default="out", help='output directory')
+    args = parser.parse_args()
+    if not op.exists(args.odir): os.makedirs(args.odir)
+
+    B = Bookbinder(args.g3file, [op.join(args.odir, f'out{i:03d}.g3') for i in range(len(args.g3file))])
+    for h in core.G3File(args.hkfile):
+        B(h)
