@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
-import so3g
 from spt3g import core
 import numpy as np
+import os, os.path as op
+
 
 def pos2vel(p):
     return np.ediff1d(p)
@@ -243,13 +244,20 @@ class Bookbinder(object):
     """
     Bookbinder
     """
-    def __init__(self, smurf_files, out_files):
+    def __init__(self, smurf_files, out_files, verbose=True):
         self._smurf_files = smurf_files
         self._out_files = out_files
+        self._verbose = verbose
 
         self.frameproc = FrameProcessor()
-        self.smurf_iter = core.G3File(self._smurf_files.pop(0))
-        self.writer = core.G3Writer(self._out_files.pop(0))
+
+        ifile = self._smurf_files.pop(0)
+        if self._verbose: print(f"Bookbinding {ifile}")
+        self.smurf_iter = core.G3File(ifile)
+
+        ofile = self._out_files.pop(0)
+        if self._verbose: print(f"Writing {ofile}")
+        self.writer = core.G3Writer(ofile)
 
     def write_frames(self, frames_list):
         """
@@ -257,6 +265,9 @@ class Bookbinder(object):
         """
         if not isinstance(frames_list, list):
             frames_list = list(frames_list)
+
+        if len(frames_list) == 0: return
+        if self._verbose: print(f"=> Writing {len(frames_list)} frames")
 
         for f in frames_list:
             self.writer.Process(f)
@@ -302,10 +313,13 @@ class Bookbinder(object):
                     # If there are remaining files, update the
                     # SMuRF source iterator and G3 file writer
                     if len(self._smurf_files) > 0:
-                        self.smurf_iter = core.G3File(self._smurf_files.pop(0))
+                        ifile = self._smurf_files.pop(0)
+                        if self._verbose: print(f"Bookbinding {ifile}")
+                        self.smurf_iter = core.G3File(ifile)
                     if len(self._out_files) > 0:
-                        self.writer = core.G3Writer(self._out_files.pop(0))
-
+                        ofile = self._out_files.pop(0)
+                        if self._verbose: print(f"Writing {ofile}")
+                        self.writer = core.G3Writer(ofile)
                     return
 
                 if f.type != core.G3FrameType.Scan:
@@ -314,17 +328,3 @@ class Bookbinder(object):
 
         self.write_frames(output)
         return
-
-if __name__ == '__main__':
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--g3', dest='g3file', nargs='+', type=str, required=True,
-                        help='full path to G3 file')
-    parser.add_argument('--hk', dest='hkfile', nargs='+', type=str, required=True,
-                        help='full path to HK file')
-    args = parser.parse_args()
-
-    B = Bookbinder(args.g3file, ['out{:03d}.g3'.format(i) for i in range(len(args.g3file))])
-    for h in core.G3File(args.hkfile):
-        B(h)
