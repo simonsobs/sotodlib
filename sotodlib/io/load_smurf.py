@@ -599,7 +599,7 @@ class G3tSmurf:
         raise(Exception("Input not a datetime or timestamp"))
 
 
-    def add_file(self, path, session):
+    def add_file(self, path, session, overwrite=False):
         """
         Indexes a single file and adds it to the sqlite database. Creates a
         single entry in Files and as many Frame entries as there are frames in
@@ -611,14 +611,29 @@ class G3tSmurf:
                 Path of the file to index
             session : SQLAlchemy session
                 Current, active sqlalchemy session
+            overwrite : bool
+                If true and file exists in the database, update it.
         """
 
         frame_types = {
             ft.type_name: ft for ft in session.query(FrameType).all()
         }
+        
+        ## name has a unique constraint in table
+        db_file = session.query(Files).filter(Files.name==path).one_or_none()
+        if db_file is None:
+            db_file = Files(name=path)
+            session.add(db_file)
+        elif not overwrite:
+            logger.info(f"File {path} found in database, use overwrite=True to update")
+            return
+        else:
+            logger.debug(f"File {path} found in database, updating entry and re-making frames")
+            db_frames = db_file.frames 
+            [session.delete( frame ) for frame in db_frames];
+            session.commit()
 
-        db_file = Files(name=path)
-        session.add(db_file)
+        
         try:
             splits = path.split('/')
             db_file.stream_id = splits[-2]
@@ -630,7 +645,7 @@ class G3tSmurf:
 
         total_channels = 0
         file_start, file_stop = None, None
-        frame_idx = 0
+        frame_idx = -1
         while True:
             
             try: 
@@ -654,13 +669,17 @@ class G3tSmurf:
             timestamp = frame['time'].time / spt3g_core.G3Units.s
             db_frame_time = dt.datetime.fromtimestamp(timestamp)
             
-            
+            if str(frame.type) != 'Wiring':
+                dump = False
+            else:
+                dump = bool(frame['dump'])
+                
             ## only make Frame once the non-nullable fields are known
             db_frame = Frames(frame_idx=frame_idx, file=db_file,
                              offset = db_frame_offset,
                              frame_type = db_frame_frame_type,
                              time = db_frame_time,
-                             status_dump = 'dump' in frame
+                             status_dump = dump,
                              )
         
             data = frame.get('data')
@@ -1378,9 +1397,9 @@ class G3tSmurf:
             stream_id = q[0].stream_id
             
         if status is None:
-            scan_start = session.query(Frames.start).filter(Frames.start > start,
+            scan_start = session.query(Frames.time).filter(Frames.time >= start,
                                                             Frames.type_name=='Scan')
-            scan_start = scan_start.order_by(Frames.start).first()
+            scan_start = scan_start.order_by(Frames.time).first()
                 
 
             try:
@@ -1398,7 +1417,8 @@ class G3tSmurf:
         if len(idx) == 0:
             logger.warning("No samples returned in time range")
             aman.restrict('samps', (0, 0))
-        else:            aman.restrict('samps', (idx[0], idx[-1]))
+        else:           
+            aman.restrict('samps', (idx[0], idx[-1]))
         session.close()
         
         return aman
