@@ -8,7 +8,7 @@ import os, os.path as op
 def pos2vel(p):
     return np.ediff1d(p)
 
-def locate_sign_changes(t, dy=0.001, min_gap=200):
+def locate_crossing_events(t, dy=0.001, min_gap=200):
     tmin = np.min(t)
     tmax = np.max(t)
 
@@ -111,19 +111,19 @@ class _DataBundle():
 class _HKBundle(_DataBundle):
     def __init__(self):
         super().__init__()
-        self.turnaround_times = []
+        self.azimuth_events = []
 
     def set_azimuth_velocity(self):
         self.data['Azimuth_Velocity'] = pos2vel(self.data['Azimuth_Corrected'])
 
-    def set_turnaround_times(self):
+    def set_azimuth_events(self):
         if 'Azimuth_Velocity' not in self.data.keys():
             self.set_azimuth_velocity()
-        self.turnaround_times = [self.times[i] for i in
-                                 locate_sign_changes(self.data['Azimuth_Velocity'])]
+        self.azimuth_events = [self.times[i] for i in
+                                 locate_crossing_events(self.data['Azimuth_Velocity'])]
 
     def ready(self):
-        return len(self.turnaround_times) > 0
+        return len(self.azimuth_events) > 0
 
 class _SmurfBundle(_DataBundle):
     def ready(self, flush_time):
@@ -211,21 +211,21 @@ class FrameProcessor(object):
 
             self.hkbundle.add(f['blocks'][0])   # 0th block for now
             self.hkbundle.set_azimuth_velocity()
-            self.hkbundle.set_turnaround_times()
+            self.hkbundle.set_azimuth_events()
 
-            # If the first detected turnaround (threshold crossing) event occurs near the
+            # If the first detected threshold crossing (in azimuth) event occurs near the
             # beginning of the frame, it is usually because it directly follows a sign-change
             # event and therefore NOT a significant event and should be ignored.
             # The exception is when the telescope is stopped: a threshold crossing after a stop
             # state IS a significant event, since it means the telescope is no longer stopped
             # -- in this case do NOT ignore it.
-            if len(self.hkbundle.turnaround_times) > 0 and len(self.hkbundle.times) > 0:
+            if len(self.hkbundle.azimuth_events) > 0 and len(self.hkbundle.times) > 0:
                 # G3Time is in units of 10 nanoseconds; 1 second = 1e8 units of time
-                if int(self.hkbundle.turnaround_times[0]) - int(self.hkbundle.times[0]) < 1e8:
+                if int(self.hkbundle.azimuth_events[0]) - int(self.hkbundle.times[0]) < 1e8:
                     # This check occurs BEFORE the new state is determined, so current_state
                     # refers to the state at the end of the previous frame
                     if self.current_state == 0:
-                        self.hkbundle.turnaround_times.pop(0)
+                        self.hkbundle.azimuth_events.pop(0)
 
         if f.type == core.G3FrameType.Scan:
             if self.smbundle is None:
@@ -292,7 +292,7 @@ class Bookbinder(object):
         if not self.frameproc.ready():
             return
 
-        tt = self.frameproc.hkbundle.turnaround_times
+        tt = self.frameproc.hkbundle.azimuth_events
         output = []
         while len(tt) > 0:
             self.frameproc.flush_time = tt.pop(0)
