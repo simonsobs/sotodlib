@@ -113,12 +113,13 @@ class _HKBundle(_DataBundle):
         super().__init__()
         self.azimuth_events = []
 
-    def set_azimuth_velocity(self):
+    def set_velocities(self):
         self.data['Azimuth_Velocity'] = pos2vel(self.data['Azimuth_Corrected'])
+        self.data['Elevation_Velocity'] = pos2vel(self.data['Elevation_Corrected'])
 
     def set_azimuth_events(self):
         if 'Azimuth_Velocity' not in self.data.keys():
-            self.set_azimuth_velocity()
+            self.set_velocities()
         self.azimuth_events = [self.times[i] for i in
                                  locate_crossing_events(self.data['Azimuth_Velocity'])]
 
@@ -210,7 +211,7 @@ class FrameProcessor(object):
                 self.hkbundle = _HKBundle()
 
             self.hkbundle.add(f['blocks'][0])   # 0th block for now
-            self.hkbundle.set_azimuth_velocity()
+            self.hkbundle.set_velocities()
             self.hkbundle.set_azimuth_events()
 
             # If the first detected threshold crossing (in azimuth) event occurs near the
