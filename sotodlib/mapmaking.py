@@ -571,13 +571,19 @@ def project_out_from_matrix(A, V):
     return A - Q.dot(np.linalg.solve(np.conj(V.T).dot(Q), np.conj(Q.T)))
 def measure_power(d): return np.real(np.mean(d*np.conj(d),-1))
 def makebins(edge_freqs, srate, nfreq, nmin=0, rfun=None):
+    # Translate from frequency to index
     binds  = freq2ind(edge_freqs, srate, nfreq, rfun=rfun)
+    # Make sure no bins have two few entries
     if nmin > 0:
         binds2 = [binds[0]]
         for b in binds:
             if b-binds2[-1] >= nmin: binds2.append(b)
         binds = binds2
-    return np.array([np.concatenate([[0],binds]),np.concatenate([binds,[nfreq]])]).T
+    # Cap at nfreq and eliminate any resulting empty bins
+    binds = np.unique(np.minimum(np.concatenate([[0],binds,[nfreq]]),nfreq))
+    # Go from edges to [:,{from,to}]
+    bins  = np.array([binds[:-1],binds[1:]]).T
+    return bins
 def mycontiguous(a):
     # I used this in act for some reason, but not sure why. I vaguely remember ascontiguousarray
     # causing weird failures later in lapack
