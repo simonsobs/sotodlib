@@ -290,7 +290,7 @@ def main():
     # this should be mm.NmatDetvecs() for serious runs, but that one doesn't handle
     # too low sample rate or too few detectors, so it's not good for test runs as
     # long as the toast simulation steps are so slow.
-    mlmapmaker.Nmat = mm.NmatUncorr()
+    mlmapmaker.Nmat = mm.NmatDetvecs()
     mlmapmaker.out_dir = args.out_dir
     mlmapmaker.apply(data)
     log.info_rank("Finished ML map-making in", comm=wcomm, timer=timer)
