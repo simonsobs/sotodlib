@@ -465,6 +465,8 @@ class NmatDetvecs(Nmat):
         # First build our set of eigenvectors in two bins. The first goes from
         # 0.25 to 4 Hz the second from 4Hz and up
         mode_bins = makebins(self.mode_bins, srate, nfreq, 1000, rfun=np.round)[1:]
+        if np.any(np.diff(mode_bins) < 0):
+            raise RuntimeError(f"At least one of the frequency bins has a negative range: \n{mode_bins}")
         # Then use these to get our set of basis vectors
         vecs = find_modes_jon(ft, mode_bins, eig_lim=self.eig_lim, single_lim=self.single_lim, verbose=self.verbose)
         nmode= vecs.shape[1]
