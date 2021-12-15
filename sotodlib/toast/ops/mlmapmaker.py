@@ -74,9 +74,7 @@ class MLMapmaker(Operator):
 
     Nmat = Instance(allow_none=True, klass=mm.Nmat, help="The noise matrix to use")
 
-    dtype_map = Instance(
-        klass=np.dtype, args=(np.float64,), help="Numpy dtype of map products"
-    )
+    dtype_map = Unicode("float64", allow_none=True, help="Numpy dtype of map products")
 
     times = Unicode(defaults.times, help="Observation shared key for timestamps")
 
@@ -192,7 +190,7 @@ class MLMapmaker(Operator):
             dtype_tod    = np.float32
             signal_cut   = mm.SignalCut(data.comm.comm_world, dtype=dtype_tod)
             signal_map   = mm.SignalMap(self._shape, self._wcs, data.comm.comm_world, comps=self.comps,
-                               dtype=self.dtype_map, recenter=self._recenter, tiled=self.tiled)
+                               dtype=np.dtype(self.dtype_map), recenter=self._recenter, tiled=self.tiled)
             signals      = [signal_cut, signal_map]
             noise_model  = mm.NmatDetvecs(verbose=(self.verbose > 1), downweight=[1e-4, 0.25, 0.50], window=0)
             #noise_model  = mm.NmatUncorr()

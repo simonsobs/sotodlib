@@ -466,6 +466,11 @@ def reduce_data(job, args, data):
     ops.mem_count.prefix = "After deconvolving time constant"
     ops.mem_count.apply(data)
 
+    # Run ML mapmaker
+
+    ops.mlmapmaker.apply(data)
+    log.info_rank("Finished ML map-making in", comm=world_comm, timer=timer)
+
     # Apply the filter stack
 
     log.info_rank("Filtering signal", comm=world_comm)
@@ -735,7 +740,7 @@ def main():
             name="filterbin",
             enabled=False,
         ),
-        # so_ops.MLMapmaker(name="mlmapmaker", enabled=False, comps="TQU"),
+        so_ops.MLMapmaker(name="mlmapmaker", enabled=False, comps="TQU"),
         toast.ops.MemoryCounter(name="mem_count", enabled=False),
     ]
     if toast.ops.madam.available():
