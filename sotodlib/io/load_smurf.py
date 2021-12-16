@@ -2086,7 +2086,16 @@ def load_file(filename, channels=None, ignore_missing=True,
         logger.error("No files provided to load")
     
     if status is None:
-        status = SmurfStatus.from_file(filenames[0])
+        try:    
+            logger.warning('Loading status frame from the file at the start'
+                            ' of the corresponding observation.')
+            file_id = filenames[0].split('/')[-1][10:]
+            status_fp = filenames[0].replace(file_id, '_000.g3')
+            status = SmurfStatus.from_file(status_fp)
+        except Exception as e:
+            logger.error(f'Error when trying to load status from {status_fp}, maybe the file doesn\'t exist?'
+                          'Please load the status manually.')
+            raise e
 
     if channels is not None:
         ch_mask = get_channel_mask(channels, status, archive=archive, 
