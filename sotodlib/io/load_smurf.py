@@ -2085,10 +2085,13 @@ def load_file(filename, channels=None, ignore_missing=True,
     if len(filenames) == 0:
         logger.error("No files provided to load")
     
-    if status is None:
-        try:    
-            logger.warning('Loading status frame from the file at the start'
+    if status is None or status.num_chans is None:
+        try:
+            if status is None:
+                logger.warning('Loading status frame from the file at the start'
                             ' of the corresponding observation.')
+            else:
+                logger.warning("Status information is missing 'num_chans.' Trying to fix.")
             file_id = filenames[0].split('/')[-1][10:]
             status_fp = filenames[0].replace(file_id, '_000.g3')
             status = SmurfStatus.from_file(status_fp)
