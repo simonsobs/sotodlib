@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 # Copyright (c) 2019-2021 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
@@ -231,6 +230,7 @@ def main():
         wind_dist=3000 * u.meter,
         z0_center=2000 * u.meter,
         z0_sigma=0 * u.meter,
+        cache_dir="atm_cache",
     )
     sim_atmosphere.detector_pointing = det_pointing_azel
     # Here is where we could enable a small polarization fraction, in which
