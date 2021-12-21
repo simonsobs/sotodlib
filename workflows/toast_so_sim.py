@@ -48,6 +48,7 @@ if t3g.available:
     from spt3g import core as c3g
 
 import sotodlib.toast.ops as so_ops
+import sotodlib.mapmaking
 
 
 def parse_config(operators, templates, comm):
@@ -468,6 +469,8 @@ def reduce_data(job, args, data):
 
     # Run ML mapmaker
 
+    #ops.mlmapmaker.Nmat = sotodlib.mapmaking.NmatUncorr()
+    ops.mlmapmaker.Nmat = sotodlib.mapmaking.NmatDetvecs()
     ops.mlmapmaker.apply(data)
     log.info_rank("Finished ML map-making in", comm=world_comm, timer=timer)
 

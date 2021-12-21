@@ -72,7 +72,7 @@ class MLMapmaker(Operator):
 
     comps = Unicode("T", help="Components (must be 'T', 'QU' or 'TQU')")
 
-    Nmat = Instance(klass=mm.Nmat, help="The noise matrix to use")
+    Nmat = Instance(klass=mm.Nmat, allow_none=True, help="The noise matrix to use")
 
     dtype_map = Unicode("float64", allow_none=True, help="Numpy dtype of map products")
 
@@ -117,7 +117,9 @@ class MLMapmaker(Operator):
 
     tiled = Bool(
         False,
-        help="If True, the map will be represented as distributed tiles in memory. For large maps this is faster and more memory efficient, but for small maps it has some overhead due to extra communication."
+        help="If True, the map will be represented as distributed tiles in memory. "
+        "For large maps this is faster and more memory efficient, but for small "
+        "maps it has some overhead due to extra communication."
     )
 
     verbose = Int(
@@ -150,6 +152,16 @@ class MLMapmaker(Operator):
             raise traitlets.TraitError("Det flag mask should be a positive integer")
         return check
 
+    @traitlets.validate("dtype_map")
+    def _check_det_flag_mask(self, proposal):
+        check = proposal["value"]
+        if check not in ["float", "float64"]:
+            raise traitlets.TraitError(
+                "Map data type must be float64 until so3g.ProjEng supports "
+                "other map data types."
+            )
+        return check
+
     @traitlets.validate("verbose")
     def _check_params(self, proposal):
         check = proposal["value"]
@@ -173,8 +185,12 @@ class MLMapmaker(Operator):
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
 
-        if self.area is None:
-            raise RuntimeError("You must set the 'area' trait before calling exec")
+        for trait in "area", "Nmat", "dtype_map":
+            value = getattr(self, trait)
+            if value is None:
+                raise RuntimeError(
+                    f"You must set `{trait}` before running MLMapmaker"
+                )
 
         if self._mapmaker is None:
             # First call- create the mapmaker instance.
