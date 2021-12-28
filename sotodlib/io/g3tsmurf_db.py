@@ -345,13 +345,15 @@ class Channels(Base):
     assignment file, SMuRF band and channel number. Many channels will map to
     one detector on a UFM.
 
+    Dec. 2021 -- Updated channel names to include stream_id to ensure uniqueness
     
     Attributes
     ----------
     id : integer 
         primary key
     name : string
-        name of of channel. In the form of sch_<ctime>_<band>_<channel>
+        name of of channel. This is the unique readout id that will be matched with 
+        the unique detector id. Has the form of sch_<stream_id>_<ctime>_<band>_<channel>
     stream_id : string
         stream_id for file
     subband : integer

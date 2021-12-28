@@ -391,7 +391,8 @@ class G3tSmurf:
                 if int(notch[2]) in ch_made:
                     continue
                     
-                ch_name = 'sch_{:10d}_{:01d}_{:03d}'.format(ctime, band, int(notch[2]))
+                ch_name = 'sch_{}_{:10d}_{:01d}_{:03d}'.format(stream_id, ctime, 
+                                                               band, int(notch[2]))
                 ch = Channels(subband=int(notch[1]),
                               channel=int(notch[2]),
                               frequency=notch[0],
@@ -1683,7 +1684,7 @@ def _get_timestamps(streams, load_type=None):
 def load_file(filename, channels=None, ignore_missing=True, 
              load_biases=True, load_primary=True, status=None,
              archive=None, obsfiledb=None, show_pb=True, det_axis='dets'):
-    """Load data from file where there may not be a connected archive.
+    """Load data from file where there may or may not be a connected archive.
 
     Args
     ----
