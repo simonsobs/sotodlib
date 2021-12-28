@@ -22,7 +22,7 @@ from .. import core
 from . import load as io_load
 
 from sotodlib.io.g3tsmurf_db import (Base, Observations, Tags, Files, Tunes, 
-                                    TuneSets, ChanAssignments, Channels, 
+                                     TuneSets, ChanAssignments, Channels, 
                                      FrameType, Frames)
 Session = sessionmaker()
 num_bias_lines = 16
@@ -44,6 +44,8 @@ SMURF_ACTIONS = {
     ],
 }
  
+
+# Types of Frames we care about indexing
 type_key = ['Observation', 'Wiring', 'Scan']
 
 class TimingParadigm(Enum):
@@ -439,7 +441,7 @@ class G3tSmurf:
             if 'resonances' not in data[band]:
                 ### tune file doesn't have info for this band
                 continue
-            ## try to use tune file to find channel assignment befoe just
+            ## try to use tune file to find channel assignment before just
             ## assuming "most recent"
             if 'channel_assignment' in data[band]:
                 cha_name = data[band]['channel_assignment'].split('/')[-1]
@@ -518,7 +520,7 @@ class G3tSmurf:
         tune.tuneset = tuneset
         session.commit()
     
-    def add_new_observation(self, stream_id, ctime, obs_data, session,
+    def add_new_observation(self, stream_id, action_name, action_ctime, session,
                             max_early=5,max_wait=100):
         """Add new entry to the observation table. Called by the
         index_metadata function.
@@ -527,10 +529,9 @@ class G3tSmurf:
         -------
         stream_id : string
             The stream id for the particular SMuRF slot
-        ctime : int
-            The ctime of the SMuRF action called to create the tuning file.
-        obs_data: list
-            List of files that come with the observation. Currently un-used
+        action_ctime : int
+            The ctime of the SMuRF action called to create the observation. Often
+            slightly different than the .g3 session ID
         session : SQLAlchemy Session
             The active session
         max_early : int     
@@ -538,20 +539,57 @@ class G3tSmurf:
         max_wait : int  
             Maximum amount of time between the streaming start action and the 
             making of .g3 files that belong to an observation
-        
-        TODO: how will simultaneous streaming with two stream_ids work?
         """
+        ## Check if observation exists already
         obs = session.query(Observations).filter(
-                        Observations.obs_id == str(ctime)).one_or_none()
+                        Observations.stream_id == stream_id,
+                        Observations.action_ctime == action_ctime).one_or_none()
         if obs is None:
-            obs = Observations(obs_id = str(ctime),
-                               timestamp = ctime,
-                               start = dt.datetime.fromtimestamp(ctime))
+            x = session.query(Files.name)
+            x = x.filter(Files.start >= dt.datetime.utcfromtimestamp(action_ctime-max_early))
+            x = x.order_by(Files.start).first()
+            if x is None:
+                logger.debug(f"No .g3 files from Action {action_name} in {stream_id}"\
+                            f" at {action_ctime}. Not Making Observation")
+                return
+
+            session_id = int( (x.name[:-3].split('/')[-1]).split('_')[0])
+
+            ## Verify the files we found match with Observation
+            status = SmurfStatus.from_file(x.name)
+            if status.action is not None:
+                assert status.action == action_name
+                assert status.action_timestamp == action_ctime
+
+            ## Verify inside of file matches the outside
+            reader = so3g.G3IndexedReader(x.name)
+            while True:
+                frames = reader.Process(None)
+                if not frames:
+                    break
+                frame = frames[0]
+
+                if str(frame.type) == 'Observation':
+                    assert frame['sostream_id'] == stream_id
+                    assert frame['session_id'] == session_id 
+                    start = dt.datetime.utcfromtimestamp(frame['time'].time / spt3g_core.G3Units.s )
+
+            ## Build Observation 
+            obs = Observations( 
+                obs_id=f"{stream_id}_{session_id}",
+                timestamp = session_id,
+                action_ctime = action_ctime,
+                action_name = action_name,
+                stream_id = stream_id,
+                start = start,
+            )
             session.add(obs)
             session.commit()
-
-        self.update_observation_files(obs, session, max_early=max_early,
-                    max_wait=max_wait)
+        
+        ## obs.stop is only updated when streaming session is over
+        if obs.stop is None:
+            self.update_observation_files(obs, session, max_early=max_early,
+                                          max_wait=max_wait)
 
     def update_observation_files(self, obs, session, max_early=5, 
                                 max_wait=100,force=False):
@@ -572,67 +610,86 @@ class G3tSmurf:
             appears complete
         """
         
-        if not force and obs.duration is not None and len(obs.tunesets) >= 1:
+        if not force and obs.stop is not None:
             return
 
-        x=session.query(Files.name).filter(
+        x = session.query(Files.name).filter(
                             Files.start >= obs.start-dt.timedelta(seconds=max_early))
         x = x.order_by(Files.start).first()
         if x is None:
             ## no files to add at this point
-            session.commit()
             return
+
         x = x[0]
-        f_start, f_num = (x[:-3].split('/')[-1]).split('_')
+        session_id, f_num = (x[:-3].split('/')[-1]).split('_')
         prefix = '/'.join(x.split('/')[:-1])+'/'
-
-        if int(f_start)-obs.start.timestamp() > max_wait:
+        if int(session_id)-obs.start.timestamp() > max_wait:
             ## we don't have .g3 files for some reason
-            pass
-        else:
-            flist = session.query(Files).filter(Files.name.like(prefix+f_start+'%'))
-            flist = flist.order_by(Files.start).all()
-            
-            ## Use Status information to set Tuneset
-            status = SmurfStatus.from_file(flist[0].name)
-            if status.action is not None:
-                if status.action not in SMURF_ACTIONS['observations']:
-                    logger.warning(f"Status Action {status.action} from file does not \
-                                    match accepted observation types")
-                if status.action_timestamp != obs.timestamp:
-                    logger.error(f"Status timestamp {status.action_timestamp} from file does \
-                                not match observation timestamp {obs.timestamp}")
-                    return
-            ## Add any tags from the status
-            if len(status.tags)>0:
-                for tag in status.tags:
-                    new_tag = Tags(obs_id = obs.obs_id, tag=tag)
-                obs.tag = ','.join(status.tags)
-                session.add(new_tag)
-            
-            if status.tune is not None:
-                tune = session.query(Tunes).filter( 
-                            Tunes.name == status.tune).one_or_none()
-                if tune is None:
-                    logger.warning(f"Tune {status.tune} not found in database, update error?")
-                    tuneset = None
-                else:
-                    tuneset = tune.tuneset
-            else:
-                tuneset = session.query(TuneSets).filter(TuneSets.start <= obs.start)
-                tuneset = tuneset.order_by(db.desc(TuneSets.start)).first()
-                
-            already_have = [ts.id for ts in obs.tunesets]
-            if tuneset is not None:
-                if not tuneset.id in already_have:
-                    obs.tunesets.append(tuneset)
+            return
 
-            ## Update file entries
-            for f in flist:
-                f.obs_id = obs.obs_id
-                if tuneset is not None:
-                    f.detset = tuneset.name
-            obs.duration = flist[-1].stop.timestamp() - obs.timestamp
+        flist = session.query(Files).filter(Files.name.like(prefix+session_id+'%'))
+        flist = flist.order_by(Files.start).all()
+        ## Load Status Information
+        status = SmurfStatus.from_file(flist[0].name)
+
+        ## Add any tags from the status
+        if len(status.tags)>0:
+            for tag in status.tags:
+                new_tag = Tags(obs_id = obs.obs_id, tag=tag)
+            obs.tag = ','.join(status.tags)
+            session.add(new_tag)
+
+        ## Add Tune and Tuneset information
+        if status.tune is not None:
+            tune = session.query(Tunes).filter( 
+                        Tunes.name == status.tune).one_or_none()
+            if tune is None:
+                logger.warning(f"Tune {status.tune} not found in database, update error?")
+                tuneset = None
+            else:
+                tuneset = tune.tuneset
+        else:
+            tuneset = session.query(TuneSets).filter(TuneSets.start <= obs.start)
+            tuneset = tuneset.order_by(db.desc(TuneSets.start)).first()
+
+        already_have = [ts.id for ts in obs.tunesets]
+        if tuneset is not None:
+            if not tuneset.id in already_have:
+                obs.tunesets.append(tuneset)
+
+        obs_samps = 0
+        ## Update file entries
+        for db_file in flist:
+            db_file.obs_id = obs.obs_id
+            if tuneset is not None:
+                db_file.detset = tuneset.name
+
+            ## this is where I learned sqlite does not accept numpy 32 or 64 bit ints
+            file_samps = sum([fr.n_samples if fr.n_samples is not None else 0 for fr in db_file.frames])
+            db_file.sample_start = obs_samps
+            db_file.sample_stop = obs_samps + file_samps
+            obs_samps = obs_samps + file_samps + 1
+
+        obs_ended = False
+
+        ## Search through file looking for stream closeout
+        reader = so3g.G3IndexedReader(flist[-1].name)
+        while True:
+            frames = reader.Process(None)
+            if not frames:
+                break
+            frame = frames[0]
+            if str(frame.type) == 'Wiring':
+                if 'AMCc.SmurfProcessor.FileWriter.IsOpen' in frame['status']:
+                    status = {}
+                    status.update(yaml.safe_load(frame['status']))
+                    if not status['AMCc.SmurfProcessor.FileWriter.IsOpen']:
+                        obs_ended = True
+                        break
+
+        if obs_ended:
+            obs.n_samples = obs_samps-1
+            obs.duration = flist[-1].stop.timestamp() - flist[0].start.timestamp()
             obs.stop = flist[-1].stop
         session.commit()
 

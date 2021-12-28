@@ -23,19 +23,35 @@ association_table_dets = db.Table('detsets', Base.metadata,
 )
 
 class Observations(Base):
-    """Times on continuous detector readout. This table is named obs and serves
-    as the ObsDb table when loading via Context.
-
+    """Times of continuous detector readout. This table is named obs and serves
+    as the ObsDb table when loading via Context. This table is meant to by built
+    off of Level 2 data, before the data from different stream_id/smurf slots have
+    been bookbound and perfectly co-sampled.
+    
+    Observations are not created if the action folder has no associated .g3 files.
+    
+    Dec. 2021 -- The definitions of obs_id and timestamp changed to better 
+    match the operation of the smurf-streamer / sodetlib / pysmurf.
+    
     Attributes 
     -----------
     obs_id : string
-        The "session_id" of the observation which is usually the integer ctime
-        of the pysmurf action called to start the readout. (The first part of
-        the .g3 file name).
+        <stream_id>_<session_id>. 
     timestamp : integer
-        Generally int(obs_id). Here to make relative querying easier
+        The .g3 session_id, which is also the ctime the .g3 streaming started
+        and the first part .g3 file name.
+    action_ctime : integer 
+        The ctime of the pysmurf action, generally slightly different than
+        the .g3 session_id
+    action_name : stream
+        The name of the action used to create the observation. 
+    stream_id : string
+        The stream_id of this observation. Required since level 2 data is not
+        perfectly co-sampled across stream_ids.
     duration : float
         The total observation time in seconds
+    n_samples : integer
+        The total number of samples in the observation
     start : datetime.datetime
         The start of the observation as a datetime object
     stop : datetime.datetime
@@ -52,13 +68,18 @@ class Observations(Base):
         one per stream_id (SMuRF crate slot). 
     """
     __tablename__ = 'obs'
-    ## ctime of beginning of the observation
-        
+
     obs_id = db.Column(db.String, primary_key=True)
     timestamp = db.Column(db.Integer)
+    action_ctime = db.Column(db.Integer)
+    action_name = db.Column(db.String)
+    
+    stream_id = db.Column(db.String)
+    
     # in seconds
     duration = db.Column(db.Float)
-
+    n_samples = db.Column(db.Integer)
+    
     start = db.Column(db.DateTime)
     stop = db.Column(db.DateTime)
     
@@ -141,7 +162,7 @@ class Files(Base):
     start = db.Column(db.DateTime)
     stop = db.Column(db.DateTime)
     
-    ## this is sample in an observation (I think?)
+    ## This is sample in an Observation 
     sample_start = db.Column(db.Integer)
     sample_stop = db.Column(db.Integer)
     
