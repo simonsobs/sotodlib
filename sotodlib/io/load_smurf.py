@@ -840,7 +840,7 @@ class G3tSmurf:
                     self.add_new_channel_assignment(stream_id, ctime, 
                                                     fname, path, session)  
                 except Exception as e:
-                    _self.process_index_error(session, e, stream_id, ctime, path, stop_at_error)
+                    self._process_index_error(session, e, stream_id, ctime, path, stop_at_error)
                     
     def index_tunes(self, session, min_ctime=16000*1e5, max_ctime=None,
                     pattern = 'tune.npy', stop_at_error=False):
@@ -863,7 +863,7 @@ class G3tSmurf:
                     logger.debug(f"Add new Tune: {stream_id}, {ctime}, {path}")
                     self.add_new_tuning(stream_id, ctime, path, session)
                 except Exception as e:
-                    _self.process_index_error(session, e, stream_id, ctime, 
+                    self._process_index_error(session, e, stream_id, ctime, 
                                                 path, stop_at_error)
 
         
@@ -889,7 +889,7 @@ class G3tSmurf:
                     logger.debug(f"Add new Observation: {stream_id}, {ctime}, {obs_path}")
                     self.add_new_observation(stream_id, ctime, obs_path, session)
                 except Exception as e:
-                    _self.process_index_error(session, e, stream_id, ctime, path, stop_at_error)
+                    self._process_index_error(session, e, stream_id, ctime, path, stop_at_error)
                     
 
     def index_metadata(self, min_ctime=16000*1e5, max_ctime=None, stop_at_error=False):
