@@ -152,7 +152,7 @@ class G3tSmurf:
             datetime: datetime of x if x is a timestamp
         """
         if np.issubdtype(type(x),np.floating) or np.issubdtype(type(x),np.integer):
-            return dt.datetime.fromtimestamp(x)
+            return dt.datetime.utcfromtimestamp(x)
         elif isinstance(x,np.datetime64):
             return x.astype(dt.datetime)
         elif isinstance(x,dt.datetime) or isinstance(x,dt.date):
@@ -228,7 +228,7 @@ class G3tSmurf:
             db_frame_frame_type = frame_types[str(frame.type)]
 
             timestamp = frame['time'].time / spt3g_core.G3Units.s
-            db_frame_time = dt.datetime.fromtimestamp(timestamp)
+            db_frame_time = dt.datetime.utcfromtimestamp(timestamp)
             
             if str(frame.type) != 'Wiring':
                 dump = False
@@ -249,17 +249,17 @@ class G3tSmurf:
                 if sostream_version >= 2:  # Using SuperTimestreams
                     db_frame.n_channels = len(data.names)
                     db_frame.n_samples = len(data.times)
-                    db_frame.start = dt.datetime.fromtimestamp(
+                    db_frame.start = dt.datetime.utcfromtimestamp(
                         data.times[0].time / spt3g_core.G3Units.s
                     )
-                    db_frame.stop = dt.datetime.fromtimestamp(
+                    db_frame.stop = dt.datetime.utcfromtimestamp(
                         data.times[-1].time / spt3g_core.G3Units.s
                     )
                 else:
                     db_frame.n_samples = data.n_samples
                     db_frame.n_channels = len(data)
-                    db_frame.start = dt.datetime.fromtimestamp(data.start.time /spt3g_core.G3Units.s)
-                    db_frame.stop = dt.datetime.fromtimestamp(data.stop.time /spt3g_core.G3Units.s)
+                    db_frame.start = dt.datetime.utcfromtimestamp(data.start.time /spt3g_core.G3Units.s)
+                    db_frame.stop = dt.datetime.utcfromtimestamp(data.stop.time /spt3g_core.G3Units.s)
 
                 if file_start is None:
                     file_start = db_frame.start
@@ -481,7 +481,7 @@ class G3tSmurf:
         tune = session.query(Tunes).filter(Tunes.name == name,
                                           Tunes.stream_id == stream_id).one_or_none()
         if tune is None:
-            tune = Tunes(name=name, start=dt.datetime.fromtimestamp(ctime),
+            tune = Tunes(name=name, start=dt.datetime.utcfromtimestamp(ctime),
                            path=tune_path, stream_id=stream_id)
             session.add(tune)
             session.commit()
@@ -506,7 +506,7 @@ class G3tSmurf:
         if tuneset is None:
             logger.debug(f"New Tuneset Detected {stream_id}, {ctime}, {[[a.name for a in assign_set]]}")
             tuneset = TuneSets(name=name, path=tune_path, stream_id=stream_id,
-                               start=dt.datetime.fromtimestamp(ctime))
+                               start=dt.datetime.utcfromtimestamp(ctime))
             session.add(tuneset)
             session.commit()
 
