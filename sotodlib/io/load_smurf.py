@@ -797,7 +797,7 @@ class G3tSmurf:
                         except GeneratorExit:
                             return
     
-    def _processes_index_error(self, session, e, stream_id, ctime, path, stop_at_error):
+    def _process_index_error(self, session, e, stream_id, ctime, path, stop_at_error):
         if type(e) == ValueError:
             logger.info(f"Value Error at {stream_id}, {ctime}, {path}")
         elif type(e) == IntegrityError:
@@ -888,7 +888,7 @@ class G3tSmurf:
                 try:
                     obs_path = os.listdir( os.path.join(path, 'outputs'))
                     logger.debug(f"Add new Observation: {stream_id}, {ctime}, {obs_path}")
-                    self.add_new_observation(stream_id, ctime, obs_path, session)
+                    self.add_new_observation(stream_id, action, ctime, session)
                 except Exception as e:
                     self._process_index_error(session, e, stream_id, ctime, path, stop_at_error)
                     
