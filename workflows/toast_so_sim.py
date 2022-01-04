@@ -50,6 +50,10 @@ if t3g.available:
 import sotodlib.toast.ops as so_ops
 import sotodlib.mapmaking
 
+# Make sure pixell uses a reliable FFT engine
+import pixell.fft
+pixell.fft.engine = "fftw"
+
 
 def parse_config(operators, templates, comm):
     """Parse command line arguments and load any config files.
@@ -471,6 +475,7 @@ def reduce_data(job, args, data):
 
     #ops.mlmapmaker.Nmat = sotodlib.mapmaking.NmatUncorr()
     ops.mlmapmaker.Nmat = sotodlib.mapmaking.NmatDetvecs()
+    ops.mlmapmaker.out_dir = args.out_dir
     ops.mlmapmaker.apply(data)
     log.info_rank("Finished ML map-making in", comm=world_comm, timer=timer)
 
