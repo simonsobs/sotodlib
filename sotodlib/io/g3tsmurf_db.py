@@ -46,8 +46,9 @@ class Observations(Base):
     action_name : stream
         The name of the action used to create the observation. 
     stream_id : string
-        The stream_id of this observation. Required since level 2 data is not
-        perfectly co-sampled across stream_ids.
+        The stream_id of this observation. Generally corresponds to UFM or Smurf
+        slot. Column is implemented since level 2 data is not perfectly co-sampled 
+        across stream_ids.
     duration : float
         The total observation time in seconds
     n_samples : integer
@@ -57,8 +58,8 @@ class Observations(Base):
     stop : datetime.datetime
         The end of the observation as a datetime object
     tag : string
-        Tags for this observation. These are populated through
-        tags set while running sodetlib's stream data functions. 
+        Tags for this observation in a single comma delimited string. These are populated 
+        through tags set while running sodetlib's stream data functions. 
     files : list of SQLAlchemy instances of Files
         The list of .g3 files in this observation built through a relationship
         to the Files table. [f.name for f in Observation.files] will return
@@ -452,3 +453,4 @@ class Frames(Base):
 
     def __repr__(self):
         return f"Frame({self.type_name})<{self.frame_idx}>"
+
