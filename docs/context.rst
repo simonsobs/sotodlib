@@ -469,6 +469,67 @@ Note the ``obs:obs_id`` column is gone -- it was taken as index
 information, and matched against the ``obs:obs_id`` in the
 ``request``.
 
+Custom Archive Formats
+----------------------
+
+HDF5 is cool but sometimes you need or want to use a different storage
+system.  Setting up a custom loader function involves the following:
+
+- A loader class that can read the metadata from that storage
+  system, respecting the request API.
+- A module, containg the loader class, and also the ability to
+  register the loader class with sotodlib, under a particular laoder
+  name.
+- A ManifestDb data field called ``loader``, with the value set to the
+  loader name.
+
+Here's a sketchy example.  We start by defining a loader class, that
+will read a number from a text file::
+
+  from sotodlib.io import metadata
+  from sotodlib.core.metadata import ResultSet, SuperLoader, LoaderInterface
+
+  class TextLoader(LoaderInterface):
+      def from_loadspec(self, load_params):
+          with open(load_params['filename']) as fin:
+              the_answer = float(fin.read())
+          rs = ResultSet(keys=['answer'], [(the_answer, )])
+
+  SuperLoader.register_metadata('text_loader', TextLoader)
+
+Let's suppose that code (including the SuperLoader business) is in a
+module called ``othertel.textloader``.  To get this code to run
+whenever we're working with a certain dataset, add it to the
+``imports`` list in the context.yaml:
+
+.. code-block:: yaml
+
+  # Standard i/o import, and TextLoader for othertel.
+  imports:
+    - sotodlib.io.metadata
+    - othertel.textloader
+
+Now for the ManifestDb::
+
+  scheme = metadata.ManifestScheme()
+  scheme.add_exact_match('obs:obs_id')
+  scheme.add_data_field('loader')
+
+  db = metadata.ManifestDb(scheme=scheme)
+  db.add_entry({'obs:obs_id: 'obs12345',
+                'loader': 'text_loader'},
+               filename='obs12345_timeconst.txt')
+  db.add_entry({'obs:obs_id: 'obs12600',
+                'loader': 'text_loader'},
+               filename='obs12600_timeconst.txt')
+
+Now if a metadata request is made for ``obs12345``, for example, a
+single number will be loaded from ``obs12345_timeconst.txt``.
+
+Note the thing returned by ``TextLoader.from_loadspec`` is a
+ResultSet.  Presently the only types you can return from a loader
+class function are ResultSet and AxisManager.
+
 
 Metadata Indexes
 ================
@@ -549,64 +610,6 @@ limit) for the key ``obs:timestamp``.
 
 Example 3: Other observation selectors
 ``````````````````````````````````````
-
-HDF5 is cool but sometimes you need or want to use a different storage
-system.  Setting up a custom loader function involves the following:
-
-- A loader class that can read the metadata from that storage
-  system, respecting the request API.
-- A module, containg the loader class, and also the ability to
-  register the loader class with sotodlib, under a particular laoder
-  name.
-- A ManifestDb data field called ``loader``, with the value set to the
-  loader name.
-
-Here's a sketchy example.  We start by defining a loader class, that
-will read a number from a text file::
-
-  from sotodlib.io import metadata
-  from sotodlib.core.metadata import ResultSet, SuperLoader, LoaderInterface
-
-  class TextLoader(LoaderInterface):
-      def from_loadspec(self, load_params):
-          with open(load_params['filename']) as fin:
-              the_answer = float(fin.read())
-          rs = ResultSet(keys=['answer'], [(the_answer, )])
-
-  SuperLoader.register_metadata('text_loader', TextLoader)
-
-Let's suppose that code (including the SuperLoader business) is in a
-module called ``othertel.textloader``.  To get this code to run
-whenever we're working with a certain dataset, add it to the
-``imports`` list in the context.yaml:
-
-.. code-block:: yaml
-
-  # Standard i/o import, and TextLoader for othertel.
-  imports:
-    - sotodlib.io.metadata
-    - othertel.textloader
-
-Now for the ManifestDb::
-
-  scheme = metadata.ManifestScheme()
-  scheme.add_exact_match('obs:obs_id')
-  scheme.add_data_field('loader')
-
-  db = metadata.ManifestDb(scheme=scheme)
-  db.add_entry({'obs:obs_id: 'obs12345',
-                'loader': 'text_loader'},
-               filename='obs12345_timeconst.txt')
-  db.add_entry({'obs:obs_id: 'obs12600',
-                'loader': 'text_loader'},
-               filename='obs12600_timeconst.txt')
-
-Now if a metadata request is made for ``obs12345``, for example, a
-single number will be loaded from ``obs12345_timeconst.txt``.
-
-Note the thing returned by ``TextLoader.from_loadspec`` is a
-ResultSet.  Presently the only types you can return from a loader
-class function are ResultSet and AxisManager.
 
 
 
