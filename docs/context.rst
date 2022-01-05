@@ -359,6 +359,38 @@ Using that context file::
 will return an AxisManager with aman.thing for that specific
 observation.
 
+If this is example is almost, but not quite, what you need, consider the
+following:
+
+- You can use multiple HDF5 files in your Metadata Archive -- the
+  filename is a parameter to ``db.add_entry``.  That helps to keep
+  your HDF5 files a manageable size, and is good practice in cases
+  where there are regular (e.g. daily or hourly) updates to an
+  archive.
+- You can use an archive format other than HDF5 (if you must), see the
+  example in :ref:`metadata-archives-custom`.
+- The entries in the Index do not have to be per-``obs_id``.  You can
+  associate results to ranges of time or to other fields in the ObsDb.
+  See examples in :ref:`metadata-indexes`.
+- The entries in the Archive do not need to be per-detector.  You can
+  specify results for a whole group of detectors, if that group is
+  enumerated in the DetDb.  For example, if DetDb contains a column
+  ``band``, the dataset could contain columns ``dets:band`` and
+  ``cal`` and simply report one calibration number for each frequency
+  band.  (On load, the Context Metadata system will automatically
+  broadcast the ``cal`` number so that it has shape ``(n_dets,)`` in
+  the fully populated AxisManager.)
+- You can store all the results (i.e., results for multiple
+  ``obs_id``) in a single HDF5 dataset.  This is not usually a good
+  idea if your results are per-detector, per-observation... the
+  dataset will be huge, and not easy to update incrementally.  But for
+  smaller things (one or two numbers per observation, as in the
+  ``dets:band`` example above) it can be convenient.  Doing this
+  requires including ``obs:obs_id`` (or some other ObsDb column) in
+  the dataset.
+
+
+.. _metadata-archives:
 
 Metadata Archives
 =================
@@ -469,6 +501,8 @@ Note the ``obs:obs_id`` column is gone -- it was taken as index
 information, and matched against the ``obs:obs_id`` in the
 ``request``.
 
+.. _metadata-archives-custom:
+
 Custom Archive Formats
 ----------------------
 
@@ -530,6 +564,8 @@ Note the thing returned by ``TextLoader.from_loadspec`` is a
 ResultSet.  Presently the only types you can return from a loader
 class function are ResultSet and AxisManager.
 
+
+.. _metadata-indexes:
 
 Metadata Indexes
 ================
