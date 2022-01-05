@@ -308,6 +308,90 @@ resolving the metadata request, loading the results, and broadcasting
 them to their intended targets.
 
 
+Example
+=======
+
+Let's say we want to build an HDF5 database with a number ``thing``
+per detector per observation::
+
+    from sotodlib.core import Context, metadata
+    import sotodlib.io.metadata as io_meta
+
+    context = Context('context_file_no_thing.yaml')
+    obs_rs = context.obsdb.query()
+    h5_file = 'thing.h5'
+
+    for i in range(len(obs_rs)):
+        aman = context.get_obs(obs_rs[i]['obs_id'])
+        things = calculate_thing(aman)
+        thing_rs = metadata.ResultSet(keys=['dets:name', 'thing'])
+        for d, det in enumerate(aman.dets.vals):
+            thing_rs.rows.append((det, things[d]))
+        io_meta.write_dataset(thing_rs, h5_file, f'thing_for_{obs_id}')
+
+Once we've built the lower level HDF5 file we need to add it to a
+metadata index::
+
+    scheme = metadata.ManifestScheme()
+    scheme.add_exact_match('obs:obs_id')
+    scheme.add_data_field('dataset')
+
+    db = metadata.ManifestDb(scheme=scheme)
+    for i in range(len(obs_rs)):
+        obs_id = obs_rs[i]['obs_id']
+        db.add_entry({'obs:obs_id': obs_id,
+                      'dataset': f'thing_for_{obs_id}',},
+                       filename=h5_file)
+
+    db.to_file('thing_db.gz')
+
+Then have a new context file that includes::
+
+    metadata:
+        - db : 'thing_db.gz'
+          name : 'thing'
+
+Using that context file::
+
+    context = Context('context_file_with_thing.yaml')
+    aman = context.get_obs(your_favorite_obs_id)
+
+will return an AxisManager that includes ``aman.thing`` for that
+specific observation.
+
+If this is example is almost, but not quite, what you need, consider the
+following:
+
+- You can use multiple HDF5 files in your Metadata Archive -- the
+  filename is a parameter to ``db.add_entry``.  That helps to keep
+  your HDF5 files a manageable size, and is good practice in cases
+  where there are regular (e.g. daily or hourly) updates to an
+  archive.
+- You can use an archive format other than HDF5 (if you must), see the
+  example in :ref:`metadata-archives-custom`.
+- The entries in the Index do not have to be per-``obs_id``.  You can
+  associate results to ranges of time or to other fields in the ObsDb.
+  See examples in :ref:`metadata-indexes`.
+- The entries in the Archive do not need to be per-detector.  You can
+  specify results for a whole group of detectors, if that group is
+  enumerated in the DetDb.  For example, if DetDb contains a column
+  ``band``, the dataset could contain columns ``dets:band`` and
+  ``cal`` and simply report one calibration number for each frequency
+  band.  (On load, the Context Metadata system will automatically
+  broadcast the ``cal`` number so that it has shape ``(n_dets,)`` in
+  the fully populated AxisManager.)
+- You can store all the results (i.e., results for multiple
+  ``obs_id``) in a single HDF5 dataset.  This is not usually a good
+  idea if your results are per-detector, per-observation... the
+  dataset will be huge, and not easy to update incrementally.  But for
+  smaller things (one or two numbers per observation, as in the
+  ``dets:band`` example above) it can be convenient.  Doing this
+  requires including ``obs:obs_id`` (or some other ObsDb column) in
+  the dataset.
+
+
+.. _metadata-archives:
+
 Metadata Archives
 =================
 
@@ -417,6 +501,71 @@ Note the ``obs:obs_id`` column is gone -- it was taken as index
 information, and matched against the ``obs:obs_id`` in the
 ``request``.
 
+.. _metadata-archives-custom:
+
+Custom Archive Formats
+----------------------
+
+HDF5 is cool but sometimes you need or want to use a different storage
+system.  Setting up a custom loader function involves the following:
+
+- A loader class that can read the metadata from that storage
+  system, respecting the request API.
+- A module, containg the loader class, and also the ability to
+  register the loader class with sotodlib, under a particular laoder
+  name.
+- A ManifestDb data field called ``loader``, with the value set to the
+  loader name.
+
+Here's a sketchy example.  We start by defining a loader class, that
+will read a number from a text file::
+
+  from sotodlib.io import metadata
+  from sotodlib.core.metadata import ResultSet, SuperLoader, LoaderInterface
+
+  class TextLoader(LoaderInterface):
+      def from_loadspec(self, load_params):
+          with open(load_params['filename']) as fin:
+              the_answer = float(fin.read())
+          rs = ResultSet(keys=['answer'], [(the_answer, )])
+
+  SuperLoader.register_metadata('text_loader', TextLoader)
+
+Let's suppose that code (including the SuperLoader business) is in a
+module called ``othertel.textloader``.  To get this code to run
+whenever we're working with a certain dataset, add it to the
+``imports`` list in the context.yaml:
+
+.. code-block:: yaml
+
+  # Standard i/o import, and TextLoader for othertel.
+  imports:
+    - sotodlib.io.metadata
+    - othertel.textloader
+
+Now for the ManifestDb::
+
+  scheme = metadata.ManifestScheme()
+  scheme.add_exact_match('obs:obs_id')
+  scheme.add_data_field('loader')
+
+  db = metadata.ManifestDb(scheme=scheme)
+  db.add_entry({'obs:obs_id: 'obs12345',
+                'loader': 'text_loader'},
+               filename='obs12345_timeconst.txt')
+  db.add_entry({'obs:obs_id: 'obs12600',
+                'loader': 'text_loader'},
+               filename='obs12600_timeconst.txt')
+
+Now if a metadata request is made for ``obs12345``, for example, a
+single number will be loaded from ``obs12345_timeconst.txt``.
+
+Note the thing returned by ``TextLoader.from_loadspec`` is a
+ResultSet.  Presently the only types you can return from a loader
+class function are ResultSet and AxisManager.
+
+
+.. _metadata-indexes:
 
 Metadata Indexes
 ================
@@ -498,64 +647,52 @@ limit) for the key ``obs:timestamp``.
 Example 3: Other observation selectors
 ``````````````````````````````````````
 
-HDF5 is cool but sometimes you need or want to use a different storage
-system.  Setting up a custom loader function involves the following:
+Other fields from ObsDb can be used to build the Metadata Index.
+While timestamp or obs_id are quite general, a more compact and direct
+association can be made if ObsDb contains a field that is more
+directly connected to the metadata.
 
-- A loader class that can read the metadata from that storage
-  system, respecting the request API.
-- A module, containg the loader class, and also the ability to
-  register the loader class with sotodlib, under a particular laoder
-  name.
-- A ManifestDb data field called ``loader``, with the value set to the
-  loader name.
+For example, suppose there was an intermittent problem with a subset
+of the detectors that requires us to discard those data from analysis.
+The problem occurred randomly, but it could be identified and each
+observation could be classified as either having that problem or not.
+We decide to eliminate those bad detectors by applying a calibration
+factor of 0 to the data.
 
-Here's a sketchy example.  We start by defining a loader class, that
-will read a number from a text file::
+We create an HDF5 file called ``bad_det_issue.h5`` with two datasets:
 
-  from sotodlib.io import metadata
-  from sotodlib.core.metadata import ResultSet, SuperLoader, LoaderInterface
+- ``cal_all_ok``: has columns ``dets:name`` (listing all detectors)
+  and ``cal``, where ``cal`` is all 1s.
+- ``cal_mask_bad``: same but with ``cal=0`` for the bad detectors.
 
-  class TextLoader(LoaderInterface):
-      def from_loadspec(self, load_params):
-          with open(load_params['filename']) as fin:
-              the_answer = float(fin.read())
-          rs = ResultSet(keys=['answer'], [(the_answer, )])
+We update the ObsDb we are using to include a column
+``bad_det_issue``, and for each observation we set it to value 0 (if
+the problem is not seen in that observation) or 1 (if it is).
 
-  SuperLoader.register_metadata('text_loader', TextLoader)
-
-Let's suppose that code (including the SuperLoader business) is in a
-module called ``othertel.textloader``.  To get this code to run
-whenever we're working with a certain dataset, add it to the
-``imports`` list in the context.yaml:
-
-.. code-block:: yaml
-
-  # Standard i/o import, and TextLoader for othertel.
-  imports:
-    - sotodlib.io.metadata
-    - othertel.textloader
-
-Now for the ManifestDb::
+We build the Metadata Index to select the right dataset from
+``bad_det_issue.h5``, depending on the value of ``bad_det_issue`` in
+the ObsDb::
 
   scheme = metadata.ManifestScheme()
-  scheme.add_exact_match('obs:obs_id')
-  scheme.add_data_field('loader')
+  scheme.add_exact_match('obs:bad_det_issue')
+  scheme.add_data_field('dataset')
 
   db = metadata.ManifestDb(scheme=scheme)
-  db.add_entry({'obs:obs_id: 'obs12345',
-                'loader': 'text_loader'},
-               filename='obs12345_timeconst.txt')
-  db.add_entry({'obs:obs_id: 'obs12600',
-                'loader': 'text_loader'},
-               filename='obs12600_timeconst.txt')
+  db.add_entry({'obs:bad_det_issue': 0,
+                'dataset': 'cal_all_ok'},
+                filename='bad_det_issue.h5')
+  db.add_entry({'obs:bad_det_issue': 1,
+                'dataset': 'cal_mask_bad'},
+                filename='bad_det_issue.h5')
+  db.to_file('cal_bad_det_issue.gz')
 
-Now if a metadata request is made for ``obs12345``, for example, a
-single number will be loaded from ``obs12345_timeconst.txt``.
+The context.yaml metadata entry would probably look like this::
 
-Note the thing returned by ``TextLoader.from_loadspec`` is a
-ResultSet.  Presently the only types you can return from a loader
-class function are ResultSet and AxisManager.
-
+  metadata:
+    ...
+    - db: '{metadata_lib}/cal_bad_det_issue.gz'
+      name: 'cal_remove_bad&cal'
+    ...
 
 
 ManifestDb reference
