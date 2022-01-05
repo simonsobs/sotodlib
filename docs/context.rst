@@ -611,6 +611,52 @@ limit) for the key ``obs:timestamp``.
 Example 3: Other observation selectors
 ``````````````````````````````````````
 
+Other fields from ObsDb can be used to build the Metadata Index.
+While timestamp or obs_id are quite general, a more compact and direct
+association can be made if ObsDb contains a field that is more
+directly connected to the metadata.
+
+For example, suppose there was an intermittent problem with a subset
+of the detectors that requires us to discard those data from analysis.
+The problem occurred randomly, but it could be identified and each
+observation could be classified as either having that problem or not.
+We decide to eliminate those bad detectors by applying a calibration
+factor of 0 to the data.
+
+We create an HDF5 file called ``bad_det_issue.h5`` with two datasets:
+
+- ``cal_all_ok``: has columns ``dets:name`` (listing all detectors)
+  and ``cal``, where ``cal`` is all 1s.
+- ``cal_mask_bad``: same but with ``cal=0`` for the bad detectors.
+
+We update the ObsDb we are using to include a column
+``bad_det_issue``, and for each observation we set it to value 0 (if
+the problem is not seen in that observation) or 1 (if it is).
+
+We build the Metadata Index to select the right dataset from
+``bad_det_issue.h5``, depending on the value of ``bad_det_issue`` in
+the ObsDb::
+
+  scheme = metadata.ManifestScheme()
+  scheme.add_exact_match('obs:bad_det_issue')
+  scheme.add_data_field('dataset')
+
+  db = metadata.ManifestDb(scheme=scheme)
+  db.add_entry({'obs:bad_det_issue': 0,
+                'dataset': 'cal_all_ok'},
+                filename='bad_det_issue.h5')
+  db.add_entry({'obs:bad_det_issue': 1,
+                'dataset': 'cal_mask_bad'},
+                filename='bad_det_issue.h5')
+  db.to_file('cal_bad_det_issue.gz')
+
+The context.yaml metadata entry would probably look like this::
+
+  metadata:
+    ...
+    - db: '{metadata_lib}/cal_bad_det_issue.gz'
+      name: 'cal_remove_bad&cal'
+    ...
 
 
 ManifestDb reference
