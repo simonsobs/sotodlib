@@ -308,6 +308,58 @@ resolving the metadata request, loading the results, and broadcasting
 them to their intended targets.
 
 
+Example
+=======
+
+Let's say we want to build an HDF5 database with a number ``thing``
+per detector per observation::
+
+    from sotodlib.core import Context, metadata
+    import sotodlib.io.metadata as io_meta
+
+    context = Context('context_file_no_thing.yaml')
+    obs_rs = context.obsdb.query()
+    h5_file = 'thing.h5'
+
+    for i in range(len(obs_rs)):
+        aman = context.get_obs(obs_rs[i]['obs_id'])
+        things = calculate_thing(aman)
+        thing_rs = metadata.ResultSet(keys=['obs:obs_id', 'dets:name', 'thing'])
+        for d,det in enumerate(aman.dets.vals):
+            thing_rs.rows.append( (obs_id, det, things[d]))
+        io_meta.write_dataset(thing_rs, h5_file, f'thing_for_{obs_id}')
+
+Once we've built the lower level HDF5 file we need to add it to a
+metadata index::
+
+    scheme = metadata.ManifestScheme()
+    scheme.add_exact_match('obs:obs_id')
+    scheme.add_data_field('dataset')
+
+    db = metadata.ManifestDb(scheme=scheme)
+    for i in range(len(obs_rs)):
+        obs_id = obs_rs[i]['obs_id']
+        db.add_entry({'obs:obs_id': obs_id,
+                      'dataset': f'thing_for_{obs_id}',},
+                       filename=h5_file)
+
+    db.to_file('thing_db.gz')
+
+Then have a new context file that includes::
+
+    metadata:
+        - db : 'thing_db.gz'
+          name : 'thing'
+
+Using that context file::
+
+    context = Context('context_file_with_thing.yaml')
+    aman = context.get_obs(your_favorite_obs_id)
+
+will return an AxisManager with aman.thing for that specific
+observation.
+
+
 Metadata Archives
 =================
 
@@ -495,57 +547,7 @@ In the this case, when we add entries to the ManifestDb, we pass a
 tuple of timestamps (lower inclusive limit, higher non-inclusive
 limit) for the key ``obs:timestamp``.
 
-Example 3: Detector Specific Example
-````````````````````````````````````
-
-Let's say we want to build an HDF5 database with a number ``thing`` per detector 
-per observation::
-
-    from sotodlib.core import Context, metadata
-    import sotodlib.io.metadata as io_meta
-
-    context = Context('context_file_no_thing.yaml')
-    obs_rs = context.obsdb.query()
-    h5_file = 'thing.h5'
-    
-    for i in range(len(obs_rs)):
-        aman = context.get_obs( obs_rs[i]['obs_id'] )
-        things = calculate_thing(aman)
-        thing_rs = metadata.ResultSet(keys=['obs:obs_id', 'dets:name', 'thing'])
-        for d,det in enumerate(aman.dets.vals):
-            thing_rs.rows.append( (obs_id, det, things[d]))
-        io_meta.write_dataset(thing_rs, h5_file, f'thing_for_{obs_id}')
-
-Once we've built the lower level HDF5 file we need to add it to a metadata
-index::
-
-    scheme = metadata.ManifestScheme()
-    scheme.add_exact_match('obs:obs_id')
-    scheme.add_data_field('dataset')
-
-    db = metadata.ManifestDb(scheme=scheme)
-    for i in range(len(obs_rs)):
-        obs_id = obs_rs[i]['obs_id']
-        db.add_entry({'obs:obs_id': obs_id, 
-                      'dataset': f'thing_for_{obs_id}',},
-                       filename=h5_file)
-    
-    db.to_file('thing_db.gz')        
-
-Then have a new context file that includes::
-    
-    metadata:
-        - db : 'thing_db.gz'
-          name : 'thing' 
-
-Using that context file::
-
-    context = Context('context_file_with_thing.yaml')
-    aman = context.get_obs( your_favorite_obs_id )
-
-will return an AxisManager with aman.thing for that specific observation.
-
-Example 4: Other observation selectors
+Example 3: Other observation selectors
 ``````````````````````````````````````
 
 HDF5 is cool but sometimes you need or want to use a different storage
