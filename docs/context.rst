@@ -324,9 +324,9 @@ per detector per observation::
     for i in range(len(obs_rs)):
         aman = context.get_obs(obs_rs[i]['obs_id'])
         things = calculate_thing(aman)
-        thing_rs = metadata.ResultSet(keys=['obs:obs_id', 'dets:name', 'thing'])
-        for d,det in enumerate(aman.dets.vals):
-            thing_rs.rows.append( (obs_id, det, things[d]))
+        thing_rs = metadata.ResultSet(keys=['dets:name', 'thing'])
+        for d, det in enumerate(aman.dets.vals):
+            thing_rs.rows.append((det, things[d]))
         io_meta.write_dataset(thing_rs, h5_file, f'thing_for_{obs_id}')
 
 Once we've built the lower level HDF5 file we need to add it to a
@@ -356,8 +356,8 @@ Using that context file::
     context = Context('context_file_with_thing.yaml')
     aman = context.get_obs(your_favorite_obs_id)
 
-will return an AxisManager with aman.thing for that specific
-observation.
+will return an AxisManager that includes ``aman.thing`` for that
+specific observation.
 
 If this is example is almost, but not quite, what you need, consider the
 following:
