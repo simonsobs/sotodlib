@@ -378,7 +378,9 @@ class MLMapmaker(Operator):
         if self.write_rhs:
             self._signal_map.write(prefix, "rhs", self._signal_map.rhs)
         if self.write_div:
-            self._signal_map.write(prefix, "div", self._signal_map.div)
+            #self._signal_map.write(prefix, "div", self._signal_map.div)
+            # FIXME : only writing the TT variance to avoid integer overflow in communication
+            self._signal_map.write(prefix, "div", self._signal_map.div[0, 0])
         mmul = tilemap.map_mul if self.tiled else enmap.map_mul
         if self.write_bin:
             self._signal_map.write(prefix, "bin", mmul(self._signal_map.idiv, self._signal_map.rhs))
