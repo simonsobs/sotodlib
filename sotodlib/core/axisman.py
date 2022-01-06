@@ -276,6 +276,10 @@ class ScalarAxis(AxisInterface):
             if np.isscalar(src) or src is None:
                 return ScalarAxis(self.name, 0)
             return ScalarAxis(self.name, src.shape[axis_index])
+        if np.isscalar(src) or src is None:
+            if self.count == 0:
+                return self
+            raise ValueError("Scalar data is incompatible with axis %s" % repr(self))
         return super().resolve(src, axis_index)
 
     def restriction(self, selector):
