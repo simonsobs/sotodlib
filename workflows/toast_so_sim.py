@@ -24,10 +24,11 @@ an interactive python session.
 
 """
 
+import argparse
+import datetime
 import os
 import sys
 import traceback
-import argparse
 
 import numpy as np
 
@@ -659,6 +660,13 @@ def main():
 
     # Get optional MPI parameters
     comm, procs, rank = toast.get_world()
+
+    nthread = os.environ["OMP_NUM_THREADS"]
+    log.info_rank(
+        f"Executing workflow with {procs} MPI tasks, each with "
+        f"{nthread} OpenMP threads at {datetime.datetime.now()}",
+        comm,
+    )
 
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"Start of the workflow:  {mem}", comm)
