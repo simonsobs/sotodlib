@@ -565,7 +565,10 @@ class AxisManager:
         # Promote input data to a full AxisManager, so we can call up
         # to self.merge.
         helper = AxisManager()
-        assign = [None for s in data.shape]
+        if np.isscalar(data) or data is None:
+            assign = [None]
+        else:
+            assign = [None for s in data.shape]
         # Resolve each axis declaration into an axis object, and check
         # for conflict.  If an axis is passed by name only, the
         # dimensions must agree with self.  If a full axis definition
@@ -578,6 +581,9 @@ class AxisManager:
                         raise ValueError("Axis assignment refers to unknown "
                                          "axis '%s'." % axis)
                     axis = self._axes[axis]
+                # If data is scalar axis needs to be ScalarAxis
+                if (np.isscalar(data) or data is None) and not isinstance(axis, ScalarAxis):
+                    raise TypeError("Can't assign scalar to non scalar axis")
                 axis = axis.resolve(data, index)
                 helper._axes[axis.name] = axis
                 assign[index] = axis.name
