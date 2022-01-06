@@ -248,6 +248,48 @@ class LabelAxis(AxisInterface):
             return ax
 
 
+class ScalarAxis(AxisInterface):
+    """This class manages a scalar axis
+    Works for both scalars and scalar arrays,
+    when data is scalar (not array) count is 0.
+
+    Not sure what a meaningful restriction for
+    scalars would be so for now it just returns 
+    itself and and slice(None)
+
+    Same goes for intersection, so for now the
+    function is identical to IndexAxis.intersection
+    
+    """
+    def __init__(self, name, count=None):
+        super().__init__(name)
+        self.count = count
+
+    def copy(self):
+        return ScalarAxis(self.name)
+
+    def __repr__(self):
+        return 'ScalarAxis(%s)' % self.count
+
+    def resolve(self, src, axis_index=None):
+        if self.count is None:
+            if np.isscalar(src) or src is None:
+                return ScalarAxis(self.name, 0)
+            return ScalarAxis(self.name, src.shape[axis_index])
+        return super().resolve(src, axis_index)
+
+    def restriction(self, selector):
+        return self, slice(None)
+
+    def intersection(self, friend, return_slices=False):
+        count_out = min(self.count, friend.count)
+        ax = IndexAxis(self.name, count_out)
+        if return_slices:
+            return ax, slice(count_out), slice(count_out)
+        else:
+            return ax
+
+
 class AxisManager:
     """A container for numpy arrays and other multi-dimensional
     data-carrying objects (including other AxisManagers).  This object
