@@ -248,52 +248,6 @@ class LabelAxis(AxisInterface):
             return ax
 
 
-class ScalarAxis(AxisInterface):
-    """This class manages a scalar axis
-    Works for both scalars and scalar arrays,
-    when data is scalar (not array) count is 0.
-
-    Not sure what a meaningful restriction for
-    scalars would be so for now it just returns 
-    itself and and slice(None)
-
-    Same goes for intersection, so for now the
-    function is identical to IndexAxis.intersection
-    
-    """
-    def __init__(self, name, count=None):
-        super().__init__(name)
-        self.count = count
-
-    def copy(self):
-        return ScalarAxis(self.name)
-
-    def __repr__(self):
-        return 'ScalarAxis(%s)' % self.count
-
-    def resolve(self, src, axis_index=None):
-        if self.count is None:
-            if np.isscalar(src) or src is None:
-                return ScalarAxis(self.name, 0)
-            return ScalarAxis(self.name, src.shape[axis_index])
-        if np.isscalar(src) or src is None:
-            if self.count == 0:
-                return self
-            raise ValueError("Scalar data is incompatible with axis %s" % repr(self))
-        return super().resolve(src, axis_index)
-
-    def restriction(self, selector):
-        return self, slice(None)
-
-    def intersection(self, friend, return_slices=False):
-        count_out = min(self.count, friend.count)
-        ax = IndexAxis(self.name, count_out)
-        if return_slices:
-            return ax, slice(count_out), slice(count_out)
-        else:
-            return ax
-
-
 class AxisManager:
     """A container for numpy arrays and other multi-dimensional
     data-carrying objects (including other AxisManagers).  This object
@@ -552,6 +506,8 @@ class AxisManager:
 
           data: The data to register.  This must be of an acceptable
             type, i.e. a numpy array or another AxisManager.
+            If scalar (or None) then data will be directly added to
+            _fields with no associated axis.
 
           axis_map: A list that assigns dimensions of data to
             particular Axes.  Each entry in the list must be a tuple
@@ -566,13 +522,15 @@ class AxisManager:
             assert(id(self) not in data._managed_ids())
             assert(axis_map is None)
             axis_map = [(i, v) for i, v in enumerate(data._axes.values())]
+        # Handle scalars
+        if np.isscalar(data) or data is None:
+            self._fields[name] = data
+            self._assignments[name] = [None]
+            return self
         # Promote input data to a full AxisManager, so we can call up
         # to self.merge.
         helper = AxisManager()
-        if np.isscalar(data) or data is None:
-            assign = [None]
-        else:
-            assign = [None for s in data.shape]
+        assign = [None for s in data.shape]
         # Resolve each axis declaration into an axis object, and check
         # for conflict.  If an axis is passed by name only, the
         # dimensions must agree with self.  If a full axis definition
@@ -585,9 +543,6 @@ class AxisManager:
                         raise ValueError("Axis assignment refers to unknown "
                                          "axis '%s'." % axis)
                     axis = self._axes[axis]
-                # If data is scalar axis needs to be ScalarAxis
-                if (np.isscalar(data) or data is None) and not isinstance(axis, ScalarAxis):
-                    raise TypeError("Can't assign scalar to non scalar axis")
                 axis = axis.resolve(data, index)
                 helper._axes[axis.name] = axis
                 assign[index] = axis.name
@@ -682,6 +637,8 @@ class AxisManager:
         for k, v in self._fields.items():
             if isinstance(v, AxisManager):
                 dest._fields[k] = v.restrict_axes(axes, in_place=in_place)
+            elif np.isscalar(v) or v is None:
+                dest._fields[k] = v
             else:
                 # I.e. an ndarray.
                 sslice = [sels.get(ax, slice(None))
@@ -748,6 +705,8 @@ class AxisManager:
                 dest._fields[k] = v.copy()
                 if axis_name in v._axes:
                     dest._fields[k].restrict(axis_name, selector)
+            elif np.isscalar(v) or v is None:
+                dest._fields[k] = v
             else:
                 sslice = [sl if n == axis_name else slice(None)
                           for n in dest._assignments[k]]
