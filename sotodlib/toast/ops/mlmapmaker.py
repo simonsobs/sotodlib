@@ -352,7 +352,7 @@ class MLMapmaker(Operator):
             nmat_dir  = self.nmat_dir.format(out_dir=self.out_dir)
             nmat_file = nmat_dir + "/nmat_%s.hdf" % ob.name
             if self.nmat_mode == "load" or self.nmat_mode == "cache" and os.path.isfile(nmat_file):
-                print("Reading noise model %s" % nmat_file)
+                #print("Reading noise model %s" % nmat_file)
                 nmat = mm.read_nmat(nmat_file)
             else: nmat = None
 
@@ -362,7 +362,7 @@ class MLMapmaker(Operator):
             # Maybe save the noise model we built (only if we actually built one rather than
             # reading one in)
             if self.nmat_mode in ["save", "cache"] and nmat is None:
-                print("Writing noise model %s" % nmat_file)
+                #print("Writing noise model %s" % nmat_file)
                 from pixell import utils # not sure how toast makes dirs safely, so using this
                 utils.mkdir(nmat_dir)
                 mm.write_nmat(nmat_file, self._mapmaker.data[-1].nmat)
