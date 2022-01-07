@@ -147,7 +147,7 @@ def parse_config(operators, templates, comm):
     # Create our output directory
     if comm is None or comm.rank == 0:
         if not os.path.isdir(args.out_dir):
-            os.makedirs(args.out_dir)
+            os.makedirs(args.out_dir, exist_ok=True)
 
     # Log the config that was actually used at runtime.
     outlog = os.path.join(args.out_dir, "config_log.toml")
@@ -474,8 +474,6 @@ def reduce_data(job, args, data):
 
     # Run ML mapmaker
 
-    #ops.mlmapmaker.Nmat = sotodlib.mapmaking.NmatUncorr()
-    ops.mlmapmaker.Nmat = sotodlib.mapmaking.NmatDetvecs()
     ops.mlmapmaker.out_dir = args.out_dir
     ops.mlmapmaker.apply(data)
     log.info_rank("Finished ML map-making in", comm=world_comm, timer=timer)

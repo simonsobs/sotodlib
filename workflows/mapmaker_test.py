@@ -35,7 +35,7 @@ import pixell.fft
 pixell.fft.engine = "fftw"
 
 
-def parse_args():
+def parse_args(mlmapmaker, comm):
     """Parse command line arguments"""
     # Argument parsing
     parser = argparse.ArgumentParser(description="SO mapmaker test")
@@ -63,12 +63,6 @@ def parse_args():
         help="Input NSIDE=4096 TQU file to scan from.",
     )
     parser.add_argument(
-        "--area_file",
-        required=True,
-        default=None,
-        help="Input FITS file with WCS information.",
-    )
-    parser.add_argument(
         "--out_dir",
         required=False,
         type=str,
@@ -76,25 +70,13 @@ def parse_args():
         help="The output directory",
     )
 
-    parser.add_argument(
-        "--nmat_dir",
-        required=False,
-        type=str,
-        default="{out_dir}/nmats",
-        help="Directory where noise matrices are read/written/cached depending on nmat_mode",
-    )
+    config, args, jobargs = toast.parse_config(parser, operators=[mlmapmaker])
 
-    parser.add_argument(
-        "--nmat_mode",
-        required=False,
-        type=str,
-        default="build",
-        help="How to build the noise matrix. 'build': Always build from tod. 'cache': Use if available in nmat_dir, otherwise build and save. 'load': Load from nmat_dir, error if missing. 'save': Build from tod and save.",
-    )
+    # Log the config that was actually used at runtime.
+    outlog = os.path.join(args.out_dir, "config_log.toml")
+    toast.config.dump_toml(outlog, config, comm=comm)
 
-    args = parser.parse_args()
-
-    return args
+    return config, args, jobargs
 
 
 def load_schedule(comm, path):
@@ -137,11 +119,15 @@ def main():
     gt = toast.timing.GlobalTimers.get()
     gt.start("mapmaker_test main")
 
-    # Get commandline options
-    args = parse_args()
+    mlmapmaker = so_ops.MLMapmaker(comps="TQU")
 
     # Get optional MPI parameters
     comm, procs, rank = toast.get_world()
+
+    # Get commandline options
+    config, args, jobargs = parse_args(mlmapmaker, comm)
+    job = toast.create_from_config(config)
+    mlmapmaker = job.operators.MLMapmaker
 
     # Make the output directory
     if rank == 0:
@@ -304,16 +290,8 @@ def main():
     log.info_rank("Finished ground-filtering in", comm=wcomm, timer=timer)
 
     # Run ML mapmaker
-    mlmapmaker = so_ops.MLMapmaker(comps="TQU")
-    mlmapmaker.area = args.area_file
     mlmapmaker.enabled = True  # Toggle to False to disable
-    # this should be mm.NmatDetvecs() for serious runs, but that one doesn't handle
-    # too low sample rate or too few detectors, so it's not good for test runs as
-    # long as the toast simulation steps are so slow.
-    mlmapmaker.Nmat = mm.NmatDetvecs()
     mlmapmaker.out_dir = args.out_dir
-    mlmapmaker.nmat_dir = args.nmat_dir
-    mlmapmaker.nmat_mode = args.nmat_mode
     mlmapmaker.apply(data)
     log.info_rank("Finished ML map-making in", comm=wcomm, timer=timer)
 
