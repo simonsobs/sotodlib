@@ -24,10 +24,11 @@ an interactive python session.
 
 """
 
+import argparse
+import datetime
 import os
 import sys
 import traceback
-import argparse
 
 import numpy as np
 
@@ -48,6 +49,11 @@ if t3g.available:
     from spt3g import core as c3g
 
 import sotodlib.toast.ops as so_ops
+import sotodlib.mapmaking
+
+# Make sure pixell uses a reliable FFT engine
+import pixell.fft
+pixell.fft.engine = "fftw"
 
 
 def parse_config(operators, templates, comm):
@@ -468,6 +474,9 @@ def reduce_data(job, args, data):
 
     # Run ML mapmaker
 
+    #ops.mlmapmaker.Nmat = sotodlib.mapmaking.NmatUncorr()
+    ops.mlmapmaker.Nmat = sotodlib.mapmaking.NmatDetvecs()
+    ops.mlmapmaker.out_dir = args.out_dir
     ops.mlmapmaker.apply(data)
     log.info_rank("Finished ML map-making in", comm=world_comm, timer=timer)
 
@@ -651,6 +660,13 @@ def main():
 
     # Get optional MPI parameters
     comm, procs, rank = toast.get_world()
+
+    nthread = os.environ["OMP_NUM_THREADS"]
+    log.info_rank(
+        f"Executing workflow with {procs} MPI tasks, each with "
+        f"{nthread} OpenMP threads at {datetime.datetime.now()}",
+        comm,
+    )
 
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"Start of the workflow:  {mem}", comm)
