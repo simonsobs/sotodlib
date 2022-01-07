@@ -27,11 +27,15 @@ class MLMapmaker:
         # Prepare our tod
         tod    = obs.signal.astype(self.dtype, copy=False)
         utils.deslope(tod, w=5, inplace=True)
-        # Build the noise model and apply it
+        # Allow the user to override the noise model on a per-obs level
         if noise_model is None: noise_model = self.noise_model
         ctime  = obs.timestamps
         srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
-        nmat   = self.noise_model.build(tod, srate=srate)
+        # Build the noise model from the obs unless a fully
+        # initialized noise model was passed
+        if noise_model.ready: nmat = noise_model
+        else: nmat = noise_model.build(tod, srate=srate)
+        # And apply it to the tod
         tod    = nmat.apply(tod)
         # Add the observation to each of our signals
         for signal in self.signals:
@@ -383,7 +387,9 @@ def safe_invert_div(div, lim=1e-2):
 ################################
 
 class Nmat:
-    def __init__(self): self.ivar = np.full(1, 1.0)
+    def __init__(self):
+        self.ivar  = np.full(1, 1.0)
+        self.ready = True
     def build(self, tod, **kwargs): return self
     def apply(self, tod): return tod
     def write(self, fname):
@@ -399,6 +405,7 @@ class NmatUncorr(Nmat):
         self.bins       = bins
         self.ips_binned = ips_binned
         self.ivar       = ivar
+        self.ready      = bins is not None and ips_binned is not None and ivar is not None
     def build(self, tod, **kwargs):
         ps = np.abs(fft.rfft(tod))**2
         if   self.spacing == "exp": bins = utils.expbin(ps.shape[-1], nbin=self.nbin, nmin=self.nmin)
@@ -457,6 +464,7 @@ class NmatDetvecs(Nmat):
         self.window = window
         self.nwin   = nwin
         self.D, self.V, self.iD, self.iV, self.s, self.ivar = D, V, iD, iV, s, ivar
+        self.ready      = all([a is not None for a in [D, V, iD, iV, s, ivar]])
     def build(self, tod, srate, **kwargs):
         # Apply window before measuring noise model
         nwin  = utils.nint(self.window/srate)
@@ -532,7 +540,7 @@ class NmatDetvecs(Nmat):
                 iV    = self.iV[bi]/norm**0.5
                 ft[:] = iD[:,None]*ft + self.s*iV.dot(iV.T.dot(ft))
         else:
-            so3g.nmat_detvecs_apply(ftod.view(tod.dtype), self.bins, self.iD, self.iV, self.s, norm)
+            so3g.nmat_detvecs_apply(ftod.view(tod.dtype), self.bins, self.iD, self.iV, float(self.s), float(norm))
         # I divided by the normalization above instead of passing normalize=True
         # here to reduce the number of operations needed
         fft.irfft(ftod, tod)
@@ -555,10 +563,11 @@ def write_nmat(fname, nmat):
 
 def read_nmat(fname):
     data = bunch.read(fname)
-    if   data.type == "NmatDetvecs": return NmatDetvecs.from_bunch(data)
-    elif data.type == "NmatUncorr":  return NmatUncorr .from_bunch(data)
-    elif data.type == "Nmat":        return Nmat       .from_bunch(data)
-    else: raise IOError("Unrecognized noise matrix type '%s' in '%s'" % (str(data.type), fname))
+    typ  = data.type.decode()
+    if   typ == "NmatDetvecs": return NmatDetvecs.from_bunch(data)
+    elif typ == "NmatUncorr":  return NmatUncorr .from_bunch(data)
+    elif typ == "Nmat":        return Nmat       .from_bunch(data)
+    else: raise IOError("Unrecognized noise matrix type '%s' in '%s'" % (str(typ), fname))
 
 def measure_cov(d, nmax=10000):
     d = d[:,::max(1,d.shape[1]//nmax)]
