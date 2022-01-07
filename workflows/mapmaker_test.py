@@ -76,6 +76,22 @@ def parse_args():
         help="The output directory",
     )
 
+    parser.add_argument(
+        "--nmat_dir",
+        required=False,
+        type=str,
+        default="{out_dir}/nmats",
+        help="Directory where noise matrices are read/written/cached depending on nmat_mode",
+    )
+
+    parser.add_argument(
+        "--nmat_mode",
+        required=False,
+        type=str,
+        default="build",
+        help="How to build the noise matrix. 'build': Always build from tod. 'cache': Use if available in nmat_dir, otherwise build and save. 'load': Load from nmat_dir, error if missing. 'save': Build from tod and save.",
+    )
+
     args = parser.parse_args()
 
     return args
@@ -241,7 +257,7 @@ def main():
     # case we need to specify the Stokes weights in Az/El.
     # sim_atmosphere.polarization_fraction = 0.01
     # sim_atmosphere.detector_weights = weights_azel
-    sim_atmosphere.enabled = True  # Toggle to False to disable
+    sim_atmosphere.enabled = False  # Toggle to False to disable
     sim_atmosphere.serial = False
     sim_atmosphere.apply(data)
     log.info_rank("Simulated and observed atmosphere in", comm=wcomm, timer=timer)
@@ -296,6 +312,8 @@ def main():
     # long as the toast simulation steps are so slow.
     mlmapmaker.Nmat = mm.NmatDetvecs()
     mlmapmaker.out_dir = args.out_dir
+    mlmapmaker.nmat_dir = args.nmat_dir
+    mlmapmaker.nmat_mode = args.nmat_mode
     mlmapmaker.apply(data)
     log.info_rank("Finished ML map-making in", comm=wcomm, timer=timer)
 

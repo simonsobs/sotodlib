@@ -74,6 +74,10 @@ class MLMapmaker(Operator):
 
     Nmat = Instance(klass=mm.Nmat, allow_none=True, help="The noise matrix to use")
 
+    nmat_mode = Unicode("build", help="How to initialize the noise matrix. 'build': Always build from data in obs. 'cache': Use if available in nmat_dir, otherwise build and save. 'load': Load from nmat_dir, error if missing. 'save': Build from obs data and save.")
+
+    nmat_dir = Unicode("{out_dir}/nmats", help="Where to read/write/cache noise matrices. See nmat_mode. If {out_dir} is in the string, then it will be expanded to the value of the out_dir parameter")
+
     dtype_map = Unicode("float64", allow_none=True, help="Numpy dtype of map products")
 
     times = Unicode(defaults.times, help="Observation shared key for timestamps")
@@ -344,8 +348,24 @@ class MLMapmaker(Operator):
             # >>> tod.boresight
             # AxisManager(az[samps], el[samps], roll[samps], samps:OffsetAxis(372680))
 
-            self._mapmaker.add_obs(ob.name, axobs)
+            # Maybe load precomputed noise model
+            nmat_dir  = self.nmat_dir.format(out_dir=self.out_dir)
+            nmat_file = nmat_dir + "/nmat_%s.hdf" % ob.name
+            if self.nmat_mode == "load" or self.nmat_mode == "cache" and os.path.isfile(nmat_file):
+                print("Reading noise model %s" % nmat_file)
+                nmat = mm.read_nmat(nmat_file)
+            else: nmat = None
+
+            self._mapmaker.add_obs(ob.name, axobs, noise_model=nmat)
             del axobs
+
+            # Maybe save the noise model we built (only if we actually built one rather than
+            # reading one in)
+            if self.nmat_mode in ["save", "cache"] and nmat is None:
+                print("Writing noise model %s" % nmat_file)
+                from pixell import utils # not sure how toast makes dirs safely, so using this
+                utils.mkdir(nmat_dir)
+                mm.write_nmat(nmat_file, self._mapmaker.data[-1].nmat)
 
             # Optionally delete the input detector data to save memory, if
             # the calling code knows that no additional operators will be
