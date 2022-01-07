@@ -74,11 +74,26 @@ class MLMapmaker(Operator):
 
     Nmat = Instance(klass=mm.Nmat, allow_none=True, help="The noise matrix to use")
 
-    nmat_mode = Unicode("build", help="How to initialize the noise matrix. 'build': Always build from data in obs. 'cache': Use if available in nmat_dir, otherwise build and save. 'load': Load from nmat_dir, error if missing. 'save': Build from obs data and save.")
+    nmat_type = Unicode(
+        "NmatDetvecs",
+        help="Noise matrix type is either `NmatDetvecs` or `NmatUncorr`",
+    )
 
-    nmat_dir = Unicode("{out_dir}/nmats", help="Where to read/write/cache noise matrices. See nmat_mode. If {out_dir} is in the string, then it will be expanded to the value of the out_dir parameter")
+    nmat_mode = Unicode(
+        "build",
+        help="How to initialize the noise matrix.  "
+        "'build': Always build from data in obs.  "
+        "'cache': Use if available in nmat_dir, otherwise build and save.  "
+        "'load': Load from nmat_dir, error if missing.  "
+        "'save': Build from obs data and save."
+    )
 
-    dtype_map = Unicode("float64", allow_none=True, help="Numpy dtype of map products")
+    nmat_dir = Unicode(
+        "{out_dir}/nmats",
+        help="Where to read/write/cache noise matrices. See nmat_mode. "
+        "If {out_dir} is in the string, then it will be expanded to the value of the out_dir parameter")
+
+    dtype_map = Unicode("float64", help="Numpy dtype of map products")
 
     times = Unicode(defaults.times, help="Observation shared key for timestamps")
 
@@ -218,6 +233,15 @@ class MLMapmaker(Operator):
             raise traitlets.TraitError("write_iter_map must be nonnegative")
         return check
 
+    @traitlets.validate("nmat_type")
+    def _check_nmat_type(self, proposal):
+        check = proposal["value"]
+        allowed = ["NmatUncorr", "NmatDetvecs"]
+        if check not in allowed:
+            msg = f"nmat_type must be one of {allowed}, not {check}"
+            raise traitlets.TraitError(msg)
+        return check
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._mapmaker = None
@@ -226,12 +250,18 @@ class MLMapmaker(Operator):
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
 
-        for trait in "area", "Nmat", "dtype_map":
+        for trait in ["area"]:
             value = getattr(self, trait)
             if value is None:
                 raise RuntimeError(
                     f"You must set `{trait}` before running MLMapmaker"
                 )
+
+        # nmat_type is guaranteed to be a valid Nmat class
+        self.Nmat = getattr(mm, self.nmat_type)()
+
+        comm = data.comm.comm_world
+        gcomm = data.comm.comm_group
 
         if self._mapmaker is None:
             # First call- create the mapmaker instance.
@@ -245,8 +275,8 @@ class MLMapmaker(Operator):
                 self._recenter = mm.parse_recentering(self.center_at)
 
             dtype_tod    = np.float32
-            signal_cut   = mm.SignalCut(data.comm.comm_world, dtype=dtype_tod)
-            signal_map   = mm.SignalMap(self._shape, self._wcs, data.comm.comm_world, comps=self.comps,
+            signal_cut   = mm.SignalCut(comm, dtype=dtype_tod)
+            signal_map   = mm.SignalMap(self._shape, self._wcs, comm, comps=self.comps,
                                dtype=np.dtype(self.dtype_map), recenter=self._recenter, tiled=self.tiled)
             signals      = [signal_cut, signal_map]
             self._mapmaker = mm.MLMapmaker(signals, noise_model=self.Nmat, dtype=dtype_tod, verbose=self.verbose)
@@ -351,10 +381,13 @@ class MLMapmaker(Operator):
             # Maybe load precomputed noise model
             nmat_dir  = self.nmat_dir.format(out_dir=self.out_dir)
             nmat_file = nmat_dir + "/nmat_%s.hdf" % ob.name
-            if self.nmat_mode == "load" or self.nmat_mode == "cache" and os.path.isfile(nmat_file):
-                #print("Reading noise model %s" % nmat_file)
+            if self.nmat_mode == "load" or (
+                    self.nmat_mode == "cache" and os.path.isfile(nmat_file)
+            ):
+                log.info_rank(f"Loading noise model from '{nmat_file}'", comm=gcomm)
                 nmat = mm.read_nmat(nmat_file)
-            else: nmat = None
+            else:
+                nmat = None
 
             self._mapmaker.add_obs(ob.name, axobs, noise_model=nmat)
             del axobs
@@ -362,9 +395,8 @@ class MLMapmaker(Operator):
             # Maybe save the noise model we built (only if we actually built one rather than
             # reading one in)
             if self.nmat_mode in ["save", "cache"] and nmat is None:
-                #print("Writing noise model %s" % nmat_file)
-                from pixell import utils # not sure how toast makes dirs safely, so using this
-                utils.mkdir(nmat_dir)
+                log.info_rank(f"Writing noise model to '{nmat_file}'", comm=gcomm)
+                os.makedirs(nmat_dir, exist_ok=True)
                 mm.write_nmat(nmat_file, self._mapmaker.data[-1].nmat)
 
             # Optionally delete the input detector data to save memory, if
