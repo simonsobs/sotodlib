@@ -231,6 +231,7 @@ def main():
         wind_dist=3000 * u.meter,
         z0_center=2000 * u.meter,
         z0_sigma=0 * u.meter,
+        cache_dir = "atm_cache",
     )
     sim_atmosphere.detector_pointing = det_pointing_azel
     # Here is where we could enable a small polarization fraction, in which
