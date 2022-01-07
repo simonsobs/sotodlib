@@ -172,6 +172,10 @@ class SignalMap(Signal):
             self.dof  = MapZipper(*self.rhs.geometry, dtype=self.dtype)
         self.idiv  = safe_invert_div(self.div)
         self.ready = True
+        # DEBUG begin
+        # print(f"{self.comm.rank:4} : tiles : {self.rhs.geometry}", flush=True)
+        print(f"{self.comm.rank:4} : tiles : {self.geo_work}", flush=True)
+        # DEBUG end
     @property
     def ncomp(self): return len(self.comps)
     def forward(self, id, tod, map, tmul=1, mmul=1):

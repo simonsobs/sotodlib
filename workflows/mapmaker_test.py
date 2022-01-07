@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 # Copyright (c) 2019-2021 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
@@ -30,6 +29,10 @@ from toast.mpi import MPI
 from toast.schedule_sim_ground import run_scheduler
 
 import sotodlib.toast.ops as so_ops
+
+# Make sure pixell uses a reliable FFT engine
+import pixell.fft
+pixell.fft.engine = "fftw"
 
 
 def parse_args():
@@ -231,7 +234,7 @@ def main():
         wind_dist=3000 * u.meter,
         z0_center=2000 * u.meter,
         z0_sigma=0 * u.meter,
-        cache_dir = "atm_cache",
+        cache_dir="atm_cache",
     )
     sim_atmosphere.detector_pointing = det_pointing_azel
     # Here is where we could enable a small polarization fraction, in which

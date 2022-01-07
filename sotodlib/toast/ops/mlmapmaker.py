@@ -15,7 +15,7 @@ from astropy import units as u
 from pixell import enmap, tilemap
 
 import toast
-from toast.traits import trait_docs, Unicode, Int, Instance, Bool
+from toast.traits import trait_docs, Unicode, Int, Instance, Bool, Float
 from toast.ops import Operator
 from toast.utils import Logger, Environment, rate_from_times
 from toast.timing import function_timer, Timer
@@ -72,7 +72,7 @@ class MLMapmaker(Operator):
 
     comps = Unicode("T", help="Components (must be 'T', 'QU' or 'TQU')")
 
-    Nmat = Instance(klass=mm.Nmat, help="The noise matrix to use")
+    Nmat = Instance(klass=mm.Nmat, allow_none=True, help="The noise matrix to use")
 
     dtype_map = Unicode("float64", allow_none=True, help="Numpy dtype of map products")
 
@@ -117,7 +117,9 @@ class MLMapmaker(Operator):
 
     tiled = Bool(
         False,
-        help="If True, the map will be represented as distributed tiles in memory. For large maps this is faster and more memory efficient, but for small maps it has some overhead due to extra communication."
+        help="If True, the map will be represented as distributed tiles in memory. "
+        "For large maps this is faster and more memory efficient, but for small "
+        "maps it has some overhead due to extra communication."
     )
 
     verbose = Int(
@@ -128,6 +130,22 @@ class MLMapmaker(Operator):
 
     weather = Unicode("vacuum", help="Weather to assume when making maps")
     site    = Unicode("so",     help="Site to use when making maps")
+
+    maxiter = Int(500, help="Maximum number of CG iterations")
+
+    maxerr = Float(1e-6, help="Maximum error in the CG solver")
+
+    write_div = Bool(True, help="Write out the noise weight map")
+
+    write_rhs = Bool(
+        True, help="Write out the right hand side of the mapmaking equation"
+    )
+
+    write_bin = Bool(True, help="Write out the binned map")
+
+    write_iter_map = Int(
+        10, help="Number of iterations between saved maps.  Set to zero to disable."
+    )
 
     @traitlets.validate("comps")
     def _check_mode(self, proposal):
@@ -150,6 +168,16 @@ class MLMapmaker(Operator):
             raise traitlets.TraitError("Det flag mask should be a positive integer")
         return check
 
+    @traitlets.validate("dtype_map")
+    def _check_det_flag_mask(self, proposal):
+        check = proposal["value"]
+        if check not in ["float", "float64"]:
+            raise traitlets.TraitError(
+                "Map data type must be float64 until so3g.ProjEng supports "
+                "other map data types."
+            )
+        return check
+
     @traitlets.validate("verbose")
     def _check_params(self, proposal):
         check = proposal["value"]
@@ -165,6 +193,27 @@ class MLMapmaker(Operator):
                 check = 1
         return check
 
+    @traitlets.validate("maxiter")
+    def _check_maxiter(self, proposal):
+        check = proposal["value"]
+        if check <= 0:
+            raise traitlets.TraitError("Maxiter should be greater than zero")
+        return check
+
+    @traitlets.validate("maxerr")
+    def _check_maxerr(self, proposal):
+        check = proposal["value"]
+        if check <= 0:
+            raise traitlets.TraitError("Maxerr should be greater than zero")
+        return check
+
+    @traitlets.validate("write_iter_map")
+    def _check_maxerr(self, proposal):
+        check = proposal["value"]
+        if check < 0:
+            raise traitlets.TraitError("write_iter_map must be nonnegative")
+        return check
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._mapmaker = None
@@ -173,8 +222,12 @@ class MLMapmaker(Operator):
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
 
-        if self.area is None:
-            raise RuntimeError("You must set the 'area' trait before calling exec")
+        for trait in "area", "Nmat", "dtype_map":
+            value = getattr(self, trait)
+            if value is None:
+                raise RuntimeError(
+                    f"You must set `{trait}` before running MLMapmaker"
+                )
 
         if self._mapmaker is None:
             # First call- create the mapmaker instance.
@@ -322,10 +375,15 @@ class MLMapmaker(Operator):
         # This will need to be modified for more general cases where we don't solve for
         # a sky map, or where we solve for multiple sky maps. The mapmaker itself supports it,
         # the problem is the direct access to the rhs, div and idiv members
-        self._signal_map.write(prefix, "rhs", self._signal_map.rhs)
-        self._signal_map.write(prefix, "div", self._signal_map.div)
+        if self.write_rhs:
+            self._signal_map.write(prefix, "rhs", self._signal_map.rhs)
+        if self.write_div:
+            #self._signal_map.write(prefix, "div", self._signal_map.div)
+            # FIXME : only writing the TT variance to avoid integer overflow in communication
+            self._signal_map.write(prefix, "div", self._signal_map.div[0, 0])
         mmul = tilemap.map_mul if self.tiled else enmap.map_mul
-        self._signal_map.write(prefix, "bin", mmul(self._signal_map.idiv, self._signal_map.rhs))
+        if self.write_bin:
+            self._signal_map.write(prefix, "bin", mmul(self._signal_map.idiv, self._signal_map.rhs))
 
         if comm is not None:
             comm.barrier()
@@ -334,8 +392,11 @@ class MLMapmaker(Operator):
         tstep = Timer()
         tstep.start()
 
-        for step in self._mapmaker.solve():
-            dump = step.i % 10 == 0
+        for step in self._mapmaker.solve(maxiter=self.maxiter, maxerr=self.maxerr):
+            if self.write_iter_map < 1:
+                dump = False
+            else:
+                dump = step.i % self.write_iter_map == 0
             dstr = ""
             if dump:
                 dstr = "(write)"
@@ -348,7 +409,7 @@ class MLMapmaker(Operator):
 
         log.info_rank(f"MLMapmaker finished solve in", comm=comm, timer=timer)
 
-        for signal, val in zip(signals, step.x):
+        for signal, val in zip(self._mapmaker.signals, step.x):
             if signal.output:
                 signal.write(prefix, "map", val)
 
