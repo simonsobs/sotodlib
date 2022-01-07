@@ -65,7 +65,7 @@ class MLMapmaker:
         self.prepare()
         rhs    = self.dof.zip(*[signal.rhs for signal in self.signals])
         solver = utils.CG(self.A, rhs, M=self.M, dot=self.dof.dot)
-        while True or solver.i < maxiter and solver.err > maxerr:
+        while solver.i < maxiter and solver.err > maxerr:
             solver.step()
             yield bunch.Bunch(i=solver.i, err=solver.err, x=self.dof.unzip(solver.x))
 
