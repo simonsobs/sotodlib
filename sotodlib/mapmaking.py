@@ -170,16 +170,16 @@ class SignalMap(Signal):
             self.rhs  = tilemap.redistribute(self.rhs, self.comm)
             self.div  = tilemap.redistribute(self.div, self.comm)
             self.dof  = TileMapZipper(self.rhs.geometry, dtype=self.dtype, comm=self.comm)
+            # DEBUG begin
+            # print(f"{self.comm.rank:4} : tiles : {self.rhs.geometry}", flush=True)
+            print(f"{self.comm.rank:4} : tiles : {self.geo_work}", flush=True)
+            # DEBUG end
         else:
             self.rhs  = utils.allreduce(self.rhs, self.comm)
             self.div  = utils.allreduce(self.div, self.comm)
             self.dof  = MapZipper(*self.rhs.geometry, dtype=self.dtype)
         self.idiv  = safe_invert_div(self.div)
         self.ready = True
-        # DEBUG begin
-        # print(f"{self.comm.rank:4} : tiles : {self.rhs.geometry}", flush=True)
-        print(f"{self.comm.rank:4} : tiles : {self.geo_work}", flush=True)
-        # DEBUG end
     @property
     def ncomp(self): return len(self.comps)
     def forward(self, id, tod, map, tmul=1, mmul=1):
@@ -442,7 +442,7 @@ class NmatUncorr(Nmat):
 
 class NmatDetvecs(Nmat):
     def __init__(self, bin_edges=None, eig_lim=16, single_lim=0.55, mode_bins=[0.25,4.0,20],
-            downweight=None, window=0, nwin=None, verbose=False, bins=None, D=None, V=None, iD=None, iV=None, s=None, ivar=None):
+            downweight=[], window=0, nwin=None, verbose=False, bins=None, D=None, V=None, iD=None, iV=None, s=None, ivar=None):
         # This is all taken from act, not tuned to so yet
         if bin_edges is None: bin_edges = np.array([
             0.10, 0.25, 0.35, 0.45, 0.55, 0.70, 0.85, 1.00,
