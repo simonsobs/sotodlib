@@ -527,8 +527,8 @@ class NmatDetvecs(Nmat):
         return NmatDetvecs(bin_edges=self.bin_edges, eig_lim=self.eig_lim, single_lim=self.single_lim,
                 window=self.window, nwin=nwin, downweight=self.downweight, verbose=self.verbose,
                 bins=bins, D=D, V=V, iD=iD, iV=iV, s=s, ivar=ivar)
-    def apply(self, tod, inplace=False, slow=False):
-        if inplace: tod = np.array(tod)
+    def apply(self, tod, inplace=True, slow=False):
+        if not inplace: tod = np.array(tod)
         apply_window(tod, self.nwin)
         ftod = fft.rfft(tod)
         norm = tod.shape[1]
