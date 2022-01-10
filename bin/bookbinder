@@ -15,6 +15,5 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if not op.exists(args.odir): os.makedirs(args.odir)
 
-    B = Bookbinder(args.g3file, [op.join(args.odir, f'out{i:03d}.g3') for i in range(len(args.g3file))])
-    for h in core.G3File(args.hkfile):
-        B(h)
+    B = Bookbinder(args.hkfile, args.g3file, [op.join(args.odir, f'out{i:03d}.g3') for i in range(len(args.g3file))])
+    B()
