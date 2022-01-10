@@ -229,12 +229,15 @@ class Bookbinder(object):
     """
     Bookbinder
     """
-    def __init__(self, smurf_files, out_files, verbose=True):
+    def __init__(self, hk_files, smurf_files, out_files, verbose=True):
+        self._hk_files = hk_files
         self._smurf_files = smurf_files
         self._out_files = out_files
         self._verbose = verbose
 
         self.frameproc = FrameProcessor()
+
+        self.hk_iter = core.G3File(self._hk_files.pop(0))
 
         ifile = self._smurf_files.pop(0)
         if self._verbose: print(f"Bookbinding {ifile}")
@@ -257,33 +260,20 @@ class Bookbinder(object):
         for f in frames_list:
             self.writer.Process(f)
 
-    def __call__(self, fr):
-        """
-        Main loop
+    def __call__(self):
+        for h in self.hk_iter:
+            if h['hkagg_type'] != 2:
+                continue
+            self.frameproc(h)
 
-        Strategy:
-        1. Add HK frames until sign change detected - get list of (timestamps of) sign changes
-        2. While len(sign_changes) > 0, pop the first sign change, add SMuRF frames until that time;
-        emit new frame; truncate HK and SMuRF frames
-        3. Repeat Step 2 until len(sign_changes) == 0, then go back to Step 1
-        """
-        if fr.type != core.G3FrameType.Housekeeping:
-            return
-
-        if fr['hkagg_type'] != 2:
-            return
-
-        self.frameproc(fr)
-        if not self.frameproc.ready():
-            return
-
-        tt = self.frameproc.hkbundle.azimuth_events
-        output = []
-        while len(tt) > 0:
-            self.frameproc.flush_time = tt.pop(0)
+        for event_time in self.frameproc.hkbundle.azimuth_events:
+            self.frameproc.flush_time = event_time
+            output = []
 
             if self.frameproc.smbundle is not None and self.frameproc.smbundle.ready(self.frameproc.flush_time):
                 output += self.frameproc.flush()
+                self.write_frames(output)
+                continue
 
             while self.frameproc.smbundle is None or not self.frameproc.smbundle.ready(self.frameproc.flush_time):
                 try:
@@ -305,11 +295,14 @@ class Bookbinder(object):
                         ofile = self._out_files.pop(0)
                         if self._verbose: print(f"Writing {ofile}")
                         self.writer = core.G3Writer(ofile)
-                    return
+                    else:
+                        break
 
-                if f.type != core.G3FrameType.Scan:
-                    continue
-                output += self.frameproc(f)  # FrameProcessor returns a list of frames (can be empty)
-
-        self.write_frames(output)
-        return
+                    # Reset the state of the loop
+                    self.frameproc.flush_time = event_time
+                    output = []
+                else:
+                    if f.type != core.G3FrameType.Scan:
+                        continue
+                    output += self.frameproc(f)  # FrameProcessor returns a list of frames (can be empty)
+                    self.write_frames(output)
