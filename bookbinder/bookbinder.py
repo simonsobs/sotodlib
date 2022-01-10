@@ -2,7 +2,6 @@
 
 from spt3g import core
 import numpy as np
-import os, os.path as op
 
 
 def pos2vel(p):
