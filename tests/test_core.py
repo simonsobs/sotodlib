@@ -44,6 +44,8 @@ class TestAxisManager(unittest.TestCase):
         a1[10] = 1.
         aman = core.AxisManager(core.IndexAxis('samps', len(a1)))
         aman.wrap('a1', a1, [(0, 'samps')])
+        aman.wrap('a2', 1)
+
         # This should return a separate thing.
         rman = aman.restrict('samps', (10, 30), in_place=False)
         #self.assertNotEqual(aman.a1[0], 0.)
@@ -59,6 +61,7 @@ class TestAxisManager(unittest.TestCase):
         aman = core.AxisManager(core.LabelAxis('dets', dets),
                                 core.OffsetAxis('samps', a1.shape[1]))
         aman.wrap('a1', a1, [(0, 'dets'), (1, 'samps')])
+        aman.wrap('a2', 1)
 
         r_axes = {'dets': core.LabelAxis('dets', dets[1:2]),
                   'samps': core.OffsetAxis('samps', 20, 10)}
