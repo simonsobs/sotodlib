@@ -359,6 +359,8 @@ class AxisManager:
         return default
 
     def shape_str(self, name):
+        if np.isscalar(self._fields[name]) or self._fields[name] is None:
+            return '0'
         s = []
         for n, ax in zip(self._fields[name].shape, self._assignments[name]):
             if ax is None:
