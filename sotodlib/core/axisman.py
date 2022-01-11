@@ -525,7 +525,7 @@ class AxisManager:
         # Handle scalars
         if np.isscalar(data) or data is None:
             self._fields[name] = data
-            self._assignments[name] = [None]
+            self._assignments[name] = []
             return self
         # Promote input data to a full AxisManager, so we can call up
         # to self.merge.
