@@ -88,6 +88,18 @@ class TestAxisManager(unittest.TestCase):
                               cls=so3g.proj.RangesMatrix.zeros)
             self.assertEqual(aman.x.shape, aman.f.shape)
 
+    def test_160_scalars(self):
+        aman = core.AxisManager(core.LabelAxis('dets', ['a', 'b']),
+                                core.OffsetAxis('samps', 100))
+
+        # Accept trivially promoted scalars
+        aman.wrap('x', 12)
+        aman.wrap('z', 'hello')
+
+        # Don't just let people wrap any old thing.
+        with self.assertRaises(ValueError):
+            aman.wrap('a_dict', {'a': 123})
+
     # Multi-dimensional restrictions.
 
     def test_200_multid(self):
