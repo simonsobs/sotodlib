@@ -50,18 +50,28 @@ class MLMapmaker:
             self.dof.add(signal.dof)
         self.ready = True
     def A(self, x):
+        from enlib import bench
         # unzip goes from flat array of all the degrees of freedom to individual maps, cuts etc.
         # to_work makes a scratch copy and does any redistribution needed
-        iwork = [signal.to_work(m) for signal,m in zip(self.signals,self.dof.unzip(x))]
-        owork = [w*0 for w in iwork]
+        with bench.mark("to_work+unzip"):
+            iwork = [signal.to_work(m) for signal,m in zip(self.signals,self.dof.unzip(x))]
+            owork = [w*0 for w in iwork]
         for di, data in enumerate(self.data):
-            tod = np.zeros([data.ndet, data.nsamp], self.dtype)
-            for si, signal in enumerate(self.signals):
-                signal.forward(data.id, tod, iwork[si])
-            data.nmat.apply(tod)
-            for si, signal in reversed(list(enumerate(self.signals))):
-                signal.backward(data.id, tod, owork[si])
-        return self.dof.zip(*[signal.from_work(w) for signal,w in zip(self.signals,owork)])
+            with bench.mark("zeros"):
+                tod = np.zeros([data.ndet, data.nsamp], self.dtype)
+            with bench.mark("forward"):
+                for si, signal in enumerate(self.signals):
+                    signal.forward(data.id, tod, iwork[si])
+            with bench.mark("nmat"):
+                data.nmat.apply(tod)
+            with bench.mark("backward"):
+                for si, signal in reversed(list(enumerate(self.signals))):
+                    signal.backward(data.id, tod, owork[si])
+        with bench.mark("from_work+zip"):
+            res = self.dof.zip(*[signal.from_work(w) for signal,w in zip(self.signals,owork)])
+        utils.mkdir("bench")
+        bench.stats.write("bench/bench_%03d.txt" % self.signals[-1].comm.rank)
+        return res
     def M(self, x):
         iwork = self.dof.unzip(x)
         return self.dof.zip(*[signal.precon(w) for signal, w in zip(self.signals, iwork)])
