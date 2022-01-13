@@ -100,7 +100,7 @@ class TestAxisManager(unittest.TestCase):
         aman.wrap('z', 'hello')
 
         # Don't just let people wrap any old thing.
-        with self.assertRaises(ValueError):
+        with self.assertRaises(AttributeError):
             aman.wrap('a_dict', {'a': 123})
 
     # Multi-dimensional restrictions.
