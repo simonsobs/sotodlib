@@ -2148,9 +2148,10 @@ def load_file(filename, channels=None, ignore_missing=True,
     aman.wrap('ch_info', ch_info)
 
     temp = core.AxisManager( aman.samps.copy() )
-    for k in streams['primary'].keys():
-        temp.wrap( k, io_load.hstack_into(None, streams['primary'][k]), ([(0,'samps')]) )
-    aman.wrap('primary', temp)
+    if load_primary:
+        for k in streams['primary'].keys():
+            temp.wrap(k, io_load.hstack_into(None, streams['primary'][k]), ([(0,'samps')]))
+        aman.wrap('primary', temp)
 
     if load_biases:
         bias_axis = core.LabelAxis('bias_lines', np.arange(len(streams['tes_biases'].keys())))
