@@ -1,4 +1,4 @@
-.. py:module:: sotodlib.io.load_smurf
+.. py:module:: sotodlib.io.load_smurf 
 
 =========
 G3tSMuRF 
@@ -79,6 +79,7 @@ commands and can filter on any of the columns in the
 
 .. autoclass:: G3tSmurf
     :members: load_data
+    :noindex:
 
 Channel Masks on Load
 ======================
@@ -325,8 +326,9 @@ G3tSmurf Full API
 
 Database Tables
 ---------------
+.. py:module:: sotodlib.io.g3tsmurf_db
 
-.. image:: images/G3tSmurf_table_relations.png
+.. image:: images/g3tsmurf_table_relations_202112.png
    :width: 600
 
 .. autoclass:: Observations
