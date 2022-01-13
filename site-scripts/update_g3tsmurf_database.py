@@ -48,7 +48,8 @@ if __name__ == '__main__':
 
     session = SMURF.Session()
 
-    new_obs = session.query(Observations).filter( Observations.start >= min_time).all()
+    new_obs = session.query(Observations).filter( Observations.start >= min_time,
+                                                  Observations.stop == None).all()
     for obs in new_obs:
         SMURF.update_observation_files(obs, session, force=True)
 

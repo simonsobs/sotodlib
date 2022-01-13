@@ -1,6 +1,5 @@
 import sqlalchemy as db
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship, backref
 
 from spt3g import core as spt3g_core
@@ -22,26 +21,12 @@ logger.setLevel(logging.INFO)
 from .. import core
 from . import load as io_load
 
-
-Base = declarative_base()
+from sotodlib.io.g3tsmurf_db import (Base, Observations, Tags, Files, Tunes, 
+                                     TuneSets, ChanAssignments, Channels, 
+                                     FrameType, Frames)
 Session = sessionmaker()
 num_bias_lines = 16
 
-
-association_table = db.Table('association_chan_assign', Base.metadata,
-    db.Column('tunesets', db.Integer, db.ForeignKey('tunesets.id')),
-    db.Column('chan_assignments', db.Integer, db.ForeignKey('chan_assignments.id'))
-)
-
-association_table_obs = db.Table('association_obs', Base.metadata,
-    db.Column('tunesets', db.Integer, db.ForeignKey('tunesets.id')),
-    db.Column('observations', db.Integer, db.ForeignKey('obs.obs_id'))
-)
-
-association_table_dets = db.Table('detsets', Base.metadata,
-    db.Column('name', db.Integer, db.ForeignKey('tunesets.name')),
-    db.Column('det', db.Integer, db.ForeignKey('channels.name'))
-)
 
 """
 Actions used to define when observations happen
@@ -59,433 +44,9 @@ SMURF_ACTIONS = {
     ],
 }
  
-    
-class Observations(Base):
-    """Times on continuous detector readout. This table is named obs and serves
-    as the ObsDb table when loading via Context.
 
-    Attributes 
-    -----------
-    obs_id : string
-        The "session_id" of the observation which is usually the integer ctime
-        of the pysmurf action called to start the readout. (The first part of
-        the .g3 file name).
-    timestamp : integer
-        Generally int(obs_id). Here to make relative querying easier
-    duration : float
-        The total observation time in seconds
-    start : datetime.datetime
-        The start of the observation as a datetime object
-    stop : datetime.datetime
-        The end of the observation as a datetime object
-    tag : string
-        Tags for this observation. These are populated through
-        tags set while running sodetlib's stream data functions. 
-    files : list of SQLAlchemy instances of Files
-        The list of .g3 files in this observation built through a relationship
-        to the Files table. [f.name for f in Observation.files] will return
-        absolute paths to all the files.
-    tunesets : list of SQLAlchemy instances of TuneSets 
-        The TuneSets used in this observation. There is expected to be
-        one per stream_id (SMuRF crate slot). 
-    """
-    __tablename__ = 'obs'
-    ## ctime of beginning of the observation
-        
-    obs_id = db.Column(db.String, primary_key=True)
-    timestamp = db.Column(db.Integer)
-    # in seconds
-    duration = db.Column(db.Float)
-
-    start = db.Column(db.DateTime)
-    stop = db.Column(db.DateTime)
-    
-    tag = db.Column(db.String)
-    ## one to many
-    files = relationship("Files", back_populates='observation') 
-    
-    ## many to many
-    tunesets = relationship("TuneSets", 
-                           secondary=association_table_obs,
-                           back_populates='observations')
-
-    def __repr__(self):
-        try:
-            return f"{self.obs_id}: {self.start} -> {self.stop} [{self.stop-self.start}] ({self.tag})"
-        except:
-            return f"{self.obs_id}: {self.start} -> {self.stop} ({self.tag})"
-
-    
-class Tags(Base):
-    """Tags used to mark Observations.
-    
-    To have these automatically added, use
-    sodetlib.smurf_funct.smurf_ops.stream_g3_on( S, tag= 'tag1,tag2')
-    or 
-    sodetlib.smurf_funct.smurf_ops.take_g3_data(S, dur, tag='tag1,tag2')
-    
-    Note, this table is not relationally mapped to the Observation.tag column.
-        It is set up to match the Context design
-    """
-    __tablename__ = 'tags'
-    id = db.Column(db.Integer, primary_key=True)
-    
-    obs_id = db.Column(db.String)
-    tag = db.Column(db.String)
-    
-class Files(Base):
-    """Table to store file indexing info. This table is named files in sql and
-    serves as the ObsFileDb when loading via Context.
-
-    Attributes
-    ------------
-    id : integer
-        auto-incremented primary key
-    name : string
-        complete absolute path to file
-    start : datetime.datetime
-        the start time for the file
-    stop : datetime.datetime
-        the stop time for the file
-    sample_start : integer
-        Not Implemented Yet
-    sample_stop : integer
-        Not Implemented Yet
-    obs_id : String 
-        observation id linking Files table to the Observation table
-    observation : SQLAlchemy Observation Instance
-    stream_id : The stream_id for the file. Generally of the form crateXslotY.
-        These are expected to map one per UXM.
-    n_frames : Integer
-        Number of frames in the .g3 file
-    frames : list of SQLALchemy Frame Instances
-        List of database entries for the frames in this file
-    n_channels : Integer
-        The number of channels read out in this file
-    detset : string
-        TuneSet.name for this file. Used to map the TuneSet table to the Files
-        table. Called detset to serve duel-purpose and map files to detsets
-        while loading through Context. 
-    tuneset : SQLAlchemy TuneSet Instance
-    tune_id : integer 
-        id of the tune file used in this file. Used to map Tune table to the
-        Files table.
-    tune : SQLAlchemy Tune Instance
-    """
-    __tablename__ = 'files'
-    id = db.Column(db.Integer, primary_key=True)
-
-    name = db.Column(db.String, nullable=False, unique=True)
-    
-    start = db.Column(db.DateTime)
-    stop = db.Column(db.DateTime)
-    
-    ## this is sample in an observation (I think?)
-    sample_start = db.Column(db.Integer)
-    sample_stop = db.Column(db.Integer)
-    
-    ## this is a string for compatibility with sotodlib, not because it makes 
-    ## sense here
-    obs_id = db.Column(db.String, db.ForeignKey('obs.obs_id'))
-    observation = relationship("Observations", back_populates='files')
-    
-    stream_id = db.Column(db.String)
-    
-    n_frames = db.Column(db.Integer)
-    frames = relationship("Frames", back_populates='file')
-    
-    ## n_channels is a renaming of channels
-    n_channels = db.Column(db.Integer)
-    
-    # breaking from linked table convention to match with obsfiledb requirements
-    ## many to one
-    detset = db.Column(db.String, db.ForeignKey('tunesets.name'))
-    tuneset = relationship("TuneSets", back_populates='files')
-    
-    tune_id = db.Column(db.Integer, db.ForeignKey('tunes.id'))
-    tune = relationship("Tunes", back_populates='files')
-    
-class Tunes(Base):
-    """Indexing of 'tunes' available during observations. Should
-    correspond to all tune files. 
-
-    Attributes 
-    -----------
-    id : integer 
-        primary key
-    name : string
-        name of tune file
-    path : string
-        absolute path of tune file
-    stream_id : string
-        stream_id for file
-    start : datetime.datetime
-        The time the tune file is made
-    files : list of SQLAlchemy File instances
-        All file using this tune file
-    tuneset_id : integer
-        id of tuneset this tune belongs to. Used to link Tunes table to TuneSets
-        table
-    tuneset : SQLAlchemy TuneSet instance
-    """
-    __tablename__ = 'tunes'
-    __table_args__ = (
-        db.UniqueConstraint('name', 'stream_id'),
-    )
-    id = db.Column( db.Integer, primary_key=True)
-    
-    name = db.Column(db.String)
-    path = db.Column(db.String)
-    stream_id = db.Column(db.String)
-    
-    ## should stop exist? tune file use does not need to be continguous
-    start = db.Column(db.DateTime)
-    
-    ## files that use this tune file
-    ## one to many
-    files = relationship("Files", back_populates='tune')
-    
-    ## one to many
-    tuneset_id = db.Column(db.Integer, db.ForeignKey('tunesets.id'))
-    tuneset = relationship("TuneSets", back_populates='tunes')
-
-class TuneSets(Base):
-    """Indexing of 'tunes sets' available during observations. Should
-    correspond to the tune files where new_master_assignment=True. TuneSets
-    exist to combine sets of <=8 Channel Assignments since SMuRF tuning and
-    setup is run "per smurf band" while channel readout reads all tuned bands.
-    Every TuneSet is a Tune file but not all Tunes are a Tuneset. This is
-    because new Tunes can be made for the same set of channel assignments as the
-    cryostat / readout environments evolve.
-    
-    Attributes
-    ----------
-    id : integer 
-        primary key
-    name : string
-        name of tune file
-    path : string
-        absolute path of tune file
-    stream_id : string
-        stream_id for file
-    start : datetime.datetime
-        The time the tune file is made
-    stop : datetime.datetine
-        Not Implemented Yet
-    files : list of SQLAlchemy File instances.
-    tunes : list of Tunes that are part of the TuneSet
-    observations : list of observations that have this TuneSet
-    chan_assignments : list of Channel Assignments that are part of the this
-        tuneset 
-    channels : list of Channels that are part of this TuneSet
-    """
-    __tablename__ = 'tunesets'
-    __table_args__ = (
-        db.UniqueConstraint('name', 'stream_id'),
-    )
-    id = db.Column( db.Integer, primary_key=True)
-    
-    name = db.Column(db.String)
-    path = db.Column(db.String)
-    stream_id = db.Column(db.String)
-    
-    ## should stop exist? tune file use does not need to be continguous
-    start = db.Column(db.DateTime)
-    stop = db.Column(db.DateTime)
-    
-    ## files that use this detset
-    ## one to many
-    files = relationship("Files", back_populates='tuneset')
-    tunes = relationship("Tunes", back_populates='tuneset')
-    ## many to many
-    observations = relationship("Observations", 
-                                secondary=association_table_obs,
-                                back_populates='tunesets')
-    
-    ## many to many
-    chan_assignments = relationship('ChanAssignments', 
-                                    secondary=association_table,
-                                    back_populates='tunesets')
-    
-    ## many to many
-    dets = relationship('Channels', 
-                        secondary=association_table_dets,
-                        back_populates='detsets')
-    
-    @property
-    def channels(self):
-        return self.dets
-    
-class Bands(Base):
-    """
-    Indexing Table (may be removed). One row per SMuRF band per slot.
-    """
-    __tablename__ = 'bands'
-    __table_args__ = (
-        db.UniqueConstraint('number', 'stream_id'),
-    )
-    id = db.Column( db.Integer, primary_key=True )
-    number = db.Column( db.Integer )
-    stream_id = db.Column( db.String)
-    
-    
-class ChanAssignments(Base):
-    """The available channel assignments. TuneSets are made of up to eight of
-    these assignments. 
-
-    Attributes
-    ----------
-    id : integer 
-        primary key
-    ctime : integer
-        ctime where the channel assignment was made
-    name : string
-        name of the channel assignment file
-    path : string
-        absolute path of channel assignment file
-    stream_id : string
-        stream_id for file
-    band : integer
-        Smurf band for this channel assignment
-    tunesets : list of SQLAlchemy tunesets
-        The Tunesets the channel assignment is in
-    channels : list of SQLAlchemy channels
-        The channels in the channel assignment
-    """
-    __tablename__ = 'chan_assignments'
-    id = db.Column(db.Integer, primary_key=True)
-    
-    ctime = db.Column(db.Integer)
-    path = db.Column(db.String, unique=True)
-    name = db.Column(db.String)
-    stream_id = db.Column(db.String)
-    band = db.Column(db.Integer)
-    
-    ## Channel Assignments are put into detector sets
-    ## many to many bidirectional 
-    tunesets = relationship('TuneSets', 
-                           secondary=association_table,
-                           back_populates='chan_assignments')
-
-    ## Each channel assignment is made of many channels
-    ## one to many
-    channels = relationship("Channels", back_populates='chan_assignment')
-    
-class Channels(Base):
-    """All the channels tracked by SMuRF indexed by the ctime of the channel
-    assignment file, SMuRF band and channel number. Many channels will map to
-    one detector on a UFM.
-
-    
-    Attributes
-    ----------
-    id : integer 
-        primary key
-    name : string
-        name of of channel. In the form of sch_<ctime>_<band>_<channel>
-    stream_id : string
-        stream_id for file
-    subband : integer
-        The subband of the channel
-    channel : integer
-        The assigned smurf channel
-    frequency : float
-        The frequency of the resonator when the channel assigments were made
-    band : integer
-        The smurf band for the channel
-    ca_id : integer
-        The id of the channel assignment for the channel. Used for SQL mapping
-    chan_assignment : SQLAlchemy ChanAssignments Instance
-    detsets : List of SQLAlchemy Tunesets
-        The tunesets the channel can be found in
-    """
-    __tablename__ = 'channels'
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String, unique=True)
-    stream_id = db.Column(db.String)
-    
-    ## smurf channels
-    subband = db.Column(db.Integer)
-    channel = db.Column(db.Integer)
-    frequency = db.Column(db.Float)
-
-    band = db.Column(db.Integer)
-
-    ## many to one
-    ca_id = db.Column(db.Integer, db.ForeignKey('chan_assignments.id'))
-    chan_assignment = relationship("ChanAssignments", back_populates='channels')
-
-    
-    ## many to many
-    detsets = relationship('TuneSets',
-                         secondary=association_table_dets,
-                         back_populates='dets')
-    
-    
+# Types of Frames we care about indexing
 type_key = ['Observation', 'Wiring', 'Scan']
-
-
-class FrameType(Base):
-    """Enum table for storing frame types"""
-    __tablename__ = "frame_type"
-    id = db.Column(db.Integer, primary_key=True)
-    type_name = db.Column(db.String, unique=True, nullable=True)
-
-    
-class Frames(Base):
-    """Table to store frame indexing info
-    Attributes
-    ----------
-    id : Integer
-        Primary Key
-    file_id : integer
-        id of the file the frame is part of, used for SQL mapping
-    file : SQLAlchemy instance
-    frame_idx : integer
-        frame index in the file
-    offset : integer
-        frame offset used by so3g indexed reader
-    type_name : string
-        frame types, use Observation, Wiring, and Scan frames
-    time : datetime.datetime
-        The start of the frame
-    n_samples : integer
-        the number of samples in the frame
-    n_channels : integer
-        the number of channels in the frame
-    start : datetime.datetime
-        the start of the frame
-    stop : datetime.datetime
-        the end of the frame
-    """
-    __tablename__ = 'frame_offsets'
-    __table_args__ = (
-        db.UniqueConstraint('file_id', 'frame_idx', name='_frame_loc'),
-    )
-
-    id = db.Column(db.Integer, primary_key=True)
-
-    file_id = db.Column(db.Integer, db.ForeignKey('files.id'))
-    file = relationship("Files", back_populates='frames')
-
-    frame_idx = db.Column(db.Integer, nullable=False)
-    offset = db.Column(db.Integer, nullable=False)
-
-    type_name = db.Column(db.String, db.ForeignKey('frame_type.type_name'))
-    frame_type = relationship('FrameType')
-    
-    status_dump = db.Column(db.Boolean, nullable=False, default=False)
-    time = db.Column(db.DateTime, nullable=False)
-
-    # Specific to data frames
-    n_samples = db.Column(db.Integer)
-    n_channels = db.Column(db.Integer)
-    start = db.Column(db.DateTime)
-    stop = db.Column(db.DateTime)
-
-    def __repr__(self):
-        return f"Frame({self.type_name})<{self.frame_idx}>"
-
 
 class TimingParadigm(Enum):
     G3Timestream = 1
@@ -591,7 +152,7 @@ class G3tSmurf:
             datetime: datetime of x if x is a timestamp
         """
         if np.issubdtype(type(x),np.floating) or np.issubdtype(type(x),np.integer):
-            return dt.datetime.fromtimestamp(x)
+            return dt.datetime.utcfromtimestamp(x)
         elif isinstance(x,np.datetime64):
             return x.astype(dt.datetime)
         elif isinstance(x,dt.datetime) or isinstance(x,dt.date):
@@ -667,7 +228,7 @@ class G3tSmurf:
             db_frame_frame_type = frame_types[str(frame.type)]
 
             timestamp = frame['time'].time / spt3g_core.G3Units.s
-            db_frame_time = dt.datetime.fromtimestamp(timestamp)
+            db_frame_time = dt.datetime.utcfromtimestamp(timestamp)
             
             if str(frame.type) != 'Wiring':
                 dump = False
@@ -688,17 +249,17 @@ class G3tSmurf:
                 if sostream_version >= 2:  # Using SuperTimestreams
                     db_frame.n_channels = len(data.names)
                     db_frame.n_samples = len(data.times)
-                    db_frame.start = dt.datetime.fromtimestamp(
+                    db_frame.start = dt.datetime.utcfromtimestamp(
                         data.times[0].time / spt3g_core.G3Units.s
                     )
-                    db_frame.stop = dt.datetime.fromtimestamp(
+                    db_frame.stop = dt.datetime.utcfromtimestamp(
                         data.times[-1].time / spt3g_core.G3Units.s
                     )
                 else:
                     db_frame.n_samples = data.n_samples
                     db_frame.n_channels = len(data)
-                    db_frame.start = dt.datetime.fromtimestamp(data.start.time /spt3g_core.G3Units.s)
-                    db_frame.stop = dt.datetime.fromtimestamp(data.stop.time /spt3g_core.G3Units.s)
+                    db_frame.start = dt.datetime.utcfromtimestamp(data.start.time /spt3g_core.G3Units.s)
+                    db_frame.stop = dt.datetime.utcfromtimestamp(data.stop.time /spt3g_core.G3Units.s)
 
                 if file_start is None:
                     file_start = db_frame.start
@@ -714,7 +275,7 @@ class G3tSmurf:
 
 
     def index_archive(self, verbose=False, stop_at_error=False,
-                      skip_old_format=True, min_ctime=None):
+                      skip_old_format=True, min_ctime=None, max_ctime=None):
         """
         Adds all files from an archive to the File and Frame sqlite tables.
         Files must be indexed before the metadata entries can be made.
@@ -728,8 +289,11 @@ class G3tSmurf:
         skip_old_format: bool
             If True, will skip over indexing files before the name convention
             was changed to be ctime_###.g3. 
-        min_ctime: float
+        min_ctime: int, float, or None
             If set, files with session-ids less than this ctime will be
+            skipped.
+        max_ctime: int, float, or None
+            If set, files with session-ids higher than this ctime will be
             skipped.
         """
         session = self.Session()
@@ -748,7 +312,11 @@ class G3tSmurf:
                         session_id = int(f.split('_')[0])
                         if session_id < min_ctime:
                             continue
-
+                    if '-' not in f and (max_ctime is not None):
+                        # We know the filename is <ctime>_###.g3
+                        session_id = int(f.split('_')[0])
+                        if session_id > max_ctime:
+                            continue
                     files.append(path)
 
         if verbose:
@@ -823,7 +391,8 @@ class G3tSmurf:
                 if int(notch[2]) in ch_made:
                     continue
                     
-                ch_name = 'sch_{:10d}_{:01d}_{:03d}'.format(ctime, band, int(notch[2]))
+                ch_name = 'sch_{}_{:10d}_{:01d}_{:03d}'.format(stream_id, ctime, 
+                                                               band, int(notch[2]))
                 ch = Channels(subband=int(notch[1]),
                               channel=int(notch[2]),
                               frequency=notch[0],
@@ -873,7 +442,7 @@ class G3tSmurf:
             if 'resonances' not in data[band]:
                 ### tune file doesn't have info for this band
                 continue
-            ## try to use tune file to find channel assignment befoe just
+            ## try to use tune file to find channel assignment before just
             ## assuming "most recent"
             if 'channel_assignment' in data[band]:
                 cha_name = data[band]['channel_assignment'].split('/')[-1]
@@ -913,7 +482,7 @@ class G3tSmurf:
         tune = session.query(Tunes).filter(Tunes.name == name,
                                           Tunes.stream_id == stream_id).one_or_none()
         if tune is None:
-            tune = Tunes(name=name, start=dt.datetime.fromtimestamp(ctime),
+            tune = Tunes(name=name, start=dt.datetime.utcfromtimestamp(ctime),
                            path=tune_path, stream_id=stream_id)
             session.add(tune)
             session.commit()
@@ -938,7 +507,7 @@ class G3tSmurf:
         if tuneset is None:
             logger.debug(f"New Tuneset Detected {stream_id}, {ctime}, {[[a.name for a in assign_set]]}")
             tuneset = TuneSets(name=name, path=tune_path, stream_id=stream_id,
-                               start=dt.datetime.fromtimestamp(ctime))
+                               start=dt.datetime.utcfromtimestamp(ctime))
             session.add(tuneset)
             session.commit()
 
@@ -952,7 +521,7 @@ class G3tSmurf:
         tune.tuneset = tuneset
         session.commit()
     
-    def add_new_observation(self, stream_id, ctime, obs_data, session,
+    def add_new_observation(self, stream_id, action_name, action_ctime, session,
                             max_early=5,max_wait=100):
         """Add new entry to the observation table. Called by the
         index_metadata function.
@@ -961,10 +530,9 @@ class G3tSmurf:
         -------
         stream_id : string
             The stream id for the particular SMuRF slot
-        ctime : int
-            The ctime of the SMuRF action called to create the tuning file.
-        obs_data: list
-            List of files that come with the observation. Currently un-used
+        action_ctime : int
+            The ctime of the SMuRF action called to create the observation. Often
+            slightly different than the .g3 session ID
         session : SQLAlchemy Session
             The active session
         max_early : int     
@@ -972,20 +540,57 @@ class G3tSmurf:
         max_wait : int  
             Maximum amount of time between the streaming start action and the 
             making of .g3 files that belong to an observation
-        
-        TODO: how will simultaneous streaming with two stream_ids work?
         """
+        ## Check if observation exists already
         obs = session.query(Observations).filter(
-                        Observations.obs_id == str(ctime)).one_or_none()
+                        Observations.stream_id == stream_id,
+                        Observations.action_ctime == action_ctime).one_or_none()
         if obs is None:
-            obs = Observations(obs_id = str(ctime),
-                               timestamp = ctime,
-                               start = dt.datetime.fromtimestamp(ctime))
+            x = session.query(Files.name)
+            x = x.filter(Files.start >= dt.datetime.utcfromtimestamp(action_ctime-max_early))
+            x = x.order_by(Files.start).first()
+            if x is None:
+                logger.debug(f"No .g3 files from Action {action_name} in {stream_id}"\
+                            f" at {action_ctime}. Not Making Observation")
+                return
+
+            session_id = int( (x.name[:-3].split('/')[-1]).split('_')[0])
+
+            ## Verify the files we found match with Observation
+            status = SmurfStatus.from_file(x.name)
+            if status.action is not None:
+                assert status.action == action_name
+                assert status.action_timestamp == action_ctime
+
+            ## Verify inside of file matches the outside
+            reader = so3g.G3IndexedReader(x.name)
+            while True:
+                frames = reader.Process(None)
+                if not frames:
+                    break
+                frame = frames[0]
+
+                if str(frame.type) == 'Observation':
+                    assert frame['sostream_id'] == stream_id
+                    assert frame['session_id'] == session_id 
+                    start = dt.datetime.utcfromtimestamp(frame['time'].time / spt3g_core.G3Units.s )
+
+            ## Build Observation 
+            obs = Observations( 
+                obs_id=f"{stream_id}_{session_id}",
+                timestamp = session_id,
+                action_ctime = action_ctime,
+                action_name = action_name,
+                stream_id = stream_id,
+                start = start,
+            )
             session.add(obs)
             session.commit()
-
-        self.update_observation_files(obs, session, max_early=max_early,
-                    max_wait=max_wait)
+        
+        ## obs.stop is only updated when streaming session is over
+        if obs.stop is None:
+            self.update_observation_files(obs, session, max_early=max_early,
+                                          max_wait=max_wait)
 
     def update_observation_files(self, obs, session, max_early=5, 
                                 max_wait=100,force=False):
@@ -1006,67 +611,86 @@ class G3tSmurf:
             appears complete
         """
         
-        if not force and obs.duration is not None and len(obs.tunesets) >= 1:
+        if not force and obs.stop is not None:
             return
 
-        x=session.query(Files.name).filter(
+        x = session.query(Files.name).filter(
                             Files.start >= obs.start-dt.timedelta(seconds=max_early))
         x = x.order_by(Files.start).first()
         if x is None:
             ## no files to add at this point
-            session.commit()
             return
+
         x = x[0]
-        f_start, f_num = (x[:-3].split('/')[-1]).split('_')
+        session_id, f_num = (x[:-3].split('/')[-1]).split('_')
         prefix = '/'.join(x.split('/')[:-1])+'/'
-
-        if int(f_start)-obs.start.timestamp() > max_wait:
+        if int(session_id)-obs.start.timestamp() > max_wait:
             ## we don't have .g3 files for some reason
-            pass
-        else:
-            flist = session.query(Files).filter(Files.name.like(prefix+f_start+'%'))
-            flist = flist.order_by(Files.start).all()
-            
-            ## Use Status information to set Tuneset
-            status = SmurfStatus.from_file(flist[0].name)
-            if status.action is not None:
-                if status.action not in SMURF_ACTIONS['observations']:
-                    logger.warning(f"Status Action {status.action} from file does not \
-                                    match accepted observation types")
-                if status.action_timestamp != obs.timestamp:
-                    logger.error(f"Status timestamp {status.action_timestamp} from file does \
-                                not match observation timestamp {obs.timestamp}")
-                    return
-            ## Add any tags from the status
-            if len(status.tags)>0:
-                for tag in status.tags:
-                    new_tag = Tags(obs_id = obs.obs_id, tag=tag)
-                obs.tag = ','.join(status.tags)
-                session.add(new_tag)
-            
-            if status.tune is not None:
-                tune = session.query(Tunes).filter( 
-                            Tunes.name == status.tune).one_or_none()
-                if tune is None:
-                    logger.warning(f"Tune {status.tune} not found in database, update error?")
-                    tuneset = None
-                else:
-                    tuneset = tune.tuneset
-            else:
-                tuneset = session.query(TuneSets).filter(TuneSets.start <= obs.start)
-                tuneset = tuneset.order_by(db.desc(TuneSets.start)).first()
-                
-            already_have = [ts.id for ts in obs.tunesets]
-            if tuneset is not None:
-                if not tuneset.id in already_have:
-                    obs.tunesets.append(tuneset)
+            return
 
-            ## Update file entries
-            for f in flist:
-                f.obs_id = obs.obs_id
-                if tuneset is not None:
-                    f.detset = tuneset.name
-            obs.duration = flist[-1].stop.timestamp() - obs.timestamp
+        flist = session.query(Files).filter(Files.name.like(prefix+session_id+'%'))
+        flist = flist.order_by(Files.start).all()
+        ## Load Status Information
+        status = SmurfStatus.from_file(flist[0].name)
+
+        ## Add any tags from the status
+        if len(status.tags)>0:
+            for tag in status.tags:
+                new_tag = Tags(obs_id = obs.obs_id, tag=tag)
+            obs.tag = ','.join(status.tags)
+            session.add(new_tag)
+
+        ## Add Tune and Tuneset information
+        if status.tune is not None:
+            tune = session.query(Tunes).filter( 
+                        Tunes.name == status.tune).one_or_none()
+            if tune is None:
+                logger.warning(f"Tune {status.tune} not found in database, update error?")
+                tuneset = None
+            else:
+                tuneset = tune.tuneset
+        else:
+            tuneset = session.query(TuneSets).filter(TuneSets.start <= obs.start)
+            tuneset = tuneset.order_by(db.desc(TuneSets.start)).first()
+
+        already_have = [ts.id for ts in obs.tunesets]
+        if tuneset is not None:
+            if not tuneset.id in already_have:
+                obs.tunesets.append(tuneset)
+
+        obs_samps = 0
+        ## Update file entries
+        for db_file in flist:
+            db_file.obs_id = obs.obs_id
+            if tuneset is not None:
+                db_file.detset = tuneset.name
+
+            ## this is where I learned sqlite does not accept numpy 32 or 64 bit ints
+            file_samps = sum([fr.n_samples if fr.n_samples is not None else 0 for fr in db_file.frames])
+            db_file.sample_start = obs_samps
+            db_file.sample_stop = obs_samps + file_samps
+            obs_samps = obs_samps + file_samps + 1
+
+        obs_ended = False
+
+        ## Search through file looking for stream closeout
+        reader = so3g.G3IndexedReader(flist[-1].name)
+        while True:
+            frames = reader.Process(None)
+            if not frames:
+                break
+            frame = frames[0]
+            if str(frame.type) == 'Wiring':
+                if 'AMCc.SmurfProcessor.FileWriter.IsOpen' in frame['status']:
+                    status = {}
+                    status.update(yaml.safe_load(frame['status']))
+                    if not status['AMCc.SmurfProcessor.FileWriter.IsOpen']:
+                        obs_ended = True
+                        break
+
+        if obs_ended:
+            obs.n_samples = obs_samps-1
+            obs.duration = flist[-1].stop.timestamp() - flist[0].start.timestamp()
             obs.stop = flist[-1].stop
         session.commit()
 
@@ -1142,9 +766,11 @@ class G3tSmurf:
 
         Yields
         -------
-        tuple (fname, ctime, abs_path)
+        tuple (fname, stream_id, ctime, abs_path)
         fname : string
             file name with ctime removed
+        stream_id : string
+            stream_id where the file is saved
         ctime : int
             file ctime
         abs_path : string
@@ -1171,7 +797,7 @@ class G3tSmurf:
                         except GeneratorExit:
                             return
     
-    def _processes_index_error(self, session, e, stream_id, ctime, path, stop_at_error):
+    def _process_index_error(self, session, e, stream_id, ctime, path, stop_at_error):
         if type(e) == ValueError:
             logger.info(f"Value Error at {stream_id}, {ctime}, {path}")
         elif type(e) == IntegrityError:
@@ -1184,8 +810,9 @@ class G3tSmurf:
             raise(e)
             
     def index_channel_assignments(self, session, min_ctime=16000*1e5, 
-                                pattern = 'channel_assignment',
-                                 stop_at_error=False):
+                                  max_ctime=None,
+                                  pattern = 'channel_assignment',
+                                  stop_at_error=False):
         """ Index all channel assignments newer than a minimum ctime
         
         Args
@@ -1193,11 +820,14 @@ class G3tSmurf:
         session : G3tSmurf session connection
         min_time : int of float
             minimum time for for indexing
+        max_time : int, float, or None
+            maximum time for indexing
         pattern : string
             string pattern to look for channel assignments
         """
         
-        for fpattern, stream_id, ctime, path in self.search_metadata_files(min_ctime=min_ctime):
+        for fpattern, stream_id, ctime, path in self.search_metadata_files(min_ctime=min_ctime,
+                                                                          max_ctime=max_ctime):
             if pattern in fpattern:
                 try:
                     ## decide if this is the last channel assignment in the directory
@@ -1211,31 +841,34 @@ class G3tSmurf:
                     self.add_new_channel_assignment(stream_id, ctime, 
                                                     fname, path, session)  
                 except Exception as e:
-                    _self.process_index_error(session, e, stream_id, ctime, path, stop_at_error)
+                    self._process_index_error(session, e, stream_id, ctime, path, stop_at_error)
                     
-    def index_tunes(self, session, min_ctime=16000*1e5, pattern = 'tune.npy',
-                    stop_at_error=False):
+    def index_tunes(self, session, min_ctime=16000*1e5, max_ctime=None,
+                    pattern = 'tune.npy', stop_at_error=False):
         """ Index all tune files newer than a minimum ctime
 
         Args
         -----
         session : G3tSmurf session connection
         min_time : int of float
-            minimum time for for indexing
+            minimum time for indexing
+        max_time : int, float, or None
+            maximum time for indexing            
         pattern : string
            string pattern to look for tune files
         """
-        for fname, stream_id, ctime, path in self.search_metadata_files(min_ctime=min_ctime):
+        for fname, stream_id, ctime, path in self.search_metadata_files(min_ctime=min_ctime,
+                                                                       max_ctime=max_ctime):
             if pattern in fname:
                 try:
                     logger.debug(f"Add new Tune: {stream_id}, {ctime}, {path}")
                     self.add_new_tuning(stream_id, ctime, path, session)
                 except Exception as e:
-                    _self.process_index_error(session, e, stream_id, ctime, 
+                    self._process_index_error(session, e, stream_id, ctime, 
                                                 path, stop_at_error)
 
         
-    def index_observations(self, session, min_ctime=16000*1e5,
+    def index_observations(self, session, min_ctime=16000*1e5, max_ctime=None,
                            stop_at_error=False):
         """ Index all observations newer than a minimum ctime. Uses
         SMURF_ACTIONS to define which actions are observations.
@@ -1243,22 +876,24 @@ class G3tSmurf:
         Args
         -----
         session : G3tSmurf session connection
-        min_time : int of float
-            minimum time for for indexing
-
+        min_time : int or float
+            minimum time for indexing
+        max_time : int, float, or None
+            maximum time for indexing
         """
 
-        for action, stream_id, ctime, path in self.search_metadata_actions(min_ctime=min_ctime):
+        for action, stream_id, ctime, path in self.search_metadata_actions(min_ctime=min_ctime,
+                                                                          max_ctime=max_ctime):
             if action in SMURF_ACTIONS['observations']:       
                 try:
                     obs_path = os.listdir( os.path.join(path, 'outputs'))
                     logger.debug(f"Add new Observation: {stream_id}, {ctime}, {obs_path}")
-                    self.add_new_observation(stream_id, ctime, obs_path, session)
+                    self.add_new_observation(stream_id, action, ctime, session)
                 except Exception as e:
-                    _self.process_index_error(session, e, stream_id, ctime, path, stop_at_error)
+                    self._process_index_error(session, e, stream_id, ctime, path, stop_at_error)
                     
 
-    def index_metadata(self, min_ctime=16000*1e5, stop_at_error=False):
+    def index_metadata(self, min_ctime=16000*1e5, max_ctime=None, stop_at_error=False):
         """Adds all channel assignments, tunes, and observations in archive to
         database. Adding relevant entries to Files as well.
 
@@ -1266,6 +901,8 @@ class G3tSmurf:
         ----
         min_ctime : int
             Lowest ctime to start looking for new metadata
+        max_ctime : None or int
+            Highest ctime to look for new metadata
         stop_at_error: bool
            If True, will stop if there is an error indexing a file.
         """
@@ -1279,13 +916,14 @@ class G3tSmurf:
         
         logger.debug("Indexing Channel Assignments")
         self.index_channel_assignments(session, min_ctime=min_ctime,
+                                        max_ctime=max_ctime,
                                         stop_at_error=stop_at_error)
         logger.debug("Indexing Tune Files")
         self.index_tunes(session, min_ctime=min_ctime,
-                                        stop_at_error=stop_at_error)
+                         max_ctime=max_ctime, stop_at_error=stop_at_error)
         logger.debug("Indexing Observations")
         self.index_observations(session, min_ctime=min_ctime,
-                                        stop_at_error=stop_at_error)
+                                max_ctime=max_ctime,stop_at_error=stop_at_error)
             
         session.close()
 
@@ -2046,7 +1684,7 @@ def _get_timestamps(streams, load_type=None):
 def load_file(filename, channels=None, ignore_missing=True, 
              load_biases=True, load_primary=True, status=None,
              archive=None, obsfiledb=None, show_pb=True, det_axis='dets'):
-    """Load data from file where there may not be a connected archive.
+    """Load data from file where there may or may not be a connected archive.
 
     Args
     ----
