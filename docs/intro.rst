@@ -56,8 +56,13 @@ Activate / load your python stack from the previous section.  Since you created
 a conda environment or virtualenv directory specifically for S.O. tools, you
 can always delete that directory and make a new one as needed.
 
-Currently the sotodlib package does not require any other S.O. packages.  In
-the future, it will require sotoddb and so3g as dependencies.
+sotodlib requires the following affiliated packages:
+
+- `so3g`_
+- `spt3g_software`_
+
+.. _so3g: https://github.com/simonsobs/so3g
+.. _spt3g_software: https://github.com/CMB-S4/spt3g_software
 
 
 Installing sotodlib
