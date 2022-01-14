@@ -45,6 +45,13 @@ setup_opts["license"] = "MIT"
 setup_opts["requires"] = ["Python (>3.4.0)", ]
 setup_opts["scripts"] = pipes
 setup_opts["include_package_data"] = True
+setup_opts["install_requires"] = [
+    'numpy',
+    'scipy',
+    'matplotlib',
+    'quaternionarray',
+    'PyYAML',
+]
 
 # Command Class dictionary.
 # Begin with the versioneer command class dictionary.
