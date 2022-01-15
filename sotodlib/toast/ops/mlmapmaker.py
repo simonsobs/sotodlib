@@ -12,7 +12,7 @@ import traitlets
 
 from astropy import units as u
 
-from pixell import enmap, tilemap
+from pixell import enmap, tilemap, fft
 
 import toast
 from toast.traits import trait_docs, Unicode, Int, Instance, Bool, Float
@@ -153,6 +153,11 @@ class MLMapmaker(Operator):
     maxiter = Int(500, help="Maximum number of CG iterations")
 
     maxerr = Float(1e-6, help="Maximum error in the CG solver")
+
+    truncate_tod = Bool(
+        False,
+        help="Truncate TOD to an easily factorizable length to ensure efficient FFT.",
+    )
 
     write_div = Bool(True, help="Write out the noise weight map")
 
@@ -303,18 +308,40 @@ class MLMapmaker(Operator):
 
             axdets = LabelAxis("dets", dets)
 
+            nsample = int(ob.n_local_samples)
+            ind = slice(None)
+            ncut = nsample - fft.fft_len(nsample)
+            if ncut != 0:
+                if self.truncate_tod:
+                    log.info_rank(
+                        f"Truncating {ncut} / {nsample} samples ({100 * ncut / nsample:.3f}%) from "
+                        f"{ob.name} for better FFT performance.",
+                        comm=gcomm,
+                    )
+                    nsample -= ncut
+                    ind = slice(nsample)
+                else:
+                    log.warning_rank(
+                        f"{ob.name} length contains large prime factors.  "
+                        F"FFT performance may be degrared.  Recommend "
+                        f"truncating {ncut} / {nsample} samples ({100 * ncut / nsample:.3f}%).",
+                        comm=gcomm,
+                    )
+
             axsamps = OffsetAxis(
                 "samps",
-                count=ob.n_local_samples,
+                count=nsample,
                 offset=ob.local_index_offset,
                 origin_tag=ob.name,
             )
 
             # Convert the data view into a RangesMatrix
-            ranges = so3g.proj.ranges.RangesMatrix.zeros((len(dets), int(ob.n_local_samples)))
+            ranges = so3g.proj.ranges.RangesMatrix.zeros((len(dets), nsample))
             if self.view is not None:
-                 view_ranges = np.array([[x.first, x.last + 1] for x in ob.intervals[self.view]])
-                 ranges += so3g.proj.ranges.Ranges.from_array(view_ranges, ob.n_local_samples)
+                 view_ranges = np.array(
+                     [[x.first, min(x.last, nsample) + 1] for x in ob.intervals[self.view]]
+                 )
+                 ranges += so3g.proj.ranges.Ranges.from_array(view_ranges, nsample)
 
             # Convert the focalplane offsets into the expected form
             det_to_row = {y["name"]: x for x, y in enumerate(fp.detector_data)}
@@ -341,7 +368,7 @@ class MLMapmaker(Operator):
 
             # Convert Az/El quaternion of the detector back into
             # angles from the simulation.
-            theta, phi, pa = toast.qarray.to_angles(ob.shared[self.boresight])
+            theta, phi, pa = toast.qarray.to_angles(ob.shared[self.boresight][ind])
 
             # Azimuth is measured in the opposite direction from longitude
             az = 2 * np.pi - phi
@@ -355,15 +382,15 @@ class MLMapmaker(Operator):
 
             axobs = AxisManager()
             axobs.wrap("focal_plane", axfp)
-            axobs.wrap("timestamps", ob.shared[self.times], axis_map=[(0, axsamps)])
+            axobs.wrap("timestamps", ob.shared[self.times][ind], axis_map=[(0, axsamps)])
             axobs.wrap(
                 "signal",
-                ob.detdata[self.det_data][dets, :],
+                ob.detdata[self.det_data][dets, ind],
                 axis_map=[(0, axdets), (1, axsamps)],
             )
             axobs.wrap("boresight", axbore)
             axobs.wrap("glitch_flags", ranges, axis_map=[(0, axdets), (1, axsamps)])
-            axobs.wrap("weather", np.full(1, "vacuum"))
+            axobs.wrap("weather", np.full(1, self.weather))
             axobs.wrap("site",    np.full(1, "so"))
 
             # NOTE:  Expected contents look like:

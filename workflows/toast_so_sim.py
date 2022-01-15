@@ -52,8 +52,8 @@ import sotodlib.toast.ops as so_ops
 import sotodlib.mapmaking
 
 # Make sure pixell uses a reliable FFT engine
-#import pixell.fft
-#pixell.fft.engine = "fftw"
+import pixell.fft
+pixell.fft.engine = "fftw"
 
 
 def parse_config(operators, templates, comm):
@@ -676,7 +676,10 @@ def main():
     # Get optional MPI parameters
     comm, procs, rank = toast.get_world()
 
-    nthread = os.environ["OMP_NUM_THREADS"]
+    if "OMP_NUM_THREADS" in os.environ:
+        nthread = os.environ["OMP_NUM_THREADS"]
+    else:
+        nthread = 1
     log.info_rank(
         f"Executing workflow with {procs} MPI tasks, each with "
         f"{nthread} OpenMP threads at {datetime.datetime.now()}",

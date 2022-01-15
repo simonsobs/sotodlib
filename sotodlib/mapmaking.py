@@ -465,8 +465,15 @@ def inject_map(obs, map, recenter=None):
 
 @function_timer
 def safe_invert_div(div, lim=1e-2):
-    from threadpoolctl import threadpool_limits
-    with threadpool_limits(limits=1, user_api="blas"):
+    try:
+        # try setting up a context manager that limits the number of threads
+        from threadpoolctl import threadpool_limitse
+        cm = threadpool_limits(limits=1, user_api="blas")
+    except:
+        # threadpoolctl not available, need a dummy context manager
+        import contextlib
+        cm = contextlib.nullcontext()
+    with cm:
         hit = div[0,0] != 0
         # Get the condition number of each pixel
         work    = np.ascontiguousarray(div[:,:,hit].T)
