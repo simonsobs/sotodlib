@@ -52,8 +52,8 @@ import sotodlib.toast.ops as so_ops
 import sotodlib.mapmaking
 
 # Make sure pixell uses a reliable FFT engine
-import pixell.fft
-pixell.fft.engine = "fftw"
+#import pixell.fft
+#pixell.fft.engine = "fftw"
 
 
 def parse_config(operators, templates, comm):
@@ -132,6 +132,10 @@ def parse_config(operators, templates, comm):
         default=False,
         action="store_true",
         help="Map each observation separately.",
+    )
+
+    parser.add_argument(
+        "--realization", required=False, help="Realization index", type=int,
     )
 
     # Build a config dictionary starting from the operator defaults, overriding with any
@@ -225,7 +229,7 @@ def job_create(config, jobargs, telescope, schedule, comm):
     return job, group_size, full_pointing
 
 
-def simulate_data(job, toast_comm, telescope, schedule):
+def simulate_data(job, args, toast_comm, telescope, schedule):
     log = toast.utils.Logger.get()
     ops = job.operators
     tmpls = job.templates
@@ -248,6 +252,8 @@ def simulate_data(job, toast_comm, telescope, schedule):
     ops.sim_ground.schedule = schedule
     if ops.sim_ground.weather is None:
         ops.sim_ground.weather = telescope.site.name
+    if args.realization is not None:
+        ops.sim_ground.realization = args.realization
     ops.sim_ground.apply(data)
     log.info_rank("Simulated telescope pointing in", comm=world_comm, timer=timer)
 
@@ -277,7 +283,6 @@ def simulate_data(job, toast_comm, telescope, schedule):
 
     ops.elevation_model.noise_model = ops.default_model.noise_model
     ops.elevation_model.detector_pointing = ops.det_pointing_azel
-    ops.elevation_model.view = ops.det_pointing_azel.view
     ops.elevation_model.apply(data)
     log.info_rank("Created elevation noise model in", comm=world_comm, timer=timer)
 
@@ -308,6 +313,10 @@ def simulate_data(job, toast_comm, telescope, schedule):
         ops.binner_final = ops.binner
 
     # Simulate atmosphere
+
+    if args.realization is not None:
+        ops.sim_atmosphere_coarse.realization = 1000000 + args.realization
+        ops.sim_atmosphere.realization = args.realization
 
     for sim_atm in ops.sim_atmosphere_coarse, ops.sim_atmosphere:
         if not sim_atm.enabled:
@@ -343,6 +352,8 @@ def simulate_data(job, toast_comm, telescope, schedule):
     # Simulate scan-synchronous signal
 
     ops.sim_sss.detector_pointing = ops.det_pointing_azel
+    if args.realization is not None:
+        ops.sim_sss.realization = args.realization
     ops.sim_sss.apply(data)
     log.info_rank("Simulated Scan-synchronous signal", comm=world_comm, timer=timer)
 
@@ -361,6 +372,8 @@ def simulate_data(job, toast_comm, telescope, schedule):
 
     # Apply a time constant
 
+    if args.realization is not None:
+        ops.convolve_time_constant.realization = args.realization
     ops.convolve_time_constant.apply(data)
     log.info_rank("Convolved time constant in", comm=world_comm, timer=timer)
 
@@ -370,6 +383,8 @@ def simulate_data(job, toast_comm, telescope, schedule):
     # Simulate detector noise
 
     ops.sim_noise.noise_model = ops.elevation_model.out_model
+    if args.realization is not None:
+        ops.sim_noise.realization = args.realization
     log.info_rank("Simulating detector noise", comm=world_comm)
     ops.sim_noise.apply(data)
     log.info_rank("Simulated detector noise in", comm=world_comm, timer=timer)
@@ -389,6 +404,8 @@ def simulate_data(job, toast_comm, telescope, schedule):
 
     # Add calibration error
 
+    if args.realization is not None:
+        ops.gainscrambler.realization = args.realization
     ops.gainscrambler.apply(data)
     log.info_rank("Simulated gain errors in", comm=world_comm, timer=timer)
 
@@ -778,7 +795,7 @@ def main():
     toast_comm = toast.Comm(world=comm, groupsize=group_size)
 
     # Create simulated data
-    data = simulate_data(job, toast_comm, telescope, schedule)
+    data = simulate_data(job, args, toast_comm, telescope, schedule)
 
     # Handle special case of caching the atmosphere simulations.  In this
     # case, we are not simulating timestreams or doing data reductions.

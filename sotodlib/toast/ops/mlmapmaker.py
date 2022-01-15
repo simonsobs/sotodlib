@@ -413,9 +413,17 @@ class MLMapmaker(Operator):
         log = Logger.get()
         timer = Timer()
         comm = data.comm.comm_world
+        gcomm = data.comm.comm_group
         timer.start()
 
         self._mapmaker.prepare()
+
+        if self.tiled:
+            geo_work = self._mapmaker.signals[1].geo_work
+            nactive = len(geo_work.active)
+            ntile = np.prod(geo_work.shape[-2:])
+            log.info_rank(f"{nactive} / {ntile} tiles active", comm=gcomm)
+
         log.info_rank(
             f"MLMapmaker finished prepare in",
             comm=comm,
@@ -428,14 +436,21 @@ class MLMapmaker(Operator):
         # a sky map, or where we solve for multiple sky maps. The mapmaker itself supports it,
         # the problem is the direct access to the rhs, div and idiv members
         if self.write_rhs:
-            self._signal_map.write(prefix, "rhs", self._signal_map.rhs)
+            fname = self._signal_map.write(prefix, "rhs", self._signal_map.rhs)
+            log.info_rank(f"Wrote rhs to {fname}", comm=comm)
+            
         if self.write_div:
             #self._signal_map.write(prefix, "div", self._signal_map.div)
             # FIXME : only writing the TT variance to avoid integer overflow in communication
-            self._signal_map.write(prefix, "div", self._signal_map.div[0, 0])
+            fname = self._signal_map.write(prefix, "div", self._signal_map.div[0, 0])
+            log.info_rank(f"Wrote div to {fname}", comm=comm)
+
         mmul = tilemap.map_mul if self.tiled else enmap.map_mul
         if self.write_bin:
-            self._signal_map.write(prefix, "bin", mmul(self._signal_map.idiv, self._signal_map.rhs))
+            fname = self._signal_map.write(
+                prefix, "bin", mmul(self._signal_map.idiv, self._signal_map.rhs)
+            )
+            log.info_rank(f"Wrote bin to {fname}", comm=comm)
 
         if comm is not None:
             comm.barrier()
@@ -457,7 +472,8 @@ class MLMapmaker(Operator):
             if dump:
                 for signal, val in zip(self._mapmaker.signals, step.x):
                     if signal.output:
-                        signal.write(prefix, "map%04d" % step.i, val)
+                        fname = signal.write(prefix, "map%04d" % step.i, val)
+                        log.info_rank(f"Wrote signal to {fname}", comm=comm)
 
         log.info_rank(f"MLMapmaker finished solve in", comm=comm, timer=timer)
 

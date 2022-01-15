@@ -2,11 +2,17 @@
 # e.g. noise_model.py, pointing_matrix.py, utilities, mlmapmaker.py etc. Maybe we will
 # do that later, but for now I don't think that split makes things easier for the user.
 
-import numpy as np, sys, time, warnings
+from time import time
+import sys
+import warnings
+
+import numpy as np
 import so3g
+from pixell import enmap, utils, fft, bunch, tilemap
+from toast.timing import Timer, function_timer, GlobalTimers
+
 from . import coords
 from . import tod_ops
-from pixell import enmap, utils, fft, bunch, wcsutils, mpi, tilemap, memory
 
 ##########################################
 ##### Maximum likelihood mapmaking #######
@@ -23,6 +29,8 @@ class MLMapmaker:
         self.data         = []
         self.dof          = MultiZipper()
         self.ready        = False
+
+    @function_timer
     def add_obs(self, id, obs, noise_model=None):
         # Prepare our tod
         tod    = obs.signal.astype(self.dtype, copy=False)
@@ -43,28 +51,61 @@ class MLMapmaker:
         # Save what we need about this observation
         self.data.append(bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime),
             dets=obs.dets.vals, nmat=nmat))
+
+    @function_timer
     def prepare(self):
         if self.ready: return
         for signal in self.signals:
             signal.prepare()
             self.dof.add(signal.dof)
         self.ready = True
+
+    @function_timer
     def A(self, x):
         # unzip goes from flat array of all the degrees of freedom to individual maps, cuts etc.
         # to_work makes a scratch copy and does any redistribution needed
+        #t0 = time()
+        #t1 = time()
         iwork = [signal.to_work(m) for signal,m in zip(self.signals,self.dof.unzip(x))]
+        #t2 = time(); print(f" A    iwork : {t2-t1:8.3f}s", flush=True)
         owork = [w*0 for w in iwork]
+        #t1 = time(); print(f" A    owork : {t1-t2:8.3f}s", flush=True)
+        #t_forward = 0
+        #t_apply = 0
+        #t_backward = 0
         for di, data in enumerate(self.data):
             tod = np.zeros([data.ndet, data.nsamp], self.dtype)
+            #t1 = time()
             for si, signal in enumerate(self.signals):
                 signal.forward(data.id, tod, iwork[si])
-            data.nmat.apply(tod)
+            #t2 = time()
+            #t_forward += t2 - t1
+            data.nmat.apply(tod, id=data.id)
+            #t1 = time()
+            #t_apply += t1 - t2
             for si, signal in reversed(list(enumerate(self.signals))):
                 signal.backward(data.id, tod, owork[si])
-        return self.dof.zip(*[signal.from_work(w) for signal,w in zip(self.signals,owork)])
+            #t2 = time()
+            #t_backward += t2 - t1
+        #print(f" A  forward : {t_forward:8.3f}s", flush=True)
+        #print(f" A    apply : {t_apply:8.3f}s", flush=True)
+        #print(f" A backward : {t_backward:8.3f}s", flush=True)
+        #t1 = time()
+        result = self.dof.zip(*[signal.from_work(w) for signal,w in zip(self.signals,owork)])
+        #t2 = time(); print(f" A      zip : {t2-t1:8.3f}s", flush=True)
+        #print(f" A    TOTAL : {t2-t0:8.3f}s", flush=True)
+        return result
+
+    @function_timer
     def M(self, x):
+        #t1 = time()
         iwork = self.dof.unzip(x)
-        return self.dof.zip(*[signal.precon(w) for signal, w in zip(self.signals, iwork)])
+        #t2 = time(); print(f" M    iwork : {t2-t1:8.3f}s", flush=True)
+        result = self.dof.zip(*[signal.precon(w) for signal, w in zip(self.signals, iwork)])
+        #t1 = time(); print(f" M      zip : {t1-t2:8.3f}s", flush=True)
+        return result
+
+    @function_timer
     def solve(self, maxiter=500, maxerr=1e-6):
         self.prepare()
         rhs    = self.dof.zip(*[signal.rhs for signal in self.signals])
@@ -123,6 +164,8 @@ class SignalMap(Signal):
         else:
             self.rhs = enmap.zeros((ncomp,)     +shape, wcs, dtype=dtype)
             self.div = enmap.zeros((ncomp,ncomp)+shape, wcs, dtype=dtype)
+
+    @function_timer
     def add_obs(self, id, obs, nmat, Nd):
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
@@ -161,6 +204,8 @@ class SignalMap(Signal):
         # Save the per-obs things we need. Just the pointing matrix in our case.
         # Nmat and other non-Signal-specific things are handled in the mapmaker itself.
         self.data[id] = bunch.Bunch(pmap=pmap, obs_geo=obs_rhs.geometry)
+
+    @function_timer
     def prepare(self):
         """Called when we're done adding everything. Sets up the map distribution,
         degrees of freedom and preconditioner."""
@@ -170,18 +215,17 @@ class SignalMap(Signal):
             self.rhs  = tilemap.redistribute(self.rhs, self.comm)
             self.div  = tilemap.redistribute(self.div, self.comm)
             self.dof  = TileMapZipper(self.rhs.geometry, dtype=self.dtype, comm=self.comm)
-            # DEBUG begin
-            # print(f"{self.comm.rank:4} : tiles : {self.rhs.geometry}", flush=True)
-            print(f"{self.comm.rank:4} : tiles : {self.geo_work}", flush=True)
-            # DEBUG end
         else:
             self.rhs  = utils.allreduce(self.rhs, self.comm)
             self.div  = utils.allreduce(self.div, self.comm)
             self.dof  = MapZipper(*self.rhs.geometry, dtype=self.dtype)
         self.idiv  = safe_invert_div(self.div)
         self.ready = True
+
     @property
     def ncomp(self): return len(self.comps)
+
+    @function_timer
     def forward(self, id, tod, map, tmul=1, mmul=1):
         """map2tod operation. For tiled maps, the map should be in work distribution,
         as returned by unzip. Adds into tod."""
@@ -189,6 +233,8 @@ class SignalMap(Signal):
         if tmul != 1: tod *= tmul
         if mmul != 1: map = map*mmul
         self.data[id].pmap.from_map(dest=tod, signal_map=map, comps=self.comps)
+
+    @function_timer
     def backward(self, id, tod, map, tmul=1, mmul=1):
         """tod2map operation. For tiled maps, the map should be in work distribution,
         as returned by unzip. Adds into map"""
@@ -196,15 +242,23 @@ class SignalMap(Signal):
         if tmul != 1: tod  = tod*tmul
         if mmul != 1: map *= mmul
         self.data[id].pmap.to_map(signal=tod, dest=map, comps=self.comps)
+
+    @function_timer
     def precon(self, map):
         if self.tiled: return tilemap.map_mul(self.idiv, map)
         else: return enmap.map_mul(self.idiv, map)
+
+    @function_timer
     def to_work(self, map):
         if self.tiled: return tilemap.redistribute(map, self.comm, self.geo_work.active)
         else: return map.copy()
+
+    @function_timer
     def from_work(self, map):
         if self.tiled: return tilemap.redistribute(map, self.comm, self.rhs.geometry.active)
         else: return utils.allreduce(map, self.comm)
+
+    @function_timer
     def write(self, prefix, tag, m):
         if not self.output: return
         oname = self.ofmt.format(name=self.name)
@@ -214,6 +268,7 @@ class SignalMap(Signal):
         else:
             if self.comm.rank == 0:
                 enmap.write_map(oname, m)
+        return oname
 
 class SignalCut(Signal):
     def __init__(self, comm, name="cut", ofmt="{name}_{rank:02}", dtype=np.float32,
@@ -227,6 +282,8 @@ class SignalCut(Signal):
         self.off   = 0
         self.rhs   = []
         self.div   = []
+
+    @function_timer
     def add_obs(self, id, obs, nmat, Nd):
         """Add and process an observation. "obs" should be an Observation axis manager,
         nmat a noise model, representing the inverse noise covariance matrix,
@@ -246,6 +303,8 @@ class SignalCut(Signal):
         self.off += pcut.njunk
         self.rhs.append(obs_rhs)
         self.div.append(obs_div)
+
+    @function_timer
     def prepare(self):
         """Process the added observations, determining our degrees of freedom etc.
         Should be done before calling forward and backward."""
@@ -254,22 +313,31 @@ class SignalCut(Signal):
         self.div = np.concatenate(self.div)
         self.dof = ArrayZipper(self.rhs.shape, dtype=self.dtype, comm=self.comm)
         self.ready = True
+
+    @function_timer
     def forward(self, id, tod, junk):
         if id not in self.data: return
         d = self.data[id]
         d.pcut.forward(tod, junk[d.i1:d.i2])
+
+    @function_timer
     def precon(self, junk):
         return junk/self.div
+
+    @function_timer
     def backward(self, id, tod, junk):
         if id not in self.data: return
         d = self.data[id]
         d.pcut.backward(tod, junk[d.i1:d.i2])
+
+    @function_timer
     def write(self, prefix, tag, m):
         if not self.output: return
         oname = self.ofmt.format(name=self.name, rank=self.comm.rank)
         oname = "%s%s_%s.%s" % (prefix, oname, tag, self.ext)
         with h5py.File(oname, "w") as hfile:
             hfile["data"] = m
+        return oname
 
 class ArrayZipper:
     def __init__(self, shape, dtype, comm=None):
@@ -277,8 +345,14 @@ class ArrayZipper:
         self.ndof  = int(np.product(shape))
         self.dtype = dtype
         self.comm  = comm
+
+    @function_timer
     def zip(self, arr):  return arr.reshape(-1)
+
+    @function_timer
     def unzip(self, x):  return x.reshape(self.shape).astype(self.dtype, copy=False)
+
+    @function_timer
     def dot(self, a, b):
         return np.sum(a*b) if self.comm is None else self.comm.allreduce(np.sum(a*b))
 
@@ -288,8 +362,14 @@ class MapZipper:
         self.ndof  = int(np.product(shape))
         self.dtype = dtype
         self.comm  = comm
+
+    @function_timer
     def zip(self, map): return np.asarray(map.reshape(-1))
+
+    @function_timer
     def unzip(self, x): return enmap.ndmap(x.reshape(self.shape), self.wcs).astype(self.dtype, copy=False)
+
+    @function_timer
     def dot(self, a, b):
         return np.sum(a*b) if self.comm is None else utils.allreduce(np.sum(a*b),self.comm)
 
@@ -299,10 +379,16 @@ class TileMapZipper:
         self.comm  = comm
         self.dtype = dtype
         self.ndof  = geo.size
+
+    @function_timer
     def zip(self, map):
         return np.asarray(map.reshape(-1))
+
+    @function_timer
     def unzip(self, x):
         return tilemap.TileMap(x.reshape(self.geo.pre+(-1,)).astype(self.dtype, copy=False), self.geo)
+
+    @function_timer
     def dot(self, a, b):
         return self.comm.allreduce(np.sum(a*b))
 
@@ -311,17 +397,25 @@ class MultiZipper:
         self.zippers = []
         self.ndof    = 0
         self.bins    = []
+
+    @function_timer
     def add(self, zipper):
         self.zippers.append(zipper)
         self.bins.append([self.ndof, self.ndof+zipper.ndof])
         self.ndof += zipper.ndof
+
+    @function_timer
     def zip(self, *objs):
         return np.concatenate([zipper.zip(obj) for zipper, obj in zip(self.zippers, objs)])
+
+    @function_timer
     def unzip(self, x):
         res = []
         for zipper, (b1,b2) in zip(self.zippers, self.bins):
             res.append(zipper.unzip(x[b1:b2]))
         return res
+
+    @function_timer
     def dot(self, a, b):
         res = 0
         for (b1,b2), dof in zip(self.bins, self.zippers):
@@ -335,17 +429,24 @@ class PmatCut:
         self.model  = model or "full"
         self.params = params
         self.njunk  = so3g.process_cuts(self.cuts.ranges, "measure", self.model, self.params, None, None)
+
+    @function_timer
     def forward(self, tod, junk):
         """Project from the cut parameter (junk) space for this scan to tod."""
         so3g.process_cuts(self.cuts.ranges, "insert", self.model, self.params, tod, junk)
+
+    @function_timer
     def backward(self, tod, junk):
         """Project from tod to cut parameters (junk) for this scan."""
         so3g.process_cuts(self.cuts.ranges, "extract", self.model, self.params, tod, junk)
         self.clear(tod)
+
+    @function_timer
     def clear(self, tod):
         junk = np.empty(self.njunk, tod.dtype)
         so3g.process_cuts(self.cuts.ranges, "clear", self.model, self.params, tod, junk)
 
+@function_timer
 def inject_map(obs, map, recenter=None):
     # Infer the stokes components
     map = map.preflat
@@ -362,24 +463,27 @@ def inject_map(obs, map, recenter=None):
     # And perform the actual injection
     pmat.from_map(map.extract(shape, wcs), dest=obs.signal)
 
+@function_timer
 def safe_invert_div(div, lim=1e-2):
-    hit = div[0,0] != 0
-    # Get the condition number of each pixel
-    work    = np.ascontiguousarray(div[:,:,hit].T)
-    E, V    = np.linalg.eigh(work)
-    cond    = E[:,0]/E[:,-1]
-    good    = cond >= lim
-    # Invert the good ones
-    inv_good= np.einsum("...ij,...j,...kj->...ik", V[good], 1/E[good], V[good])
-    # Treat the bad ones as being purely T
-    inv_bad = work[~good]*0
-    inv_bad[:,0,0] = 1/work[~good,0,0]
-    # Copy back
-    work[good]  = inv_good
-    work[~good] = inv_bad
-    # And put into final output
-    idiv = div*0
-    idiv[:,:,hit] = work.T
+    from threadpoolctl import threadpool_limits
+    with threadpool_limits(limits=1, user_api="blas"):
+        hit = div[0,0] != 0
+        # Get the condition number of each pixel
+        work    = np.ascontiguousarray(div[:,:,hit].T)
+        E, V    = np.linalg.eigh(work)
+        cond    = E[:,0]/E[:,-1]
+        good    = cond >= lim
+        # Invert the good ones
+        inv_good= np.einsum("...ij,...j,...kj->...ik", V[good], 1/E[good], V[good])
+        # Treat the bad ones as being purely T
+        inv_bad = work[~good]*0
+        inv_bad[:,0,0] = 1/work[~good,0,0]
+        # Copy back
+        work[good]  = inv_good
+        work[~good] = inv_bad
+        # And put into final output
+        idiv = div*0
+        idiv[:,:,hit] = work.T
     return idiv
 
 ################################
@@ -406,6 +510,8 @@ class NmatUncorr(Nmat):
         self.ips_binned = ips_binned
         self.ivar       = ivar
         self.ready      = bins is not None and ips_binned is not None and ivar is not None
+
+    @function_timer
     def build(self, tod, **kwargs):
         ps = np.abs(fft.rfft(tod))**2
         if   self.spacing == "exp": bins = utils.expbin(ps.shape[-1], nbin=self.nbin, nmin=self.nmin)
@@ -420,6 +526,8 @@ class NmatUncorr(Nmat):
         ivar /= bins[-1,1]-bins[0,0]
         ivar *= tod.shape[1]
         return NmatUncorr(spacing=self.spacing, nbin=len(bins), nmin=self.nmin, bins=bins, ips_binned=ips_binned, ivar=ivar)
+
+    @function_timer
     def apply(self, tod, inplace=False):
         if inplace: tod = np.array(tod)
         ftod = fft.rfft(tod)
@@ -431,11 +539,14 @@ class NmatUncorr(Nmat):
         # here to reduce the number of operations needed
         fft.irfft(ftod, tod)
         return tod
+
+    @function_timer
     def write(self, fname):
         data = bunch.Bunch(type="NmatUncorr")
         for field in ["spacing", "nbin", "nmin", "bins", "ips_binned", "ivar"]:
             data[field] = getattr(self, field)
         bunch.write(fname, data)
+
     @staticmethod
     def from_bunch(data):
         return NmatUncorr(spacing=data.spacing, nbin=data.nbin, nmin=data.nmin, bins=data.bins, ips_binned=data.ips_binned, ivar=data.ivar)
@@ -465,6 +576,8 @@ class NmatDetvecs(Nmat):
         self.nwin   = nwin
         self.D, self.V, self.iD, self.iV, self.s, self.ivar = D, V, iD, iV, s, ivar
         self.ready      = all([a is not None for a in [D, V, iD, iV, s, ivar]])
+
+    @function_timer
     def build(self, tod, srate, **kwargs):
         # Apply window before measuring noise model
         nwin  = utils.nint(self.window/srate)
@@ -527,10 +640,15 @@ class NmatDetvecs(Nmat):
         return NmatDetvecs(bin_edges=self.bin_edges, eig_lim=self.eig_lim, single_lim=self.single_lim,
                 window=self.window, nwin=nwin, downweight=self.downweight, verbose=self.verbose,
                 bins=bins, D=D, V=V, iD=iD, iV=iV, s=s, ivar=ivar)
+
     def apply(self, tod, inplace=True, slow=False):
         if not inplace: tod = np.array(tod)
         apply_window(tod, self.nwin)
+        #t1 = time(); print(f"    apply :  apply_window : {t1-t2:8.3f}s", flush=True)
+        gt.start(f"NmatDetvecs.apply({id}): fft.rfft {tod.shape}")
         ftod = fft.rfft(tod)
+        gt.stop(f"NmatDetvecs.apply({id}): fft.rfft {tod.shape}")
+        #t2 = time(); print(f"    apply :          rfft : {t2-t1:8.3f}s", flush=True)
         norm = tod.shape[1]
         if slow:
             for bi, b in enumerate(self.bins):
@@ -540,27 +658,40 @@ class NmatDetvecs(Nmat):
                 iV    = self.iV[bi]/norm**0.5
                 ft[:] = iD[:,None]*ft + self.s*iV.dot(iV.T.dot(ft))
         else:
+            gt.start(f"NmatDetvecs.apply({id}): so3g.nmat_detvecs_apply")
             so3g.nmat_detvecs_apply(ftod.view(tod.dtype), self.bins, self.iD, self.iV, float(self.s), float(norm))
+            gt.stop(f"NmatDetvecs.apply({id}): so3g.nmat_detvecs_apply")
+            #t1 = time(); print(f"    apply : detvecs_apply : {t1-t2:8.3f}s", flush=True)
         # I divided by the normalization above instead of passing normalize=True
         # here to reduce the number of operations needed
+        gt.start(f"NmatDetvecs.apply({id}): fft.irfft {ftod.shape}")
         fft.irfft(ftod, tod)
+        gt.stop(f"NmatDetvecs.apply({id}): fft.irfft {ftod.shape}")
+        #t2 = time(); print(f"    apply :         irfft : {t2-t1:8.3f}s", flush=True)
         apply_window(tod, self.nwin)
+        #t1 = time(); print(f"    apply :  apply_window : {t1-t2:8.3f}s", flush=True)
+        #print(f"    apply :         TOTAL : {t1-t0:8.3f}s", flush=True)
         return tod
+
+    @function_timer
     def write(self, fname):
         data = bunch.Bunch(type="NmatDetvecs")
         for field in ["bin_edges", "eig_lim", "single_lim", "window", "nwin", "downweight",
                 "bins", "D", "V", "iD", "iV", "s", "ivar"]:
             data[field] = getattr(self, field)
         bunch.write(fname, data)
+
     @staticmethod
     def from_bunch(data):
         return NmatDetvecs(bin_edges=data.bin_edges, eig_lim=data.eig_lim, single_lim=data.single_lim,
                 window=data.window, nwin=data.nwin, downweight=data.downweight,
                 bins=data.bins, D=data.D, V=data.V, iD=data.iD, iV=data.iV, s=data.s, ivar=data.ivar)
 
+@function_timer
 def write_nmat(fname, nmat):
     nmat.write(fname)
 
+@function_timer
 def read_nmat(fname):
     data = bunch.read(fname)
     typ  = data.type.decode()
@@ -569,6 +700,7 @@ def read_nmat(fname):
     elif typ == "Nmat":        return Nmat       .from_bunch(data)
     else: raise IOError("Unrecognized noise matrix type '%s' in '%s'" % (str(typ), fname))
 
+@function_timer
 def measure_cov(d, nmax=10000):
     d = d[:,::max(1,d.shape[1]//nmax)]
     n,m = d.shape
@@ -578,13 +710,21 @@ def measure_cov(d, nmax=10000):
         sub = mycontiguous(d[:,i:i+step])
         res += np.real(sub.dot(np.conj(sub.T)))
     return res/m
+
+@function_timer
 def project_out(d, modes): return d-modes.T.dot(modes.dot(d))
+
+@function_timer
 def project_out_from_matrix(A, V):
     # Used Woodbury to project out the given vectors from the covmat A
     if V.size == 0: return A
     Q = A.dot(V)
     return A - Q.dot(np.linalg.solve(np.conj(V.T).dot(Q), np.conj(Q.T)))
+
+@function_timer
 def measure_power(d): return np.real(np.mean(d*np.conj(d),-1))
+
+@function_timer
 def makebins(edge_freqs, srate, nfreq, nmin=0, rfun=None):
     # Translate from frequency to index
     binds  = freq2ind(edge_freqs, srate, nfreq, rfun=rfun)
@@ -599,12 +739,16 @@ def makebins(edge_freqs, srate, nfreq, nmin=0, rfun=None):
     # Go from edges to [:,{from,to}]
     bins  = np.array([binds[:-1],binds[1:]]).T
     return bins
+
+@function_timer
 def mycontiguous(a):
     # I used this in act for some reason, but not sure why. I vaguely remember ascontiguousarray
     # causing weird failures later in lapack
     b = np.zeros(a.shape, a.dtype)
     b[...] = a[...]
     return b
+
+@function_timer
 def find_modes_jon(ft, bins, eig_lim=None, single_lim=0, skip_mean=False, verbose=False):
     ndet = ft.shape[0]
     vecs = np.zeros([ndet,0])
@@ -637,6 +781,8 @@ def find_modes_jon(ft, bins, eig_lim=None, single_lim=0, skip_mean=False, verbos
         e, v = e[accept], v[:,accept]
         vecs = np.concatenate([vecs,v],1)
     return vecs
+
+@function_timer
 def measure_detvecs(ft, vecs):
     # Measure amps when we have non-orthogonal vecs
     rhs  = vecs.T.dot(ft)
@@ -650,16 +796,22 @@ def measure_detvecs(ft, vecs):
     # The total auto-power
     Nd = np.mean(np.abs(ft)**2,1)
     return E, Nu, Nd
+
+@function_timer
 def sichol(A):
     iA = np.linalg.inv(A)
     try: return np.linalg.cholesky(iA), 1
     except np.linalg.LinAlgError:
         return np.linalg.cholesky(-iA), -1
+
+@function_timer
 def safe_inv(a):
     with utils.nowarn():
         res = 1/a
         res[~np.isfinite(res)] = 0
     return res
+
+@function_timer
 def woodbury_invert(D, V, s=1):
     """Given a compressed representation C = D + sVV', compute a
     corresponding representation for inv(C) using the Woodbury
@@ -680,6 +832,8 @@ def woodbury_invert(D, V, s=1):
         iV[i] = iD[i,:,None]*V[i].dot(core)
     sout = -sout
     return iD, iV, sout
+
+@function_timer
 def apply_window(tod, nsamp, exp=1):
     """Apply a cosine taper to each end of the TOD."""
     if nsamp <= 0: return
@@ -701,6 +855,7 @@ def get_ids(query):
 
 def infer_comps(ncomp): return ["T","QU","TQU"][ncomp-1]
 
+@function_timer
 def parse_recentering(desc):
     """Parse an object centering description, as provided by the --center-at argument.
     The format is [from=](ra:dec|name),[to=(ra:dec|name)],[up=(ra:dec|name|system)]
@@ -756,6 +911,7 @@ def parse_recentering(desc):
         raise ValueError("parse_recentering needs at least the from argument")
     return info
 
+@function_timer
 def evaluate_recentering(info, ctime, geom=None, site=None, weather="typical"):
     """Evaluate the quaternion that performs the coordinate recentering specified in
     info, which can be obtained from parse_recentering."""
@@ -787,6 +943,7 @@ def evaluate_recentering(info, ctime, geom=None, site=None, weather="typical"):
     pu = get_pos(info["up"],   ctime, info["up_sys"])
     return [p1,p2,pu]
 
+@function_timer
 def recentering_to_quat_lonlat(p1, p2, pu):
     """Return the quaternion that represents the rotation that takes point p1
     to p2, with the up direction pointing towards the point pu, all given as lonlat pairs"""
@@ -806,12 +963,14 @@ def recentering_to_quat_lonlat(p1, p2, pu):
     a = quat.decompose_lonlat(R*quat.rotation_lonlat(ra1,dec1))
     return R
 
+@function_timer
 def highpass(tod, fknee=1e-2, alpha=3):
     ft   = fft.rfft(tod)
     freq = fft.rfftfreq(tod.shape[1])
     ft  /= 1 + (freq/fknee)**-alpha
     return fft.irfft(ft, tod, normalize=True)
 
+@function_timer
 def find_boresight_jumps(vals, width=20, tol=0.1):
     # median filter array to get reference behavior
     bad   = np.zeros(vals.size,dtype=bool)
@@ -820,6 +979,7 @@ def find_boresight_jumps(vals, width=20, tol=0.1):
     bad  |= np.abs(vals-fvals) > tol
     return bad
 
+@function_timer
 def robust_unwind(a, period=2*np.pi, cut=None, tol=1e-3, mask=None):
     """Like utils.unwind, but only registers something as an angle jump if
     it is of just the right shape. If cut is specified, it should be a list
@@ -842,10 +1002,12 @@ def robust_unwind(a, period=2*np.pi, cut=None, tol=1e-3, mask=None):
     # Then correct our values
     return a - np.cumsum(jumps)*period
 
+@function_timer
 def find_elevation_outliers(el, tol=0.5*utils.degree):
     typ = np.median(el[::100])
     return np.abs(el-typ)>tol
 
+@function_timer
 def freq2ind(freqs, srate, nfreq, rfun=None):
     """Returns the index of the first fourier mode with greater than freq
     frequency, for each freq in freqs."""
@@ -853,6 +1015,7 @@ def freq2ind(freqs, srate, nfreq, rfun=None):
     if rfun  is None: rfun = np.ceil
     return rfun(np.asarray(freqs)/(srate/2.0)*nfreq).astype(int)
 
+@function_timer
 def rangemat_sum(rangemat):
     res = np.zeros(len(rangemat))
     for i, r in enumerate(rangemat):
@@ -860,11 +1023,13 @@ def rangemat_sum(rangemat):
         res[i] = np.sum(ra[:,1]-ra[:,0])
     return res
 
+@function_timer
 def find_usable_detectors(obs, maxcut=0.1):
     ncut  = rangemat_sum(obs.glitch_flags)
     good  = ncut < obs.samps.count * maxcut
     return obs.dets.vals[good]
 
+@function_timer
 def fix_boresight_glitches(obs, ang_tol=0.1*utils.degree, t_tol=1):
     az   = robust_unwind(obs.boresight.az)
     bad  = find_boresight_jumps(az,               tol=ang_tol)
@@ -876,4 +1041,5 @@ def fix_boresight_glitches(obs, ang_tol=0.1*utils.degree, t_tol=1):
     tod_ops.get_gap_fill_single(obs.boresight.az, bcut, swap=True)
     tod_ops.get_gap_fill_single(obs.boresight.el, bcut, swap=True)
 
+@function_timer
 def unarr(a): return np.array(a).reshape(-1)[0]
