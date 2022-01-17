@@ -236,8 +236,6 @@ class Bookbinder(object):
 
         self.frameproc = FrameProcessor()
 
-        self.hk_iter = core.G3File(self._hk_files.pop(0))
-
         ifile = self._smurf_files.pop(0)
         if self._verbose: print(f"Bookbinding {ifile}")
         self.smurf_iter = core.G3File(ifile)
@@ -260,10 +258,11 @@ class Bookbinder(object):
             self.writer.Process(f)
 
     def __call__(self):
-        for h in self.hk_iter:
-            if h['hkagg_type'] != 2:
-                continue
-            self.frameproc(h)
+        for hkfile in self._hk_files:
+            for h in core.G3File(hkfile):
+                if h['hkagg_type'] != 2:
+                    continue
+                self.frameproc(h)
 
         for event_time in self.frameproc.hkbundle.azimuth_events:
             self.frameproc.flush_time = event_time
