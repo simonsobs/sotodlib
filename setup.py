@@ -51,6 +51,9 @@ setup_opts["install_requires"] = [
     'matplotlib',
     'quaternionarray',
     'PyYAML',
+    'toml',
+    'skyfield',
+    'pixell',
 ]
 
 # Command Class dictionary.
