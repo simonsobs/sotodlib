@@ -72,7 +72,8 @@ hold other AxisManagers, and some other stuff too).
 
     dset = core.AxisManager().wrap('tod', tod)
 
-AxisManagers can also hold scalars (ints, floats, strings, etc.), note that ``None`` is considered a scalar as well.
+AxisManagers can also hold scalars, a value is considered scalar if
+``'np.isscalar'`` thinks it is a scalar or if it is ``'None'``.
 
 .. code-block:: python
 
@@ -81,7 +82,7 @@ AxisManagers can also hold scalars (ints, floats, strings, etc.), note that ``No
 Inspecting::
 
     >>> print(dset)
-    AxisManager(tod[3,10000], scalar[0])
+    AxisManager(tod[3,10000], scalar)
     >>> print(dset.tod)
     [[10. 10. 10. ... 10. 10. 10.]
      [11. 11. 11. ... 11. 11. 11.]
