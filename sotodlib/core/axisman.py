@@ -526,6 +526,8 @@ class AxisManager:
             axis_map = [(i, v) for i, v in enumerate(data._axes.values())]
         # Handle scalars
         if np.isscalar(data) or data is None:
+            if name in self._fields:
+                raise ValueError(f'Key: {name} already found in {self}')
             self._fields[name] = data
             self._assignments[name] = []
             return self
