@@ -360,7 +360,7 @@ class AxisManager:
 
     def shape_str(self, name):
         if np.isscalar(self._fields[name]) or self._fields[name] is None:
-            return '0'
+            return ''
         s = []
         for n, ax in zip(self._fields[name].shape, self._assignments[name]):
             if ax is None:
@@ -376,7 +376,8 @@ class AxisManager:
                   for k in self._fields.keys()]
                  + ['%s:%s' % (k, v._minirepr_())
                     for k, v in self._axes.items()])
-        return ("{}(".format(type(self).__name__) + ', '.join(stuff) + ")")
+        return ("{}(".format(type(self).__name__)
+                + ', '.join(stuff).replace('[]', '') + ")")
 
     # constructors...
     @classmethod
