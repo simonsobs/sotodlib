@@ -14,6 +14,9 @@ class TestAxisManager(unittest.TestCase):
         a1[10] = 1.
         aman = core.AxisManager(core.IndexAxis('samps', len(a1)))
         aman.wrap('a1', a1, [(0, 'samps')])
+        # Don't let people wrap the same field twice
+        with self.assertRaises(ValueError):
+            aman.wrap('a1', 2*a1, [(0, 'samps')])
         aman.restrict('samps', (10, 30))
         self.assertNotEqual(aman.a1[0], 0.)
         self.assertEqual(len(aman.a1), 20)
@@ -98,6 +101,10 @@ class TestAxisManager(unittest.TestCase):
         # Accept trivially promoted scalars
         aman.wrap('x', 12)
         aman.wrap('z', 'hello')
+
+        # Don't let people wrap the same scalar twice
+        with self.assertRaises(ValueError):
+            aman.wrap('x', 13)
 
         # Don't just let people wrap any old thing.
         with self.assertRaises(AttributeError):
