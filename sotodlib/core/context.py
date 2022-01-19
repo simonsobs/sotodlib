@@ -167,7 +167,7 @@ class Context(odict):
                 = metadata.SuperLoader(self)
 
     def get_obs(self, obs_id=None, dets=None, detsets=None,
-                loader_type=None, logic_only=False):
+                loader_type=None, logic_only=False, filename=None):
         """Load TOD and supporting metadata for a particular observation id.
         The detectors to read can be specified through colon-coding in
         obs_id, through dets, or through detsets.
@@ -177,6 +177,15 @@ class Context(odict):
 
         """
         detspec = {}
+
+        if filename is not None:
+            if obs_id is not None or detsets is not None:
+                logger.warning(f'Passing filename={filename} to get_obs causes '
+                               f'obs_id={obs_id} and detsets={detsets} to be ignored.')
+            # Resolve this to an obs_id / detset combo.
+            info = self.obsfiledb.lookup_file(filename, prefix='', resolve_paths=False)
+            obs_id = info['obs_id']
+            detsets = info['detsets']
 
         # Handle the case that this is a row from a obsdb query.
         if isinstance(obs_id, dict):

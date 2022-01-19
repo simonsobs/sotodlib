@@ -114,5 +114,24 @@ class TestObsFileDB(unittest.TestCase):
         results = db.verify()
         assert(all([r[0] for r in results['raw']]))
 
+    def test_040_lookups(self):
+        db = self.get_simple_db(prepath='somewhere/else/')
+        target = 'somewhere/else/obs0_group0_0000.g3'
+        for item, result in enumerate([
+                db.lookup_file(target, resolve_paths=False),
+                db.lookup_file(self.test_dir + target),
+                db.lookup_file(self.test_dir + target, resolve_paths=True),
+                db.lookup_file('x/' + target, prefix='x/'),
+                db.lookup_file('notx/../x/' + target, prefix='x/'),
+                ]):
+            self.assertEqual(result['obs_id'], 'obs0', 'Subcase #%i' % item)
+
+        assert(db.lookup_file('obsXYZ_.g3', fail_ok=True) is None)
+        with self.assertRaises(RuntimeError):
+            db.lookup_file('obsXYZ_.g3')
+        with self.assertRaises(RuntimeError):
+            db.lookup_file('notx/../x/' + target, resolve_paths=False)
+
+
 if __name__ == '__main__':
     unittest.main()
