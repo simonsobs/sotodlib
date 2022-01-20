@@ -167,6 +167,7 @@ class Context(odict):
                 = metadata.SuperLoader(self)
 
     def get_obs(self, obs_id=None, dets=None, detsets=None,
+                samples=None,
                 loader_type=None, logic_only=False, filename=None):
         """Load TOD and supporting metadata for a particular observation id.
         The detectors to read can be specified through colon-coding in
@@ -179,13 +180,21 @@ class Context(odict):
         detspec = {}
 
         if filename is not None:
-            if obs_id is not None or detsets is not None:
+            if obs_id is not None or detsets is not None or samples is not None:
                 logger.warning(f'Passing filename={filename} to get_obs causes '
-                               f'obs_id={obs_id} and detsets={detsets} to be ignored.')
+                               f'obs_id={obs_id} and detsets={detsets} and '
+                               f'samples={samples} be ignored.')
             # Resolve this to an obs_id / detset combo.
-            info = self.obsfiledb.lookup_file(filename, prefix='', resolve_paths=False)
+            info = self.obsfiledb.lookup_file(filename, resolve_paths=True)
             obs_id = info['obs_id']
             detsets = info['detsets']
+            if info['sample_range'] is None or None in info['sample_range']:
+                samples = None
+                logger.warning('Due to incomplete ObsFileDb info, passing filename=... '
+                               'will cause *all* files for the detset covered '
+                               'by that file to be loaded.')
+            else:
+                samples = info['sample_range']
 
         # Handle the case that this is a row from a obsdb query.
         if isinstance(obs_id, dict):
@@ -263,7 +272,8 @@ class Context(odict):
         # Load TOD.
         from ..io.load import OBSLOADER_REGISTRY
         loader_func = OBSLOADER_REGISTRY[loader_type]  # Register your loader?
-        aman = loader_func(self.obsfiledb, obs_id, dets)
+        aman = loader_func(self.obsfiledb, obs_id, dets,
+                           samples=samples)
 
         if aman is None:
             return meta
