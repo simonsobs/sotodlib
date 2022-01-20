@@ -957,7 +957,8 @@ class G3tSmurf:
         return sids
 
     def load_data(self, start, end, stream_id=None, channels=None,
-                  show_pb=True, load_biases=True, status=None):
+                  show_pb=True, load_biases=True, status=None,
+                  short_labels=True):
         """
         Loads smurf G3 data for a given time range. For the specified time range
         this will return a chunk of data that includes that time range.
@@ -1047,7 +1048,7 @@ class G3tSmurf:
                 status = None
         
         aman = load_file( flist, status=status, channels=channels,
-                         archive=self, show_pb=show_pb)
+                         archive=self, show_pb=show_pb, short_labels=short_labels)
         
         msk = np.all([aman.timestamps >= start.timestamp(),
                       aman.timestamps < end.timestamp()], axis=0)
@@ -1527,26 +1528,31 @@ def _get_tuneset_channel_names(status, ch_map, archive):
             return ch_map
     
     bands, channels, names = zip(*[(ch.band, ch.channel, ch.name) for ch in tune.tuneset.channels])
+    ruids = []
+    
     for i in range(len(ch_map)):
         try:
             msk = np.all( [ch_map['band'][i]== bands, ch_map['channel'][i]==channels], axis=0)
             j = np.where(msk)[0][0]
-            ch_map[i]['name'] = names[j]
+            ruids.append( names[j] )
         except:
             logger.info(f"Information retrival error for Detector {ch_map[i]}")
+            ruids.append( 'sch_NONE_{}_{:03d}'.format(ch_map['band'][i],
+                                                      ch_map['channel'][i]) )
             continue 
 
     session.close()
-    return ch_map
+    return ruids
 
 def _get_detset_channel_names(status, ch_map, obsfiledb):
     """Update channel maps with name from obsfiledb
     """
     ## tune file in status
     if status.tune is not None and len(status.tune) > 0:
-        c =  obsfiledb.conn.execute('select det from detsets '
+        c = obsfiledb.conn.execute('select tuneset_id from tunes '
                     'where name=?', (status.tune,))
-        detsets = [r[0] for r in c]
+        tuneset_id = [r[0] for r in c][0]
+        
     else:
         logger.info("Tune information not in SmurfStatus, using most recent Tune")
         c = obsfiledb.conn.execute('select tuneset_id from tunes '
@@ -1554,30 +1560,42 @@ def _get_detset_channel_names(status, ch_map, obsfiledb):
                             'order by start desc', (dt.datetime.utcfromtimestamp(status.start),))
         tuneset_id = [r[0] for r in c][0]
 
-        c = obsfiledb.conn.execute('select name from tunesets '
-                                   'where id=?', (tuneset_id,))
-        tuneset = [r[0] for r in c][0]
+    c = obsfiledb.conn.execute('select name from tunesets '
+                               'where id=?', (tuneset_id,))
+    tuneset = [r[0] for r in c][0]
 
-        c = obsfiledb.conn.execute('select det from detsets '
-                            'where name=?', (tuneset,))
-        detsets = [r[0] for r in c]
+    c = obsfiledb.conn.execute('select det from detsets '
+                        'where name=?', (tuneset,))
+    detsets = [r[0] for r in c]
     
+    ruids = []
+
+    if len(detsets) == 0:
+        logger.warning("Found no detsets related to this observation, is the database incomplete?")
+        
+        for i in range(len(ch_map)):
+            ruids.append( 'sch_NONE_{}_{:03d}'.format(ch_map['band'][i],
+                                                      ch_map['channel'][i]) )
+        return ruids
+            
     sql="select band,channel,name from channels where name in ({seq})".format(
                 seq=','.join(['?']*len(detsets)))
     c = obsfiledb.conn.execute(sql,detsets)
-
     bands, channels, names = zip(*[(r[0],r[1],r[2]) for r in c])
-
+    
+    
     for i in range(len(ch_map)):
         try:
             msk = np.all( [ch_map['band'][i]== bands, ch_map['channel'][i]==channels], axis=0)
             j = np.where(msk)[0][0]
-            ch_map[i]['name'] = names[j]
+            ruids.append( names[j] )
         except:
             logger.info(f"Information retrival error for Detector {ch_map[i]}")
+            ruids.append( 'sch_NONE_{}_{:03d}'.format(ch_map['band'][i],
+                                                      ch_map['channel'][i]) )
             continue 
             
-    return ch_map
+    return ruids
 
 def _get_channel_mapping(status, ch_map):
     """Generate baseline channel map from status object
@@ -1586,20 +1604,18 @@ def _get_channel_mapping(status, ch_map):
         try:
             sch = status.readout_to_smurf( ch )
             ch_map[i]['rchannel'] = 'r{:04d}'.format(ch)
-            ch_map[i]['name'] = 'sch_NONE_{}_{:03d}'.format(sch[0],sch[1])
             ch_map[i]['freqs']= status.freq_map[sch[0], sch[1]]
             ch_map[i]['band'] = sch[0]
             ch_map[i]['channel'] = sch[1]
         except:
             ch_map[i]['rchannel'] = 'r{:04d}'.format(ch)
-            ch_map[i]['name'] = 'rch_{:04d}'.format(ch)
             ch_map[i]['freqs']= -1
             ch_map[i]['band'] = -1
             ch_map[i]['channel'] = -1        
     return ch_map
 
 def get_channel_info(status, mask=None, archive=None, obsfiledb=None, 
-                    det_axis='dets'):
+                    det_axis='dets', short_labels=True):
     """Create the Channel Info Section of a G3tSmurf AxisManager
     
     This function returns an AxisManager with the following properties::
@@ -1612,6 +1628,7 @@ def get_channel_info(status, mask=None, archive=None, obsfiledb=None,
             * channel : Smurf Channel
             * frequency : resonator frequency
             * rchannel : readout channel
+            * ruid : readout unique ID
     
     Args
     -----
@@ -1622,6 +1639,9 @@ def get_channel_info(status, mask=None, archive=None, obsfiledb=None,
         G3tSmurf instance for looking for tunes/tunesets
     obsfiledb : ObsfileDb instance (optional)
         ObsfileDb instance for det names / band / channel
+    short_labels : bool
+        Makes the labels used in the detector axis shorter/easier to read
+        if false the labels will be the full readout unique ID
         
     Returns
     --------
@@ -1632,23 +1652,29 @@ def get_channel_info(status, mask=None, archive=None, obsfiledb=None,
     if mask is not None:
         ch_list = ch_list[mask]
     
-    ch_map = np.zeros( len(ch_list), dtype = [('idx', int), ('name', np.unicode_,30), 
-                                              ('rchannel', np.unicode_,30), ('band', int),
-                                             ('channel', int), ('freqs', float)])
+    ch_map = np.zeros( len(ch_list), dtype = [('idx', int), ('rchannel', np.unicode_,30), 
+                                              ('band', int), ('channel', int), 
+                                              ('freqs', float)])
     ch_map['idx'] = ch_list
     
     ch_map = _get_channel_mapping(status, ch_map)
     
     if archive is not None:
-        ch_map = _get_tuneset_channel_names(status, ch_map, archive)
+        ruids = _get_tuneset_channel_names(status, ch_map, archive)
     elif obsfiledb is not None:
-        ch_map = _get_detset_channel_names(status, ch_map, obsfiledb)
+        ruids = _get_detset_channel_names(status, ch_map, obsfiledb)
+     
+    if short_labels:
+        labels = ['sbch_{}_{:03d}'.format(ch_map['band'][i], ch_map['channel'][i]) for i in range(len(ch_list))]
+        ch_info = core.AxisManager( core.LabelAxis(det_axis, labels),)
+    else:
+        ch_info = core.AxisManager( core.LabelAxis(det_axis, ruids),)
         
-    ch_info = core.AxisManager( core.LabelAxis(det_axis, ch_map['name']),)
     ch_info.wrap('band', ch_map['band'], ([(0,det_axis)]) )
     ch_info.wrap('channel', ch_map['channel'], ([(0,det_axis)]) )
     ch_info.wrap('frequency', ch_map['freqs'], ([(0,det_axis)]) )
     ch_info.wrap('rchannel', ch_map['rchannel'], ([(0,det_axis)]) )
+    ch_info.wrap('ruid', np.array(ruids), ([(0,det_axis)]) )
     
     return ch_info
 
@@ -1683,7 +1709,8 @@ def _get_timestamps(streams, load_type=None):
         
 def load_file(filename, channels=None, ignore_missing=True, 
              load_biases=True, load_primary=True, status=None,
-             archive=None, obsfiledb=None, show_pb=True, det_axis='dets'):
+             archive=None, obsfiledb=None, show_pb=True, det_axis='dets',
+             short_labels=True):
     """Load data from file where there may or may not be a connected archive.
 
     Args
@@ -1705,6 +1732,9 @@ def load_file(filename, channels=None, ignore_missing=True,
       status : a SmurfStatus Instance we don't want to use the one from the 
           first file
       det_axis : name of the axis used for channels / detectors
+      short_labels : bool
+        Makes the labels used in the detector axis shorter/easier to read
+        if false the labels will be the full readout unique ID
 
     Returns
     ---------
@@ -1746,7 +1776,8 @@ def load_file(filename, channels=None, ignore_missing=True,
         ch_mask = None
 
     ch_info = get_channel_info(status, ch_mask, archive=archive, 
-                                   obsfiledb=obsfiledb, det_axis=det_axis)
+                                   obsfiledb=obsfiledb, det_axis=det_axis,
+                                  short_labels=short_labels)
 
     subreq = [
         io_load.FieldGroup('data', ch_info.rchannel, timestamp_field='time'),
