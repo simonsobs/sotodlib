@@ -1549,9 +1549,10 @@ def _get_detset_channel_names(status, ch_map, obsfiledb):
     """
     ## tune file in status
     if status.tune is not None and len(status.tune) > 0:
-        c =  obsfiledb.conn.execute('select det from detsets '
+        c = obsfiledb.conn.execute('select tuneset_id from tunes '
                     'where name=?', (status.tune,))
-        detsets = [r[0] for r in c]
+        tuneset_id = [r[0] for r in c][0]
+        
     else:
         logger.info("Tune information not in SmurfStatus, using most recent Tune")
         c = obsfiledb.conn.execute('select tuneset_id from tunes '
@@ -1559,13 +1560,13 @@ def _get_detset_channel_names(status, ch_map, obsfiledb):
                             'order by start desc', (dt.datetime.utcfromtimestamp(status.start),))
         tuneset_id = [r[0] for r in c][0]
 
-        c = obsfiledb.conn.execute('select name from tunesets '
-                                   'where id=?', (tuneset_id,))
-        tuneset = [r[0] for r in c][0]
+    c = obsfiledb.conn.execute('select name from tunesets '
+                               'where id=?', (tuneset_id,))
+    tuneset = [r[0] for r in c][0]
 
-        c = obsfiledb.conn.execute('select det from detsets '
-                            'where name=?', (tuneset,))
-        detsets = [r[0] for r in c]
+    c = obsfiledb.conn.execute('select det from detsets '
+                        'where name=?', (tuneset,))
+    detsets = [r[0] for r in c]
     
     ruids = []
 
