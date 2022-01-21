@@ -412,31 +412,18 @@ def load_file(filename, dets=None, signal_only=False):
     return aman
 
 
-def load_observation(db, obs_id, dets=None, prefix=None, samples=None,
+def load_observation(db, obs_id, dets=None, samples=None, prefix=None,
                      **kwargs):
-    """Load the data for some observation.  You can restrict to only some
-    detectors. Coming soon: also restrict by time range / sample
-    index.
+    """Obsloader function for TOAST simulate data -- this function matches
+    output from pipe-s0001/s0002 (and SSO sims in 2019-2021).
 
-    This specifically targets the pipe-s0001/s0002 sim format.
-
-    Arguments:
-
-      db (ObsFileDb): The database describing this observation file
-        set.
-      obs_id (str): The identifier of the observation.
-      dets (list of str): The detector names of interest.  If None,
-        loads all dets present in this observation.  To load
-        only the ancillary data, pass an empty list.
-      prefix (str): The root address of the data files.  If not
-        specified, the prefix is taken from the ObsFileDb.
-
-    Returns an AxisManager with the data.
+    See API template, `sotodlib.core.context.obsloader_template`, for
+    details.
 
     """
-    if len(kwargs):
-        raise ValueError("This loader function received unimplemented args:"
-                         f"{kwargs}")
+    if any([v is not None for v in kwargs.values()]):
+        raise RuntimeError(
+            f"This loader function does not understand kwargs: f{kwargs}")
 
     if prefix is None:
         prefix = db.prefix
@@ -574,18 +561,14 @@ def hstack_into(dest, src_arrays):
     return dest
 
 
-#: OBSLOADER_REGISTRY will be accessed by the Context system to load
-#: TOD.  The signature of functions here is:
-#:
-#:  loader(db, obs_id, dets=None, prefix=None)
-#:
-#: Here db is an ObsFileDb, obs_id is a string, dets is a list of
-#: string names of readout channels, and prefix is a string that overrides
-#: the path prefix of ObsFileDb.
-#:
-#: "This is an interim solution and the API will change", he said in
-#: March 2020.
-OBSLOADER_REGISTRY = {
-    'pipe-s0001': load_observation,
-    'default': load_observation,
+# Register the loaders defined here.
+core.OBSLOADER_REGISTRY.update(
+    {
+        'pipe-s0001': load_observation,
+        'default': load_observation,
     }
+)
+
+
+# Deprecated alias (used to live here...)
+OBSLOADER_REGISTRY = core.OBSLOADER_REGISTRY

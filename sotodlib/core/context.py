@@ -285,8 +285,10 @@ class Context(odict):
                             "but should be a list. Check .yaml formatting")
         meta = self.loader.load(metadata_list, request)
 
+        # Make sure standard obsloaders are registered ...
+        from ..io import load as _
+
         # Load TOD.
-        from ..io.load import OBSLOADER_REGISTRY
         loader_func = OBSLOADER_REGISTRY[loader_type]  # Register your loader?
         aman = loader_func(self.obsfiledb, obs_id, dets,
                            samples=samples)
@@ -343,3 +345,51 @@ def _read_cfg(filename=None, envvar=None, default=None):
     if not os.path.exists(filename):
         return False, filename, odict()
     return True, filename, yaml.safe_load(open(filename, 'r'))
+
+
+def obsloader_template(db, obs_id, dets=None, prefix=None, samples=None,
+                       **kwargs):
+    """This function is here to document the API for "obsloader" functions
+    used by the Context system.  "obsloader" functions are used to
+    load time-ordered detector data (rather than supporting metadata)
+    from file archives, and return an AxisManager.
+
+    Args:
+      db (ObsFileDB): The database supporting the data files.
+      obs_id (str): The obs_id (as recognized by ObsFileDb).
+      dets (list of str): The dets to load.  If None, all dets are
+        loaded.  If an empty list, ancillary data for the observation
+        is still loaded.
+      samples (tuple): The (start, end) indices of samples which
+        should be loaded.  If start is None, 0 is used.  If end is
+        None, sample_count is used.  Passing None is equivalent to
+        passing (None, None).
+      prefix (str): The root address of the data files, if not already
+        known to the ObsFileDb.  (This is passed through to ObsFileDb
+        prefix= argument.)
+
+    Notes:
+      This interface is subject to further extension.  When possible
+      such extensions should take the form of optional arguments,
+      whose default value is None and which are not activated except
+      when needed.  This permits existing loaders to future-proof
+      themselves by including ``**kwargs`` in the function signature
+      but raising an exception if kwargs contains anything strange.
+      See the body of this example function for template code to
+      reject unexpected kwargs.
+
+    Returns:
+      An AxisManager with the data.
+
+    """
+    if any([v is not None for v in kwargs.values()]):
+        raise RuntimeError(
+            f"This loader function does not understand these kwargs: f{kwargs}")
+    raise NotImplementedError("This is just a template function.")
+
+
+#: OBSLOADER_REGISTRY will be accessed by the Context system to load
+#: TOD.  The function obsloader_template, in this module, shows the
+#: signature and describes the interface.
+
+OBSLOADER_REGISTRY = {}
