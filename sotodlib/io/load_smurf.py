@@ -1834,7 +1834,16 @@ def load_file(filename, channels=None, ignore_missing=True,
 
     return aman
 
-def load_g3tsmurf_obs(db, obs_id, dets=None):
+def load_g3tsmurf_obs(db, obs_id, dets=None, **kwargs):
+    """Obsloader function for g3tsmurf data archives.
+
+    See API template, `sotodlib.core.context.obsloader_template`, for
+    details.
+
+    """
+    if any([v is not None for v in kwargs.values()]):
+        raise RuntimeError(
+            f"This loader function does not understand kwargs: f{kwargs}")
     c = db.conn.execute('select name from files '
                     'where obs_id=?' +
                     'order by start', (obs_id,))
@@ -1842,5 +1851,5 @@ def load_g3tsmurf_obs(db, obs_id, dets=None):
     return load_file(flist, dets, obsfiledb=db)
 
 
-io_load.OBSLOADER_REGISTRY['g3tsmurf'] = load_g3tsmurf_obs
+core.OBSLOADER_REGISTRY['g3tsmurf'] = load_g3tsmurf_obs
 

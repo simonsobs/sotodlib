@@ -204,7 +204,8 @@ Context system:
 ``obs_loader_type``
     A string, giving the name of a loader function that should be used
     to load the TOD.  The functions are registered in the module
-    variable ``sotodlib.io.load.OBSLOADER_REGISTRY``.
+    variable ``sotodlib.core.OBSLOADER_REGISTRY``; also see
+    :func:`sotodlib.core.context.obsloader_template`.
 
 ``metadata``
 
@@ -252,6 +253,16 @@ Context
 .. autoclass:: Context
    :special-members: __init__
    :members:
+
+obsloader
+---------
+
+Data formats are abstracted in the Context system, and "obsloader"
+functions provide the implementations to load data for a particular
+storage format.  The API is documented in the ``obsloader_template``
+function:
+
+.. autofunction:: sotodlib.core.context.obsloader_template
 
 SuperLoader
 -----------
