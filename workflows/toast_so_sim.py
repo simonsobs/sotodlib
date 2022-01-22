@@ -409,6 +409,19 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     ops.gainscrambler.apply(data)
     log.info_rank("Simulated gain errors in", comm=world_comm, timer=timer)
 
+    # DEBUG begin
+    """
+    import pickle
+    my_data = []
+    for obs in data.obs:
+        my_data.append(np.array(obs.detdata["signal"]))
+    fname = f"datadump_{world_comm.rank}.pck"
+    with open(fname, "wb") as fout:
+        pickle.dump(my_data, fout)
+    print(f"Wrote {fname}", flush=True)
+    """
+    # DEBUG end
+
     return data
 
 
@@ -712,6 +725,7 @@ def main():
         toast.ops.ScanHealpixMap(name="scan_map", enabled=False),
         toast.ops.SimAtmosphere(
             name="sim_atmosphere_coarse",
+            add_loading=False,
             lmin_center=300 * u.m,
             lmin_sigma=30 * u.m,
             lmax_center=10000 * u.m,
@@ -728,6 +742,7 @@ def main():
         ),
         toast.ops.SimAtmosphere(
             name="sim_atmosphere",
+            add_loading=True,
             lmin_center=0.001 * u.m,
             lmin_sigma=0.0001 * u.m,
             lmax_center=1 * u.m,
