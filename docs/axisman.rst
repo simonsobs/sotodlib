@@ -72,14 +72,23 @@ hold other AxisManagers, and some other stuff too).
 
     dset = core.AxisManager().wrap('tod', tod)
 
+AxisManagers can also hold scalars, a value is considered scalar if
+``'np.isscalar'`` thinks it is a scalar or if it is ``'None'``.
+
+.. code-block:: python
+
+    dset = dset.wrap('scalar', 1.0)
+
 Inspecting::
 
     >>> print(dset)
-    AxisManager(tod[3,10000])
+    AxisManager(tod[3,10000], scalar)
     >>> print(dset.tod)
     [[10. 10. 10. ... 10. 10. 10.]
      [11. 11. 11. ... 11. 11. 11.]
      [12. 12. 12. ... 12. 12. 12.]]
+    >>> print(dset.scalar)
+    1.0
 
 
 The value that AxisManager adds is an ability to relate an axis in one
