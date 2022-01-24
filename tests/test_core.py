@@ -14,6 +14,9 @@ class TestAxisManager(unittest.TestCase):
         a1[10] = 1.
         aman = core.AxisManager(core.IndexAxis('samps', len(a1)))
         aman.wrap('a1', a1, [(0, 'samps')])
+        # Don't let people wrap the same field twice
+        with self.assertRaises(ValueError):
+            aman.wrap('a1', 2*a1, [(0, 'samps')])
         aman.restrict('samps', (10, 30))
         self.assertNotEqual(aman.a1[0], 0.)
         self.assertEqual(len(aman.a1), 20)
@@ -44,6 +47,8 @@ class TestAxisManager(unittest.TestCase):
         a1[10] = 1.
         aman = core.AxisManager(core.IndexAxis('samps', len(a1)))
         aman.wrap('a1', a1, [(0, 'samps')])
+        aman.wrap('a2', 1)
+
         # This should return a separate thing.
         rman = aman.restrict('samps', (10, 30), in_place=False)
         #self.assertNotEqual(aman.a1[0], 0.)
@@ -59,6 +64,7 @@ class TestAxisManager(unittest.TestCase):
         aman = core.AxisManager(core.LabelAxis('dets', dets),
                                 core.OffsetAxis('samps', a1.shape[1]))
         aman.wrap('a1', a1, [(0, 'dets'), (1, 'samps')])
+        aman.wrap('a2', 1)
 
         r_axes = {'dets': core.LabelAxis('dets', dets[1:2]),
                   'samps': core.OffsetAxis('samps', 20, 10)}
@@ -87,6 +93,22 @@ class TestAxisManager(unittest.TestCase):
             f = aman.wrap_new('f', shape=('dets', 'samps'),
                               cls=so3g.proj.RangesMatrix.zeros)
             self.assertEqual(aman.x.shape, aman.f.shape)
+
+    def test_160_scalars(self):
+        aman = core.AxisManager(core.LabelAxis('dets', ['a', 'b']),
+                                core.OffsetAxis('samps', 100))
+
+        # Accept trivially promoted scalars
+        aman.wrap('x', 12)
+        aman.wrap('z', 'hello')
+
+        # Don't let people wrap the same scalar twice
+        with self.assertRaises(ValueError):
+            aman.wrap('x', 13)
+
+        # Don't just let people wrap any old thing.
+        with self.assertRaises(AttributeError):
+            aman.wrap('a_dict', {'a': 123})
 
     # Multi-dimensional restrictions.
 

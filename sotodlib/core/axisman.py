@@ -359,6 +359,8 @@ class AxisManager:
         return default
 
     def shape_str(self, name):
+        if np.isscalar(self._fields[name]) or self._fields[name] is None:
+            return ''
         s = []
         for n, ax in zip(self._fields[name].shape, self._assignments[name]):
             if ax is None:
@@ -374,7 +376,8 @@ class AxisManager:
                   for k in self._fields.keys()]
                  + ['%s:%s' % (k, v._minirepr_())
                     for k, v in self._axes.items()])
-        return ("{}(".format(type(self).__name__) + ', '.join(stuff) + ")")
+        return ("{}(".format(type(self).__name__)
+                + ', '.join(stuff).replace('[]', '') + ")")
 
     # constructors...
     @classmethod
@@ -506,6 +509,8 @@ class AxisManager:
 
           data: The data to register.  This must be of an acceptable
             type, i.e. a numpy array or another AxisManager.
+            If scalar (or None) then data will be directly added to
+            _fields with no associated axis.
 
           axis_map: A list that assigns dimensions of data to
             particular Axes.  Each entry in the list must be a tuple
@@ -520,6 +525,13 @@ class AxisManager:
             assert(id(self) not in data._managed_ids())
             assert(axis_map is None)
             axis_map = [(i, v) for i, v in enumerate(data._axes.values())]
+        # Handle scalars
+        if np.isscalar(data) or data is None:
+            if name in self._fields:
+                raise ValueError(f'Key: {name} already found in {self}')
+            self._fields[name] = data
+            self._assignments[name] = []
+            return self
         # Promote input data to a full AxisManager, so we can call up
         # to self.merge.
         helper = AxisManager()
@@ -630,6 +642,8 @@ class AxisManager:
         for k, v in self._fields.items():
             if isinstance(v, AxisManager):
                 dest._fields[k] = v.restrict_axes(axes, in_place=in_place)
+            elif np.isscalar(v) or v is None:
+                dest._fields[k] = v
             else:
                 # I.e. an ndarray.
                 sslice = [sels.get(ax, slice(None))
@@ -696,6 +710,8 @@ class AxisManager:
                 dest._fields[k] = v.copy()
                 if axis_name in v._axes:
                     dest._fields[k].restrict(axis_name, selector)
+            elif np.isscalar(v) or v is None:
+                dest._fields[k] = v
             else:
                 sslice = [sl if n == axis_name else slice(None)
                           for n in dest._assignments[k]]
