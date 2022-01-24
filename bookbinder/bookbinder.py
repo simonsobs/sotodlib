@@ -2,10 +2,19 @@
 
 from spt3g import core
 import numpy as np
-
+import so3g
 
 def pos2vel(p):
     return np.ediff1d(p)
+
+def smurf_reader(filename):
+    reader = so3g.G3IndexedReader(filename)
+    while True:
+        frames = reader.Process(None)
+        assert len(frames) <= 1
+        if len(frames) == 0:
+            break
+        yield frames[0]
 
 class _DataBundle():
     def __init__(self):
@@ -48,6 +57,26 @@ class _SmurfBundle(_DataBundle):
         Returns True if the current frame has crossed the flush_time
         """
         return len(self.times) > 0 and self.times[-1] >= flush_time
+
+    def add(self, b):
+        self.times.extend(b.times)
+        if self.data is None:
+            self.data = {c: [] for c in b.names}
+        for i, c in enumerate(b.names):
+            self.data[c].extend(b.data[i])
+
+    def rebundle(self, flush_time):
+        if len(self.times) == 0:
+            return None
+        output = so3g.G3SuperTimestream()
+        output.times = core.G3VectorTime([t for t in self.times if t < flush_time])
+        output.names = [k for (k,_) in self.data.items()]
+        output.quanta = np.ones(len(self.data.keys()), dtype=np.double)
+        output.data = np.vstack([v[:len(output.times)] for (_,v) in self.data.items()])
+        self.times = [t for t in self.times if t >= flush_time]
+        self.data = {c: self.data[c][len(output.times):] for c in self.data.keys()}
+
+        return output
 
 class FrameProcessor(object):
     def __init__(self):
@@ -180,7 +209,7 @@ class FrameProcessor(object):
         f['hk'] = self.hkbundle.rebundle(self.flush_time)
 
         # Co-sampled (interpolated) azimuth encoder data
-        f['data']['Azimuth'] = core.G3Timestream(np.interp(f['data'].times, f['hk'].times, f['hk']['Azimuth_Corrected'], left=np.nan, right=np.nan))
+        f['Azimuth'] = core.G3Timestream(np.interp(f['data'].times, f['hk'].times, f['hk']['Azimuth_Corrected'], left=np.nan, right=np.nan))
 
         self.determine_state(f['hk']['Azimuth_Velocity'])
         f['state'] = self.current_state
@@ -288,7 +317,7 @@ class Bookbinder(object):
                     if len(self._smurf_files) > 0:
                         ifile = self._smurf_files.pop(0)
                         if self._verbose: print(f"Bookbinding {ifile}")
-                        self.smurf_iter = core.G3File(ifile)
+                        self.smurf_iter = smurf_reader(ifile)
                     if len(self._out_files) > 0:
                         ofile = self._out_files.pop(0)
                         if self._verbose: print(f"Writing {ofile}")
