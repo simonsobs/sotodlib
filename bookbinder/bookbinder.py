@@ -68,11 +68,12 @@ class _SmurfBundle(_DataBundle):
     def rebundle(self, flush_time):
         if len(self.times) == 0:
             return None
+
         output = so3g.G3SuperTimestream()
         output.times = core.G3VectorTime([t for t in self.times if t < flush_time])
-        output.names = [k for (k,_) in self.data.items()]
+        output.names = [k for k in self.data.keys()]
         output.quanta = np.ones(len(self.data.keys()), dtype=np.double)
-        output.data = np.vstack([v[:len(output.times)] for (_,v) in self.data.items()])
+        output.data = np.vstack([v[:len(output.times)] for v in self.data.values()])
         self.times = [t for t in self.times if t >= flush_time]
         self.data = {c: self.data[c][len(output.times):] for c in self.data.keys()}
 
@@ -267,7 +268,7 @@ class Bookbinder(object):
 
         ifile = self._smurf_files.pop(0)
         if self._verbose: print(f"Bookbinding {ifile}")
-        self.smurf_iter = core.G3File(ifile)
+        self.smurf_iter = smurf_reader(ifile)
 
         ofile = self._out_files.pop(0)
         if self._verbose: print(f"Writing {ofile}")
