@@ -16,10 +16,14 @@ def smurf_reader(filename):
             break
         yield frames[0]
 
-class _DataBundle():
+class _HKBundle():
     def __init__(self):
         self.times = []
         self.data = None
+        self.azimuth_events = []
+
+    def ready(self):
+        return len(self.azimuth_events) > 0
 
     def add(self, b):
         self.times.extend(b.times)
@@ -43,15 +47,11 @@ class _DataBundle():
 
         return output
 
-class _HKBundle(_DataBundle):
+class _SmurfBundle():
     def __init__(self):
-        super().__init__()
-        self.azimuth_events = []
+        self.times = []
+        self.data = None
 
-    def ready(self):
-        return len(self.azimuth_events) > 0
-
-class _SmurfBundle(_DataBundle):
     def ready(self, flush_time):
         """
         Returns True if the current frame has crossed the flush_time
