@@ -18,6 +18,15 @@ from . import tod_ops
 ##### Maximum likelihood mapmaking #######
 ##########################################
 
+#def deslope_el(tod, el, bsize=10, inplace=False):
+#    if not inplace: tod = tod.copy()
+#    def prepare(x): return np.gradient(utils.block_reduce(x, bsize), axis=-1)
+#    e     = prepare(el)
+#    d     = prepare(tod)
+#    amp   = np.sum(d*e,-1)/np.sum(e*e)
+#    tod  -= amp[:,None]*el
+#    return tod
+
 class MLMapmaker:
     def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False):
         if noise_model is None:
@@ -34,7 +43,9 @@ class MLMapmaker:
     def add_obs(self, id, obs, noise_model=None):
         # Prepare our tod
         tod    = obs.signal.astype(self.dtype, copy=False)
-        utils.deslope(tod, w=5, inplace=True)
+        bunch.write("test0.hdf", bunch.Bunch(tod=tod[::10], el=obs.boresight.el))
+        #tod    = deslope_el(tod, obs.boresight.el, inplace=True)
+        utils.deslope(tod, w=1, inplace=True)
         # Allow the user to override the noise model on a per-obs level
         if noise_model is None: noise_model = self.noise_model
         ctime  = obs.timestamps
@@ -44,7 +55,9 @@ class MLMapmaker:
         if noise_model.ready: nmat = noise_model
         else: nmat = noise_model.build(tod, srate=srate)
         # And apply it to the tod
+        bunch.write("test1.hdf", bunch.Bunch(tod=tod[::10], el=obs.boresight.el))
         tod    = nmat.apply(tod)
+        bunch.write("test2.hdf", bunch.Bunch(tod=tod[::10]))
         # Add the observation to each of our signals
         for signal in self.signals:
             signal.add_obs(id, obs, nmat, tod)
@@ -524,18 +537,17 @@ class NmatUncorr(Nmat):
         if   self.spacing == "exp": bins = utils.expbin(ps.shape[-1], nbin=self.nbin, nmin=self.nmin)
         elif self.spacing == "lin": bins = utils.expbin(ps.shape[-1], nbin=self.nbin, nmin=self.nmin)
         else: raise ValueError("Unrecognized spacing '%s'" % str(self.spacing))
-        ps_binned  = utils.bin_data(bins, ps)
+        ps_binned  = utils.bin_data(bins, ps) / tod.shape[1]
         ips_binned = 1/ps_binned
         # Compute the representative inverse variance per sample
         ivar = np.zeros(len(tod))
         for bi, b in enumerate(bins):
             ivar += ips_binned[:,bi]*(b[1]-b[0])
         ivar /= bins[-1,1]-bins[0,0]
-        ivar *= tod.shape[1]
         return NmatUncorr(spacing=self.spacing, nbin=len(bins), nmin=self.nmin, bins=bins, ips_binned=ips_binned, ivar=ivar)
 
     @function_timer
-    def apply(self, tod, inplace=False):
+    def apply(self, tod, inplace=False, id=None):
         if inplace: tod = np.array(tod)
         ftod = fft.rfft(tod)
         # Candidate for speedup in C

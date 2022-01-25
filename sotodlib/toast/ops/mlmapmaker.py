@@ -281,6 +281,10 @@ class MLMapmaker(Operator):
 
             dtype_tod    = np.float32
             signal_cut   = mm.SignalCut(comm, dtype=dtype_tod)
+            print("tiled", self.tiled)
+            self.tiled=False
+            print("FIXME")
+
             signal_map   = mm.SignalMap(self._shape, self._wcs, comm, comps=self.comps,
                                dtype=np.dtype(self.dtype_map), recenter=self._recenter, tiled=self.tiled)
             signals      = [signal_cut, signal_map]
