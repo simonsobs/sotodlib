@@ -99,8 +99,8 @@ b = 6356752.31424518 #semiaxis minor
 def spectrum(power, fc, sigma, base, err_fc, noise, az_size, el_size, dist):
 
     '''
-    Generate a power spectrum in W/m^2/sr/Hz for a source with a delta-like emission and 
-    a top-hat beam in 2D 
+    Generate a power spectrum in W/m^2/sr/Hz for a source with a delta-like emission and
+    a top-hat beam in 2D
     Parameters:
     - power: total power of the signal in dBm
     - fc: frequency of the signal in GHz
@@ -109,14 +109,14 @@ def spectrum(power, fc, sigma, base, err_fc, noise, az_size, el_size, dist):
     - err_fc: error in the signal frequency in kHz
     - noise: noise of the signal in W/Hz
     - ang_size: beam size of the signal in degrees as [az_size, el_size]
-    - dist: distance of the source in meter 
+    - dist: distance of the source in meter
     '''
 
     fc *= 1e9 ### Conversion to Hz
     err_fc *= 1e3
 
     fc = fc+np.random.normal(0, err_fc)
-    
+
     sigma *= 1e3 ### Conversion to Hz
 
     factor = 10 #Increase by a factor the width of the signal
@@ -126,7 +126,7 @@ def spectrum(power, fc, sigma, base, err_fc, noise, az_size, el_size, dist):
     central = np.arange(-factor*sigma, factor*sigma, sigma)+fc
 
     #Add edges to fill the gap for future interpolations
-    nstep = 20 
+    nstep = 20
     edge_l = np.linspace(fc-freq_step*1e9, fc-factor*sigma, nstep)
     edge_u = np.linspace(fc+factor*sigma, fc+freq_step*1e9, nstep)
 
@@ -138,7 +138,7 @@ def spectrum(power, fc, sigma, base, err_fc, noise, az_size, el_size, dist):
     mask = np.in1d(freq, central)
 
     signal = np.zeros_like(freq)
-    
+
     signal[mask] = power-10*np.log10(sigma)
     signal[~mask] = base
 
@@ -152,7 +152,7 @@ def spectrum(power, fc, sigma, base, err_fc, noise, az_size, el_size, dist):
     signal /= (4*np.pi*az_size*np.sin(el_size*np.pi)) #Normalize in the solid angle
     signal /= dist**2 #Normalize based on the distance
 
-    return freq, signal 
+    return freq, signal
 
 @trait_docs
 class SimSource(Operator):
@@ -179,7 +179,7 @@ class SimSource(Operator):
     )
 
     source_err_flag = Bool(
-        False, 
+        False,
         help = 'Set True to compute the position error of the drone',
     )
 
@@ -214,39 +214,31 @@ class SimSource(Operator):
     )
 
     source_beam_az = Float(
-        115, 
+        115,
         help = 'Beam size along the azimuthal axis of the source in degrees',
     )
 
     source_beam_el = Float(
-        65, 
+        65,
         help = 'Beam size along the elevation axis of the source in degrees',
     )
 
 
     source_pol_angle = Float(
-        90, 
+        90,
         help = 'Angle of the polarization vector emitted by the source in degrees (0 means parallel to the gorund and 90 vertical)',
     )
 
     source_pol_angle_error = Float(
-        0, 
+        0,
         help = 'Error in the angle of the polarization vector',
     )
 
     polarization_fraction = Float(
-        1, 
+        1,
         help = 'Polarization fraction of the emitted signal',
     )
 
-    weights = Unicode(
-        None,
-        allow_none=True,
-        help="Observation detdata key for detector Stokes weights",
-    )
-
-    weights_mode = Unicode("IQU", help="Stokes weights mode (eg. 'I', 'IQU', 'QU')")
-    
     beam_file = Unicode(
         None,
         allow_none=True,
@@ -262,6 +254,12 @@ class SimSource(Operator):
         klass=Operator,
         allow_none=True,
         help="Operator that translates boresight Az/El pointing into detector frame",
+    )
+
+    detector_weights = Instance(
+        klass=Operator,
+        allow_none=True,
+        help="Operator that translates boresight Az/El pointing into detector weights",
     )
 
     elevation = Unicode(
@@ -305,6 +303,26 @@ class SimSource(Operator):
                     msg = f"detector_pointing operator should have a '{trt}' trait"
                     raise traitlets.TraitError(msg)
         return detpointing
+
+    @traitlets.validate("detector_weights")
+    def _check_detector_weights(self, proposal):
+        detweights = proposal["value"]
+        if detweights is not None:
+            if not isinstance(detweights, Operator):
+                raise traitlets.TraitError(
+                    "detector_weights should be an Operator instance"
+                )
+            # Check that this operator has the traits we expect
+            for trt in [
+                "view",
+                "quats",
+                "weights",
+                "mode",
+            ]:
+                if not detweights.has_trait(trt):
+                    msg = f"detector_weights operator should have a '{trt}' trait"
+                    raise traitlets.TraitError(msg)
+        return detweights
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -366,8 +384,13 @@ class SimSource(Operator):
         timer.start()
 
         if self.source_init_dist != 0 :
-            az_init = float(np.random.choice(obs.shared[self.azimuth], 1))*u.rad
-            el_init = float(np.random.choice(obs.shared[self.elevation], 1))*u.rad
+            # FIXME : Drone position should be chosen so that all
+            #         detectors sweep across it, even when simulating
+            #         only a subset (e.g. wafer)
+            # az_init = float(np.random.choice(obs.shared[self.azimuth], 1))*u.rad
+            # el_init = float(np.random.choice(obs.shared[self.elevation], 1))*u.rad
+            az_init = np.median(np.array(obs.shared[self.azimuth])) * u.rad
+            el_init = np.amax(np.array(obs.shared[self.elevation])) * u.rad
 
             E, N, U = hor2enu(az_init, el_init, self.source_init_dist)
             X, Y, Z = enu2ecef(E, N, U, observer.lat, observer.lon, observer.elevation, ell='WGS84')
@@ -393,7 +416,7 @@ class SimSource(Operator):
                 )
 
         X_tel, Y_tel, Z_tel, _, _, _  = lonlat2ecef(observer.lat, observer.lon, observer.elevation)
-        
+
         E, N, U, delta_E, delta_N, delta_U = ecef2enu(X_tel, Y_tel, Z_tel, \
                                                       X, Y, Z, \
                                                       0, 0, 0, \
@@ -435,13 +458,13 @@ class SimSource(Operator):
                 source_el = np.interp(times, self.source_pos[:,0], source_el.value)*source_el.unit
             else:
                 source_el = np.ones_like(times)*source_el
-        
+
         if len(source_distance) != len(times):
             if len(source_distance) > 1:
                 source_distance = np.interp(times, self.source_pos[:,0], source_distance.value)*source_distance.unit
             else:
                 source_distance = np.ones_like(times)*source_distance
-        
+
         if len(size) != len(times):
             if len(size) > 1:
                 size = np.interp(times, self.source_pos[:,0], size.value)*size.unit
@@ -463,7 +486,7 @@ class SimSource(Operator):
     def _get_source_temp(self, distance):
 
         dist = np.median(distance.value)  ### Get the median distance
-        
+
         amp = self.source_amp
         fc = self.source_freq
         sigma = self.source_width
@@ -477,7 +500,7 @@ class SimSource(Operator):
 
         temp = s2tcmb(spec, freq.to_value(u.Hz)) * u.K
 
-        return freq, temp 
+        return freq, temp
 
     def _get_beam_map(self, det, source_diameter, ttemp_det):
         """
@@ -533,12 +556,13 @@ class SimSource(Operator):
             bandpass = obs.telescope.focalplane.bandpass
             signal = obs.detdata[self.det_data][det]
 
-            # Compute detector quaternions
+            # Compute detector quaternions and Stokes weights
 
             obs_data = Data(comm=data.comm)
             obs_data._internal = data._internal
             obs_data.obs = [obs]
             self.detector_pointing.apply(obs_data, detectors=[det])
+            self.detector_weights.apply(obs_data, detectors=[det])
             obs_data.obs.clear()
             del obs_data
 
@@ -565,24 +589,25 @@ class SimSource(Operator):
             sig = beam(x[good], y[good], grid=False)
 
             # Stokes weights for observing polarized source
-            if self.weights is None:
+            if self.detector_weights is None:
                 weights_I = 1
                 weights_Q = 0
                 weights_U = 0
             else:
-                weights = obs.detdata[self.weights][det]
-                if "I" in self.weights_mode:
-                    ind = self.weights_mode.index("I")
+                weights = obs.detdata[self.detector_weights.weights][det]
+                weight_mode = self.detector_weights.mode
+                if "I" in weight_mode:
+                    ind = weight_mode.index("I")
                     weights_I = weights[good, ind].copy()
                 else:
                     weights_I = 0
-                if "Q" in self.weights_mode:
-                    ind = self.weights_mode.index("Q")
+                if "Q" in weight_mode:
+                    ind = weight_mode.index("Q")
                     weights_Q = weights[good, ind].copy()
                 else:
                     weights_Q = 0
-                if "U" in self.weights_mode:
-                    ind = self.weights_mode.index("U")
+                if "U" in weight_mode:
+                    ind = weight_mode.index("U")
                     weights_U = weights[good, ind].copy()
                 else:
                     weights_U = 0
@@ -619,7 +644,7 @@ class SimSource(Operator):
 
         if self.weights is not None:
             req["weights"].append(self.weights)
-        
+
         return req
 
     def _provides(self):
