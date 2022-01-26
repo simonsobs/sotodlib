@@ -18,14 +18,19 @@ from . import tod_ops
 ##### Maximum likelihood mapmaking #######
 ##########################################
 
-#def deslope_el(tod, el, bsize=10, inplace=False):
-#    if not inplace: tod = tod.copy()
-#    def prepare(x): return np.gradient(utils.block_reduce(x, bsize), axis=-1)
-#    e     = prepare(el)
-#    d     = prepare(tod)
-#    amp   = np.sum(d*e,-1)/np.sum(e*e)
-#    tod  -= amp[:,None]*el
-#    return tod
+def deslope_el(tod, el, srate, inplace=False):
+    if not inplace: tod = tod.copy()
+    utils.deslope(tod, w=1, inplace=True)
+    f     = fft.rfftfreq(tod.shape[-1], 1/srate)
+    fknee = 3.0
+    with utils.nowarn():
+        iN = (1+(f/fknee)**-3.5)**-1
+    b  = 1/np.sin(el)
+    utils.deslope(b, w=1, inplace=True)
+    Nb = fft.irfft(iN*fft.rfft(b),b*0)
+    amp= np.sum(tod*Nb,-1)/np.sum(b*Nb)
+    tod-= amp[:,None]*b
+    return tod
 
 class MLMapmaker:
     def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False):
@@ -42,22 +47,22 @@ class MLMapmaker:
     @function_timer
     def add_obs(self, id, obs, noise_model=None):
         # Prepare our tod
-        tod    = obs.signal.astype(self.dtype, copy=False)
-        bunch.write("test0.hdf", bunch.Bunch(tod=tod[::10], el=obs.boresight.el))
-        #tod    = deslope_el(tod, obs.boresight.el, inplace=True)
-        utils.deslope(tod, w=1, inplace=True)
-        # Allow the user to override the noise model on a per-obs level
-        if noise_model is None: noise_model = self.noise_model
         ctime  = obs.timestamps
         srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
+        tod    = obs.signal.astype(self.dtype, copy=False)
+        utils.deslope(tod, w=1, inplace=True)
+        #bunch.write("test0.hdf", bunch.Bunch(tod=tod[::10], el=obs.boresight.el))
+        #tod    = deslope_el2(tod, obs.boresight.el, srate, inplace=True)
+        # Allow the user to override the noise model on a per-obs level
+        if noise_model is None: noise_model = self.noise_model
         # Build the noise model from the obs unless a fully
         # initialized noise model was passed
         if noise_model.ready: nmat = noise_model
         else: nmat = noise_model.build(tod, srate=srate)
         # And apply it to the tod
-        bunch.write("test1.hdf", bunch.Bunch(tod=tod[::10], el=obs.boresight.el))
+        #bunch.write("test1.hdf", bunch.Bunch(tod=tod[::10], el=obs.boresight.el))
         tod    = nmat.apply(tod)
-        bunch.write("test2.hdf", bunch.Bunch(tod=tod[::10]))
+        #bunch.write("test2.hdf", bunch.Bunch(tod=tod[::10]))
         # Add the observation to each of our signals
         for signal in self.signals:
             signal.add_obs(id, obs, nmat, tod)
@@ -522,18 +527,27 @@ class Nmat:
     def from_bunch(data): return Nmat()
 
 class NmatUncorr(Nmat):
-    def __init__(self, spacing="exp", nbin=100, nmin=10, bins=None, ips_binned=None, ivar=None):
+    def __init__(self, spacing="exp", nbin=100, nmin=10, window=2, bins=None, ips_binned=None, ivar=None, nwin=None):
         self.spacing    = spacing
         self.nbin       = nbin
         self.nmin       = nmin
         self.bins       = bins
         self.ips_binned = ips_binned
         self.ivar       = ivar
+        self.window     = window
+        self.nwin       = nwin
         self.ready      = bins is not None and ips_binned is not None and ivar is not None
 
     @function_timer
-    def build(self, tod, **kwargs):
-        ps = np.abs(fft.rfft(tod))**2
+    def build(self, tod, srate, **kwargs):
+        # Apply window while taking fft
+        nwin  = utils.nint(self.window*srate)
+        apply_window(tod, nwin)
+        ft    = fft.rfft(tod)
+        # Unapply window again
+        apply_window(tod, nwin, -1)
+        ps = np.abs(ft)**2
+        del ft
         if   self.spacing == "exp": bins = utils.expbin(ps.shape[-1], nbin=self.nbin, nmin=self.nmin)
         elif self.spacing == "lin": bins = utils.expbin(ps.shape[-1], nbin=self.nbin, nmin=self.nmin)
         else: raise ValueError("Unrecognized spacing '%s'" % str(self.spacing))
@@ -544,11 +558,12 @@ class NmatUncorr(Nmat):
         for bi, b in enumerate(bins):
             ivar += ips_binned[:,bi]*(b[1]-b[0])
         ivar /= bins[-1,1]-bins[0,0]
-        return NmatUncorr(spacing=self.spacing, nbin=len(bins), nmin=self.nmin, bins=bins, ips_binned=ips_binned, ivar=ivar)
+        return NmatUncorr(spacing=self.spacing, nbin=len(bins), nmin=self.nmin, bins=bins, ips_binned=ips_binned, ivar=ivar, window=self.window, nwin=nwin)
 
     @function_timer
     def apply(self, tod, inplace=False, id=None):
         if inplace: tod = np.array(tod)
+        apply_window(tod, self.nwin)
         ftod = fft.rfft(tod)
         # Candidate for speedup in C
         norm = tod.shape[1]
@@ -557,25 +572,26 @@ class NmatUncorr(Nmat):
         # I divided by the normalization above instead of passing normalize=True
         # here to reduce the number of operations needed
         fft.irfft(ftod, tod)
+        apply_window(tod, self.nwin)
         return tod
 
     @function_timer
     def write(self, fname):
         data = bunch.Bunch(type="NmatUncorr")
-        for field in ["spacing", "nbin", "nmin", "bins", "ips_binned", "ivar"]:
+        for field in ["spacing", "nbin", "nmin", "bins", "ips_binned", "ivar", "window", "nwin"]:
             data[field] = getattr(self, field)
         bunch.write(fname, data)
 
     @staticmethod
     def from_bunch(data):
-        return NmatUncorr(spacing=data.spacing, nbin=data.nbin, nmin=data.nmin, bins=data.bins, ips_binned=data.ips_binned, ivar=data.ivar)
+        return NmatUncorr(spacing=data.spacing, nbin=data.nbin, nmin=data.nmin, bins=data.bins, ips_binned=data.ips_binned, ivar=data.ivar, window=window, nwin=nwin)
 
 class NmatDetvecs(Nmat):
     def __init__(self, bin_edges=None, eig_lim=16, single_lim=0.55, mode_bins=[0.25,4.0,20],
-            downweight=[], window=0, nwin=None, verbose=False, bins=None, D=None, V=None, iD=None, iV=None, s=None, ivar=None):
+            downweight=None, window=2, nwin=None, verbose=False, bins=None, D=None, V=None, iD=None, iV=None, s=None, ivar=None):
         # This is all taken from act, not tuned to so yet
         if bin_edges is None: bin_edges = np.array([
-            0.10, 0.25, 0.35, 0.45, 0.55, 0.70, 0.85, 1.00,
+            0.16, 0.25, 0.35, 0.45, 0.55, 0.70, 0.85, 1.00,
             1.20, 1.40, 1.70, 2.00, 2.40, 2.80, 3.40, 3.80,
             4.60, 5.00, 5.50, 6.00, 6.50, 7.00, 8.00, 9.00, 10.0, 11.0,
             12.0, 13.0, 14.0, 16.0, 18.0, 20.0, 22.0,
@@ -599,7 +615,7 @@ class NmatDetvecs(Nmat):
     @function_timer
     def build(self, tod, srate, **kwargs):
         # Apply window before measuring noise model
-        nwin  = utils.nint(self.window/srate)
+        nwin  = utils.nint(self.window*srate)
         apply_window(tod, nwin)
         ft    = fft.rfft(tod)
         # Unapply window again
