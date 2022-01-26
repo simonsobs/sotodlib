@@ -35,7 +35,7 @@ def main():
     )
     group.add_argument(
         "--wafer_slots",
-        help="Comma-separated list of optics tube slots. "
+        help="Comma-separated list of wafer slots. "
     )
     parser.add_argument(
         "--reverse", action="store_true", help="Reverse offsets")
@@ -58,9 +58,17 @@ def main():
     parser.add_argument(
         "--elevation-deg",
         required=False,
-        type=np.float,
+        type=float,
         help="Observing elevation",
     )
+    parser.add_argument(
+        "--verbose",
+        required=False,
+        action="store_true",
+        help="Verbose output",
+        dest="verbose",
+    )
+    parser.set_defaults(corotate_lat=True)
 
     args = parser.parse_args()
 
@@ -170,7 +178,11 @@ def main():
         az_offset *= -1
         el_offset *= -1
 
-    print(f"{az_offset:.3f} {el_offset:.3f} {dist_max:.3f}" + waferstring)
+    if args.verbose:
+        print("{:8} {:8} {:8} {:8}".format("Az [deg]", "El [deg]", "Dist [deg]", "Wafer"))
+        print(f"{np.degrees(az_offset):8.3f} {np.degrees(el_offset):8.3f} {dist_max:8.3f} {waferstring:8}")
+    else:
+        print(f"{az_offset:.3f} {el_offset:.3f} {dist_max:.3f}" + waferstring)
 
     return
 
