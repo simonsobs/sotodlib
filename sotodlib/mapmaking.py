@@ -588,7 +588,7 @@ class NmatUncorr(Nmat):
 
 class NmatDetvecs(Nmat):
     def __init__(self, bin_edges=None, eig_lim=16, single_lim=0.55, mode_bins=[0.25,4.0,20],
-            downweight=None, window=2, nwin=None, verbose=False, bins=None, D=None, V=None, iD=None, iV=None, s=None, ivar=None):
+            downweight=[], window=2, nwin=None, verbose=False, bins=None, D=None, V=None, iD=None, iV=None, s=None, ivar=None):
         # This is all taken from act, not tuned to so yet
         if bin_edges is None: bin_edges = np.array([
             0.16, 0.25, 0.35, 0.45, 0.55, 0.70, 0.85, 1.00,
