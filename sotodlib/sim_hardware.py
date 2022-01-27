@@ -1085,42 +1085,38 @@ def get_example():
     telescopes["LAT"] = tele
 
     fwhm_sat = OrderedDict()
-    fwhm_sat["SAT_f030"] = 7.4
-    fwhm_sat["SAT_f040"] = 5.1
-    fwhm_sat["SAT_f090"] = 2.2
-    fwhm_sat["SAT_f150"] = 1.4
-    fwhm_sat["SAT_f230"] = 1.0
-    fwhm_sat["SAT_f290"] = 0.9
-    sfwhm = OrderedDict()
-    scale = 0.09668 / 0.00495
-    for k, v in fwhm_sat.items():
-        sfwhm[k] = float(int(scale * v * 10.0) // 10)
+    fwhm_sat["SAT_f030"] = 91.0
+    fwhm_sat["SAT_f040"] = 63.0
+    fwhm_sat["SAT_f090"] = 30.0
+    fwhm_sat["SAT_f150"] = 17.0
+    fwhm_sat["SAT_f230"] = 11.0
+    fwhm_sat["SAT_f290"] = 9.0
 
     tele = OrderedDict()
     tele["tube_slots"] = ["ST1"]
     tele["platescale"] = 0.09668
-    tele["fwhm"] = sfwhm
+    tele["fwhm"] = fwhm_sat
     tele["platform_name"] = ""
     telescopes["SAT1"] = tele
 
     tele = OrderedDict()
     tele["tube_slots"] = ["ST2"]
     tele["platescale"] = 0.09668
-    tele["fwhm"] = sfwhm
+    tele["fwhm"] = fwhm_sat
     tele["platform_name"] = ""
     telescopes["SAT2"] = tele
 
     tele = OrderedDict()
     tele["tube_slots"] = ["ST3"]
     tele["platescale"] = 0.09668
-    tele["fwhm"] = sfwhm
+    tele["fwhm"] = fwhm_sat
     tele["platform_name"] = ""
     telescopes["SAT3"] = tele
 
     tele = OrderedDict()
     tele["tube_slots"] = ["ST4"]
     tele["platescale"] = 0.09668
-    tele["fwhm"] = sfwhm
+    tele["fwhm"] = fwhm_sat
     tele["platform_name"] = ""
     telescopes["SAT4"] = tele
 
