@@ -410,9 +410,12 @@ class MLMapmaker(Operator):
             # Maybe load precomputed noise model
             nmat_dir  = self.nmat_dir.format(out_dir=self.out_dir)
             nmat_file = nmat_dir + "/nmat_%s.hdf" % ob.name
-            if self.nmat_mode == "load" or (
-                    self.nmat_mode == "cache" and os.path.isfile(nmat_file)
-            ):
+            there = os.path.isfile(nmat_file)
+            if self.nmat_mode == "load" and not there:
+                raise RuntimeError(
+                    f"Nmat mode is 'load' but {nmat_file} does not exist."
+                )
+            if self.nmat_mode == "load" or (self.nmat_mode == "cache" and there):
                 log.info_rank(f"Loading noise model from '{nmat_file}'", comm=gcomm)
                 nmat = mm.read_nmat(nmat_file)
             else:
