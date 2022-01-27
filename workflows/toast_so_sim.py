@@ -379,7 +379,7 @@ def simulate_data(job, toast_comm, telescope, schedule):
 
     # Simulate HWP-synchronous signal
 
-    ops.sim_hwpss.stokes_weights = ops.weights_azel
+    ops.sim_hwpss.detector_pointing = ops.det_pointing_azel
     ops.sim_hwpss.apply(data)
     log.info_rank(
         "Simulated HWP-synchronous signal",
