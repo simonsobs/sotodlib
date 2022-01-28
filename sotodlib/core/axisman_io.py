@@ -93,7 +93,7 @@ def _safe_scalars(x):
         return tuple([_safe_scalars(_x) for _x in x])
     if isinstance(x, dict):
         return {k: _safe_scalars(v) for k, v in x.items()}
-    if isinstance(x, (np.integer, np.floating, np.str_)):
+    if isinstance(x, (np.integer, np.floating, np.str_, np.bool_)):
         return x.item()
     # Must be fine then!
     return x
