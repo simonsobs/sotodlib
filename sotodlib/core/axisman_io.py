@@ -85,6 +85,19 @@ def _retype_for_read(data):
 
 # save/load AxisManager to HDF5.
 
+def _safe_scalars(x):
+    # Kill any np.integer, np.floating, or np.str_ vals... they don't serialize.
+    if isinstance(x, list):
+        return [_safe_scalars(_x) for _x in x]
+    if isinstance(x, tuple):
+        return tuple([_safe_scalars(_x) for _x in x])
+    if isinstance(x, dict):
+        return {k: _safe_scalars(v) for k, v in x.items()}
+    if isinstance(x, (np.integer, np.floating, np.str_)):
+        return x.item()
+    # Must be fine then!
+    return x
+
 def _save_axisman(axisman, dest, group=None):
     """
     See AxisManager.save.
@@ -136,6 +149,9 @@ def _save_axisman(axisman, dest, group=None):
                            'args': (v.name, v.count)})
         else:
             raise ValueError(f"No encoder for axis class: {v.__class__}")
+
+    # Sanitize ...
+    schema = _safe_scalars(schema)
 
     if isinstance(dest, str):
         f = h5py.File(dest, 'a')
