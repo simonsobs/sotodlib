@@ -1769,6 +1769,9 @@ def load_file(filename, channels=None, ignore_missing=True,
             raise e
 
     if channels is not None:
+        if len(channels) == 0:
+            logger.error("Requested empty list of channels. Use channels=None to "
+                         "load all channels.")
         ch_mask = get_channel_mask(channels, status, archive=archive, 
                                    obsfiledb=obsfiledb,
                                    ignore_missing=ignore_missing)
