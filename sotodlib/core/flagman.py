@@ -1,5 +1,6 @@
 import numpy as np
 from functools import reduce
+from collections import OrderedDict as odict
 
 from so3g.proj import Ranges, RangesMatrix
 from . import AxisManager
@@ -232,10 +233,32 @@ class FlagManager(AxisManager):
         
         return cls(tod[dets_name], tod[samps_name])
 
+    @classmethod
+    def promote(cls, src, dets_name, samps_name):
+        """Create an instance of this class from an AxisManager.  The axes in
+        src with names dets_name and samps_name are used for the dets
+        and samps axes.
+
+        This is a move-style constructor, and empties out src to
+        minimize copies.
+
+        """
+        flagman = cls(src._axes.pop(dets_name),
+                      src._axes.pop(samps_name))
+        flagman._axes.update(src._axes)
+        flagman._fields = dict(src._fields)
+        flagman._assignments = dict(src._assignments)
+
+        # Reset source.
+        src._axes = odict()
+        src._assignments = {}
+        src._fields = odict()
+
+        return flagman
+
 def _get_shape(data):
     try:
         return data.shape
     except:
         ### catches if a detector mask is just a list
         return np.shape(data)
-    

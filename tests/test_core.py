@@ -1,4 +1,7 @@
 import unittest
+import tempfile
+import os
+import shutil
 
 import numpy as np
 from sotodlib import core
@@ -208,6 +211,35 @@ class TestAxisManager(unittest.TestCase):
         self.assertEqual(aman.shape, (3, n//2))
         self.assertEqual(aman._axes['samps'].offset, ofs)
         self.assertEqual(aman.x[0], n//2)
+
+    def test_500_io(self):
+        # Test save/load HDF5
+        dets = ['det0', 'det1', 'det2']
+        n, ofs = 1000, 0
+        aman = core.AxisManager(
+            core.LabelAxis('dets', dets),
+            core.OffsetAxis('samps', n, ofs),
+            core.IndexAxis('indexaxis', 12))
+        # Make sure this has axes, scalars, a string array ...
+        aman.wrap_new('test1', ('dets', 'samps'), dtype='float32')
+        aman.wrap_new('flag1', shape=('dets', 'samps'),
+                      cls=so3g.proj.RangesMatrix.zeros)
+        aman.wrap('scalar', 8)
+        aman.wrap('test_str', np.array(['a', 'b', 'cd']))
+        aman.wrap('flags', core.FlagManager.for_tod(aman, 'dets', 'samps'))
+        with tempfile.TemporaryDirectory() as tempdir:
+            filename = os.path.join(tempdir, 'test.h5')
+            aman.save(filename, 'my_axisman')
+            aman2 = aman.load(filename, 'my_axisman')
+            shutil.copy(filename, 'debug.h5')
+        # This is not a very satisfying comparison ... support for ==
+        # should be required for all AxisManager members!
+        for k in aman._fields.keys():
+            self.assertEqual(aman[k].__class__, aman2[k].__class__)
+            if hasattr(aman[k], 'shape'):
+                self.assertEqual(aman[k].shape, aman2[k].shape)
+            else:
+                self.assertEqual(aman[k], aman2[k])  # scalar
 
     def test_900_everything(self):
         tod = core.AxisManager(
