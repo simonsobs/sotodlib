@@ -529,6 +529,12 @@ class AxisManager:
         if np.isscalar(data) or data is None:
             if name in self._fields:
                 raise ValueError(f'Key: {name} already found in {self}')
+            if np.iscomplex(data):
+                # Complex values aren't supported by HDF scheme right now.
+                raise ValueError(f'Cannot store complex value as scalar.')
+            if isinstance(data, (np.integer, np.floating, np.str_)):
+                # Convert sneaky numpy scalars to native python int/float/str
+                data = data.item()
             self._fields[name] = data
             self._assignments[name] = []
             return self

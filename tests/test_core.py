@@ -105,6 +105,14 @@ class TestAxisManager(unittest.TestCase):
         aman.wrap('x', 12)
         aman.wrap('z', 'hello')
 
+        # Check that numpy int/float types are unpacked.
+        aman.wrap('a', np.int32(12))
+        aman.wrap('b', np.float32(12.))
+        aman.wrap('c', np.str_('twelve'))
+        self.assertNotIsInstance(aman['a'], np.integer)
+        self.assertNotIsInstance(aman['b'], np.floating)
+        self.assertNotIsInstance(aman['c'], np.str_)
+
         # Don't let people wrap the same scalar twice
         with self.assertRaises(ValueError):
             aman.wrap('x', 13)
@@ -112,6 +120,8 @@ class TestAxisManager(unittest.TestCase):
         # Don't just let people wrap any old thing.
         with self.assertRaises(AttributeError):
             aman.wrap('a_dict', {'a': 123})
+        with self.assertRaises(ValueError):
+            aman.wrap('square_root', 1j)
 
     # Multi-dimensional restrictions.
 
@@ -227,6 +237,11 @@ class TestAxisManager(unittest.TestCase):
         aman.wrap('scalar', 8)
         aman.wrap('test_str', np.array(['a', 'b', 'cd']))
         aman.wrap('flags', core.FlagManager.for_tod(aman, 'dets', 'samps'))
+
+        aman.wrap('a', np.int32(12))
+        aman.wrap('b', np.float32(12.))
+        aman.wrap('c', np.str_('twelve'))
+
         with tempfile.TemporaryDirectory() as tempdir:
             filename = os.path.join(tempdir, 'test.h5')
             aman.save(filename, 'my_axisman')
