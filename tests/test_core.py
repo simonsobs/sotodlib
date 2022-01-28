@@ -229,6 +229,7 @@ class TestAxisManager(unittest.TestCase):
         aman = core.AxisManager(
             core.LabelAxis('dets', dets),
             core.LabelAxis('int_labels', np.array([13,14,15])), # yuck
+            core.LabelAxis('bool_labels', np.array([True, False])), # yuck
             core.OffsetAxis('samps', n, ofs),
             core.IndexAxis('indexaxis', 12))
         # Make sure this has axes, scalars, a string array ...
@@ -242,6 +243,7 @@ class TestAxisManager(unittest.TestCase):
         aman.wrap('a', np.int32(12))
         aman.wrap('b', np.float32(12.))
         aman.wrap('c', np.str_('twelve'))
+        aman.wrap('d', np.bool_(False))
 
         with tempfile.TemporaryDirectory() as tempdir:
             filename = os.path.join(tempdir, 'test.h5')

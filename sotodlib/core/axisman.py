@@ -532,7 +532,7 @@ class AxisManager:
             if np.iscomplex(data):
                 # Complex values aren't supported by HDF scheme right now.
                 raise ValueError(f'Cannot store complex value as scalar.')
-            if isinstance(data, (np.integer, np.floating, np.str_)):
+            if isinstance(data, (np.integer, np.floating, np.str_, np.bool_)):
                 # Convert sneaky numpy scalars to native python int/float/str
                 data = data.item()
             self._fields[name] = data
