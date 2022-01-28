@@ -1663,8 +1663,12 @@ def get_channel_info(status, mask=None, archive=None, obsfiledb=None,
         ruids = _get_tuneset_channel_names(status, ch_map, archive)
     elif obsfiledb is not None:
         ruids = _get_detset_channel_names(status, ch_map, obsfiledb)
-     
-    if short_labels:
+    else:
+        ruids = None
+        
+    if short_labels or ruids is None:
+        if not short_labels:
+            logger.debug("Ignoring RUID request because not loading from database")
         labels = ['sbch_{}_{:03d}'.format(ch_map['band'][i], ch_map['channel'][i]) for i in range(len(ch_list))]
         ch_info = core.AxisManager( core.LabelAxis(det_axis, labels),)
     else:
@@ -1674,7 +1678,8 @@ def get_channel_info(status, mask=None, archive=None, obsfiledb=None,
     ch_info.wrap('channel', ch_map['channel'], ([(0,det_axis)]) )
     ch_info.wrap('frequency', ch_map['freqs'], ([(0,det_axis)]) )
     ch_info.wrap('rchannel', ch_map['rchannel'], ([(0,det_axis)]) )
-    ch_info.wrap('ruid', np.array(ruids), ([(0,det_axis)]) )
+    if ruids is not None:
+        ch_info.wrap('ruid', np.array(ruids), ([(0,det_axis)]) )
     
     return ch_info
 
@@ -1753,21 +1758,31 @@ def load_file(filename, channels=None, ignore_missing=True,
     if len(filenames) == 0:
         logger.error("No files provided to load")
     
+    if status is not None and status.num_chans is None:
+        logger.warning("Status information is missing 'num_chans.' Will try to fix.")
+        status = None
+        
+    if status is None:
+        try:
+            logger.debug(f"Loading status from {filenames[0]}")
+            status = SmurfStatus.from_file(filenames[0])
+        except:
+            logger.warning(f"Failed to load status from {filenames[0]}.")
+            
     if status is None or status.num_chans is None:
         try:
-            if status is None:
-                logger.warning('Loading status frame from the file at the start'
-                            ' of the corresponding observation.')
-            else:
-                logger.warning("Status information is missing 'num_chans.' Trying to fix.")
+            logger.warning(f"Complete status not available in {filenames[0]}\n"
+                           "Trying to load status frame from the file at the start "
+                           "of the corresponding observation.")
+            
             file_id = filenames[0].split('/')[-1][10:]
             status_fp = filenames[0].replace(file_id, '_000.g3')
-            status = SmurfStatus.from_file(status_fp)
+            status = SmurfStatus.from_file(status_fp)        
         except Exception as e:
             logger.error(f'Error when trying to load status from {status_fp}, maybe the file doesn\'t exist?'
                           'Please load the status manually.')
             raise e
-
+            
     if channels is not None:
         ch_mask = get_channel_mask(channels, status, archive=archive, 
                                    obsfiledb=obsfiledb,
