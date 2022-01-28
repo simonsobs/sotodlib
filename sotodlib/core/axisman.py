@@ -763,6 +763,65 @@ class AxisManager:
             self._assignments.update(aman._assignments)
         return self
 
+    def save(self, dest, group=None):
+        """Write this AxisManager data to an HDF5 group.  This is an
+        experimental feature primarily intended to assist with
+        debugging.  The schema is subject to change, and it's possible
+        that not all objects supported by AxisManager can be
+        serialized.
+
+        Args:
+          dest (str or h5py.Group): Place to save it (in combination
+            with group).
+          group (str or None): Group within the HDF5 file (relative to
+            dest).
+
+        Notes:
+          If dest is a string, it is taken to be an HDF5 filename and
+          is opened in 'a' mode.  The group, in that case, is the
+          full group name in the file where the data should be written.
+
+          If dest is an h5py.Group, the group is the group name in the
+          file relative to dest.
+
+          For example, these are equivalent::
+
+            # Filename + group address:
+            axisman.save('test.h5', 'x/y/z')
+
+            # Open h5py.File + group address:
+            with h5py.File('test.h5', 'a') as h:
+              axisman.save(h, 'x/y/z')
+
+            # Partial group address
+            with h5py.File('test.h5', 'a') as h:
+              g = h.create_group('x/y')
+              axisman.save(g, 'z')
+
+          When passing a filename, the code probably won't use a
+          context manager... so if you want that protection, open your
+          own h5py.File as in the 2nd and 3rd example.
+
+        """
+        from .axisman_io import _save_axisman
+        return _save_axisman(self, dest, group)
+
+    @classmethod
+    def load(cls, src, group=None):
+        """Load a saved AxisManager from an HDF5 file and return it.  See docs
+        for save() function.
+
+        The (src, group) args are combined in the same way as (dest,
+        group) in the save function.  Examples::
+
+          axisman = AxisManager.load('test.h5', 'x/y/z')
+
+          with h5py.File('test.h5', 'r') as h:
+            axisman = AxisManager.load(h, 'x/y/z')
+        """
+        from .axisman_io import _load_axisman
+        return _load_axisman(src, group, cls)
+
 
 def get_coindices(v0, v1):
     """Given vectors v0 and v1, each of which contains no duplicate
