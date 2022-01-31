@@ -160,6 +160,7 @@ class MLMapmaker(Operator):
     )
 
     write_div = Bool(True, help="Write out the noise weight map")
+    write_hits= Bool(True, help="Write out the hitcount map")
 
     write_rhs = Bool(
         True, help="Write out the right hand side of the mapmaking equation"
@@ -466,12 +467,16 @@ class MLMapmaker(Operator):
         if self.write_rhs:
             fname = self._signal_map.write(prefix, "rhs", self._signal_map.rhs)
             log.info_rank(f"Wrote rhs to {fname}", comm=comm)
-            
+
         if self.write_div:
             #self._signal_map.write(prefix, "div", self._signal_map.div)
             # FIXME : only writing the TT variance to avoid integer overflow in communication
             fname = self._signal_map.write(prefix, "div", self._signal_map.div[0, 0])
             log.info_rank(f"Wrote div to {fname}", comm=comm)
+
+        if self.write_hits:
+            fname = self._signal_map.write(prefix, "hits", self._signal_map.hits)
+            log.info_rank(f"Wrote hits to {fname}", comm=comm)
 
         mmul = tilemap.map_mul if self.tiled else enmap.map_mul
         if self.write_bin:

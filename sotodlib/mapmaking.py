@@ -179,9 +179,11 @@ class SignalMap(Signal):
             geo = tilemap.geometry(shape, wcs, tile_shape=tile_shape)
             self.rhs = tilemap.zeros(geo.copy(pre=(ncomp,)),      dtype=dtype)
             self.div = tilemap.zeros(geo.copy(pre=(ncomp,ncomp)), dtype=dtype)
+            self.hits= tilemap.zeros(geo.copy(pre=()),            dtype=dtype)
         else:
             self.rhs = enmap.zeros((ncomp,)     +shape, wcs, dtype=dtype)
             self.div = enmap.zeros((ncomp,ncomp)+shape, wcs, dtype=dtype)
+            self.hits= enmap.zeros(              shape, wcs, dtype=dtype)
 
     @function_timer
     def add_obs(self, id, obs, nmat, Nd):
@@ -215,10 +217,16 @@ class SignalMap(Signal):
             Nd *= nmat.ivar[:,None]
             obs_div[i]   = 0
             pmap.to_map(signal=Nd, dest=obs_div[i])
+        # Build hitcount
+        Nd[:] = 1
+        pcut.clear(Nd)
+        obs_hits = pmap.to_map(signal=Nd)
         del Nd
+
         # Update our full rhs and div. This works for both plain and distributed maps
         self.rhs = self.rhs.insert(obs_rhs, op=np.ndarray.__iadd__)
         self.div = self.div.insert(obs_div, op=np.ndarray.__iadd__)
+        self.hits= self.hits.insert(obs_hits[0],op=np.ndarray.__iadd__)
         # Save the per-obs things we need. Just the pointing matrix in our case.
         # Nmat and other non-Signal-specific things are handled in the mapmaker itself.
         self.data[id] = bunch.Bunch(pmap=pmap, obs_geo=obs_rhs.geometry)
@@ -232,10 +240,12 @@ class SignalMap(Signal):
             self.geo_work = self.rhs.geometry
             self.rhs  = tilemap.redistribute(self.rhs, self.comm)
             self.div  = tilemap.redistribute(self.div, self.comm)
+            self.hits = tilemap.redistribute(self.hits,self.comm)
             self.dof  = TileMapZipper(self.rhs.geometry, dtype=self.dtype, comm=self.comm)
         else:
             self.rhs  = utils.allreduce(self.rhs, self.comm)
             self.div  = utils.allreduce(self.div, self.comm)
+            self.hits = utils.allreduce(self.hits,self.comm)
             self.dof  = MapZipper(*self.rhs.geometry, dtype=self.dtype)
         self.idiv  = safe_invert_div(self.div)
         self.ready = True
