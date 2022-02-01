@@ -672,7 +672,7 @@ class AxisManager:
         Axis.  The Axis definition and all data fields mapped to that
         axis will be modified.
         
-        Arugments:
+        Arguments:
           axis_name (str): The name of the Axis.
           selector (slice or special): Selector, in a form understood
             by the underlying Axis class (see the .restriction method
