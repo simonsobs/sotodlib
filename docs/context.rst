@@ -1272,53 +1272,15 @@ The purpose of ObsFileDb is to provide a map into a large set of TOD
 files, giving the names of the files and a compressed expression of
 what time indices and detectors are present in each file.
 
-Organization of Files
-=====================
-
-The ObsFileDb is represented on disk by an sqlite database file.  The
-sqlite database contains information about data files, and the
-*partial paths* of the data files.  By *partial paths*, we mean that
-only the part of the filenames relative to some root node of the data
-set should be stored in the database.  In order for the code to find
-the data files easily, it is most natural to place the
-obsfiledb.sqlite file in that same root node of the data set.
-Consider the following file listing as an example::
-
-  /
-   data/
-        planet_obs/
-                   obsfiledb.sqlite     # the database
-                   observation0/        # directory for an obs
-                                data0_0 # one data file
-                                data0_1
-                   observation1/
-                                data1_0
-                                data1_1
-                   observation2/
-                   ...
-
-On this particular file system, our "root node of the data set" is
-located at ``/data/planet_obs``.  All data files are located in
-subdirectories of that one root node directory.  The ObsFileDb
-database file is also located in that directory, and called
-``obsfiledb.sqlite``.  The filenames in obsfiledb.sqlite are written
-relative to that root node directory; for example
-``observation0/data0_1``.  This means that we can copy or move the
-contents of the ``planet_obs`` directory to some other path and the
-ObsFileDb will not need to be updated.
-
-There are functions in ObsFileDb that return the full path to the
-files, rather than the partial path.  This is achieved by combining
-the partial file names in the database with the ObsFileDb instance's
-"prefix".  By default, "prefix" is set equal to the directory where
-the source sqlite datafile is located.  But it can be overridden, if
-needed, when the ObsFileDb is instantiated (or afterwards).
+The ObsFileDb is an sqlite database.  It carries some information
+about each "Observation" and the "detectors"; but is complementary to
+the ObsDb and DetDb.
 
 
 Data Model
 ==========
 
-We assume the following organization of the data:
+We assume the following organization of the time-ordered data:
 
 - The data are divided into contiguous segments of time called
   "Observations".  An observation is identified by an ``obs_id``,
@@ -1335,7 +1297,7 @@ Here's some ascii art showing an example of how the data in an
 observation must be split between files::
 
      sample index
-   X-------------------------------------------------->
+   +-------------------------------------------------->
  d |
  e |   +-------------------------+------------------+
  t |   | obs0_waf0_00000         | obs0_waf0_01000  |
@@ -1375,15 +1337,51 @@ particular detset (string ``detset.name``).  The second is called
 (string ``files.obs_id``), detset (string ``files.detset``), and
 sample range (integers ``sample_start`` and ``sample_stop``).
 
-The ObsFileDb is intended to be portable with the TOD data.  It should
-thus be placed near the data (such as in the base directory of the
-data), and use relative filenames.
-
 Constructing the ObsFileDb involves building the detsets and files
 tables, using functions ``add_detset`` and ``add_obsfile``.  Using the
 ObsFileDb is accomplished through the functions ``get_dets``,
 ``get_detsets``, ``get_obs``, and through custom SQL queries on
 ``conn``.
+
+
+Relative vs. Absolute Paths
+===========================
+
+The filenames stored in ObsFileDb may be specified with relative or
+absolute paths.  (Absolute paths are assumed if the filename starts
+with a /.)  Relative paths are taken as being relative to the
+directory where the ObsFileDb sqlite file lives; this can be
+overridden by setting the ``prefix`` attribute.  Consider the
+following file listing as an example::
+
+  /
+   data/
+        planet_obs/
+                   obsfiledb.sqlite     # the database
+                   observation0/        # directory for an obs
+                                data0_0 # one data file
+                                data0_1
+                   observation1/
+                                data1_0
+                                data1_1
+                   observation2/
+                   ...
+
+Note the ``obsfiledb.sqlite`` file, located in ``/data/planet_obs``.
+The filenames in obsfiledb.sqlite might be specified in one of two
+ways:
+
+  1. Using paths relative to the directory where ``obsfiledb.sqlite``
+     is located.  For example, ``observation0/data0_1``.  Relative paths
+     permit one to move the tree of data to other locations without
+     needing to alter the ``obsfiledb.sqlite`` (as long as the
+     relative locations of the data and sqlite file remain fixed).
+  2. Using absolute paths on this file system; for example
+     ``/data/planet_obs/observation0/data0_1``.  This is not portable,
+     but it is a better choice if the ObsFileDb ``.sqlite`` file
+     isn't kept near the TOD data files.
+
+A database may contain a mixture of relative and absolute paths.
 
 
 Example Usage
