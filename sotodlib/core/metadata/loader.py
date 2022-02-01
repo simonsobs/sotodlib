@@ -8,7 +8,9 @@ REGISTRY = {
 
 class SuperLoader:
     def __init__(self, context=None, detdb=None, obsdb=None, working_dir=None):
-        """Args:
+        """Metadata batch loader.
+
+        Args:
           context (Context): context, from which detdb and obsdb will
             be pulled unless they are specified explicitly.
           detdb (DetDb): detdb to use when resolving detector axis.
