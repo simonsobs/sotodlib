@@ -237,14 +237,19 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None,
             _consumed = unpack_frame_object(target, item, streams[item.name], comp_info,
                                             offset=offset, max_count=max_count)
             _n, sl = our_slice(_consumed, 1)
-            if _n > 0 and  item.timestamp_field is not None:
+
+            # Check and slice timestamp field independently -- must
+            # work even if no dets requested led to _n=0 above.
+            if item.timestamp_field is not None:
                 if isinstance(target, G3SuperTimestream):
-                    streams[item.timestamp_field].append(
-                        np.array(target.times)[sl] / g3core.G3Units.sec)
+                    timesv = np.array(target.times)[sl] / g3core.G3Units.sec
                 else:
                     t0, t1, ns = target.start, target.stop, target.n_samples
                     t0, t1 = t0.time / g3core.G3Units.sec, t1.time / g3core.G3Units.sec
-                    streams[item.timestamp_field].append(np.linspace(t0, t1, ns)[sl])
+                    timesv = np.linspace(t0, t1, ns)
+                _consumed = len(timesv)
+                _n, sl = our_slice(_consumed, 1)
+                streams[item.timestamp_field].append(timesv[sl])
             continue
         # This is a simple field.
         item = Field.as_field(item)
