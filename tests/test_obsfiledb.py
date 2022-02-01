@@ -119,8 +119,8 @@ class TestObsFileDB(unittest.TestCase):
         target = 'somewhere/else/obs0_group0_0000.g3'
         for item, result in enumerate([
                 db.lookup_file(target, resolve_paths=False),
-                db.lookup_file(self.test_dir + target),
-                db.lookup_file(self.test_dir + target, resolve_paths=True),
+                db.lookup_file(self.test_dir + '/' + target),
+                db.lookup_file(self.test_dir + '/' + target, resolve_paths=True),
                 db.lookup_file('x/' + target, prefix='x/'),
                 db.lookup_file('notx/../x/' + target, prefix='x/'),
                 ]):

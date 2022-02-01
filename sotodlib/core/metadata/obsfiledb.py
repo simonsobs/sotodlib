@@ -54,8 +54,9 @@ class ObsFileDb:
     #: The sqlite3 database connection.
     conn = None
 
-    #: The filename prefix to apply to all filename results returned
-    #: from this database.
+    #: Path relative to which filenames in the database should be
+    #: interpreted.  This only applies to relative filenames (those not
+    #: starting with /).
     prefix = ''
 
     def __init__(self, map_file=None, prefix=None, init_db=True, readonly=False):
@@ -301,7 +302,8 @@ class ObsFileDb:
                 'from files where name like ?', ('%' + basename, ))
             rows = c.fetchall()
             # Keep only the rows that are definitely our target file.
-            rows = [r for r in rows if os.path.realpath(prefix + r[0]) == filename]
+            rows = [r for r in rows
+                    if os.path.realpath(os.path.join(prefix, r[0])) == filename]
         else:
             # Do literal exact matching of filename to database.
             c = self.conn.execute(
