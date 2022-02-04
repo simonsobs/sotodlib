@@ -7,13 +7,17 @@ REGISTRY = {
 
 
 class SuperLoader:
-    def __init__(self, context=None, detdb=None, obsdb=None):
-        """
+    def __init__(self, context=None, detdb=None, obsdb=None, working_dir=None):
+        """Metadata batch loader.
+
         Args:
           context (Context): context, from which detdb and obsdb will
             be pulled unless they are specified explicitly.
           detdb (DetDb): detdb to use when resolving detector axis.
           obsdb (ObsDb): obsdb to use when resolving obs axis.
+          working_dir (str): base directory for any metadata specified
+            as relative paths.  If None, but if context is not None,
+            then the path of context.filename is used.
 
         """
         if context is not None:
@@ -21,9 +25,12 @@ class SuperLoader:
                 detdb = context.detdb
             if obsdb is None:
                 obsdb = context.obsdb
+            if working_dir is None:
+                working_dir = os.path.split(context.filename)[0]
         self.detdb = detdb
         self.obsdb = obsdb
         self.manifest_cache = {}
+        self.working_dir = working_dir
 
     @staticmethod
     def register_metadata(name, loader_class):
@@ -51,19 +58,26 @@ class SuperLoader:
           Each entry in spec_list must be a dictionary with the
           following keys:
 
-            `db` (str)
+            ``db`` (str)
                 The path to a ManifestDb file.
 
-            `name` (str)
+            ``name`` (str)
                 Naively, the name to give to the extracted data.  But
                 the string may encode more complicated instructions,
                 which are understood by the Unpacker class in this
                 module.
 
-            `loader` (str, optional)
+            ``loader`` (str, optional)
                 The name of the loader class to use when loading the
                 data.  This is normally unnecessary, and will override
                 any value declared in the ManifestDb.
+
+          Before being passed to the loader, any filenames returned
+          from the ManifestDb will be resolved relative to the ``db``
+          location, unless the filename begins with a '/' in which
+          case it is treated as an absolute path.  Similarly, the
+          ``db`` path should be a relative location relative to the
+          context file, or else an absolute path starting with '/'.
 
         Returns:
           A list of tuples (unpacker, item), corresponding to ecah
@@ -77,6 +91,8 @@ class SuperLoader:
         items = []
         for spec_dict in spec_list:
             dbfile = spec_dict['db']
+            if dbfile[0] != '/':
+                dbfile = os.path.join(self.working_dir, dbfile)
             dbfile_path = os.path.split(dbfile)[0]
             names = spec_dict['name']
             loader = spec_dict.get('loader', None)
@@ -158,6 +174,9 @@ class SuperLoader:
                 loader_object = loader_class(detdb=self.detdb, obsdb=self.obsdb)
                 mi1 = loader_object.from_loadspec(index_line)
                 # restrict to index_line...
+                if (self.detdb is None and
+                    len([k for k in index_line if k.startswith('dets:')])):
+                    raise ValueError(f"Metadata not loadable without detdb: {index_line}")
                 mi2 = mi1.restrict_dets(index_line, detdb=self.detdb)
                 results.append(mi2)
 
