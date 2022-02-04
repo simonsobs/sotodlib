@@ -167,7 +167,8 @@ class Context(odict):
                 = metadata.SuperLoader(self)
 
     def get_obs(self, obs_id=None, dets=None, detsets=None,
-                loader_type=None, logic_only=False):
+                samples=None,
+                loader_type=None, logic_only=False, filename=None):
         """Load TOD and supporting metadata for a particular observation id.
         The detectors to read can be specified through colon-coding in
         obs_id, through dets, or through detsets.
@@ -177,6 +178,23 @@ class Context(odict):
 
         """
         detspec = {}
+
+        if filename is not None:
+            if obs_id is not None or detsets is not None or samples is not None:
+                logger.warning(f'Passing filename={filename} to get_obs causes '
+                               f'obs_id={obs_id} and detsets={detsets} and '
+                               f'samples={samples} be ignored.')
+            # Resolve this to an obs_id / detset combo.
+            info = self.obsfiledb.lookup_file(filename, resolve_paths=True)
+            obs_id = info['obs_id']
+            detsets = info['detsets']
+            if info['sample_range'] is None or None in info['sample_range']:
+                samples = None
+                logger.warning('Due to incomplete ObsFileDb info, passing filename=... '
+                               'will cause *all* files for the detset covered '
+                               'by that file to be loaded.')
+            else:
+                samples = info['sample_range']
 
         # Handle the case that this is a row from a obsdb query.
         if isinstance(obs_id, dict):
@@ -202,7 +220,7 @@ class Context(odict):
                                      'in re-restriction on property "%s"' % (t, prop))
                 detspec[prop] = t
 
-        # Start the list of detector selectors.
+        # Start a list of det specs ... see DetDb.intersect.
         dets_selection = [detspec]
 
         # Did user give a list of dets (or detspec)?
@@ -226,8 +244,24 @@ class Context(odict):
 
         # Make the final list of dets -- force resolve it to a list,
         # not a detspec.
-        dets = self.detdb.intersect(*dets_selection,
-                                    resolve=True)
+        if self.detdb is None:
+            # Try to resolve this without a DetDb (if you do this
+            # better, maybe make it a static method of DetDb.
+            dets = None
+            for ds in dets_selection:
+                if isinstance(ds, dict):
+                    if len(ds) != 0:
+                        raise ValueError("Complex det request can't be processed "
+                                         "without a detdb; spec=f{dets_selection}")
+                else:
+                    if dets is None:
+                        dets = set(ds)
+                    else:
+                        dets.intersection_update(ds)
+            dets = list(dets)
+        else:
+            dets = self.detdb.intersect(*dets_selection,
+                                        resolve=True)
 
         # The request to the metadata loader should include obs_id and
         # the detector selection.
@@ -251,10 +285,13 @@ class Context(odict):
                             "but should be a list. Check .yaml formatting")
         meta = self.loader.load(metadata_list, request)
 
+        # Make sure standard obsloaders are registered ...
+        from ..io import load as _
+
         # Load TOD.
-        from ..io.load import OBSLOADER_REGISTRY
         loader_func = OBSLOADER_REGISTRY[loader_type]  # Register your loader?
-        aman = loader_func(self.obsfiledb, obs_id, dets)
+        aman = loader_func(self.obsfiledb, obs_id, dets,
+                           samples=samples)
 
         if aman is None:
             return meta
@@ -308,3 +345,51 @@ def _read_cfg(filename=None, envvar=None, default=None):
     if not os.path.exists(filename):
         return False, filename, odict()
     return True, filename, yaml.safe_load(open(filename, 'r'))
+
+
+def obsloader_template(db, obs_id, dets=None, prefix=None, samples=None,
+                       **kwargs):
+    """This function is here to document the API for "obsloader" functions
+    used by the Context system.  "obsloader" functions are used to
+    load time-ordered detector data (rather than supporting metadata)
+    from file archives, and return an AxisManager.
+
+    Args:
+      db (ObsFileDB): The database supporting the data files.
+      obs_id (str): The obs_id (as recognized by ObsFileDb).
+      dets (list of str): The dets to load.  If None, all dets are
+        loaded.  If an empty list, ancillary data for the observation
+        is still loaded.
+      samples (tuple): The (start, end) indices of samples which
+        should be loaded.  If start is None, 0 is used.  If end is
+        None, sample_count is used.  Passing None is equivalent to
+        passing (None, None).
+      prefix (str): The root address of the data files, if not already
+        known to the ObsFileDb.  (This is passed through to ObsFileDb
+        prefix= argument.)
+
+    Notes:
+      This interface is subject to further extension.  When possible
+      such extensions should take the form of optional arguments,
+      whose default value is None and which are not activated except
+      when needed.  This permits existing loaders to future-proof
+      themselves by including ``**kwargs`` in the function signature
+      but raising an exception if kwargs contains anything strange.
+      See the body of this example function for template code to
+      reject unexpected kwargs.
+
+    Returns:
+      An AxisManager with the data.
+
+    """
+    if any([v is not None for v in kwargs.values()]):
+        raise RuntimeError(
+            f"This loader function does not understand these kwargs: f{kwargs}")
+    raise NotImplementedError("This is just a template function.")
+
+
+#: OBSLOADER_REGISTRY will be accessed by the Context system to load
+#: TOD.  The function obsloader_template, in this module, shows the
+#: signature and describes the interface.
+
+OBSLOADER_REGISTRY = {}
