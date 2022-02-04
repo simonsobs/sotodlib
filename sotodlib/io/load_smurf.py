@@ -1325,7 +1325,7 @@ class SmurfStatus:
         start_frame = q.first()
         session_start = start_frame.time
         if stream_id is None:
-            stream_id == start_frame.file.stream_id
+            stream_id = start_frame.file.stream_id
          
         status_frames = session.query(Frames).join(Files).filter(
                 Files.stream_id == stream_id,
