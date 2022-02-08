@@ -190,6 +190,10 @@ Context system:
     difficult to load TOD data with the ObsFileDb and it will be
     difficult to load metadata without the ObsDb and DetDb.
 
+``obsfiledb.prefix``
+    Optional specification of ``prefix`` attribute for the ObsFileDb.
+    (This will be ignored if the ObsFileDb specifies absolute paths.)
+
 ``obs_colon_tags``
     A list of strings.  The strings in this list must refer to columns
     from the DetDb.  When a string appears in this list, then the
