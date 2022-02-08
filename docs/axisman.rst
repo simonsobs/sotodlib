@@ -162,6 +162,25 @@ objects::
     >>> print(dset.boresight.az.shape)
     (290,)
 
+For debugging, you can write AxisManagers to HDF5 files and then read
+them back.  (This is an experimental feature so don't rely on this for
+long term stability!)::
+
+    >>> dset.save('output.h5', 'my_axismanager/dset')
+
+    >>> dset_reloaded = AxisManager.load('output.h5', 'my_axismanager/dset')
+    >>> dset_reloaded
+    AxisManager(tod[dets,samps], hwp_angle[samps], boresight*[samps],
+      dets:LabelAxis(2), samps:IndexAxis(290))
+
+Numerical arrays are stored as simple HDF5 datasets, so you can also
+use h5py to load the saved arrays::
+
+    >>> import h5py
+    >>> f = h5py.File('output.h5')
+    >>> f['my_axismanager/dset/tod'][:]
+    <HDF5 dataset "tod": shape (2,290), type "<f8">
+
 
 ---------
 Reference
