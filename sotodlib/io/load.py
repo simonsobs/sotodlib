@@ -444,11 +444,6 @@ def load_observation(db, obs_id, dets=None, samples=None, prefix=None,
         raise RuntimeError(
             f"This loader function does not understand kwargs: f{kwargs}")
 
-    if prefix is None:
-        prefix = db.prefix
-        if prefix is None:
-            prefix = './'
-
     if no_signal is None:
         no_signal = False  # from here, assume no_signal in [True, False]
 
@@ -520,6 +515,7 @@ def load_observation(db, obs_id, dets=None, samples=None, prefix=None,
 
         stop = sample_stop
 
+        file_list = db.get_files(obs_id, [detset], prefix=prefix)[detset]
         streams = None
         for row in detset_files:
             filename, file_start, file_stop = row
