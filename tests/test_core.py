@@ -233,8 +233,6 @@ class TestAxisManager(unittest.TestCase):
         n, ofs = 1000, 0
         aman = core.AxisManager(
             core.LabelAxis('dets', dets),
-            core.LabelAxis('int_labels', np.array([13,14,15])), # yuck
-            core.LabelAxis('bool_labels', np.array([True, False])), # yuck
             core.OffsetAxis('samps', n, ofs),
             core.IndexAxis('indexaxis', 12))
         # Make sure this has axes, scalars, a string array ...
