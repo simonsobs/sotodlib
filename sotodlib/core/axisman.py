@@ -202,6 +202,9 @@ class LabelAxis(AxisInterface):
         super().__init__(name)
         if vals is not None:
             vals = np.array(vals)
+            if vals.dtype.type is not np.str_:
+                raise TypeError(
+                        'LabelAxis labels must be strings not %s' % vals.dtype)
         self.vals = vals
 
     @property
