@@ -20,7 +20,13 @@ class _HKBundle():
     def __init__(self):
         self.times = []
         self.data = None
+
         self.azimuth_events = []
+        self.azimuth_starts = []
+        self.azimuth_stops = []
+        self.elevation_events = []
+        self.elevation_starts = []
+        self.elevation_stops = []
 
     def ready(self):
         return len(self.azimuth_events) > 0
@@ -98,19 +104,23 @@ class FrameProcessor(object):
         tmax = np.max(t)
 
         if len(t) == 0:
-            return []
+            return [], [], []
 
         if np.sign(tmax) == np.sign(tmin):
-            return []
+            return [], [], []
 
         # If the data does not entirely cross the threshold region,
         # do not consider it a sign change
         if tmin > -dy and tmax < dy:
-            return []
+            return [], [], []
 
         # Find where the data crosses the lower and upper boundaries of the threshold region
         c_lower = (np.where(np.sign(t[:-1]+dy) != np.sign(t[1:]+dy))[0] + 1)
         c_upper = (np.where(np.sign(t[:-1]-dy) != np.sign(t[1:]-dy))[0] + 1)
+
+        # Classify each crossing as entering or exiting the threshold region
+        c_lower_enter = []; c_lower_exit = []
+        c_upper_enter = []; c_upper_exit = []
 
         # Noise handling:
         # If there are multiple crossings of the same boundary (upper or lower) in quick
@@ -119,11 +129,25 @@ class FrameProcessor(object):
         if len(c_lower) > 0:
             spl = np.array_split(c_lower, np.where(np.ediff1d(c_lower) > min_gap)[0] + 1)
             c_lower = np.array([int(np.ceil(np.mean(s))) for s in spl])
+            # Determine if this crossing is entering or exiting threshold region
+            for i, s in enumerate(spl):
+                if t[s[0]-1] < t[s[-1]+1]:
+                    c_lower_enter.append(c_lower[i])
+                else:
+                    c_lower_exit.append(c_lower[i])
         if len(c_upper) > 0:
             spu = np.array_split(c_upper, np.where(np.ediff1d(c_upper) > min_gap)[0] + 1)
             c_upper = np.array([int(np.ceil(np.mean(s))) for s in spu])
+            # Determine if this crossing is entering or exiting threshold region
+            for i, s in enumerate(spu):
+                if t[s[0]-1] < t[s[-1]+1]:
+                    c_upper_exit.append(c_upper[i])
+                else:
+                    c_upper_enter.append(c_upper[i])
 
-        events = np.sort(np.concatenate((c_lower, c_upper)))
+        starts = np.sort(np.concatenate((c_lower_exit, c_upper_exit))).astype(np.int64)
+        stops = np.sort(np.concatenate((c_lower_enter, c_upper_enter))).astype(np.int64)
+        events = np.sort(np.concatenate((starts, stops))).astype(np.int64)
 
         # Look for zero-crossings
         zc = []
@@ -168,11 +192,21 @@ class FrameProcessor(object):
         if events[0] < min_gap and self.current_state == 0:
             events = events[1:]
 
-        return events
+        return events, starts, stops
 
-    def determine_state(self, v, dy=0.001):
-        # If the velocity lies entirely in the threshold region, the telescope is stopped
-        self.current_state = int(np.min(v) > -dy and np.max(v) < dy)
+    def determine_state(self, v_az, v_el, dy=0.001):
+        if np.min(v_el) < -dy or np.max(v_el) > dy:
+            # If the el velocity exceeds the threshold region, the telescope is slewing
+            state = 2
+        elif np.min(v_az) < -dy or np.max(v_az) > dy:
+            # If the az velocity (but not el velocity) exceeds the threshold region, the telescope
+            # is scanning
+            state = 0
+        else:
+            # If the velocities lie entirely in the threshold region, the telescope is stopped
+            state = 1
+
+        self.current_state = state
 
     def split_frame(self, f, maxlength=10000):
         output = []
@@ -212,7 +246,7 @@ class FrameProcessor(object):
         # Co-sampled (interpolated) azimuth encoder data
         f['Azimuth'] = core.G3Timestream(np.interp(f['data'].times, f['hk'].times, f['hk']['Azimuth_Corrected'], left=np.nan, right=np.nan))
 
-        self.determine_state(f['hk']['Azimuth_Velocity'])
+        self.determine_state(f['hk']['Azimuth_Velocity'], f['hk']['Elevation_Velocity'])
         f['state'] = self.current_state
 
         if len(f['data'].times) > self.maxlength:
@@ -238,8 +272,15 @@ class FrameProcessor(object):
             self.hkbundle.data['Azimuth_Velocity'] = pos2vel(self.hkbundle.data['Azimuth_Corrected'])
             self.hkbundle.data['Elevation_Velocity'] = pos2vel(self.hkbundle.data['Elevation_Corrected'])
 
-            self.hkbundle.azimuth_events = [self.hkbundle.times[i] for i in
-                                    self.locate_crossing_events(self.hkbundle.data['Azimuth_Velocity'])]
+            azimuth_events = self.locate_crossing_events(self.hkbundle.data['Azimuth_Velocity'])
+            self.hkbundle.azimuth_events = [self.hkbundle.times[i] for i in azimuth_events[0]]
+            self.hkbundle.azimuth_starts = [self.hkbundle.times[i] for i in azimuth_events[1]]
+            self.hkbundle.azimuth_stops  = [self.hkbundle.times[i] for i in azimuth_events[2]]
+
+            elevation_events = self.locate_crossing_events(self.hkbundle.data['Elevation_Velocity'])
+            self.hkbundle.elevation_events = [self.hkbundle.times[i] for i in elevation_events[0]]
+            self.hkbundle.elevation_starts = [self.hkbundle.times[i] for i in elevation_events[1]]
+            self.hkbundle.elevation_stops  = [self.hkbundle.times[i] for i in elevation_events[2]]
 
         if f.type == core.G3FrameType.Scan:
             if self.smbundle is None:
@@ -287,6 +328,67 @@ class Bookbinder(object):
         for f in frames_list:
             self.writer.Process(f)
 
+    def find_frame_splits(self):
+        """
+        Determine the frame boundaries of the output Book
+        """
+        frame_splits = []
+
+        # Assign a value to each event based on what occurs at that time: 0 for a zero-crossing,
+        # +/-1 for an azimuth start/stop, and +/-2 for an elevation start/stop. The cumulative
+        # sum of the resulting vector marks the state of the telescope at each event.
+        event_times = np.unique(np.concatenate((self.frameproc.hkbundle.azimuth_events, self.frameproc.hkbundle.elevation_events)))
+        values = []
+        for e in event_times:
+            # Note that multiple events can occur at the same event time, e.g., both az and el
+            # can start moving at the same time
+            v = 0
+            if e in self.frameproc.hkbundle.azimuth_starts:
+                v += 1
+            if e in self.frameproc.hkbundle.azimuth_stops:
+                v -= 1
+            if e in self.frameproc.hkbundle.elevation_starts:
+                v += 2
+            if e in self.frameproc.hkbundle.elevation_stops:
+                v -= 2
+            values.append(v)
+        seq = np.cumsum(values)
+
+        # If the housekeeping file starts while the telescope is moving, a stop event will occur
+        # prior to a start event, resulting in negative values in the seq vector.
+        # In that case, shift every value up by the lowest value.
+        starts_while_moving = False
+        m = np.min(seq)
+        if m < 0:
+            starts_while_moving = True
+            seq -= m
+
+        # Each time the seq returns to zero, the telescope is coming to a complete stop (in both
+        # az and el). Split the seq vector at these places.
+        sp = np.where(seq == 0)[0] + 1
+        sps = np.array_split(seq, sp)
+        spi = np.array_split(range(len(seq)), sp)
+
+        # Determine the times where the frame should be split
+        for i, s in enumerate(sps):
+            if len(s) == 0:
+                continue
+            if np.max(s) >= 2:
+                # The telescope is slewing; only record the start (if it exists) and
+                # the stop of the slew
+                if i == 0 and starts_while_moving:
+                    slew_stop = event_times[spi[i][-1]]
+                    frame_splits += [slew_stop]
+                else:
+                    slew_start = event_times[spi[i][0]]
+                    slew_stop  = event_times[spi[i][-1]]
+                    frame_splits += [slew_start, slew_stop]
+            else:
+                # All the events are frame splits
+                frame_splits += list(event_times[spi[i]])
+
+        return frame_splits
+
     def __call__(self):
         for hkfile in self._hk_files:
             for h in core.G3File(hkfile):
@@ -294,7 +396,7 @@ class Bookbinder(object):
                     continue
                 self.frameproc(h)
 
-        for event_time in self.frameproc.hkbundle.azimuth_events:
+        for event_time in self.find_frame_splits():
             self.frameproc.flush_time = event_time
             output = []
 
