@@ -45,6 +45,11 @@ class TestAxisManager(unittest.TestCase):
         aman.restrict('dets', ['det1'])
         self.assertNotEqual(aman.a1[0], 0.)
 
+        # Don't let people use non string labels
+        dets_int = [0, 1, 2]
+        with self.assertRaises(TypeError):
+            aman = core.AxisManager(core.LabelAxis('dets', dets_int))
+
     def test_130_not_inplace(self):
         a1 = np.zeros(100)
         a1[10] = 1.
