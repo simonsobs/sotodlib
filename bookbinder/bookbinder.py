@@ -239,12 +239,24 @@ class FrameProcessor(object):
     def flush(self):
         output = []
 
-        f = core.G3Frame(core.G3FrameType.Scan)
-        f['data'] = self.smbundle.rebundle(self.flush_time)
-        f['hk'] = self.hkbundle.rebundle(self.flush_time)
+        smurf_data = self.smbundle.rebundle(self.flush_time)
+        hk_data = self.hkbundle.rebundle(self.flush_time)
 
         # Co-sampled (interpolated) azimuth encoder data
-        f['Azimuth'] = core.G3Timestream(np.interp(f['data'].times, f['hk'].times, f['hk']['Azimuth_Corrected'], left=np.nan, right=np.nan))
+        cosamp_az = np.interp(smurf_data.times, hk_data.times, hk_data['Azimuth_Corrected'], left=np.nan, right=np.nan)
+        cosamp_el = np.interp(smurf_data.times, hk_data.times, hk_data['Elevation_Corrected'], left=np.nan, right=np.nan)
+
+        # Create SuperTimestream with co-sampled data included
+        sts = so3g.G3SuperTimestream()
+        sts.times = smurf_data.times
+        sts.names = [k for k in smurf_data.names] + ['Co-sampled_Azimuth_Corrected', 'Co-sampled_Elevation_Corrected']
+        sts.quanta = np.ones(len(sts.names), dtype=np.double)
+        sts.data = np.vstack((smurf_data.data, cosamp_az, cosamp_el))
+
+        # Write data to frame
+        f = core.G3Frame(core.G3FrameType.Scan)
+        f['data'] = sts
+        f['hk'] = hk_data
 
         self.determine_state(f['hk']['Azimuth_Velocity'], f['hk']['Elevation_Velocity'])
         f['state'] = self.current_state
