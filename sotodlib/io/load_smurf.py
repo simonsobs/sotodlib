@@ -1162,6 +1162,8 @@ class SmurfStatus:
         self.start = self.status.get('start')
         self.stop = self.status.get('stop')
         
+        self.aman = core.AxisManager()
+
         # Reads in useful status values as attributes
         mapper_root = 'AMCc.SmurfProcessor.ChannelMapper'
         self.num_chans = self.status.get(f'{mapper_root}.NumChannels')
@@ -1190,20 +1192,28 @@ class SmurfStatus:
         self.action_timestamp = self.status.get(f'{pysmurf_root}.pysmurf_action_timestamp')
         if self.action_timestamp == 0:
             self.action_timestamp = None
-        
+         
         filter_root = 'AMCc.SmurfProcessor.Filter'
         self.filter_a = self.status.get(f'{filter_root}.A')
         if self.filter_a is not None:
             self.filter_a = np.array(ast.literal_eval(self.filter_a))
+            self.aman = core.AxisManager(self.aman, core.IndexAxis('filter_a', len(self.filter_a)))
+            self.aman = self.aman.wrap('filter_a', self.filter_a, [(0, 'filter_a')])
         self.filter_b = self.status.get(f'{filter_root}.B')
         if self.filter_b is not None:
             self.filter_b = np.array(ast.literal_eval(self.filter_b))
+            self.aman = core.AxisManager(self.aman, core.IndexAxis('filter_a', len(self.filter_a)))
+            self.aman.wrap('filter_a', self.filter_a, [(0, 'filter_a')])
         self.filter_gain = self.status.get(f'{filter_root}.Gain')
+        self.aman = self.aman.wrap('filter_gain', self.filter_gain)
         self.filter_order = self.status.get(f'{filter_root}.Order')
+        self.aman = self.aman.wrap('filter_order', self.filter_order)
         self.filter_enabled = not self.status.get('{filter_root}.Disable')
+        self.aman = self.aman.wrap('filter_enabled', self.filter_enabled)
 
         ds_root = 'AMCc.SmurfProcessor.Downsampler'
         self.downsample_factor = self.status.get(f'{ds_root}.Factor')
+        self.aman = self.aman.wrap('downsample_factor', self.downsample_factor)
         self.downsample_enabled = not self.status.get(f'{ds_root}.Disable')
 
         # Tries to make resonator frequency map
@@ -1235,7 +1245,7 @@ class SmurfStatus:
                 f'{band_roots[0]}.digitizerFrequencyMHz', 614.4))
             ramp_max_cnt_rate_hz = 1.e6*digitizer_freq_mhz / 2.
             self.flux_ramp_rate_hz = ramp_max_cnt_rate_hz / (ramp_max_cnt + 1)
-        
+        self.aman = self.aman.wrap('flux_ramp_rate_hz', self.flux_ramp_rate_hz)
         self._make_tags()
         
     def _make_tags(self, delimiters=',|\\t| '):
