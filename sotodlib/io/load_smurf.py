@@ -1153,6 +1153,10 @@ class SmurfStatus:
         flux_ramp_rate_hz : float
             Flux Ramp Rate calculated from the RampMaxCnt and the digitizer
             frequency.
+        aman : AxisManager
+            AxisManager containing the following fields:
+                filter_a, filter_b, filter_gain, filter_order, filter_enabled,
+                downsample_factor, flux_ramp_rate_hz
     """    
     NUM_BANDS = 8
     CHANS_PER_BAND = 512
