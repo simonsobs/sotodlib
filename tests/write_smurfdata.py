@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import numpy as np
+import so3g
 from spt3g import core
 from sosmurf.SessionManager import SessionManager
 
@@ -31,11 +32,12 @@ for i in range(10):
     # Vector of unix timestamps
     t = frame_time + dt * np.arange(n)
 
-    # Construct the G3TimesampleMap containing the data
-    data = core.G3TimesampleMap()
+    # Construct the G3SuperTimestream containing the data
+    data = so3g.G3SuperTimestream()
     data.times = core.G3VectorTime([core.G3Time(_t * core.G3Units.s) for _t in t])
-    for c in range(Nchan):
-        data['r{:04d}'.format(c)] = core.G3Timestream(sweep)
+    data.names = [f'r{c:04d}' for c in range(Nchan)]
+    data.quanta = np.ones(Nchan, dtype=np.double)
+    data.data = np.vstack([sweep for i in range(Nchan)])
 
     # Create an output data frame and insert the data
     frame = core.G3Frame(core.G3FrameType.Scan)
