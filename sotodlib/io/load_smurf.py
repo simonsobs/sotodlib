@@ -1833,7 +1833,8 @@ def load_file(filename, channels=None, ignore_missing=True,
     ## Build AxisManager
     aman = core.AxisManager(
         ch_info[det_axis].copy(),
-        core.OffsetAxis('samps', count, 0)
+        core.OffsetAxis('samps', count, 0),
+        status.aman
     )
     aman.wrap( 'timestamps', _get_timestamps(streams), ([(0,'samps')]))
 
