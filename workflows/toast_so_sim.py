@@ -219,7 +219,7 @@ def job_create(config, jobargs, telescope, schedule, comm):
     return job, group_size, full_pointing
 
 
-def simulate_data(job, toast_comm, telescope, schedule):
+def simulate_data(job, toast_comm, telescope, schedule, args):
     log = toast.utils.Logger.get()
     ops = job.operators
     tmpls = job.templates
@@ -346,6 +346,7 @@ def simulate_data(job, toast_comm, telescope, schedule):
     # Simulate Artificial Source
 
     ops.sim_source.detector_pointing = ops.det_pointing_azel
+    ops.sim_source.FoV = telescope.focalplane.field_of_view
     if ops.sim_source.polarization_fraction != 0:
         ops.sim_source.detector_weights = ops.weights_azel
     ops.sim_source.apply(data)
@@ -394,8 +395,11 @@ def simulate_data(job, toast_comm, telescope, schedule):
     )
 
     # Optionally write out the data
-    if ops.save_hdf5.volume is None:
-        ops.save_hdf5.volume = os.path.join(args.out_dir, "data")
+    if args.out_dir is not None:
+        hdf5_path = os.path.join(args.out_dir, "data")
+        os.makedirs(hdf5_path)
+        ops.save_hdf5.volume = hdf5_path 
+
     ops.save_hdf5.apply(data)
     log.info_rank("Saved HDF5 data in", comm=world_comm, timer=timer)
 
@@ -760,7 +764,7 @@ def main():
             name="filterbin",
             enabled=False,
         ),
-        # so_ops.MLMapmaker(name="mlmapmaker", enabled=False, comps="TQU"),
+        so_ops.MLMapmaker(name="mlmapmaker", enabled=False, comps="TQU"),
         toast.ops.MemoryCounter(name="mem_count", enabled=False),
     ]
     if toast.ops.madam.available():
@@ -784,7 +788,7 @@ def main():
     toast_comm = toast.Comm(world=comm, groupsize=group_size)
 
     # Create simulated data
-    data = simulate_data(job, toast_comm, telescope, schedule)
+    data = simulate_data(job, toast_comm, telescope, schedule, args)
 
     # Handle special case of caching the atmosphere simulations.  In this
     # case, we are not simulating timestreams or doing data reductions.

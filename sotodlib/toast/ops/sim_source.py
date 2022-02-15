@@ -22,7 +22,7 @@ from toast.traits import trait_docs, Int, Unicode, Float, Instance, List, Bool
 
 from toast.ops.operator import Operator
 
-from toast.utils import Environment, Logger, Timer
+from toast.utils import Logger, Timer
 
 from toast.observation import default_values as defaults
 
@@ -76,22 +76,6 @@ def s2tcmb(s_nu, nu):
     slope = 2 * k_b * nu ** 2 / c ** 2 * ((x / 2) / np.sinh(x / 2)) ** 2
 
     return s_nu / slope
-
-
-# def tb2tcmb(spectrum, nu):
-#     """Convert blackbody spectrum to t_cmb
-#     as defined above
-#     Args:
-#         tb: float or array
-#             blackbody temperature, unit: Kelvin
-#         nu: float or array (with same dimension as tb)
-#             frequency where the spectral radiance is evaluated, unit: Hz
-#     Return
-#         t_cmb: same dimension as tb
-#             t_cmb, unit: Kelvin_cmb
-#     """
-#     s_nu = tb2s(tb, nu)
-#     return s2tcmb(s_nu, nu)
 
 a = 6378137.0 #semiaxis major
 b = 6356752.31424518 #semiaxis minor
@@ -169,18 +153,23 @@ class SimSource(Operator):
         help="Observation shared key for timestamps",
     )
 
-    source_init_dist = Float(
+    source_init_dist = Quantity(
+        500 * u.meter,
         help = 'Initial distance of the artificial source in meters',
     )
 
-    source_pos = List(
-        required=False,
-        help = 'Source Position in ECEF Coordinates as [time, X, Y, Z] in meters',
+    variable_elevation = Bool(
+        False,
+        help = 'Set True to change the drone elevation'
     )
 
-    source_err_flag = Bool(
+    keep_distance = Bool(
         False,
-        help = 'Set True to compute the position error of the drone',
+        help = 'Set True to maintain the distance always the same throughout a scan'
+    )
+
+    FoV = Quantity(
+        help = 'Field of View of the focal plane'
     )
 
     source_err = List(
@@ -243,6 +232,26 @@ class SimSource(Operator):
         None,
         allow_none=True,
         help="Pickle file that stores the simulated beam",
+    )
+
+    wind_gusts_amp = Quantity(
+        0 * u.meter/u.second,
+        help = "Amplitude of gusts of wind"
+    )
+
+    wind_gusts_duration = Quantity(
+        0 * u.second,
+        help = "Duration of each gust of wind"
+    )
+
+    wind_gusts_number = Float(
+        0, 
+        help = "Number of wind gusts"
+    )
+
+    wind_damp = Float(
+        0,
+        help = "Dampening effect to reduce the movement of the drone due to gusts"
     )
 
     det_data = Unicode(
@@ -383,96 +392,110 @@ class SimSource(Operator):
         timer = Timer()
         timer.start()
 
-        if self.source_init_dist != 0 :
-            # FIXME : Drone position should be chosen so that all
-            #         detectors sweep across it, even when simulating
-            #         only a subset (e.g. wafer)
-            # az_init = float(np.random.choice(obs.shared[self.azimuth], 1))*u.rad
-            # el_init = float(np.random.choice(obs.shared[self.elevation], 1))*u.rad
-            az_init = np.median(np.array(obs.shared[self.azimuth])) * u.rad
-            el_init = np.amax(np.array(obs.shared[self.elevation])) * u.rad
+        az_start = np.median(np.array(obs.shared[self.azimuth])) * u.rad
 
-            E, N, U = hor2enu(az_init, el_init, self.source_init_dist)
+        az_init = np.ones_like(times)*az_start
+
+        if not self.variable_elevation:
+            el_init = np.ones_like(az_init)*np.amax(np.array(obs.shared[self.elevation])) * u.rad
+
+        else:
+            #Always consider a discending drone, it is easier to fly this way
+            el_start = np.array(obs.shared[self.elevation])[0] * u.rad + \
+                self.FoV/2
+            el_end = el_start-self.FoV
+            el_init = np.linspace(el_start, el_end, len(times), endpoint=True)
+
+            if not self.keep_distance:
+                distance = self.source_init_dist * np.cos(el_start)/np.cos(el_init)
+
+        if self.keep_distance:
+            distance = np.ones_like(times)*self.source_init_dist
+
+        if np.any(self.source_error >= 1e-4) or self.wind_gusts_amp.value != 0:
+
+            E, N, U = hor2enu(az_init, el_init, distance)
             X, Y, Z = enu2ecef(E, N, U, observer.lat, observer.lon, observer.elevation, ell='WGS84')
 
-            if self.source_err_flag:
+
+            if np.any(self.source_error >= 1e-4):
                 X = X+np.random.normal(0, self.source_err[0], size=(len(times)))*X.unit
                 Y = Y+np.random.normal(0, self.source_err[1], size=(len(times)))*Y.unit
                 Z = Z+np.random.normal(0, self.source_err[2], size=(len(times)))*z.unit
-            else:
-                X = np.ones_like(times)*X
-                Y = np.ones_like(times)*Y
-                Z = np.ones_like(times)*Z
+
+            if self.wind_gusts_amp.value != 0:
+
+                delta_t = np.amin(np.diff(times))
+
+                samples = int(self.wind_gusts_duration.value/delta_t)
+
+                dx = np.zeros((self.wind_gusts_number, samples))
+                dy = np.zeros_like(dx)
+                dz = np.zeros_like(dx)
+
+                #Compute random wind direction for any wind gust
+                v = np.random.rand(self.wind_gusts_number, 3)
+                wind_direction = v/np.linalg.norm(v)
+
+                #Compute the angles using the versor direction
+                theta = np.arccos(wind_direction[:,2])
+                phi = np.arctan2(wind_direction[:,1], wind_direction[:,0])
+
+                base = np.reshape(np.tile(np.arange(0, samples+1), self.wind_gusts_number), \
+                                  (self.wind_gusts_number, samples+1))
+
+                dt = base*delta_t
+
+                wind_amp = self.wind_gusts_amp*self.drone_damp
+
+                dz = wind_amp*wind_direction[:,2][:, np.newaxis]*dt
+                dx = wind_amp*np.sin(theta[:, np.newaxis])*np.cos(phi[:, np.newaxis])*dt
+                dy = wind_amp*np.sin(theta[:, np.newaxis])*np.sin(phi[:, np.newaxis])*dt
+
+                #Create an array of position returning to the origin
+                dx = np.hstack((dx, np.flip(dx, axis=1)))
+                dy = np.hstack((dy, np.flip(dy, axis=1)))
+                dz = np.hstack((dz, np.flip(dz, axis=1)))
+
+                idx = np.arange(len(X))
+                idx_wind = np.ones(self.wind_gusts_number)
+
+                while np.any(np.diff(idx_wind) < 2.5*samples):
+                    idx_wind = np.random.choice(idx, self.wind_gusts_number)
+
+                idxs = (np.hstack((base, base[:,-1][:, np.newaxis] \
+                        + np.ones(self.wind_gusts_number, dtype=int)[:, np.newaxis]+base)) \
+                        + idx_wind).flatten()
+
+                good, = np.where(idxs<len(X))
+                valid = np.arange(0, len(good), dtype=int)
+                
+                X[idxs[good]] += dx.flatten()[valid]
+                Y[idxs[good]] += dy.flatten()[valid]
+                Z[idxs[good]] += dz.flatten()[valid]
+
+            X_tel, Y_tel, Z_tel, _, _, _  = lonlat2ecef(observer.lat, observer.lon, observer.elevation)
+
+            E, N, U, _, _, _ = ecef2enu(X_tel, Y_tel, Z_tel, \
+                                        X, Y, Z, \
+                                        0, 0, 0, \
+                                        0, 0, 0, \
+                                        observer.lat, observer.lon)
+
+            source_az, source_el, source_distance, _,_,_ = enu2hor(E, N, U, 0,0,0)
 
         else:
-            if self.source_pos.size > 0:
-                X = self.source_pos[:,1]*u.meter
-                Y = self.source_pos[:,2]*u.meter
-                Z = self.source_pos[:,3]*u.meter
+            source_az = az_init.copy()
+            source_el = el_init.copy()
+            source_distance = distance.copy()
 
-            else:
-                raise RuntimeError(
-                    "Select one between the source distance and the source ECEF position"
-                )
-
-        X_tel, Y_tel, Z_tel, _, _, _  = lonlat2ecef(observer.lat, observer.lon, observer.elevation)
-
-        E, N, U, delta_E, delta_N, delta_U = ecef2enu(X_tel, Y_tel, Z_tel, \
-                                                      X, Y, Z, \
-                                                      0, 0, 0, \
-                                                      self.source_err[0], self.source_err[1], self.source_err[2], \
-                                                      observer.lat, observer.lon)
-
-        source_az, source_el, source_distance, delta_az, delta_el, delta_srange = enu2hor(E, N, U, delta_E, delta_N, delta_U)
-
-
-
-        if np.any(delta_az != 0) or np.any(delta_el != 0) or np.any(delta_srange != 0):
-            if delta_az.size == 1:
-                source_az = source_az+np.random.normal(0, delta_az.value, size=(len(source_az)))*source_az.unit
-            else:
-                source_az = source_az+np.random.normal(0, np.amax(delta_az).value, size=(len(source_az)))*source_az.unit
-
-            if delta_el.size == 1:
-                source_el = source_el+np.random.normal(0, delta_el.value, size=(len(source_el)))*source_el.unit
-            else:
-                source_el = source_el+np.random.normal(0, np.amax(delta_el).value, size=(len(source_el)))*source_el.unit
-
-            if delta_srange.size == 1:
-                source_distance = source_distance+np.random.normal(0, delta_srange.value, size=(len(source_distance)))*source_distance.unit
-            else:
-                source_distance = source_distance+np.random.normal(0, np.amax(delta_srange).value, size=(len(source_distance)))*source_distance.unit
 
         size = check_quantity(self.source_size, u.m)
-
         size = (size/source_distance)*u.rad
-
-        if len(source_az) != len(times):
-            if len(source_az) > 1:
-                source_az = np.interp(times, self.source_pos[:,0], source_az.value)*source_az.unit
-            else:
-                source_az = np.ones_like(times)*source_az
-
-        if len(source_el) != len(times):
-            if len(source_el) > 1:
-                source_el = np.interp(times, self.source_pos[:,0], source_el.value)*source_el.unit
-            else:
-                source_el = np.ones_like(times)*source_el
-
-        if len(source_distance) != len(times):
-            if len(source_distance) > 1:
-                source_distance = np.interp(times, self.source_pos[:,0], source_distance.value)*source_distance.unit
-            else:
-                source_distance = np.ones_like(times)*source_distance
-
-        if len(size) != len(times):
-            if len(size) > 1:
-                size = np.interp(times, self.source_pos[:,0], size.value)*size.unit
-            else:
-                size = np.ones_like(times)*size
 
         obs['source_az'] = source_az
         obs['source_el'] = source_el
+        obs['source_distance'] = source_distance
 
         if data.comm.group_rank == 0:
             timer.stop()
