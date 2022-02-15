@@ -363,6 +363,7 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     # Simulate Artificial Source
 
     ops.sim_source.detector_pointing = ops.det_pointing_azel
+    ops.sim_source.FoV = telescope.focalplane.field_of_view
     if ops.sim_source.polarization_fraction != 0:
         ops.sim_source.detector_weights = ops.weights_azel
     ops.sim_source.apply(data)
@@ -415,8 +416,11 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     )
 
     # Optionally write out the data
-    if ops.save_hdf5.volume is None:
-        ops.save_hdf5.volume = os.path.join(args.out_dir, "data")
+    if args.out_dir is not None:
+        hdf5_path = os.path.join(args.out_dir, "data")
+        os.makedirs(hdf5_path)
+        ops.save_hdf5.volume = hdf5_path
+
     ops.save_hdf5.apply(data)
     log.info_rank("Saved HDF5 data in", comm=world_comm, timer=timer)
 
