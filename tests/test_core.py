@@ -45,6 +45,11 @@ class TestAxisManager(unittest.TestCase):
         aman.restrict('dets', ['det1'])
         self.assertNotEqual(aman.a1[0], 0.)
 
+        # Don't let people use non string labels
+        dets_int = [0, 1, 2]
+        with self.assertRaises(TypeError):
+            aman = core.AxisManager(core.LabelAxis('dets', dets_int))
+
     def test_130_not_inplace(self):
         a1 = np.zeros(100)
         a1[10] = 1.
@@ -228,8 +233,6 @@ class TestAxisManager(unittest.TestCase):
         n, ofs = 1000, 0
         aman = core.AxisManager(
             core.LabelAxis('dets', dets),
-            core.LabelAxis('int_labels', np.array([13,14,15])), # yuck
-            core.LabelAxis('bool_labels', np.array([True, False])), # yuck
             core.OffsetAxis('samps', n, ofs),
             core.IndexAxis('indexaxis', 12))
         # Make sure this has axes, scalars, a string array ...

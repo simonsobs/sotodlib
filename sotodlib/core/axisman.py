@@ -191,6 +191,8 @@ class LabelAxis(AxisInterface):
     element has been given a unique name.  The vector of names can be
     found in self.vals.
 
+    Instantiation with labels that are not strings will raise a TypeError.
+
     On intersection of two vectors, only elements whose names appear
     in both axes will be preserved.
 
@@ -202,6 +204,9 @@ class LabelAxis(AxisInterface):
         super().__init__(name)
         if vals is not None:
             vals = np.array(vals)
+            if vals.dtype.type is not np.str_:
+                raise TypeError(
+                        'LabelAxis labels must be strings not %s' % vals.dtype)
         self.vals = vals
 
     @property
