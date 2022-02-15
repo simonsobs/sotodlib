@@ -191,7 +191,7 @@ class G3tSmurf:
 
         frame_types = {ft.type_name: ft for ft in session.query(FrameType).all()}
 
-        ## name has a unique constraint in table
+        # name has a unique constraint in table
         db_file = session.query(Files).filter(Files.name == path).one_or_none()
         if db_file is None:
             db_file = Files(name=path)
@@ -211,7 +211,7 @@ class G3tSmurf:
             splits = path.split("/")
             db_file.stream_id = splits[-2]
         except:
-            ## should this fail silently?
+            # should this fail silently?
             pass
 
         reader = so3g.G3IndexedReader(path)
@@ -247,7 +247,7 @@ class G3tSmurf:
             else:
                 dump = bool(frame["dump"])
 
-            ## only make Frame once the non-nullable fields are known
+            # only make Frame once the non-nullable fields are known
             db_frame = Frames(
                 frame_idx=frame_idx,
                 file=db_file,
@@ -405,7 +405,7 @@ class G3tSmurf:
         if np.sum([notches[:, 2] != -1]) != len(ch_assign.channels):
             ch_made = [c.channel for c in ch_assign.channels]
             for notch in notches:
-                ## smurf did not assign a channel
+                # smurf did not assign a channel
                 if notch[2] == -1:
                     continue
                 if int(notch[2]) in ch_made:
@@ -467,13 +467,13 @@ class G3tSmurf:
         data = np.load(tune_path, allow_pickle=True).item()
         assign_set = []
 
-        ### Determine the TuneSet
+        # Determine the TuneSet
         for band in data.keys():
             if "resonances" not in data[band]:
-                ### tune file doesn't have info for this band
+                # tune file doesn't have info for this band
                 continue
-            ## try to use tune file to find channel assignment before just
-            ## assuming "most recent"
+            # try to use tune file to find channel assignment before just
+            # assuming "most recent"
             if "channel_assignment" in data[band]:
                 cha_name = data[band]["channel_assignment"].split("/")[-1]
                 cha = (
@@ -529,15 +529,15 @@ class G3tSmurf:
             session.add(tune)
             session.commit()
 
-        ## assign set is the set of channel assignments that make up this tune
-        ## file
+        # assign set is the set of channel assignments that make up this tune
+        # file
         assign_set = self._assign_set_from_file(
             tune_path, ctime=ctime, stream_id=stream_id, session=session
         )
 
         tuneset = None
         tunesets = session.query(TuneSets)
-        ## tunesets with any channel assignments matching list
+        # tunesets with any channel assignments matching list
         tunesets = tunesets.filter(
             TuneSets.chan_assignments.any(
                 ChanAssignments.id.in_([a.id for a in assign_set])
@@ -565,7 +565,7 @@ class G3tSmurf:
             session.add(tuneset)
             session.commit()
 
-            ## add a the assignments and channels to the detector set
+            # add a the assignments and channels to the detector set
             for db_cha in assign_set:
                 tuneset.chan_assignments.append(db_cha)
                 for ch in db_cha.channels:
@@ -596,7 +596,7 @@ class G3tSmurf:
             Maximum amount of time between the streaming start action and the
             making of .g3 files that belong to an observation
         """
-        ## Check if observation exists already
+        # Check if observation exists already
         obs = (
             session.query(Observations)
             .filter(
@@ -620,13 +620,13 @@ class G3tSmurf:
 
             session_id = int((x.name[:-3].split("/")[-1]).split("_")[0])
 
-            ## Verify the files we found match with Observation
+            # Verify the files we found match with Observation
             status = SmurfStatus.from_file(x.name)
             if status.action is not None:
                 assert status.action == action_name
                 assert status.action_timestamp == action_ctime
 
-            ## Verify inside of file matches the outside
+            # Verify inside of file matches the outside
             reader = so3g.G3IndexedReader(x.name)
             while True:
                 frames = reader.Process(None)
@@ -641,7 +641,7 @@ class G3tSmurf:
                         frame["time"].time / spt3g_core.G3Units.s
                     )
 
-            ## Build Observation
+            # Build Observation
             obs = Observations(
                 obs_id=f"{stream_id}_{session_id}",
                 timestamp=session_id,
@@ -653,7 +653,7 @@ class G3tSmurf:
             session.add(obs)
             session.commit()
 
-        ## obs.stop is only updated when streaming session is over
+        # obs.stop is only updated when streaming session is over
         if obs.stop is None:
             self.update_observation_files(
                 obs, session, max_early=max_early, max_wait=max_wait
@@ -687,29 +687,29 @@ class G3tSmurf:
         )
         x = x.order_by(Files.start).first()
         if x is None:
-            ## no files to add at this point
+            # no files to add at this point
             return
 
         x = x[0]
         session_id, f_num = (x[:-3].split("/")[-1]).split("_")
         prefix = "/".join(x.split("/")[:-1]) + "/"
         if int(session_id) - obs.start.timestamp() > max_wait:
-            ## we don't have .g3 files for some reason
+            # we don't have .g3 files for some reason
             return
 
         flist = session.query(Files).filter(Files.name.like(prefix + session_id + "%"))
         flist = flist.order_by(Files.start).all()
-        ## Load Status Information
+        # Load Status Information
         status = SmurfStatus.from_file(flist[0].name)
 
-        ## Add any tags from the status
+        # Add any tags from the status
         if len(status.tags) > 0:
             for tag in status.tags:
                 new_tag = Tags(obs_id=obs.obs_id, tag=tag)
             obs.tag = ",".join(status.tags)
             session.add(new_tag)
 
-        ## Add Tune and Tuneset information
+        # Add Tune and Tuneset information
         if status.tune is not None:
             tune = session.query(Tunes).filter(Tunes.name == status.tune).one_or_none()
             if tune is None:
@@ -729,13 +729,13 @@ class G3tSmurf:
                 obs.tunesets.append(tuneset)
 
         obs_samps = 0
-        ## Update file entries
+        # Update file entries
         for db_file in flist:
             db_file.obs_id = obs.obs_id
             if tuneset is not None:
                 db_file.detset = tuneset.name
 
-            ## this is where I learned sqlite does not accept numpy 32 or 64 bit ints
+            # this is where I learned sqlite does not accept numpy 32 or 64 bit ints
             file_samps = sum(
                 [
                     fr.n_samples if fr.n_samples is not None else 0
@@ -748,7 +748,7 @@ class G3tSmurf:
 
         obs_ended = False
 
-        ## Search through file looking for stream closeout
+        # Search through file looking for stream closeout
         reader = so3g.G3IndexedReader(flist[-1].name)
         while True:
             frames = reader.Process(None)
@@ -762,10 +762,10 @@ class G3tSmurf:
                     if not status["AMCc.SmurfProcessor.FileWriter.IsOpen"]:
                         obs_ended = True
                         break
-                if 'AMCc.SmurfProcessor.SOStream.open_g3stream' in frame['status']:
+                if "AMCc.SmurfProcessor.SOStream.open_g3stream" in frame["status"]:
                     status = {}
-                    status.update(yaml.safe_load(frame['status']))
-                    if not status['AMCc.SmurfProcessor.SOStream.open_g3stream']:
+                    status.update(yaml.safe_load(frame["status"]))
+                    if not status["AMCc.SmurfProcessor.SOStream.open_g3stream"]:
                         obs_ended = True
                         break
 
@@ -934,8 +934,8 @@ class G3tSmurf:
         ):
             if pattern in fpattern:
                 try:
-                    ## decide if this is the last channel assignment in the directory
-                    ## needed because we often get multiple channel assignments in the same folder
+                    # decide if this is the last channel assignment in the directory
+                    # needed because we often get multiple channel assignments in the same folder
                     root = os.path.join("/", *path.split("/")[:-1])
                     cha_times = [
                         int(f.split("_")[0]) for f in os.listdir(root) if pattern in f
@@ -1064,21 +1064,23 @@ class G3tSmurf:
         )
 
         session.close()
-    
+
     def lookup_file(self, filename, fail_ok=False):
         """Lookup a file's observations details in database. Meant to look
         and act like core.metadata.obsfiledb.lookup_file.
         """
         session = self.Session()
-        file = session.query(Files).filter(Files.name==filename).one_or_none()
+        file = session.query(Files).filter(Files.name == filename).one_or_none()
 
         if file is None and fail_ok:
             logger.debug(f"Did not find file {filename} in database")
             return None
 
-        return { 'obs_id': file.obs_id,
-                 'detsets' : [file.detset],
-                 'sample_range' :(file.sample_start, file.sample_stop)}
+        return {
+            "obs_id": file.obs_id,
+            "detsets": [file.detset],
+            "sample_range": (file.sample_start, file.sample_stop),
+        }
 
     def _stream_ids_in_range(self, start, end):
         """
@@ -1544,7 +1546,7 @@ class SmurfStatus:
             .order_by(Frames.time)
         )
 
-        ## Look for the last dump frame if avaliable
+        # Look for the last dump frame if avaliable
         dump_frame = (
             status_frames.filter(Frames.status_dump)
             .order_by(Frames.time.desc())
@@ -1655,13 +1657,13 @@ def get_channel_mask(
     for ch in ch_list:
         if np.isscalar(ch):
             if np.issubdtype(type(ch), np.integer):
-                #### this is an absolute readout channel
+                # this is an absolute readout channel
                 if not ignore_missing and ~np.any(status.mask == ch):
                     raise ValueError(f"channel {ch} not found")
                 msk[status.mask == ch] = True
 
             elif np.issubdtype(type(ch), np.floating):
-                #### this is a resonator frequency
+                # this is a resonator frequency
                 b, c = np.where(np.isclose(status.freq_map, ch, rtol=1e-7))
                 if len(b) == 0:
                     if not ignore_missing:
@@ -1674,7 +1676,7 @@ def get_channel_mask(
                 msk[status.mask_inv[b, c][0]] = True
 
             elif np.issubdtype(type(ch), np.str_):
-                #### this is a channel name
+                # this is a channel name
                 if session is not None:
                     channel = (
                         session.query(Channels)
@@ -1714,7 +1716,7 @@ def get_channel_mask(
                 raise TypeError(f"type {type(ch)} for channel {ch} not understood")
         else:
             if len(ch) == 2:
-                ### this is a band, channel pair
+                # this is a band, channel pair
                 idx = status.mask_inv[ch[0], ch[1]]
                 if idx == -1:
                     if not ignore_missing:
@@ -1732,7 +1734,7 @@ def _get_tuneset_channel_names(status, ch_map, archive):
     """Update channel maps with name from Tuneset"""
     session = archive.Session()
 
-    ## tune file in status
+    # tune file in status
     if status.tune is not None and len(status.tune) > 0:
         tune_file = status.tune.split("/")[-1]
         tune = session.query(Tunes).filter(Tunes.name == tune_file).one_or_none()
@@ -1780,7 +1782,7 @@ def _get_tuneset_channel_names(status, ch_map, archive):
 
 def _get_detset_channel_names(status, ch_map, obsfiledb):
     """Update channel maps with name from obsfiledb"""
-    ## tune file in status
+    # tune file in status
     if status.tune is not None and len(status.tune) > 0:
         c = obsfiledb.conn.execute(
             "select tuneset_id from tunes " "where name=?", (status.tune,)
@@ -1938,44 +1940,46 @@ def get_channel_info(
 
     return ch_info
 
+
 def _get_sample_info(filenames):
     """Scan through a list of files and count samples. Starts counting
     from the first file in the list. Used in load_file for sample restiction
     if no database connection is available.
-    
+
     Args
     -----
     filenames : list
         list of filenames
-    
-    Returns 
+
+    Returns
     --------
     out : list
-        a list of dictionaries formatted for load_file. 
-        in the pattern of [ {filename: filename, 
+        a list of dictionaries formatted for load_file.
+        in the pattern of [ {filename: filename,
                             sample_range: (sample_start, sample_stop)}]
     """
     out = []
     start = 0
     for file in filenames:
-        samps = 0 
+        samps = 0
         reader = so3g.G3IndexedReader(file)
         while True:
             frames = reader.Process(None)
             if len(frames) == 0:
                 break
             frame = frames[0]
-            if str(frame.type) != 'Scan':
+            if str(frame.type) != "Scan":
                 continue
-            data = frame.get('data')
-            sostream_version = frame.get('sostream_version', 0)
+            data = frame.get("data")
+            sostream_version = frame.get("sostream_version", 0)
             if sostream_version >= 2:
                 samps += len(data.times)
             else:
                 samps += len(data)
-        out.append( {'filename':file, 'sample_range':(start, start+samps)} )
+        out.append({"filename": file, "sample_range": (start, start + samps)})
         start += samps
     return out
+
 
 def _get_timestamps(streams, load_type=None):
     """Calculate the timestamp field for loaded data
@@ -1989,8 +1993,8 @@ def _get_timestamps(streams, load_type=None):
             will use the TimingParadigm class for indexing
     """
     if load_type is None:
-        ## determine the desired loading type. Expand as logic as
-        ## data fields develop
+        # determine the desired loading type. Expand as logic as
+        # data fields develop
         if "primary" in streams:
             if "UnixTime" in streams["primary"]:
                 load_type = TimingParadigm.SmurfUnixTime
@@ -2006,11 +2010,20 @@ def _get_timestamps(streams, load_type=None):
     logger.error("Timing System could not be determined")
 
 
-        
-def load_file(filename, channels=None, samples=None, ignore_missing=True, 
-             load_biases=True, load_primary=True, status=None,
-             archive=None, obsfiledb=None, show_pb=True, det_axis='dets',
-             short_labels=True):
+def load_file(
+    filename,
+    channels=None,
+    samples=None,
+    ignore_missing=True,
+    load_biases=True,
+    load_primary=True,
+    status=None,
+    archive=None,
+    obsfiledb=None,
+    show_pb=True,
+    det_axis="dets",
+    short_labels=True,
+):
     """Load data from file where there may or may not be a connected archive.
 
     Args
@@ -2033,7 +2046,7 @@ def load_file(filename, channels=None, samples=None, ignore_missing=True,
           these fields.
       archive : a G3tSmurf instance (optional)
       obsfiledb : a ObsFileDb instance (optional, used when loading from context)
-      status : a SmurfStatus Instance if we don't want to use the one from the 
+      status : a SmurfStatus Instance if we don't want to use the one from the
           first file
       det_axis : name of the axis used for channels / detectors
       short_labels : bool
@@ -2111,31 +2124,31 @@ def load_file(filename, channels=None, samples=None, ignore_missing=True,
         short_labels=short_labels,
     )
 
-    ### flist will take the form [(file, sample_start, sample_stop)...] and will be 
-    ### passed to io_load.unpack_frames
+    # flist will take the form [(file, sample_start, sample_stop)...] and will be
+    # passed to io_load.unpack_frames
     flist = []
     if samples is None:
         sample_start, sample_stop = 0, None
-        flist = [ (f, 0, None) for f in filenames]        
+        flist = [(f, 0, None) for f in filenames]
     else:
         sample_start, sample_stop = samples
-        
+
         if archive is None and obsfiledb is None:
             outs = _get_sample_info(filenames)
         else:
             X = [archive if archive is not None else obsfiledb][0]
-            outs = [ X.lookup_file( file ) for file in filenames ]
-        stop = sample_stop 
+            outs = [X.lookup_file(file) for file in filenames]
+        stop = sample_stop
         for filename, out in zip(filenames, outs):
-            file_start, file_stop = out['sample_range']
+            file_start, file_stop = out["sample_range"]
             if stop is not None:
                 if file_start > sample_stop:
                     continue
-                stop = sample_stop-file_start
-            
-            start = max(0, sample_start-file_start)
-            flist.append( (filename, start, stop) )
-            
+                stop = sample_stop - file_start
+
+            start = max(0, sample_start - file_start)
+            flist.append((filename, start, stop))
+
     subreq = [
         io_load.FieldGroup("data", ch_info.rchannel, timestamp_field="time"),
     ]
@@ -2153,8 +2166,12 @@ def load_file(filename, channels=None, samples=None, ignore_missing=True,
     request = io_load.FieldGroup("root", subreq)
     streams = None
     try:
-        for filename, start, stop in tqdm( flist , total=len(flist), disable=(not show_pb)):
-            streams = io_load.unpack_frames(filename, request, streams=streams, samples=(start,stop))
+        for filename, start, stop in tqdm(
+            flist, total=len(flist), disable=(not show_pb)
+        ):
+            streams = io_load.unpack_frames(
+                filename, request, streams=streams, samples=(start, stop)
+            )
     except KeyError:
         logger.error(
             "Frames do not contain expected fields. Did Channel Mask change during the file?"
@@ -2163,9 +2180,11 @@ def load_file(filename, channels=None, samples=None, ignore_missing=True,
 
     count = sum(map(len, streams["time"]))
 
-    ## Build AxisManager
+    # Build AxisManager
     aman = core.AxisManager(
-        ch_info[det_axis].copy(), core.OffsetAxis("samps", count, sample_start), status.aman
+        ch_info[det_axis].copy(),
+        core.OffsetAxis("samps", count, sample_start),
+        status.aman,
     )
     aman.wrap("timestamps", _get_timestamps(streams), ([(0, "samps")]))
 
@@ -2188,18 +2207,23 @@ def load_file(filename, channels=None, samples=None, ignore_missing=True,
         aman.wrap("primary", temp)
 
     if load_biases:
-        bias_labels = ['b{:02d}'.format(b_num)
-                       for b_num in range(len(streams['tes_biases'].keys()))]
-        bias_axis = core.LabelAxis('bias_lines', np.array(bias_labels))
-        aman.wrap('biases', np.zeros((bias_axis.count, aman.samps.count)), 
-                          [ (0,bias_axis), 
-                            (1,'samps')])
-        for k in streams['tes_biases'].keys():
+        bias_labels = [
+            "b{:02d}".format(b_num)
+            for b_num in range(len(streams["tes_biases"].keys()))
+        ]
+        bias_axis = core.LabelAxis("bias_lines", np.array(bias_labels))
+        aman.wrap(
+            "biases",
+            np.zeros((bias_axis.count, aman.samps.count)),
+            [(0, bias_axis), (1, "samps")],
+        )
+        for k in streams["tes_biases"].keys():
             i = int(k[4:])
             io_load.hstack_into(aman.biases[i], streams["tes_biases"][k])
     aman.wrap("flags", core.FlagManager.for_tod(aman, det_axis, "samps"))
 
     return aman
+
 
 def load_g3tsmurf_obs(db, obs_id, dets=None, samples=None, **kwargs):
     """Obsloader function for g3tsmurf data archives.
