@@ -935,7 +935,7 @@ class G3tSmurf:
 
     def lookup_file(self, filename, fail_ok=False):
         """Lookup a file's observations details in database. Meant to look
-        and act like core.metadata.obsfiledb.lookup_file
+        and act like core.metadata.obsfiledb.lookup_file.
         """
         session = self.Session()
         file = session.query(Files).filter(Files.name==filename).one_or_none()
@@ -945,7 +945,7 @@ class G3tSmurf:
             return None
 
         return { 'obs_id': file.obs_id,
-                 'detsets' : file.detset,
+                 'detsets' : [file.detset],
                  'sample_range' :(file.sample_start, file.sample_stop)}
 
     def _stream_ids_in_range(self, start, end):
@@ -1704,7 +1704,9 @@ def get_channel_info(status, mask=None, archive=None, obsfiledb=None,
     return ch_info
 
 def _get_sample_info(filenames):
-    """Scan through a list of files and count samples.
+    """Scan through a list of files and count samples. Starts counting
+    from the first file in the list. Used in load_file for sample restiction
+    if no database connection is available.
     
     Args
     -----
@@ -1715,7 +1717,8 @@ def _get_sample_info(filenames):
     --------
     out : list
         a list of dictionaries formatted for load_file. 
-        in the pattern of [ {filename: filename, sample_range: (sample_start, sample_stop)}]
+        in the pattern of [ {filename: filename, 
+                            sample_range: (sample_start, sample_stop)}]
     """
     out = []
     start = 0
