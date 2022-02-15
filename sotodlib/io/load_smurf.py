@@ -744,7 +744,7 @@ class G3tSmurf:
             )
             db_file.sample_start = obs_samps
             db_file.sample_stop = obs_samps + file_samps
-            obs_samps = obs_samps + file_samps + 1
+            obs_samps = obs_samps + file_samps
 
         obs_ended = False
 
@@ -762,9 +762,15 @@ class G3tSmurf:
                     if not status["AMCc.SmurfProcessor.FileWriter.IsOpen"]:
                         obs_ended = True
                         break
+                if 'AMCc.SmurfProcessor.SOStream.open_g3stream' in frame['status']:
+                    status = {}
+                    status.update(yaml.safe_load(frame['status']))
+                    if not status['AMCc.SmurfProcessor.SOStream.open_g3stream']:
+                        obs_ended = True
+                        break
 
         if obs_ended:
-            obs.n_samples = obs_samps - 1
+            obs.n_samples = obs_samps
             obs.duration = flist[-1].stop.timestamp() - flist[0].start.timestamp()
             obs.stop = flist[-1].stop
         session.commit()
@@ -1058,6 +1064,21 @@ class G3tSmurf:
         )
 
         session.close()
+    
+    def lookup_file(self, filename, fail_ok=False):
+        """Lookup a file's observations details in database. Meant to look
+        and act like core.metadata.obsfiledb.lookup_file.
+        """
+        session = self.Session()
+        file = session.query(Files).filter(Files.name==filename).one_or_none()
+
+        if file is None and fail_ok:
+            logger.debug(f"Did not find file {filename} in database")
+            return None
+
+        return { 'obs_id': file.obs_id,
+                 'detsets' : [file.detset],
+                 'sample_range' :(file.sample_start, file.sample_stop)}
 
     def _stream_ids_in_range(self, start, end):
         """
@@ -1917,6 +1938,44 @@ def get_channel_info(
 
     return ch_info
 
+def _get_sample_info(filenames):
+    """Scan through a list of files and count samples. Starts counting
+    from the first file in the list. Used in load_file for sample restiction
+    if no database connection is available.
+    
+    Args
+    -----
+    filenames : list
+        list of filenames
+    
+    Returns 
+    --------
+    out : list
+        a list of dictionaries formatted for load_file. 
+        in the pattern of [ {filename: filename, 
+                            sample_range: (sample_start, sample_stop)}]
+    """
+    out = []
+    start = 0
+    for file in filenames:
+        samps = 0 
+        reader = so3g.G3IndexedReader(file)
+        while True:
+            frames = reader.Process(None)
+            if len(frames) == 0:
+                break
+            frame = frames[0]
+            if str(frame.type) != 'Scan':
+                continue
+            data = frame.get('data')
+            sostream_version = frame.get('sostream_version', 0)
+            if sostream_version >= 2:
+                samps += len(data.times)
+            else:
+                samps += len(data)
+        out.append( {'filename':file, 'sample_range':(start, start+samps)} )
+        start += samps
+    return out
 
 def _get_timestamps(streams, load_type=None):
     """Calculate the timestamp field for loaded data
@@ -1947,19 +2006,11 @@ def _get_timestamps(streams, load_type=None):
     logger.error("Timing System could not be determined")
 
 
-def load_file(
-    filename,
-    channels=None,
-    ignore_missing=True,
-    load_biases=True,
-    load_primary=True,
-    status=None,
-    archive=None,
-    obsfiledb=None,
-    show_pb=True,
-    det_axis="dets",
-    short_labels=True,
-):
+        
+def load_file(filename, channels=None, samples=None, ignore_missing=True, 
+             load_biases=True, load_primary=True, status=None,
+             archive=None, obsfiledb=None, show_pb=True, det_axis='dets',
+             short_labels=True):
     """Load data from file where there may or may not be a connected archive.
 
     Args
@@ -1969,6 +2020,10 @@ def load_file(
           Note that SmurfStatus is only loaded from the first file
       channels: list or None
           If not None, it should be a list that can be sent to get_channel_mask.
+      samples : tuple or None
+          If not None, it should be a tuple of (sample_start, sample_stop) where the
+          sample counts are relative to the entire g3 session, not just the files
+          being loaded from the list.
       ignore_missing : bool
           If true, will not raise errors if a requested channel is not found
       load_biases : bool
@@ -1978,7 +2033,7 @@ def load_file(
           these fields.
       archive : a G3tSmurf instance (optional)
       obsfiledb : a ObsFileDb instance (optional, used when loading from context)
-      status : a SmurfStatus Instance we don't want to use the one from the
+      status : a SmurfStatus Instance if we don't want to use the one from the 
           first file
       det_axis : name of the axis used for channels / detectors
       short_labels : bool
@@ -2056,6 +2111,31 @@ def load_file(
         short_labels=short_labels,
     )
 
+    ### flist will take the form [(file, sample_start, sample_stop)...] and will be 
+    ### passed to io_load.unpack_frames
+    flist = []
+    if samples is None:
+        sample_start, sample_stop = 0, None
+        flist = [ (f, 0, None) for f in filenames]        
+    else:
+        sample_start, sample_stop = samples
+        
+        if archive is None and obsfiledb is None:
+            outs = _get_sample_info(filenames)
+        else:
+            X = [archive if archive is not None else obsfiledb][0]
+            outs = [ X.lookup_file( file ) for file in filenames ]
+        stop = sample_stop 
+        for filename, out in zip(filenames, outs):
+            file_start, file_stop = out['sample_range']
+            if stop is not None:
+                if file_start > sample_stop:
+                    continue
+                stop = sample_stop-file_start
+            
+            start = max(0, sample_start-file_start)
+            flist.append( (filename, start, stop) )
+            
     subreq = [
         io_load.FieldGroup("data", ch_info.rchannel, timestamp_field="time"),
     ]
@@ -2073,8 +2153,8 @@ def load_file(
     request = io_load.FieldGroup("root", subreq)
     streams = None
     try:
-        for filename in tqdm(filenames, total=len(filenames), disable=(not show_pb)):
-            streams = io_load.unpack_frames(filename, request, streams=streams)
+        for filename, start, stop in tqdm( flist , total=len(flist), disable=(not show_pb)):
+            streams = io_load.unpack_frames(filename, request, streams=streams, samples=(start,stop))
     except KeyError:
         logger.error(
             "Frames do not contain expected fields. Did Channel Mask change during the file?"
@@ -2085,7 +2165,7 @@ def load_file(
 
     ## Build AxisManager
     aman = core.AxisManager(
-        ch_info[det_axis].copy(), core.OffsetAxis("samps", count, 0), status.aman
+        ch_info[det_axis].copy(), core.OffsetAxis("samps", count, sample_start), status.aman
     )
     aman.wrap("timestamps", _get_timestamps(streams), ([(0, "samps")]))
 
@@ -2108,23 +2188,20 @@ def load_file(
         aman.wrap("primary", temp)
 
     if load_biases:
-        bias_axis = core.LabelAxis(
-            "bias_lines", np.arange(len(streams["tes_biases"].keys()))
-        )
-        aman.wrap(
-            "biases",
-            np.zeros((bias_axis.count, aman.samps.count)),
-            [(0, bias_axis), (1, "samps")],
-        )
-        for k in streams["tes_biases"].keys():
+        bias_labels = ['b{:02d}'.format(b_num)
+                       for b_num in range(len(streams['tes_biases'].keys()))]
+        bias_axis = core.LabelAxis('bias_lines', np.array(bias_labels))
+        aman.wrap('biases', np.zeros((bias_axis.count, aman.samps.count)), 
+                          [ (0,bias_axis), 
+                            (1,'samps')])
+        for k in streams['tes_biases'].keys():
             i = int(k[4:])
             io_load.hstack_into(aman.biases[i], streams["tes_biases"][k])
     aman.wrap("flags", core.FlagManager.for_tod(aman, det_axis, "samps"))
 
     return aman
 
-
-def load_g3tsmurf_obs(db, obs_id, dets=None, **kwargs):
+def load_g3tsmurf_obs(db, obs_id, dets=None, samples=None, **kwargs):
     """Obsloader function for g3tsmurf data archives.
 
     See API template, `sotodlib.core.context.obsloader_template`, for
@@ -2139,7 +2216,7 @@ def load_g3tsmurf_obs(db, obs_id, dets=None, **kwargs):
         "select name from files " "where obs_id=?" + "order by start", (obs_id,)
     )
     flist = [row[0] for row in c]
-    return load_file(flist, dets, obsfiledb=db)
+    return load_file(flist, dets, samples=samples, obsfiledb=db)
 
 
 core.OBSLOADER_REGISTRY["g3tsmurf"] = load_g3tsmurf_obs
