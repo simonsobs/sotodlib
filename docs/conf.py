@@ -96,7 +96,7 @@ autodoc_default_options = {
 autodoc_mock_imports = []
 for missing in ('numpy', 'matplotlib', 'healpy', 'astropy','sqlalchemy',
                 'quaternionarray', 'yaml', 'toml', 'sqlite3','tqdm',
-                'skyfield', 'h5py', 'pyfftw',
+                'skyfield', 'h5py', 'pyfftw', 'scipy',
                 'toast', 'spt3g', 'so3g', 'pixell'):
     try:
         foo = import_module(missing)
