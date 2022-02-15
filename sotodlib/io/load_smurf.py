@@ -1841,7 +1841,9 @@ def load_file(filename, channels=None, ignore_missing=True,
         aman.wrap('primary', temp)
 
     if load_biases:
-        bias_axis = core.LabelAxis('bias_lines', np.arange(len(streams['tes_biases'].keys())))
+        bias_labels = ['b{:02d}'.format(b_num)
+                       for b_num in range(len(streams['tes_biases'].keys()))]
+        bias_axis = core.LabelAxis('bias_lines', np.array(bias_labels))
         aman.wrap('biases', np.zeros((bias_axis.count, aman.samps.count)), 
                           [ (0,bias_axis), 
                             (1,'samps')])
