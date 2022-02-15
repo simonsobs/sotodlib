@@ -5,3 +5,6 @@ sphinx-argparse==0.3.1
 
 # Required because it is used at root level in some modules.
 numpy
+
+# Before you add anything else to docs/requirements.txt, consider
+# adding it to the "missing" module list in conf.py.
