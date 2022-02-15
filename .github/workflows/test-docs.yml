@@ -7,8 +7,14 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - run: |
-        cd docs/
-        pip install -r requirements.txt
-        sphinx-build -M html . _build -W
+
+    - name: Clone repo
+      uses: actions/checkout@v2
+
+    - name: Install docs dependencies
+      working-directory: ./docs
+      run: pip3 install -r requirements.txt
+
+    - name: Build docs
+      working-directory: ./docs
+      run: sphinx-build -M html . _build -W
