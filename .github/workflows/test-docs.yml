@@ -1,0 +1,13 @@
+name: "Test docs build"
+on: 
+- push
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - run: |
+        cd docs/
+        pip install -r requirements.txt
+        sphinx-build -M html . _build -W
