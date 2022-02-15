@@ -466,6 +466,25 @@ def get_supergeom(*geoms, tol=1e-3):
         s0 = corner_b - corner_a
     return tuple(map(int, s0)), w0
 
+def _confirm_wcs(*maps):
+    """Insist that all arguments either have the same .wcs, or do not have
+    a wcs.  Each argument should be either an ndmap (with a .wcs
+    attribute) or an ndarray (without a .wcs attribute).
+
+    Raises a ValueError if more than one argument has a .wcs attribute
+    and they do not all agree.  Returns either the first .wcs
+    attribute encountered, or None if there aren't any.
+
+    """
+    wcs_to_use = None
+    for i, m in enumerate(maps):
+        if hasattr(m, 'wcs'):
+            if wcs_to_use is None:
+                wcs_to_use = m.wcs
+            elif not wcsutils.equal(wcs_to_use, m.wcs):
+                raise ValueError('The wcs from %ith item is discordant with prior ones.' % i)
+    return wcs_to_use
+
 def _invert_weights_map(weights, eigentol=1e-6, kill_partials=True,
                         UPLO='U'):
     """Compute an inverse weights matrix, using eigendecomposition methods
