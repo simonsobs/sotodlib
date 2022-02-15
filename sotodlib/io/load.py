@@ -211,10 +211,10 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None,
     for item in to_remove:
         field_request.remove(item)
     field_request.extend(to_add)
-
+    
     if isinstance(fo, G3SuperTimestream):
         key_map = {k: i for i, k in enumerate(fo.names)}
-
+        
     def our_slice(n, oversamp):
         # returns (range size, slice)
         if n <= offset:
@@ -237,12 +237,11 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None,
             _consumed = unpack_frame_object(target, item, streams[item.name], comp_info,
                                             offset=offset, max_count=max_count)
             _n, sl = our_slice(_consumed, 1)
-
             # Check and slice timestamp field independently -- must
             # work even if no dets requested led to _n=0 above.
             if item.timestamp_field is not None:
                 if isinstance(target, G3SuperTimestream):
-                    timesv = np.array(target.times)[sl] / g3core.G3Units.sec
+                    timesv = np.array(target.times) / g3core.G3Units.sec
                 else:
                     t0, t1, ns = target.start, target.stop, target.n_samples
                     t0, t1 = t0.time / g3core.G3Units.sec, t1.time / g3core.G3Units.sec
@@ -272,6 +271,7 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None,
                 v = np.array(fo[key])
         _consumed = len(v) // item.oversample
         _n, sl = our_slice(_consumed, item.oversample)
+
         if _n:
             streams[key].append(v[sl])
     return _consumed
