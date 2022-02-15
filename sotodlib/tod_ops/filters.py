@@ -76,7 +76,7 @@ def fourier_filter(tod, filt_function,
         n = fft_ops.find_superior_integer(axis.count)
         logger.info('fourier_filter: padding %i -> %i' % (axis.count, n))
     elif resize == 'trim':
-        n = fft.find_inferior_integer(axis.count)
+        n = fft_ops.find_inferior_integer(axis.count)
         logger.info('fourier_filter: trimming %i -> %i' % (axis.count, n))
     elif resize is None:
         n = axis.count
