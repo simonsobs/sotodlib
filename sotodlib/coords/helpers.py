@@ -410,11 +410,21 @@ def get_supergeom(*geoms, tol=1e-3):
     wcs1), ...], return a geometry (shape, wcs) that includes all of
     them as a subset.
 
+    Each argument can be a geometry (shape, wcs) or an ndmap.
+
     """
-    s0, w0 = geoms[0]
+    def as_geom(item):
+        if isinstance(item, enmap.ndmap):
+            shape, wcs = item.geometry
+        else:
+            shape, wcs = item
+        return (shape[-2:], wcs)
+
+    s0, w0 = as_geom(geoms[0])
     w0 = w0.deepcopy()
 
-    for s, w in geoms[1:]:
+    for item in geoms[1:]:
+        s, w = as_geom(item)
         # is_compatible is necessary but not sufficient.
         if not wcsutils.is_compatible(w0, w):
             raise ValueError('Incompatible wcs: %s <- %s' % (w0, w))
