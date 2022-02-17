@@ -42,9 +42,19 @@ setup_opts["author_email"] = "so_software@simonsobservatory.org"
 setup_opts["url"] = "https://github.com/simonsobs/sotodlib"
 setup_opts["packages"] = find_packages(where=".", exclude="tests")
 setup_opts["license"] = "MIT"
-setup_opts["requires"] = ["Python (>3.4.0)", ]
+setup_opts["requires"] = ["Python (>3.7.0)", ]
 setup_opts["scripts"] = pipes
 setup_opts["include_package_data"] = True
+setup_opts["install_requires"] = [
+    'numpy',
+    'scipy',
+    'matplotlib',
+    'quaternionarray',
+    'PyYAML',
+    'toml',
+    'skyfield',
+    'pixell',
+]
 
 # Command Class dictionary.
 # Begin with the versioneer command class dictionary.
