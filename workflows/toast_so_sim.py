@@ -346,7 +346,7 @@ def simulate_data(job, toast_comm, telescope, schedule, args):
     # Simulate Artificial Source
 
     ops.sim_source.detector_pointing = ops.det_pointing_azel
-    ops.sim_source.FoV = telescope.focalplane.field_of_view
+    ops.sim_source.FoV = telescope.focalplane
     if ops.sim_source.polarization_fraction != 0:
         ops.sim_source.detector_weights = ops.weights_azel
     ops.sim_source.apply(data)
