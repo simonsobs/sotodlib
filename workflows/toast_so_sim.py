@@ -422,6 +422,8 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
             if not os.path.isdir(hdf5_path):
                 os.makedirs(hdf5_path)
 
+        ops.save_hdf5.volume = hdf5_path
+
     ops.save_hdf5.apply(data)
     log.info_rank("Saved HDF5 data in", comm=world_comm, timer=timer)
 
