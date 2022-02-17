@@ -1,5 +1,6 @@
 import os
 import pickle
+import copy
 
 import traitlets
 
@@ -168,8 +169,8 @@ class SimSource(Operator):
         help = 'Set True to maintain the distance always the same throughout a scan'
     )
 
-    FoV = Quantity(
-        help = 'Field of View of the focal plane'
+    focalplane = Instance(
+        help="Focalplane instance used for FoV calculation",
     )
 
     source_err = List(
@@ -401,9 +402,17 @@ class SimSource(Operator):
 
         else:
             #Always consider a discending drone, it is easier to fly this way
+            temp = copy.copy(self.focalplane.field_of_view)
+
+            self.focalplane.compute_fov()
+            FoV = copy.copy(self.focalplane.fiel_of_view)
+
+            self.focalplane.field_of_view = temp
+
+
             el_start = np.array(obs.shared[self.elevation])[0] * u.rad + \
-                self.FoV/2
-            el_end = el_start-self.FoV
+                FoV/2
+            el_end = el_start-FoV
             el_init = np.linspace(el_start, el_end, len(times), endpoint=True)
 
             if not self.keep_distance:
