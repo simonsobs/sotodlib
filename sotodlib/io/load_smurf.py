@@ -1305,6 +1305,8 @@ class SmurfStatus:
     ------------
         status : dict
             Full smurf status dictionary
+        dump_frame : bool
+            Whether the SmurfStatus was built off a dump frame
         num_chans: int
             Number of channels that are streaming
         mask : Optional[np.ndarray]
@@ -1350,6 +1352,9 @@ class SmurfStatus:
         self.stop = self.status.get("stop")
 
         self.aman = core.AxisManager()
+
+        self.dump_frame = self.status.get("dump_frame")
+        self.aman = self.aman.wrap("dump_frame", self.dump_frame)
 
         # Reads in useful status values as attributes
         mapper_root = "AMCc.SmurfProcessor.ChannelMapper"
@@ -1483,7 +1488,9 @@ class SmurfStatus:
                         status["stop"] = frame["time"].time / spt3g_core.G3Units.s
                     status.update(yaml.safe_load(frame["status"]))
                     if frame["dump"]:
+                        status["dump_frame"] = True
                         break
+                    status["dump_frame"] = False
         return cls(status)
 
     @classmethod
