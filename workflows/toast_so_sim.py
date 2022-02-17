@@ -418,8 +418,9 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     # Optionally write out the data
     if args.out_dir is not None:
         hdf5_path = os.path.join(args.out_dir, "data")
-        os.makedirs(hdf5_path)
-        ops.save_hdf5.volume = hdf5_path
+        if toast_comm.world_rank == 0:
+            if not os.path.isdir(hdf5_path):
+                os.makedirs(hdf5_path)
 
     ops.save_hdf5.apply(data)
     log.info_rank("Saved HDF5 data in", comm=world_comm, timer=timer)
@@ -818,7 +819,7 @@ def main():
             name="filterbin",
             enabled=False,
         ),
-        so_ops.MLMapmaker(name="mlmapmaker", enabled=False, comps="TQU"),
+        #so_ops.MLMapmaker(name="mlmapmaker", enabled=False, comps="TQU"),
         toast.ops.MemoryCounter(name="mem_count", enabled=False),
     ]
     if toast.ops.madam.available():

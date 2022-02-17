@@ -19,7 +19,7 @@ from toast import qarray as qa
 
 from toast.data import Data
 
-from toast.traits import trait_docs, Int, Unicode, Float, Instance, List, Bool
+from toast.traits import trait_docs, Int, Unicode, Float, Instance, List, Bool, Quantity
 
 from toast.ops.operator import Operator
 
@@ -398,7 +398,8 @@ class SimSource(Operator):
         az_init = np.ones_like(times)*az_start
 
         if not self.variable_elevation:
-            el_init = np.ones_like(az_init)*np.amax(np.array(obs.shared[self.elevation])) * u.rad
+            el_init = np.ones(len(times))*np.amax(np.array(obs.shared[self.elevation])) * u.rad
+            el_start = el_init[0]
 
         else:
             #Always consider a discending drone, it is easier to fly this way
@@ -415,19 +416,18 @@ class SimSource(Operator):
             el_end = el_start-FoV
             el_init = np.linspace(el_start, el_end, len(times), endpoint=True)
 
-            if not self.keep_distance:
-                distance = self.source_init_dist * np.cos(el_start)/np.cos(el_init)
-
         if self.keep_distance:
             distance = np.ones_like(times)*self.source_init_dist
+        else:
+            distance = self.source_init_dist * np.cos(el_start)/np.cos(el_init)
 
-        if np.any(self.source_error >= 1e-4) or self.wind_gusts_amp.value != 0:
+        if np.any(np.array(self.source_error) >= 1e-4) or self.wind_gusts_amp.value != 0:
 
             E, N, U = hor2enu(az_init, el_init, distance)
             X, Y, Z = enu2ecef(E, N, U, observer.lat, observer.lon, observer.elevation, ell='WGS84')
 
 
-            if np.any(self.source_error >= 1e-4):
+            if np.any(np.array(self.source_error) >= 1e-4):
                 X = X+np.random.normal(0, self.source_err[0], size=(len(times)))*X.unit
                 Y = Y+np.random.normal(0, self.source_err[1], size=(len(times)))*Y.unit
                 Z = Z+np.random.normal(0, self.source_err[2], size=(len(times)))*z.unit
