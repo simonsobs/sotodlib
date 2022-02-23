@@ -1127,6 +1127,56 @@ def dump_DetDb(archive, detdb_file):
     session.close()
     return my_db
 
+def make_DetDb_single_obs(obsfiledb, obs_id, detdb_path):
+
+    # find relevant files to get status
+    c = obsfiledb.conn.execute('select name from files ' 
+                         'where obs_id=?' + 
+                         'order by start', (obs_id,))
+                        
+    flist = [row[0] for row in c]
+
+    # load status
+    # for now, assume this is always the start of an obs so this won't break
+    status = SmurfStatus.from_file(flist[0])
+
+    # Pulling very specific pieces from get_channel_info. This isn't the best way to do this
+    # but just want something that minimally works right now and I'll clean it up for PR
+
+    # this should not be hardcoded but it is for now
+    mask = None
+
+
+    ch_list = np.arange(status.num_chans)
+    ch_map = np.zeros( len(ch_list), dtype = [('idx', int), ('rchannel', np.unicode_,30), 
+                                              ('band', int), ('channel', int), 
+                                              ('freqs', float)])
+
+    ch_map['idx'] = ch_list
+    ch_map = _get_channel_mapping(status, ch_map)
+    ruids = _get_detset_channel_names(status, ch_map, obsfiledb)
+
+    # right now, require specific path to detdb, no helping userf
+    detdb = core.metadata.DetDb(detdb_path)
+
+    column_defs = [
+                "'ruid' str",
+                "'band' int",
+                "'channel' int",
+                "'frequency' float",
+    ]
+
+    detdb.create_table('base',column_defs)
+
+    for i, ch in tqdm(enumerate(ch_map)):
+        detdb.get_id(ruids[i])
+        detdb.add_props('base',ruids[i],ruid=ruids[i],band=ch['band'].item(),channel=ch['channel'].item(),frequency=ch['freqs'].item())
+
+    return detdb
+
+
+
+
 class SmurfStatus:
     """
     This is a class that attempts to extract essential information from the
