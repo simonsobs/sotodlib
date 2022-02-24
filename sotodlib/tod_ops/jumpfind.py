@@ -5,25 +5,35 @@ import scipy.ndimage as simg
 
 def jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs):
     """
-    New and improved jumpfinder
+    Recursive edge detection based jumpfinder.
 
-    @param x: Data to jumpfind on, expects 1D
-              Note that x will by modified in place with jumps removed
-              Pass x.copy() to preserve x (say to pass to a better jump fixer)
-    @param min_chunk: The smallest chunk of data to look for jumps in
-    @param min_size: The smalled jump size counted as a jump
-    @param win_size: Number of samples to average over when checking jump size
-    @param max_depth: The maximum recursion depth, set negetive to not use
-    @param depth: The current recursion depth
-    @param **kwargs: Arguments to pass to scipy.signal.find_peaks
-
-    @returns jumps: The indices of jumps in x
-                    There is some uncertainty on order of 1 sample
-                    Jumps within min_chunk of each other can't be distinguished
-
-    The jumpfinder is very sensitive to changes in parameters
+    Note that the jumpfinder is very sensitive to changes in parameters
     and the parameters are not independant of each other,
-    so it may take some playing around to get it to work properly
+    so it may take some playing around to get it to work properly.
+
+    Arguments:
+
+        x: Data to jumpfind on, expects 1D
+           Note that x will by modified in place with jumps removed
+           pass x.copy() to preserve x (say to pass to a better jump fixer)
+
+        min_chunk: The smallest chunk of data to look for jumps in
+
+        min_size: The smalled jump size counted as a jump
+
+        win_size: Number of samples to average over when checking jump size
+
+        max_depth: The maximum recursion depth, set negetive to not use
+
+        depth: The current recursion depth
+
+        **kwargs: Arguments to pass to scipy.signal.find_peaks
+
+    Returns:
+
+        jumps: The indices of jumps in x
+               There is some uncertainty on order of 1 sample
+               Jumps within min_chunk of each other may not be distinguished
     """
     if len(x) < min_chunk:
         return np.array([])
@@ -94,34 +104,48 @@ def filter_and_jumpfind(
     """
     Apply filter to data and then search for jumps
 
-    @param x: Data to jumpfind on, expects 1D
-    @param sigma: Sigma of gaussain kernal
-    @param order: Order of gaussain filter
-                Note the following:
-                Order 0 works a bit better than just calling jumpfind
-                Order 1 is not reccomended, it can catch both jumps and spikes
-                    but it cant't distinguish them and misses jumps
-                Order 2 works well to catch jumps and has a low false negetive rate
-                    but it can get confused near large spikes
-    @param min_chunk: The smallest chunk of data to look for jumps in
-    @param min_size: The smalled jump size counted as a jump
-                     Note that this is in terms of the filtered data
-    @param abs_min_size: The minimum size of jumps in the unfiltered data
-                         Note that for order 0 this is not used
-    @param win_size: Number of samples to average over when checking jump size
-                     For order 2, 2*sigma works well
-    @param max_depth: The max recursion depth, set negetive to not use
-    @param **kwargs: Arguments to pass to scipy.signal.find_peaks
-
-    @returns jumps: The indices of jumps in x
-                    There is some uncertainty on order of 1 sample
-                    Jumps within min_chunk of each other can't be distinguished
-
-    The jumpfinder is very sensitive to changes in parameters
+    Note that the jumpfinder is very sensitive to changes in parameters
     and the parameters are not independant of each other,
     so it may take some playing around to get it to work properly
+
+    Arguments:
+        x: Data to jumpfind on, expects 1D
+
+        sigma: Sigma of gaussain kernal
+
+        order: Order of gaussain filter
+               Note the following:
+               Order 0 works a bit better than just calling jumpfind
+               Order 1 is not reccomended, it can catch both jumps and spikes
+                   but it cant't distinguish them and misses jumps
+               Order 2 works well to catch jumps and has a low false negetive rate
+                   but it can get confused near large spikes
+
+        param min_chunk: The smallest chunk of data to look for jumps in
+
+        param min_size: The smalled jump size counted as a jump
+                        Note that this is in terms of the filtered data
+
+        param abs_min_size: The minimum size of jumps in the unfiltered data
+                            Note that for order 0 this is not used
+
+        param win_size: Number of samples to average over when checking jump size
+                        For order 2, 2*sigma works well
+
+        max_depth: The max recursion depth, set negetive to not use
+
+        **kwargs: Arguments to pass to scipy.signal.find_peaks
+
+    Returns:
+
+        jumps: The indices of jumps in x
+               There is some uncertainty on order of 1 sample
+               Jumps within min_chunk of each other may not be distinguished
     """
+    # Apply filter
     x_filt = simg.gaussian_filter(x, sigma, order)
+
+    # Search for jumps in filtered data
     jumps = jumpfind(x_filt, min_chunk, min_size, win_size, max_depth, 0, **kwargs)
 
     if order == 0:
@@ -155,12 +179,18 @@ def jumpfind_default_pars(x):
     The presence of large spikes can have a negetive effect on this function,
     please mask/slice/interpolate them out before using this functon.
 
-    @param x: Data to jumpfind on, expects 1D
-
-    @returns jumps: The indices of jumps in x
-
     Tested mostly on LATR data and seems to be working well.
     Limited tests with LATRT data have also gone well.
+
+    Arguments:
+
+        x: Data to jumpfind on, expects 1D
+
+    Returns:
+
+        jumps: The indices of jumps in x
+               There is some uncertainty on order of a few samples
+               Jumps within 20 samples of each other may not be distinguished
     """
     return filter_and_jumpfind(
         x,
@@ -183,14 +213,22 @@ def jumpfind_default_pars_recursive(x, max_depth=-1, depth=0):
     params since std is sensitive to the presence of jumps.
     Using a jump agnostic metric instead should alleviate the need for this function.
 
-    @param x: Data to jumpfind on, expects 1D
-    @param max_depth: The maximum recursion depth, set negetive to not use
-    @param depth: The current recursion depth
-
-    @return jumps: The indices of jumps in x
-
     Tested mostly on LATR data and seems to be working well.
     Limited tests with LATRT data have also gone well.
+
+    Arguments:
+
+        x: Data to jumpfind on, expects 1D
+
+        max_depth: The maximum recursion depth, set negetive to not use
+
+        depth: The current recursion depth
+
+    Returns:
+
+        jumps: The indices of jumps in x
+               There is some uncertainty on order of a few samples
+               Jumps within 20 samples of each other may not be distinguished
     """
     # Find jumps
     jumps = jumpfind_default_pars(x)
