@@ -3,7 +3,7 @@ import scipy.signal as sig
 import scipy.ndimage as simg
 
 
-def jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs):
+def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs):
     """
     Recursive edge detection based jumpfinder.
 
@@ -146,7 +146,7 @@ def filter_and_jumpfind(
     x_filt = simg.gaussian_filter(x, sigma, order)
 
     # Search for jumps in filtered data
-    jumps = jumpfind(x_filt, min_chunk, min_size, win_size, max_depth, 0, **kwargs)
+    jumps = _jumpfind(x_filt, min_chunk, min_size, win_size, max_depth, 0, **kwargs)
 
     if order == 0:
         return jumps
