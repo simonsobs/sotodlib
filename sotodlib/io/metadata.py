@@ -19,7 +19,8 @@ import h5py
 from sotodlib.core.metadata import ResultSet, SuperLoader, LoaderInterface
 import warnings
 
-def write_dataset(data, filename, address, overwrite=False, mode='a'):
+def write_dataset(data, filename, address, overwrite=False, mode='a',
+                 attrs=None):
     """Write a metadata object to an HDF5 file as a single dataset.
 
     Args:
@@ -33,6 +34,7 @@ def write_dataset(data, filename, address, overwrite=False, mode='a'):
         write address is already occupied.
       mode: The mode specification used for opening the file
         (ignored if filename is an open file).
+      attrs : dictionary of attributes to add to the dataset 
 
     """
     if isinstance(data, ResultSet):
@@ -60,6 +62,9 @@ def write_dataset(data, filename, address, overwrite=False, mode='a'):
                     f'Address {address} already exists in {filename}; '
                     f'pass overwrite=True to clobber it.')
         fout.create_dataset(address, data=data)
+        if attrs is not None:
+            for k in attrs:
+                fout[address].attrs[k] = attrs[k]
 
 
 def read_dataset(fin, dataset):

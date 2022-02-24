@@ -346,6 +346,12 @@ class ManifestDb:
             return None
         return row_id[0]
 
+    def get_files(self):
+        """Return a list of the files used to save data
+        """
+        c = self.conn.execute('select name from files')
+        return [row[0] for row in c]
+        
     def match(self, params, multi=False):
         """Given Index Data, return Endpoint Data.
 
