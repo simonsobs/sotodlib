@@ -252,3 +252,26 @@ def jumpfind_default_pars_recursive(x, max_depth=-1, depth=0):
         jumps = np.insert(jumps, i + added, sub_jumps + _jumps[i])
         added += len(sub_jumps)
     return jumps
+
+
+def jumpfind(tod, signal_name="signal", axis=-1):
+    """
+    Find jumps in tod.signal_name.
+
+    Arguments:
+
+        tod: axis manager
+
+        signal_name: Attribute of tod to jumpfind on
+
+        axis: Axis of tod.signal_name to jumpfind along
+
+    Returns:
+
+        jumps: The indices of jumps in x
+               There is some uncertainty on order of a few samples
+               Jumps within 20 samples of each other may not be distinguished
+    """
+    signal = getattr(tod, signal_name)
+
+    return np.apply_along_axis(jumpfind_default_pars_recursive, axis, signal)
