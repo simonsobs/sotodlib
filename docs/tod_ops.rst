@@ -155,3 +155,12 @@ using this submodule.
 
 .. automodule:: sotodlib.tod_ops.detrend
    :members:
+
+
+tod_ops.jumpfind
+================
+
+Functions to find jumps in data.
+
+.. automodule:: sotodlib.tod_ops.jumpfind
+   :members:
