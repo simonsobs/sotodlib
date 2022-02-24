@@ -109,6 +109,7 @@ def filter_and_jumpfind(
     so it may take some playing around to get it to work properly
 
     Arguments:
+
         x: Data to jumpfind on, expects 1D
 
         sigma: Sigma of gaussain kernal
@@ -117,9 +118,9 @@ def filter_and_jumpfind(
                Note the following:
                Order 0 works a bit better than just calling jumpfind
                Order 1 is not reccomended, it can catch both jumps and spikes
-                   but it cant't distinguish them and misses jumps
+               but it cant't distinguish them and misses jumps
                Order 2 works well to catch jumps and has a low false negetive rate
-                   but it can get confused near large spikes
+               but it can get confused near large spikes
 
         param min_chunk: The smallest chunk of data to look for jumps in
 
