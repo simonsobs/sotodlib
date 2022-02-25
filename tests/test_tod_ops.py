@@ -151,7 +151,7 @@ class JumpfindTest(unittest.TestCase):
         sig_jumps[jump_locs[2]:] -= 200
         tod.wrap('sig_jumps', sig_jumps, [(0, 'samps')])
 
-        jumps = tod_ops.jumpfind(tod, signal_name='sig_jumps', axis=0)
+        jumps = tod_ops.jumpfind(tod, signal_name='sig_jumps')
 
         self.assertEqual(len(jump_locs), len(jumps))
         self.assertTrue(np.all(np.abs(jumps - jump_locs) < 20))
