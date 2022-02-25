@@ -255,17 +255,16 @@ def jumpfind_default_pars_recursive(x, max_depth=-1, depth=0):
     return jumps
 
 
-def jumpfind(tod, signal_name="signal", axis=-1):
+def jumpfind(tod, signal_name="signal"):
     """
     Find jumps in tod.signal_name.
+    Expects tod.signal_name to be 1D of 2D
 
     Arguments:
 
         tod: axis manager
 
         signal_name: Attribute of tod to jumpfind on
-
-        axis: Axis of tod.signal_name to jumpfind along
 
     Returns:
 
@@ -275,4 +274,9 @@ def jumpfind(tod, signal_name="signal", axis=-1):
     """
     signal = getattr(tod, signal_name)
 
-    return np.apply_along_axis(jumpfind_default_pars_recursive, axis, signal)
+    if len(signal.shape) == 1:
+        return jumpfind_default_pars_recursive(signal)
+    elif len(signal.shape) == 2:
+        return [jumpfind_default_pars_recursive(sig) for sig in signal]
+    else:
+        raise ValueError("Jumpfinder only works on 1D or 2D data")
