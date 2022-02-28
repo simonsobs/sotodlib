@@ -4,6 +4,6 @@ from .filters import fourier_filter
 from .gapfill import \
     get_gap_fill, get_gap_fill_single, \
     get_gap_model, get_gap_model_single
-from .jumpfind import jumpfind
+from .jumpfind import *
 
 from . import pca

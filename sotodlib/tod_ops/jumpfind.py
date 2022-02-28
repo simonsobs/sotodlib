@@ -193,14 +193,20 @@ def jumpfind_default_pars(x):
                There is some uncertainty on order of a few samples
                Jumps within 20 samples of each other may not be distinguished
     """
+    _x = sig.detrend(x)
+    if _x.std() > 10:
+        _x = _x/(10**(int(np.log10(_x.std()))))
+    if np.isclose(_x.std(), 0.0):
+        return np.array([])
+
     return filter_and_jumpfind(
-        x,
-        x.std() / 2,
-        2,
+        _x,
+        2*_x.std(),
+        0,
+        10,
+        1.5,
+        0,
         20,
-        1e-9 * (x.std()) ** 2,
-        x.std() / 2,
-        100,
         0,
         height=1,
         prominence=1,
