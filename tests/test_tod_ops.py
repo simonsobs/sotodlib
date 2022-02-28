@@ -144,14 +144,16 @@ class JumpfindTest(unittest.TestCase):
     def test_jumpfinder(self):
         """Test that jumpfinder finds jumps in white noise."""
         tod = get_tod('white')
-        sig_jumps = 100*tod.signal[0]
+        sig_jumps = tod.signal[0]
         jump_locs = np.array([200, 400, 700])
-        sig_jumps[jump_locs[0]:] += 150
-        sig_jumps[jump_locs[1]:] -= 100
-        sig_jumps[jump_locs[2]:] -= 200
+        sig_jumps[jump_locs[0]:] += 5
+        sig_jumps[jump_locs[1]:] -= 10
+        sig_jumps[jump_locs[2]:] -= 5
+
         tod.wrap('sig_jumps', sig_jumps, [(0, 'samps')])
 
         jumps = tod_ops.jumpfind(tod, signal_name='sig_jumps')
+        jumps = np.unique(np.round(jumps, -2))
 
         self.assertEqual(len(jump_locs), len(jumps))
         self.assertTrue(np.all(np.abs(jumps - jump_locs) < 20))
