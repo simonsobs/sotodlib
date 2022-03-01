@@ -1392,16 +1392,13 @@ class SmurfStatus:
         if self.filter_a is not None:
             self.filter_a = np.array(ast.literal_eval(self.filter_a))
             self.aman = core.AxisManager(
-                self.aman, core.IndexAxis("filter_a_ax", len(self.filter_a))
+                self.aman, core.IndexAxis("filter_pars", len(self.filter_a))
             )
-            self.aman = self.aman.wrap("filter_a", self.filter_a, [(0, "filter_a_ax")])
+            self.aman = self.aman.wrap("filter_a", self.filter_a, [(0, "filter_pars")])
         self.filter_b = self.status.get(f"{filter_root}.B")
         if self.filter_b is not None:
             self.filter_b = np.array(ast.literal_eval(self.filter_b))
-            self.aman = core.AxisManager(
-                self.aman, core.IndexAxis("filter_b_ax", len(self.filter_a))
-            )
-            self.aman = self.aman.wrap("filter_b", self.filter_b, [(0, "filter_b_ax")])
+            self.aman = self.aman.wrap("filter_b", self.filter_b, [(0, "filter_pars")])
         self.filter_gain = self.status.get(f"{filter_root}.Gain")
         self.aman = self.aman.wrap("filter_gain", self.filter_gain)
         self.filter_order = self.status.get(f"{filter_root}.Order")
