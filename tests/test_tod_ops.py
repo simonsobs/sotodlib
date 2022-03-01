@@ -152,7 +152,11 @@ class JumpfindTest(unittest.TestCase):
 
         tod.wrap('sig_jumps', sig_jumps, [(0, 'samps')])
 
-        jumps = tod_ops.jumpfind(tod, signal_name='sig_jumps')
+        # Find jumps, using a conservative sensitivity here because the jumps
+        # are large and we want to avoid false positives
+        jumps = tod_ops.jumpfind(tod, signal_name='sig_jumps', sensitivity=.5)
+
+        # Remove double counted jumps and round to remove uncertainty
         jumps = np.unique(np.round(jumps, -2))
 
         self.assertEqual(len(jump_locs), len(jumps))
