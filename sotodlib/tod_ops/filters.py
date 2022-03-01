@@ -378,12 +378,12 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None, invert=Fa
       b: numerator polynomial filter coefficients (z^0,z^1, ...)
       a: denominator coefficients
       fscale: scalar used to compute z = exp(-2j*pi*freqs*fscale).
-        This will generally correspond to the sampling frequency of
-        the original signal (before decimation).
+        This will generally correspond to the downsampling factor applied
+        to the original signal (before decimation).
       iir_params: IIR filter params as described below; or a string
         name under which to look up those params in tod; or a list of
         three strings to loop up the params in tod, in which case the
-        order should be: a, b, fscale; defaults to: 
+        order should be: a, b, fscale; defaults to:
         ['filter_a', 'filter_b', 'downsample_factor']
         Note that if `a` and `b` are passed explicitly
         then no attempt is made to resolve this argument.
