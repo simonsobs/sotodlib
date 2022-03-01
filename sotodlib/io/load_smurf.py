@@ -2193,7 +2193,7 @@ def load_file(
     aman.wrap("timestamps", _get_timestamps(streams), ([(0, "samps")]))
 
     # Conversion from DAC counts to squid phase
-    aman.wrap("signal", np.zeros(aman.shape, "float32"), [(0, det_axis), (1, "samps")])
+    aman.wrap("signal", np.zeros((aman[det_axis].count, aman["samps"].count), "float32"), [(0, det_axis), (1, "samps")])
     for idx in range(aman[det_axis].count):
         io_load.hstack_into(aman.signal[idx], streams["data"][ch_info.rchannel[idx]])
 
