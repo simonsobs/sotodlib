@@ -174,7 +174,7 @@ def filter_and_jumpfind(
     return jumps[j_i]
 
 
-def jumpfind_default_pars(x):
+def jumpfind_default_pars(x, sensitivity=2.0):
     """
     Calculate (semi) intelligent default parameters and jumpfind with them
     The presence of large spikes can have a negetive effect on this function,
@@ -186,6 +186,11 @@ def jumpfind_default_pars(x):
     Arguments:
 
         x: Data to jumpfind on, expects 1D
+
+        sensitivity: Sensitivity of the jumpfinder, roughly correlates with
+                     1/(jump size) but since data is filtered, detrended, and
+                     rescaled during jumpfinding it is better to think of it as
+                     something non-physical.
 
     Returns:
 
@@ -204,7 +209,7 @@ def jumpfind_default_pars(x):
         2*_x.std(),
         0,
         10,
-        1.5,
+        1.0/sensitivity,
         0,
         20,
         0,
@@ -213,7 +218,7 @@ def jumpfind_default_pars(x):
     )
 
 
-def jumpfind_default_pars_recursive(x, max_depth=-1, depth=0):
+def jumpfind_default_pars_recursive(x, sensitivity=2.0, max_depth=-1, depth=0):
     """
     Recursively run jumpfind_default_pars
     This helps find jumps that are missed due to jumpfind_default_pars using std to determine some
@@ -227,6 +232,11 @@ def jumpfind_default_pars_recursive(x, max_depth=-1, depth=0):
 
         x: Data to jumpfind on, expects 1D
 
+        sensitivity: Sensitivity of the jumpfinder, roughly correlates with
+                     1/(jump size) but since data is filtered, detrended, and
+                     rescaled during jumpfinding it is better to think of it as
+                     something non-physical.
+
         max_depth: The maximum recursion depth, set negetive to not use
 
         depth: The current recursion depth
@@ -238,7 +248,7 @@ def jumpfind_default_pars_recursive(x, max_depth=-1, depth=0):
                Jumps within 20 samples of each other may not be distinguished
     """
     # Find jumps
-    jumps = jumpfind_default_pars(x)
+    jumps = jumpfind_default_pars(x, sensitivity)
 
     # If no jumps found return
     if len(jumps) == 0:
@@ -254,14 +264,14 @@ def jumpfind_default_pars_recursive(x, max_depth=-1, depth=0):
     added = 0
     for i in range(len(_jumps) - 1):
         sub_jumps = jumpfind_default_pars_recursive(
-            x[(_jumps[i]) : (_jumps[i + 1])], max_depth, depth + 1
+            x[(_jumps[i]) : (_jumps[i + 1])], sensitivity, max_depth, depth + 1
         )
         jumps = np.insert(jumps, i + added, sub_jumps + _jumps[i])
         added += len(sub_jumps)
     return jumps
 
 
-def jumpfind(tod, signal_name="signal"):
+def jumpfind(tod, signal_name="signal", sensitivity=2.0):
     """
     Find jumps in tod.signal_name.
     Expects tod.signal_name to be 1D of 2D
@@ -272,6 +282,11 @@ def jumpfind(tod, signal_name="signal"):
 
         signal_name: Attribute of tod to jumpfind on
 
+        sensitivity: Sensitivity of the jumpfinder, roughly correlates with
+                     1/(jump size) but since data is filtered, detrended, and
+                     rescaled during jumpfinding it is better to think of it as
+                     something non-physical.
+
     Returns:
 
         jumps: The indices of jumps in x
@@ -281,8 +296,8 @@ def jumpfind(tod, signal_name="signal"):
     signal = getattr(tod, signal_name)
 
     if len(signal.shape) == 1:
-        return jumpfind_default_pars_recursive(signal)
+        return jumpfind_default_pars_recursive(signal, sensitivity)
     elif len(signal.shape) == 2:
-        return [jumpfind_default_pars_recursive(sig) for sig in signal]
+        return [jumpfind_default_pars_recursive(sig, sensitivity) for sig in signal]
     else:
         raise ValueError("Jumpfinder only works on 1D or 2D data")
