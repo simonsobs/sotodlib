@@ -657,9 +657,7 @@ class NmatDetvecs(Nmat):
                 iV    = self.iV[bi]/norm**0.5
                 ft[:] = iD[:,None]*ft + self.s*iV.dot(iV.T.dot(ft))
         else:
-            gt.start(f"NmatDetvecs.apply({id}): so3g.nmat_detvecs_apply")
             so3g.nmat_detvecs_apply(ftod.view(tod.dtype), self.bins, self.iD, self.iV, float(self.s), float(norm))
-            gt.stop(f"NmatDetvecs.apply({id}): so3g.nmat_detvecs_apply")
         # I divided by the normalization above instead of passing normalize=True
         # here to reduce the number of operations needed
         fft.irfft(ftod, tod)
