@@ -647,11 +647,7 @@ class NmatDetvecs(Nmat):
     def apply(self, tod, inplace=True, slow=False):
         if not inplace: tod = np.array(tod)
         apply_window(tod, self.nwin)
-        #t1 = time(); print(f"    apply :  apply_window : {t1-t2:8.3f}s", flush=True)
-        gt.start(f"NmatDetvecs.apply({id}): fft.rfft {tod.shape}")
         ftod = fft.rfft(tod)
-        gt.stop(f"NmatDetvecs.apply({id}): fft.rfft {tod.shape}")
-        #t2 = time(); print(f"    apply :          rfft : {t2-t1:8.3f}s", flush=True)
         norm = tod.shape[1]
         if slow:
             for bi, b in enumerate(self.bins):
@@ -664,16 +660,10 @@ class NmatDetvecs(Nmat):
             gt.start(f"NmatDetvecs.apply({id}): so3g.nmat_detvecs_apply")
             so3g.nmat_detvecs_apply(ftod.view(tod.dtype), self.bins, self.iD, self.iV, float(self.s), float(norm))
             gt.stop(f"NmatDetvecs.apply({id}): so3g.nmat_detvecs_apply")
-            #t1 = time(); print(f"    apply : detvecs_apply : {t1-t2:8.3f}s", flush=True)
         # I divided by the normalization above instead of passing normalize=True
         # here to reduce the number of operations needed
-        gt.start(f"NmatDetvecs.apply({id}): fft.irfft {ftod.shape}")
         fft.irfft(ftod, tod)
-        gt.stop(f"NmatDetvecs.apply({id}): fft.irfft {ftod.shape}")
-        #t2 = time(); print(f"    apply :         irfft : {t2-t1:8.3f}s", flush=True)
         apply_window(tod, self.nwin)
-        #t1 = time(); print(f"    apply :  apply_window : {t1-t2:8.3f}s", flush=True)
-        #print(f"    apply :         TOTAL : {t1-t0:8.3f}s", flush=True)
         return tod
 
     def write(self, fname):
