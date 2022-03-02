@@ -2,7 +2,6 @@ import so3g.proj
 import numpy as np
 import scipy
 from pixell import enmap, tilemap
-from toast.timing import Timer, function_timer
 
 from .helpers import _get_csl, _valid_arg, _not_both
 from . import helpers
@@ -184,7 +183,6 @@ class P:
                            timestamps=timestamps, focal_plane=focal_plane,
                            boresight=boresight, rot=rot, cuts=cuts)
 
-    @function_timer
     def zeros(self, super_shape=None, comps=None):
         """Returns an enmap concordant with this object's configured geometry
         and component count.
@@ -208,7 +206,6 @@ class P:
             proj = self._get_proj()
             return enmap.ndmap(proj.zeros(super_shape), wcs=self.geom.wcs)
 
-    @function_timer
     def to_map(self, tod=None, dest=None, comps=None, signal=None,
                det_weights=None, cuts=None):
         """Project time-ordered signal into a map.  This performs the operation
@@ -243,7 +240,6 @@ class P:
                 det_weights=det_weights, comps=comps, threads=threads)
         return dest
 
-    @function_timer
     def to_weights(self, tod=None, dest=None, comps=None, signal=None,
                    det_weights=None, cuts=None):
         """Computes the weights matrix for the uncorrelated noise model and
@@ -282,7 +278,6 @@ class P:
                 det_weights=det_weights, comps=comps, threads=threads)
         return dest
 
-    @function_timer
     def to_inverse_weights(self, weights_map=None, tod=None, dest=None,
                            comps=None, signal=None, det_weights=None, cuts=None,
                            eigentol=1e-4,
@@ -302,7 +297,6 @@ class P:
         dest[:] = helpers._invert_weights_map(weights_map, eigentol=eigentol, UPLO='U')
         return dest
 
-    @function_timer
     def remove_weights(self, signal_map=None, weights_map=None, inverse_weights_map=None,
                        dest=None, **kwargs):
         """Apply the inverse weights matrix to a signal map.
@@ -335,7 +329,6 @@ class P:
         dest[:] = helpers._apply_inverse_weights_map(inverse_weights_map, signal_map)
         return dest
 
-    @function_timer
     def from_map(self, signal_map, dest=None, comps=None, wrap=None,
                  cuts=None, tod=None):
         """Project from a map into the time-domain.
