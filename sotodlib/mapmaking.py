@@ -94,7 +94,7 @@ class MLMapmaker:
                 signal.forward(data.id, tod, iwork[si])
             #t2 = time()
             #t_forward += t2 - t1
-            data.nmat.apply(tod, id=data.id)
+            data.nmat.apply(tod)
             #t1 = time()
             #t_apply += t1 - t2
             for si, signal in reversed(list(enumerate(self.signals))):
@@ -531,7 +531,7 @@ class NmatUncorr(Nmat):
         ivar /= bins[-1,1]-bins[0,0]
         return NmatUncorr(spacing=self.spacing, nbin=len(bins), nmin=self.nmin, bins=bins, ips_binned=ips_binned, ivar=ivar, window=self.window, nwin=nwin)
 
-    def apply(self, tod, inplace=False, id=None):
+    def apply(self, tod, inplace=False):
         if inplace: tod = np.array(tod)
         apply_window(tod, self.nwin)
         ftod = fft.rfft(tod)
