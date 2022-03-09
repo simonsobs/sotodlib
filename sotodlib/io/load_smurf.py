@@ -1157,21 +1157,23 @@ def make_DetDb_single_obs(obsfiledb, obs_id, detdb_path):
     ruids = _get_detset_channel_names(status, ch_map, obsfiledb)
 
     # right now, require specific path to detdb, no helping userf
-    detdb = core.metadata.DetDb(detdb_path)
+    detdb = core.metadata.DetDb()
 
     column_defs = [
-                "'ruid' str",
-                "'band' int",
-                "'channel' int",
-                "'frequency' float",
+                "'readout_id' str",
+                "'smurf_band' int",
+                "'smurf_channel' int",
+                "'res_frequency' float",
     ]
 
     detdb.create_table('base',column_defs)
 
     for i, ch in tqdm(enumerate(ch_map)):
         detdb.get_id(ruids[i])
-        detdb.add_props('base',ruids[i],ruid=ruids[i],band=ch['band'].item(),channel=ch['channel'].item(),frequency=ch['freqs'].item())
+        detdb.add_props('base',ruids[i],readout_id=ruids[i],smurf_band=ch['band'].item(),
+                        smurf_channel=ch['channel'].item(),res_frequency=ch['freqs'].item(),commit=False)
 
+    detdb.conn.commit()
     return detdb
 
 
