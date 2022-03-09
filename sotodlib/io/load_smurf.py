@@ -1127,7 +1127,7 @@ def dump_DetDb(archive, detdb_file):
     session.close()
     return my_db
 
-def make_DetDb_single_obs(obsfiledb, obs_id, detdb_path):
+def make_DetDb_single_obs(obsfiledb, obs_id):
 
     # find relevant files to get status
     c = obsfiledb.conn.execute('select name from files ' 
