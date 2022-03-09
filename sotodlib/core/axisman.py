@@ -774,7 +774,7 @@ class AxisManager:
             self._assignments.update(aman._assignments)
         return self
 
-    def save(self, dest, group=None):
+    def save(self, dest, group=None, overwrite=False):
         """Write this AxisManager data to an HDF5 group.  This is an
         experimental feature primarily intended to assist with
         debugging.  The schema is subject to change, and it's possible
@@ -786,6 +786,8 @@ class AxisManager:
             with group).
           group (str or None): Group within the HDF5 file (relative to
             dest).
+          overwrite (bool): If True, remove any existing thing at the
+            specified address before writing there.
 
         Notes:
           If dest is a string, it is taken to be an HDF5 filename and
@@ -794,6 +796,10 @@ class AxisManager:
 
           If dest is an h5py.Group, the group is the group name in the
           file relative to dest.
+
+          The overwrite argument only matters if group is passed as a
+          string.  A RuntimeError is raised if the group address
+          already exists and overwrite==False.
 
           For example, these are equivalent::
 
@@ -815,7 +821,7 @@ class AxisManager:
 
         """
         from .axisman_io import _save_axisman
-        return _save_axisman(self, dest, group)
+        return _save_axisman(self, dest, group=group, overwrite=overwrite)
 
     @classmethod
     def load(cls, src, group=None):
