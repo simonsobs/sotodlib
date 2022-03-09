@@ -2188,9 +2188,9 @@ def load_file(
     aman = core.AxisManager(
         ch_info[det_axis].copy(),
         core.OffsetAxis("samps", count, sample_start),
-        status.aman,
     )
     aman.wrap("timestamps", _get_timestamps(streams), ([(0, "samps")]))
+    aman.wrap("status", status.aman)
 
     # Conversion from DAC counts to squid phase
     aman.wrap("signal", np.zeros((aman[det_axis].count, aman["samps"].count), "float32"), [(0, det_axis), (1, "samps")])
