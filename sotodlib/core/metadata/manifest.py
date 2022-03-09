@@ -115,15 +115,20 @@ class ManifestScheme:
         Returns column definitions for the map table.
         """
         entries = [row for row in TABLE_DEFS['map_template']]
+        uniques = []
         for c in self.cols:
             name, purpose, match, dtype = c
             if match == 'exact':
                 entries.append('`%s` %s' % (name, dtype))
+                uniques.append('`%s`' % name)
             elif match == 'range':
                 entries.append('`%s__lo` %s' % (name, dtype))
                 entries.append('`%s__hi` %s' % (name, dtype))
+                uniques.append('`%s__lo`' % name)
+                uniques.append('`%s__hi`' % name)
             else:
                 raise ValueError("Bad ctype '%s'" % match)
+        entries.append('UNIQUE(' + ','.join(uniques) + ')')
         return entries
 
     @classmethod
@@ -374,24 +379,30 @@ class ManifestDb:
             raise ValueError('Matched multiple rows with index data: %s' % rows)
         return rows[0]
 
-    def add_entry(self, params, filename=None, create=True, commit=True):
-        """
-        Add an entry to the map table.
+    def add_entry(self, params, filename=None, create=True, commit=True,
+                  replace=False):
+        """Add an entry to the map table.
 
         Arguments:
-
           params: a dict of values for the Index Data columns.  In the
             case of 'range' columns, a pair of values must be
             provided.  Endpoint Data, other than the filename, should
             also be included here.
-
           filename: the filename to associate with matching Index Data.
-
           create: if False, do not create new entry in the file table
             (and fail if entry for filename does not already exist).
-
           commit: if False, do not commit changes to the database (for
             batch use).
+          replace: if True, do not raise an error if the index data
+            matches a row of the table already; instead just update
+            the record.
+
+        Notes:
+          The uniqueness check in the database will only prevent (or
+          replace) *identical* index entries.  Other inconsistent
+          states, such as overlapping time ranges that would both
+          match some single timestamp, are not caught here.
+
         """
         # Validate the input data.
         q, p = self.scheme.get_insertion_query(params)
@@ -400,8 +411,12 @@ class ManifestDb:
         c = self.conn.cursor()
         marks = ','.join('?' * len(p))
         c = self.conn.cursor()
-        c.execute('insert into map (%s,file_id) values (%s,?)' % (q, marks),
-                  p + (file_id,))
+        query = 'into map (%s,file_id) values (%s,?)' % (q, marks)
+        if replace:
+            query = 'insert or replace ' + query
+        else:
+            query = 'insert ' + query
+        c.execute(query, p + (file_id,))
         if commit:
             self.conn.commit()
 
