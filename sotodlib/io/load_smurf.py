@@ -110,6 +110,35 @@ def get_sample_timestamps(frame):
         times = np.array([t.time / spt3g_core.G3Units.s for t in frame["data"].times()])
         return times, TimingParadigm.G3Timestream
 
+def _file_has_end_frames(filename):
+    ended = False
+    
+    ## Search through file looking for stream closeout
+    reader = so3g.G3IndexedReader(filename)
+    logger.debug(f"Reading {filename} to look for observation end.")
+    while True:
+        frames = reader.Process(None)
+        if not frames:
+            break
+        frame = frames[0]
+        if str(frame.type) == 'Wiring':
+            ## ignore dump frames, they lie (and are at the beginning of observations)
+            if frame["dump"]:
+                continue
+            if 'AMCc.SmurfProcessor.FileWriter.IsOpen' in frame['status']:
+                status = {}
+                status.update(yaml.safe_load(frame['status']))
+                if not status['AMCc.SmurfProcessor.FileWriter.IsOpen']:
+                    ended = True
+                    break
+            if 'AMCc.SmurfProcessor.SOStream.open_g3stream' in frame['status']:
+                status = {}
+                status.update(yaml.safe_load(frame['status']))
+                if not status['AMCc.SmurfProcessor.SOStream.open_g3stream']:
+                    ended = True
+                    break
+    return ended
+
 
 class G3tSmurf:
     def __init__(self, archive_path, db_path=None, meta_path=None, echo=False):
@@ -680,6 +709,7 @@ class G3tSmurf:
         """
 
         if not force and obs.stop is not None:
+            logger.debug(f"Returning from {obs.obs_id} without updates")
             return
 
         x = session.query(Files.name).filter(
@@ -687,19 +717,23 @@ class G3tSmurf:
         )
         x = x.order_by(Files.start).first()
         if x is None:
-            # no files to add at this point
+            logger.debug(f"Found no files after start of {obs.obs_id}")
+            ## no files to add at this point
             return
 
         x = x[0]
         session_id, f_num = (x[:-3].split("/")[-1]).split("_")
         prefix = "/".join(x.split("/")[:-1]) + "/"
-        if int(session_id) - obs.start.timestamp() > max_wait:
-            # we don't have .g3 files for some reason
+        if int(session_id)-obs.start.timestamp() > max_wait:
+            ## we don't have .g3 files for some reason
+            logger.debug(f"Found no files associated with {obs.obs_id}")
             return
 
         flist = session.query(Files).filter(Files.name.like(prefix + session_id + "%"))
         flist = flist.order_by(Files.start).all()
-        # Load Status Information
+        logger.debug(f"Found {len(flist)} files in {obs.obs_id}")
+        ## Load Status Information
+
         status = SmurfStatus.from_file(flist[0].name)
 
         # Add any tags from the status
@@ -746,33 +780,20 @@ class G3tSmurf:
             db_file.sample_stop = obs_samps + file_samps
             obs_samps = obs_samps + file_samps
 
-        obs_ended = False
-
-        # Search through file looking for stream closeout
-        reader = so3g.G3IndexedReader(flist[-1].name)
-        while True:
-            frames = reader.Process(None)
-            if not frames:
-                break
-            frame = frames[0]
-            if str(frame.type) == "Wiring":
-                if "AMCc.SmurfProcessor.FileWriter.IsOpen" in frame["status"]:
-                    status = {}
-                    status.update(yaml.safe_load(frame["status"]))
-                    if not status["AMCc.SmurfProcessor.FileWriter.IsOpen"]:
-                        obs_ended = True
-                        break
-                if "AMCc.SmurfProcessor.SOStream.open_g3stream" in frame["status"]:
-                    status = {}
-                    status.update(yaml.safe_load(frame["status"]))
-                    if not status["AMCc.SmurfProcessor.SOStream.open_g3stream"]:
-                        obs_ended = True
-                        break
+        obs_ended = _file_has_end_frames(flist[-1].name)
+        if obs.stop is None and not obs_ended and (force or flist[-1].stop <=
+                                                    dt.datetime.now()-dt.timedelta(hours=1)):
+            ## try to brute force find the end if it's been awhile
+            for f in flist[::-1]:
+                if not obs_ended:
+                    obs_ended = _file_has_end_frames(f.name)
 
         if obs_ended:
+            logger.debug(f"Found that {obs.obs_id} has ended.")
             obs.n_samples = obs_samps
             obs.duration = flist[-1].stop.timestamp() - flist[0].start.timestamp()
             obs.stop = flist[-1].stop
+            logger.debug(f"Setting {obs.obs_id} stop time to {obs.stop}")
         session.commit()
 
     def search_metadata_actions(
