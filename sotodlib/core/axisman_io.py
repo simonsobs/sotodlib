@@ -98,7 +98,7 @@ def _safe_scalars(x):
     # Must be fine then!
     return x
 
-def _save_axisman(axisman, dest, group=None):
+def _save_axisman(axisman, dest, group=None, overwrite=False):
     """
     See AxisManager.save.
     """
@@ -159,6 +159,13 @@ def _save_axisman(axisman, dest, group=None):
     else:
         f = None
     if group is not None:
+        if group in dest:
+            if overwrite:
+                del dest[group]
+            else:
+                raise RuntimeError(
+                    f'Destination group "{group}" already exists in {dest}; '
+                    f'pass overwite=True to clobber.')
         dest = f.create_group(group)
 
     dest.attrs['_axisman'] = json.dumps({
