@@ -383,8 +383,10 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None, invert=Fa
       iir_params: IIR filter params as described below; or a string
         name under which to look up those params in tod; or a list of
         three strings to loop up the params in tod, in which case the
-        order should be: a, b, fscale; defaults to:
-        ['filter_a', 'filter_b', 'downsample_factor']
+        order should be: a, b, fscale; or a string to look up the SmurfStatus
+        AxisManager within the tod, if tod['iir_params'] resolves to an
+        AxisManager then this is assumed.
+        Default value is 'status'
         Note that if `a` and `b` are passed explicitly
         then no attempt is made to resolve this argument.
 
@@ -403,7 +405,7 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None, invert=Fa
     if a is None:
         # Get params from TOD?
         if iir_params is None:
-            iir_params = ['filter_b', 'filter_a', 'downsample_factor']
+            iir_params = "status" 
         if isinstance(iir_params, list):
             a = tod[iir_params[0]]
             b = tod[iir_params[1]]
@@ -411,8 +413,16 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None, invert=Fa
         else:
             if isinstance(iir_params, str):
                 iir_params = tod[iir_params]
-            a, b, fscale = iir_params  # must be (3, n)
-            fscale = fscale[0]
+            if isinstance(iir_filter, np.ndarray):
+                a, b, fscale = iir_params  # must be (3, n)
+                fscale = fscale[0]
+            elif isinstance(iir_filter, type(tod)):
+                a = iir_params.filter_a
+                b = iir_params.filter_b
+                fscale = iir_params.downsample_factor
+            else:
+                raise ValueError("Provided iir_params not valid,\
+                                  refer to docstring for acceptable values")
     z = np.exp(-2j*np.pi*freqs * fscale)
     B, A = np.polyval(b[::-1], z), np.polyval(a[::-1], z)
     if invert:
