@@ -251,8 +251,14 @@ class TestAxisManager(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tempdir:
             filename = os.path.join(tempdir, 'test.h5')
             aman.save(filename, 'my_axisman')
+            # Overwrite
+            aman.save(filename, 'my_axisman', overwrite=True)
+            # Refuse to overwrite
+            with self.assertRaises(RuntimeError):
+                aman.save(filename, 'my_axisman')
+            # Read back.
             aman2 = aman.load(filename, 'my_axisman')
-            shutil.copy(filename, 'debug.h5')
+        # Check what was read back.
         # This is not a very satisfying comparison ... support for ==
         # should be required for all AxisManager members!
         for k in aman._fields.keys():
