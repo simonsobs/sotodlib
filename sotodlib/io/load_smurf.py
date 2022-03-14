@@ -958,12 +958,12 @@ class G3tSmurf:
                     # decide if this is the last channel assignment in the directory
                     # needed because we often get multiple channel assignments in the same folder
                     root = os.path.join("/", *path.split("/")[:-1])
-                    cha_times = [
-                        int(f.split("_")[0]) for f in os.listdir(root) if pattern in f
-                    ]
+                    fname = path.split('/')[-1]
+                    fband = int(re.findall('b\d.txt', fname)[0][1])
+                    cha_times = [int(f.split('_')[0]) for f in os.listdir(root) if f'b{fband}.txt'
+                                 in f.split('_')[-1]]
                     if ctime != np.max(cha_times):
                         continue
-                    fname = path.split("/")[-1]
                     logger.debug(
                         f"Add new channel assignment: {stream_id},{ctime}, {path}"
                     )
