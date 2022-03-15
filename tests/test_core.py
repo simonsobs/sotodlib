@@ -128,6 +128,11 @@ class TestAxisManager(unittest.TestCase):
         with self.assertRaises(ValueError):
             aman.wrap('square_root', 1j)
 
+        # Make sure AxisManager with scalar can be copied
+        aman_copy = aman.copy()
+        self.assertEqual(aman['x'], aman_copy['x'])
+
+
     # Multi-dimensional restrictions.
 
     def test_200_multid(self):
