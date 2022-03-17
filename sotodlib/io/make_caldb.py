@@ -48,13 +48,15 @@ class _MakeCalDb:
         name : string
             base name that will be used in database / hdf5 file naming
         context : string or loaded context object. used to access loaders and obsfiledb
+        db_file : path to database file, does assume it was greated with the exact same
+            parameters as this current class instance
         prefix : place to start creating database if db_file is None
         h5prefix : place to start creating h5 files if h5 files is None
         field_names : string, list of strings, or None
-            names to be used in the result set creation. Must match length of 
+            names to be used in the result set creation. Must match 
             results returned from the calc function. If none, name will be used
         manifest_args : dict or none. Information to add to the Manifest Database for
-            each observation.
+            each observation. Most common use: loaders
         """
         self.name = name
         if isinstance(context, str):
@@ -113,7 +115,7 @@ class _MakeCalDb:
         
         
     def __repr__(self):
-        return f"CalcCalDb {self.name}"
+        return f"MakeCalDb {self.name}"
         
     def calc(self, obs_id, samples=None, *args ):
         """Function written over by child classes, takes in an obs_id and set of 
@@ -190,7 +192,6 @@ class Make_ObsCalDb(_MakeCalDb):
     
     def write_h5_data(self, h5_file, dataset, samples, 
                       ids, result, attrs, overwrite=False ):
-        
         if len(samples) != 1:
             raise ValueError("Expect len(samples)==1 where samples=[(0,obs_n_samps)]"
                             f"received {samples}")
@@ -211,6 +212,9 @@ class Make_ObsCalDb(_MakeCalDb):
                               overwrite=overwrite, )
         
     def calc(self, obs_id, samples=None):
+        """This function expected to be called by the child classes, used to 
+        determine the number of samples in the observation.
+        """
         if samples is not None:
             raise ValueError(f"{type(self).__name__} does not accept samples argument")
         
@@ -225,10 +229,14 @@ class Make_SampleCalDb(_MakeCalDb):
     an observation. An example of this might be a glitch detection algorithm that returns
     detected glitches at certain samples and their significance at that sample.
     """
+    
     def __init__(self, name, context, **kwargs):
         super().__init__(name, context, **kwargs)
         
     def calc(self, obs_id, samples=None):
+        """This function expected to be called by the child classes, used to 
+        determine the number of samples in the observation.
+        """
         if samples is not None:
             raise ValueError(f"{type(self).__name__} does not accept samples argument")
         
