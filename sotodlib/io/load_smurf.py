@@ -43,7 +43,6 @@ SMURF_ACTIONS = {
         'stream_g3_on',         
     ],
 }
- 
 
 # Types of Frames we care about indexing
 type_key = ['Observation', 'Wiring', 'Scan']
@@ -1176,7 +1175,14 @@ def make_DetDb_single_obs(obsfiledb, obs_id):
     detdb.conn.commit()
     return detdb
 
+def detdb_context_hook(ctx, obs_id):
+    ddb = make_DetDb_single_obs(ctx.obsfiledb, obs_id)
+    ctx.detdb = ddb
+    return ddb
 
+core.Context.hook_sets['obs_detdb_load'] = {
+    'before-load-obs': detdb_context_hook,
+}
 
 
 class SmurfStatus:
