@@ -1394,9 +1394,9 @@ def make_DetDb_single_obs(obsfiledb, obs_id):
     detdb.conn.commit()
     return detdb
 
-def detdb_context_hook(ctx, obs_id):
+def obs_detdb_context_hook(ctx, obs_id):
     ddb = make_DetDb_single_obs(ctx.obsfiledb, obs_id)
-    ctx.detdb = ddb
+    ctx.obs_detdb = ddb
     return ddb
 
 core.Context.hook_sets['obs_detdb_load'] = {
