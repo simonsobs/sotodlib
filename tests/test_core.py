@@ -248,25 +248,28 @@ class TestAxisManager(unittest.TestCase):
         aman.wrap('c', np.str_('twelve'))
         aman.wrap('d', np.bool_(False))
 
-        with tempfile.TemporaryDirectory() as tempdir:
-            filename = os.path.join(tempdir, 'test.h5')
-            aman.save(filename, 'my_axisman')
-            # Overwrite
-            aman.save(filename, 'my_axisman', overwrite=True)
-            # Refuse to overwrite
-            with self.assertRaises(RuntimeError):
-                aman.save(filename, 'my_axisman')
-            # Read back.
-            aman2 = aman.load(filename, 'my_axisman')
-        # Check what was read back.
-        # This is not a very satisfying comparison ... support for ==
-        # should be required for all AxisManager members!
-        for k in aman._fields.keys():
-            self.assertEqual(aman[k].__class__, aman2[k].__class__)
-            if hasattr(aman[k], 'shape'):
-                self.assertEqual(aman[k].shape, aman2[k].shape)
-            else:
-                self.assertEqual(aman[k], aman2[k])  # scalar
+        # Make sure the saving / clobbering / readback logic works
+        # equally for simple group name, root group, None->root group.
+        for dataset in ['path/to/my_axisman', '/', None]:
+            with tempfile.TemporaryDirectory() as tempdir:
+                filename = os.path.join(tempdir, 'test.h5')
+                aman.save(filename, dataset)
+                # Overwrite
+                aman.save(filename, dataset, overwrite=True)
+                # Refuse to overwrite
+                with self.assertRaises(RuntimeError):
+                    aman.save(filename, dataset)
+                # Read back.
+                aman2 = aman.load(filename, dataset)
+            # Check what was read back.
+            # This is not a very satisfying comparison ... support for ==
+            # should be required for all AxisManager members!
+            for k in aman._fields.keys():
+                self.assertEqual(aman[k].__class__, aman2[k].__class__)
+                if hasattr(aman[k], 'shape'):
+                    self.assertEqual(aman[k].shape, aman2[k].shape)
+                else:
+                    self.assertEqual(aman[k], aman2[k])  # scalar
 
     def test_900_everything(self):
         tod = core.AxisManager(
