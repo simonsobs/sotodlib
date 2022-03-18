@@ -153,20 +153,28 @@ def _save_axisman(axisman, dest, group=None, overwrite=False):
     # Sanitize ...
     schema = _safe_scalars(schema)
 
+    # Resolve the destination group.
+    file_to_close = None
     if isinstance(dest, str):
-        f = h5py.File(dest, 'a')
-        dest = f
-    else:
-        f = None
+        file_to_close = h5py.File(dest, 'a')
+        dest = file_to_close['/']
+    assert isinstance(dest, h5py.Group)  # filename or Group expected
     if group is not None:
         if group in dest:
+            dest = dest[group]
+        else:
+            dest = dest.create_group(group)
+
+    # Needs emptying?  This might be slower than just del dest[group],
+    # but it also works for '/' or Groups passed in by reference only.
+    for target in [dest, dest.attrs]:
+        for k in list(target.keys()):
             if overwrite:
-                del dest[group]
+                del target[k]
             else:
                 raise RuntimeError(
-                    f'Destination group "{group}" already exists in {dest}; '
+                    f'Destination group "{dest.name}" is not empty; '
                     f'pass overwite=True to clobber.')
-        dest = f.create_group(group)
 
     dest.attrs['_axisman'] = json.dumps({
         'version': 0,
@@ -195,8 +203,8 @@ def _save_axisman(axisman, dest, group=None, overwrite=False):
     if len(scalars):
         dest.attrs['_scalars'] = json.dumps(scalars)
 
-    if f:
-        f.close()
+    if file_to_close:
+        file_to_close.close()
 
 def _load_axisman(src, group=None, cls=None):
     """
