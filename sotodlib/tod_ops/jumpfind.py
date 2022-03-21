@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.signal as sig
 import scipy.ndimage as simg
+from so3g.proj import Ranges, RangesMatrix
 
 
 def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs):
@@ -200,16 +201,16 @@ def jumpfind_default_pars(x, sensitivity=2.0):
     """
     _x = sig.detrend(x)
     if _x.std() > 10:
-        _x = _x/(10**(int(np.log10(_x.std()))))
+        _x = _x / (10 ** (int(np.log10(_x.std()))))
     if np.isclose(_x.std(), 0.0):
         return np.array([])
 
     return filter_and_jumpfind(
         _x,
-        2*_x.std(),
+        2 * _x.std(),
         0,
         10,
-        1.0/sensitivity,
+        1.0 / sensitivity,
         0,
         20,
         0,
@@ -271,7 +272,7 @@ def jumpfind_default_pars_recursive(x, sensitivity=2.0, max_depth=-1, depth=0):
     return jumps
 
 
-def jumpfind(tod, signal=None, sensitivity=2.0):
+def jumpfind(tod, signal=None, sensitivity=2.0, buff_size=10):
     """
     Find jumps in tod.signal_name.
     Expects tod.signal_name to be 1D of 2D
@@ -287,18 +288,26 @@ def jumpfind(tod, signal=None, sensitivity=2.0):
                      rescaled during jumpfinding it is better to think of it as
                      something non-physical.
 
+        buff_size: Amount to buffer each jump location in the output RangesMatrix
+
     Returns:
 
-        jumps: The indices of jumps in x
+        jumps: RangesMatrix containing jumps in signal, if signal is 1D Ranges in returned instead
                There is some uncertainty on order of a few samples
                Jumps within 20 samples of each other may not be distinguished
     """
     if signal is None:
         signal = tod.signal
 
+    jump_mask = np.zeros(signal.shape, dtype=bool)
+
     if len(signal.shape) == 1:
-        return jumpfind_default_pars_recursive(signal, sensitivity)
+        jumps = jumpfind_default_pars_recursive(signal, sensitivity)
+        jump_mask[jumps] = True
     elif len(signal.shape) == 2:
-        return [jumpfind_default_pars_recursive(sig, sensitivity) for sig in signal]
+        for i, _signal in enumerate(signal):
+            jumps = jumpfind_default_pars_recursive(_signal, sensitivity)
+            jump_mask[i][jumps] = True
     else:
         raise ValueError("Jumpfinder only works on 1D or 2D data")
+    return RangesMatrix.from_mask(jump_mask).buffer(buff_size)
