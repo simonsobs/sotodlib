@@ -1,6 +1,12 @@
 import numpy as np
 import scipy.stats as stats
 
+## "temporary" fix to deal with scipy>1.8 changing the sparse setup
+try:
+    from scipy.sparse import csr_array
+except ImportError:
+    from scipy.sparse import csr_matrix as csr_array
+    
 from so3g.proj import Ranges, RangesMatrix
 
 from .tod_ops import filters
@@ -40,9 +46,10 @@ def get_turnaround_flags(tod, qlim=1, az=None, merge=True,
     return flag
 
 
-def get_glitch_flags(tod, t_glitch=0.002, hp_fc=0.5, n_sig=10, buffer=200, 
-                     signal=None, merge=True, 
-                     overwrite=False, name='glitches'):
+def get_glitch_flags(aman, t_glitch=0.002, hp_fc=0.5, n_sig=10, buffer=200, 
+                     signal=None, merge=True,
+                     overwrite=False, name='glitches',
+                     full_output=True):
     """ Find glitches with fourier filtering
     Translation from moby2 as starting point
     
@@ -55,7 +62,9 @@ def get_glitch_flags(tod, t_glitch=0.002, hp_fc=0.5, n_sig=10, buffer=200,
         signal (str): if None, defaults to 'signal'
         merge (bool): if true, add to tod.flags
         name (string): name of flag to add to tod.flags
-        overwrite (bool): if true, write over flag. if false, don't
+        overwrite (bool): if true, write over flag. if false, don't    
+        full_output (bool): if true, return sparse matrix with the significance of 
+            the detected glitches
     
     Returns:
         flag: RangesMatrix object of glitches
@@ -65,24 +74,36 @@ def get_glitch_flags(tod, t_glitch=0.002, hp_fc=0.5, n_sig=10, buffer=200,
         signal = 'signal'
     # f-space filtering
     filt = filters.high_pass_sine2(cutoff=hp_fc) * filters.gaussian_filter(t_sigma=0.002)
-    fvec = fourier_filter(tod, filt, detrend='linear', 
+    fvec = fourier_filter(aman, filt, detrend='linear', 
                           signal_name=signal, resize='zero_pad')
     # get the threshods based on n_sig x nlev = n_sig x iqu x 0.741
     fvec = np.abs(fvec)
-    thres = 0.741 * stats.iqr(fvec, axis=1) * n_sig
+    iqr_range = 0.741 * stats.iqr(fvec, axis=1) 
     # get flags
-    msk = fvec > thres[:,None]
+    msk = fvec > iqr_range[:,None]*n_sig
     flag = RangesMatrix( [Ranges.from_bitmask(m) for m in msk])
     flag.buffer(buffer)
     
     if merge:
-        if name in tod.flags and not overwrite:
+        if name in aman.flags and not overwrite:
             raise ValueError('Flag name {} already exists in tod.flags'.format(name))
-        elif name in tod.flags:
-            tod.flags[name] = flag
+        elif name in aman.flags:
+            aman.flags[name] = flag
         else:
-            tod.flags.wrap(name, flag)
-        
+            aman.flags.wrap(name, flag)
+    
+    if full_output:
+        indptr = np.append( 0, 
+                           np.cumsum( [np.sum(msk[i]) 
+                                       for i in range(aman.dets.count)]))
+        indices = np.concatenate( [np.where(msk[i])[0] 
+                                   for i in range(aman.dets.count) ])
+        data = np.concatenate( [ fvec[i][msk[i]]/iqr_range[i] 
+                                for i in range(aman.dets.count)  ])
+        smat = csr_array( (data, indices, indptr), 
+                         shape=( aman.dets.count, aman.samps.count))
+        return flag, smat
+    
     return flag
 
 def get_trending_flags(aman, max_trend=5*np.pi, n_pieces=1, signal=None,
