@@ -271,7 +271,7 @@ def jumpfind_default_pars_recursive(x, sensitivity=2.0, max_depth=-1, depth=0):
     return jumps
 
 
-def jumpfind(tod, signal_name="signal", sensitivity=2.0):
+def jumpfind(tod, signal=None, sensitivity=2.0):
     """
     Find jumps in tod.signal_name.
     Expects tod.signal_name to be 1D of 2D
@@ -280,7 +280,7 @@ def jumpfind(tod, signal_name="signal", sensitivity=2.0):
 
         tod: axis manager
 
-        signal_name: Attribute of tod to jumpfind on
+        signal: Signal to jumpfind on. If None than tod.signal is used.
 
         sensitivity: Sensitivity of the jumpfinder, roughly correlates with
                      1/(jump size) but since data is filtered, detrended, and
@@ -293,7 +293,8 @@ def jumpfind(tod, signal_name="signal", sensitivity=2.0):
                There is some uncertainty on order of a few samples
                Jumps within 20 samples of each other may not be distinguished
     """
-    signal = getattr(tod, signal_name)
+    if signal is None:
+        signal = tod.signal
 
     if len(signal.shape) == 1:
         return jumpfind_default_pars_recursive(signal, sensitivity)
