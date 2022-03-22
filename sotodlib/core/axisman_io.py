@@ -3,6 +3,12 @@ import numpy as np
 import json
 import h5py
 
+## "temporary" fix to deal with scipy>1.8 changing the sparse setup
+try:
+    from scipy.sparse import csr_array
+except ImportError:
+    from scipy.sparse import csr_matrix as csr_array
+
 from .axisman import *
 from .flagman import FlagManager
 
@@ -60,6 +66,24 @@ def expand_RangesMatrix(flat_rm):
         start = ends[i+stride-1]
     return so3g.proj.RangesMatrix(ranges, child_shape=shape[1:])
 
+## Flatten and Expand sparse arrays
+def flatten_csr_array(arr):
+    """Extract information from scipy.sparse.csr_array for saving in
+    hdf5 files"""
+    return {
+        'data': arr.data,
+        'indices': arr.indices,
+        'indptr': arr.indptr,
+        'shape': arr.shape,
+    }
+
+
+def expand_csr_array(flat_arr):
+    """Reconstruct csr_array from flattened versions
+    """
+    return csr_array( (flat_arr['data'], flat_arr['indices'],
+                       flat_arr['indptr']),
+                     shape=flat_arr['shape'])
 
 # Helper functions for numpy arrays containing unicode strings; must
 # be written to HDF5 as "S" type arrays.
@@ -127,6 +151,8 @@ def _save_axisman(axisman, dest, group=None):
                 raise ValueError(f"No encoder system for {k}={v.__class__}")
         elif isinstance(v, so3g.proj.RangesMatrix):
             item['encoding'] = 'rangesmatrix'
+        elif isinstance(v, csr_array):
+            item['encoding'] = 'csrarray'
         else:
             print(v.__class__)
         schema.append(item)
@@ -176,6 +202,10 @@ def _save_axisman(axisman, dest, group=None):
         elif item['encoding'] == 'rangesmatrix':
             g = dest.create_group(item['name'])
             for k, v in flatten_RangesMatrix(data).items():
+                g.create_dataset(k, data=v)
+        elif item['encoding'] == 'csrarray':
+            g = dest.create_group(item['name'])
+            for k, v in flatten_csr_array(data).items():
                 g.create_dataset(k, data=v)
         elif item['encoding'] == 'axisman':
             g = dest.create_group(item['name'])
@@ -243,6 +273,10 @@ def _load_axisman(src, group=None, cls=None):
             x = src[item['name']]
             rm_flat = {k: x[k][:] for k in ['shape', 'intervals', 'ends']}
             axisman.wrap(item['name'], expand_RangesMatrix(rm_flat), assign)
+        elif item['encoding'] == 'csrarray':
+            x = src[item['name']]
+            csr_flat = {k: x[k][:] for k in ['shape', 'data', 'indices', 'indptr']}
+            axisman.wrap(item['name'], expand_csr_array(csr_flat), assign)
         else:
             print('No decoder for:', item)
 
