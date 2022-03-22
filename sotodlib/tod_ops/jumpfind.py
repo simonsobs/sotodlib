@@ -272,7 +272,7 @@ def jumpfind_default_pars_recursive(x, sensitivity=2.0, max_depth=-1, depth=0):
     return jumps
 
 
-def jumpfind(tod, signal=None, sensitivity=2.0, buff_size=10):
+def jumpfind(tod, signal=None, sensitivity=2.0, max_depth=-1, buff_size=10):
     """
     Find jumps in tod.signal_name.
     Expects tod.signal_name to be 1D of 2D
@@ -287,6 +287,8 @@ def jumpfind(tod, signal=None, sensitivity=2.0, buff_size=10):
                      1/(jump size) but since data is filtered, detrended, and
                      rescaled during jumpfinding it is better to think of it as
                      something non-physical.
+
+        max_depth: The maximum recursion depth, set negetive to not use
 
         buff_size: Amount to buffer each jump location in the output RangesMatrix
 
