@@ -279,7 +279,12 @@ class FrameProcessor(object):
             if self.hkbundle is None:
                 self.hkbundle = _HKBundle()
 
-            self.hkbundle.add(f['blocks'][0])   # 0th block for now
+            try:
+                i = list(f['block_names']).index('ACU_position')
+            except ValueError:
+                print("'ACU_position' field not found in block names.")
+                return
+            self.hkbundle.add(f['blocks'][i])
 
             self.hkbundle.data['Azimuth_Velocity'] = pos2vel(self.hkbundle.data['Azimuth_Corrected'])
             self.hkbundle.data['Elevation_Velocity'] = pos2vel(self.hkbundle.data['Elevation_Corrected'])
