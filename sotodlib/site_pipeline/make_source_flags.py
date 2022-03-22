@@ -7,7 +7,6 @@ import yaml
 
 import sotodlib
 from sotodlib import core, coords, site_pipeline
-import so3g
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +90,7 @@ def main(args=None):
                 flags += _flags
 
         if flags is None:
+            import so3g  # This is here to dodge sphinxarg mocking failure.
             flags = so3g.proj.RangesMatrix.zeros(
                 shape=(tod.dets.count, tod.samps.count))
 
