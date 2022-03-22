@@ -1,7 +1,7 @@
 import numpy as np
 import scipy.signal as sig
 import scipy.ndimage as simg
-from so3g.proj import Ranges, RangesMatrix
+from so3g.proj import RangesMatrix
 
 
 def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs):
@@ -85,7 +85,7 @@ def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs)
     _jumps = np.append(_jumps, len(x))
     added = 0
     for i in range(len(_jumps) - 1):
-        sub_jumps = jumpfind(
+        sub_jumps = _jumpfind(
             x[(_jumps[i]) : (_jumps[i + 1])],
             min_chunk,
             min_size,
