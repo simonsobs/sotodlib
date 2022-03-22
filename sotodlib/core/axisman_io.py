@@ -68,21 +68,21 @@ def expand_RangesMatrix(flat_rm):
 
 ## Flatten and Expand sparse arrays
 def flatten_csr_array(arr):
-    """Extract information from scipy.sparse.csr_array for saving in 
+    """Extract information from scipy.sparse.csr_array for saving in
     hdf5 files"""
     return {
-        'data' : arr.data,
-        'indices' : arr.indices,
-        'indptr' : arr.indptr,
-        'shape' : arr.shape,
+        'data': arr.data,
+        'indices': arr.indices,
+        'indptr': arr.indptr,
+        'shape': arr.shape,
     }
 
 
 def expand_csr_array(flat_arr):
-    """Reconstruct csr arrays from flattened versions
+    """Reconstruct csr_array from flattened versions
     """
-    return csr_array( (flat_arr['data'], flat_arr['indices'], 
-                       flat_arr['indptr']), 
+    return csr_array( (flat_arr['data'], flat_arr['indices'],
+                       flat_arr['indptr']),
                      shape=flat_arr['shape'])
 
 # Helper functions for numpy arrays containing unicode strings; must
