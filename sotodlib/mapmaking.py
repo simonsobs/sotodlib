@@ -2,15 +2,34 @@
 # e.g. noise_model.py, pointing_matrix.py, utilities, mlmapmaker.py etc. Maybe we will
 # do that later, but for now I don't think that split makes things easier for the user.
 
-import numpy as np, sys, time, warnings
+from time import time
+import sys
+import warnings
+
+import numpy as np
 import so3g
+from pixell import enmap, utils, fft, bunch, tilemap
+
 from . import coords
 from . import tod_ops
-from pixell import enmap, utils, fft, bunch, wcsutils, mpi, tilemap, memory
 
 ##########################################
 ##### Maximum likelihood mapmaking #######
 ##########################################
+
+def deslope_el(tod, el, srate, inplace=False):
+    if not inplace: tod = tod.copy()
+    utils.deslope(tod, w=1, inplace=True)
+    f     = fft.rfftfreq(tod.shape[-1], 1/srate)
+    fknee = 3.0
+    with utils.nowarn():
+        iN = (1+(f/fknee)**-3.5)**-1
+    b  = 1/np.sin(el)
+    utils.deslope(b, w=1, inplace=True)
+    Nb = fft.irfft(iN*fft.rfft(b),b*0)
+    amp= np.sum(tod*Nb,-1)/np.sum(b*Nb)
+    tod-= amp[:,None]*b
+    return tod
 
 class MLMapmaker:
     def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False):
@@ -23,48 +42,82 @@ class MLMapmaker:
         self.data         = []
         self.dof          = MultiZipper()
         self.ready        = False
+
     def add_obs(self, id, obs, noise_model=None):
         # Prepare our tod
-        tod    = obs.signal.astype(self.dtype, copy=False)
-        utils.deslope(tod, w=5, inplace=True)
-        # Allow the user to override the noise model on a per-obs level
-        if noise_model is None: noise_model = self.noise_model
         ctime  = obs.timestamps
         srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
+        tod    = obs.signal.astype(self.dtype, copy=False)
+        utils.deslope(tod, w=1, inplace=True)
+        #bunch.write("test0.hdf", bunch.Bunch(tod=tod[::10], el=obs.boresight.el))
+        #tod    = deslope_el2(tod, obs.boresight.el, srate, inplace=True)
+        # Allow the user to override the noise model on a per-obs level
+        if noise_model is None: noise_model = self.noise_model
         # Build the noise model from the obs unless a fully
         # initialized noise model was passed
         if noise_model.ready: nmat = noise_model
         else: nmat = noise_model.build(tod, srate=srate)
         # And apply it to the tod
+        #bunch.write("test1.hdf", bunch.Bunch(tod=tod[::10], el=obs.boresight.el))
         tod    = nmat.apply(tod)
+        #bunch.write("test2.hdf", bunch.Bunch(tod=tod[::10]))
         # Add the observation to each of our signals
         for signal in self.signals:
             signal.add_obs(id, obs, nmat, tod)
         # Save what we need about this observation
         self.data.append(bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime),
             dets=obs.dets.vals, nmat=nmat))
+
     def prepare(self):
         if self.ready: return
         for signal in self.signals:
             signal.prepare()
             self.dof.add(signal.dof)
         self.ready = True
+
     def A(self, x):
         # unzip goes from flat array of all the degrees of freedom to individual maps, cuts etc.
         # to_work makes a scratch copy and does any redistribution needed
+        #t0 = time()
+        #t1 = time()
         iwork = [signal.to_work(m) for signal,m in zip(self.signals,self.dof.unzip(x))]
+        #t2 = time(); print(f" A    iwork : {t2-t1:8.3f}s", flush=True)
         owork = [w*0 for w in iwork]
+        #t1 = time(); print(f" A    owork : {t1-t2:8.3f}s", flush=True)
+        #t_forward = 0
+        #t_apply = 0
+        #t_backward = 0
         for di, data in enumerate(self.data):
             tod = np.zeros([data.ndet, data.nsamp], self.dtype)
+            #t1 = time()
             for si, signal in enumerate(self.signals):
                 signal.forward(data.id, tod, iwork[si])
+            #t2 = time()
+            #t_forward += t2 - t1
             data.nmat.apply(tod)
+            #t1 = time()
+            #t_apply += t1 - t2
             for si, signal in reversed(list(enumerate(self.signals))):
                 signal.backward(data.id, tod, owork[si])
-        return self.dof.zip(*[signal.from_work(w) for signal,w in zip(self.signals,owork)])
+            #t2 = time()
+            #t_backward += t2 - t1
+        #print(f" A  forward : {t_forward:8.3f}s", flush=True)
+        #print(f" A    apply : {t_apply:8.3f}s", flush=True)
+        #print(f" A backward : {t_backward:8.3f}s", flush=True)
+        #t1 = time()
+        result = self.dof.zip(*[signal.from_work(w) for signal,w in zip(self.signals,owork)])
+        #t2 = time(); print(f" A      zip : {t2-t1:8.3f}s", flush=True)
+        #print(f" A    TOTAL : {t2-t0:8.3f}s", flush=True)
+        return result
+
     def M(self, x):
+        #t1 = time()
         iwork = self.dof.unzip(x)
-        return self.dof.zip(*[signal.precon(w) for signal, w in zip(self.signals, iwork)])
+        #t2 = time(); print(f" M    iwork : {t2-t1:8.3f}s", flush=True)
+        result = self.dof.zip(*[signal.precon(w) for signal, w in zip(self.signals, iwork)])
+        #t1 = time(); print(f" M      zip : {t1-t2:8.3f}s", flush=True)
+        return result
+
     def solve(self, maxiter=500, maxerr=1e-6):
         self.prepare()
         rhs    = self.dof.zip(*[signal.rhs for signal in self.signals])
@@ -120,9 +173,12 @@ class SignalMap(Signal):
             geo = tilemap.geometry(shape, wcs, tile_shape=tile_shape)
             self.rhs = tilemap.zeros(geo.copy(pre=(ncomp,)),      dtype=dtype)
             self.div = tilemap.zeros(geo.copy(pre=(ncomp,ncomp)), dtype=dtype)
+            self.hits= tilemap.zeros(geo.copy(pre=()),            dtype=dtype)
         else:
             self.rhs = enmap.zeros((ncomp,)     +shape, wcs, dtype=dtype)
             self.div = enmap.zeros((ncomp,ncomp)+shape, wcs, dtype=dtype)
+            self.hits= enmap.zeros(              shape, wcs, dtype=dtype)
+
     def add_obs(self, id, obs, nmat, Nd):
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
@@ -154,13 +210,20 @@ class SignalMap(Signal):
             Nd *= nmat.ivar[:,None]
             obs_div[i]   = 0
             pmap.to_map(signal=Nd, dest=obs_div[i])
+        # Build hitcount
+        Nd[:] = 1
+        pcut.clear(Nd)
+        obs_hits = pmap.to_map(signal=Nd)
         del Nd
+
         # Update our full rhs and div. This works for both plain and distributed maps
         self.rhs = self.rhs.insert(obs_rhs, op=np.ndarray.__iadd__)
         self.div = self.div.insert(obs_div, op=np.ndarray.__iadd__)
+        self.hits= self.hits.insert(obs_hits[0],op=np.ndarray.__iadd__)
         # Save the per-obs things we need. Just the pointing matrix in our case.
         # Nmat and other non-Signal-specific things are handled in the mapmaker itself.
         self.data[id] = bunch.Bunch(pmap=pmap, obs_geo=obs_rhs.geometry)
+
     def prepare(self):
         """Called when we're done adding everything. Sets up the map distribution,
         degrees of freedom and preconditioner."""
@@ -169,19 +232,19 @@ class SignalMap(Signal):
             self.geo_work = self.rhs.geometry
             self.rhs  = tilemap.redistribute(self.rhs, self.comm)
             self.div  = tilemap.redistribute(self.div, self.comm)
+            self.hits = tilemap.redistribute(self.hits,self.comm)
             self.dof  = TileMapZipper(self.rhs.geometry, dtype=self.dtype, comm=self.comm)
-            # DEBUG begin
-            # print(f"{self.comm.rank:4} : tiles : {self.rhs.geometry}", flush=True)
-            print(f"{self.comm.rank:4} : tiles : {self.geo_work}", flush=True)
-            # DEBUG end
         else:
             self.rhs  = utils.allreduce(self.rhs, self.comm)
             self.div  = utils.allreduce(self.div, self.comm)
+            self.hits = utils.allreduce(self.hits,self.comm)
             self.dof  = MapZipper(*self.rhs.geometry, dtype=self.dtype)
         self.idiv  = safe_invert_div(self.div)
         self.ready = True
+
     @property
     def ncomp(self): return len(self.comps)
+
     def forward(self, id, tod, map, tmul=1, mmul=1):
         """map2tod operation. For tiled maps, the map should be in work distribution,
         as returned by unzip. Adds into tod."""
@@ -189,6 +252,7 @@ class SignalMap(Signal):
         if tmul != 1: tod *= tmul
         if mmul != 1: map = map*mmul
         self.data[id].pmap.from_map(dest=tod, signal_map=map, comps=self.comps)
+
     def backward(self, id, tod, map, tmul=1, mmul=1):
         """tod2map operation. For tiled maps, the map should be in work distribution,
         as returned by unzip. Adds into map"""
@@ -196,15 +260,19 @@ class SignalMap(Signal):
         if tmul != 1: tod  = tod*tmul
         if mmul != 1: map *= mmul
         self.data[id].pmap.to_map(signal=tod, dest=map, comps=self.comps)
+
     def precon(self, map):
         if self.tiled: return tilemap.map_mul(self.idiv, map)
         else: return enmap.map_mul(self.idiv, map)
+
     def to_work(self, map):
         if self.tiled: return tilemap.redistribute(map, self.comm, self.geo_work.active)
         else: return map.copy()
+
     def from_work(self, map):
         if self.tiled: return tilemap.redistribute(map, self.comm, self.rhs.geometry.active)
         else: return utils.allreduce(map, self.comm)
+
     def write(self, prefix, tag, m):
         if not self.output: return
         oname = self.ofmt.format(name=self.name)
@@ -214,6 +282,7 @@ class SignalMap(Signal):
         else:
             if self.comm.rank == 0:
                 enmap.write_map(oname, m)
+        return oname
 
 class SignalCut(Signal):
     def __init__(self, comm, name="cut", ofmt="{name}_{rank:02}", dtype=np.float32,
@@ -227,6 +296,7 @@ class SignalCut(Signal):
         self.off   = 0
         self.rhs   = []
         self.div   = []
+
     def add_obs(self, id, obs, nmat, Nd):
         """Add and process an observation. "obs" should be an Observation axis manager,
         nmat a noise model, representing the inverse noise covariance matrix,
@@ -246,6 +316,7 @@ class SignalCut(Signal):
         self.off += pcut.njunk
         self.rhs.append(obs_rhs)
         self.div.append(obs_div)
+
     def prepare(self):
         """Process the added observations, determining our degrees of freedom etc.
         Should be done before calling forward and backward."""
@@ -254,22 +325,27 @@ class SignalCut(Signal):
         self.div = np.concatenate(self.div)
         self.dof = ArrayZipper(self.rhs.shape, dtype=self.dtype, comm=self.comm)
         self.ready = True
+
     def forward(self, id, tod, junk):
         if id not in self.data: return
         d = self.data[id]
         d.pcut.forward(tod, junk[d.i1:d.i2])
+
     def precon(self, junk):
         return junk/self.div
+
     def backward(self, id, tod, junk):
         if id not in self.data: return
         d = self.data[id]
         d.pcut.backward(tod, junk[d.i1:d.i2])
+
     def write(self, prefix, tag, m):
         if not self.output: return
         oname = self.ofmt.format(name=self.name, rank=self.comm.rank)
         oname = "%s%s_%s.%s" % (prefix, oname, tag, self.ext)
         with h5py.File(oname, "w") as hfile:
             hfile["data"] = m
+        return oname
 
 class ArrayZipper:
     def __init__(self, shape, dtype, comm=None):
@@ -277,8 +353,11 @@ class ArrayZipper:
         self.ndof  = int(np.product(shape))
         self.dtype = dtype
         self.comm  = comm
+
     def zip(self, arr):  return arr.reshape(-1)
+
     def unzip(self, x):  return x.reshape(self.shape).astype(self.dtype, copy=False)
+
     def dot(self, a, b):
         return np.sum(a*b) if self.comm is None else self.comm.allreduce(np.sum(a*b))
 
@@ -288,8 +367,11 @@ class MapZipper:
         self.ndof  = int(np.product(shape))
         self.dtype = dtype
         self.comm  = comm
+
     def zip(self, map): return np.asarray(map.reshape(-1))
+
     def unzip(self, x): return enmap.ndmap(x.reshape(self.shape), self.wcs).astype(self.dtype, copy=False)
+
     def dot(self, a, b):
         return np.sum(a*b) if self.comm is None else utils.allreduce(np.sum(a*b),self.comm)
 
@@ -299,10 +381,13 @@ class TileMapZipper:
         self.comm  = comm
         self.dtype = dtype
         self.ndof  = geo.size
+
     def zip(self, map):
         return np.asarray(map.reshape(-1))
+
     def unzip(self, x):
         return tilemap.TileMap(x.reshape(self.geo.pre+(-1,)).astype(self.dtype, copy=False), self.geo)
+
     def dot(self, a, b):
         return self.comm.allreduce(np.sum(a*b))
 
@@ -311,17 +396,21 @@ class MultiZipper:
         self.zippers = []
         self.ndof    = 0
         self.bins    = []
+
     def add(self, zipper):
         self.zippers.append(zipper)
         self.bins.append([self.ndof, self.ndof+zipper.ndof])
         self.ndof += zipper.ndof
+
     def zip(self, *objs):
         return np.concatenate([zipper.zip(obj) for zipper, obj in zip(self.zippers, objs)])
+
     def unzip(self, x):
         res = []
         for zipper, (b1,b2) in zip(self.zippers, self.bins):
             res.append(zipper.unzip(x[b1:b2]))
         return res
+
     def dot(self, a, b):
         res = 0
         for (b1,b2), dof in zip(self.bins, self.zippers):
@@ -335,13 +424,16 @@ class PmatCut:
         self.model  = model or "full"
         self.params = params
         self.njunk  = so3g.process_cuts(self.cuts.ranges, "measure", self.model, self.params, None, None)
+
     def forward(self, tod, junk):
         """Project from the cut parameter (junk) space for this scan to tod."""
         so3g.process_cuts(self.cuts.ranges, "insert", self.model, self.params, tod, junk)
+
     def backward(self, tod, junk):
         """Project from tod to cut parameters (junk) for this scan."""
         so3g.process_cuts(self.cuts.ranges, "extract", self.model, self.params, tod, junk)
         self.clear(tod)
+
     def clear(self, tod):
         junk = np.empty(self.njunk, tod.dtype)
         so3g.process_cuts(self.cuts.ranges, "clear", self.model, self.params, tod, junk)
@@ -363,23 +455,32 @@ def inject_map(obs, map, recenter=None):
     pmat.from_map(map.extract(shape, wcs), dest=obs.signal)
 
 def safe_invert_div(div, lim=1e-2):
-    hit = div[0,0] != 0
-    # Get the condition number of each pixel
-    work    = np.ascontiguousarray(div[:,:,hit].T)
-    E, V    = np.linalg.eigh(work)
-    cond    = E[:,0]/E[:,-1]
-    good    = cond >= lim
-    # Invert the good ones
-    inv_good= np.einsum("...ij,...j,...kj->...ik", V[good], 1/E[good], V[good])
-    # Treat the bad ones as being purely T
-    inv_bad = work[~good]*0
-    inv_bad[:,0,0] = 1/work[~good,0,0]
-    # Copy back
-    work[good]  = inv_good
-    work[~good] = inv_bad
-    # And put into final output
-    idiv = div*0
-    idiv[:,:,hit] = work.T
+    try:
+        # try setting up a context manager that limits the number of threads
+        from threadpoolctl import threadpool_limitse
+        cm = threadpool_limits(limits=1, user_api="blas")
+    except:
+        # threadpoolctl not available, need a dummy context manager
+        import contextlib
+        cm = contextlib.nullcontext()
+    with cm:
+        hit = div[0,0] != 0
+        # Get the condition number of each pixel
+        work    = np.ascontiguousarray(div[:,:,hit].T)
+        E, V    = np.linalg.eigh(work)
+        cond    = E[:,0]/E[:,-1]
+        good    = cond >= lim
+        # Invert the good ones
+        inv_good= np.einsum("...ij,...j,...kj->...ik", V[good], 1/E[good], V[good])
+        # Treat the bad ones as being purely T
+        inv_bad = work[~good]*0
+        inv_bad[:,0,0] = 1/work[~good,0,0]
+        # Copy back
+        work[good]  = inv_good
+        work[~good] = inv_bad
+        # And put into final output
+        idiv = div*0
+        idiv[:,:,hit] = work.T
     return idiv
 
 ################################
@@ -398,30 +499,41 @@ class Nmat:
     def from_bunch(data): return Nmat()
 
 class NmatUncorr(Nmat):
-    def __init__(self, spacing="exp", nbin=100, nmin=10, bins=None, ips_binned=None, ivar=None):
+    def __init__(self, spacing="exp", nbin=100, nmin=10, window=2, bins=None, ips_binned=None, ivar=None, nwin=None):
         self.spacing    = spacing
         self.nbin       = nbin
         self.nmin       = nmin
         self.bins       = bins
         self.ips_binned = ips_binned
         self.ivar       = ivar
+        self.window     = window
+        self.nwin       = nwin
         self.ready      = bins is not None and ips_binned is not None and ivar is not None
-    def build(self, tod, **kwargs):
-        ps = np.abs(fft.rfft(tod))**2
+
+    def build(self, tod, srate, **kwargs):
+        # Apply window while taking fft
+        nwin  = utils.nint(self.window*srate)
+        apply_window(tod, nwin)
+        ft    = fft.rfft(tod)
+        # Unapply window again
+        apply_window(tod, nwin, -1)
+        ps = np.abs(ft)**2
+        del ft
         if   self.spacing == "exp": bins = utils.expbin(ps.shape[-1], nbin=self.nbin, nmin=self.nmin)
         elif self.spacing == "lin": bins = utils.expbin(ps.shape[-1], nbin=self.nbin, nmin=self.nmin)
         else: raise ValueError("Unrecognized spacing '%s'" % str(self.spacing))
-        ps_binned  = utils.bin_data(bins, ps)
+        ps_binned  = utils.bin_data(bins, ps) / tod.shape[1]
         ips_binned = 1/ps_binned
         # Compute the representative inverse variance per sample
         ivar = np.zeros(len(tod))
         for bi, b in enumerate(bins):
             ivar += ips_binned[:,bi]*(b[1]-b[0])
         ivar /= bins[-1,1]-bins[0,0]
-        ivar *= tod.shape[1]
-        return NmatUncorr(spacing=self.spacing, nbin=len(bins), nmin=self.nmin, bins=bins, ips_binned=ips_binned, ivar=ivar)
+        return NmatUncorr(spacing=self.spacing, nbin=len(bins), nmin=self.nmin, bins=bins, ips_binned=ips_binned, ivar=ivar, window=self.window, nwin=nwin)
+
     def apply(self, tod, inplace=False):
         if inplace: tod = np.array(tod)
+        apply_window(tod, self.nwin)
         ftod = fft.rfft(tod)
         # Candidate for speedup in C
         norm = tod.shape[1]
@@ -430,22 +542,25 @@ class NmatUncorr(Nmat):
         # I divided by the normalization above instead of passing normalize=True
         # here to reduce the number of operations needed
         fft.irfft(ftod, tod)
+        apply_window(tod, self.nwin)
         return tod
+
     def write(self, fname):
         data = bunch.Bunch(type="NmatUncorr")
-        for field in ["spacing", "nbin", "nmin", "bins", "ips_binned", "ivar"]:
+        for field in ["spacing", "nbin", "nmin", "bins", "ips_binned", "ivar", "window", "nwin"]:
             data[field] = getattr(self, field)
         bunch.write(fname, data)
+
     @staticmethod
     def from_bunch(data):
-        return NmatUncorr(spacing=data.spacing, nbin=data.nbin, nmin=data.nmin, bins=data.bins, ips_binned=data.ips_binned, ivar=data.ivar)
+        return NmatUncorr(spacing=data.spacing, nbin=data.nbin, nmin=data.nmin, bins=data.bins, ips_binned=data.ips_binned, ivar=data.ivar, window=window, nwin=nwin)
 
 class NmatDetvecs(Nmat):
     def __init__(self, bin_edges=None, eig_lim=16, single_lim=0.55, mode_bins=[0.25,4.0,20],
-            downweight=[], window=0, nwin=None, verbose=False, bins=None, D=None, V=None, iD=None, iV=None, s=None, ivar=None):
+            downweight=[], window=2, nwin=None, verbose=False, bins=None, D=None, V=None, iD=None, iV=None, s=None, ivar=None):
         # This is all taken from act, not tuned to so yet
         if bin_edges is None: bin_edges = np.array([
-            0.10, 0.25, 0.35, 0.45, 0.55, 0.70, 0.85, 1.00,
+            0.16, 0.25, 0.35, 0.45, 0.55, 0.70, 0.85, 1.00,
             1.20, 1.40, 1.70, 2.00, 2.40, 2.80, 3.40, 3.80,
             4.60, 5.00, 5.50, 6.00, 6.50, 7.00, 8.00, 9.00, 10.0, 11.0,
             12.0, 13.0, 14.0, 16.0, 18.0, 20.0, 22.0,
@@ -465,9 +580,10 @@ class NmatDetvecs(Nmat):
         self.nwin   = nwin
         self.D, self.V, self.iD, self.iV, self.s, self.ivar = D, V, iD, iV, s, ivar
         self.ready      = all([a is not None for a in [D, V, iD, iV, s, ivar]])
+
     def build(self, tod, srate, **kwargs):
         # Apply window before measuring noise model
-        nwin  = utils.nint(self.window/srate)
+        nwin  = utils.nint(self.window*srate)
         apply_window(tod, nwin)
         ft    = fft.rfft(tod)
         # Unapply window again
@@ -527,6 +643,7 @@ class NmatDetvecs(Nmat):
         return NmatDetvecs(bin_edges=self.bin_edges, eig_lim=self.eig_lim, single_lim=self.single_lim,
                 window=self.window, nwin=nwin, downweight=self.downweight, verbose=self.verbose,
                 bins=bins, D=D, V=V, iD=iD, iV=iV, s=s, ivar=ivar)
+
     def apply(self, tod, inplace=True, slow=False):
         if not inplace: tod = np.array(tod)
         apply_window(tod, self.nwin)
@@ -546,12 +663,14 @@ class NmatDetvecs(Nmat):
         fft.irfft(ftod, tod)
         apply_window(tod, self.nwin)
         return tod
+
     def write(self, fname):
         data = bunch.Bunch(type="NmatDetvecs")
         for field in ["bin_edges", "eig_lim", "single_lim", "window", "nwin", "downweight",
                 "bins", "D", "V", "iD", "iV", "s", "ivar"]:
             data[field] = getattr(self, field)
         bunch.write(fname, data)
+
     @staticmethod
     def from_bunch(data):
         return NmatDetvecs(bin_edges=data.bin_edges, eig_lim=data.eig_lim, single_lim=data.single_lim,
@@ -578,13 +697,17 @@ def measure_cov(d, nmax=10000):
         sub = mycontiguous(d[:,i:i+step])
         res += np.real(sub.dot(np.conj(sub.T)))
     return res/m
+
 def project_out(d, modes): return d-modes.T.dot(modes.dot(d))
+
 def project_out_from_matrix(A, V):
     # Used Woodbury to project out the given vectors from the covmat A
     if V.size == 0: return A
     Q = A.dot(V)
     return A - Q.dot(np.linalg.solve(np.conj(V.T).dot(Q), np.conj(Q.T)))
+
 def measure_power(d): return np.real(np.mean(d*np.conj(d),-1))
+
 def makebins(edge_freqs, srate, nfreq, nmin=0, rfun=None):
     # Translate from frequency to index
     binds  = freq2ind(edge_freqs, srate, nfreq, rfun=rfun)
@@ -599,12 +722,14 @@ def makebins(edge_freqs, srate, nfreq, nmin=0, rfun=None):
     # Go from edges to [:,{from,to}]
     bins  = np.array([binds[:-1],binds[1:]]).T
     return bins
+
 def mycontiguous(a):
     # I used this in act for some reason, but not sure why. I vaguely remember ascontiguousarray
     # causing weird failures later in lapack
     b = np.zeros(a.shape, a.dtype)
     b[...] = a[...]
     return b
+
 def find_modes_jon(ft, bins, eig_lim=None, single_lim=0, skip_mean=False, verbose=False):
     ndet = ft.shape[0]
     vecs = np.zeros([ndet,0])
@@ -637,6 +762,7 @@ def find_modes_jon(ft, bins, eig_lim=None, single_lim=0, skip_mean=False, verbos
         e, v = e[accept], v[:,accept]
         vecs = np.concatenate([vecs,v],1)
     return vecs
+
 def measure_detvecs(ft, vecs):
     # Measure amps when we have non-orthogonal vecs
     rhs  = vecs.T.dot(ft)
@@ -650,16 +776,19 @@ def measure_detvecs(ft, vecs):
     # The total auto-power
     Nd = np.mean(np.abs(ft)**2,1)
     return E, Nu, Nd
+
 def sichol(A):
     iA = np.linalg.inv(A)
     try: return np.linalg.cholesky(iA), 1
     except np.linalg.LinAlgError:
         return np.linalg.cholesky(-iA), -1
+
 def safe_inv(a):
     with utils.nowarn():
         res = 1/a
         res[~np.isfinite(res)] = 0
     return res
+
 def woodbury_invert(D, V, s=1):
     """Given a compressed representation C = D + sVV', compute a
     corresponding representation for inv(C) using the Woodbury
@@ -680,6 +809,7 @@ def woodbury_invert(D, V, s=1):
         iV[i] = iD[i,:,None]*V[i].dot(core)
     sout = -sout
     return iD, iV, sout
+
 def apply_window(tod, nsamp, exp=1):
     """Apply a cosine taper to each end of the TOD."""
     if nsamp <= 0: return
