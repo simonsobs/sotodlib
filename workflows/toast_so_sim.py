@@ -134,6 +134,10 @@ def parse_config(operators, templates, comm):
         help="Map each observation separately.",
     )
 
+    parser.add_argument(
+        "--realization", required=False, help="Realization index", type=int,
+    )
+
     # Build a config dictionary starting from the operator defaults, overriding with any
     # config files specified with the '--config' commandline option, followed by any
     # individually specified parameter overrides.
@@ -147,7 +151,7 @@ def parse_config(operators, templates, comm):
     # Create our output directory
     if comm is None or comm.rank == 0:
         if not os.path.isdir(args.out_dir):
-            os.makedirs(args.out_dir)
+            os.makedirs(args.out_dir, exist_ok=True)
 
     # Log the config that was actually used at runtime.
     outlog = os.path.join(args.out_dir, "config_log.toml")
@@ -225,7 +229,7 @@ def job_create(config, jobargs, telescope, schedule, comm):
     return job, group_size, full_pointing
 
 
-def simulate_data(job, toast_comm, telescope, schedule):
+def simulate_data(job, args, toast_comm, telescope, schedule):
     log = toast.utils.Logger.get()
     ops = job.operators
     tmpls = job.templates
@@ -248,6 +252,8 @@ def simulate_data(job, toast_comm, telescope, schedule):
     ops.sim_ground.schedule = schedule
     if ops.sim_ground.weather is None:
         ops.sim_ground.weather = telescope.site.name
+    if args.realization is not None:
+        ops.sim_ground.realization = args.realization
     ops.sim_ground.apply(data)
     log.info_rank("Simulated telescope pointing in", comm=world_comm, timer=timer)
 
@@ -277,7 +283,6 @@ def simulate_data(job, toast_comm, telescope, schedule):
 
     ops.elevation_model.noise_model = ops.default_model.noise_model
     ops.elevation_model.detector_pointing = ops.det_pointing_azel
-    ops.elevation_model.view = ops.det_pointing_azel.view
     ops.elevation_model.apply(data)
     log.info_rank("Created elevation noise model in", comm=world_comm, timer=timer)
 
@@ -308,6 +313,10 @@ def simulate_data(job, toast_comm, telescope, schedule):
         ops.binner_final = ops.binner
 
     # Simulate atmosphere
+
+    if args.realization is not None:
+        ops.sim_atmosphere_coarse.realization = 1000000 + args.realization
+        ops.sim_atmosphere.realization = args.realization
 
     for sim_atm in ops.sim_atmosphere_coarse, ops.sim_atmosphere:
         if not sim_atm.enabled:
@@ -343,6 +352,8 @@ def simulate_data(job, toast_comm, telescope, schedule):
     # Simulate scan-synchronous signal
 
     ops.sim_sss.detector_pointing = ops.det_pointing_azel
+    if args.realization is not None:
+        ops.sim_sss.realization = args.realization
     ops.sim_sss.apply(data)
     log.info_rank("Simulated Scan-synchronous signal", comm=world_comm, timer=timer)
 
@@ -361,6 +372,8 @@ def simulate_data(job, toast_comm, telescope, schedule):
 
     # Apply a time constant
 
+    if args.realization is not None:
+        ops.convolve_time_constant.realization = args.realization
     ops.convolve_time_constant.apply(data)
     log.info_rank("Convolved time constant in", comm=world_comm, timer=timer)
 
@@ -370,6 +383,8 @@ def simulate_data(job, toast_comm, telescope, schedule):
     # Simulate detector noise
 
     ops.sim_noise.noise_model = ops.elevation_model.out_model
+    if args.realization is not None:
+        ops.sim_noise.realization = args.realization
     log.info_rank("Simulating detector noise", comm=world_comm)
     ops.sim_noise.apply(data)
     log.info_rank("Simulated detector noise in", comm=world_comm, timer=timer)
@@ -389,8 +404,23 @@ def simulate_data(job, toast_comm, telescope, schedule):
 
     # Add calibration error
 
+    if args.realization is not None:
+        ops.gainscrambler.realization = args.realization
     ops.gainscrambler.apply(data)
     log.info_rank("Simulated gain errors in", comm=world_comm, timer=timer)
+
+    # DEBUG begin
+    """
+    import pickle
+    my_data = []
+    for obs in data.obs:
+        my_data.append(np.array(obs.detdata["signal"]))
+    fname = f"datadump_{world_comm.rank}.pck"
+    with open(fname, "wb") as fout:
+        pickle.dump(my_data, fout)
+    print(f"Wrote {fname}", flush=True)
+    """
+    # DEBUG end
 
     return data
 
@@ -474,8 +504,6 @@ def reduce_data(job, args, data):
 
     # Run ML mapmaker
 
-    #ops.mlmapmaker.Nmat = sotodlib.mapmaking.NmatUncorr()
-    ops.mlmapmaker.Nmat = sotodlib.mapmaking.NmatDetvecs()
     ops.mlmapmaker.out_dir = args.out_dir
     ops.mlmapmaker.apply(data)
     log.info_rank("Finished ML map-making in", comm=world_comm, timer=timer)
@@ -661,7 +689,10 @@ def main():
     # Get optional MPI parameters
     comm, procs, rank = toast.get_world()
 
-    nthread = os.environ["OMP_NUM_THREADS"]
+    if "OMP_NUM_THREADS" in os.environ:
+        nthread = os.environ["OMP_NUM_THREADS"]
+    else:
+        nthread = 1
     log.info_rank(
         f"Executing workflow with {procs} MPI tasks, each with "
         f"{nthread} OpenMP threads at {datetime.datetime.now()}",
@@ -694,6 +725,7 @@ def main():
         toast.ops.ScanHealpixMap(name="scan_map", enabled=False),
         toast.ops.SimAtmosphere(
             name="sim_atmosphere_coarse",
+            add_loading=False,
             lmin_center=300 * u.m,
             lmin_sigma=30 * u.m,
             lmax_center=10000 * u.m,
@@ -710,6 +742,7 @@ def main():
         ),
         toast.ops.SimAtmosphere(
             name="sim_atmosphere",
+            add_loading=True,
             lmin_center=0.001 * u.m,
             lmin_sigma=0.0001 * u.m,
             lmax_center=1 * u.m,
@@ -780,7 +813,7 @@ def main():
     toast_comm = toast.Comm(world=comm, groupsize=group_size)
 
     # Create simulated data
-    data = simulate_data(job, toast_comm, telescope, schedule)
+    data = simulate_data(job, args, toast_comm, telescope, schedule)
 
     # Handle special case of caching the atmosphere simulations.  In this
     # case, we are not simulating timestreams or doing data reductions.
