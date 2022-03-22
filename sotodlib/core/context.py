@@ -167,7 +167,7 @@ class Context(odict):
                 = metadata.SuperLoader(self)
 
     def get_obs(self, obs_id=None, dets=None, detsets=None,
-                samples=None,
+                samples=None, no_signal=None,
                 loader_type=None, logic_only=False, filename=None):
         """Load TOD and supporting metadata for a particular observation id.
         The detectors to read can be specified through colon-coding in
@@ -291,7 +291,7 @@ class Context(odict):
         # Load TOD.
         loader_func = OBSLOADER_REGISTRY[loader_type]  # Register your loader?
         aman = loader_func(self.obsfiledb, obs_id, dets,
-                           samples=samples)
+                           samples=samples, no_signal=no_signal)
 
         if aman is None:
             return meta
@@ -348,6 +348,7 @@ def _read_cfg(filename=None, envvar=None, default=None):
 
 
 def obsloader_template(db, obs_id, dets=None, prefix=None, samples=None,
+                       no_signal=None,
                        **kwargs):
     """This function is here to document the API for "obsloader" functions
     used by the Context system.  "obsloader" functions are used to
@@ -367,6 +368,9 @@ def obsloader_template(db, obs_id, dets=None, prefix=None, samples=None,
       prefix (str): The root address of the data files, if not already
         known to the ObsFileDb.  (This is passed through to ObsFileDb
         prefix= argument.)
+      no_signal (bool): If True, loader should avoid reading signal
+        data (if possible) and should set .signal=None in the output.
+        Passing None is equivalent to passing False.
 
     Notes:
       This interface is subject to further extension.  When possible
