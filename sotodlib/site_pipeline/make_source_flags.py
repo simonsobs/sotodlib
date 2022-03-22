@@ -7,6 +7,7 @@ import yaml
 
 import sotodlib
 from sotodlib import core, coords, site_pipeline
+import so3g
 
 logger = logging.getLogger(__name__)
 
@@ -65,10 +66,12 @@ def main(args=None):
     for group in groups:
         logger.info(f'Loading {config["obs_id"]}:{group_by}={group}')
         if group_by == 'detset':
-            # Load data.  We don't need all the signal, btw.
-            tod = ctx.get_obs(config['obs_id'], detsets=[group])
+            # Load pointing and dets axis; we don't need signal though.
+            tod = ctx.get_obs(config['obs_id'], detsets=[group],
+                              no_signal=True)
         else:
-            tod = ctx.get_obs(config['obs_id'], dets={group_by: group})
+            tod = ctx.get_obs(config['obs_id'], dets={group_by: group},
+                              no_signal=True)
 
         # Load / compute mask parameters.
         mask_params = config['mask_params']['default']
@@ -86,6 +89,10 @@ def main(args=None):
                 flags = _flags
             else:
                 flags += _flags
+
+        if flags is None:
+            flags = so3g.proj.RangesMatrix.zeros(
+                shape=(tod.dets.count, tod.samps.count))
 
         # Compute fraction of samples
         weight = np.mean(flags.get_stats()['samples']) / flags.shape[1]
