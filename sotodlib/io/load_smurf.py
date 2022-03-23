@@ -1397,6 +1397,14 @@ def make_DetDb_single_obs(obsfiledb, obs_id):
     detdb.conn.commit()
     return detdb
 
+def obs_detdb_context_hook(ctx, obs_id, *args, **kwargs):
+    ddb = make_DetDb_single_obs(ctx.obsfiledb, obs_id)
+    ctx.obs_detdb = ddb
+    return ddb
+
+core.Context.hook_sets['obs_detdb_load'] = {
+    'before-load-obs': obs_detdb_context_hook,
+}
 
 class SmurfStatus:
     """
