@@ -2358,7 +2358,7 @@ def load_g3tsmurf_obs(db, obs_id, dets=None, samples=None, **kwargs):
         "select name from files " "where obs_id=?" + "order by start", (obs_id,)
     )
     flist = [row[0] for row in c]
-    return load_file(flist, dets, samples=samples, obsfiledb=db)
+    return load_file(flist, dets, samples=samples, obsfiledb=db, short_labels=False)
 
 
 core.OBSLOADER_REGISTRY["g3tsmurf"] = load_g3tsmurf_obs
