@@ -15,7 +15,6 @@ from astropy import units as u
 
 import sotodlib.sim_hardware as hardware
 from sotodlib.core.hardware import LAT_COROTATOR_OFFSET
-LAT_COROTATOR_OFFSET_DEG = LAT_COROTATOR_OFFSET / u.deg
 
 
 XAXIS, YAXIS, ZAXIS = np.eye(3)
@@ -118,7 +117,7 @@ def main():
 
     if telescope == "LAT":
         if args.corotate_lat:
-            rot = qa.rotation(ZAXIS, np.radians(LAT_COROTATOR_OFFSET_DEG))
+            rot = qa.rotation(ZAXIS, LAT_COROTATOR_OFFSET.to_value(u.rad))
         else:
             if args.elevation_deg is None:
                 raise RuntimeError(
@@ -126,7 +125,7 @@ def main():
                 )
             rot = qa.rotation(
                 ZAXIS,
-                np.radians(args.elevation_deg - 60 + LAT_COROTATOR_OFFSET_DEG)
+                np.radians(args.elevation_deg - 60 + LAT_COROTATOR_OFFSET.to_value(u.deg))
             )
     else:
         if args.elevation_deg is not None:
