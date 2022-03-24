@@ -7,6 +7,11 @@ import numpy as np
 from sotodlib import core
 import so3g
 
+## "temporary" fix to deal with scipy>1.8 changing the sparse setup
+try:
+    from scipy.sparse import csr_array
+except ImportError:
+    from scipy.sparse import csr_matrix as csr_array
 
 class TestAxisManager(unittest.TestCase):
 
@@ -128,6 +133,11 @@ class TestAxisManager(unittest.TestCase):
         with self.assertRaises(ValueError):
             aman.wrap('square_root', 1j)
 
+        # Make sure AxisManager with scalar can be copied
+        aman_copy = aman.copy()
+        self.assertEqual(aman['x'], aman_copy['x'])
+
+
     # Multi-dimensional restrictions.
 
     def test_200_multid(self):
@@ -247,6 +257,9 @@ class TestAxisManager(unittest.TestCase):
         aman.wrap('b', np.float32(12.))
         aman.wrap('c', np.str_('twelve'))
         aman.wrap('d', np.bool_(False))
+
+        aman.wrap('sparse', csr_array( ((8,3), ([0,1], [20,54])), 
+                                      shape=(aman.dets.count, aman.samps.count)))
 
         # Make sure the saving / clobbering / readback logic works
         # equally for simple group name, root group, None->root group.

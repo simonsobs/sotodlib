@@ -285,7 +285,10 @@ class AxisManager:
         if axes_only:
             return out
         for k, v in self._fields.items():
-            out._fields[k] = v.copy()
+            if np.isscalar(v) or v is None:
+                out._fields[k] = v
+            else:
+                out._fields[k] = v.copy()
         for k, v in self._assignments.items():
             out._assignments[k] = v.copy()
         return out
