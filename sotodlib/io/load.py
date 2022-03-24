@@ -418,6 +418,7 @@ def load_file(filename, dets=None, signal_only=False):
 
 
 def load_observation(db, obs_id, dets=None, samples=None, prefix=None,
+                     no_signal=None,
                      **kwargs):
     """Obsloader function for TOAST simulate data -- this function matches
     output from pipe-s0001/s0002 (and SSO sims in 2019-2021).
@@ -434,6 +435,9 @@ def load_observation(db, obs_id, dets=None, samples=None, prefix=None,
         prefix = db.prefix
         if prefix is None:
             prefix = './'
+
+    if no_signal is None:
+        no_signal = False  # from here, assume no_signal in [True, False]
 
     # Regardless of what dets have been asked for (maybe none), get
     # the list of detsets implicated in this observation.
@@ -472,10 +476,18 @@ def load_observation(db, obs_id, dets=None, samples=None, prefix=None,
                             'from files '
                             'where obs_id=? and detset=? ' +
                             'order by sample_start', (obs_id, detset))
-        subreq = [
-            FieldGroup('signal', dets, timestamp_field='timestamps',
-                       compression=True),
-            ]
+        subreq = []
+        if no_signal:
+            if aman is None:
+                subreq.extend([
+                    FieldGroup('signal', [], timestamp_field='timestamps',
+                               compression=True),
+                ])
+        else:
+            subreq.extend([
+                FieldGroup('signal', dets, timestamp_field='timestamps',
+                           compression=True),
+            ])
         if aman is None:
             subreq.extend([
                 FieldGroup('boresight', ['az', 'el', 'roll']),
@@ -486,6 +498,9 @@ def load_observation(db, obs_id, dets=None, samples=None, prefix=None,
                 Field('boresight_azel', oversample=4),
                 Field('boresight_radec', oversample=4),
             ])
+        if len(subreq) == 0:
+            continue
+
         request = FieldGroup('root', subreq)
 
         if samples:
@@ -512,8 +527,11 @@ def load_observation(db, obs_id, dets=None, samples=None, prefix=None,
                 core.LabelAxis('dets', [p[1] for p in pairs_req]),
                 core.OffsetAxis('samps', count, sample_start, obs_id),
             )
-            aman.wrap('signal', np.zeros(aman.shape, 'float32'),
-                      [(0, 'dets'), (1, 'samps')])
+            if no_signal:
+                aman.wrap('signal', None)
+            else:
+                aman.wrap('signal', np.zeros(aman.shape, 'float32'),
+                          [(0, 'dets'), (1, 'samps')])
 
             # The non-signal fields are duplicated across files so you
             # can just absorb them once.

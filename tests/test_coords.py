@@ -5,6 +5,7 @@
 
 """
 
+import itertools
 import unittest
 import numpy as np
 
@@ -168,6 +169,20 @@ class CoordsUtilsTest(unittest.TestCase):
         qb = coords.ScalarLastQuat(v3)
         np.testing.assert_array_equal(qa, qb)
 
+    def test_cover(self):
+        x0, y0 = 1*DEG, 4*DEG
+        R = 5*DEG
+        x = np.linspace(-R, R, 50)
+        y = np.linspace(-R, R, 45)
+        xy = np.transpose(list(itertools.product(x, y)))
+        s = xy[0]**2 + xy[1]**2 < R**2
+        
+        xy = xy[:,s] + np.array([x0, y0])[:,None]
+        (xi0, eta0), R0, (xi, eta) = \
+            coords.helpers.get_focal_plane_cover(count=16, xieta=xy)
+        np.testing.assert_allclose([xi0, eta0, R], [x0, y0, R0],
+                                   atol=R*0.05)
+        self.assertEqual(len(xi), 16)
 
 if __name__ == '__main__':
     unittest.main()
