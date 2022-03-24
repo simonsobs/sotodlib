@@ -254,21 +254,11 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     sight = _get_csl(sight)
     n_samp = len(sight.Q)
 
-    # Do a simplest convex hull...
-    q = so3g.proj.quat.rotation_xieta(fp0.xi, fp0.eta)
-    xi, eta, _ = so3g.proj.quat.decompose_xieta(q)
-    xi0, eta0 = xi.mean(), eta.mean()
-    R = ((xi - xi0)**2 + (eta - eta0)**2).max()**.5
-
-    n_circ = 16
-    dphi = 2*np.pi/n_circ
-    phi = np.arange(n_circ) * dphi
-    # cos(dphi/2) is the largest underestimate in radius one can make when
-    # replacing a circle with an n_circ-sided polygon, as we do here.
-    L = 1.01 * R / np.cos(dphi/2)
-    xi, eta = L * np.cos(phi) + xi0, L * np.sin(phi) + eta0
-    fake_dets = ['hull%i' % i for i in range(n_circ)]
-    fp1 = so3g.proj.FocalPlane.from_xieta(fake_dets, xi, eta, 0*xi)
+    # Get a convex hull focal plane.
+    (xi0, eta0), R, xieta1 = get_focal_plane_cover(
+        focal_plane=fp0, count=16)
+    fake_dets = ['hull%i' % i for i in range(xieta1.shape[1])]
+    fp1 = so3g.proj.FocalPlane.from_xieta(fake_dets, xieta1[0], xieta1[1])
 
     asm = so3g.proj.Assembly.attach(sight, fp1)
     output = np.zeros((len(fake_dets), n_samp, 4))
@@ -300,6 +290,70 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     w.wcs.crpix -= corners[0]
     shape        = tuple(corners[1]-corners[0]+1)[::-1]
     return (shape, w)
+
+def get_focal_plane_cover(tod=None, count=0, focal_plane=None,
+                          xieta=None):
+    """Process a bunch of detector positions into a center and radius such
+    that a circle with that center and radius contains all the
+    detectors.  Also return detector positions, arranged approximately
+    in a circle, whose convex hull contains all input detectors.
+
+    Args:
+      tod (AxisManager): source of focal_plane, if it is not passed.
+      count (int): number of points on the enclosing circle to return.
+      focal_plane (AxisManager): source for xi and eta, if xieta is
+        not passed in
+      xieta (array): (2, n) array (or similar) of xi and eta
+        detector positions.
+
+    Returns:
+      xieta0: array[2] with array center, (xi0, eta0).
+      radius: radius of the enclosing circle.
+      xietas: array with shape (2, count) carrying the xi and eta
+        coords of the circular convex hull.
+
+    Notes:
+      If count=0, an empty list is returned for xietas.  Otherwise,
+      count must be at least 3 so that the shape is not degenerate.
+
+    """
+    if xieta is None:
+        if focal_plane is None:
+            focal_plane = tod.focal_plane
+        xi = focal_plane.xi
+        eta = focal_plane.eta
+    else:
+        xi, eta = xieta[:2]
+    qs = so3g.proj.quat.rotation_xieta(xi, eta)
+
+    # Starting guess for center
+    xi0, eta0 = xi.mean(), eta.mean()
+    for i in range(10):
+        q = so3g.proj.quat.rotation_xieta(xi0, eta0)
+        d_xi, d_eta, _ = so3g.proj.quat.decompose_xieta(~q * qs)
+        if abs(d_xi.mean()) + abs(d_eta.mean()) < 1e-5*DEG:
+            break
+        xi0 += d_xi.mean()*.8
+        eta0 += d_eta.mean()*.8
+    else:
+        raise ValueError('No convergence?')
+    R = (d_xi**2 + d_eta**2).max()**.5
+    if count == 0:
+        return ((xi0, eta0), R, [])
+    if count < 3:
+        raise ValueError('count must be 0 or >=3.')
+
+    dphi = 2*np.pi/count
+    phi = np.arange(count) * dphi
+    # cos(dphi/2) is the largest underestimate in radius one can make when
+    # replacing a circle with an n_circ-sided polygon, as we do here.
+    L = 1.01 * R / np.cos(dphi/2)
+    xi, eta = L * np.cos(phi), L * np.sin(phi)
+
+    # Rotate those into place.
+    xi, eta, _ = so3g.proj.quat.decompose_xieta(
+        q * so3g.proj.quat.rotation_xieta(xi, eta))
+    return (np.array([xi0, eta0]), R, np.array([xi, eta]))
 
 def get_supergeom(*geoms, tol=1e-3):
     """Given a set of compatible geometries [(shape0, wcs0), (shape1,
