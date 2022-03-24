@@ -958,12 +958,12 @@ class G3tSmurf:
                     # decide if this is the last channel assignment in the directory
                     # needed because we often get multiple channel assignments in the same folder
                     root = os.path.join("/", *path.split("/")[:-1])
-                    cha_times = [
-                        int(f.split("_")[0]) for f in os.listdir(root) if pattern in f
-                    ]
+                    fname = path.split('/')[-1]
+                    fband = int(re.findall('b\d.txt', fname)[0][1])
+                    cha_times = [int(f.split('_')[0]) for f in os.listdir(root) if f'b{fband}.txt'
+                                 in f.split('_')[-1]]
                     if ctime != np.max(cha_times):
                         continue
-                    fname = path.split("/")[-1]
                     logger.debug(
                         f"Add new channel assignment: {stream_id},{ctime}, {path}"
                     )
@@ -1308,6 +1308,91 @@ def dump_DetDb(archive, detdb_file):
         )
     session.close()
     return my_db
+
+def dump_DetDb(archive, detdb_file):
+    """
+    Take a G3tSmurf archive and create a a DetDb of the type used with Context
+
+    Args
+    -----
+        archive : G3tSmurf instance
+        detdb_file : filename
+    """
+    my_db = core.metadata.DetDb(map_file=detdb_file)
+    my_db.create_table("base", column_defs=[])
+    column_defs = [
+        "'band' int",
+        "'channel' int",
+        "'frequency' float",
+        "'chan_assignment' int",
+    ]
+    my_db.create_table("smurf", column_defs=column_defs)
+
+    ddb_list = my_db.dets()["name"]
+    session = archive.Session()
+    channels = session.query(Channels).all()
+    msk = np.where([ch.name not in ddb_list for ch in channels])[0].astype(int)
+    for ch in tqdm(np.array(channels)[msk]):
+        my_db.get_id(name=ch.name)
+        my_db.add_props(
+            "smurf",
+            ch.name,
+            band=ch.band,
+            channel=ch.channel,
+            frequency=ch.frequency,
+            chan_assignment=ch.chan_assignment.ctime,
+        )
+    session.close()
+    return my_db
+
+def make_DetDb_single_obs(obsfiledb, obs_id):
+
+    # find relevant files to get status
+    c = obsfiledb.conn.execute('select name from files ' 
+                         'where obs_id=?' + 
+                         'order by start', (obs_id,))
+                        
+    flist = [row[0] for row in c]
+
+    # load status
+    # for now, assume this is always the start of an obs so this won't break
+    status = SmurfStatus.from_file(flist[0])
+
+    # Pulling very specific pieces from get_channel_info. This isn't the best way to do this
+    # but just want something that minimally works right now and I'll clean it up for PR
+
+    # this should not be hardcoded but it is for now
+    mask = None
+
+
+    ch_list = np.arange(status.num_chans)
+    ch_map = np.zeros( len(ch_list), dtype = [('idx', int), ('rchannel', np.unicode_,30), 
+                                              ('band', int), ('channel', int), 
+                                              ('freqs', float)])
+
+    ch_map['idx'] = ch_list
+    ch_map = _get_channel_mapping(status, ch_map)
+    ruids = _get_detset_channel_names(status, ch_map, obsfiledb)
+
+    # right now, require specific path to detdb, no helping userf
+    detdb = core.metadata.DetDb()
+
+    column_defs = [
+                "'readout_id' str",
+                "'smurf_band' int",
+                "'smurf_channel' int",
+                "'res_frequency' float",
+    ]
+
+    detdb.create_table('base',column_defs)
+
+    for i, ch in tqdm(enumerate(ch_map)):
+        detdb.get_id(ruids[i])
+        detdb.add_props('base',ruids[i],readout_id=ruids[i],smurf_band=ch['band'].item(),
+                        smurf_channel=ch['channel'].item(),res_frequency=ch['freqs'].item(),commit=False)
+
+    detdb.conn.commit()
+    return detdb
 
 
 class SmurfStatus:
