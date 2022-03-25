@@ -40,12 +40,21 @@ def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs)
         return np.array([])
     # Make step to convolve data with
     step = np.ones(2 * len(x))
-    step[len(x) :] = -1
+    step[len(x):] = -1
+
+    # If std is basically 0 no need to check for jumps
+    if np.isclose(x.std(), 0.0):
+        return np.array([])
+
     # Mean subtract the data
-    x -= x.mean()
+    _x = x - x.mean()
+
+    # Scale data to have std of order 1
+    if _x.std() > 10:
+        _x = _x / (10 ** (int(np.log10(_x.std()))))
 
     # Convolve and find jumps
-    x_step = sig.convolve(x, step, "valid")
+    x_step = sig.convolve(_x, step, "valid")
     u_jumps, _ = sig.find_peaks(x_step, **kwargs)
     d_jumps, _ = sig.find_peaks(-1 * x_step, **kwargs)
     jumps = np.concatenate([u_jumps, d_jumps])
