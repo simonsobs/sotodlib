@@ -9,7 +9,9 @@
 import os
 import sys
 from importlib import import_module
-import mock
+
+# This module mocker will auto-mock submodules.
+from sphinx.ext.autodoc.mock import _MockModule
 
 # -- Path setup --------------------------------------------------------------
 
@@ -108,7 +110,7 @@ for missing in ('numpy', 'matplotlib', 'healpy', 'astropy','sqlalchemy',
 # For sphinxarg.ext, we need to mock the modules now.
 # https://github.com/ashb/sphinx-argparse/issues/9
 for missing in autodoc_mock_imports:
-    sys.modules[missing] = mock.Mock()
+    sys.modules[missing] = _MockModule(missing)
 
 
 # -- Options for HTML output -------------------------------------------------
