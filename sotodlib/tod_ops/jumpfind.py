@@ -40,7 +40,7 @@ def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs)
         return np.array([])
     # Make step to convolve data with
     step = np.ones(2 * len(x))
-    step[len(x):] = -1
+    step[len(x) :] = -1
 
     # If std is basically 0 no need to check for jumps
     if np.isclose(x.std(), 0.0):
@@ -108,11 +108,11 @@ def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs)
     return jumps
 
 
-def filter_and_jumpfind(
+def jumpfind_gaussian(
     x, sigma, order, min_chunk, min_size, abs_min_size, win_size, max_depth, **kwargs
 ):
     """
-    Apply filter to data and then search for jumps
+    Apply gaussain filter to data and then search for jumps
 
     Note that the jumpfinder is very sensitive to changes in parameters
     and the parameters are not independant of each other,
@@ -184,11 +184,17 @@ def filter_and_jumpfind(
     return jumps[j_i]
 
 
-def jumpfind_default_pars(x, sensitivity=2.0, max_depth=-1, depth=0):
+def jumpfind_recursive_gaussian(x, sensitivity=2.0, max_depth=-1, depth=0):
     """
     Calculate (semi) intelligent default parameters and jumpfind with them
+    The data is gaussain filtered before jumpfinding.
+
     The presence of large spikes can have a negetive effect on this function,
     please mask/slice/interpolate them out before using this functon.
+
+    Note that the difference between this and jumpfind_gaussian is that in this
+    function the filter is applied in each segment at it recurses.
+    It also attempts to compute parameters based on the std of the data.
 
     Tested mostly on LATR data and seems to be working well.
     Limited tests with LATRT data have also gone well.
@@ -218,7 +224,7 @@ def jumpfind_default_pars(x, sensitivity=2.0, max_depth=-1, depth=0):
     if np.isclose(_x.std(), 0.0):
         return np.array([])
 
-    jumps = filter_and_jumpfind(
+    jumps = jumpfind_gaussian(
         _x,
         2 * _x.std(),
         0,
@@ -244,7 +250,7 @@ def jumpfind_default_pars(x, sensitivity=2.0, max_depth=-1, depth=0):
     _jumps = np.append(_jumps, len(x))
     added = 0
     for i in range(len(_jumps) - 1):
-        sub_jumps = jumpfind_default_pars(
+        sub_jumps = jumpfind_recursive_gaussian(
             x[(_jumps[i]) : (_jumps[i + 1])], sensitivity, max_depth, depth + 1
         )
         jumps = np.insert(jumps, i + added, sub_jumps + _jumps[i])
@@ -284,11 +290,11 @@ def jumpfind(tod, signal=None, sensitivity=2.0, max_depth=-1, buff_size=10):
     jump_mask = np.zeros(signal.shape, dtype=bool)
 
     if len(signal.shape) == 1:
-        jumps = jumpfind_default_pars(signal, sensitivity)
+        jumps = jumpfind_recursive_gaussian(signal, sensitivity)
         jump_mask[jumps] = True
     elif len(signal.shape) == 2:
         for i, _signal in enumerate(signal):
-            jumps = jumpfind_default_pars(_signal, sensitivity)
+            jumps = jumpfind_recursive_gaussian(_signal, sensitivity)
             jump_mask[i][jumps] = True
     else:
         raise ValueError("Jumpfinder only works on 1D or 2D data")
