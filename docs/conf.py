@@ -9,6 +9,7 @@
 import os
 import sys
 from importlib import import_module
+import mock
 
 # -- Path setup --------------------------------------------------------------
 
@@ -103,6 +104,12 @@ for missing in ('numpy', 'matplotlib', 'healpy', 'astropy','sqlalchemy',
         foo = import_module(missing)
     except ImportError:
         autodoc_mock_imports.append(missing)
+
+# For sphinxarg.ext, we need to mock the modules now.
+# https://github.com/ashb/sphinx-argparse/issues/9
+for missing in autodoc_mock_imports:
+    sys.modules[missing] = mock.Mock()
+
 
 # -- Options for HTML output -------------------------------------------------
 
