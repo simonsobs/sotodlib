@@ -3,6 +3,9 @@ sphinx==4.2.0
 sphinx_rtd_theme==1.0.0
 sphinx-argparse==0.3.1
 
+# Required so we can mock things for sphinxarg.ext
+mock
+
 # Required because it is used at root level in some modules.
 numpy
 
