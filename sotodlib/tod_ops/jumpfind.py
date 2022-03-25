@@ -184,56 +184,11 @@ def filter_and_jumpfind(
     return jumps[j_i]
 
 
-def jumpfind_default_pars(x, sensitivity=2.0):
+def jumpfind_default_pars(x, sensitivity=2.0, max_depth=-1, depth=0):
     """
     Calculate (semi) intelligent default parameters and jumpfind with them
     The presence of large spikes can have a negetive effect on this function,
     please mask/slice/interpolate them out before using this functon.
-
-    Tested mostly on LATR data and seems to be working well.
-    Limited tests with LATRT data have also gone well.
-
-    Arguments:
-
-        x: Data to jumpfind on, expects 1D
-
-        sensitivity: Sensitivity of the jumpfinder, roughly correlates with
-                     1/(jump size) but since data is filtered, detrended, and
-                     rescaled during jumpfinding it is better to think of it as
-                     something non-physical.
-
-    Returns:
-
-        jumps: The indices of jumps in x
-               There is some uncertainty on order of a few samples
-               Jumps within 20 samples of each other may not be distinguished
-    """
-    _x = sig.detrend(x)
-    if _x.std() > 10:
-        _x = _x / (10 ** (int(np.log10(_x.std()))))
-    if np.isclose(_x.std(), 0.0):
-        return np.array([])
-
-    return filter_and_jumpfind(
-        _x,
-        2 * _x.std(),
-        0,
-        10,
-        1.0 / sensitivity,
-        0,
-        20,
-        0,
-        height=1,
-        prominence=1,
-    )
-
-
-def jumpfind_default_pars_recursive(x, sensitivity=2.0, max_depth=-1, depth=0):
-    """
-    Recursively run jumpfind_default_pars
-    This helps find jumps that are missed due to jumpfind_default_pars using std to determine some
-    params since std is sensitive to the presence of jumps.
-    Using a jump agnostic metric instead should alleviate the need for this function.
 
     Tested mostly on LATR data and seems to be working well.
     Limited tests with LATRT data have also gone well.
@@ -257,8 +212,24 @@ def jumpfind_default_pars_recursive(x, sensitivity=2.0, max_depth=-1, depth=0):
                There is some uncertainty on order of a few samples
                Jumps within 20 samples of each other may not be distinguished
     """
-    # Find jumps
-    jumps = jumpfind_default_pars(x, sensitivity)
+    _x = sig.detrend(x)
+    if _x.std() > 10:
+        _x = _x / (10 ** (int(np.log10(_x.std()))))
+    if np.isclose(_x.std(), 0.0):
+        return np.array([])
+
+    jumps = filter_and_jumpfind(
+        _x,
+        2 * _x.std(),
+        0,
+        10,
+        1.0 / sensitivity,
+        0,
+        20,
+        0,
+        height=1,
+        prominence=1,
+    )
 
     # If no jumps found return
     if len(jumps) == 0:
@@ -273,7 +244,7 @@ def jumpfind_default_pars_recursive(x, sensitivity=2.0, max_depth=-1, depth=0):
     _jumps = np.append(_jumps, len(x))
     added = 0
     for i in range(len(_jumps) - 1):
-        sub_jumps = jumpfind_default_pars_recursive(
+        sub_jumps = jumpfind_default_pars(
             x[(_jumps[i]) : (_jumps[i + 1])], sensitivity, max_depth, depth + 1
         )
         jumps = np.insert(jumps, i + added, sub_jumps + _jumps[i])
@@ -313,11 +284,11 @@ def jumpfind(tod, signal=None, sensitivity=2.0, max_depth=-1, buff_size=10):
     jump_mask = np.zeros(signal.shape, dtype=bool)
 
     if len(signal.shape) == 1:
-        jumps = jumpfind_default_pars_recursive(signal, sensitivity)
+        jumps = jumpfind_default_pars(signal, sensitivity)
         jump_mask[jumps] = True
     elif len(signal.shape) == 2:
         for i, _signal in enumerate(signal):
-            jumps = jumpfind_default_pars_recursive(_signal, sensitivity)
+            jumps = jumpfind_default_pars(_signal, sensitivity)
             jump_mask[i][jumps] = True
     else:
         raise ValueError("Jumpfinder only works on 1D or 2D data")
