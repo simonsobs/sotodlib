@@ -109,13 +109,19 @@ def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs)
     return jumps
 
 
-def jumpfind_tv(x, weight, min_chunk, min_size, win_size, max_depth, **kwargs):
+def jumpfind_tv(
+    x,
+    weight=1,
+    min_chunk=10,
+    min_size=0.1,
+    win_size=20,
+    max_depth=-1,
+    height=1,
+    prominence=1,
+    **kwargs
+):
     """
     Apply total variance filter and then search for jumps
-
-    Note that the jumpfinder is very sensitive to changes in parameters
-    and the parameters are not independant of each other,
-    so it may take some playing around to get it to work properly.
 
     Arguments:
 
@@ -132,7 +138,11 @@ def jumpfind_tv(x, weight, min_chunk, min_size, win_size, max_depth, **kwargs):
 
         max_depth: The maximum recursion depth, set negetive to not use
 
-        **kwargs: Arguments to pass to scipy.signal.find_peaks
+        height: Height of peaks to pass to scipy.signal.find_peaks
+
+        prominence: Prominence of peaks to pass to scipy.signal.find_peaks
+
+        **kwargs: Additional arguments to pass to scipy.signal.find_peaks
 
     Returns:
 
@@ -141,18 +151,34 @@ def jumpfind_tv(x, weight, min_chunk, min_size, win_size, max_depth, **kwargs):
                Jumps within min_chunk of each other may not be distinguished
     """
     x_filt = denoise_tv_chambolle(x, weight)
-    return _jumpfind(x_filt, min_chunk, min_size, win_size, max_depth, 0, **kwargs)
+    return _jumpfind(
+        x_filt,
+        min_chunk,
+        min_size,
+        win_size,
+        max_depth,
+        0,
+        height=height,
+        prominence=prominence,
+        **kwargs
+    )
 
 
 def jumpfind_gaussian(
-    x, sigma, order, min_chunk, min_size, abs_min_size, win_size, max_depth, **kwargs
+    x,
+    sigma=5,
+    order=0,
+    min_chunk=10,
+    min_size=0.1,
+    abs_min_size=0,
+    win_size=20,
+    max_depth=-1,
+    height=1,
+    prominence=1,
+    **kwargs
 ):
     """
     Apply gaussain filter to data and then search for jumps
-
-    Note that the jumpfinder is very sensitive to changes in parameters
-    and the parameters are not independant of each other,
-    so it may take some playing around to get it to work properly
 
     Arguments:
 
@@ -181,7 +207,11 @@ def jumpfind_gaussian(
 
         max_depth: The max recursion depth, set negetive to not use
 
-        **kwargs: Arguments to pass to scipy.signal.find_peaks
+        height: Height of peaks to pass to scipy.signal.find_peaks
+
+        prominence: Prominence of peaks to pass to scipy.signal.find_peaks
+
+        **kwargs: Additional arguments to pass to scipy.signal.find_peaks
 
     Returns:
 
@@ -193,7 +223,17 @@ def jumpfind_gaussian(
     x_filt = simg.gaussian_filter(x, sigma, order)
 
     # Search for jumps in filtered data
-    jumps = _jumpfind(x_filt, min_chunk, min_size, win_size, max_depth, 0, **kwargs)
+    jumps = _jumpfind(
+        x_filt,
+        min_chunk,
+        min_size,
+        win_size,
+        max_depth,
+        0,
+        height=height,
+        prominence=prominence,
+        **kwargs
+    )
 
     if order == 0:
         return jumps
@@ -231,9 +271,6 @@ def jumpfind_recursive_gaussian(x, sensitivity=2.0, max_depth=-1, depth=0):
     Note that the difference between this and jumpfind_gaussian is that in this
     function the filter is applied in each segment at it recurses.
     It also attempts to compute parameters based on the std of the data.
-
-    Tested mostly on LATR data and seems to be working well.
-    Limited tests with LATRT data have also gone well.
 
     Arguments:
 
@@ -294,7 +331,7 @@ def jumpfind_recursive_gaussian(x, sensitivity=2.0, max_depth=-1, depth=0):
     return jumps
 
 
-def jumpfind(tod, signal=None, sensitivity=2.0, max_depth=-1, buff_size=10):
+def jumpfind(tod, signal=None, buff_size=10, jumpfinder=jumpfind_tv, **kwargs):
     """
     Find jumps in tod.signal_name.
     Expects tod.signal_name to be 1D of 2D
@@ -305,20 +342,17 @@ def jumpfind(tod, signal=None, sensitivity=2.0, max_depth=-1, buff_size=10):
 
         signal: Signal to jumpfind on. If None than tod.signal is used.
 
-        sensitivity: Sensitivity of the jumpfinder, roughly correlates with
-                     1/(jump size) but since data is filtered, detrended, and
-                     rescaled during jumpfinding it is better to think of it as
-                     something non-physical.
-
         max_depth: The maximum recursion depth, set negetive to not use
 
-        buff_size: Amount to buffer each jump location in the output RangesMatrix
+        jumpfinder: Jumpfinding function to use
+
+        **kwargs: Keyword args to pass to jumpfinder
 
     Returns:
 
         jumps: RangesMatrix containing jumps in signal, if signal is 1D Ranges in returned instead
                There is some uncertainty on order of a few samples
-               Jumps within 20 samples of each other may not be distinguished
+               Jumps within a few samples of each other may not be distinguished
     """
     if signal is None:
         signal = tod.signal
@@ -326,11 +360,11 @@ def jumpfind(tod, signal=None, sensitivity=2.0, max_depth=-1, buff_size=10):
     jump_mask = np.zeros(signal.shape, dtype=bool)
 
     if len(signal.shape) == 1:
-        jumps = jumpfind_recursive_gaussian(signal, sensitivity)
+        jumps = jumpfinder(signal, **kwargs)
         jump_mask[jumps] = True
     elif len(signal.shape) == 2:
         for i, _signal in enumerate(signal):
-            jumps = jumpfind_recursive_gaussian(_signal, sensitivity)
+            jumps = jumpfinder(_signal, **kwargs)
             jump_mask[i][jumps] = True
     else:
         raise ValueError("Jumpfinder only works on 1D or 2D data")
