@@ -152,9 +152,9 @@ class JumpfindTest(unittest.TestCase):
 
         tod.wrap('sig_jumps', sig_jumps, [(0, 'samps')])
 
-        # Find jumps, using a conservative sensitivity here because the jumps
+        # Find jumps, using a conservative min_size here because the jumps
         # are large and we want to avoid false positives
-        jumps = tod_ops.jumpfind(tod, signal=tod.sig_jumps, sensitivity=.5)
+        jumps = tod_ops.jumpfind(tod, signal=tod.sig_jumps, min_size=2)
         jumps = jumps.ranges().flatten()
 
         # Remove double counted jumps and round to remove uncertainty
