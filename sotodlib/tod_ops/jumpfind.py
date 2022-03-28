@@ -2,6 +2,7 @@ import numpy as np
 import scipy.signal as sig
 import scipy.ndimage as simg
 from so3g.proj import RangesMatrix
+from skimage.restoration import denoise_tv_chambolle
 
 
 def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs):
@@ -106,6 +107,41 @@ def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs)
         jumps = np.insert(jumps, i + added, sub_jumps + _jumps[i])
         added += len(sub_jumps)
     return jumps
+
+
+def jumpfind_tv(x, weight, min_chunk, min_size, win_size, max_depth, **kwargs):
+    """
+    Apply total variance filter and then search for jumps
+
+    Note that the jumpfinder is very sensitive to changes in parameters
+    and the parameters are not independant of each other,
+    so it may take some playing around to get it to work properly.
+
+    Arguments:
+
+        x: Data to jumpfind on, expects 1D
+
+        weight: Denoising weight. Higher weights denoise more, lower weights
+                preserve the input signal better
+
+        min_chunk: The smallest chunk of data to look for jumps in
+
+        min_size: The smalled jump size counted as a jump
+
+        win_size: Number of samples to average over when checking jump size
+
+        max_depth: The maximum recursion depth, set negetive to not use
+
+        **kwargs: Arguments to pass to scipy.signal.find_peaks
+
+    Returns:
+
+        jumps: The indices of jumps in x
+               There is some uncertainty on order of 1 sample
+               Jumps within min_chunk of each other may not be distinguished
+    """
+    x_filt = denoise_tv_chambolle(x, weight)
+    return _jumpfind(x_filt, min_chunk, min_size, win_size, max_depth, 0, **kwargs)
 
 
 def jumpfind_gaussian(
