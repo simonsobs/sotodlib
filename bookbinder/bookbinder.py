@@ -208,34 +208,6 @@ class FrameProcessor(object):
 
         self.current_state = state
 
-    def split_frame(self, f, maxlength=10000):
-        output = []
-
-        smb = _SmurfBundle()
-        smb.add(f['data'])
-
-        hkb = _HKBundle()
-        hkb.add(f['hk'])
-
-        while len(smb.times) > maxlength:
-            t = smb.times[maxlength]
-
-            g = core.G3Frame(core.G3FrameType.Scan)
-            g['data'] = smb.rebundle(t)
-            g['hk'] = hkb.rebundle(t)
-            g['state'] = self.current_state
-
-            output += [g]
-
-        g = core.G3Frame(core.G3FrameType.Scan)
-        g['data'] = smb.rebundle(smb.times[-1] + 1)
-        g['hk'] = hkb.rebundle(hkb.times[-1] + 1)
-        g['state'] = self.current_state
-
-        output += [g]
-
-        return output
-
     def flush(self):
         output = []
 
@@ -261,10 +233,7 @@ class FrameProcessor(object):
         self.determine_state(f['hk']['Azimuth_Velocity'], f['hk']['Elevation_Velocity'])
         f['state'] = self.current_state
 
-        if len(f['data'].times) > self.maxlength:
-            output += self.split_frame(f, maxlength=self.maxlength)
-        else:
-            output += [f]
+        output += [f]
 
         return output
 
@@ -307,7 +276,11 @@ class FrameProcessor(object):
 
             self.smbundle.add(f['data'])
 
-            if self.smbundle.ready(self.flush_time):
+            # If the existing data exceeds the specified maximum length
+            if len(self.smbundle.times) > self.maxlength:
+                output += self.flush(self.smbundle.times[self.maxlength])
+            # If a frame split event has been reached
+            elif self.smbundle.ready(self.flush_time):
                 output += self.flush()
 
             return output
@@ -459,3 +432,6 @@ class Bookbinder(object):
                         continue
                     output += self.frameproc(f)  # FrameProcessor returns a list of frames (can be empty)
                     self.write_frames(output)
+
+                    # Clear buffer after writing
+                    output = []
