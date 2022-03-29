@@ -4,7 +4,6 @@ import scipy.ndimage as simg
 from so3g.proj import RangesMatrix
 from skimage.restoration import denoise_tv_chambolle
 
-
 def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs):
     """
     Recursive edge detection based jumpfinder.
@@ -113,7 +112,7 @@ def jumpfind_tv(
     x,
     weight=1,
     min_chunk=10,
-    min_size=0.1,
+    min_size=0.5,
     win_size=20,
     max_depth=-1,
     height=1,
