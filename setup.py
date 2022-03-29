@@ -54,6 +54,7 @@ setup_opts["install_requires"] = [
     'toml',
     'skyfield',
     'pixell',
+    'pyfftw',
 ]
 
 # Command Class dictionary.
