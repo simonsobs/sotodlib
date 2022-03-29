@@ -2,8 +2,8 @@ import sqlalchemy as db
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker, relationship, backref
 
-from spt3g import core as spt3g_core
 import so3g
+from spt3g import core as spt3g_core
 import datetime as dt
 import os
 import re
