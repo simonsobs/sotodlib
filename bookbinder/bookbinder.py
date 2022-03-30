@@ -208,11 +208,13 @@ class FrameProcessor(object):
 
         self.current_state = state
 
-    def flush(self):
+    def flush(self, flush_time=None):
+        if flush_time == None:
+            flush_time = self.flush_time
         output = []
 
-        smurf_data = self.smbundle.rebundle(self.flush_time)
-        hk_data = self.hkbundle.rebundle(self.flush_time)
+        smurf_data = self.smbundle.rebundle(flush_time)
+        hk_data = self.hkbundle.rebundle(flush_time)
 
         # Co-sampled (interpolated) azimuth encoder data
         cosamp_az = np.interp(smurf_data.times, hk_data.times, hk_data['Azimuth_Corrected'], left=np.nan, right=np.nan)
@@ -232,6 +234,28 @@ class FrameProcessor(object):
 
         self.determine_state(f['hk']['Azimuth_Velocity'], f['hk']['Elevation_Velocity'])
         f['state'] = self.current_state
+
+        output += [f]
+
+        return output
+
+    def flush_no_hk(self, flush_time):
+        output = []
+
+        smurf_data = self.smbundle.rebundle(flush_time)
+
+        # Create SuperTimestream with co-sampled data included
+        sts = so3g.G3SuperTimestream()
+        sts.times = smurf_data.times
+        sts.names = [k for k in smurf_data.names]
+        # sts.quanta = np.ones(len(sts.names), dtype=np.double)
+        sts.data = smurf_data.data
+
+        # Write data to frame
+        f = core.G3Frame(core.G3FrameType.Scan)
+        f['data'] = sts
+
+        f['state'] = 3  # no encoder
 
         output += [f]
 
@@ -276,8 +300,13 @@ class FrameProcessor(object):
 
             self.smbundle.add(f['data'])
 
+            # Default mode: when there is no (relevant) HK data,
+            # rebundle frames uniformly into frames of length self.maxlength
+            if self.hkbundle is None:
+                if len(self.smbundle.times) > self.maxlength:
+                    output += self.flush_no_hk(self.smbundle.times[self.maxlength])
             # If the existing data exceeds the specified maximum length
-            if len(self.smbundle.times) > self.maxlength:
+            elif len(self.smbundle.times) > self.maxlength:
                 output += self.flush(self.smbundle.times[self.maxlength])
             # If a frame split event has been reached
             elif self.smbundle.ready(self.flush_time):
@@ -389,7 +418,41 @@ class Bookbinder(object):
                 N_hkfr_with_enc += 1
 
         if N_hkfr_with_enc == 0:
-            print("No encoder data found in HK file(s).")
+            print("No encoder data found in HK file(s); continuing with default mode.")
+
+            # Loop over SMuRF frames/files
+            while len(self._smurf_files) >= 0:
+                output = []
+                for f in self.smurf_iter:
+                    if f.type != core.G3FrameType.Scan:
+                        continue
+                    output += self.frameproc(f)
+
+                    # To avoid keeping too many frames in memory, write out buffer if too long
+                    if len(output) >= 10:
+                        if self._verbose:
+                            print("Writing out buffered frames to avoid storing too many in memory.")
+                        self.write_frames(output)
+                        output = []
+
+                # If there are no more SMuRF frames, output remaining SMuRF data
+                if len(self.frameproc.smbundle.times) > 0:
+                    output += self.frameproc.flush_no_hk(self.frameproc.smbundle.times[-1] + 1)
+                self.write_frames(output)
+
+                # If there are remaining files, update the
+                # SMuRF source iterator and G3 file writer
+                if len(self._smurf_files) > 0:
+                    ifile = self._smurf_files.pop(0)
+                    if self._verbose: print(f"Bookbinding {ifile}")
+                    self.smurf_iter = smurf_reader(ifile)
+                if len(self._out_files) > 0:
+                    ofile = self._out_files.pop(0)
+                    if self._verbose: print(f"Writing {ofile}")
+                    self.writer = core.G3Writer(ofile)
+                else:
+                    break
+
             return
 
         for event_time in self.find_frame_splits():
