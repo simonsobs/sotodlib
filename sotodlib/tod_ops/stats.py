@@ -125,7 +125,7 @@ def fit_psd(
 
 
 def fit_hist(
-    aman, data=None, hist=None, bins=None, field="signal", skew=True, **hist_params
+    aman, signal=None, hist=None, bins=None, skew=True, **hist_params
 ):
     """
     Fit gaussian function to histogram of some data
@@ -133,12 +133,11 @@ def fit_hist(
     Arguments:
         aman: AxisManager with data
 
-        data: The data to make histogram from, if None then field of aman specified in field var is used
+        signal: The data to make histogram from, if None then aman.signal is used 
 
         hist: The histogram to fit, if None then histogram of data is used
-        bins: The histogram bin edges expected length is (len(hist)+1), if None is provided but hist is provided then range(len(hist)+1) is used
 
-        field: The field from aman to fit, defaults to signal
+        bins: The histogram bin edges expected length is (len(hist)+1), if None is provided but hist is provided then range(len(hist)+1) is used
 
         skew: If True fit with skewgauss, if False fit with gauss. Defaults to True
     Returns:
@@ -156,9 +155,9 @@ def fit_hist(
         bins: The bins of the histogram
     """
     if hist is None:
-        if data is None:
-            data = getattr(aman, field)
-        hist, _bins = np.histogram(data, **hist_params)
+        if signal is None:
+            signal = getattr(aman, field)
+        hist, _bins = np.histogram(signal, **hist_params)
     if bins is None:
         bins = range(len(hist) + 1)
     bins = (_bins[:-1] + _bins[1:]) / 2
@@ -171,18 +170,17 @@ def fit_hist(
     return popt, hist, _bins
 
 
-def fit_sine(aman, data=None, timestamps=None, field="signal"):
+def fit_sine(aman, signal=None, timestamps=None):
     """
     Fit sine function to some data, if data is 2d then each row is fit individually
 
     Arguments:
         aman: AxisManager with data and timestamps
 
-        data: The data to fit, if None then field of aman specified in field var is used
+        signal: The data to fit, if None then aman.signal is used/ 
 
-        timestamps: The timestamps to fit against, if None than aman.timestamps is usfit_params        field: The field of the aman to fit if data is None, by default signal is used
+        timestamps: The timestamps to fit against, if None than aman.timestamps is used
 
-        field: The field from aman to fit, defaults to signal
     Returns:
         fit_params: 2d array where each row contains the following fit params:
             A: Amplitude of the fit sine function
@@ -193,15 +191,15 @@ def fit_sine(aman, data=None, timestamps=None, field="signal"):
 
             offset: Offset to add to the fit sine function
     """
-    if data is None:
-        data = getattr(aman, field)
+    if signal is None:
+        data = amn.signal 
     if timestamps is None:
         timestamps = aman.timestamps
-    if len(data.shape) == 1:
-        data = np.array([data])
+    if len(signal.shape) == 1:
+        signal = np.array([signal])
 
-    fit_params = np.zeros((len(data), 4))
-    for i, dat in enumerate(data):
+    fit_params = np.zeros((len(signal), 4))
+    for i, dat in enumerate(signal):
         popt, pcov = opt.curve_fit(sine, timestamps, dat)
         fit_params[i] = popt
 
@@ -340,8 +338,6 @@ def interpolate_nans(
     aman,
     signal=None,
     timestamps=None,
-    signal_field="signal",
-    timestamp_field="timestamps",
 ):
     """
     Interpolate over nans in place
@@ -350,19 +346,16 @@ def interpolate_nans(
 
         aman: AxisManager with timestamps and data to resample.
 
-        signal: 1- or 2-d array of data to interpolate over. If None, uses the field of aman specified in signal_field.
+        signal: 1- or 2-d array of data to interpolate over. If None, uses aman.signal.
 
-        timestamps: 1-d array of timestamps. If None, uses the field of aman specified in timestamp_field. Cannot have nans present.
+        timestamps: 1-d array of timestamps. If None, uses aman.timestamps. Cannot have nans present.
             If you want to interpolate over timestamps pass them as the signal argument and set this argument to something like np.arange(len(timestamps)
 
-        signal_field: The field of aman to use as the signal
-
-        timestamp_field: The field of aman to use as the timestamps
     """
     if signal is None:
-        signal = getattr(aman, signal_field)
+        signal = aman.signal 
     if timestamps is None:
-        timestamps = getattr(aman, timestamp_field)
+        timestamps = aman.timestamps 
 
     def _interpolate_nans(y, x):
         if len(x) == 0:
