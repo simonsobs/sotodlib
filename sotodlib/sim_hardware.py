@@ -13,7 +13,62 @@ import numpy as np
 
 import quaternionarray as qa
 
+import so3g.proj.quat as so3q
+
+from .coords import ScalarLastQuat
+
 from .core import Hardware
+
+# Important note on coordinate systems
+#
+# The functions in this module help to lay out the detectors in the
+# focal plane by combining various components, such as assembling
+# rhombi into wafers and wafers into optical tubes.  This is done in a
+# cartesian projection plane with axes oriented like this:
+#
+#        Layout coordinates here
+#        -----------------------
+#
+#      Y^                   O
+#       |                  O O
+#       |                   O O
+#       |                  O + O
+#       +-----> X           O O O
+#
+#   (Z into the page)     Some dets
+#
+# with the idea being that the detectors are sensitive to radiation
+# coming from some point on the sphere (x, y, z) near z=1.  In the
+# final layout, that one would want to rigidly attach to the
+# boresight, the X-axis points in the direction of increasing azimuth
+# and the Y-axis in the direction of increasing elevation.  The
+# encoded quaternion is the rotation that takes vectors in detector
+# coordinates to vectors in this system.
+#
+# However, this XYZ cartesian system is left-handed, and thus does not
+# naturally connect with the pointing codes used in TOAST (and so3g).
+# What is needed for TOAST is illustrated here:
+#
+#     TOAST focal plane coordinates
+#     -----------------------------
+#
+#      X^                   O
+#       |                  O O
+#       |                   O O
+#       |                  O + O
+#       +-----> Y           O O O
+#
+#   (Z into the page)   Those same dets
+#
+# Here's how this discrepancy is dealt with.  In this module, the
+# final quaternion stored in each detector's info dict is transformed,
+# right at the end, from the left-handed layout system into the
+# right-handed TOAST focal plane system.  When decoding the "quat"
+# property of detectors for plotting, the "X" and "Y" coordinates so
+# extracted must not be naively plotted as pylab.scatter(x, y)!  To
+# show the layout "as it would project onto the sky", you want
+# pylab.scatter(y, x).  (See vis_hardware, for example.)
+
 
 # FIXME:  much of this code is copy/pasted from the toast source, simply to
 # avoid a dependency.  Once we can "pip install toast", we should consider
@@ -506,7 +561,7 @@ def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
             pol_B[p] = 90.0 + pol_A[p]
         # We are going to remove 2 pixels for mechanical reasons
         kf = dim * (dim - 1) // 2
-        kill = [kf, kf + dim - 2]
+        kill = [(dim*dim+kf), (dim*dim+kf) + dim - 2]
         layout_A = rhombus_hex_layout(nrhombus, width, gap,
                                       rhombus_rotate=pol_A, killpix=kill)
         layout_B = rhombus_hex_layout(nrhombus, width, gap,
@@ -519,20 +574,28 @@ def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
         # same nominal orientation but trail each other along the
         # vertex-vertex axis of the hexagon.  The polarization orientation
         # changes every other column
-        handed = list()
-        pol_A = np.zeros(npix, dtype=np.float64)
-        pol_B = np.zeros(npix, dtype=np.float64)
-        for p in range(npix):
-            row, col = hex_row_col(npix, p)
-            if np.mod(col, 2) == 0:
-                handed.append("L")
-            else:
-                handed.append("R")
-            if np.mod(col, 4) < 2:
-                pol_A[p] = 0.0
-            else:
-                pol_A[p] = 45.0
-            pol_B[p] = 90.0 + pol_A[p]
+
+        if npix==37:
+            pol_A=np.array([45.,0.,45.,45.,45.,45.,0.,0.,0.,45.,45.,0.,0.,0.,45.,45.,0.,0.,0.,
+                            45.,0.,0.,45.,45.,0.,0.,0.,0.,0.,0.,45.,45.,0.,0.,45.,45.,45.])
+            handed=["R","L","R","L","L","R","L","R","L","R","L","R","R","R","L","R","L","R","R",
+                    "L","R","L","R","L","R","L","L","L","L","R","L","R","L","R","L","L","L"]
+            pol_B=90.0+pol_A
+        else:
+            handed = list()
+            pol_A = np.zeros(npix, dtype=np.float64)
+            pol_B = np.zeros(npix, dtype=np.float64)
+            for p in range(npix):
+                row, col = hex_row_col(npix, p)
+                if np.mod(col, 2) == 0:
+                    handed.append("L")
+                else:
+                    handed.append("R")
+                if np.mod(col, 4) < 2:
+                    pol_A[p] = 0.0
+                else:
+                    pol_A[p] = 45.0
+                pol_B[p] = 90.0 + pol_A[p]
         layout_A = hex_layout(npix, width, rotate=pol_A)
         layout_B = hex_layout(npix, width, rotate=pol_B)
     else:
@@ -543,7 +606,9 @@ def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
     # each band.
     dets = OrderedDict()
 
-    chan_per_AMC = cardprops["nchannel"] // cardprops["nAMC"]
+    #chan_per_AMC = cardprops["nchannel"] // cardprops["nAMC"]
+    chan_per_AMC = 910
+    chan_per_mux = 64
     chan_per_bias = cardprops["nchannel"] // cardprops["nbias"]
     readout_freq_range=np.linspace(4.,6.,chan_per_AMC)
     readout_freq=np.append(readout_freq_range,readout_freq_range)
@@ -573,8 +638,9 @@ def sim_wafer_detectors(hw, wafer_slot, platescale, fwhm, band=None,
                 dprops["channel"] = doff
                 dprops["AMC"] = doff // chan_per_AMC
                 dprops["bias"] = doff // chan_per_bias
-                dprops["reset_rate_kHz"] = 4.
                 dprops["readout_freq_GHz"] = readout_freq[doff]
+                dprops["bondpad"] = doff-(doff//chan_per_mux)*chan_per_mux
+                dprops["mux_position"] = doff//chan_per_mux
                 # Layout quaternion offset is from the origin.  Now we apply
                 # the rotation of the wafer center.
                 dprops["quat"] = qa.mult(center, layout[p]).flatten()
@@ -659,8 +725,8 @@ def sim_telescope_detectors(hw, tele, tube_slots=None):
 
             wradius = 0.5 * (waferspace * platescale * np.pi / 180.0)
             wcenters = [
-                np.array([np.tan(thirty) * wradius, wradius, 0.0]),
-                np.array([-wradius / np.cos(thirty), 0.0, 0.0]),
+                np.array([np.tan(thirty) * wradius, wradius, thirty*4]),
+                np.array([-wradius / np.cos(thirty), 0.0, thirty*8]),
                 np.array([np.tan(thirty) * wradius, -wradius, 0.0])
             ]
             qwcenters = ang_to_quat(wcenters)
@@ -675,8 +741,18 @@ def sim_telescope_detectors(hw, tele, tube_slots=None):
                 alldets.update(dets)
                 windx += 1
             tindx += 1
-    return alldets
 
+    # Transform quats from left-handed layout coordinates to
+    # right-handed TOAST-compatible coordintes -- see note at top of
+    # this file.  Note the ScalarLastQuat is just helping us convert to
+    # and from 3g quats.
+    quats_in = ScalarLastQuat([d['quat'] for d in alldets.values()])  # shape (n, 4)
+    xi, eta, gamma = so3q.decompose_xieta(quats_in.to_g3())
+    quats_out = ScalarLastQuat(so3q.rotation_xieta(eta, xi, np.pi/2 - gamma))
+    for d, q in zip(alldets.values(), quats_out):
+        d['quat'] = q
+
+    return alldets
 
 def get_example():
     """Return an example Hardware config with the required sections.
@@ -697,14 +773,15 @@ def get_example():
     bnd["low"] = 21.7
     bnd["high"] = 29.7
     bnd["bandpass"] = ""
-    bnd["NET"] = 501.1
+    bnd["NET"] = 435.1
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
     # Noise elevation scaling fits from Carlos Sierra
     # These numbers are for V3 LAT baseline
-    bnd["A"] = 0.09
-    bnd["C"] = 0.87
+    bnd["A"] = 0.06
+    bnd["C"] = 0.92
+    bnd["NET_corr"] = 1.10
     bands["LAT_f030"] = bnd
 
     bnd = OrderedDict()
@@ -712,12 +789,13 @@ def get_example():
     bnd["low"] = 30.9
     bnd["high"] = 46.9
     bnd["bandpass"] = ""
-    bnd["NET"] = 309.9
+    bnd["NET"] = 281.5
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.25
-    bnd["C"] = 0.64
+    bnd["A"] = 0.16
+    bnd["C"] = 0.79
+    bnd["NET_corr"] = 1.02
     bands["LAT_f040"] = bnd
 
     bnd = OrderedDict()
@@ -725,12 +803,13 @@ def get_example():
     bnd["low"] = 79.0
     bnd["high"] = 105.0
     bnd["bandpass"] = ""
-    bnd["NET"] = 337.4
+    bnd["NET"] = 361.0
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.14
+    bnd["A"] = 0.16
     bnd["C"] = 0.80
+    bnd["NET_corr"] = 1.09
     bands["LAT_f090"] = bnd
 
     bnd = OrderedDict()
@@ -738,12 +817,13 @@ def get_example():
     bnd["low"] = 130.0
     bnd["high"] = 165.0
     bnd["bandpass"] = ""
-    bnd["NET"] = 445.5
+    bnd["NET"] = 352.4
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
     bnd["A"] = 0.17
-    bnd["C"] = 0.76
+    bnd["C"] = 0.78
+    bnd["NET_corr"] = 1.01
     bands["LAT_f150"] = bnd
 
     bnd = OrderedDict()
@@ -751,12 +831,13 @@ def get_example():
     bnd["low"] = 196.7
     bnd["high"] = 254.7
     bnd["bandpass"] = ""
-    bnd["NET"] = 953.2
+    bnd["NET"] = 724.4
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.30
-    bnd["C"] = 0.58
+    bnd["A"] = 0.29
+    bnd["C"] = 0.62
+    bnd["NET_corr"] = 1.02
     bands["LAT_f230"] = bnd
 
     bnd = OrderedDict()
@@ -764,12 +845,13 @@ def get_example():
     bnd["low"] = 258.4
     bnd["high"] = 312.4
     bnd["bandpass"] = ""
-    bnd["NET"] = 2333.0
+    bnd["NET"] = 1803.9
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
     bnd["A"] = 0.36
-    bnd["C"] = 0.49
+    bnd["C"] = 0.53
+    bnd["NET_corr"] = 1.00
     bands["LAT_f290"] = bnd
     
     bnd = OrderedDict()
@@ -777,14 +859,15 @@ def get_example():
     bnd["low"] = 21.7
     bnd["high"] = 29.7
     bnd["bandpass"] = ""
-    bnd["NET"] = 386.1
+    bnd["NET"] = 314.1
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
     # Noise elevation scaling fits from Carlos Sierra
     # These numbers are for V3 SAT baseline
-    bnd["A"] = 0.10
-    bnd["C"] = 0.87
+    bnd["A"] = 0.06
+    bnd["C"] = 0.92
+    bnd["NET_corr"] = 1.06
     bands["SAT_f030"] = bnd
     
     bnd = OrderedDict()
@@ -792,12 +875,13 @@ def get_example():
     bnd["low"] = 30.9
     bnd["high"] = 46.9
     bnd["bandpass"] = ""
-    bnd["NET"] = 258.8
+    bnd["NET"] = 225.8
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.26
-    bnd["C"] = 0.66
+    bnd["A"] = 0.19
+    bnd["C"] = 0.76
+    bnd["NET_corr"] = 1.01
     bands["SAT_f040"] = bnd
     
     bnd = OrderedDict()
@@ -805,12 +889,13 @@ def get_example():
     bnd["low"] = 79.0
     bnd["high"] = 105.0
     bnd["bandpass"] = ""
-    bnd["NET"] = 248.8
+    bnd["NET"] = 245.1
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.17
-    bnd["C"] = 0.78
+    bnd["A"] = 0.19
+    bnd["C"] = 0.76
+    bnd["NET_corr"] = 1.04
     bands["SAT_f090"] = bnd
     
     bnd = OrderedDict()
@@ -818,12 +903,13 @@ def get_example():
     bnd["low"] = 130.0
     bnd["high"] = 165.0
     bnd["bandpass"] = ""
-    bnd["NET"] = 311.1
+    bnd["NET"] = 250.2
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
     bnd["A"] = 0.23
-    bnd["C"] = 0.71
+    bnd["C"] = 0.70
+    bnd["NET_corr"] = 1.02
     bands["SAT_f150"] = bnd
     
     bnd = OrderedDict()
@@ -831,12 +917,13 @@ def get_example():
     bnd["low"] = 196.7
     bnd["high"] = 254.7
     bnd["bandpass"] = ""
-    bnd["NET"] = 614.4
+    bnd["NET"] = 540.3
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.43
-    bnd["C"] = 0.44
+    bnd["A"] = 0.35
+    bnd["C"] = 0.54
+    bnd["NET_corr"] = 1.00
     bands["SAT_f230"] = bnd
     
     bnd = OrderedDict()
@@ -844,12 +931,13 @@ def get_example():
     bnd["low"] = 258.4
     bnd["high"] = 312.4
     bnd["bandpass"] = ""
-    bnd["NET"] = 1524.7
+    bnd["NET"] = 1397.5
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
     bnd["alpha"] = 3.5
-    bnd["A"] = 0.48
-    bnd["C"] = 0.38
+    bnd["A"] = 0.42
+    bnd["C"] = 0.45
+    bnd["NET_corr"] = 1.00
     bands["SAT_f290"] = bnd
 
     cnf["bands"] = bands
@@ -937,7 +1025,7 @@ def get_example():
         ttyp = ltubes[tindx]
         tb = OrderedDict()
         tb["type"] = ttyp
-        tb["waferspace"] = 127.89
+        tb["waferspace"] = 128.4
         tb["wafer_slots"] = list()
         for tw in range(3):
             off = 0
@@ -959,7 +1047,7 @@ def get_example():
         ttyp = stubes[tindx]
         tb = OrderedDict()
         tb["type"] = ttyp
-        tb["waferspace"] = 127.89
+        tb["waferspace"] = 128.4
         tb["wafer_slots"] = list()
         for tw in range(7):
             off = 0
@@ -997,42 +1085,38 @@ def get_example():
     telescopes["LAT"] = tele
 
     fwhm_sat = OrderedDict()
-    fwhm_sat["SAT_f030"] = 7.4
-    fwhm_sat["SAT_f040"] = 5.1
-    fwhm_sat["SAT_f090"] = 2.2
-    fwhm_sat["SAT_f150"] = 1.4
-    fwhm_sat["SAT_f230"] = 1.0
-    fwhm_sat["SAT_f290"] = 0.9
-    sfwhm = OrderedDict()
-    scale = 0.09668 / 0.00495
-    for k, v in fwhm_sat.items():
-        sfwhm[k] = float(int(scale * v * 10.0) // 10)
+    fwhm_sat["SAT_f030"] = 91.0
+    fwhm_sat["SAT_f040"] = 63.0
+    fwhm_sat["SAT_f090"] = 30.0
+    fwhm_sat["SAT_f150"] = 17.0
+    fwhm_sat["SAT_f230"] = 11.0
+    fwhm_sat["SAT_f290"] = 9.0
 
     tele = OrderedDict()
     tele["tube_slots"] = ["ST1"]
     tele["platescale"] = 0.09668
-    tele["fwhm"] = sfwhm
+    tele["fwhm"] = fwhm_sat
     tele["platform_name"] = ""
     telescopes["SAT1"] = tele
 
     tele = OrderedDict()
     tele["tube_slots"] = ["ST2"]
     tele["platescale"] = 0.09668
-    tele["fwhm"] = sfwhm
+    tele["fwhm"] = fwhm_sat
     tele["platform_name"] = ""
     telescopes["SAT2"] = tele
 
     tele = OrderedDict()
     tele["tube_slots"] = ["ST3"]
     tele["platescale"] = 0.09668
-    tele["fwhm"] = sfwhm
+    tele["fwhm"] = fwhm_sat
     tele["platform_name"] = ""
     telescopes["SAT3"] = tele
 
     tele = OrderedDict()
     tele["tube_slots"] = ["ST4"]
     tele["platescale"] = 0.09668
-    tele["fwhm"] = sfwhm
+    tele["fwhm"] = fwhm_sat
     tele["platform_name"] = ""
     telescopes["SAT4"] = tele
 
@@ -1060,7 +1144,7 @@ def get_example():
             cdprops = OrderedDict()
             cdprops["nbias"] = 12
             cdprops["nAMC"] = 2
-            cdprops["nchannel"] = 2000
+            cdprops["nchannel"] = 1764
             cdprops["card_name"] = ""
             card_slots[crd] = cdprops
 
@@ -1102,8 +1186,9 @@ def get_example():
         dprops["channel"] = d
         dprops["AMC"] = 0
         dprops["bias"] = 0
-        dprops["reset_rate_kHz"] = 4.
         dprops["readout_freq_GHz"] = 4.
+        dprops["bondpad"] = 0
+        dprops["mux_position"] = 0
         dprops["quat"] = np.array([0.0, 0.0, 0.0, 1.0])
         dprops["detector_name"] = ""
         dname = "w{}_p{}_{}_{}".format("42", "000", dprops["band"],

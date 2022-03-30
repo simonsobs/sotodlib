@@ -15,8 +15,12 @@ from sotodlib.io.metadata import ResultSetHdfLoader, write_dataset, _decode_arra
 
 import os
 import h5py
+import sqlite3
+
+from ._helpers import mpi_multi
 
 
+@unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
 class MetadataTest(unittest.TestCase):
 
     def setUp(self):
@@ -72,7 +76,30 @@ class MetadataTest(unittest.TestCase):
         data = loader.from_loadspec(req)
         self.assertCountEqual(data['timeconst'], [TGOOD])
 
-    def test_010_dbs(self):
+    def test_010_manifest_basics(self):
+        """Test that you can create a ManifestScheme and ManifestDb and add
+        records but not duplicates unless you need to.
+
+        """
+        scheme = metadata.ManifestScheme() \
+                         .add_range_match('obs:timestamp')
+        mandb = metadata.ManifestDb(scheme=scheme)
+        mandb.add_entry({'obs:timestamp': (0, 1e9)}, 'a.h5')
+
+        # Duplicate index prevented?
+        with self.assertRaises(sqlite3.IntegrityError):
+            mandb.add_entry({'obs:timestamp': (0, 1e9)}, 'b.h5')
+
+        # Replace accepted?
+        mandb.add_entry({'obs:timestamp': (0, 1e9)}, 'c.h5',
+                        replace=True)
+
+        # Returns the single correct value?
+        self.assertEqual(
+            'c.h5', mandb.match({'obs:timestamp': 100})['filename'])
+
+    def test_020_db_resolution(self):
+
         """Test metadata detdb/obsdb resolution system
 
         This tests one of the more complicated cases:

@@ -5,6 +5,7 @@
 
 """
 
+import itertools
 import unittest
 import numpy as np
 
@@ -147,6 +148,41 @@ class CoordsUtilsTest(unittest.TestCase):
         self.assertIs(_valid_arg(tod.get('b')), None)
         self.assertIs(_valid_arg(tod.get('b'), 'a', src=tod), tod.a)
 
+    def test_scalar_last_quat(self):
+        test_array = np.array([[2,3,4,1],[90,100,23,14]])
+
+        # Convert one quat
+        qa = coords.ScalarLastQuat(test_array[0])
+        self.assertIsInstance(qa, np.ndarray)
+        q3 = qa.to_g3()
+        self.assertIsInstance(q3, so3g.proj.quat.quat)
+        self.assertEqual(q3.a, 1)
+        qb = coords.ScalarLastQuat(q3)
+        np.testing.assert_array_equal(qa, qb)
+
+        # Convert a vector of quats
+        qa = coords.ScalarLastQuat(test_array)
+        v3 = qa.to_g3()
+        self.assertIsInstance(v3, so3g.proj.quat.G3VectorQuat)
+        self.assertEqual(v3[0].a, 1)
+        self.assertEqual(v3[1].a, 14)
+        qb = coords.ScalarLastQuat(v3)
+        np.testing.assert_array_equal(qa, qb)
+
+    def test_cover(self):
+        x0, y0 = 1*DEG, 4*DEG
+        R = 5*DEG
+        x = np.linspace(-R, R, 50)
+        y = np.linspace(-R, R, 45)
+        xy = np.transpose(list(itertools.product(x, y)))
+        s = xy[0]**2 + xy[1]**2 < R**2
+        
+        xy = xy[:,s] + np.array([x0, y0])[:,None]
+        (xi0, eta0), R0, (xi, eta) = \
+            coords.helpers.get_focal_plane_cover(count=16, xieta=xy)
+        np.testing.assert_allclose([xi0, eta0, R], [x0, y0, R0],
+                                   atol=R*0.05)
+        self.assertEqual(len(xi), 16)
 
 if __name__ == '__main__':
     unittest.main()

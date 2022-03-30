@@ -84,11 +84,12 @@ def fourier_filter(tod, filt_function,
 
     a, b, t_1, t_2 = fft_ops.build_rfft_object(n_det, n, 'BOTH')
 
-    if detrend is None:
-        signal = np.atleast_2d(getattr(tod, signal_name))
-    else:
+    if detrend is not None:
         signal = detrend_data(tod, detrend, axis_name=axis_name,
                              signal_name=signal_name)
+    else:
+        signal = tod[signal_name]
+    signal = np.atleast_2d(signal)
 
     if other_idx is not None and other_idx != 0:
         ## so that code can be written always along axis 1
@@ -111,7 +112,9 @@ def fourier_filter(tod, filt_function,
     # Un-pad?
     signal = a[:,:min(n, axis.count)]
         
-    if other_idx is not None and other_idx != 0:
+    if other_idx is None:
+        return signal[0]
+    if other_idx != 0:
         return signal.transpose()
     
     return signal
@@ -362,7 +365,7 @@ def high_pass_sine2(freqs, tod, cutoff, width=None):
     if width is None:
         width = cutoff * 2
     phase = np.pi * np.clip((abs(freqs) - cutoff) / width, -0.5, 0.5)
-    return -0.5 + 0.5 * np.sin(phase)
+    return 0.5 + 0.5 * np.sin(phase)
 
 @fft_filter
 def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None, invert=False):
@@ -375,12 +378,18 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None, invert=Fa
       b: numerator polynomial filter coefficients (z^0,z^1, ...)
       a: denominator coefficients
       fscale: scalar used to compute z = exp(-2j*pi*freqs*fscale).
-        This will generally correspond to the sampling frequency of
-        the original signal (before decimation).
+        This will generally correspond to the downsampling factor applied
+        to the original signal (before decimation).
       iir_params: IIR filter params as described below; or a string
-        name under which to look up those params in tod; defaults to
-        'iir_params'.  Note that if `a` and `b` are passed explicitly
+        name under which to look up those params in tod; or a list of
+        three strings to loop up the params in tod, in which case the
+        order should be: a, b, fscale; or a string to look up the SmurfStatus
+        AxisManager within the tod, if tod['iir_params'] resolves to an
+        AxisManager then this is assumed.
+        Default value is 'status'
+        Note that if `a` and `b` are passed explicitly
         then no attempt is made to resolve this argument.
+
       invert: If true, returns denom/num instead of num/denom.
 
     Notes:
@@ -396,11 +405,24 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None, invert=Fa
     if a is None:
         # Get params from TOD?
         if iir_params is None:
-            iir_params = 'iir_params'
-        if isinstance(iir_params, str):
-            iir_params = tod[iir_params]
-        a, b, fscale = iir_params  # must be (3, n)
-        fscale = fscale[0]
+            iir_params = "status" 
+        if isinstance(iir_params, list):
+            a = tod[iir_params[0]]
+            b = tod[iir_params[1]]
+            fscale = tod[iir_params[2]]
+        else:
+            if isinstance(iir_params, str):
+                iir_params = tod[iir_params]
+            if isinstance(iir_filter, np.ndarray):
+                a, b, fscale = iir_params  # must be (3, n)
+                fscale = fscale[0]
+            elif isinstance(iir_filter, type(tod)):
+                a = iir_params.filter_a
+                b = iir_params.filter_b
+                fscale = iir_params.downsample_factor
+            else:
+                raise ValueError("Provided iir_params not valid,\
+                                  refer to docstring for acceptable values")
     z = np.exp(-2j*np.pi*freqs * fscale)
     B, A = np.polyval(b[::-1], z), np.polyval(a[::-1], z)
     if invert:

@@ -191,6 +191,8 @@ class LabelAxis(AxisInterface):
     element has been given a unique name.  The vector of names can be
     found in self.vals.
 
+    Instantiation with labels that are not strings will raise a TypeError.
+
     On intersection of two vectors, only elements whose names appear
     in both axes will be preserved.
 
@@ -202,6 +204,9 @@ class LabelAxis(AxisInterface):
         super().__init__(name)
         if vals is not None:
             vals = np.array(vals)
+            if vals.dtype.type is not np.str_:
+                raise TypeError(
+                        'LabelAxis labels must be strings not %s' % vals.dtype)
         self.vals = vals
 
     @property
@@ -280,7 +285,10 @@ class AxisManager:
         if axes_only:
             return out
         for k, v in self._fields.items():
-            out._fields[k] = v.copy()
+            if np.isscalar(v) or v is None:
+                out._fields[k] = v
+            else:
+                out._fields[k] = v.copy()
         for k, v in self._assignments.items():
             out._assignments[k] = v.copy()
         return out
@@ -359,6 +367,8 @@ class AxisManager:
         return default
 
     def shape_str(self, name):
+        if np.isscalar(self._fields[name]) or self._fields[name] is None:
+            return ''
         s = []
         for n, ax in zip(self._fields[name].shape, self._assignments[name]):
             if ax is None:
@@ -374,7 +384,8 @@ class AxisManager:
                   for k in self._fields.keys()]
                  + ['%s:%s' % (k, v._minirepr_())
                     for k, v in self._axes.items()])
-        return ("{}(".format(type(self).__name__) + ', '.join(stuff) + ")")
+        return ("{}(".format(type(self).__name__)
+                + ', '.join(stuff).replace('[]', '') + ")")
 
     # constructors...
     @classmethod
@@ -506,6 +517,8 @@ class AxisManager:
 
           data: The data to register.  This must be of an acceptable
             type, i.e. a numpy array or another AxisManager.
+            If scalar (or None) then data will be directly added to
+            _fields with no associated axis.
 
           axis_map: A list that assigns dimensions of data to
             particular Axes.  Each entry in the list must be a tuple
@@ -520,6 +533,19 @@ class AxisManager:
             assert(id(self) not in data._managed_ids())
             assert(axis_map is None)
             axis_map = [(i, v) for i, v in enumerate(data._axes.values())]
+        # Handle scalars
+        if np.isscalar(data) or data is None:
+            if name in self._fields:
+                raise ValueError(f'Key: {name} already found in {self}')
+            if np.iscomplex(data):
+                # Complex values aren't supported by HDF scheme right now.
+                raise ValueError(f'Cannot store complex value as scalar.')
+            if isinstance(data, (np.integer, np.floating, np.str_, np.bool_)):
+                # Convert sneaky numpy scalars to native python int/float/str
+                data = data.item()
+            self._fields[name] = data
+            self._assignments[name] = []
+            return self
         # Promote input data to a full AxisManager, so we can call up
         # to self.merge.
         helper = AxisManager()
@@ -630,6 +656,8 @@ class AxisManager:
         for k, v in self._fields.items():
             if isinstance(v, AxisManager):
                 dest._fields[k] = v.restrict_axes(axes, in_place=in_place)
+            elif np.isscalar(v) or v is None:
+                dest._fields[k] = v
             else:
                 # I.e. an ndarray.
                 sslice = [sels.get(ax, slice(None))
@@ -672,7 +700,7 @@ class AxisManager:
         Axis.  The Axis definition and all data fields mapped to that
         axis will be modified.
         
-        Arugments:
+        Arguments:
           axis_name (str): The name of the Axis.
           selector (slice or special): Selector, in a form understood
             by the underlying Axis class (see the .restriction method
@@ -693,8 +721,11 @@ class AxisManager:
         new_ax, sl = dest._axes[axis_name].restriction(selector)
         for k, v in self._fields.items():
             if isinstance(v, AxisManager):
+                dest._fields[k] = v.copy()
                 if axis_name in v._axes:
-                    dest._fields[k] = v.copy().restrict(axis_name, selector)
+                    dest._fields[k].restrict(axis_name, selector)
+            elif np.isscalar(v) or v is None:
+                dest._fields[k] = v
             else:
                 sslice = [sl if n == axis_name else slice(None)
                           for n in dest._assignments[k]]
@@ -745,6 +776,71 @@ class AxisManager:
                 self._fields[k] = v
             self._assignments.update(aman._assignments)
         return self
+
+    def save(self, dest, group=None, overwrite=False):
+        """Write this AxisManager data to an HDF5 group.  This is an
+        experimental feature primarily intended to assist with
+        debugging.  The schema is subject to change, and it's possible
+        that not all objects supported by AxisManager can be
+        serialized.
+
+        Args:
+          dest (str or h5py.Group): Place to save it (in combination
+            with group).
+          group (str or None): Group within the HDF5 file (relative to
+            dest).
+          overwrite (bool): If True, remove any existing thing at the
+            specified address before writing there.
+
+        Notes:
+          If dest is a string, it is taken to be an HDF5 filename and
+          is opened in 'a' mode.  The group, in that case, is the
+          full group name in the file where the data should be written.
+
+          If dest is an h5py.Group, the group is the group name in the
+          file relative to dest.
+
+          The overwrite argument only matters if group is passed as a
+          string.  A RuntimeError is raised if the group address
+          already exists and overwrite==False.
+
+          For example, these are equivalent::
+
+            # Filename + group address:
+            axisman.save('test.h5', 'x/y/z')
+
+            # Open h5py.File + group address:
+            with h5py.File('test.h5', 'a') as h:
+              axisman.save(h, 'x/y/z')
+
+            # Partial group address
+            with h5py.File('test.h5', 'a') as h:
+              g = h.create_group('x/y')
+              axisman.save(g, 'z')
+
+          When passing a filename, the code probably won't use a
+          context manager... so if you want that protection, open your
+          own h5py.File as in the 2nd and 3rd example.
+
+        """
+        from .axisman_io import _save_axisman
+        return _save_axisman(self, dest, group=group, overwrite=overwrite)
+
+    @classmethod
+    def load(cls, src, group=None):
+        """Load a saved AxisManager from an HDF5 file and return it.  See docs
+        for save() function.
+
+        The (src, group) args are combined in the same way as (dest,
+        group) in the save function.  Examples::
+
+          axisman = AxisManager.load('test.h5', 'x/y/z')
+
+          with h5py.File('test.h5', 'r') as h:
+            axisman = AxisManager.load(h, 'x/y/z')
+        """
+        from .axisman_io import _load_axisman
+        return _load_axisman(src, group, cls)
 
 
 def get_coindices(v0, v1):

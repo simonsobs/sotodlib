@@ -72,14 +72,23 @@ hold other AxisManagers, and some other stuff too).
 
     dset = core.AxisManager().wrap('tod', tod)
 
+AxisManagers can also hold scalars, a value is considered scalar if
+``'np.isscalar'`` thinks it is a scalar or if it is ``'None'``.
+
+.. code-block:: python
+
+    dset = dset.wrap('scalar', 1.0)
+
 Inspecting::
 
     >>> print(dset)
-    AxisManager(tod[3,10000])
+    AxisManager(tod[3,10000], scalar)
     >>> print(dset.tod)
     [[10. 10. 10. ... 10. 10. 10.]
      [11. 11. 11. ... 11. 11. 11.]
      [12. 12. 12. ... 12. 12. 12.]]
+    >>> print(dset.scalar)
+    1.0
 
 
 The value that AxisManager adds is an ability to relate an axis in one
@@ -152,6 +161,25 @@ objects::
     (2, 290)
     >>> print(dset.boresight.az.shape)
     (290,)
+
+For debugging, you can write AxisManagers to HDF5 files and then read
+them back.  (This is an experimental feature so don't rely on this for
+long term stability!)::
+
+    >>> dset.save('output.h5', 'my_axismanager/dset')
+
+    >>> dset_reloaded = AxisManager.load('output.h5', 'my_axismanager/dset')
+    >>> dset_reloaded
+    AxisManager(tod[dets,samps], hwp_angle[samps], boresight*[samps],
+      dets:LabelAxis(2), samps:IndexAxis(290))
+
+Numerical arrays are stored as simple HDF5 datasets, so you can also
+use h5py to load the saved arrays::
+
+    >>> import h5py
+    >>> f = h5py.File('output.h5')
+    >>> f['my_axismanager/dset/tod'][:]
+    <HDF5 dataset "tod": shape (2,290), type "<f8">
 
 
 ---------

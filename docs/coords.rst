@@ -258,6 +258,8 @@ Coordinate Conversions
 
 .. autofunction:: get_radec
 .. autofunction:: get_horiz
+.. autoclass:: ScalarLastQuat
+   :members:
 
 Map and Geometry helpers
 ------------------------
@@ -265,3 +267,9 @@ Map and Geometry helpers
 .. autofunction:: get_footprint
 .. autofunction:: get_wcs_kernel
 .. autofunction:: get_supergeom
+
+Planet Mapmaking support
+------------------------
+
+.. automodule:: sotodlib.coords.planets
+   :members:

@@ -4,8 +4,14 @@ from scipy.signal import welch
 import numpy as np
 import pyfftw
 
+import so3g
+
 from . import detrend_data
-        
+
+def _get_num_threads():
+    # Guess how many threads we should be using in FFT ops...
+    return so3g.useful_info().get('omp_num_threads', 4)
+
 def rfft(aman, detrend='linear', resize='zero_pad', window=np.hanning,
          axis_name='samps', signal_name='signal', delta_t=None):
     """Return the real fft of aman.signal_name along the axis axis_name. 
@@ -126,7 +132,7 @@ def build_rfft_object(n_det, n, direction='FFTW_FORWARD', **kwargs):
         
         t_fun: function for performing FFT (two are returned if direction=='BOTH')
     """
-    fftargs = {'threads': 4, 'flags': ['FFTW_ESTIMATE']}
+    fftargs = {'threads': _get_num_threads(), 'flags': ['FFTW_ESTIMATE']}
     fftargs.update(kwargs)
     
     a = pyfftw.empty_aligned((n_det,n), dtype='float32')
@@ -205,3 +211,38 @@ def calc_psd(aman, signal=None, timestamps=None, **kwargs):
         
     freqs, Pxx = welch( signal, 1/np.median(np.diff(timestamps)), **kwargs)
     return freqs, Pxx
+
+def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
+    """
+    Function that calculates the white noise level as a median PSD value between two frequencies.
+    Defaults to calculation of white noise between 5 and 10Hz.
+    Defaults frequency information to a wrapped "freqs" field in aman.
+    Args:
+    - aman: Axis manager 
+        Uses aman.freq as frequency information associated with the PSD, pxx.
+    - pxx: Float array
+        Psd information to calculate white noise. Defaults to aman.pxx
+    - freqs: 1d Float array
+        frequency information related to the psd. Defaults to aman.freqs
+    - low_f: Floating point number
+        low frequency cutoff to calculate median psd value. Defaults to 5Hz
+    - high_f: Floating point number
+        high frequency cutoff to calculate median psd value. Defaults to 10Hz
+    Returns:
+    wn: Float array 
+        array of white noise levels for each psd passed into argument.
+    """
+    if freqs is None:
+        freqs = aman.freqs
+
+    if pxx is None:
+        pxx = aman.pxx
+    
+    fmsk = np.all([freqs >= low_f, freqs <= high_f], axis=0 )
+    if pxx.ndim == 1:
+        wn2 = np.median(pxx[fmsk])
+    else:
+        wn2 = np.median(pxx[:,fmsk], axis=1)
+    
+    wn = np.sqrt(wn2)
+    return wn

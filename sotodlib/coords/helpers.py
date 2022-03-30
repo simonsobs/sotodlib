@@ -2,6 +2,8 @@ import so3g.proj
 import numpy as np
 from pixell import enmap, wcsutils, utils
 
+import time
+
 DEG = np.pi/180
 
 
@@ -66,12 +68,62 @@ def _valid_arg(*args, src=None):
             return a
     return None
 
-def _not_both(a, b, name='{item}'):
+def _not_both(a, b, name='{item}', dtype=None):
     if a is not None:
         if b is not None:
             raise ValueError('self.%s and kwarg %s both not None!' % (name, name))
-        return a
+        b = a
+    if b is not None and dtype is not None:
+        b = b.astype(dtype)
     return b
+
+class Timer:
+    """Context manager that prints elapsed time to terminal or a log or
+    whatever.  For example::
+
+        with Timer('tod-to-map projection', logger.info):
+            P.to_map(tod)
+
+    Should log a message of the form::
+
+        INFO:tod-to-map projection:            3.212 seconds
+
+    Use the fmt keyword argument to enter your own format string,
+    which can include references to {msg}, {start_time}, {end_time},
+    {elapsed}.
+
+    To avoid repeating the same arguments, subclass this and set
+    FORMAT and PRINT_FUNC for your use cases::
+
+       class MyTimer(Timer):
+           FORMAT = 'mapmaker7: {msg} took {elapsed:10.3f} seconds'
+           PRINT_FUNC = lambda x: (logger.info(x), print(x))
+
+    """
+    FMT = '{msg:40}: {elapsed:10.3f} seconds'
+    PRINT_FUNC = print
+
+    def __init__(self, msg=None, print_func=None, fmt=None):
+        if msg is None:
+            msg = 'timed operation'
+        if fmt is None:
+            fmt = self.FMT
+        if print_func is None:
+            print_func = self.PRINT_FUNC
+        self.msg = msg
+        self.fmt = fmt
+        self.print_func = print_func
+        self.start_time = time.time()
+    def __enter__(self):
+        return self
+    def __exit__(self, *args, **kw):
+        self.end_time = time.time()
+        self.elapsed = self.end_time - self.start_time
+        self.text = self.fmt.format(
+            msg=self.msg, start_time=self.start_time, end_time=self.end_time,
+            elapsed=self.elapsed)
+        self.print_func(self.text)
+
 
 def get_radec(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
               boresight=None, sight=None):
@@ -202,21 +254,11 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     sight = _get_csl(sight)
     n_samp = len(sight.Q)
 
-    # Do a simplest convex hull...
-    q = so3g.proj.quat.rotation_xieta(fp0.xi, fp0.eta)
-    xi, eta, _ = so3g.proj.quat.decompose_xieta(q)
-    xi0, eta0 = xi.mean(), eta.mean()
-    R = ((xi - xi0)**2 + (eta - eta0)**2).max()**.5
-
-    n_circ = 16
-    dphi = 2*np.pi/n_circ
-    phi = np.arange(n_circ) * dphi
-    # cos(dphi/2) is the largest underestimate in radius one can make when
-    # replacing a circle with an n_circ-sided polygon, as we do here.
-    L = 1.01 * R / np.cos(dphi/2)
-    xi, eta = L * np.cos(phi) + xi0, L * np.sin(phi) + eta0
-    fake_dets = ['hull%i' % i for i in range(n_circ)]
-    fp1 = so3g.proj.FocalPlane.from_xieta(fake_dets, xi, eta, 0*xi)
+    # Get a convex hull focal plane.
+    (xi0, eta0), R, xieta1 = get_focal_plane_cover(
+        focal_plane=fp0, count=16)
+    fake_dets = ['hull%i' % i for i in range(xieta1.shape[1])]
+    fp1 = so3g.proj.FocalPlane.from_xieta(fake_dets, xieta1[0], xieta1[1])
 
     asm = so3g.proj.Assembly.attach(sight, fp1)
     output = np.zeros((len(fake_dets), n_samp, 4))
@@ -248,6 +290,70 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     w.wcs.crpix -= corners[0]
     shape        = tuple(corners[1]-corners[0]+1)[::-1]
     return (shape, w)
+
+def get_focal_plane_cover(tod=None, count=0, focal_plane=None,
+                          xieta=None):
+    """Process a bunch of detector positions into a center and radius such
+    that a circle with that center and radius contains all the
+    detectors.  Also return detector positions, arranged approximately
+    in a circle, whose convex hull contains all input detectors.
+
+    Args:
+      tod (AxisManager): source of focal_plane, if it is not passed.
+      count (int): number of points on the enclosing circle to return.
+      focal_plane (AxisManager): source for xi and eta, if xieta is
+        not passed in
+      xieta (array): (2, n) array (or similar) of xi and eta
+        detector positions.
+
+    Returns:
+      xieta0: array[2] with array center, (xi0, eta0).
+      radius: radius of the enclosing circle.
+      xietas: array with shape (2, count) carrying the xi and eta
+        coords of the circular convex hull.
+
+    Notes:
+      If count=0, an empty list is returned for xietas.  Otherwise,
+      count must be at least 3 so that the shape is not degenerate.
+
+    """
+    if xieta is None:
+        if focal_plane is None:
+            focal_plane = tod.focal_plane
+        xi = focal_plane.xi
+        eta = focal_plane.eta
+    else:
+        xi, eta = xieta[:2]
+    qs = so3g.proj.quat.rotation_xieta(xi, eta)
+
+    # Starting guess for center
+    xi0, eta0 = xi.mean(), eta.mean()
+    for i in range(10):
+        q = so3g.proj.quat.rotation_xieta(xi0, eta0)
+        d_xi, d_eta, _ = so3g.proj.quat.decompose_xieta(~q * qs)
+        if abs(d_xi.mean()) + abs(d_eta.mean()) < 1e-5*DEG:
+            break
+        xi0 += d_xi.mean()*.8
+        eta0 += d_eta.mean()*.8
+    else:
+        raise ValueError('No convergence?')
+    R = (d_xi**2 + d_eta**2).max()**.5
+    if count == 0:
+        return ((xi0, eta0), R, [])
+    if count < 3:
+        raise ValueError('count must be 0 or >=3.')
+
+    dphi = 2*np.pi/count
+    phi = np.arange(count) * dphi
+    # cos(dphi/2) is the largest underestimate in radius one can make when
+    # replacing a circle with an n_circ-sided polygon, as we do here.
+    L = 1.01 * R / np.cos(dphi/2)
+    xi, eta = L * np.cos(phi), L * np.sin(phi)
+
+    # Rotate those into place.
+    xi, eta, _ = so3g.proj.quat.decompose_xieta(
+        q * so3g.proj.quat.rotation_xieta(xi, eta))
+    return (np.array([xi0, eta0]), R, np.array([xi, eta]))
 
 def get_supergeom(*geoms, tol=1e-3):
     """Given a set of compatible geometries [(shape0, wcs0), (shape1,
@@ -300,42 +406,60 @@ def get_supergeom(*geoms, tol=1e-3):
         s0 = corner_b - corner_a
     return tuple(map(int, s0)), w0
 
-def _invert_weights_map(weights, eigentol=1e-6, UPLO='U'):
+def _invert_weights_map(weights, eigentol=1e-6, kill_partials=True,
+                        UPLO='U'):
     """Compute an inverse weights matrix, using eigendecomposition methods
     that are safe against singular matrices.  This is similar to
     scipy.linalg.pinvh, but applied to each pixel in a map in an
     efficient way.
 
     Args:
-      weights: an array with at least 2 dimensions, where the leading
-        two dimensions are the same.  For example, shape (3, 3, 200,
-        100) or (3, 3, 10231230).
-      eigentol: sets the threshold for keeping eigenvectors.  In each
-        matrix inversion, any eigenvectors whose absolute values are
-        less than eigentol times the largest absolute eigenvalue are
-        set to zero (and thus excluded from inclusion in the inverse).
-      UPLO (str): this can be 'U' or 'L' signifying that only the
+      weights (array): an array (or ndarray) with at least 2
+        dimensions, where the leading two dimensions represent
+        submatrices that are to be inverted; the other dimensions
+        index "the pixel".  Valid shapes would be, for example, (3, 3,
+        200, 100) or (3, 3, 10231230).
+      eigentol (float): sets the threshold for keeping eigenvectors.
+        In each sub-matrix inversion, any eigenvectors whose absolute
+        values are less than eigentol times the largest absolute
+        eigenvalue are set to zero (and thus excluded from inclusion
+        in the inverse).
+      kill_partials (bool): if True, then pixels where any
+        eigenvectors are zero (or have been forced to zero) will have
+        all their eigenvectors forced to zero.  Stated another way,
+        all pixels with singular or nearly singular weights
+        sub-matrices will be treated as having no weight at all.
+      UPLO (str): this can be 'U' or 'L', signifying that only the
         upper diagonal or lower diagonal (respectively) elements of
         each weights sub-matrix should be considered.  (This argument
         is passed through to np.linalg.eigh.)
 
     Returns:
-      The inverse of weights, computed for the square submatrices
-      defined by the first two axes.  In cases where the inverse does
-      not formally exist, the non-trivial eigenmodes of the matrix
-      will be exactly inverted, and singular or near-singular modes
-      form the null space.
+      A matrix with the same shape as weights, but where the submatrix
+      carried in the first two dimensions is the inverse of the
+      corresponding submatrix of weights; or possibly a pseudo-inverse
+      or the zero matrix depending on arguments described above.
 
     """
+    # Quick short circuit in trivial case...
+    if weights.shape[:2] == (1, 1):
+        iw = np.zeros_like(weights)  # yes, this preserves wcs
+        iw[weights!=0] = 1./weights[weights!=0]
+        return iw
+
     # Collapse and reindex weights map so it is (npix, n, n).
     w = weights.reshape(weights.shape[:2] + (-1,)).transpose(2, 0, 1)
 
     # Get eigendecomposition of each (n, n) sub-matrix
     v, U = np.linalg.eigh(w, UPLO)
 
-    # Identify acceptable eigenvalues -- reject ones that too small
-    # relative to max eigenvalue in their pixel.
-    eig_ok = (abs(v) > abs(v).max(axis=-1)[:,None] * eigentol)
+    # Identify acceptable eigenvalues -- reject ones that are non-positive or too
+    # small relative to max eigenvalue in their pixel.
+    eig_ok = (v > 0) * (v > v[:,-1:] * eigentol)
+
+    # Does one bad eig spoil the basket?
+    if kill_partials:
+        eig_ok *= np.all(eig_ok, axis=1)[:,None]
 
     # Force each unacceptable eigenmode to 0.
     U *= eig_ok[:,None,:]
@@ -363,3 +487,67 @@ def _apply_inverse_weights_map(inverse_weights, target):
         target.shape[1], target.shape[2], target.shape[0], 1)
     m1 = np.matmul(iw, m)
     return m1.transpose(2,3,0,1).reshape(target.shape)
+
+
+class ScalarLastQuat(np.ndarray):
+    """Wrapper class for numpy arrays carrying quaternions with the ijk1
+    signature.
+
+    The practice in many codes, including TOAST, quaternionarray, and
+    scipy is to store quaternions in numpy arrays with shape (..., 4),
+    with the real part of the quaternion at index [..., 3].  In
+    contrast, spt3g_software inherits the 1ijk from boost.
+
+    This class serves two main purposes:
+
+    - It can be used to annotate numpy arrays as carrying quaternions
+      in the ijk1 signature (without disturbing their behavior as
+      numpy arrays).
+    - It provides conversion to and from G3 quaternion containers,
+      including signature correction.
+
+    When instantiating an object of this class with a numpy array as
+    an argument, the object will wrap a view of the array (not a
+    copy).
+
+    When instantiating an object of this class with a G3 quat as an
+    argument, the object will store a copy of the G3 quat, translated
+    to ijk1 signature::
+
+      q_g3 = spt3g.core.quat(1.,2.,3.,4.)
+      q_tq = ScalarLastQuat(q_g3)
+      q_g3_again = q_tq.to_g3()
+
+      print(q_g3, q_tq, q_g3_again)
+      =>  (1,2,3,4) [2. 3. 4. 1.] (1,2,3,4)
+
+    """
+    def __new__(cls, arr):
+        if isinstance(arr, so3g.proj.quat.G3VectorQuat):
+            arr = np.asarray(arr)
+            obj = np.empty(arr.shape)
+            obj[:,:3] = arr[:,1:]
+            obj[:,3] = arr[:,0]
+        elif isinstance(arr, so3g.proj.quat.quat):
+            obj = np.array((arr.b, arr.c, arr.d, arr.a))
+        else:
+            obj = np.asarray(arr)
+        return obj.view(cls)
+
+    def to_g3(self):
+        """Return the ijk1-signature equivalent of the enclosed quaternion
+        array, as a spt3g.core.quat (if 1-d) or a G3VectorQuat (if
+        2-d).
+
+        """
+        if self.shape[-1] != 4:
+            raise ValueError("Last axis must have 4 elements.")
+        if self.ndim == 1:
+            b, c, d, a = self[:].astype(float)
+            return so3g.proj.quat.quat(a, b, c, d)
+        if self.ndim == 2:
+            temp = np.zeros(self.shape, float)
+            temp[..., 0] = self[..., 3]
+            temp[..., 1:] = self[..., :3]
+            return so3g.proj.quat.G3VectorQuat(temp)
+        raise ValueError("Can only convert 1- or 2-d arrays to G3.")

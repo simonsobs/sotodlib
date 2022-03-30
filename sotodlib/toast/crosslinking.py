@@ -9,6 +9,7 @@ import toast
 
 from toast.map import covariance_apply, covariance_invert, DistPixels
 from toast.todmap.todmap_math import OpAccumDiag
+from toast import qarray as qa
 
 
 class OpCrossLinking(toast.Operator):
@@ -70,37 +71,38 @@ class OpCrossLinking(toast.Operator):
         )
         
         for det in tod.local_dets:
-            if "pol_angle_deg" in focalplane[det]:
-                psi = np.radians(focalplane[det]["pol_angle_deg"])
-            elif "pol_angle_rad" in focalplane[det]:
-                psi = focalplane[det]["pol_angle_rad"]
+            # measure the scan direction wrt the local meridian
+            # for each sample
+            quat = tod.read_pntg(detector=det)
+            theta, phi = qa.to_position(quat)
+            theta = np.pi / 2 - theta
+            # scan direction across the reference sample
+            dphi = (np.roll(phi, -1) - np.roll(phi, 1))
+            dtheta = np.roll(theta, -1) - np.roll(theta, 1)
+            # except first and last sample
+            for dx, x in (dphi, phi), (dtheta, theta):
+                dx[0] = x[1] - x[0]
+                dx[-1] = x[-1] - x[-2]
+            # scale dphi to on-sky
+            dphi *= np.cos(theta)
+            # Avoid overflows
+            tiny = np.abs(dphi) < 1e-30
+            if np.any(tiny):
+                ang = np.zeros(nsample)
+                ang[tiny] = np.sign(dtheta) * np.sign(dphi) * np.pi / 2
+                not_tiny = np.logical_not(tiny)
+                ang[not_tiny] = np.arctan(dtheta[not_tiny] / dphi[not_tiny])
             else:
-                raise RuntimeError(
-                    "Could not find polarization angle for {} in focalplane."
-                    "".format(det)
-                )
-            weights_name_in = "{}_{}".format(self._weights, det)
-            weights_in = tod.cache.reference(weights_name_in)
+                ang = np.arctan(dtheta / dphi)
 
-            iw, qw, uw = weights_in.T
-            # The polarization weights may include a polarization
-            # efficiency term we don't want
-            eta = np.sqrt(qw ** 2 + uw ** 2)
-            cos2psi_in = qw / eta
-            sin2psi_in = uw / eta
-            cos2psi_det = np.cos(2 * psi)
-            sin2psi_det = np.sin(2 * psi)
-            # Subtract the detector polarization angle from the polarization weights
-            # Rather than evaluate tons of sines and cosines
-            cos2psi_out = cos2psi_in * cos2psi_det + sin2psi_in * sin2psi_det
-            sin2psi_out = sin2psi_in * cos2psi_det - cos2psi_in * sin2psi_det
-
-            weights_out = np.vstack([np.ones(nsample), cos2psi_out, sin2psi_out]).T
-            weights_name_out = "{}_{}".format(self.weight_name, det)
+            weights_out = np.vstack(
+                [np.ones(nsample), np.cos(2 * ang), np.sin(2 * ang)]
+            ).T
+            weights_name_out = f"{self.weight_name}_{det}"
             tod.cache.put(weights_name_out, weights_out, replace=True)
 
             # Need a constant signal to map
-            signal_name = "{}_{}".format(self.signal_name, det)
+            signal_name = f"{self.signal_name}_{det}"
             tod.cache.add_alias(signal_name, self.dummy_name)
         return
 
@@ -116,7 +118,7 @@ class OpCrossLinking(toast.Operator):
     def exec(self, data):
         comm = data.comm.comm_world
 
-        if comm.rank == 0:
+        if comm is None or comm.rank == 0:
             os.makedirs(self._outdir, exist_ok=True)
 
         for obs in data.obs:
