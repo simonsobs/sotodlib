@@ -212,20 +212,17 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         signal -= signal_pca
 
     else:
+        # Make sure PCA decomposition targets (signal_pca) are mean 0.
+        # It's convenient to remove the same levels from signal now,
+        # too.
         levels = signal_pca.mean(axis=1)
+        signal_pca -= levels[:,None]
         signal -= levels[:,None]
-        signal_pca -= level[:,None]
 
-        # Clean the means, get PCA model, restore means.
-        #signal -= levels[:,None]
+        # Get PCA model and discard the source vectors.
         pca = tod_ops.pca.get_pca_model(tod, signal=signal_pca, n_modes=n_modes)
-        #signal += levels[:,None]
-
-        # Swap original data back into the TOD, remove means.
-        #gaps.swap(tod, signal=signal)
-        #signal -= levels[:,None]
-
         del signal_pca
+
         # Remove the PCA model.
         tod_ops.pca.add_model(tod, pca, -1, signal=signal)
 
