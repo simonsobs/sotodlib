@@ -7,6 +7,7 @@ import logging
 
 from . import detrend_data
 from . import fft_ops
+from sotodlib import core
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,6 @@ def fourier_filter(tod, filt_function,
                    axis_name='samps', signal_name='signal', 
                    time_name='timestamps',
                    **kwargs):
-    
     """Return a filtered tod.signal_name along the axis axis_name. 
         Does not change the data in the axis manager.
     
@@ -118,6 +118,46 @@ def fourier_filter(tod, filt_function,
         return signal.transpose()
     
     return signal
+
+def fft_trim(tod, axis='samps', prefer='right'):
+    """Restrict AxisManager sample range so that FFTs are efficient.  This
+    uses the find_inferior_integer function.
+
+    Args:
+      tod (AxisManager): Target, which is modified in place.
+      axis (str): Axis to target.
+      prefer (str): One of ['left', 'right', 'center'], indicating
+        whether to trim away samples from the end, the beginning, or
+        !equally at the beginning and end (respectively).
+
+    Returns:
+      The (start, stop) indices to use to slice an array and get these
+      samples.
+
+    """
+    axis_obj = tod[axis]
+    old_size = axis_obj.count
+    new_size = fft_ops.find_inferior_integer(old_size)
+
+    offset = old_size - new_size
+    if prefer == 'left':
+        offset = 0
+    elif prefer == 'center':
+        offset //= 2
+    elif prefer == 'right':
+        pass
+    else:
+        raise ValueError(f'Invalid choice prefer="{prefer}"')
+
+    start_stop = (offset, offset+new_size)
+
+    if isinstance(axis_obj, core.OffsetAxis):
+        # Account for special indexing of OffsetAxis.
+        offset += axis_obj.offset
+
+    tod.restrict(axis, (offset, offset+new_size))
+    return start_stop
+
 
 ################################################################
 
