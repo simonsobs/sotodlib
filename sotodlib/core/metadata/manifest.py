@@ -42,9 +42,12 @@ The ManifestScheme includes:
 
 import sqlite3
 import os
+import sys
+import json
 import numpy as np
+import argparse
 
-from . import common
+from . import common, resultset
 
 TABLE_DEFS = {
     'input_scheme': [
@@ -93,6 +96,15 @@ class ManifestScheme:
         """
         self.cols.append((name, 'out', 'exact', dtype))
         return self
+
+    def as_resultset(self):
+        """Get the scheme structure as a ResultSet.  This is a safer
+        alternative to inspecting .cols directly.
+
+        """
+        rs = resultset.ResultSet(['field', 'purpose', 'col_type', 'data_type'])
+        rs.rows = list(self.cols)
+        return rs
 
     def _get_scheme_rows(self):
         """
@@ -296,13 +308,17 @@ class ManifestDb:
         return common.sqlite_to_file(self.conn, filename, overwrite=overwrite, fmt=fmt)
 
     @classmethod
-    def from_file(cls, filename, fmt=None):
+    def from_file(cls, filename, fmt=None, force_new_db=True):
         """Instantiate an ManifestDb and return it, with the data copied in
         from the specified file.
 
         Args:
           filename (str): path to the file.
           fmt (str): format of the input; see to_file for details.
+          force_new_db (bool): Used if connecting to an sqlite
+            database. If True the database is copied into memory and
+            if False returns a read-only connection to the database
+            without reading it into memory
 
         Returns:
           ManifestDb with an sqlite3 connection that is mapped to memory.
@@ -313,7 +329,7 @@ class ManifestDb:
           constructor map_file argument.
 
         """
-        conn = common.sqlite_from_file(filename, fmt=fmt)
+        conn = common.sqlite_from_file(filename, fmt=fmt, force_new_db=force_new_db)
         return cls(conn)
 
     @classmethod
@@ -428,3 +444,249 @@ class ManifestDb:
         Raises SchemaError in the first case, IntervalError in the second.
         """
         return False
+
+
+def get_parser():
+    parser = argparse.ArgumentParser(
+        epilog="""For details of individual modes, pass a dummy database argument
+        followed by the mode and -h, e.g.: "%(prog)s x files -h" """)
+
+    parser.add_argument('filename', help="Path to a ManifestDb.",
+                        metavar='my_db.sqlite')
+
+    cmdsubp = parser.add_subparsers(
+        dest='mode')
+
+    # "summary"
+    p = cmdsubp.add_parser(
+        'summary', help=
+        "Summarize database structure and number of entries.",
+        usage="""
+
+    %(prog)s
+
+        This will print a summary of the index fields and
+        endpoint fields.  (This mode is chosen by default.)
+        """)
+
+    # "files"
+    p = cmdsubp.add_parser(
+        'files', usage="""
+
+    %(prog)s
+    %(prog)s --all
+    %(prog)s --clean
+
+        This will print out a list of archive files referenced
+        by the database.  --all prints all the rows, even if
+        there are a lot of them.  --clean is used to get a
+        simple list, one file per line, for use with rsync
+        or whatever.
+        """,
+        help="List the files referenced in the database.")
+
+    p.add_argument('--clean', action='store_true',
+                   help="Print a simple list of all files (for script digestion).")
+    p.add_argument('--all', action='store_true',
+                   help="Print all files, not an abbreviated list.")
+
+    # "lookup"
+    p = cmdsubp.add_parser(
+        'lookup', help=
+        "Query database for specific index data and display matched endpoint data.",
+        usage="""
+
+    %(prog)s val1,val2,... [val1,val2,... ]
+
+        Each command line argument is converted to a single query, and
+        must consist of comma-delimited fields to be associated
+        one-to-one with the index fields.
+
+    Example 1: if the single index field is "obs:obs_id":
+
+        %(prog)s obs_1840300000
+
+    Example 2: do two queries (single index field)
+
+        %(prog)s obs_1840300000 obs_185040012
+
+    Example 3: single query, two index fields (perhaps timestamp and wafer):
+
+        %(prog)s 1840300000,wafer29
+
+        """)
+    p.add_argument('index', nargs='*', help=
+                   "Index information.  Comma-delimit your data, for example: "
+                   "1456453245,wafer5")
+
+    # "reroot"
+    p = cmdsubp.add_parser(
+        'reroot', help=
+        "Batch change filenames (by prefix) in the database.",
+        usage="""
+    %(prog)s /path/on/system1 /path/on/system2 -o my_new_manifest.sqlite
+    %(prog)s /path/on/system1 /new_path/on/system1 --overwrite
+    %(prog)s ./result1/obs_12345.h5 ./result2/obs_12345.h5 --overwrite
+
+        These operations will create a new ManifestDb, will all the
+        entries from my_db.sqlite, but with the filenames
+        (potentially) altered.  Any filename that starts with the
+        first argument will be changed, in the output, to instead
+        start with the second argument.  When you do this you must
+        either say where to write the output (-o) or give the program
+        permission to overwrite your input database file.  Note that
+        the first argument need not match all entries in the database;
+        you can use it to pick out a subset (even a single entry).
+    """)
+    p.add_argument('old_prefix', help=
+                   "Prefix to match in current database.")
+    p.add_argument('new_prefix', help=
+                   "Prefix to replace it with.")
+    p.add_argument('--overwrite', action='store_true')
+    p.add_argument('--output-db', '-o')
+    p.add_argument('--dry-run', action='store_true')
+
+    return parser
+
+def main(args=None):
+    if args is None:
+        args = sys.argv[1:]
+    parser = get_parser()
+    args = parser.parse_args(args)
+
+    if args.mode is None:
+        args.mode = 'summary'
+
+    db = ManifestDb.from_file(args.filename, force_new_db=False)
+
+    if args.mode == 'summary':
+        header = f'Summary for {args.filename}'
+        print(header)
+        print('-' * len(header))
+        print()
+
+        schema = db.scheme.as_resultset()
+        row_count = db.conn.execute('select count(id) from map').fetchone()[0]
+        print(f'Total number of index entries:  {row_count:>7}')
+        print()
+
+        print('Index fields:')
+        fmt = '   {field:20}  {data_type:20} {col_type:>10}'
+        hdr = fmt.format(field="Field", data_type="Type", col_type="Match")
+        print(hdr)
+        print('   ' + '-' * (len(hdr) - 3))
+        for row in schema:
+            if row['purpose'] == 'in':
+                print(fmt.format(**row))
+        print()
+
+        print('Endpoint fields:')
+        fmt = '   {field:20}  {data_type:20} {count:>10}'
+        hdr = fmt.format(field="Field", data_type="Type", count="Entries")
+        print(hdr)
+        print('   ' + '-' * (len(hdr) - 3))
+        for row in schema:
+            if row['purpose'] == 'out':
+                count = len(db.conn.execute('select distinct "%s" from map' % row['field']).fetchall())
+                print(fmt.format(count=count, **row))
+        file_count = db.conn.execute('select count(id) from files').fetchone()[0]
+        print(fmt.format(
+            field='filename', data_type='filename', count=file_count))
+
+        print()
+
+    elif args.mode == 'files':
+        # Get all files.
+        rows = db.conn.execute(
+            'select files.name as filename, count(map.id) '
+            'from map join files on '
+            'map.file_id==files.id group by filename').fetchall()
+
+        if args.clean:
+            for filename, count in rows:
+                print(filename)
+        else:
+            fmt = '  {count:>7} {filename}'
+            hdr = fmt.format(count="Count", filename="Filename")
+            print(hdr)
+            print('-' * (len(hdr) + 20))
+            n = len(rows)
+            super_count = sum([r[1] for r in rows])
+            if n > 20 and not args.all:
+                rows = rows[:10]
+            for filename, count in rows:
+                print(fmt.format(filename=filename, count=count))
+            if len(rows) < n:
+                other_count = super_count - sum([r[1] for r in rows])
+                print(fmt.format(count=other_count, filename='...'))
+                print('(Pass --all to show all results.)')
+            print()
+
+    elif args.mode == 'lookup':
+        schema = db.scheme.as_resultset()
+
+        index_fields = [r['field'] for r in schema if r['purpose'] == 'in']
+        endpoint_fields = [r['field'] for r in schema if r['purpose'] == 'out']
+
+        results = []
+        for index in args.index:
+            vals = index.split(',')
+            if len(vals) != len(index_fields):
+                print(f'Index data "{index}" decodes to "{len(vals)}" fields, ')
+                print(f'but we expected "{len(index_fields)}".')
+
+            query = {r: a for r, a in zip(index_fields, vals)}
+            matches = db.match(query, multi=True)
+
+            results.append({'query': query,
+                            'matches': []})
+            endpoint_fields.append('filename')
+            for i, m in enumerate(matches):
+                results[-1]['matches'].append({})
+                for k in endpoint_fields:
+                    results[-1]['matches'][-1][k] = matches[i][k]
+
+        print(json.dumps(results, indent=4))
+
+    elif args.mode == 'reroot':
+        # Reconnect with write?
+        if args.overwrite:
+            if args.output_db:
+                parser.error("Specify only one of --overwrite or --output-db.")
+            db = ManifestDb.from_file(args.filename, force_new_db=True)
+            args.output_db = args.filename
+        else:
+            if args.output_db is None:
+                parser.error("Specify an output database name with --output-db, "
+                             "or pass --overwrite to clobber.")
+            db = ManifestDb.from_file(args.filename, force_new_db=True)
+
+        # Get all files matching this prefix ...
+        c = db.conn.execute('select id, name from files '
+                            'where name like "%s%%"' % (args.old_prefix))
+        rows = c.fetchall()
+        print('Found %i records matching prefix ...'
+               % len(rows))
+
+        print('Converting to new prefix ...')
+        n_examples = 1
+
+        if not args.dry_run:
+            c = db.conn.cursor()
+
+        for (_id, name) in rows:
+            new_name = args.new_prefix + name[len(args.old_prefix):]
+            if n_examples > 0:
+                print(f'  Example: converting filename\n'
+                      f'      "{name}"\n'
+                      f'    to\n'
+                      f'      "{new_name}"')
+                n_examples -= 1
+            if not args.dry_run:
+                c.execute('update files set name=? where id=?', (new_name, _id))
+
+        print('Saving to %s' % args.output_db)
+        if not args.dry_run:
+            db.conn.commit()
+            c.execute('vacuum')
+            db.to_file(args.output_db)
