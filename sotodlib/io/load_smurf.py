@@ -2298,6 +2298,14 @@ def load_file(
     aman.wrap("timestamps", _get_timestamps(streams), ([(0, "samps")]))
     aman.wrap("status", status.aman)
 
+    # If readout filter in enabled build iir_params AxisManager
+    if status.filter_enabled:
+        iir_params = core.AxisManager()
+        iir_params.wrap("a", status.filter_a)
+        iir_params.wrap("b", status.filter_b)
+        iir_params.wrap("fscale", 1/status.flux_ramp_rate_hz)
+        aman.wrap("iir_params", iir_params)
+
     # Conversion from DAC counts to squid phase
     aman.wrap("signal", np.zeros((aman[det_axis].count, aman["samps"].count), "float32"), [(0, det_axis), (1, "samps")])
     for idx in range(aman[det_axis].count):
