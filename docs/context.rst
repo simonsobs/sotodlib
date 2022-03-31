@@ -706,6 +706,24 @@ The context.yaml metadata entry would probably look like this::
     ...
 
 
+
+so-metadata tool
+----------------
+
+The ``so-metadata`` script is a tool for inspecting and manipulating
+ManifestDbs stored on disk.  For example, it can show you what files
+are referred to by the ManifestDb, and what kind of information is
+used to index the database.
+
+If you need to change the filenames in a ManifestDb, the "reroot" mode
+might be helpful.
+
+
+.. argparse::
+   :module: sotodlib.core.metadata.manifest
+   :func: get_parser
+
+
 ManifestDb reference
 --------------------
 
