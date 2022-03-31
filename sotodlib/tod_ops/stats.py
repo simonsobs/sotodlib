@@ -1,6 +1,3 @@
-"""
-Useful tools for statistical analyses
-"""
 from scipy.stats import skewnorm, binned_statistic
 from scipy.interpolate import interp1d
 import scipy.optimize as opt
@@ -29,7 +26,8 @@ def noise_model(
 
         flux_ramp_freq: The flux ramp frequency
 
-        tf_fix: Function to calculates adjustment to transfer function, if None then function that always returns 1 is used
+        tf_fix: Function to calculates adjustment to transfer function,
+                if None then function that always returns 1 is used
 
         wl: The  white noise level
 
@@ -124,16 +122,14 @@ def fit_psd(
     return popt, _noise_model(0, *popt), Pxx, freqs
 
 
-def fit_hist(
-    aman, signal=None, hist=None, bins=None, skew=True, **hist_params
-):
+def fit_hist(aman, signal=None, hist=None, bins=None, skew=True, **hist_params):
     """
     Fit gaussian function to histogram of some data
 
     Arguments:
         aman: AxisManager with data
 
-        signal: The data to make histogram from, if None then aman.signal is used 
+        signal: The data to make histogram from, if None then aman.signal is used
 
         hist: The histogram to fit, if None then histogram of data is used
 
@@ -177,7 +173,7 @@ def fit_sine(aman, signal=None, timestamps=None):
     Arguments:
         aman: AxisManager with data and timestamps
 
-        signal: The data to fit, if None then aman.signal is used/ 
+        signal: The data to fit, if None then aman.signal is used/
 
         timestamps: The timestamps to fit against, if None than aman.timestamps is used
 
@@ -192,7 +188,7 @@ def fit_sine(aman, signal=None, timestamps=None):
             offset: Offset to add to the fit sine function
     """
     if signal is None:
-        data = amn.signal 
+        data = amn.signal
     if timestamps is None:
         timestamps = aman.timestamps
     if len(signal.shape) == 1:
@@ -334,11 +330,7 @@ def average_to(
     return t, d
 
 
-def interpolate_nans(
-    aman,
-    signal=None,
-    timestamps=None,
-):
+def interpolate_nans(aman, signal=None, timestamps=None):
     """
     Interpolate over nans in place
 
@@ -353,9 +345,9 @@ def interpolate_nans(
 
     """
     if signal is None:
-        signal = aman.signal 
+        signal = aman.signal
     if timestamps is None:
-        timestamps = aman.timestamps 
+        timestamps = aman.timestamps
 
     def _interpolate_nans(y, x):
         if len(x) == 0:
