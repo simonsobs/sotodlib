@@ -471,7 +471,7 @@ def get_parser():
 
     # "files"
     p = cmdsubp.add_parser(
-        'files', usage="""
+        'files', usage="""Syntax:
 
     %(prog)s
     %(prog)s --all
@@ -494,7 +494,7 @@ def get_parser():
     p = cmdsubp.add_parser(
         'lookup', help=
         "Query database for specific index data and display matched endpoint data.",
-        usage="""
+        usage="""Syntax:
 
     %(prog)s val1,val2,... [val1,val2,... ]
 
@@ -523,7 +523,12 @@ def get_parser():
     p = cmdsubp.add_parser(
         'reroot', help=
         "Batch change filenames (by prefix) in the database.",
-        usage="""
+        usage="""Syntax:
+
+    %(prog)s old_prefix new_prefix [output options]
+
+Examples:
+
     %(prog)s /path/on/system1 /path/on/system2 -o my_new_manifest.sqlite
     %(prog)s /path/on/system1 /new_path/on/system1 --overwrite
     %(prog)s ./result1/obs_12345.h5 ./result2/obs_12345.h5 --overwrite
@@ -542,13 +547,17 @@ def get_parser():
                    "Prefix to match in current database.")
     p.add_argument('new_prefix', help=
                    "Prefix to replace it with.")
-    p.add_argument('--overwrite', action='store_true')
-    p.add_argument('--output-db', '-o')
-    p.add_argument('--dry-run', action='store_true')
+    p.add_argument('--overwrite', action='store_true', help=
+                   "Store modified database in the same file.")
+    p.add_argument('--output-db', '-o', help=
+                   "Store modified database in this file.")
+    p.add_argument('--dry-run', action='store_true', help=
+                   "Run the conversion steps but do not write the results anywhere.")
 
     return parser
 
 def main(args=None):
+    """Entry point for the so-metadata tool."""
     if args is None:
         args = sys.argv[1:]
     parser = get_parser()
