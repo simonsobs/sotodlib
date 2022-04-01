@@ -15,43 +15,42 @@ def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs)
 
     Arguments:
 
-        x: Data to jumpfind on, expects 1D
-           Note that x will by modified in place with jumps removed
-           pass x.copy() to preserve x (say to pass to a better jump fixer)
+        x: Data to jumpfind on, expects 1D.
 
-        min_chunk: The smallest chunk of data to look for jumps in
+        min_chunk: The smallest chunk of data to look for jumps in.
 
-        min_size: The smalled jump size counted as a jump
+        min_size: The smalled jump size counted as a jump.
 
-        win_size: Number of samples to average over when checking jump size
+        win_size: Number of samples to average over when checking jump size.
 
-        max_depth: The maximum recursion depth, set negetive to not use
+        max_depth: The maximum recursion depth.
+                   Set negetive for infite depth and 0 for no recursion.
 
-        depth: The current recursion depth
+        depth: The current recursion depth.
 
-        **kwargs: Arguments to pass to scipy.signal.find_peaks
+        **kwargs: Arguments to pass to scipy.signal.find_peaks.
 
     Returns:
 
-        jumps: The indices of jumps in x
-               There is some uncertainty on order of 1 sample
-               Jumps within min_chunk of each other may not be distinguished
+        jumps: The indices of jumps in x.
+               There is some uncertainty on order of 1 sample.
+               Jumps within min_chunk of each other may not be distinguished.
     """
     if len(x) < min_chunk:
-        return np.array([])
+        return np.array([], dtype=int)
 
     # If std is basically 0 no need to check for jumps
     if np.isclose(x.std(), 0.0):
-        return np.array([])
+        return np.array([], dtype=int)
 
-    # Mean subtract the data
+    # Mean subtract to make the jumps in the steps below more prominant peaks
     _x = x - x.mean()
 
     # Scale data to have std of order 1
     if _x.std() > 10:
         _x = _x / (10 ** (int(np.log10(_x.std()))))
 
-    # Take cumulative sum
+    # Take cumulative sum, this is equivalent to convolving with a step
     x_step = np.cumsum(_x)
 
     # Look for peaks to find jumps
@@ -83,11 +82,11 @@ def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs)
 
     # If no jumps found return
     if len(jumps) == 0:
-        return jumps
+        return jumps.astype(int)
 
     # If at max_depth then return
     if depth == max_depth:
-        return jumps
+        return jumps.astype(int)
 
     # Recursively check for jumps between jumps
     _jumps = np.insert(jumps, 0, 0)
@@ -105,7 +104,7 @@ def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs)
         )
         jumps = np.insert(jumps, i + added, sub_jumps + _jumps[i])
         added += len(sub_jumps)
-    return jumps
+    return jumps.astype(int)
 
 
 def jumpfind_tv(
@@ -120,34 +119,35 @@ def jumpfind_tv(
     **kwargs
 ):
     """
-    Apply total variance filter and then search for jumps
+    Apply total variance filter and then search for jumps.
 
     Arguments:
 
-        x: Data to jumpfind on, expects 1D
+        x: Data to jumpfind on, expects 1D.
 
         weight: Denoising weight. Higher weights denoise more, lower weights
-                preserve the input signal better
+                preserve the input signal better.
 
-        min_chunk: The smallest chunk of data to look for jumps in
+        min_chunk: The smallest chunk of data to look for jumps in.
 
-        min_size: The smalled jump size counted as a jump
+        min_size: The smalled jump size counted as a jump.
 
-        win_size: Number of samples to average over when checking jump size
+        win_size: Number of samples to average over when checking jump size.
 
-        max_depth: The maximum recursion depth, set negetive to not use
+        max_depth: The maximum recursion depth.
+                   Set negetive for infite depth and 0 for no recursion.
 
-        height: Height of peaks to pass to scipy.signal.find_peaks
+        height: Height of peaks to pass to scipy.signal.find_peaks.
 
-        prominence: Prominence of peaks to pass to scipy.signal.find_peaks
+        prominence: Prominence of peaks to pass to scipy.signal.find_peaks.
 
-        **kwargs: Additional arguments to pass to scipy.signal.find_peaks
+        **kwargs: Additional arguments to pass to scipy.signal.find_peaks.
 
     Returns:
 
-        jumps: The indices of jumps in x
-               There is some uncertainty on order of 1 sample
-               Jumps within min_chunk of each other may not be distinguished
+        jumps: The indices of jumps in x.
+               There is some uncertainty on order of 1 sample.
+               Jumps within min_chunk of each other may not be distinguished.
     """
     x_filt = denoise_tv_chambolle(x, weight)
     return _jumpfind(
@@ -177,15 +177,15 @@ def jumpfind_gaussian(
     **kwargs
 ):
     """
-    Apply gaussain filter to data and then search for jumps
+    Apply gaussain filter to data and then search for jumps.
 
     Arguments:
 
-        x: Data to jumpfind on, expects 1D
+        x: Data to jumpfind on, expects 1D.
 
-        sigma: Sigma of gaussain kernal
+        sigma: Sigma of gaussain kernal.
 
-        order: Order of gaussain filter
+        order: Order of gaussain filter.
                Note the following:
                Order 0 works a bit better than just calling jumpfind
                Order 1 is not reccomended, it can catch both jumps and spikes
@@ -193,30 +193,31 @@ def jumpfind_gaussian(
                Order 2 works well to catch jumps and has a low false negetive rate
                but it can get confused near large spikes
 
-        param min_chunk: The smallest chunk of data to look for jumps in
+        min_chunk: The smallest chunk of data to look for jumps in.
 
-        param min_size: The smalled jump size counted as a jump
-                        Note that this is in terms of the filtered data
+        min_size: The smalled jump size counted as a jump.
+                        Note that this is in terms of the filtered data.
 
-        param abs_min_size: The minimum size of jumps in the unfiltered data
-                            Note that for order 0 this is not used
+        abs_min_size: The minimum size of jumps in the unfiltered data.
+                            Note that for order 0 this is not used.
 
-        param win_size: Number of samples to average over when checking jump size
-                        For order 2, 2*sigma works well
+        win_size: Number of samples to average over when checking jump size.
+                        For order 2, 2*sigma works well.
 
-        max_depth: The max recursion depth, set negetive to not use
+        max_depth: The maximum recursion depth.
+                   Set negetive for infite depth and 0 for no recursion.
 
-        height: Height of peaks to pass to scipy.signal.find_peaks
+        height: Height of peaks to pass to scipy.signal.find_peaks.
 
-        prominence: Prominence of peaks to pass to scipy.signal.find_peaks
+        prominence: Prominence of peaks to pass to scipy.signal.find_peaks.
 
-        **kwargs: Additional arguments to pass to scipy.signal.find_peaks
+        **kwargs: Additional arguments to pass to scipy.signal.find_peaks.
 
     Returns:
 
-        jumps: The indices of jumps in x
-               There is some uncertainty on order of 1 sample
-               Jumps within min_chunk of each other may not be distinguished
+        jumps: The indices of jumps in x.
+               There is some uncertainty on order of 1 sample.
+               Jumps within min_chunk of each other may not be distinguished.
     """
     # Apply filter
     x_filt = simg.gaussian_filter(x, sigma, order)
@@ -273,22 +274,23 @@ def jumpfind_recursive_gaussian(x, sensitivity=2.0, max_depth=-1, depth=0):
 
     Arguments:
 
-        x: Data to jumpfind on, expects 1D
+        x: Data to jumpfind on, expects 1D.
 
         sensitivity: Sensitivity of the jumpfinder, roughly correlates with
                      1/(jump size) but since data is filtered, detrended, and
                      rescaled during jumpfinding it is better to think of it as
                      something non-physical.
 
-        max_depth: The maximum recursion depth, set negetive to not use
+        max_depth: The maximum recursion depth.
+                   Set negetive for infite depth and 0 for no recursion.
 
-        depth: The current recursion depth
+        depth: The current recursion depth.
 
     Returns:
 
-        jumps: The indices of jumps in x
-               There is some uncertainty on order of a few samples
-               Jumps within 20 samples of each other may not be distinguished
+        jumps: The indices of jumps in x.
+               There is some uncertainty on order of a few samples.
+               Jumps within 20 samples of each other may not be distinguished.
     """
     _x = sig.detrend(x)
     if _x.std() > 10:
@@ -341,53 +343,54 @@ def jumpfind_sliding_window(
 
     Arguments:
 
-        x: Data to jumpfind on, expects 1D
+        x: Data to jumpfind on, expects 1D.
 
-        window_size: Size of window to use
+        window_size: Size of window to use.
 
-        overlap: Overlap between adjacent windows
+        overlap: Overlap between adjacent windows.
 
-        jumpfinder: Jumpfinding function to use
+        jumpfinder: Jumpfinding function to use.
 
-        **kwargs: Keyword args to pass to jumpfinder
+        **kwargs: Keyword args to pass to jumpfinder.
 
     Returns:
 
-        jumps: The indices of jumps in x
-               There is some uncertainty on order of 1 sample
-               Jumps within min_chunk of each other may not be distinguished
+        jumps: The indices of jumps in x.
+               There is some uncertainty on order of 1 sample.
+               Jumps within min_chunk of each other may not be distinguished.
     """
-    jumps = np.array([])
+    jumps = np.array([], dtype=int)
     for i in range(len(x) // (window_size - overlap)):
         start = i * (window_size - overlap)
         end = np.min((start + window_size, len(x)))
         _jumps = jumpfinder(x[start:end], **kwargs) + start
         jumps = np.hstack((jumps, _jumps))
-    return np.unique(jumps)
+    return np.unique(jumps).astype(int)
 
 
 def jumpfind(tod, signal=None, buff_size=10, jumpfinder=jumpfind_tv, **kwargs):
     """
     Find jumps in tod.signal_name.
-    Expects tod.signal_name to be 1D of 2D
+    Expects tod.signal_name to be 1D of 2D.
 
     Arguments:
 
-        tod: axis manager
+        tod: axis manager.
 
         signal: Signal to jumpfind on. If None than tod.signal is used.
 
-        max_depth: The maximum recursion depth, set negetive to not use
+        buff_size: How many samples to flag around each jump in RangesMatrix.
 
-        jumpfinder: Jumpfinding function to use
+        jumpfinder: Jumpfinding function to use.
 
-        **kwargs: Keyword args to pass to jumpfinder
+        **kwargs: Keyword args to pass to jumpfinder.
 
     Returns:
 
-        jumps: RangesMatrix containing jumps in signal, if signal is 1D Ranges in returned instead
-               There is some uncertainty on order of a few samples
-               Jumps within a few samples of each other may not be distinguished
+        jumps: RangesMatrix containing jumps in signal,
+               if signal is 1D Ranges in returned instead.
+               There is some uncertainty on order of a few samples.
+               Jumps within a few samples of each other may not be distinguished.
     """
     if signal is None:
         signal = tod.signal
