@@ -4,6 +4,7 @@ import scipy.ndimage as simg
 from so3g.proj import RangesMatrix
 from skimage.restoration import denoise_tv_chambolle
 
+
 def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs):
     """
     Recursive edge detection based jumpfinder.
@@ -327,6 +328,42 @@ def jumpfind_recursive_gaussian(x, sensitivity=2.0, max_depth=-1, depth=0):
         jumps = np.insert(jumps, i + added, sub_jumps + _jumps[i])
         added += len(sub_jumps)
     return jumps
+
+
+def jumpfind_sliding_window(
+    x, window_size=10000, overlap=1000, jumpfinder=jumpfind_tv, **kwargs
+):
+    """
+    Run jumpfinder through a sliding window.
+    This can help get jumps towards the edges of the data that may be missed.
+    Nominally those jumps can be found if the jumpfinder reaches sufficient depth,
+    but sometimes it takes tweaking of the parameters to catch them.
+
+    Arguments:
+
+        x: Data to jumpfind on, expects 1D
+
+        window_size: Size of window to use
+
+        overlap: Overlap between adjacent windows
+
+        jumpfinder: Jumpfinding function to use
+
+        **kwargs: Keyword args to pass to jumpfinder
+
+    Returns:
+
+        jumps: The indices of jumps in x
+               There is some uncertainty on order of 1 sample
+               Jumps within min_chunk of each other may not be distinguished
+    """
+    jumps = np.array([])
+    for i in range(len(x) // (window_size - overlap)):
+        start = i * (window_size - overlap)
+        end = np.min((start + window_size, len(x)))
+        _jumps = jumpfinder(x[start:end], **kwargs) + start
+        jumps = np.hstack((jumps, _jumps))
+    return np.unique(jumps)
 
 
 def jumpfind(tod, signal=None, buff_size=10, jumpfinder=jumpfind_tv, **kwargs):
