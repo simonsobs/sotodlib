@@ -207,7 +207,7 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
     else:
         levels = signal_pca.mean(axis=1)
         signal -= levels[:,None]
-        signal_pca -= level[:,None]
+        signal_pca -= levels[:,None]
 
         # Clean the means, get PCA model, restore means.
         #signal -= levels[:,None]
