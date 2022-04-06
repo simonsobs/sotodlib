@@ -649,10 +649,6 @@ def dump_spt3g(job, args, data):
         ]
     )
 
-    print([
-            (ops.default_model.noise_model, ops.default_model.noise_model),
-            (ops.elevation_model.out_model, ops.elevation_model.out_model),
-        ])
     # Note that we export detector flags below to a float64 G3TimestreamMap
     # in order to use FLAC compression.
     # FIXME:  This workflow currently does not use any operators that create

@@ -2,26 +2,46 @@ import numpy as np
 from astropy import units as u
 
 
-'''
+"""
+A set of functions used in to convert from GPS coordinates to Horizontal coordinates. 
+These functions are used in the toast3 drone simulation operator. 
+
+The coordinate systems introduced here are:
+
+- ECEF: Earth Center, Earth Fixed Coordinate System (geocentric coordinates system). 
+        It uses a cartesian system centered at the Earth Center-of-Mass to represent
+        locations.
+- Geodetic: Uses an angular coordinate system (longitude, latitude and geodetic height)
+            to describe the Earth. The coordinate system is defined by a datum, which 
+            describes the 3D shape of the Earth. The most common datum is the WGS-84, 
+            which is also used by GPS and represents the Earth as an Ellipsoid. 
+- ENU: Earth-North-Up local coordinate system. It is based on the tangent plane defined 
+       by the local vertical direction and the Earth's axis of rotation. The resulting 
+       cartesian system has three coordinates: one gives the position along the northern 
+       axis (tangent to the meridians), one along the eastern axis (tangent to the paralles)
+       and one representing the vertical direction (normal direction to the chosen geodetic
+       datum). To maintain the right-hand convention, x is along the East axis, y along 
+       the North axis and Z along the Up axis.
+
 Most of the functions are adapted from pymap3d, to include error calulations 
-'''
+"""
 
 def ellipsoid(model='WGS84'):
 
-    '''
+    """
     Return the major and minor semiaxis given an ellipsoid model.
     Returns:
     - a: astropy.Quantity, semiaxis major in meter
     - b: astropy.Quantity, semiaxis minor in meter
-    '''
+    """
 
     if model == 'WGS84':
         a = 6378137.0*u.meter         
         b = 6356752.31424518*u.meter 
 
-        return a, b
+    return a, b
 
-def check_quantity(val, unit):
+def _check_quantity(val, unit):
 
     if isinstance(val, u.Quantity):
         return val.to(unit)
@@ -29,7 +49,7 @@ def check_quantity(val, unit):
         return val * unit
 
 def ecef2lonlat(x, y, z, ell='WGS84'):
-    '''
+    """
     convert ECEF to geodetic coordinates
     Parameters
     ----------
@@ -52,11 +72,11 @@ def ecef2lonlat(x, y, z, ell='WGS84'):
     based on:
     You, Rey-Jer. (2000). Transformation of Cartesian to Geodetic Coordinates without Iterations.
     Journal of Surveying Engineering. doi: 10.1061/(ASCE)0733-9453
-    '''
+    """
 
-    x = check_quantity(x, u.meter)
-    y = check_quantity(y, u.meter)
-    z = check_quantity(z, u.meter)
+    x = _check_quantity(x, u.meter)
+    y = _check_quantity(y, u.meter)
+    z = _check_quantity(z, u.meter)
 
     a, b = ellipsoid(ell)
 
@@ -96,7 +116,7 @@ def ecef2lonlat(x, y, z, ell='WGS84'):
         if inside:
             alt = -alt
 
-    return lat, lon, alt
+    return lon, lat, alt
 
 def hor2enu(az, el, srange, deg=True):
     """
@@ -126,15 +146,15 @@ def hor2enu(az, el, srange, deg=True):
     else:
         azel_unit = u.rad
 
-    az = check_quantity(az, azel_unit)
-    el = check_quantity(el, azel_unit)
-    srange = check_quantity(srange, u.meter)
+    az = _check_quantity(az, azel_unit)
+    el = _check_quantity(el, azel_unit)
+    srange = _check_quantity(srange, u.meter)
 
     r = srange * np.cos(el)
 
     return r*np.sin(az), r*np.cos(az), srange*np.sin(el)
 
-def enu2ecef(E, N, U, lat, lon, alt, ell='WGS84', deg=True):
+def enu2ecef(E, N, U, lon, lat, alt, ell='WGS84', deg=True):
     """
     Parameters
     ----------
@@ -144,12 +164,12 @@ def enu2ecef(E, N, U, lat, lon, alt, ell='WGS84', deg=True):
         target north ENU coordinate. If numpy float or array, it is considered in meters
     U : float, array (numpy or Quantity)
         target up ENU coordinate. If numpy float or array, it is considered in meters
-    lat : float, array (numpy or Quantity)
-          geodetic latitude of the observer, if numpy float or array the unit is determined 
-          by the deg parameter 
     lon : float, array (numpy or Quantity)
           geodetic longitude of the observer, if numpy float or array the unit is determined 
           by the deg parameter
+    lat : float, array (numpy or Quantity)
+          geodetic latitude of the observer, if numpy float or array the unit is determined 
+          by the deg parameter 
     alt : float, array (numpy or Quantity)
           altitude above geodetic ellipsoid of the observer, If numpy float or array, 
           it is considered in meters
@@ -172,13 +192,13 @@ def enu2ecef(E, N, U, lat, lon, alt, ell='WGS84', deg=True):
     else:
         lonlat_unit = u.rad
 
-    lon = check_quantity(lon, lonlat_unit)
-    lat = check_quantity(lat, lonlat_unit)
-    alt = check_quantity(alt, u.meter)
+    lon = _check_quantity(lon, lonlat_unit)
+    lat = _check_quantity(lat, lonlat_unit)
+    alt = _check_quantity(alt, u.meter)
 
-    E = check_quantity(E, u.meter)
-    N = check_quantity(N, u.meter)
-    U = check_quantity(U, u.meter)
+    E = _check_quantity(E, u.meter)
+    N = _check_quantity(N, u.meter)
+    U = _check_quantity(U, u.meter)
 
     t = np.cos(lat) * U - np.sin(lat) * N
     dz = np.sin(lat) * U + np.cos(lat) * N
@@ -186,20 +206,20 @@ def enu2ecef(E, N, U, lat, lon, alt, ell='WGS84', deg=True):
     dx = np.cos(lon) * t - np.sin(lon) * E
     dy = np.sin(lon) * t + np.cos(lon) * E
 
-    x0, y0, z0, _, _, _ = lonlat2ecef(lat, lon, alt, ell, deg=deg)
+    x0, y0, z0, _, _, _ = lonlat2ecef(lon, lat, alt, ell, deg=deg)
 
     return x0 + dx, y0 + dy, z0 + dz
 
-def lonlat2ecef(lat, lon, alt, ell='WGS84', deg=True, uncertainty=False, \
+def lonlat2ecef(lon, lat, alt, ell='WGS84', deg=True, uncertainty=False, \
                 delta_lon=0, delta_lat=0, delta_alt=0):
-    '''
+    """
     convert geodetic coordinates to ECEF 
     Parameters
     ----------
-    lat : float, array (numpy or Quantity)
-          geodetic latitude, if numpy float or array the unit is determined by the deg parameter 
     lon : float, array (numpy or Quantity)
           geodetic longitude, if numpy float or array the unit is determined by the deg parameter
+    lat : float, array (numpy or Quantity)
+          geodetic latitude, if numpy float or array the unit is determined by the deg parameter 
     alt : float, array (numpy or Quantity)
           altitude above geodetic ellipsoid, If numpy float or array, it is considered in meters
     ell : string, optional
@@ -210,12 +230,12 @@ def lonlat2ecef(lat, lon, alt, ell='WGS84', deg=True, uncertainty=False, \
           reference ellipsoid
     uncertainty : bool, optional
                   if True computes the uncertainties associated in ECEF coordinates
-    delta_lat : float, array (numpy or Quantity)
-                delta geodetic latitude, if numpy float or array the unit is determined by 
-                the deg parameter 
     delta_lon : float, array (numpy or Quantity)
                 delta geodetic longitude, if numpy float or array the unit is determined by 
                 the deg parameter
+    delta_lat : float, array (numpy or Quantity)
+                delta geodetic latitude, if numpy float or array the unit is determined by 
+                the deg parameter 
     delta_alt : float, array (numpy or Quantity)
                 delta altitude above geodetic ellipsoid, if numpy float or array the unit is 
                 determined by the deg parameter
@@ -227,16 +247,16 @@ def lonlat2ecef(lat, lon, alt, ell='WGS84', deg=True, uncertainty=False, \
         target y ECEF coordinate
     z : Quantity
         target z ECEF coordinate
-    '''
+    """
 
     if deg:
         lonlat_unit = u.deg
     else:
         lonlat_unit = u.rad
 
-    lon = check_quantity(lon, lonlat_unit)
-    lat = check_quantity(lat, lonlat_unit)
-    alt = check_quantity(alt, u.meter)
+    lon = _check_quantity(lon, lonlat_unit)
+    lat = _check_quantity(lat, lonlat_unit)
+    alt = _check_quantity(alt, u.meter)
     
     cos_lat = np.cos(lat)
     sin_lat = np.sin(lat)
@@ -253,12 +273,12 @@ def lonlat2ecef(lat, lon, alt, ell='WGS84', deg=True, uncertainty=False, \
     
     if uncertainty:
 
-        delta_lat = check_quantity(delta_lat, lonlat_unit)
-        delta_lon = check_quantity(delta_lon, lonlat_unit)
-        delta_alt = check_quantity(delta_alt, u.meter)
+        delta_lat = _check_quantity(delta_lat, lonlat_unit)
+        delta_lon = _check_quantity(delta_lon, lonlat_unit)
+        delta_alt = _check_quantity(delta_alt, u.meter)
         
-        delta_x, delta_y, delta_z = lonlat2ecef_error(cos_lon, cos_lat, sin_lon, sin_lat, \
-                                                      alt, a, b, delta_lat, delta_lon, delta_alt)
+        delta_x, delta_y, delta_z = _lonlat2ecef_error(cos_lon, cos_lat, sin_lon, sin_lat, \
+                                                       alt, a, b, delta_lat, delta_lon, delta_alt)
     
     else:
         delta_x, delta_y, delta_z = np.zeros_like(x)*u.meter, \
@@ -267,13 +287,13 @@ def lonlat2ecef(lat, lon, alt, ell='WGS84', deg=True, uncertainty=False, \
     
     return x, y, z, delta_x, delta_y, delta_z
 
-def lonlat2ecef_error(cos_lon, cos_lat, sin_lon, sin_lat, alt, a, b, \
-                      delta_lon, delta_lat, delta_alt):
+def _lonlat2ecef_error(cos_lon, cos_lat, sin_lon, sin_lat, alt, a, b, \
+                       delta_lon, delta_lat, delta_alt):
 
-    '''
+    """
     Compute the error in ECEF coordinates given paramters derived in the lonlat2ecef 
     function. Check that function for a deeper explanation
-    '''
+    """
 
     delta_x = np.sqrt(delta_alt**2*cos_lon**2*cos_lat**2+\
                       delta_lon**2*(a**2/np.sqrt(a**2*cos_lat**2 + \
@@ -308,9 +328,9 @@ def ecef2enu(ecef_obs_x, ecef_obs_y, ecef_obs_z, \
              ecef_target_x, ecef_target_y, ecef_target_z, \
              delta_obs_x, delta_obs_y, delta_obs_z, \
              delta_target_x, delta_target_y, delta_target_z, \
-             lat, lon, deg=True):
+             lon, lat, deg=True):
     
-    '''
+    """
     Return the position relative to a refence point in a ENU system. If one of delta_obs or delta_target 
     are different from zeros then uncertainties is calculated automatically. 
     The array returns as EAST, NORTH, UP
@@ -340,10 +360,10 @@ def ecef2enu(ecef_obs_x, ecef_obs_y, ecef_obs_z, \
                      y ECEF Coordinates error of the target, if numpy array the unit is meter
     delta_target_z : numpy or Quantity, numpy or Quantity
                      z ECEF Coordinates error of the target, if numpy array the unit is meter
-    lat : float, array (numpy or Quantity)
-          geodetic latitude, if numpy float or array the unit is determined by the deg parameter 
     lon : float, array (numpy or Quantity)
           geodetic longitude, if numpy float or array the unit is determined by the deg parameter
+    lat : float, array (numpy or Quantity)
+          geodetic latitude, if numpy float or array the unit is determined by the deg parameter 
     deg : bool, optional
           if azimuth and elevation are not astropy quantities, if True set them to degrees
     Returns
@@ -360,31 +380,31 @@ def ecef2enu(ecef_obs_x, ecef_obs_y, ecef_obs_z, \
               North ENU coordinate error
     delta_U : Quantity
               Up ENU coordinate error
-    '''
+    """
     
     if deg:
         lonlat_unit = u.deg
     else:
         lonlat_unit = u.rad
 
-    lon = check_quantity(lon, lonlat_unit)
-    lat = check_quantity(lat, lonlat_unit)
+    lon = _check_quantity(lon, lonlat_unit)
+    lat = _check_quantity(lat, lonlat_unit)
 
-    ecef_obs_x = check_quantity(ecef_obs_x, u.meter)
-    ecef_obs_y = check_quantity(ecef_obs_y, u.meter)
-    ecef_obs_z = check_quantity(ecef_obs_z, u.meter)
+    ecef_obs_x = _check_quantity(ecef_obs_x, u.meter)
+    ecef_obs_y = _check_quantity(ecef_obs_y, u.meter)
+    ecef_obs_z = _check_quantity(ecef_obs_z, u.meter)
 
-    ecef_target_x = check_quantity(ecef_target_x, u.meter)
-    ecef_target_y = check_quantity(ecef_target_y, u.meter)
-    ecef_target_z = check_quantity(ecef_target_z, u.meter)
+    ecef_target_x = _check_quantity(ecef_target_x, u.meter)
+    ecef_target_y = _check_quantity(ecef_target_y, u.meter)
+    ecef_target_z = _check_quantity(ecef_target_z, u.meter)
 
-    delta_obs_x = check_quantity(delta_obs_x, u.meter)
-    delta_obs_y = check_quantity(delta_obs_y, u.meter)
-    delta_obs_z = check_quantity(delta_obs_z, u.meter)
+    delta_obs_x = _check_quantity(delta_obs_x, u.meter)
+    delta_obs_y = _check_quantity(delta_obs_y, u.meter)
+    delta_obs_z = _check_quantity(delta_obs_z, u.meter)
 
-    delta_target_x = check_quantity(delta_target_x, u.meter)
-    delta_target_y = check_quantity(delta_target_y, u.meter)
-    delta_target_z = check_quantity(delta_target_z, u.meter)
+    delta_target_x = _check_quantity(delta_target_x, u.meter)
+    delta_target_y = _check_quantity(delta_target_y, u.meter)
+    delta_target_z = _check_quantity(delta_target_z, u.meter)
     
     cos_lat = np.cos(lat)
     sin_lat = np.sin(lat)
@@ -409,13 +429,13 @@ def ecef2enu(ecef_obs_x, ecef_obs_y, ecef_obs_z, \
         delta_enu = np.matmul(mat, delta_diff)
     else:
         delta_enu = np.zeros_like(enu)
-        delta_enu = check_quantity(delta_enu, u.meter)
+        delta_enu = _check_quantity(delta_enu, u.meter)
     
     return enu[0], enu[1], enu[2], delta_enu[0], delta_enu[1], delta_enu[2]
 
 def enu2hor(E, N, U, delta_E, delta_N, delta_U, degrees=True):
 
-    '''
+    """
     Compute Horizontal coordinates given the coordinates in the East-North-Up system
     Parameters
     ----------
@@ -425,15 +445,15 @@ def enu2hor(E, N, U, delta_E, delta_N, delta_U, degrees=True):
         target north ENU coordinate. If numpy float or array, it is considered in meters
     U : float, array (numpy or Quantity)
         target up ENU coordinate. If numpy float or array, it is considered in meters
-    '''
+    """
 
-    E = check_quantity(E, u.meter)
-    N = check_quantity(N, u.meter)
-    U = check_quantity(U, u.meter)
+    E = _check_quantity(E, u.meter)
+    N = _check_quantity(N, u.meter)
+    U = _check_quantity(U, u.meter)
 
-    delta_E = check_quantity(delta_E, u.meter)
-    delta_N = check_quantity(delta_N, u.meter)
-    delta_U = check_quantity(delta_U, u.meter)
+    delta_E = _check_quantity(delta_E, u.meter)
+    delta_N = _check_quantity(delta_N, u.meter)
+    delta_U = _check_quantity(delta_U, u.meter)
 
     s = np.sqrt(E**2+N**2+U**2)
     el = np.arctan2(U, np.sqrt(E**2+N**2))

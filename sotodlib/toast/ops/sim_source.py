@@ -6,7 +6,6 @@ import traitlets
 
 import numpy as np
 
-from astropy import constants
 from astropy import units as u
 
 import ephem
@@ -28,59 +27,9 @@ from toast.utils import Logger, Timer
 
 from toast.observation import default_values as defaults
 
-from ...coords.local import *
+from sotodlib.coords import local
 
-
-
-def tb2s(tb, nu):
-    """ Convert blackbody temperature to spectral
-    radiance s_nu at frequency nu
-    Args:
-        tb: float or array
-            blackbody temperature, unit: Kelvin
-        nu: float or array (with same dimension as tb)
-            frequency where the spectral radiance is evaluated, unit: Hz
-    Return:
-        s_nu: same dimension as tb
-            spectral radiance s_nu, unit: W*sr−1*m−2*Hz−1
-    """
-    h = constants.h.value
-    c = constants.c.value
-    k_b = constants.k_B.value
-
-    x = h * nu / (k_b * tb)
-
-    return 2 * h * nu ** 3 / c ** 2 / (np.exp(x) - 1)
-
-
-def s2tcmb(s_nu, nu):
-    """ Convert spectral radiance s_nu at frequency nu to t_cmb,
-    t_cmb is defined in the CMB community as the offset from the
-    mean CMB temperature assuming a linear relation between t_cmb
-    and s_nu, the t_cmb/s_nu slope is evalutated at the mean CMB
-    temperature.
-    Args:
-        s_nu: float or array
-            spectral radiance s_nu, unit: W*sr−1*m−2*Hz−1
-        nu: float or array (with same dimension as s_nu)
-            frequency where the evaluation is perfomed, unit: Hz
-    Return:
-        t_cmb: same dimension as s_nu
-            t_cmb, unit: Kelvin_cmb
-    """
-    T_cmb = 2.72548  # K from Fixsen, 2009, ApJ 707 (2): 916–920
-    h = constants.h.value
-    c = constants.c.value
-    k_b = constants.k_B.value
-
-    x = h * nu / (k_b * T_cmb)
-
-    slope = 2 * k_b * nu ** 2 / c ** 2 * ((x / 2) / np.sinh(x / 2)) ** 2
-
-    return s_nu / slope
-
-a = 6378137.0 #semiaxis major
-b = 6356752.31424518 #semiaxis minor
+from . import utils
 
 def spectrum(power, fc, sigma, base, err_fc, noise, az_size, el_size, dist):
 
@@ -426,18 +375,15 @@ class SimSource(Operator):
         else:
             distance = self.source_init_dist * np.cos(el_start)/np.cos(el_init)
 
-        if np.any(np.array(self.source_error) >= 1e-4) or self.wind_gusts_amp.value != 0:
         if np.any(np.array(self.source_err) >= 1e-4) or self.wind_gusts_amp.value != 0:
 
-            E, N, U = hor2enu(az_init, el_init, distance)
-            X, Y, Z = enu2ecef(E, N, U, observer.lat, observer.lon, observer.elevation, ell='WGS84')
+            E, N, U = local.hor2enu(az_init, el_init, distance)
+            X, Y, Z = local.enu2ecef(E, N, U, observer.lon, observer.lat, observer.elevation, ell='WGS84')
 
-
-            if np.any(np.array(self.source_error) >= 1e-4):
             if np.any(np.array(self.source_err) >= 1e-4):
                 X = X+np.random.normal(0, self.source_err[0], size=(len(times)))*X.unit
                 Y = Y+np.random.normal(0, self.source_err[1], size=(len(times)))*Y.unit
-                Z = Z+np.random.normal(0, self.source_err[2], size=(len(times)))*z.unit
+                Z = Z+np.random.normal(0, self.source_err[2], size=(len(times)))*Z.unit
 
             if self.wind_gusts_amp.value != 0:
 
@@ -490,15 +436,15 @@ class SimSource(Operator):
                 Y[idxs[good]] += dy.flatten()[valid]
                 Z[idxs[good]] += dz.flatten()[valid]
 
-            X_tel, Y_tel, Z_tel, _, _, _  = lonlat2ecef(observer.lat, observer.lon, observer.elevation)
+            X_tel, Y_tel, Z_tel, _, _, _  = local.lonlat2ecef(observer.lon, observer.lat, observer.elevation)
 
-            E, N, U, _, _, _ = ecef2enu(X_tel, Y_tel, Z_tel, \
-                                        X, Y, Z, \
-                                        0, 0, 0, \
-                                        0, 0, 0, \
-                                        observer.lat, observer.lon)
+            E, N, U, _, _, _ = local.ecef2enu(X_tel, Y_tel, Z_tel, \
+                                              X, Y, Z, \
+                                              0, 0, 0, \
+                                              0, 0, 0, \
+                                              observer.lon, observer.lat)
 
-            source_az, source_el, source_distance, _,_,_ = enu2hor(E, N, U, 0,0,0)
+            source_az, source_el, source_distance, _,_,_ = local.enu2hor(E, N, U, 0,0,0)
 
         else:
             source_az = az_init.copy()
@@ -506,7 +452,7 @@ class SimSource(Operator):
             source_distance = distance.copy()
 
 
-        size = check_quantity(self.source_size, u.m)
+        size = local._check_quantity(self.source_size, u.m)
         size = (size/source_distance)*u.rad
 
         obs['source_az'] = source_az
@@ -537,7 +483,7 @@ class SimSource(Operator):
 
         freq = freq *u.Hz
 
-        temp = s2tcmb(spec, freq.to_value(u.Hz)) * u.K
+        temp = utils.s2tcmb(spec, freq.to_value(u.Hz))
 
         return freq, temp
 
