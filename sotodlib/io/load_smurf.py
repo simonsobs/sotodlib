@@ -185,7 +185,8 @@ class G3tSmurf:
         """
         Takes an input (either a timestamp or datetime), and returns a datetime.
         Intended to allow flexibility in inputs for various other functions
-
+        Note that x will be assumed to be in UTC and the datetime will reflect that
+        
         Args
         ----
             x: input datetime of timestamp
@@ -197,9 +198,9 @@ class G3tSmurf:
         if np.issubdtype(type(x), np.floating) or np.issubdtype(type(x), np.integer):
             return dt.datetime.utcfromtimestamp(x)
         elif isinstance(x, np.datetime64):
-            return x.astype(dt.datetime)
+            return x.astype(dt.datetime).replace(tzinfo=dt.timezone.utc)
         elif isinstance(x, dt.datetime) or isinstance(x, dt.date):
-            return x
+            return x.replace(tzinfo=dt.timezone.utc)
         raise (Exception("Input not a datetime or timestamp"))
 
     def add_file(self, path, session, overwrite=False):
@@ -1111,9 +1112,9 @@ class G3tSmurf:
         Args
         -----
             start : timestamp or DateTime
-                start time for data
+                start time for data in UTC
             end :  timestamp or DateTime
-                end time for data
+                end time for data in UTC
         Returns
         --------
             stream_ids: List of stream ids.
@@ -1173,9 +1174,9 @@ class G3tSmurf:
         Args
         -----
             start : timestamp or DateTime
-                start time for data
+                start time for data in UTC
             end :  timestamp or DateTime
-                end time for data
+                end time for data in UTC
             stream_id : String
                 stream_id to load, in case there are multiple
             channels : list or None
@@ -1604,7 +1605,7 @@ class SmurfStatus:
         Args
         -------
             time : (timestamp)
-                Time at which you want the rogue status
+                Time at which you want the rogue status in UTC
             archive : (G3tSmurf instance)
                 The G3tSmurf archive to use to find the status
             show_pb : (bool)
