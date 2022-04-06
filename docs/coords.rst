@@ -271,3 +271,9 @@ Planet Mapmaking support
 
 .. automodule:: sotodlib.coords.planets
    :members:
+
+Local coordinate systems
+------------------------
+
+.. automodule:: sotodlib.coords.local
+   :members:
