@@ -424,12 +424,11 @@ def _invert_weights_map(weights, eigentol=1e-6, kill_partials=True,
 def _apply_inverse_weights_map(inverse_weights, target):
     """Apply a map of matrices to a map of vectors.
 
-    Assumes inverse_weights.shape = (a, b, ny, nx) and target.shape =
-    (b, nx, ny); the result has shape (a, nx, ny).
+    Assumes inverse_weights.shape = (a, b, ...) and target.shape =
+    (b, ...); the result has shape (a, ...).
 
     """
-    iw = inverse_weights.transpose((2,3,0,1))
-    m = target.transpose((1,2,0)).reshape(
-        target.shape[1], target.shape[2], target.shape[0], 1)
-    m1 = np.matmul(iw, m)
-    return m1.transpose(2,3,0,1).reshape(target.shape)
+    iw = np.moveaxis(inverse_weights, (0,1), (-2,-1))
+    t  = np.moveaxis(target[:,None],  (0,1), (-2,-1))
+    m  = np.matmul(iw, t)
+    return np.moveaxis(m, (-2,-1), (0,1))[:,0]
