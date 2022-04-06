@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 # Copyright (c) 2019-2021 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
@@ -20,6 +19,7 @@ from astropy import units as u
 # Import sotodlib.toast first before toast, since that sets default object names
 # to use in toast.
 import sotodlib.toast as sotoast
+from sotodlib import mapmaking as mm
 
 import toast
 import toast.ops
@@ -30,8 +30,12 @@ from toast.schedule_sim_ground import run_scheduler
 
 import sotodlib.toast.ops as so_ops
 
+# Make sure pixell uses a reliable FFT engine
+import pixell.fft
+pixell.fft.engine = "fftw"
 
-def parse_args():
+
+def parse_args(mlmapmaker, comm):
     """Parse command line arguments"""
     # Argument parsing
     parser = argparse.ArgumentParser(description="SO mapmaker test")
@@ -59,12 +63,6 @@ def parse_args():
         help="Input NSIDE=4096 TQU file to scan from.",
     )
     parser.add_argument(
-        "--area_file",
-        required=True,
-        default=None,
-        help="Input FITS file with WCS information.",
-    )
-    parser.add_argument(
         "--out_dir",
         required=False,
         type=str,
@@ -72,9 +70,13 @@ def parse_args():
         help="The output directory",
     )
 
-    args = parser.parse_args()
+    config, args, jobargs = toast.parse_config(parser, operators=[mlmapmaker])
 
-    return args
+    # Log the config that was actually used at runtime.
+    outlog = os.path.join(args.out_dir, "config_log.toml")
+    toast.config.dump_toml(outlog, config, comm=comm)
+
+    return config, args, jobargs
 
 
 def load_schedule(comm, path):
@@ -117,11 +119,15 @@ def main():
     gt = toast.timing.GlobalTimers.get()
     gt.start("mapmaker_test main")
 
-    # Get commandline options
-    args = parse_args()
+    mlmapmaker = so_ops.MLMapmaker(comps="TQU")
 
     # Get optional MPI parameters
     comm, procs, rank = toast.get_world()
+
+    # Get commandline options
+    config, args, jobargs = parse_args(mlmapmaker, comm)
+    job = toast.create_from_config(config)
+    mlmapmaker = job.operators.MLMapmaker
 
     # Make the output directory
     if rank == 0:
@@ -206,8 +212,8 @@ def main():
 
     # Scan input map.  This will create the pixel distribution as well, since
     # it does not yet exist.
-    scan_map = toast.ops.ScanHealpix(file=args.sky_file)
-    scan_map.enabled = False
+    scan_map = toast.ops.ScanHealpixMap(file=args.sky_file)
+    scan_map.enabled = True
     scan_map.pixel_pointing = pixels_radec
     scan_map.stokes_weights = weights_radec
     scan_map.apply(data)
@@ -230,6 +236,7 @@ def main():
         wind_dist=3000 * u.meter,
         z0_center=2000 * u.meter,
         z0_sigma=0 * u.meter,
+        cache_dir="atm_cache",
     )
     sim_atmosphere.detector_pointing = det_pointing_azel
     # Here is where we could enable a small polarization fraction, in which
@@ -237,6 +244,7 @@ def main():
     # sim_atmosphere.polarization_fraction = 0.01
     # sim_atmosphere.detector_weights = weights_azel
     sim_atmosphere.enabled = False  # Toggle to False to disable
+    sim_atmosphere.serial = False
     sim_atmosphere.apply(data)
     log.info_rank("Simulated and observed atmosphere in", comm=wcomm, timer=timer)
 
@@ -282,9 +290,8 @@ def main():
     log.info_rank("Finished ground-filtering in", comm=wcomm, timer=timer)
 
     # Run ML mapmaker
-    mlmapmaker = so_ops.MLMapmaker(comps="TQU")
-    mlmapmaker.area = args.area_file
     mlmapmaker.enabled = True  # Toggle to False to disable
+    mlmapmaker.out_dir = args.out_dir
     mlmapmaker.apply(data)
     log.info_rank("Finished ML map-making in", comm=wcomm, timer=timer)
 
@@ -303,6 +310,7 @@ def main():
     binner.stokes_weights = weights_radec
 
     mapmaker = toast.ops.MapMaker(name="mapmaker")
+    mapmaker.weather = "vacuum"
     mapmaker.write_hdf5 = True
     mapmaker.binning = binner
     # No templates for now (will just do the binning)

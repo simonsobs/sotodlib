@@ -58,12 +58,6 @@ class SimHWPSS(Operator):
         help="Operator that translates boresight Az/El pointing into detector frame",
     )
 
-    stokes_weights = Instance(
-        klass=Operator,
-        allow_none=True,
-        help="This must be an instance of a Stokes weights operator",
-    )
-
     fname_hwpss = Unicode(
         os.path.join(
             os.path.dirname(os.path.realpath(__file__)),
@@ -72,21 +66,6 @@ class SimHWPSS(Operator):
         help="File containing measured or estimated HWPSS profiles",
     )
 
-    @traitlets.validate("stokes_weights")
-    def _check_stokes_weights(self, proposal):
-        weights = proposal["value"]
-        if weights is not None:
-            if not isinstance(weights, Operator):
-                raise traitlets.TraitError(
-                    "stokes_weights should be an Operator instance"
-                )
-            # Check that this operator has the traits we expect
-            for trt in ["weights", "view"]:
-                if not weights.has_trait(trt):
-                    msg = f"stokes_weights operator should have a '{trt}' trait"
-                    raise traitlets.TraitError(msg)
-        return weights
-
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -94,7 +73,7 @@ class SimHWPSS(Operator):
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
 
-        for trait in "stokes_weights", :
+        for trait in "detector_pointing", :
             value = getattr(self, trait)
             if value is None:
                 raise RuntimeError(
@@ -103,6 +82,10 @@ class SimHWPSS(Operator):
 
         if not os.path.isfile(self.fname_hwpss):
             raise RuntimeError(f"{self.fname_hwpss} does not exist!")
+
+        # theta is the incident angle, also known as the radial distance
+        #     to the boresight.
+        # chi is the HWP rotation angle
 
         with open(self.fname_hwpss, "rb") as fin:
             self.thetas, self.chis, self.all_stokes = pickle.load(fin)
@@ -128,18 +111,22 @@ class SimHWPSS(Operator):
                 # Get incident angle
 
                 det_quat = focalplane[det]["quat"]
-                det_theta, det_phi = qa.to_position(det_quat)
+                det_theta, det_phi, det_psi = qa.to_angles(det_quat)
 
-                # Compute Stokes weights (and quaternions as a by-product)
+                # Compute Stokes weights
+
+                iweights = 1
+                qweights = np.cos(2 * det_psi)
+                uweights = np.sin(2 * det_psi)
+
+                # Convert Az/El quaternion of the detector into elevation
 
                 obs_data = Data(comm=data.comm)
                 obs_data._internal = data._internal
                 obs_data.obs = [obs]
-                self.stokes_weights.apply(obs_data, detectors=[det])
+                self.detector_pointing.apply(obs_data, detectors=[det])
                 obs_data.obs.clear()
                 del obs_data
-
-                # Convert Az/El quaternion of the detector into elevation
 
                 azel_quat = obs.detdata[
                     self.stokes_weights.detector_pointing.quats
