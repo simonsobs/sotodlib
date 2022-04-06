@@ -214,50 +214,44 @@ class FrameProcessor(object):
         output = []
 
         smurf_data = self.smbundle.rebundle(flush_time)
-        hk_data = self.hkbundle.rebundle(flush_time)
 
-        # Co-sampled (interpolated) azimuth encoder data
-        cosamp_az = np.interp(smurf_data.times, hk_data.times, hk_data['Azimuth_Corrected'], left=np.nan, right=np.nan)
-        cosamp_el = np.interp(smurf_data.times, hk_data.times, hk_data['Elevation_Corrected'], left=np.nan, right=np.nan)
+        try:
+            hk_data = self.hkbundle.rebundle(flush_time)
+        except:
+        # No az/el encoder data found in HK files
+            # Create SuperTimestream containing SMuRF data
+            sts = so3g.G3SuperTimestream()
+            sts.times = smurf_data.times
+            sts.names = [k for k in smurf_data.names]
+            sts.quanta = np.ones(len(sts.names), dtype=np.double)
+            sts.data = smurf_data.data
 
-        # Create SuperTimestream with co-sampled data included
-        sts = so3g.G3SuperTimestream()
-        sts.times = smurf_data.times
-        sts.names = [k for k in smurf_data.names] + ['Co-sampled_Azimuth_Corrected', 'Co-sampled_Elevation_Corrected']
-        sts.quanta = np.ones(len(sts.names), dtype=np.double)
-        sts.data = np.vstack((smurf_data.data, cosamp_az, cosamp_el))
+            # Write data to frame
+            f = core.G3Frame(core.G3FrameType.Scan)
+            f['data'] = sts
 
-        # Write data to frame
-        f = core.G3Frame(core.G3FrameType.Scan)
-        f['data'] = sts
-        f['hk'] = hk_data
+            f['state'] = 3
+        else:
+            # Co-sampled (interpolated) az/el encoder data
+            cosamp_az = np.interp(smurf_data.times, hk_data.times, hk_data['Azimuth_Corrected'], left=np.nan, right=np.nan)
+            cosamp_el = np.interp(smurf_data.times, hk_data.times, hk_data['Elevation_Corrected'], left=np.nan, right=np.nan)
 
-        self.determine_state(f['hk']['Azimuth_Velocity'], f['hk']['Elevation_Velocity'])
-        f['state'] = self.current_state
+            # Create SuperTimestream with co-sampled data included
+            sts = so3g.G3SuperTimestream()
+            sts.times = smurf_data.times
+            sts.names = [k for k in smurf_data.names] + ['Co-sampled_Azimuth_Corrected', 'Co-sampled_Elevation_Corrected']
+            sts.quanta = np.ones(len(sts.names), dtype=np.double)
+            sts.data = np.vstack((smurf_data.data, cosamp_az, cosamp_el))
 
-        output += [f]
+            # Write data to frame
+            f = core.G3Frame(core.G3FrameType.Scan)
+            f['data'] = sts
+            f['hk'] = hk_data
 
-        return output
-
-    def flush_no_hk(self, flush_time):
-        output = []
-
-        smurf_data = self.smbundle.rebundle(flush_time)
-
-        # Create SuperTimestream with co-sampled data included
-        sts = so3g.G3SuperTimestream()
-        sts.times = smurf_data.times
-        sts.names = [k for k in smurf_data.names]
-        # sts.quanta = np.ones(len(sts.names), dtype=np.double)
-        sts.data = smurf_data.data
-
-        # Write data to frame
-        f = core.G3Frame(core.G3FrameType.Scan)
-        f['data'] = sts
-
-        f['state'] = 3  # no encoder
-
-        output += [f]
+            self.determine_state(f['hk']['Azimuth_Velocity'], f['hk']['Elevation_Velocity'])
+            f['state'] = self.current_state
+        finally:
+            output += [f]
 
         return output
 
@@ -300,16 +294,11 @@ class FrameProcessor(object):
 
             self.smbundle.add(f['data'])
 
-            # Default mode: when there is no (relevant) HK data,
-            # rebundle frames uniformly into frames of length self.maxlength
-            if self.hkbundle is None:
-                if len(self.smbundle.times) > self.maxlength:
-                    output += self.flush_no_hk(self.smbundle.times[self.maxlength])
             # If the existing data exceeds the specified maximum length
-            elif len(self.smbundle.times) > self.maxlength:
+            if len(self.smbundle.times) > self.maxlength:
                 output += self.flush(self.smbundle.times[self.maxlength])
             # If a frame split event has been reached
-            elif self.smbundle.ready(self.flush_time):
+            elif self.flush_time is not None and self.smbundle.ready(self.flush_time):
                 output += self.flush()
 
             return output
@@ -437,7 +426,7 @@ class Bookbinder(object):
 
                 # If there are no more SMuRF frames, output remaining SMuRF data
                 if len(self.frameproc.smbundle.times) > 0:
-                    output += self.frameproc.flush_no_hk(self.frameproc.smbundle.times[-1] + 1)
+                    output += self.frameproc.flush(self.frameproc.smbundle.times[-1] + 1)
                 self.write_frames(output)
 
                 # If there are remaining files, update the
