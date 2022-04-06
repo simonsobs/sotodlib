@@ -185,8 +185,8 @@ class G3tSmurf:
         """
         Takes an input (either a timestamp or datetime), and returns a datetime.
         Intended to allow flexibility in inputs for various other functions
-        Note that x will be assumed to be in UTC and the datetime will reflect that
-        
+        Note that x will be assumed to be in UTC if timezone is not specified
+
         Args
         ----
             x: input datetime of timestamp
@@ -200,7 +200,9 @@ class G3tSmurf:
         elif isinstance(x, np.datetime64):
             return x.astype(dt.datetime).replace(tzinfo=dt.timezone.utc)
         elif isinstance(x, dt.datetime) or isinstance(x, dt.date):
-            return x.replace(tzinfo=dt.timezone.utc)
+            if x.tzinfo == None:
+                return x.replace(tzinfo=dt.timezone.utc)
+            return x
         raise (Exception("Input not a datetime or timestamp"))
 
     def add_file(self, path, session, overwrite=False):
@@ -1112,9 +1114,9 @@ class G3tSmurf:
         Args
         -----
             start : timestamp or DateTime
-                start time for data in UTC
+                start time for data, assumed to be in UTC unless specified
             end :  timestamp or DateTime
-                end time for data in UTC
+                end time for data, assumed to be in UTC unless specified
         Returns
         --------
             stream_ids: List of stream ids.
@@ -1174,9 +1176,9 @@ class G3tSmurf:
         Args
         -----
             start : timestamp or DateTime
-                start time for data in UTC
+                start time for data, assumed to be in UTC unless specified
             end :  timestamp or DateTime
-                end time for data in UTC
+                end time for data, assumed to be in UTC unless specified
             stream_id : String
                 stream_id to load, in case there are multiple
             channels : list or None
@@ -1605,7 +1607,8 @@ class SmurfStatus:
         Args
         -------
             time : (timestamp)
-                Time at which you want the rogue status in UTC
+                Time at which you want the rogue status
+                Assumed to be in UTC unless specified
             archive : (G3tSmurf instance)
                 The G3tSmurf archive to use to find the status
             show_pb : (bool)
