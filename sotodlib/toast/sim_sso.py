@@ -203,7 +203,7 @@ class OpSimSSO(Operator):
             raise ValueError('Unknown planet name')
 
 
-    def _get_beam_map(self, det, sso_dia, ttemp_det):
+    def _get_beam_map(self, sso_dia, ttemp_det):
         """
         Construct a 2-dimensional interpolator for the beam
         """
@@ -339,7 +339,7 @@ class OpSimSSO(Operator):
             self._get_planet_temp(self.sso_name)
             ttemp_det = np.interp(det_freqs, self.t_freqs, self.ttemp)
             ttemp_det = np.sum(ttemp_det * det_bandpass)
-            beam, radius = self._get_beam_map(det, sso_dia, ttemp_det)
+            beam, radius = self._get_beam_map(sso_dia, ttemp_det)
 
             # Interpolate the beam map at appropriate locations
             x = (az - sso_az) * np.cos(el)
