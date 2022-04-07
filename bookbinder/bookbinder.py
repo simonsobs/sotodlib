@@ -295,10 +295,10 @@ class FrameProcessor(object):
             self.smbundle.add(f['data'])
 
             # If the existing data exceeds the specified maximum length
-            if len(self.smbundle.times) > self.maxlength:
-                output += self.flush(self.smbundle.times[self.maxlength])
+            while len(self.smbundle.times) >= self.maxlength:
+                output += self.flush(self.smbundle.times[self.maxlength-1] + 1)
             # If a frame split event has been reached
-            elif self.flush_time is not None and self.smbundle.ready(self.flush_time):
+            if self.flush_time is not None and self.smbundle.ready(self.flush_time):
                 output += self.flush()
 
             return output
