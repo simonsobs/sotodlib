@@ -214,38 +214,36 @@ class FrameProcessor(object):
 
         smurf_data = self.smbundle.rebundle(flush_time)
 
+        # Create SuperTimestream containing SMuRF data
+        sts = so3g.G3SuperTimestream()
+        sts.times = smurf_data.times
+        sts.names = [k for k in smurf_data.names]
+        sts.data = smurf_data.data
+
+        # Write signal data to frame
+        f = core.G3Frame(core.G3FrameType.Scan)
+        f['signal'] = sts
+
         try:
             hk_data = self.hkbundle.rebundle(flush_time)
         except:
-        # No az/el encoder data found in HK files
-            # Create SuperTimestream containing SMuRF data
-            sts = so3g.G3SuperTimestream()
-            sts.times = smurf_data.times
-            sts.names = [k for k in smurf_data.names]
-            sts.data = smurf_data.data
-
-            # Write data to frame
-            f = core.G3Frame(core.G3FrameType.Scan)
-            f['data'] = sts
-
+            # No az/el encoder data found in HK files
             f['state'] = 3
         else:
             # Co-sampled (interpolated) az/el encoder data
             cosamp_az = np.interp(smurf_data.times, hk_data.times, hk_data['Azimuth_Corrected'], left=np.nan, right=np.nan)
             cosamp_el = np.interp(smurf_data.times, hk_data.times, hk_data['Elevation_Corrected'], left=np.nan, right=np.nan)
 
-            # Create SuperTimestream with co-sampled data included
-            sts = so3g.G3SuperTimestream()
-            sts.times = smurf_data.times
-            sts.names = [k for k in smurf_data.names] + ['Co-sampled_Azimuth_Corrected', 'Co-sampled_Elevation_Corrected']
-            sts.data = np.vstack((smurf_data.data, cosamp_az, cosamp_el)).astype(np.int32)
+            # Ancillary data (co-sampled HK encoder data)
+            anc_data = core.G3TimesampleMap()
+            anc_data.times = smurf_data.times
+            anc_data['az_enc'] = core.G3VectorDouble(cosamp_az)
+            anc_data['el_enc'] = core.G3VectorDouble(cosamp_el)
 
-            # Write data to frame
-            f = core.G3Frame(core.G3FrameType.Scan)
-            f['data'] = sts
-            f['hk'] = hk_data
+            # Write ancillary data to frame
+            f['ancil'] = anc_data
 
-            self.determine_state(f['hk']['Azimuth_Velocity'], f['hk']['Elevation_Velocity'])
+            self.determine_state(hk_data['Azimuth_Velocity'], hk_data['Elevation_Velocity'])
             f['state'] = self.current_state
         finally:
             output += [f]
