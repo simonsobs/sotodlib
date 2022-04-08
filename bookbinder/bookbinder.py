@@ -69,7 +69,7 @@ class _SmurfBundle():
         if self.data is None:
             self.data = {c: [] for c in b.names}
         for i, c in enumerate(b.names):
-            self.data[c].extend(b.data[i])
+            self.data[c].extend(b.data[i].astype(np.int32))
 
     def rebundle(self, flush_time):
         if len(self.times) == 0:
@@ -78,8 +78,7 @@ class _SmurfBundle():
         output = so3g.G3SuperTimestream()
         output.times = core.G3VectorTime([t for t in self.times if t < flush_time])
         output.names = [k for k in self.data.keys()]
-        output.quanta = np.ones(len(self.data.keys()), dtype=np.double)
-        output.data = np.vstack([v[:len(output.times)] for v in self.data.values()])
+        output.data = np.array([np.array(v[:len(output.times)]) for v in self.data.values()], dtype=np.int32)
         self.times = [t for t in self.times if t >= flush_time]
         self.data = {c: self.data[c][len(output.times):] for c in self.data.keys()}
 
@@ -223,7 +222,6 @@ class FrameProcessor(object):
             sts = so3g.G3SuperTimestream()
             sts.times = smurf_data.times
             sts.names = [k for k in smurf_data.names]
-            sts.quanta = np.ones(len(sts.names), dtype=np.double)
             sts.data = smurf_data.data
 
             # Write data to frame
@@ -240,8 +238,7 @@ class FrameProcessor(object):
             sts = so3g.G3SuperTimestream()
             sts.times = smurf_data.times
             sts.names = [k for k in smurf_data.names] + ['Co-sampled_Azimuth_Corrected', 'Co-sampled_Elevation_Corrected']
-            sts.quanta = np.ones(len(sts.names), dtype=np.double)
-            sts.data = np.vstack((smurf_data.data, cosamp_az, cosamp_el))
+            sts.data = np.vstack((smurf_data.data, cosamp_az, cosamp_el)).astype(np.int32)
 
             # Write data to frame
             f = core.G3Frame(core.G3FrameType.Scan)
