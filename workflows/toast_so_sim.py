@@ -817,7 +817,7 @@ def main():
             name="filterbin",
             enabled=False,
         ),
-        #so_ops.MLMapmaker(name="mlmapmaker", enabled=False, comps="TQU"),
+        so_ops.MLMapmaker(name="mlmapmaker", enabled=False, comps="TQU"),
         toast.ops.MemoryCounter(name="mem_count", enabled=False),
     ]
     if toast.ops.madam.available():
