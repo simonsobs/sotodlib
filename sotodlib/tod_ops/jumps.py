@@ -5,7 +5,7 @@ from so3g.proj import RangesMatrix
 from skimage.restoration import denoise_tv_chambolle
 
 
-def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs):
+def _jumpfinder(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs):
     """
     Recursive edge detection based jumpfinder.
 
@@ -19,12 +19,12 @@ def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs)
 
         min_chunk: The smallest chunk of data to look for jumps in.
 
-        min_size: The smalled jump size counted as a jump.
+        min_size: The smallest jump size counted as a jump.
 
         win_size: Number of samples to average over when checking jump size.
 
         max_depth: The maximum recursion depth.
-                   Set negetive for infite depth and 0 for no recursion.
+                   Set negative for infite depth and 0 for no recursion.
 
         depth: The current recursion depth.
 
@@ -60,7 +60,7 @@ def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs)
     jumps.sort()
 
     # Filter out jumps that are too small
-    sizes = get_jumps_sizes(x, jumps, min_chunk, win_size)
+    sizes = get_jump_sizes(x, jumps, min_chunk, win_size)
     jumps = jumps[abs(sizes) > min_size]
 
     # If no jumps found return
@@ -76,7 +76,7 @@ def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs)
     _jumps = np.append(_jumps, len(x))
     added = 0
     for i in range(len(_jumps) - 1):
-        sub_jumps = _jumpfind(
+        sub_jumps = _jumpfinder(
             x[(_jumps[i]) : (_jumps[i + 1])],
             min_chunk,
             min_size,
@@ -90,7 +90,7 @@ def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs)
     return jumps.astype(int)
 
 
-def get_jumps_sizes(x, jumps, min_chunk, win_size):
+def get_jump_sizes(x, jumps, min_chunk, win_size):
     """
     Estimate jumps sizes.
 
@@ -126,7 +126,7 @@ def get_jumps_sizes(x, jumps, min_chunk, win_size):
     return sizes.astype(int)
 
 
-def jumpfind_tv(
+def jumpfinder_tv(
     x,
     weight=1,
     min_chunk=10,
@@ -149,12 +149,12 @@ def jumpfind_tv(
 
         min_chunk: The smallest chunk of data to look for jumps in.
 
-        min_size: The smalled jump size counted as a jump.
+        min_size: The smallest jump size counted as a jump.
 
         win_size: Number of samples to average over when checking jump size.
 
         max_depth: The maximum recursion depth.
-                   Set negetive for infite depth and 0 for no recursion.
+                   Set negative for infite depth and 0 for no recursion.
 
         height: Height of peaks to pass to scipy.signal.find_peaks.
 
@@ -169,7 +169,7 @@ def jumpfind_tv(
                Jumps within min_chunk of each other may not be distinguished.
     """
     x_filt = denoise_tv_chambolle(x, weight)
-    return _jumpfind(
+    return _jumpfinder(
         x_filt,
         min_chunk,
         min_size,
@@ -182,7 +182,7 @@ def jumpfind_tv(
     )
 
 
-def jumpfind_gaussian(
+def jumpfinder_gaussian(
     x,
     sigma=5,
     min_chunk=10,
@@ -194,23 +194,23 @@ def jumpfind_gaussian(
     **kwargs
 ):
     """
-    Apply gaussain filter to data and then search for jumps.
+    Apply gaussian filter to data and then search for jumps.
 
     Arguments:
 
         x: Data to jumpfind on, expects 1D.
 
-        sigma: Sigma of gaussain kernal.
+        sigma: Sigma of gaussian kernal.
 
         min_chunk: The smallest chunk of data to look for jumps in.
 
-        min_size: The smalled jump size counted as a jump.
+        min_size: The smallest jump size counted as a jump.
                   Note that this is in terms of the filtered data.
 
         win_size: Number of samples to average over when checking jump size.
 
         max_depth: The maximum recursion depth.
-                   Set negetive for infite depth and 0 for no recursion.
+                   Set negative for infite depth and 0 for no recursion.
 
         height: Height of peaks to pass to scipy.signal.find_peaks.
 
@@ -228,7 +228,7 @@ def jumpfind_gaussian(
     x_filt = simg.gaussian_filter(x, sigma, 0)
 
     # Search for jumps in filtered data
-    return _jumpfind(
+    return _jumpfinder(
         x_filt,
         min_chunk,
         min_size,
@@ -241,12 +241,12 @@ def jumpfind_gaussian(
     )
 
 
-def jumpfind_recursive_gaussian(x, sensitivity=2.0, max_depth=-1, depth=0):
+def jumpfinder_recursive_gaussian(x, sensitivity=2.0, max_depth=-1, depth=0):
     """
     Calculate (semi) intelligent default parameters and jumpfind with them
-    The data is gaussain filtered before jumpfinding.
+    The data is gaussian filtered before jumpfinding.
 
-    The presence of large spikes can have a negetive effect on this function,
+    The presence of large spikes can have a negative effect on this function,
     please mask/slice/interpolate them out before using this functon.
 
     Note that the difference between this and jumpfind_gaussian is that in this
@@ -263,7 +263,7 @@ def jumpfind_recursive_gaussian(x, sensitivity=2.0, max_depth=-1, depth=0):
                      something non-physical.
 
         max_depth: The maximum recursion depth.
-                   Set negetive for infite depth and 0 for no recursion.
+                   Set negative for infite depth and 0 for no recursion.
 
         depth: The current recursion depth.
 
@@ -279,7 +279,7 @@ def jumpfind_recursive_gaussian(x, sensitivity=2.0, max_depth=-1, depth=0):
     if np.isclose(_x.std(), 0.0):
         return np.array([])
 
-    jumps = jumpfind_gaussian(
+    jumps = jumpfinder_gaussian(
         _x,
         2 * _x.std(),
         10,
@@ -311,8 +311,8 @@ def jumpfind_recursive_gaussian(x, sensitivity=2.0, max_depth=-1, depth=0):
     return jumps
 
 
-def jumpfind_sliding_window(
-    x, window_size=10000, overlap=1000, jumpfinder=jumpfind_tv, **kwargs
+def jumpfinder_sliding_window(
+    x, window_size=10000, overlap=1000, jumpfinder=jumpfinder_tv, **kwargs
 ):
     """
     Run jumpfinder through a sliding window.
@@ -347,7 +347,7 @@ def jumpfind_sliding_window(
     return np.unique(jumps).astype(int)
 
 
-def jumpfind(tod, signal=None, buff_size=10, jumpfinder=jumpfind_tv, **kwargs):
+def find_jumps(tod, signal=None, buff_size=10, jumpfinder=jumpfinder_tv, **kwargs):
     """
     Find jumps in tod.signal_name.
     Expects tod.signal_name to be 1D of 2D.

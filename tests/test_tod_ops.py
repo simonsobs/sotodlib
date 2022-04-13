@@ -153,12 +153,12 @@ class JumpfindTest(unittest.TestCase):
         tod.wrap('sig_jumps', sig_jumps, [(0, 'samps')])
 
         # Find jumps with TV filtering
-        jumps_tv = tod_ops.jumpfind(tod, signal=tod.sig_jumps, min_size=2)
+        jumps_tv = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=2)
         jumps_tv = jumps_tv.ranges().flatten()
 
         # Find jumps with gaussian filtering
-        jumps_gauss = tod_ops.jumpfind(tod, signal=tod.sig_jumps,
-                                       jumpfinder=tod_ops.jumpfind_gaussian, min_size=2)
+        jumps_gauss = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps,
+                                       jumpfinder=tod_ops.jumps.jumpfinder_gaussian, min_size=2)
         jumps_gauss = jumps_gauss.ranges().flatten()
 
         # Remove double counted jumps and round to remove uncertainty
