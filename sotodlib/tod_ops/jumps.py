@@ -5,6 +5,25 @@ from so3g.proj import RangesMatrix
 from skimage.restoration import denoise_tv_chambolle
 
 
+def std_est(x):
+    """
+    Estimate white noise standard deviation of data.
+    More robust to jumps and 1/f then np.std()
+
+    Arguments:
+
+        x: Data to compute standard deviation of.
+
+    Returns:
+
+        stdev: The estimated white noise standard deviation of x.
+    """
+    # Find ~1 sigma limits of differenced data
+    lims = np.quantile(np.diff(x), [0.159, 0.841])
+    # Convert to standard deviation
+    return (lims[1] - lims[0]) / 8 ** 0.5
+
+
 def _jumpfinder(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs):
     """
     Recursive edge detection based jumpfinder.
@@ -43,12 +62,11 @@ def _jumpfinder(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwarg
     if np.isclose(x.std(), 0.0):
         return np.array([], dtype=int)
 
-    # Mean subtract to make the jumps in the steps below more prominant peaks
-    _x = x - x.mean()
-
     # Scale data to have std of order 1
-    if _x.std() > 10:
-        _x = _x / (10 ** (int(np.log10(_x.std()))))
+    _x = x / std_est(x)
+
+    # Mean subtract to make the jumps in the steps below more prominant peaks
+    _x -= _x.mean()
 
     # Take cumulative sum, this is equivalent to convolving with a step
     x_step = np.cumsum(_x)
