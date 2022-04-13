@@ -157,10 +157,10 @@ using this submodule.
    :members:
 
 
-tod_ops.jumpfind
-================
+tod_ops.jumps
+=============
 
 Functions to find jumps in data.
 
-.. automodule:: sotodlib.tod_ops.jumpfind
+.. automodule:: sotodlib.tod_ops.jumps
    :members:
