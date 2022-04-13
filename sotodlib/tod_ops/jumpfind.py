@@ -166,10 +166,8 @@ def jumpfind_tv(
 def jumpfind_gaussian(
     x,
     sigma=5,
-    order=0,
     min_chunk=10,
     min_size=0.1,
-    abs_min_size=0,
     win_size=20,
     max_depth=-1,
     height=1,
@@ -185,24 +183,12 @@ def jumpfind_gaussian(
 
         sigma: Sigma of gaussain kernal.
 
-        order: Order of gaussain filter.
-               Note the following:
-               Order 0 works a bit better than just calling jumpfind
-               Order 1 is not reccomended, it can catch both jumps and spikes
-               but it cant't distinguish them and misses jumps
-               Order 2 works well to catch jumps and has a low false negetive rate
-               but it can get confused near large spikes
-
         min_chunk: The smallest chunk of data to look for jumps in.
 
         min_size: The smalled jump size counted as a jump.
-                        Note that this is in terms of the filtered data.
-
-        abs_min_size: The minimum size of jumps in the unfiltered data.
-                            Note that for order 0 this is not used.
+                  Note that this is in terms of the filtered data.
 
         win_size: Number of samples to average over when checking jump size.
-                        For order 2, 2*sigma works well.
 
         max_depth: The maximum recursion depth.
                    Set negetive for infite depth and 0 for no recursion.
@@ -220,10 +206,10 @@ def jumpfind_gaussian(
                Jumps within min_chunk of each other may not be distinguished.
     """
     # Apply filter
-    x_filt = simg.gaussian_filter(x, sigma, order)
+    x_filt = simg.gaussian_filter(x, sigma, 0)
 
     # Search for jumps in filtered data
-    jumps = _jumpfind(
+    return _jumpfind(
         x_filt,
         min_chunk,
         min_size,
@@ -234,30 +220,6 @@ def jumpfind_gaussian(
         prominence=prominence,
         **kwargs
     )
-
-    if order == 0:
-        return jumps
-
-    # Filter out jumps that are too small
-    j_i = []
-    for i, j in enumerate(jumps):
-        if i + 1 < len(jumps):
-            right = min(j + win_size, len(x), jumps[i + 1] - min_chunk)
-        else:
-            right = min(j + win_size, len(x))
-        if i > 0:
-            left = max(j - win_size, 0, jumps[i - 1] + min_chunk)
-        else:
-            left = max(j - win_size, 0)
-
-        if (
-            abs(
-                np.median(x[j + min_chunk : right]) - np.median(x[left : j - min_chunk])
-            )
-            > abs_min_size
-        ):
-            j_i.append(i)
-    return jumps[j_i]
 
 
 def jumpfind_recursive_gaussian(x, sensitivity=2.0, max_depth=-1, depth=0):
@@ -301,10 +263,8 @@ def jumpfind_recursive_gaussian(x, sensitivity=2.0, max_depth=-1, depth=0):
     jumps = jumpfind_gaussian(
         _x,
         2 * _x.std(),
-        0,
         10,
         1.0 / sensitivity,
-        0,
         20,
         0,
         height=1,
