@@ -60,25 +60,8 @@ def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs)
     jumps.sort()
 
     # Filter out jumps that are too small
-    j_i = []
-    for i, j in enumerate(jumps):
-        if i + 1 < len(jumps):
-            right = min(j + win_size, len(x), jumps[i + 1] - min_chunk)
-        else:
-            right = min(j + win_size, len(x))
-        if i > 0:
-            left = max(j - win_size, 0, jumps[i - 1] + min_chunk)
-        else:
-            left = max(j - win_size, 0)
-
-        if (
-            abs(
-                np.median(x[j + min_chunk : right]) - np.median(x[left : j - min_chunk])
-            )
-            > min_size
-        ):
-            j_i.append(i)
-    jumps = jumps[j_i]
+    sizes = get_jumps_sizes(x, jumps, min_chunk, win_size)
+    jumps = jumps[abs(sizes) > min_size]
 
     # If no jumps found return
     if len(jumps) == 0:
@@ -105,6 +88,42 @@ def _jumpfind(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs)
         jumps = np.insert(jumps, i + added, sub_jumps + _jumps[i])
         added += len(sub_jumps)
     return jumps.astype(int)
+
+
+def get_jumps_sizes(x, jumps, min_chunk, win_size):
+    """
+    Estimate jumps sizes.
+
+    Arguments:
+
+        x: Data with jumps, expects 1D.
+
+        jumps: Indices of jumps in x.
+
+        min_chunk: The smallest chunk of data to look for jumps in.
+
+        win_size: Number of samples to average over when checking jump size.
+
+    Returns:
+
+        sizes: Array of jump sizes, same order and jumps.
+    """
+    sizes = np.zeros(len(jumps))
+    for i, j in enumerate(jumps):
+        if i + 1 < len(jumps):
+            right = min(j + win_size, len(x), jumps[i + 1] - min_chunk)
+        else:
+            right = min(j + win_size, len(x))
+        right_height = np.median(x[j + min_chunk : right])
+
+        if i > 0:
+            left = max(j - win_size, 0, jumps[i - 1] + min_chunk)
+        else:
+            left = max(j - win_size, 0)
+        left_height = np.median(x[left : j - min_chunk])
+
+        sizes[i] = right_height - left_height
+    return sizes.astype(int)
 
 
 def jumpfind_tv(
