@@ -327,7 +327,8 @@ def find_jumps(
     buff_size=10,
     jumpfinder=jumpfinder_tv,
     min_chunk=10,
-    min_size=0.1,
+    min_sigma=5,
+    min_size=None,
     win_size=20,
     max_depth=-1,
     **kwargs
@@ -348,7 +349,15 @@ def find_jumps(
 
         min_chunk: The smallest chunk of data to look for jumps in.
 
+        min_sigma: Number of standard deviations to count as a jump, note that
+                   the standard deviation here is computed by std_est and is
+                   the white noise standard deviation, so it doesn't include
+                   contributions from jumps or 1/f.
+                   If min_size is provided it will be used instead of this.
+
         min_size: The smallest jump size counted as a jump.
+                  By default this is set to None and min_sigma is used instead,
+                  if set this will override min_sigma.
 
         win_size: Number of samples to average over when checking jump size.
 
@@ -384,12 +393,16 @@ def find_jumps(
     jump_mask = np.zeros(signal.shape, dtype=bool)
 
     if len(signal.shape) == 1:
+        if min_size is None:
+            min_size = min_sigma * std_est(signal)
         jumps = jumpfinder(signal, min_chunk, min_size, win_size, max_depth, **kwargs)
         jump_mask[jumps] = True
     elif len(signal.shape) == 2:
         for i, _signal in enumerate(signal):
+            if min_size is None:
+                _min_size = min_sigma * std_est(_signal)
             jumps = jumpfinder(
-                _signal, min_chunk, min_size, win_size, max_depth, **kwargs
+                _signal, min_chunk, _min_size, win_size, max_depth, **kwargs
             )
             jump_mask[i][jumps] = True
     else:
