@@ -190,7 +190,7 @@ def calc_psd(aman, signal=None, timestamps=None, **kwargs):
     """Calculates the power spectrum density of an input signal using signal.welch()
     Data defaults to aman.signal and times defaults to aman.timestamps
         Arguments:
-            aman: AxisManager with (dets, samps) OR (channels, samps)axes.
+            aman: AxisManager with (dets, samps) OR (channels, samps) axes.
 
             signal: data signal to pass to scipy.signal.welch()
             

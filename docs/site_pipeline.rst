@@ -101,6 +101,59 @@ Here's an annotated example:
       'buffer': 200,
     }
 
+make-white-noise
+-----------------
+
+This script calculates the median "white noise" between two specified
+frequencies (5 Hz and 10 Hz are the default for now). The configuration file can
+be used to pass parameters to the PSD calculation function and the binning
+function.
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.make_white_noise
+   :func: get_parser
+
+Config file format
+``````````````````
+
+Here's an annotated example:
+
+.. code-block:: yaml
+  
+  # Context for <whatever>
+  context_file: ./context4_b.yaml
+
+  # How to subdivide observations (by detset)
+  subobs:
+    use: detset
+    label: detset
+
+  # Metadata index & archive filenaming
+  archive:
+    index: 'archive.sqlite'
+    policy:
+      type: 'simple'
+      filename: 'archive.h5'
+
+  # PSD parameters
+  psd_params:
+    default: {
+      'detrend': 'linear',
+      'window': 'hann',
+    }
+
+  # Noise parameters
+  noise_params:
+    default: {
+      'low_f': 5,
+      'high_f': 10,
+    }
+
+
+
 Support
 =======
 
