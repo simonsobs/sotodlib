@@ -267,7 +267,7 @@ def jumpfinder_sliding_window(
     max_depth=-1,
     window_size=10000,
     overlap=1000,
-    jumpfinder=jumpfinder_tv,
+    jumpfinder_func=jumpfinder_tv,
     **kwargs
 ):
     """
@@ -284,7 +284,7 @@ def jumpfinder_sliding_window(
 
         overlap: Overlap between adjacent windows.
 
-        jumpfinder: Jumpfinding function to use.
+        jumpfinder_func: Jumpfinding function to use.
 
         min_chunk: The smallest chunk of data to look for jumps in.
 
@@ -316,7 +316,7 @@ def jumpfinder_sliding_window(
     for i in range(len(x) // (window_size - overlap)):
         start = i * (window_size - overlap)
         end = np.min((start + window_size, len(x)))
-        _jumps = jumpfinder(x[start:end], **kwargs) + start
+        _jumps = jumpfinder_func(x[start:end], **kwargs) + start
         jumps = np.hstack((jumps, _jumps))
     return np.unique(jumps).astype(int)
 
@@ -365,20 +365,16 @@ def find_jumps(
                    Set negative for infite depth and 0 for no recursion.
 
         **kwargs: Additional keyword args to pass to jumpfinder.
-                  Arguments that will ultimately be passed to scipy.signal.find_peaks
-                  should be passed after arguments specific to the jumpfinder.
-                  The additional arguments to pass for each jumpfinder are below:
 
                   * _jumpfinder: None
                   * jumpfinder_tv: weight
                   * jumpfinder_gaussian: sigma
-                  * jumpfinder_sliding_window: window_size, overlap, jumpfinder
+                  * jumpfinder_sliding_window: window_size, overlap, jumpfinder_func
 
                   See docstrings of each jumpfinder for more details.
 
                   Note that jumpfinder_sliding_window accepts kwargs to pass
-                  on to whichever jumpfinder it calls, those arguments should
-                  go after these but still before any arguments for find_peaks.
+                  on to whichever jumpfinder it calls as well.
 
     Returns:
 
@@ -395,14 +391,26 @@ def find_jumps(
     if len(signal.shape) == 1:
         if min_size is None:
             min_size = min_sigma * std_est(signal)
-        jumps = jumpfinder(signal, min_chunk, min_size, win_size, max_depth, **kwargs)
+        jumps = jumpfinder(
+            signal,
+            min_chunk=min_chunk,
+            min_size=min_size,
+            win_size=win_size,
+            max_depth=max_depth,
+            **kwargs
+        )
         jump_mask[jumps] = True
     elif len(signal.shape) == 2:
         for i, _signal in enumerate(signal):
             if min_size is None:
                 _min_size = min_sigma * std_est(_signal)
             jumps = jumpfinder(
-                _signal, min_chunk, _min_size, win_size, max_depth, **kwargs
+                _signal,
+                min_chunk=min_chunk,
+                min_size=_min_size,
+                win_size=win_size,
+                max_depth=max_depth,
+                **kwargs
             )
             jump_mask[i][jumps] = True
     else:
