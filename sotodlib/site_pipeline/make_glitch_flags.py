@@ -83,6 +83,7 @@ def main(args=None):
         # Wrap result into AxisManager for HDF5 off-load.
         aman = core.AxisManager(tod.dets)
         aman.wrap('glitch_flags', tod_flags, [(0, 'dets')])
+        aman.wrap('glitch_detections', csr, [(0, 'dets'), (1,'samps')])
 
         # Get file + dataset from policy.
         policy = site_pipeline.util.ArchivePolicy.from_params(config['archive']['policy'])
