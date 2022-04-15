@@ -324,7 +324,7 @@ def jumpfinder_sliding_window(
 def find_jumps(
     tod,
     signal=None,
-    buff_size=10,
+    buff_size=0,
     jumpfinder=jumpfinder_tv,
     min_chunk=10,
     min_sigma=5,
