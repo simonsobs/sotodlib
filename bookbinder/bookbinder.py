@@ -307,6 +307,7 @@ class Bookbinder(object):
         self._smurf_files = smurf_files
         self._out_files = out_files
         self._verbose = verbose
+        self.metadata = []
 
         self.frameproc = FrameProcessor()
 
@@ -409,8 +410,16 @@ class Bookbinder(object):
                 output = []
                 for f in self.smurf_iter:
                     if f.type != core.G3FrameType.Scan:
-                        continue
-                    output += self.frameproc(f)
+                        if self.frameproc.smbundle is None or len(self.frameproc.smbundle.times) == 0:
+                            output += [f]
+                        else:
+                            self.metadata += [f]
+                    else:
+                        o = self.frameproc(f)
+                        # Write out metadata frames only when FrameProcessor outputs one or more (scan) frames
+                        if len(o) > 0:
+                            output += o + self.metadata
+                            self.metadata = []
 
                     # To avoid keeping too many frames in memory, write out buffer if too long
                     if len(output) >= 10:
@@ -422,7 +431,8 @@ class Bookbinder(object):
                 # If there are no more SMuRF frames, output remaining SMuRF data
                 if len(self.frameproc.smbundle.times) > 0:
                     output += self.frameproc.flush(self.frameproc.smbundle.times[-1] + 1)
-                self.write_frames(output)
+                self.write_frames(output + self.metadata)
+                self.metadata = []
 
                 # If there are remaining files, update the
                 # SMuRF source iterator and G3 file writer
@@ -476,9 +486,17 @@ class Bookbinder(object):
                     output = []
                 else:
                     if f.type != core.G3FrameType.Scan:
-                        continue
-                    output += self.frameproc(f)  # FrameProcessor returns a list of frames (can be empty)
+                        if self.frameproc.smbundle is None or len(self.frameproc.smbundle.times) == 0:
+                            output += [f]
+                        else:
+                            self.metadata += [f]
+                    else:
+                        output += self.frameproc(f)  # FrameProcessor returns a list of frames (can be empty)
+                        # Write out metadata frames only when FrameProcessor outputs one or more (scan) frames
+                        if len(output) > 0:
+                            output += self.metadata
                     self.write_frames(output)
 
-                    # Clear buffer after writing
+                    # Clear buffers after writing
                     output = []
+                    self.metadata = []
