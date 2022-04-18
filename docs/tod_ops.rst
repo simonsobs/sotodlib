@@ -160,7 +160,10 @@ using this submodule.
 tod_ops.jumps
 =============
 
-Functions to find jumps in data.
+Functions to find jumps in data. The jumps are found by taking the cumulative
+sum of mean subtracted data (which may be filtered) and looking for peaks in the
+output. Taking the cumulative sum is functionally the same as convolving with
+an unit step, so it is acting as a matched filter.
 
 .. automodule:: sotodlib.tod_ops.jumps
    :members:
