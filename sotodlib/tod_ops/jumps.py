@@ -316,8 +316,15 @@ def jumpfinder_sliding_window(
     for i in range(len(x) // (window_size - overlap)):
         start = i * (window_size - overlap)
         end = np.min((start + window_size, len(x)))
-        _jumps = jumpfinder_func(x[start:end], **kwargs) + start
-        jumps = np.hstack((jumps, _jumps))
+        _jumps = jumpfinder_func(
+            x[start:end],
+            min_chunk=min_chunk,
+            min_size=min_size,
+            win_size=win_size,
+            max_depth=max_depth,
+            **kwargs
+        )
+        jumps = np.hstack((jumps, _jumps + start))
     return np.unique(jumps).astype(int)
 
 
