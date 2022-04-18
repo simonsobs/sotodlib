@@ -355,9 +355,9 @@ def find_jumps(
     buff_size=0,
     jumpfinder=jumpfinder_tv,
     min_chunk=None,
-    min_sigma=None,
+    min_sigma=5,
     min_size=None,
-    win_size=20,
+    win_size=None,
     max_depth=-1,
     **kwargs
 ):
