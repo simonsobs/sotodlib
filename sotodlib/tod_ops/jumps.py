@@ -56,11 +56,11 @@ def _jumpfinder(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwarg
                Jumps within min_chunk of each other may not be distinguished.
     """
     if min_chunk is None:
-        min_chunk = 10
+        min_chunk = 20
     if min_size is None:
         min_size = 0.1
     if win_size is None:
-        win_size = 20
+        win_size = 10
 
     if len(x) < min_chunk:
         return np.array([], dtype=int)
@@ -85,7 +85,7 @@ def _jumpfinder(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwarg
     jumps.sort()
 
     # Filter out jumps that are too small
-    sizes = get_jump_sizes(x, jumps, min_chunk, win_size)
+    sizes = get_jump_sizes(x, jumps, win_size)
     jumps = jumps[abs(sizes) > min_size]
 
     # If no jumps found return
@@ -115,7 +115,7 @@ def _jumpfinder(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwarg
     return jumps.astype(int)
 
 
-def get_jump_sizes(x, jumps, min_chunk, win_size):
+def get_jump_sizes(x, jumps, win_size):
     """
     Estimate jumps sizes.
 
@@ -124,8 +124,6 @@ def get_jump_sizes(x, jumps, min_chunk, win_size):
         x: Data with jumps, expects 1D.
 
         jumps: Indices of jumps in x.
-
-        min_chunk: The smallest chunk of data to look for jumps in.
 
         win_size: Number of samples to average over when checking jump size.
 
@@ -136,16 +134,16 @@ def get_jump_sizes(x, jumps, min_chunk, win_size):
     sizes = np.zeros(len(jumps))
     for i, j in enumerate(jumps):
         if i + 1 < len(jumps):
-            right = min(j + win_size, len(x), jumps[i + 1] - min_chunk)
+            right = min(j + win_size, len(x), int((jumps[i + 1] + j) / 2))
         else:
             right = min(j + win_size, len(x))
-        right_height = np.median(x[j + min_chunk : right])
+        right_height = np.median(x[int((j + right) / 2) : right])
 
         if i > 0:
-            left = max(j - win_size, 0, jumps[i - 1] + min_chunk)
+            left = max(j - win_size, 0, int((jumps[i - 1] + j) / 2))
         else:
             left = max(j - win_size, 0)
-        left_height = np.median(x[left : j - min_chunk])
+        left_height = np.median(x[left : int((j + left) / 2)])
 
         sizes[i] = right_height - left_height
     return sizes.astype(int)
@@ -194,11 +192,11 @@ def jumpfinder_tv(
                Jumps within min_chunk of each other may not be distinguished.
     """
     if min_chunk is None:
-        min_chunk = 2
+        min_chunk = 5
     if min_size is None:
         min_size = 0.1
     if win_size is None:
-        win_size = 4
+        win_size = 5
 
     x_filt = denoise_tv_chambolle(x, weight)
     return _jumpfinder(
@@ -257,11 +255,11 @@ def jumpfinder_gaussian(
                Jumps within min_chunk of each other may not be distinguished.
     """
     if min_chunk is None:
-        min_chunk = 10
+        min_chunk = 20
     if min_size is None:
         min_size = 0.1
     if win_size is None:
-        win_size = 20
+        win_size = 10
 
     # Apply filter
     x_filt = simg.gaussian_filter(x, sigma, 0)
