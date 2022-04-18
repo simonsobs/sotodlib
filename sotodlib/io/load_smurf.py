@@ -1403,7 +1403,7 @@ def obs_detdb_context_hook(ctx, obs_id, *args, **kwargs):
     return ddb
 
 core.Context.hook_sets['obs_detdb_load'] = {
-    'before-load-obs': obs_detdb_context_hook,
+    'before-use-detdb': obs_detdb_context_hook,
 }
 
 class SmurfStatus:
