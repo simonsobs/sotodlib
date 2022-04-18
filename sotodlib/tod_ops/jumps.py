@@ -55,6 +55,13 @@ def _jumpfinder(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwarg
                There is some uncertainty on order of 1 sample.
                Jumps within min_chunk of each other may not be distinguished.
     """
+    if min_chunk is None:
+        min_chunk = 10
+    if min_size is None:
+        min_size = 0.1
+    if win_size is None:
+        win_size = 20
+
     if len(x) < min_chunk:
         return np.array([], dtype=int)
 
@@ -146,9 +153,9 @@ def get_jump_sizes(x, jumps, min_chunk, win_size):
 
 def jumpfinder_tv(
     x,
-    min_chunk=10,
-    min_size=0.5,
-    win_size=20,
+    min_chunk=None,
+    min_size=None,
+    win_size=None,
     max_depth=-1,
     weight=1,
     height=1,
@@ -186,6 +193,13 @@ def jumpfinder_tv(
                There is some uncertainty on order of 1 sample.
                Jumps within min_chunk of each other may not be distinguished.
     """
+    if min_chunk is None:
+        min_chunk = 2
+    if min_size is None:
+        min_size = 0.1
+    if win_size is None:
+        win_size = 4
+
     x_filt = denoise_tv_chambolle(x, weight)
     return _jumpfinder(
         x_filt,
@@ -242,6 +256,13 @@ def jumpfinder_gaussian(
                There is some uncertainty on order of 1 sample.
                Jumps within min_chunk of each other may not be distinguished.
     """
+    if min_chunk is None:
+        min_chunk = 10
+    if min_size is None:
+        min_size = 0.1
+    if win_size is None:
+        win_size = 20
+
     # Apply filter
     x_filt = simg.gaussian_filter(x, sigma, 0)
 
@@ -261,9 +282,9 @@ def jumpfinder_gaussian(
 
 def jumpfinder_sliding_window(
     x,
-    min_chunk=10,
-    min_size=0.1,
-    win_size=20,
+    min_chunk=None,
+    min_size=None,
+    win_size=None,
     max_depth=-1,
     window_size=10000,
     overlap=1000,
@@ -333,8 +354,8 @@ def find_jumps(
     signal=None,
     buff_size=0,
     jumpfinder=jumpfinder_tv,
-    min_chunk=10,
-    min_sigma=5,
+    min_chunk=None,
+    min_sigma=None,
     min_size=None,
     win_size=20,
     max_depth=-1,
