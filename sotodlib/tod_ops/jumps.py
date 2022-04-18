@@ -411,6 +411,8 @@ def find_jumps(
         for i, _signal in enumerate(signal):
             if min_size is None:
                 _min_size = min_sigma * std_est(_signal)
+            else:
+                _min_size = min_size
             jumps = jumpfinder(
                 _signal,
                 min_chunk=min_chunk,
