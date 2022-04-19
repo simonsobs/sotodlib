@@ -66,7 +66,7 @@ def _jumpfinder(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwarg
         return np.array([], dtype=int)
 
     # If std is basically 0 no need to check for jumps
-    if np.isclose(x.std(), 0.0):
+    if np.isclose(x.std(), 0.0) or (std_est(x) == 0):
         return np.array([], dtype=int)
 
     # Scale data to have std of order 1
@@ -214,9 +214,9 @@ def jumpfinder_tv(
 
 def jumpfinder_gaussian(
     x,
-    min_chunk=10,
-    min_size=0.1,
-    win_size=20,
+    min_chunk=None,
+    min_size=None,
+    win_size=None,
     max_depth=-1,
     sigma=5,
     height=1,
