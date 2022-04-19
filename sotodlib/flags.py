@@ -1,5 +1,5 @@
 import numpy as np
-import scipy.stats as stats
+from scipy import stats
 
 ## "temporary" fix to deal with scipy>1.8 changing the sparse setup
 try:
