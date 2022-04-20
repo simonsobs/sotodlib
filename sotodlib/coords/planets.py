@@ -619,6 +619,12 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
         # Clear P's internal cuts as we'll be modifying those to pass
         # in directly.
         base_cuts, P.cuts = P.cuts, None
+        output = {
+            'P': P,
+            'det_weights': det_weights,
+            'splits': {}
+        }
+
         # Write out _map and _weights for each group.
         for group_label, group_cuts in data_splits.items():
             logger.info(f'Mapping split "{group_label}"')
@@ -628,11 +634,17 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
             m = P.remove_weights(
                 tod=tod, signal=signal, weights_map=w, cuts=group_cuts,
                 det_weights=det_weights, eigentol=eigentol)
-            m.astype('float32').write(
-                filename.format(map=f'{group_label}_map', **info))
-            w.astype('float32').write(
-                filename.format(map=f'{group_label}_weights', **info))
-        return None
+            output['splits'][group_label] = {
+                'binned': None,
+                'weights': w.astype('float32'),
+                'solved': m.astype('float32'),
+            }
+            if filename is not None:
+                m.astype('float32').write(
+                    filename.format(map=f'{group_label}_map', **info))
+                w.astype('float32').write(
+                    filename.format(map=f'{group_label}_weights', **info))
+        return output
 
     with MmTimer('project signal and weight maps'):
         map1 = P.to_map(tod, signal=signal, det_weights=det_weights)
