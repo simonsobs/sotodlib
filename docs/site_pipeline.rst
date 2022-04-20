@@ -69,6 +69,87 @@ Here's an annotated example:
     default: {'xyr': [0., 0., 0.1]}
 
 
+make-uncal-beam-map
+-------------------
+
+.. automodule:: sotodlib.site_pipeline.make_uncal_beam_map
+   :members:
+   :undoc-members:
+
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.make_uncal_beam_map
+   :func: _get_parser
+   :prog: make-uncal-beam-map
+
+Config file format
+``````````````````
+
+Here's an annotated example:
+
+.. code-block:: yaml
+
+  # Data source
+  context_file: ./act_uranus/context.yaml
+
+  # Sub-observation data grouping
+  subobs:
+    use: detset
+    label: wafer_slot
+
+  # Database of results
+  archive:
+    index: 'archive.sqlite'
+    policy:
+      type: 'directory'
+      root_dir: './'
+      pattern: 'maps/{product_id}'
+
+  # Output selection and naming
+  output:
+    map_codes: ['solved', 'weights']
+    pattern: '{product_id}_{split}_{map_code}.fits'
+
+  # Plot generation
+  plotting:
+    zoom:
+      f090: [10, arcmin]
+      f150: [10, arcmin]
+
+  # Preprocessing
+  preprocessing:
+    cal_keys: ['abscal', 'relcal']
+    pointing_keys: ['boresight_offset']
+
+  # Mapmaking parameters
+  mapmaking:
+    force_source: Uranus
+    res:
+      f090: [15, arcsec]
+      f150: [15, arcsec]
+
+
+Inputs
+``````
+
+The formal inputs should all be made available through the Context.
+They are:
+
+- Obs Book
+- HWP Angle
+- Chanmap
+- Basecal - store in 'cal_base'
+- RelCal model - store in 'cal_flat'
+- Timeconst model
+- Focal plane
+- Glitch flags - store in 'glitch_flags'
+- Noise cuts - store in 'noise_cuts'
+- HWP Spinsync
+
+
 Support
 =======
 
