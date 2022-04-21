@@ -56,7 +56,9 @@ class _HKBundle():
 class _SmurfBundle():
     def __init__(self):
         self.times = []
-        self.data = None
+        self.signal = None
+        self.bias = None
+        self.primary = None
 
     def ready(self, flush_time):
         """
@@ -64,25 +66,68 @@ class _SmurfBundle():
         """
         return len(self.times) > 0 and self.times[-1] >= flush_time
 
-    def add(self, b):
-        self.times.extend(b.times)
-        if self.data is None:
-            self.data = {c: [] for c in b.names}
-        for i, c in enumerate(b.names):
-            self.data[c].extend(b.data[i].astype(np.int32))
+    def createNewSuperTimestream(self, f):
+        """
+        From the input SuperTimestream, create a new (empty) SuperTimestream
+        with the same channels and channel names
+        """
+        dtype = np.int32 if (f.data.dtype != np.int64) else np.int64
+
+        sts = so3g.G3SuperTimestream()
+        sts.names = f.names
+        sts.times = core.G3VectorTime([])
+        sts.data = np.empty( (len(f.names), 0) , dtype=dtype)
+
+        return sts
+
+    def add(self, f):
+        self.times.extend(f['data'].times)
+
+        if self.signal is None:
+            self.signal = self.createNewSuperTimestream(f['data'])
+        self.signal.times.extend(f['data'].times)
+        self.signal.data = np.hstack((self.signal.data, f['data'].data)).astype(np.int32)
+
+        if 'tes_biases' in f.keys():
+            if self.bias is None:
+                self.bias = self.createNewSuperTimestream(f['tes_biases'])
+            self.bias.times.extend(f['tes_biases'].times)
+            self.bias.data = np.hstack((self.bias.data, f['tes_biases'].data)).astype(np.int32)
+
+        if 'primary' in f.keys():
+            if self.primary is None:
+                self.primary = self.createNewSuperTimestream(f['primary'])
+            self.primary.times.extend(f['primary'].times)
+            self.primary.data = np.hstack((self.primary.data, f['primary'].data)).astype(np.int64)
 
     def rebundle(self, flush_time):
-        if len(self.times) == 0:
-            return None
+        """
+        Output the buffered data before flush_time, keep the rest in buffer
+        """
+        def rebundle_sts(sts, flush_time):
+            if sts is None:
+                return None, sts
 
-        output = so3g.G3SuperTimestream()
-        output.times = core.G3VectorTime([t for t in self.times if t < flush_time])
-        output.names = [k for k in self.data.keys()]
-        output.data = np.array([np.array(v[:len(output.times)]) for v in self.data.values()], dtype=np.int32)
+            # Output SuperTimestream (to be written to frame)
+            stsout = so3g.G3SuperTimestream()
+            stsout.names = sts.names
+            stsout.times = core.G3VectorTime([t for t in sts.times if t < flush_time])
+            stsout.data = sts.data[:,:len(stsout.times)]
+            # New buffer SuperTimestream
+            newsts = so3g.G3SuperTimestream()
+            newsts.names = sts.names
+            newsts.times = core.G3VectorTime([t for t in sts.times if t >= flush_time])
+            newsts.data = sts.data[:,len(stsout.times):]
+
+            return stsout, newsts
+
+        signalout, self.signal = rebundle_sts(self.signal, flush_time)
+        biasout, self.bias = rebundle_sts(self.bias, flush_time)
+        primout, self.primary = rebundle_sts(self.primary, flush_time)
+
         self.times = [t for t in self.times if t >= flush_time]
-        self.data = {c: self.data[c][len(output.times):] for c in self.data.keys()}
 
-        return output
+        return signalout, biasout, primout
 
 class FrameProcessor(object):
     def __init__(self):
@@ -212,7 +257,7 @@ class FrameProcessor(object):
             flush_time = self.flush_time
         output = []
 
-        smurf_data = self.smbundle.rebundle(flush_time)
+        smurf_data, smurf_bias, smurf_primary = self.smbundle.rebundle(flush_time)
 
         # Create SuperTimestream containing SMuRF data
         sts = so3g.G3SuperTimestream()
@@ -223,6 +268,10 @@ class FrameProcessor(object):
         # Write signal data to frame
         f = core.G3Frame(core.G3FrameType.Scan)
         f['signal'] = sts
+        if smurf_bias is not None:
+            f['tes_bias'] = smurf_bias
+        if smurf_primary is not None:
+            f['primary'] = smurf_primary
 
         try:
             hk_data = self.hkbundle.rebundle(flush_time)
@@ -287,7 +336,7 @@ class FrameProcessor(object):
 
             output = []
 
-            self.smbundle.add(f['data'])
+            self.smbundle.add(f)
 
             # If the existing data exceeds the specified maximum length
             while len(self.smbundle.times) >= self.maxlength:
