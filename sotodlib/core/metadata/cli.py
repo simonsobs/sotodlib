@@ -20,6 +20,7 @@ import os
 from .. import Context
 from . import ObsDb
 from . import manifest
+from . import obsfiledb
 
 
 CLI_NAME = 'so-metadata'
@@ -57,6 +58,9 @@ def get_parser():
 
     sp = sps.add_parser('metadata', description="Inspect (or modify) a ManifestDb.")
     manifest.get_parser(sp)
+
+    sp = sps.add_parser('obsfiledb')
+    obsfiledb.get_parser(sp)
 
     return parser
 
@@ -130,6 +134,9 @@ def main():
 
     elif args._subcmd == 'metadata':
         manifest.main(args)
+
+    elif args._mode == 'obsfiledb':
+        obsfiledb.main(args, parser=parser)
 
     else:
         parser.error('Not implemented: {args._subcmd}')
