@@ -139,13 +139,15 @@ class FilterTest(unittest.TestCase):
                 tod_ops.filters.iir_filter(iir_params=iir_params),
                 tod_ops.filters.iir_filter(
                     a=iir_params.a, b=iir_params.b, fscale=iir_params.fscale),
+                tod_ops.filters.identity_filter(),
         ]:
             f = np.fft.fftfreq(tod.samps.count) * f0
             y = filt(f, tod)
             sig_filt = tod_ops.fourier_filter(tod, filt)
             sigma1 = sig_filt.std(axis=1)
             print(f'Filter takes sigma from {sigma0} to {sigma1}')
-            self.assertTrue(np.all(sigma1 < sigma0))
+            if not isinstance(filt, tod_ops.filters.identity_filter):
+                self.assertTrue(np.all(sigma1 < sigma0))
 
         # Check 1d
         sig1f = tod_ops.fourier_filter(tod, filt, signal_name='sig1d',
