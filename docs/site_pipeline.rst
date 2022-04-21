@@ -135,19 +135,31 @@ Here's an annotated example:
 Inputs
 ``````
 
-The formal inputs should all be made available through the Context.
-They are:
+The Context should cause the TOD to be loaded with all supporting
+metadata loaded into the AxisManager.  Here are key members that will
+be processed:
 
-- Obs Book
-- HWP Angle
-- Chanmap
-- Basecal - store in 'cal_base'
-- RelCal model - store in 'cal_flat'
-- Timeconst model
-- Focal plane
-- Glitch flags - store in 'glitch_flags'
-- Noise cuts - store in 'noise_cuts'
-- HWP Spinsync
+- Deconvolution step:
+
+  - ``'timeconst'``
+  - ``'iir_params'``
+
+- Calibration:
+
+  - Whatever is listed in preprocessing.cal_keys
+
+- Pointing correction:
+
+  - ``'boresight_offset'``
+
+- Demodulation and downsampling:
+
+  - not implemented
+
+- Planet mapmaking:
+
+  - ``'source_flags'``
+  - ``'glitch_flags'`` - optional
 
 
 Support
