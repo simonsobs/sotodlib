@@ -66,6 +66,7 @@ Here's an annotated example:
 
   # Mask parameters
   mask_params:
+    mask_res: [2, 'arcmin']
     default: {'xyr': [0., 0., 0.1]}
 
 

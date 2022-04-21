@@ -74,13 +74,16 @@ def main(args=None):
 
         # Load / compute mask parameters.
         mask_params = config['mask_params']['default']
+        mask_res = site_pipeline.util.parse_angle(
+            site_pipeline.util.lookup_conditional(config['mask_params'], 'res',
+                                                  default=[1, 'arcmin']))
 
         sources = coords.planets.get_nearby_sources(tod)
         flags = None
         for source_name, eph_object in sources:
             logger.info(f'Flagging for {source_name} ...')
             _flags = coords.planets.compute_source_flags(
-                tod, center_on=source_name, res=0.01*coords.DEG,
+                tod, center_on=source_name, res=mask_res*coords.DEG,
                 mask=mask_params)
             weight = np.mean(_flags.get_stats()['samples']) / _flags.shape[1]
             logger.info(f' ... weight for {source_name} was {weight*100:.2}%.')
@@ -114,7 +117,7 @@ def main(args=None):
                    'dataset': dest_dataset}
         if group_by != 'detset':
             db_data['dets:'+group_by] = group
-        db.add_entry(db_data, dest_file)
+        db.add_entry(db_data, dest_file, replace=True)
 
     # Return something?
     return tod, aman
