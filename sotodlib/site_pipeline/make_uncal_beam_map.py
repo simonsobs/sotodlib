@@ -88,6 +88,17 @@ def _adjust_focal_plane(tod, focal_plane=None, boresight_offset=None):
     fp.eta[:] = eta
     fp.gamma[:] = gamma
 
+def _promote_array_data(ctx, tod):
+    # Wrap detdb properties into tod.array_data.  This makes SO sim
+    # TOD AxisManagers look like ACT TOD AxisManagers ... we'll get an
+    # SO solution in place.
+    props = ctx.detdb.props()
+    array_data = core.AxisManager(
+        core.LabelAxis('dets', props['name']))
+    for k in props.keys:
+        array_data.wrap(k, props[k], [(0, 'dets')])
+    tod.wrap('array_data', array_data)
+    return array_data
 
 def main(args=None):
     """Entry point."""
@@ -146,6 +157,10 @@ def main(args=None):
             dets = tod.dets.vals[::10]
             tod.restrict('dets', dets)
 
+        # Boost detdb into array_data.
+        if 'array_data' not in tod:
+            _promote_array_data(ctx, tod)
+
         # Modify samps axis for FFTs.
         tod_ops.fft_trim(tod)
 
@@ -173,8 +188,13 @@ def main(args=None):
         # Deconvolve readout filter and detector time constants.
         tod_ops.fft_trim(tod)
         tod_ops.detrend_tod(tod)
-        filt = (tod_ops.filters.iir_filter(invert=True)
-                * tod_ops.filters.timeconst_filter(invert=True))
+
+        filt = tod_ops.filters.identity_filter()
+        if 'iir_params' in tod:
+            filt *= tod_ops.filters.iir_filter(invert=True)
+        if 'timeconst' in tod:
+            filt *= tod_ops.filters.timeconst_filter(invert=True)
+
         tod.signal[:] = tod_ops.fourier_filter(tod, filt, resize=None, detrend=None)
 
         # Demodulation & downsampling.
@@ -216,10 +236,13 @@ def main(args=None):
 
         # Make the maps.
         logger.info(f'Calling mapmaker.')
+        cuts = tod.get('glitch_flags', None)
         output = coords.planets.make_map(tod, center_on=source_name,
                                          res=res_deg*coords.DEG,
                                          data_splits=band_splits,
-                                         info=map_info)
+                                         cuts=cuts,
+                                         info=map_info,
+                                         thread_algo='domdir')
 
         # Save and plot
         ocfg = config['output']
@@ -249,7 +272,7 @@ def main(args=None):
 
             # Plot
             plot_filename = os.path.join(
-                dest_dir, ppattern.format(map_code=code, split=key, **map_info))
+                dest_dir, ppattern.format(map_code='solved', split=key, **map_info))
             _plot_map(bundle, plot_filename)
 
 
