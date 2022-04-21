@@ -26,7 +26,7 @@ def fourier_filter(tod, filt_function,
         
         filt_function: function( freqs, tod ) function that takes a set of 
             frequencies and the axis manager and returns the filter in 
-            fouier space
+            fourier space
         
         detrend: Method of detrending to be done before ffting. Can
             be 'linear', 'mean', or None.
@@ -82,8 +82,6 @@ def fourier_filter(tod, filt_function,
     else:
         raise ValueError('resize must be "zero_pad", "trim", or None')
 
-    a, b, t_1, t_2 = fft_ops.build_rfft_object(n_det, n, 'BOTH')
-
     if detrend is not None:
         signal = detrend_data(tod, detrend, axis_name=axis_name,
                              signal_name=signal_name)
@@ -91,31 +89,39 @@ def fourier_filter(tod, filt_function,
         signal = tod[signal_name]
     signal = np.atleast_2d(signal)
 
-    if other_idx is not None and other_idx != 0:
-        ## so that code can be written always along axis 1
-        signal = signal.transpose()
+    if isinstance(filt_function, identity_filter):
+        logger.info('fourier_filter: filt_function is identity; skipping FFT.')
+        signal = signal.copy()
 
-    # This copy is valid for all modes of "resize"
-    a[:,:min(n, axis.count)] = signal[:,:min(n, axis.count)]
-    a[:,min(n, axis.count):] = 0
-    
-    ## FFT Signal
-    t_1();
-    
-    ## Get Filter
-    freqs = np.fft.rfftfreq(n, delta_t)
-    filt_function.apply(freqs, tod, b, **kwargs)
+    else:
+        a, b, t_1, t_2 = fft_ops.build_rfft_object(n_det, n, 'BOTH')
 
-    ## FFT Back
-    t_2();
-    
-    # Un-pad?
-    signal = a[:,:min(n, axis.count)]
-        
+        if other_idx is not None and other_idx != 0:
+            ## so that code can be written always along axis 1
+            signal = signal.transpose()
+
+        # This copy is valid for all modes of "resize"
+        a[:,:min(n, axis.count)] = signal[:,:min(n, axis.count)]
+        a[:,min(n, axis.count):] = 0
+
+        ## FFT Signal
+        t_1()
+
+        ## Get Filter
+        freqs = np.fft.rfftfreq(n, delta_t)
+        filt_function.apply(freqs, tod, b, **kwargs)
+
+        ## FFT Back
+        t_2()
+
+        # Un-pad?
+        signal = a[:,:min(n, axis.count)]
+
+        if other_idx is not None and other_idx != 0:
+            return signal.transpose()
+
     if other_idx is None:
         return signal[0]
-    if other_idx != 0:
-        return signal.transpose()
     
     return signal
 
@@ -167,6 +173,10 @@ class _chainable:
     def _preference(f):
         return getattr(f, 'preference', 'compose')
     def __mul__(self, other):
+        if isinstance(other, identity_filter):
+            return self
+        if isinstance(self, identity_filter):
+            return other
         return FilterChain([self, other])
 
 class FilterFunc(_chainable):
@@ -272,6 +282,18 @@ fft_apply_filter = FilterApplyFunc.deco
 
 # Filtering Functions
 #################
+@fft_filter
+def identity_filter(freqs, tod, invert=False):
+    """Identity filter (gain=1 at all frequencies).
+
+    This filter has some special handling -- the FFT will not take
+    place if your only intention is to apply an identify filter; also
+    identity_filter() * other_filter() will simply return the
+    other_filter().
+
+    """
+    return np.ones(len(freqs))
+
 @fft_filter
 def low_pass_butter4(freqs, tod, fc):
     """4th-order low-pass filter with f3db at fc (Hz).
