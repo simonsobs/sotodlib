@@ -392,7 +392,7 @@ class P:
         if cuts is None:
             cuts = self.cuts
         if self.threads is False:
-            return proj, cuts
+            return proj, ~cuts
         if self.threads is None:
             self.threads = 'simple'
         if isinstance(self.threads, str):
