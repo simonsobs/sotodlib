@@ -630,10 +630,12 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
             logger.info(f'Mapping split "{group_label}"')
             if base_cuts is not None:
                 group_cuts = group_cuts + base_cuts
-            w = P.to_weights(cuts=group_cuts, det_weights=det_weights)
-            m = P.remove_weights(
-                tod=tod, signal=signal, weights_map=w, cuts=group_cuts,
-                det_weights=det_weights, eigentol=eigentol)
+            with MmTimer('getting weights'):
+                w = P.to_weights(cuts=group_cuts, det_weights=det_weights)
+            with MmTimer('getting map and applying inverse weights'):
+                m = P.remove_weights(
+                    tod=tod, signal=signal, weights_map=w, cuts=group_cuts,
+                    det_weights=det_weights, eigentol=eigentol)
             output['splits'][group_label] = {
                 'binned': None,
                 'weights': w.astype('float32'),
