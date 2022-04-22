@@ -3,17 +3,35 @@
 import os, os.path as op
 import argparse
 from bookbinder import Bookbinder
-from spt3g import core
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--g3', dest='g3file', nargs='+', type=str, required=True,
-                        help='full path to G3 file')
-    parser.add_argument('--hk', dest='hkfile', nargs='+', type=str, required=True,
-                        help='full path to HK file')
-    parser.add_argument('--odir', default="out", help='output directory')
+    parser.add_argument('--smurf', dest='smurffiles', nargs='+', type=str, required=True,
+                        help='full path to SMuRF files')
+    parser.add_argument('--hk', dest='hkfiles', nargs='+', type=str, required=True,
+                        help='full path to HK files')
+    parser.add_argument('--prefix', default="obs", help='prefix for output Book')
+    parser.add_argument('--timestamp', dest='timestamp', type=int,
+                        help='timestamp of the start of the observation')
+    parser.add_argument('--tel-tube', dest='teltube', type=str,
+                        help='ID of telescope and optics tube')
+    parser.add_argument('--slot-flags', dest='slotflags', type=str,
+                        help='1s and 0s indicating eligible stream_ids included in Book')
     args = parser.parse_args()
-    if not op.exists(args.odir): os.makedirs(args.odir)
 
-    B = Bookbinder(args.hkfile, args.g3file, [op.join(args.odir, f'out{i:03d}.g3') for i in range(len(args.g3file))])
+    book_id = args.prefix
+    if args.timestamp is not None:
+        book_id += '_' + str(args.timestamp)
+    if args.teltube is not None:
+        book_id += '_' + args.teltube
+    if args.slotflags is not None:
+        book_id += '_' + args.slotflags
+    if not op.exists(book_id):
+        os.makedirs(book_id)
+
+    B = Bookbinder(args.hkfiles, args.smurffiles,
+                   out_files = [op.join(book_id, f'D_w01_{i:03d}.g3') for i in range(len(args.smurffiles))],
+                   book_id = book_id,
+                   session_id = args.timestamp,
+                   stream_id = args.slotflags)
     B()
