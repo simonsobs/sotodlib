@@ -11,7 +11,7 @@ python3 -m pip install --upgrade pip
 
 python3 -m pip install --upgrade scipy
 python3 -m pip install nose toml mpi4py toast-cmb quaternionarray pyfftw \
-    skyfield
+    skyfield scikit-image
 
 # Install S.O. dependencies
 python3 -m pip install pixell
