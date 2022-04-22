@@ -2,7 +2,7 @@ from sotodlib import core
 import os
 
 REGISTRY = {
-    '_default': 'ResultSetHdf'
+    '_default': 'DefaultHdf'
 }
 
 
