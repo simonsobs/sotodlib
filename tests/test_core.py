@@ -7,6 +7,11 @@ import numpy as np
 from sotodlib import core
 import so3g
 
+## "temporary" fix to deal with scipy>1.8 changing the sparse setup
+try:
+    from scipy.sparse import csr_array
+except ImportError:
+    from scipy.sparse import csr_matrix as csr_array
 
 class TestAxisManager(unittest.TestCase):
 
@@ -132,6 +137,57 @@ class TestAxisManager(unittest.TestCase):
         aman_copy = aman.copy()
         self.assertEqual(aman['x'], aman_copy['x'])
 
+    def test_170_concat(self):
+        # AxisManagers with shape (2, 100) and (3, 100)...
+        detsA = ['det0', 'det1']
+        detsB = ['det2', 'det3', 'det4']
+        nsamps = 100
+        amanA = core.AxisManager(core.LabelAxis('dets', detsA),
+                                 core.OffsetAxis('samps', nsamps))
+        amanB = core.AxisManager(core.LabelAxis('dets', detsB),
+                                 core.OffsetAxis('samps', nsamps))
+
+        # Empty AxisManagers ...
+        aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
+        self.assertEqual(aman.dets.count, len(detsA) + len(detsB))
+
+        # Concat arrays?
+        amanA.wrap_new('signal', shape=('dets', 'samps'))
+        amanB.wrap_new('signal', shape=('dets', 'samps'))
+        aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
+        self.assertEqual(aman.signal.shape[0], len(detsA) + len(detsB))
+
+        # Handling of array that does not share the axis?
+        amanA.wrap_new('azimuth', shape=('samps',))[:] = 1.
+        amanB.wrap_new('azimuth', shape=('samps',))[:] = 2.
+
+        # ... other_fields="fail"
+        with self.assertRaises(ValueError):
+            aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
+
+        # ... other_fields="drop"
+        aman = core.AxisManager.concatenate([amanA, amanB], axis='dets',
+                                            other_fields='drop')
+        self.assertNotIn('azimuth', aman)
+
+        # ... other_fields="first"
+        aman = core.AxisManager.concatenate([amanA, amanB], axis='dets',
+                                            other_fields='first')
+        self.assertIn('azimuth', aman)
+        self.assertSequenceEqual(aman._assignments['azimuth'], ['samps'])
+        self.assertEqual(aman.azimuth[0], 1.)
+
+        # Handling of child AxisManagers
+        fpA = core.AxisManager(amanA.dets.copy())
+        fpB = core.AxisManager(amanB.dets.copy())
+        fpA.wrap_new('x', shape=('dets',))
+        fpB.wrap_new('x', shape=('dets',))
+        amanA.wrap('fp', fpA)
+        amanB.wrap('fp', fpB)
+        aman = core.AxisManager.concatenate([amanA, amanB], axis='dets',
+                                            other_fields='drop')
+        self.assertSequenceEqual(aman.fp.shape, (aman.dets.count, ))
+
 
     # Multi-dimensional restrictions.
 
@@ -252,6 +308,9 @@ class TestAxisManager(unittest.TestCase):
         aman.wrap('b', np.float32(12.))
         aman.wrap('c', np.str_('twelve'))
         aman.wrap('d', np.bool_(False))
+
+        aman.wrap('sparse', csr_array( ((8,3), ([0,1], [20,54])), 
+                                      shape=(aman.dets.count, aman.samps.count)))
 
         # Make sure the saving / clobbering / readback logic works
         # equally for simple group name, root group, None->root group.

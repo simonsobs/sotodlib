@@ -8,6 +8,7 @@
 import unittest
 import numpy as np
 import pylab as pl
+import scipy.signal
 
 from numpy.testing import assert_array_equal, assert_allclose
 
@@ -120,6 +121,14 @@ class FilterTest(unittest.TestCase):
         sigma0 = tod.signal.std(axis=1)
         f0 = SAMPLE_FREQ_HZ
         fc = f0 / 4
+
+        # A simple IIR filter
+        b, a = scipy.signal.butter(4, fc, fs=f0)
+        iir_params = core.AxisManager()
+        iir_params.wrap('a', a)
+        iir_params.wrap('b', b)
+        iir_params.wrap('fscale', 1)
+
         for filt in [
                 tod_ops.filters.high_pass_butter4(fc),
                 tod_ops.filters.high_pass_sine2(fc),
@@ -127,13 +136,16 @@ class FilterTest(unittest.TestCase):
                 tod_ops.filters.low_pass_sine2(fc),
                 tod_ops.filters.gaussian_filter(fc, f_sigma=f0 / 10),
                 tod_ops.filters.gaussian_filter(0, f_sigma=f0 / 10),
+                tod_ops.filters.iir_filter(iir_params=iir_params),
+                tod_ops.filters.iir_filter(
+                    a=iir_params.a, b=iir_params.b, fscale=iir_params.fscale),
         ]:
             f = np.fft.fftfreq(tod.samps.count) * f0
             y = filt(f, tod)
             sig_filt = tod_ops.fourier_filter(tod, filt)
             sigma1 = sig_filt.std(axis=1)
-            self.assertTrue(np.all(sigma1 < sigma0))
             print(f'Filter takes sigma from {sigma0} to {sigma1}')
+            self.assertTrue(np.all(sigma1 < sigma0))
 
         # Check 1d
         sig1f = tod_ops.fourier_filter(tod, filt, signal_name='sig1d',
