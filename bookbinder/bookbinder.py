@@ -351,12 +351,18 @@ class Bookbinder(object):
     """
     Bookbinder
     """
-    def __init__(self, hk_files, smurf_files, out_files, verbose=True):
+    def __init__(self, hk_files, smurf_files, out_files, book_id=None, session_id=None, stream_id=None, verbose=True):
         self._hk_files = hk_files
         self._smurf_files = smurf_files
         self._out_files = out_files
+        self._ancil_files = ['/'.join(n.split('/')[:-1] + [f'A_ancil_{i:03d}.g3']) for i, n in enumerate(self._out_files)]
+        self._book_id = book_id
+        self._session_id = session_id
+        self._stream_id = stream_id
         self._verbose = verbose
         self.metadata = []
+        self.frame_num = 0
+        self.sample_num = 0
 
         self.frameproc = FrameProcessor()
 
@@ -367,6 +373,24 @@ class Bookbinder(object):
         ofile = self._out_files.pop(0)
         if self._verbose: print(f"Writing {ofile}")
         self.writer = core.G3Writer(ofile)
+
+        afile = self._ancil_files.pop(0)
+        self.ancil_writer = core.G3Writer(afile)
+
+    def add_misc_data(self, f):
+        oframe = core.G3Frame(f.type)
+        oframe['book_id'] = self._book_id
+        for k in f.keys():
+            if k not in ['frame_num', 'session_id', 'stream_id', 'sostream_id', 'time']:
+                oframe[k] = f[k]
+        oframe['frame_num'] = core.G3Int(self.frame_num)
+        if self._session_id is not None:
+            oframe['session_id'] = core.G3Int(self._session_id)
+        if self._stream_id is not None:
+            oframe['stream_id'] = core.G3String(self._stream_id)
+        if oframe.type == core.G3FrameType.Scan:
+            oframe['sample_range'] = core.G3VectorInt([self.sample_num, self.sample_num+len(f['signal'].times)-1])
+        return oframe
 
     def write_frames(self, frames_list):
         """
@@ -379,7 +403,19 @@ class Bookbinder(object):
         if self._verbose: print(f"=> Writing {len(frames_list)} frames")
 
         for f in frames_list:
-            self.writer.Process(f)
+            oframe = self.add_misc_data(f)
+            self.writer.Process(oframe)
+            self.write_ancil_frames(oframe)
+            self.frame_num += 1
+            self.sample_num += len(f['signal'].times) if oframe.type == core.G3FrameType.Scan else 0
+
+    def write_ancil_frames(self, f):
+        aframe = core.G3Frame()
+        if 'ancil' in f.keys():
+            aframe['ancil'] = f['ancil']
+        if 'sample_range' in f.keys():
+            aframe['sample_range'] = f['sample_range']
+        self.ancil_writer(aframe)
 
     def find_frame_splits(self):
         """
@@ -493,6 +529,10 @@ class Bookbinder(object):
                     ofile = self._out_files.pop(0)
                     if self._verbose: print(f"Writing {ofile}")
                     self.writer = core.G3Writer(ofile)
+                    afile = self._ancil_files.pop(0)
+                    self.ancil_writer = core.G3Writer(afile)
+                    self.frame_num = 0
+                    self.sample_num = 0
                 else:
                     break
 
@@ -527,6 +567,10 @@ class Bookbinder(object):
                         ofile = self._out_files.pop(0)
                         if self._verbose: print(f"Writing {ofile}")
                         self.writer = core.G3Writer(ofile)
+                        afile = self._ancil_files.pop(0)
+                        self.ancil_writer = core.G3Writer(afile)
+                        self.frame_num = 0
+                        self.sample_num = 0
                     else:
                         break
 
