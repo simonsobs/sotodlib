@@ -16,6 +16,7 @@ http://docs.h5py.org/en/stable/strings.html for a little more info.
 import numpy as np
 import h5py
 
+from sotodlib.core import AxisManager
 from sotodlib.core.metadata import ResultSet, SuperLoader, LoaderInterface
 import warnings
 
@@ -82,6 +83,29 @@ def read_dataset(fin, dataset):
     for row in data:
         rs.rows.append(tuple(row))
     return rs
+
+
+class DefaultHdfLoader(LoaderInterface):
+    """Determine the type of H5 saved data and pass off the loading to the
+    correct class.
+    """
+    def from_loadspec(self, load_params):
+        with h5py.File(load_params['filename'], mode='r') as fin:
+            # look for AxisManager save signature
+            if '_axisman' in fin[ load_params['dataset'] ].attrs.keys():
+                newload = AxisManagerHdfLoader()
+                return newload.from_loadspec(load_params)
+            else:
+                newload = ResultSetHdfLoader()
+                return newload.from_loadspec(load_params)
+
+class AxisManagerHdfLoader(LoaderInterface):
+    def from_loadspec(self, load_params):
+        """ Generate an AxisManager from the load_params dictionary.
+        """
+        aman = AxisManager.load(load_params['filename'],
+                                load_params['dataset'])
+        return aman
 
 
 class ResultSetHdfLoader(LoaderInterface):
@@ -248,6 +272,8 @@ class _nullcontext:
         pass
 
 
+SuperLoader.register_metadata('DefaultHdf', DefaultHdfLoader)
+SuperLoader.register_metadata('AxisManagerHdf', AxisManagerHdfLoader)
 SuperLoader.register_metadata('ResultSetHdf', ResultSetHdfLoader)
 
 # The old name... remove some day.
