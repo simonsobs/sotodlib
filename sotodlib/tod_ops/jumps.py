@@ -447,6 +447,27 @@ def find_jumps(
 
 
 def jumpfix(x, jumps, sizes, **kwargs):
+    """
+    Fix jumps.
+    Currently does the extremely naive technique of just subtracting the provided size.
+    Jumps of size ~2*n*pi will be assumed to be tracking jumps of size 2*n*pi.
+
+    Arguments:
+
+        x: Signal to fix jumps on.
+
+        jumps: Array of jump locations.
+
+        sizes: Size of each jump.
+
+        **kwargs: Arguments to pass on to np.isclose.
+
+    Returns:
+
+        _x: Signal with jumps fixed.
+            Because jump positions may be off by a few samples, there are often
+            glitches at the jump positions.
+    """
     _x = x.copy()
     for j, s in zip(jumps, sizes):
         # Check for tracking jump
@@ -457,9 +478,45 @@ def jumpfix(x, jumps, sizes, **kwargs):
     return _x
 
 
-def jumps_fix(aman, signal=None, jumps=None, sizes=None):
+def jumps_fix(tod, signal=None, jumps=None, sizes=None):
+    """
+    Interface for jump fixing.
+    Currently only supports very naive jump fixing but more to come.
+
+    Arguments:
+
+        tod: Axis manager.
+
+        signal: Signal to jumpfix on. If None than tod.signal is used.
+
+        jumps: Locations of jumps. Can be the following types:
+
+                * ndarray: 1d or 2d array of jump locations.
+                           If 1d signal must also be 1d.
+                           If 2d signal must also be 2d and ordered the same.
+                * Ranges: Ranges of jump location, currently doesn't assume any
+                          buffering and takes the first index of each range to be
+                          a jump. Signal must be 1d.
+                * list: List of ndarrays or Ranges which will be treated as above.
+                        Signal must be 2d and ordered the same.
+                        If list contains ndarrays they must be 1d.
+                * RangesMatrix: Each range in RangesMatrix is treated as above.
+                                Signal must be 2d and ordered the same.
+
+        sizes: Jump sizes.
+               If signal is 1d this should be an iterable where each element is a size.
+               If signal is 2d this should be an iterable where each element is an
+               iterable containing sizes for the corresponding row in signal.
+               Sizes should have the same ordering as jumps.
+
+        Returns:
+
+            fixed_signal: Signal with jump fixing applied.
+                          Note that because jump positions may be off by a few samples,
+                          there are often glitches at the jump positions in this output.
+    """
     if signal is None:
-        signal = aman.signal
+        signal = tod.signal
 
     ndim = len(signal.shape)
     if ndim not in (1, 2):
