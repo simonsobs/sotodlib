@@ -1,7 +1,7 @@
 import numpy as np
 import scipy.signal as sig
 import scipy.ndimage as simg
-from so3g.proj import RangesMatrix
+from so3g.proj import Ranges, RangesMatrix
 from skimage.restoration import denoise_tv_chambolle
 
 
@@ -444,3 +444,56 @@ def find_jumps(
     else:
         raise ValueError("Jumpfinder only works on 1D or 2D data")
     return RangesMatrix.from_mask(jump_mask).buffer(buff_size)
+
+
+def jumpfix(x, jumps, sizes):
+    _x = x.copy()
+    for j, s in zip(jumps, sizes):
+        _x[j:] -= s
+    return _x
+
+
+def jumps_fix(aman, signal=None, jumps=None, sizes=None):
+    if signal is None:
+        signal = aman.signal
+
+    ndim = len(signal.shape)
+    if ndim not in (1, 2):
+        raise ValueError("Jumpfixer only works on 1D or 2D data")
+
+    if isinstance(jumps, np.ndarray):
+        jump_locs = jumps
+        jdim = jump_locs.ndim
+    elif isinstance(jumps, Ranges):
+        jdim = 1
+        jump_locs = jumps.ranges().flatten()[::2]
+    elif isinstance(jumps, list):
+        jdim = 2
+        jump_locs = []
+        for i, _jumps in enumerate(jumps):
+            if isinstance(_jumps, np.ndarray):
+                jump_locs.append(_jumps)
+            elif isinstance(_jumps, Ranges):
+                jump_locs.append(_jumps.ranges().flatten()[::2])
+            else:
+                raise ValueError("Jumps provided in invalid format")
+    elif isinstance(jumps, RangesMatrix):
+        jdim = 2
+        jump_locs = []
+        for _jumps in jumps.ranges:
+            jump_locs.append(_jumps.ranges().flatten()[::2])
+    else:
+        raise ValueError("Jumps provided in invalid format")
+
+    if jdim != ndim:
+        raise ValueError("Jumps and signal don't have the same number of dimensions")
+
+    if ndim == 1:
+        if jump_locs.shape != sizes.shape:
+            raise ValueError("Number of sizes does not match number of jumps")
+        return jumpfix(signal, jump_locs, sizes)
+
+    signal_fixed = np.zeros(signal.shape)
+    for i, _jump_locs in enumerate(jump_locs):
+        signal_fixed[i] = jumpfix(signal[i], _jump_locs, sizes[i])
+    return signal_fixed
