@@ -446,9 +446,13 @@ def find_jumps(
     return RangesMatrix.from_mask(jump_mask).buffer(buff_size)
 
 
-def jumpfix(x, jumps, sizes):
+def jumpfix(x, jumps, sizes, **kwargs):
     _x = x.copy()
     for j, s in zip(jumps, sizes):
+        # Check for tracking jump
+        # TODO: Figure out correct atol and rtol for this
+        if np.isclose(s / (2 * np.pi), np.round(s / (2 * np.pi)), **kwargs):
+            s = 2 * np.pi * np.round(s / (2 * np.pi))
         _x[j:] -= s
     return _x
 
