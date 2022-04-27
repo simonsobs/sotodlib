@@ -556,5 +556,7 @@ def jumps_fix(tod, signal=None, jumps=None, sizes=None):
 
     signal_fixed = np.zeros(signal.shape)
     for i, _jump_locs in enumerate(jump_locs):
+        if _jump_locs.shape != sizes[i].shape:
+            raise ValueError("Number of sizes does not match number of jumps")
         signal_fixed[i] = jumpfix(signal[i], _jump_locs, sizes[i])
     return signal_fixed
