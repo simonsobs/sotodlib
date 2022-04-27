@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.signal as sig
 import scipy.ndimage as simg
+import scipy.optimize as sopt
 from so3g.proj import Ranges, RangesMatrix
 from skimage.restoration import denoise_tv_chambolle
 
@@ -444,6 +445,38 @@ def find_jumps(
     else:
         raise ValueError("Jumpfinder only works on 1D or 2D data")
     return RangesMatrix.from_mask(jump_mask).buffer(buff_size)
+
+
+def jumpsize_fit(x, jump, size):
+    """
+    Try to fit for a more precise jump size.
+    The parameter that is minimized is the size of the peak in the matched filter.
+
+    Arguments:
+
+        x: Signal to fit for jump on.
+           Note that currently this function expects a signal with a single jump,
+           so the input should be sliced accordingly.
+
+        jump: Jump location.
+
+        size: Size of jump, used as initial value in fit.
+
+    Returns:
+
+        fit_size: The fit size of the jump.
+    """
+    # TODO: fit for optimal jump location?
+    # TODO: simultaneous fit of multiple jumps?
+    def min_func(size, x, pos):
+        _x = x.copy()
+        _x[pos:] -= size
+        _x -= _x.mean()
+        _x = np.cumsum(_x)
+        return _x.max() - _x.min()
+
+    res = sopt.minimize(min_func, size, (x, jump))
+    return res.x
 
 
 def jumpfix(x, jumps, sizes, **kwargs):
