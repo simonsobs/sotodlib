@@ -447,7 +447,7 @@ def find_jumps(
     return RangesMatrix.from_mask(jump_mask).buffer(buff_size)
 
 
-def jumpsize_fit(x, jumps, sizes, win_size=10):
+def fit_jump_sizes(x, jumps, sizes, win_size=10):
     """
     Try to fit for a more precise jump size.
     The parameter that is minimized is the size of the peak in the matched filter.
@@ -524,7 +524,7 @@ def jumpfix(x, jumps, sizes, win_size=10, fit=True, **kwargs):
         sizes = get_jump_sizes(_x, jumps, win_size=win_size)
 
     if fit:
-        sizes = jumpsize_fit(_x, jumps, sizes)
+        sizes = fit_jump_sizes(_x, jumps, sizes)
 
     for j, s in zip(jumps, sizes):
         # Check for tracking jump
