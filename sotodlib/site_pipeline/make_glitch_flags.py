@@ -81,8 +81,8 @@ def main(args=None):
         logger.info(f'Total mask weight is {weight*100:.2}%.')
 
         # Wrap result into AxisManager for HDF5 off-load.
-        aman = core.AxisManager(tod.dets)
-        aman.wrap('glitch_flags', tod_flags, [(0, 'dets')])
+        aman = core.AxisManager(tod.dets, tod.samps)
+        aman.wrap('glitch_flags', tod_flags, [(0, 'dets'), (1,'samps')])
         aman.wrap('glitch_detections', csr, [(0, 'dets'), (1,'samps')])
 
         # Get file + dataset from policy.
