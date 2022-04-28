@@ -137,6 +137,57 @@ class TestAxisManager(unittest.TestCase):
         aman_copy = aman.copy()
         self.assertEqual(aman['x'], aman_copy['x'])
 
+    def test_170_concat(self):
+        # AxisManagers with shape (2, 100) and (3, 100)...
+        detsA = ['det0', 'det1']
+        detsB = ['det2', 'det3', 'det4']
+        nsamps = 100
+        amanA = core.AxisManager(core.LabelAxis('dets', detsA),
+                                 core.OffsetAxis('samps', nsamps))
+        amanB = core.AxisManager(core.LabelAxis('dets', detsB),
+                                 core.OffsetAxis('samps', nsamps))
+
+        # Empty AxisManagers ...
+        aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
+        self.assertEqual(aman.dets.count, len(detsA) + len(detsB))
+
+        # Concat arrays?
+        amanA.wrap_new('signal', shape=('dets', 'samps'))
+        amanB.wrap_new('signal', shape=('dets', 'samps'))
+        aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
+        self.assertEqual(aman.signal.shape[0], len(detsA) + len(detsB))
+
+        # Handling of array that does not share the axis?
+        amanA.wrap_new('azimuth', shape=('samps',))[:] = 1.
+        amanB.wrap_new('azimuth', shape=('samps',))[:] = 2.
+
+        # ... other_fields="fail"
+        with self.assertRaises(ValueError):
+            aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
+
+        # ... other_fields="drop"
+        aman = core.AxisManager.concatenate([amanA, amanB], axis='dets',
+                                            other_fields='drop')
+        self.assertNotIn('azimuth', aman)
+
+        # ... other_fields="first"
+        aman = core.AxisManager.concatenate([amanA, amanB], axis='dets',
+                                            other_fields='first')
+        self.assertIn('azimuth', aman)
+        self.assertSequenceEqual(aman._assignments['azimuth'], ['samps'])
+        self.assertEqual(aman.azimuth[0], 1.)
+
+        # Handling of child AxisManagers
+        fpA = core.AxisManager(amanA.dets.copy())
+        fpB = core.AxisManager(amanB.dets.copy())
+        fpA.wrap_new('x', shape=('dets',))
+        fpB.wrap_new('x', shape=('dets',))
+        amanA.wrap('fp', fpA)
+        amanB.wrap('fp', fpB)
+        aman = core.AxisManager.concatenate([amanA, amanB], axis='dets',
+                                            other_fields='drop')
+        self.assertSequenceEqual(aman.fp.shape, (aman.dets.count, ))
+
 
     # Multi-dimensional restrictions.
 
@@ -260,20 +311,29 @@ class TestAxisManager(unittest.TestCase):
 
         aman.wrap('sparse', csr_array( ((8,3), ([0,1], [20,54])), 
                                       shape=(aman.dets.count, aman.samps.count)))
-                  
-        with tempfile.TemporaryDirectory() as tempdir:
-            filename = os.path.join(tempdir, 'test.h5')
-            aman.save(filename, 'my_axisman')
-            aman2 = aman.load(filename, 'my_axisman')
-            shutil.copy(filename, 'debug.h5')
-        # This is not a very satisfying comparison ... support for ==
-        # should be required for all AxisManager members!
-        for k in aman._fields.keys():
-            self.assertEqual(aman[k].__class__, aman2[k].__class__)
-            if hasattr(aman[k], 'shape'):
-                self.assertEqual(aman[k].shape, aman2[k].shape)
-            else:
-                self.assertEqual(aman[k], aman2[k])  # scalar
+
+        # Make sure the saving / clobbering / readback logic works
+        # equally for simple group name, root group, None->root group.
+        for dataset in ['path/to/my_axisman', '/', None]:
+            with tempfile.TemporaryDirectory() as tempdir:
+                filename = os.path.join(tempdir, 'test.h5')
+                aman.save(filename, dataset)
+                # Overwrite
+                aman.save(filename, dataset, overwrite=True)
+                # Refuse to overwrite
+                with self.assertRaises(RuntimeError):
+                    aman.save(filename, dataset)
+                # Read back.
+                aman2 = aman.load(filename, dataset)
+            # Check what was read back.
+            # This is not a very satisfying comparison ... support for ==
+            # should be required for all AxisManager members!
+            for k in aman._fields.keys():
+                self.assertEqual(aman[k].__class__, aman2[k].__class__)
+                if hasattr(aman[k], 'shape'):
+                    self.assertEqual(aman[k].shape, aman2[k].shape)
+                else:
+                    self.assertEqual(aman[k], aman2[k])  # scalar
 
     def test_900_everything(self):
         tod = core.AxisManager(

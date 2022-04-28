@@ -438,7 +438,7 @@ class AxisManager:
         return self.restrict('dets', new_ax.vals)
 
     @staticmethod
-    def concatenate(items, axis=0):
+    def concatenate(items, axis=0, other_fields='fail'):
         """Concatenate multiple AxisManagers along the specified axis, which
         can be an integer (corresponding to the order in
         items[0]._axes) or the string name of the axis.
@@ -446,10 +446,19 @@ class AxisManager:
         This operation is difficult to sanity check so it's best to
         use it only in simple, controlled cases!  The first item is
         given significant privilege in defining what fields are
-        relevant.  Only fields actually referencing the target axis
-        will be propagated in this operation.
+        relevant.  Fields that appear in the first item, but do not
+        share the target axis, will be treated as follows depending on
+        the value of other_fields:
+
+        - If other_fields='fail', the function will fail with a ValueError.
+        - If other_fields='first', the values from the first element
+          of items will be copied into the output.
+        - If other_fields='drop', the fields will simply be ignored
+          (and the output will only contain fields that share the
+          target axis).
 
         """
+        assert other_fields in ['fail', 'first', 'drop']
         if not isinstance(axis, str):
             axis = list(items[0]._axes.keys())[axis]
         fields = []
@@ -486,13 +495,17 @@ class AxisManager:
             if len(keepers) == 0:
                 # Well we tried.
                 keepers = [items[0]]
-            # Call class-specific concatenation.
-            if isinstance(keepers[0], np.ndarray):
+            # Call class-specific concatenation if needed.
+            if isinstance(keepers[0], AxisManager):
+                new_data[name] = AxisManager.concatenate(
+                    keepers, axis=ax_dim, other_fields=other_fields)
+            elif isinstance(keepers[0], np.ndarray):
                 new_data[name] = np.concatenate(keepers, axis=ax_dim)
             else:
                 # The general compatible object should have a static
                 # method called concatenate.
                 new_data[name] = keepers[0].concatenate(keepers, axis=ax_dim)
+
         # Construct.
         new_axes = []
         for ax_name, ax_def in items[0]._axes.items():
@@ -502,7 +515,21 @@ class AxisManager:
         output = AxisManager(*new_axes)
         for k, v in items[0]._assignments.items():
             axis_map = [(i, n) for i, n in enumerate(v) if n is not None]
-            output.wrap(k, new_data[k], axis_map)
+            if isinstance(items[0][k], AxisManager):
+                axis_map = None  # wrap doesn't like this.
+            if k in new_data:
+                output.wrap(k, new_data[k], axis_map)
+            else:
+                if other_fields == 'fail':
+                    raise ValueError(
+                        f"The field '{k}' does not share axis '{axis}'; "
+                        f"pass other_fields='drop' or 'first' or else "
+                        f"remove this field from the targets.")
+                elif other_fields == 'first':
+                    # Just copy it.
+                    output.wrap(k, items[0][k].copy(), axis_map)
+                elif other_fields == 'drop':
+                    pass
         return output
 
     # Add and remove data while maintaining internal consistency.
@@ -777,7 +804,7 @@ class AxisManager:
             self._assignments.update(aman._assignments)
         return self
 
-    def save(self, dest, group=None):
+    def save(self, dest, group=None, overwrite=False):
         """Write this AxisManager data to an HDF5 group.  This is an
         experimental feature primarily intended to assist with
         debugging.  The schema is subject to change, and it's possible
@@ -789,6 +816,8 @@ class AxisManager:
             with group).
           group (str or None): Group within the HDF5 file (relative to
             dest).
+          overwrite (bool): If True, remove any existing thing at the
+            specified address before writing there.
 
         Notes:
           If dest is a string, it is taken to be an HDF5 filename and
@@ -797,6 +826,10 @@ class AxisManager:
 
           If dest is an h5py.Group, the group is the group name in the
           file relative to dest.
+
+          The overwrite argument only matters if group is passed as a
+          string.  A RuntimeError is raised if the group address
+          already exists and overwrite==False.
 
           For example, these are equivalent::
 
@@ -818,7 +851,7 @@ class AxisManager:
 
         """
         from .axisman_io import _save_axisman
-        return _save_axisman(self, dest, group)
+        return _save_axisman(self, dest, group=group, overwrite=overwrite)
 
     @classmethod
     def load(cls, src, group=None):
