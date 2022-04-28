@@ -13,8 +13,8 @@ def get_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('data_prefix', 
                         help="The prefix to data locations, use individual"
-                        "locations flags if data is stored in non-standard folders")
-    parser.add_argument('db_path', help="Path to Database to update")
+                        " locations flags if data is stored in non-standard folders")
+    parser.add_argument('db_path', help="Path to database to search")
     parser.add_argument('--min-ctime', help="Minimum ctime to look for overlaps")
     parser.add_argument('--max-ctime', help="Maximum ctime to look for overlaps")
     parser.add_argument('--stream-ids',help="A comma separated list of"
@@ -24,7 +24,7 @@ def get_parser():
                         help="Minimum overlap (in seconds) required to be an"
                         " overlapping observation")    
     parser.add_argument("--ignore-singles", action="store_true",
-                        help="If passed,script will not return observations with"
+                        help="If passed, script will not return observations with"
                         " no overlapping segments")
     parser.add_argument('--timestream-folder', 
                         help="Absolute path to folder with .g3 timestreams."
