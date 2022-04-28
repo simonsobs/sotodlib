@@ -2,8 +2,8 @@ import sqlalchemy as db
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker, relationship, backref
 
-from spt3g import core as spt3g_core
 import so3g
+from spt3g import core as spt3g_core
 import datetime as dt
 import os
 import re
@@ -185,6 +185,7 @@ class G3tSmurf:
         """
         Takes an input (either a timestamp or datetime), and returns a datetime.
         Intended to allow flexibility in inputs for various other functions
+        Note that x will be assumed to be in UTC if timezone is not specified
 
         Args
         ----
@@ -197,8 +198,10 @@ class G3tSmurf:
         if np.issubdtype(type(x), np.floating) or np.issubdtype(type(x), np.integer):
             return dt.datetime.utcfromtimestamp(x)
         elif isinstance(x, np.datetime64):
-            return x.astype(dt.datetime)
+            return x.astype(dt.datetime).replace(tzinfo=dt.timezone.utc)
         elif isinstance(x, dt.datetime) or isinstance(x, dt.date):
+            if x.tzinfo == None:
+                return x.replace(tzinfo=dt.timezone.utc)
             return x
         raise (Exception("Input not a datetime or timestamp"))
 
@@ -1111,9 +1114,9 @@ class G3tSmurf:
         Args
         -----
             start : timestamp or DateTime
-                start time for data
+                start time for data, assumed to be in UTC unless specified
             end :  timestamp or DateTime
-                end time for data
+                end time for data, assumed to be in UTC unless specified
         Returns
         --------
             stream_ids: List of stream ids.
@@ -1173,9 +1176,9 @@ class G3tSmurf:
         Args
         -----
             start : timestamp or DateTime
-                start time for data
+                start time for data, assumed to be in UTC unless specified
             end :  timestamp or DateTime
-                end time for data
+                end time for data, assumed to be in UTC unless specified
             stream_id : String
                 stream_id to load, in case there are multiple
             channels : list or None
@@ -1394,6 +1397,14 @@ def make_DetDb_single_obs(obsfiledb, obs_id):
     detdb.conn.commit()
     return detdb
 
+def obs_detdb_context_hook(ctx, obs_id, *args, **kwargs):
+    ddb = make_DetDb_single_obs(ctx.obsfiledb, obs_id)
+    ctx.obs_detdb = ddb
+    return ddb
+
+core.Context.hook_sets['obs_detdb_load'] = {
+    'before-use-detdb': obs_detdb_context_hook,
+}
 
 class SmurfStatus:
     """
@@ -1605,6 +1616,7 @@ class SmurfStatus:
         -------
             time : (timestamp)
                 Time at which you want the rogue status
+                Assumed to be in UTC unless specified
             archive : (G3tSmurf instance)
                 The G3tSmurf archive to use to find the status
             show_pb : (bool)
@@ -2298,6 +2310,14 @@ def load_file(
     aman.wrap("timestamps", _get_timestamps(streams), ([(0, "samps")]))
     aman.wrap("status", status.aman)
 
+    # If readout filter in enabled build iir_params AxisManager
+    if status.filter_enabled:
+        iir_params = core.AxisManager()
+        iir_params.wrap("a", status.filter_a)
+        iir_params.wrap("b", status.filter_b)
+        iir_params.wrap("fscale", 1/status.flux_ramp_rate_hz)
+        aman.wrap("iir_params", iir_params)
+
     # Conversion from DAC counts to squid phase
     aman.wrap("signal", np.zeros((aman[det_axis].count, aman["samps"].count), "float32"), [(0, det_axis), (1, "samps")])
     for idx in range(aman[det_axis].count):
@@ -2350,7 +2370,7 @@ def load_g3tsmurf_obs(db, obs_id, dets=None, samples=None, **kwargs):
         "select name from files " "where obs_id=?" + "order by start", (obs_id,)
     )
     flist = [row[0] for row in c]
-    return load_file(flist, dets, samples=samples, obsfiledb=db)
+    return load_file(flist, dets, samples=samples, obsfiledb=db, short_labels=False)
 
 
 core.OBSLOADER_REGISTRY["g3tsmurf"] = load_g3tsmurf_obs

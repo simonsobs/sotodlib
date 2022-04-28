@@ -2,7 +2,7 @@ from sotodlib import core
 import os
 
 REGISTRY = {
-    '_default': 'ResultSetHdf'
+    '_default': 'DefaultHdf'
 }
 
 
@@ -45,7 +45,7 @@ class SuperLoader:
         """
         REGISTRY[name] = loader_class
 
-    def load_raw(self, spec_list, request):
+    def load_raw(self, spec_list, request, detdb=None):
         """Loads metadata objects and returns them in their Natural
         containers.
 
@@ -53,6 +53,8 @@ class SuperLoader:
           spec_list (list of dict): A list of metadata specification
             dictionaries.
           request (dict): A metadata request dictionary.
+          detdb (core.metadata.DetDb): A DetDb-like object for use
+            loading metadata.
 
         Notes:
           Each entry in spec_list must be a dictionary with the
@@ -88,6 +90,8 @@ class SuperLoader:
           already applied.
 
         """
+        if detdb is None:
+            detdb = self.detdb
         items = []
         for spec_dict in spec_list:
             dbfile = spec_dict['db']
@@ -171,13 +175,13 @@ class SuperLoader:
                     loader_class = REGISTRY[loader]
                 except KeyError:
                     raise RuntimeError('No metadata loader registered under name "%s"' % loader)
-                loader_object = loader_class(detdb=self.detdb, obsdb=self.obsdb)
+                loader_object = loader_class(detdb=detdb, obsdb=self.obsdb)
                 mi1 = loader_object.from_loadspec(index_line)
                 # restrict to index_line...
-                if (self.detdb is None and
+                if (detdb is None and
                     len([k for k in index_line if k.startswith('dets:')])):
                     raise ValueError(f"Metadata not loadable without detdb: {index_line}")
-                mi2 = mi1.restrict_dets(index_line, detdb=self.detdb)
+                mi2 = mi1.restrict_dets(index_line, detdb=detdb)
                 results.append(mi2)
 
             # Check that we got results, then combine them in to single ResultSet.
@@ -194,11 +198,13 @@ class SuperLoader:
             items.append((unpackers, result))
         return items
 
-    def unpack(self, packed_items, dest=None):
+    def unpack(self, packed_items, dest=None, detdb=None):
         """Unpack items from packed_items, and return then in a single
         AxisManager.
 
         """
+        if detdb is None:
+            detdb = self.detdb
         if dest is None:
             dest = core.AxisManager()
         for unpackers, metadata_instance in packed_items:
@@ -206,7 +212,7 @@ class SuperLoader:
             if isinstance(metadata_instance, core.AxisManager):
                 child_axes = metadata_instance
             else:
-                child_axes = metadata_instance.axismanager(detdb=self.detdb)
+                child_axes = metadata_instance.axismanager(detdb=detdb)
             fields_to_delete = list(child_axes._fields.keys())
             # Unpack to requested field names.
             for unpack in unpackers:
@@ -223,7 +229,7 @@ class SuperLoader:
                 dest.merge(child_axes)
         return dest
 
-    def load(self, spec_list, request, dest=None, check=False):
+    def load(self, spec_list, request, detdb=None, dest=None, check=False):
         """Loads metadata objects and processes them into a single
         AxisManager.  This is equivalent to running load_raw and then
         unpack, though the two are intermingled.
@@ -234,11 +240,14 @@ class SuperLoader:
         or the Exception raised when trying to load that entry.
 
         """
+        if detdb is None:
+            detdb = self.detdb
+
         if check:
             errors = []
             for spec in spec_list:
                 try:
-                    item = self.load_raw([spec], request)
+                    item = self.load_raw([spec], request, detdb)
                     errors.append((spec, None))
                 except Exception as e:
                     errors.append((spec, e))
@@ -246,8 +255,8 @@ class SuperLoader:
 
         for spec in spec_list:
             try:
-                item = self.load_raw([spec], request)
-                dest = self.unpack(item, dest=dest)
+                item = self.load_raw([spec], request, detdb)
+                dest = self.unpack(item, dest=dest, detdb=detdb)
             except Exception as e:
                 e.args = e.args + (
                     "\n\nThe above exception arose while processing "

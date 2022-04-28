@@ -71,6 +71,7 @@ class Context(odict):
         self.obsdb = None
         self.detdb = None
         self.obsfiledb = None
+        self.obs_detdb = None
 
         for to_import in self.get('imports', []):
             importlib.import_module(to_import)
@@ -167,7 +168,7 @@ class Context(odict):
                 = metadata.SuperLoader(self)
 
     def get_obs(self, obs_id=None, dets=None, detsets=None,
-                samples=None,
+                samples=None, no_signal=None,
                 loader_type=None, logic_only=False, filename=None):
         """Load TOD and supporting metadata for a particular observation id.
         The detectors to read can be specified through colon-coding in
@@ -200,6 +201,18 @@ class Context(odict):
         if isinstance(obs_id, dict):
             obs_id = obs_id['obs_id']  # You passed in a dict.
 
+        # Call a hook after preparing obs_id but before loading obs
+        self._call_hook('before-use-detdb', obs_id=obs_id, dets=dets,
+                        detsets=detsets, samples=samples)
+
+        # Identify whether we should use a detdb or an obs_detdb
+        # If there is an obs_detdb, use that.
+        # Otherwise, use whatever is in self.detdb, even if that is None.
+        if self.obs_detdb is not None:
+            detdb = self.obs_detdb
+        else:
+            detdb = self.detdb
+
         # If the obs_id is colon-coded, decode them.
         if ':' in obs_id:
             tokens = obs_id.split(':')
@@ -208,7 +221,7 @@ class Context(odict):
             # Create a map from option value to option key.
             prop_map = {}
             for f in allowed_fields[::-1]:
-                for v in self.detdb.props(props=[f]).distinct()[f]:
+                for v in detdb.props(props=[f]).distinct()[f]:
                     prop_map[v] = f
             for t in tokens[1:]:
                 prop = prop_map.get(t)
@@ -244,7 +257,7 @@ class Context(odict):
 
         # Make the final list of dets -- force resolve it to a list,
         # not a detspec.
-        if self.detdb is None:
+        if detdb is None:
             # Try to resolve this without a DetDb (if you do this
             # better, maybe make it a static method of DetDb.
             dets = None
@@ -260,8 +273,8 @@ class Context(odict):
                         dets.intersection_update(ds)
             dets = list(dets)
         else:
-            dets = self.detdb.intersect(*dets_selection,
-                                        resolve=True)
+            dets = detdb.intersect(*dets_selection,
+                                   resolve=True)
 
         # The request to the metadata loader should include obs_id and
         # the detector selection.
@@ -283,7 +296,7 @@ class Context(odict):
         if not isinstance(metadata_list, list):
             raise ValueError(f"Context metadata entry has type {type(metadata_list)} "
                             "but should be a list. Check .yaml formatting")
-        meta = self.loader.load(metadata_list, request)
+        meta = self.loader.load(metadata_list, request, detdb=detdb)
 
         # Make sure standard obsloaders are registered ...
         from ..io import load as _
@@ -291,7 +304,7 @@ class Context(odict):
         # Load TOD.
         loader_func = OBSLOADER_REGISTRY[loader_type]  # Register your loader?
         aman = loader_func(self.obsfiledb, obs_id, dets,
-                           samples=samples)
+                           samples=samples, no_signal=no_signal)
 
         if aman is None:
             return meta
@@ -307,8 +320,21 @@ class Context(odict):
         """
         if isinstance(request, str):
             request = {'obs:obs_id': request}
+
+        # Call a hook after preparing obs_id but before loading obs
+        obs_id = request['obs:obs_id']
+        self._call_hook('before-use-detdb', obs_id=obs_id,
+                        detsets=detsets, samples=samples)
+        # Identify whether we should use a detdb or an obs_detdb
+        # If there is an obs_detdb, use that.
+        # Otherwise, use whatever is in self.detdb, even if that is None.
+        if self.obs_detdb is not None:
+            detdb = self.obs_detdb
+        else:
+            detdb = self.detdb
+
         metadata_list = self._get_warn_missing('metadata', [])
-        return self.loader.load(metadata_list, request)
+        return self.loader.load(metadata_list, request, detdb)
 
     def check_meta(self, request):
         """Check for existence of required metadata.
@@ -316,8 +342,21 @@ class Context(odict):
         """
         if isinstance(request, str):
             request = {'obs:obs_id': request}
+
+        # Call a hook after preparing obs_id but before loading obs
+        obs_id = request['obs:obs_id']
+        self._call_hook('before-use-detdb', obs_id=obs_id,
+                        detsets=detsets, samples=samples)
+        # Identify whether we should use a detdb or an obs_detdb
+        # If there is an obs_detdb, use that.
+        # Otherwise, use whatever is in self.detdb, even if that is None.
+        if self.obs_detdb is not None:
+            detdb = self.obs_detdb
+        else:
+            detdb = self.detdb
+
         metadata_list = self._get_warn_missing('metadata', [])
-        return self.loader.check(metadata_list, request)
+        return self.loader.check(metadata_list, request, detdb)
 
 
 def _read_cfg(filename=None, envvar=None, default=None):
@@ -348,6 +387,7 @@ def _read_cfg(filename=None, envvar=None, default=None):
 
 
 def obsloader_template(db, obs_id, dets=None, prefix=None, samples=None,
+                       no_signal=None,
                        **kwargs):
     """This function is here to document the API for "obsloader" functions
     used by the Context system.  "obsloader" functions are used to
@@ -367,6 +407,9 @@ def obsloader_template(db, obs_id, dets=None, prefix=None, samples=None,
       prefix (str): The root address of the data files, if not already
         known to the ObsFileDb.  (This is passed through to ObsFileDb
         prefix= argument.)
+      no_signal (bool): If True, loader should avoid reading signal
+        data (if possible) and should set .signal=None in the output.
+        Passing None is equivalent to passing False.
 
     Notes:
       This interface is subject to further extension.  When possible
