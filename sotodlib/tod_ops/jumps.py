@@ -147,7 +147,7 @@ def get_jump_sizes(x, jumps, win_size):
         left_height = np.median(x[left : int((j + left) / 2)])
 
         sizes[i] = right_height - left_height
-    return sizes.astype(int)
+    return sizes.astype(float)
 
 
 def jumpfinder_tv(
