@@ -132,7 +132,9 @@ def main(args=None):
                         logger.warning(f"Map Maker Failed on {ts.path}")
                         continue
 
-                    readout_ids, bands, channels = zip(*[(ch.name, ch.band, ch.channel) for ch in ts.channels])
+                    readout_ids, bands, channels = zip(*[
+                            (ch.name, ch.band, ch.channel) for ch in ts.channels
+                            ])
                     bands = np.array(bands)
                     channels = np.array(channels)
 
@@ -152,3 +154,4 @@ def main(args=None):
                         
 if __name__ == "__main__":
     main()
+
