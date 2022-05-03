@@ -14,7 +14,7 @@ import numpy as np
 import scipy
 import scipy.stats
 import scipy.signal
-import time, ephem, copy, os, pickle
+import time, ephem, copy, os
 from scipy import interpolate
 from scipy.optimize import curve_fit
 from glob import glob
@@ -662,7 +662,7 @@ def run(indir, outdir, f_format, tube, band, wafer, sso_name, year, month, day, 
         amp = full_df.amp.values
         full_df['rel_cal'] = amp/np.mean(amp)
 
-        beam_file = '/mnt/so1/users/zhileixu/beam_model/%s_%s_beam.p'%(tele, band)
+        beam_file = '/mnt/so1/shared/site-pipeline/bcp/%s_%s_beam.h5'%(tele, band)
         sso_obj = sim_sso.OpSimSSO(sso_name, beam_file)
 
         sso_obj._get_planet_temp(sso_name)

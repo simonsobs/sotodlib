@@ -13,7 +13,6 @@ import toast.qarray as qa
 import healpy as hp
 from scipy.constants import au as AU
 from scipy.interpolate import RectBivariateSpline
-import pickle
 import h5py
 
 def to_JD(t):
@@ -105,7 +104,7 @@ class OpSimSSO(Operator):
 
     Args:
         name (str): Name of the SSO, must be recognized by pyEphem
-        beam_file: the pickle file that stores the simulated beam
+        beam_file: the hdf5 file that stores the simulated beam
         out (str): accumulate data to the cache with name
             <out>_<detector>.  If the named cache objects do not exist,
             then they are created.
@@ -208,15 +207,14 @@ class OpSimSSO(Operator):
         Construct a 2-dimensional interpolator for the beam
         """
         #Read in the simulated beam
-        with open(self._beam_file, 'rb') as f_t:
-            beam_dic = pickle.load(f_t)
-        description = beam_dic['size'] # 2d array [[size, res], [n, 1]]
-        model = beam_dic['data']
-        res = description[0][1]
+        with h5py(self._beam_file, 'r') as f_t:
+            model = f_t["beam"][:]
+            res = f_t["beam"].attrs["res"]
+            n = f_t["beam"].attrs["npix"]
+            size = f_t["beam"].attrs["size"]
+
         beam_solid_angle = np.sum(model)*np.radians(res)**2
 
-        n = int(description[1][0])
-        size = description[0][0]
         sso_radius_avg = np.average(sso_dia)/2. # in arcsed
         sso_solid_angle = np.pi*np.radians(sso_radius_avg/3600)**2
         amp = ttemp_det * sso_solid_angle/beam_solid_angle
