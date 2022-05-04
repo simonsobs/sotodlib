@@ -207,10 +207,10 @@ class OpSimSSO(Operator):
         Construct a 2-dimensional interpolator for the beam
         """
         #Read in the simulated beam
-        with h5py(self._beam_file, 'r') as f_t:
+        with h5py.File(self._beam_file, 'r') as f_t:
             model = f_t["beam"][:]
             res = f_t["beam"].attrs["res"]
-            n = f_t["beam"].attrs["npix"]
+            n = int(f_t["beam"].attrs["npix"])
             size = f_t["beam"].attrs["size"]
 
         beam_solid_angle = np.sum(model)*np.radians(res)**2
