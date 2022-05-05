@@ -360,6 +360,19 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     ops.mem_count.prefix = "After simulating scan-synchronous signal"
     ops.mem_count.apply(data)
 
+    # Simulate Artificial Source
+
+    ops.sim_source.detector_pointing = ops.det_pointing_azel
+    ops.sim_source.focalplane = telescope.focalplane
+    if ops.sim_source.polarization_fraction != 0:
+        ops.sim_source.detector_weights = ops.weights_azel
+    ops.sim_source.apply(data)
+    log.info_rank(
+        "Simulated and observed artificial source",
+        comm=world_comm,
+        timer=timer,
+    )
+
     # Simulate Solar System Objects
 
     ops.sim_sso.detector_pointing = ops.det_pointing_azel
@@ -401,6 +414,18 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
         comm=world_comm,
         timer=timer,
     )
+
+    # Optionally write out the data
+    if args.out_dir is not None:
+        hdf5_path = os.path.join(args.out_dir, "data")
+        if toast_comm.world_rank == 0:
+            if not os.path.isdir(hdf5_path):
+                os.makedirs(hdf5_path)
+
+        ops.save_hdf5.volume = hdf5_path
+
+    ops.save_hdf5.apply(data)
+    log.info_rank("Saved HDF5 data in", comm=world_comm, timer=timer)
 
     # Add calibration error
 
@@ -624,6 +649,7 @@ def dump_spt3g(job, args, data):
             (ops.elevation_model.out_model, ops.elevation_model.out_model),
         ]
     )
+
     # Note that we export detector flags below to a float64 G3TimestreamMap
     # in order to use FLAC compression.
     # FIXME:  This workflow currently does not use any operators that create
@@ -758,10 +784,12 @@ def main():
         ),
         toast.ops.SimScanSynchronousSignal(name="sim_sss", enabled=False),
         so_ops.SimSSO(name="sim_sso", enabled=False),
+        so_ops.SimSource(name="sim_source", enabled=False),
         so_ops.SimHWPSS(name="sim_hwpss", enabled=False),
         toast.ops.TimeConstant(
             name="convolve_time_constant", deconvolve=False, enabled=False
         ),
+        toast.ops.SaveHDF5(name="save_hdf5", enabled=False),
         toast.ops.GainScrambler(name="gainscrambler", enabled=False),
         toast.ops.SimNoise(name="sim_noise"),
         toast.ops.PixelsHealpix(name="pixels_radec"),
