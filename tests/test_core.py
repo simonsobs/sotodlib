@@ -188,6 +188,18 @@ class TestAxisManager(unittest.TestCase):
                                             other_fields='drop')
         self.assertSequenceEqual(aman.fp.shape, (aman.dets.count, ))
 
+        # Loop checking
+        a = amanA.copy()
+        b = amanB.copy()
+        a.wrap('b', b)
+        with self.assertRaises(AssertionError):
+            a.wrap('a', a)
+        with self.assertRaises(AssertionError):
+            a.b.wrap('a', a)
+        # This is allowed because a.b is not the same as b.  Maybe it
+        # should be... but that will be a deliberate API change.
+        b.wrap('a', a)
+        self.assertNotIn('a', a.b)
 
     # Multi-dimensional restrictions.
 

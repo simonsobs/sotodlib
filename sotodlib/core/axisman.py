@@ -297,7 +297,7 @@ class AxisManager:
         ids = [id(self)]
         for v in self._fields.values():
             if isinstance(v, AxisManager):
-                ids.extend(v.managed_ids)
+                ids.extend(v._managed_ids())
         return ids
 
     def __delitem__(self, name):
