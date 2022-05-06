@@ -88,18 +88,6 @@ def _adjust_focal_plane(tod, focal_plane=None, boresight_offset=None):
     fp.eta[:] = eta
     fp.gamma[:] = gamma
 
-def _promote_array_data(ctx, tod):
-    # Wrap detdb properties into tod.array_data.  This makes SO sim
-    # TOD AxisManagers look like ACT TOD AxisManagers ... we'll get an
-    # SO solution in place.
-    props = ctx.detdb.props()
-    array_data = core.AxisManager(
-        core.LabelAxis('dets', props['name']))
-    for k in props.keys:
-        array_data.wrap(k, props[k], [(0, 'dets')])
-    tod.wrap('array_data', array_data)
-    return array_data
-
 def main(args=None):
     """Entry point."""
     if args is None:
@@ -159,7 +147,7 @@ def main(args=None):
 
         # Boost detdb into array_data.
         if 'array_data' not in tod:
-            _promote_array_data(ctx, tod)
+            util.promote_array_data(ctx, tod)
 
         # Modify samps axis for FFTs.
         tod_ops.fft_trim(tod)
