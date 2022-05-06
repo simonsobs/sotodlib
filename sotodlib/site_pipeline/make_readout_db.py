@@ -30,7 +30,7 @@ def get_detector_id(array_name, tune):
 
     if tune.is_optical is None:
         if tune.bond_pad == -1:
-            duid = f"{array_name}_BARE_Mp{tune.mux_layout_position:02}b{tune.bond_pad:02}D"  
+            duid = f"{array_name}_BARE_Mp{tune.mux_layout_position:02}bNCD"  
         elif tune.bond_pad == 64:
             duid = f"{array_name}_SQID_Mp{tune.mux_layout_position:02}b{tune.bond_pad:02}D"
         elif tune.det_row is None:
@@ -81,7 +81,6 @@ def setup_readout_db(configs):
 def main(args=None):
     if args is None:
         args = parse_args()
-
 
     configs = yaml.safe_load(open(args.config_file, "r"))
 
