@@ -2,6 +2,8 @@ import math
 import os
 import inspect
 
+from .. import core
+
 class ArchivePolicy:
     """Storage policy assistance.  Helps to determine the HDF5
     filename and dataset name for a result.
@@ -197,3 +199,16 @@ def lookup_conditional(source, key, tags=None, default=KeyError):
             if t in source:
                 return lookup_conditional(source[t], None, tags=tags, default=default)
         return default
+
+
+def promote_array_data(ctx, tod):
+    # Wrap detdb properties into tod.array_data.  This makes SO sim
+    # TOD AxisManagers look like ACT TOD AxisManagers ... we'll get an
+    # SO solution in place.
+    props = ctx.detdb.props()
+    array_data = core.AxisManager(
+        core.LabelAxis('dets', props['name']))
+    for k in props.keys:
+        array_data.wrap(k, props[k], [(0, 'dets')])
+    tod.wrap('array_data', array_data)
+    return array_data
