@@ -74,7 +74,7 @@ def main(args=None):
 
             if tune.is_optical is None:
                 if tune.bond_pad == -1:
-                    duid = f"{array_name}_BARE_Mp{tune.mux_layout_position:02}b{tune.bond_pad:02}D"  
+                    duid = f"{array_name}_BARE_Mp{tune.mux_layout_position:02}bNCD"  
                     dtype = 'BARE'
                 elif tune.bond_pad == 64:
                     duid = f"{array_name}_SQID_Mp{tune.mux_layout_position:02}b{tune.bond_pad:02}D"
