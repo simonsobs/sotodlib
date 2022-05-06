@@ -323,8 +323,8 @@ class Context(odict):
 
         # Call a hook after preparing obs_id but before loading obs
         obs_id = request['obs:obs_id']
-        self._call_hook('before-use-detdb', obs_id=obs_id,
-                        detsets=detsets, samples=samples)
+        self._call_hook('before-use-detdb', obs_id=obs_id)
+
         # Identify whether we should use a detdb or an obs_detdb
         # If there is an obs_detdb, use that.
         # Otherwise, use whatever is in self.detdb, even if that is None.
@@ -345,8 +345,8 @@ class Context(odict):
 
         # Call a hook after preparing obs_id but before loading obs
         obs_id = request['obs:obs_id']
-        self._call_hook('before-use-detdb', obs_id=obs_id,
-                        detsets=detsets, samples=samples)
+        self._call_hook('before-use-detdb', obs_id=obs_id)
+
         # Identify whether we should use a detdb or an obs_detdb
         # If there is an obs_detdb, use that.
         # Otherwise, use whatever is in self.detdb, even if that is None.
