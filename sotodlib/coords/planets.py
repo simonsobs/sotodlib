@@ -434,7 +434,8 @@ def _add_to_mask(req, mask_map):
         raise ValueError(f'Requested mask is None.  For no mask, pass [].')
     if isinstance(req, (list, tuple)):
         for _r in req:
-            _generate_mask(_r, mask_map)
+            # Also, maybe test this somehow?
+            _add_to_mask(_r, mask_map)
     elif isinstance(req, dict):
         shape = req.get('shape', 'circle')
         if shape == 'circle':
