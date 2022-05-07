@@ -157,6 +157,17 @@ class TestAxisManager(unittest.TestCase):
         aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
         self.assertEqual(aman.signal.shape[0], len(detsA) + len(detsB))
 
+        # Even if one is empty?
+        amanX = amanA.restrict('dets', [])
+        amanY = amanB.copy()
+        aman = core.AxisManager.concatenate([amanX, amanY])
+        self.assertEqual(aman.signal.shape[0], amanY.signal.shape[0])
+
+        # or both are empty?
+        amanY = amanB.restrict('dets', [])
+        aman = core.AxisManager.concatenate([amanX, amanY])
+        self.assertEqual(aman.signal.shape[0], 0)
+
         # Handling of array that does not share the axis?
         amanA.wrap_new('azimuth', shape=('samps',))[:] = 1.
         amanB.wrap_new('azimuth', shape=('samps',))[:] = 2.

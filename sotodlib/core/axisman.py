@@ -203,7 +203,10 @@ class LabelAxis(AxisInterface):
     def __init__(self, name, vals=None):
         super().__init__(name)
         if vals is not None:
-            vals = np.array(vals)
+            if len(vals):
+                vals = np.array(vals)
+            else:
+                vals = np.array([], dtype=np.str_)
             if vals.dtype.type is not np.str_:
                 raise TypeError(
                         'LabelAxis labels must be strings not %s' % vals.dtype)
@@ -494,7 +497,7 @@ class AxisManager:
                 keepers.append(item._fields[name])
             if len(keepers) == 0:
                 # Well we tried.
-                keepers = [items[0]]
+                keepers = [items[0]._fields[name]]
             # Call class-specific concatenation if needed.
             if isinstance(keepers[0], AxisManager):
                 new_data[name] = AxisManager.concatenate(
