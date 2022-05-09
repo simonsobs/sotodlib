@@ -479,15 +479,14 @@ class Bookbinder(object):
         return frame_splits
 
     def __call__(self):
-        N_hkfr_with_enc = 0    # Number of HK frames that contain encoder data
         for hkfile in self._hk_files:
             for h in core.G3File(hkfile):
                 if h['hkagg_type'] != 2 or ('ACU_position' not in h['block_names']):
                     continue
+                self.default_mode = False
                 self.frameproc(h)
-                N_hkfr_with_enc += 1
 
-        if N_hkfr_with_enc == 0:
+        if self.default_mode:
             print("No encoder data found in HK file(s); continuing with default mode.")
 
             # Loop over SMuRF frames/files
