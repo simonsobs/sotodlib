@@ -447,7 +447,7 @@ def find_jumps(
     return RangesMatrix.from_mask(jump_mask).buffer(buff_size)
 
 
-def fit_jump_sizes(x, jumps, sizes, win_size=10):
+def fit_jump_sizes(x, jumps, sizes, win_size=10, jump_range=5):
     """
     Try to fit for a more precise jump size.
     The parameter that is minimized is the size of the peak in the matched filter.
@@ -463,11 +463,13 @@ def fit_jump_sizes(x, jumps, sizes, win_size=10):
         sizes: Sizes of jumps, used as initial value in fit.
 
         win_size: Maximum number of samples to include on either side of jump in slice.
+
+        jump_range: Number of samples on either side of jump to fit for optimal jump location in.
+
     Returns:
 
-        fit_sizes: The fit sizes of the jumps.
+        fit_res: The fit poistions and sizes of the jumps.
     """
-    # TODO: fit for optimal jump location?
     # TODO: simultaneous fit of multiple jumps?
     def min_func(size, x, pos):
         _x = x.copy()
@@ -476,20 +478,30 @@ def fit_jump_sizes(x, jumps, sizes, win_size=10):
         _x = np.cumsum(_x)
         return _x.max() - _x.min()
 
-    fit_sizes = np.zeros(len(sizes))
-    for i, j in enumerate(jumps):
-        if i + 1 < len(jumps):
-            right = min(j + win_size, len(x), int((jumps[i + 1] + j) / 2))
-        else:
-            right = min(j + win_size, len(x))
+    fit_res = np.zeros((len(sizes), 2))
+    for i, _j in enumerate(jumps):
+        # Ugly brute force fit for optimal jump location
+        _jumps = np.arange(_j - jump_range, _j + jump_range)
+        if jump_range == 0:
+            _jumps = [_j]
+        fit_sizes = np.zeros(len(_jumps))
+        fit_fun = np.zeros(len(_jumps))
+        for k, j in enumerate(_jumps):
+            if i + 1 < len(jumps):
+                right = min(j + win_size, len(x), int((jumps[i + 1] + j) / 2))
+            else:
+                right = min(j + win_size, len(x))
 
-        if i > 0:
-            left = max(j - win_size, 0, int((jumps[i - 1] + j) / 2))
-        else:
-            left = max(j - win_size, 0)
-        res = sopt.minimize(min_func, sizes[i], (x[left:right], j - left))
-        fit_sizes[i] = res.x
-    return fit_sizes
+            if i > 0:
+                left = max(j - win_size, 0, int((jumps[i - 1] + j) / 2))
+            else:
+                left = max(j - win_size, 0)
+            res = sopt.minimize(min_func, sizes[i], (x[left:right], j - left))
+            fit_sizes[k] = res.x
+            fit_fun[k] = res.fun
+        idx = np.argmin(fit_fun)
+        fit_res[i] = (idx - 5 + _j, fit_sizes[idx])
+    return fit_res
 
 
 def jumpfix(x, jumps, sizes, min_size=0, win_size=10, fit=True, **kwargs):
@@ -510,7 +522,7 @@ def jumpfix(x, jumps, sizes, min_size=0, win_size=10, fit=True, **kwargs):
 
         win_size: Window size for get_jump_sizes, also used to slice if fit=True.
 
-        fit: Call jumpsize_fit to try to fit for a more accurate jump size.
+        fit: Call jumpsize_fit to try to fit for a more accurate jump position and size.
 
         **kwargs: Arguments to pass on to np.isclose.
 
@@ -526,7 +538,9 @@ def jumpfix(x, jumps, sizes, min_size=0, win_size=10, fit=True, **kwargs):
         sizes = get_jump_sizes(_x, jumps, win_size=win_size)
 
     if fit:
-        sizes = fit_jump_sizes(_x, jumps, sizes)
+        fit_res = fit_jump_sizes(_x, jumps, sizes).T
+        jumps = fit_res[0].astype(int)
+        sizes = fit_res[1]
 
     for j, s in zip(jumps, sizes):
         if abs(s) < min_size:
