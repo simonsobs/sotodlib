@@ -447,9 +447,9 @@ def find_jumps(
     return RangesMatrix.from_mask(jump_mask).buffer(buff_size)
 
 
-def fit_jump_sizes(x, jumps, sizes, win_size=10, jump_range=5):
+def fit_jumps(x, jumps, sizes, win_size=10, jump_range=5):
     """
-    Try to fit for a more precise jump size.
+    Try to fit for a more precise jump size and position.
     The parameter that is minimized is the size of the peak in the matched filter.
 
     Arguments:
@@ -522,7 +522,7 @@ def jumpfix(x, jumps, sizes, min_size=0, win_size=10, fit=True, **kwargs):
 
         win_size: Window size for get_jump_sizes, also used to slice if fit=True.
 
-        fit: Call jumpsize_fit to try to fit for a more accurate jump position and size.
+        fit: Call fit_jumps to try to fit for a more accurate jump position and size.
 
         **kwargs: Arguments to pass on to np.isclose.
 
@@ -538,7 +538,7 @@ def jumpfix(x, jumps, sizes, min_size=0, win_size=10, fit=True, **kwargs):
         sizes = get_jump_sizes(_x, jumps, win_size=win_size)
 
     if fit:
-        fit_res = fit_jump_sizes(_x, jumps, sizes).T
+        fit_res = fit_jumps(_x, jumps, sizes).T
         jumps = fit_res[0].astype(int)
         sizes = fit_res[1]
 
@@ -553,7 +553,7 @@ def jumpfix(x, jumps, sizes, min_size=0, win_size=10, fit=True, **kwargs):
     return _x
 
 
-def jumps_fix(tod, signal=None, jumps=None, sizes=None):
+def fix_jumps(tod, signal=None, jumps=None, sizes=None):
     """
     Interface for jump fixing.
     Currently only supports very naive jump fixing but more to come.
