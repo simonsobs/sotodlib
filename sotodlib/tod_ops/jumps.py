@@ -492,7 +492,7 @@ def fit_jump_sizes(x, jumps, sizes, win_size=10):
     return fit_sizes
 
 
-def jumpfix(x, jumps, sizes, win_size=10, fit=True, **kwargs):
+def jumpfix(x, jumps, sizes, min_size=0, win_size=10, fit=True, **kwargs):
     """
     Fix jumps.
     Currently does the extremely naive technique of just subtracting the provided size.
@@ -505,6 +505,8 @@ def jumpfix(x, jumps, sizes, win_size=10, fit=True, **kwargs):
         jumps: Array of jump locations.
 
         sizes: Size of each jump, if None get_jump_sizes is called.
+
+        min_size: Smallest size jump to fix.
 
         win_size: Window size for get_jump_sizes, also used to slice if fit=True.
 
@@ -527,6 +529,8 @@ def jumpfix(x, jumps, sizes, win_size=10, fit=True, **kwargs):
         sizes = fit_jump_sizes(_x, jumps, sizes)
 
     for j, s in zip(jumps, sizes):
+        if abs(s) < min_size:
+            continue
         # Check for tracking jump
         # TODO: Figure out correct atol and rtol for this
         if np.isclose(s / (2 * np.pi), np.round(s / (2 * np.pi)), **kwargs):
