@@ -1,4 +1,6 @@
 from sotodlib import core
+from ..axisman import get_coindices
+
 import logging
 import os
 import numpy as np
@@ -297,12 +299,22 @@ class SuperLoader:
 
             # Things that augment det_info need to be resolved before
             # the check==True escape.
-            if spec['name'] == '+det_info':
-                # todo
-                pass
+            if spec.get('det_info'):
+                # Merge this info into det_info.  Note we have to find a 
+                key = spec['det_key']
+                both, i0, i1 = get_coindices(item[key], det_info[key])
+
+                det_info = det_info.subset(rows=i1)
+                item = item.subset([k for k in item.keys if k != key],
+                                   rows=i0)
+                det_info.merge(item)
+                item = None
 
             if check:
                 items.append((spec, error))
+                continue
+
+            if item is None:
                 continue
 
             # Make everything an axisman.
@@ -320,8 +332,34 @@ class SuperLoader:
         if check:
             return items
 
+        dest.wrap('det_info', convert_det_info(det_info))
+
         return dest
 
+
+def convert_det_info(det_info, dets=None):
+    """
+    Convert det_info ResultSet into nested AxisManager.
+    """
+    children = {}
+    if dets is None:
+        dets = det_info['name']
+    output = core.AxisManager(core.LabelAxis('dets', dets))
+    subtables = {}
+    for k in det_info.keys:
+        if '.' in k:
+            prefix, subkey = k.split('.', 1)
+            if not prefix in subtables:
+                subtables[prefix] = []
+            subtables[prefix].append(subkey)
+        else:
+            output.wrap(k, det_info[k], [(0, 'dets')])
+    for subtable, subkeys in subtables.items():
+        sub_info = det_info.subset(keys=[f'{subtable}.{k}' for k in subkeys])
+        sub_info.keys = subkeys
+        child = convert_det_info(sub_info, dets)
+        output.wrap(subtable, child)
+    return output
 
 class Unpacker:
     """Encapsulation of instructions for what information to extract from
