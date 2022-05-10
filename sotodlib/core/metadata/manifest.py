@@ -362,7 +362,7 @@ class ManifestDb:
             return None
         return row_id[0]
 
-    def match(self, params, multi=False):
+    def match(self, params, multi=False, prefix=None):
         """Given Index Data, return Endpoint Data.
 
         Arguments:
@@ -387,6 +387,9 @@ class ManifestDb:
         rows = c.fetchall()
         rp.insert(0, 'filename')
         rows = [dict(zip(rp, r)) for r in rows]
+        if prefix is not None:
+            for r in rows:
+                r['filename'] = os.path.join(prefix, r['filename'])
         if multi:
             return rows
         if len(rows) == 0:
