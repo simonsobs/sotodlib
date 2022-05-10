@@ -153,6 +153,14 @@ class ResultSet(object):
             output[k] = c
         return output
 
+    def get_mask(self, select, prefix=''):
+        s = np.ones(len(self), bool)
+        for k, v in select.items():
+            if k.startswith(prefix):
+                k = k[len(prefix):]
+                s *= (self[k] == v)
+        return s
+
     def distinct(self):
         """
         Returns a ResultSet that is a copy of the present one, with
@@ -174,11 +182,47 @@ class ResultSet(object):
         assert(len(self.keys) == len(set(self.keys)))
 
     # Todo: decide whether axisman conversion code lives here or axisman...
-    def axismanager(self, detdb=None):
+    def axismanager(self, det_info=None, axis_name='dets',
+                    axis_key='name', prefix='dets:'):
         from sotodlib import core
-        return core.AxisManager.from_resultset(self, detdb=detdb)
 
-    # Todo: move this to the right place, too.
+        # Determine the dets axis columns
+        dets_cols = {}
+        for k in self.keys:
+            if k.startswith(prefix):
+                dets_cols[k] = k[len(prefix):]
+        # Get the detector names for entry.
+        if axis_key in dets_cols:
+            # If axis_key is a field in this dataset, there should be
+            # one row per detector, and construction is simple.
+            dets = self[axis_key]
+            assert(len(dets) == len(set(dets)))  # unique list?
+            aman = core.AxisManager(core.LabelAxis(axis_name, dets))
+            for k in self.keys:
+                if not k.startswith(prefix):
+                    aman.wrap(k, self[k], [(0, axis_name)])
+        else:
+            # Each row in self represents more than one detector, and
+            # we want to broadcast that to one row per detector.
+            if det_info is None:
+                raise RuntimeError(
+                    'Expansion to dets axes requires det_info '
+                    'but None was not passed in.')
+            dets = []
+            indices = []
+            for row_i, row in enumerate(self.subset(keys=dets_cols.keys())):
+                props = {v: row[k] for k, v in dets_cols.items()}
+                dets_i = det_info[axis_key][det_info.get_mask(props)]
+                assert all(d not in dets for d in dets_i)  # Not disjoint!
+                dets.extend(dets_i)
+                indices.extend([row_i] * len(dets_i))
+            indices = np.array(indices)
+            aman = core.AxisManager(core.LabelAxis(axis_name, dets))
+            for k in self.keys:
+                if not k.startswith(prefix):
+                    aman.wrap(k, self[k][indices], [(0, axis_name)])
+        return aman
+
     def restrict_dets(self, restriction, detdb=None):
         # There are 4 classes of keys:
         # - dets:* keys appearing only in restriction
