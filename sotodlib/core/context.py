@@ -296,7 +296,7 @@ class Context(odict):
         if not isinstance(metadata_list, list):
             raise ValueError(f"Context metadata entry has type {type(metadata_list)} "
                             "but should be a list. Check .yaml formatting")
-        meta = self.loader.load(metadata_list, request, detdb=detdb)
+        meta = self.loader.load(metadata_list, request, det_info=detdb.props())
 
         # Make sure standard obsloaders are registered ...
         from ..io import load as _
@@ -312,7 +312,7 @@ class Context(odict):
             aman.merge(meta)
         return aman
 
-    def get_meta(self, request):
+    def get_meta(self, request, check=False):
         """Load and return the supporting metadata for an observation.  The
         request parameter can be a simple observation id as a string,
         or else a request dict like the kind passed in from get_obs.
@@ -334,29 +334,14 @@ class Context(odict):
             detdb = self.detdb
 
         metadata_list = self._get_warn_missing('metadata', [])
-        return self.loader.load(metadata_list, request, detdb)
+        det_info = detdb.props()
+        return self.loader.load(metadata_list, request, det_info=det_info, check=check)
 
     def check_meta(self, request):
         """Check for existence of required metadata.
 
         """
-        if isinstance(request, str):
-            request = {'obs:obs_id': request}
-
-        # Call a hook after preparing obs_id but before loading obs
-        obs_id = request['obs:obs_id']
-        self._call_hook('before-use-detdb', obs_id=obs_id)
-
-        # Identify whether we should use a detdb or an obs_detdb
-        # If there is an obs_detdb, use that.
-        # Otherwise, use whatever is in self.detdb, even if that is None.
-        if self.obs_detdb is not None:
-            detdb = self.obs_detdb
-        else:
-            detdb = self.detdb
-
-        metadata_list = self._get_warn_missing('metadata', [])
-        return self.loader.check(metadata_list, request, detdb)
+        return self.get_meta(request, check=True)
 
 
 def _read_cfg(filename=None, envvar=None, default=None):

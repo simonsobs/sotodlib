@@ -390,56 +390,6 @@ class AxisManager:
         return ("{}(".format(type(self).__name__)
                 + ', '.join(stuff).replace('[]', '') + ")")
 
-    # constructors...
-    @classmethod
-    def from_resultset(cls, rset, detdb,
-                       axis_name='dets',
-                       prefix='dets:'):
-        # Determine the dets axis columns
-        dets_cols = {}
-        for k in rset.keys:
-            if k.startswith(prefix):
-                dets_cols[k] = k[len(prefix):]
-        # Get the detector names for entry.
-        if prefix + 'name' in dets_cols:
-            dets = rset[prefix + 'name']
-            self = cls(LabelAxis(axis_name, dets))
-            for k in rset.keys:
-                if not k.startswith(prefix):
-                    self.wrap(k, rset[k], [(0, axis_name)])
-        else:
-            # Generate the expansion map...
-            if detdb is None:
-                raise RuntimeError(
-                    'Expansion to dets axes requires detdb '
-                    'but None was not passed in.')
-            dets = []
-            indices = []
-            for row_i, row in enumerate(rset.subset(keys=dets_cols.keys())):
-                props = {v: row[k] for k, v in dets_cols.items()}
-                dets_i = list(detdb.dets(props=props)['name'])
-                assert all(d not in dets for d in dets_i)  # Not disjoint!
-                dets.extend(dets_i)
-                indices.extend([row_i] * len(dets_i))
-            indices = np.array(indices)
-            self = cls(LabelAxis(axis_name, dets))
-            for k in rset.keys:
-                if not k.startswith(prefix):
-                    self.wrap(k, rset[k][indices], [(0, axis_name)])
-        return self
-
-    def restrict_dets(self, restriction, detdb=None):
-        # Just convert the restriction to a list of dets, compare to
-        # what we have, and return the reduced result.
-        props = {k[len('dets:'):]: v for k, v in restriction.items()
-                 if k.startswith('dets:')}
-        if len(props) == 0:
-            return self
-        restricted_dets = detdb.dets(props=props)
-        ax2 = LabelAxis('new_dets', restricted_dets['name'])
-        new_ax, i0, i1 = self._axes['dets'].intersection(ax2, True)
-        return self.restrict('dets', new_ax.vals)
-
     @staticmethod
     def concatenate(items, axis=0, other_fields='fail'):
         """Concatenate multiple AxisManagers along the specified axis, which

@@ -1,9 +1,24 @@
 from sotodlib import core
+import logging
 import os
+import numpy as np
+
+from . import ResultSet
+
+logger = logging.getLogger(__name__)
 
 REGISTRY = {
     '_default': 'DefaultHdf'
 }
+
+
+def _filter_items(prefix, d, remove=True):
+    # Restrict d to only items that start with prefix; if d is a dict,
+    # return a dict with only the keys that satisfy that condition.
+    if isinstance(d, dict):
+        return {k: d[prefix*remove + k]
+                for k in _filter_items(prefix, list(d.keys()), remove=remove)}
+    return [k[len(prefix)*remove:] for k in d if k.startswith(prefix)]
 
 
 class SuperLoader:
@@ -17,7 +32,8 @@ class SuperLoader:
           obsdb (ObsDb): obsdb to use when resolving obs axis.
           working_dir (str): base directory for any metadata specified
             as relative paths.  If None, but if context is not None,
-            then the path of context.filename is used.
+            then the path of context.filename is used; otherwise cwd
+            is used.
 
         """
         if context is not None:
@@ -27,6 +43,8 @@ class SuperLoader:
                 obsdb = context.obsdb
             if working_dir is None:
                 working_dir = os.path.split(context.filename)[0]
+        if working_dir is None:
+            working_dir = os.getcwd()
         self.detdb = detdb
         self.obsdb = obsdb
         self.manifest_cache = {}
@@ -45,20 +63,24 @@ class SuperLoader:
         """
         REGISTRY[name] = loader_class
 
-    def load_raw(self, spec_list, request, detdb=None):
-        """Loads metadata objects and returns them in their Natural
-        containers.
+    def load_one(self, spec, request, det_info):
+        """Process a single metadata entry (spec) by loading a ManifestDb and
+        reading metadata for a particular observation.  The request
+        must be pre-augmented with all ObsDb info that might be
+        needed.  det_info is used to screen the returned data for the
+        various index_lines.
 
         Args:
-          spec_list (list of dict): A list of metadata specification
-            dictionaries.
-          request (dict): A metadata request dictionary.
-          detdb (core.metadata.DetDb): A DetDb-like object for use
-            loading metadata.
+          spec (dict): A metadata specification dict (corresponding to
+            a metadata list entry in context.yaml).
+          request (dict): A metadata request dict (stating what
+            observation and detectors are of interest).
+          det_info (ResultSet): Table of detector properties to use
+            when resolving metadata that is indexed with dets:*
+            fields.
 
         Notes:
-          Each entry in spec_list must be a dictionary with the
-          following keys:
+          The metadata ``spec`` dict has the following schema:
 
             ``db`` (str)
                 The path to a ManifestDb file.
@@ -71,18 +93,38 @@ class SuperLoader:
 
             ``loader`` (str, optional)
                 The name of the loader class to use when loading the
-                data.  This is normally unnecessary, and will override
-                any value declared in the ManifestDb.
+                data.  This will take precedence over what is
+                specified in the ManifestDb, and is normally
+                unnecessary but can be used for debugging /
+                work-arounds.
 
-          Before being passed to the loader, any filenames returned
-          from the ManifestDb will be resolved relative to the ``db``
-          location, unless the filename begins with a '/' in which
-          case it is treated as an absolute path.  Similarly, the
-          ``db`` path should be a relative location relative to the
-          context file, or else an absolute path starting with '/'.
+          Any filenames in the ManifestDb that are given as relative
+          paths will be resolved relative to the directory where the
+          db file is found.
+
+          The ``request`` dict specifies what times and detectors are
+          of interest.  If the metadata archive is indexed by
+          timestamp and wafer_slot, then you might pass in::
+
+             {'obs:timestamp': 1234567000.,
+              'dets:wafer_slot': 'w01'}
+
+          When this function is invoked from self.load, the request
+          dict will have been automatically "augmented" using the
+          ObsDb.  The main purpose of this is to provide obs:timestamp
+          (and any other useful indexing fields) from ObsDb based on
+          obs:obs_id.
+
+          The ``det_info`` object comes into play in cases where a
+          loaded metadata result refers to some large group of
+          detectors, but the metadata index, or the user request,
+          expresses that the result should be limited to only a subset
+          of those detectors.  This is notated in practice by
+          including dets:* fields in the index data in the ManifestDb,
+          or in the request dict.
 
         Returns:
-          A list of tuples (unpacker, item), corresponding to ecah
+          A list of tuples (unpacker, item), corresponding to each
           entry in spec_list.  The unpacker is an Unpacker object
           created based on the 'name' field.  The item is the metadata
           in its native format (which could be a ResultSet or
@@ -90,201 +132,195 @@ class SuperLoader:
           already applied.
 
         """
-        if detdb is None:
-            detdb = self.detdb
-        items = []
-        for spec_dict in spec_list:
-            dbfile = spec_dict['db']
-            if dbfile[0] != '/':
-                dbfile = os.path.join(self.working_dir, dbfile)
-            dbfile_path = os.path.split(dbfile)[0]
-            names = spec_dict['name']
-            loader = spec_dict.get('loader', None)
-
-            # Load the database, match the request,
-            if dbfile not in self.manifest_cache:
-                if dbfile.endswith('sqlite'):
-                    man = core.metadata.ManifestDb.readonly(dbfile)
-                else:
-                    man = core.metadata.ManifestDb.from_file(dbfile)
-                self.manifest_cache[dbfile] = man
-            man = self.manifest_cache[dbfile]
-
-            # Provide any extrinsic boosting.  Downstream products
-            # (like an HDF5 table) might require some parameters from
-            # the ObsDb, and we can't tell that from here.  So query
-            # what you can, and pass it along.
-            if self.obsdb is not None and 'obs:obs_id' in request:
-                obs_info = self.obsdb.get(request['obs:obs_id'], add_prefix='obs:')
-                if obs_info is not None:
-                    obs_info.update(request)
-                    request = obs_info
-
-            missing_keys = man.scheme.get_required_params()
-            for k in request.keys():
-                if k in missing_keys:
-                    missing_keys.remove(k)
-            obs_keys = [k for k in missing_keys if k.startswith('obs:')]
-            if len(obs_keys):
-                if self.obsdb is None:
-                    reason = 'no ObsDb was passed in'
-                elif 'obs:obs_id' not in request:
-                    reason = 'obs_id was not specified in the request'
-                elif obs_info is None:
-                    reason = 'ObsDb has no info on %s' % request['obs:obs_id']
-                else:
-                    reason = 'ObsDb does not provide a value for %s' % obs_keys
-                raise RuntimeError(
-                    'Metadata request could not be constructed because: %s' % reason)
-
-            try:
-                index_lines = man.match(request, multi=True)
-            except Exception as e:
-                # Catch any errors and provide a bunch of context to
-                # help user fix their config.
-                text = str(e)
-                raise RuntimeError(
-                    'An exception was raised while decoding the following spec:\n'
-                    + '  ' + str(spec_dict) + '\n'
-                    + 'with the following request:\n'
-                    + '  ' + str(request) + '\n'
-                    + 'The exception is:\n  %s' % text)
-
-            # Make files relative to db location.
-            for line in index_lines:
-                if 'filename' in line:
-                    line['filename'] = os.path.join(dbfile_path, line['filename'])
-
-            # Load and reduce each Index line
-            results = []
-            for index_line in index_lines:
-                # Augment the index_line with info from the request.
-                skip_this = False
-                for k in request:
-                    if k in index_line:
-                        if request[k] != index_line[k]:
-                            skip_this = True
-                if skip_this:
-                    continue
-                index_line.update(request)
-                if loader is None:
-                    loader = index_line.get('loader')
-                if loader is None:
-                    loader = REGISTRY['_default']
-                try:
-                    loader_class = REGISTRY[loader]
-                except KeyError:
-                    raise RuntimeError('No metadata loader registered under name "%s"' % loader)
-                loader_object = loader_class(detdb=detdb, obsdb=self.obsdb)
-                mi1 = loader_object.from_loadspec(index_line)
-                # restrict to index_line...
-                if (detdb is None and
-                    len([k for k in index_line if k.startswith('dets:')])):
-                    raise ValueError(f"Metadata not loadable without detdb: {index_line}")
-                mi2 = mi1.restrict_dets(index_line, detdb=detdb)
-                results.append(mi2)
-
-            # Check that we got results, then combine them in to single ResultSet.
-            assert(len(results) > 0)
-            result = results[0].concatenate(results)
-
-            # Get list of fields and decode name map.
-            if isinstance(result, core.AxisManager):
-                fields = list(result._fields.keys())
+        # Load the database, match the request,
+        dbfile = os.path.join(self.working_dir, spec['db'])
+        dbpath = os.path.split(dbfile)[0]
+        if dbfile not in self.manifest_cache:
+            if dbfile.endswith('sqlite'):
+                man = core.metadata.ManifestDb.readonly(dbfile)
             else:
-                fields = result.keys
-            unpackers = Unpacker.decode(names, fields)
+                man = core.metadata.ManifestDb.from_file(dbfile)
+            self.manifest_cache[dbfile] = man
+        man = self.manifest_cache[dbfile]
 
-            items.append((unpackers, result))
-        return items
+        # Do we have all the keys we need?
+        provided_obs_keys = _filter_items(
+            'obs:', man.scheme.get_required_params(), remove=False)
+        missing_obs_keys = (set(provided_obs_keys) - set(request.keys()))
+        if len(missing_obs_keys):
+            raise RuntimeError(
+                f'Metadata request is indexed by {request.keys()} but '
+                f'request info includes only {provided_obs_keys}.')
 
-    def unpack(self, packed_items, dest=None, detdb=None):
-        """Unpack items from packed_items, and return then in a single
+        # Lookup.
+        try:
+            index_lines = man.match(request, multi=True, prefix=dbpath)
+        except Exception as e:
+            text = str(e)
+            raise RuntimeError(
+                'An exception was raised while decoding the following spec:\n'
+                + '  ' + str(spec) + '\n'
+                + 'with the following request:\n'
+                + '  ' + str(request) + '\n'
+                + 'The exception is:\n  %s' % text)
+
+        # Load each index_line.
+        results = []
+        for index_line in index_lines:
+            logger.debug(f'Processing index_line={index_line}')
+            # Augment the index_line with info from the request; if
+            # the request and index_line share a key but conflict on
+            # the value, we don't want this item.
+            skip_this = False
+            for k in request:
+                if k in index_line:
+                    if request[k] != index_line[k]:
+                        skip_this = True
+            if skip_this:
+                continue
+            index_line.update(request)
+            loader = spec.get('loader', None)
+            if loader is None:
+                loader = index_line.get('loader', REGISTRY['_default'])
+            try:
+                loader_class = REGISTRY[loader]
+            except KeyError:
+                raise RuntimeError('No metadata loader registered under name "%s"' % loader)
+
+            loader_object = loader_class()  # pass obs info?
+            mi1 = loader_object.from_loadspec(index_line)
+
+            # Restrict returned values according to the specs in index_line.
+
+            if isinstance(mi1, ResultSet):
+                # For simple tables, the restrictions can be
+                # integrated into the table, to be dealt with later.
+                det_restricts = _filter_items('dets:', index_line, remove=False)
+                mask = np.ones(len(mi1), bool)
+                keep_cols = list(mi1.keys)
+                new_cols = []
+                for k, v in det_restricts.items():
+                    if k in mi1.keys:
+                        mask *= (mi1[k] == v)
+                        #keep_cols.remove(k)
+                    else:
+                        new_cols.append((k, v))
+                a = mi1.subset(keys=keep_cols, rows=mask)
+                mi2 = ResultSet([k for k, v in new_cols],
+                                [[v for k, v in new_cols]] * len(a))
+                mi2.merge(a)
+
+            elif isinstance(mi1, core.AxisManager):
+                # For AxisManager results, the dets axis *must*
+                # reconcile 1-to-1 with some field in det_info, and
+                # that may be used to toss things out based on
+                # index_line.
+                det_restricts = _filter_items('dets:', index_line, remove=True)
+                dets_key = 'name'
+                idx = np.array([list(det_info['name']).index(v)
+                                for v in mi1.dets.vals])
+                mask = np.ones(len(idx), bool)
+                for k, v in det_restricts.items():
+                    mask *= (det_info[k][idx] == v)
+                if mask.all():
+                    mi2 = mi1
+                else:
+                    mi2 = mi1.restrict('dets', mi1.dets.vals[mask])
+
+            else:
+                raise RuntimeError(
+                    'Returned object is non-specialized type {}: {}'
+                    .format(mi1.__class__, mi1))
+
+            results.append(mi2)
+
+        # Check that we got results, then combine them in to single ResultSet.
+        assert(len(results) > 0)
+        result = results[0].concatenate(results)
+        return result
+
+    def load(self, spec_list, request, det_info=None, dest=None, check=False):
+        """Loads metadata objects and processes them into a single
         AxisManager.
 
+        Args:
+          spec_list (list of dicts): Each dict is a metadata spec, as
+            described in load_one.
+          request (dict): A request dict.
+          det_info (AxisManager): Detector info table to use for
+            reconciling 'dets:*' field restrictions.
+          dest (AxisManager or None): Destination container for the
+            metadata (if None, a new one is created).
+          check (bool): If True, run in check mode (see Notes).
+
+        Returns:
+          In normal mode, an AxisManager containing the metadata
+          (dest).  In check mode, a list of tuples (spec, exception).
+
+        Notes:
+          If check=True, this won't store and return the loaded
+          metadata; it will instead return a list of the same length
+          as spec_list, with either None (if the entry loaded
+          successful) or the Exception raised when trying to load that
+          entry.  When check=False, metadata retrieval errors will
+          raise some kind of error.  When check=True, those are caught
+          and returned to the caller.
+
         """
-        if detdb is None:
-            detdb = self.detdb
-        if dest is None:
-            dest = core.AxisManager()
-        for unpackers, metadata_instance in packed_items:
-            # Convert to AxisManager...
-            if isinstance(metadata_instance, core.AxisManager):
-                child_axes = metadata_instance
-            else:
-                child_axes = metadata_instance.axismanager(detdb=detdb)
-            fields_to_delete = list(child_axes._fields.keys())
-            # Unpack to requested field names.
-            for unpack in unpackers:
-                if unpack.src is None:
-                    dest.wrap(unpack.dest, child_axes)
-                    break
+        # Augmented request.
+        if self.obsdb is not None and 'obs:obs_id' in request:
+            obs_info = self.obsdb.get(request['obs:obs_id'], add_prefix='obs:')
+            if obs_info is not None:
+                obs_info.update(request)
+                request = obs_info
+
+        def reraise(e, spec):
+            e.args = e.args + (
+                "\n\nThe above exception arose while processing "
+                "the following metadata spec:\n"
+                f"  spec:    {spec}\n"
+                f"  request: {request}\n\n"
+                "Does your database expose this product for this observation?",)
+            raise e
+
+        # Process each item.
+        items = []
+        for spec in spec_list:
+            try:
+                item = self.load_one(spec, request, det_info)
+                error = None
+            except Exception as e:
+                if check:
+                    error = e
                 else:
-                    fields_to_delete.remove(unpack.src)
-                    if unpack.src != unpack.dest:
-                        child_axes.move(unpack.src, unpack.dest)
-            else:
-                for f in fields_to_delete:
-                    child_axes.move(f, None)
-                dest.merge(child_axes)
-        return dest
+                    reraise(e, spec)
 
-    def load(self, spec_list, request, detdb=None, dest=None, check=False):
-        """Loads metadata objects and processes them into a single
-        AxisManager.  This is equivalent to running load_raw and then
-        unpack, though the two are intermingled.
+            # Things that augment det_info need to be resolved before
+            # the check==True escape.
+            if spec['name'] == '+det_info':
+                # todo
+                pass
 
-        If check=True, this won't store and return the loaded
-        metadata; it will instead return a list of the same length as
-        spec_list, with either None (if the entry loaded successful)
-        or the Exception raised when trying to load that entry.
+            if check:
+                items.append((spec, error))
+                continue
 
-        """
-        if detdb is None:
-            detdb = self.detdb
+            # Make everything an axisman.
+            if not isinstance(item, core.AxisManager):
+                item = item.axismanager(det_info=det_info)
+
+            # Unpack it.
+            try:
+                unpackers = Unpacker.decode(spec['name'], item)
+                for unpacker in unpackers:
+                    dest = unpacker.unpack(item, dest=dest)
+            except Exception as e:
+                reraise(e, spec)
 
         if check:
-            errors = []
-            for spec in spec_list:
-                try:
-                    item = self.load_raw([spec], request, detdb)
-                    errors.append((spec, None))
-                except Exception as e:
-                    errors.append((spec, e))
-            return errors
+            return items
 
-        for spec in spec_list:
-            try:
-                item = self.load_raw([spec], request, detdb)
-                dest = self.unpack(item, dest=dest, detdb=detdb)
-            except Exception as e:
-                e.args = e.args + (
-                    "\n\nThe above exception arose while processing "
-                    "the following metadata spec:\n"
-                    f"  spec:    {spec}\n"
-                    f"  request: {request}\n\n"
-                    "Does your database expose this product for this observation?",)
-                raise e
         return dest
-
-    def check(self, spec_list, request):
-        """Runs the same loading code as self.load, but does not keep the
-        results, and will not raise an error due to missing metadata.
-
-        Instead, this function returns information about whether
-        metadata caused any trouble.
-
-        """
-        errors = []
-        ok = True
-        for spec in spec_list:
-            try:
-                item = self.load_raw([spec], request)
-                errors.append((spec, None))
-            except Exception as e:
-                errors.append((spec, e))
-                ok = False
-        return ok, errors
 
 
 class Unpacker:
@@ -292,8 +328,8 @@ class Unpacker:
     some source container, and what to call it in the destination
     container.
 
-    The classmethod :ref:method:``decode`` is used populate Unpacker
-    objects from metadata instructions; see docstring.
+    The classmethod :ref:method:``decode`` is used to populate
+    Unpacker objects from metadata instructions; see docstring.
 
     Attributes:
       dest (str): The field name in the destination container.
@@ -304,18 +340,21 @@ class Unpacker:
 
     """
     @classmethod
-    def decode(cls, coded, wildcard=[]):
-        """
-        Args:
+    def decode(cls, coded, target=None, wildcard=None):
+        """Args:
           coded (list of str or str): Each entry of the string is a
             "coded request" which is converted to an Unpacker, as
             described below.  Passing a string here yields the same
             results as passing a single-element list containing that
             string.
-          wildcard (list of str): source names from which to draw, in
-            the case that the coded request contains a wildcard.
-            Wildcard decoding, if requested, will fail unless the list
-            has exactly 1 entry.
+          target (AxisManager): The object from which the targets will
+            be unpacked.  This is only accessed if wildcard is None.
+          wildcard (list of str): source_name values to draw from if
+            the user has requested wildcard matching.  Currently only
+            a single wildcard item may be extracted, so the list must
+            have length 1.  If not passed explicitly, wildcard list
+            will be taken from ``target``.  Passing [] for this option
+            will effectively disable the wildcard feature.
 
         Returns:
           A list of Unpacker objects, one per entry in coded.
@@ -333,6 +372,10 @@ class Unpacker:
         """
         if isinstance(coded, str):
             coded = [coded]
+
+        if wildcard is None and target is not None:
+            wildcard = list(target._fields.keys())[:1]
+
         # Make a plan based on the name list.
         unpackers = []
         wrap_name = None
@@ -361,6 +404,36 @@ class Unpacker:
             return f'<Unpacker:{self.dest}>'
         return f'<Unpacker:{self.dest}<-{self.src}>'
 
+    def unpack(self, item, dest=None):
+        """Extract desired fields from an AxisManager and merge them into
+        another one.
+
+        Args:
+
+          item (AxisManager): Source object from which to extract
+            fields.
+          dest (AxisManager): Place to put them.
+
+        Returns:
+          dest, or a new AxisManager if dest=None was passed in.
+
+        """
+        if dest is None:
+            dest = core.AxisManager()
+        fields_to_delete = list(item._fields.keys())
+        # Unpack to requested field names.
+        if self.src is None:
+            dest.wrap(self.dest, item)
+            return dest
+        else:
+            fields_to_delete.remove(self.src)
+            if self.src != self.dest:
+                item.move(self.src, self.dest)
+        for f in fields_to_delete:
+            item.move(f, None)
+        dest.merge(item)
+        return dest
+
 
 class LoaderInterface:
     """Base class for "Loader" classes.  Subclasses must define, at least,
@@ -375,8 +448,8 @@ class LoaderInterface:
         References to the input database are cached for later use.
 
         """
-        self.detdb = detdb
-        self.obsdb = obsdb
+        #self.detdb = detdb
+        #self.obsdb = obsdb
 
     def from_loadspec(self, load_params):
         """Retrieve a metadata result.

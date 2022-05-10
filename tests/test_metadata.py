@@ -133,11 +133,11 @@ class MetadataTest(unittest.TestCase):
 
         # To match the early/late example we need DetDb and ObsDb.
         detdb = metadata.DetDb()
-        detdb.create_table('base', ["`band` str", "`polcode` str"])
-        detdb.add_props('base', 'det1', band='f090', polcode='A')
-        detdb.add_props('base', 'det2', band='f090', polcode='B')
-        detdb.add_props('base', 'det3', band='f150', polcode='A')
-        detdb.add_props('base', 'det4', band='f150', polcode='B')
+        detdb.create_table('base', ["`name` str", "`band` str", "`polcode` str"])
+        detdb.add_props('base', 'det1', name='det1', band='f090', polcode='A')
+        detdb.add_props('base', 'det2', name='det2', band='f090', polcode='B')
+        detdb.add_props('base', 'det3', name='det3', band='f150', polcode='A')
+        detdb.add_props('base', 'det4', name='det4', band='f150', polcode='B')
 
         obsdb = metadata.ObsDb()
         t_pivot = 2000010000
@@ -171,7 +171,7 @@ class MetadataTest(unittest.TestCase):
             {'db': mandb_fn,
              'name': 'tau&timeconst'}
         ]
-        mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00'})
+        mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00'}, detdb.props())
         self.assertCountEqual(mtod['tau'], [T090, T090, T150, T150])
 
         # Test 2: ManifestDb specifies polcode, which crosses with
@@ -196,7 +196,7 @@ class MetadataTest(unittest.TestCase):
         # Now we expect only f090 A and f150 B to resolve to non-bad vals.
         # Make sure you reinit the loader, to avoid cached dbs.
         loader = metadata.SuperLoader(obsdb=obsdb, detdb=detdb)
-        mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00'})
+        mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00'}, detdb.props())
         self.assertCountEqual(mtod['tau'], [T090, TBAD, TBAD, T150])
 
 
