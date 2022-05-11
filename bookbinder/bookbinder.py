@@ -363,6 +363,7 @@ class Bookbinder(object):
         self.metadata = []
         self.frame_num = 0
         self.sample_num = 0
+        self.default_mode = True
 
         self.frameproc = FrameProcessor()
 
@@ -422,6 +423,10 @@ class Bookbinder(object):
         Determine the frame boundaries of the output Book
         """
         frame_splits = []
+
+        if self.default_mode:
+            frame_splits += [core.G3Time(1e18)]  # 1e18 = 2286-11-20T17:46:40.000000000 (in the distant future)
+            return frame_splits
 
         # Assign a value to each event based on what occurs at that time: 0 for a zero-crossing,
         # +/-1 for an azimuth start/stop, and +/-2 for an elevation start/stop. The cumulative
@@ -486,63 +491,15 @@ class Bookbinder(object):
                 self.default_mode = False
                 self.frameproc(h)
 
-        if self.default_mode:
-            print("No encoder data found in HK file(s); continuing with default mode.")
-
-            # Loop over SMuRF frames/files
-            while len(self._smurf_files) >= 0:
-                output = []
-                for f in self.smurf_iter:
-                    if f.type != core.G3FrameType.Scan:
-                        if self.frameproc.smbundle is None or len(self.frameproc.smbundle.times) == 0:
-                            output += [f]
-                        else:
-                            self.metadata += [f]
-                    else:
-                        o = self.frameproc(f)
-                        # Write out metadata frames only when FrameProcessor outputs one or more (scan) frames
-                        if len(o) > 0:
-                            output += o + self.metadata
-                            self.metadata = []
-
-                    # To avoid keeping too many frames in memory, write out buffer if too long
-                    if len(output) >= 10:
-                        if self._verbose:
-                            print("Writing out buffered frames to avoid storing too many in memory.")
-                        self.write_frames(output)
-                        output = []
-
-                # If there are no more SMuRF frames, output remaining SMuRF data
-                if len(self.frameproc.smbundle.times) > 0:
-                    output += self.frameproc.flush(self.frameproc.smbundle.times[-1] + 1)
-                self.write_frames(output + self.metadata)
-                self.metadata = []
-
-                # If there are remaining files, update the
-                # SMuRF source iterator and G3 file writer
-                if len(self._smurf_files) > 0:
-                    ifile = self._smurf_files.pop(0)
-                    if self._verbose: print(f"Bookbinding {ifile}")
-                    self.smurf_iter = smurf_reader(ifile)
-                if len(self._out_files) > 0:
-                    ofile = self._out_files.pop(0)
-                    if self._verbose: print(f"Writing {ofile}")
-                    self.writer = core.G3Writer(ofile)
-                    afile = self._ancil_files.pop(0)
-                    self.ancil_writer = core.G3Writer(afile)
-                    self.frame_num = 0
-                    self.sample_num = 0
-                else:
-                    break
-
-            return
-
         for event_time in self.find_frame_splits():
             self.frameproc.flush_time = event_time
             output = []
 
             if self.frameproc.smbundle is not None and self.frameproc.smbundle.ready(self.frameproc.flush_time):
                 output += self.frameproc.flush()
+                if len(output) > 0:
+                    output += self.metadata
+                    self.metadata = []
                 self.write_frames(output)
                 continue
 
@@ -554,7 +511,8 @@ class Bookbinder(object):
                     if len(self.frameproc.smbundle.times) > 0:
                         self.frameproc.flush_time = self.frameproc.smbundle.times[-1] + 1  # +1 to ensure last sample gets included (= 1e-8 sec << sampling cadence)
                         output += self.frameproc.flush()
-                    self.write_frames(output)
+                    self.write_frames(output + self.metadata)
+                    self.metadata = []
 
                     # If there are remaining files, update the
                     # SMuRF source iterator and G3 file writer
@@ -587,8 +545,8 @@ class Bookbinder(object):
                         # Write out metadata frames only when FrameProcessor outputs one or more (scan) frames
                         if len(output) > 0:
                             output += self.metadata
+                            self.metadata = []
                     self.write_frames(output)
 
-                    # Clear buffers after writing
+                    # Clear output buffer after writing
                     output = []
-                    self.metadata = []
