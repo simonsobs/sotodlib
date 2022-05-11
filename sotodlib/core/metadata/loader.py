@@ -204,7 +204,6 @@ class SuperLoader:
                 for k, v in det_restricts.items():
                     if k in mi1.keys:
                         mask *= (mi1[k] == v)
-                        #keep_cols.remove(k)
                     else:
                         new_cols.append((k, v))
                 a = mi1.subset(keys=keep_cols, rows=mask)
@@ -219,15 +218,14 @@ class SuperLoader:
                 # index_line.
                 det_restricts = _filter_items('dets:', index_line, remove=True)
                 dets_key = 'name'
-                idx = np.array([list(det_info['name']).index(v)
-                                for v in mi1.dets.vals])
-                mask = np.ones(len(idx), bool)
+                new_dets, i_new, i_info = get_coindices(mi1.dets.vals, det_info['name'])
+                mask = np.ones(len(i_new), bool)
                 for k, v in det_restricts.items():
-                    mask *= (det_info[k][idx] == v)
-                if mask.all():
+                    mask *= (det_info[k][i_info] == v)
+                if mask.all() and len(new_dets) == mi1.dets.count:
                     mi2 = mi1
                 else:
-                    mi2 = mi1.restrict('dets', mi1.dets.vals[mask])
+                    mi2 = mi1.restrict('dets', new_dets[mask])
 
             else:
                 raise RuntimeError(
@@ -288,6 +286,7 @@ class SuperLoader:
         # Process each item.
         items = []
         for spec in spec_list:
+            logger.debug(f'Processing metadata spec={spec}')
             try:
                 item = self.load_one(spec, request, det_info)
                 error = None
@@ -297,16 +296,26 @@ class SuperLoader:
                 else:
                     reraise(e, spec)
 
-            # Things that augment det_info need to be resolved before
-            # the check==True escape.
             if spec.get('det_info'):
-                # Merge this info into det_info.  Note we have to find a 
-                key = spec['det_key']
-                both, i0, i1 = get_coindices(item[key], det_info[key])
+                # Things that augment det_info need to be resolved
+                # before the check==True escape.  det_info things
+                # should be ResultSets where all keys are prefixed
+                # with dets:!
+                if any([not k.startswith('dets:') for k in item.keys]):
+                    reraise(RuntimeError(
+                        f'New det_info metadata has keys without prefix "dets:": '
+                        f'{item}'))
 
+                det_key = spec['det_key']
+                key = det_key[len('dets:'):]
+                both, i0, i1 = get_coindices(item[det_key], det_info[key])
+
+                logger.debug(f' ... updating det_info (row count '
+                             f'{len(det_info)} -> {len(i1)})')
                 det_info = det_info.subset(rows=i1)
-                item = item.subset([k for k in item.keys if k != key],
+                item = item.subset([k for k in item.keys if k != det_key],
                                    rows=i0)
+                item.keys = [k[len('dets:'):] for k in item.keys]
                 det_info.merge(item)
                 item = None
 
@@ -315,6 +324,7 @@ class SuperLoader:
                 continue
 
             if item is None:
+                # Exit for the det_info case.
                 continue
 
             # Make everything an axisman.
@@ -328,6 +338,8 @@ class SuperLoader:
                     dest = unpacker.unpack(item, dest=dest)
             except Exception as e:
                 reraise(e, spec)
+
+            logger.debug(f'load(): dest now has shape {dest.shape}')
 
         if check:
             return items
