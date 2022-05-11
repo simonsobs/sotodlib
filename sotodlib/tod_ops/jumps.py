@@ -464,7 +464,7 @@ def fit_jumps(x, jumps, sizes, win_size=10, jump_range=5):
 
         win_size: Maximum number of samples to include on either side of jump in slice.
 
-        jump_range: Number of samples on either side of jump to fit for optimal jump location in.
+        jump_range: Number of samples on either side of jump to fit jump location from.
 
     Returns:
 
@@ -504,7 +504,7 @@ def fit_jumps(x, jumps, sizes, win_size=10, jump_range=5):
     return fit_res
 
 
-def jumpfix(x, jumps, sizes, min_size=0, win_size=10, fit=True, **kwargs):
+def jumpfix(x, jumps, sizes, min_size=0, win_size=10, fit=True, jump_range=5, **kwargs):
     """
     Fix jumps.
     Currently does the extremely naive technique of just subtracting the provided size.
@@ -524,6 +524,8 @@ def jumpfix(x, jumps, sizes, min_size=0, win_size=10, fit=True, **kwargs):
 
         fit: Call fit_jumps to try to fit for a more accurate jump position and size.
 
+        jump_range: Number of samples on either side of jump to fit jump location from.
+
         **kwargs: Arguments to pass on to np.isclose.
 
     Returns:
@@ -538,7 +540,9 @@ def jumpfix(x, jumps, sizes, min_size=0, win_size=10, fit=True, **kwargs):
         sizes = get_jump_sizes(_x, jumps, win_size=win_size)
 
     if fit:
-        fit_res = fit_jumps(_x, jumps, sizes).T
+        fit_res = fit_jumps(
+            _x, jumps, sizes, win_size=win_size, jump_range=jump_range
+        ).T
         jumps = fit_res[0].astype(int)
         sizes = fit_res[1]
 
@@ -553,7 +557,18 @@ def jumpfix(x, jumps, sizes, min_size=0, win_size=10, fit=True, **kwargs):
     return _x
 
 
-def fix_jumps(tod, signal=None, jumps=None, sizes=None):
+def fix_jumps(
+    tod,
+    signal=None,
+    jumps=None,
+    sizes=None,
+    min_sigma=1,
+    min_size=None,
+    win_size=10,
+    fit=False,
+    jump_range=5,
+    **kwargs
+):
     """
     Interface for jump fixing.
     Currently only supports very naive jump fixing but more to come.
@@ -583,6 +598,23 @@ def fix_jumps(tod, signal=None, jumps=None, sizes=None):
                If signal is 2d this should be an iterable where each element is an
                iterable containing sizes for the corresponding row in signal.
                Sizes should have the same ordering as jumps.
+
+        min_sigma: Min number of standard deviations a jump should be to attempt fixing.
+                   Note that the standard deviation here is computed by std_est and is
+                   the white noise standard deviation, so it doesn't include
+                   contributions from jumps or 1/f.
+                   If min_size is provided it will be used instead of this.
+
+        min_size: Smallest size jump to fix.
+
+        win_size: Window size for get_jump_sizes, also used to slice if fit=True.
+
+        fit: Call fit_jumps to try to fit for a more accurate jump position and size.
+
+        jump_range: Number of samples on either side of jump to fit jump location from.
+
+        **kwargs: Arguments to pass on to np.isclose.
+                  Used to determine if a jump is a tracking jump.
 
         Returns:
 
@@ -625,13 +657,41 @@ def fix_jumps(tod, signal=None, jumps=None, sizes=None):
         raise ValueError("Jumps and signal don't have the same number of dimensions")
 
     if ndim == 1:
-        if jump_locs.shape != sizes.shape:
+        if sizes is not None and jump_locs.shape != sizes.shape:
             raise ValueError("Number of sizes does not match number of jumps")
-        return jumpfix(signal, jump_locs, sizes)
+        if min_size is None:
+            min_size = min_sigma * std_est(signal)
+        return jumpfix(
+            signal,
+            jump_locs,
+            sizes,
+            min_size=min_size,
+            win_size=win_size,
+            fit=fit,
+            jump_range=jump_range,
+            **kwargs
+        )
 
     signal_fixed = np.zeros(signal.shape)
     for i, _jump_locs in enumerate(jump_locs):
-        if _jump_locs.shape != sizes[i].shape:
+        if (
+            sizes is not None
+            and sizes[i] is not None
+            and _jump_locs.shape != sizes[i].shape
+        ):
             raise ValueError("Number of sizes does not match number of jumps")
-        signal_fixed[i] = jumpfix(signal[i], _jump_locs, sizes[i])
+        if min_size is None:
+            _min_size = min_sigma * std_est(signal[i])
+        else:
+            _min_size = min_size
+        signal_fixed[i] = jumpfix(
+            signal[i],
+            _jump_locs,
+            sizes[i],
+            min_size=_min_size,
+            win_size=win_size,
+            fit=fit,
+            jump_range=jump_range,
+            **kwargs
+        )
     return signal_fixed
