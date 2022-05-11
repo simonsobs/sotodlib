@@ -279,7 +279,13 @@ class SuperLoader:
             if obs_info is not None:
                 obs_info.update(request)
                 request = obs_info
-
+            if dest is None:
+                dest = core.AxisManager()
+            obs_man = core.AxisManager()
+            for k, v in obs_info.items():
+                obs_man.wrap(k[len('obs:'):], v)
+            dest.wrap('obs_info', obs_man)
+            
         def reraise(e, spec):
             e.args = e.args + (
                 "\n\nThe above exception arose while processing "
