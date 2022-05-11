@@ -239,7 +239,8 @@ class SuperLoader:
         result = results[0].concatenate(results)
         return result
 
-    def load(self, spec_list, request, det_info=None, dest=None, check=False):
+    def load(self, spec_list, request, det_info=None, free_tags=[],
+             free_tag_fields=[], dest=None, check=False):
         """Loads metadata objects and processes them into a single
         AxisManager.
 
@@ -249,6 +250,11 @@ class SuperLoader:
           request (dict): A request dict.
           det_info (AxisManager): Detector info table to use for
             reconciling 'dets:*' field restrictions.
+          free_tags (list of str): Strings that restrict the detector
+            to any detector that matches the string in any of the
+            det_info fields listed in free_tag_fields.
+          free_tag_fields (list of str): Fields (of the form dets:x)
+            that can be inspected to match free_tags.
           dest (AxisManager or None): Destination container for the
             metadata (if None, a new one is created).
           check (bool): If True, run in check mode (see Notes).
@@ -282,6 +288,22 @@ class SuperLoader:
                 f"  request: {request}\n\n"
                 "Does your database expose this product for this observation?",)
             raise e
+
+        def check_tags(det_info):
+            mask = np.ones(len(det_info), bool)
+            for tag in free_tags:
+                for field in free_tag_fields:
+                    if field in det_info.keys:
+                        s = (det_info[field] == tag)
+                        if s.any():
+                            mask *= s
+            if not np.all(mask):
+                logger.debug(f' ... free tags reduce det_info (row count '
+                             f'{len(det_info)} -> {mask.sum()})')
+                det_info = det_info.subset(rows=mask)
+            return det_info
+
+        det_info = check_tags(det_info)
 
         # Process each item.
         items = []
@@ -318,6 +340,8 @@ class SuperLoader:
                 item.keys = [k[len('dets:'):] for k in item.keys]
                 det_info.merge(item)
                 item = None
+
+                det_info = check_tags(det_info)
 
             if check:
                 items.append((spec, error))
