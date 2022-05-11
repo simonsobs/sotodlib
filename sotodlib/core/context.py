@@ -318,8 +318,15 @@ class Context(odict):
         or else a request dict like the kind passed in from get_obs.
 
         """
+        free_tags, free_tag_fields = [], []
         if isinstance(request, str):
-            request = {'obs:obs_id': request}
+            free_tag_fields = self.get('obs_colon_tags', [])
+            if len(free_tag_fields):
+                obs_id = request.split(':')[0]
+                free_tags = request.split(':')[1:]
+            else:
+                obs_id = request
+            request = {'obs:obs_id': obs_id}
 
         # Call a hook after preparing obs_id but before loading obs
         obs_id = request['obs:obs_id']
@@ -335,7 +342,8 @@ class Context(odict):
 
         metadata_list = self._get_warn_missing('metadata', [])
         det_info = detdb.props()
-        return self.loader.load(metadata_list, request, det_info=det_info, check=check)
+        return self.loader.load(metadata_list, request, det_info=det_info, check=check,
+                                free_tags=free_tags, free_tag_fields=free_tag_fields)
 
     def check_meta(self, request):
         """Check for existence of required metadata.
