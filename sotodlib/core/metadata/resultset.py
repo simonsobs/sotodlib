@@ -178,6 +178,17 @@ class ResultSet(object):
         from sotodlib import core
         return core.AxisManager.from_resultset(self, detdb=detdb)
 
+    def to_axismanager(self, axis_name="dets", axis_key="dets"):
+        from sotodlib import core
+        aman = core.AxisManager(
+            core.LabelAxis(axis_name, self[axis_key])
+        )
+        for k in self.keys:
+            if k == axis_key:
+                continue
+            aman.wrap(k, self[k], [(0,axis_name)])
+        return aman
+
     # Todo: move this to the right place, too.
     def restrict_dets(self, restriction, detdb=None):
         # There are 4 classes of keys:
