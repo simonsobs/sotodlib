@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os.path as op
 from spt3g import core
 import numpy as np
 import so3g
@@ -357,6 +358,7 @@ class Bookbinder(object):
         self._out_files = out_files
         self._ancil_files = ['/'.join(n.split('/')[:-1] + [f'A_ancil_{i:03d}.g3']) for i, n in enumerate(self._out_files)]
         self._book_id = book_id
+        self._frame_splits_file = op.join(book_id, 'frame_splits.txt')
         self._session_id = session_id
         self._stream_id = stream_id
         self._verbose = verbose
@@ -491,7 +493,13 @@ class Bookbinder(object):
                 self.default_mode = False
                 self.frameproc(h)
 
-        for event_time in self.find_frame_splits():
+        if op.isfile(self._frame_splits_file):
+            frame_splits = [core.G3Time(t) for t in np.loadtxt(self._frame_splits_file, dtype='int')]
+        else:
+            frame_splits = self.find_frame_splits()
+            np.savetxt(self._frame_splits_file, frame_splits, fmt='%i')
+
+        for event_time in frame_splits:
             self.frameproc.flush_time = event_time
             output = []
 
