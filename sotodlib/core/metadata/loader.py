@@ -346,33 +346,7 @@ class SuperLoader:
                     reraise(spec, e)
 
             if spec.get('det_info'):
-                # Things that augment det_info need to be resolved
-                # before the check==True escape.  det_info things
-                # should be ResultSets where all keys are prefixed
-                # with dets:!
-                new_keys = _filter_items('dets:', item.keys)
-                if (len(new_keys) != len(item.keys)):
-                    reraise(spec, RuntimeError(
-                        f'New det_info metadata has keys without prefix "dets:": '
-                        f'{item}'))
-                item.keys = new_keys
-
-                match_key = spec['det_key'][len('dets:'):]
-                both, i0, i1 = get_coindices(item[match_key], det_info[match_key])
-
-                # Common fields need to be in accordance, then drop them.
-                common_keys = set(item.keys) & set(det_info.keys)
-                for k in common_keys:
-                    if len(i0) and np.any(item[k][i0] != det_info[k][i1]):
-                        reraise(spec, ValueError(f'Conflict in field "{k}"'))
-
-                logger.debug(f' ... updating det_info (row count '
-                             f'{len(det_info)} -> {len(i1)})')
-                det_info = det_info.subset(rows=i1)
-                item = item.subset([k for k in item.keys
-                                    if k != match_key and k not in common_keys],
-                                   rows=i0)
-                det_info.merge(item)
+                det_info = merge_det_info(det_info, item)
                 item = None
 
                 det_info, aug_request = check_tags(det_info, aug_request)
@@ -407,6 +381,58 @@ class SuperLoader:
         dest.wrap('det_info', convert_det_info(det_info))
 
         return dest
+
+
+def merge_det_info(det_info, new_info,
+                   index_columns=['readout_id', 'det_id']):
+    """Args:
+
+      det_info (ResultSet): The det_info table to start from, with
+        columns *without* the 'dets:' prefix.
+      new_info (ResultSet): New data to merge/check against
+        det_info; only columns with dets: prefix are processed.
+
+    Returns:
+      A (possibly) new det_info table, containing updates and
+      restrictions from new_info.  This will contain at least the
+      columns that det_info had, and at most as many rows.
+
+    Notes:
+      The input arguments det_info and new_info may be modified by
+      this function.
+
+    """
+    new_keys = _filter_items('dets:', new_info.keys)
+    if (len(new_keys) != len(new_info.keys)):
+        reraise(spec, RuntimeError(
+            f'New det_info metadata has keys without prefix "dets:": '
+            f'{new_info}'))
+    new_info.keys = new_keys
+
+    for match_key in index_columns:
+        if match_key in new_info.keys and match_key in det_info.keys:
+            break
+    else:
+        raise ValueError(
+            f'No co-index key ({index_columns}) was found in both '
+            f'{det_info} and {new_info}')
+
+    both, i0, i1 = get_coindices(new_info[match_key], det_info[match_key])
+
+    # Common fields need to be in accordance, then drop them.
+    common_keys = set(new_info.keys) & set(det_info.keys)
+    for k in common_keys:
+        if len(i0) and np.any(new_info[k][i0] != det_info[k][i1]):
+            reraise(spec, ValueError(f'Conflict in field "{k}"'))
+
+    logger.debug(f' ... updating det_info (row count '
+                 f'{len(det_info)} -> {len(i1)})')
+    det_info = det_info.subset(rows=i1)
+    new_info = new_info.subset([k for k in new_info.keys
+                        if k != match_key and k not in common_keys],
+                       rows=i0)
+    det_info.merge(new_info)
+    return det_info
 
 
 def convert_det_info(det_info, dets=None):
