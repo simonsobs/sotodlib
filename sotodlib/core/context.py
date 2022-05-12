@@ -170,7 +170,8 @@ class Context(odict):
 
     def get_obs(self, obs_id=None, dets=None, detsets=None,
                 free_tags=None, samples=None, no_signal=None,
-                loader_type=None, logic_only=False, filename=None):
+                loader_type=None, logic_only=False, filename=None,
+                meta=None):
         """Load TOD and supporting metadata for some observation.
 
         Args:
@@ -178,7 +179,10 @@ class Context(odict):
           obs_id (multiple): The observation to load (see Notes).
           dets (list): The detectors to read (default: all).
           detsets (list): The detsets to read (default: all).
-          samples (tuple of ints): The start and stop samples (default: all).
+          free_tags (list): Strings to match against the
+            obs_colon_tags fields for detector restrictions.
+          samples (tuple of ints): The start and stop sample indices
+            (default: all).
           no_signal (bool): If True, the .signal will be set to None.
             This is a way to get the axes and pointing info without
             the (large) TOD blob.
@@ -341,8 +345,25 @@ class Context(odict):
         else:
             detdb = self.detdb
 
+        # Initialize det_info, starting with detdb.
+        if detdb is not None:
+            det_info = detdb.props()
+
+            # Backwards compatibility -- add "readout_id" if not found.
+            if 'readout_id' not in det_info.keys:
+                logger.warning('DetDb does not contain "readout_id"; aliasing from "name".')
+                det_info.merge(ResultSet(['dets:readout_id'],
+                                         [(name,) for name in det_info['name']]))
+
+        # Incorporate detset info from obsfiledb.
+        detsets_info = self.obsfiledb.get_det_table(obs_id)
+        if det_info is None:
+            det_info = detsets_info
+        else:
+            det_info = metadata.merge_det_info(det_info, detsets_info,
+                                               ['readout_id'])
+
         metadata_list = self._get_warn_missing('metadata', [])
-        det_info = detdb.props()
         return self.loader.load(metadata_list, request, det_info=det_info, check=check,
                                 free_tags=free_tags, free_tag_fields=free_tag_fields)
 
