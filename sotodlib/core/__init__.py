@@ -13,3 +13,5 @@ from .axisman import IndexAxis, OffsetAxis, LabelAxis
 from .flagman import FlagManager
 
 from .hardware import Hardware
+
+from . import util
