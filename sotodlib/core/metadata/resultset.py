@@ -216,7 +216,7 @@ class ResultSet(object):
                 assert all(d not in dets for d in dets_i)  # Not disjoint!
                 dets.extend(dets_i)
                 indices.extend([row_i] * len(dets_i))
-            indices = np.array(indices)
+            indices = np.array(indices, dtype=int)
             aman = core.AxisManager(core.LabelAxis(axis_name, dets))
             for k in self.keys:
                 if not k.startswith(prefix):
