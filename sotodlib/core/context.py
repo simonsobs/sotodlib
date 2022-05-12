@@ -5,6 +5,7 @@ import importlib
 import logging
 
 from . import metadata
+from .axisman import AxisManager
 
 logger = logging.getLogger(__name__)
 
@@ -168,16 +169,57 @@ class Context(odict):
                 = metadata.SuperLoader(self)
 
     def get_obs(self, obs_id=None, dets=None, detsets=None,
-                samples=None, no_signal=None,
+                free_tags=None, samples=None, no_signal=None,
                 loader_type=None, logic_only=False, filename=None):
-        """Load TOD and supporting metadata for a particular observation id.
-        The detectors to read can be specified through colon-coding in
-        obs_id, through dets, or through detsets.
+        """Load TOD and supporting metadata for some observation.
 
-        After figuring out what detectors you want, loader_type will
-        be used to fund a loader function in the OBSLOADER_REGISTRY.
+        Args:
+
+          obs_id (multiple): The observation to load (see Notes).
+          dets (list): The detectors to read (default: all).
+          detsets (list): The detsets to read (default: all).
+          samples (tuple of ints): The start and stop samples (default: all).
+          no_signal (bool): If True, the .signal will be set to None.
+            This is a way to get the axes and pointing info without
+            the (large) TOD blob.
+          loader_type (str): Name of the registered TOD loader
+            function to use (this will override whatever is specified
+            in context.yaml).
+          logic_only (bool): If True, stop short of loading any data
+            and instead return a description of what files would be
+            read in.
+          filename (str): Instead of loading based on obs_id, figure
+            out what observation, detectors, and sample range sample
+            range are covered by this file and load that (along with
+            supporting metadata).
+          meta (AxisManager): Instead of loading based on obs_id, use
+            an AxisManager returned by get_meta (with possible
+            additional restrictions applied) as the way to determine
+            obs_id, sample range, and detectors to load.  Using this
+            suppresses metadata loading through the present function.
+
+        Notes:
+
+          The observation to load can be specified through the obs_id
+          argument, or through filename (if obs_id is None).  If
+          obs_id is a dict, it will be interpreted as the output from
+          an ObsDb query and expected to contain the key
+          ``'obs:obs_id'``.  If obs_id is a string, then it will first
+          be split on the ':' character, and the result converted to
+          {'obs:obs_id': tokens[0]}; the other tokens are interpreted
+          as "free_tags".
+
+          Finally if obs_id is an AxisManager, it's treated as if it
+          had been passed in through the meta argument.
+
+          Detector selection?
+
+          Note on interface stability: it's safe to assume that the
+          first arg will always be obs_id.  But all other arguments
+          should be passed by keyword.
 
         """
+        meta = None
         detspec = {}
 
         if filename is not None:
@@ -197,9 +239,23 @@ class Context(odict):
             else:
                 samples = info['sample_range']
 
-        # Handle the case that this is a row from a obsdb query.
-        if isinstance(obs_id, dict):
+        # Handle some special cases for obs_id; at the end of this
+        # checks and conversion, obs_id should be a string.
+
+        if isinstance(obs_id, AxisManager):
+            # Warn about meta.
+            meta = obs_id
+
+        elif isinstance(obs_id, dict):
             obs_id = obs_id['obs_id']  # You passed in a dict.
+
+        if meta is not None:
+            # Warn about samples, detsets, meta.
+            obs_id = meta['obs_info']['obs_id']  # You passed in an AxisMan
+            dets = list(meta.dets.vals)
+            detsets = []
+            if 'samps' in meta:
+                samples = (meta.samps.offset, meta.samps.offset + meta.samps.count)
 
         # Call a hook after preparing obs_id but before loading obs
         self._call_hook('before-use-detdb', obs_id=obs_id, dets=dets,
@@ -213,68 +269,13 @@ class Context(odict):
         else:
             detdb = self.detdb
 
-        # If the obs_id is colon-coded, decode them.
+        # If the obs_id is colon-coded, extract the tags.
+        free_tags = list(free_tags) if free_tags else []
         if ':' in obs_id:
             tokens = obs_id.split(':')
             obs_id = tokens[0]
-            allowed_fields = self.get('obs_colon_tags', [])
-            # Create a map from option value to option key.
-            prop_map = {}
-            for f in allowed_fields[::-1]:
-                for v in detdb.props(props=[f]).distinct()[f]:
-                    prop_map[v] = f
-            for t in tokens[1:]:
-                prop = prop_map.get(t)
-                if prop is None:
-                    raise ValueError('obs_id included tag "%s" but that is not '
-                                     'a value for any of DetDb.%s.' % (t, allowed_fields))
-                if prop in detspec:
-                    raise ValueError('obs_id included tag "%s" and that resulted '
-                                     'in re-restriction on property "%s"' % (t, prop))
-                detspec[prop] = t
-
-        # Start a list of det specs ... see DetDb.intersect.
-        dets_selection = [detspec]
-
-        # Did user give a list of dets (or detspec)?
-        if dets is not None:
-            dets_selection.append(dets)
-
-        # Default detsets should be only those listed in obsfiledb
-        if detsets is None and self.obsfiledb is not None:
-            detsets = self.obsfiledb.get_detsets(obs_id)
-
-        # Intersect with detectors allowed by the detsets argument?
-        if detsets is not None:
-            all_detsets = self.obsfiledb.get_detsets(obs_id)
-            ddets = []
-            for ds in detsets:
-                if isinstance(ds, int):
-                    # So user can pass in detsets=[0] as a shortcut.
-                    ds = all_detsets[ds]
-                ddets.extend(self.obsfiledb.get_dets(ds))
-            dets_selection.append(ddets)
-
-        # Make the final list of dets -- force resolve it to a list,
-        # not a detspec.
-        if detdb is None:
-            # Try to resolve this without a DetDb (if you do this
-            # better, maybe make it a static method of DetDb.
-            dets = None
-            for ds in dets_selection:
-                if isinstance(ds, dict):
-                    if len(ds) != 0:
-                        raise ValueError("Complex det request can't be processed "
-                                         "without a detdb; spec=f{dets_selection}")
-                else:
-                    if dets is None:
-                        dets = set(ds)
-                    else:
-                        dets.intersection_update(ds)
-            dets = list(dets)
-        else:
-            dets = detdb.intersect(*dets_selection,
-                                   resolve=True)
+            free_tags.extend(tokens[1:])
+            free_tag_fields = self.get('obs_colon_tags', [])
 
         # The request to the metadata loader should include obs_id and
         # the detector selection.
