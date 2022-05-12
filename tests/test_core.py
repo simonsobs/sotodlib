@@ -382,5 +382,25 @@ class TestFlagManager(unittest.TestCase):
         tod.wrap('flags', flags)
         self.assertTrue( type(tod.flags) == core.FlagManager )
 
+
+class TestUtil(unittest.TestCase):
+    def test_coindices(self):
+        x = ['d', 'a', 'g', 'e', 'b']
+        y = ['x', 'b', 'o', 'd', 'q']
+        z, i0, i1 = core.util.get_coindices(x, y)
+        the_answers = (['d', 'b'], [0, 4], [3, 1])
+        self.assertEqual(list(z),  the_answers[0])
+        self.assertEqual(list(i0), the_answers[1])
+        self.assertEqual(list(i1), the_answers[2])
+
+    def test_multi_index(self):
+        x = ['x', 'y', 'c', 'a']
+        y = ['a', 'a', 'b', 'c', 'a', 'u']
+        ix = core.util.get_multi_index(x, y)
+        the_answer = np.array([x.index(_y) if _y in x else -1
+                               for _y in y])
+        self.assertEqual(list(ix), list(the_answer))
+
+
 if __name__ == '__main__':
     unittest.main()
