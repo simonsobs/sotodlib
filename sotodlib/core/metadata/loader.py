@@ -123,7 +123,8 @@ class SuperLoader:
           expresses that the result should be limited to only a subset
           of those detectors.  This is notated in practice by
           including dets:* fields in the index data in the ManifestDb,
-          or in the request dict.
+          or in the request dict.  Only fields already present in
+          det_info may be included in the request dict.
 
         Returns:
           A list of tuples (unpacker, item), corresponding to each
@@ -274,19 +275,20 @@ class SuperLoader:
 
         """
         # Augmented request.
+        aug_request = _filter_items('obs:', request, False)
         if self.obsdb is not None and 'obs:obs_id' in request:
             obs_info = self.obsdb.get(request['obs:obs_id'], add_prefix='obs:')
             if obs_info is not None:
-                obs_info.update(request)
-                request = obs_info
+                obs_info.update(aug_request)
+                aug_request.update(obs_info)
             if dest is None:
                 dest = core.AxisManager()
             obs_man = core.AxisManager()
-            for k, v in obs_info.items():
-                obs_man.wrap(k[len('obs:'):], v)
+            for k, v in _filter_items('obs:', obs_info).items():
+                obs_man.wrap(k, v)
             dest.wrap('obs_info', obs_man)
             
-        def reraise(e, spec):
+        def reraise(spec, e):
             e.args = e.args + (
                 "\n\nThe above exception arose while processing "
                 "the following metadata spec:\n"
@@ -295,59 +297,85 @@ class SuperLoader:
                 "Does your database expose this product for this observation?",)
             raise e
 
-        def check_tags(det_info):
+        def check_tags(det_info, aug_request, final=False):
             mask = np.ones(len(det_info), bool)
+            unmatched = list(free_tags)
             for tag in free_tags:
                 for field in free_tag_fields:
                     if field in det_info.keys:
                         s = (det_info[field] == tag)
                         if s.any():
                             mask *= s
+                            unmatched.remove(tag)
+            if final and len(unmatched):
+                raise RuntimeError(
+                    f'One or more free tags was left unconsumed: {unmatched}')
+
+            det_reqs = _filter_items('dets:', request, True)
+            unmatched = []
+            for k, v in det_reqs.items():
+                if k in det_info.keys:
+                    mask *= (det_info[k] == v)
+                    aug_request['dets:' + k] = v
+                else:
+                    unmatched.append('dets:' + k)
+            if final and len(unmatched):
+                raise RuntimeError(
+                    f'One or more dets:* selections was left unconsumed: {unmatched}')
+
             if not np.all(mask):
-                logger.debug(f' ... free tags reduce det_info (row count '
+                logger.debug(f' ... free tags / request reduce det_info (row count '
                              f'{len(det_info)} -> {mask.sum()})')
                 det_info = det_info.subset(rows=mask)
-            return det_info
+            return det_info, aug_request
 
-        det_info = check_tags(det_info)
+        det_info, aug_request = check_tags(det_info, aug_request)
 
         # Process each item.
         items = []
         for spec in spec_list:
-            logger.debug(f'Processing metadata spec={spec}')
+            logger.debug(f'Processing metadata spec={spec} with augmented '
+                         f'request={aug_request}')
             try:
-                item = self.load_one(spec, request, det_info)
+                item = self.load_one(spec, aug_request, det_info)
                 error = None
             except Exception as e:
                 if check:
                     error = e
                 else:
-                    reraise(e, spec)
+                    reraise(spec, e)
 
             if spec.get('det_info'):
                 # Things that augment det_info need to be resolved
                 # before the check==True escape.  det_info things
                 # should be ResultSets where all keys are prefixed
                 # with dets:!
-                if any([not k.startswith('dets:') for k in item.keys]):
-                    reraise(RuntimeError(
+                new_keys = _filter_items('dets:', item.keys)
+                if (len(new_keys) != len(item.keys)):
+                    reraise(spec, RuntimeError(
                         f'New det_info metadata has keys without prefix "dets:": '
                         f'{item}'))
+                item.keys = new_keys
 
-                det_key = spec['det_key']
-                key = det_key[len('dets:'):]
-                both, i0, i1 = get_coindices(item[det_key], det_info[key])
+                match_key = spec['det_key'][len('dets:'):]
+                both, i0, i1 = get_coindices(item[match_key], det_info[match_key])
+
+                # Common fields need to be in accordance, then drop them.
+                common_keys = set(item.keys) & set(det_info.keys)
+                for k in common_keys:
+                    if len(i0) and np.any(item[k][i0] != det_info[k][i1]):
+                        reraise(spec, ValueError(f'Conflict in field "{k}"'))
 
                 logger.debug(f' ... updating det_info (row count '
                              f'{len(det_info)} -> {len(i1)})')
                 det_info = det_info.subset(rows=i1)
-                item = item.subset([k for k in item.keys if k != det_key],
+                item = item.subset([k for k in item.keys
+                                    if k != match_key and k not in common_keys],
                                    rows=i0)
-                item.keys = [k[len('dets:'):] for k in item.keys]
                 det_info.merge(item)
                 item = None
 
-                det_info = check_tags(det_info)
+                det_info, aug_request = check_tags(det_info, aug_request)
 
             if check:
                 items.append((spec, error))
@@ -367,9 +395,11 @@ class SuperLoader:
                 for unpacker in unpackers:
                     dest = unpacker.unpack(item, dest=dest)
             except Exception as e:
-                reraise(e, spec)
+                reraise(spec, e)
 
             logger.debug(f'load(): dest now has shape {dest.shape}')
+
+        check_tags(det_info, aug_request, final=True)
 
         if check:
             return items
