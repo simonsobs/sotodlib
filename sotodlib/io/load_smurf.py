@@ -1993,7 +1993,7 @@ def get_channel_info(
             * channel : Smurf Channel
             * frequency : resonator frequency
             * rchannel : readout channel
-            * ruid : readout unique ID
+            * readout_id : readout unique ID
 
     Args
     -----
@@ -2058,7 +2058,7 @@ def get_channel_info(
     ch_info.wrap("frequency", ch_map["freqs"], ([(0, det_axis)]))
     ch_info.wrap("rchannel", ch_map["rchannel"], ([(0, det_axis)]))
     if ruids is not None:
-        ch_info.wrap("ruid", np.array(ruids), ([(0, det_axis)]))
+        ch_info.wrap("readout_id", np.array(ruids), ([(0, det_axis)]))
 
     return ch_info
 
@@ -2144,7 +2144,7 @@ def load_file(
     obsfiledb=None,
     show_pb=True,
     det_axis="dets",
-    short_labels=True,
+    short_labels=False,
 ):
     """Load data from file where there may or may not be a connected archive.
 
