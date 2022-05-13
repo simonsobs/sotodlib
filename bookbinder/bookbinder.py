@@ -356,8 +356,8 @@ class Bookbinder(object):
         self._hk_files = hk_files
         self._smurf_files = smurf_files
         self._out_files = out_files
-        self._ancil_files = ['/'.join(n.split('/')[:-1] + [f'A_ancil_{i:03d}.g3']) for i, n in enumerate(self._out_files)]
         self._book_id = book_id
+        self._ancil_files = [op.join(book_id, f'A_ancil_{i:03d}.g3') for i in range(len(self._out_files))]
         self._frame_splits_file = op.join(book_id, 'frame_splits.txt')
         self._session_id = session_id
         self._stream_id = stream_id
