@@ -240,7 +240,7 @@ class SuperLoader:
         return result
 
     def load(self, spec_list, request, det_info=None, free_tags=[],
-             free_tag_fields=[], dest=None, check=False):
+             free_tag_fields=[], dest=None, check=False, det_info_scan=False):
         """Loads metadata objects and processes them into a single
         AxisManager.
 
@@ -258,6 +258,8 @@ class SuperLoader:
           dest (AxisManager or None): Destination container for the
             metadata (if None, a new one is created).
           check (bool): If True, run in check mode (see Notes).
+          det_info_scan (bool): If True, *only* process entries that
+            directly update det_info.
 
         Returns:
           In normal mode, an AxisManager containing the metadata
@@ -336,8 +338,12 @@ class SuperLoader:
         # Process each item.
         items = []
         for spec in spec_list:
+            if det_info_scan and not spec.get('det_info'):
+                continue
+
             logger.debug(f'Processing metadata spec={spec} with augmented '
                          f'request={aug_request}')
+
             try:
                 item = self.load_one(spec, aug_request, det_info)
                 error = None
