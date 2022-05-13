@@ -1144,7 +1144,6 @@ class G3tSmurf:
         show_pb=True,
         load_biases=True,
         status=None,
-        short_labels=True,
     ):
         """
         Loads smurf G3 data for a given time range. For the specified time range
@@ -1244,7 +1243,6 @@ class G3tSmurf:
             channels=channels,
             archive=self,
             show_pb=show_pb,
-            short_labels=short_labels,
         )
 
         msk = np.all(
