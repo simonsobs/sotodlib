@@ -2292,7 +2292,7 @@ def load_file(
 
     # Build AxisManager
     aman = core.AxisManager(
-        ch_info[det_axis].copy(),
+        ch_info[det_axis],
         core.OffsetAxis("samps", count, sample_start),
     )
     aman.wrap("timestamps", _get_timestamps(streams), ([(0, "samps")]))
@@ -2313,8 +2313,14 @@ def load_file(
 
     rad_per_count = np.pi / 2 ** 15
     aman.signal *= rad_per_count
-
-    aman.wrap("ch_info", ch_info)
+    
+    aman.wrap(
+        "det_info", 
+        core.AxisManager( ch_info[det_axis])
+    )
+    if "readout_id" in ch_info:
+        aman.det_info.wrap("readout_id", ch_info.readout_id, [(0,det_axis)])
+    aman.det_info.wrap("smurf", ch_info)
 
     temp = core.AxisManager(aman.samps.copy())
     if load_primary:
