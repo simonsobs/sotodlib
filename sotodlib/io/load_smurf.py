@@ -1979,7 +1979,7 @@ def _get_channel_mapping(status, ch_map):
 
 
 def get_channel_info(
-    status, mask=None, archive=None, obsfiledb=None, det_axis="dets", short_labels=True
+    status, mask=None, archive=None, obsfiledb=None, det_axis="dets",
 ):
     """Create the Channel Info Section of a G3tSmurf AxisManager
 
@@ -2004,9 +2004,6 @@ def get_channel_info(
         G3tSmurf instance for looking for tunes/tunesets
     obsfiledb : ObsfileDb instance (optional)
         ObsfileDb instance for det names / band / channel
-    short_labels : bool
-        Makes the labels used in the detector axis shorter/easier to read
-        if false the labels will be the full readout unique ID
 
     Returns
     --------
@@ -2038,9 +2035,7 @@ def get_channel_info(
     else:
         ruids = None
 
-    if short_labels or ruids is None:
-        if not short_labels:
-            logger.debug("Ignoring RUID request because not loading from database")
+    if ruids is None:
         labels = [
             "sbch_{}_{:03d}".format(ch_map["band"][i], ch_map["channel"][i])
             for i in range(len(ch_list))
@@ -2144,7 +2139,6 @@ def load_file(
     obsfiledb=None,
     show_pb=True,
     det_axis="dets",
-    short_labels=False,
 ):
     """Load data from file where there may or may not be a connected archive.
 
@@ -2171,9 +2165,6 @@ def load_file(
       status : a SmurfStatus Instance if we don't want to use the one from the
           first file
       det_axis : name of the axis used for channels / detectors
-      short_labels : bool
-        Makes the labels used in the detector axis shorter/easier to read
-        if false the labels will be the full readout unique ID
 
     Returns
     ---------
@@ -2243,7 +2234,6 @@ def load_file(
         archive=archive,
         obsfiledb=obsfiledb,
         det_axis=det_axis,
-        short_labels=short_labels,
     )
 
     # flist will take the form [(file, sample_start, sample_stop)...] and will be
@@ -2370,7 +2360,7 @@ def load_g3tsmurf_obs(db, obs_id, dets=None, samples=None, **kwargs):
         "select name from files " "where obs_id=?" + "order by start", (obs_id,)
     )
     flist = [row[0] for row in c]
-    return load_file(flist, dets, samples=samples, obsfiledb=db, short_labels=False)
+    return load_file(flist, dets, samples=samples, obsfiledb=db, )
 
 
 core.OBSLOADER_REGISTRY["g3tsmurf"] = load_g3tsmurf_obs
