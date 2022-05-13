@@ -1,5 +1,4 @@
 from sotodlib import core
-from ..axisman import get_coindices
 
 import logging
 import os
@@ -219,7 +218,7 @@ class SuperLoader:
                 # index_line.
                 det_restricts = _filter_items('dets:', index_line, remove=True)
                 dets_key = 'name'
-                new_dets, i_new, i_info = get_coindices(mi1.dets.vals, det_info['name'])
+                new_dets, i_new, i_info = core.util.get_coindices(mi1.dets.vals, det_info['name'])
                 mask = np.ones(len(i_new), bool)
                 for k, v in det_restricts.items():
                     mask *= (det_info[k][i_info] == v)
@@ -315,8 +314,11 @@ class SuperLoader:
             unmatched = []
             for k, v in det_reqs.items():
                 if k in det_info.keys:
-                    mask *= (det_info[k] == v)
-                    aug_request['dets:' + k] = v
+                    if isinstance(v, list):
+                        mask *= (core.util.get_multi_index(v, det_info[k]) >= 0)
+                    else:
+                        mask *= (det_info[k] == v)
+                        aug_request['dets:' + k] = v
                 else:
                     unmatched.append('dets:' + k)
             if final and len(unmatched):
@@ -417,7 +419,7 @@ def merge_det_info(det_info, new_info,
             f'No co-index key ({index_columns}) was found in both '
             f'{det_info} and {new_info}')
 
-    both, i0, i1 = get_coindices(new_info[match_key], det_info[match_key])
+    both, i0, i1 = core.util.get_coindices(new_info[match_key], det_info[match_key])
 
     # Common fields need to be in accordance, then drop them.
     common_keys = set(new_info.keys) & set(det_info.keys)
