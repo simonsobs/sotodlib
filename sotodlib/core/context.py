@@ -170,12 +170,10 @@ class Context(odict):
 
     def get_obs(self, obs_id=None, dets=None, detsets=None,
                 free_tags=None, samples=None, no_signal=None,
-                loader_type=None, logic_only=False, filename=None,
-                meta=None):
+                loader_type=None, filename=None, meta=None):
         """Load TOD and supporting metadata for some observation.
 
         Args:
-
           obs_id (multiple): The observation to load (see Notes).
           dets (list): The detectors to read (default: all).
           detsets (list): The detsets to read (default: all).
@@ -189,9 +187,6 @@ class Context(odict):
           loader_type (str): Name of the registered TOD loader
             function to use (this will override whatever is specified
             in context.yaml).
-          logic_only (bool): If True, stop short of loading any data
-            and instead return a description of what files would be
-            read in.
           filename (str): Instead of loading based on obs_id, figure
             out what observation, detectors, and sample range sample
             range are covered by this file and load that (along with
@@ -210,13 +205,40 @@ class Context(odict):
           an ObsDb query and expected to contain the key
           ``'obs:obs_id'``.  If obs_id is a string, then it will first
           be split on the ':' character, and the result converted to
-          {'obs:obs_id': tokens[0]}; the other tokens are interpreted
-          as "free_tags".
+          {'obs:obs_id': tokens[0]}; the other tokens are appended to
+          "free_tags".
 
           Finally if obs_id is an AxisManager, it's treated as if it
           had been passed in through the meta argument.
 
-          Detector selection?
+          The detector subset to load is determined by the dets and
+          detsets arguments and any free_tags.  Arbitrary fields known
+          to det_info can be passed through dets, as lists or
+          individual strings to match.  For example::
+
+            dets={'dets:readout_id': ['my_det0', 'my_det6']}
+
+          which is equivalent to
+
+            dets=['my_det0', 'my_det6']
+
+          Batches can be selected using other det_info fields, e.g.::
+
+            dets={'dets:band': 'f150', 'dets:wafer_slot': ['w21', 'w22']}
+
+          You activate detsets through::
+
+            detsets=['fileset0', 'fileset1']
+
+          which is equivalent to including
+
+            dets={'dets:detset': ['fileset0', 'fileset1']}
+
+          The sample range to load is determined by the samples
+          argument.  Use Python start/stop indexing; for example
+          samples=(0, -2) will try to read all but the last two
+          samples and samples=(100, None) will read all samples except
+          the first 100.
 
           Note on interface stability: it's safe to assume that the
           first arg will always be obs_id.  But all other arguments
@@ -247,66 +269,43 @@ class Context(odict):
         # checks and conversion, obs_id should be a string.
 
         if isinstance(obs_id, AxisManager):
-            # Warn about meta.
-            meta = obs_id
+            # Just move that to the meta argument.
+            assert(meta is None)  # obs_id and meta both passed in?
+            obs_id, meta = None, obs_id
 
         elif isinstance(obs_id, dict):
             obs_id = obs_id['obs_id']  # You passed in a dict.
 
-        if meta is not None:
-            # Warn about samples, detsets, meta.
-            obs_id = meta['obs_info']['obs_id']  # You passed in an AxisMan
-            dets = list(meta.dets.vals)
-            detsets = []
-            if 'samps' in meta:
-                samples = (meta.samps.offset, meta.samps.offset + meta.samps.count)
-
-        # Call a hook after preparing obs_id but before loading obs
-        self._call_hook('before-use-detdb', obs_id=obs_id, dets=dets,
-                        detsets=detsets, samples=samples)
-
-        # Identify whether we should use a detdb or an obs_detdb
-        # If there is an obs_detdb, use that.
-        # Otherwise, use whatever is in self.detdb, even if that is None.
-        if self.obs_detdb is not None:
-            detdb = self.obs_detdb
-        else:
-            detdb = self.detdb
-
-        # If the obs_id is colon-coded, extract the tags.
+        # If the obs_id has colon-coded free tags, extract them.
         free_tags = list(free_tags) if free_tags else []
-        if ':' in obs_id:
+        if isinstance(obs_id, str) and ':' in obs_id:
             tokens = obs_id.split(':')
             obs_id = tokens[0]
             free_tags.extend(tokens[1:])
-            free_tag_fields = self.get('obs_colon_tags', [])
 
-        # The request to the metadata loader should include obs_id and
-        # the detector selection.
-        request = {'obs:obs_id': obs_id}
-        request.update({'dets:'+k: v for k, v in detspec.items()})
+        if meta is None:
+            # Load the metadata.
+            request = {'obs:obs_id': obs_id}
+            if detsets is not None:
+                request['dets:detset'] = detsets
+            if isinstance(dets, list):
+                request['dets:readout_id'] = dets
+            elif dets is not None:
+                request.update({'dets:' + k: v for k, v in dets.items()})
+            meta = self.get_meta(request, free_tags=free_tags)
 
-        if logic_only:
-            # Return the results of detector and obs resolution.
-            return {'request': request,
-                    'detspec': detspec,
-                    'dets': dets}
-
-        # How to load?
-        if loader_type is None:
-            loader_type = self.get('obs_loader_type', 'default')
-
-        # Load metadata.
-        metadata_list = self._get_warn_missing('metadata', [])
-        if not isinstance(metadata_list, list):
-            raise ValueError(f"Context metadata entry has type {type(metadata_list)} "
-                            "but should be a list. Check .yaml formatting")
-        meta = self.loader.load(metadata_list, request, det_info=detdb.props())
+        # Use the obs_id, dets, and samples (if possible) from meta.
+        obs_id = meta['obs_info']['obs_id']
+        dets = list(meta.det_info['readout_id'])
+        if samples is None and 'samps' in meta:
+            samples = (meta.samps.offset, meta.samps.offset + meta.samps.count)
 
         # Make sure standard obsloaders are registered ...
         from ..io import load as _
 
         # Load TOD.
+        if loader_type is None:
+            loader_type = self.get('obs_loader_type', 'default')
         loader_func = OBSLOADER_REGISTRY[loader_type]  # Register your loader?
         aman = loader_func(self.obsfiledb, obs_id, dets,
                            samples=samples, no_signal=no_signal)
@@ -317,18 +316,22 @@ class Context(odict):
             aman.merge(meta)
         return aman
 
-    def get_meta(self, request, check=False):
+    def get_meta(self, request, samples=None, check=False,
+                 free_tags=None, free_tag_fields=None,
+                 det_info_scan=False):
         """Load and return the supporting metadata for an observation.  The
         request parameter can be a simple observation id as a string,
         or else a request dict like the kind passed in from get_obs.
 
         """
-        free_tags, free_tag_fields = [], []
-        if isinstance(request, str):
+        if free_tag_fields is None:
             free_tag_fields = self.get('obs_colon_tags', [])
+
+        free_tags = list(free_tags) if free_tags else []
+        if isinstance(request, str):
             if len(free_tag_fields):
                 obs_id = request.split(':')[0]
-                free_tags = request.split(':')[1:]
+                free_tags.extend(request.split(':')[1:])
             else:
                 obs_id = request
             request = {'obs:obs_id': obs_id}
@@ -352,8 +355,8 @@ class Context(odict):
             # Backwards compatibility -- add "readout_id" if not found.
             if 'readout_id' not in det_info.keys:
                 logger.warning('DetDb does not contain "readout_id"; aliasing from "name".')
-                det_info.merge(ResultSet(['dets:readout_id'],
-                                         [(name,) for name in det_info['name']]))
+                det_info.merge(metadata.ResultSet(
+                    ['readout_id'], [(name,) for name in det_info['name']]))
 
         # Incorporate detset info from obsfiledb.
         detsets_info = self.obsfiledb.get_det_table(obs_id)
@@ -365,7 +368,8 @@ class Context(odict):
 
         metadata_list = self._get_warn_missing('metadata', [])
         return self.loader.load(metadata_list, request, det_info=det_info, check=check,
-                                free_tags=free_tags, free_tag_fields=free_tag_fields)
+                                free_tags=free_tags, free_tag_fields=free_tag_fields,
+                                det_info_scan=det_info_scan)
 
     def check_meta(self, request):
         """Check for existence of required metadata.
