@@ -494,7 +494,7 @@ class Bookbinder(object):
                 self.frameproc(h)
 
         if op.isfile(self._frame_splits_file):
-            frame_splits = [core.G3Time(t) for t in np.loadtxt(self._frame_splits_file, dtype='int')]
+            frame_splits = [core.G3Time(t) for t in np.loadtxt(self._frame_splits_file, dtype='int', ndmin=1)]
         else:
             frame_splits = self.find_frame_splits()
             np.savetxt(self._frame_splits_file, frame_splits, fmt='%i')
