@@ -166,7 +166,7 @@ class Context(odict):
         # The metadata loader.
         if load_list == 'all' or 'loader' in load_list:
             self.loader \
-                = metadata.SuperLoader(self)
+                = metadata.SuperLoader(self, obsdb=self.obsdb)
 
     def get_obs(self, obs_id=None, dets=None, detsets=None,
                 free_tags=None, samples=None, no_signal=None,
@@ -349,6 +349,7 @@ class Context(odict):
             detdb = self.detdb
 
         # Initialize det_info, starting with detdb.
+        det_info = None
         if detdb is not None:
             det_info = detdb.props()
 
@@ -360,11 +361,8 @@ class Context(odict):
 
         # Incorporate detset info from obsfiledb.
         detsets_info = self.obsfiledb.get_det_table(obs_id)
-        if det_info is None:
-            det_info = detsets_info
-        else:
-            det_info = metadata.merge_det_info(det_info, detsets_info,
-                                               ['readout_id'])
+        det_info = metadata.merge_det_info(det_info, detsets_info,
+                                           ['readout_id'])
 
         metadata_list = self._get_warn_missing('metadata', [])
         return self.loader.load(metadata_list, request, det_info=det_info, check=check,

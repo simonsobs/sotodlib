@@ -42,7 +42,7 @@ class SuperLoader:
                 detdb = context.detdb
             if obsdb is None:
                 obsdb = context.obsdb
-            if working_dir is None:
+            if working_dir is None and context.filename is not None:
                 working_dir = os.path.split(context.filename)[0]
         if working_dir is None:
             working_dir = os.getcwd()
@@ -135,15 +135,21 @@ class SuperLoader:
 
         """
         # Load the database, match the request,
-        dbfile = os.path.join(self.working_dir, spec['db'])
-        dbpath = os.path.split(dbfile)[0]
-        if dbfile not in self.manifest_cache:
-            if dbfile.endswith('sqlite'):
-                man = core.metadata.ManifestDb.readonly(dbfile)
-            else:
-                man = core.metadata.ManifestDb.from_file(dbfile)
-            self.manifest_cache[dbfile] = man
-        man = self.manifest_cache[dbfile]
+        if isinstance(spec['db'], str):
+            # The usual case.
+            dbfile = os.path.join(self.working_dir, spec['db'])
+            dbpath = os.path.split(dbfile)[0]
+            if dbfile not in self.manifest_cache:
+                if dbfile.endswith('sqlite'):
+                    man = core.metadata.ManifestDb.readonly(dbfile)
+                else:
+                    man = core.metadata.ManifestDb.from_file(dbfile)
+                self.manifest_cache[dbfile] = man
+            man = self.manifest_cache[dbfile]
+        elif isinstance(spec['db'], core.metadata.ManifestDb):
+            # Useful for testing and hacking
+            dbpath = self.working_dir
+            man = spec['db']
 
         # Do we have all the keys we need?
         provided_obs_keys = _filter_items(
@@ -395,8 +401,8 @@ def merge_det_info(det_info, new_info,
                    index_columns=['readout_id', 'det_id']):
     """Args:
 
-      det_info (ResultSet): The det_info table to start from, with
-        columns *without* the 'dets:' prefix.
+      det_info (ResultSet or None): The det_info table to start from,
+        with columns *without* the 'dets:' prefix.
       new_info (ResultSet): New data to merge/check against
         det_info; only columns with dets: prefix are processed.
 
@@ -407,7 +413,9 @@ def merge_det_info(det_info, new_info,
 
     Notes:
       The input arguments det_info and new_info may be modified by
-      this function.
+      this function.  Passing in None for det_info is convenient to
+      initialize a det_info from a new_info where the columns are
+      named dets:* ...
 
     """
     new_keys = _filter_items('dets:', new_info.keys)
@@ -418,12 +426,16 @@ def merge_det_info(det_info, new_info,
     new_info.keys = new_keys
 
     for match_key in index_columns:
-        if match_key in new_info.keys and match_key in det_info.keys:
+        if match_key in new_info.keys and \
+           (det_info is None or match_key in det_info.keys):
             break
     else:
         raise ValueError(
             f'No co-index key ({index_columns}) was found in both '
             f'{det_info} and {new_info}')
+
+    if det_info is None:
+        return new_info
 
     both, i0, i1 = core.util.get_coindices(new_info[match_key], det_info[match_key])
 
@@ -449,7 +461,7 @@ def convert_det_info(det_info, dets=None):
     """
     children = {}
     if dets is None:
-        dets = det_info['name']
+        dets = det_info['readout_id']
     output = core.AxisManager(core.LabelAxis('dets', dets))
     subtables = {}
     for k in det_info.keys:
