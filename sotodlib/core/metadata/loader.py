@@ -13,15 +13,6 @@ REGISTRY = {
 }
 
 
-def _filter_items(prefix, d, remove=True):
-    # Restrict d to only items that start with prefix; if d is a dict,
-    # return a dict with only the keys that satisfy that condition.
-    if isinstance(d, dict):
-        return {k: d[prefix*remove + k]
-                for k in _filter_items(prefix, list(d.keys()), remove=remove)}
-    return [k[len(prefix)*remove:] for k in d if k.startswith(prefix)]
-
-
 class SuperLoader:
     def __init__(self, context=None, detdb=None, obsdb=None, working_dir=None):
         """Metadata batch loader.
@@ -255,7 +246,7 @@ class SuperLoader:
             described in load_one.
           request (dict): A request dict.
           det_info (AxisManager): Detector info table to use for
-            reconciling 'dets:*' field restrictions.
+            reconciling 'dets:...' field restrictions.
           free_tags (list of str): Strings that restrict the detector
             to any detector that matches the string in any of the
             det_info fields listed in free_tag_fields.
@@ -397,6 +388,15 @@ class SuperLoader:
         return dest
 
 
+def _filter_items(prefix, d, remove=True):
+    # Restrict d to only items that start with prefix; if d is a dict,
+    # return a dict with only the keys that satisfy that condition.
+    if isinstance(d, dict):
+        return {k: d[prefix*remove + k]
+                for k in _filter_items(prefix, list(d.keys()), remove=remove)}
+    return [k[len(prefix)*remove:] for k in d if k.startswith(prefix)]
+
+
 def merge_det_info(det_info, new_info,
                    index_columns=['readout_id', 'det_id']):
     """Args:
@@ -415,7 +415,7 @@ def merge_det_info(det_info, new_info,
       The input arguments det_info and new_info may be modified by
       this function.  Passing in None for det_info is convenient to
       initialize a det_info from a new_info where the columns are
-      named dets:* ...
+      named dets:... .
 
     """
     new_keys = _filter_items('dets:', new_info.keys)
@@ -478,6 +478,7 @@ def convert_det_info(det_info, dets=None):
         child = convert_det_info(sub_info, dets)
         output.wrap(subtable, child)
     return output
+
 
 class Unpacker:
     """Encapsulation of instructions for what information to extract from
