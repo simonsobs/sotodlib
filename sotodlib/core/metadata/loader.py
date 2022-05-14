@@ -375,7 +375,7 @@ class SuperLoader:
 
             # Make everything an axisman.
             if not isinstance(item, core.AxisManager):
-                item = item.axismanager(det_info=det_info)
+                item = item.axismanager(det_info=det_info, axis_key='readout_id')
 
             # Unpack it.
             try:
