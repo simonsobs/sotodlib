@@ -68,7 +68,7 @@ class SuperLoader:
           request (dict): A metadata request dict (stating what
             observation and detectors are of interest).
           det_info (ResultSet): Table of detector properties to use
-            when resolving metadata that is indexed with dets:*
+            when resolving metadata that is indexed with dets:...
             fields.
 
         Notes:
@@ -112,7 +112,7 @@ class SuperLoader:
           detectors, but the metadata index, or the user request,
           expresses that the result should be limited to only a subset
           of those detectors.  This is notated in practice by
-          including dets:* fields in the index data in the ManifestDb,
+          including dets:... fields in the index data in the ManifestDb,
           or in the request dict.  Only fields already present in
           det_info may be included in the request dict.
 
@@ -313,7 +313,7 @@ class SuperLoader:
             unmatched = []
             for k, v in det_reqs.items():
                 if k in det_info.keys:
-                    if isinstance(v, list):
+                    if isinstance(v, (list, np.ndarray)):
                         mask *= (core.util.get_multi_index(v, det_info[k]) >= 0)
                     else:
                         mask *= (det_info[k] == v)
@@ -485,7 +485,7 @@ class Unpacker:
     some source container, and what to call it in the destination
     container.
 
-    The classmethod :ref:method:``decode`` is used to populate
+    The classmethod :func:`decode` is used to populate
     Unpacker objects from metadata instructions; see docstring.
 
     Attributes:

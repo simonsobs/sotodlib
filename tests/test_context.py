@@ -116,6 +116,11 @@ class ContextTest(unittest.TestCase):
         checks = ctx.get_meta(obs_id, check=True)
         self.assertIsInstance(checks, list)
 
+        # Check det_info mode
+        det_info = ctx.get_det_info(obs_id)
+        self.assertIsInstance(det_info, metadata.ResultSet)
+        self.assertEqual(len(det_info), n)
+
     def test_110_more_loads(self):
         dataset_sim = DatasetSim()
         n_det, n_samp = dataset_sim.det_count, dataset_sim.sample_count
@@ -127,17 +132,17 @@ class ContextTest(unittest.TestCase):
         self.assertEqual(tod.signal.shape, (n_det, n_samp))
 
         tod = ctx.get_obs(obs_id + ':f090')
-        self.assertEqual(tod.signal.shape, (n_det//2, n_samp))
+        self.assertEqual(tod.signal.shape, (n_det // 2, n_samp))
 
         tod = ctx.get_obs(obs_id, free_tags=['f150'])
-        self.assertEqual(tod.signal.shape, (n_det//2, n_samp))
+        self.assertEqual(tod.signal.shape, (n_det // 2, n_samp))
 
         tod = ctx.get_obs(obs_id, samples=(10, n_samp // 2))
         self.assertEqual(tod.signal.shape, (n_det, n_samp // 2 - 10))
 
         # Loading via filename
         tod = ctx.get_obs(filename='obs_number_11_neard.txt')
-        self.assertEqual(tod.signal.shape, (n_det//2, n_samp))
+        self.assertEqual(tod.signal.shape, (n_det // 2, n_samp))
 
         # Loading via prepopulated & modified meta
         meta = ctx.get_meta(obs_id)
@@ -151,6 +156,11 @@ class ContextTest(unittest.TestCase):
         meta.restrict('dets', meta.dets.vals[:5])
         tod = ctx.get_obs(meta)
         self.assertEqual(tod.signal.shape, (5, 80))
+
+        det_info = ctx.get_det_info(obs_id)
+        det_info = det_info.subset(rows=det_info['band'] == 'f090')
+        tod = ctx.get_obs(obs_id, dets=det_info)
+        self.assertEqual(tod.signal.shape, (n_det // 2, n_samp))
 
 
 class DatasetSim:

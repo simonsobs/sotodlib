@@ -5,7 +5,7 @@ import importlib
 import logging
 
 from . import metadata
-from .axisman import AxisManager, OffsetAxis
+from .axisman import AxisManager, OffsetAxis, AxisInterface
 
 logger = logging.getLogger(__name__)
 
@@ -182,13 +182,13 @@ class Context(odict):
         """Load TOD and supporting metadata for some observation.
 
         Most arguments to this function are also accepted by (and in
-        fact passed directly to) ``.get_meta``, but are documented
+        fact passed directly to) :func:`get_meta`, but are documented
         here.
 
         Args:
           obs_id (multiple): The observation to load (see Notes).
-          dets (list or dict): The detectors to read.  If None, all
-            dets will be read.
+          dets (list, dict or ResultSet): The detectors to read.  If
+            None, all dets will be read.
           samples (tuple of ints): The start and stop sample indices.
             If None, read all samples.  (Note that some loader
             functions might not support this argument.)
@@ -252,6 +252,15 @@ class Context(odict):
 
             dets=['det_00', 'det_01']
 
+          You can instead pass a "det_info" ResultSet directly into
+          the dets argument; that is equivalent to passing
+          dets=det_info['readout_id'].  This is to accomodate the
+          following sort of pattern::
+
+            det_info = context.get_det_info(obs_id)
+            det_info = det_info.subset(rows=(det_info['band'] == 'f090'))
+            tod = context.get_obs(obs_id, dets=det_info)
+
           The sample range to load is determined by the samples
           argument.  Use Python start/stop indexing; for example
           samples=(0, -2) will try to read all but the last two
@@ -303,9 +312,10 @@ class Context(odict):
         """Load supporting metadata for an observation and return it in an
         AxisManager.
 
-        The arguments shared with method .get_tod (obs_id, dets,
-        samples, filename, detsets, meta, free_tags) have the same
-        meaning as in that function and are treated in the same way.
+        The arguments shared with :func:`get_obs` (``obs_id``,
+        ``dets``, ``samples`, ``filename``, ``detsets`, ``meta``,
+        ``free_tags``) have the same meaning as in that function and
+        are treated in the same way.
 
         Args:
           check (bool): If True, run in a check mode where an attempt
@@ -416,6 +426,8 @@ class Context(odict):
             request['dets:detset'] = detsets
         if isinstance(dets, list):
             request['dets:readout_id'] = dets
+        elif isinstance(dets, metadata.ResultSet):
+            request['dets:readout_id'] = dets['readout_id']
         elif dets is not None:
             for k, v in dets.items():
                 if not k.startswith('dets:'):
@@ -440,6 +452,40 @@ class Context(odict):
                 axm = AxisManager(OffsetAxis('samps', stop - start, start, obs_id))
                 meta = meta.merge(axm)
         return meta
+
+    def get_det_info(self,
+                     obs_id=None,
+                     dets=None,
+                     samples=None,
+                     filename=None,
+                     detsets=None,
+                     meta=None,
+                     free_tags=None):
+        """Pass all arguments to :func:`get_meta(det_info_scan=True)`, and
+        then return only the det_info, as a ResultSet.
+
+        """
+        if meta is None:
+            meta = self.get_meta(obs_id=obs_id, dets=dets, samples=samples,
+                                 filename=filename, detsets=detsets, free_tags=free_tags,
+                                 det_info_scan=True)
+        # Convert
+        def _unpack(aman):
+            items = []
+            for k in aman.keys():
+                if isinstance(aman[k], AxisManager):
+                    sub_items = _unpack(aman[k])
+                    for _k, _c in sub_items:
+                        items.append((f'{k}.{_k}', _c))
+                elif isinstance(aman[k], AxisInterface):
+                    pass
+                else:
+                    items.append((k, aman[k]))
+            return items
+
+        items = _unpack(meta.det_info)
+        return metadata.ResultSet([k for k, v in items],
+                                  zip(*[v for k, v in items]))
 
 
 def _read_cfg(filename=None, envvar=None, default=None):
