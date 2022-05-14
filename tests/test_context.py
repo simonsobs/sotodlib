@@ -12,6 +12,7 @@ from sotodlib import core
 from sotodlib.core import metadata, Context, OBSLOADER_REGISTRY
 from sotodlib.io.metadata import ResultSetHdfLoader, write_dataset, _decode_array
 
+import numpy as np
 import os
 import h5py
 import sqlite3
@@ -75,8 +76,10 @@ class ContextTest(unittest.TestCase):
         # Test detector resolutions ...
         ctx = dataset_sim.get_context()
         n = len(dataset_sim.dets)
+        obs_id = dataset_sim.obss['obs_id'][1]
         for selection, count in [
                 ({'dets:readout_id': ['det05']}, 1),
+                ({'dets:readout_id': np.array(['det05'])}, 1),
                 ({'dets:detset': 'neard'}, 4),
                 ({'dets:detset': ['neard']}, 4),
                 ({'dets:detset': ['neard', 'fard']}, 8),
@@ -85,8 +88,7 @@ class ContextTest(unittest.TestCase):
                 ({'dets:band': ['f090']}, 4),
                 ({'dets:band': ['f090'], 'dets:detset': ['neard']}, 2),
         ]:
-            selection['obs:obs_id'] = dataset_sim.obss['obs_id'][1]
-            meta = ctx.get_meta(selection)
+            meta = ctx.get_meta(obs_id, dets=selection)
             self.assertEqual(meta.dets.count, count, msg=f"{selection}")
 
         # And without detdb nor metadata
@@ -94,9 +96,25 @@ class ContextTest(unittest.TestCase):
         for selection, count in [
                 ({'dets:detset': ['neard']}, 4),
         ]:
-            selection['obs:obs_id'] = dataset_sim.obss['obs_id'][1]
-            meta = ctx.get_meta(selection)
+            meta = ctx.get_meta(obs_id, dets=selection)
             self.assertEqual(meta.dets.count, count, msg=f"{selection}")
+
+        # Using free tags
+        ctx = dataset_sim.get_context()
+        for _id, _tags, count in [
+                (obs_id, ['f090'], 4),
+                (obs_id + ':f090', [], 4),
+        ]:
+            meta = ctx.get_meta(_id, free_tags=_tags)
+            self.assertEqual(meta.dets.count, count, msg=f"{selection}")
+
+        # And with obs_id as a dict.
+        meta = ctx.get_meta({'obs:obs_id': obs_id})
+        self.assertEqual(meta.dets.count, 8)
+
+        # Check check mode
+        checks = ctx.get_meta(obs_id, check=True)
+        self.assertIsInstance(checks, list)
 
     def test_110_more_loads(self):
         dataset_sim = DatasetSim()
@@ -124,8 +142,15 @@ class ContextTest(unittest.TestCase):
         # Loading via prepopulated & modified meta
         meta = ctx.get_meta(obs_id)
         meta.restrict('dets', meta.dets.vals[:5])
-        tod = ctx.get_obs(meta)
+        tod = ctx.get_obs(obs_id=meta)
         self.assertEqual(tod.signal.shape, (5, n_samp))
+        tod = ctx.get_obs(meta=meta)
+        self.assertEqual(tod.signal.shape, (5, n_samp))
+
+        meta = ctx.get_meta(obs_id, samples=(10,90))
+        meta.restrict('dets', meta.dets.vals[:5])
+        tod = ctx.get_obs(meta)
+        self.assertEqual(tod.signal.shape, (5, 80))
 
 
 class DatasetSim:
