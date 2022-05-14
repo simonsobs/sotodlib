@@ -153,14 +153,6 @@ class ResultSet(object):
             output[k] = c
         return output
 
-    def get_mask(self, select, prefix=''):
-        s = np.ones(len(self), bool)
-        for k, v in select.items():
-            if k.startswith(prefix):
-                k = k[len(prefix):]
-                s *= (self[k] == v)
-        return s
-
     def distinct(self):
         """
         Returns a ResultSet that is a copy of the present one, with
@@ -181,9 +173,22 @@ class ResultSet(object):
                     break
         assert(len(self.keys) == len(set(self.keys)))
 
-    # Todo: decide whether axisman conversion code lives here or axisman...
     def axismanager(self, det_info=None, axis_name='dets',
                     axis_key='name', prefix='dets:'):
+        """Convert self to a Context-compatible AxisManager.
+
+        Rows of this ResultSet correspond to the AxisManager axis_name
+        ("dets" by default).  The axis values are taken from field
+        prefix+axis_key, if that field exists in self; otherwise they
+        are taken from det_info (where axis_key must be a field).  In
+        the latter case, the fields in self starting with prefix are
+        joined, in the SQL sense, against the fields with the same
+        name in det_info.
+
+        The AxisManager that is returned may not have as many rows as
+        either det_info or self.
+
+        """
         from sotodlib import core
 
         # Determine the dets axis columns
@@ -208,15 +213,22 @@ class ResultSet(object):
                 raise RuntimeError(
                     'Expansion to dets axes requires det_info '
                     'but None was not passed in.')
-            dets = []
-            indices = []
-            for row_i, row in enumerate(self.subset(keys=dets_cols.keys())):
-                props = {v: row[k] for k, v in dets_cols.items()}
-                dets_i = det_info[axis_key][det_info.get_mask(props)]
-                assert all(d not in dets for d in dets_i)  # Not disjoint!
-                dets.extend(dets_i)
-                indices.extend([row_i] * len(dets_i))
-            indices = np.array(indices, dtype=int)
+
+            row_map = {}  # map from multi-key value to row in self
+            for i, row in enumerate(self):
+                key = tuple([row[k] for k in dets_cols.keys()])
+                if key in row_map:
+                    raise ValueError("Duplicate entries for combined unique key.")
+                row_map[key] = i
+
+            # Get index of self that corresponds to each row in det_info.
+            indices = np.array(
+                [row_map.get(tuple(row.values()), -1)
+                 for row in det_info.subset(keys=dets_cols.values())])
+            mask = indices >= 0
+            dets = det_info[axis_key][mask]
+            indices = indices[mask]
+
             aman = core.AxisManager(core.LabelAxis(axis_name, dets))
             for k in self.keys:
                 if not k.startswith(prefix):
