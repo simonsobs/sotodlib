@@ -69,32 +69,6 @@ class ContextTest(unittest.TestCase):
             ctx = Context(self._write_context(cd))
             self.assertIsInstance(getattr(ctx, key), cls)
 
-    def test_010_metadata(self):
-        obs_list = ['obs%i' % i for i in range(2)]
-        det_list = ['det%i' % i for i in range(4)]
-        ctx = Context(self._write_context(MINIMAL_CONTEXT))
-
-        ctx.obsdb = metadata.ObsDb()
-        for i, obs_id in enumerate(obs_list):
-            ctx.obsdb.update_obs(obs_id, data={'timestamp': 1680000000 + i*600})
-
-        ctx.detdb = metadata.DetDb()
-        ctx.detdb.create_table('base', [
-            "`index` integer",
-            "`band` string",
-        ])
-        for i, d in enumerate(det_list):
-            ctx.detdb.add_props('base', d,
-                                index=i,
-                                band={0: 'f090', 1: 'f150'}[i % 2])
-
-        req = ctx.get_obs('obs0', logic_only=True)
-        self.assertEqual(len(req['dets']), len(det_list))
-        req = ctx.get_obs('obs0', logic_only=True, dets=['det0'])
-        self.assertEqual(len(req['dets']), 1)
-        req = ctx.get_obs('obs0', logic_only=True, dets={'band': 'f090'})
-        self.assertEqual(len(req['dets']), len(det_list) // 2)
-
     def test_100_loads(self):
         dataset_sim = DatasetSim()
 
