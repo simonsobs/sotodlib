@@ -335,7 +335,7 @@ per detector per observation::
     for i in range(len(obs_rs)):
         aman = context.get_obs(obs_rs[i]['obs_id'])
         things = calculate_thing(aman)
-        thing_rs = metadata.ResultSet(keys=['dets:name', 'thing'])
+        thing_rs = metadata.ResultSet(keys=['dets:readout_id', 'thing'])
         for d, det in enumerate(aman.dets.vals):
             thing_rs.rows.append((det, things[d]))
         io_meta.write_dataset(thing_rs, h5_file, f'thing_for_{obs_id}')
