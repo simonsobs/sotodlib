@@ -413,7 +413,7 @@ class Bookbinder(object):
             self.sample_num += len(f['signal'].times) if oframe.type == core.G3FrameType.Scan else 0
 
     def write_ancil_frames(self, f):
-        aframe = core.G3Frame()
+        aframe = core.G3Frame(f.type)
         if 'ancil' in f.keys():
             aframe['ancil'] = f['ancil']
         if 'sample_range' in f.keys():
