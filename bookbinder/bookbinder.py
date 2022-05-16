@@ -519,6 +519,7 @@ class Bookbinder(object):
                     if len(self.frameproc.smbundle.times) > 0:
                         self.frameproc.flush_time = self.frameproc.smbundle.times[-1] + 1  # +1 to ensure last sample gets included (= 1e-8 sec << sampling cadence)
                         output += self.frameproc.flush()
+                    output = [o for o in output if len(o['signal'].times) > 0]
                     self.write_frames(output + self.metadata)
                     self.metadata = []
 
@@ -550,6 +551,7 @@ class Bookbinder(object):
                             self.metadata += [f]
                     else:
                         output += self.frameproc(f)  # FrameProcessor returns a list of frames (can be empty)
+                        output = [o for o in output if len(o['signal'].times) > 0]
                         # Write out metadata frames only when FrameProcessor outputs one or more (scan) frames
                         if len(output) > 0:
                             output += self.metadata
