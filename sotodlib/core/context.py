@@ -225,8 +225,8 @@ class Context(odict):
             used in the ObsDb and ObsFileDb.  Note however that this
             string may include "free tags" (see below).
           - a dict -- this is understood to be an ObsDb record, and
-            the value under key 'obs:obs_id' will be used as the
-            obs_id (the other items will be ignored).
+            the value under key 'obs_id' will be used as the obs_id
+            (the other items will be ignored).
           - an AxisManager -- this is a short-hand for passing an
             object through meta=... .  I.e., ``get_obs(obs_is=axisman)``
             is treated the same way as ``get_obs(obs_id=None, meta=axisman)``.
@@ -375,7 +375,7 @@ class Context(odict):
             obs_id, meta = None, obs_id
 
         elif isinstance(obs_id, dict):
-            obs_id = obs_id['obs:obs_id']  # You passed in a dict.
+            obs_id = obs_id['obs_id']  # You passed in a dict.
 
         elif isinstance(obs_id, str):
             # If the obs_id has colon-coded free tags, extract them.
