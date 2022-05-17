@@ -214,8 +214,8 @@ class SuperLoader:
                 # that may be used to toss things out based on
                 # index_line.
                 det_restricts = _filter_items('dets:', index_line, remove=True)
-                dets_key = 'name'
-                new_dets, i_new, i_info = core.util.get_coindices(mi1.dets.vals, det_info['name'])
+                dets_key = 'readout_id'
+                new_dets, i_new, i_info = core.util.get_coindices(mi1.dets.vals, det_info[dets_key])
                 mask = np.ones(len(i_new), bool)
                 for k, v in det_restricts.items():
                     mask *= (det_info[k][i_info] == v)
