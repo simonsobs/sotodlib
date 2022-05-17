@@ -89,8 +89,9 @@ class AxisInterface:
 class IndexAxis(AxisInterface):
     """This class manages a simple integer-indexed axis.  When
     intersecting data, the longer one will be simply truncated to
-    match the shorter.  Selectors must be tuples compatible with
-    slice(), e.g. (2,8,2).
+    match the shorter.  Selectors must be slice objects (with stride
+    1!) or tuples to be passed into slice(), e.g. (0, 1000) or (0,
+    None, 1)..
 
     """
     def __init__(self, name, count=None):
@@ -139,6 +140,9 @@ class OffsetAxis(AxisInterface):
     reference point.  It could be a TOD name ('obs_2020-12-01') or a
     timestamp or whatever.
 
+    Selectors must be slice objects (with stride 1!) or tuples to be
+    passed into slice(), e.g. (0, 1000) or (0, None, 1).
+
     """
 
     origin_tag = None
@@ -166,7 +170,10 @@ class OffsetAxis(AxisInterface):
         return super().resolve(src, axis_index)
 
     def restriction(self, selector):
-        sl = slice(*selector)
+        if not isinstance(selector, slice):
+            sl = slice(*selector)
+        else:
+            sl = selector
         start, stop, stride = sl.indices(self.count + self.offset)
         assert stride == 1
         assert start >= self.offset
