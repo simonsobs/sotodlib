@@ -109,7 +109,11 @@ class ContextTest(unittest.TestCase):
             self.assertEqual(meta.dets.count, count, msg=f"{selection}")
 
         # And with obs_id as a dict.
-        meta = ctx.get_meta({'obs:obs_id': obs_id})
+        meta = ctx.get_meta({'obs_id': obs_id})
+        self.assertEqual(meta.dets.count, 8)
+
+        # You know, the kind of dict you get from obsdb.
+        meta = ctx.get_meta(ctx.obsdb.get()[0])
         self.assertEqual(meta.dets.count, 8)
 
         # Check check mode
