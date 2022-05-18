@@ -1,6 +1,13 @@
 import numpy as np
 from collections import OrderedDict as odict
 
+import scipy.sparse as sparse
+## "temporary" fix to deal with scipy>1.8 changing the sparse setup
+try:
+    from scipy.sparse import csr_array
+except ImportError:
+    from scipy.sparse import csr_matrix as csr_array
+
 from .util import get_coindices
 
 
@@ -463,6 +470,14 @@ class AxisManager:
                     keepers, axis=ax_dim, other_fields=other_fields)
             elif isinstance(keepers[0], np.ndarray):
                 new_data[name] = np.concatenate(keepers, axis=ax_dim)
+            elif isinstance(keepers[0], csr_array):
+                if ax_dim == 0:
+                    new_data[name] = sparse.vstack(keepers)
+                elif ax_dim == 1:
+                    new_data[name] = sparse.hstack(keepers)
+                else:
+                    raise ValueError('sparse arrays cannot concatenate along '
+                                     f'axes greater than 1, received {ax_dim}')
             else:
                 # The general compatible object should have a static
                 # method called concatenate.
