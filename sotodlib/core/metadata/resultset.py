@@ -179,6 +179,14 @@ class ResultSet(object):
         return core.AxisManager.from_resultset(self, detdb=detdb)
 
     def to_axismanager(self, axis_name="dets", axis_key="dets"):
+        """Build an AxisManager directly from a Result, projecting all columns
+        along a single axis. This requires no additional metadata to build
+        
+        Args:
+            axis_name: string, name of the axis in the AxisManager
+            axis_key: string, name of the key in the ResultSet to put into the
+                axis labels.
+        """
         from sotodlib import core
         aman = core.AxisManager(
             core.LabelAxis(axis_name, self[axis_key])
@@ -186,6 +194,9 @@ class ResultSet(object):
         for k in self.keys:
             if k == axis_key:
                 continue
+            if sum([ x is None for x in self[k]]) > 0:
+                raise TypeError("None(s) found in key {}, these cannot be ".format(k)+
+                               "nicely wrapped into an AxisManager")
             aman.wrap(k, self[k], [(0,axis_name)])
         return aman
 
