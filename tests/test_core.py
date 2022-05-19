@@ -157,6 +157,31 @@ class TestAxisManager(unittest.TestCase):
         aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
         self.assertEqual(aman.signal.shape[0], len(detsA) + len(detsB))
 
+        # Even if one is empty?
+        amanX = amanA.restrict('dets', [])
+        amanY = amanB.copy()
+        aman = core.AxisManager.concatenate([amanX, amanY])
+        self.assertEqual(aman.signal.shape[0], amanY.signal.shape[0])
+
+        # or both are empty?
+        amanY = amanB.restrict('dets', [])
+        aman = core.AxisManager.concatenate([amanX, amanY])
+        self.assertEqual(aman.signal.shape[0], 0)
+
+        # or with sparse arrays?
+        amanAA = core.AxisManager(core.LabelAxis('dets', detsA),
+                                 core.OffsetAxis('samps', nsamps))
+        amanBB = core.AxisManager(core.LabelAxis('dets', detsB),
+                                 core.OffsetAxis('samps', nsamps))
+        amanAA.wrap('sparse', csr_array( ((8,3), ([0,1], [1,21])), 
+                                      shape=(amanAA.dets.count, amanAA.samps.count)),
+                   [(0,'dets'),(1,'samps')])
+        amanBB.wrap('sparse', csr_array( ((8,3), ([0,1], [2,54])), 
+                                      shape=(amanBB.dets.count, amanBB.samps.count)),
+                    [(0,'dets'),(1,'samps')])
+        aman = core.AxisManager.concatenate([amanAA, amanBB])
+        self.assertEqual(aman.dets.count, len(detsA) + len(detsB))
+
         # Handling of array that does not share the axis?
         amanA.wrap_new('azimuth', shape=('samps',))[:] = 1.
         amanB.wrap_new('azimuth', shape=('samps',))[:] = 2.
@@ -188,6 +213,18 @@ class TestAxisManager(unittest.TestCase):
                                             other_fields='drop')
         self.assertSequenceEqual(aman.fp.shape, (aman.dets.count, ))
 
+        # Loop checking
+        a = amanA.copy()
+        b = amanB.copy()
+        a.wrap('b', b)
+        with self.assertRaises(AssertionError):
+            a.wrap('a', a)
+        with self.assertRaises(AssertionError):
+            a.b.wrap('a', a)
+        # This is allowed because a.b is not the same as b.  Maybe it
+        # should be... but that will be a deliberate API change.
+        b.wrap('a', a)
+        self.assertNotIn('a', a.b)
 
     # Multi-dimensional restrictions.
 
@@ -309,7 +346,7 @@ class TestAxisManager(unittest.TestCase):
         aman.wrap('c', np.str_('twelve'))
         aman.wrap('d', np.bool_(False))
 
-        aman.wrap('sparse', csr_array( ((8,3), ([0,1], [20,54])), 
+        aman.wrap('sparse', csr_array( ((8,3), ([0,1], [1,54])), 
                                       shape=(aman.dets.count, aman.samps.count)))
 
         # Make sure the saving / clobbering / readback logic works
@@ -358,6 +395,26 @@ class TestFlagManager(unittest.TestCase):
         flags = core.FlagManager.for_tod(tod, 'dets', 'samps')
         tod.wrap('flags', flags)
         self.assertTrue( type(tod.flags) == core.FlagManager )
+
+
+class TestUtil(unittest.TestCase):
+    def test_coindices(self):
+        x = ['d', 'a', 'g', 'e', 'b']
+        y = ['x', 'b', 'o', 'd', 'q']
+        z, i0, i1 = core.util.get_coindices(x, y)
+        the_answers = (['d', 'b'], [0, 4], [3, 1])
+        self.assertEqual(list(z),  the_answers[0])
+        self.assertEqual(list(i0), the_answers[1])
+        self.assertEqual(list(i1), the_answers[2])
+
+    def test_multi_index(self):
+        x = ['x', 'y', 'c', 'a']
+        y = ['a', 'a', 'b', 'c', 'a', 'u']
+        ix = core.util.get_multi_index(x, y)
+        the_answer = np.array([x.index(_y) if _y in x else -1
+                               for _y in y])
+        self.assertEqual(list(ix), list(the_answer))
+
 
 if __name__ == '__main__':
     unittest.main()
