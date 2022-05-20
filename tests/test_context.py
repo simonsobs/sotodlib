@@ -85,7 +85,6 @@ class ContextTest(unittest.TestCase):
                 ({'dets:detset': ['neard']}, 4),
                 ({'dets:detset': ['neard', 'fard']}, 8),
                 ({'dets:detset': ['neard'], 'dets:readout_id': ['det00', 'det05']}, 1),
-                ({'dets:readout_id': ['xx']}, 0),
                 ({'dets:band': ['f090']}, 4),
                 ({'dets:band': ['f090'], 'dets:detset': ['neard']}, 2),
         ]:
@@ -183,15 +182,15 @@ class DatasetSim:
     """
     def __init__(self):
         self.dets = metadata.ResultSet(
-            ['readout_id', 'band', 'pol_code', 'x', 'y'],
-            [('det00', 'f090', 'A', 0.0, 0.0),
-             ('det01', 'f090', 'B', 0.0, 0.0),
-             ('det02', 'f150', 'A', 0.0, 0.0),
-             ('det03', 'f150', 'B', 0.0, 0.0),
-             ('det04', 'f090', 'A', 1.0, 0.0),
-             ('det05', 'f090', 'B', 1.0, 0.0),
-             ('det06', 'f150', 'A', 1.0, 0.0),
-             ('det07', 'f150', 'B', 1.0, 0.0)])
+            ['readout_id', 'band', 'pol_code', 'x', 'y', 'detset'],
+            [('det00', 'f090', 'A', 0.0, 0.0, 'neard'),
+             ('det01', 'f090', 'B', 0.0, 0.0, 'neard'),
+             ('det02', 'f150', 'A', 0.0, 0.0, 'neard'),
+             ('det03', 'f150', 'B', 0.0, 0.0, 'neard'),
+             ('det04', 'f090', 'A', 1.0, 0.0, 'fard'),
+             ('det05', 'f090', 'B', 1.0, 0.0, 'fard'),
+             ('det06', 'f150', 'A', 1.0, 0.0, 'fard'),
+             ('det07', 'f150', 'B', 1.0, 0.0, 'fard')])
 
         self.obss = metadata.ResultSet(
             ['obs_id', 'timestamp', 'type', 'target'],
@@ -216,7 +215,7 @@ class DatasetSim:
                                     'pol_code string',
                                     'x float',
                                     'y float'])
-        save_for_later = ['band']
+        save_for_later = ['band', 'detset']
         for row in self.dets.subset(keys=[k for k in self.dets.keys
                                           if k not in save_for_later]):
             detdb.add_props('base', row['readout_id'], **row)
@@ -228,13 +227,11 @@ class DatasetSim:
             obsdb.update_obs(row['obs_id'], data=row)
 
         obsfiledb = metadata.ObsFileDb()
-        obsfiledb.add_detset('neard', self.dets['readout_id'][:len(self.dets)//2])
-        obsfiledb.add_detset('fard',  self.dets['readout_id'][len(self.dets)//2:])
-        for obs_id in self.obss['obs_id']:
-            obsfiledb.add_obsfile(f'{obs_id}_neard.txt', obs_id, 'neard',
-                                  0, self.sample_count)
-            obsfiledb.add_obsfile(f'{obs_id}_fard.txt', obs_id, 'fard',
-                                  0, self.sample_count)
+        for ds in ['neard', 'fard']:
+            obsfiledb.add_detset(ds, self.dets['readout_id'][self.dets['detset'] == ds])
+            for obs_id in self.obss['obs_id']:
+                obsfiledb.add_obsfile(f'{obs_id}_{ds}.txt', obs_id, ds,
+                                      0, self.sample_count)
 
         ctx = Context(data=MINIMAL_CONTEXT)
         ctx.obsdb = obsdb
@@ -290,16 +287,32 @@ class DatasetSim:
                  'dets:band': band
                  }, 'some_flags.g3')
 
+        # metadata: some_detset_info.h5
+        ## This matches purely based on dets:* properties.
+        _scheme = metadata.ManifestScheme() \
+                  .add_data_field('dataset') \
+                  .add_exact_match('dets:detset') \
+                  .add_data_field('loader')
+        info_db = metadata.ManifestDb(scheme=_scheme)
+        for detset in ['neard', 'fard']:
+            info_db.add_entry(
+                {'loader': 'unittest_loader',
+                 'dataset': detset,
+                 'dets:detset': detset,
+                 }, 'some_detset_info.h5')
+
         # metadata into context.
         ctx['metadata'] = [
-                {'db': bands_db,
-                 'det_info': True,
-                 'dets_key': 'readout_id'},
-                {'db': abscal_db,
-                 'name': 'cal&abscal'},
-                {'db': flags_db,
-                 'name': 'flags&'},
-            ]
+            {'db': bands_db,
+             'det_info': True,
+             'dets_key': 'readout_id'},
+            {'db': abscal_db,
+             'name': 'cal&abscal'},
+            {'db': flags_db,
+             'name': 'flags&'},
+            {'db': info_db,
+             'name': 'focal_plane'},
+        ]
 
         return ctx
 
@@ -345,6 +358,12 @@ class DatasetSim:
                 # from ever getting requested.
                 raise RuntimeError('metadata system asked for f220 data')
             return output
+        elif filename == 'some_detset_info.h5':
+            rs = metadata.ResultSet(['dets:readout_id', 'x', 'y'])
+            for row in self.dets.subset(rows=self.dets['detset'] == kw['dets:detset']):
+                rs.append({'dets:readout_id': row['readout_id'],
+                           'x': 100., 'y': 102.})
+            return rs
         else:
             raise ValueError(f'metadata request for "{filename}"')
 
