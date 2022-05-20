@@ -111,7 +111,7 @@ def main(args=None):
             channels = np.array(channels)
 
             rs_list = core.metadata.ResultSet(
-                keys=["dets:detector_id", 
+                keys=["dets:det_id", 
                       "dets:readout_id"]
             )
 
@@ -139,13 +139,13 @@ def main(args=None):
                     continue
                 i_rid = i_rid[0]
                 #ch_info.readout_id[i_did] = readout_ids[i_rid]
-                rs_list.append( {"dets:detector_id": det_id,
+                rs_list.append( {"dets:det_id": det_id,
                                  "dets:readout_id": readout_ids[i_rid]})
 
             for rid in readout_ids:
                 if rid in rs_list["dets:readout_id"]:
                     continue
-                rs_list.append( {"dets:detector_id": "NO_MATCH",
+                rs_list.append( {"dets:det_id": "NO_MATCH",
                                  "dets:readout_id": rid})
         
             
