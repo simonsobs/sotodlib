@@ -13,7 +13,7 @@ from argparse import ArgumentParser
 from detmap.makemap import MapMaker
 from sotodlib import core
 from sotodlib.io.load_smurf import G3tSmurf, TuneSets
-from sotodlib.io.metadata import write_dataset
+from sotodlib.io.metadata import write_dataset, read_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def main(args=None):
                      configs["g3tsmurf_db"],
                      meta_path=os.path.join(configs["data_prefix"], "smurf"))
     session = SMURF.Session()
-    print(configs["read_db"])
+
     if os.path.exists(configs["read_db"]):
         logger.info(f'Mapping {configs["read_db"]} for the archive index.')
         db = core.metadata.ManifestDb(configs["read_db"])
@@ -51,13 +51,18 @@ def main(args=None):
         scheme.add_data_field('dets:detset')
         scheme.add_data_field('dataset')
         db = core.metadata.ManifestDb(configs["read_db"], scheme=scheme)      
-        
+    
+    array_names = [array["name"] for array in configs["arrays"]]
+    det_info_group = ",".join(array_names)     
+
     for array in configs["arrays"]:
         ## Load Det Info
-        det_info = core.AxisManager.load(configs["det_info"])
+        rs = read_dataset(configs["det_info"], det_info_group)
+        det_rs = core.metadata.merge_det_info(None, rs)
+        det_info = core.metadata.loader.convert_det_info(det_rs, dets=det_rs["det_id"])
         det_info.restrict( 
             "dets", 
-            det_info.dets.vals[det_info.array==array["name"]],
+            det_info.dets.vals[det_info.wafer.array==array["name"]],
         )
         logger.info(
             "Found {det_info.dets.count} detector_ids for Array {array['name'}"
