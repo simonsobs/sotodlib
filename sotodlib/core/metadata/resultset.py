@@ -173,68 +173,6 @@ class ResultSet(object):
                     break
         assert(len(self.keys) == len(set(self.keys)))
 
-    def axismanager(self, det_info=None, axis_name='dets',
-                    axis_key='name', prefix='dets:'):
-        """Convert self to a Context-compatible AxisManager.
-
-        Rows of this ResultSet correspond to the AxisManager axis_name
-        ("dets" by default).  The axis values are taken from field
-        prefix+axis_key, if that field exists in self; otherwise they
-        are taken from det_info (where axis_key must be a field).  In
-        the latter case, the fields in self starting with prefix are
-        joined, in the SQL sense, against the fields with the same
-        name in det_info.
-
-        The AxisManager that is returned may not have as many rows as
-        either det_info or self.
-
-        """
-        from sotodlib import core
-
-        # Determine the dets axis columns
-        dets_cols = {}
-        for k in self.keys:
-            if k.startswith(prefix):
-                dets_cols[k] = k[len(prefix):]
-        # Get the detector names for entry.
-        if axis_key in dets_cols:
-            # If axis_key is a field in this dataset, there should be
-            # one row per detector, and construction is simple.
-            dets = self[axis_key]
-            assert(len(dets) == len(set(dets)))  # unique list?
-            aman = core.AxisManager(core.LabelAxis(axis_name, dets))
-            for k in self.keys:
-                if not k.startswith(prefix):
-                    aman.wrap(k, self[k], [(0, axis_name)])
-        else:
-            # Each row in self represents more than one detector, and
-            # we want to broadcast that to one row per detector.
-            if det_info is None:
-                raise RuntimeError(
-                    'Expansion to dets axes requires det_info '
-                    'but None was not passed in.')
-
-            row_map = {}  # map from multi-key value to row in self
-            for i, row in enumerate(self):
-                key = tuple([row[k] for k in dets_cols.keys()])
-                if key in row_map:
-                    raise ValueError("Duplicate entries for combined unique key.")
-                row_map[key] = i
-
-            # Get index of self that corresponds to each row in det_info.
-            indices = np.array(
-                [row_map.get(tuple(row.values()), -1)
-                 for row in det_info.subset(keys=dets_cols.values())])
-            mask = indices >= 0
-            dets = det_info[axis_key][mask]
-            indices = indices[mask]
-
-            aman = core.AxisManager(core.LabelAxis(axis_name, dets))
-            for k in self.keys:
-                if not k.startswith(prefix):
-                    aman.wrap(k, self[k][indices], [(0, axis_name)])
-        return aman
-
     def to_axismanager(self, axis_name="dets", axis_key="dets"):
         """Build an AxisManager directly from a Result, projecting all columns
         along a single axis. This requires no additional metadata to build

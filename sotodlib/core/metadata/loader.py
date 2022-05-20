@@ -163,20 +163,32 @@ class SuperLoader:
                 + '  ' + str(request) + '\n'
                 + 'The exception is:\n  %s' % text)
 
+        # Pre-screen the index_lines for dets:* assignments; plan to
+        # skip lines that aren't relevant according to det_info.
+        to_skip = []
+        for index_line in index_lines:
+            logger.debug(f'Pre-screening index_line={index_line}')
+            skip_this = len(det_info) == 0
+            if not skip_this:
+                mask = np.ones(len(det_info), bool)
+                for k, v in _filter_items('dets:', index_line, remove=True).items():
+                    mask *= (det_info[k] == v)
+                skip_this = (mask.sum() == 0)
+            to_skip.append(skip_this)
+
+        # Load at least one item, or we won't have the structure of
+        # the output.
+        if np.all(to_skip):
+            to_skip[0] = False
+
         # Load each index_line.
         results = []
-        for index_line in index_lines:
-            logger.debug(f'Processing index_line={index_line}')
-            # Augment the index_line with info from the request; if
-            # the request and index_line share a key but conflict on
-            # the value, we don't want this item.
-            skip_this = False
-            for k in request:
-                if k in index_line:
-                    if request[k] != index_line[k]:
-                        skip_this = True
-            if skip_this:
+        for skip, index_line in zip(to_skip, index_lines):
+            if skip:
+                logger.debug(f'Skipping load for index_line={index_line}')
                 continue
+            logger.debug(f'Loading for index_line={index_line}')
+
             index_line.update(request)
             loader = spec.get('loader', None)
             if loader is None:
@@ -215,10 +227,13 @@ class SuperLoader:
                 # index_line.
                 det_restricts = _filter_items('dets:', index_line, remove=True)
                 dets_key = 'readout_id'
-                new_dets, i_new, i_info = core.util.get_coindices(mi1.dets.vals, det_info[dets_key])
+                new_dets, i_new, i_info = core.util.get_coindices(
+                    mi1.dets.vals, det_info[dets_key])
+
                 mask = np.ones(len(i_new), bool)
-                for k, v in det_restricts.items():
-                    mask *= (det_info[k][i_info] == v)
+                if len(i_info):
+                    for k, v in det_restricts.items():
+                        mask *= (det_info[k][i_info] == v)
                 if mask.all() and len(new_dets) == mi1.dets.count:
                     mi2 = mi1
                 else:
@@ -272,7 +287,8 @@ class SuperLoader:
           and returned to the caller.
 
         """
-        # Augmented request.
+        # Augmented request -- note that dets:* restrictions from
+        # request will be added back into this by check tags.
         aug_request = _filter_items('obs:', request, False)
         if self.obsdb is not None and 'obs:obs_id' in request:
             obs_info = self.obsdb.get(request['obs:obs_id'], add_prefix='obs:')
@@ -365,8 +381,13 @@ class SuperLoader:
                 continue
 
             # Make everything an axisman.
-            if not isinstance(item, core.AxisManager):
-                item = item.axismanager(det_info=det_info, axis_key='readout_id')
+            if isinstance(item, ResultSet):
+                item = broadcast_resultset(item, det_info=det_info)
+
+            elif not isinstance(item, core.AxisManager):
+                logger.error(
+                    f'The decoded item {item} is not an AxisManager or '
+                    f'other well-understood type.  Request was: {request}.')
 
             # Unpack it.
             try:
@@ -478,6 +499,103 @@ def convert_det_info(det_info, dets=None):
         child = convert_det_info(sub_info, dets)
         output.wrap(subtable, child)
     return output
+
+
+def broadcast_resultset(
+        rs, det_info, axis_name='dets', axis_key='readout_id',
+        prefix='dets:'):
+    """Convert rs from a ResultSet into an AxisManager, but reconciling
+    against the det_info table to make sure the output's .dets axis
+    matches an indexing column of det_info (such as readout_id).
+
+    Args:
+      rs (ResultSet): target to convert.  Each column will become a
+        vector in the output, unless it begins with 'dets:' in which
+        case it will be reconciled and/or discarded (see Notes).
+      det_info (ResultSet): table of detector info to use for
+        broadcasting rs onto the output axis.
+      axis_name (str): Name to use for the LabelAxis of the output.
+      axis_key (str): Name of the column of rs that should be used for
+        the values in the LabelAxis of the output.
+      prefix (str): The prefix that should be used to identify
+        indexing columns in rs.
+
+    Returns:
+      AxisManager.
+
+    Notes:
+      This function is to be applied to specially formatted ResultSet
+      tables that contains a mixture of "indexing columns" and "data
+      columns".  The "indexing columns" are the ones that start with
+      ``prefix``, and are used to associate values in the data columns
+      with specific detectors.  For example::
+
+        >>> print(rs)
+        ResultSet<[dets:readout_id,a,b], 1280 rows>
+        >>> print(det_info)
+        ResultSet<[readout_id,x,y,detset], 1280 rows>
+        >>> aman = broadcast_resultset(rs, det_info)
+        >>> print(aman, aman.dets)
+        AxisManager(a[dets], b[dets], dets:LabelAxis(1280))
+
+      In this case the rs column dets:readout_id contains all the same
+      values as det_info['readout_id'], and the AxisManager thus also
+      contains all 1280 entries.  The .dets axis has the values in the
+      order of det_info['readout_id'].
+
+      To broadcast, fields with the stated prefix must also be found
+      in det_info.  For example::
+
+        >>> print(rs)
+        ResultSet<[dets:band,dets:wafer,abscal], 14 rows>
+        >>> print(det_info)
+        ResultSet<[readout_id,band,wafer,detset], 1760 rows>
+        >>> aman = broadcast_resultset(rs, det_info)
+        >>> print(aman)
+        AxisManager(abscal[dets], dets:LabelAxis(1738))
+
+      To use database terminology, the rs table is joined with the
+      det_info table on the fields prefixed with ``prefix`` (in this
+      case, 'band' and 'wafer').  The remaining columns from rs (just
+      'abscal') are populated as fields in the output.  Note how the
+      output .dets axis has fewer elements than det_info -- the 14
+      rows of rs specifying values for different (band, wafer)
+      combinations were enough to match only 1738 of the rows in
+      det_info.  (This can happen even when not broadcasting.)
+
+    """
+    from sotodlib import core
+
+    # Store short names for each index column.
+    index_cols = {}
+    for k in rs.keys:
+        if k.startswith(prefix):
+            index_cols[k] = k[len(prefix):]
+
+    # Construct a map that takes a (tuple of dets:* values) to
+    # specific row index of rs.
+    row_map = {}
+    for i, row in enumerate(rs):
+        key = tuple([row[k] for k in index_cols.keys()])
+        if key in row_map:
+            raise ValueError("Duplicate entries for combined unique key.")
+        row_map[key] = i
+
+    # Get index of rs that corresponds to each row in det_info.
+    indices = np.array(
+        [row_map.get(tuple(row.values()), -1)
+         for row in det_info.subset(keys=index_cols.values())],
+        dtype=int)
+    mask = (indices >= 0)
+    dets = det_info[axis_key][mask]
+    indices = indices[mask]  # drop any det_info items not matched
+
+    # Re-order and wrap each field.
+    aman = core.AxisManager(core.LabelAxis(axis_name, dets))
+    for k in rs.keys:
+        if not k.startswith(prefix):
+            aman.wrap(k, rs[k][indices], [(0, axis_name)])
+    return aman
 
 
 class Unpacker:
