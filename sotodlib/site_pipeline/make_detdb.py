@@ -1,64 +1,62 @@
 import os
 import sys
+import yaml
 import logging
 import numpy as np
 from argparse import ArgumentParser
 
 from detmap.makemap import MapMaker
-from sotodlib.core import AxisManager
-from sotodlib.core.metadata import ResultSet
+from sotodlib import core
+from sotodlib.io.metadata import write_dataset
+
 
 logger = logging.getLogger(__name__)
 
 def parse_args():
     parser = ArgumentParser()
-    parser.add_argument('-a', '--array-names',help=
-                        "Comma-Separated array names to generate for this"
-                        " DetInfo.")
-    parser.add_argument('-o', '--out-file', help=
-                        "File name to save det info.")
+    parser.add_argument('-c', '--config-file',help=
+                        "Configuration File for running DetMap")
     args = parser.parse_args()
     return args
 
 def main(args=None):
     if args is None:
         args = parse_args()
-    
-    array_names = args.array_names.split(',')
+        
+    configs = yaml.safe_load(open(args.config_file, "r"))
+
+    array_names = [array["name"] for array in configs["arrays"]]
     logger.info(f"Creating Det Info for UFMs-{','.join([array for array in array_names])}")
     
-    if args.out_file is None:
-        out_file = f"det_info.h5"
-        out_dir = '.'
-        out_path = out_file
-    else:
-        out_path = args.out_file
-        out_dir, out_file = os.path.split(args.out_file)
-        if out_dir == '':
-            out_dir = '.'
+    scheme = core.metadata.ManifestScheme()
+    scheme.add_range_match('obs:timestamp')
+    scheme.add_data_field('dataset')
+    db = core.metadata.ManifestDb(configs["det_db"], scheme=scheme)  
     
+    out_dir, out_file = os.path.split(configs["det_info"])
     
+    w = "dets:wafer."
     keys = [
-        "dets",
-        "array",
-        "bond_pad",
-        "mux_band",
-        "mux_channel",
-        "mux_subband",
-        "mux_position",
-        "design_freq_mhz",
-        "bias_line",
-        "pol",
-        "bandpass",
-        "det_row",
-        "det_col",
-        "rhombus",
-        "type",
-        "det_x",
-        "det_y",
-        "angle",
+        "dets:det_id",
+        w+"array",
+        w+"bond_pad",
+        w+"mux_band",
+        w+"mux_channel",
+        w+"mux_subband",
+        w+"mux_position",
+        w+"design_freq_mhz",
+        w+"bias_line",
+        w+"pol",
+        w+"bandpass",
+        w+"det_row",
+        w+"det_col",
+        w+"rhombus",
+        w+"type",
+        w+"det_x",
+        w+"det_y",
+        w+"angle",
     ]
-    det_rs = ResultSet(keys=keys)
+    det_rs = core.metadata.ResultSet(keys=keys)
     
     for array_name in array_names:
         # Generate the OperateTuneData for the Array
@@ -77,29 +75,36 @@ def main(args=None):
             #print(tune.detector_id, tune.is_optical)
             # add detector name to database
             det_rs.append({
-                "dets": tune.detector_id,
-                "array": array_name,
-                "bond_pad": tune.bond_pad,
-                "mux_band": str(tune.mux_band),
-                "mux_channel": none_to_nan(tune.mux_channel),
-                "mux_subband": none_to_nan(tune.mux_subband),
-                "mux_position": none_to_nan(tune.mux_layout_position),
-                "design_freq_mhz": none_to_nan(tune.design_freq_mhz),
-                "bias_line": none_to_nan(tune.bias_line),
-                "pol": str(tune.pol),
-                "bandpass": f"f{tune.bandpass}" if tune.bandpass is not None else "NC",
-                "det_row": none_to_nan(tune.det_row),
-                "det_col": none_to_nan(tune.det_col),
-                "rhombus": str(tune.rhomb),
-                "type": str(tune.det_type),
-                "det_x": none_to_nan(tune.det_x),
-                "det_y": none_to_nan(tune.det_y),
-                "angle": np.radians(none_to_nan(tune.angle_actual_deg)),
+                "dets:det_id": tune.detector_id,
+                w+"array": array_name,
+                w+"bond_pad": tune.bond_pad,
+                w+"mux_band": str(tune.mux_band),
+                w+"mux_channel": none_to_nan(tune.mux_channel),
+                w+"mux_subband": none_to_nan(tune.mux_subband),
+                w+"mux_position": none_to_nan(tune.mux_layout_position),
+                w+"design_freq_mhz": none_to_nan(tune.design_freq_mhz),
+                w+"bias_line": none_to_nan(tune.bias_line),
+                w+"pol": str(tune.pol),
+                w+"bandpass": f"f{tune.bandpass}" if tune.bandpass is not None else "NC",
+                w+"det_row": none_to_nan(tune.det_row),
+                w+"det_col": none_to_nan(tune.det_col),
+                w+"rhombus": str(tune.rhomb),
+                w+"type": str(tune.det_type),
+                w+"det_x": none_to_nan(tune.det_x),
+                w+"det_y": none_to_nan(tune.det_y),
+                w+"angle": np.radians(none_to_nan(tune.angle_actual_deg)),
             })
     
-    aman = det_rs.to_axismanager()
-    aman.save(out_path)
-    return aman
+    dest_dataset = ",".join(array_names)
+    write_dataset(det_rs, configs["det_info"], dest_dataset)
+    # Update the index.
+    db_data = {'obs:timestamp': [0, 2e11],
+               'dataset': dest_dataset}
+    db.add_entry(db_data, configs["det_info"])
+
+    #aman = det_rs.to_axismanager(axis_key="dets:det_id")
+    #aman.save(out_path)
+    #return aman
 
 def none_to_nan(val):
     if val is None:
