@@ -438,7 +438,14 @@ class ManifestDb:
         c.execute(query, p + (file_id,))
         if commit:
             self.conn.commit()
-
+    
+    def get_entries(self):
+        """Return list of all entry names in database
+        """
+        c = self.conn.execute('select dataset from map')
+        return [r[0] for r in c]
+        
+        
     def validate(self):
         """
         Checks that the database is following internal rules.
