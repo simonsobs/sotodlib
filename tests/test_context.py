@@ -11,6 +11,7 @@ import tempfile
 from sotodlib import core
 from sotodlib.core import metadata, Context, OBSLOADER_REGISTRY
 from sotodlib.io.metadata import ResultSetHdfLoader, write_dataset, _decode_array
+import so3g
 
 import numpy as np
 import os
@@ -90,6 +91,8 @@ class ContextTest(unittest.TestCase):
         ]:
             meta = ctx.get_meta(obs_id, dets=selection)
             self.assertEqual(meta.dets.count, count, msg=f"{selection}")
+            self.assertTrue('cal' in meta)
+            self.assertTrue('flags' in meta)
 
         # And without detdb nor metadata
         ctx = dataset_sim.get_context(with_detdb=False)
@@ -134,6 +137,12 @@ class ContextTest(unittest.TestCase):
         ctx = dataset_sim.get_context()
         tod = ctx.get_obs(obs_id)
         self.assertEqual(tod.signal.shape, (n_det, n_samp))
+
+        # ... metadata reconciliation check
+        self.assertTrue(np.all(tod.cal > 0))
+        for band, f in zip(tod.det_info['band'], tod.flags):
+            # The f090 dets should have 0 flag intervals; f150 have 1
+            self.assertEqual(len(f.ranges()), int(band == 'f150'))
 
         tod = ctx.get_obs(obs_id + ':f090')
         self.assertEqual(tod.signal.shape, (n_det // 2, n_samp))
@@ -238,18 +247,58 @@ class DatasetSim:
             'obs_colon_tags': ['band'],
         })
 
+        if not with_metadata:
+            return ctx
+
         # metadata: bands.h5
         _scheme = metadata.ManifestScheme() \
                   .add_data_field('loader') \
                   .add_range_match('obs:timestamp')
         bands_db = metadata.ManifestDb(scheme=_scheme)
-        bands_db.add_entry({'obs:timestamp': [0, 2e9], 'loader': 'unittest_loader'}, 'bands.h5')
+        bands_db.add_entry(
+            {'obs:timestamp': [0, 2e9], 'loader': 'unittest_loader'},
+            'bands.h5')
 
-        if with_metadata:
-            ctx['metadata'] = [
+        # metadata: abscals.h5
+        _scheme = metadata.ManifestScheme() \
+                  .add_range_match('obs:timestamp') \
+                  .add_data_field('loader') \
+                  .add_data_field('dataset') \
+                  .add_data_field('dets:band')
+        abscal_db = metadata.ManifestDb(scheme=_scheme)
+        for band in ['f090', 'f150']:
+            abscal_db.add_entry(
+                {'obs:timestamp': [0, 2e9],
+                 'loader': 'unittest_loader',
+                 'dataset': f'mostly_{band}',
+                 'dets:band': band
+                },
+                'abscal.h5')
+
+        # metadata: some_flags.g3
+        _scheme = metadata.ManifestScheme() \
+                  .add_range_match('obs:timestamp') \
+                  .add_data_field('loader') \
+                  .add_data_field('frame_index', 'int') \
+                  .add_data_field('dets:band')
+        flags_db = metadata.ManifestDb(scheme=_scheme)
+        for frame, band in enumerate(['f090', 'f150', 'f220']):
+            flags_db.add_entry(
+                {'obs:timestamp': [0, 2e9],
+                 'loader': 'unittest_loader',
+                 'frame_index': frame,
+                 'dets:band': band
+                 }, 'some_flags.g3')
+
+        # metadata into context.
+        ctx['metadata'] = [
                 {'db': bands_db,
                  'det_info': True,
                  'dets_key': 'readout_id'},
+                {'db': abscal_db,
+                 'name': 'cal&abscal'},
+                {'db': flags_db,
+                 'name': 'flags&'},
             ]
 
         return ctx
@@ -261,6 +310,41 @@ class DatasetSim:
             rs = self.dets.subset(keys=['readout_id', 'band'])
             rs.keys = ['dets:' + k for k in rs.keys]
             return rs
+        elif filename == 'abscal.h5':
+            rs = metadata.ResultSet(['dets:band', 'abscal'])
+            if kw['dataset'] == 'mostly_f090':
+                rs.append({'dets:band': 'f090',
+                           'abscal': 90.})
+                rs.append({'dets:band': 'f150',
+                           'abscal': -1.})
+            else:
+                rs.append({'dets:band': 'f090',
+                           'abscal': -1.})
+                rs.append({'dets:band': 'f150',
+                           'abscal': 150.})
+            return rs
+        elif filename == 'some_flags.g3':
+            output = core.AxisManager(
+                core.LabelAxis('dets', self.dets['readout_id']),
+                core.OffsetAxis('samps', self.sample_count, 0))
+            if kw['frame_index'] == 0:
+                # Frame 0 declares zeros for all dets, but is
+                # restricted by the ManifestDb to only apply to f090.
+                output.wrap('flags', so3g.proj.RangesMatrix.zeros(output.shape),
+                            [(0, 'dets'), (1, 'samps')])
+            elif kw['frame_index'] == 1:
+                # Frame 1 declares ones for only the f150 dets (and is
+                # marked to apply to f150 in the ManifestDb).
+                output.wrap('flags', so3g.proj.RangesMatrix.ones(output.shape),
+                            [(0, 'dets'), (1, 'samps')])
+                output.restrict('dets',
+                                self.dets['readout_id'][self.dets['band'] == 'f150'])
+            else:
+                # Frame 2 is marked in the ManifestDb as being for
+                # f220; the det_info preprocessing should prevent this
+                # from ever getting requested.
+                raise RuntimeError('metadata system asked for f220 data')
+            return output
         else:
             raise ValueError(f'metadata request for "{filename}"')
 
