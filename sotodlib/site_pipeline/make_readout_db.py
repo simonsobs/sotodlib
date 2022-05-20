@@ -1,3 +1,6 @@
+"""Build Matching Database between readout_id and detector_id
+"""
+
 import os
 import sys
 import yaml
@@ -8,8 +11,9 @@ import datetime as dt
 from argparse import ArgumentParser
 
 from detmap.makemap import MapMaker
-from sotodlib.core import AxisManager
+from sotodlib import core
 from sotodlib.io.load_smurf import G3tSmurf, TuneSets
+from sotodlib.io.metadata import write_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -21,18 +25,9 @@ def parse_args():
                         "Minimum ctime to search for TuneSets")
     parser.add_argument('--max-ctime', type=float, help=
                         "Maximum ctime to search for TuneSets")
+    parser.add_argument('--override', action='store_true')
     args = parser.parse_args()
     return args
-
-"""
-h5 file group plan
-
-stream_id/
-    tunesets/
-        v0_map
-        v1_map
-        ...
-"""
 
 def main(args=None):
     if args is None:
@@ -44,11 +39,22 @@ def main(args=None):
                      configs["g3tsmurf_db"],
                      meta_path=os.path.join(configs["data_prefix"], "smurf"))
     session = SMURF.Session()
-    h5_file = h5py.File(configs["channel_info"], "a")
-
+    print(configs["read_db"])
+    if os.path.exists(configs["read_db"]):
+        logger.info(f'Mapping {configs["read_db"]} for the archive index.')
+        db = core.metadata.ManifestDb(configs["read_db"])
+        
+    else:
+        logger.info(f'Creating {configs["read_db"]} for the archive index.')
+        scheme = core.metadata.ManifestScheme()
+        scheme.add_range_match('obs:timestamp')
+        scheme.add_data_field('dets:detset')
+        scheme.add_data_field('dataset')
+        db = core.metadata.ManifestDb(configs["read_db"], scheme=scheme)      
+        
     for array in configs["arrays"]:
         ## Load Det Info
-        det_info = AxisManager.load(configs["det_info"])
+        det_info = core.AxisManager.load(configs["det_info"])
         det_info.restrict( 
             "dets", 
             det_info.dets.vals[det_info.array==array["name"]],
@@ -56,11 +62,6 @@ def main(args=None):
         logger.info(
             "Found {det_info.dets.count} detector_ids for Array {array['name'}"
         )
-
-        ## Make sure stream_id exists in Channel Info
-        if array["stream_id"] not in h5_file:
-            h5_file.create_group(array["stream_id"])
-        array_group = h5_file[ array["stream_id"] ]
 
         ## Find TuneSets for Each Array
         tunesets = session.query(TuneSets).filter(
@@ -79,71 +80,85 @@ def main(args=None):
         
         ## Run mapping on each TuneSet.
         for ts in tunesets:
-            if ts.name not in array_group:
-                array_group.create_group(ts.name)
-            ts_group = array_group[ ts.name ]
+            mapping = array["mapping"]      
+            dest_dataset = f"{ts.stream_id}_{ts.name}_mapping_v{mapping['version']}"
             
-            for mapping in array["mapping"]:
-                map_key = f"{mapping['version']}_{mapping['strategy']}"
-                if map_key in ts_group:
+            if dest_dataset in db.get_entries() and not args.override:
+                logger.debug(f"Dataset {dest_dataset} already exists")
+                continue
+            
+            ## Setup Mapping for Each Mapping Type
+            map_maker = MapMaker(
+                north_is_highband=array["north_is_highband"],
+                array_name = array["name"],
+                mapping_strategy = mapping["strategy"],
+                dark_bias_lines=array["dark_bias_lines"],
+                **mapping["params"]
+            )
+
+            array_map=None
+            logger.info(f"Making Map for {ts.path}")
+            try:
+                array_map = map_maker.make_map_smurf(tunefile=ts.path)
+            except:
+                logger.warning(f"Map Maker Failed on {ts.path}")
+                continue
+
+            readout_ids, bands, channels = zip(*[
+                    (ch.name, ch.band, ch.channel) for ch in ts.channels
+                    ])
+            bands = np.array(bands)
+            channels = np.array(channels)
+
+            rs_list = core.metadata.ResultSet(
+                keys=["dets:detector_id", 
+                      "dets:readout_id"]
+            )
+
+            ## loop through detector IDs and find readout ID matches
+            for tune in array_map:
+                det_id = tune.detector_id
+                if det_id is None:
+                    ## resonators smurf found that array map doesn't think 
+                    ## should exist (artifacts?)
                     continue
-
-                ## Setup Mapping for Each Mapping Type
-                map_maker = MapMaker(
-                    north_is_highband=array["north_is_highband"],
-                    array_name = array["name"],
-                    mapping_strategy = mapping["strategy"],
-                    dark_bias_lines=array["dark_bias_lines"],
-                    **mapping["params"]
-                )
-
-
-                array_map=None
-                logger.info(f"Making Map for {ts.path}")
-                try:
-                    array_map = map_maker.make_map_smurf(tunefile=ts.path)
-                except:
-                    logger.warning(f"Map Maker Failed on {ts.path}")
+                i_did = np.where(det_info.dets.vals == det_id)[0]
+                if len(i_did) != 1:
+                    logger.warning(f"Map returned detector_id, {det_id}, "
+                                "not in database, what happened?")
                     continue
-                
-                readout_ids, bands, channels = zip(*[
-                        (ch.name, ch.band, ch.channel) for ch in ts.channels
-                        ])
-                bands = np.array(bands)
-                channels = np.array(channels)
-                
-                ch_info = AxisManager( det_info.dets )
-                ch_info.wrap_new("readout_id", ("dets",), dtype=object)
+                i_did = i_did[0]
+                i_rid = np.where(np.all([
+                        bands == tune.smurf_band,
+                        channels == tune.smurf_channel], axis=0))[0]
+                if len(i_rid) != 1:
+                    logger.debug(f"Detector {det_id} not found in Tuneset {ts.name}")
+                    ## If we want to track which detectors do not have readout_ids it
+                    ## would go here, but has trouble with dets:readout_id loading in 
+                    ## the current framework
+                    continue
+                i_rid = i_rid[0]
+                #ch_info.readout_id[i_did] = readout_ids[i_rid]
+                rs_list.append( {"dets:detector_id": det_id,
+                                 "dets:readout_id": readout_ids[i_rid]})
 
-                for tune in array_map:
-                    det_id = tune.detector_id
-                    if det_id is None:
-                        continue
-                    i_did = np.where(ch_info.dets.vals == det_id)[0]
-                    if len(i_did) != 1:
-                        logger.warning(f"Map returned detector_id, {det_id}, "
-                                    "not in database, what happened?")
-                        continue
-                    i_did = i_did[0]
-                    i_rid = np.where(np.all([
-                            bands == tune.smurf_band,
-                            channels == tune.smurf_channel], axis=0))[0]
-                    if len(i_rid) != 1:
-                        logger.debug(f"Detector {det_id} not found in Tuneset {ts.name}")
-                        continue
-                    i_rid = i_rid[0]
-                    ch_info.readout_id[i_did] = readout_ids[i_rid]
+            for rid in readout_ids:
+                if rid in rs_list["dets:readout_id"]:
+                    continue
+                rs_list.append( {"dets:detector_id": "NO_MATCH",
+                                 "dets:readout_id": rid})
+        
+            
+            write_dataset(rs_list, configs["read_info"], dest_dataset, args.override)
+            
+            if not dest_dataset in db.get_entries():
+                # Update the index.
+                db_data = {'obs:timestamp': [0, 2e11],
+                           'dets:detset': ts.name,
+                           'dataset': dest_dataset}
+                db.add_entry(db_data, configs["read_info"])
 
-                not_found = ch_info.readout_id == 0
-                logger.info(f"{np.sum(not_found)} detectors were not found in "
-                            f"tuneset {ts.name} for mapping {map_key}")
 
-                ch_info.restrict( "dets", ch_info.dets.vals[~not_found])
-                ch_info.readout_id = np.array(ch_info.readout_id, dtype='str')
-                
-                ts_group.create_group(map_key)
-                ch_info.save( ts_group[map_key])
-    h5_file.close()
 
 if __name__ == "__main__":
     main()
