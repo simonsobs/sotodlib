@@ -163,20 +163,32 @@ class SuperLoader:
                 + '  ' + str(request) + '\n'
                 + 'The exception is:\n  %s' % text)
 
+        # Pre-screen the index_lines for dets:* assignments; plan to
+        # skip lines that aren't relevant according to det_info.
+        to_skip = []
+        for index_line in index_lines:
+            logger.debug(f'Pre-screening index_line={index_line}')
+            skip_this = len(det_info) == 0
+            if not skip_this:
+                mask = np.ones(len(det_info), bool)
+                for k, v in _filter_items('dets:', index_line, remove=True).items():
+                    mask *= (det_info[k] == v)
+                skip_this = (mask.sum() == 0)
+            to_skip.append(skip_this)
+
+        # Load at least one item, or we won't have the structure of
+        # the output.
+        if np.all(to_skip):
+            to_skip[0] = False
+
         # Load each index_line.
         results = []
-        for index_line in index_lines:
-            logger.debug(f'Processing index_line={index_line}')
-            # Augment the index_line with info from the request; if
-            # the request and index_line share a key but conflict on
-            # the value, we don't want this item.
-            skip_this = False
-            for k in request:
-                if k in index_line:
-                    if request[k] != index_line[k]:
-                        skip_this = True
-            if skip_this:
+        for skip, index_line in zip(to_skip, index_lines):
+            if skip:
+                logger.debug(f'Skipping load for index_line={index_line}')
                 continue
+            logger.debug(f'Loading for index_line={index_line}')
+
             index_line.update(request)
             loader = spec.get('loader', None)
             if loader is None:
@@ -215,10 +227,13 @@ class SuperLoader:
                 # index_line.
                 det_restricts = _filter_items('dets:', index_line, remove=True)
                 dets_key = 'readout_id'
-                new_dets, i_new, i_info = core.util.get_coindices(mi1.dets.vals, det_info[dets_key])
+                new_dets, i_new, i_info = core.util.get_coindices(
+                    mi1.dets.vals, det_info[dets_key])
+
                 mask = np.ones(len(i_new), bool)
-                for k, v in det_restricts.items():
-                    mask *= (det_info[k][i_info] == v)
+                if len(i_info):
+                    for k, v in det_restricts.items():
+                        mask *= (det_info[k][i_info] == v)
                 if mask.all() and len(new_dets) == mi1.dets.count:
                     mi2 = mi1
                 else:
@@ -272,7 +287,8 @@ class SuperLoader:
           and returned to the caller.
 
         """
-        # Augmented request.
+        # Augmented request -- note that dets:* restrictions from
+        # request will be added back into this by check tags.
         aug_request = _filter_items('obs:', request, False)
         if self.obsdb is not None and 'obs:obs_id' in request:
             obs_info = self.obsdb.get(request['obs:obs_id'], add_prefix='obs:')
@@ -568,7 +584,8 @@ def broadcast_resultset(
     # Get index of rs that corresponds to each row in det_info.
     indices = np.array(
         [row_map.get(tuple(row.values()), -1)
-         for row in det_info.subset(keys=index_cols.values())])
+         for row in det_info.subset(keys=index_cols.values())],
+        dtype=int)
     mask = (indices >= 0)
     dets = det_info[axis_key][mask]
     indices = indices[mask]  # drop any det_info items not matched
