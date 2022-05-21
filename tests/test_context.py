@@ -127,6 +127,12 @@ class ContextTest(unittest.TestCase):
         self.assertIsInstance(det_info, metadata.ResultSet)
         self.assertEqual(len(det_info), n)
 
+        # Check tolerant mode
+        ctx = dataset_sim.get_context(with_bad_metadata=True)
+        with self.assertRaises(Exception):
+            ctx.get_meta(obs_id)
+        ctx.get_meta(obs_id, ignore_missing=True)
+
     def test_110_more_loads(self):
         dataset_sim = DatasetSim()
         n_det, n_samp = dataset_sim.det_count, dataset_sim.sample_count
@@ -209,7 +215,8 @@ class DatasetSim:
         OBSLOADER_REGISTRY['unittest_loader'] = self.tod_loader
         metadata.SuperLoader.register_metadata('unittest_loader', _TestML)
 
-    def get_context(self, with_detdb=True, with_metadata=True):
+    def get_context(self, with_detdb=True, with_metadata=True,
+                    with_bad_metadata=False):
         detdb = metadata.DetDb()
         detdb.create_table('base', ['readout_id string',
                                     'pol_code string',
@@ -313,6 +320,13 @@ class DatasetSim:
             {'db': info_db,
              'name': 'focal_plane'},
         ]
+
+        if with_bad_metadata:
+            # This entry is intended to cause a lookup failure.
+            ctx['metadata'].insert(0, {
+                'db': 'not-a-file.sqlite',
+                'name': 'important_info&',
+            })
 
         return ctx
 
