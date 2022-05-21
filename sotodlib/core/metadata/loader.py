@@ -467,9 +467,9 @@ def merge_det_info(det_info, new_info,
     """
     new_keys = _filter_items('dets:', new_info.keys)
     if (len(new_keys) != len(new_info.keys)):
-        reraise(spec, RuntimeError(
+        raise RuntimeError(
             f'New det_info metadata has keys without prefix "dets:": '
-            f'{new_info}'))
+            f'{new_info}')
     new_info.keys = new_keys
 
     for match_key in index_columns:
@@ -490,7 +490,7 @@ def merge_det_info(det_info, new_info,
     common_keys = set(new_info.keys) & set(det_info.keys)
     for k in common_keys:
         if len(i0) and np.any(new_info[k][i0] != det_info[k][i1]):
-            reraise(spec, ValueError(f'Conflict in field "{k}"'))
+            raise ValueError(f'Conflict in field "{k}"')
 
     logger.debug(f' ... updating det_info (row count '
                  f'{len(det_info)} -> {len(i1)})')
