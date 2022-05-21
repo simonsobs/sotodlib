@@ -4,7 +4,7 @@ from collections import OrderedDict
 import numpy as np
 
 from . import common
-
+from .resultset import ResultSet
 
 TABLE_DEFS = {
     'detsets': [
@@ -232,6 +232,17 @@ class ObsFileDb:
         """
         c = self.conn.execute('select det from detsets where name=?', (detset,))
         return [r[0] for r in c]
+
+    def get_det_table(self, obs_id):
+        """Get table of detectors and detsets suitable for use with Context
+        det_info.  Returns Resultset with keys=['dets:detset','dets:readout_id'].
+
+        """
+        c = self.conn.execute(
+            'select detsets.name as `dets:detset`, det as `dets:readout_id`'
+            'from detsets join files '
+            'on files.detset=detsets.name where obs_id=?', (obs_id, ))
+        return ResultSet.from_cursor(c)
 
     def get_files(self, obs_id, detsets=None, prefix=None):
         """Get the file names associated with a particular obs_id and detsets.
