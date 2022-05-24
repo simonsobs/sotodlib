@@ -180,6 +180,19 @@ class G3tSmurf:
                 session.add(ft)
             session.commit()
 
+    @classmethod
+    def from_configs(cls, configs):
+        """
+        Create a G3tSmurf instance from a configs dictionary
+
+        Args
+        -----
+        configs - dictionary containing `data_prefix` and `g3tsmurf_db` keys
+        """
+        return cls(os.path.join(configs["data_prefix"], "timestreams"),
+                   configs["g3tsmurf_db"],
+                   meta_path=os.path.join(configs["data_prefix"],"smurf"))
+
     @staticmethod
     def _make_datetime(x):
         """
