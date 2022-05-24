@@ -72,12 +72,8 @@ def main(args=None):
         tod = ctx.get_obs(config['obs_id'], detsets=[detset],
                           no_signal=True)
 
-        # Boost detdb into array_data.
-        if 'array_data' not in tod:
-            util.promote_array_data(ctx, tod)
-
         # Figure out the indexing info for this.
-        this_index = tod.array_data[group_by]
+        this_index = tod.det_info[group_by]
         assert([x == this_index[0] for x in this_index])
         this_index = this_index[0]
         if this_index in index_map:

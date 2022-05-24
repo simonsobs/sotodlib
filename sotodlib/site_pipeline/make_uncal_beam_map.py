@@ -145,10 +145,6 @@ def main(args=None):
             dets = tod.dets.vals[::10]
             tod.restrict('dets', dets)
 
-        # Boost detdb into array_data.
-        if 'array_data' not in tod:
-            util.promote_array_data(ctx, tod)
-
         # Modify samps axis for FFTs.
         tod_ops.fft_trim(tod)
 
@@ -170,7 +166,7 @@ def main(args=None):
         
         # Plan to split on frequency band
         band_splits = core.metadata.ResultSet(['dets:name', 'group'])
-        band_splits.rows = list(zip(tod.dets.vals, tod.array_data['fcode']))
+        band_splits.rows = list(zip(tod.dets.vals, tod.det_info['band']))
         band_splits = coords.planets.load_detector_splits(tod, source=band_splits)
 
         # Deconvolve readout filter and detector time constants.
