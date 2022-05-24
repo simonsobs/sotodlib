@@ -20,8 +20,8 @@ Pipeline Elements
 imprinter
 ----------
 
-This script is designed to help with the bookbinding. It will search a give
-level 2 G3tSmurf database for observations that overlap in time. The different
+This script is designed to help with the bookbinding. It will search a given
+Level 2 G3tSmurf database for observations that overlap in time. The different
 optional arguments will let us pass information from something like the sorunlib
 database to further filter the observations. 
 
