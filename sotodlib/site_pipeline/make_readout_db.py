@@ -47,8 +47,7 @@ def main(args=None):
     else:
         logger.info(f'Creating {configs["read_db"]} for the archive index.')
         scheme = core.metadata.ManifestScheme()
-        scheme.add_range_match('obs:timestamp')
-        scheme.add_data_field('dets:detset')
+        scheme.add_exact_match('dets:detset')
         scheme.add_data_field('dataset')
         db = core.metadata.ManifestDb(configs["read_db"], scheme=scheme)      
     
@@ -65,7 +64,7 @@ def main(args=None):
             det_info.dets.vals[det_info.wafer.array==array["name"]],
         )
         logger.info(
-            "Found {det_info.dets.count} detector_ids for Array {array['name'}"
+            f"Found {det_info.dets.count} detector_ids for Array {array['name']}"
         )
 
         ## Find TuneSets for Each Array
@@ -158,8 +157,7 @@ def main(args=None):
             
             if not dest_dataset in db.get_entries():
                 # Update the index.
-                db_data = {'obs:timestamp': [0, 2e11],
-                           'dets:detset': ts.name,
+                db_data = {'dets:detset': ts.name,
                            'dataset': dest_dataset}
                 db.add_entry(db_data, configs["read_info"])
 
