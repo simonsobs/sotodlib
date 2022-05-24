@@ -491,9 +491,11 @@ def load_detector_splits(tod=None, filename=None, dataset=None,
     if source is None:
         if dataset is None:
             filename, dataset = filename.split(':')
-        source = metadata.read_dataset(filename, dataset).axismanager()
-    elif isinstance(source, metadata.ResultSet):
-        source = source.axismanager()
+        source = metadata.read_dataset(filename, dataset)
+    if isinstance(source, metadata.ResultSet):
+        di = core.metadata.loader.unconvert_det_info(tod.det_info)
+        source = core.metadata.loader.broadcast_resultset(
+            source, di, axis_key='name')
     else:
         source = source.copy()
     source.restrict_axes([tod.dets])
