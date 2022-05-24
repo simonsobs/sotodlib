@@ -143,25 +143,47 @@ class SuperLoader:
             man = spec['db']
 
         # Do we have all the keys we need?
-        provided_obs_keys = _filter_items(
+        required_obs_keys = _filter_items(
             'obs:', man.scheme.get_required_params(), remove=False)
-        missing_obs_keys = (set(provided_obs_keys) - set(request.keys()))
+        missing_obs_keys = (set(required_obs_keys) - set(request.keys()))
         if len(missing_obs_keys):
             raise RuntimeError(
                 f'Metadata request is indexed by {request.keys()} but '
-                f'request info includes only {provided_obs_keys}.')
+                f'ManifestDb requires {required_obs_keys}.')
 
-        # Lookup.
-        try:
-            index_lines = man.match(request, multi=True, prefix=dbpath)
-        except Exception as e:
-            text = str(e)
-            raise RuntimeError(
-                'An exception was raised while decoding the following spec:\n'
-                + '  ' + str(spec) + '\n'
-                + 'with the following request:\n'
-                + '  ' + str(request) + '\n'
-                + 'The exception is:\n  %s' % text)
+        required_dets_keys = _filter_items(
+            'dets:', man.scheme.get_required_params(), remove=False)
+        missing_dets_keys = list((set(required_dets_keys) - set(request.keys())))
+
+        if len(missing_dets_keys):
+            # Make request to ManifestDb for each detector bundle.
+            short_keys = _filter_items('dets:', missing_dets_keys)
+            try:
+                subreqs = det_info.subset(keys=short_keys).distinct()
+            except:
+                raise RuntimeError(
+                    f'Decoding spec={spec} with request={request} requires '
+                    f'keys={missing_dets_keys} but det_info={det_info}.')
+            subreqs.keys = missing_dets_keys # back with dets: prefix ...
+        else:
+            subreqs = ResultSet([], [()])  # length 1!
+
+        index_lines = []
+        for subreq in subreqs:
+            subreq.update(request)
+            try:
+                _lines = man.match(subreq, multi=True, prefix=dbpath)
+            except Exception as e:
+                text = str(e)
+                raise RuntimeError(
+                    'An exception was raised while decoding the following spec:\n'
+                    + '  ' + str(spec) + '\n'
+                    + 'with the following request:\n'
+                    + '  ' + str(subreq) + '\n'
+                    + 'The exception is:\n  %s' % text)
+            for _line in _lines:
+                _line.update(subreq)
+                index_lines.append(_line)
 
         # Pre-screen the index_lines for dets:* assignments; plan to
         # skip lines that aren't relevant according to det_info.
@@ -179,6 +201,11 @@ class SuperLoader:
         # Load at least one item, or we won't have the structure of
         # the output.
         if np.all(to_skip):
+            if len(to_skip) == 0:
+                raise RuntimeError(
+                    f'The metadata item spec={spec} with request={request} '
+                    f'and det_info={det_info} matched no items in the ManifestDb; '
+                    f'in this case we cannot even return an empty structure.')
             to_skip[0] = False
 
         # Load each index_line.
@@ -189,7 +216,6 @@ class SuperLoader:
                 continue
             logger.debug(f'Loading for index_line={index_line}')
 
-            index_line.update(request)
             loader = spec.get('loader', None)
             if loader is None:
                 loader = index_line.get('loader', REGISTRY['_default'])
@@ -252,7 +278,8 @@ class SuperLoader:
         return result
 
     def load(self, spec_list, request, det_info=None, free_tags=[],
-             free_tag_fields=[], dest=None, check=False, det_info_scan=False):
+             free_tag_fields=[], dest=None, check=False, det_info_scan=False,
+             ignore_missing=False):
         """Loads metadata objects and processes them into a single
         AxisManager.
 
@@ -272,6 +299,8 @@ class SuperLoader:
           check (bool): If True, run in check mode (see Notes).
           det_info_scan (bool): If True, *only* process entries that
             directly update det_info.
+          ignore_missing (bool): If True, don't fail when a metadata
+            item can't be loaded, just try to proceed without it.
 
         Returns:
           In normal mode, an AxisManager containing the metadata
@@ -363,6 +392,10 @@ class SuperLoader:
             except Exception as e:
                 if check:
                     error = e
+                elif ignore_missing:
+                    logger.warning(f'Failed to load metadata for spec={spec}, '
+                                   f'request={aug_request}; ignoring.')
+                    continue
                 else:
                     reraise(spec, e)
 
@@ -441,9 +474,9 @@ def merge_det_info(det_info, new_info,
     """
     new_keys = _filter_items('dets:', new_info.keys)
     if (len(new_keys) != len(new_info.keys)):
-        reraise(spec, RuntimeError(
+        raise RuntimeError(
             f'New det_info metadata has keys without prefix "dets:": '
-            f'{new_info}'))
+            f'{new_info}')
     new_info.keys = new_keys
 
     for match_key in index_columns:
@@ -464,7 +497,7 @@ def merge_det_info(det_info, new_info,
     common_keys = set(new_info.keys) & set(det_info.keys)
     for k in common_keys:
         if len(i0) and np.any(new_info[k][i0] != det_info[k][i1]):
-            reraise(spec, ValueError(f'Conflict in field "{k}"'))
+            raise ValueError(f'Conflict in field "{k}"')
 
     logger.debug(f' ... updating det_info (row count '
                  f'{len(det_info)} -> {len(i1)})')
