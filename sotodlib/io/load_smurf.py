@@ -1273,43 +1273,6 @@ class G3tSmurf:
         """
         return SmurfStatus.from_time(time, self, stream_id=stream_id, show_pb=show_pb)
 
-
-def dump_DetDb(archive, detdb_file):
-    """
-    Take a G3tSmurf archive and create a a DetDb of the type used with Context
-
-    Args
-    -----
-        archive : G3tSmurf instance
-        detdb_file : filename
-    """
-    my_db = core.metadata.DetDb(map_file=detdb_file)
-    my_db.create_table("base", column_defs=[])
-    column_defs = [
-        "'band' int",
-        "'channel' int",
-        "'frequency' float",
-        "'chan_assignment' int",
-    ]
-    my_db.create_table("smurf", column_defs=column_defs)
-
-    ddb_list = my_db.dets()["name"]
-    session = archive.Session()
-    channels = session.query(Channels).all()
-    msk = np.where([ch.name not in ddb_list for ch in channels])[0].astype(int)
-    for ch in tqdm(np.array(channels)[msk]):
-        my_db.get_id(name=ch.name)
-        my_db.add_props(
-            "smurf",
-            ch.name,
-            band=ch.band,
-            channel=ch.channel,
-            frequency=ch.frequency,
-            chan_assignment=ch.chan_assignment.ctime,
-        )
-    session.close()
-    return my_db
-
 def dump_DetDb(archive, detdb_file):
     """
     Take a G3tSmurf archive and create a a DetDb of the type used with Context
