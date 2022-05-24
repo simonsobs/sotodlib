@@ -182,6 +182,37 @@ use h5py to load the saved arrays::
     <HDF5 dataset "tod": shape (2,290), type "<f8">
 
 
+---------------
+Reserved Fields
+---------------
+
+As we develop the SO pipeline we will need to reserve field names that have
+specific names within the pipeline so that functions can be written to expect a
+specific set of fields. Not all AxisManagers will have all these fields by default. 
+These will be added here as the code develops. 
+
+* ``dets`` - the axis for detectors  
+* ``samps`` - the axis for samples
+* ``bias_lines`` - the axis for bias lines in a UFM.
+* ``timestamps`` `[samps]` - the field for UTC timestamps 
+* ``signal`` `[dets, samps]` - the field for detector signal
+* ``obs_info`` - AxisManager of scalars with ObsDb information for the loaded observation
+* ``det_info`` `[dets]` - AxisManager containing loaded detector metadata
+
+  * ``readout_id`` - The unique readout ID of the resonator
+  * ``det_id`` - The unique detector ID matched to the resonator.
+  * | ``wafer`` - An AxisManager of different parameters related to the hardware
+    | mapping on the UFM itself. Loaded based on ``det_id`` field in the
+    | ``det_info``.
+
+* | ``status`` - A SmurfStatus AxisManager containing information from status
+  | frames in the .g3 timestreams. :class:`sotodlib.io.load_smurf.SmurfStatus`
+* | ``iir_params`` - An AxisManager with the readout filter parameters. Used by
+  | :meth:`sotodlib.tod_ops.filters.iir_filter`.
+* | ``primary`` `[samps]` - An AxisManager with SMuRF readout information that is
+  | synced with the timestreams.
+* ``biases`` `[bias_lines, samps]` - Bias voltage applied to TESes over time.
+
 ---------
 Reference
 ---------
