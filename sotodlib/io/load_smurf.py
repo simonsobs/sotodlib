@@ -2307,21 +2307,17 @@ def load_file(
         aman.wrap("iir_params", iir_params)
 
     # Conversion from DAC counts to squid phase
-    aman.wrap("signal", np.zeros((aman[det_axis].count, aman["samps"].count), "float32"), [(0, det_axis), (1, "samps")])
+    aman.wrap(
+        "signal", 
+        np.zeros((aman[det_axis].count, aman["samps"].count), "float32"), 
+                 [(0, det_axis), (1, "samps")]
+    )
     for idx in range(aman[det_axis].count):
         io_load.hstack_into(aman.signal[idx], streams["data"][ch_info.rchannel[idx]])
 
     rad_per_count = np.pi / 2 ** 15
     aman.signal *= rad_per_count
     
-    aman.wrap(
-        "det_info", 
-        core.AxisManager( ch_info[det_axis])
-    )
-    if "readout_id" in ch_info:
-        aman.det_info.wrap("readout_id", ch_info.readout_id, [(0,det_axis)])
-    aman.det_info.wrap("smurf", ch_info)
-
     temp = core.AxisManager(aman.samps.copy())
     if load_primary:
         for k in streams["primary"].keys():
@@ -2345,7 +2341,7 @@ def load_file(
             i = int(k[4:])
             io_load.hstack_into(aman.biases[i], streams["tes_biases"][k])
     aman.wrap("flags", core.FlagManager.for_tod(aman, det_axis, "samps"))
-
+    
     return aman
 
 
