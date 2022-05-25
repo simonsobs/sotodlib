@@ -1,6 +1,8 @@
 import math
 import os
 import inspect
+import logging
+import time
 
 from .. import core
 
@@ -199,3 +201,39 @@ def lookup_conditional(source, key, tags=None, default=KeyError):
             if t in source:
                 return lookup_conditional(source[t], None, tags=tags, default=default)
         return default
+
+class _ReltimeFormatter(logging.Formatter):
+    def __init__(self, *args, t0=None, **kw):
+        super().__init__(*args, **kw)
+        if t0 is None:
+            t0 = time.time()
+        self.start_time = t0
+
+    def formatTime(self, record, datefmt=None):
+        if datefmt is None:
+            datefmt = '%8.3f'
+        return datefmt % (record.created - self.start_time)
+
+def init_logger(name, announce=''):
+    """Configure and return a logger for site_pipeline elements.  It is
+    disconnected from general sotodlib (propagate=False) and displays
+    relative instead of absolute timestamps.
+
+    """
+    logger = logging.getLogger(name)
+    logger.propagate = False
+    logger.setLevel(logging.DEBUG)
+
+    ch = logging.StreamHandler()
+    formatter = _ReltimeFormatter('%(asctime)s: %(message)s (%(levelname)s)')
+
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+
+    i, r = formatter.start_time // 1, formatter.start_time % 1
+    text = (time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(i))
+            + (',%03d' % (r*1000)))
+    logger.info(f'{announce}Log timestamps are relative to {text}')
+
+    return logger
