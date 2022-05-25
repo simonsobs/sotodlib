@@ -170,7 +170,11 @@ class SuperLoader:
 
         index_lines = []
         for subreq in subreqs:
+            # Reject any subreq that explicitly contradicts request on any key.
+            if any([subreq.get(k, v) != v for k, v in request.items()]):
+                continue
             subreq.update(request)
+
             try:
                 _lines = man.match(subreq, multi=True, prefix=dbpath)
             except Exception as e:
@@ -182,6 +186,9 @@ class SuperLoader:
                     + '  ' + str(subreq) + '\n'
                     + 'The exception is:\n  %s' % text)
             for _line in _lines:
+                # Now reject any _line if they contradict subreq.
+                if any([subreq.get(k, v) != v for k, v in _line.items()]):
+                    continue
                 _line.update(subreq)
                 index_lines.append(_line)
 
@@ -273,6 +280,7 @@ class SuperLoader:
             results.append(mi2)
 
         # Check that we got results, then combine them in to single ResultSet.
+        logger.debug(f'Concatenating {len(results)} results: {results}')
         assert(len(results) > 0)
         result = results[0].concatenate(results)
         return result
