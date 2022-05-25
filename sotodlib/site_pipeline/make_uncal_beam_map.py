@@ -22,7 +22,8 @@ from sotodlib import core, coords, site_pipeline, tod_ops
 
 from . import util
 
-logger = logging.getLogger(__name__)
+logger = util.init_logger(__name__, 'make_uncal_beam_map: ')
+
 
 def _get_parser():
     parser = ArgumentParser()
@@ -105,13 +106,17 @@ def main(args=None):
     ctx = core.Context(config['context_file'])
 
     group_by = config['subobs'].get('use', 'detset')
+    if group_by.startswith('dets:'):
+        group_by = group_by.split(':',1)[1]
+
     if group_by == 'detset':
         groups = ctx.obsfiledb.get_detsets(config['obs_id'])
-    elif group_by.startswith('dets:'):
-        group_by = group_by.split(':',1)[1]
-        groups = ctx.detdb.props(props=group_by).distinct()[group_by]
     else:
-        raise ValueError("Can't group by '{group_by}'")
+        det_info = ctx.get_det_info(config['obs_id'])
+        groups = det_info.subset(keys=[group_by]).distinct()[group_by]
+
+    # Ignore some values?
+    groups = [g for g in groups if g not in config['subobs'].get('ignore_vals', [])]
 
     if len(groups) == 0:
         logger.warning(f'No map groups found for obs_id={config["obs_id"]}')
@@ -135,18 +140,23 @@ def main(args=None):
         }
         map_info['product_id'] = '{obs_id}-{group}'.format(**map_info)
 
-        if group_by == 'detset':
-            tod = ctx.get_obs(config['obs_id'], detsets=[group])
-        else:
-            tod = ctx.get_obs(config['obs_id'], dets={group_by: group})
+        # Read data.
+        tod = ctx.get_obs(config['obs_id'], dets={group_by: group})
+        if len(tod.signal) == 0:
+            logger.warning(f'No detectors loaded for obs_id={config["obs_id"]}, '
+                           f'group {group_by}={group}; skipping.')
+            continue
 
         # Modify dets axis for testing
         if config['_args'].test:
+            logger.warning(f'Decimating focal plane (--test).')
             dets = tod.dets.vals[::10]
             tod.restrict('dets', dets)
 
         # Modify samps axis for FFTs.
+        logger.info(f' -- Before trimming, TOD shape is: {tod.shape}.')
         tod_ops.fft_trim(tod)
+        logger.info(f' -- After trimming, TOD shape is:  {tod.shape}.')
 
         # Determine what source to map.
         ## To-do: have a mode where it maps all sources it finds.
@@ -165,9 +175,7 @@ def main(args=None):
         map_info['source_name'] = source_name
         
         # Plan to split on frequency band
-        band_splits = core.metadata.ResultSet(['dets:name', 'group'])
-        band_splits.rows = list(zip(tod.dets.vals, tod.det_info['band']))
-        band_splits = coords.planets.load_detector_splits(tod, source=band_splits)
+        band_splits = coords.planets.load_detector_splits(tod, source=tod.det_info['band'])
 
         # Deconvolve readout filter and detector time constants.
         tod_ops.fft_trim(tod)
@@ -187,7 +195,7 @@ def main(args=None):
         # Fix pointing.
         logger.info('Applying pointing corrections.')
         if 'boresight_offset' in tod:
-            logger.info(' ... applying "boresight_offset".')
+            logger.info(' -- applying "boresight_offset".')
             _adjust_focal_plane(tod)
 
         # Apply calibration
@@ -213,9 +221,9 @@ def main(args=None):
         
         dest_dir = policy.get_dest(**map_info)
         if os.path.exists(dest_dir):
-            logger.info(f' ... destination already exists ({dest_dir})')
+            logger.info(f' -- destination already exists ({dest_dir})')
         else:
-            logger.info(f' ... creating destination dir ({dest_dir})')
+            logger.info(f' -- creating destination dir ({dest_dir})')
             os.makedirs(dest_dir)
 
         # Make the maps.
@@ -238,10 +246,12 @@ def main(args=None):
         db_code = ocfg['map_codes'][0]
         
         for key, bundle in output['splits'].items():
+            logger.info(f'Processing outputs for group={group}, band={key}...')
             # Save
             for code in ocfg['map_codes']:
                 filename = os.path.join(
                     dest_dir, opattern.format(map_code=code, split=key, **map_info))
+                logger.info(f' -- writing map to {filename}')
                 bundle[code].write(filename)
                 if filename in used_names:
                     logger.warning(f'Wrote this file more than once: {filename}; '
@@ -257,6 +267,7 @@ def main(args=None):
             # Plot
             plot_filename = os.path.join(
                 dest_dir, ppattern.format(map_code='solved', split=key, **map_info))
+            logger.info(f' -- writing plots to {plot_filename}...')
             _plot_map(bundle, plot_filename)
 
 
