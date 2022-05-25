@@ -458,14 +458,13 @@ def load_detector_splits(tod=None, filename=None, dataset=None,
     passed in directly as an AxisManager.
 
     Args:
-
       tod (AxisManager): This is required, to get the list of dets and
         the samps count.
       filename (str): The HDF filename, or filename:dataset.
       dataset (str): The HDF dataset (if not passed in with filename).
-      source (ResultSet or AxisManager): If not None, then filename
-        and dataset are ignored and this object is processed (as
-        though it had just been loaded from HDF).
+      source (array, ResultSet or AxisManager): If not None, then
+        filename and dataset are ignored and this object is processed
+        (as though it had just been loaded from HDF).
       wrap (str): If not None, the address in tod where to store the
         loaded split data.
 
@@ -477,7 +476,9 @@ def load_detector_splits(tod=None, filename=None, dataset=None,
     If passing in "source" directly as a ResultSet, it should have
     columns 'dets:name' and 'group'; if as an AxisManager then it
     should have a 'dets' axis and a vector 'group' with shape
-    ('dets',) providing the group name for each detector.
+    ('dets',) providing the group name for each detector.  If it is a
+    numpy array, it is assumed to correspond one-to-one with the .dets
+    axis of TOD and the array gives the group name for each detector.
 
     Returns:
       data_splits (dict of RangesMatrix): Each entry of the dict is a
@@ -492,12 +493,15 @@ def load_detector_splits(tod=None, filename=None, dataset=None,
         if dataset is None:
             filename, dataset = filename.split(':')
         source = metadata.read_dataset(filename, dataset)
-    if isinstance(source, metadata.ResultSet):
+    if isinstance(source, np.ndarray):
+        source, _s = core.AxisManager(tod.dets), source
+        source.wrap('group', _s)
+    elif isinstance(source, metadata.ResultSet):
         di = core.metadata.loader.unconvert_det_info(tod.det_info)
         source = core.metadata.loader.broadcast_resultset(
             source, di, axis_key='name')
     else:
-        source = source.copy()
+        source = source.copy()  # is this an AxisManager?
     source.restrict_axes([tod.dets])
     if wrap:
         tod.wrap(wrap, source)
