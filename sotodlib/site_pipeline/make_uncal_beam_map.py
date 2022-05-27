@@ -45,19 +45,133 @@ def _get_config(args):
     cfg['_args'] = args
     return cfg
 
-def _plot_map(bundle, filename=None, **kwargs):
-    # To-do for the plot:
-    # - T map and weights map (full footprint)
-    # - T, Q, and U zoomed in on source
-    # - labeled array diagram showing participating detectors and
-    #  their weights
+def _clip_map(m, mask=None, edges=[0.05, 0.95]):
+    if mask is None:
+        mask = ~np.isnan(m)
+    lims = np.quantile(m[mask], edges)
+    lims = lims[0] + (lims[1] - lims[0]) * \
+           (np.array([0., 1.]) - edges[0]) / (edges[1] - edges[0])
+    out = np.clip(m, *lims)
+    out[~mask] = np.nan
+    return out
+
+def _renorm(im):
+    s = ~np.isnan(im)
+    mag = abs(im[s]).max()
+    if mag <= 0:
+        alpha = 0
+    else:
+        alpha = int(np.floor(np.log10(mag)))
+    rescale = 10**-alpha
+    label = '$10^{%d}$' % alpha
+    imr = im.copy()
+    imr[s] *= rescale
+    return imr, label, rescale
+
+def _squarify(ax, lims=None):
+    if lims is None:
+        lims = []
+        xl = ax.get_xlim()
+        yl = ax.get_ylim()
+        for z in [xl, yl]:
+            z0, dz = (z[0] + z[1])/2, (z[0] - z[1])/2
+            lims.append([z0, np.sign(dz), abs(dz)])
+        dz = max([l[2] for l in lims])
+        lims = [(l[0] + l[1]*dz, l[0] - l[1]*dz) for l in lims]
+    ax.set_xlim(*lims[0])
+    ax.set_ylim(*lims[1])
+
+def _plot_one_map(fig, ax, m):
+    mr, units, _ = _renorm(m)
+    im = ax.imshow(mr)
+    fig.colorbar(im, ax=ax, label=f'Units ({units})',
+                 orientation='horizontal')
+    return im
+
+def plot_map(bundle, filename=None, tod=None, obs_info=None, det_info=None,
+             focal_plane=None, det_mask=None, group=None, subset=None,
+             zoom_size=None, title=None, **kwargs):
+    if tod is not None:
+        if obs_info is None:
+            obs_info = tod.get('obs_info')
+        if det_info is None:
+            det_info = tod.get('det_info')
+        if focal_plane is None:
+            focal_plane = tod.get('focal_plane')
+
     src_map = bundle['solved']
-    fig, axs = plt.subplots(3, 1, subplot_kw={'projection': src_map.wcs},
-                            figsize=(5, 8))
+    if src_map.shape[0] == 3:
+        fig, axs = plt.subplots(2, 3, figsize=(9, 8),
+                                subplot_kw={'projection': 'so-beammap'})
+        axs = {
+            'W':  axs[0, 0],
+            'T':  axs[0, 1],
+            'fp': axs[0, 2],
+            'Tz': axs[1, 0],
+            'Qz': axs[1, 1],
+            'Uz': axs[1, 2],
+        }
+
+    else:
+        fig, axs = plt.subplots(2, 2, figsize=(7, 8),
+                                subplot_kw={'projection': 'so-beammap'})
+        axs = {
+            'W':  axs[0, 0],
+            'T':  axs[0, 1],
+            'Tz': axs[1, 0],
+            'fp': axs[1, 1],
+        }
+
     mask = bundle['weights'][0,0] != 0
-    for _m, ax in zip(src_map, axs):
-        _m1 = np.ma.masked_where(~mask, _m)
-        ax.imshow(_m1, origin='lower')
+    _plot_one_map(fig, axs['W'],
+                  _clip_map(bundle['weights'][0, 0], mask))
+    _plot_one_map(fig, axs['T'],
+                  _clip_map(src_map[0], mask))
+    _squarify(axs['W'])
+    _squarify(axs['T'])
+
+    # zoomed in ...
+    if zoom_size is None:
+        zoom_size = 0.5  # deg
+    Z = zoom_size * coords.DEG
+    box = np.array([[-Z, Z], [Z, -Z]])
+    zoomed = src_map.submap(box)
+
+    # Plot whichever of T/Q/U are appearing here.
+    for i, k in enumerate(['Tz', 'Qz', 'Uz']):
+        if k in axs:
+            _plot_one_map(fig, axs[k], zoomed[i])
+
+    if focal_plane:
+        x, y = focal_plane.xi / coords.DEG, focal_plane.eta / coords.DEG
+        if det_mask is not None:
+            x, y = x[det_mask], y[det_mask]
+        axs['fp'].scatter(x, y, s=2, alpha=.25)
+        axs['fp'].set_aspect('equal')
+
+    if title is None:
+        try:
+            title = '{obs_info.obs_id} - {group} - {subset}'.format(
+                obs_info=obs_info, group=group, subset=subset)
+        except:
+            title = ''
+    plt.suptitle(title)
+
+    for k, label, c in [
+            ('W', 'Weight', 'k'),
+            ('T', 'Signal', 'k'),
+            ('Tz', 'T', 'w'),
+            ('Qz', 'Q', 'w'),
+            ('Uz', 'U', 'w')]:
+        if k in axs:
+            axs[k].text(0.95, 0.95, label, color=c,
+                        horizontalalignment='right',
+                        verticalalignment='top',
+                        transform=axs[k].transAxes)
+
+    plt.tight_layout()
+    plt.subplots_adjust(top=.9)
+
     if filename is not None:
         fig.savefig(filename)
     return fig
@@ -173,7 +287,7 @@ def main(args=None):
                              ([n for n, s in sources],))
                 sys.exit(1)
         map_info['source_name'] = source_name
-        
+
         # Plan to split on frequency band
         band_splits = coords.planets.load_detector_splits(tod, source=tod.det_info['band'])
 
@@ -214,11 +328,11 @@ def main(args=None):
             for b in band_splits.keys()]
         assert(all([r == reses[0] for r in reses]))  # Resolution conflict
         res_deg = util.parse_angle(reses[0])
-        
+
         # Where to put things.
         policy = util.ArchivePolicy.from_params(
             config['archive']['policy'])
-        
+
         dest_dir = policy.get_dest(**map_info)
         if os.path.exists(dest_dir):
             logger.info(f' -- destination already exists ({dest_dir})')
@@ -244,7 +358,7 @@ def main(args=None):
 
         used_names = []  # watch for accidental self-overwrites
         db_code = ocfg['map_codes'][0]
-        
+
         for key, bundle in output['splits'].items():
             logger.info(f'Processing outputs for group={group}, band={key}...')
             # Save
@@ -268,7 +382,11 @@ def main(args=None):
             plot_filename = os.path.join(
                 dest_dir, ppattern.format(map_code='solved', split=key, **map_info))
             logger.info(f' -- writing plots to {plot_filename}...')
-            _plot_map(bundle, plot_filename)
+
+            band_mask = (tod.det_info['band'] == key)
+            zoom_size = util.parse_angle(util.lookup_conditional(pcfg, 'zoom', tags=[key]))
+            plot_map(bundle, plot_filename, zoom_size=zoom_size,
+                     tod=tod, det_mask=band_mask, group=group, subset=key)
 
 
     # Return something?
