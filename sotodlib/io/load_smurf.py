@@ -2072,7 +2072,7 @@ def _get_sample_info(filenames):
     return out
 
 
-def _get_timestamps(streams, load_type=None):
+def _get_timestamps(streams, load_type=None, linearize_timestamps=True):
     """Calculate the timestamp field for loaded data
 
     Args
@@ -2082,6 +2082,9 @@ def _get_timestamps(streams, load_type=None):
         load_type : None or int
             if None, uses highest precision version possible. integer values
             will use the TimingParadigm class for indexing
+        linearize_timestamps : bool
+          if true and using unix timing, linearize the timing based on the 
+          frame counter
     """
     if load_type is None:
         # determine the desired loading type. Expand as logic as
@@ -2095,7 +2098,12 @@ def _get_timestamps(streams, load_type=None):
             load_type = TimingParadigm.G3Timestream
 
     if load_type == TimingParadigm.SmurfUnixTime:
-        return io_load.hstack_into(None, streams["primary"]["UnixTime"]) / 1e9
+        timestamps = io_load.hstack_into(None, streams["primary"]["UnixTime"]) / 1e9
+        if linearize_timestamps:
+            frames = io_load.hstack_into(None, streams["primary"]["FrameCounter"])
+            fsamp, offset = np.polyfit(frames , timestamps, 1)
+            timestamps = offset + fsamp*frames
+        return timestamps
     if load_type == TimingParadigm.G3Timestream:
         return io_load.hstack_into(None, streams["time"])
     logger.error("Timing System could not be determined")
@@ -2113,6 +2121,7 @@ def load_file(
     obsfiledb=None,
     show_pb=True,
     det_axis="dets",
+    linearize_timestamps=True,
 ):
     """Load data from file where there may or may not be a connected archive.
 
@@ -2139,6 +2148,9 @@ def load_file(
       status : a SmurfStatus Instance if we don't want to use the one from the
           first file
       det_axis : name of the axis used for channels / detectors
+      linearize_timestamps : bool
+          sent to _get_timestamps. if true and using unix timing, linearize the timing 
+          based on the frame counter
 
     Returns
     ---------
@@ -2271,7 +2283,11 @@ def load_file(
         ch_info[det_axis],
         core.OffsetAxis("samps", count, sample_start),
     )
-    aman.wrap("timestamps", _get_timestamps(streams), ([(0, "samps")]))
+    aman.wrap(
+        "timestamps", 
+        _get_timestamps(streams, linearize_timestamps=linearize_timestamps), 
+        ([(0, "samps")])
+    )
     aman.wrap("status", status.aman)
 
     # If readout filter in enabled build iir_params AxisManager
