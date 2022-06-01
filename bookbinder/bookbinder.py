@@ -352,7 +352,8 @@ class Bookbinder(object):
     """
     Bookbinder
     """
-    def __init__(self, hk_files, smurf_files, out_files, book_id=None, session_id=None, stream_id=None, verbose=True):
+    def __init__(self, hk_files, smurf_files, out_files, book_id=None, session_id=None, stream_id=None,
+                 start_time=None, end_time=None, verbose=True):
         self._hk_files = hk_files
         self._smurf_files = smurf_files
         self._out_files = out_files
@@ -361,6 +362,8 @@ class Bookbinder(object):
         self._frame_splits_file = op.join(book_id, 'frame_splits.txt')
         self._session_id = session_id
         self._stream_id = stream_id
+        self._start_time = start_time
+        self._end_time = end_time
         self._verbose = verbose
         self.metadata = []
         self.frame_num = 0
@@ -379,6 +382,11 @@ class Bookbinder(object):
 
         afile = self._ancil_files.pop(0)
         self.ancil_writer = core.G3Writer(afile)
+
+        if self._start_time is not None:
+            self._start_time = core.G3Time(self._start_time)
+        if self._end_time is not None:
+            self._end_time = core.G3Time(self._end_time)
 
     def add_misc_data(self, f):
         oframe = core.G3Frame(f.type)
@@ -485,6 +493,54 @@ class Bookbinder(object):
 
         return frame_splits
 
+    def trim_frame(self, f):
+        def trim_sts_start(sts, start_time=self._start_time):
+            newsts = so3g.G3SuperTimestream()
+            newsts.names = sts.names
+            newsts.times = core.G3VectorTime([t for t in sts.times if t >= start_time])
+            newsts.data = sts.data[:,(len(sts.times)-len(newsts.times)):]
+            return newsts
+
+        def trim_sts_end(sts, end_time=self._end_time):
+            newsts = so3g.G3SuperTimestream()
+            newsts.names = sts.names
+            newsts.times = core.G3VectorTime([t for t in sts.times if t <= end_time])
+            newsts.data = sts.data[:,:len(newsts.times)]
+            return newsts
+
+        if self._start_time is None and self._end_time is None:
+            return f
+
+        # Trim starting samples (if needed)
+        if self._start_time is not None and f['data'].times[0] < self._start_time:
+            trimmed_frame_start = core.G3Frame(f.type)
+            trimmed_frame_start['data'] = trim_sts_start(f['data'])
+            if 'tes_bias' in f.keys():
+                trimmed_frame_start['tes_bias'] = trim_sts_start(f['tes_bias'])
+            if 'primary' in f.keys():
+                trimmed_frame_start['primary'] = trim_sts_start(f['primary'])
+            for k in f.keys():
+                if k not in ['data', 'tes_bias', 'primary']:
+                    trimmed_frame_start[k] = f[k]
+            trimmed_frame = trimmed_frame_start
+        else:
+            trimmed_frame = f
+
+        # Trim ending samples (if needed)
+        if self._end_time is not None and trimmed_frame['data'].times[-1] > self._end_time:
+            trimmed_frame_end = core.G3Frame(trimmed_frame.type)
+            trimmed_frame_end['data'] = trim_sts_end(trimmed_frame['data'])
+            if 'tes_bias' in trimmed_frame.keys():
+                trimmed_frame_end['tes_bias'] = trim_sts_end(trimmed_frame['tes_bias'])
+            if 'primary' in trimmed_frame.keys():
+                trimmed_frame_end['primary'] = trim_sts_end(trimmed_frame['primary'])
+            for k in trimmed_frame.keys():
+                if k not in ['data', 'tes_bias', 'primary']:
+                    trimmed_frame_end[k] = trimmed_frame[k]
+            trimmed_frame = trimmed_frame_end
+
+        return trimmed_frame
+
     def __call__(self):
         for hkfile in self._hk_files:
             for h in core.G3File(hkfile):
@@ -550,7 +606,7 @@ class Bookbinder(object):
                         else:
                             self.metadata += [f]
                     else:
-                        output += self.frameproc(f)  # FrameProcessor returns a list of frames (can be empty)
+                        output += self.frameproc(self.trim_frame(f))  # FrameProcessor returns a list of frames (can be empty)
                         output = [o for o in output if len(o['signal'].times) > 0]
                         # Write out metadata frames only when FrameProcessor outputs one or more (scan) frames
                         if len(output) > 0:
