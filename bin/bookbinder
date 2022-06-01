@@ -17,6 +17,10 @@ if __name__ == '__main__':
                         help='ID of telescope and optics tube')
     parser.add_argument('--slot-flags', dest='slotflags', type=str,
                         help='1s and 0s indicating eligible stream_ids included in Book')
+    parser.add_argument('--start-time', dest='start_time', type=int,
+                        help='Timestamp of first sample (inclusive)')
+    parser.add_argument('--end-time', dest='end_time', type=int,
+                        help='Timestamp of last sample (inclusive)')
     args = parser.parse_args()
 
     book_id = args.prefix
@@ -33,5 +37,7 @@ if __name__ == '__main__':
                    out_files = [op.join(book_id, f'D_w01_{i:03d}.g3') for i in range(len(args.smurffiles))],
                    book_id = book_id,
                    session_id = args.timestamp,
-                   stream_id = args.slotflags)
+                   stream_id = args.slotflags,
+                   start_time = args.start_time,
+                   end_time = args.end_time)
     B()
