@@ -190,7 +190,7 @@ As we develop the SO pipeline we will need to standardize field names that have
 specific uses within the pipeline so that functions can be written to expect a
 specific set of fields. Not all AxisManagers will have all these fields by
 default and many fields are linked to documentation locations where more details
-can be found. There are meant to prevent naming collisions and more will be 
+can be found. These are meant to prevent naming collisions and more will be 
 added here as the code develops. 
 
 * ``dets`` - the axis for detectors  
@@ -221,7 +221,7 @@ SMuRF fields loaded through :meth:`sotodlib.io.load_file`.
 Pointing information required for :mod:`sotodlib.coords`.
 
 * | ``boresight`` `[samps]` - AxisManager with boresight pointing in horizon
-  | coordinates.
+  | coordinates. Child fields are ``az``, ``el``, and ``roll``.
 * | ``focal_plane`` `[dets]` - AxisManager with detector position and orientation
   | relative to boresight pointing.
 * | ``boresight_equ`` `[samps]` - AxisManager with boresight in equitorial
