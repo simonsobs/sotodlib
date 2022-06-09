@@ -10,6 +10,8 @@ if __name__ == '__main__':
                         help='full path to SMuRF files')
     parser.add_argument('--hk', dest='hkfiles', nargs='+', type=str, required=True,
                         help='full path to HK files')
+    parser.add_argument('--out-root', dest='out_root', default=".", type=str,
+                        help='Path to output directory')
     parser.add_argument('--prefix', default="obs", help='prefix for output Book')
     parser.add_argument('--timestamp', dest='timestamp', type=int,
                         help='timestamp of the start of the observation')
@@ -34,7 +36,7 @@ if __name__ == '__main__':
         os.makedirs(book_id)
 
     B = Bookbinder(args.hkfiles, args.smurffiles,
-                   out_files = [op.join(book_id, f'D_w01_{i:03d}.g3') for i in range(len(args.smurffiles))],
+                   out_root = args.out_root,
                    book_id = book_id,
                    session_id = args.timestamp,
                    stream_id = args.slotflags,
