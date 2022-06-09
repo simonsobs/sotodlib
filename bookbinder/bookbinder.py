@@ -526,6 +526,9 @@ class Bookbinder(object):
         else:
             trimmed_frame = f
 
+        if len(trimmed_frame['data'].times) == 0:
+            return trimmed_frame
+
         # Trim ending samples (if needed)
         if self._end_time is not None and trimmed_frame['data'].times[-1] > self._end_time:
             trimmed_frame_end = core.G3Frame(trimmed_frame.type)
