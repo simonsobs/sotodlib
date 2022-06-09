@@ -352,14 +352,14 @@ class Bookbinder(object):
     """
     Bookbinder
     """
-    def __init__(self, hk_files, smurf_files, out_files, book_id=None, session_id=None, stream_id=None,
+    def __init__(self, hk_files, smurf_files, out_root='.', book_id=None, session_id=None, stream_id=None,
                  start_time=None, end_time=None, verbose=True):
         self._hk_files = hk_files
         self._smurf_files = smurf_files
-        self._out_files = out_files
         self._book_id = book_id
-        self._ancil_files = [op.join(book_id, f'A_ancil_{i:03d}.g3') for i in range(len(self._out_files))]
-        self._frame_splits_file = op.join(book_id, 'frame_splits.txt')
+        self._out_files = [op.join(out_root, book_id, f'D_{stream_id}_{i:03d}.g3') for i in range(len(smurf_files))]
+        self._ancil_files = [op.join(out_root, book_id, f'A_ancil_{i:03d}.g3') for i in range(len(smurf_files))]
+        self._frame_splits_file = op.join(out_root, book_id, 'frame_splits.txt')
         self._session_id = session_id
         self._stream_id = stream_id
         self._start_time = start_time
