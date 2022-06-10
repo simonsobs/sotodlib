@@ -85,6 +85,7 @@ def main(args=None):
         
         ## Run mapping on each TuneSet.
         for ts in tunesets:
+            bgmap_path = None
             mapping = array["mapping"]      
             dest_dataset = f"{ts.stream_id}_{ts.name}_mapping_v{mapping['version']}"
             
@@ -104,7 +105,8 @@ def main(args=None):
             array_map=None
             logger.info(f"Making Map for {ts.path}")
             try:
-                array_map = map_maker.make_map_smurf(tunefile=ts.path)
+                array_map = map_maker.make_map_smurf(tunefile=ts.path,
+                                                     bgmap_path=bgmap_path)
             except:
                 logger.warning(f"Map Maker Failed on {ts.path}")
                 continue
@@ -119,13 +121,12 @@ def main(args=None):
                 keys=["dets:det_id", 
                       "dets:readout_id"]
             )
-
-            ## loop through detector IDs and find readout ID matches
-            for tune in array_map:
+            # loop through detector IDs and find readout ID matches
+            for tune in array_map.get_mux_output(add_back_null=False):
                 det_id = tune.detector_id
                 if det_id is None:
-                    ## resonators smurf found that array map doesn't think 
-                    ## should exist (artifacts?)
+                    logger.warning('The DetMap issued "det_id" is should not allowed to be None in the return from ' +
+                                   'detmap.data_io.channel_assignment.OperateTuneData.get_mux_output()')
                     continue
                 i_did = np.where(det_info.dets.vals == det_id)[0]
                 if len(i_did) != 1:
