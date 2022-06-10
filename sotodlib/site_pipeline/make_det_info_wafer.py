@@ -31,9 +31,7 @@ def main(args=None):
     scheme = core.metadata.ManifestScheme()
     scheme.add_range_match('obs:timestamp')
     scheme.add_data_field('dataset')
-    db = core.metadata.ManifestDb(configs["det_db"], scheme=scheme)  
-    
-    out_dir, out_file = os.path.split(configs["det_info"])
+    db = core.metadata.ManifestDb(configs["det_db"], scheme=scheme)
     
     w = "dets:wafer."
     keys = [
@@ -59,20 +57,13 @@ def main(args=None):
     det_rs = core.metadata.ResultSet(keys=keys)
     
     for array_name in array_names:
-        # Generate the OperateTuneData for the Array
-        map_maker = MapMaker( north_is_highband=False, ## should not matter for this
-                              array_name=array_name,
-                              dark_bias_lines=None,
-                              output_parent_dir=out_dir,
-                              verbose=False)
-        otd, layout = map_maker.load_metadata()
-        otd.map_layout_data(layout)
-
-        ## we CANNOT use otd.tune_data for the for loop.
-        ## probably need docs/change control on the IDs in DetMap if that
-        ## the source of the IDs
-        for tune in otd: 
-            #print(tune.detector_id, tune.is_optical)
+        # Initialize a detmap.makemap.MapMaker() instance that will have ideal/design metadata for this array.
+        map_maker = MapMaker(north_is_highband=False,  # used to set smurf_band in metadata
+                             array_name=array_name,
+                             verbose=False)
+        # iterate over the ideal/design metadata for this array
+        for tune in map_maker.grab_metadata():
+            # print(tune.detector_id, tune.is_optical)
             # add detector name to database
             det_rs.append({
                 "dets:det_id": tune.detector_id,
