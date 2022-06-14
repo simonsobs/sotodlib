@@ -102,10 +102,6 @@ def main(args=None):
                'dataset': dest_dataset}
     db.add_entry(db_data, configs["det_info"])
 
-    #aman = det_rs.to_axismanager(axis_key="dets:det_id")
-    #aman.save(out_path)
-    #return aman
-
 def none_to_nan(val):
     if val is None:
         return np.nan
