@@ -80,7 +80,7 @@ def main(args=None):
             bgmap_path = None
             mapping = array["mapping"]
             dest_dataset = f"{ts.stream_id}_{ts.name}_mapping_v{mapping['version']}"
-            if dest_dataset in db.get_entries(["dataset"])["dataset"] and not args.overwrite:
+            if dest_dataset in list(db.get_entries(["dataset"])["dataset"]) and not args.overwrite:
                 logger.debug(f"Dataset {dest_dataset} already exists")
                 continue
             # Setup Mapping for Each Mapping Type
@@ -141,7 +141,7 @@ def main(args=None):
 
             write_dataset(rs_list, configs["read_info"], dest_dataset, args.overwrite)
 
-            if dest_dataset not in db.get_entries(["dataset"])["dataset"]:
+            if dest_dataset not in list(db.get_entries(["dataset"])["dataset"]):
                 # Update the index.
                 db_data = {'dets:detset': ts.name,
                            'dataset': dest_dataset}
