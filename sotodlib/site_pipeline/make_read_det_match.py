@@ -26,7 +26,7 @@ def parse_args():
     "Minimum ctime to search for TuneSets")
     parser.add_argument('--max-ctime', type=float, help=
     "Maximum ctime to search for TuneSets")
-    parser.add_argument('--override', action='store_true')
+    parser.add_argument('--overwrite', action='store_true')
     args = parser.parse_args()
     return args
 
@@ -35,9 +35,6 @@ def main(args=None):
     if args is None:
         args = parse_args()
     configs = yaml.safe_load(open(args.config_file, "r"))
-    # SMURF = G3tSmurf(os.path.join(configs["data_prefix"], "timestreams"),
-    #                  configs["g3tsmurf_db"],
-    #                  meta_path=os.path.join(configs["data_prefix"], "smurf"))
     SMURF = G3tSmurf.from_configs(configs)
     session = SMURF.Session()
     if os.path.exists(configs["read_db"]):
@@ -83,7 +80,7 @@ def main(args=None):
             bgmap_path = None
             mapping = array["mapping"]
             dest_dataset = f"{ts.stream_id}_{ts.name}_mapping_v{mapping['version']}"
-            if dest_dataset in db.get_entries() and not args.override:
+            if dest_dataset in db.get_entries(["dataset"])["dataset"] and not args.overwrite:
                 logger.debug(f"Dataset {dest_dataset} already exists")
                 continue
             # Setup Mapping for Each Mapping Type
@@ -142,9 +139,9 @@ def main(args=None):
                 rs_list.append({"dets:det_id": "NO_MATCH",
                                 "dets:readout_id": rid})
 
-            write_dataset(rs_list, configs["read_info"], dest_dataset, args.override)
+            write_dataset(rs_list, configs["read_info"], dest_dataset, args.overwrite)
 
-            if dest_dataset not in db.get_entries():
+            if dest_dataset not in db.get_entries(["dataset"])["dataset"]:
                 # Update the index.
                 db_data = {'dets:detset': ts.name,
                            'dataset': dest_dataset}
