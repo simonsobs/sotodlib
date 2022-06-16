@@ -57,33 +57,35 @@ def main(args=None):
     det_rs = core.metadata.ResultSet(keys=keys)
 
     for array_name in array_names:
-        # Initialize a detmap.makemap.MapMaker() instance that will have ideal/design metadata for this array.
-        map_maker = MapMaker(north_is_highband=False,  # used to set smurf_band in metadata
+        # Initialize a detmap.makemap.MapMaker() instance 
+        # that will have ideal/design metadata for this array.
+        map_maker = MapMaker(north_is_highband=False,                              
                              array_name=array_name,
                              verbose=False)
+
         # iterate over the ideal/design metadata for this array
         for tune in map_maker.grab_metadata():
-            # print(tune.detector_id, tune.is_optical)
+            
             # add detector name to database
             det_rs.append({
                 "dets:det_id": tune.detector_id,
                 w + "array": array_name,
                 w + "bond_pad": tune.bond_pad,
                 w + "mux_band": str(tune.mux_band),
-                w + "mux_channel": none_to_nan(tune.mux_channel),
-                w + "mux_subband": none_to_nan(tune.mux_subband),
-                w + "mux_position": none_to_nan(tune.mux_layout_position),
-                w + "design_freq_mhz": none_to_nan(tune.design_freq_mhz),
-                w + "bias_line": none_to_nan(tune.bias_line),
+                w + "mux_channel": replace_none(tune.mux_channel, -1),
+                w + "mux_subband": replace_none(tune.mux_subband, -1),
+                w + "mux_position": replace_none(tune.mux_layout_position, -1),
+                w + "design_freq_mhz": replace_none(tune.design_freq_mhz),
+                w + "bias_line": replace_none(tune.bias_line, -1),
                 w + "pol": str(tune.pol),
                 w + "bandpass": f"f{tune.bandpass}" if tune.bandpass is not None else "NC",
-                w + "det_row": none_to_nan(tune.det_row),
-                w + "det_col": none_to_nan(tune.det_col),
+                w + "det_row": replace_none(tune.det_row, -1),
+                w + "det_col": replace_none(tune.det_col, -1),
                 w + "rhombus": str(tune.rhomb),
                 w + "type": str(tune.det_type),
-                w + "det_x": none_to_nan(tune.det_x),
-                w + "det_y": none_to_nan(tune.det_y),
-                w + "angle": np.radians(none_to_nan(tune.angle_actual_deg)),
+                w + "det_x": replace_none(tune.det_x),
+                w + "det_y": replace_none(tune.det_y),
+                w + "angle": np.radians(replace_none(tune.angle_actual_deg)),
             })
 
     dest_dataset = ",".join(array_names)
@@ -95,9 +97,9 @@ def main(args=None):
 
     return None
 
-def none_to_nan(val):
+def replace_none(val, replace_val=np.nan):
     if val is None:
-        return np.nan
+        return replace_val
     return val
 
 
