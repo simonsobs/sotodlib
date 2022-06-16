@@ -439,12 +439,25 @@ class ManifestDb:
         if commit:
             self.conn.commit()
     
-    def get_entries(self):
+    def get_entries(self, fields):
         """Return list of all entry names in database
+        that are in the listed fields
+
+        Arguments
+        ---------
+        fields: list of strings
+            should correspond to columns in map table made through 
+            ManifestScheme.add_data_field( field_name )
+
+        Returns
+        --------
+        ResultSet with keys equal to field names
         """
-        c = self.conn.execute('select dataset from map')
-        return [r[0] for r in c]
-        
+        if not isinstance(fields, list):
+            raise ValueError("fields must be a list")
+        q = f"select distinct {','.join(fields)} from map"
+        c = self.conn.execute(q)
+        return resultset.ResultSet.from_cursor(c)
         
     def validate(self):
         """
