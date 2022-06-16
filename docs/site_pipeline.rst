@@ -47,6 +47,9 @@ This script uses the DetMap software package to build detector IDs for a set of
 UFMs and save them in a ManifestDb / HDF5 file. The formatting of the ResultSet 
 saved in HDF5 file will map all this information into ``det_info.wafer`` when used 
 with a correctly formatted context file and a readout to detector id mapping.
+The detector info mapping created by this script will be stable as long as the
+same UFMs are used in the same optics tube positions, meaning it only needs to
+be re-made if the physical hardware setup changes. 
 
 make_read_det_match
 ```````````````````

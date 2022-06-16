@@ -111,7 +111,8 @@ def main(args=None):
             for tune in array_map.get_mux_output(add_back_null=False):
                 det_id = tune.detector_id
                 if det_id is None:
-                    logger.warning('The DetMap issued "det_id" is should not allowed to be None in the return from ' +
+                    logger.warning('The DetMap issued "det_id" is should not allowed' +
+                                   'to be None in the return from ' +
                                    'detmap.data_io.channel_assignment.OperateTuneData.get_mux_output()')
                     continue
                 i_did = np.where(det_info.dets.vals == det_id)[0]
