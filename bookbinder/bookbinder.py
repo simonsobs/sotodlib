@@ -137,6 +137,7 @@ class FrameProcessor(object):
         self.flush_time = None
         self.maxlength = 10000
         self.current_state = 0  # default to scan state
+        self._frame_splits = []
 
     def ready(self):
         """
@@ -341,7 +342,9 @@ class FrameProcessor(object):
 
             # If the existing data exceeds the specified maximum length
             while len(self.smbundle.times) >= self.maxlength:
-                output += self.flush(self.smbundle.times[self.maxlength-1] + 1)
+                split_time = self.smbundle.times[self.maxlength-1] + 1
+                self._frame_splits.append(split_time)
+                output += self.flush(split_time)
             # If a frame split event has been reached
             if self.flush_time is not None and self.smbundle.ready(self.flush_time):
                 output += self.flush()
@@ -360,6 +363,7 @@ class Bookbinder(object):
         self._out_files = [op.join(out_root, book_id, f'D_{stream_id}_{i:03d}.g3') for i in range(len(smurf_files))]
         self._ancil_files = [op.join(out_root, book_id, f'A_ancil_{i:03d}.g3') for i in range(len(smurf_files))]
         self._frame_splits_file = op.join(out_root, book_id, 'frame_splits.txt')
+        self._frame_splits = []
         self._session_id = session_id
         self._stream_id = stream_id
         self._start_time = start_time
@@ -553,12 +557,11 @@ class Bookbinder(object):
                 self.frameproc(h)
 
         if op.isfile(self._frame_splits_file):
-            frame_splits = [core.G3Time(t) for t in np.loadtxt(self._frame_splits_file, dtype='int', ndmin=1)]
+            self._frame_splits = [core.G3Time(t) for t in np.loadtxt(self._frame_splits_file, dtype='int', ndmin=1)]
         else:
-            frame_splits = self.find_frame_splits()
-            np.savetxt(self._frame_splits_file, frame_splits, fmt='%i')
+            self._frame_splits = self.find_frame_splits()
 
-        for event_time in frame_splits:
+        for event_time in self._frame_splits:
             self.frameproc.flush_time = event_time
             output = []
 
@@ -619,3 +622,7 @@ class Bookbinder(object):
 
                     # Clear output buffer after writing
                     output = []
+
+        self._frame_splits += self.frameproc._frame_splits
+        if not op.isfile(self._frame_splits_file):
+            np.savetxt(self._frame_splits_file, np.unique([int(t) for t in self._frame_splits]), fmt='%i')
