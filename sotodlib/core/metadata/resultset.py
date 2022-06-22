@@ -173,12 +173,6 @@ class ResultSet(object):
                     break
         assert(len(self.keys) == len(set(self.keys)))
 
-    # Todo: decide whether axisman conversion code lives here or axisman...
-    def axismanager(self, detdb=None):
-        from sotodlib import core
-        return core.AxisManager.from_resultset(self, detdb=detdb)
-
-    # Todo: move this to the right place, too.
     def restrict_dets(self, restriction, detdb=None):
         # There are 4 classes of keys:
         # - dets:* keys appearing only in restriction

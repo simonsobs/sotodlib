@@ -1,6 +1,15 @@
 import numpy as np
 from collections import OrderedDict as odict
 
+import scipy.sparse as sparse
+## "temporary" fix to deal with scipy>1.8 changing the sparse setup
+try:
+    from scipy.sparse import csr_array
+except ImportError:
+    from scipy.sparse import csr_matrix as csr_array
+
+from .util import get_coindices
+
 
 class AxisInterface:
     """Abstract base class for axes managed by AxisManager."""
@@ -87,8 +96,9 @@ class AxisInterface:
 class IndexAxis(AxisInterface):
     """This class manages a simple integer-indexed axis.  When
     intersecting data, the longer one will be simply truncated to
-    match the shorter.  Selectors must be tuples compatible with
-    slice(), e.g. (2,8,2).
+    match the shorter.  Selectors must be slice objects (with stride
+    1!) or tuples to be passed into slice(), e.g. (0, 1000) or (0,
+    None, 1)..
 
     """
     def __init__(self, name, count=None):
@@ -137,6 +147,9 @@ class OffsetAxis(AxisInterface):
     reference point.  It could be a TOD name ('obs_2020-12-01') or a
     timestamp or whatever.
 
+    Selectors must be slice objects (with stride 1!) or tuples to be
+    passed into slice(), e.g. (0, 1000) or (0, None, 1).
+
     """
 
     origin_tag = None
@@ -164,7 +177,10 @@ class OffsetAxis(AxisInterface):
         return super().resolve(src, axis_index)
 
     def restriction(self, selector):
-        sl = slice(*selector)
+        if not isinstance(selector, slice):
+            sl = slice(*selector)
+        else:
+            sl = selector
         start, stop, stride = sl.indices(self.count + self.offset)
         assert stride == 1
         assert start >= self.offset
@@ -191,6 +207,8 @@ class LabelAxis(AxisInterface):
     element has been given a unique name.  The vector of names can be
     found in self.vals.
 
+    Instantiation with labels that are not strings will raise a TypeError.
+
     On intersection of two vectors, only elements whose names appear
     in both axes will be preserved.
 
@@ -201,7 +219,13 @@ class LabelAxis(AxisInterface):
     def __init__(self, name, vals=None):
         super().__init__(name)
         if vals is not None:
-            vals = np.array(vals)
+            if len(vals):
+                vals = np.array(vals)
+            else:
+                vals = np.array([], dtype=np.str_)
+            if vals.dtype.type is not np.str_:
+                raise TypeError(
+                        'LabelAxis labels must be strings not %s' % vals.dtype)
         self.vals = vals
 
     @property
@@ -280,7 +304,10 @@ class AxisManager:
         if axes_only:
             return out
         for k, v in self._fields.items():
-            out._fields[k] = v.copy()
+            if np.isscalar(v) or v is None:
+                out._fields[k] = v
+            else:
+                out._fields[k] = v.copy()
         for k, v in self._assignments.items():
             out._assignments[k] = v.copy()
         return out
@@ -289,7 +316,7 @@ class AxisManager:
         ids = [id(self)]
         for v in self._fields.values():
             if isinstance(v, AxisManager):
-                ids.extend(v.managed_ids)
+                ids.extend(v._managed_ids())
         return ids
 
     def __delitem__(self, name):
@@ -359,6 +386,8 @@ class AxisManager:
         return default
 
     def shape_str(self, name):
+        if np.isscalar(self._fields[name]) or self._fields[name] is None:
+            return ''
         s = []
         for n, ax in zip(self._fields[name].shape, self._assignments[name]):
             if ax is None:
@@ -374,60 +403,11 @@ class AxisManager:
                   for k in self._fields.keys()]
                  + ['%s:%s' % (k, v._minirepr_())
                     for k, v in self._axes.items()])
-        return ("{}(".format(type(self).__name__) + ', '.join(stuff) + ")")
-
-    # constructors...
-    @classmethod
-    def from_resultset(cls, rset, detdb,
-                       axis_name='dets',
-                       prefix='dets:'):
-        # Determine the dets axis columns
-        dets_cols = {}
-        for k in rset.keys:
-            if k.startswith(prefix):
-                dets_cols[k] = k[len(prefix):]
-        # Get the detector names for entry.
-        if prefix + 'name' in dets_cols:
-            dets = rset[prefix + 'name']
-            self = cls(LabelAxis(axis_name, dets))
-            for k in rset.keys:
-                if not k.startswith(prefix):
-                    self.wrap(k, rset[k], [(0, axis_name)])
-        else:
-            # Generate the expansion map...
-            if detdb is None:
-                raise RuntimeError(
-                    'Expansion to dets axes requires detdb '
-                    'but None was not passed in.')
-            dets = []
-            indices = []
-            for row_i, row in enumerate(rset.subset(keys=dets_cols.keys())):
-                props = {v: row[k] for k, v in dets_cols.items()}
-                dets_i = list(detdb.dets(props=props)['name'])
-                assert all(d not in dets for d in dets_i)  # Not disjoint!
-                dets.extend(dets_i)
-                indices.extend([row_i] * len(dets_i))
-            indices = np.array(indices)
-            self = cls(LabelAxis(axis_name, dets))
-            for k in rset.keys:
-                if not k.startswith(prefix):
-                    self.wrap(k, rset[k][indices], [(0, axis_name)])
-        return self
-
-    def restrict_dets(self, restriction, detdb=None):
-        # Just convert the restriction to a list of dets, compare to
-        # what we have, and return the reduced result.
-        props = {k[len('dets:'):]: v for k, v in restriction.items()
-                 if k.startswith('dets:')}
-        if len(props) == 0:
-            return self
-        restricted_dets = detdb.dets(props=props)
-        ax2 = LabelAxis('new_dets', restricted_dets['name'])
-        new_ax, i0, i1 = self._axes['dets'].intersection(ax2, True)
-        return self.restrict('dets', new_ax.vals)
+        return ("{}(".format(type(self).__name__)
+                + ', '.join(stuff).replace('[]', '') + ")")
 
     @staticmethod
-    def concatenate(items, axis=0):
+    def concatenate(items, axis=0, other_fields='fail'):
         """Concatenate multiple AxisManagers along the specified axis, which
         can be an integer (corresponding to the order in
         items[0]._axes) or the string name of the axis.
@@ -435,10 +415,19 @@ class AxisManager:
         This operation is difficult to sanity check so it's best to
         use it only in simple, controlled cases!  The first item is
         given significant privilege in defining what fields are
-        relevant.  Only fields actually referencing the target axis
-        will be propagated in this operation.
+        relevant.  Fields that appear in the first item, but do not
+        share the target axis, will be treated as follows depending on
+        the value of other_fields:
+
+        - If other_fields='fail', the function will fail with a ValueError.
+        - If other_fields='first', the values from the first element
+          of items will be copied into the output.
+        - If other_fields='drop', the fields will simply be ignored
+          (and the output will only contain fields that share the
+          target axis).
 
         """
+        assert other_fields in ['fail', 'first', 'drop']
         if not isinstance(axis, str):
             axis = list(items[0]._axes.keys())[axis]
         fields = []
@@ -474,14 +463,26 @@ class AxisManager:
                 keepers.append(item._fields[name])
             if len(keepers) == 0:
                 # Well we tried.
-                keepers = [items[0]]
-            # Call class-specific concatenation.
-            if isinstance(keepers[0], np.ndarray):
+                keepers = [items[0]._fields[name]]
+            # Call class-specific concatenation if needed.
+            if isinstance(keepers[0], AxisManager):
+                new_data[name] = AxisManager.concatenate(
+                    keepers, axis=ax_dim, other_fields=other_fields)
+            elif isinstance(keepers[0], np.ndarray):
                 new_data[name] = np.concatenate(keepers, axis=ax_dim)
+            elif isinstance(keepers[0], csr_array):
+                if ax_dim == 0:
+                    new_data[name] = sparse.vstack(keepers)
+                elif ax_dim == 1:
+                    new_data[name] = sparse.hstack(keepers)
+                else:
+                    raise ValueError('sparse arrays cannot concatenate along '
+                                     f'axes greater than 1, received {ax_dim}')
             else:
                 # The general compatible object should have a static
                 # method called concatenate.
                 new_data[name] = keepers[0].concatenate(keepers, axis=ax_dim)
+
         # Construct.
         new_axes = []
         for ax_name, ax_def in items[0]._axes.items():
@@ -491,7 +492,21 @@ class AxisManager:
         output = AxisManager(*new_axes)
         for k, v in items[0]._assignments.items():
             axis_map = [(i, n) for i, n in enumerate(v) if n is not None]
-            output.wrap(k, new_data[k], axis_map)
+            if isinstance(items[0][k], AxisManager):
+                axis_map = None  # wrap doesn't like this.
+            if k in new_data:
+                output.wrap(k, new_data[k], axis_map)
+            else:
+                if other_fields == 'fail':
+                    raise ValueError(
+                        f"The field '{k}' does not share axis '{axis}'; "
+                        f"pass other_fields='drop' or 'first' or else "
+                        f"remove this field from the targets.")
+                elif other_fields == 'first':
+                    # Just copy it.
+                    output.wrap(k, items[0][k].copy(), axis_map)
+                elif other_fields == 'drop':
+                    pass
         return output
 
     # Add and remove data while maintaining internal consistency.
@@ -506,6 +521,8 @@ class AxisManager:
 
           data: The data to register.  This must be of an acceptable
             type, i.e. a numpy array or another AxisManager.
+            If scalar (or None) then data will be directly added to
+            _fields with no associated axis.
 
           axis_map: A list that assigns dimensions of data to
             particular Axes.  Each entry in the list must be a tuple
@@ -520,6 +537,19 @@ class AxisManager:
             assert(id(self) not in data._managed_ids())
             assert(axis_map is None)
             axis_map = [(i, v) for i, v in enumerate(data._axes.values())]
+        # Handle scalars
+        if np.isscalar(data) or data is None:
+            if name in self._fields:
+                raise ValueError(f'Key: {name} already found in {self}')
+            if np.iscomplex(data):
+                # Complex values aren't supported by HDF scheme right now.
+                raise ValueError(f'Cannot store complex value as scalar.')
+            if isinstance(data, (np.integer, np.floating, np.str_, np.bool_)):
+                # Convert sneaky numpy scalars to native python int/float/str
+                data = data.item()
+            self._fields[name] = data
+            self._assignments[name] = []
+            return self
         # Promote input data to a full AxisManager, so we can call up
         # to self.merge.
         helper = AxisManager()
@@ -630,6 +660,8 @@ class AxisManager:
         for k, v in self._fields.items():
             if isinstance(v, AxisManager):
                 dest._fields[k] = v.restrict_axes(axes, in_place=in_place)
+            elif np.isscalar(v) or v is None:
+                dest._fields[k] = v
             else:
                 # I.e. an ndarray.
                 sslice = [sels.get(ax, slice(None))
@@ -672,7 +704,7 @@ class AxisManager:
         Axis.  The Axis definition and all data fields mapped to that
         axis will be modified.
         
-        Arugments:
+        Arguments:
           axis_name (str): The name of the Axis.
           selector (slice or special): Selector, in a form understood
             by the underlying Axis class (see the .restriction method
@@ -696,6 +728,8 @@ class AxisManager:
                 dest._fields[k] = v.copy()
                 if axis_name in v._axes:
                     dest._fields[k].restrict(axis_name, selector)
+            elif np.isscalar(v) or v is None:
+                dest._fields[k] = v
             else:
                 sslice = [sl if n == axis_name else slice(None)
                           for n in dest._assignments[k]]
@@ -747,47 +781,71 @@ class AxisManager:
             self._assignments.update(aman._assignments)
         return self
 
+    def save(self, dest, group=None, overwrite=False):
+        """Write this AxisManager data to an HDF5 group.  This is an
+        experimental feature primarily intended to assist with
+        debugging.  The schema is subject to change, and it's possible
+        that not all objects supported by AxisManager can be
+        serialized.
 
-def get_coindices(v0, v1):
-    """Given vectors v0 and v1, each of which contains no duplicate
-    values, determine the elements that are found in both vectors.
-    Returns (vals, i0, i1), i.e. the vector of common elements and
-    the vectors of indices into v0 and v1 where those elements are
-    found.
+        Args:
+          dest (str or h5py.Group): Place to save it (in combination
+            with group).
+          group (str or None): Group within the HDF5 file (relative to
+            dest).
+          overwrite (bool): If True, remove any existing thing at the
+            specified address before writing there.
 
-    This routine will use np.intersect1d if it can.  The ordering of
-    the results is different from intersect1d -- vals is not sorted,
-    but rather will the elements will appear in the same order that
-    they were found in v0 (so i0 is strictly increasing).
+        Notes:
+          If dest is a string, it is taken to be an HDF5 filename and
+          is opened in 'a' mode.  The group, in that case, is the
+          full group name in the file where the data should be written.
 
-    """
-    try:
-        vals, i0, i1 = np.intersect1d(v0, v1, return_indices=True)
-        order = np.argsort(i0)
-        return vals[order], i0[order], i1[order]
-    except TypeError:  # return_indices not implemented in numpy < 1.15
-        pass
+          If dest is an h5py.Group, the group is the group name in the
+          file relative to dest.
 
-    # The old fashioned way
-    v0 = np.asarray(v0)
-    w0 = sorted([(j, i) for i, j in enumerate(v0)])
-    w1 = sorted([(j, i) for i, j in enumerate(v1)])
-    i0, i1 = 0, 0
-    pairs = []
-    while i0 < len(w0) and i1 < len(w1):
-        if w0[i0][0] == w1[i1][0]:
-            pairs.append((w0[i0][1], w1[i1][1]))
-            i0 += 1
-            i1 += 1
-        elif w0[i0][0] < w1[i1][0]:
-            i0 += 1
-        else:
-            i1 += 1
-    if len(pairs) == 0:
-        return (np.zeros(0, v0.dtype), np.zeros(0, int), np.zeros(0, int))
-    pairs.sort()
-    i0, i1 = np.transpose(pairs)
-    return v0[i0], i0, i1
+          The overwrite argument only matters if group is passed as a
+          string.  A RuntimeError is raised if the group address
+          already exists and overwrite==False.
+
+          For example, these are equivalent::
+
+            # Filename + group address:
+            axisman.save('test.h5', 'x/y/z')
+
+            # Open h5py.File + group address:
+            with h5py.File('test.h5', 'a') as h:
+              axisman.save(h, 'x/y/z')
+
+            # Partial group address
+            with h5py.File('test.h5', 'a') as h:
+              g = h.create_group('x/y')
+              axisman.save(g, 'z')
+
+          When passing a filename, the code probably won't use a
+          context manager... so if you want that protection, open your
+          own h5py.File as in the 2nd and 3rd example.
+
+        """
+        from .axisman_io import _save_axisman
+        return _save_axisman(self, dest, group=group, overwrite=overwrite)
+
+    @classmethod
+    def load(cls, src, group=None):
+        """Load a saved AxisManager from an HDF5 file and return it.  See docs
+        for save() function.
+
+        The (src, group) args are combined in the same way as (dest,
+        group) in the save function.  Examples::
+
+          axisman = AxisManager.load('test.h5', 'x/y/z')
+
+          with h5py.File('test.h5', 'r') as h:
+            axisman = AxisManager.load(h, 'x/y/z')
+        """
+        from .axisman_io import _load_axisman
+        return _load_axisman(src, group, cls)
+
 
 def simplify_slice(sslice, shape):
     """Given a tuple of slices, such as what __getitem__ might produce, and the
