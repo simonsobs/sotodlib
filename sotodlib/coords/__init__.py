@@ -4,3 +4,4 @@ from .helpers import (
     Timer, DEG,
 )
 from . import planets
+from . import local

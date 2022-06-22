@@ -294,5 +294,4 @@ class SOFocalplane(Focalplane):
             detector_data=detdata,
             field_of_view=field_of_view,
             sample_rate=sample_rate,
-            comm=comm,
         )

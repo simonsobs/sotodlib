@@ -12,7 +12,7 @@ import traitlets
 
 from astropy import units as u
 
-from pixell import enmap, tilemap
+from pixell import enmap, tilemap, fft
 
 import toast
 from toast.traits import trait_docs, Unicode, Int, Instance, Bool, Float
@@ -74,11 +74,26 @@ class MLMapmaker(Operator):
 
     Nmat = Instance(klass=mm.Nmat, allow_none=True, help="The noise matrix to use")
 
-    nmat_mode = Unicode("build", help="How to initialize the noise matrix. 'build': Always build from data in obs. 'cache': Use if available in nmat_dir, otherwise build and save. 'load': Load from nmat_dir, error if missing. 'save': Build from obs data and save.")
+    nmat_type = Unicode(
+        "NmatDetvecs",
+        help="Noise matrix type is either `NmatDetvecs` or `NmatUncorr`",
+    )
 
-    nmat_dir = Unicode("{out_dir}/nmats", help="Where to read/write/cache noise matrices. See nmat_mode. If {out_dir} is in the string, then it will be expanded to the value of the out_dir parameter")
+    nmat_mode = Unicode(
+        "build",
+        help="How to initialize the noise matrix.  "
+        "'build': Always build from data in obs.  "
+        "'cache': Use if available in nmat_dir, otherwise build and save.  "
+        "'load': Load from nmat_dir, error if missing.  "
+        "'save': Build from obs data and save."
+    )
 
-    dtype_map = Unicode("float64", allow_none=True, help="Numpy dtype of map products")
+    nmat_dir = Unicode(
+        "{out_dir}/nmats",
+        help="Where to read/write/cache noise matrices. See nmat_mode. "
+        "If {out_dir} is in the string, then it will be expanded to the value of the out_dir parameter")
+
+    dtype_map = Unicode("float64", help="Numpy dtype of map products")
 
     times = Unicode(defaults.times, help="Observation shared key for timestamps")
 
@@ -139,7 +154,13 @@ class MLMapmaker(Operator):
 
     maxerr = Float(1e-6, help="Maximum error in the CG solver")
 
+    truncate_tod = Bool(
+        False,
+        help="Truncate TOD to an easily factorizable length to ensure efficient FFT.",
+    )
+
     write_div = Bool(True, help="Write out the noise weight map")
+    write_hits= Bool(True, help="Write out the hitcount map")
 
     write_rhs = Bool(
         True, help="Write out the right hand side of the mapmaking equation"
@@ -218,6 +239,15 @@ class MLMapmaker(Operator):
             raise traitlets.TraitError("write_iter_map must be nonnegative")
         return check
 
+    @traitlets.validate("nmat_type")
+    def _check_nmat_type(self, proposal):
+        check = proposal["value"]
+        allowed = ["NmatUncorr", "NmatDetvecs"]
+        if check not in allowed:
+            msg = f"nmat_type must be one of {allowed}, not {check}"
+            raise traitlets.TraitError(msg)
+        return check
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._mapmaker = None
@@ -226,12 +256,18 @@ class MLMapmaker(Operator):
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
 
-        for trait in "area", "Nmat", "dtype_map":
+        for trait in ["area"]:
             value = getattr(self, trait)
             if value is None:
                 raise RuntimeError(
                     f"You must set `{trait}` before running MLMapmaker"
                 )
+
+        # nmat_type is guaranteed to be a valid Nmat class
+        self.Nmat = getattr(mm, self.nmat_type)()
+
+        comm = data.comm.comm_world
+        gcomm = data.comm.comm_group
 
         if self._mapmaker is None:
             # First call- create the mapmaker instance.
@@ -245,8 +281,9 @@ class MLMapmaker(Operator):
                 self._recenter = mm.parse_recentering(self.center_at)
 
             dtype_tod    = np.float32
-            signal_cut   = mm.SignalCut(data.comm.comm_world, dtype=dtype_tod)
-            signal_map   = mm.SignalMap(self._shape, self._wcs, data.comm.comm_world, comps=self.comps,
+            signal_cut   = mm.SignalCut(comm, dtype=dtype_tod)
+
+            signal_map   = mm.SignalMap(self._shape, self._wcs, comm, comps=self.comps,
                                dtype=np.dtype(self.dtype_map), recenter=self._recenter, tiled=self.tiled)
             signals      = [signal_cut, signal_map]
             self._mapmaker = mm.MLMapmaker(signals, noise_model=self.Nmat, dtype=dtype_tod, verbose=self.verbose)
@@ -273,18 +310,40 @@ class MLMapmaker(Operator):
 
             axdets = LabelAxis("dets", dets)
 
+            nsample = int(ob.n_local_samples)
+            ind = slice(None)
+            ncut = nsample - fft.fft_len(nsample)
+            if ncut != 0:
+                if self.truncate_tod:
+                    log.info_rank(
+                        f"Truncating {ncut} / {nsample} samples ({100 * ncut / nsample:.3f}%) from "
+                        f"{ob.name} for better FFT performance.",
+                        comm=gcomm,
+                    )
+                    nsample -= ncut
+                    ind = slice(nsample)
+                else:
+                    log.warning_rank(
+                        f"{ob.name} length contains large prime factors.  "
+                        F"FFT performance may be degrared.  Recommend "
+                        f"truncating {ncut} / {nsample} samples ({100 * ncut / nsample:.3f}%).",
+                        comm=gcomm,
+                    )
+
             axsamps = OffsetAxis(
                 "samps",
-                count=ob.n_local_samples,
+                count=nsample,
                 offset=ob.local_index_offset,
                 origin_tag=ob.name,
             )
 
             # Convert the data view into a RangesMatrix
-            ranges = so3g.proj.ranges.RangesMatrix.zeros((len(dets), int(ob.n_local_samples)))
+            ranges = so3g.proj.ranges.RangesMatrix.zeros((len(dets), nsample))
             if self.view is not None:
-                 view_ranges = np.array([[x.first, x.last + 1] for x in ob.intervals[self.view]])
-                 ranges += so3g.proj.ranges.Ranges.from_array(view_ranges, ob.n_local_samples)
+                 view_ranges = np.array(
+                     [[x.first, min(x.last, nsample) + 1] for x in ob.intervals[self.view]]
+                 )
+                 ranges += so3g.proj.ranges.Ranges.from_array(view_ranges, nsample)
 
             # Convert the focalplane offsets into the expected form
             det_to_row = {y["name"]: x for x, y in enumerate(fp.detector_data)}
@@ -311,7 +370,7 @@ class MLMapmaker(Operator):
 
             # Convert Az/El quaternion of the detector back into
             # angles from the simulation.
-            theta, phi, pa = toast.qarray.to_angles(ob.shared[self.boresight])
+            theta, phi, pa = toast.qarray.to_angles(ob.shared[self.boresight][ind])
 
             # Azimuth is measured in the opposite direction from longitude
             az = 2 * np.pi - phi
@@ -325,15 +384,15 @@ class MLMapmaker(Operator):
 
             axobs = AxisManager()
             axobs.wrap("focal_plane", axfp)
-            axobs.wrap("timestamps", ob.shared[self.times], axis_map=[(0, axsamps)])
+            axobs.wrap("timestamps", ob.shared[self.times][ind], axis_map=[(0, axsamps)])
             axobs.wrap(
                 "signal",
-                ob.detdata[self.det_data][dets, :],
+                ob.detdata[self.det_data][dets, ind],
                 axis_map=[(0, axdets), (1, axsamps)],
             )
             axobs.wrap("boresight", axbore)
             axobs.wrap("glitch_flags", ranges, axis_map=[(0, axdets), (1, axsamps)])
-            axobs.wrap("weather", np.full(1, "vacuum"))
+            axobs.wrap("weather", np.full(1, self.weather))
             axobs.wrap("site",    np.full(1, "so"))
 
             # NOTE:  Expected contents look like:
@@ -351,10 +410,16 @@ class MLMapmaker(Operator):
             # Maybe load precomputed noise model
             nmat_dir  = self.nmat_dir.format(out_dir=self.out_dir)
             nmat_file = nmat_dir + "/nmat_%s.hdf" % ob.name
-            if self.nmat_mode == "load" or self.nmat_mode == "cache" and os.path.isfile(nmat_file):
-                #print("Reading noise model %s" % nmat_file)
+            there = os.path.isfile(nmat_file)
+            if self.nmat_mode == "load" and not there:
+                raise RuntimeError(
+                    f"Nmat mode is 'load' but {nmat_file} does not exist."
+                )
+            if self.nmat_mode == "load" or (self.nmat_mode == "cache" and there):
+                log.info_rank(f"Loading noise model from '{nmat_file}'", comm=gcomm)
                 nmat = mm.read_nmat(nmat_file)
-            else: nmat = None
+            else:
+                nmat = None
 
             self._mapmaker.add_obs(ob.name, axobs, noise_model=nmat)
             del axobs
@@ -362,9 +427,8 @@ class MLMapmaker(Operator):
             # Maybe save the noise model we built (only if we actually built one rather than
             # reading one in)
             if self.nmat_mode in ["save", "cache"] and nmat is None:
-                #print("Writing noise model %s" % nmat_file)
-                from pixell import utils # not sure how toast makes dirs safely, so using this
-                utils.mkdir(nmat_dir)
+                log.info_rank(f"Writing noise model to '{nmat_file}'", comm=gcomm)
+                os.makedirs(nmat_dir, exist_ok=True)
                 mm.write_nmat(nmat_file, self._mapmaker.data[-1].nmat)
 
             # Optionally delete the input detector data to save memory, if
@@ -381,9 +445,17 @@ class MLMapmaker(Operator):
         log = Logger.get()
         timer = Timer()
         comm = data.comm.comm_world
+        gcomm = data.comm.comm_group
         timer.start()
 
         self._mapmaker.prepare()
+
+        if self.tiled:
+            geo_work = self._mapmaker.signals[1].geo_work
+            nactive = len(geo_work.active)
+            ntile = np.prod(geo_work.shape[-2:])
+            log.info_rank(f"{nactive} / {ntile} tiles active", comm=gcomm)
+
         log.info_rank(
             f"MLMapmaker finished prepare in",
             comm=comm,
@@ -396,14 +468,25 @@ class MLMapmaker(Operator):
         # a sky map, or where we solve for multiple sky maps. The mapmaker itself supports it,
         # the problem is the direct access to the rhs, div and idiv members
         if self.write_rhs:
-            self._signal_map.write(prefix, "rhs", self._signal_map.rhs)
+            fname = self._signal_map.write(prefix, "rhs", self._signal_map.rhs)
+            log.info_rank(f"Wrote rhs to {fname}", comm=comm)
+
         if self.write_div:
             #self._signal_map.write(prefix, "div", self._signal_map.div)
             # FIXME : only writing the TT variance to avoid integer overflow in communication
-            self._signal_map.write(prefix, "div", self._signal_map.div[0, 0])
+            fname = self._signal_map.write(prefix, "div", self._signal_map.div[0, 0])
+            log.info_rank(f"Wrote div to {fname}", comm=comm)
+
+        if self.write_hits:
+            fname = self._signal_map.write(prefix, "hits", self._signal_map.hits)
+            log.info_rank(f"Wrote hits to {fname}", comm=comm)
+
         mmul = tilemap.map_mul if self.tiled else enmap.map_mul
         if self.write_bin:
-            self._signal_map.write(prefix, "bin", mmul(self._signal_map.idiv, self._signal_map.rhs))
+            fname = self._signal_map.write(
+                prefix, "bin", mmul(self._signal_map.idiv, self._signal_map.rhs)
+            )
+            log.info_rank(f"Wrote bin to {fname}", comm=comm)
 
         if comm is not None:
             comm.barrier()
@@ -425,7 +508,8 @@ class MLMapmaker(Operator):
             if dump:
                 for signal, val in zip(self._mapmaker.signals, step.x):
                     if signal.output:
-                        signal.write(prefix, "map%04d" % step.i, val)
+                        fname = signal.write(prefix, "map%04d" % step.i, val)
+                        log.info_rank(f"Wrote signal to {fname}", comm=comm)
 
         log.info_rank(f"MLMapmaker finished solve in", comm=comm, timer=timer)
 
