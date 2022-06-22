@@ -4,9 +4,6 @@
 
 This module contains code for conditioning G3Timestream data in G3Frames
 
-Attributes:
-    MeanSubtract (DataG3Module): Inline definition for mean subtracting data
-    MedianSubtract (DataG3Module): Inline definition for median subtracting data
 """
 import numpy as np
 import scipy.signal as signal
