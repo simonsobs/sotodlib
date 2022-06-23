@@ -567,6 +567,7 @@ class Bookbinder(object):
 
             if self.frameproc.smbundle is not None and self.frameproc.smbundle.ready(self.frameproc.flush_time):
                 output += self.frameproc.flush()
+                output = [o for o in output if len(o['signal'].times) > 0]  # Remove 0-length frames
                 if len(output) > 0:
                     output += self.metadata
                     self.metadata = []
