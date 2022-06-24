@@ -373,6 +373,7 @@ class Bookbinder(object):
         self.frame_num = 0
         self.sample_num = 0
         self.default_mode = True
+        self.DEFAULT_TIME = 1e18  # 1e18 = 2286-11-20T17:46:40.000000000 (in the distant future)
 
         self.frameproc = FrameProcessor()
 
@@ -439,7 +440,7 @@ class Bookbinder(object):
         frame_splits = []
 
         if self.default_mode:
-            frame_splits += [core.G3Time(1e18)]  # 1e18 = 2286-11-20T17:46:40.000000000 (in the distant future)
+            frame_splits += [core.G3Time(self.DEFAULT_TIME)]
             return frame_splits
 
         # Assign a value to each event based on what occurs at that time: 0 for a zero-crossing,
