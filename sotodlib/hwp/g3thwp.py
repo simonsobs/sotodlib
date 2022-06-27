@@ -101,22 +101,24 @@ class G3tHWP():
             for f in filename: scanner.process_file(path + '/' + f)
         else: scanner.process_file(path + '/' + filename)
         arc = scanner.finalize()
+        if not any(arc.get_fields()[0]): 
+            print('INFO: No HK data in input g3 files: ' + filename)
+            self._start = 0
+            self._end = 0
+            return {}
 
+        self._start = arc.simple([key for key in arc.get_fields()[0].keys()][0])[0][0]
+        self._end = arc.simple([key for key in arc.get_fields()[0].keys()][0])[0][-1]
         for i in range(len(hwp_keys)):
             if not hwp_keys[i] in arc.get_fields()[0].keys():
-                if any(arc.get_fields()): 
-                    print('INFO: HWP is not spinning in input g3 files: ' + filename)
-                    self._start = arc.simple([key for key in arc.get_fields()[0].keys()][0])[0][0]
-                    self._end = arc.simple([key for key in arc.get_fields()[0].keys()][0])[0][-1]
-                else:
-                    print('INFO: No HK data in input g3 files: ' + filename)
+                print('INFO: HWP is not spinning in input g3 files: ' + filename)
                 return {}
-
             
         data_raw = arc.simple(hwp_keys)
-        
-        data = {'rising_edge_count':data_raw[0], 'irig_time':data_raw[1], 'counter':data_raw[2], 'counter_index':data_raw[3], \
-                'irig_synch_pulse_clock_time':data_raw[4], 'irig_synch_pulse_clock_counts':data_raw[5], 'quad':data_raw[6]}
+        data = {}
+        for k in range(len(hwp_keys)):
+            d = {hwp_keys[k]: data[k]}
+            data = dict(**data, **d)
 
         return data     
     
@@ -265,6 +267,7 @@ class G3tHWP():
         """
 
         if solved['slow_time'].size==0: 
+            print('INFO: No output file due to input solved data is empty')
             return
         session = so3g.hk.HKSessionHelper(hkagg_version=2)
         writer = core.G3Writer(g3out)
