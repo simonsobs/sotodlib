@@ -115,10 +115,9 @@ class G3tHWP():
                 return {}
             
         data_raw = arc.simple(hwp_keys)
-        data = {}
-        for k in range(len(hwp_keys)):
-            d = {hwp_keys[k]: data_raw[k]}
-            data = dict(**data, **d)
+        
+        data = {'rising_edge_count':data_raw[0], 'irig_time':data_raw[1], 'counter':data_raw[2], 'counter_index':data_raw[3], \
+                'irig_synch_pulse_clock_time':data_raw[4], 'irig_synch_pulse_clock_counts':data_raw[5], 'quad':data_raw[6]}
 
         return data     
     
@@ -178,7 +177,6 @@ class G3tHWP():
             rising_edge = []        
 
         if 'counter' in data.keys() and 'irig_time' in data.keys():
-            
             # Reject unexpected counter
             time = scipy.interpolate.interp1d(rising_edge, irig_time, kind='linear',fill_value='extrapolate')(counter)
             idx = np.where((time>=data['irig_time'][0][0]-2) & (time<=data['irig_time'][0][-1]+2))
