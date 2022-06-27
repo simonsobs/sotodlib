@@ -117,7 +117,7 @@ class G3tHWP():
         data_raw = arc.simple(hwp_keys)
         data = {}
         for k in range(len(hwp_keys)):
-            d = {hwp_keys[k]: data[k]}
+            d = {hwp_keys[k]: data_raw[k]}
             data = dict(**data, **d)
 
         return data     
