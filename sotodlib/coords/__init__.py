@@ -4,3 +4,4 @@ from .helpers import (
     Timer, DEG, ScalarLastQuat
 )
 from . import planets
+from . import local
