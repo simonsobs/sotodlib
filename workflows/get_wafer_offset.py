@@ -11,9 +11,10 @@ from collections import OrderedDict
 import healpy as hp
 import numpy as np
 import toast.qarray as qa
+from astropy import units as u
 
 import sotodlib.sim_hardware as hardware
-from sotodlib.core.hardware import LAT_COROTATOR_OFFSET_DEG
+from sotodlib.core.hardware import LAT_COROTATOR_OFFSET
 
 
 XAXIS, YAXIS, ZAXIS = np.eye(3)
@@ -33,7 +34,7 @@ def main():
     )
     group.add_argument(
         "--wafer_slots",
-        help="Comma-separated list of optics tube slots. "
+        help="Comma-separated list of wafer slots. "
     )
     parser.add_argument(
         "--reverse", action="store_true", help="Reverse offsets")
@@ -56,9 +57,17 @@ def main():
     parser.add_argument(
         "--elevation-deg",
         required=False,
-        type=np.float,
+        type=float,
         help="Observing elevation",
     )
+    parser.add_argument(
+        "--verbose",
+        required=False,
+        action="store_true",
+        help="Verbose output",
+        dest="verbose",
+    )
+    parser.set_defaults(corotate_lat=True)
 
     args = parser.parse_args()
 
@@ -108,7 +117,7 @@ def main():
 
     if telescope == "LAT":
         if args.corotate_lat:
-            rot = qa.rotation(ZAXIS, np.radians(LAT_COROTATOR_OFFSET_DEG))
+            rot = qa.rotation(ZAXIS, LAT_COROTATOR_OFFSET.to_value(u.rad))
         else:
             if args.elevation_deg is None:
                 raise RuntimeError(
@@ -116,7 +125,7 @@ def main():
                 )
             rot = qa.rotation(
                 ZAXIS,
-                np.radians(args.elevation_deg - 60 + LAT_COROTATOR_OFFSET_DEG)
+                np.radians(args.elevation_deg - 60 + LAT_COROTATOR_OFFSET.to_value(u.deg))
             )
     else:
         if args.elevation_deg is not None:
@@ -168,7 +177,11 @@ def main():
         az_offset *= -1
         el_offset *= -1
 
-    print(f"{az_offset:.3f} {el_offset:.3f} {dist_max:.3f}" + waferstring)
+    if args.verbose:
+        print("{:8} {:8} {:8} {:8}".format("Az [deg]", "El [deg]", "Dist [deg]", "Wafer"))
+        print(f"{np.degrees(az_offset):8.3f} {np.degrees(el_offset):8.3f} {dist_max:8.3f} {waferstring:8}")
+    else:
+        print(f"{az_offset:.3f} {el_offset:.3f} {dist_max:.3f}" + waferstring)
 
     return
 

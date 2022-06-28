@@ -27,11 +27,11 @@ setup_opts["entry_points"] = {
 }
 
 pipes = [
-    "pipelines/toast_so_sim.py",
-    "pipelines/toast_so_example.py",
-    "pipelines/toast_bin_so3g.py",
-    "pipelines/toast_so_tf.py",
-    "pipelines/get_wafer_offset.py",
+    "workflows/toast_so_sim.py",
+    #"pipelines/toast_so_example.py",
+    #"pipelines/toast_bin_so3g.py",
+    #"pipelines/toast_so_tf.py",
+    "workflows/get_wafer_offset.py",
 ]
 
 setup_opts["name"] = "sotodlib"
