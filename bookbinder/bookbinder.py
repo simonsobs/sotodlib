@@ -360,7 +360,7 @@ class Bookbinder(object):
         self._hk_files = hk_files
         self._smurf_files = smurf_files
         self._book_id = book_id
-        self._out_files = [op.join(out_root, book_id, f'D_{stream_id}_{i:03d}.g3') for i in range(len(smurf_files))]
+        self._out_root = out_root
         self._ancil_files = [op.join(out_root, book_id, f'A_ancil_{i:03d}.g3') for i in range(len(smurf_files))]
         self._frame_splits_file = op.join(out_root, book_id, 'frame_splits.txt')
         self._frame_splits = []
@@ -372,7 +372,10 @@ class Bookbinder(object):
         self.metadata = []
         self.frame_num = 0
         self.sample_num = 0
+        self.total_samples = 0
+        self.ofile_num = 0
         self.default_mode = True
+        self.MAX_SAMPLES = 1e9
         self.DEFAULT_TIME = 1e18  # 1e18 = 2286-11-20T17:46:40.000000000 (in the distant future)
 
         self.frameproc = FrameProcessor()
@@ -381,11 +384,11 @@ class Bookbinder(object):
         if self._verbose: print(f"Bookbinding {ifile}")
         self.smurf_iter = smurf_reader(ifile)
 
-        ofile = self._out_files.pop(0)
+        ofile = op.join(out_root, book_id, f'D_{stream_id}_{self.ofile_num:03d}.g3')
         if self._verbose: print(f"Writing {ofile}")
         self.writer = core.G3Writer(ofile)
 
-        afile = self._ancil_files.pop(0)
+        afile = op.join(out_root, book_id, f'A_ancil_{self.ofile_num:03d}.g3')
         self.ancil_writer = core.G3Writer(afile)
 
         if self._start_time is not None:
@@ -419,6 +422,21 @@ class Bookbinder(object):
         if self._verbose: print(f"=> Writing {len(frames_list)} frames")
 
         for f in frames_list:
+            # If the total number of samples (including all channels) exceeds the max allowed,
+            # create a new output file
+            if f.type == core.G3FrameType.Scan:
+                nsamples = np.size(f['signal'].data)
+                self.total_samples += nsamples
+                if self.total_samples > self.MAX_SAMPLES:
+                    self.ofile_num += 1
+                    ofile = op.join(self._out_root, self._book_id, f'D_{self._stream_id}_{self.ofile_num:03d}.g3')
+                    if self._verbose: print(f"Writing {ofile}")
+                    self.writer = core.G3Writer(ofile)
+                    afile = op.join(self._out_root, self._book_id, f'A_ancil_{self.ofile_num:03d}.g3')
+                    self.ancil_writer = core.G3Writer(afile)
+                    self.total_samples = nsamples
+                    self.frame_num = 0
+                    self.sample_num = 0
             oframe = self.add_misc_data(f)
             self.writer.Process(oframe)
             self.write_ancil_frames(oframe)
@@ -579,34 +597,21 @@ class Bookbinder(object):
                 try:
                     f = next(self.smurf_iter)
                 except StopIteration:
-                    # If there are no more SMuRF frames, output remaining SMuRF data
-                    if len(self.frameproc.smbundle.times) > 0:
-                        self.frameproc.flush_time = self.frameproc.smbundle.times[-1] + 1  # +1 to ensure last sample gets included (= 1e-8 sec << sampling cadence)
-                        output += self.frameproc.flush()
-                    output = [o for o in output if len(o['signal'].times) > 0]  # Remove 0-length frames
-                    self.write_frames(output + self.metadata)
-                    self.metadata = []
-
                     # If there are remaining files, update the
                     # SMuRF source iterator and G3 file writer
                     if len(self._smurf_files) > 0:
                         ifile = self._smurf_files.pop(0)
                         if self._verbose: print(f"Bookbinding {ifile}")
                         self.smurf_iter = smurf_reader(ifile)
-                    if len(self._out_files) > 0:
-                        ofile = self._out_files.pop(0)
-                        if self._verbose: print(f"Writing {ofile}")
-                        self.writer = core.G3Writer(ofile)
-                        afile = self._ancil_files.pop(0)
-                        self.ancil_writer = core.G3Writer(afile)
-                        self.frame_num = 0
-                        self.sample_num = 0
                     else:
+                        # If there are no more SMuRF files, output remaining SMuRF data
+                        self.frameproc.flush_time = self.frameproc.smbundle.times[-1] + 1  # +1 to ensure last sample gets included (= 1e-8 sec << sampling cadence)
+                        output += self.frameproc.flush()
+                        output = [o for o in output if len(o['signal'].times) > 0]  # Remove 0-length frames
+                        self.write_frames(output + self.metadata)
+                        output = []
+                        self.metadata = []
                         break
-
-                    # Reset the state of the loop
-                    self.frameproc.flush_time = event_time
-                    output = []
                 else:
                     if f.type != core.G3FrameType.Scan:
                         if self.frameproc.smbundle is None or len(self.frameproc.smbundle.times) == 0:
