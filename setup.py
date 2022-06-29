@@ -25,11 +25,8 @@ setup_opts["entry_points"] = {
     ]
 }
 
-pipes = [
+scripts = [
     "workflows/toast_so_sim.py",
-    #"pipelines/toast_so_example.py",
-    #"pipelines/toast_bin_so3g.py",
-    #"pipelines/toast_so_tf.py",
     "workflows/get_wafer_offset.py",
 ]
 
@@ -43,7 +40,7 @@ setup_opts["url"] = "https://github.com/simonsobs/sotodlib"
 setup_opts["packages"] = find_packages(where=".", exclude="tests")
 setup_opts["license"] = "MIT"
 setup_opts["requires"] = ["Python (>=3.7.0)", ]
-setup_opts["scripts"] = pipes
+setup_opts["scripts"] = scripts
 setup_opts["package_data"] = {
     "sotodlib": [
         "toast/ops/data/*"
