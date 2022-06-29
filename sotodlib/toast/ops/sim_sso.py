@@ -194,18 +194,16 @@ class SimSSO(Operator):
         Get the thermodynamic planet temperature given
         the frequency
         """
-
         dir_path = os.path.dirname(os.path.realpath(__file__))
         hf = h5py.File(os.path.join(dir_path, "data/planet_data.h5"), "r")
         if sso_name in hf.keys():
-            tb = np.array(hf.get(sso_name))
+            tb = np.array(hf.get(sso_name)) * u.K
             freq = np.array(hf.get("freqs_ghz")) * u.GHz
-            temp = utils.tb2tcmb(tb, freq.to_value(u.Hz))
+            temp = utils.tb2tcmb(tb, freq)
         else:
             raise ValueError(
                 f"Unknown planet name: '{sso_name}' not in {hf.keys()}"
             )
-
         return freq, temp
 
     def _get_beam_map(self, det, sso_diameter, ttemp_det):
