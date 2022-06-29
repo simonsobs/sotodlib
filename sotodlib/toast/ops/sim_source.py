@@ -357,15 +357,7 @@ class SimSource(Operator):
             el_start = el_init[0]
 
         else:
-            #Always consider a discending drone, it is easier to fly this way
-            # temp = copy.copy(self.focalplane.field_of_view)
-
-            # self.focalplane.compute_fov()
-            # FoV = copy.copy(self.focalplane.fiel_of_view)
-            # self.focalplane._compute_fov()
-            # FoV = copy.copy(self.focalplane.field_of_view)
-
-            # self.focalplane.field_of_view = temp
+            # Always consider a discending drone, it is easier to fly this way
 
             FoV = self.focalplane.field_of_view
 
