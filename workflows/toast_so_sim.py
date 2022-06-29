@@ -229,6 +229,34 @@ def job_create(config, jobargs, telescope, schedule, comm):
     return job, group_size, full_pointing
 
 
+def select_pixelization(job, args):
+    # Select between healpix and flat pixelization
+    ops = job.operators
+    if ops.pixels_healpix_radec.enabled:
+        if ops.pixels_wcs_radec.enabled:
+            raise RuntimeError("Only one solver pixelization scheme should be enabled")
+        else:
+            args.pixels_solve = ops.pixels_healpix_radec
+    else:
+        if ops.pixels_wcs_radec.enabled:
+            args.pixels_solve = ops.pixels_wcs_radec
+        else:
+            raise RuntimeError(
+                "Exactly one solver pixelization scheme should be enabled"
+            )
+    if ops.pixels_healpix_radec_final.enabled:
+        if ops.pixels_wcs_radec_final.enabled:
+            raise RuntimeError("Only one final pixelization scheme can be enabled")
+        else:
+            args.pixels_final = ops.pixels_healpix_radec_final
+    else:
+        if ops.pixels_wcs_radec_final.enabled:
+            args.pixels_final = ops.pixels_healpix_radec_final
+        else:
+            # Use the same as the solver
+            args.pixels_final = args.pixels_solve
+
+
 def simulate_data(job, args, toast_comm, telescope, schedule):
     log = toast.utils.Logger.get()
     ops = job.operators
@@ -291,20 +319,15 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
 
     # Set up the pointing.  Each pointing matrix operator requires a detector pointing
     # operator, and each binning operator requires a pointing matrix operator.
-    ops.pixels_radec.detector_pointing = ops.det_pointing_radec
+    args.pixels_solve.detector_pointing = ops.det_pointing_radec
     ops.weights_radec.detector_pointing = ops.det_pointing_radec
     ops.weights_radec.hwp_angle = ops.sim_ground.hwp_angle
-    ops.pixels_radec_final.detector_pointing = ops.det_pointing_radec
+    args.pixels_final.detector_pointing = ops.det_pointing_radec
 
-    ops.binner.pixel_pointing = ops.pixels_radec
+    ops.binner.pixel_pointing = args.pixels_solve
     ops.binner.stokes_weights = ops.weights_radec
 
-    # If we are not using a different pointing matrix for our final binning, then
-    # use the same one as the solve.
-    if not ops.pixels_radec_final.enabled:
-        ops.pixels_radec_final = ops.pixels_radec
-
-    ops.binner_final.pixel_pointing = ops.pixels_radec_final
+    ops.binner_final.pixel_pointing = args.pixels_final
     ops.binner_final.stokes_weights = ops.weights_radec
 
     # If we are not using a different binner for our final binning, use the same one
@@ -339,7 +362,7 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     # in case that is different from the solver pointing model.
 
     ops.scan_map.pixel_dist = ops.binner_final.pixel_dist
-    ops.scan_map.pixel_pointing = ops.pixels_radec_final
+    ops.scan_map.pixel_pointing = args.pixels_final
     ops.scan_map.stokes_weights = ops.weights_radec
     ops.scan_map.save_pointing = use_full_pointing(job)
     log.info_rank("Simulating sky signal", comm=world_comm)
@@ -415,24 +438,23 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
         timer=timer,
     )
 
-    # Optionally write out the data
-    if args.out_dir is not None:
-        hdf5_path = os.path.join(args.out_dir, "data")
-        if toast_comm.world_rank == 0:
-            if not os.path.isdir(hdf5_path):
-                os.makedirs(hdf5_path)
-
-        ops.save_hdf5.volume = hdf5_path
-
-    ops.save_hdf5.apply(data)
-    log.info_rank("Saved HDF5 data in", comm=world_comm, timer=timer)
-
     # Add calibration error
 
     if args.realization is not None:
         ops.gainscrambler.realization = args.realization
     ops.gainscrambler.apply(data)
     log.info_rank("Simulated gain errors in", comm=world_comm, timer=timer)
+
+    # Optionally write out the data
+    if args.out_dir is not None:
+        hdf5_path = os.path.join(args.out_dir, "data")
+        if toast_comm.world_rank == 0:
+            if not os.path.isdir(hdf5_path):
+                os.makedirs(hdf5_path)
+        ops.save_hdf5.volume = hdf5_path
+
+    ops.save_hdf5.apply(data)
+    log.info_rank("Saved HDF5 data in", comm=world_comm, timer=timer)
 
     # DEBUG begin
     """
@@ -464,7 +486,7 @@ def reduce_data(job, args, data):
     # Apply noise estimation
 
     ops.noise_estim.detector_pointing = ops.det_pointing_radec
-    ops.noise_estim.pixel_pointing = ops.pixels_radec_final
+    ops.noise_estim.pixel_pointing = args.pixels_final
     ops.noise_estim.stokes_weights = ops.weights_radec
     ops.noise_estim.pixel_dist = ops.binner_final.pixel_dist
     ops.noise_estim.output_dir = args.out_dir
@@ -483,7 +505,7 @@ def reduce_data(job, args, data):
 
     # Optional geometric factors
 
-    ops.h_n.pixel_pointing = ops.pixels_radec_final
+    ops.h_n.pixel_pointing = args.pixels_final
     ops.h_n.pixel_dist = ops.binner_final.pixel_dist
     ops.h_n.output_dir = args.out_dir
     ops.h_n.apply(data)
@@ -492,7 +514,7 @@ def reduce_data(job, args, data):
     ops.mem_count.prefix = "After h_n map"
     ops.mem_count.apply(data)
 
-    ops.cadence_map.pixel_pointing = ops.pixels_radec_final
+    ops.cadence_map.pixel_pointing = args.pixels_final
     ops.cadence_map.pixel_dist = ops.binner_final.pixel_dist
     ops.cadence_map.output_dir = args.out_dir
     ops.cadence_map.apply(data)
@@ -501,7 +523,7 @@ def reduce_data(job, args, data):
     ops.mem_count.prefix = "After cadence map"
     ops.mem_count.apply(data)
 
-    ops.crosslinking.pixel_pointing = ops.pixels_radec_final
+    ops.crosslinking.pixel_pointing = args.pixels_final
     ops.crosslinking.pixel_dist = ops.binner_final.pixel_dist
     ops.crosslinking.output_dir = args.out_dir
     ops.crosslinking.apply(data)
@@ -612,14 +634,14 @@ def reduce_data(job, args, data):
     ops.mem_count.prefix = "After mapmaker"
     ops.mem_count.apply(data)
 
-    # ops.mlmapmaker.apply(data)
-    # log.info_rank("Finished ML map-making in", comm=world_comm, timer=timer)
+    ops.mlmapmaker.apply(data)
+    log.info_rank("Finished ML map-making in", comm=world_comm, timer=timer)
 
     # Optionally run Madam
 
     if toast.ops.madam.available():
         ops.madam.params = toast.ops.madam_params_from_mapmaker(ops.mapmaker)
-        ops.madam.pixel_pointing = ops.pixels_radec_final
+        ops.madam.pixel_pointing = args.pixels_final
         ops.madam.stokes_weights = ops.weights_radec
         ops.madam.apply(data)
         log.info_rank("Finished Madam in", comm=world_comm, timer=timer)
@@ -635,74 +657,6 @@ def reduce_data(job, args, data):
 
     ops.mem_count.prefix = "After filtered statistics"
     ops.mem_count.apply(data)
-
-
-def dump_spt3g(job, args, data):
-    """Save data to SPT3G format."""
-    if not t3g.available:
-        raise RuntimeError("SPT3G is not available, cannot save to that format")
-    ops = job.operators
-    save_dir = os.path.join(args.out_dir, "spt3g")
-    meta_exporter = t3g.export_obs_meta(
-        noise_models=[
-            (ops.default_model.noise_model, ops.default_model.noise_model),
-            (ops.elevation_model.out_model, ops.elevation_model.out_model),
-        ]
-    )
-
-    # Note that we export detector flags below to a float64 G3TimestreamMap
-    # in order to use FLAC compression.
-    # FIXME:  This workflow currently does not use any operators that create
-    # detector flags.  Once it does, add that back below.
-    data_exporter = t3g.export_obs_data(
-        shared_names=[
-            (
-                ops.sim_ground.boresight_azel,
-                ops.sim_ground.boresight_azel,
-                c3g.G3VectorQuat,
-            ),
-            (
-                ops.sim_ground.boresight_radec,
-                ops.sim_ground.boresight_radec,
-                c3g.G3VectorQuat,
-            ),
-            (ops.sim_ground.position, ops.sim_ground.position, None),
-            (ops.sim_ground.velocity, ops.sim_ground.velocity, None),
-            (ops.sim_ground.azimuth, ops.sim_ground.azimuth, None),
-            (ops.sim_ground.elevation, ops.sim_ground.elevation, None),
-            # (ops.sim_ground.hwp_angle, ops.sim_ground.hwp_angle, None),
-            (ops.sim_ground.shared_flags, "telescope_flags", None),
-        ],
-        det_names=[
-            (
-                ops.sim_noise.det_data,
-                ops.sim_noise.det_data,
-                c3g.G3TimestreamMap,
-            ),
-            # ("flags", "detector_flags", c3g.G3TimestreamMap),
-        ],
-        interval_names=[
-            (ops.sim_ground.scan_leftright_interval, "intervals_scan_leftright"),
-            (ops.sim_ground.turn_leftright_interval, "intervals_turn_leftright"),
-            (ops.sim_ground.scan_rightleft_interval, "intervals_scan_rightleft"),
-            (ops.sim_ground.turn_rightleft_interval, "intervals_turn_rightleft"),
-            (ops.sim_ground.elnod_interval, "intervals_elnod"),
-            (ops.sim_ground.scanning_interval, "intervals_scanning"),
-            (ops.sim_ground.turnaround_interval, "intervals_turnaround"),
-            (ops.sim_ground.sun_up_interval, "intervals_sun_up"),
-            (ops.sim_ground.sun_close_interval, "intervals_sun_close"),
-        ],
-        compress=True,
-    )
-    exporter = t3g.export_obs(
-        meta_export=meta_exporter,
-        data_export=data_exporter,
-        export_rank=0,
-    )
-    dumper = toast.ops.SaveSpt3g(
-        directory=save_dir, framefile_mb=500, obs_export=exporter
-    )
-    dumper.apply(data)
 
 
 def main():
@@ -792,7 +746,14 @@ def main():
         toast.ops.SaveHDF5(name="save_hdf5", enabled=False),
         toast.ops.GainScrambler(name="gainscrambler", enabled=False),
         toast.ops.SimNoise(name="sim_noise"),
-        toast.ops.PixelsHealpix(name="pixels_radec"),
+        toast.ops.PixelsHealpix(name="pixels_healpix_radec"),
+        toast.ops.PixelsWCS(
+            name="pixels_wcs_radec",
+            project="CAR",
+            resolution=(0.01 * u.degree, 0.01 * u.degree),
+            auto_bounds=True,
+            enabled=False,
+        ),
         toast.ops.StokesWeights(name="weights_radec", mode="IQU"),
         toast.ops.NoiseEstim(name="noise_estim", enabled=False),
         toast.ops.FlagSSO(name="flag_sso", enabled=False),
@@ -810,7 +771,8 @@ def main():
         toast.ops.Statistics(name="filtered_statistics", enabled=False),
         toast.ops.BinMap(name="binner", pixel_dist="pix_dist"),
         toast.ops.MapMaker(name="mapmaker"),
-        toast.ops.PixelsHealpix(name="pixels_radec_final", enabled=False),
+        toast.ops.PixelsHealpix(name="pixels_healpix_radec_final", enabled=False),
+        toast.ops.PixelsWCS(name="pixels_wcs_radec_final", enabled=False),
         toast.ops.BinMap(
             name="binner_final", enabled=False, pixel_dist="pix_dist_final"
         ),
@@ -838,6 +800,9 @@ def main():
         config, jobargs, telescope, schedule, comm
     )
 
+    # Select pixelization
+    select_pixelization(job, args)
+
     # Create the toast communicator
     toast_comm = toast.Comm(world=comm, groupsize=group_size)
 
@@ -848,10 +813,6 @@ def main():
     # case, we are not simulating timestreams or doing data reductions.
 
     if not job.operators.sim_atmosphere.cache_only:
-        # Optionally save to spt3g format
-        if args.save_spt3g:
-            dump_spt3g(job, args, data)
-
         # Reduce the data
         reduce_data(job, args, data)
 

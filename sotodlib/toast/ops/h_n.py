@@ -19,7 +19,7 @@ from toast.timing import function_timer, Timer
 
 from toast.pixels import PixelDistribution, PixelData
 
-from toast.pixels_io import write_healpix_fits
+from toast.pixels_io_healpix import write_healpix_fits
 
 from toast.covariance import covariance_invert, covariance_apply
 
