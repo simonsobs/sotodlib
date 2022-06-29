@@ -119,14 +119,6 @@ def parse_config(operators, templates, comm):
     )
 
     parser.add_argument(
-        "--save_spt3g",
-        required=False,
-        default=False,
-        action="store_true",
-        help="Save simulated data to SPT3G format.",
-    )
-
-    parser.add_argument(
         "--obsmaps",
         required=False,
         default=False,
@@ -232,29 +224,41 @@ def job_create(config, jobargs, telescope, schedule, comm):
 def select_pixelization(job, args):
     # Select between healpix and flat pixelization
     ops = job.operators
-    if ops.pixels_healpix_radec.enabled:
-        if ops.pixels_wcs_radec.enabled:
-            raise RuntimeError("Only one solver pixelization scheme should be enabled")
-        else:
-            args.pixels_solve = ops.pixels_healpix_radec
+    if ops.pixels_wcs_source.enabled:
+        # We are doing source mapping
+        ops.pixels_healpix_radec.enabled = False
+        ops.pixels_wcs_radec.enabled = False
+
+        # Set detector pointing
+        ops.pixels_wcs_source.detector_pointing = ops.det_pointing_azel
+        args.pixels_solve = ops.pixels_wcs_source
+        args.pixels_final = ops.pixels_wcs_source
     else:
-        if ops.pixels_wcs_radec.enabled:
-            args.pixels_solve = ops.pixels_wcs_radec
+        if ops.pixels_healpix_radec.enabled:
+            if ops.pixels_wcs_radec.enabled:
+                raise RuntimeError("Only one solver pixelization scheme should be enabled")
+            else:
+                args.pixels_solve = ops.pixels_healpix_radec
         else:
-            raise RuntimeError(
-                "Exactly one solver pixelization scheme should be enabled"
-            )
-    if ops.pixels_healpix_radec_final.enabled:
-        if ops.pixels_wcs_radec_final.enabled:
-            raise RuntimeError("Only one final pixelization scheme can be enabled")
+            if ops.pixels_wcs_radec.enabled:
+                args.pixels_solve = ops.pixels_wcs_radec
+            else:
+                raise RuntimeError(
+                    "Exactly one solver pixelization scheme should be enabled"
+                )
+        args.pixels_solve.detector_pointing = ops.det_pointing_radec
+        if ops.pixels_healpix_radec_final.enabled:
+            if ops.pixels_wcs_radec_final.enabled:
+                raise RuntimeError("Only one final pixelization scheme can be enabled")
+            else:
+                args.pixels_final = ops.pixels_healpix_radec_final
         else:
-            args.pixels_final = ops.pixels_healpix_radec_final
-    else:
-        if ops.pixels_wcs_radec_final.enabled:
-            args.pixels_final = ops.pixels_healpix_radec_final
-        else:
-            # Use the same as the solver
-            args.pixels_final = args.pixels_solve
+            if ops.pixels_wcs_radec_final.enabled:
+                args.pixels_final = ops.pixels_healpix_radec_final
+            else:
+                # Use the same as the solver
+                args.pixels_final = args.pixels_solve
+        args.pixels_solve.detector_pointing = ops.det_pointing_radec
 
 
 def simulate_data(job, args, toast_comm, telescope, schedule):
@@ -319,10 +323,9 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
 
     # Set up the pointing.  Each pointing matrix operator requires a detector pointing
     # operator, and each binning operator requires a pointing matrix operator.
-    args.pixels_solve.detector_pointing = ops.det_pointing_radec
+
     ops.weights_radec.detector_pointing = ops.det_pointing_radec
     ops.weights_radec.hwp_angle = ops.sim_ground.hwp_angle
-    args.pixels_final.detector_pointing = ops.det_pointing_radec
 
     ops.binner.pixel_pointing = args.pixels_solve
     ops.binner.stokes_weights = ops.weights_radec
@@ -752,6 +755,14 @@ def main():
             project="CAR",
             resolution=(0.01 * u.degree, 0.01 * u.degree),
             auto_bounds=True,
+            enabled=False,
+        ),
+        toast.ops.PixelsWCS(
+            name="pixels_wcs_source",
+            project="CAR",
+            resolution=(0.01 * u.degree, 0.01 * u.degree),
+            auto_bounds=True,
+            center_offset="source",
             enabled=False,
         ),
         toast.ops.StokesWeights(name="weights_radec", mode="IQU"),
