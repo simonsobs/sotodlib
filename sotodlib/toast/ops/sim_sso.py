@@ -171,6 +171,16 @@ class SimSSO(Operator):
                     data, sso, times, observer
                 )
 
+                # Store the SSO location
+                source_coord = np.column_stack(
+                    [sso_az.to_value(u.degree), sso_el.to_value(u.degree)]
+                )
+                obs.shared.create_column("source", (len(sso_az), 2), dtype=np.float64)
+                if obs.comm.group_rank == 0:
+                    obs.shared["source"].set(source_coord)
+                else:
+                    obs.shared["source"].set(None)
+
                 # Make sure detector data output exists
                 dets = obs.select_local_detectors(detectors)
                 obs.detdata.ensure(self.det_data, detectors=dets)
