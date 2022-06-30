@@ -454,7 +454,7 @@ class SimSource(Operator):
         obs['source_el'] = source_el
         obs['source_distance'] = source_distance
 
-        # Create a shared data object with the fake source location
+        # Create a shared data object with the source location
         source_coord = np.column_stack(
             [source_az.to_value(u.degree), source_el.to_value(u.degree)]
         )
