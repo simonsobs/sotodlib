@@ -2122,6 +2122,7 @@ def load_file(
     show_pb=True,
     det_axis="dets",
     linearize_timestamps=True,
+    merge_det_info=True,
 ):
     """Load data from file where there may or may not be a connected archive.
 
@@ -2151,6 +2152,8 @@ def load_file(
       linearize_timestamps : bool
           sent to _get_timestamps. if true and using unix timing, linearize the timing 
           based on the frame counter
+      merge_det_info : bool
+          if true, emulate det_info from file info
 
     Returns
     ---------
@@ -2289,6 +2292,20 @@ def load_file(
         ([(0, "samps")])
     )
     aman.wrap("status", status.aman)
+    if merge_det_info:
+        det_info = core.AxisManager(
+            ch_info[det_axis]
+        )
+        smurf = core.AxisManager(
+            ch_info[det_axis]
+        )
+        det_info.wrap("readout_id", ch_info[det_axis].vals, [(0,det_axis)])
+        smurf.wrap("band", ch_info.band, [(0,det_axis)])
+        smurf.wrap("channel", ch_info.channel, [(0,det_axis)])
+        smurf.wrap("res_frequency", ch_info.frequency, [(0,det_axis)])
+        det_info.wrap("smurf", smurf)
+        aman.wrap("det_info", det_info)
+        
 
     # If readout filter in enabled build iir_params AxisManager
     if status.filter_enabled:
@@ -2352,7 +2369,7 @@ def load_g3tsmurf_obs(db, obs_id, dets=None, samples=None, **kwargs):
         "select name from files " "where obs_id=?" + "order by start", (obs_id,)
     )
     flist = [row[0] for row in c]
-    return load_file(flist, dets, samples=samples, obsfiledb=db, )
+    return load_file(flist, dets, samples=samples, obsfiledb=db, merge_det_info=False)
 
 
 core.OBSLOADER_REGISTRY["g3tsmurf"] = load_g3tsmurf_obs
