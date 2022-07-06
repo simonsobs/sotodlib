@@ -62,7 +62,7 @@ class SOFocalplane(Focalplane):
         self,
         hwfile=None,
         telescope=None,
-        sample_rate=10.0 * u.Hz,
+        sample_rate=u.Quantity(10.0, u.Hz),
         bands=None,
         wafer_slots=None,
         tube_slots=None,
