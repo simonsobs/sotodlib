@@ -408,6 +408,8 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
         comm=world_comm,
         timer=timer,
     )
+    if rank == 0:
+        print("Source coord = ", data.obs[0].shared["source"].data)
 
     # Apply a time constant
 
