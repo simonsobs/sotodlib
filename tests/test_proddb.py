@@ -2,7 +2,10 @@ import unittest
 
 from sotodlib.core import metadata
 
+from ._helpers import create_outdir, mpi_multi
 
+
+@unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
 class TestProdDb(unittest.TestCase):
     def setUp(self):
         # Init.
@@ -39,7 +42,7 @@ class TestProdDb(unittest.TestCase):
         print('\nCONSTRUCTED   :', self.scheme.cols)
         print('\nRECONSTRUCTED :', self.manifest.scheme.cols)
         assert (self.manifest.scheme.cols == self.scheme.cols)
-            
+
 
 if __name__ == '__main__':
     unittest.main()

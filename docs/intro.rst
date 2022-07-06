@@ -34,7 +34,6 @@ Create a new conda environment::
   %> conda create --copy -m -p ${HOME}/software/so
   %> conda activate ~/software/so
   %> conda install pip numpy scipy matplotlib
-  %> pip install quaternionarray
 
 ... Or Use Virtualenv and Pip
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -46,10 +45,8 @@ it::
   %> virtualenv -p python3 ${HOME}/software/so
   %> source ${HOME}/software/so/bin/activate
 
-Now use pip to install the dependencies we need::
-
-    %> pip install numpy scipy matplotlib
-    %> pip install quaternionarray
+pip installable external dependencies will be automatically installed when pip
+installing the sotodlib package.
 
 
 S.O. Affiliated Dependencies
@@ -59,8 +56,13 @@ Activate / load your python stack from the previous section.  Since you created
 a conda environment or virtualenv directory specifically for S.O. tools, you
 can always delete that directory and make a new one as needed.
 
-Currently the sotodlib package does not require any other S.O. packages.  In
-the future, it will require sotoddb and so3g as dependencies.
+sotodlib requires the following affiliated packages:
+
+- `so3g`_
+- `spt3g_software`_
+
+.. _so3g: https://github.com/simonsobs/so3g
+.. _spt3g_software: https://github.com/CMB-S4/spt3g_software
 
 
 Installing sotodlib

@@ -15,8 +15,12 @@ from sotodlib.io.metadata import ResultSetHdfLoader, write_dataset, _decode_arra
 
 import os
 import h5py
+import sqlite3
+
+from ._helpers import mpi_multi
 
 
+@unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
 class MetadataTest(unittest.TestCase):
 
     def setUp(self):
@@ -72,7 +76,29 @@ class MetadataTest(unittest.TestCase):
         data = loader.from_loadspec(req)
         self.assertCountEqual(data['timeconst'], [TGOOD])
 
-    def test_010_dbs(self):
+    def test_010_manifest_basics(self):
+        """Test that you can create a ManifestScheme and ManifestDb and add
+        records but not duplicates unless you need to.
+
+        """
+        scheme = metadata.ManifestScheme() \
+                         .add_range_match('obs:timestamp')
+        mandb = metadata.ManifestDb(scheme=scheme)
+        mandb.add_entry({'obs:timestamp': (0, 1e9)}, 'a.h5')
+
+        # Duplicate index prevented?
+        with self.assertRaises(sqlite3.IntegrityError):
+            mandb.add_entry({'obs:timestamp': (0, 1e9)}, 'b.h5')
+
+        # Replace accepted?
+        mandb.add_entry({'obs:timestamp': (0, 1e9)}, 'c.h5',
+                        replace=True)
+
+        # Returns the single correct value?
+        self.assertEqual(
+            'c.h5', mandb.match({'obs:timestamp': 100})['filename'])
+
+    def test_020_db_resolution(self):
         """Test metadata detdb/obsdb resolution system
 
         This tests one of the more complicated cases:
@@ -106,11 +132,11 @@ class MetadataTest(unittest.TestCase):
 
         # To match the early/late example we need DetDb and ObsDb.
         detdb = metadata.DetDb()
-        detdb.create_table('base', ["`band` str", "`polcode` str"])
-        detdb.add_props('base', 'det1', band='f090', polcode='A')
-        detdb.add_props('base', 'det2', band='f090', polcode='B')
-        detdb.add_props('base', 'det3', band='f150', polcode='A')
-        detdb.add_props('base', 'det4', band='f150', polcode='B')
+        detdb.create_table('base', ["`readout_id` str", "`band` str", "`polcode` str"])
+        detdb.add_props('base', 'det1', readout_id='det1', band='f090', polcode='A')
+        detdb.add_props('base', 'det2', readout_id='det2', band='f090', polcode='B')
+        detdb.add_props('base', 'det3', readout_id='det3', band='f150', polcode='A')
+        detdb.add_props('base', 'det4', readout_id='det4', band='f150', polcode='B')
 
         obsdb = metadata.ObsDb()
         t_pivot = 2000010000
@@ -144,7 +170,7 @@ class MetadataTest(unittest.TestCase):
             {'db': mandb_fn,
              'name': 'tau&timeconst'}
         ]
-        mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00'})
+        mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00'}, detdb.props())
         self.assertCountEqual(mtod['tau'], [T090, T090, T150, T150])
 
         # Test 2: ManifestDb specifies polcode, which crosses with
@@ -169,7 +195,7 @@ class MetadataTest(unittest.TestCase):
         # Now we expect only f090 A and f150 B to resolve to non-bad vals.
         # Make sure you reinit the loader, to avoid cached dbs.
         loader = metadata.SuperLoader(obsdb=obsdb, detdb=detdb)
-        mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00'})
+        mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00'}, detdb.props())
         self.assertCountEqual(mtod['tau'], [T090, TBAD, TBAD, T150])
 
 

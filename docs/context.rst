@@ -204,7 +204,8 @@ Context system:
 ``obs_loader_type``
     A string, giving the name of a loader function that should be used
     to load the TOD.  The functions are registered in the module
-    variable ``sotodlib.io.load.OBSLOADER_REGISTRY``.
+    variable ``sotodlib.core.OBSLOADER_REGISTRY``; also see
+    :func:`sotodlib.core.context.obsloader_template`.
 
 ``metadata``
 
@@ -252,6 +253,16 @@ Context
 .. autoclass:: Context
    :special-members: __init__
    :members:
+
+obsloader
+---------
+
+Data formats are abstracted in the Context system, and "obsloader"
+functions provide the implementations to load data for a particular
+storage format.  The API is documented in the ``obsloader_template``
+function:
+
+.. autofunction:: sotodlib.core.context.obsloader_template
 
 SuperLoader
 -----------
@@ -307,6 +318,90 @@ observations and the wafer for each detector), the system can support
 resolving the metadata request, loading the results, and broadcasting
 them to their intended targets.
 
+
+Example
+=======
+
+Let's say we want to build an HDF5 database with a number ``thing``
+per detector per observation::
+
+    from sotodlib.core import Context, metadata
+    import sotodlib.io.metadata as io_meta
+
+    context = Context('context_file_no_thing.yaml')
+    obs_rs = context.obsdb.query()
+    h5_file = 'thing.h5'
+
+    for i in range(len(obs_rs)):
+        aman = context.get_obs(obs_rs[i]['obs_id'])
+        things = calculate_thing(aman)
+        thing_rs = metadata.ResultSet(keys=['dets:readout_id', 'thing'])
+        for d, det in enumerate(aman.dets.vals):
+            thing_rs.rows.append((det, things[d]))
+        io_meta.write_dataset(thing_rs, h5_file, f'thing_for_{obs_id}')
+
+Once we've built the lower level HDF5 file we need to add it to a
+metadata index::
+
+    scheme = metadata.ManifestScheme()
+    scheme.add_exact_match('obs:obs_id')
+    scheme.add_data_field('dataset')
+
+    db = metadata.ManifestDb(scheme=scheme)
+    for i in range(len(obs_rs)):
+        obs_id = obs_rs[i]['obs_id']
+        db.add_entry({'obs:obs_id': obs_id,
+                      'dataset': f'thing_for_{obs_id}',},
+                       filename=h5_file)
+
+    db.to_file('thing_db.gz')
+
+Then have a new context file that includes::
+
+    metadata:
+        - db : 'thing_db.gz'
+          name : 'thing'
+
+Using that context file::
+
+    context = Context('context_file_with_thing.yaml')
+    aman = context.get_obs(your_favorite_obs_id)
+
+will return an AxisManager that includes ``aman.thing`` for that
+specific observation.
+
+If this is example is almost, but not quite, what you need, consider the
+following:
+
+- You can use multiple HDF5 files in your Metadata Archive -- the
+  filename is a parameter to ``db.add_entry``.  That helps to keep
+  your HDF5 files a manageable size, and is good practice in cases
+  where there are regular (e.g. daily or hourly) updates to an
+  archive.
+- You can use an archive format other than HDF5 (if you must), see the
+  example in :ref:`metadata-archives-custom`.
+- The entries in the Index do not have to be per-``obs_id``.  You can
+  associate results to ranges of time or to other fields in the ObsDb.
+  See examples in :ref:`metadata-indexes`.
+- The entries in the Archive do not need to be per-detector.  You can
+  specify results for a whole group of detectors, if that group is
+  enumerated in the DetDb.  For example, if DetDb contains a column
+  ``band``, the dataset could contain columns ``dets:band`` and
+  ``cal`` and simply report one calibration number for each frequency
+  band.  (On load, the Context Metadata system will automatically
+  broadcast the ``cal`` number so that it has shape ``(n_dets,)`` in
+  the fully populated AxisManager.)
+- You can store all the results (i.e., results for multiple
+  ``obs_id``) in a single HDF5 dataset.  This is not usually a good
+  idea if your results are per-detector, per-observation... the
+  dataset will be huge, and not easy to update incrementally.  But for
+  smaller things (one or two numbers per observation, as in the
+  ``dets:band`` example above) it can be convenient.  Doing this
+  requires including ``obs:obs_id`` (or some other ObsDb column) in
+  the dataset.
+
+
+.. _metadata-archives:
 
 Metadata Archives
 =================
@@ -417,6 +512,71 @@ Note the ``obs:obs_id`` column is gone -- it was taken as index
 information, and matched against the ``obs:obs_id`` in the
 ``request``.
 
+.. _metadata-archives-custom:
+
+Custom Archive Formats
+----------------------
+
+HDF5 is cool but sometimes you need or want to use a different storage
+system.  Setting up a custom loader function involves the following:
+
+- A loader class that can read the metadata from that storage
+  system, respecting the request API.
+- A module, containg the loader class, and also the ability to
+  register the loader class with sotodlib, under a particular laoder
+  name.
+- A ManifestDb data field called ``loader``, with the value set to the
+  loader name.
+
+Here's a sketchy example.  We start by defining a loader class, that
+will read a number from a text file::
+
+  from sotodlib.io import metadata
+  from sotodlib.core.metadata import ResultSet, SuperLoader, LoaderInterface
+
+  class TextLoader(LoaderInterface):
+      def from_loadspec(self, load_params):
+          with open(load_params['filename']) as fin:
+              the_answer = float(fin.read())
+          rs = ResultSet(keys=['answer'], [(the_answer, )])
+
+  SuperLoader.register_metadata('text_loader', TextLoader)
+
+Let's suppose that code (including the SuperLoader business) is in a
+module called ``othertel.textloader``.  To get this code to run
+whenever we're working with a certain dataset, add it to the
+``imports`` list in the context.yaml:
+
+.. code-block:: yaml
+
+  # Standard i/o import, and TextLoader for othertel.
+  imports:
+    - sotodlib.io.metadata
+    - othertel.textloader
+
+Now for the ManifestDb::
+
+  scheme = metadata.ManifestScheme()
+  scheme.add_exact_match('obs:obs_id')
+  scheme.add_data_field('loader')
+
+  db = metadata.ManifestDb(scheme=scheme)
+  db.add_entry({'obs:obs_id: 'obs12345',
+                'loader': 'text_loader'},
+               filename='obs12345_timeconst.txt')
+  db.add_entry({'obs:obs_id: 'obs12600',
+                'loader': 'text_loader'},
+               filename='obs12600_timeconst.txt')
+
+Now if a metadata request is made for ``obs12345``, for example, a
+single number will be loaded from ``obs12345_timeconst.txt``.
+
+Note the thing returned by ``TextLoader.from_loadspec`` is a
+ResultSet.  Presently the only types you can return from a loader
+class function are ResultSet and AxisManager.
+
+
+.. _metadata-indexes:
 
 Metadata Indexes
 ================
@@ -498,64 +658,70 @@ limit) for the key ``obs:timestamp``.
 Example 3: Other observation selectors
 ``````````````````````````````````````
 
-HDF5 is cool but sometimes you need or want to use a different storage
-system.  Setting up a custom loader function involves the following:
+Other fields from ObsDb can be used to build the Metadata Index.
+While timestamp or obs_id are quite general, a more compact and direct
+association can be made if ObsDb contains a field that is more
+directly connected to the metadata.
 
-- A loader class that can read the metadata from that storage
-  system, respecting the request API.
-- A module, containg the loader class, and also the ability to
-  register the loader class with sotodlib, under a particular laoder
-  name.
-- A ManifestDb data field called ``loader``, with the value set to the
-  loader name.
+For example, suppose there was an intermittent problem with a subset
+of the detectors that requires us to discard those data from analysis.
+The problem occurred randomly, but it could be identified and each
+observation could be classified as either having that problem or not.
+We decide to eliminate those bad detectors by applying a calibration
+factor of 0 to the data.
 
-Here's a sketchy example.  We start by defining a loader class, that
-will read a number from a text file::
+We create an HDF5 file called ``bad_det_issue.h5`` with two datasets:
 
-  from sotodlib.io import metadata
-  from sotodlib.core.metadata import ResultSet, SuperLoader, LoaderInterface
+- ``cal_all_ok``: has columns ``dets:name`` (listing all detectors)
+  and ``cal``, where ``cal`` is all 1s.
+- ``cal_mask_bad``: same but with ``cal=0`` for the bad detectors.
 
-  class TextLoader(LoaderInterface):
-      def from_loadspec(self, load_params):
-          with open(load_params['filename']) as fin:
-              the_answer = float(fin.read())
-          rs = ResultSet(keys=['answer'], [(the_answer, )])
+We update the ObsDb we are using to include a column
+``bad_det_issue``, and for each observation we set it to value 0 (if
+the problem is not seen in that observation) or 1 (if it is).
 
-  SuperLoader.register_metadata('text_loader', TextLoader)
-
-Let's suppose that code (including the SuperLoader business) is in a
-module called ``othertel.textloader``.  To get this code to run
-whenever we're working with a certain dataset, add it to the
-``imports`` list in the context.yaml:
-
-.. code-block:: yaml
-
-  # Standard i/o import, and TextLoader for othertel.
-  imports:
-    - sotodlib.io.metadata
-    - othertel.textloader
-
-Now for the ManifestDb::
+We build the Metadata Index to select the right dataset from
+``bad_det_issue.h5``, depending on the value of ``bad_det_issue`` in
+the ObsDb::
 
   scheme = metadata.ManifestScheme()
-  scheme.add_exact_match('obs:obs_id')
-  scheme.add_data_field('loader')
+  scheme.add_exact_match('obs:bad_det_issue')
+  scheme.add_data_field('dataset')
 
   db = metadata.ManifestDb(scheme=scheme)
-  db.add_entry({'obs:obs_id: 'obs12345',
-                'loader': 'text_loader'},
-               filename='obs12345_timeconst.txt')
-  db.add_entry({'obs:obs_id: 'obs12600',
-                'loader': 'text_loader'},
-               filename='obs12600_timeconst.txt')
+  db.add_entry({'obs:bad_det_issue': 0,
+                'dataset': 'cal_all_ok'},
+                filename='bad_det_issue.h5')
+  db.add_entry({'obs:bad_det_issue': 1,
+                'dataset': 'cal_mask_bad'},
+                filename='bad_det_issue.h5')
+  db.to_file('cal_bad_det_issue.gz')
 
-Now if a metadata request is made for ``obs12345``, for example, a
-single number will be loaded from ``obs12345_timeconst.txt``.
+The context.yaml metadata entry would probably look like this::
 
-Note the thing returned by ``TextLoader.from_loadspec`` is a
-ResultSet.  Presently the only types you can return from a loader
-class function are ResultSet and AxisManager.
+  metadata:
+    ...
+    - db: '{metadata_lib}/cal_bad_det_issue.gz'
+      name: 'cal_remove_bad&cal'
+    ...
 
+
+
+so-metadata tool
+----------------
+
+The ``so-metadata`` script is a tool for inspecting and manipulating
+ManifestDbs stored on disk.  For example, it can show you what files
+are referred to by the ManifestDb, and what kind of information is
+used to index the database.
+
+If you need to change the filenames in a ManifestDb, the "reroot" mode
+might be helpful.
+
+
+.. argparse::
+   :module: sotodlib.core.metadata.manifest
+   :func: get_parser
 
 
 ManifestDb reference
@@ -638,6 +804,46 @@ contain only the ``obs_id``.  For each item in the context.yaml
    specified by the user (this could include storing the entire object
    as a field; or it could mean extracting and renaming a single
    field from the result, for example).
+
+
+
+Changing det_info
+-----------------
+
+Metadata entries can be used to change the active ``det_info`` table
+that is used to screen and match metadata results.  This is
+accomplished through special metadata entries with the following
+syntax::
+
+  metadata:
+  - ...
+  - db: 'more_det_info.sqlite'
+    det_info: true
+    det_key: 'dets:name'
+  - ...
+
+The boolean ``'det_info': true`` marks this as a special metadata
+entry to update ``det_info``.  The ``det_key`` entry specifies what
+column of the loaded metadata should be used as the index to add the
+information to the existing tracked ``det_info``; that key should
+exist in both the active ``det_info`` and in the result that is loaded
+here.
+
+It is expected that ``more_det_info.sqlite`` is a standard ManifestDb,
+which will be queried in the usual way except that when we get to the
+"Wrap Metadata" step, instead the following is performed:
+
+  - The index field identified by ``det_key`` is looked up in the
+    current active ``det_info`` (after removing the dets: prefix) and
+    in the new metadata object (with prefix intact).
+  - The columns from the new metadata are merged into the active
+    ``det_info``, ensuring that the index field values correspond.
+  - Only the rows for which the index field has the same value in the
+    two objects are kept.
+
+As subsequent metadata are processed, they can match against any
+fields that have been added to ``det_info`` by preceding entries in
+the metadata list.
 
 
 ------------------------------------
@@ -1086,7 +1292,8 @@ tags=True::
 So here we see that the observation is associated with tags
 ``'hwp_fast'`` and ``'cryo_problem'``.
 
-  
+.. _obsdb-names-section:
+ 
 Standardized ObsDb field names
 ==============================
 
@@ -1124,53 +1331,15 @@ The purpose of ObsFileDb is to provide a map into a large set of TOD
 files, giving the names of the files and a compressed expression of
 what time indices and detectors are present in each file.
 
-Organization of Files
-=====================
-
-The ObsFileDb is represented on disk by an sqlite database file.  The
-sqlite database contains information about data files, and the
-*partial paths* of the data files.  By *partial paths*, we mean that
-only the part of the filenames relative to some root node of the data
-set should be stored in the database.  In order for the code to find
-the data files easily, it is most natural to place the
-obsfiledb.sqlite file in that same root node of the data set.
-Consider the following file listing as an example::
-
-  /
-   data/
-        planet_obs/
-                   obsfiledb.sqlite     # the database
-                   observation0/        # directory for an obs
-                                data0_0 # one data file
-                                data0_1
-                   observation1/
-                                data1_0
-                                data1_1
-                   observation2/
-                   ...
-
-On this particular file system, our "root node of the data set" is
-located at ``/data/planet_obs``.  All data files are located in
-subdirectories of that one root node directory.  The ObsFileDb
-database file is also located in that directory, and called
-``obsfiledb.sqlite``.  The filenames in obsfiledb.sqlite are written
-relative to that root node directory; for example
-``observation0/data0_1``.  This means that we can copy or move the
-contents of the ``planet_obs`` directory to some other path and the
-ObsFileDb will not need to be updated.
-
-There are functions in ObsFileDb that return the full path to the
-files, rather than the partial path.  This is achieved by combining
-the partial file names in the database with the ObsFileDb instance's
-"prefix".  By default, "prefix" is set equal to the directory where
-the source sqlite datafile is located.  But it can be overridden, if
-needed, when the ObsFileDb is instantiated (or afterwards).
+The ObsFileDb is an sqlite database.  It carries some information
+about each "Observation" and the "detectors"; but is complementary to
+the ObsDb and DetDb.
 
 
 Data Model
 ==========
 
-We assume the following organization of the data:
+We assume the following organization of the time-ordered data:
 
 - The data are divided into contiguous segments of time called
   "Observations".  An observation is identified by an ``obs_id``,
@@ -1187,7 +1356,7 @@ Here's some ascii art showing an example of how the data in an
 observation must be split between files::
 
      sample index
-   X-------------------------------------------------->
+   +-------------------------------------------------->
  d |
  e |   +-------------------------+------------------+
  t |   | obs0_waf0_00000         | obs0_waf0_01000  |
@@ -1227,15 +1396,51 @@ particular detset (string ``detset.name``).  The second is called
 (string ``files.obs_id``), detset (string ``files.detset``), and
 sample range (integers ``sample_start`` and ``sample_stop``).
 
-The ObsFileDb is intended to be portable with the TOD data.  It should
-thus be placed near the data (such as in the base directory of the
-data), and use relative filenames.
-
 Constructing the ObsFileDb involves building the detsets and files
 tables, using functions ``add_detset`` and ``add_obsfile``.  Using the
 ObsFileDb is accomplished through the functions ``get_dets``,
 ``get_detsets``, ``get_obs``, and through custom SQL queries on
 ``conn``.
+
+
+Relative vs. Absolute Paths
+===========================
+
+The filenames stored in ObsFileDb may be specified with relative or
+absolute paths.  (Absolute paths are assumed if the filename starts
+with a /.)  Relative paths are taken as being relative to the
+directory where the ObsFileDb sqlite file lives; this can be
+overridden by setting the ``prefix`` attribute.  Consider the
+following file listing as an example::
+
+  /
+   data/
+        planet_obs/
+                   obsfiledb.sqlite     # the database
+                   observation0/        # directory for an obs
+                                data0_0 # one data file
+                                data0_1
+                   observation1/
+                                data1_0
+                                data1_1
+                   observation2/
+                   ...
+
+Note the ``obsfiledb.sqlite`` file, located in ``/data/planet_obs``.
+The filenames in obsfiledb.sqlite might be specified in one of two
+ways:
+
+  1. Using paths relative to the directory where ``obsfiledb.sqlite``
+     is located.  For example, ``observation0/data0_1``.  Relative paths
+     permit one to move the tree of data to other locations without
+     needing to alter the ``obsfiledb.sqlite`` (as long as the
+     relative locations of the data and sqlite file remain fixed).
+  2. Using absolute paths on this file system; for example
+     ``/data/planet_obs/observation0/data0_1``.  This is not portable,
+     but it is a better choice if the ObsFileDb ``.sqlite`` file
+     isn't kept near the TOD data files.
+
+A database may contain a mixture of relative and absolute paths.
 
 
 Example Usage
