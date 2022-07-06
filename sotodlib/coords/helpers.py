@@ -551,4 +551,3 @@ class ScalarLastQuat(np.ndarray):
             temp[..., 1:] = self[..., :3]
             return so3g.proj.quat.G3VectorQuat(temp)
         raise ValueError("Can only convert 1- or 2-d arrays to G3.")
->>>>>>> master
