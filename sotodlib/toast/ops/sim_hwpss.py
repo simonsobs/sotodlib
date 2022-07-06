@@ -39,7 +39,9 @@ XAXIS, YAXIS, ZAXIS = np.eye(3)
 
 @trait_docs
 class SimHWPSS(Operator):
-    """ Simulate HWP synchronous signal """
+    """Simulate HWP synchronous signal
+    
+    """
 
     API = Int(0, help="Internal interface version for this operator")
 

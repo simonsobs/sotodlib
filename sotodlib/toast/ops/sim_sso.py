@@ -54,6 +54,7 @@ def to_DJD(t):
 @trait_docs
 class SimSSO(Operator):
     """Operator that generates Solar System Object timestreams.
+    
     """
 
     # Class traits

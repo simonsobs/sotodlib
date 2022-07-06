@@ -95,8 +95,8 @@ def spectrum(power, fc, sigma, base, err_fc, noise, az_size, el_size, dist):
 
 @trait_docs
 class SimSource(Operator):
-    """
-    Operator that generates an Artificial Source timestreams.
+    """Operator that generates an Artificial Source timestreams.
+
     """
 
     # Class traits
