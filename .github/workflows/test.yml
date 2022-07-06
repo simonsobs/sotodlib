@@ -20,10 +20,7 @@ jobs:
         run: docker pull simonsobs/so3g:latest
       - name: Install dependencies
         run: docker run -v "$(pwd)":/home/sotodlib --name="test_runner" simonsobs/so3g:latest /home/sotodlib/.github/workflows/install_deps.sh && docker commit -m "dependencies" test_runner test_runner:so3g
-      - name: Run Serial Tests
+      - name: Run Serial and MPI Tests
         run: docker run -v "$(pwd)":/home/sotodlib test_runner:so3g /home/sotodlib/.github/workflows/run_tests.sh
 
-# NOTE: eventually add test steps for documentation build and MPI tests.  If the
-# commands to run inside the container become too complicated they should be moved to
-# scripts.  We could also just modify the user permissions when volume mounting the
-# source checkout, rather than making a copy inside the container for running the tests.
+# NOTE: eventually add test steps for documentation build.
