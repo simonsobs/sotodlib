@@ -32,7 +32,8 @@ from toast.ops import (
 
 @trait_docs
 class Hn(Operator):
-    """ Evaluate geometrical h_n factors to support map-based simulations.
+    """Evaluate geometrical h_n factors to support map-based simulations.
+
     """
 
     # Class traits

@@ -12,21 +12,23 @@ User Installation
 
 If you are using a stable release, then you can install the ``toast``
 package directly from either a python wheel or a conda package.  Make
-sure to create a virtualenv or conda env first:
+sure to create a virtualenv or conda env first::
 
     conda install toast
 
-OR
+OR::
 
     pip install toast
 
-And follow that by installing ``so3g`` and ``sotodlib`` as usual:
+And follow that by installing ``so3g``::
 
     pip install so3g
 
+and ``sotodlib``::
+
     pip install git+https://github.com/simonsobs/sotodlib.git@master
 
-    # OR, if you have a local git checkout of sotodlib
+OR, if you have a local git checkout of sotodlib::
 
     cd sotodlib
     pip install .
@@ -43,29 +45,29 @@ easiest way forward is to use a conda environment.  This is also the
 path to take if you want to use the latest upstream code version.
 
 To begin, make sure you already have a recent conda "base" environment.
-If you starting from scratch, I recommend running the "miniforge" `installer from conda-forge <https://github.com/conda-forge/miniforge>`_.  
-Make sure you base conda environment is activated:
+If you are starting from scratch, I recommend running the "miniforge" `installer from conda-forge <https://github.com/conda-forge/miniforge>`_.  
+Make sure your base conda environment is activated::
 
     conda env list
 
-Now decide on a name for you new development environment.  In this example
-we use "simons".  Clone toast locally and checkout the toast3 branch:
+Now decide on a name for your new development environment.  In this example
+we use "simons".  Clone toast locally and checkout the toast3 branch::
 
     git clone https://github.com/hpc4cmb/toast.git
     cd toast
     git checkout -b toast3 -t origin/toast3
 
 Next we will run a helper script to create (or activate) our new conda env
-and install toast dependencies.  Use the name you have chosen here:
+and install toast dependencies.  Use the name you have chosen here::
 
     cd toast
     ./platforms/conda_dev_setup.sh simons
 
-This new environment should show up with:
+This new environment should show up with::
 
     conda env list
 
-Now we can install the toast package itself after activating our environment:
+Now we can install the toast package itself after activating our environment::
 
     cd toast
     conda activate simons
@@ -73,13 +75,15 @@ Now we can install the toast package itself after activating our environment:
 
 Whenever you pull new changes to your git checkout, you can re-run the 
 ``platforms/conda.sh`` script to install an updated version of the toast 
-package.  Now install ``so3g`` and ``sotodlib`` as usual:
+package.  Now install ``so3g``::
 
     pip install so3g
 
+and ``sotodlib``::
+
     pip install git+https://github.com/simonsobs/sotodlib.git@master
 
-    # OR, if you have a local git checkout of sotodlib
+OR, if you have a local git checkout of sotodlib::
 
     cd sotodlib
     pip install .

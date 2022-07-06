@@ -27,9 +27,8 @@ Most of the functions are adapted from pymap3d, to include error calulations
 """
 
 def ellipsoid(model='WGS84'):
-
-    """
-    Return the major and minor semiaxis given an ellipsoid model.
+    """Return the major and minor semiaxis given an ellipsoid model.
+    
     Returns:
     - a: astropy.Quantity, semiaxis major in meter
     - b: astropy.Quantity, semiaxis minor in meter
