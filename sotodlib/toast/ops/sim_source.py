@@ -196,7 +196,7 @@ class SimSource(Operator):
     )
 
     wind_gusts_amp = Quantity(
-        u.Quantity(0.0, u.meter/u.second),
+        u.Quantity(0.0, u.Unit("m / s")),
         help = "Amplitude of gusts of wind"
     )
 
