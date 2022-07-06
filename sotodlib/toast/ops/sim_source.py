@@ -113,7 +113,7 @@ class SimSource(Operator):
     )
 
     source_init_dist = Quantity(
-        500 * u.meter,
+        u.Quantity(500.0, u.meter),
         help = 'Initial distance of the artificial source in meters',
     )
 
@@ -196,12 +196,12 @@ class SimSource(Operator):
     )
 
     wind_gusts_amp = Quantity(
-        0 * u.meter/u.second,
+        u.Quantity(0.0, u.meter/u.second),
         help = "Amplitude of gusts of wind"
     )
 
     wind_gusts_duration = Quantity(
-        0 * u.second,
+        u.Quantity(0.0, u.second),
         help = "Duration of each gust of wind"
     )
 
