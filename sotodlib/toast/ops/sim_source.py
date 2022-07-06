@@ -32,20 +32,24 @@ from sotodlib.coords import local
 from . import utils
 
 def spectrum(power, fc, sigma, base, err_fc, noise, az_size, el_size, dist):
+    """Generate a power spectrum in W/m^2/sr/Hz for a source.
+    
+    The source has a delta-like emission and a top-hat beam in 2D.
 
-    '''
-    Generate a power spectrum in W/m^2/sr/Hz for a source with a delta-like emission and
-    a top-hat beam in 2D
-    Parameters:
-    - power: total power of the signal in dBm
-    - fc: frequency of the signal in GHz
-    - sigma: width of the signal in kHz
-    - base: base level of the signal in dBm
-    - err_fc: error in the signal frequency in kHz
-    - noise: noise of the signal in W/Hz
-    - ang_size: beam size of the signal in degrees as [az_size, el_size]
-    - dist: distance of the source in meter
-    '''
+    Args:
+        power: total power of the signal in dBm
+        fc: frequency of the signal in GHz
+        sigma: width of the signal in kHz
+        base: base level of the signal in dBm
+        err_fc: error in the signal frequency in kHz
+        noise: noise of the signal in W/Hz
+        ang_size: beam size of the signal in degrees as [az_size, el_size]
+        dist: distance of the source in meter
+
+    Returns:
+        (tuple): The (frequency, spectrum) arrays.
+    
+    """
 
     fc *= 1e9 ### Conversion to Hz
     err_fc *= 1e3
@@ -520,15 +524,15 @@ class SimSource(Operator):
 
     @function_timer
     def _observe_source(
-            self,
-            data,
-            obs,
-            source_az,
-            source_el,
-            source_dist,
-            source_diameter,
-            prefix,
-            dets,
+        self,
+        data,
+        obs,
+        source_az,
+        source_el,
+        source_dist,
+        source_diameter,
+        prefix,
+        dets,
     ):
         """
         Observe the Source with each detector in tod
