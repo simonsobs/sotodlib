@@ -12,7 +12,10 @@ numpy
 #  def myfunc(val=5.0*u.meter):
 #      pass
 #
+# Similarly for pixell, whose units are also used in such a way.
+#
 astropy
+pixell
 
 # Before you add anything else to docs/requirements.txt, consider
 # adding it to the "missing" module list in conf.py.
