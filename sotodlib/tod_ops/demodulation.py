@@ -1,11 +1,17 @@
+"""Functions used for demodulating general sinusoidal modulation in
+timestreams. Often used in lab testing or with optical choppers."""
+
 import numpy as np
 from sotodlib.tod_ops import filters
 from scipy.optimize import curve_fit
-import matplotlib.pyplot as plt
+
+import logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 def _remove_demod_placeholders(aman):
-    '''Remove some temporary data from aman that was used for demodulation'''
+    '''Remove some temporary data from aman that was used for demodulation.'''
     if 'highband_sine' in aman:
         aman.move('highband_sine', None)
     if 'highband_cos' in aman:
@@ -17,8 +23,8 @@ def _remove_demod_placeholders(aman):
     return
 
 
-def demod_sine(aman, freq=8.0, lp_fc=1, signal_name='signal',
-               demod_name='demod_signal', dets_axis='dets'):
+def demod_sine(aman, freq=8.0, lp_fc=1, signal=None,
+               demod_name='demod_signal'):
     '''Demodulate a sinusoidal function from AxisManager.signal_name and then
     place it into AxisManager.demod_name, using a sqrt(sin + cos) wave.
 
@@ -27,18 +33,20 @@ def demod_sine(aman, freq=8.0, lp_fc=1, signal_name='signal',
         aman                 - axis manager to use
         freq                 - demodulation frequency (Hz)
         lp_fc                - low pass filter cutoff frequency to use (Hz)
-        signal_name          - name of axis manager signal to demodulate
+        signal               - name of axis manager signal to demodulate.
+                               If not specified this uses 'aman.signal'
         demod_name           - name of resulting demod signal to put in aman
-        det_axis             - name of detector axis manager name to use
     '''
+    if signal is None:
+        signal = aman.signal
     try:
         sinewave = np.sin(2*np.pi*freq*(aman.timestamps-aman.timestamps[0]))
         coswave = np.cos(2*np.pi*freq*(aman.timestamps-aman.timestamps[0]))
 
-        aman.wrap('highband_sine', aman[signal_name] *
-                  sinewave[None, :], [(0, dets_axis), (1, 'samps')])
-        aman.wrap('highband_cos', aman[signal_name] *
-                  coswave[None, :], [(0, dets_axis), (1, 'samps')])
+        aman.wrap('highband_sine', signal * sinewave[None, :],
+                  [(0, 'dets'), (1, 'samps')])
+        aman.wrap('highband_cos', signal * coswave[None, :],
+                  [(0, 'dets'), (1, 'samps')])
 
         aman.wrap('mod_sine', sinewave**2, [(0, 'samps')])
         aman.wrap('mod_cos', coswave**2, [(0, 'samps')])
@@ -60,7 +68,7 @@ def demod_sine(aman, freq=8.0, lp_fc=1, signal_name='signal',
 
         demod_signal = np.sqrt(demod_cos_signal**2 + demod_sin_signal**2)
 
-        aman.wrap(demod_name, demod_signal, [(0, dets_axis), (1, 'samps')])
+        aman.wrap(demod_name, demod_signal, [(0, 'dets'), (1, 'samps')])
         _remove_demod_placeholders(aman)
     except:
         _remove_demod_placeholders(aman)
@@ -73,8 +81,8 @@ def sinewave(aman, freq=8.0, phase=0):
         2 * np.pi * freq * (aman.timestamps-aman.timestamps[0]) + phase)
 
 
-def demod_single_sine(aman, phase, freq=8.0, lp_fc=1, signal_name='signal',
-                      demod_name='demod_signal', dets_axis='dets'):
+def demod_single_sine(aman, phase, freq=8.0, lp_fc=1, signal=None,
+                      demod_name='demod_signal'):
     '''Demodulate a sinusoidal function from AxisManager.signal_name and then
     place it into AxisManager.demod_name. This only uses a single sine + phase
     in the demodulation with the phase preferably fitted to the data
@@ -87,14 +95,16 @@ def demod_single_sine(aman, phase, freq=8.0, lp_fc=1, signal_name='signal',
                                (this should be fitted or determined beforehand)
         freq                 - demodulation frequency (Hz)
         lp_fc                - low pass filter cutoff frequency to use (Hz)
-        signal_name          - name of axis manager signal to demodulate
+        signal               - name of axis manager signal to demodulate.
+                               If not specified this uses 'aman.signal'
         demod_name           - name of resulting demod signal to put in aman
-        det_axis             - name of detector axis manager name to use
     '''
+    if signal is None:
+        signal = aman.signal
     try:
         demod_sinewave = sinewave(aman, phase=phase)
-        aman.wrap('highband_sine', aman[signal_name] *
-                  demod_sinewave[None, :], [(0, dets_axis), (1, 'samps')])
+        aman.wrap('highband_sine', signal * demod_sinewave[None, :],
+                  [(0, 'dets'), (1, 'samps')])
 
         aman.wrap('mod_sine', demod_sinewave**2, [(0, 'samps')])
 
@@ -111,7 +121,7 @@ def demod_single_sine(aman, phase, freq=8.0, lp_fc=1, signal_name='signal',
 
         demod_signal = demod_sin_signal
 
-        aman.wrap(demod_name, demod_signal, [(0, dets_axis), (1, 'samps')])
+        aman.wrap(demod_name, demod_signal, [(0, 'dets'), (1, 'samps')])
         _remove_demod_placeholders(aman)
     except:
         _remove_demod_placeholders(aman)
@@ -140,6 +150,7 @@ def get_phase_fit_signals(aman, middle_relative_time, index_limit=100,
 
     phase_fit_signals = []
     if (plot):
+        import matplotlib.pyplot as plt
         plt.figure(figsize=(10, 5))
 
     for i in range(0, aman.dets.count):
@@ -167,7 +178,7 @@ def get_phase_fit_signals(aman, middle_relative_time, index_limit=100,
 
 def _fit_sin(tt, yy, freq=8, plot=False):
     '''Fit sin to the input time sequence, and return fitting parameters
-    "amplitude", "omega", "phase", "offset", "freq"'''
+    "amplitude", "phase", "offset", "freq"'''
     # Create sine func to fit.
     omega = 2 * np.pi * freq
 
@@ -187,6 +198,7 @@ def _fit_sin(tt, yy, freq=8, plot=False):
     A, phi, c = popt
 
     if (plot):
+        import matplotlib.pyplot as plt
         plt.plot(tt, yy, label='data')
         plt.plot(tt, sinfunc(tt, *popt), label='fit, phase = %.2f' % phi)
         plt.legend()
@@ -197,7 +209,8 @@ def _fit_sin(tt, yy, freq=8, plot=False):
 
 def fit_phase(aman, middle_relative_time, index_limit=180, threshold=.8,
               freq=8.0, plot=False):
-    '''Fit a sinewave to the data to find the chopper phase.
+    '''Fit a sinewave to modulated data, only useful in regions where the
+    modulated signal has sufficient signal-to-noise.
 
     args:
 
@@ -228,12 +241,12 @@ def fit_phase(aman, middle_relative_time, index_limit=180, threshold=.8,
     global_phases = np.unwrap(np.sort(np.mod(global_phases, 2 * np.pi)))
     mean, median, std = (np.mean(global_phases), np.median(global_phases),
                          np.std(global_phases))
-
-    print('mean, median, std of fitted phases: %.2f, %.2f, %.2f' % (
+    logger.debug('mean, median, std of fitted phases: %.2f, %.2f, %.2f' % (
         mean, median, std))
     phase_to_use = median
 
     if (plot):
+        import matplotlib.pyplot as plt
         plt.figure(figsize=(10, 5))
 
         amplitudes = []
