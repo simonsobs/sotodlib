@@ -331,6 +331,11 @@ class G3tSmurf:
 
             session.add(db_frame)
 
+        if file_start is None:
+            ## happens if there are no scan frames in file
+            file_start = db_file.frames[0].time
+            file_stop = db_file.frames[-1].time
+            
         db_file.start = file_start
         db_file.stop = file_stop
         db_file.n_channels = total_channels
