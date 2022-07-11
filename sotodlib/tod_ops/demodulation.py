@@ -7,7 +7,6 @@ from scipy.optimize import curve_fit
 
 import logging
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 def _remove_demod_placeholders(aman):
