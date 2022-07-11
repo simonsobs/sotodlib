@@ -3,8 +3,10 @@ import numpy as np
 import scipy.interpolate
 import so3g
 from spt3g import core
+import argparse
 
-class G3tHWP(): 
+class update_hwp_angle(): 
+    
     def __init__(self, debug=False):
 
         """
@@ -27,8 +29,6 @@ class G3tHWP():
         self._delta_angle = 2 * np.pi / self._num_edges
         self._ref_edges = 2
         self._ref_indexes = []
-
-        
 
     def load_data(self, start, end, archive_path, instance='HBA1'):
 
@@ -68,7 +68,7 @@ class G3tHWP():
         
         return data
         
-    def load_file(self, path, filename, instance='HBA1'):
+    def load_file(self, filename, instance='HBA1'):
         
         """
         Loads house keeping data with specified g3 files. 
@@ -76,8 +76,6 @@ class G3tHWP():
         
         Args
         -----
-            path : str
-                path to HK g3 file
             filename : str or [str] or np,array(str)
                 HK g3 filename (str or array)
             instance : str          
@@ -98,8 +96,8 @@ class G3tHWP():
         if self._debug: print('loading HK data files ...')
         scanner = so3g.hk.HKArchiveScanner()
         if isinstance(filename, list) or isinstance(filename, np.ndarray):
-            for f in filename: scanner.process_file(path + '/' + f)
-        else: scanner.process_file(path + '/' + filename)
+            for f in filename: scanner.process_file(f)
+        else: scanner.process_file(filename)
         arc = scanner.finalize()
         if not any(arc.get_fields()[0]): 
             print('INFO: No HK data in input g3 files: ' + filename)
@@ -497,16 +495,23 @@ class G3tHWP():
         smurf_angle = scipy.interpolate.interp1d(self._time, self.angle, kind='linear',fill_value='extrapolate')(smurf_timestamp)
         return smurf_angle
     
+    
+    def main(args=None):
+        
+        parser = argparse.ArgumentParser(description='Analyze HWP encoder data from level-2 HK data, and produce HWP angle solution for all times.')
 
-    def demod(self, data, time, fs, hwp_angle, bpf_width=0.1, lpf_cut=0.5):
+        parser.add_argument('-f','--file', action='store', required=True, help='A filename or list of filenames (to be loaded in order).', nargs='*')
+        parser.add_argument('--output', default='./output.g3', help='A path to output g3 file')
 
-        start = time[0]
-        stop = time[-1]
-        diff_angle = np.diff(hwp_angle) % (2*np.pi)
-        speed = (np.sum(diff_angle) / (stop - start)) / (2*np.pi)
+        args = parser.parse_args()
+        print('files=' + str(args.file))
+        print('output=' + args.output)
+        
+        hwp = update_hwp_angle()
+        data = hwp.load_file(args.file)
+        solved = hwp.analyze(data)
+        hwp.write_solution(solved,args.output)
 
-        data_bpf = self.bandpass_filter(data, speed-bpf_width, speed+bpf_width, fs)
-        data_demod = (data_bpf * np.exp(-1j*(4*speed))).real
-        data_demod_lpf = self.lowpass_filter(data_demod, lpf_cut, fs)
 
-        return data_demod_lpf
+if __name__ == "__main__": 
+    update_hwp_angle.main() 
