@@ -43,9 +43,9 @@ def demod_sine(aman, freq=8.0, lp_fc=1, signal=None,
         sinewave = np.sin(2*np.pi*freq*(aman.timestamps-aman.timestamps[0]))
         coswave = np.cos(2*np.pi*freq*(aman.timestamps-aman.timestamps[0]))
 
-        aman.wrap('highband_sine', signal * sinewave[None, :],
+        aman.wrap('highband_sine', signal * sinewave,
                   [(0, 'dets'), (1, 'samps')])
-        aman.wrap('highband_cos', signal * coswave[None, :],
+        aman.wrap('highband_cos', signal * coswave,
                   [(0, 'dets'), (1, 'samps')])
 
         aman.wrap('mod_sine', sinewave**2, [(0, 'samps')])
@@ -103,7 +103,7 @@ def demod_single_sine(aman, phase, freq=8.0, lp_fc=1, signal=None,
         signal = aman.signal
     try:
         demod_sinewave = sinewave(aman, phase=phase)
-        aman.wrap('highband_sine', signal * demod_sinewave[None, :],
+        aman.wrap('highband_sine', signal * demod_sinewave,
                   [(0, 'dets'), (1, 'samps')])
 
         aman.wrap('mod_sine', demod_sinewave**2, [(0, 'samps')])
@@ -178,7 +178,7 @@ def get_phase_fit_signals(aman, middle_relative_time, index_limit=100,
 
 def _fit_sin(tt, yy, freq=8, plot=False):
     '''Fit sin to the input time sequence, and return fitting parameters
-    "amplitude", "phase", "offset", "freq"'''
+    "amplitude", "omega", "phase", "offset", "freq"'''
     # Create sine func to fit.
     omega = 2 * np.pi * freq
 
