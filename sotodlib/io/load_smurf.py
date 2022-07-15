@@ -1759,8 +1759,10 @@ def get_channel_mask(
         if np.isscalar(ch):
             if np.issubdtype(type(ch), np.integer):
                 # this is an absolute readout INDEX (not band*512+ch)
-                if ch >= status.num_chans:
+                if not ignore_missing and ch >= status.num_chans:
                     raise ValueError(f"Requested Index {ch} > {status.num_chans}")
+                if ch >= status.num_chans:
+                    continue
                 msk[ch] = True
 
             elif np.issubdtype(type(ch), np.floating):
