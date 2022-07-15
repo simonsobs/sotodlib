@@ -59,7 +59,10 @@ class Observations(Base):
         The end of the observation as a datetime object
     tag : string
         Tags for this observation in a single comma delimited string. These are populated 
-        through tags set while running sodetlib's stream data functions. 
+        through tags set while running sodetlib's stream data functions.
+    calibration : bool
+        Boolean that stores whether or not the observation is a calibration-type observation
+        i.e. an IV curve, a bias step, etc. 
     files : list of SQLAlchemy instances of Files
         The list of .g3 files in this observation built through a relationship
         to the Files table. [f.name for f in Observation.files] will return
@@ -85,6 +88,8 @@ class Observations(Base):
     stop = db.Column(db.DateTime)
     
     tag = db.Column(db.String)
+
+    calibration = db.Column(db.Boolean)
     ## one to many
     files = relationship("Files", back_populates='observation') 
     
