@@ -1726,8 +1726,7 @@ def get_channel_mask(
         List of desired channels the type of each list element is used
         to determine what it is:
 
-        * int : absolute readout index (ex: if you just want to load range(X)
-                channels or range(100,200) ). Useful for batching.
+        * int : index of channel in file. Useful for batching.
         * (int, int) : band, channel
         * string : channel name (requires archive or obsfiledb)
         * float : frequency in the smurf status (or should we use channel assignment?)
