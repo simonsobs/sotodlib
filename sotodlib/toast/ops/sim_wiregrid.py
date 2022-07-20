@@ -47,8 +47,6 @@ class SimWireGrid(Operator):
         255, help="Bit mask value applied during wire grid rotation"
     )
 
-    hwp_angle = Unicode(defaults.hwp_angle, help="Observation shared key for HWP angle")
-
     wiregrid_angle = Unicode(
         "wiregrid_angle", help="Observation shared key for wiregrid angle"
     )

@@ -411,6 +411,13 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
         timer=timer,
     )
 
+    # Simulate wiregrid calibration observations
+
+    ops.sim_wiregrid.detector_pointing = ops.det_pointing_azel
+    ops.sim_wiregrid.detector_weights = ops.weights_azel
+    ops.sim_wiregrid.apply(data)
+    log.info_rank("Simulated wiregrid in", comm=world_comm, timer=timer)
+
     # Apply a time constant
 
     if args.realization is not None:
@@ -735,6 +742,7 @@ def main():
         so_ops.SimSSO(name="sim_sso", enabled=False),
         so_ops.SimSource(name="sim_source", enabled=False),
         so_ops.SimHWPSS(name="sim_hwpss", enabled=False),
+        so_ops.SimWireGrid(name="sim_wiregrid", enabled=False),
         toast.ops.TimeConstant(
             name="convolve_time_constant", deconvolve=False, enabled=False
         ),
