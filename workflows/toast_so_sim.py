@@ -435,13 +435,16 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
 
     # Simulate HWP-synchronous signal
 
-    ops.sim_hwpss.detector_pointing = ops.det_pointing_azel
-    ops.sim_hwpss.apply(data)
-    log.info_rank(
-        "Simulated HWP-synchronous signal",
-        comm=world_comm,
-        timer=timer,
-    )
+    if ops.sim_ground.hwp_angle is not None:
+        ops.sim_hwpss.hwp_angle = ops.sim_ground.hwp_angle
+        ops.sim_hwpss.detector_pointing = ops.det_pointing_azel
+        ops.sim_hwpss.stokes_weights = ops.weights_azel
+        ops.sim_hwpss.apply(data)
+        log.info_rank(
+            "Simulated HWP-synchronous signal",
+            comm=world_comm,
+            timer=timer,
+        )
 
     # Add calibration error
 
@@ -644,7 +647,7 @@ def reduce_data(job, args, data):
 
     # Optionally run Madam
 
-    if toast.ops.madam.available():
+    if toast.ops.madam.available() and ops.madam.enabled:
         ops.madam.params = toast.ops.madam_params_from_mapmaker(ops.mapmaker)
         ops.madam.pixel_pointing = args.pixels_final
         ops.madam.stokes_weights = ops.weights_radec
