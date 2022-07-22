@@ -398,6 +398,8 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
         comm=world_comm,
         timer=timer,
     )
+    if rank == 0 and ops.sim_source.enabled:
+        print("Source coord = ", data.obs[0].shared["source"].data)
 
     # Simulate Solar System Objects
 
@@ -408,8 +410,6 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
         comm=world_comm,
         timer=timer,
     )
-    if rank == 0:
-        print("Source coord = ", data.obs[0].shared["source"].data)
 
     # Apply a time constant
 
@@ -463,19 +463,6 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
 
     ops.save_hdf5.apply(data)
     log.info_rank("Saved HDF5 data in", comm=world_comm, timer=timer)
-
-    # DEBUG begin
-    """
-    import pickle
-    my_data = []
-    for obs in data.obs:
-        my_data.append(np.array(obs.detdata["signal"]))
-    fname = f"datadump_{world_comm.rank}.pck"
-    with open(fname, "wb") as fout:
-        pickle.dump(my_data, fout)
-    print(f"Wrote {fname}", flush=True)
-    """
-    # DEBUG end
 
     return data
 
@@ -792,10 +779,7 @@ def main():
         toast.ops.BinMap(
             name="binner_final", enabled=False, pixel_dist="pix_dist_final"
         ),
-        toast.ops.FilterBin(
-            name="filterbin",
-            enabled=False,
-        ),
+        toast.ops.FilterBin(name="filterbin", enabled=False),
         so_ops.MLMapmaker(name="mlmapmaker", enabled=False, comps="TQU"),
         toast.ops.MemoryCounter(name="mem_count", enabled=False),
     ]
