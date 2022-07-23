@@ -67,7 +67,7 @@ def lev_dist(str1, str2, i1=0, i2=0):
     )
 
 
-def match_template(focal_plane, template):
+def match_template(focal_plane, template, out_thresh=0):
     """
     Match fit focal plane againts a template.
 
@@ -80,10 +80,17 @@ def match_template(focal_plane, template):
                   Should have columns:
                   x, y.
 
+        out_thresh: Threshold at which points will be considered outliers.
+                    Should be in range [0, 1) and is checked against the
+                    probability that a point matches its mapped point in the template.
+
     Returns:
 
         mapping: Mapping between elements in template and focal_plane.
                  template[i] = focal_plane[mapping[i]]
+
+        outliers: Indices of points that are outliers.
+                  Note that this is in the basis of template and mapping, not focal_plane.
     """
     reg = AffineRegistration(**{"X": template, "Y": focal_plane})
 
@@ -91,7 +98,11 @@ def match_template(focal_plane, template):
     inv = np.linalg.inv(reg.P)
     mapping = np.argmax(inv, axis=0)
 
-    return mapping
+    outliers = np.array([])
+    if out_thresh > 0:
+        outliers = np.where(reg.P[range(reg.P.shape[0]), mapping] < out_thresh)[0]
+
+    return mapping, outliers
 
 
 def transform_focal_plane(focal_plane, theta, reflect=False):
