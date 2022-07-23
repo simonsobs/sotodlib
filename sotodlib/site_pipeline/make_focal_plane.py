@@ -86,8 +86,11 @@ def match_template(focal_plane, template):
                  template[i] = focal_plane[mapping[i]]
     """
     reg = AffineRegistration(**{"X": template, "Y": focal_plane})
-    mapping = np.argmax(reg.P, axis=1)
-    # TODO: address collisions
+
+    # This should get the maximum probability without collisions
+    inv = np.linalg.inv(reg.P)
+    mapping = np.argmax(inv, axis=0)
+
     return mapping
 
 
