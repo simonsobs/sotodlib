@@ -37,8 +37,8 @@ def match_template(focal_plane, template, out_thresh=0):
 
     Arguments:
 
-        focal_plane: Fit focal_plane. Should have columns:
-                     x, y.
+        focal_plane: Focal plane after either having optics model applied or being fit with channel map.
+                     Should have columns: x, y.
 
         template: Table containing template of focal plane.
                   Should have columns:
