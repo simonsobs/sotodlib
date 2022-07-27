@@ -109,8 +109,13 @@ def match_chan_map(pointing, template, out_thresh=0, weight=2):
     target_id = np.arange(len(template_rs))
     source_id = np.arange(len(pointing))
 
-    reg = ConstrainedDeformableRegistration(**{"X": template_rs[t_i], "Y": pointing_rs[p_i]}, e_alpha=1./weight, source_id = source_id, target_id = target_id)
-    
+    reg = ConstrainedDeformableRegistration(
+        **{"X": template_rs[t_i], "Y": pointing_rs[p_i]},
+        e_alpha=1.0 / weight,
+        source_id=source_id,
+        target_id=target_id
+    )
+
     # Undo sorting
     p_ii = np.argsort(p_i)
     t_ii = np.argsost(t_i)
