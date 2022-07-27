@@ -51,12 +51,12 @@ def match_template(focal_plane, template, out_thresh=0):
     Returns:
 
         mapping: Mapping between elements in template and focal_plane.
-                 template[i] = focal_plane[mapping[i]]
+                 focal_plane[i] = template[mapping[i]]
 
         outliers: Indices of points that are outliers.
-                  Note that this is in the basis of template and mapping, not focal_plane.
+                  Note that this is in the basis of mapping and focal_plane, not template.
     """
-    reg = AffineRegistration(**{"X": template, "Y": focal_plane})
+    reg = AffineRegistration(**{"X": focal_plane, "Y": template})
 
     # This should get the maximum probability without collisions
     inv = np.linalg.inv(reg.P)
@@ -92,11 +92,11 @@ def match_chan_map(pointing, template, out_thresh=0, weight=2):
 
     Returns:
 
-        mapping: Mapping between elements in template and focal_plane.
-                 template[i] = pointing[mapping[i]]
+        mapping: Mapping between elements in template and pointing.
+                 pointing[i] = template[mapping[i]]
 
         outliers: Indices of points that are outliers.
-                  Note that this is in the basis of template and mapping, not pointing.
+                  Note that this is in the basis of mapping and pointing, not template.
     """
     # Rescale pointing and template to be [0, 1]
     pointing_rs = rescale(pointing[1])
@@ -106,11 +106,11 @@ def match_chan_map(pointing, template, out_thresh=0, weight=2):
     p_i = np.argsort(pointing[0])
     t_i = np.argsort(template[0])
 
-    target_id = np.arange(len(template_rs))
-    source_id = np.arange(len(pointing))
+    target_id = np.arange(len(pointing_rs))
+    source_id = np.arange(len(template_rs))
 
     reg = ConstrainedDeformableRegistration(
-        **{"X": template_rs[t_i], "Y": pointing_rs[p_i]},
+        **{"X": pointing_rs[p_i], "Y": template_rs[t_i]},
         e_alpha=1.0 / weight,
         source_id=source_id,
         target_id=target_id
@@ -119,7 +119,7 @@ def match_chan_map(pointing, template, out_thresh=0, weight=2):
     # Undo sorting
     p_ii = np.argsort(p_i)
     t_ii = np.argsost(t_i)
-    P = reg.P[np.ix_(p_ii, t_ii)]
+    P = reg.P[np.ix_(t_ii, p_ii)]
 
     # This should get the maximum probability without collisions
     inv = np.linalg.inv(P)
