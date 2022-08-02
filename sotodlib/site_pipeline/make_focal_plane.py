@@ -4,11 +4,41 @@ import pandas as pd
 import scipy.optimize as opt
 from sotodlib.core import Context
 from functools import lru_cache
+from scipy.spatial.transform import Rotation as R
 
 # Should I implement my own version?
 # NOTE: Need this fork for priors https://github.com/agporto/pycpd
 # Should be merged soon https://github.com/siavashk/pycpd/pull/57
 from pycpd import AffineRegistration, ConstrainedDeformableRegistration
+
+
+def LAT_coord_transform(xy, rot_fp, rot_ufm, r=72.645):
+    """
+    Transform from instrument model coords to LAT Zemax coords
+
+    Arguments:
+
+        xy: XY coords from instrument model.
+            Should be a (2, n) array.
+
+        rot_fp: Angle of array location on focal plane in deg.
+
+        rot_ufm: Rotatation of UFM about its center.
+
+    Returns:
+
+        xy_trans: Transformed coords.
+    """
+    xy_trans = np.zeros((xy.shape[1], 3))
+    xy_trans[:, :2] = xy.T
+
+    r1 = R.from_euler("z", rot_fp, degrees=True)
+    shift = np.array([r, 0, 0]).apply(r1)
+
+    r2 = R.from_euler("z", rot_ufm, degrees=True)
+    xy_trans = r2.apply(xy_trans) + shift
+
+    return xy_trans.T
 
 
 def rescale(xy):
