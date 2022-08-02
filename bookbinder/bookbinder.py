@@ -356,7 +356,7 @@ class Bookbinder(object):
     Bookbinder
     """
     def __init__(self, hk_files, smurf_files, out_root='.', book_id=None, session_id=None, stream_id=None,
-                 start_time=None, end_time=None, verbose=True):
+                 start_time=None, end_time=None, max_nchannels=1e3, verbose=True):
         self._hk_files = hk_files
         self._smurf_files = smurf_files
         self._book_id = book_id
@@ -372,10 +372,10 @@ class Bookbinder(object):
         self.metadata = []
         self.frame_num = 0
         self.sample_num = 0
-        self.total_samples = 0
         self.ofile_num = 0
         self.default_mode = True
-        self.MAX_SAMPLES = 1e9
+        self.MAX_SAMPLES_TOTAL = 1e9
+        self.MAX_SAMPLES_PER_CHANNEL = self.MAX_SAMPLES_TOTAL // max_nchannels
         self.DEFAULT_TIME = 1e18  # 1e18 = 2286-11-20T17:46:40.000000000 (in the distant future)
 
         self.frameproc = FrameProcessor()
@@ -408,7 +408,7 @@ class Bookbinder(object):
         if self._stream_id is not None:
             oframe['stream_id'] = core.G3String(self._stream_id)
         if oframe.type == core.G3FrameType.Scan:
-            oframe['sample_range'] = core.G3VectorInt([self.sample_num, self.sample_num+len(f['signal'].times)-1])
+            oframe['sample_range'] = core.G3VectorInt([self.sample_num-len(f['signal'].times), self.sample_num-1])
         return oframe
 
     def write_frames(self, frames_list):
@@ -422,26 +422,23 @@ class Bookbinder(object):
         if self._verbose: print(f"=> Writing {len(frames_list)} frames")
 
         for f in frames_list:
-            # If the total number of samples (including all channels) exceeds the max allowed,
-            # create a new output file
+            # If the number of samples (per channel) exceeds the max allowed, create a new output file
             if f.type == core.G3FrameType.Scan:
-                nsamples = np.size(f['signal'].data)
-                self.total_samples += nsamples
-                if self.total_samples > self.MAX_SAMPLES:
+                nsamples = len(f['signal'].times)   # number of samples in current frame
+                self.sample_num += nsamples         # cumulative number of samples in current output file
+                if self.sample_num > self.MAX_SAMPLES_PER_CHANNEL:
                     self.ofile_num += 1
                     ofile = op.join(self._out_root, self._book_id, f'D_{self._stream_id}_{self.ofile_num:03d}.g3')
                     if self._verbose: print(f"Writing {ofile}")
                     self.writer = core.G3Writer(ofile)
                     afile = op.join(self._out_root, self._book_id, f'A_ancil_{self.ofile_num:03d}.g3')
                     self.ancil_writer = core.G3Writer(afile)
-                    self.total_samples = nsamples
-                    self.frame_num = 0
-                    self.sample_num = 0
+                    self.sample_num = nsamples      # reset sample number to length of current frame
+                    self.frame_num = 0              # reset frame number to 0
             oframe = self.add_misc_data(f)
             self.writer.Process(oframe)
             self.write_ancil_frames(oframe)
             self.frame_num += 1
-            self.sample_num += len(f['signal'].times) if oframe.type == core.G3FrameType.Scan else 0
 
     def write_ancil_frames(self, f):
         aframe = core.G3Frame(f.type)
