@@ -11,3 +11,4 @@ from .sim_source import SimSource
 from .h_n import Hn
 from .mlmapmaker import MLMapmaker
 from .sim_wiregrid import SimWireGrid
+from .sim_stimulator import SimStimulator

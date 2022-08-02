@@ -268,9 +268,7 @@ class SimWireGrid(Operator):
         prov = {
             "meta": list(),
             "shared": [self.wiregrid_angle],
-            "detdata": [
-                self.det_data,
-            ],
+            "detdata": [self.det_data],
         }
         return prov
 
