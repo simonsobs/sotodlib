@@ -1726,7 +1726,7 @@ def get_channel_mask(
         List of desired channels the type of each list element is used
         to determine what it is:
 
-        * int : absolute readout channel
+        * int : index of channel in file. Useful for batching.
         * (int, int) : band, channel
         * string : channel name (requires archive or obsfiledb)
         * float : frequency in the smurf status (or should we use channel assignment?)
@@ -1758,10 +1758,12 @@ def get_channel_mask(
     for ch in ch_list:
         if np.isscalar(ch):
             if np.issubdtype(type(ch), np.integer):
-                # this is an absolute readout channel
-                if not ignore_missing and ~np.any(status.mask == ch):
-                    raise ValueError(f"channel {ch} not found")
-                msk[status.mask == ch] = True
+                # this is an absolute readout INDEX (not band*512+ch)
+                if not ignore_missing and ch >= status.num_chans:
+                    raise ValueError(f"Requested Index {ch} > {status.num_chans}")
+                if ch >= status.num_chans:
+                    continue
+                msk[ch] = True
 
             elif np.issubdtype(type(ch), np.floating):
                 # this is a resonator frequency
