@@ -658,6 +658,7 @@ class G3tSmurf:
         if obs is None:
             x = session.query(Files.name)
             x = x.filter(
+                Files.stream_id == stream_id,
                 Files.start >= dt.datetime.utcfromtimestamp(action_ctime - max_early)
             )
             x = x.order_by(Files.start).first()
@@ -734,7 +735,8 @@ class G3tSmurf:
             return
 
         x = session.query(Files.name).filter(
-            Files.start >= obs.start - dt.timedelta(seconds=max_early)
+            Files.stream_id == obs.stream_id,
+            Files.start >= obs.start - dt.timedelta(seconds=max_early),
         )
         x = x.order_by(Files.start).first()
         if x is None:
