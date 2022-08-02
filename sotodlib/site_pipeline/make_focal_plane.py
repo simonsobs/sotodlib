@@ -38,11 +38,10 @@ def match_template(focal_plane, template, out_thresh=0):
     Arguments:
 
         focal_plane: Focal plane after either having optics model applied or being fit with channel map.
-                     Should have columns: x, y.
+                     Should have columns: x, y or x, y, pol.
 
         template: Table containing template of focal plane.
-                  Should have columns:
-                  x, y.
+                  Should have columns: x, y os x, y, pol.
 
         out_thresh: Threshold at which points will be considered outliers.
                     Should be in range [0, 1) and is checked against the
@@ -76,12 +75,12 @@ def match_chan_map(pointing, template, out_thresh=0, weight=2):
     Arguments:
 
         pointing: Pointing data. Should be a tuple with elements:
-                  readout_id, [xi_0, eta_0].
-                  Where readout_id is an (n,) array and [xi_0, eta_0] is (n, 2).
+                  readout_id, [xi_0, eta_0] or readout_id, [xi_0, eta_0, pol].
+                  Where readout_id is an (n,) array and [xi_0, eta_0(, pol)] is (n, 2(3)).
 
         template: Tuple containing channel map and template with elements:
-                  readout_id, [x, y].
-                  Where readout_id is an (n,) array and [x, y] is (n, 2).
+                  readout_id, [x, y] or readout_id, [x, y, pol]
+                  Where readout_id is an (n,) array and [x, y(, pol)] is (n, 2(3)).
 
         out_thresh: Threshold at which points will be considered outliers.
                     Should be in range [0, 1) and is checked against the
