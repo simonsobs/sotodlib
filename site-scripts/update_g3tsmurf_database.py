@@ -51,7 +51,12 @@ if __name__ == '__main__':
     new_obs = session.query(Observations).filter( Observations.start >= min_time,
                                                   Observations.stop == None).all()
     for obs in new_obs:
-        SMURF.update_observation_files(obs, session, force=True)
+        SMURF.update_observation_files(
+            obs, 
+            session, 
+            force=True,
+            max_early=90,
+        )
 
     if args.detdb_filename is not None:
         dump_DetDb(SMURF, args.detdb_filename)
