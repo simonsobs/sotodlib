@@ -1,9 +1,7 @@
 import argparse as ap
 import numpy as np
 import pandas as pd
-import scipy.optimize as opt
 from sotodlib.core import Context
-from functools import lru_cache
 from scipy.spatial.transform import Rotation as R
 
 # Should I implement my own version?
