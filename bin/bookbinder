@@ -23,6 +23,8 @@ if __name__ == '__main__':
                         help='Timestamp of first sample (inclusive)')
     parser.add_argument('--end-time', dest='end_time', type=int,
                         help='Timestamp of last sample (inclusive)')
+    parser.add_argument('--max-nchannels', dest='max_nchannels', type=int,
+                        help='Largest number of channels in Book; used to determine file splits')
     args = parser.parse_args()
 
     book_id = args.prefix
