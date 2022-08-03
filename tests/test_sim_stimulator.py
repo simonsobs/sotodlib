@@ -25,7 +25,7 @@ class SimStimulatorTest(unittest.TestCase):
         focalplane = sotoast.SOFocalplane(
             hwfile=None,
             telescope="LAT",
-            sample_rate=100 * u.Hz,
+            sample_rate=1000 * u.Hz,
             bands="LAT_f090",
             wafer_slots=None,
             tube_slots=None,
@@ -71,13 +71,7 @@ class SimStimulatorTest(unittest.TestCase):
         )
         sim_ground.apply(data)
 
-        so_ops.SimStimulator(
-            name="sim_stimulator",
-            chopper_rates="1,2,4,8",
-            chopper_step_time=60 * u.s,
-            heater_temperature=70 * u.K,
-            blackbody_temperature=17 * u.K,
-        ).apply(data)
+        so_ops.SimStimulator(name="sim_stimulator").apply(data)
 
 if __name__ == '__main__':
     unittest.main()
