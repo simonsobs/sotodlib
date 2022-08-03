@@ -465,6 +465,25 @@ class P:
         if self.tiled: return map.tiles
         else:          return map
 
+class P_PrecompDebug:
+    def __init__(self, geom, pixels, phases):
+        self.geom   = wrap_geom(geom).nopre
+        self.pixels = pixels
+        self.phases = phases
+    def zeros(self, super_shape=None):
+        if super_shape is None: super_shape = (self.phases.shape[2],)
+        return enmap.zeros(super_shape + self.geom.shape, self.geom.wcs)
+    def to_map(self, dest=None, signal=None, comps=None):
+        if dest is None: dest  = self.zeros()
+        proj = so3g.ProjEng_Precomp_NonTiled()
+        proj.to_map(dest, self.pixels, self.phases, signal, None, None)
+        return dest
+    def from_map(self, signal_map, dest=None, comps=None):
+        if dest is None: dest = np.zeros(self.pixels.shape[:2], np.float32)
+        proj  = so3g.ProjEng_Precomp_NonTiled()
+        proj.from_map(signal_map, self.pixels, self.phases, dest)
+        return dest
+
 def wrap_geom(geom):
     if isinstance(geom, tuple) or isinstance(geom, list):
         return enmap.Geometry(*geom)
