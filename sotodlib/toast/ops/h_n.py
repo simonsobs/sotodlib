@@ -19,7 +19,7 @@ from toast.timing import function_timer, Timer
 
 from toast.pixels import PixelDistribution, PixelData
 
-from toast.pixels_io import write_healpix_fits
+from toast.pixels_io_healpix import write_healpix_fits
 
 from toast.covariance import covariance_invert, covariance_apply
 
@@ -32,7 +32,8 @@ from toast.ops import (
 
 @trait_docs
 class Hn(Operator):
-    """ Evaluate geometrical h_n factors to support map-based simulations.
+    """Evaluate geometrical h_n factors to support map-based simulations.
+
     """
 
     # Class traits

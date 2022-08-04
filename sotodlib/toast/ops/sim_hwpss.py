@@ -39,7 +39,9 @@ XAXIS, YAXIS, ZAXIS = np.eye(3)
 
 @trait_docs
 class SimHWPSS(Operator):
-    """ Simulate HWP synchronous signal """
+    """Simulate HWP synchronous signal
+    
+    """
 
     API = Int(0, help="Internal interface version for this operator")
 
@@ -125,6 +127,7 @@ class SimHWPSS(Operator):
                 obs_data._internal = data._internal
                 obs_data.obs = [obs]
                 self.detector_pointing.apply(obs_data, detectors=[det])
+                self.stokes_weights.apply(obs_data, detectors=[det])
                 obs_data.obs.clear()
                 del obs_data
 

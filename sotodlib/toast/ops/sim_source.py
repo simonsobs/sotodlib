@@ -32,20 +32,24 @@ from sotodlib.coords import local
 from . import utils
 
 def spectrum(power, fc, sigma, base, err_fc, noise, az_size, el_size, dist):
+    """Generate a power spectrum in W/m^2/sr/Hz for a source.
+    
+    The source has a delta-like emission and a top-hat beam in 2D.
 
-    '''
-    Generate a power spectrum in W/m^2/sr/Hz for a source with a delta-like emission and
-    a top-hat beam in 2D
-    Parameters:
-    - power: total power of the signal in dBm
-    - fc: frequency of the signal in GHz
-    - sigma: width of the signal in kHz
-    - base: base level of the signal in dBm
-    - err_fc: error in the signal frequency in kHz
-    - noise: noise of the signal in W/Hz
-    - ang_size: beam size of the signal in degrees as [az_size, el_size]
-    - dist: distance of the source in meter
-    '''
+    Args:
+        power: total power of the signal in dBm
+        fc: frequency of the signal in GHz
+        sigma: width of the signal in kHz
+        base: base level of the signal in dBm
+        err_fc: error in the signal frequency in kHz
+        noise: noise of the signal in W/Hz
+        ang_size: beam size of the signal in degrees as [az_size, el_size]
+        dist: distance of the source in meter
+
+    Returns:
+        (tuple): The (frequency, spectrum) arrays.
+    
+    """
 
     fc *= 1e9 ### Conversion to Hz
     err_fc *= 1e3
@@ -87,12 +91,16 @@ def spectrum(power, fc, sigma, base, err_fc, noise, az_size, el_size, dist):
     signal /= (4*np.pi*az_size*np.sin(el_size*np.pi)) #Normalize in the solid angle
     signal /= dist**2 #Normalize based on the distance
 
+    # Set units
+    freq *= u.Hz
+    signal *= u.W / (u.m**2 * u.Hz)
+
     return freq, signal
 
 @trait_docs
 class SimSource(Operator):
-    """
-    Operator that generates an Artificial Source timestreams.
+    """Operator that generates an Artificial Source timestreams.
+
     """
 
     # Class traits
@@ -105,7 +113,7 @@ class SimSource(Operator):
     )
 
     source_init_dist = Quantity(
-        500 * u.meter,
+        u.Quantity(500.0, u.meter),
         help = 'Initial distance of the artificial source in meters',
     )
 
@@ -188,12 +196,12 @@ class SimSource(Operator):
     )
 
     wind_gusts_amp = Quantity(
-        0 * u.meter/u.second,
+        u.Quantity(0.0, u.Unit("m / s")),
         help = "Amplitude of gusts of wind"
     )
 
     wind_gusts_duration = Quantity(
-        0 * u.second,
+        u.Quantity(0.0, u.second),
         help = "Duration of each gust of wind"
     )
 
@@ -314,14 +322,13 @@ class SimSource(Operator):
             observer.lat = site.earthloc.lat.to_value(u.radian)
             observer.elevation = site.earthloc.height.to_value(u.meter)
 
-
             prefix = f"{comm.group} : {obs.name}"
 
             # Get the observation time span and compute the horizontal
             # position of the SSO
             times = obs.shared[self.times].data
 
-            source_az, source_el, source_dist, source_diameter = self._get_source_position(data, obs, observer, times)
+            source_az, source_el, source_dist, source_diameter = self._get_source_position(obs, observer, times)
 
             # Make sure detector data output exists
             dets = obs.select_local_detectors(detectors)
@@ -339,7 +346,7 @@ class SimSource(Operator):
         return
 
     @function_timer
-    def _get_source_position(self, data, obs, observer, times):
+    def _get_source_position(self, obs, observer, times):
 
         log = Logger.get()
         timer = Timer()
@@ -354,16 +361,9 @@ class SimSource(Operator):
             el_start = el_init[0]
 
         else:
-            #Always consider a discending drone, it is easier to fly this way
-            temp = copy.copy(self.focalplane.field_of_view)
+            # Always consider a discending drone, it is easier to fly this way
 
-            self.focalplane.compute_fov()
-            FoV = copy.copy(self.focalplane.fiel_of_view)
-            self.focalplane._compute_fov()
-            FoV = copy.copy(self.focalplane.field_of_view)
-
-            self.focalplane.field_of_view = temp
-
+            FoV = self.focalplane.field_of_view
 
             el_start = np.array(obs.shared[self.elevation])[0] * u.rad + \
                 FoV/2
@@ -451,7 +451,6 @@ class SimSource(Operator):
             source_el = el_init.copy()
             source_distance = distance.copy()
 
-
         size = local._check_quantity(self.source_size, u.m)
         size = (size/source_distance)*u.rad
 
@@ -459,10 +458,20 @@ class SimSource(Operator):
         obs['source_el'] = source_el
         obs['source_distance'] = source_distance
 
-        if data.comm.group_rank == 0:
+        # Create a shared data object with the source location
+        source_coord = np.column_stack(
+            [source_az.to_value(u.degree), source_el.to_value(u.degree)]
+        )
+        obs.shared.create_column("source", (len(source_az), 2), dtype=np.float64)
+        if obs.comm.group_rank == 0:
+            obs.shared["source"].set(source_coord)
+        else:
+            obs.shared["source"].set(None)
+
+        if obs.comm.group_rank == 0:
             timer.stop()
             log.verbose(
-                f"{data.comm.group} : Computed source position in "
+                f"{obs.comm.group} : Computed source position in "
                 f"{timer.seconds():.1f} seconds"
             )
 
@@ -481,9 +490,7 @@ class SimSource(Operator):
         freq, spec = spectrum(amp, fc, sigma, base, sigma, noise, \
                               self.source_beam_az, self.source_beam_el, dist)
 
-        freq = freq *u.Hz
-
-        temp = utils.s2tcmb(spec, freq.to_value(u.Hz))
+        temp = utils.s2tcmb(spec, freq)
 
         return freq, temp
 
@@ -517,15 +524,15 @@ class SimSource(Operator):
 
     @function_timer
     def _observe_source(
-            self,
-            data,
-            obs,
-            source_az,
-            source_el,
-            source_dist,
-            source_diameter,
-            prefix,
-            dets,
+        self,
+        data,
+        obs,
+        source_az,
+        source_el,
+        source_dist,
+        source_diameter,
+        prefix,
+        dets,
     ):
         """
         Observe the Source with each detector in tod
@@ -637,6 +644,9 @@ class SimSource(Operator):
         return {
             "detdata": [
                 self.det_data,
+            ],
+            "shared": [
+                "source",
             ]
         }
 
