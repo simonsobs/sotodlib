@@ -493,7 +493,6 @@ def _apply_inverse_weights_map(inverse_weights, target):
     m  = np.matmul(iw, t)
     return np.moveaxis(m, (-2,-1), (0,1))[:,0]
 
-
 class ScalarLastQuat(np.ndarray):
     """Wrapper class for numpy arrays carrying quaternions with the ijk1
     signature.
