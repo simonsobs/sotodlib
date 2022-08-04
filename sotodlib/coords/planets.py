@@ -49,8 +49,9 @@ class SlowSource:
 
     @classmethod
     def for_named_source(cls, name, timestamp):
-        """Returns a SlowSource for planet ``source_name``, with position and
-        peculiar velocity measured at time timestamp.
+
+        """Returns a SlowSource for planet ``name``, with position and
+        peculiar velocity measured at time timestamp (float, unix).
 
         """
         dt = 3600
@@ -126,16 +127,22 @@ def get_scan_q(tod, planet, refq=None):
             'psi': psi,
             'planet': planet}
 
-def get_scan_P(tod, planet, refq=None, res=0.01*coords.DEG, size=None, **kw):
+def get_scan_P(tod, planet, refq=None, res=None, size=None, **kw):
     """Get a standard Projection Matrix targeting a planet (or some
     interesting fixed position), in source-scan coordinates.
 
     Returns a Projection Matrix and the output from get_scan_q.
 
     """
+    logger.debug('get_scan_P: init for {planet}')
+
+    if res is None:
+        res = 0.01 * coords.DEG
     X = get_scan_q(tod, planet)
     rot = so3g.proj.quat.rotation_lonlat(0, 0) * X['rot']
     wcs_kernel = coords.get_wcs_kernel('tan', 0., 0., res=res)
+
+    logger.debug(f'get_scan_P: getting projection matrix for {wcs_kernel}.')
     P = coords.P.for_tod(tod, rot=rot, wcs_kernel=wcs_kernel, **kw)
     if size is not None:
         # Trim to a local square
@@ -276,6 +283,75 @@ def get_source_pos(source_name, timestamp, site='_default'):
     ra, dec, distance = amet0.radec()
     return ra.to(units.rad).value, dec.to(units.rad).value, distance.to(units.au).value
 
+def get_nearby_sources(tod=None, source_list=None, distance=1.):
+    """Identify solar system objects (especially "planets") that might be
+    within a TOD's scan footprint.
+
+    Arguments:
+      tod (AxisManager): The data to check.  Needs to have
+        focal_plane, boresight, timestamps.
+      source_list (list or None): A list of source names or None to
+        use a default list.  Use simple planet names in lower case
+        (e.g. ['uranus']), or tuples with source name, RA, and dec in
+        degrees (e.g. [('tau_a', 83.63, 22.01)]).
+      distance (float): Maximum distance from the source center, in
+        degrees, to consider as "within the footprint".  (This should
+        be at least the sum of the beam radius and the planet radius
+        ... though there's usually no harm in going a bit larger than
+        that.)
+
+    Returns:
+      List of tuples (source_name, SlowSource) that satisfy the
+      "nearby" condition.
+
+    """
+    # Make a full sky map with not very many pixels.
+    shape, wcs = enmap.fullsky_geometry(res=2 * coords.DEG, proj='car')
+
+    # Sight line
+    sight = so3g.proj.CelestialSightLine.az_el(
+        tod.timestamps, tod.boresight.az, tod.boresight.el,
+        site='so', weather='typical')
+
+    # One central detector
+    xieta0, R, _ = coords.helpers.get_focal_plane_cover(tod, 0)
+    fp = so3g.proj.FocalPlane.from_xieta(['x'], [xieta0[0]],[xieta0[1]],[0])
+
+    asm = so3g.proj.Assembly.attach(sight, fp)
+    p = so3g.proj.Projectionist.for_geom(shape, wcs)
+    w = p.to_map(np.zeros((1,len(tod.timestamps)), 'float32')+1, asm, comps='T')
+    w = enmap.enmap(w, wcs=wcs)
+
+    if source_list is None:
+        source_list = [
+            'mercury',
+            'venus',
+            'mars',
+            'jupiter',
+            'saturn',
+            'uranus',
+            'neptune',
+            ('tau_a', 83.6331, 22.0145),
+        ]
+
+    positions = []
+    for source_name in source_list:
+        t = tod.timestamps[0]
+        if isinstance(source_name, (list, tuple)):
+            source_name, ra, dec = source_name
+            sl = coords.planets.SlowSource(t, float(ra) * coords.DEG,
+                                           float(dec) * coords.DEG)
+        else:
+            sl = coords.planets.SlowSource.for_named_source(source_name, t)
+        x = w.distance_from([[sl.dec],[sl.ra]])
+        md = x[w[0]!=0].min()
+        logger.debug(('Source {:12} is at ({:8.4f},{:8.4f}); '
+                      'that is {:5.2f} degrees off footprint.').format(
+                          source_name, sl.ra / coords.DEG,
+                          sl.dec / coords.DEG, md/coords.DEG))
+        if md < (R * 1.1 + distance * coords.DEG):
+            positions.append((source_name, sl))
+    return positions
 
 def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
                          center_on=None, res=None):
@@ -298,31 +374,56 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
     Returns:
       RangesMatrix marking the samples inside the masked region.
 
+    Notes:
+      The mask can be a dict or a list of dicts.  Each dict must be of
+      the form::
+
+        {'shape': 'circle',
+         'xyr': (XI, ETA, R)}
+
+      where R is the radius of the circular mask, and XI and ETA are
+      the center of the circle, all in degrees.
+
     """
     if P is None:
+        logger.info('Getting Projection Matrix ...')
         P, X = get_scan_P(tod, center_on, res=res, comps='T')
 
     if isinstance(mask, str):
-        # Assume it's the filename listing (x, y, radius) in deg.
-        disk = None
-        mask_map = P.zeros()
-        for line in open(mask):
-            if line[0] == '#':
-                continue
-            dx, dy, radius = map(float, line.split())
-            d = enmap.distance_from(P.geom[0], P.geom[1],
-                                    [[dy * coords.DEG],[dx * coords.DEG]])
-            mask_map += 1.* (d < radius * coords.DEG)
-        a = P.from_map(mask_map)
-        source_flags = so3g.proj.RangesMatrix(
-            [so3g.proj.Ranges.from_mask(r!=0) for r in a])
-    else:
-        raise ValueError("Argument 'mask' must be a filename.")
+        # Assume it's a filename, and file is simple columns of (x, y,
+        # radius) in deg.  (Deprecated!)
+        mask = [{'xyr': list(map(float, line.split()))}
+                for line in open(mask)]
+
+    mask_map = P.zeros()
+    _add_to_mask(mask, mask_map)
+    a = P.from_map(mask_map)
+    source_flags = so3g.proj.RangesMatrix(
+        [so3g.proj.Ranges.from_mask(r!=0) for r in a])
 
     if wrap:
         asssert(tod is not None, "Pass in a tod to 'wrap' the output.")
         tod.wrap(wrap, source_flags, [(0, 'dets'), (1, 'samps')])
     return source_flags
+
+def _add_to_mask(req, mask_map):
+    # Helper for compute_source_flags.
+    if req is None:
+        raise ValueError(f'Requested mask is None.  For no mask, pass [].')
+    if isinstance(req, (list, tuple)):
+        for _r in req:
+            _generate_mask(_r, mask_map)
+    elif isinstance(req, dict):
+        shape = req.get('shape', 'circle')
+        if shape == 'circle':
+            x, y, r = req['xyr']
+            d = enmap.distance_from(mask_map.shape, mask_map.wcs,
+                                    [[y * coords.DEG], [x * coords.DEG]])
+            mask_map += 1.* (d < r * coords.DEG)
+        else:
+            raise ValueError(f'Unknown shape="{shape}" in mask request.')
+    else:
+        raise ValueError(f'Weird mask request: {req}')
 
 def get_det_weights(tod, signal=None, wrap=None,
                     outlier_clip=None):

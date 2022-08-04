@@ -173,12 +173,29 @@ class ResultSet(object):
                     break
         assert(len(self.keys) == len(set(self.keys)))
 
-    # Todo: decide whether axisman conversion code lives here or axisman...
-    def axismanager(self, detdb=None):
+    def to_axismanager(self, axis_name="dets", axis_key="dets"):
+        """Build an AxisManager directly from a ResultSet, projecting all columns
+        along a single axis. This requires no additional metadata to build
+        
+        Args:
+            axis_name: string, name of the axis in the AxisManager
+            axis_key: string, name of the key in the ResultSet to put into the
+                axis labels. This key will not be added to the AxisManager
+                fields. 
+        """
         from sotodlib import core
-        return core.AxisManager.from_resultset(self, detdb=detdb)
+        aman = core.AxisManager(
+            core.LabelAxis(axis_name, self[axis_key])
+        )
+        for k in self.keys:
+            if k == axis_key:
+                continue
+            if any([ x is None for x in self[k]]):
+                raise TypeError("None(s) found in key {}, these cannot be ".format(k)+
+                               "nicely wrapped into an AxisManager")
+            aman.wrap(k, self[k], [(0,axis_name)])
+        return aman
 
-    # Todo: move this to the right place, too.
     def restrict_dets(self, restriction, detdb=None):
         # There are 4 classes of keys:
         # - dets:* keys appearing only in restriction

@@ -18,6 +18,8 @@ Welcome to SOTODLib's documentation!
    g3tsmurf.rst
    tod_ops.rst
    coords.rst
+   toast.rst
+   site_pipeline.rst
    reference.rst
    dev.rst
 

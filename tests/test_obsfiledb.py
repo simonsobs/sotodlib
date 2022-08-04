@@ -5,12 +5,15 @@ import tempfile
 
 from sotodlib.core import metadata
 
+from ._helpers import create_outdir, mpi_multi
 
+
+@unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
 class TestObsFileDB(unittest.TestCase):
-    test_filename = 'test_obsfiledb.sqlite'
-    test_datatree = 'test_datatree'
 
     def setUp(self):
+        self.test_filename = 'test_obsfiledb.sqlite'
+        self.test_datatree = 'test_datatree'
         if os.path.exists(self.test_filename):
             os.remove(self.test_filename)
         self.test_dir = tempfile.mkdtemp()
@@ -21,7 +24,8 @@ class TestObsFileDB(unittest.TestCase):
         if os.path.exists(self.test_dir):
             shutil.rmtree(self.test_dir)
 
-    def get_simple_db(self, n_obs=2, n_detsets=2, n_dets=3, n_segs=3):
+    def get_simple_db(self, n_obs=2, n_detsets=2, n_dets=3, n_segs=3,
+                      prepath=''):
         # Create database in RAM
         db = metadata.ObsFileDb()
         obs_ids = ['obs%i' % i for i in range(n_obs)]
@@ -32,7 +36,7 @@ class TestObsFileDB(unittest.TestCase):
             for detset in detsets:
                 for file_index in range(n_segs):
                     sample_index = file_index * 1000
-                    filename = f'{obs_id}_{detset}_{sample_index:04d}.g3'
+                    filename = f'{prepath}{obs_id}_{detset}_{sample_index:04d}.g3'
                     db.add_obsfile(filename, obs_id, detset, sample_index)
         db.prefix = self.test_dir
         return db
@@ -104,8 +108,29 @@ class TestObsFileDB(unittest.TestCase):
         results = db.verify()
         assert(all([r[0] for r in results['raw']]))
 
-        # Now re-instantiate the DB a few different ways to confirm
-        # that it sets prefix properly.
+        # Absolute paths should override db.prefix.
+        db = self.get_simple_db(prepath=self.test_dir + '/')
+        db.prefix = '/whatever'
+        results = db.verify()
+        assert(all([r[0] for r in results['raw']]))
+
+    def test_040_lookups(self):
+        db = self.get_simple_db(prepath='somewhere/else/')
+        target = 'somewhere/else/obs0_group0_0000.g3'
+        for item, result in enumerate([
+                db.lookup_file(target, resolve_paths=False),
+                db.lookup_file(self.test_dir + '/' + target),
+                db.lookup_file(self.test_dir + '/' + target, resolve_paths=True),
+                db.lookup_file('x/' + target, prefix='x/'),
+                db.lookup_file('notx/../x/' + target, prefix='x/'),
+                ]):
+            self.assertEqual(result['obs_id'], 'obs0', 'Subcase #%i' % item)
+
+        assert(db.lookup_file('obsXYZ_.g3', fail_ok=True) is None)
+        with self.assertRaises(RuntimeError):
+            db.lookup_file('obsXYZ_.g3')
+        with self.assertRaises(RuntimeError):
+            db.lookup_file('notx/../x/' + target, resolve_paths=False)
 
 
 if __name__ == '__main__':
