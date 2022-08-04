@@ -489,10 +489,21 @@ def safe_invert_div(div, lim=1e-2):
 
 class Nmat:
     def __init__(self):
-        self.ivar  = np.full(1, 1.0)
+        """Initialize the noise model. In subclasses this will typically set up parameters, but not
+        build the details that depend on the actual time-ordered data"""
+        self.ivar  = 1.0
         self.ready = True
-    def build(self, tod, **kwargs): return self
-    def apply(self, tod): return tod
+    def build(self, tod, **kwargs):
+        """Measure the noise properties of the given time-ordered data tod[ndet,nsamp], and
+        return a noise model object tailored for that specific tod. The returned object
+        needs to provide the .apply(tod) method, which multiplies the tod by the inverse noise
+        covariance matrix. Usually the returned object will be of the same class as the one
+        we call .build(tod) on, just with more of the internal state initialized."""
+        return self
+    def apply(self, tod):
+        """Multiply the time-ordered data tod[ndet,nsamp] by the inverse noise covariance matrix.
+        This is done in-pace, but the result is also returned."""
+        return tod*self.ivar
     def write(self, fname):
         bunch.write(fname, bunch.Bunch(type="Nmat"))
     @staticmethod
