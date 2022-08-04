@@ -180,6 +180,19 @@ class G3tSmurf:
                 session.add(ft)
             session.commit()
 
+    @classmethod
+    def from_configs(cls, configs):
+        """
+        Create a G3tSmurf instance from a configs dictionary
+
+        Args
+        -----
+        configs - dictionary containing `data_prefix` and `g3tsmurf_db` keys
+        """
+        return cls(os.path.join(configs["data_prefix"], "timestreams"),
+                   configs["g3tsmurf_db"],
+                   meta_path=os.path.join(configs["data_prefix"],"smurf"))
+
     @staticmethod
     def _make_datetime(x):
         """
@@ -1144,7 +1157,6 @@ class G3tSmurf:
         show_pb=True,
         load_biases=True,
         status=None,
-        short_labels=True,
     ):
         """
         Loads smurf G3 data for a given time range. For the specified time range
@@ -1244,7 +1256,6 @@ class G3tSmurf:
             channels=channels,
             archive=self,
             show_pb=show_pb,
-            short_labels=short_labels,
         )
 
         msk = np.all(
@@ -1274,43 +1285,6 @@ class G3tSmurf:
             at specified time.
         """
         return SmurfStatus.from_time(time, self, stream_id=stream_id, show_pb=show_pb)
-
-
-def dump_DetDb(archive, detdb_file):
-    """
-    Take a G3tSmurf archive and create a a DetDb of the type used with Context
-
-    Args
-    -----
-        archive : G3tSmurf instance
-        detdb_file : filename
-    """
-    my_db = core.metadata.DetDb(map_file=detdb_file)
-    my_db.create_table("base", column_defs=[])
-    column_defs = [
-        "'band' int",
-        "'channel' int",
-        "'frequency' float",
-        "'chan_assignment' int",
-    ]
-    my_db.create_table("smurf", column_defs=column_defs)
-
-    ddb_list = my_db.dets()["name"]
-    session = archive.Session()
-    channels = session.query(Channels).all()
-    msk = np.where([ch.name not in ddb_list for ch in channels])[0].astype(int)
-    for ch in tqdm(np.array(channels)[msk]):
-        my_db.get_id(name=ch.name)
-        my_db.add_props(
-            "smurf",
-            ch.name,
-            band=ch.band,
-            channel=ch.channel,
-            frequency=ch.frequency,
-            chan_assignment=ch.chan_assignment.ctime,
-        )
-    session.close()
-    return my_db
 
 def dump_DetDb(archive, detdb_file):
     """
@@ -1979,7 +1953,7 @@ def _get_channel_mapping(status, ch_map):
 
 
 def get_channel_info(
-    status, mask=None, archive=None, obsfiledb=None, det_axis="dets", short_labels=True
+    status, mask=None, archive=None, obsfiledb=None, det_axis="dets",
 ):
     """Create the Channel Info Section of a G3tSmurf AxisManager
 
@@ -1993,7 +1967,7 @@ def get_channel_info(
             * channel : Smurf Channel
             * frequency : resonator frequency
             * rchannel : readout channel
-            * ruid : readout unique ID
+            * readout_id : readout unique ID
 
     Args
     -----
@@ -2004,9 +1978,6 @@ def get_channel_info(
         G3tSmurf instance for looking for tunes/tunesets
     obsfiledb : ObsfileDb instance (optional)
         ObsfileDb instance for det names / band / channel
-    short_labels : bool
-        Makes the labels used in the detector axis shorter/easier to read
-        if false the labels will be the full readout unique ID
 
     Returns
     --------
@@ -2038,9 +2009,7 @@ def get_channel_info(
     else:
         ruids = None
 
-    if short_labels or ruids is None:
-        if not short_labels:
-            logger.debug("Ignoring RUID request because not loading from database")
+    if ruids is None:
         labels = [
             "sbch_{}_{:03d}".format(ch_map["band"][i], ch_map["channel"][i])
             for i in range(len(ch_list))
@@ -2058,7 +2027,7 @@ def get_channel_info(
     ch_info.wrap("frequency", ch_map["freqs"], ([(0, det_axis)]))
     ch_info.wrap("rchannel", ch_map["rchannel"], ([(0, det_axis)]))
     if ruids is not None:
-        ch_info.wrap("ruid", np.array(ruids), ([(0, det_axis)]))
+        ch_info.wrap("readout_id", np.array(ruids), ([(0, det_axis)]))
 
     return ch_info
 
@@ -2152,8 +2121,8 @@ def load_file(
     obsfiledb=None,
     show_pb=True,
     det_axis="dets",
-    short_labels=True,
     linearize_timestamps=True,
+    merge_det_info=True,
 ):
     """Load data from file where there may or may not be a connected archive.
 
@@ -2180,12 +2149,11 @@ def load_file(
       status : a SmurfStatus Instance if we don't want to use the one from the
           first file
       det_axis : name of the axis used for channels / detectors
-      short_labels : bool
-        Makes the labels used in the detector axis shorter/easier to read
-        if false the labels will be the full readout unique ID
       linearize_timestamps : bool
           sent to _get_timestamps. if true and using unix timing, linearize the timing 
           based on the frame counter
+      merge_det_info : bool
+          if true, emulate det_info from file info
 
     Returns
     ---------
@@ -2255,7 +2223,6 @@ def load_file(
         archive=archive,
         obsfiledb=obsfiledb,
         det_axis=det_axis,
-        short_labels=short_labels,
     )
 
     # flist will take the form [(file, sample_start, sample_stop)...] and will be
@@ -2316,7 +2283,7 @@ def load_file(
 
     # Build AxisManager
     aman = core.AxisManager(
-        ch_info[det_axis].copy(),
+        ch_info[det_axis],
         core.OffsetAxis("samps", count, sample_start),
     )
     aman.wrap(
@@ -2325,6 +2292,20 @@ def load_file(
         ([(0, "samps")])
     )
     aman.wrap("status", status.aman)
+    if merge_det_info:
+        det_info = core.AxisManager(
+            ch_info[det_axis]
+        )
+        smurf = core.AxisManager(
+            ch_info[det_axis]
+        )
+        det_info.wrap("readout_id", ch_info[det_axis].vals, [(0,det_axis)])
+        smurf.wrap("band", ch_info.band, [(0,det_axis)])
+        smurf.wrap("channel", ch_info.channel, [(0,det_axis)])
+        smurf.wrap("res_frequency", ch_info.frequency, [(0,det_axis)])
+        det_info.wrap("smurf", smurf)
+        aman.wrap("det_info", det_info)
+        
 
     # If readout filter in enabled build iir_params AxisManager
     if status.filter_enabled:
@@ -2335,15 +2316,17 @@ def load_file(
         aman.wrap("iir_params", iir_params)
 
     # Conversion from DAC counts to squid phase
-    aman.wrap("signal", np.zeros((aman[det_axis].count, aman["samps"].count), "float32"), [(0, det_axis), (1, "samps")])
+    aman.wrap(
+        "signal", 
+        np.zeros((aman[det_axis].count, aman["samps"].count), "float32"), 
+                 [(0, det_axis), (1, "samps")]
+    )
     for idx in range(aman[det_axis].count):
         io_load.hstack_into(aman.signal[idx], streams["data"][ch_info.rchannel[idx]])
 
     rad_per_count = np.pi / 2 ** 15
     aman.signal *= rad_per_count
-
-    aman.wrap("ch_info", ch_info)
-
+    
     temp = core.AxisManager(aman.samps.copy())
     if load_primary:
         for k in streams["primary"].keys():
@@ -2367,7 +2350,7 @@ def load_file(
             i = int(k[4:])
             io_load.hstack_into(aman.biases[i], streams["tes_biases"][k])
     aman.wrap("flags", core.FlagManager.for_tod(aman, det_axis, "samps"))
-
+    
     return aman
 
 
@@ -2386,7 +2369,7 @@ def load_g3tsmurf_obs(db, obs_id, dets=None, samples=None, **kwargs):
         "select name from files " "where obs_id=?" + "order by start", (obs_id,)
     )
     flist = [row[0] for row in c]
-    return load_file(flist, dets, samples=samples, obsfiledb=db, short_labels=False)
+    return load_file(flist, dets, samples=samples, obsfiledb=db, merge_det_info=False)
 
 
 core.OBSLOADER_REGISTRY["g3tsmurf"] = load_g3tsmurf_obs

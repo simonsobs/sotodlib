@@ -32,12 +32,13 @@ XAXIS, YAXIS, ZAXIS = np.eye(3)
 
 @trait_docs
 class CoRotator(Operator):
-    """ The LAT focalplane projected on the sky rotates as the cryostat
+    """The LAT focalplane projected on the sky rotates as the cryostat
     (co-rotator) tilts.  Usually the tilt is the same as the observing
     elevation to maintain constant angle between the mirror and the cryostat.
 
     This operator be applied *before* expanding the detector pointing
     from boresight.
+
     """
 
     # Class traits
