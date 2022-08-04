@@ -254,21 +254,11 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     sight = _get_csl(sight)
     n_samp = len(sight.Q)
 
-    # Do a simplest convex hull...
-    q = so3g.proj.quat.rotation_xieta(fp0.xi, fp0.eta)
-    xi, eta, _ = so3g.proj.quat.decompose_xieta(q)
-    xi0, eta0 = xi.mean(), eta.mean()
-    R = ((xi - xi0)**2 + (eta - eta0)**2).max()**.5
-
-    n_circ = 16
-    dphi = 2*np.pi/n_circ
-    phi = np.arange(n_circ) * dphi
-    # cos(dphi/2) is the largest underestimate in radius one can make when
-    # replacing a circle with an n_circ-sided polygon, as we do here.
-    L = 1.01 * R / np.cos(dphi/2)
-    xi, eta = L * np.cos(phi) + xi0, L * np.sin(phi) + eta0
-    fake_dets = ['hull%i' % i for i in range(n_circ)]
-    fp1 = so3g.proj.FocalPlane.from_xieta(fake_dets, xi, eta, 0*xi)
+    # Get a convex hull focal plane.
+    (xi0, eta0), R, xieta1 = get_focal_plane_cover(
+        focal_plane=fp0, count=16)
+    fake_dets = ['hull%i' % i for i in range(xieta1.shape[1])]
+    fp1 = so3g.proj.FocalPlane.from_xieta(fake_dets, xieta1[0], xieta1[1])
 
     asm = so3g.proj.Assembly.attach(sight, fp1)
     output = np.zeros((len(fake_dets), n_samp, 4))
@@ -300,6 +290,70 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     w.wcs.crpix -= corners[0]
     shape        = tuple(corners[1]-corners[0]+1)[::-1]
     return (shape, w)
+
+def get_focal_plane_cover(tod=None, count=0, focal_plane=None,
+                          xieta=None):
+    """Process a bunch of detector positions into a center and radius such
+    that a circle with that center and radius contains all the
+    detectors.  Also return detector positions, arranged approximately
+    in a circle, whose convex hull contains all input detectors.
+
+    Args:
+      tod (AxisManager): source of focal_plane, if it is not passed.
+      count (int): number of points on the enclosing circle to return.
+      focal_plane (AxisManager): source for xi and eta, if xieta is
+        not passed in
+      xieta (array): (2, n) array (or similar) of xi and eta
+        detector positions.
+
+    Returns:
+      xieta0: array[2] with array center, (xi0, eta0).
+      radius: radius of the enclosing circle.
+      xietas: array with shape (2, count) carrying the xi and eta
+        coords of the circular convex hull.
+
+    Notes:
+      If count=0, an empty list is returned for xietas.  Otherwise,
+      count must be at least 3 so that the shape is not degenerate.
+
+    """
+    if xieta is None:
+        if focal_plane is None:
+            focal_plane = tod.focal_plane
+        xi = focal_plane.xi
+        eta = focal_plane.eta
+    else:
+        xi, eta = xieta[:2]
+    qs = so3g.proj.quat.rotation_xieta(xi, eta)
+
+    # Starting guess for center
+    xi0, eta0 = xi.mean(), eta.mean()
+    for i in range(10):
+        q = so3g.proj.quat.rotation_xieta(xi0, eta0)
+        d_xi, d_eta, _ = so3g.proj.quat.decompose_xieta(~q * qs)
+        if abs(d_xi.mean()) + abs(d_eta.mean()) < 1e-5*DEG:
+            break
+        xi0 += d_xi.mean()*.8
+        eta0 += d_eta.mean()*.8
+    else:
+        raise ValueError('No convergence?')
+    R = (d_xi**2 + d_eta**2).max()**.5
+    if count == 0:
+        return ((xi0, eta0), R, [])
+    if count < 3:
+        raise ValueError('count must be 0 or >=3.')
+
+    dphi = 2*np.pi/count
+    phi = np.arange(count) * dphi
+    # cos(dphi/2) is the largest underestimate in radius one can make when
+    # replacing a circle with an n_circ-sided polygon, as we do here.
+    L = 1.01 * R / np.cos(dphi/2)
+    xi, eta = L * np.cos(phi), L * np.sin(phi)
+
+    # Rotate those into place.
+    xi, eta, _ = so3g.proj.quat.decompose_xieta(
+        q * so3g.proj.quat.rotation_xieta(xi, eta))
+    return (np.array([xi0, eta0]), R, np.array([xi, eta]))
 
 def get_supergeom(*geoms, tol=1e-3):
     """Given a set of compatible geometries [(shape0, wcs0), (shape1,
@@ -428,7 +482,72 @@ def _apply_inverse_weights_map(inverse_weights, target):
     (b, ...); the result has shape (a, ...).
 
     """
-    iw = np.moveaxis(inverse_weights, (0,1), (-2,-1))
-    t  = np.moveaxis(target[:,None],  (0,1), (-2,-1))
-    m  = np.matmul(iw, t)
-    return np.moveaxis(m, (-2,-1), (0,1))[:,0]
+    iw = inverse_weights.transpose((2,3,0,1))
+    m = target.transpose((1,2,0)).reshape(
+        target.shape[1], target.shape[2], target.shape[0], 1)
+    m1 = np.matmul(iw, m)
+    return m1.transpose(2,3,0,1).reshape(target.shape)
+
+
+class ScalarLastQuat(np.ndarray):
+    """Wrapper class for numpy arrays carrying quaternions with the ijk1
+    signature.
+
+    The practice in many codes, including TOAST, quaternionarray, and
+    scipy is to store quaternions in numpy arrays with shape (..., 4),
+    with the real part of the quaternion at index [..., 3].  In
+    contrast, spt3g_software inherits the 1ijk from boost.
+
+    This class serves two main purposes:
+
+    - It can be used to annotate numpy arrays as carrying quaternions
+      in the ijk1 signature (without disturbing their behavior as
+      numpy arrays).
+    - It provides conversion to and from G3 quaternion containers,
+      including signature correction.
+
+    When instantiating an object of this class with a numpy array as
+    an argument, the object will wrap a view of the array (not a
+    copy).
+
+    When instantiating an object of this class with a G3 quat as an
+    argument, the object will store a copy of the G3 quat, translated
+    to ijk1 signature::
+
+      q_g3 = spt3g.core.quat(1.,2.,3.,4.)
+      q_tq = ScalarLastQuat(q_g3)
+      q_g3_again = q_tq.to_g3()
+
+      print(q_g3, q_tq, q_g3_again)
+      =>  (1,2,3,4) [2. 3. 4. 1.] (1,2,3,4)
+
+    """
+    def __new__(cls, arr):
+        if isinstance(arr, so3g.proj.quat.G3VectorQuat):
+            arr = np.asarray(arr)
+            obj = np.empty(arr.shape)
+            obj[:,:3] = arr[:,1:]
+            obj[:,3] = arr[:,0]
+        elif isinstance(arr, so3g.proj.quat.quat):
+            obj = np.array((arr.b, arr.c, arr.d, arr.a))
+        else:
+            obj = np.asarray(arr)
+        return obj.view(cls)
+
+    def to_g3(self):
+        """Return the ijk1-signature equivalent of the enclosed quaternion
+        array, as a spt3g.core.quat (if 1-d) or a G3VectorQuat (if
+        2-d).
+
+        """
+        if self.shape[-1] != 4:
+            raise ValueError("Last axis must have 4 elements.")
+        if self.ndim == 1:
+            b, c, d, a = self[:].astype(float)
+            return so3g.proj.quat.quat(a, b, c, d)
+        if self.ndim == 2:
+            temp = np.zeros(self.shape, float)
+            temp[..., 0] = self[..., 3]
+            temp[..., 1:] = self[..., :3]
+            return so3g.proj.quat.G3VectorQuat(temp)
+        raise ValueError("Can only convert 1- or 2-d arrays to G3.")

@@ -25,7 +25,7 @@ toast_import_error = None
 if toast_available is None:
     try:
         import toast
-        from toast.mpi import MPI
+        from toast.mpi import MPI, get_world
         from toast.todmap import TODGround
         from toast.tod import AnalyticNoise
         toast_available = True
@@ -45,12 +45,11 @@ class TimeConstantTest(TestCase):
             )
             return
 
-        self.outdir = None
-        if MPI.COMM_WORLD.rank == 0:
-            self.outdir = create_outdir(fixture_name)
-        self.outdir = MPI.COMM_WORLD.bcast(self.outdir, root=0)
+        self.comm, self.procs, self.rank = get_world()
 
-        toastcomm = toast.Comm()
+        self.outdir = create_outdir(fixture_name, comm=self.comm)
+
+        toastcomm = toast.Comm(world=self.comm)
         self.data = toast.Data(toastcomm)
 
         # Focalplane

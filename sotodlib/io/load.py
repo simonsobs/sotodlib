@@ -31,6 +31,16 @@ from collections import OrderedDict
 
 from .. import core
 
+
+# Interim, Oct. 2021.  Wait a year, remove this caution.
+if hasattr(so3g, 'G3SuperTimestream'):
+    from so3g import G3SuperTimestream
+else:
+    class MockG3SuperTimestream(object):
+        pass
+    G3SuperTimestream = MockG3SuperTimestream
+
+
 class FieldGroup(list):
     """This is essentially a roadmap for decoding data from a
     G3FrameObject.  Each entry in this list is either a string, giving
@@ -153,10 +163,11 @@ class FieldGroup(list):
                 dest[k] = src[k]
 
 class Field:
-    def __init__(self, name, optional=False, wildcard=False):
+    def __init__(self, name, optional=False, wildcard=False, oversample=1):
         self.name = name
         self.wildcard = wildcard
         self.opts = {'optional': optional}
+        self.oversample = oversample
 
     @staticmethod
     def as_field(item):
@@ -167,7 +178,8 @@ class Field:
         raise TypeError('Cannot promote %s to Field.' % item)
 
 
-def unpack_frame_object(fo, field_request, streams, compression_info=None):
+def unpack_frame_object(fo, field_request, streams, compression_info=None,
+                        offset=0, max_count=None):
     """Unpack requested fields from a G3FrameObject, and update a data structure.
     
     Arguments:
@@ -186,28 +198,57 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None):
             assert(item.name == '*')  # That's the only wildcard we allow right now...
             to_remove.append(item)
             del streams[item.name]
-            for k in fo.keys():
-                to_add.append(Field(k))
-                to_add[-1].opts = item.opts
-                streams[k] = []
+            if isinstance(fo, G3SuperTimestream):
+                for k in fo.names:
+                    to_add.append(Field(k))
+                    to_add[-1].opts = item.opts
+                    streams[k] = []
+            else:
+                for k in fo.keys():
+                    to_add.append(Field(k))
+                    to_add[-1].opts = item.opts
+                    streams[k] = []
     for item in to_remove:
         field_request.remove(item)
     field_request.extend(to_add)
+    
+    if isinstance(fo, G3SuperTimestream):
+        key_map = {k: i for i, k in enumerate(fo.names)}
+        
+    def our_slice(n, oversamp):
+        # returns (range size, slice)
+        if n <= offset:
+            return 0, slice(0, 0)
+        n = n - offset
+        if max_count is not None:
+            n = min(n, max_count)
+        return n, slice(offset * oversamp, (offset + n) * oversamp)
 
+    _consumed = 0
     for item in field_request:
         if isinstance(item, FieldGroup):
             if item.compression:
-                gain = fo.get('compressor_gain_%s' % item.name, {})
-                offset = fo.get('compressor_offset_%s' % item.name, {})
-                comp_info = (gain, offset)
+                _gain = fo.get('compressor_gain_%s' % item.name, {})
+                _offset = fo.get('compressor_offset_%s' % item.name, {})
+                comp_info = (_gain, _offset)
             else:
                 comp_info = None
             target = fo[item.name]
-            unpack_frame_object(target, item, streams[item.name], comp_info)
+            _consumed = unpack_frame_object(target, item, streams[item.name], comp_info,
+                                            offset=offset, max_count=max_count)
+            _n, sl = our_slice(_consumed, 1)
+            # Check and slice timestamp field independently -- must
+            # work even if no dets requested led to _n=0 above.
             if item.timestamp_field is not None:
-                t0, t1, ns = target.start, target.stop, target.n_samples
-                t0, t1 = t0.time / g3core.G3Units.sec, t1.time / g3core.G3Units.sec
-                streams[item.timestamp_field].append(np.linspace(t0, t1, ns))
+                if isinstance(target, G3SuperTimestream):
+                    timesv = np.array(target.times) / g3core.G3Units.sec
+                else:
+                    t0, t1, ns = target.start, target.stop, target.n_samples
+                    t0, t1 = t0.time / g3core.G3Units.sec, t1.time / g3core.G3Units.sec
+                    timesv = np.linspace(t0, t1, ns)
+                _consumed = len(timesv)
+                _n, sl = our_slice(_consumed, 1)
+                streams[item.timestamp_field].append(timesv[sl])
             continue
         # This is a simple field.
         item = Field.as_field(item)
@@ -220,14 +261,22 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None):
                 assert(key not in streams)
                 continue
         if compression_info is not None:
-            gain, offset = compression_info
-            m, b = gain.get(key, 1.), offset.get(key, 0.)
+            _gain, _offset = compression_info
+            m, b = _gain.get(key, 1.), _offset.get(key, 0.)
             v = np.array(fo[key], dtype='float32') / m + b
         else:
-            v = np.array(fo[key])
-        streams[key].append(v)
+            if isinstance(fo, G3SuperTimestream):
+                v = fo.data[key_map[key]]
+            else:
+                v = np.array(fo[key])
+        _consumed = len(v) // item.oversample
+        _n, sl = our_slice(_consumed, item.oversample)
 
-def unpack_frames(filename, field_request, streams):
+        if _n:
+            streams[key].append(v[sl])
+    return _consumed
+
+def unpack_frames(filename, field_request, streams, samples=None):
     """Read frames from the specified file and expand the data by stream.
     Only the requested fields, specified through *_fields arguments,
     are expanded.
@@ -238,6 +287,9 @@ def unpack_frames(filename, field_request, streams):
       streams: Structure to which to append the
         streams from this file (perhaps obtained from running
         unpack_frames on a preceding file).
+      samples (int, int): Start and end of sample range to unpack
+        *from this file*.  First argument must be non-negative.  Second
+        argument may be None, indicating to read forever.
 
     Returns:
       streams (structure containing lists of numpy arrays).
@@ -245,15 +297,30 @@ def unpack_frames(filename, field_request, streams):
     """
     if streams is None:
         streams = field_request.empty()
+    if samples is None:
+        offset = 0
+        to_read = None
+    else:
+        offset, to_read = samples
+        if to_read is not None:
+            to_read -= offset
 
     reader = so3g.G3IndexedReader(filename)
-    while True:
+    while to_read is None or to_read > 0:
         frames = reader.Process(None)
         if len(frames) == 0:
             break
         frame = frames[0]
-        if frame.type == g3core.G3FrameType.Scan:
-            unpack_frame_object(frame, field_request, streams)
+        if frame.type != g3core.G3FrameType.Scan:
+            continue
+        _consumed = unpack_frame_object(
+            frame, field_request, streams, offset=offset, max_count=to_read)
+        offset -= _consumed
+        if offset < 0:
+            if to_read is not None:
+                to_read += offset
+            offset = 0
+
     return streams
 
 
@@ -283,10 +350,10 @@ def load_file(filename, dets=None, signal_only=False):
         FieldGroup('boresight', ['az', 'el', 'roll']),
         Field('hwp_angle', optional=True),
         Field('corotator_angle', optional=True),
-        'site_position',
-        'site_velocity',
-        'boresight_azel',
-        'boresight_radec',
+        Field('site_position', oversample=3),
+        Field('site_velocity', oversample=3),
+        Field('boresight_azel', oversample=4),
+        Field('boresight_radec', oversample=4),
     ])
     request = FieldGroup('root', subreq)
 
@@ -350,31 +417,27 @@ def load_file(filename, dets=None, signal_only=False):
     return aman
 
 
-def load_observation(db, obs_id, dets=None, prefix=None):
-    """Load the data for some observation.  You can restrict to only some
-    detectors. Coming soon: also restrict by time range / sample
-    index.
+def load_observation(db, obs_id, dets=None, samples=None, prefix=None,
+                     no_signal=None,
+                     **kwargs):
+    """Obsloader function for TOAST simulate data -- this function matches
+    output from pipe-s0001/s0002 (and SSO sims in 2019-2021).
 
-    This specifically targets the pipe-s0001/s0002 sim format.
-
-    Arguments:
-
-      db (ObsFileDb): The database describing this observation file
-        set.
-      obs_id (str): The identifier of the observation.
-      dets (list of str): The detector names of interest.  If None,
-        loads all dets present in this observation.  To load
-        only the ancillary data, pass an empty list.
-      prefix (str): The root address of the data files.  If not
-        specified, the prefix is taken from the ObsFileDb.
-
-    Returns an AxisManager with the data.
+    See API template, `sotodlib.core.context.obsloader_template`, for
+    details.
 
     """
+    if any([v is not None for v in kwargs.values()]):
+        raise RuntimeError(
+            f"This loader function does not understand kwargs: f{kwargs}")
+
     if prefix is None:
         prefix = db.prefix
         if prefix is None:
             prefix = './'
+
+    if no_signal is None:
+        no_signal = False  # from here, assume no_signal in [True, False]
 
     # Regardless of what dets have been asked for (maybe none), get
     # the list of detsets implicated in this observation.
@@ -409,39 +472,66 @@ def load_observation(db, obs_id, dets=None, prefix=None):
     aman = None
 
     for detset, dets in dets_by_detset.items():
-        c = db.conn.execute('select name from files '
+        c = db.conn.execute('select name, sample_start, sample_stop '
+                            'from files '
                             'where obs_id=? and detset=? ' +
                             'order by sample_start', (obs_id, detset))
-        subreq = [
-            FieldGroup('signal', dets, timestamp_field='timestamps',
-                       compression=True),
-            ]
+        subreq = []
+        if no_signal:
+            if aman is None:
+                subreq.extend([
+                    FieldGroup('signal', [], timestamp_field='timestamps',
+                               compression=True),
+                ])
+        else:
+            subreq.extend([
+                FieldGroup('signal', dets, timestamp_field='timestamps',
+                           compression=True),
+            ])
         if aman is None:
             subreq.extend([
                 FieldGroup('boresight', ['az', 'el', 'roll']),
                 Field('hwp_angle', optional=True),
                 Field('corotator_angle', optional=True),
-                'site_position',
-                'site_velocity',
-                'boresight_azel',
-                'boresight_radec',
+                Field('site_position', oversample=3),
+                Field('site_velocity', oversample=3),
+                Field('boresight_azel', oversample=4),
+                Field('boresight_radec', oversample=4),
             ])
+        if len(subreq) == 0:
+            continue
+
         request = FieldGroup('root', subreq)
+
+        if samples:
+            sample_start, sample_stop = samples
+        else:
+            sample_start, sample_stop = 0, None
+
+        stop = sample_stop
 
         streams = None
         for row in c:
-            f = row[0]
-            streams = unpack_frames(prefix+f, request, streams)
+            f, file_start, file_stop = row
+            assert(file_start is not None)
+            start = max(0, sample_start - file_start)
+            if sample_stop is not None:
+                stop = sample_stop - file_start
+            streams = unpack_frames(
+                prefix+f, request, streams, samples=(start, stop))
 
         if aman is None:
             # Create AxisManager now that we know the sample count.
             count = sum(map(len,streams['timestamps']))
             aman = core.AxisManager(
                 core.LabelAxis('dets', [p[1] for p in pairs_req]),
-                core.OffsetAxis('samps', count, 0, obs_id),
+                core.OffsetAxis('samps', count, sample_start, obs_id),
             )
-            aman.wrap('signal', np.zeros(aman.shape, 'float32'),
-                      [(0, 'dets'), (1, 'samps')])
+            if no_signal:
+                aman.wrap('signal', None)
+            else:
+                aman.wrap('signal', np.zeros(aman.shape, 'float32'),
+                          [(0, 'dets'), (1, 'samps')])
 
             # The non-signal fields are duplicated across files so you
             # can just absorb them once.
@@ -494,18 +584,14 @@ def hstack_into(dest, src_arrays):
     return dest
 
 
-#: OBSLOADER_REGISTRY will be accessed by the Context system to load
-#: TOD.  The signature of functions here is:
-#:
-#:  loader(db, obs_id, dets=None, prefix=None)
-#:
-#: Here db is an ObsFileDb, obs_id is a string, dets is a list of
-#: string names of readout channels, and prefix is a string that overrides
-#: the path prefix of ObsFileDb.
-#:
-#: "This is an interim solution and the API will change", he said in
-#: March 2020.
-OBSLOADER_REGISTRY = {
-    'pipe-s0001': load_observation,
-    'default': load_observation,
+# Register the loaders defined here.
+core.OBSLOADER_REGISTRY.update(
+    {
+        'pipe-s0001': load_observation,
+        'default': load_observation,
     }
+)
+
+
+# Deprecated alias (used to live here...)
+OBSLOADER_REGISTRY = core.OBSLOADER_REGISTRY

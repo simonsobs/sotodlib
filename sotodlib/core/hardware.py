@@ -20,7 +20,7 @@ import toml
 #   `LAT_COROTATOR_OFFSET` + observing elevation, unless the receiver
 # is being rotated to maintain the orientation.
 
-LAT_COROTATOR_OFFSET = 90 * u.deg
+LAT_COROTATOR_OFFSET = u.Quantity(90.0, u.degree)
 
 
 class Hardware(object):

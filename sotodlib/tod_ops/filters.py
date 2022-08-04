@@ -368,7 +368,8 @@ def high_pass_sine2(freqs, tod, cutoff, width=None):
     return 0.5 + 0.5 * np.sin(phase)
 
 @fft_filter
-def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None, invert=False):
+def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None,
+               invert=False):
     """Infinite impulse response (IIR) filter.  This sort of filter is
     used in digital applications as a low-pass filter prior to
     decimation.  The Smurf and MCE readout filters can both be
@@ -378,12 +379,10 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None, invert=Fa
       b: numerator polynomial filter coefficients (z^0,z^1, ...)
       a: denominator coefficients
       fscale: scalar used to compute z = exp(-2j*pi*freqs*fscale).
-        This will generally correspond to the sampling frequency of
-        the original signal (before decimation).
-      iir_params: IIR filter params as described below; or a string
-        name under which to look up those params in tod; defaults to
-        'iir_params'.  Note that if `a` and `b` are passed explicitly
-        then no attempt is made to resolve this argument.
+        In general this should be equal to 1/f_orig, where f_orig
+        is the original sampling frequency (before downsampling).
+      iir_params: Alternative way to specify b, a, and fscale (see
+        notes).
       invert: If true, returns denom/num instead of num/denom.
 
     Notes:
@@ -391,9 +390,15 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None, invert=Fa
       scipy.signal.freqs, scipy.signal.butter, etc.  The "angular
       frequencies", `w`, are computed as 2*pi*freqs*fscale.
 
-      To pass in all parameters at once, set iir_params (or
-      tod[iir_params]) to a (3, n) array.  This will be expanded to
-      a=P[0,:], b=P[1,:], fscale=P[2,0].
+      If the filter parameters (b, a, fscale) are not passed in
+      explicitly, they will be extracted from an AxisManager based on
+      the argument iir_params, which must be a dict or AxisManager
+      with keys "b", "a", and "fscale", but note that:
+
+      - If iir_params is a string, tod[iir_params] is used (and must
+        be an AxisManager or dict).
+      - If iir_params is None, that's the same as passing
+        iir_params='iir_params'.
 
     """
     if a is None:
@@ -402,8 +407,14 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None, invert=Fa
             iir_params = 'iir_params'
         if isinstance(iir_params, str):
             iir_params = tod[iir_params]
-        a, b, fscale = iir_params  # must be (3, n)
-        fscale = fscale[0]
+        try:
+            a = iir_params['a']
+            b = iir_params['b']
+            fscale = iir_params['fscale']
+        except Exception as e:
+            raise ValueError("Failed to extract filter parameters from "
+                             f"iir_params={iir_params}.")
+
     z = np.exp(-2j*np.pi*freqs * fscale)
     B, A = np.polyval(b[::-1], z), np.polyval(a[::-1], z)
     if invert:

@@ -5,10 +5,13 @@ import os
 import time
 import numpy as np
 
+from ._helpers import mpi_multi
+
 # Global Announcement: I know, but I hate slow tests.
 example = None
 
 
+@unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
 class TestDetDb(unittest.TestCase):
     def setUp(self):
         global example
@@ -86,10 +89,11 @@ class TestDetDb(unittest.TestCase):
 
     def test_io(self):
         """Check to_file and from_file."""
+
         db0 = example.copy()
-        dump_list = [('test.sqlite', None),
-                     ('test.txt', 'dump'),
-                     ('test.gz', None)]
+        dump_list = [(f'test.sqlite', None),
+                     (f'test.txt', 'dump'),
+                     (f'test.gz', None)]
         # Save.
         for fn, fmt in dump_list:
             print(f'Writing {fn}')
