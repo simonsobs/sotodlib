@@ -30,7 +30,9 @@ from ...core import AxisManager, IndexAxis, OffsetAxis, LabelAxis
 
 @trait_docs
 class MLMapmaker(Operator):
-    """Operator which accumulates data to the Maximum Likelihood Mapmaker."""
+    """Operator which accumulates data to the Maximum Likelihood Mapmaker.
+    
+    """
 
     # Class traits
 

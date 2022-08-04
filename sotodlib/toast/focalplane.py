@@ -16,11 +16,11 @@ from ..sim_hardware import get_example, sim_telescope_detectors
 
 
 FOCALPLANE_RADII = {
-    "LAT": 3.6 * u.deg,
-    "SAT1": 17.8 * u.deg,
-    "SAT2": 17.8 * u.deg,
-    "SAT3": 17.8 * u.deg,
-    "SAT4": 17.2 * u.deg,
+    "LAT": u.Quantity(3.6, u.deg),
+    "SAT1": u.Quantity(17.8, u.deg),
+    "SAT2": u.Quantity(17.8, u.deg),
+    "SAT3": u.Quantity(17.8, u.deg),
+    "SAT4": u.Quantity(17.2, u.deg),
 }
 
 
@@ -62,7 +62,7 @@ class SOFocalplane(Focalplane):
         self,
         hwfile=None,
         telescope=None,
-        sample_rate=10 * u.Hz,
+        sample_rate=u.Quantity(10.0, u.Hz),
         bands=None,
         wafer_slots=None,
         tube_slots=None,
