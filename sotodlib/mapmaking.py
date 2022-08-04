@@ -33,6 +33,16 @@ def deslope_el(tod, el, srate, inplace=False):
 
 class MLMapmaker:
     def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False):
+        """Initialize a Maximum Likelihood Mapmaker.
+        Arguments:
+        * signals: List of Signal-objects representing the models that will be solved
+          jointly for. Typically this would be the sky map and the cut samples. NB!
+          The way the cuts currently work, they *MUST* be the first signal specified.
+          If not, the equation system will be inconsistent and won't converge.
+        * noise_model: A noise model constructor which will be used to initialize the
+          noise model for each observation. Can be overriden in add_obs.
+        * dtype: The data type to use for the time-ordered data. Only tested with float32
+        * verbose: Whether to print progress messages. Not implemented"""
         if noise_model is None:
             noise_model = NmatUncorr()
         self.signals      = signals
@@ -49,8 +59,6 @@ class MLMapmaker:
         srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
         tod    = obs.signal.astype(self.dtype, copy=False)
         utils.deslope(tod, w=1, inplace=True)
-        #bunch.write("test0.hdf", bunch.Bunch(tod=tod[::10], el=obs.boresight.el))
-        #tod    = deslope_el2(tod, obs.boresight.el, srate, inplace=True)
         # Allow the user to override the noise model on a per-obs level
         if noise_model is None: noise_model = self.noise_model
         # Build the noise model from the obs unless a fully
@@ -58,9 +66,7 @@ class MLMapmaker:
         if noise_model.ready: nmat = noise_model
         else: nmat = noise_model.build(tod, srate=srate)
         # And apply it to the tod
-        #bunch.write("test1.hdf", bunch.Bunch(tod=tod[::10], el=obs.boresight.el))
         tod    = nmat.apply(tod)
-        #bunch.write("test2.hdf", bunch.Bunch(tod=tod[::10]))
         # Add the observation to each of our signals
         for signal in self.signals:
             signal.add_obs(id, obs, nmat, tod)
@@ -90,14 +96,14 @@ class MLMapmaker:
         for di, data in enumerate(self.data):
             tod = np.zeros([data.ndet, data.nsamp], self.dtype)
             #t1 = time()
-            for si, signal in enumerate(self.signals):
+            for si, signal in reversed(list(enumerate(self.signals))):
                 signal.forward(data.id, tod, iwork[si])
             #t2 = time()
             #t_forward += t2 - t1
             data.nmat.apply(tod)
             #t1 = time()
             #t_apply += t1 - t2
-            for si, signal in reversed(list(enumerate(self.signals))):
+            for si, signal in enumerate(self.signals):
                 signal.backward(data.id, tod, owork[si])
             #t2 = time()
             #t_backward += t2 - t1
@@ -179,7 +185,7 @@ class SignalMap(Signal):
             self.div = enmap.zeros((ncomp,ncomp)+shape, wcs, dtype=dtype)
             self.hits= enmap.zeros(              shape, wcs, dtype=dtype)
 
-    def add_obs(self, id, obs, nmat, Nd):
+    def add_obs(self, id, obs, nmat, Nd, pmap=None):
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
         nmat a noise model, representing the inverse noise covariance matrix,
@@ -188,13 +194,14 @@ class SignalMap(Signal):
         Nd     = Nd.copy() # This copy can be avoided if build_obs is split into two parts
         ctime  = obs.timestamps
         pcut   = PmatCut(obs.glitch_flags) # could pass this in, but fast to construct
-        # Build the local geometry and pointing matrix for this observation
-        if self.recenter:
-            rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter,
-                ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
-        else: rot = None
-        pmap = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry,
-            rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site))
+        if pmap is None:
+            # Build the local geometry and pointing matrix for this observation
+            if self.recenter:
+                rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter,
+                    ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
+            else: rot = None
+            pmap = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry,
+                rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site))
         # Build the RHS for this observation
         pcut.clear(Nd)
         obs_rhs = pmap.zeros()
@@ -207,7 +214,7 @@ class SignalMap(Signal):
             Nd[:]        = 0
             pmap.from_map(obs_div[i], dest=Nd)
             pcut.clear(Nd)
-            Nd *= nmat.ivar[:,None]
+            Nd = nmat.white(Nd)
             obs_div[i]   = 0
             pmap.to_map(signal=Nd, dest=obs_div[i])
         # Build hitcount
@@ -454,7 +461,7 @@ def inject_map(obs, map, recenter=None):
     # And perform the actual injection
     pmat.from_map(map.extract(shape, wcs), dest=obs.signal)
 
-def safe_invert_div(div, lim=1e-2):
+def safe_invert_div(div, lim=1e-2, lim0=np.finfo(np.float32).tiny**0.5):
     try:
         # try setting up a context manager that limits the number of threads
         from threadpoolctl import threadpool_limitse
@@ -464,7 +471,7 @@ def safe_invert_div(div, lim=1e-2):
         import contextlib
         cm = contextlib.nullcontext()
     with cm:
-        hit = div[0,0] != 0
+        hit = div[0,0] > lim0
         # Get the condition number of each pixel
         work    = np.ascontiguousarray(div[:,:,hit].T)
         E, V    = np.linalg.eigh(work)
@@ -503,6 +510,9 @@ class Nmat:
     def apply(self, tod):
         """Multiply the time-ordered data tod[ndet,nsamp] by the inverse noise covariance matrix.
         This is done in-pace, but the result is also returned."""
+        return tod*self.ivar
+    def white(self, tod):
+        """Like apply, but without detector or time correlations"""
         return tod*self.ivar
     def write(self, fname):
         bunch.write(fname, bunch.Bunch(type="Nmat"))
@@ -553,6 +563,13 @@ class NmatUncorr(Nmat):
         # I divided by the normalization above instead of passing normalize=True
         # here to reduce the number of operations needed
         fft.irfft(ftod, tod)
+        apply_window(tod, self.nwin)
+        return tod
+
+    def white(self, tod, inplace=True):
+        if not inplace: tod = np.array(tod)
+        apply_window(tod, self.nwin)
+        tod *= self.ivar[:,None]
         apply_window(tod, self.nwin)
         return tod
 
@@ -672,6 +689,13 @@ class NmatDetvecs(Nmat):
         # I divided by the normalization above instead of passing normalize=True
         # here to reduce the number of operations needed
         fft.irfft(ftod, tod)
+        apply_window(tod, self.nwin)
+        return tod
+
+    def white(self, tod, inplace=True):
+        if not inplace: tod = np.array(tod)
+        apply_window(tod, self.nwin)
+        tod *= self.ivar[:,None]
         apply_window(tod, self.nwin)
         return tod
 
@@ -833,12 +857,12 @@ def apply_window(tod, nsamp, exp=1):
 ###### Utilities #######
 ########################
 
-def get_ids(query):
+def get_ids(query, context=None):
     try:
         with open(query, "r") as fname:
             return [line.split()[0] for line in fname]
     except IOError:
-        return context.obsdb.query(query)['obs_id']
+        return context.obsdb.query(query or "1")['obs_id']
 
 def infer_comps(ncomp): return ["T","QU","TQU"][ncomp-1]
 
