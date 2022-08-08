@@ -768,7 +768,10 @@ class G3tSmurf:
 
         # Add Tune and Tuneset information
         if status.tune is not None:
-            tune = session.query(Tunes).filter(Tunes.name == status.tune).one_or_none()
+            tune = session.query(Tunes).filter(
+                Tunes.name == status.tune,
+                Tunes.stream_id == obs.stream_id,
+            ).one_or_none()
             if tune is None:
                 logger.warning(
                     f"Tune {status.tune} not found in database, update error?"
