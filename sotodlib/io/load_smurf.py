@@ -1853,10 +1853,10 @@ def _get_tuneset_channel_names(status, ch_map, archive):
         tune_file = status.tune.split("/")[-1]
         tune = session.query(Tunes).filter(Tunes.name == tune_file).one_or_none()
         if tune is None:
-            logger.info(f"Tune file {tune_file} not found in G3tSmurf archive")
+            logger.warning(f"Tune file {tune_file} not found in G3tSmurf archive")
             return None
         if tune.tuneset is None:
-            logger.info(f"Tune file {tune_file} has no TuneSet in G3tSmurf archive")
+            logger.warning(f"Tune file {tune_file} has no TuneSet in G3tSmurf archive")
             return None
     else:
         logger.info("Tune information not in SmurfStatus, using most recent Tune")
@@ -1865,10 +1865,10 @@ def _get_tuneset_channel_names(status, ch_map, archive):
         )
         tune = tune.order_by(db.desc(Tunes.start)).first()
         if tune is None:
-            logger.info("Most recent Tune does not exist")
+            logger.warning("Most recent Tune does not exist")
             return None
         if tune.tuneset is None:
-            logger.info(f"Tune file {tune.name} has no TuneSet in G3tSmurf archive")
+            logger.warning(f"Tune file {tune.name} has no TuneSet in G3tSmurf archive")
             return None
 
     bands, channels, names = zip(
