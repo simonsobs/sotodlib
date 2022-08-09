@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import os.path as op
+import os.path as op, os
 from spt3g import core
 import numpy as np
 import so3g
@@ -384,11 +384,13 @@ class Bookbinder(object):
         if self._verbose: print(f"Bookbinding {ifile}")
         self.smurf_iter = smurf_reader(ifile)
 
-        ofile = op.join(out_root, book_id, f'D_{stream_id}_{self.ofile_num:03d}.g3')
+        out_bdir = op.join(out_root, book_id)
+        if not op.exists(out_bdir): os.makedirs(out_bdir)
+        ofile = op.join(out_bdir, f'D_{stream_id}_{self.ofile_num:03d}.g3')
         if self._verbose: print(f"Writing {ofile}")
         self.writer = core.G3Writer(ofile)
 
-        afile = op.join(out_root, book_id, f'A_ancil_{self.ofile_num:03d}.g3')
+        afile = op.join(out_bdir, f'A_ancil_{self.ofile_num:03d}.g3')
         self.ancil_writer = core.G3Writer(afile)
 
         if self._start_time is not None:
