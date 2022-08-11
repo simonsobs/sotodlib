@@ -376,7 +376,7 @@ class Bookbinder(object):
         self.default_mode = True
         self.MAX_SAMPLES_TOTAL = 1e9
         self.MAX_SAMPLES_PER_CHANNEL = self.MAX_SAMPLES_TOTAL // max_nchannels
-        self.DEFAULT_TIME = 1e18  # 1e18 = 2286-11-20T17:46:40.000000000 (in the distant future)
+        self.DEFAULT_TIME = core.G3Time(1e18)  # 1e18 = 2286-11-20T17:46:40.000000000 (in the distant future)
 
         self.frameproc = FrameProcessor()
 
@@ -457,7 +457,7 @@ class Bookbinder(object):
         frame_splits = []
 
         if self.default_mode:
-            frame_splits += [core.G3Time(self.DEFAULT_TIME)]
+            frame_splits += [self.DEFAULT_TIME]
             return frame_splits
 
         # Assign a value to each event based on what occurs at that time: 0 for a zero-crossing,
@@ -604,7 +604,7 @@ class Bookbinder(object):
                         self.smurf_iter = smurf_reader(ifile)
                     else:
                         # If there are no more SMuRF files, output remaining SMuRF data
-                        self.frameproc.flush_time = self.frameproc.smbundle.times[-1] + 1  # +1 to ensure last sample gets included (= 1e-8 sec << sampling cadence)
+                        self.frameproc.flush_time = self.DEFAULT_TIME
                         output += self.frameproc.flush()
                         output = [o for o in output if len(o['signal'].times) > 0]  # Remove 0-length frames
                         self.write_frames(output + self.metadata)
