@@ -626,7 +626,7 @@ class G3tSmurf:
         session.commit()
 
     def add_new_observation(
-        self, stream_id, action_name, action_ctime, session, max_early=5, max_wait=100
+        self, stream_id, action_name, action_ctime, session, max_early=5,
     ):
         """Add new entry to the observation table. Called by the
         index_metadata function.
@@ -642,9 +642,6 @@ class G3tSmurf:
             The active session
         max_early : int
             Buffer time to allow the g3 file to be earlier than the smurf action
-        max_wait : int
-            Maximum amount of time between the streaming start action and the
-            making of .g3 files that belong to an observation
         """
         # Check if observation exists already
         obs = (
@@ -705,11 +702,11 @@ class G3tSmurf:
         # obs.stop is only updated when streaming session is over
         if obs.stop is None:
             self.update_observation_files(
-                obs, session, max_early=max_early, max_wait=max_wait
+                obs, session, max_early=max_early,
             )
 
     def update_observation_files(
-        self, obs, session, max_early=5, max_wait=100, force=False
+        self, obs, session, max_early=5, force=False
     ):
         """Update existing observation. A separate function to make it easier
         to deal with partial data transfers. See add_new_observation for args
@@ -718,9 +715,6 @@ class G3tSmurf:
         -----
         max_early : int
             Buffer time to allow the g3 file to be earlier than the smurf action
-        max_wait : int
-            Maximum amount of time between the streaming start action and the
-            making of .g3 files that belong to an observation
         session : SQLAlchemy Session
             The active session
         force : bool
@@ -794,6 +788,8 @@ class G3tSmurf:
             db_file.obs_id = obs.obs_id
             if tuneset is not None:
                 db_file.detset = tuneset.name
+            if tune is not None:
+                db_file.tune_id = tune.id
 
             # this is where I learned sqlite does not accept numpy 32 or 64 bit ints
             file_samps = sum(
