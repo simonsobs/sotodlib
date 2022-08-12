@@ -55,7 +55,6 @@ if __name__ == '__main__':
             obs, 
             session, 
             force=True,
-            max_early=90,
         )
 
     if args.detdb_filename is not None:

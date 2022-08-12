@@ -86,7 +86,11 @@ class Observations(Base):
     
     tag = db.Column(db.String)
     ## one to many
-    files = relationship("Files", back_populates='observation') 
+    files = relationship(
+        "Files", 
+        back_populates='observation',
+        order_by="Files.start",
+    ) 
     
     ## many to many
     tunesets = relationship("TuneSets", 
