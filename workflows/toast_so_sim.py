@@ -490,6 +490,14 @@ def reduce_data(job, args, data):
     timer = toast.timing.Timer()
     timer.start()
 
+    # Apply demodulation
+
+    ops.demodulate.stokes_weights = ops.weights_radec
+    ops.demodulate.hwp_angle = ops.sim_ground.hwp_angle
+    ops.demodulate.noise_model = ops.default_model.noise_model
+    ops.demodulate.apply(data)
+    log.info_rank("Demodulated in", comm=world_comm, timer=timer)
+
     # Apply noise estimation
 
     ops.noise_estim.detector_pointing = ops.det_pointing_radec
@@ -772,6 +780,7 @@ def main():
             enabled=False,
         ),
         toast.ops.StokesWeights(name="weights_radec", mode="IQU"),
+        toast.ops.Demodulate(name="demodulate", enabled=False),
         toast.ops.NoiseEstim(name="noise_estim", enabled=False),
         toast.ops.FlagSSO(name="flag_sso", enabled=False),
         so_ops.Hn(name="h_n", enabled=False),
