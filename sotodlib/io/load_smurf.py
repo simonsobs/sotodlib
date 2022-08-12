@@ -1839,7 +1839,13 @@ def get_channel_mask(
 
 
 def _get_tuneset_channel_names(status, ch_map, archive):
-    """Update channel maps with name from Tuneset"""
+    """Update channel maps with name from Tuneset
+    
+    Returns 
+    ruids: list or None
+        a list of readout_ids that align with ch_map. Returns None if 
+        readout_ids cannot be found.
+    """
     session = archive.Session()
 
     # tune file in status
@@ -1847,11 +1853,11 @@ def _get_tuneset_channel_names(status, ch_map, archive):
         tune_file = status.tune.split("/")[-1]
         tune = session.query(Tunes).filter(Tunes.name == tune_file).one_or_none()
         if tune is None:
-            logger.info(f"Tune file {tune_file} not found in G3tSmurf archive")
-            return ch_map
+            logger.warning(f"Tune file {tune_file} not found in G3tSmurf archive")
+            return None
         if tune.tuneset is None:
-            logger.info(f"Tune file {tune_file} has no TuneSet in G3tSmurf archive")
-            return ch_map
+            logger.warning(f"Tune file {tune_file} has no TuneSet in G3tSmurf archive")
+            return None
     else:
         logger.info("Tune information not in SmurfStatus, using most recent Tune")
         tune = session.query(Tunes).filter(
@@ -1859,11 +1865,11 @@ def _get_tuneset_channel_names(status, ch_map, archive):
         )
         tune = tune.order_by(db.desc(Tunes.start)).first()
         if tune is None:
-            logger.info("Most recent Tune does not exist")
-            return ch_map
+            logger.warning("Most recent Tune does not exist")
+            return None
         if tune.tuneset is None:
-            logger.info(f"Tune file {tune.name} has no TuneSet in G3tSmurf archive")
-            return ch_map
+            logger.warning(f"Tune file {tune.name} has no TuneSet in G3tSmurf archive")
+            return None
 
     bands, channels, names = zip(
         *[(ch.band, ch.channel, ch.name) for ch in tune.tuneset.channels]
