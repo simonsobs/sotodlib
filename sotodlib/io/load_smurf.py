@@ -651,6 +651,7 @@ class G3tSmurf:
             session.query(Observations)
             .filter(
                 Observations.stream_id == stream_id,
+                Observations.action_name == action_name,
                 Observations.action_ctime == action_ctime,
             )
             .one_or_none()
@@ -688,9 +689,7 @@ class G3tSmurf:
                 if str(frame.type) == "Observation":
                     assert frame["sostream_id"] == stream_id
                     assert frame["session_id"] == session_id
-                    start = dt.datetime.utcfromtimestamp(
-                        frame["time"].time / spt3g_core.G3Units.s
-                    )
+                    break
 
             # Build Observation
             obs = Observations(
@@ -699,7 +698,6 @@ class G3tSmurf:
                 action_ctime=action_ctime,
                 action_name=action_name,
                 stream_id=stream_id,
-                start=start,
             )
             session.add(obs)
             session.commit()
@@ -734,29 +732,28 @@ class G3tSmurf:
             logger.debug(f"Returning from {obs.obs_id} without updates")
             return
 
-        x = session.query(Files.name).filter(
-            Files.stream_id == obs.stream_id,
-            Files.start >= obs.start - dt.timedelta(seconds=max_early),
+        # Prefix is deterministic based on observation details
+        prefix = os.path.join(
+                self.archive_path,
+                str(obs.timestamp)[:5],
+                obs.stream_id
         )
-        x = x.order_by(Files.start).first()
-        if x is None:
-            logger.debug(f"Found no files after start of {obs.obs_id}")
-            ## no files to add at this point
-            return
 
-        x = x[0]
-        session_id, f_num = (x[:-3].split("/")[-1]).split("_")
-        prefix = "/".join(x.split("/")[:-1]) + "/"
-        if int(session_id)-obs.start.timestamp() > max_wait:
-            ## we don't have .g3 files for some reason
+        flist = session.query(Files).filter(
+            Files.name.like(prefix + "/"+ str(obs.timestamp)+"%")
+        ).order_by(Files.start).all()
+
+        
+        logger.debug(f"Found {len(flist)} files in {obs.obs_id}")
+        if len(flist)==0:
+            ## we don't have .g3 files for some reason, shouldn't be possible?
             logger.debug(f"Found no files associated with {obs.obs_id}")
             return
+        
+        ## set start to be the first scan frame in file/observation
+        obs.start = flist[0].start
 
-        flist = session.query(Files).filter(Files.name.like(prefix + session_id + "%"))
-        flist = flist.order_by(Files.start).all()
-        logger.debug(f"Found {len(flist)} files in {obs.obs_id}")
         ## Load Status Information
-
         status = SmurfStatus.from_file(flist[0].name)
 
         # Add any tags from the status
@@ -768,7 +765,10 @@ class G3tSmurf:
 
         # Add Tune and Tuneset information
         if status.tune is not None:
-            tune = session.query(Tunes).filter(Tunes.name == status.tune).one_or_none()
+            tune = session.query(Tunes).filter(
+                Tunes.name == status.tune,
+                Tunes.stream_id == obs.stream_id,
+            ).one_or_none()
             if tune is None:
                 logger.warning(
                     f"Tune {status.tune} not found in database, update error?"
@@ -777,7 +777,10 @@ class G3tSmurf:
             else:
                 tuneset = tune.tuneset
         else:
-            tuneset = session.query(TuneSets).filter(TuneSets.start <= obs.start)
+            tuneset = session.query(TuneSets).filter(
+                TuneSets.start <= obs.start,
+                TuneSets.stream_id == obs.stream_id,
+            )
             tuneset = tuneset.order_by(db.desc(TuneSets.start)).first()
 
         already_have = [ts.id for ts in obs.tunesets]
@@ -948,7 +951,7 @@ class G3tSmurf:
             session.rollback()
             logger.info(f"Integrity Error at {stream_id}, {ctime}, {path}")
         else:
-            logger.info(f"Unexplained Error at {stream_id}, {ctime}, {path}")
+            logger.info(f"Error of type {type(e).__name__} at {stream_id}, {ctime}, {path}")
         if stop_at_error:
             raise (e)
 
