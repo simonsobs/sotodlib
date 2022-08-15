@@ -697,9 +697,9 @@ class G3tSmurf:
                     break
 
             if calibration:
-                obs_id=f"cal_{stream_id}_{session_id}",
+                obs_id=f"cal_{stream_id}_{session_id}"
             else:
-                obs_id=f"{stream_id}_{session_id}",
+                obs_id=f"{stream_id}_{session_id}"
             
             # Build Observation
             obs = Observations(
@@ -1061,24 +1061,19 @@ class G3tSmurf:
         for action, stream_id, ctime, path in self.search_metadata_actions(
             min_ctime=min_ctime, max_ctime=max_ctime
         ):
-            if action in SMURF_ACTIONS["observations"]:
+            if action in SMURF_ACTIONS["observations"] or action in SMURF_ACTIONS["calibrations"]:
                 try:
                     obs_path = os.listdir(os.path.join(path, "outputs"))
                     logger.debug(
                         f"Add new Observation: {stream_id}, {ctime}, {obs_path}"
                     )
-                    self.add_new_observation(stream_id, action, ctime, session, calibration=False)
-                except Exception as e:
-                    self._process_index_error(
-                        session, e, stream_id, ctime, path, stop_at_error
+                    self.add_new_observation(
+                        stream_id, 
+                        action, 
+                        ctime, 
+                        session, 
+                        calibration=(action in SMURF_ACTIONS["calibrations"])
                     )
-            if action in SMURF_ACTIONS["calibrations"]:
-                try:
-                    obs_path = os.listdir(os.path.join(path, "outputs"))
-                    logger.debug(
-                        f"Add new Observation: {stream_id}, {ctime}, {obs_path}"
-                    )
-                    self.add_new_observation(stream_id, action, ctime, session, calibration=True)
                 except Exception as e:
                     self._process_index_error(
                         session, e, stream_id, ctime, path, stop_at_error
