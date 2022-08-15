@@ -51,7 +51,13 @@ SMURF_ACTIONS = {
         "stream_data_on",
         "take_noise_psd",
         "take_g3_data",
-        "stream_g3_on",
+        "stream_g3_on"
+    ],
+    "calibrations": [
+        "take_iv",
+        "take_bias_steps",
+        "take_bgmap",
+        "take_noise"
     ],
 }
 
@@ -626,7 +632,7 @@ class G3tSmurf:
         session.commit()
 
     def add_new_observation(
-        self, stream_id, action_name, action_ctime, session, max_early=5,
+        self, stream_id, action_name, action_ctime, session, calibration, max_early=5,
     ):
         """Add new entry to the observation table. Called by the
         index_metadata function.
@@ -640,6 +646,8 @@ class G3tSmurf:
             slightly different than the .g3 session ID
         session : SQLAlchemy Session
             The active session
+        calibration : boolean
+            Boolean that indicates whether the observation is a calibration observation.
         max_early : int
             Buffer time to allow the g3 file to be earlier than the smurf action
         """
@@ -688,13 +696,19 @@ class G3tSmurf:
                     assert frame["session_id"] == session_id
                     break
 
+            if calibration:
+                obs_id=f"cal_{stream_id}_{session_id}"
+            else:
+                obs_id=f"{stream_id}_{session_id}"
+            
             # Build Observation
             obs = Observations(
-                obs_id=f"{stream_id}_{session_id}",
+                obs_id=obs_id,
                 timestamp=session_id,
                 action_ctime=action_ctime,
                 action_name=action_name,
                 stream_id=stream_id,
+                calibration=calibration,
             )
             session.add(obs)
             session.commit()
@@ -1047,13 +1061,19 @@ class G3tSmurf:
         for action, stream_id, ctime, path in self.search_metadata_actions(
             min_ctime=min_ctime, max_ctime=max_ctime
         ):
-            if action in SMURF_ACTIONS["observations"]:
+            if action in SMURF_ACTIONS["observations"] or action in SMURF_ACTIONS["calibrations"]:
                 try:
                     obs_path = os.listdir(os.path.join(path, "outputs"))
                     logger.debug(
                         f"Add new Observation: {stream_id}, {ctime}, {obs_path}"
                     )
-                    self.add_new_observation(stream_id, action, ctime, session)
+                    self.add_new_observation(
+                        stream_id, 
+                        action, 
+                        ctime, 
+                        session, 
+                        calibration=(action in SMURF_ACTIONS["calibrations"])
+                    )
                 except Exception as e:
                     self._process_index_error(
                         session, e, stream_id, ctime, path, stop_at_error
