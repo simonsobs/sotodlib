@@ -632,7 +632,7 @@ class G3tSmurf:
         session.commit()
 
     def add_new_observation(
-        self, stream_id, action_name, action_ctime, session, calibration, max_early=5, max_wait=100
+        self, stream_id, action_name, action_ctime, session, calibration, max_early=5,
     ):
         """Add new entry to the observation table. Called by the
         index_metadata function.
@@ -650,15 +650,13 @@ class G3tSmurf:
             Boolean that indicates whether the observation is a calibration observation.
         max_early : int
             Buffer time to allow the g3 file to be earlier than the smurf action
-        max_wait : int
-            Maximum amount of time between the streaming start action and the
-            making of .g3 files that belong to an observation
         """
         # Check if observation exists already
         obs = (
             session.query(Observations)
             .filter(
                 Observations.stream_id == stream_id,
+                Observations.action_name == action_name,
                 Observations.action_ctime == action_ctime,
             )
             .one_or_none()
@@ -666,6 +664,7 @@ class G3tSmurf:
         if obs is None:
             x = session.query(Files.name)
             x = x.filter(
+                Files.stream_id == stream_id,
                 Files.start >= dt.datetime.utcfromtimestamp(action_ctime - max_early)
             )
             x = x.order_by(Files.start).first()
@@ -695,42 +694,33 @@ class G3tSmurf:
                 if str(frame.type) == "Observation":
                     assert frame["sostream_id"] == stream_id
                     assert frame["session_id"] == session_id
-                    start = dt.datetime.utcfromtimestamp(
-                        frame["time"].time / spt3g_core.G3Units.s
-                    )
+                    break
 
-            # Build Observation
             if calibration:
-                obs = Observations(
-                    obs_id=f"cal_{stream_id}_{session_id}",
-                    timestamp=session_id,
-                    action_ctime=action_ctime,
-                    action_name=action_name,
-                    stream_id=stream_id,
-                    start=start,
-                    calibration=calibration,
-                )
+                obs_id=f"cal_{stream_id}_{session_id}",
             else:
-                obs = Observations(
-                    obs_id=f"{stream_id}_{session_id}",
-                    timestamp=session_id,
-                    action_ctime=action_ctime,
-                    action_name=action_name,
-                    stream_id=stream_id,
-                    start=start,
-                    calibration=calibration,
-                )
+                obs_id=f"{stream_id}_{session_id}",
+            
+            # Build Observation
+            obs = Observations(
+                obs_id=obs_id,
+                timestamp=session_id,
+                action_ctime=action_ctime,
+                action_name=action_name,
+                stream_id=stream_id,
+                calibration=calibration,
+            )
             session.add(obs)
             session.commit()
 
         # obs.stop is only updated when streaming session is over
         if obs.stop is None:
             self.update_observation_files(
-                obs, session, max_early=max_early, max_wait=max_wait
+                obs, session, max_early=max_early,
             )
 
     def update_observation_files(
-        self, obs, session, max_early=5, max_wait=100, force=False
+        self, obs, session, max_early=5, force=False
     ):
         """Update existing observation. A separate function to make it easier
         to deal with partial data transfers. See add_new_observation for args
@@ -739,9 +729,6 @@ class G3tSmurf:
         -----
         max_early : int
             Buffer time to allow the g3 file to be earlier than the smurf action
-        max_wait : int
-            Maximum amount of time between the streaming start action and the
-            making of .g3 files that belong to an observation
         session : SQLAlchemy Session
             The active session
         force : bool
@@ -753,28 +740,28 @@ class G3tSmurf:
             logger.debug(f"Returning from {obs.obs_id} without updates")
             return
 
-        x = session.query(Files.name).filter(
-            Files.start >= obs.start - dt.timedelta(seconds=max_early)
+        # Prefix is deterministic based on observation details
+        prefix = os.path.join(
+                self.archive_path,
+                str(obs.timestamp)[:5],
+                obs.stream_id
         )
-        x = x.order_by(Files.start).first()
-        if x is None:
-            logger.debug(f"Found no files after start of {obs.obs_id}")
-            ## no files to add at this point
-            return
 
-        x = x[0]
-        session_id, f_num = (x[:-3].split("/")[-1]).split("_")
-        prefix = "/".join(x.split("/")[:-1]) + "/"
-        if int(session_id)-obs.start.timestamp() > max_wait:
-            ## we don't have .g3 files for some reason
+        flist = session.query(Files).filter(
+            Files.name.like(prefix + "/"+ str(obs.timestamp)+"%")
+        ).order_by(Files.start).all()
+
+        
+        logger.debug(f"Found {len(flist)} files in {obs.obs_id}")
+        if len(flist)==0:
+            ## we don't have .g3 files for some reason, shouldn't be possible?
             logger.debug(f"Found no files associated with {obs.obs_id}")
             return
+        
+        ## set start to be the first scan frame in file/observation
+        obs.start = flist[0].start
 
-        flist = session.query(Files).filter(Files.name.like(prefix + session_id + "%"))
-        flist = flist.order_by(Files.start).all()
-        logger.debug(f"Found {len(flist)} files in {obs.obs_id}")
         ## Load Status Information
-
         status = SmurfStatus.from_file(flist[0].name)
 
         # Add any tags from the status
@@ -786,7 +773,10 @@ class G3tSmurf:
 
         # Add Tune and Tuneset information
         if status.tune is not None:
-            tune = session.query(Tunes).filter(Tunes.name == status.tune).one_or_none()
+            tune = session.query(Tunes).filter(
+                Tunes.name == status.tune,
+                Tunes.stream_id == obs.stream_id,
+            ).one_or_none()
             if tune is None:
                 logger.warning(
                     f"Tune {status.tune} not found in database, update error?"
@@ -795,7 +785,10 @@ class G3tSmurf:
             else:
                 tuneset = tune.tuneset
         else:
-            tuneset = session.query(TuneSets).filter(TuneSets.start <= obs.start)
+            tuneset = session.query(TuneSets).filter(
+                TuneSets.start <= obs.start,
+                TuneSets.stream_id == obs.stream_id,
+            )
             tuneset = tuneset.order_by(db.desc(TuneSets.start)).first()
 
         already_have = [ts.id for ts in obs.tunesets]
@@ -809,6 +802,8 @@ class G3tSmurf:
             db_file.obs_id = obs.obs_id
             if tuneset is not None:
                 db_file.detset = tuneset.name
+            if tune is not None:
+                db_file.tune_id = tune.id
 
             # this is where I learned sqlite does not accept numpy 32 or 64 bit ints
             file_samps = sum(
@@ -966,7 +961,7 @@ class G3tSmurf:
             session.rollback()
             logger.info(f"Integrity Error at {stream_id}, {ctime}, {path}")
         else:
-            logger.info(f"Unexplained Error at {stream_id}, {ctime}, {path}")
+            logger.info(f"Error of type {type(e).__name__} at {stream_id}, {ctime}, {path}")
         if stop_at_error:
             raise (e)
 
@@ -1757,7 +1752,7 @@ def get_channel_mask(
         List of desired channels the type of each list element is used
         to determine what it is:
 
-        * int : absolute readout channel
+        * int : index of channel in file. Useful for batching.
         * (int, int) : band, channel
         * string : channel name (requires archive or obsfiledb)
         * float : frequency in the smurf status (or should we use channel assignment?)
@@ -1789,10 +1784,12 @@ def get_channel_mask(
     for ch in ch_list:
         if np.isscalar(ch):
             if np.issubdtype(type(ch), np.integer):
-                # this is an absolute readout channel
-                if not ignore_missing and ~np.any(status.mask == ch):
-                    raise ValueError(f"channel {ch} not found")
-                msk[status.mask == ch] = True
+                # this is an absolute readout INDEX (not band*512+ch)
+                if not ignore_missing and ch >= status.num_chans:
+                    raise ValueError(f"Requested Index {ch} > {status.num_chans}")
+                if ch >= status.num_chans:
+                    continue
+                msk[ch] = True
 
             elif np.issubdtype(type(ch), np.floating):
                 # this is a resonator frequency
@@ -1863,7 +1860,13 @@ def get_channel_mask(
 
 
 def _get_tuneset_channel_names(status, ch_map, archive):
-    """Update channel maps with name from Tuneset"""
+    """Update channel maps with name from Tuneset
+    
+    Returns 
+    ruids: list or None
+        a list of readout_ids that align with ch_map. Returns None if 
+        readout_ids cannot be found.
+    """
     session = archive.Session()
 
     # tune file in status
@@ -1871,11 +1874,11 @@ def _get_tuneset_channel_names(status, ch_map, archive):
         tune_file = status.tune.split("/")[-1]
         tune = session.query(Tunes).filter(Tunes.name == tune_file).one_or_none()
         if tune is None:
-            logger.info(f"Tune file {tune_file} not found in G3tSmurf archive")
-            return ch_map
+            logger.warning(f"Tune file {tune_file} not found in G3tSmurf archive")
+            return None
         if tune.tuneset is None:
-            logger.info(f"Tune file {tune_file} has no TuneSet in G3tSmurf archive")
-            return ch_map
+            logger.warning(f"Tune file {tune_file} has no TuneSet in G3tSmurf archive")
+            return None
     else:
         logger.info("Tune information not in SmurfStatus, using most recent Tune")
         tune = session.query(Tunes).filter(
@@ -1883,11 +1886,11 @@ def _get_tuneset_channel_names(status, ch_map, archive):
         )
         tune = tune.order_by(db.desc(Tunes.start)).first()
         if tune is None:
-            logger.info("Most recent Tune does not exist")
-            return ch_map
+            logger.warning("Most recent Tune does not exist")
+            return None
         if tune.tuneset is None:
-            logger.info(f"Tune file {tune.name} has no TuneSet in G3tSmurf archive")
-            return ch_map
+            logger.warning(f"Tune file {tune.name} has no TuneSet in G3tSmurf archive")
+            return None
 
     bands, channels, names = zip(
         *[(ch.band, ch.channel, ch.name) for ch in tune.tuneset.channels]
