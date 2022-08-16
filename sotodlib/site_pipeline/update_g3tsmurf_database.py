@@ -12,9 +12,7 @@ import argparse
 import logging
 from sotodlib.io.load_smurf import G3tSmurf, Observations, dump_DetDb, logger
 
-
-if __name__ == '__main__':
-    
+def get_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('data_prefix', help="The prefix to data locations, use individual"
                                             "locations flags if data is stored in non-standard folders")
@@ -31,8 +29,11 @@ if __name__ == '__main__':
                         action="store_true")
     parser.add_argument("--verbosity", help="increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug",
                        default=2, type=int)
+    return parser
 
+if __name__ == '__main__':
     
+    parser = get_parser()
     args = parser.parse_args()
     
     if args.timestream_folder is None:
