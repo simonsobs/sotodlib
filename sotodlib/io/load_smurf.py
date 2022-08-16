@@ -2159,6 +2159,7 @@ def load_file(
     channels=None,
     samples=None,
     ignore_missing=True,
+    no_signal=False,
     load_biases=True,
     load_primary=True,
     status=None,
@@ -2184,6 +2185,8 @@ def load_file(
           being loaded from the list.
       ignore_missing : bool
           If true, will not raise errors if a requested channel is not found
+      no_signal : bool
+          If true, will not load the detector signal from files  
       load_biases : bool
           If true, will load the bias lines for each detector
       load_primary : bool
@@ -2295,9 +2298,14 @@ def load_file(
             start = max(0, sample_start - file_start)
             flist.append((filename, start, stop))
 
-    subreq = [
-        io_load.FieldGroup("data", ch_info.rchannel, timestamp_field="time"),
-    ]
+    if no_signal:
+        subreq = [
+            io_load.FieldGroup("data", [], timestamp_field="time")    
+        ]
+    else:
+        subreq = [
+            io_load.FieldGroup("data", ch_info.rchannel, timestamp_field="time")        
+        ]
     if load_primary:
         subreq.extend(
             [io_load.FieldGroup("primary", [io_load.Field("*", wildcard=True)])]
@@ -2399,7 +2407,14 @@ def load_file(
     return aman
 
 
-def load_g3tsmurf_obs(db, obs_id, dets=None, samples=None, **kwargs):
+def load_g3tsmurf_obs(
+    db, 
+    obs_id, 
+    dets=None, 
+    samples=None, 
+    no_signal=None
+    **kwargs
+    ):
     """Obsloader function for g3tsmurf data archives.
 
     See API template, `sotodlib.core.context.obsloader_template`, for
@@ -2414,7 +2429,16 @@ def load_g3tsmurf_obs(db, obs_id, dets=None, samples=None, **kwargs):
         "select name from files " "where obs_id=?" + "order by start", (obs_id,)
     )
     flist = [row[0] for row in c]
-    return load_file(flist, dets, samples=samples, obsfiledb=db, merge_det_info=False)
+    if no_signal is None:
+        no_signal=False
+    return load_file(
+        flist, 
+        dets, 
+        samples=samples, 
+        obsfiledb=db, 
+        no_signal=no_signal,
+        merge_det_info=False
+    )
 
 
 core.OBSLOADER_REGISTRY["g3tsmurf"] = load_g3tsmurf_obs
