@@ -84,8 +84,10 @@ def main(args=None):
 
         # Load / compute mask parameters.
         mask_params = config['mask_params']['default']
-        mask_res = util.parse_angle(util.lookup_conditional(
-            config['mask_params'], 'res', default=[1, 'arcmin']))
+        mask_res = util.parse_quantity(
+            util.lookup_conditional(
+                config['mask_params'], 'res', default=[1, 'arcmin']),
+            'deg').value
 
         sources = coords.planets.get_nearby_sources(tod)
         flags = None

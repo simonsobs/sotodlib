@@ -3,6 +3,7 @@ import os
 import inspect
 import logging
 import time
+from astropy import units as u
 
 from .. import core
 
@@ -46,37 +47,61 @@ class DirectoryArchivePolicy:
         return os.path.join(self.root_dir, self.pattern.format(**kw))
 
 
-def parse_angle(angle, default_units='deg', desired_units='deg'):
-    """Convert an expression for an angle into a float in the desired
-    angle units.  This accepts floats or tuples that also state the
-    unit.  For example:
+def parse_quantity(val, default_units=None):
+    """Convert an expression with units into an astropy Quantity.
 
-      parse_angle(123.)
-        => 123.
+    Args:
+      val: the expression (see Notes).
+      default_units: the units to assume if they are not provided in
+        val.
 
-      parse_angle((60, 'arcmin'))
-        => 1.
+    Returns:
+      The astropy Quantity decoded from the argument.  Note the
+      quantity is converted to the default_units, if they are
+      provided.
 
-      parse_angle(1, desired_units='rad')
-        => 0.017453292519943295
+    Notes:
+      The default_units, if provided, should be "unit-like", by which
+      we mean it is either:
+        - An astropy Unit.
+        - A string that astropy.units.Unit() can parse.
 
-      parse_angle(1, default_units='rad')
-        => 57.29577951308232
+      The val can be any of the following:
+        - A tuple (x, u) or list [x, u], where x is a float and u is
+          unit-like.
+        - A string (x), where x can be parsed by astropy.units.Quantity.
+        - A float (x), but only if default_units is not None.
 
-    The units must be one of ['rad', 'deg', 'arcmin', 'arcsec'].
+    Examples:
+      >>> parse_quantity('100 arcsec')
+      <Quantity 100. arcsec>
+
+      >>> parse_quantity([12., 'deg'])
+      <Quantity 12. deg>
+
+      >>> parse_quantity('15 arcmin', 'deg')
+      <Quantity 0.25 deg>
+
+      >>> parse_quantity(100, 'm')
+      <Quantity 100. m>
 
     """
-    units = {
-        'rad': 1.,
-        'deg': math.pi/180,
-        'arcmin': math.pi/180/60,
-        'arcsec': math.pi/180/60/60,
-    }
-    try:
-        angle = float(angle)
-    except TypeError:
-        angle, default_units = angle  # e.g. (12, 'arcmin')
-    return angle * units[default_units] / units[desired_units]
+    if default_units is not None:
+        default_units = u.Unit(default_units)
+
+    if isinstance(val, str):
+        q = u.Quantity(val)
+    elif isinstance(val, (list, tuple)):
+        q = val[0] * u.Unit(val[1])
+    elif isinstance(val, (float, int)):
+        if default_units is None:
+            raise ValueError(
+                f"Cannot decode argument '{val}' without default_units.")
+        q = val * default_units
+
+    if default_units is not None:
+        q = q.to(default_units)
+    return q
 
 
 def _filter_dict(d, bad_keys=['_stop_here']):
