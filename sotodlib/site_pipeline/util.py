@@ -63,14 +63,16 @@ def parse_quantity(val, default_units=None):
     Notes:
       The default_units, if provided, should be "unit-like", by which
       we mean it is either:
-        - An astropy Unit.
-        - A string that astropy.units.Unit() can parse.
+
+      - An astropy Unit.
+      - A string that astropy.units.Unit() can parse.
 
       The val can be any of the following:
-        - A tuple (x, u) or list [x, u], where x is a float and u is
-          unit-like.
-        - A string (x), where x can be parsed by astropy.units.Quantity.
-        - A float (x), but only if default_units is not None.
+
+      - A tuple (x, u) or list [x, u], where x is a float and u is
+        unit-like.
+      - A string (x), where x can be parsed by astropy.units.Quantity.
+      - A float (x), but only if default_units is not None.
 
     Examples:
       >>> parse_quantity('100 arcsec')
