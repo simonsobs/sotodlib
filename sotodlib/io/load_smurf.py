@@ -2367,18 +2367,19 @@ def load_file(
         iir_params.wrap("b", status.filter_b)
         iir_params.wrap("fscale", 1/status.flux_ramp_rate_hz)
         aman.wrap("iir_params", iir_params)
+    
+    if not no_signal:
+        aman.wrap(
+            "signal", 
+            np.zeros((aman[det_axis].count, aman["samps"].count), "float32"), 
+                     [(0, det_axis), (1, "samps")]
+        )
+        for idx in range(aman[det_axis].count):
+            io_load.hstack_into(aman.signal[idx], streams["data"][ch_info.rchannel[idx]])
 
-    # Conversion from DAC counts to squid phase
-    aman.wrap(
-        "signal", 
-        np.zeros((aman[det_axis].count, aman["samps"].count), "float32"), 
-                 [(0, det_axis), (1, "samps")]
-    )
-    for idx in range(aman[det_axis].count):
-        io_load.hstack_into(aman.signal[idx], streams["data"][ch_info.rchannel[idx]])
-
-    rad_per_count = np.pi / 2 ** 15
-    aman.signal *= rad_per_count
+        # Conversion from DAC counts to squid phase
+        rad_per_count = np.pi / 2 ** 15
+        aman.signal *= rad_per_count
     
     temp = core.AxisManager(aman.samps.copy())
     if load_primary:
@@ -2412,7 +2413,7 @@ def load_g3tsmurf_obs(
     obs_id, 
     dets=None, 
     samples=None, 
-    no_signal=None
+    no_signal=None,
     **kwargs
     ):
     """Obsloader function for g3tsmurf data archives.
