@@ -380,6 +380,17 @@ class Bookbinder(object):
 
         self.frameproc = FrameProcessor()
 
+        if self._start_time is not None:
+            self._start_time = core.G3Time(self._start_time)
+        if self._end_time is not None:
+            self._end_time = core.G3Time(self._end_time)
+
+        if self._start_time is not None and self._end_time is not None:
+            if int(self._start_time) >= int(self._end_time):
+                raise ValueError("Start time should be before end time." +
+                                 "\nStart time: " + str(self._start_time) +
+                                 "\nEnd time:   " + str(self._end_time))
+
         ifile = self._smurf_files.pop(0)
         if self._verbose: print(f"Bookbinding {ifile}")
         self.smurf_iter = smurf_reader(ifile)
@@ -392,11 +403,6 @@ class Bookbinder(object):
 
         afile = op.join(out_bdir, f'A_ancil_{self.ofile_num:03d}.g3')
         self.ancil_writer = core.G3Writer(afile)
-
-        if self._start_time is not None:
-            self._start_time = core.G3Time(self._start_time)
-        if self._end_time is not None:
-            self._end_time = core.G3Time(self._end_time)
 
     def add_misc_data(self, f):
         oframe = core.G3Frame(f.type)
