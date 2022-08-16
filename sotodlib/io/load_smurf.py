@@ -127,7 +127,11 @@ def _file_has_end_frames(filename):
         if not frames:
             break
         frame = frames[0]
-        if str(frame.type) == 'Wiring':
+        if frame.type == spt3g_core.G3FrameType.Observation:
+            if frame["stream_placement"]=="end":
+                ended = True
+                break
+        if frame.type == spt3g_core.G3FrameType.Wiring:
             ## ignore dump frames, they lie (and are at the beginning of observations)
             if frame["dump"]:
                 continue
@@ -1867,7 +1871,10 @@ def _get_tuneset_channel_names(status, ch_map, archive):
     # tune file in status
     if status.tune is not None and len(status.tune) > 0:
         tune_file = status.tune.split("/")[-1]
-        tune = session.query(Tunes).filter(Tunes.name == tune_file).one_or_none()
+        tune = session.query(Tunes).filter(
+            Tunes.name == tune_file,
+            Tunes.stream_id == status.stream_id,
+        ).one_or_none()
         if tune is None:
             logger.warning(f"Tune file {tune_file} not found in G3tSmurf archive")
             return None
@@ -1878,6 +1885,7 @@ def _get_tuneset_channel_names(status, ch_map, archive):
         logger.info("Tune information not in SmurfStatus, using most recent Tune")
         tune = session.query(Tunes).filter(
             Tunes.start <= dt.datetime.utcfromtimestamp(status.start)
+            Tunes.stream_id == status.stream_id,
         )
         tune = tune.order_by(db.desc(Tunes.start)).first()
         if tune is None:
