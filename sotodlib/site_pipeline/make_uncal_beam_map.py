@@ -14,7 +14,6 @@ import numpy as np
 import os
 import sys
 import yaml
-import matplotlib.pyplot as plt
 
 import sotodlib
 import so3g
@@ -91,6 +90,8 @@ def _plot_one_map(fig, ax, m):
 def plot_map(bundle, filename=None, tod=None, obs_info=None, det_info=None,
              focal_plane=None, det_mask=None, group=None, subset=None,
              zoom_size=None, title=None, **kwargs):
+    import matplotlib.pyplot as plt
+
     if tod is not None:
         if obs_info is None:
             obs_info = tod.get('obs_info')
@@ -327,7 +328,7 @@ def main(args=None):
             util.lookup_conditional(config['mapmaking'], 'res', tags=[b])
             for b in band_splits.keys()]
         assert(all([r == reses[0] for r in reses]))  # Resolution conflict
-        res_deg = util.parse_angle(reses[0])
+        res_deg = util.parse_quantity(reses[0], 'deg').value
 
         # Where to put things.
         policy = util.ArchivePolicy.from_params(
@@ -384,7 +385,10 @@ def main(args=None):
             logger.info(f' -- writing plots to {plot_filename}...')
 
             band_mask = (tod.det_info['band'] == key)
-            zoom_size = util.parse_angle(util.lookup_conditional(pcfg, 'zoom', tags=[key]))
+            zoom_size = util.parse_quantity(
+                util.lookup_conditional(pcfg, 'zoom', tags=[key]),
+                'deg').value
+
             plot_map(bundle, plot_filename, zoom_size=zoom_size,
                      tod=tod, det_mask=band_mask, group=group, subset=key)
 
