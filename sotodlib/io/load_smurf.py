@@ -1471,6 +1471,7 @@ class SmurfStatus:
         self.status = status
         self.start = self.status.get("start")
         self.stop = self.status.get("stop")
+        self.stream_id = self.status.get("stream_id")
 
         self.aman = core.AxisManager()
 
@@ -1599,6 +1600,7 @@ class SmurfStatus:
                     break
                 frame = frames[0]
                 if str(frame.type) == "Wiring":
+                    status["stream_id"] = frame["sostream_id"]
                     if status.get("start") is None:
                         status["start"] = frame["time"].time / spt3g_core.G3Units.s
                         status["stop"] = frame["time"].time / spt3g_core.G3Units.s
@@ -1688,6 +1690,7 @@ class SmurfStatus:
         status = {
             "start": status_frames[0].time.timestamp(),
             "stop": status_frames[-1].time.timestamp(),
+            "stream_id": stream_id,
         }
         cur_file = None
         for frame_info in tqdm(status_frames, disable=(not show_pb)):
@@ -1884,7 +1887,7 @@ def _get_tuneset_channel_names(status, ch_map, archive):
     else:
         logger.info("Tune information not in SmurfStatus, using most recent Tune")
         tune = session.query(Tunes).filter(
-            Tunes.start <= dt.datetime.utcfromtimestamp(status.start)
+            Tunes.start <= dt.datetime.utcfromtimestamp(status.start),
             Tunes.stream_id == status.stream_id,
         )
         tune = tune.order_by(db.desc(Tunes.start)).first()
