@@ -188,68 +188,26 @@ the "_" will be assumed to be in the same observation/streaming session. The
 metadata searches are done through the action folders and their produced
 timestreams.
 
-    
-Database Creation
-==================
 
-To build a database from scratch, we create a G3tSmurf instance using a database
-path that does not already exist, index the timestream folder, and then index 
-the metadata folder::
+.. _g3tsmurf-update-section:
 
-    SMURF = G3tSmurf(archive_path='/path/to/data/timestreams/',
-                     meta_path='/path/to/data/smurf/,
-                     db_path='/path/to/database.db')
-
-    SMURF.index_archive()
-    SMURF.index_metadata()
-
-There are options for inputting a minimum ctime if desired.
-
-
-
-G3tSmurf Update Script
-======================
+Database Creation and Update Script
+====================================
 
 Keeping the databases updated requires a little care when we are building
 databases while data is actively being taken. To assist with this there is
-an **update_g3tsmurf_database.py** script saved within the **pipelines** folder.
-This
-script takes the *data_prefix* which is the path to the main save folders and
-expects to find the *timestreams* and *smurf* folders at that path. The
-*db_path* is the path to the database to be created or updated. The user running
-this script must have read, write, and execute permissions to that file.
+an **update_g3tsmurf_database.py** script saved within the
+**sotodlib.site_pipeline** folder. This script takes the *data_prefix* which is 
+the path to the main save folders and expects to find the *timestreams* and
+*smurf* folders at that path. The *db_path* is the path to the database to be
+created or updated. The user running this script must have read, write, and 
+execute permissions to that file.
 
-Here is the help for this script:: 
+Here is the information for this script:
 
-    prompt>> python3 update_g3tsmurf_database.py --help
-
-    usage: update_g3tsmurf_database.py [-h]
-                                   [--timestream-folder TIMESTREAM_FOLDER]
-                                   [--smurf-folder SMURF_FOLDER]
-                                   [--detdb-filename DETDB_FILENAME]
-                                   [--update-delay UPDATE_DELAY]
-                                   [--from-scratch]
-                                   data_prefix db_path
-    
-    positional arguments:
-    data_prefix           The prefix to data locations, use individual locations
-                          flags if data is stored in non-standard folders
-    db_path               Path to Database to update
-    
-    optional arguments:
-    -h, --help           show this help message and exit
-    --timestream-folder TIMESTREAM_FOLDER
-                         Absolute path to folder with .g3 timestreams.
-                         Overrides data_prefix
-    --smurf-folder SMURF_FOLDER
-                         Absolute path to folder with pysmurf archived data.
-                         Overrides data_prefix
-    --detdb-filename DETDB_FILENAME
-                         File for dumping the context detector database
-    --update-delay UPDATE_DELAY
-                         Days to subtract from now to set as minimum ctime
-    --from-scratch       Builds or updates database from scratch
-    
+.. argparse::
+    :module: sotodlib.site_pipeline.update_g3tsmurf_database
+    :func: get_parser
 
 Building off G3tSmurf
 =====================

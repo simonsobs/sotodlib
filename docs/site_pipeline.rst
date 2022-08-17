@@ -17,6 +17,12 @@ quick-turnaround data processing at the observatory.
 Pipeline Elements
 =================
 
+update-g3tsmurf-db
+-------------------
+
+This script set up to create and maintain g3tsmurf databases. :ref:`See details
+here<g3tsmurf-update-section>`.
+
 imprinter
 ----------
 

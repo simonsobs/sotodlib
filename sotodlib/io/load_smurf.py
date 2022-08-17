@@ -184,7 +184,7 @@ class G3tSmurf:
     def _create_frame_types(self):
         session = self.Session()
         if not session.query(FrameType).all():
-            print("Creating FrameType table...")
+            logger.info("Creating FrameType table...")
             for k in type_key:
                 ft = FrameType(type_name=k)
                 session.add(ft)
@@ -353,11 +353,11 @@ class G3tSmurf:
 
     def index_archive(
         self,
-        verbose=False,
         stop_at_error=False,
         skip_old_format=True,
         min_ctime=None,
         max_ctime=None,
+        show_pb=True,
     ):
         """
         Adds all files from an archive to the File and Frame sqlite tables.
@@ -365,8 +365,6 @@ class G3tSmurf:
 
         Args
         ----
-        verbose: bool
-            Verbose mode
         stop_at_error: bool
             If True, will stop if there is an error indexing a file.
         skip_old_format: bool
@@ -378,6 +376,8 @@ class G3tSmurf:
         max_ctime: int, float, or None
             If set, files with session-ids higher than this ctime will be
             skipped.
+        show_pb: bool
+            If true, will show progress bar for file indexing
         """
         session = self.Session()
         indexed_files = [f[0] for f in session.query(Files.name).all()]
@@ -402,21 +402,20 @@ class G3tSmurf:
                             continue
                     files.append(path)
 
-        if verbose:
-            print(f"Indexing {len(files)} files...")
+        logger.info(f"Indexing {len(files)} files...")
 
-        for f in tqdm(sorted(files)[::-1]):
+        for f in tqdm(sorted(files)[::-1], disable=(not show_pb)):
             try:
                 self.add_file(os.path.join(root, f), session)
                 session.commit()
             except IntegrityError as e:
                 # Database Integrity Errors, such as duplicate entries
                 session.rollback()
-                print(e)
+                logger.warning(f"Integrity error with error {e}")
             except RuntimeError as e:
                 # End of stream errors, for G3Files that were not fully flushed
                 session.rollback()
-                print(f"Failed on file {f} due to end of stream error!")
+                logger.warning(f"Failed on file {f} due to end of stream error!")
             except Exception as e:
                 # This will catch generic errors such as attempting to load
                 # out-of-date files that do not have the required frame
@@ -424,8 +423,7 @@ class G3tSmurf:
                 session.rollback()
                 if stop_at_error:
                     raise e
-                elif verbose:
-                    print(f"Failed on file {f}:\n{e}")
+                logger.warning(f"Failed on file {f}:\n{e}")
         session.close()
 
     def add_new_channel_assignment(self, stream_id, ctime, cha, cha_path, session):
