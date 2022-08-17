@@ -1,6 +1,9 @@
 """Utility functions for interacting with level 2 data and g3tsmurf
 """
 
+import os
+import numpy as np
+
 from sotodlib.io.g3tsmurf_db import Observations
 
 def get_obs_folder(obs_id, archive):
@@ -10,6 +13,7 @@ def get_obs_folder(obs_id, archive):
     """
     session = archive.Session()
     obs = session.query(Observations).filter(Observations.obs_id == obs_id).one()
+    session.close()
     
     return os.path.join(
         archive.meta_path, 
