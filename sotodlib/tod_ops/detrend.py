@@ -32,6 +32,8 @@ def detrend_data(tod, method='linear', axis_name='samps',
 
     """
     signal = tod[signal_name]
+    dtype_in = signal.dtype
+
     axis_idx = list(tod._assignments[signal_name]).index(axis_name)
     n_samps = signal.shape[axis_idx]
     
@@ -57,7 +59,7 @@ def detrend_data(tod, method='linear', axis_name='samps',
 
     if axis_idx != signal.ndim - 1:
         signal = signal.transpose(tuple(axis_reorder))
-    return signal
+    return signal.astype(dtype_in)
 
 def detrend_tod(tod, method='linear', signal_name='signal', axis_name='samps', count=10, out_name=None):
     """simple wrapper: to be more verbose"""
