@@ -26,6 +26,6 @@ import logging
 logger = logging.getLogger(__name__)
 _log_fmt = '%(levelname)s: %(name)s: %(message)s'
 _ch = logging.StreamHandler()
-_ch.setLevel(logging.DEBUG)
+_ch.setLevel(logging.INFO)
 _ch.setFormatter(logging.Formatter(_log_fmt))
 logger.addHandler(_ch)
