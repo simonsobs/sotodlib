@@ -72,7 +72,19 @@ def get_batch(
     test = False,
     load_file_args={},
 ):
-    """Generator to loop through and load AxisManagers of sections of Observations
+    """A Generator to loop through and load AxisManagers of sections of
+    Observations. When run with none of the optional arguments it will default
+    to returning the full observations. Some arguments over-write others as
+    described in the docstrings below.
+
+    Example usage::
+
+        for aman in get_batch(obs_id, archive, ram_limit=2e9):
+            run_analysis_pipeline(aman)
+
+        for aman in get_batch(obs_id, archive, n_dets=200):
+            run_analysis_pipeline(aman)
+        
     
     Arguments
     ----------
