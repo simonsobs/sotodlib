@@ -128,7 +128,7 @@ def _file_has_end_frames(filename):
             break
         frame = frames[0]
         if frame.type == spt3g_core.G3FrameType.Observation:
-            if frame["stream_placement"]=="end":
+            if frame.get("stream_placement")=="end":
                 ended = True
                 break
         if frame.type == spt3g_core.G3FrameType.Wiring:
