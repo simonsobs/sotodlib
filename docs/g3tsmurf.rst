@@ -119,7 +119,7 @@ AxisManagers loaded with G3tSmurf will all have the form::
             'TESRelaySetting', 'UnixTime'
         biases (optional): (bias_lines, samps)
             Bias values during the data
-        ch_info : AxisManager (dets,)
+        det_info : AxisManager (dets,)
             Information about channels, including SMuRF band, channel,
              frequency.
 
@@ -209,11 +209,13 @@ Here is the information for this script:
     :module: sotodlib.site_pipeline.update_g3tsmurf_database
     :func: get_parser
 
-Building off G3tSmurf
-=====================
+Utilities with G3tSmurf
+------------------------
 
+File System Searches
+====================
 Several of the generators used in the database indexing could be useful for
-building calibration databases off the same file set.
+building search functions off the same file set.
 **G3tSmurf.search_metadata_actions** and **G3tSmurf.search_metadata_files** are
 generators which can be used in loops to easily page through either actions or
 files. For Example::
@@ -232,8 +234,35 @@ files. For Example::
     
         return os.path.join(base_dir, 'outputs',info)
 
+ 
+Batched load of Observations
+============================
+
+Loading long large observations into memory at once can cause issues with memory
+usage, especially on smaller computing facilities. This function is a generator
+than can be called to automatically split observations into smaller sections.
+
+.. automodule:: sotodlib.io.g3tsmurf_utils
+    :special-members: get_batch
+    :noindex:
+
+Observation Files
+==================
+
+There are many instances where we might want to load the SMuRF metadata
+associated with actions that have made it into the database. These function take
+an obs_id and a G3tSmurf instance and return paths or file lists. 
+
+.. automodule:: sotodlib.io.g3tsmurf_utils
+    :special-members: get_obs_folder, get_obs_outputs, get_obs_plots
+    :noindex:
+
 Usage with Context
 ------------------
+
+.. py:module:: sotodlib.io.load_smurf
+    :noindex:
+
 The G3tSmurf database can now be used with the larger `sotodlib` Context system.
 In this setup, the main G3tSmurf database is both the ObsFileDb and the ObsDb.
 The DetDb needs to be created using the `dump_DetDb(SMURF, detdb_file)`. This
