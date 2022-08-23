@@ -239,15 +239,15 @@ Batched load of Observations
 ============================
 
 Loading long large observations into memory at once can cause issues with memory
-usage, especially on smaller computing facities. This function is a generator
+usage, especially on smaller computing facilities. This function is a generator
 than can be called to automatically split observations into smaller sections.
 
 .. automodule:: sotodlib.io.g3tsmurf_utils
     :special-members: get_batch
     :noindex:
 
-Obervations Files
-=================
+Observation Files
+==================
 
 There are many instances where we might want to load the SMuRF metadata
 associated with actions that have made it into the database. These function take
