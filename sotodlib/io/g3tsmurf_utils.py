@@ -5,7 +5,7 @@ import os
 import numpy as np
 import logging
 
-from sotodlib.io.load_smurf import load_file
+from sotodlib.io.load_smurf import load_file, SmurfStatus
 from sotodlib.io.g3tsmurf_db import Observations, Files
 
 
@@ -74,8 +74,10 @@ def get_batch(
 ):
     """A Generator to loop through and load AxisManagers of sections of
     Observations. When run with none of the optional arguments it will default
-    to returning the full observations. Some arguments over-write others as
-    described in the docstrings below.
+    to returning the full observation. Some arguments over-write others as
+    described in the docstrings below. When splitting the Observations by both
+    detectors and samples, the chunks of samples for the same detectors are
+    looped through first (samples is the inner for loop).
 
     Example usage::
 
@@ -93,30 +95,31 @@ def get_batch(
     archive : G3tSmurf Instance 
         The G3tSmurf database connected to the obs_id
     ram_limit : None or float
-        A (very simplistically calculated) limit on RAM per AxisManager. If specified 
-        it overrides all other inputs for how the AxisManager is split.
+        A (very simplistically calculated) limit on RAM per AxisManager. If 
+        specified it overrides all other inputs for how the AxisManager is split.
     n_det_chunks : None or int
-        number of chunks of detectors to split the observation by. Each AxisManager
-        will have N_det = N_obs_det / n_det_chunks. If specified, it overrides n_dets
-        and det_chunks arguments.
+        number of chunks of detectors to split the observation by. Each
+        AxisManager will have N_det = N_obs_det / n_det_chunks. If specified, 
+        it overrides n_dets and det_chunks arguments.
     n_samp_chunks: None or int
         number of chunks of samples to split the observation by. Each AxisManager
-        will have N_samps = N_obs_samps / n_samps_chunks. If specified, it overrides n_samps
-        and samp_chunks arguments.
+        will have N_samps = N_obs_samps / n_samps_chunks. If specified, it overrides 
+        n_samps and samp_chunks arguments.
     n_dets : None or int
         number of detectors to load per AxisManager. If specified, it overrides the
         det_chunks argument.
     n_samps : None or int
-        number of samples to load per AxisManager. If specified it overrides the samps_chunks
-        arguments.
+        number of samples to load per AxisManager. If specified it overrides the 
+        samps_chunks arguments.
     det_chunks: None or list of lists, tuples, or ranges
-        if specified, each entry in the list is successively passed to load the AxisManagers 
-        as  `load_file(... channels = list[i] ... )`
+        if specified, each entry in the list is successively passed to load the 
+        AxisManagers as  `load_file(... channels = list[i] ... )`
     samp_chunks: None or list of tuples
-        if specified, each entry in the list is successively passed to load the AxisManagers 
-        as  `load_file(... samples = list[i] ... )`
+        if specified, each entry in the list is successively passed to load the
+        AxisManagers as  `load_file(... samples = list[i] ... )`
     test: bool
-        If true, yields a tuple of (det_chunks, samp_chunks) instead of a loaded AxisManager
+        If true, yields a tuple of (det_chunks, samp_chunks) instead of a loaded
+        AxisManager
     load_file_kwargs: dict
         additional arguments to pass to load_smurf
     
@@ -132,6 +135,12 @@ def get_batch(
     
     ts = obs.tunesets[0] ## if this throws an error we have some fallbacks
     obs_dets, obs_samps = len(ts.dets), obs.n_samples
+    session.close()
+    
+    if n_det_chunks is not None and n_dets is not None:
+        logger.warning("Both n_det_chunks and n_dets specified, n_det_chunks overrides")
+    if n_samp_chunks is not None and n_samps is not None:
+        logger.warning("Both n_samp_chunks and n_samps specified, n_samp_chunks overrides")
     
     logger.debug(f"{obs_id} has (n_dets, n_samps): ({obs_dets}, {obs_samps})")
     if ram_limit is not None:
@@ -144,12 +153,7 @@ def get_batch(
             n_samps = obs_samps//n_samp_chunks
             n_dets= pts_limit // (n_samps)
         n_det_chunks = int(np.ceil( obs_dets/n_dets ))
-
-    if n_det_chunks is not None and n_dets is not None:
-        logger.warning("Both n_det_chunks and n_dets specified, n_det_chunks overrides")
-    if n_samp_chunks is not None and n_samps is not None:
-        logger.warning("Both n_samp_chunks and n_samps specified, n_samp_chunks overrides")
-        
+    
     if n_det_chunks is not None:
         n_dets = int(np.ceil(obs_dets/n_det_chunks))
         det_chunks = [range(i*n_dets,min((i+1)*n_dets,obs_dets)) for i in range(n_det_chunks)]
@@ -173,6 +177,11 @@ def get_batch(
     if "archive" in load_file_args:
         archive = load_file_args.pop("archive")
         
+    if "status" in load_file_args:
+        status = load_file_args.pop("status")
+    else:
+        status = SmurfStatus.from_file(filenames[0])
+    
     logger.debug(f"Loading data with det_chunks: {det_chunks}.")
     logger.debug(f"Loading data in samp_chunks: {samp_chunks}.")
     
@@ -187,9 +196,9 @@ def get_batch(
                         channels=det_chunk, 
                         samples=samp_chunk, 
                         archive=archive,
+                        status=status,
                         **load_file_args,
                     )
     except GeneratorExit:
         pass
-    session.close()
     
