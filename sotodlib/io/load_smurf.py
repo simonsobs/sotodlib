@@ -127,7 +127,11 @@ def _file_has_end_frames(filename):
         if not frames:
             break
         frame = frames[0]
-        if str(frame.type) == 'Wiring':
+        if frame.type == spt3g_core.G3FrameType.Observation:
+            if frame.get("stream_placement")=="end":
+                ended = True
+                break
+        if frame.type == spt3g_core.G3FrameType.Wiring:
             ## ignore dump frames, they lie (and are at the beginning of observations)
             if frame["dump"]:
                 continue
@@ -1465,6 +1469,7 @@ class SmurfStatus:
         self.status = status
         self.start = self.status.get("start")
         self.stop = self.status.get("stop")
+        self.stream_id = self.status.get("stream_id")
 
         self.aman = core.AxisManager()
 
@@ -1593,6 +1598,7 @@ class SmurfStatus:
                     break
                 frame = frames[0]
                 if str(frame.type) == "Wiring":
+                    status["stream_id"] = frame["sostream_id"]
                     if status.get("start") is None:
                         status["start"] = frame["time"].time / spt3g_core.G3Units.s
                         status["stop"] = frame["time"].time / spt3g_core.G3Units.s
@@ -1682,6 +1688,7 @@ class SmurfStatus:
         status = {
             "start": status_frames[0].time.timestamp(),
             "stop": status_frames[-1].time.timestamp(),
+            "stream_id": stream_id,
         }
         cur_file = None
         for frame_info in tqdm(status_frames, disable=(not show_pb)):
@@ -1865,7 +1872,10 @@ def _get_tuneset_channel_names(status, ch_map, archive):
     # tune file in status
     if status.tune is not None and len(status.tune) > 0:
         tune_file = status.tune.split("/")[-1]
-        tune = session.query(Tunes).filter(Tunes.name == tune_file).one_or_none()
+        tune = session.query(Tunes).filter(
+            Tunes.name == tune_file,
+            Tunes.stream_id == status.stream_id,
+        ).one_or_none()
         if tune is None:
             logger.warning(f"Tune file {tune_file} not found in G3tSmurf archive")
             return None
@@ -1875,7 +1885,8 @@ def _get_tuneset_channel_names(status, ch_map, archive):
     else:
         logger.info("Tune information not in SmurfStatus, using most recent Tune")
         tune = session.query(Tunes).filter(
-            Tunes.start <= dt.datetime.utcfromtimestamp(status.start)
+            Tunes.start <= dt.datetime.utcfromtimestamp(status.start),
+            Tunes.stream_id == status.stream_id,
         )
         tune = tune.order_by(db.desc(Tunes.start)).first()
         if tune is None:
@@ -2146,6 +2157,7 @@ def load_file(
     channels=None,
     samples=None,
     ignore_missing=True,
+    no_signal=False,
     load_biases=True,
     load_primary=True,
     status=None,
@@ -2171,6 +2183,8 @@ def load_file(
           being loaded from the list.
       ignore_missing : bool
           If true, will not raise errors if a requested channel is not found
+      no_signal : bool
+          If true, will not load the detector signal from files  
       load_biases : bool
           If true, will load the bias lines for each detector
       load_primary : bool
@@ -2282,9 +2296,14 @@ def load_file(
             start = max(0, sample_start - file_start)
             flist.append((filename, start, stop))
 
-    subreq = [
-        io_load.FieldGroup("data", ch_info.rchannel, timestamp_field="time"),
-    ]
+    if no_signal:
+        subreq = [
+            io_load.FieldGroup("data", [], timestamp_field="time")    
+        ]
+    else:
+        subreq = [
+            io_load.FieldGroup("data", ch_info.rchannel, timestamp_field="time")        
+        ]
     if load_primary:
         subreq.extend(
             [io_load.FieldGroup("primary", [io_load.Field("*", wildcard=True)])]
@@ -2346,18 +2365,19 @@ def load_file(
         iir_params.wrap("b", status.filter_b)
         iir_params.wrap("fscale", 1/status.flux_ramp_rate_hz)
         aman.wrap("iir_params", iir_params)
+    
+    if not no_signal:
+        aman.wrap(
+            "signal", 
+            np.zeros((aman[det_axis].count, aman["samps"].count), "float32"), 
+                     [(0, det_axis), (1, "samps")]
+        )
+        for idx in range(aman[det_axis].count):
+            io_load.hstack_into(aman.signal[idx], streams["data"][ch_info.rchannel[idx]])
 
-    # Conversion from DAC counts to squid phase
-    aman.wrap(
-        "signal", 
-        np.zeros((aman[det_axis].count, aman["samps"].count), "float32"), 
-                 [(0, det_axis), (1, "samps")]
-    )
-    for idx in range(aman[det_axis].count):
-        io_load.hstack_into(aman.signal[idx], streams["data"][ch_info.rchannel[idx]])
-
-    rad_per_count = np.pi / 2 ** 15
-    aman.signal *= rad_per_count
+        # Conversion from DAC counts to squid phase
+        rad_per_count = np.pi / 2 ** 15
+        aman.signal *= rad_per_count
     
     temp = core.AxisManager(aman.samps.copy())
     if load_primary:
@@ -2386,7 +2406,14 @@ def load_file(
     return aman
 
 
-def load_g3tsmurf_obs(db, obs_id, dets=None, samples=None, **kwargs):
+def load_g3tsmurf_obs(
+    db, 
+    obs_id, 
+    dets=None, 
+    samples=None, 
+    no_signal=None,
+    **kwargs
+    ):
     """Obsloader function for g3tsmurf data archives.
 
     See API template, `sotodlib.core.context.obsloader_template`, for
@@ -2401,7 +2428,16 @@ def load_g3tsmurf_obs(db, obs_id, dets=None, samples=None, **kwargs):
         "select name from files " "where obs_id=?" + "order by start", (obs_id,)
     )
     flist = [row[0] for row in c]
-    return load_file(flist, dets, samples=samples, obsfiledb=db, merge_det_info=False)
+    if no_signal is None:
+        no_signal=False
+    return load_file(
+        flist, 
+        dets, 
+        samples=samples, 
+        obsfiledb=db, 
+        no_signal=no_signal,
+        merge_det_info=False
+    )
 
 
 core.OBSLOADER_REGISTRY["g3tsmurf"] = load_g3tsmurf_obs
