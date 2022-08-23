@@ -385,12 +385,12 @@ following:
   See examples in :ref:`metadata-indexes`.
 - The entries in the Archive do not need to be per-detector.  You can
   specify results for a whole group of detectors, if that group is
-  enumerated in the DetDb.  For example, if DetDb contains a column
-  ``band``, the dataset could contain columns ``dets:band`` and
-  ``cal`` and simply report one calibration number for each frequency
-  band.  (On load, the Context Metadata system will automatically
-  broadcast the ``cal`` number so that it has shape ``(n_dets,)`` in
-  the fully populated AxisManager.)
+  enumerated in the DetDb (or added to det_info using other metadata).
+  For example, if DetDb contains a column ``band``, the dataset could
+  contain columns ``dets:band`` and ``cal`` and simply report one
+  calibration number for each frequency band.  (On load, the Context
+  Metadata system will automatically broadcast the ``cal`` number so
+  that it has shape ``(n_dets,)`` in the fully populated AxisManager.)
 - You can store all the results (i.e., results for multiple
   ``obs_id``) in a single HDF5 dataset.  This is not usually a good
   idea if your results are per-detector, per-observation... the
@@ -600,6 +600,7 @@ Please see the class documentation for :class:`ManifestDb` and
 :class:`ManifestScheme`.  The remainder of this section demonstrates
 some basic usage patterns.
 
+
 Examples
 --------
 
@@ -629,7 +630,44 @@ rows, and write the database (including the scheme) to disk::
                filename='test2.h5')
   db.to_file('timeconst.gz')
 
-Example 2: Timestamp
+
+Example 2: Inspecting and modifying the index
+`````````````````````````````````````````````
+
+Starting from the previous example, suppose we were updating the Index
+in a cronjob and needed to first check whether we had already entered
+some entry.  We can use :func:`ManifestDb.inspect` to retrieve
+records, matching on *any* fields (they don't have to be index
+fields).  Here's a quick set of examples::
+
+  # Do we have any items in the file called "test2.h5"?
+  entries = db.inspect({'filename': 'test2.h5'})
+  if len(entries) > 0:
+    # yes, we do ...
+
+  # Have we already added the item for obs_id='obs123787'?
+  entries = db.inspect({'obs:obs_id': 'obs123787'})
+  if len(entries) == 0:
+    # no, so add it ...
+
+Entries retrieved using inspect are dicts and contain an '_id' element
+that allows you to modify or delte those records from the Index, using
+:func:`ManifestDb.update_entry` and :func:`ManifestDb.remove_entry`.
+For example::
+
+  # Delete all entries that refer to test2.h5.
+  for entry in db.inspect({'filename': 'test2.h5'}):
+    db.remove_entry(entry)
+
+  # Change the spelling of 'timeconst' in the 'dataset' field of all records.
+  for entry in db.inspect({}):
+    entry['dataset'] = entry['dataset'].replace('timeconst', 'TimECOnSt')
+    # currently it's not possible to change the filename, so don't mention it...
+    del entry['filename']
+    db.update_entry(entry)
+
+
+Example 3: Timestamp
 ````````````````````
 
 Another common use case is to map to a result based on an
@@ -655,7 +693,7 @@ In the this case, when we add entries to the ManifestDb, we pass a
 tuple of timestamps (lower inclusive limit, higher non-inclusive
 limit) for the key ``obs:timestamp``.
 
-Example 3: Other observation selectors
+Example 4: Other observation selectors
 ``````````````````````````````````````
 
 Other fields from ObsDb can be used to build the Metadata Index.
