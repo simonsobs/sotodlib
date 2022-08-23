@@ -1,5 +1,6 @@
 import datetime
 import logging
+import re
 import time
 
 import numpy as np
@@ -134,7 +135,7 @@ def get_scan_P(tod, planet, refq=None, res=None, size=None, **kw):
     Returns a Projection Matrix and the output from get_scan_q.
 
     """
-    logger.debug('get_scan_P: init for {planet}')
+    logger.debug(f'get_scan_P: init for {planet}')
 
     if res is None:
         res = 0.01 * coords.DEG
@@ -212,20 +213,17 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         signal -= signal_pca
 
     else:
+        # Make sure PCA decomposition targets (signal_pca) are mean 0.
+        # It's convenient to remove the same levels from signal now,
+        # too.
         levels = signal_pca.mean(axis=1)
+        signal_pca -= levels[:,None]
         signal -= levels[:,None]
-        signal_pca -= level[:,None]
 
-        # Clean the means, get PCA model, restore means.
-        #signal -= levels[:,None]
+        # Get PCA model and discard the source vectors.
         pca = tod_ops.pca.get_pca_model(tod, signal=signal_pca, n_modes=n_modes)
-        #signal += levels[:,None]
-
-        # Swap original data back into the TOD, remove means.
-        #gaps.swap(tod, signal=signal)
-        #signal -= levels[:,None]
-
         del signal_pca
+
         # Remove the PCA model.
         tod_ops.pca.add_model(tod, pca, -1, signal=signal)
 
@@ -234,14 +232,16 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
     return signal
 
 def get_source_pos(source_name, timestamp, site='_default'):
-    """Get the equatorial coordinates of a planet at some time.  Returns
-    the apparent position, accounting for geographical position on
-    earth, but assuming no atmospheric refraction.
+    """Get the equatorial coordinates of a planet (or fixed-position
+    source, see note) at some time.  Returns the apparent position,
+    accounting for geographical position on earth, but assuming no
+    atmospheric refraction.
 
     Note that this will download a 16M ephemeris file on first use.
 
     Args:
-      source_name: Planet name; in capitalized format, e.g. "Jupiter"
+      source_name: Planet name; in capitalized format, e.g. "Jupiter",
+        or fixed source specification.
       timestamp: unix timestamp.
       site (str or so3g.proj.EarthlySite): if this is a string, the
         site will be looked up in so3g.proj.SITES dict.
@@ -251,7 +251,21 @@ def get_source_pos(source_name, timestamp, site='_default'):
       dec (float): in radians.
       distance (float): in AU.
 
+    Note:
+
+      Before checking in the ephemeris, the source_name will be
+      matched against a regular expression and if it has the format
+      'Jxxx[+-]yyy', where xxx and yyy are decimal numbers, then a
+      fixed-position source at RA,Dec = xxx,yyy in degrees will be
+      processed.  In that case, the distance is returned as Inf.
+
     """
+    # Check against fixed-position template...
+    m = re.match(r'J(?P<ra_deg>\d+(\.\d*)?)(?P<dec_deg>[+-]\d+(\.\d*)?)', source_name)
+    if m:
+        ra, dec = float(m['ra_deg']) * coords.DEG, float(m['dec_deg']) * coords.DEG
+        return ra, dec, float('inf')
+
     # Get the ephemeris -- this will trigger a 16M download on first use.
     de_url = RESOURCE_URLS['de421.bsp']
     de_filename = au_data.download_file(de_url, cache=True)
@@ -354,7 +368,7 @@ def get_nearby_sources(tod=None, source_list=None, distance=1.):
     return positions
 
 def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
-                         center_on=None, res=None):
+                         center_on=None, res=None, max_pix=4e6):
     """Process masking instructions and create RangesMatrix that flags
     samples in the TOD that are within the masked region.  This
     masking makes use of a map with the footprint encoded in P, so
@@ -370,6 +384,12 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
         using center_on and res parameters.
       mask: source masking instructions (see note).
       wrap: key in tod at which to store the result.
+      res: If P is None, sets the target mask map resolution
+        (radians).
+      max_pix: If P is None, this sets the maximum acceptable number
+        of pixels for the mask map.  This is to catch cases where an
+        incorrect source has been passed in, for example, leading to a
+        weird map footprint
 
     Returns:
       RangesMatrix marking the samples inside the masked region.
@@ -388,6 +408,8 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
     if P is None:
         logger.info('Getting Projection Matrix ...')
         P, X = get_scan_P(tod, center_on, res=res, comps='T')
+        if P.geom[0][0] * P.geom[0][1] > max_pix:
+            raise ValueError(f'Mask map too large: {P.geom}')
 
     if isinstance(mask, str):
         # Assume it's a filename, and file is simple columns of (x, y,
@@ -412,7 +434,8 @@ def _add_to_mask(req, mask_map):
         raise ValueError(f'Requested mask is None.  For no mask, pass [].')
     if isinstance(req, (list, tuple)):
         for _r in req:
-            _generate_mask(_r, mask_map)
+            # Also, maybe test this somehow?
+            _add_to_mask(_r, mask_map)
     elif isinstance(req, dict):
         shape = req.get('shape', 'circle')
         if shape == 'circle':
@@ -424,6 +447,73 @@ def _add_to_mask(req, mask_map):
             raise ValueError(f'Unknown shape="{shape}" in mask request.')
     else:
         raise ValueError(f'Weird mask request: {req}')
+
+def load_detector_splits(tod=None, filename=None, dataset=None,
+                         source=None, wrap=None):
+    """Convert a partition of detectors into a dict of disjoint
+    RangesMatrix objects; such an object can be passed to make_map()
+    to efficiently make detector-split maps.
+
+    The "detector split" data can be read from an HDF5 dataset, or
+    passed in directly as an AxisManager.
+
+    Args:
+      tod (AxisManager): This is required, to get the list of dets and
+        the samps count.
+      filename (str): The HDF filename, or filename:dataset.
+      dataset (str): The HDF dataset (if not passed in with filename).
+      source (array, ResultSet or AxisManager): If not None, then
+        filename and dataset are ignored and this object is processed
+        (as though it had just been loaded from HDF).
+      wrap (str): If not None, the address in tod where to store the
+        loaded split data.
+
+    The format of detector splits, in an HDF5 dataset, is as one would
+    write from a ResultSet with columns ['dets:name', 'group'] (both
+    str).  All detectors sharing a value in the group column will
+    grouped together and the group label will be that value.
+
+    If passing in "source" directly as a ResultSet, it should have
+    columns 'dets:name' and 'group'; if as an AxisManager then it
+    should have a 'dets' axis and a vector 'group' with shape
+    ('dets',) providing the group name for each detector.  If it is a
+    numpy array, it is assumed to correspond one-to-one with the .dets
+    axis of TOD and the array gives the group name for each detector.
+
+    Returns:
+      data_splits (dict of RangesMatrix): Each entry of the dict is a
+        RangesMatrix that can be interpreted as cuts to apply during
+        mapmaking.  In this case the RangesMatrix will simply mark
+        each detector as either fully cut (flagged) or fully uncut.
+
+    """
+    from sotodlib.io import metadata
+
+    if source is None:
+        if dataset is None:
+            filename, dataset = filename.split(':')
+        source = metadata.read_dataset(filename, dataset)
+    if isinstance(source, np.ndarray):
+        source, _s = core.AxisManager(tod.dets), source
+        source.wrap('group', _s)
+    elif isinstance(source, metadata.ResultSet):
+        di = core.metadata.loader.unconvert_det_info(tod.det_info)
+        source = core.metadata.loader.broadcast_resultset(
+            source, di, axis_key='name')
+    else:
+        source = source.copy()  # is this an AxisManager?
+    source.restrict_axes([tod.dets])
+    if wrap:
+        tod.wrap(wrap, source)
+    yes = so3g.proj.RangesMatrix.zeros(tod.signal.shape[1])
+    flags = {}
+    for group in source['group']:
+        if group in flags:
+            continue
+        flags[group] = so3g.proj.RangesMatrix.ones((tod.signal.shape))
+        for i in (source['group']==group).nonzero()[0]:
+            flags[group].ranges[i] = yes
+    return flags
 
 def get_det_weights(tod, signal=None, wrap=None,
                     outlier_clip=None):
@@ -479,6 +569,7 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
              signal=None,
              det_weights=None,
              filename=None, source_flags=None, cuts=None,
+             data_splits=None,
              low_pass=None, n_modes=10,
              eigentol=1e-3, info={}):
     """Make a compact source map from the TOD.  Specify filename to write
@@ -530,6 +621,39 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
 
     if det_weights is None:
         det_weights = get_det_weights(tod, signal=signal, outlier_clip=2.)
+
+    if data_splits is not None:
+        # Clear P's internal cuts as we'll be modifying those to pass
+        # in directly.
+        base_cuts, P.cuts = P.cuts, None
+        output = {
+            'P': P,
+            'det_weights': det_weights,
+            'splits': {}
+        }
+
+        # Write out _map and _weights for each group.
+        for group_label, group_cuts in data_splits.items():
+            logger.info(f'Mapping split "{group_label}"')
+            if base_cuts is not None:
+                group_cuts = group_cuts + base_cuts
+            with MmTimer('getting weights'):
+                w = P.to_weights(cuts=group_cuts, det_weights=det_weights)
+            with MmTimer('getting map and applying inverse weights'):
+                m = P.remove_weights(
+                    tod=tod, signal=signal, weights_map=w, cuts=group_cuts,
+                    det_weights=det_weights, eigentol=eigentol)
+            output['splits'][group_label] = {
+                'binned': None,
+                'weights': w.astype('float32'),
+                'solved': m.astype('float32'),
+            }
+            if filename is not None:
+                m.astype('float32').write(
+                    filename.format(map=f'{group_label}_map', **info))
+                w.astype('float32').write(
+                    filename.format(map=f'{group_label}_weights', **info))
+        return output
 
     with MmTimer('project signal and weight maps'):
         map1 = P.to_map(tod, signal=signal, det_weights=det_weights)
