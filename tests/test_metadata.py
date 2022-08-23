@@ -44,7 +44,7 @@ class MetadataTest(unittest.TestCase):
             'a_bad_string': None,
             'a_bad_float': None,
             })
-        self.assertCountEqual(arx.dtype.names, ['another_string', 'another_float'])
+        self.assertEqual(list(arx.dtype.names), ['another_string', 'another_float'])
         self.assertEqual(arx['another_string'].dtype.char, 'U')
 
     def test_001_hdf(self):
@@ -74,7 +74,7 @@ class MetadataTest(unittest.TestCase):
                'obs:obs_id': test_obs_id,
                'dataset': 'timeconst_1ms'}
         data = loader.from_loadspec(req)
-        self.assertCountEqual(data['timeconst'], [TGOOD])
+        self.assertEqual(list(data['timeconst']), [TGOOD])
 
     def test_010_manifest_basics(self):
         """Test that you can create a ManifestScheme and ManifestDb and add
@@ -171,7 +171,15 @@ class MetadataTest(unittest.TestCase):
              'name': 'tau&timeconst'}
         ]
         mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00'}, detdb.props())
-        self.assertCountEqual(mtod['tau'], [T090, T090, T150, T150])
+        self.assertEqual(list(mtod['tau']), [T090, T090, T150, T150])
+
+        # Make sure that also plays well with det specs.
+        mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00', 'dets:band': 'f090'},
+                           detdb.props())
+        self.assertEqual(list(mtod['tau']), [T090, T090])
+        mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00', 'dets:band': 'f150'},
+                           detdb.props())
+        self.assertEqual(list(mtod['tau']), [T150, T150])
 
         # Test 2: ManifestDb specifies polcode, which crosses with
         # dataset band.
@@ -196,8 +204,15 @@ class MetadataTest(unittest.TestCase):
         # Make sure you reinit the loader, to avoid cached dbs.
         loader = metadata.SuperLoader(obsdb=obsdb, detdb=detdb)
         mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00'}, detdb.props())
-        self.assertCountEqual(mtod['tau'], [T090, TBAD, TBAD, T150])
+        self.assertEqual(list(mtod['tau']), [T090, TBAD, TBAD, T150])
 
+        # Make sure that also plays well with det specs.
+        mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00', 'dets:band': 'f090'},
+                           detdb.props())
+        self.assertEqual(list(mtod['tau']), [T090, TBAD])
+        mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00', 'dets:band': 'f150'},
+                           detdb.props())
+        self.assertEqual(list(mtod['tau']), [TBAD, T150])
 
 if __name__ == '__main__':
     unittest.main()
