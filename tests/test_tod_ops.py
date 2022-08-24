@@ -8,6 +8,7 @@
 import unittest
 import numpy as np
 import pylab as pl
+import scipy.signal
 
 from numpy.testing import assert_array_equal, assert_allclose
 
@@ -120,6 +121,14 @@ class FilterTest(unittest.TestCase):
         sigma0 = tod.signal.std(axis=1)
         f0 = SAMPLE_FREQ_HZ
         fc = f0 / 4
+
+        # A simple IIR filter
+        b, a = scipy.signal.butter(4, fc, fs=f0)
+        iir_params = core.AxisManager()
+        iir_params.wrap('a', a)
+        iir_params.wrap('b', b)
+        iir_params.wrap('fscale', 1)
+
         for filt in [
                 tod_ops.filters.high_pass_butter4(fc),
                 tod_ops.filters.high_pass_sine2(fc),
@@ -127,18 +136,56 @@ class FilterTest(unittest.TestCase):
                 tod_ops.filters.low_pass_sine2(fc),
                 tod_ops.filters.gaussian_filter(fc, f_sigma=f0 / 10),
                 tod_ops.filters.gaussian_filter(0, f_sigma=f0 / 10),
+                tod_ops.filters.iir_filter(iir_params=iir_params),
+                tod_ops.filters.iir_filter(
+                    a=iir_params.a, b=iir_params.b, fscale=iir_params.fscale),
+                tod_ops.filters.identity_filter(),
         ]:
             f = np.fft.fftfreq(tod.samps.count) * f0
             y = filt(f, tod)
             sig_filt = tod_ops.fourier_filter(tod, filt)
             sigma1 = sig_filt.std(axis=1)
-            self.assertTrue(np.all(sigma1 < sigma0))
             print(f'Filter takes sigma from {sigma0} to {sigma1}')
+            if not isinstance(filt, tod_ops.filters.identity_filter):
+                self.assertTrue(np.all(sigma1 < sigma0))
 
         # Check 1d
         sig1f = tod_ops.fourier_filter(tod, filt, signal_name='sig1d',
                                        detrend='linear')
         self.assertEqual(sig1f.shape, tod['sig1d'].shape)
+
+class JumpfindTest(unittest.TestCase):
+    def test_jumpfinder(self):
+        """Test that jumpfinder finds jumps in white noise."""
+        tod = get_tod('white')
+        sig_jumps = tod.signal[0]
+        jump_locs = np.array([200, 400, 700])
+        sig_jumps[jump_locs[0]:] += 5
+        sig_jumps[jump_locs[1]:] -= 10
+        sig_jumps[jump_locs[2]:] -= 5
+
+        tod.wrap('sig_jumps', sig_jumps, [(0, 'samps')])
+
+        # Find jumps with TV filtering
+        jumps_tv = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=2)
+        jumps_tv = jumps_tv.ranges().flatten()
+
+        # Find jumps with gaussian filtering
+        jumps_gauss = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps,
+                                       jumpfinder=tod_ops.jumps.jumpfinder_gaussian, min_size=2)
+        jumps_gauss = jumps_gauss.ranges().flatten()
+
+        # Remove double counted jumps and round to remove uncertainty
+        jumps_tv = np.unique(np.round(jumps_tv, -2))
+        jumps_gauss = np.unique(np.round(jumps_gauss, -2))
+
+        # Check that both methods agree
+        self.assertEqual(len(jumps_tv), len(jumps_gauss))
+        self.assertTrue(np.all(np.abs(jumps_tv - jumps_gauss) == 0))
+
+        # Check that they agree with the input
+        self.assertEqual(len(jump_locs), len(jumps_tv))
+        self.assertTrue(np.all(np.abs(jumps_tv - jump_locs) == 0))
 
 if __name__ == '__main__':
     unittest.main()

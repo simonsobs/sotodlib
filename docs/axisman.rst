@@ -72,14 +72,23 @@ hold other AxisManagers, and some other stuff too).
 
     dset = core.AxisManager().wrap('tod', tod)
 
+AxisManagers can also hold scalars, a value is considered scalar if
+``'np.isscalar'`` thinks it is a scalar or if it is ``'None'``.
+
+.. code-block:: python
+
+    dset = dset.wrap('scalar', 1.0)
+
 Inspecting::
 
     >>> print(dset)
-    AxisManager(tod[3,10000])
+    AxisManager(tod[3,10000], scalar)
     >>> print(dset.tod)
     [[10. 10. 10. ... 10. 10. 10.]
      [11. 11. 11. ... 11. 11. 11.]
      [12. 12. 12. ... 12. 12. 12.]]
+    >>> print(dset.scalar)
+    1.0
 
 
 The value that AxisManager adds is an ability to relate an axis in one
@@ -153,6 +162,70 @@ objects::
     >>> print(dset.boresight.az.shape)
     (290,)
 
+For debugging, you can write AxisManagers to HDF5 files and then read
+them back.  (This is an experimental feature so don't rely on this for
+long term stability!)::
+
+    >>> dset.save('output.h5', 'my_axismanager/dset')
+
+    >>> dset_reloaded = AxisManager.load('output.h5', 'my_axismanager/dset')
+    >>> dset_reloaded
+    AxisManager(tod[dets,samps], hwp_angle[samps], boresight*[samps],
+      dets:LabelAxis(2), samps:IndexAxis(290))
+
+Numerical arrays are stored as simple HDF5 datasets, so you can also
+use h5py to load the saved arrays::
+
+    >>> import h5py
+    >>> f = h5py.File('output.h5')
+    >>> f['my_axismanager/dset/tod'][:]
+    <HDF5 dataset "tod": shape (2,290), type "<f8">
+
+
+--------------------
+Standardized Fields
+--------------------
+
+As we develop the SO pipeline we will need to standardize field names that have
+specific uses within the pipeline so that functions can be written to expect a
+specific set of fields. Not all AxisManagers will have all these fields by
+default and many fields are linked to documentation locations where more details
+can be found. These are meant to prevent naming collisions and more will be 
+added here as the code develops. 
+
+* ``dets`` - the axis for detectors  
+* ``samps`` - the axis for samples
+* ``timestamps`` `[samps]` - the field for UTC timestamps 
+* ``signal`` `[dets, samps]` - the field for detector signal
+* | ``obs_info`` - AxisManager of scalars with ObsDb information for the loaded 
+  | observation. :ref:`Details here. <obsdb-names-section>`
+* ``det_info`` `[dets]` - AxisManager containing loaded detector metadata
+
+  * ``readout_id`` - The unique readout ID of the resonator
+  * ``det_id`` - The unique detector ID matched to the resonator.
+  * | ``wafer`` - An AxisManager of different parameters related to the hardware
+    | mapping on the UFM itself. Loaded based on ``det_id`` field in the
+    | ``det_info``.
+
+SMuRF fields loaded through :meth:`sotodlib.io.load_file`.
+
+* ``bias_lines`` - the axis for bias lines in a UFM.
+* | ``status`` - A SmurfStatus AxisManager containing information from status
+  | frames in the .g3 timestreams. :class:`sotodlib.io.load_smurf.SmurfStatus`
+* | ``iir_params`` - An AxisManager with the readout filter parameters. Used by
+  | :meth:`sotodlib.tod_ops.filters.iir_filter`.
+* | ``primary`` `[samps]` - An AxisManager with SMuRF readout information that is
+  | synced with the timestreams.
+* ``biases`` `[bias_lines, samps]` - Bias voltage applied to TESes over time.
+
+Pointing information required for :mod:`sotodlib.coords`.
+
+* | ``boresight`` `[samps]` - AxisManager with boresight pointing in horizon
+  | coordinates. Child fields are ``az``, ``el``, and ``roll``.
+* | ``focal_plane`` `[dets]` - AxisManager with detector position and orientation
+  | relative to boresight pointing.
+* | ``boresight_equ`` `[samps]` - AxisManager with boresight in equitorial
+  |  coordinates.
 
 ---------
 Reference

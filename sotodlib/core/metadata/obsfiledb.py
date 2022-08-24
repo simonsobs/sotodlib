@@ -4,7 +4,7 @@ from collections import OrderedDict
 import numpy as np
 
 from . import common
-
+from .resultset import ResultSet
 
 TABLE_DEFS = {
     'detsets': [
@@ -54,8 +54,9 @@ class ObsFileDb:
     #: The sqlite3 database connection.
     conn = None
 
-    #: The filename prefix to apply to all filename results returned
-    #: from this database.
+    #: Path relative to which filenames in the database should be
+    #: interpreted.  This only applies to relative filenames (those not
+    #: starting with /).
     prefix = ''
 
     def __init__(self, map_file=None, prefix=None, init_db=True, readonly=False):
@@ -232,6 +233,17 @@ class ObsFileDb:
         c = self.conn.execute('select det from detsets where name=?', (detset,))
         return [r[0] for r in c]
 
+    def get_det_table(self, obs_id):
+        """Get table of detectors and detsets suitable for use with Context
+        det_info.  Returns Resultset with keys=['dets:detset','dets:readout_id'].
+
+        """
+        c = self.conn.execute(
+            'select detsets.name as `dets:detset`, det as `dets:readout_id`'
+            'from detsets join files '
+            'on files.detset=detsets.name where obs_id=?', (obs_id, ))
+        return ResultSet.from_cursor(c)
+
     def get_files(self, obs_id, detsets=None, prefix=None):
         """Get the file names associated with a particular obs_id and detsets.
 
@@ -260,7 +272,70 @@ class ObsFileDb:
             output[r[0]].append((os.path.join(prefix, r[1]), r[2], r[3]))
         return output
 
+    def lookup_file(self, filename, resolve_paths=True, prefix=None, fail_ok=False):
+        """Determine what, if any, obs_id (and detset and sample range) is
+        associated with the specified data file.
+
+        Args:
+          filename (str): a string corresponding to a file that is
+            covered by this db.  See note on how this is resolved.
+          resolve_paths (bool): If True, then the incoming filename is
+            treated as a path to a specific file on disk, and the
+            database is queried for files that also resolve to that
+            are equivalent to that same file on disk (accounting for
+            prefix).  If False, then the incoming filename is taken as
+            opaque text to match against the corresponding entries in
+            the obsfiledb file "name" column (including whatever path
+            information is in either of those strings).
+          fail_ok (bool): If True, then None is returned if the
+            filename is not found in the db (instead of raising
+            RuntimeError).
+
+        Returns:
+          A dict with entries:
+          - ``obs_id``: The obs_id
+          - ``detsets``: A list containing the name of the single detset
+            covered by this file.
+          - ``sample_range``: A tuple with the start and stop sample
+            indices for this file.
+
+        """
+        if prefix is None:
+            prefix = self.prefix
+
+        if resolve_paths:
+            # Clarify our target ...
+            filename = os.path.realpath(filename)
+            basename = os.path.split(filename)[1]
+            # Do a non-conclusive match against the basename ...
+            c = self.conn.execute(
+                'select name, obs_id, detset, sample_start, sample_stop '
+                'from files where name like ?', ('%' + basename, ))
+            rows = c.fetchall()
+            # Keep only the rows that are definitely our target file.
+            rows = [r for r in rows
+                    if os.path.realpath(os.path.join(prefix, r[0])) == filename]
+        else:
+            # Do literal exact matching of filename to database.
+            c = self.conn.execute(
+                'select name, obs_id, detset, sample_start, sample_stop '
+                'from files where name=?', (filename, ))
+            rows = c.fetchall()
+
+        if len(rows) == 0:
+            if fail_ok:
+                return None
+            raise RuntimeError('No match found for "%s"' % filename)
+        if len(rows) > 1:
+            raise RuntimeError('Multiple matches found for "%s"' % filename)
+        _, obs_id, detset, start, stop = tuple(rows[0])
+
+        return {'obs_id': obs_id,
+                'detsets': [detset],
+                'sample_range': (start, stop)}
+
     def verify(self, prefix=None):
+
         """Check the filesystem for the presence of files described in the
         database.  Returns a dictionary containing this information in
         various forms; see code for details.

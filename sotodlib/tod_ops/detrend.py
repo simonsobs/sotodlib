@@ -7,12 +7,14 @@ def detrend_data(tod, method='linear', axis_name='samps',
         into the axis manager. Generally intended for use before filter.
         Using this with method ='mean' and axis_name='dets' will remove a 
         common mode from the detectors
+        Using this with method ='median' and axis_name='dets' will remove a 
+        common mode from the detectors with the median rather than the mean
     
     Arguments:
     
         tod: axis manager
     
-        method: method of detrending can be 'linear' or 'mean'
+        method: method of detrending can be 'linear', 'mean', or median
         
         axis_name: the axis along which to detrend. default is 'samps'
         
@@ -30,6 +32,8 @@ def detrend_data(tod, method='linear', axis_name='samps',
 
     """
     signal = tod[signal_name]
+    dtype_in = signal.dtype
+
     axis_idx = list(tod._assignments[signal_name]).index(axis_name)
     n_samps = signal.shape[axis_idx]
     
@@ -42,6 +46,8 @@ def detrend_data(tod, method='linear', axis_name='samps',
         
     if method == 'mean':
         signal = signal - np.mean(signal, axis=-1)[...,None]
+    elif method == 'median':
+        signal = signal - np.median(signal, axis=-1)[...,None]
     elif method == 'linear':
         x = np.linspace(0, 1, n_samps)
         count = max(1, min(count, signal.shape[-1] // 2))
@@ -49,11 +55,11 @@ def detrend_data(tod, method='linear', axis_name='samps',
         signal = signal - slopes[...,None] * x
         signal -= np.mean(signal, axis=-1)[...,None]
     else:
-        raise ValueError("method flag must be linear or mean")
+        raise ValueError("method flag must be linear, mean, or median")
 
     if axis_idx != signal.ndim - 1:
         signal = signal.transpose(tuple(axis_reorder))
-    return signal
+    return signal.astype(dtype_in)
 
 def detrend_tod(tod, method='linear', signal_name='signal', axis_name='samps', count=10, out_name=None):
     """simple wrapper: to be more verbose"""
