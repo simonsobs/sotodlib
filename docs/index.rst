@@ -24,6 +24,7 @@ Welcome to SOTODLib's documentation!
    site_pipeline.rst
    reference.rst
    dev.rst
+   calibration.rst
 
 Indices and tables
 ==================
