@@ -20,6 +20,7 @@ Welcome to SOTODLib's documentation!
    coords.rst
    reference.rst
    dev.rst
+   calibration.rst
 
 
 Indices and tables
