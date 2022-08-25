@@ -1,9 +1,11 @@
 import os
+import sys
 import numpy as np
 import scipy.interpolate
 import so3g
 from spt3g import core
 import argparse
+from tqdm import tqdm
 
 class update_hwp_angle(): 
     
@@ -119,7 +121,7 @@ class update_hwp_angle():
 
         return data     
     
-    def analyze(self, data, ratio=0.1, irig_type=0, fast=True):
+    def analyze(self, data, ratio=0.25, irig_type=0, fast=True):
         
         """
         Analyze HWP angle solution
@@ -185,14 +187,17 @@ class update_hwp_angle():
     
             # hwp speed calc. (approximate using ref)
             hwp_rate_ref = 1/np.diff(fast_time[self._ref_indexes])
-            hwp_rate = np.zeros(self._ref_indexes[1])
-            for r in range(len(self._ref_indexes))[1:-1]: 
-                hwp_rate = np.concatenate([hwp_rate,np.full(np.diff(self._ref_indexes)[r],hwp_rate_ref[r])])
-            hwp_rate = np.concatenate([hwp_rate,np.full(len(fast_time)-self._ref_indexes[-1],0)])
+            hwp_rate = [0 for i in range(self._ref_indexes[0])]
+            for n in range(len(np.diff(self._ref_indexes))):
+                hwp_rate += [hwp_rate_ref[n] for r in range(np.diff(self._ref_indexes)[n])]
+            hwp_rate += [0 for i in range(len(fast_time)-self._ref_indexes[-1])]
         else: 
             fast_time = []
             angle = []
             hwp_rate = []
+        fast_time = np.array(fast_time)
+        angle = np.array(angle)
+        hwp_rate = np.array(hwp_rate)
            
         # Slow block
         # - Time definition -
@@ -340,12 +345,15 @@ class update_hwp_angle():
         if self._debug: print('INFO: hwp angle calculation is finished.')
         return self._time, self._angle
 
+    
+
     def _find_refs(self, dev):
 
         """ Find reference slits """
         self._ref_indexes = []
         # Calculate spacing between all clock values
-        diff = np.ediff1d(self._encd_clk, to_begin=0)
+        diff = np.ediff1d(self._encd_clk, to_begin=0)#[1:]
+
         split = int(len(diff)/self._num_edges)
         diff_split = np.array_split(diff,split)
         offset = 0
@@ -375,6 +383,9 @@ class update_hwp_angle():
         # Store the count and clock values of the reference lines
         
         self._ref_indexes = np.array(self._ref_indexes)
+        if len(self._ref_indexes) == 0: 
+            print('WARNING: can not find reference points, please adjust ratio parameter!')
+            sys.exit(1)
         self._ref_clk = np.take(self._encd_clk, self._ref_indexes)
         self._ref_cnt = np.take(self._encd_cnt, self._ref_indexes)
         if self._debug: print('INFO: found {} reference points'.format(len(self._ref_indexes)))
@@ -466,15 +477,15 @@ class update_hwp_angle():
     def _encoder_packet_sort(self):
         cnt_diff = np.diff(self._encd_cnt)
         if np.any(cnt_diff != 1):
-            if self._debug: print('WARNING: counter is not correct')
+            if self._debug: print('WARNING: a part of the counter is incorrect, performing the correction process... ')
             if np.any(cnt_diff < 0): 
-                if self._debug: print('WARNING: counter is not incremental') 
-                if 1-self._pkt_size in cnt_diff: print('packet flip is found')
+                if 1-self._pkt_size in cnt_diff: 
+                    if self._debug: print('WARNING: Packet flip found, sorting process performed... ')
                 idx = np.argsort(self._encd_cnt)
                 self._encd_clk = self._encd_clk[idx]
             else:
                 if self._debug:
-                    print('WARNING: maybe packet drop exists')
+                    print('WARNING: maybe packet drop exists ...')
         else: 
             if self._debug:
                 print('INFO: no need to fix encoder index')

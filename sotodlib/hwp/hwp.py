@@ -64,7 +64,35 @@ def sim_hwpss(aman, hwp_freq=2., band=0, loading=10., inc_ang=5.):
         amp_rnd = np.random.normal(loc=amp[n], scale=amp_r[n], size=(aman.dets.count,))
         phase_rnd = np.mod(np.random.normal(loc=phi[n], scale=phi_r[n],size=(aman.dets.count,)), 2*np.pi)
         aman.hwpss += amp_rnd[:,None]*np.cos(n*aman.hwp_angle + phase_rnd[:,None])
-                                                 
+
+def sim_hwpss_2f4f(aman, hwp_freq=2., band=0, amp_2f=300, amp_4f=30, phi_2f=0, phi_4f=0):
+    """ 
+    ** HWPSS simulation function **
+    - 2f and 4f amp and phase are from I_to_P_param
+    Args ---
+    aman: AxisManager
+    hwp_freq: 2 [Hz]
+    band: MF1=0, MF2=1
+    loading: intensity [Kcmb]
+    inc_ang: incident angle [deg]
+    Return ---
+    Adding aman.hwpss
+    """
+    if 'hwpss' in aman.keys(): aman.move('hwpss','')
+    aman.wrap_new( 'hwpss', ('dets', 'samps'))
+    hwp_angle = np.mod(2*np.pi * aman.timestamps * hwp_freq, 2*np.pi)
+    if not 'hwp_angle' in aman.keys(): aman.wrap('hwp_angle', hwp_angle, [(0,'samps')])
+    else: aman.hwp_angle = hwp_angle
+    amp = [0, 0, amp_2f, 0, amp_4f]
+    amp_r = [1, 5, amp_2f*0.05, 1, amp_4f*0.05]
+    phi = [0, 0, phi_2f, 0, phi_4f]
+    phi_r = [0, np.deg2rad(1), phi_2f*0.1, np.deg2rad(1), phi_4f*0.1]
+    nf = len(amp)
+    for n in [2,4]:
+        amp_rnd = np.random.normal(loc=amp[n], scale=amp_r[n], size=(aman.dets.count,))
+        phase_rnd = np.mod(np.random.normal(loc=phi[n], scale=phi_r[n],size=(aman.dets.count,)), 2*np.pi)
+        aman.hwpss += amp_rnd[:,None]*np.cos(n*aman.hwp_angle + phase_rnd[:,None])
+
 def func_hwpss_2f4f(x,A2,A4,phi2,phi4):
     return A2*np.cos(2*x+phi2) + A4*np.cos(4*x+phi4)
     
