@@ -119,7 +119,7 @@ AxisManagers loaded with G3tSmurf will all have the form::
             'TESRelaySetting', 'UnixTime'
         biases (optional): (bias_lines, samps)
             Bias values during the data
-        ch_info : AxisManager (dets,)
+        det_info : AxisManager (dets,)
             Information about channels, including SMuRF band, channel,
              frequency.
 
@@ -188,74 +188,34 @@ the "_" will be assumed to be in the same observation/streaming session. The
 metadata searches are done through the action folders and their produced
 timestreams.
 
-    
-Database Creation
-==================
 
-To build a database from scratch, we create a G3tSmurf instance using a database
-path that does not already exist, index the timestream folder, and then index 
-the metadata folder::
+.. _g3tsmurf-update-section:
 
-    SMURF = G3tSmurf(archive_path='/path/to/data/timestreams/',
-                     meta_path='/path/to/data/smurf/,
-                     db_path='/path/to/database.db')
-
-    SMURF.index_archive()
-    SMURF.index_metadata()
-
-There are options for inputting a minimum ctime if desired.
-
-
-
-G3tSmurf Update Script
-======================
+Database Creation and Update Script
+====================================
 
 Keeping the databases updated requires a little care when we are building
 databases while data is actively being taken. To assist with this there is
-an **update_g3tsmurf_database.py** script saved within the **pipelines** folder.
-This
-script takes the *data_prefix* which is the path to the main save folders and
-expects to find the *timestreams* and *smurf* folders at that path. The
-*db_path* is the path to the database to be created or updated. The user running
-this script must have read, write, and execute permissions to that file.
+an **update_g3tsmurf_database.py** script saved within the
+**sotodlib.site_pipeline** folder. This script takes the *data_prefix* which is 
+the path to the main save folders and expects to find the *timestreams* and
+*smurf* folders at that path. The *db_path* is the path to the database to be
+created or updated. The user running this script must have read, write, and 
+execute permissions to that file.
 
-Here is the help for this script:: 
+Here is the information for this script:
 
-    prompt>> python3 update_g3tsmurf_database.py --help
+.. argparse::
+    :module: sotodlib.site_pipeline.update_g3tsmurf_database
+    :func: get_parser
 
-    usage: update_g3tsmurf_database.py [-h]
-                                   [--timestream-folder TIMESTREAM_FOLDER]
-                                   [--smurf-folder SMURF_FOLDER]
-                                   [--detdb-filename DETDB_FILENAME]
-                                   [--update-delay UPDATE_DELAY]
-                                   [--from-scratch]
-                                   data_prefix db_path
-    
-    positional arguments:
-    data_prefix           The prefix to data locations, use individual locations
-                          flags if data is stored in non-standard folders
-    db_path               Path to Database to update
-    
-    optional arguments:
-    -h, --help           show this help message and exit
-    --timestream-folder TIMESTREAM_FOLDER
-                         Absolute path to folder with .g3 timestreams.
-                         Overrides data_prefix
-    --smurf-folder SMURF_FOLDER
-                         Absolute path to folder with pysmurf archived data.
-                         Overrides data_prefix
-    --detdb-filename DETDB_FILENAME
-                         File for dumping the context detector database
-    --update-delay UPDATE_DELAY
-                         Days to subtract from now to set as minimum ctime
-    --from-scratch       Builds or updates database from scratch
-    
+Utilities with G3tSmurf
+------------------------
 
-Building off G3tSmurf
-=====================
-
+File System Searches
+====================
 Several of the generators used in the database indexing could be useful for
-building calibration databases off the same file set.
+building search functions off the same file set.
 **G3tSmurf.search_metadata_actions** and **G3tSmurf.search_metadata_files** are
 generators which can be used in loops to easily page through either actions or
 files. For Example::
@@ -274,8 +234,35 @@ files. For Example::
     
         return os.path.join(base_dir, 'outputs',info)
 
+ 
+Batched load of Observations
+============================
+
+Loading long large observations into memory at once can cause issues with memory
+usage, especially on smaller computing facilities. This function is a generator
+than can be called to automatically split observations into smaller sections.
+
+.. automodule:: sotodlib.io.g3tsmurf_utils
+    :special-members: get_batch
+    :noindex:
+
+Observation Files
+==================
+
+There are many instances where we might want to load the SMuRF metadata
+associated with actions that have made it into the database. These function take
+an obs_id and a G3tSmurf instance and return paths or file lists. 
+
+.. automodule:: sotodlib.io.g3tsmurf_utils
+    :special-members: get_obs_folder, get_obs_outputs, get_obs_plots
+    :noindex:
+
 Usage with Context
 ------------------
+
+.. py:module:: sotodlib.io.load_smurf
+    :noindex:
+
 The G3tSmurf database can now be used with the larger `sotodlib` Context system.
 In this setup, the main G3tSmurf database is both the ObsFileDb and the ObsDb.
 The DetDb needs to be created using the `dump_DetDb(SMURF, detdb_file)`. This

@@ -5,6 +5,7 @@ import shutil
 
 import numpy as np
 from sotodlib import core
+import sotodlib.core.axisman_util as amutil
 import so3g
 
 ## "temporary" fix to deal with scipy>1.8 changing the sparse setup
@@ -414,6 +415,35 @@ class TestUtil(unittest.TestCase):
         the_answer = np.array([x.index(_y) if _y in x else -1
                                for _y in y])
         self.assertEqual(list(ix), list(the_answer))
+
+
+class TestAxisManagerUtil(unittest.TestCase):
+    def test_restrict_times(self):
+        am = core.AxisManager()
+        nsamps = 100
+        am.wrap('timestamps', np.arange(nsamps),
+                [(0, core.OffsetAxis('samps', nsamps))])
+        am2 = amutil.restrict_to_times(am, 10, 20)
+        self.assertEqual(len(am2.timestamps),10)
+
+    def test_restrict_times_raises(self):
+        am = core.AxisManager()
+        nsamps = 100
+        am.wrap('timestamps', np.arange(nsamps),
+                [(0, core.OffsetAxis('samps', nsamps))])
+        with self.assertRaises(amutil.RestrictionException):
+            amutil.restrict_to_times(am, 200, 300)
+
+    def test_dict_to_am(self):
+        d = {
+            'hi': 10,
+            'nested': {
+                'abcd': np.array([0, 1]),
+                'test': 'answer',
+            }
+        }
+        am = amutil.dict_to_am(d)
+        self.assertEqual(am.nested.test, 'answer')
 
 
 if __name__ == '__main__':
