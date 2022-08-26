@@ -1292,7 +1292,8 @@ tags=True::
 So here we see that the observation is associated with tags
 ``'hwp_fast'`` and ``'cryo_problem'``.
 
-  
+.. _obsdb-names-section:
+ 
 Standardized ObsDb field names
 ==============================
 

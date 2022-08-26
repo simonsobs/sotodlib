@@ -182,6 +182,51 @@ use h5py to load the saved arrays::
     <HDF5 dataset "tod": shape (2,290), type "<f8">
 
 
+--------------------
+Standardized Fields
+--------------------
+
+As we develop the SO pipeline we will need to standardize field names that have
+specific uses within the pipeline so that functions can be written to expect a
+specific set of fields. Not all AxisManagers will have all these fields by
+default and many fields are linked to documentation locations where more details
+can be found. These are meant to prevent naming collisions and more will be 
+added here as the code develops. 
+
+* ``dets`` - the axis for detectors  
+* ``samps`` - the axis for samples
+* ``timestamps`` `[samps]` - the field for UTC timestamps 
+* ``signal`` `[dets, samps]` - the field for detector signal
+* | ``obs_info`` - AxisManager of scalars with ObsDb information for the loaded 
+  | observation. :ref:`Details here. <obsdb-names-section>`
+* ``det_info`` `[dets]` - AxisManager containing loaded detector metadata
+
+  * ``readout_id`` - The unique readout ID of the resonator
+  * ``det_id`` - The unique detector ID matched to the resonator.
+  * | ``wafer`` - An AxisManager of different parameters related to the hardware
+    | mapping on the UFM itself. Loaded based on ``det_id`` field in the
+    | ``det_info``.
+
+SMuRF fields loaded through :meth:`sotodlib.io.load_file`.
+
+* ``bias_lines`` - the axis for bias lines in a UFM.
+* | ``status`` - A SmurfStatus AxisManager containing information from status
+  | frames in the .g3 timestreams. :class:`sotodlib.io.load_smurf.SmurfStatus`
+* | ``iir_params`` - An AxisManager with the readout filter parameters. Used by
+  | :meth:`sotodlib.tod_ops.filters.iir_filter`.
+* | ``primary`` `[samps]` - An AxisManager with SMuRF readout information that is
+  | synced with the timestreams.
+* ``biases`` `[bias_lines, samps]` - Bias voltage applied to TESes over time.
+
+Pointing information required for :mod:`sotodlib.coords`.
+
+* | ``boresight`` `[samps]` - AxisManager with boresight pointing in horizon
+  | coordinates. Child fields are ``az``, ``el``, and ``roll``.
+* | ``focal_plane`` `[dets]` - AxisManager with detector position and orientation
+  | relative to boresight pointing.
+* | ``boresight_equ`` `[samps]` - AxisManager with boresight in equitorial
+  |  coordinates.
+
 ---------
 Reference
 ---------

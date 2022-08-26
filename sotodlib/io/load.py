@@ -472,10 +472,7 @@ def load_observation(db, obs_id, dets=None, samples=None, prefix=None,
     aman = None
 
     for detset, dets in dets_by_detset.items():
-        c = db.conn.execute('select name, sample_start, sample_stop '
-                            'from files '
-                            'where obs_id=? and detset=? ' +
-                            'order by sample_start', (obs_id, detset))
+        detset_files = db.get_files(obs_id, detsets=[detset], prefix=prefix)[detset]
         subreq = []
         if no_signal:
             if aman is None:
@@ -511,14 +508,14 @@ def load_observation(db, obs_id, dets=None, samples=None, prefix=None,
         stop = sample_stop
 
         streams = None
-        for row in c:
-            f, file_start, file_stop = row
+        for row in detset_files:
+            filename, file_start, file_stop = row
             assert(file_start is not None)
             start = max(0, sample_start - file_start)
             if sample_stop is not None:
                 stop = sample_stop - file_start
             streams = unpack_frames(
-                prefix+f, request, streams, samples=(start, stop))
+                filename, request, streams, samples=(start, stop))
 
         if aman is None:
             # Create AxisManager now that we know the sample count.

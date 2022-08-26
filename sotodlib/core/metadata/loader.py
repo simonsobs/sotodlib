@@ -170,7 +170,11 @@ class SuperLoader:
 
         index_lines = []
         for subreq in subreqs:
+            # Reject any subreq that explicitly contradicts request on any key.
+            if any([subreq.get(k, v) != v for k, v in request.items()]):
+                continue
             subreq.update(request)
+
             try:
                 _lines = man.match(subreq, multi=True, prefix=dbpath)
             except Exception as e:
@@ -182,6 +186,9 @@ class SuperLoader:
                     + '  ' + str(subreq) + '\n'
                     + 'The exception is:\n  %s' % text)
             for _line in _lines:
+                # Now reject any _line if they contradict subreq.
+                if any([subreq.get(k, v) != v for k, v in _line.items()]):
+                    continue
                 _line.update(subreq)
                 index_lines.append(_line)
 
@@ -273,6 +280,7 @@ class SuperLoader:
             results.append(mi2)
 
         # Check that we got results, then combine them in to single ResultSet.
+        logger.debug(f'Concatenating {len(results)} results: {results}')
         assert(len(results) > 0)
         result = results[0].concatenate(results)
         return result
@@ -510,8 +518,20 @@ def merge_det_info(det_info, new_info,
 
 
 def convert_det_info(det_info, dets=None):
-    """
-    Convert det_info ResultSet into nested AxisManager.
+    """Convert det_info ResultSet into nested AxisManager.
+
+    Args:
+      dets (list of str): The labels to use for the LabelAxis.  You
+        probably want to use the default, det_info['readout_id'], or
+        pass in det_info[something_else].
+
+    Returns:
+
+      Nested AxisManager with a LabelAxis called dets, containing all
+      the columns from det_info.  Keys in det_info are split on '.';
+      so for example det_info['sky.x'] will show up at output.sky.x,
+      a.k.a. output['sky']['x'].
+
     """
     children = {}
     if dets is None:
@@ -532,6 +552,22 @@ def convert_det_info(det_info, dets=None):
         child = convert_det_info(sub_info, dets)
         output.wrap(subtable, child)
     return output
+
+def unconvert_det_info(aman):
+    """Convert a det_info-style AxisManager (back) into a ResultSet... the
+    opposite of convert_det_info.
+
+    """
+    def get_cols(aman, prefix=''):
+        columns = []
+        for k, v in aman._fields.items():
+            if isinstance(v, core.AxisManager):
+                columns.extend(get_cols(v, prefix=k + '.'))
+            else:
+                columns.append((prefix + k, v))
+        return columns
+    keys, columns = zip(*get_cols(aman))
+    return ResultSet(keys, zip(*columns))
 
 
 def broadcast_resultset(
