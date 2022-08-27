@@ -6,6 +6,7 @@ import pickle
 import sys
 
 import numpy as np
+import scipy.signal
 
 import toast
 import toast.qarray as qa
@@ -43,8 +44,19 @@ class OpSimHWPSS(toast.Operator):
         for obs in data.obs:
             tod = obs["tod"]
             focalplane = obs["focalplane"]
+            
             # Get HWP angle
             chi = tod.local_hwp_angle()
+            
+            # Get times
+            times = tod.local_times()
+            
+            # Fast sample HWP angle with a factor 100
+            fast_time = np.linspace(times[0], times[-1], 1+(len(times)-1)*100)
+            hwp_rate = (chi[1] - chi[0]) / (times[1] - times[0]) / (2*np.pi) # Assuming constant HWP rotation
+            fast_chi = chi[0] + 2*np.pi*hwp_rate*(fast_time-fast_time[0])
+            fast_chi %= 2*np.pi
+            
             for det in tod.local_dets:
                 signal = tod.local_signal(det, self._name)
                 band = focalplane[det]["band"]
@@ -69,7 +81,7 @@ class OpSimHWPSS(toast.Operator):
 
                 # Get polarization weights
 
-                iweights = np.ones(signal.size)
+                iweights = np.ones_like(fast_time)
                 qweights = np.cos(2 * det_psi)
                 uweights = np.sin(2 * det_psi)
         
@@ -97,30 +109,35 @@ class OpSimHWPSS(toast.Operator):
                 )
                 
                 # Scale HWPSS for observing elevation
-
                 el_ref = np.radians(50)
                 scale = np.sin(el_ref) / np.sin(el)
+
+                # Interpolate elevation scaling factor for fast sampling
+                fast_scale = np.interp(fast_time,times,scale)
                 
                 # Observe HWPSS with the detector
 
                 iquv = (transmission + reflection).T
-                iquss = (
-                    iweights * np.interp(chi, self.chis, iquv[0]) +
-                    qweights * np.interp(chi, self.chis, iquv[1]) +
-                    uweights * np.interp(chi, self.chis, iquv[2])
-                ) * scale
+                fast_iquss = (
+                    iweights * np.interp(fast_chi, self.chis, iquv[0]) +
+                    qweights * np.interp(fast_chi, self.chis, iquv[1]) +
+                    uweights * np.interp(fast_chi, self.chis, iquv[2])
+                ) * fast_scale
 
                 iquv = emission.T
-                iquss += (
-                    iweights * np.interp(chi, self.chis, iquv[0]) +
-                    qweights * np.interp(chi, self.chis, iquv[1]) +
-                    uweights * np.interp(chi, self.chis, iquv[2])
+                fast_iquss += (
+                    iweights * np.interp(fast_chi, self.chis, iquv[0]) +
+                    qweights * np.interp(fast_chi, self.chis, iquv[1]) +
+                    uweights * np.interp(fast_chi, self.chis, iquv[2])
                 )
 
-                iquss -= np.median(iquss)
+                fast_iquss -= np.median(fast_iquss)
+
+                # Downsample iquss to original sampling rate
+                iquss = scipy.signal.decimate(fast_iquss,10)
+                iquss = scipy.signal.decimate(iquss, 10) # decimate needs to be called multiple times for decimation factors > 13
 
                 # Co-add with the cached signal
-
                 signal += iquss
 
         return
