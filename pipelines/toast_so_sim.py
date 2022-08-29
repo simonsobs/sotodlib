@@ -302,8 +302,6 @@ def main():
 
         memreport("after atmosphere", comm.comm_world)
 
-        so_tools.simulate_hwpss(args, comm, data, mc, totalname)
-
         # update_atmospheric_noise_weights(args, comm, data, freq, mc)
 
         toast_tools.add_signal(
@@ -319,6 +317,10 @@ def main():
         toast_tools.simulate_noise(args, comm, data, mc, totalname)
 
         memreport("after simulating noise", comm.comm_world)
+
+        so_tools.simulate_hwpss(args, comm, data, mc, totalname)
+
+        memreport("after simulating HWPSS", comm.comm_world)
 
         so_tools.apply_sim_sso(args, comm, data, mc, totalname)
 
