@@ -31,12 +31,12 @@ def LAT_coord_transform(xy, rot_fp, rot_ufm, r=72.645):
     xy_trans[:, :2] = xy.T
 
     r1 = R.from_euler("z", rot_fp, degrees=True)
-    shift = np.array([r, 0, 0]).apply(r1)
+    shift = r1.apply(np.array([r, 0, 0]))
 
     r2 = R.from_euler("z", rot_ufm, degrees=True)
     xy_trans = r2.apply(xy_trans) + shift
 
-    return xy_trans.T
+    return xy_trans.T[:2]
 
 
 def rescale(xy):
