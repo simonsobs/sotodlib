@@ -4,6 +4,7 @@ import os.path as op, os
 from spt3g import core
 import numpy as np
 import so3g
+import yaml
 
 def pos2vel(p):
     return np.ediff1d(p)
@@ -361,14 +362,15 @@ class Bookbinder(object):
         self._smurf_files = smurf_files
         self._book_id = book_id
         self._out_root = out_root
-        self._ancil_files = [op.join(out_root, book_id, f'A_ancil_{i:03d}.g3') for i in range(len(smurf_files))]
-        self._frame_splits_file = op.join(out_root, book_id, 'frame_splits.txt')
-        self._frame_splits = []
         self._session_id = session_id
         self._stream_id = stream_id
         self._start_time = start_time
         self._end_time = end_time
         self._verbose = verbose
+        self._ancil_files = [op.join(out_root, book_id, f'A_ancil_{i:03d}.g3') for i in range(len(smurf_files))]
+        self._frame_splits_file = op.join(out_root, book_id, 'frame_splits.txt')
+        self._frame_splits = []
+        self._meta_file = op.join(out_root, book_id, f'M_{self._stream_id}.yaml')
         self.metadata = []
         self.frame_num = 0
         self.sample_num = 0
@@ -572,6 +574,15 @@ class Bookbinder(object):
 
         return trimmed_frame
 
+    def compile_mfile_dict(self):
+        d = {'Book ID':             self._book_id,
+             'Session ID':          self._session_id,
+             'Start time':          int(self._start_time),
+             'End time':            int(self._end_time),
+             'Number of frames':    self.frame_num,
+             'Number of samples':   self.sample_num}
+        return d
+
     def __call__(self):
         for hkfile in self._hk_files:
             for h in core.G3File(hkfile):
@@ -638,3 +649,7 @@ class Bookbinder(object):
         self._frame_splits += self.frameproc._frame_splits
         if not op.isfile(self._frame_splits_file):
             np.savetxt(self._frame_splits_file, np.unique([int(t) for t in self._frame_splits]), fmt='%i')
+
+        # Write metadata file ('M-file')
+        with open(self._meta_file, 'w') as mfile:
+            yaml.dump(self.compile_mfile_dict(), mfile, sort_keys=False)
