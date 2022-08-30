@@ -86,7 +86,7 @@ def match_template(focal_plane, template, out_thresh=0):
     reg = AffineRegistration(**{"X": focal_plane, "Y": template})
 
     # This should get the maximum probability without collisions
-    inv = np.linalg.inv(reg.P)
+    inv = np.linalg.pinv(reg.P)
     mapping = np.argmax(inv, axis=0)
 
     outliers = np.array([])
@@ -149,7 +149,7 @@ def match_chan_map(pointing, template, out_thresh=0, weight=2):
     P = reg.P[np.ix_(t_ii, p_ii)]
 
     # This should get the maximum probability without collisions
-    inv = np.linalg.inv(P)
+    inv = np.linalg.pinv(P)
     mapping = np.argmax(inv, axis=0)
 
     outliers = np.array([])
