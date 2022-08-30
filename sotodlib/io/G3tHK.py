@@ -5,19 +5,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship, backref
 
-import numpy as np
 import os
-import so3g
 from so3g import hk
-import glob
-import time
 import datetime
-from datetime import datetime
 
 Base = declarative_base()
 Session = sessionmaker()
 
-# all database definitions for G3tHK 
+# all database definitions for G3tHK
 class HKFeeds(Base):
     """This table is named hkfeeds and serves as a db for holding
     brief information about each HK'ing file.
@@ -46,6 +41,7 @@ class HKFeeds(Base):
     # provider id
     # description
 
+
 class HKFields(Base):
     """This table is named hkfields and serves as a db for all
     fields inside each HK'ing file in the hkfeeds table.
@@ -69,6 +65,7 @@ class HKFields(Base):
     field = db.Column(db.String)
     start = db.Column(db.Integer)
     end = db.Column(db.Integer)
+
 
 class G3tHK:
     def __init__(self, hkarchive_path, db_path=None, echo=False):
@@ -95,10 +92,10 @@ class G3tHK:
         self.session = Session()
         Base.metadata.create_all(self.engine)
 
-    def load_fields(self, hkarchive_path, hkfile): #hkarchivepath is the full path
+    def load_fields(self, hkarchive_path, hkfile):
         """
-        Load fields from .g3 file and start and end time for each field. 
-        
+        Load fields from .g3 file and start and end time for each field.
+
         Args
         ____
 
@@ -106,33 +103,33 @@ class G3tHK:
             Path to data directory
         hkfile: string
             Name of .g3 HK file
-                
-        returns: list of field names and corresponding start and end times from HK .g3 files
+
+        returns: list of field names and corresponding start and
+                 end times from HK .g3 files
         """
         f = os.path.join(hkarchive_path, hkfile)
-        
+
         # enact HKArchiveScanner
         hkas = hk.HKArchiveScanner()
         hkas.process_file(f)
 
-         arc = hkas.finalize()
+        arc = hkas.finalize()
 
-            # get fields from .g3 file
-            fields, timelines = arc.get_fields()
-            hkfs = []
-            for key in fields.keys():
-                hkfs.append(key)
-            #print(fields)
+        # get fields from .g3 file
+        fields, timelines = arc.get_fields()
+        hkfs = []
+        for key in fields.keys():
+            hkfs.append(key)
 
-            starts = []
-            ends = []
-            for i in range(len(hkfs)):
-                data = arc.simple(hkfs[i])
-                time = data[0]
-                starts.append(time[0])
-                ends.append(time[-1])
+        starts = []
+        ends = []
+        for i in range(len(hkfs)):
+            data = arc.simple(hkfs[i])
+            time = data[0]
+            starts.append(time[0])
+            ends.append(time[-1])
 
-            return hkfs, starts, ends
+        return hkfs, starts, ends
 
     def add_hkfeeds(self, hkarchive_path, hkfile):
         """
@@ -147,21 +144,20 @@ class G3tHK:
         self.session.add(db_file)
         self.session.commit()
 
-    def add_hkfields(self): 
+    def add_hkfields(self):
         """
         """
         feed_list = self.session.query(HKFeeds).all()
-        
+
         for feed in feed_list:
             fields, starts, ends = self.load_fields(feed.path, feed.filename)
 
             for i in range(len(fields)):
-                db_file = HKFields( field = fields[i],
-                                    start = starts[i],
-                                    end = ends[i],
-                                    hkfeed = feed)
+                db_file = HKFields(field=fields[i],
+                                   start=starts[i],
+                                   end=ends[i],
+                                   hkfeed=feed)
                 self.session.add(db_file)
 
         self.session.commit()
-        # TODO: can be more efficient; will repeat fields as it loops through every HK file every time you run it
-
+        # TODO: can be more efficient; will repeat fields as it loops through every HK file every time you run
