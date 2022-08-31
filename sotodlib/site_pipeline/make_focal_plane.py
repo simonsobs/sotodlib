@@ -59,7 +59,7 @@ def rescale(xy):
     return xy_rs
 
 
-def match_template(focal_plane, template, out_thresh=0):
+def match_template(focal_plane, template, out_thresh=0, avoid_collision=True):
     """
     Match fit focal plane againts a template.
 
@@ -75,6 +75,8 @@ def match_template(focal_plane, template, out_thresh=0):
                     Should be in range [0, 1) and is checked against the
                     probability that a point matches its mapped point in the template.
 
+        avoid_collision: Try to avoid collisions. May effect performance.
+
     Returns:
 
         mapping: Mapping between elements in template and focal_plane.
@@ -86,9 +88,12 @@ def match_template(focal_plane, template, out_thresh=0):
     reg = AffineRegistration(**{"X": focal_plane, "Y": template})
     reg.register()
 
-    # This should get the maximum probability without collisions
-    inv = np.linalg.pinv(reg.P)
-    mapping = np.argmax(inv, axis=0)
+    if avoid_collision:
+        # This should get the maximum probability without collisions
+        inv = np.linalg.pinv(reg.P)
+        mapping = np.argmax(inv, axis=0)
+    else:
+        mapping = np.argmax(reg.P, axis=1)
 
     outliers = np.array([])
     if out_thresh > 0:
@@ -97,7 +102,7 @@ def match_template(focal_plane, template, out_thresh=0):
     return mapping, outliers
 
 
-def match_chan_map(pointing, template, out_thresh=0, weight=2):
+def match_chan_map(pointing, template, out_thresh=0, weight=2, avoid_collision=True):
     """
     Fit pointing on sky to focal plane using the channel map and template.
 
@@ -117,6 +122,8 @@ def match_chan_map(pointing, template, out_thresh=0, weight=2):
 
         weight: How strongly to weigh the channel map.
                 Should be greater than 0, with a higher number indicating more confidence.
+
+        avoid_collision: Try to avoid collisions. May effect performance.
 
     Returns:
 
@@ -150,9 +157,12 @@ def match_chan_map(pointing, template, out_thresh=0, weight=2):
     t_ii = np.argsost(t_i)
     P = reg.P[np.ix_(t_ii, p_ii)]
 
-    # This should get the maximum probability without collisions
-    inv = np.linalg.pinv(P)
-    mapping = np.argmax(inv, axis=0)
+    if avoid_collision:
+        # This should get the maximum probability without collisions
+        inv = np.linalg.pinv(reg.P)
+        mapping = np.argmax(inv, axis=0)
+    else:
+        mapping = np.argmax(reg.P, axis=1)
 
     outliers = np.array([])
     if out_thresh > 0:
