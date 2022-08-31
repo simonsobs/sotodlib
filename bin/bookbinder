@@ -8,7 +8,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--smurf', dest='smurffiles', nargs='+', type=str, required=True,
                         help='full path to SMuRF files')
-    parser.add_argument('--hk', dest='hkfiles', nargs='+', type=str, required=True,
+    parser.add_argument('--hk', dest='hkfiles', nargs='+', type=str,
                         help='full path to HK files')
     parser.add_argument('--out-root', dest='out_root', default=".", type=str,
                         help='Path to output directory')
@@ -37,7 +37,8 @@ if __name__ == '__main__':
     if not op.exists(book_id):
         os.makedirs(book_id)
 
-    B = Bookbinder(args.hkfiles, args.smurffiles,
+    B = Bookbinder(smurf_files = args.smurffiles,
+                   hk_files = args.hkfiles,
                    out_root = args.out_root,
                    book_id = book_id,
                    session_id = args.timestamp,

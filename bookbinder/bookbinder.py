@@ -356,10 +356,10 @@ class Bookbinder(object):
     """
     Bookbinder
     """
-    def __init__(self, hk_files, smurf_files, out_root='.', book_id=None, session_id=None, stream_id=None,
+    def __init__(self, smurf_files, hk_files=None, out_root='.', book_id=None, session_id=None, stream_id=None,
                  start_time=None, end_time=None, max_nchannels=1e3, verbose=True):
-        self._hk_files = hk_files
         self._smurf_files = smurf_files
+        self._hk_files = hk_files
         self._book_id = book_id
         self._out_root = out_root
         self._session_id = session_id
@@ -381,6 +381,9 @@ class Bookbinder(object):
         self.DEFAULT_TIME = core.G3Time(1e18)  # 1e18 = 2286-11-20T17:46:40.000000000 (in the distant future)
 
         self.frameproc = FrameProcessor()
+
+        if isinstance(self._hk_files, str):
+            self._hk_files = [self._hk_files]
 
         if self._start_time is not None:
             self._start_time = core.G3Time(self._start_time)
@@ -584,12 +587,15 @@ class Bookbinder(object):
         return d
 
     def __call__(self):
-        for hkfile in self._hk_files:
-            for h in core.G3File(hkfile):
-                if h['hkagg_type'] != 2 or ('ACU_position' not in h['block_names']):
-                    continue
-                self.default_mode = False
-                self.frameproc(h)
+        if self._hk_files is not None:
+            if not isinstance(self._hk_files, list):
+                raise TypeError("Please provide HK files in a list.")
+            for hkfile in self._hk_files:
+                for h in core.G3File(hkfile):
+                    if h['hkagg_type'] != 2 or ('ACU_position' not in h['block_names']):
+                        continue
+                    self.default_mode = False
+                    self.frameproc(h)
 
         if op.isfile(self._frame_splits_file):
             self._frame_splits = [core.G3Time(t) for t in np.loadtxt(self._frame_splits_file, dtype='int', ndmin=1)]
