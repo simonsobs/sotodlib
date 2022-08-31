@@ -6,4 +6,4 @@ This module contains code for HWP analysis tools
 
 """
 from .update_hwp_angle import update_hwp_angle
-from .hwp import hwp
+from . import hwp
