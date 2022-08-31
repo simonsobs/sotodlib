@@ -6,33 +6,113 @@ import so3g
 from spt3g import core
 import argparse
 from tqdm import tqdm
+import logging
+import yaml
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
 class update_hwp_angle(): 
     
-    def __init__(self, debug=False):
+    def __init__(self, config_file=None):
 
         """
-        Class to manage a L2 HK data into HWP angle g3.
-
+        Class to manage L2 HK data into HWP angle g3.
+        
         Args
         -----
-            debug: bool
-                bit for dubug mode
+        config_file: str
+            path to config yaml file
+            yaml file should include below info.
+            -----------------------
+            verbose
+            data_dir
+            field_instance
+            field_list
+            packet_size 
+            num_edges 
+            ref_edges 
+            ref_range 
+            output
         """
-
+        if config_file is not None:
+            if os.path.exists(config_file):
+                self.config_file = config_file
+                self.configs = yaml.safe_load(open(self.config_file, "r"))
+                logger.info("Loading config from " + self.config_file)
+            else:
+                logger.warning("Can not find config file, use all default values")
+                self.configs = {}
+        else:
+            logger.warning("Can not find config file, use all default values")
+            self.configs = {}
         
-        self._debug = debug
+            
+        if 'verbose' in self.configs.keys():
+            if self.configs['verbose'] >= 1:
+                logger.setLevel('INFO')
+            if self.configs['verbose'] >= 2:
+                logger.setLevel('WARNING')
+            if self.configs['verbose'] >= 3:
+                logger.setLevel('DEBUG')
+        else:
+            logger.debug('verbose is not set')
+
         self._start = 0
         self._end = 0
-        # Size of pakcets sent from the BBB
-        self._pkt_size = 120 # maybe 120 in the latest version, 150 in the previous version
-        # Number of encoder slits per HWP revolution
-        self._num_edges = 570*2
-        self._delta_angle = 2 * np.pi / self._num_edges
-        self._ref_edges = 2
-        self._ref_indexes = []
+        self._file_list = None
+        if 'start' in self.configs.keys(): 
+            self._start = self.configs['start']
+        if 'end' in self.configs.keys(): 
+            self._end = self.configs['end']
+            
+        self._file_list = None
+        if 'file_list' in self.configs.keys(): 
+            self._file_list = self.configs['file_list']
+        
+        self._data_dir = None
+        if 'data_dir' in self.configs.keys(): 
+            self._data_dir = self.configs['data_dir']
 
-    def load_data(self, start, end, archive_path, instance='HBA1'):
+        self._field_instance: 'observatory.HBA.feeds.HWPEncoder'
+        if 'field_instance' in self.configs.keys(): 
+            self._field_instance = self.configs['field_instance']
+
+        self._field_list = ['rising_edge_count', 'irig_time', 'counter', \
+                            'counter_index', 'irig_synch_pulse_clock_time', \
+                            'irig_synch_pulse_clock_counts', 'quad']
+        if 'field_list' in self.configs.keys(): 
+            self._field_list = self.configs['field_list']
+
+        # Size of pakcets sent from the BBB
+        # 120 in the latest version, 150 in the previous version        
+        self._pkt_size = 120     
+        if 'packet_size' in self.configs.keys(): 
+            self._pkt_size = self.configs['packet_size']
+        
+        # Number of encoder slits per HWP revolution
+        
+        self._num_edges = 570*2 
+        if 'num_edges' in self.configs.keys():
+            self._num_edges = self.configs['num_edges']
+
+        # Reference slit edgen width
+        self._ref_edges = 2 
+        if 'ref_edges' in self.configs.keys():
+            self._ref_edges = self.configs['ref_edges']
+
+        # Reference slit angle
+        self._delta_angle = 2 * np.pi / self._num_edges
+
+        # Reference slit indexes
+        self._ref_indexes = []
+        
+        self._output = None
+        if 'output' in self.configs.keys():
+            self._output = self.configs['output']
+
+        
+    def load_data(self, start=None, end=None, archive_path=None, instance=None):
 
         """
         Loads house keeping data for a given time range. 
@@ -45,32 +125,53 @@ class update_hwp_angle():
             end :  timestamp  or DateTime (timezone: UTC)
                 end time for data
             archive_path : str
-                path to HK g3 file
+                path to HK g3 file, default = None 
+                assuming to input from hwp config file
+                overwrite if inputting here as argument
             instance : str          
-                default = HBA1
+                instance of field list, default = None 
+                assuming to input from hwp config file
+                overwrite if inputting here as argument
+                accept both for example; just 'HBA' or 'observatory.HBA.feeds.HWPEncoder'
         """
-        self._start = start
-        self._end = end
-        hwp_keys=[
-            'observatory.' + instance + '.feeds.HWPEncoder.rising_edge_count',
-            'observatory.' + instance + '.feeds.HWPEncoder.irig_time',
-            'observatory.' + instance + '.feeds.HWPEncoder_full.counter',
-            'observatory.' + instance + '.feeds.HWPEncoder_full.counter_index',
-            'observatory.' + instance + '.feeds.HWPEncoder.irig_synch_pulse_clock_time',
-            'observatory.' + instance + '.feeds.HWPEncoder.irig_synch_pulse_clock_counts',   
-            'observatory.' + instance + '.feeds.HWPEncoder.quad',
-        ]
-        alias=[key.split('.')[-1] for key in hwp_keys]
-
+        if start is not None and end is not None:
+            self._start = start
+            self._end = end
+        if self._start is None:
+            logger.error("Can not find time range")
+            
         if isinstance(start,np.datetime64): start = start.timestamp()
         if isinstance(end,np.datetime64): end = end.timestamp()
+        
+        if archive_path is not None:
+            self._data_dir = archive_path
+        if self._data_dir is None:
+            logger.error("Can not find data directory")
+            sys.exit(1)
+        if instance is not None:
+            if 'observatory' in instance:
+                self._field_instance = instance
+            else:
+                self._field_instance = 'observatory.' + instance + '.feeds.HWPEncoder'
+        
         # load housekeeping data with hwp keys
-        if self._debug: print('loading HK data files ...')
-        data = so3g.hk.load_range(start, end, fields=hwp_keys, alias=alias, data_dir=archive_path)
+        logger.info('Loading HK data files ')
+        logger.info("input time range: " + str(self._start) + " - " + str(self._end))
+        hwp_keys = []
+        for i in range(len(self._field_list)):
+            if 'counter' in self._field_list[i]:
+                hwp_keys.append(self._field_instance + '_full.' + self._field_list[i])
+            else:
+                hwp_keys.append(self._field_instance + '.' + self._field_list[i])
+        alias=self._field_list
+
+        data = so3g.hk.load_range(self._start, self._end, fields=hwp_keys, alias=alias, data_dir=self._data_dir)
+        if not any(data):
+            logger.info('HWP is not spinning in time range {' + str(self._start) + ' - ' + str(self._end) + '}, data is empty')
         
         return data
         
-    def load_file(self, filename, instance='HBA1'):
+    def load_file(self, filename=None, instance=None):
         
         """
         Loads house keeping data with specified g3 files. 
@@ -79,30 +180,45 @@ class update_hwp_angle():
         Args
         -----
             filename : str or [str] or np,array(str)
-                HK g3 filename (str or array)
+                default = None 
+                path and filename of HK g3 (str or array)
             instance : str          
-                default = HBA1
+                default = None 
+                instance of field list
+                 - assuming to input from hwp config file
+                 - overwrite if inputting here as argument
+                 - accept both for example; just 'HBA' or 'observatory.HBA.feeds.HWPEncoder'
         """
-        hwp_keys=[
-            'observatory.' + instance + '.feeds.HWPEncoder.rising_edge_count',
-            'observatory.' + instance + '.feeds.HWPEncoder.irig_time',
-            'observatory.' + instance + '.feeds.HWPEncoder_full.counter',
-            'observatory.' + instance + '.feeds.HWPEncoder_full.counter_index',
-            'observatory.' + instance + '.feeds.HWPEncoder.irig_synch_pulse_clock_time',
-            'observatory.' + instance + '.feeds.HWPEncoder.irig_synch_pulse_clock_counts',   
-            'observatory.' + instance + '.feeds.HWPEncoder.quad',
-        ]
-        alias=[key.split('.')[-1] for key in hwp_keys]
+        
+        if filename is None and self._file_list is None:
+            logger.error('Can not find input g3 file')
+            sys.exit(1)
+        if filename is not None:
+            self._file_list = filename
+        
+        if instance is not None:
+            if 'observatory' in instance:
+                self._field_instance = instance
+            else:
+                self._field_instance = 'observatory.' + instance + '.feeds.HWPEncoder'
+        hwp_keys = [self._field_instance + '.' + self._field_list[i] for i in range(len(self._field_list))]
+        alias=self._field_list
         
         # load housekeeping files with hwp keys
-        if self._debug: print('loading HK data files ...')
+           
         scanner = so3g.hk.HKArchiveScanner()
-        if isinstance(filename, list) or isinstance(filename, np.ndarray):
-            for f in filename: scanner.process_file(f)
-        else: scanner.process_file(filename)
+        if not (isinstance(filename, list) or isinstance(filename, np.ndarray)):
+            filename = [filename]
+        for f in filename: 
+            if not os.path.exists(f):
+                logger.error('Can not find input g3 file')
+                sys.exit(1)
+            scanner.process_file(f)
+        logger.info("Loading HK data files: {}".format(' '.join(map(str, filename))))
+
         arc = scanner.finalize()
         if not any(arc.get_fields()[0]): 
-            print('INFO: No HK data in input g3 files: ' + filename)
+            logger.info('Can not find HWP field data in input g3 files: ' + filename)
             self._start = 0
             self._end = 0
             return {}
@@ -111,13 +227,12 @@ class update_hwp_angle():
         self._end = arc.simple([key for key in arc.get_fields()[0].keys()][0])[0][-1]
         for i in range(len(hwp_keys)):
             if not hwp_keys[i] in arc.get_fields()[0].keys():
-                print('INFO: HWP is not spinning in input g3 files: ' + filename)
+                logger.info("HWP is not spinning in input g3 files")
                 return {}
-            
-        data_raw = arc.simple(hwp_keys)
         
-        data = {'rising_edge_count':data_raw[0], 'irig_time':data_raw[1], 'counter':data_raw[2], 'counter_index':data_raw[3], \
-                'irig_synch_pulse_clock_time':data_raw[4], 'irig_synch_pulse_clock_counts':data_raw[5], 'quad':data_raw[6]}
+        data = {}
+        for i in range(len(alias)):
+            data = dict(**data, **{alias[i]:arc.simple(hwp_keys)[i]})
 
         return data     
     
@@ -152,7 +267,9 @@ class update_hwp_angle():
                            In this case one should find the hwp_angle populated in the fast data block.
             hwp_rate (float): the "approximate" HWP spin rate, with sign, in revs / second.  Use placeholder value of 0 for cases when not "stable".
         """
-
+        
+        if not any(data):
+            logger.info("no HWP field data")
         ## Analysis parameters ##
         # Fast block
         if 'counter' in data.keys():
@@ -242,7 +359,7 @@ class update_hwp_angle():
 
         return {'fast_time': fast_time, 'angle': angle, 'slow_time': slow_time, 'stable': stable, 'locked': locked, 'hwp_rate': hwp_rate}
 
-    def write_solution(self, solved, g3out):
+    def write_solution(self, solved, output=None):
         
         """
         Output HWP angle + flags as SO HK g3 format
@@ -266,12 +383,19 @@ class update_hwp_angle():
                            In this case one should find the hwp_angle populated in the fast data block.
             hwp_rate (float): the "approximate" HWP spin rate, with sign, in revs / second.  Use placeholder value of 0 for cases when not "locked".
         """
-
+        if self._output is None and output is None:
+            logger.error('Not specified output file')
+            return
+        if output is not  None:
+            self._output = output
         if solved['slow_time'].size==0: 
-            print('INFO: No output file due to input solved data is empty')
+            logger.error('input data is empty')
+            return
+        if solved['fast_time'].size==0: 
+            logger.info('write no rotation data')
             return
         session = so3g.hk.HKSessionHelper(hkagg_version=2)
-        writer = core.G3Writer(g3out)
+        writer = core.G3Writer(output)
         writer.Process(session.session_frame())
         prov_id = session.add_provider('hwp')
         writer.Process(session.status_frame())
@@ -297,6 +421,7 @@ class update_hwp_angle():
         return
 
     
+   
     def _hwp_angle_calculator(self, counter, counter_idx, irig_time, rising_edge, quad_time, quad, ratio, fast):
 
         #   counter: BBB counter values for encoder signal edges
@@ -329,20 +454,17 @@ class update_hwp_angle():
         # calculate hwp angle with IRIG timing
         self._calc_angle_linear()
         
-        ###############
-        if self._debug:
-            print('INFO :qualitycheck')
-            print('_time:        ', len(self._time))
-            print('_angle:       ', len(self._angle))
-            print('_encd_cnt:    ', len(self._encd_cnt))
-            print('_encd_clk:    ', len(self._encd_clk))
-            print('_ref_cnt:     ', len(self._ref_cnt))
-            print('_ref_indexes: ', len(self._ref_indexes))
-        ###############
+        logger.debug('qualitycheck')
+        logger.debug('_time:        ' + str(len(self._time)))
+        logger.debug('_angle:       ' + str(len(self._angle)))
+        logger.debug('_encd_cnt:    ' + str(len(self._encd_cnt)))
+        logger.debug('_encd_clk:    ' + str(len(self._encd_clk)))
+        logger.debug('_ref_cnt:     ' + str(len(self._ref_cnt)))
+        logger.debug('_ref_indexes: ' + str(len(self._ref_indexes)))
 
         if len(self._time) != len(self._angle):
             raise ValueError('Failed to calculate hwp angle!')
-        if self._debug: print('INFO: hwp angle calculation is finished.')
+        logger.info('hwp angle calculation is finished.')
         return self._time, self._angle
 
     
@@ -388,7 +510,7 @@ class update_hwp_angle():
             sys.exit(1)
         self._ref_clk = np.take(self._encd_clk, self._ref_indexes)
         self._ref_cnt = np.take(self._encd_cnt, self._ref_indexes)
-        if self._debug: print('INFO: found {} reference points'.format(len(self._ref_indexes)))
+        logger.debug('found {} reference points'.format(len(self._ref_indexes)))
         
         return 
         
@@ -471,24 +593,22 @@ class update_hwp_angle():
         dropped_samples = np.sum(cnt_diff[cnt_diff >= self._pkt_size])
         self._num_dropped_pkts = dropped_samples // (self._pkt_size - 1)
         if self._num_dropped_pkts > 0:
-            if self._debug: print('WARNING: {} dropped packets are found.'.format(self._num_dropped_pkts))
+            logger.warning('WARNING: {} dropped packets are found.'.format(self._num_dropped_pkts))
         return
     
     def _encoder_packet_sort(self):
         cnt_diff = np.diff(self._encd_cnt)
         if np.any(cnt_diff != 1):
-            if self._debug: print('WARNING: a part of the counter is incorrect, performing the correction process... ')
+            logger.warning('WARNING: a part of the counter is incorrect, performing the correction process... ')
             if np.any(cnt_diff < 0): 
                 if 1-self._pkt_size in cnt_diff: 
-                    if self._debug: print('WARNING: Packet flip found, sorting process performed... ')
+                    logger.warning('WARNING: Packet flip found, sorting process performed... ')
                 idx = np.argsort(self._encd_cnt)
                 self._encd_clk = self._encd_clk[idx]
             else:
-                if self._debug:
-                    print('WARNING: maybe packet drop exists ...')
+                logger.warning('WARNING: maybe packet drop exists ...')
         else: 
-            if self._debug:
-                print('INFO: no need to fix encoder index')
+            logger.debug('no need to fix encoder index')
     
     def _quad_form(self, quad, interp=False):
         # treat 30 sec span noise
@@ -509,20 +629,57 @@ class update_hwp_angle():
     
     def main(args=None):
         
-        parser = argparse.ArgumentParser(description='Analyze HWP encoder data from level-2 HK data, and produce HWP angle solution for all times.')
-
-        parser.add_argument('-f','--file', action='store', required=True, help='A filename or list of filenames (to be loaded in order).', nargs='*')
-        parser.add_argument('--output', default='./output.g3', help='A path to output g3 file')
-
+        if args is None:
+            parser = argparse.ArgumentParser(description='Analyze HWP encoder data from level-2 HK data, \
+                                                        and produce HWP angle solution for all times.')
+            parser.add_argument('-c', '--config-file', default=None, type=str,\
+                                help="Configuration File for running update_hwp_angle")
+            parser.add_argument('-t','--time', action='store', default=None, type=int,\
+                                help='time range ex) --time [start] [end]', nargs=2)
+            parser.add_argument('-d','--data-dir', action='store', default=None, type=str,\
+                                help='input data directory')
+            parser.add_argument('-f','--file', action='store', default=None, type=str,\
+                                help='filename or list of filenames (to be loaded in order).', nargs='*')
+            parser.add_argument('-o','--output', action='store', default=None, type=str,\
+                                help='path to output g3 file')
         args = parser.parse_args()
-        print('files=' + str(args.file))
-        print('output=' + args.output)
+
+        logger.info("Starting update_hwp_angle")
+
+        configs = yaml.safe_load(open(args.config_file, "r"))
         
-        hwp = update_hwp_angle()
-        data = hwp.load_file(args.file)
+        logger.info("instance update_hwp_angle class")
+        hwp = update_hwp_angle(args.config_file)
+        
+        # Load data from arguments or config file
+        logger.info("load_data")
+        data = None
+        if args.time is not None and args.data_dir is not None:
+            data = hwp.load_data(args.time[0],args.time[1],archive_path=args.data_dir)
+        elif args.time is not None and args.data_dir is None:
+            data = hwp.load_data(args.time[0],args.time[1])
+        elif args.file is not None:
+            data = hwp.load_file(args.file)
+        elif 'start' in configs.keys() and 'end' in configs.keys(): 
+            data = hwp.load_data(configs['start'],configs['end'])
+        elif 'file' in configs.keys(): 
+            data = hwp.load_file(configs['file'])
+        else:
+            logger.error("Not specified time range and filenames")
+            sys.exit(1)
+
+        logger.info("analyze")
         solved = hwp.analyze(data)
-        hwp.write_solution(solved,args.output)
 
+        logger.info("write_solution")
+        if args.output is not None:
+            output = args.output
+        elif 'output' in configs.keys(): 
+            output = configs['output']
+        hwp.write_solution(solved, output)
+        logger.info("output file: " + output)
 
+        logger.info("Finised update_hwp_angle")
+        
 if __name__ == "__main__": 
     update_hwp_angle.main() 
