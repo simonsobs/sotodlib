@@ -49,7 +49,7 @@ def subtract_hwpss(aman, hwp_angle=None, mode=0, name = 'subtract_hwpss', signal
     elif mode == 3: func = func_hwpss_all
     for i in range(aman.dets.count):
         popt, pcov = curve_fit(func, hwp_angle_bins, hwpss[i], maxfev=1000000)
-        aman.ext_hwpss[i] += func(aman.hwp_angle, *popt)
+        aman.ext_hwpss[i] = func(aman.hwp_angle, *popt)
 
 
 def demod(aman, hwp_angle=None, bpf_width=0.5, lpf_cut=0.5, signal='signal'):
