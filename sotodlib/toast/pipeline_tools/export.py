@@ -46,6 +46,12 @@ def add_export_args(parser):
         help="Do not re-digitize and compress the exported signal.",
         dest="compress",
     )
+    parser.add_argument(
+        "--export-filesize",
+        type=float,
+        default=1,
+        help="Maximum file size in GB (applied before compression)",
+    )
     parser.set_defaults(compress=False)
     return
 
@@ -93,7 +99,7 @@ def export_TOD(args, comm, data, totalname, schedules, other=None, verbose=True)
         cache_name=totalname,
         cache_copy=other,
         mask_flag_common=TODGround.TURNAROUND,
-        filesize=2 ** 30,
+        filesize=args.export_filesize * 2 ** 30,
         units=core3g.G3TimestreamUnits.Tcmb,
         detgroups=det_groups,
         compress=args.compress,
