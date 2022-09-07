@@ -545,8 +545,8 @@ class G3tHWP():
         # 2 slit distances (defined above) +/- 10%
         for i in range(split):
             _diff = diff_split[i]
-            # Define median value as nominal slit distance
-            slit_dist = np.median(_diff)
+            # Define mean value as nominal slit distance
+            slit_dist = np.mean(_diff)
             # Conditions for idenfitying the ref slit
             # Slit distance somewhere between 2 slits:
             # 2 slit distances (defined above) +/- 10%
