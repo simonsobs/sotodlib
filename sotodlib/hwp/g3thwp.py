@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # logging.basicConfig(level=logging.DEBUG)
 
 
-class update_hwp_angle():
+class G3tHWP():
 
     def __init__(self, config_file=None):
         """
@@ -48,16 +48,6 @@ class update_hwp_angle():
             logger.warning("Can not find config file, use all default values")
             self.configs = {}
 
-        if 'verbose' in self.configs.keys():
-            if self.configs['verbose'] >= 1:
-                logger.setLevel('INFO')
-            if self.configs['verbose'] >= 2:
-                logger.setLevel('WARNING')
-            if self.configs['verbose'] >= 3:
-                logger.setLevel('DEBUG')
-        else:
-            logger.debug('verbose is not set')
-
         self._start = 0
         self._end = 0
         self._file_list = None
@@ -74,7 +64,7 @@ class update_hwp_angle():
         if 'data_dir' in self.configs.keys():
             self._data_dir = self.configs['data_dir']
 
-        self._field_instance: 'observatory.HBA.feeds.HWPEncoder'
+        self._field_instance = 'observatory.HBA.feeds.HWPEncoder'
         if 'field_instance' in self.configs.keys():
             self._field_instance = self.configs['field_instance']
 
@@ -112,7 +102,7 @@ class update_hwp_angle():
             self._output = self.configs['output']
 
     def load_data(self, start=None, end=None,
-                  archive_path=None, instance=None):
+                  archive_path=None, instance='HBA'):
         """
         Loads house keeping data for a given time range.
         For the specified time range, this function returns HWP parameters in HK g3 file
@@ -155,6 +145,9 @@ class update_hwp_angle():
                 self._field_instance = instance
             else:
                 self._field_instance = 'observatory.' + instance + '.feeds.HWPEncoder'
+        else: 
+            logger.error("Can not find field instance")
+            sys.exit(1)
 
         # load housekeeping data with hwp keys
         logger.info('Loading HK data files ')
@@ -251,7 +244,8 @@ class update_hwp_angle():
             [key for key in arc.get_fields()[0].keys()][0])[0][-1]
         for i in range(len(hwp_keys)):
             if not hwp_keys[i] in arc.get_fields()[0].keys():
-                logger.info("HWP is not spinning in input g3 files")
+                logger.info("HWP is not spinning in input g3 files \
+                            or can not find field")
                 return {}
 
         data = {}
@@ -717,68 +711,3 @@ class update_hwp_angle():
             fill_value='extrapolate')(smurf_timestamp)
         return smurf_angle
 
-    def main(args=None):
-
-        if args is None:
-            parser = argparse.ArgumentParser(
-                description='Analyze HWP encoder data from level-2 HK data, \
-                                                        and produce HWP angle solution for all times.')
-            parser.add_argument(
-                '-c', '--config-file', default=None, type=str,
-                help="Configuration File for running update_hwp_angle")
-            parser.add_argument(
-                '-t', '--time', action='store', default=None, type=int,
-                help='time range ex) --time [start] [end]',
-                nargs=2)
-            parser.add_argument(
-                '-d', '--data-dir', action='store', default=None, type=str,
-                help='input data directory')
-            parser.add_argument(
-                '-f', '--file', action='store', default=None, type=str, nargs='*',
-                help='filename or list of filenames (to be loaded in order).')
-            parser.add_argument(
-                '-o', '--output', action='store', default=None, type=str,
-                help='path to output g3 file')
-        args = parser.parse_args()
-
-        logger.info("Starting update_hwp_angle")
-
-        configs = yaml.safe_load(open(args.config_file, "r"))
-
-        logger.info("instance update_hwp_angle class")
-        hwp = update_hwp_angle(args.config_file)
-
-        # Load data from arguments or config file
-        logger.info("load_data")
-        data = None
-        if args.time is not None and args.data_dir is not None:
-            data = hwp.load_data(
-                args.time[0], args.time[1], archive_path=args.data_dir)
-        elif args.time is not None and args.data_dir is None:
-            data = hwp.load_data(args.time[0], args.time[1])
-        elif args.file is not None:
-            data = hwp.load_file(args.file)
-        elif 'start' in configs.keys() and 'end' in configs.keys():
-            data = hwp.load_data(configs['start'], configs['end'])
-        elif 'file' in configs.keys():
-            data = hwp.load_file(configs['file'])
-        else:
-            logger.error("Not specified time range and filenames")
-            sys.exit(1)
-
-        logger.info("analyze")
-        solved = hwp.analyze(data)
-
-        logger.info("write_solution")
-        if args.output is not None:
-            output = args.output
-        elif 'output' in configs.keys():
-            output = configs['output']
-        hwp.write_solution(solved, output)
-        
-        logger.info("output file: " + output)
-        logger.info("Finised update_hwp_angle")
-
-
-if __name__ == "__main__":
-    update_hwp_angle.main()

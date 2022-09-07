@@ -5,7 +5,7 @@
 This module contains code for HWP analysis tools
 
 """
-from .update_hwp_angle import update_hwp_angle
+from .g3thwp import G3tHWP
 from .hwp import extract_hwpss
 from .hwp import demod
 from .hwp_sim import I_to_P_param
