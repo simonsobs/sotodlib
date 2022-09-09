@@ -25,15 +25,18 @@ class G3tHWP():
             path to config yaml file
             yaml file should include below info.
             -----------------------
-            verbose
-            data_dir
-            field_instance
-            field_list
-            packet_size
-            num_edges
-            ref_edges
-            ref_range
-            output
+            data_dir: path to L2 HK directory
+                ex) '/mnt/so1/data/ucsd-sat1/hk/'
+            field_instance: prefix of field name
+                ex) 'observatory.HBA.feeds.HWPEncoder'
+            field_list:　name list of 
+                        HWP_encoder field variable
+            packet_size: HWP OCS packet size
+            num_edges: number of slots * 2
+            ref_edges: Number of slots representing 
+                    　　　　　the width of the reference slot
+            ref_range: search range of reference slot
+            output: path+filename of output g3 file
         """
         if config_file is not None:
             if os.path.exists(config_file):
