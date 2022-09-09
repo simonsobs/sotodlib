@@ -20,18 +20,22 @@ def get_parser():
             description='Analyze HWP encoder data from level-2 HK data, \
                         and produce HWP angle solution for all times.')
     parser.add_argument(
-        '-c', '--config-file', default=None, type=str,
+        '-c', '--config-file', default=None, type=str,　required=True, 
         help="Configuration File for running update_hwp_angle")
     parser.add_argument(
         '-t', '--time', action='store', default=None, type=int,
-        help='time range ex) --time [start] [end]',
+        help='time range (ctime integers), overwrite yaml time range. \
+            file name/list will be ignored if you specify this. \
+            ex) --time [start timestamp] [end timestamp]',
         nargs=2)
     parser.add_argument(
         '-d', '--data-dir', action='store', default=None, type=str,
-        help='input data directory')
+        help='input data directory, overwrite yaml data_dir')
     parser.add_argument(
         '-f', '--file', action='store', default=None, type=str, nargs='*',
-        help='filename or list of filenames (to be loaded in order).')
+        help='path+filename or list of path+filenames (to be loaded in order). \
+            overwrite yaml file list. \
+            ignored if you specify time range by argument.')
     parser.add_argument(
         '-o', '--output', action='store', default=None, type=str,
         help='path to output g3 file')

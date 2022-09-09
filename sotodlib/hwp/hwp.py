@@ -53,7 +53,7 @@ def extract_hwpss(aman, hwp_angle=None, mode=0,
         hwpss[i] = hwpss[i][idx]
 
     if name in aman.keys():
-        aman.move(name, '')
+        aman.move(name, None)
     aman.wrap_new(name, ('dets', 'samps'))
     if mode == 0:
         func = func_hwpss_2f4f
@@ -81,16 +81,16 @@ def demod(aman, hwp_angle=None, bpf_width=0.5, lpf_cut=0.5, signal='signal'):
     """
     if hwp_angle is not None:
         if 'hwp_angle' in aman.keys():
-            aman.move('hwp_angle', '')
+            aman.move('hwp_angle', None)
         aman.wrap('hwp_angle', hwp_angle)
     if 'signal_demod_prelfilt' in aman.keys():
-        aman.move('signal_demod_prelfilt', '')
+        aman.move('signal_demod_prelfilt', None)
     if 'signal_demod_prebfilt' in aman.keys():
-        aman.move('signal_demod_prebfilt', '')
+        aman.move('signal_demod_prebfilt', None)
     if 'signal_demod_wo_lfilt' in aman.keys():
-        aman.move('signal_demod_wo_lfilt', '')
+        aman.move('signal_demod_wo_lfilt', None)
     if 'signal_demod' in aman.keys():
-        aman.move('signal_demod', '')
+        aman.move('signal_demod', None)
 
     speed = (np.sum(np.diff(aman.hwp_angle) % (2 * np.pi)) /
              (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
@@ -117,6 +117,6 @@ def demod(aman, hwp_angle=None, bpf_width=0.5, lpf_cut=0.5, signal='signal'):
                                      signal_name='signal_demod_wo_lfilt'), 
               [(0, 'dets'), (1, 'samps')])
 
-    aman.move('signal_demod_prelfilt', '')
-    aman.move('signal_demod_prebfilt', '')
-    aman.move('signal_demod_wo_lfilt', '')
+    aman.move('signal_demod_prelfilt', None)
+    aman.move('signal_demod_prebfilt', None)
+    aman.move('signal_demod_wo_lfilt', None)
