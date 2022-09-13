@@ -6,6 +6,7 @@ import pickle
 import sys
 
 import numpy as np
+import scipy.interpolate as scp
 
 import toast
 import toast.qarray as qa
@@ -15,7 +16,11 @@ XAXIS, YAXIS, ZAXIS = np.eye(3)
 
 
 class OpSimHWPSS(toast.Operator):
-    """ Simulate HWP synchronous signal """
+    """ Simulate HWP synchronous signal 
+        N.B: The HWPSS template is interpolated (with a 5th order spline interpolation).
+            Interpolation errors produce spurious peaks in the frequency domain which are 7 to 8 orders of magnitude below
+            the amplitude of the original signal.
+    """
 
     def __init__(self, name, fname_hwpss, mc=0):
         """
@@ -97,7 +102,6 @@ class OpSimHWPSS(toast.Operator):
                 )
                 
                 # Scale HWPSS for observing elevation
-
                 el_ref = np.radians(50)
                 scale = np.sin(el_ref) / np.sin(el)
                 
@@ -105,22 +109,21 @@ class OpSimHWPSS(toast.Operator):
 
                 iquv = (transmission + reflection).T
                 iquss = (
-                    iweights * np.interp(chi, self.chis, iquv[0]) +
-                    qweights * np.interp(chi, self.chis, iquv[1]) +
-                    uweights * np.interp(chi, self.chis, iquv[2])
+                    iweights * scp.splev(chi, scp.splrep(self.chis, iquv[0],k=5)) +
+                    qweights * scp.splev(chi, scp.splrep(self.chis, iquv[1],k=5)) +
+                    uweights * scp.splev(chi, scp.splrep(self.chis, iquv[2],k=5))
                 ) * scale
 
                 iquv = emission.T
                 iquss += (
-                    iweights * np.interp(chi, self.chis, iquv[0]) +
-                    qweights * np.interp(chi, self.chis, iquv[1]) +
-                    uweights * np.interp(chi, self.chis, iquv[2])
+                    iweights * scp.splev(chi, scp.splrep(self.chis, iquv[0],k=5)) +
+                    qweights * scp.splev(chi, scp.splrep(self.chis, iquv[1],k=5)) +
+                    uweights * scp.splev(chi, scp.splrep(self.chis, iquv[1],k=5))
                 )
 
                 iquss -= np.median(iquss)
 
                 # Co-add with the cached signal
-
                 signal += iquss
 
         return
