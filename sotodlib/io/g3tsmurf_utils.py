@@ -168,7 +168,7 @@ def get_batch(
         obs = session.query(Observations).filter(Observations.start<s).order_by(Observations.start.desc()).first()
         partial=True
 
-    
+    obs_id = obs.obs_id 
     db_files = session.query(Files).filter(Files.obs_id==obs_id).order_by(Files.start)
     filenames = sorted( [f.name for f in db_files])
     
