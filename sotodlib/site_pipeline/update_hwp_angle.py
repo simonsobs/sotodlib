@@ -35,7 +35,7 @@ def get_parser():
     parser.add_argument(
         '-f', '--file', action='store', default=None, type=str, nargs='*',
         help='filename or list of filenames (to be loaded in order). \
-            overwrite yaml file list. \n
+            overwrite yaml file list. \
             ignored if you specify time range by argument.')
     parser.add_argument(
         '-o', '--output', action='store', default=None, type=str,
