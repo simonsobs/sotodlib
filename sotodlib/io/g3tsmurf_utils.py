@@ -4,6 +4,7 @@
 import os
 import numpy as np
 import logging
+import datetime as dt
 
 from sotodlib.io.load_smurf import load_file, SmurfStatus
 from sotodlib.io.g3tsmurf_db import Observations, Files
