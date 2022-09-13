@@ -2,10 +2,12 @@
 
 .. _g3thwp-section:
 
-=========
-G3tHWP
-=========
+=============
+HWP submodule
+=============
 
+G3tHWP
+======
 G3tHWP is class to analyze HWP parameter in level 2 housekeeping g3 file 
 
 .. autoclass:: G3tHWP
@@ -169,9 +171,8 @@ Class and function references should be auto-generated here.
     :noindex:
 
 
-===============================
-HWPSS extraction and simulation
-===============================
+HWPSS
+=====
 .. autofunction:: sotodlib.hwp.hwp.extract_hwpss
 	  
 .. py:module:: sotodlib.hwp.sim_hwp
@@ -182,7 +183,7 @@ HWPSS extraction and simulation
 
 .. autofunction:: sotodlib.hwp.sim_hwp.I_to_P_param
 
-============
 Demodulation
 ============
+
 .. autofunction:: sotodlib.hwp.hwp.demod
