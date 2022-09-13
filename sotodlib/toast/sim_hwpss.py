@@ -70,7 +70,7 @@ class OpSimHWPSS(toast.Operator):
 
                 # Get polarization weights
 
-                iweights = np.ones_like(signal.size)
+                iweights = np.ones(signal.size)
                 qweights = np.cos(2 * det_psi)
                 uweights = np.sin(2 * det_psi)
         
