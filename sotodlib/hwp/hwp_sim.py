@@ -9,22 +9,35 @@ logger = logging.getLogger(__name__)
 
 def I_to_P_param(bandpass="f090", loading=10, inc_ang=5):
     """
-    ** I to P leakage simulation function **
-    - Mueller matirices of three layer achromatic HWP 
+    HWP I to P leakage simulation function
+    - Mueller matirices of three layer achromatic HWP \
       for each frequency and each incident angle are derived by RCWA simulation.
-    - AR coating based on Mullite-Duroid coating for SAT1 at UCSD.　
+    - AR coating based on Mullite-Duroid coating for SAT1 at UCSD.\
       Thickness are used fabricated values.
     - 2f and 4f amplitudes and phases are extracted by HWPSS fitting of MIQ and MIU.
     - Amplitudes and phases are fitted by polynominal functions w.r.t each incident angle.
-    - Only support MF because UHF and LF are design/fabrication phase. 
+    - Only support MF because UHF and LF are design/fabrication phase. \
       We will add them after the fabrications.
-    Args ---
-    band: MF1=0, MF2=1
-    loading: intensity [Kcmb]
-    inc_ang: incident angle [deg]
-    Return ---
-    amp_2f/4f: 2f/4f amplitude [mKcmb]
-    phi_2f/4f: 2f/4f phase shift [rad]
+    
+    Args
+    -----
+    bandpass: str
+        an 3-digit (front zero padded) integer "XYZ" 
+        where XYZ = 030/040/090/150/220/280
+    loading: float
+        intensity [Kcmb]
+    inc_ang: float
+        incident angle [deg]
+    Returns
+    --------
+    amp_2f: float
+        2f amplitude [mKcmb]
+    amp_4f: float
+        4f amplitude [mKcmb]
+    phi_2f: float
+        2f phase shift [rad]
+    phi_4f: float
+        4f phase shift [rad]
     """
     if bandpass == "f090":
         poly_A2_ang = np.array([-7.01e-06, -6.87e-05, 3.435e-02])
@@ -50,21 +63,32 @@ def sim_hwpss(aman, name='hwpss_sim', hwp_freq=2.,
               amp_2f_r=0.05, amp_4f_r=0.05, 
               phi_2f_r=0.1, phi_4f_r=0.1):
     """
-    ** HWPSS simulation function **
+    HWPSS simulation function
     - 2f and 4f amp and phase are from I_to_P_param function
-    Args ---
+    - Adding aman['name']
+
+    Args
+    -----
     aman: AxisManager
-    hwp_freq: 2 [Hz] (default)
-    bandpass: an 3-digit (front zero padded) integer "XYZ"
-              where XYZ = 030/040/090/150/220/280
-    loading: intensity [Kcmb]
-    inc_ang: incident angle [deg]
-    amp_2f_r: 2f HWPSS amplitude fluctuation
-    amp_4f_r: 4f HWPSS amplitude fluctuation
-    phi_2f_r: 2f HWPSS phase shift fluctuation
-    phi_4f_r: 4f HWPSS phase shift fluctuation
-    Return ---
-    Adding aman.hwpss
+        target AxisManager
+    hwp_freq: float
+        HWP rotation speed, 2 [Hz] (default)
+    bandpass: str
+        an 3-digit (front zero padded) integer "XYZ" 
+        where XYZ = 030/040/090/150/220/280
+    loading: float
+        intensity [Kcmb]
+    inc_ang: float 
+        incident angle [deg]
+    amp_2f_r: float, optional
+        2f HWPSS amplitude fluctuation
+    amp_4f_r: float, optional
+        4f HWPSS amplitude fluctuation
+    phi_2f_r: float, optional
+        2f HWPSS phase shift fluctuation
+    phi_4f_r: float, optional
+        4f HWPSS phase shift fluctuation
+
     """
     if name in aman.keys():
         aman.move(name, '')
@@ -100,9 +124,11 @@ def sim_hwpss_2f4f(aman, name='hwpss_sim', hwp_freq=2., bandpass="090",
                    amp_2f=300, amp_4f=30, phi_2f=0, phi_4f=0,
                    amp_2f_r=0.05, amp_4f_r=0.05, phi_2f_r=0.1, phi_4f_r=0.1):
     """
-    ** HWPSS simulation function **
+    HWPSS simulation function
     - 2f and 4f amp and phase from arguments
-    Args ---
+
+    Args
+    -----
     aman: AxisManager
     hwp_freq: 2 [Hz] (default)
     bandpass: an 3-digit (front zero padded) integer "XYZ"
@@ -115,8 +141,6 @@ def sim_hwpss_2f4f(aman, name='hwpss_sim', hwp_freq=2., bandpass="090",
     amp_4f_r: 4f HWPSS amplitude fluctuation
     phi_2f_r: 2f HWPSS phase shift fluctuation
     phi_4f_r: 4f HWPSS phase shift fluctuation
-    Return ---
-    Adding aman[name]
     """
     if name in aman.keys():
         aman.move(name, '')

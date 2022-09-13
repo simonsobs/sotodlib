@@ -10,7 +10,6 @@ import logging
 import yaml
 
 logger = logging.getLogger(__name__)
-# logging.basicConfig(level=logging.DEBUG)
 
 
 class G3tHWP():
@@ -23,20 +22,6 @@ class G3tHWP():
         -----
         config_file: str
             path to config yaml file
-            yaml file should include below info.
-            -----------------------
-            data_dir: path to L2 HK directory
-                ex) '/mnt/so1/data/ucsd-sat1/hk/'
-            field_instance: prefix of field name
-                ex) 'observatory.HBA.feeds.HWPEncoder'
-            field_list:　name list of 
-                        HWP_encoder field variable
-            packet_size: HWP OCS packet size
-            num_edges: number of slots * 2
-            ref_edges: Number of slots representing 
-                    　　　　　the width of the reference slot
-            ref_range: search range of reference slot
-            output: path+filename of output g3 file
         """
         if config_file is not None:
             if os.path.exists(config_file):
@@ -105,27 +90,27 @@ class G3tHWP():
             self._output = self.configs['output']
 
     def load_data(self, start=None, end=None,
-                  archive_path=None, instance='HBA'):
+                  data_dir=None, instance='HBA'):
         """
-        Loads house keeping data for a given time range.
-        For the specified time range, this function returns HWP parameters in HK g3 file
+        Loads house keeping data for a given time range and 
+        returns HWP parameters in L2 HK .g3 file
 
         Args
         -----
-            start : timestamp or DateTime (timezone: UTC)
-                start time for data
-            end :  timestamp  or DateTime (timezone: UTC)
-                end time for data
-            archive_path : str
-                path to HK g3 file, default = None
-                assuming to input from hwp config file
-                overwrite if inputting here as argument
-            instance : str
-                instance of field list, default = None
-                assuming to input from hwp config file
-                overwrite if inputting here as argument
-                accept both for example;
-                    just 'HBA' or 'observatory.HBA.feeds.HWPEncoder'
+            start : timestamp or DateTime
+                start time for data, assumed to be in UTC unless specified
+            end :  timestamp or DateTime
+                end time for data, assumed to be in UTC unless specified
+            data_dir : str or None
+                path to HK g3 file, overwrite config file
+            instance : str or None
+                instance of field list, overwrite config file \n
+                ex.) 'HBA' or 'observatory.HBA.feeds.HWPEncoder'
+
+        Returns
+        ----
+        dict 
+            {alias[i] : (time[i], data[i])} 
         """
         if start is not None and end is not None:
             self._start = start
@@ -138,8 +123,8 @@ class G3tHWP():
         if isinstance(end, np.datetime64):
             end = end.timestamp()
 
-        if archive_path is not None:
-            self._data_dir = archive_path
+        if data_dir is not None:
+            self._data_dir = data_dir
         if self._data_dir is None:
             logger.error("Can not find data directory")
             sys.exit(1)
@@ -178,30 +163,29 @@ class G3tHWP():
 
         return data
 
-    def load_file(self, filename=None, instance=None):
+    def load_file(self, file_list=None, instance=None):
         """
         Loads house keeping data with specified g3 files.
         Return HWP parameters from SO HK data.
 
         Args
         -----
-            filename : str or [str] or np,array(str)
-                default = None
-                path and filename of HK g3 (str or array)
-            instance : str
-                default = None
-                instance of field list
-                 - assuming to input from hwp config file
-                 - overwrite if inputting here as argument
-                 - accept both for example;
-                     just 'HBA' or 'observatory.HBA.feeds.HWPEncoder'
+            file_list : str or list or None
+                path and file name of input level 2 HK g3 file
+            instance : str or None
+                instance of field list, overwrite config file \n
+                ex.) 'HBA' or 'observatory.HBA.feeds.HWPEncoder'
+        Returns
+        ----
+        dict 
+            {alias[i] : (time[i], data[i])} 
         """
 
-        if filename is None and self._file_list is None:
+        if file_list is None and self._file_list is None:
             logger.error('Can not find input g3 file')
             sys.exit(1)
-        if filename is not None:
-            self._file_list = filename
+        if file_list is not None:
+            self._file_list = file_list
 
         if instance is not None:
             if 'observatory' in instance:
@@ -260,34 +244,44 @@ class G3tHWP():
     def analyze(self, data, ratio=0.25, irig_type=0, fast=True):
         """
         Analyze HWP angle solution
-        *** to be checked by hardware that 0 is CW and 1 is CCW from (sky side) consistently　for all SAT ***
+        to be checked by hardware that 0 is CW and 1 is CCW from (sky side) consistently for all SAT 
+
         Args
         -----
             data : dict
                 HWP HK data from load_data
             ratio : float, optional
-                0.1 (default)
-                parameter for referelce slit , threshold = 2 slit distances +/- 10%
+                parameter for referelce slit 
+                threshold = 2 slit distances +/- ratio
             irig_type : 0 or 1, optional
-                If 0, use 1 Hz IRIG timing (default)
-                If 1, use 10 Hz IRIG timing
+                If 0, use 1 Hz IRIG timing (default) \n
+                If 1, use 10 Hz IRIG timing 
             fast : bool, optional
                 If True, run fast fill_ref algorithm
 
         Returns
         --------
-            dict{fast_time, angle, slow_time, stable, locked, hwp_rate}
+        dict
+            {fast_time, angle, slow_time, stable, locked, hwp_rate}
 
-            fast_time: IRIG synched timing (~2kHz)
-            angle (float): IRIG synched HWP angle in radian
-            slow_time: time list of slow block
-            stable (flag): if non-zero, indicates the HWP spin state is known.
-                           i.e. it is either spinning at a measurable rate, or stationary.
-                           When this flag is non-zero, the hwp_rate field can be taken at face value.
-            locked (flag): if non-zero, indicates the HWP is spinning and the position solution is working.
-                           In this case one should find the hwp_angle populated in the fast data block.
-            hwp_rate (float): the "approximate" HWP spin rate, with sign, in revs / second.
-                            Use placeholder value of 0 for cases when not "stable".
+        
+        Notes
+        ------
+            * fast_time: timestamp
+                * IRIG synched timing (~2kHz)
+                * angle (float): IRIG synched HWP angle in radian
+            * slow_time: timestamp
+                * time list of slow block
+            * stable: bool 
+                * if non-zero, indicates the HWP spin state is known.
+                * i.e. it is either spinning at a measurable rate, or stationary.
+                * When this flag is non-zero, the hwp_rate field can be taken at face value.
+            * locked: bool
+                * if non-zero, indicates the HWP is spinning and the position solution is working.
+                * In this case one should find the hwp_angle populated in the fast data block.
+            * hwp_rate: float: 
+                * the "approximate" HWP spin rate, with sign, in revs / second.
+                * Use placeholder value of 0 for cases when not "stable".
         """
 
         if not any(data):
@@ -412,26 +406,40 @@ class G3tHWP():
         """
         Output HWP angle + flags as SO HK g3 format
 
-        File format
-        --------
-        Provider: 'hwp'
-            Fast block
-                'hwp.hwp_angle'
-            Slow block
-                'hwp.stable'
-                'hwp.locked'
-                'hwp.hwp_rate'
+        Args
+        -----
+        solved: dict
+          dict data from analyze
+        output: str or None
+          output path + file name, overwirte config file
 
-            fast_time: IRIG synched timing (~2kHz)
-            angle (float): IRIG synched HWP angle in radian
-            slow_time: time list of slow block
-            stable (flag): if non-zero, indicates the HWP spin state is known.
-                           i.e. it is either spinning at a measurable rate, or stationary.
-                            When this flag is non-zero, the hwp_rate field can be taken at face value.
-            locked (flag): if non-zero, indicates the HWP is spinning and the position solution is working.
-                           In this case one should find the hwp_angle populated in the fast data block.
-            hwp_rate (float): the "approximate" HWP spin rate, with sign, in revs / second.
-                            Use placeholder value of 0 for cases when not "locked".
+        Notes
+        -----------
+        Output file format \n
+        * Provider: 'hwp'
+            * Fast block
+                * 'hwp.hwp_angle'
+            * Slow block
+                * 'hwp.stable'
+                * 'hwp.locked'
+                * 'hwp.hwp_rate'
+
+        - fast_time: timestamp 
+            IRIG synched timing (~2kHz)
+        - angle: float
+            IRIG synched HWP angle in radian
+        - slow_time: timestamp 
+            time list of slow block
+        - stable: bool
+            if non-zero, indicates the HWP spin state is known. \n
+            i.e. it is either spinning at a measurable rate, or stationary. \n
+            When this flag is non-zero, the hwp_rate field can be taken at face value. \n
+        - locked: bool 
+            if non-zero, indicates the HWP is spinning and the position solution is working. \n
+            In this case one should find the hwp_angle populated in the fast data block. \n
+        - hwp_rate: float
+            the "approximate" HWP spin rate, with sign, in revs / second. \n
+            Use placeholder value of 0 for cases when not "locked". 
         """
         if self._output is None and output is None:
             logger.error('Not specified output file')
