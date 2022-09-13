@@ -16,7 +16,11 @@ XAXIS, YAXIS, ZAXIS = np.eye(3)
 
 
 class OpSimHWPSS(toast.Operator):
-    """ Simulate HWP synchronous signal """
+    """ Simulate HWP synchronous signal 
+        N.B: The HWPSS template is interpolated (with a 5th order spline interpolation).
+            Interpolation errors produce spurious peaks in the frequency domain which are 7 to 8 orders of magnitude below
+            the amplitude of the original signal.
+    """
 
     def __init__(self, name, fname_hwpss, mc=0):
         """
