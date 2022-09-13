@@ -259,13 +259,6 @@ be processed:
   - ``'glitch_flags'`` - optional
 
 
-Support
-=======
-
-.. automodule:: sotodlib.site_pipeline.util
-   :members:
-   :undoc-members:
-
 update-hwp-angle
 ----------------
 
@@ -282,3 +275,10 @@ Command line arguments
    :func: get_parser
    :prog: update_hwp_angle
 
+
+Support
+=======
+
+.. automodule:: sotodlib.site_pipeline.util
+   :members:
+   :undoc-members:
