@@ -1,5 +1,7 @@
 .. py:module:: sotodlib.hwp.g3thwp
 
+.. _g3thwp-section:
+
 =========
 G3tHWP
 =========
@@ -17,42 +19,49 @@ We can include a time range + data path or a full-path file list of input g3 dat
 
   hwp_angle_tool = hwp.G3tHWP('hwp_config.yaml')
 
-yaml config file should include below info.
-::
+Here's an annotated example of yaml config file:
+
+.. code-block:: yaml
+  
+  # start and end time for `update_hwp_angle.load_data` 
+  start: 1618369921
+  end: 1618373521
+
+  # path to L2 HK directory 
+  data_dir: '/mnt/so1/data/ucsd-sat1/hk/'
    
- # start and end time for `update_hwp_angle.load_data` 
- start: timestamp
- end: timestamp
+  # input file name for `update_hwp_angle.load_file` 
+  file_list:
+  - '/mnt/so1/data/ucsd-sat1/hk/16183/1618383667.g3'
+  - '/mnt/so1/data/ucsd-sat1/hk/16183/1618372860.g3'
 
- # path to L2 HK directory  ex.) '/mnt/so1/data/ucsd-sat1/hk/'
- data_dir: str
+  # prefix of field name
+  field_instance: 'observatory.HBA.feeds.HWPEncoder'
+
+  # name list of HWP_encoder field variable
+  field_list:
+  - 'rising_edge_count'
+  - 'irig_time'
+  - 'counter'
+  - 'counter_index'
+  - 'irig_synch_pulse_clock_time'
+  - 'irig_synch_pulse_clock_counts'
+  - 'quad'
    
- # input file name for `update_hwp_angle.load_file` 
- # ex.)
- # - '/mnt/so1/data/ucsd-sat1/hk/16183/1618383667.g3'
- # - '/mnt/so1/data/ucsd-sat1/hk/16183/1618372860.g3'
- file_list: str
+  # HWP OCS packet size
+  packet_size: 120
 
- # prefix of field name ex.) 'observatory.HBA.feeds.HWPEncoder'
- field_instance: str
+  # number of slots * 2
+  num_edges: 1140
 
- # name list of HWP_encoder field variable
- field_list: list
-   
- # HWP OCS packet size
- packet_size: int
+  # Number of slots representing the width of the reference slot
+  ref_edges: 2
 
- # number of slots * 2
- num_edges: int
+  # Search range of reference slot
+  ref_range: 0.1
 
- # Number of slots representing the width of the reference slot
- ref_edges: int
-
- # Search range of reference slot
- ref_range: float
-
- # path+filename of output g3 file
- output: str
+  # path+filename of output g3 file
+  output: output.g3
    
  
 
