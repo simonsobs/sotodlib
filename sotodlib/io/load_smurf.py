@@ -2290,6 +2290,8 @@ def load_file(
             if stop is not None:
                 if file_start > sample_stop:
                     continue
+                if file_stop < sample_start:
+                    continue
                 stop = sample_stop - file_start
 
             start = max(0, sample_start - file_start)
