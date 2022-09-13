@@ -154,7 +154,7 @@ def match_chan_map(pointing, template, out_thresh=0, weight=2, avoid_collision=T
 
     # Undo sorting
     p_ii = np.argsort(p_i)
-    t_ii = np.argsost(t_i)
+    t_ii = np.argsort(t_i)
     P = reg.P[np.ix_(t_ii, p_ii)]
 
     if avoid_collision:
