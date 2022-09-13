@@ -34,6 +34,8 @@ from sotodlib.io.g3tsmurf_db import (
     Frames,
 )
 
+from sotodlib.io.g3tsmurf_utils import make_datetime
+
 Session = sessionmaker()
 num_bias_lines = 16
 
@@ -202,30 +204,6 @@ class G3tSmurf:
                    configs["g3tsmurf_db"],
                    meta_path=os.path.join(configs["data_prefix"],"smurf"))
 
-    @staticmethod
-    def _make_datetime(x):
-        """
-        Takes an input (either a timestamp or datetime), and returns a datetime.
-        Intended to allow flexibility in inputs for various other functions
-        Note that x will be assumed to be in UTC if timezone is not specified
-
-        Args
-        ----
-            x: input datetime of timestamp
-
-        Returns
-        ----
-            datetime: datetime of x if x is a timestamp
-        """
-        if np.issubdtype(type(x), np.floating) or np.issubdtype(type(x), np.integer):
-            return dt.datetime.utcfromtimestamp(x)
-        elif isinstance(x, np.datetime64):
-            return x.astype(dt.datetime).replace(tzinfo=dt.timezone.utc)
-        elif isinstance(x, dt.datetime) or isinstance(x, dt.date):
-            if x.tzinfo == None:
-                return x.replace(tzinfo=dt.timezone.utc)
-            return x
-        raise (Exception("Input not a datetime or timestamp"))
 
     def add_file(self, path, session, overwrite=False):
         """
@@ -1162,8 +1140,8 @@ class G3tSmurf:
             stream_ids: List of stream ids.
         """
         session = self.Session()
-        start = self._make_datetime(start)
-        end = self._make_datetime(end)
+        start = make_datetime(start)
+        end = make_datetime(end)
         all_ids = (
             session.query(Files.stream_id)
             .filter(Files.start < end, Files.stop >= start)
@@ -1238,8 +1216,8 @@ class G3tSmurf:
 
         """
         session = self.Session()
-        start = self._make_datetime(start)
-        end = self._make_datetime(end)
+        start = make_datetime(start)
+        end = make_datetime(end)
 
         if stream_id is None:
             sids = self._stream_ids_in_range(start, end)
@@ -1632,7 +1610,7 @@ class SmurfStatus:
             status : (SmurfStatus instance)
                 object indexing of rogue variables at specified time.
         """
-        time = archive._make_datetime(time)
+        time = make_datetime(time)
         session = archive.Session()
         q = (
             session.query(Frames)

@@ -12,6 +12,31 @@ from sotodlib.io.g3tsmurf_db import Observations, Files
 logger = logging.getLogger(__name__)
 
 
+
+def make_datetime(x):
+    """
+    Takes an input (either a timestamp or datetime), and returns a datetime.
+    Intended to allow flexibility in inputs for various other functions
+    Note that x will be assumed to be in UTC if timezone is not specified
+
+    Args
+    ----
+        x: input datetime of timestamp
+
+    Returns
+    ----
+        datetime: datetime of x if x is a timestamp
+    """
+    if np.issubdtype(type(x), np.floating) or np.issubdtype(type(x), np.integer):
+        return dt.datetime.utcfromtimestamp(x)
+    elif isinstance(x, np.datetime64):
+        return x.astype(dt.datetime).replace(tzinfo=dt.timezone.utc)
+    elif isinstance(x, dt.datetime) or isinstance(x, dt.date):
+        if x.tzinfo == None:
+            return x.replace(tzinfo=dt.timezone.utc)
+        return x
+    raise (Exception("Input not a datetime or timestamp"))
+
 def get_obs_folder(obs_id, archive):
     """
     Get the folder associated with the observation action. Assumes
@@ -60,7 +85,7 @@ def get_obs_plots(obs_id, archive):
     return [os.path.join(path,f) for f in os.listdir(path)]
 
 def get_batch( 
-    obs_id, 
+    specifier, 
     archive,
     ram_limit=None, 
     n_det_chunks=None,
@@ -90,8 +115,10 @@ def get_batch(
     
     Arguments
     ----------
-    obs_id : string
-        Level 2 observation IDs
+    speciier : Observation, string (obs_id), 
+        or pair of datetimes (or strings that parse to datetimes).
+        If Observation or id is given, data is loaded with load_file,
+        otherwise, load_data with start, end times.
     archive : G3tSmurf Instance 
         The G3tSmurf database connected to the obs_id
     ram_limit : None or float
@@ -129,7 +156,18 @@ def get_batch(
     """
     
     session = archive.Session()
-    obs = session.query(Observations).filter(Observations.obs_id==obs_id).one()
+
+    partial=False
+    if isinstance(specifier, Observations):
+        obs = specifier
+    elif isinstance(specifier, str):
+        obs = session.query(Observations).filter(Observations.obs_id==specifier).one()
+    else:
+        s, e = [make_datetime(i) for i in specifier]
+        obs = session.query(Observations).filter(Observations.start<s).order_by(Observations.start.desc()).first()
+        partial=True
+
+    
     db_files = session.query(Files).filter(Files.obs_id==obs_id).order_by(Files.start)
     filenames = sorted( [f.name for f in db_files])
     
@@ -191,7 +229,7 @@ def get_batch(
                 if test:
                     yield (det_chunk, samp_chunk)
                 else:
-                    yield load_file( 
+                    aman = load_file( 
                         filenames, 
                         channels=det_chunk, 
                         samples=samp_chunk, 
@@ -199,6 +237,18 @@ def get_batch(
                         status=status,
                         **load_file_args,
                     )
+                    if partial:
+                        msk = np.all(
+                            [aman.timestamps >= s.timestamp(), aman.timestamps < e.timestamp()],
+                            axis=0,
+                        )
+                        idx = np.where(msk)[0]
+                        if len(idx) == 0:
+                            aman.restrict("samps", (0, 0))
+                        else:
+                            aman.restrict("samps", (idx[0], idx[-1]))
+                    yield aman
+
     except GeneratorExit:
         pass
     
