@@ -17,7 +17,7 @@ import ephem
 import healpy as hp
 
 from scipy.constants import au as AU
-from scipy.interpolate import RectBivariateSpline
+from scipy.interpolate import RectBivariateSpline, splrep, splev
 
 from toast.timing import function_timer
 
@@ -40,7 +40,9 @@ XAXIS, YAXIS, ZAXIS = np.eye(3)
 @trait_docs
 class SimHWPSS(Operator):
     """Simulate HWP synchronous signal
-    
+        N.B: The HWPSS template is interpolated (with a 5th order spline interpolation).
+            Interpolation errors produce spurious peaks in the frequency domain which are 7 to 8 orders of magnitude below
+            the amplitude of the original signal.
     """
 
     API = Int(0, help="Internal interface version for this operator")
@@ -175,16 +177,16 @@ class SimHWPSS(Operator):
 
                 iquv = (transmission + reflection).T
                 iquss = (
-                    iweights * np.interp(chi, self.chis, iquv[0]) +
-                    qweights * np.interp(chi, self.chis, iquv[1]) +
-                    uweights * np.interp(chi, self.chis, iquv[2])
+                    iweights * splev(chi, splrep(self.chis, iquv[0], k=5)) +
+                    qweights * splev(chi, splrep(self.chis, iquv[1], k=5)) +
+                    uweights * splev(chi, splrep(self.chis, iquv[2], k=5))
                 ) * scale
 
                 iquv = emission.T
                 iquss += (
-                    iweights * np.interp(chi, self.chis, iquv[0]) +
-                    qweights * np.interp(chi, self.chis, iquv[1]) +
-                    uweights * np.interp(chi, self.chis, iquv[2])
+                    iweights * splev(chi, splrep(self.chis, iquv[0], k=5)) +
+                    qweights * splev(chi, splrep(self.chis, iquv[1], k=5)) +
+                    uweights * splev(chi, splrep(self.chis, iquv[2], k=5))
                 )
 
                 iquss -= np.median(iquss)
