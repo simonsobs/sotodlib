@@ -160,20 +160,18 @@ def get_batch(
     else:
         status = SmurfStatus.from_file(filenames[0])
 
-    samp_s, samp_e = 0, obs_samps
-    partial = False
-    if start != None or end != None:
-        partial = True
-        samprate = 4e3 / (status.downsample_enabled * status.downsample_factor)
-        if start != None:
-            samp_s = (make_datetime(start).timestamp() - obs.start.timestamp()) * samprate \
-                - startend_buffer * samprate
-            samp_s = max(int(samp_s), 0)
-        if end != None:
-            samp_e = obs_samps - (obs.stop.timestamp() - make_datetime(end).timestamp()) * samprate \
-                + startend_buffer * samprate
-            samp_e = min(obs_samps, int(samp_e))
-        obs_samps = samp_e-samp_s
+    if start == None:
+        start = obs.start
+    if end == None:
+        end = obe.stop
+    samprate = 4e3 / (status.downsample_enabled * status.downsample_factor)
+    samp_s = (make_datetime(start).timestamp() - obs.start.timestamp()) * samprate \
+        - startend_buffer * samprate
+    samp_s = max(int(samp_s), 0)
+    samp_e = obs_samps - (obs.stop.timestamp() - make_datetime(end).timestamp()) * samprate \
+        + startend_buffer * samprate
+    samp_e = min(obs_samps, int(samp_e))
+    obs_samps = samp_e-samp_s
 
     
     if n_det_chunks is not None and n_dets is not None:
@@ -229,7 +227,7 @@ def get_batch(
                         status=status,
                         **load_file_args,
                     )
-                    if partial:
+                    if samp_s !=0 or samp_e != obs.n_samples:
                         msk = np.all(
                             [aman.timestamps >= start.timestamp(), aman.timestamps < end.timestamp()],
                             axis=0,
