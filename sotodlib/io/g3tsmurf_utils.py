@@ -122,8 +122,8 @@ def get_batch(
     samp_chunks: None or list of tuples
         if specified, each entry in the list is successively passed to load the
         AxisManagers as  `load_file(... samples = list[i] ... )`
-    start: Datetime or string. Begin batching at this time.
-    end: Datetime or string.  End betching at this time.
+    start: Datetime or timestamp. Begin batching at this time.
+    end: Datetime or timestamp.  End betching at this time.
     startend_buffer: int.  Seconds of buffer to add on either side samples estimated
         to correspond with start, end based on sampling rate.
     test: bool

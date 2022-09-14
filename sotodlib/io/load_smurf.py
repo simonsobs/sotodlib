@@ -49,7 +49,7 @@ def make_datetime(x):
 
     Args
     ----
-        x: input datetime of timestamp
+        x: input datetime or timestamp
 
     Returns
     ----
