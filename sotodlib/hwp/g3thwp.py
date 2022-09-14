@@ -547,7 +547,6 @@ class G3tHWP():
         self._ref_indexes = []
         # Calculate spacing between all clock values
         diff = np.ediff1d(self._encd_clk, to_begin=0)  # [1:]
-
         split = int(len(diff) / self._num_edges)
         diff_split = np.array_split(diff, split)
         offset = 0
@@ -556,8 +555,12 @@ class G3tHWP():
         # 2 slit distances (defined above) +/- 10%
         for i in range(split):
             _diff = diff_split[i]
+            # eliminate upper/lower 10%
+            _diff_upperlim = np.percentile(_diff, 90)
+            _diff_lowerlim = np.percentile(_diff, 10)
+            __diff = _diff[np.where((_diff < _diff_upperlim) & (_diff > _diff_lowerlim))]
             # Define mean value as nominal slit distance
-            slit_dist = np.mean(_diff)
+            slit_dist = np.mean(__diff)
             # Conditions for idenfitying the ref slit
             # Slit distance somewhere between 2 slits:
             # 2 slit distances (defined above) +/- 10%
