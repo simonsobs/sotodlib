@@ -163,17 +163,17 @@ def get_batch(
     samp_s, samp_e = 0, obs_samps
     partial = False
     if start != None or end != None:
-         partial = True
-          samprate = 4e3 / (status.downsample_enabled * status.downsample_factor)
-           if start != None:
-                samp_s = (make_datetime(start).timestamp() - obs.start.timestamp()) * samprate \
-                    - startend_buffer * samprate
-                samp_s = max(int(samp_s), 0)
-            if end != None:
-                samp_e = obs_samps - (obs.stop.timestamp() - make_datetime(end).timestamp()) * samprate \
-                    + startend_buffer * samprate
-                samp_e = min(obs_samps, int(samp_e))
-            obs_samps = samp_e-samp_s
+        partial = True
+        samprate = 4e3 / (status.downsample_enabled * status.downsample_factor)
+        if start != None:
+            samp_s = (make_datetime(start).timestamp() - obs.start.timestamp()) * samprate \
+                - startend_buffer * samprate
+            samp_s = max(int(samp_s), 0)
+        if end != None:
+            samp_e = obs_samps - (obs.stop.timestamp() - make_datetime(end).timestamp()) * samprate \
+                + startend_buffer * samprate
+            samp_e = min(obs_samps, int(samp_e))
+        obs_samps = samp_e-samp_s
 
     
     if n_det_chunks is not None and n_dets is not None:
