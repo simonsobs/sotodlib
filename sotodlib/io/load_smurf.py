@@ -2265,8 +2265,10 @@ def load_file(
         stop = sample_stop
         for filename, out in zip(filenames, outs):
             file_start, file_stop = out["sample_range"]
+            if file_stop <= sample_start:
+                continue
             if stop is not None:
-                if file_start > sample_stop:
+                if file_start >= sample_stop:
                     continue
                 stop = sample_stop - file_start
 
