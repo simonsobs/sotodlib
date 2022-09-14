@@ -118,7 +118,7 @@ class OpSimHWPSS(toast.Operator):
                 iquss += (
                     iweights * scp.splev(chi, scp.splrep(self.chis, iquv[0],k=5)) +
                     qweights * scp.splev(chi, scp.splrep(self.chis, iquv[1],k=5)) +
-                    uweights * scp.splev(chi, scp.splrep(self.chis, iquv[1],k=5))
+                    uweights * scp.splev(chi, scp.splrep(self.chis, iquv[2],k=5))
                 )
 
                 iquss -= np.median(iquss)
