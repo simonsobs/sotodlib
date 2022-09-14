@@ -6,37 +6,13 @@ import numpy as np
 import logging
 import datetime as dt
 
-from sotodlib.io.load_smurf import load_file, SmurfStatus
+from sotodlib.io.load_smurf import load_file, SmurfStatus, make_datetime
 from sotodlib.io.g3tsmurf_db import Observations, Files
 
 
 logger = logging.getLogger(__name__)
 
 
-
-def make_datetime(x):
-    """
-    Takes an input (either a timestamp or datetime), and returns a datetime.
-    Intended to allow flexibility in inputs for various other functions
-    Note that x will be assumed to be in UTC if timezone is not specified
-
-    Args
-    ----
-        x: input datetime of timestamp
-
-    Returns
-    ----
-        datetime: datetime of x if x is a timestamp
-    """
-    if np.issubdtype(type(x), np.floating) or np.issubdtype(type(x), np.integer):
-        return dt.datetime.utcfromtimestamp(x)
-    elif isinstance(x, np.datetime64):
-        return x.astype(dt.datetime).replace(tzinfo=dt.timezone.utc)
-    elif isinstance(x, dt.datetime) or isinstance(x, dt.date):
-        if x.tzinfo == None:
-            return x.replace(tzinfo=dt.timezone.utc)
-        return x
-    raise (Exception("Input not a datetime or timestamp"))
 
 def get_obs_folder(obs_id, archive):
     """
@@ -86,7 +62,7 @@ def get_obs_plots(obs_id, archive):
     return [os.path.join(path,f) for f in os.listdir(path)]
 
 def get_batch( 
-    specifier, 
+    obs_id, 
     archive,
     ram_limit=None, 
     n_det_chunks=None,
@@ -95,6 +71,9 @@ def get_batch(
     n_samps=None, 
     det_chunks=None, 
     samp_chunks=None,
+    start = None,
+    end = None,
+    startend_buffer = 10,
     test = False,
     load_file_args={},
 ):
@@ -116,10 +95,8 @@ def get_batch(
     
     Arguments
     ----------
-    speciier : Observation, string (obs_id), 
-        or pair of datetimes (or strings that parse to datetimes).
-        If Observation or id is given, data is loaded with load_file,
-        otherwise, load_data with start, end times.
+    obs_id : string, or Observatin object
+        Level 2 observation IDs
     archive : G3tSmurf Instance 
         The G3tSmurf database connected to the obs_id
     ram_limit : None or float
@@ -145,6 +122,10 @@ def get_batch(
     samp_chunks: None or list of tuples
         if specified, each entry in the list is successively passed to load the
         AxisManagers as  `load_file(... samples = list[i] ... )`
+    start: Datetime or string. Begin batching at this time.
+    end: Datetime or string.  End betching at this time.
+    startend_buffer: int.  Seconds of buffer to add on either side samples estimated
+        to correspond with start, end based on sampling rate.
     test: bool
         If true, yields a tuple of (det_chunks, samp_chunks) instead of a loaded
         AxisManager
@@ -158,23 +139,42 @@ def get_batch(
     
     session = archive.Session()
 
-    partial=False
-    if isinstance(specifier, Observations):
-        obs = specifier
-    elif isinstance(specifier, str):
-        obs = session.query(Observations).filter(Observations.obs_id==specifier).one()
+    if isinstance(obs_id, Observations):
+        obs = obs_id
+        obs_id = obs.obs_id
     else:
-        s, e = [make_datetime(i) for i in specifier]
-        obs = session.query(Observations).filter(Observations.start<s).order_by(Observations.start.desc()).first()
-        partial=True
-
-    obs_id = obs.obs_id 
+        obs = session.query(Observations).filter(Observations.obs_id==obs_id).one()
     db_files = session.query(Files).filter(Files.obs_id==obs_id).order_by(Files.start)
     filenames = sorted( [f.name for f in db_files])
     
     ts = obs.tunesets[0] ## if this throws an error we have some fallbacks
     obs_dets, obs_samps = len(ts.dets), obs.n_samples
     session.close()
+
+    ## should we let folks overwrite this here?
+    if "archive" in load_file_args:
+        archive = load_file_args.pop("archive")
+        
+    if "status" in load_file_args:
+        status = load_file_args.pop("status")
+    else:
+        status = SmurfStatus.from_file(filenames[0])
+
+    samp_s, samp_e = 0, obs_samps
+    partial = False
+    if start != None or end != None:
+         partial = True
+          samprate = 4e3 / (status.downsample_enabled * status.downsample_factor)
+           if start != None:
+                samp_s = (make_datetime(start).timestamp() - obs.start.timestamp()) * samprate \
+                    - startend_buffer * samprate
+                samp_s = max(int(samp_s), 0)
+            if end != None:
+                samp_e = obs_samps - (obs.stop.timestamp() - make_datetime(end).timestamp()) * samprate \
+                    + startend_buffer * samprate
+                samp_e = min(obs_samps, int(samp_e))
+            obs_samps = samp_e-samp_s
+
     
     if n_det_chunks is not None and n_dets is not None:
         logger.warning("Both n_det_chunks and n_dets specified, n_det_chunks overrides")
@@ -198,29 +198,20 @@ def get_batch(
         det_chunks = [range(i*n_dets,min((i+1)*n_dets,obs_dets)) for i in range(n_det_chunks)]
     if n_samp_chunks is not None:
         n_samps = int(np.ceil(obs_samps/n_samp_chunks))
-        samp_chunks = [(i*n_samps,min((i+1)*n_samps,obs_samps)) for i in range(n_samp_chunks)]
+        samp_chunks = [(samp_s+i*n_samps,min((i+1)*n_samps+samp_s,samp_e)) for i in range(n_samp_chunks)]
 
     if n_dets is not None:
         n_det_chunks = int(np.ceil(obs_dets/n_dets))
         det_chunks = [range(i*n_dets,min((i+1)*n_dets,obs_dets)) for i in range(n_det_chunks)]
     if n_samps is not None:
         n_samp_chunks = int(np.ceil(obs_samps/n_samps))
-        samp_chunks = [(i*n_samps,min((i+1)*n_samps,obs_samps)) for i in range(n_samp_chunks)]
+        samp_chunks = [(samp_s+i*n_samps,min((i+1)*n_samps+samp_s,samp_e)) for i in range(n_samp_chunks)]
         
     if det_chunks is None:
         det_chunks = [range(0,obs_dets)]
     if samp_chunks is None:
-        samp_chunks = [(0,obs_samps)]
-        
-    ## should we let folks overwrite this here?
-    if "archive" in load_file_args:
-        archive = load_file_args.pop("archive")
-        
-    if "status" in load_file_args:
-        status = load_file_args.pop("status")
-    else:
-        status = SmurfStatus.from_file(filenames[0])
-    
+        samp_chunks = [(samp_s,samp_e)]
+            
     logger.debug(f"Loading data with det_chunks: {det_chunks}.")
     logger.debug(f"Loading data in samp_chunks: {samp_chunks}.")
     
@@ -240,14 +231,14 @@ def get_batch(
                     )
                     if partial:
                         msk = np.all(
-                            [aman.timestamps >= s.timestamp(), aman.timestamps < e.timestamp()],
+                            [aman.timestamps >= start.timestamp(), aman.timestamps < end.timestamp()],
                             axis=0,
                         )
                         idx = np.where(msk)[0]
                         if len(idx) == 0:
-                            aman.restrict("samps", (0, 0))
+                            aman.restrict("samps", (aman.samps.offset, aman.samps.offset))
                         else:
-                            aman.restrict("samps", (idx[0], idx[-1]))
+                            aman.restrict("samps", (aman.samps.offset+idx[0], aman.samps.offset+idx[-1]))
                     yield aman
 
     except GeneratorExit:

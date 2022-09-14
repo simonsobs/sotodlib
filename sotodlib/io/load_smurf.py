@@ -34,10 +34,36 @@ from sotodlib.io.g3tsmurf_db import (
     Frames,
 )
 
-from sotodlib.io.g3tsmurf_utils import make_datetime
-
 Session = sessionmaker()
 num_bias_lines = 16
+
+
+"""
+Used for the input of many functions below
+"""
+def make_datetime(x):
+    """
+    Takes an input (either a timestamp or datetime), and returns a datetime.
+    Intended to allow flexibility in inputs for various other functions
+    Note that x will be assumed to be in UTC if timezone is not specified
+
+    Args
+    ----
+        x: input datetime of timestamp
+
+    Returns
+    ----
+        datetime: datetime of x if x is a timestamp
+    """
+    if np.issubdtype(type(x), np.floating) or np.issubdtype(type(x), np.integer):
+        return dt.datetime.utcfromtimestamp(x)
+    elif isinstance(x, np.datetime64):
+        return x.astype(dt.datetime).replace(tzinfo=dt.timezone.utc)
+    elif isinstance(x, dt.datetime) or isinstance(x, dt.date):
+        if x.tzinfo == None:
+            return x.replace(tzinfo=dt.timezone.utc)
+        return x
+    raise (Exception("Input not a datetime or timestamp"))
 
 
 """
