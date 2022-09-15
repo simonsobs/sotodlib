@@ -89,6 +89,11 @@ class G3tHWP():
         if 'output' in self.configs.keys():
             self._output = self.configs['output']
 
+        #Percentage for eliminating upper/lower data to calculate nominal slit width
+        self._slit_width_lim = 10
+        if 'slit_width_lim' in self.configs.keys():
+            self._slit_width_lim = self.configs['slit_width_lim']
+
     def load_data(self, start=None, end=None,
                   data_dir=None, instance='HBA'):
         """
@@ -556,8 +561,8 @@ class G3tHWP():
         for i in range(split):
             _diff = diff_split[i]
             # eliminate upper/lower 10%
-            _diff_upperlim = np.percentile(_diff, 90)
-            _diff_lowerlim = np.percentile(_diff, 10)
+            _diff_upperlim = np.percentile(_diff, 100 - self._slit_width_lim)
+            _diff_lowerlim = np.percentile(_diff, self._slit_width_lim)
             __diff = _diff[np.where((_diff < _diff_upperlim) & (_diff > _diff_lowerlim))]
             # Define mean value as nominal slit distance
             slit_dist = np.mean(__diff)
