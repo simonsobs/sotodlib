@@ -89,8 +89,8 @@ class G3tHWP():
         if 'output' in self.configs.keys():
             self._output = self.configs['output']
 
-        #Percentage for eliminating upper/lower data to calculate nominal slit width
-        self._slit_width_lim = 10
+        # Threshoild for outlier data to calculate nominal slit width
+        self._slit_width_lim = 0.1
         if 'slit_width_lim' in self.configs.keys():
             self._slit_width_lim = self.configs['slit_width_lim']
 
@@ -560,15 +560,15 @@ class G3tHWP():
         # 2 slit distances (defined above) +/- 10%
         for i in range(split):
             _diff = diff_split[i]
-            # eliminate upper/lower 10%
-            _diff_upperlim = np.percentile(_diff, 100 - self._slit_width_lim)
-            _diff_lowerlim = np.percentile(_diff, self._slit_width_lim)
+            # eliminate upper/lower _slit_width_lim
+            _diff_upperlim = np.percentile(_diff, (1 - self._slit_width_lim)*100)
+            _diff_lowerlim = np.percentile(_diff, self._slit_width_lim*100)
             __diff = _diff[np.where((_diff < _diff_upperlim) & (_diff > _diff_lowerlim))]
             # Define mean value as nominal slit distance
             slit_dist = np.mean(__diff)
             # Conditions for idenfitying the ref slit
             # Slit distance somewhere between 2 slits:
-            # 2 slit distances (defined above) +/- 10%
+            # 2 slit distances (defined above) +/- dev
             ref_hi_cond = ((self._ref_edges + 2) * slit_dist * (1 + dev))
             ref_lo_cond = ((self._ref_edges + 1) * slit_dist * (1 - dev))
             # Find the reference slit locations (indexes)
