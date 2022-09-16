@@ -85,14 +85,20 @@ class G3tHWP():
         # Reference slit indexes
         self._ref_indexes = []
 
-        self._output = None
-        if 'output' in self.configs.keys():
-            self._output = self.configs['output']
+        # Search range of reference slot
+        self._ref_range = 0.1
+        if 'ref_range' in self.configs.keys():
+            self._ref_range = self.configs['ref_range']
 
         # Threshoild for outlier data to calculate nominal slit width
         self._slit_width_lim = 0.1
         if 'slit_width_lim' in self.configs.keys():
             self._slit_width_lim = self.configs['slit_width_lim']
+
+        # Output path + filename
+        self._output = None
+        if 'output' in self.configs.keys():
+            self._output = self.configs['output']
 
     def load_data(self, start=None, end=None,
                   data_dir=None, instance='HBA'):
@@ -518,7 +524,7 @@ class G3tHWP():
         self._find_dropped_packets()
 
         # reference finding and fill its angle
-        self._find_refs(ratio)
+        self._find_refs()
         if fast:
             self._fill_refs_fast()
         else:
@@ -547,7 +553,7 @@ class G3tHWP():
         logger.info('hwp angle calculation is finished.')
         return self._time, self._angle
 
-    def _find_refs(self, dev):
+    def _find_refs(self):
         """ Find reference slits """
         self._ref_indexes = []
         # Calculate spacing between all clock values
@@ -568,9 +574,9 @@ class G3tHWP():
             slit_dist = np.mean(__diff)
             # Conditions for idenfitying the ref slit
             # Slit distance somewhere between 2 slits:
-            # 2 slit distances (defined above) +/- dev
-            ref_hi_cond = ((self._ref_edges + 2) * slit_dist * (1 + dev))
-            ref_lo_cond = ((self._ref_edges + 1) * slit_dist * (1 - dev))
+            # 2 slit distances (defined above) +/- ref_range
+            ref_hi_cond = ((self._ref_edges + 2) * slit_dist * (1 + self._ref_range))
+            ref_lo_cond = ((self._ref_edges + 1) * slit_dist * (1 - self._ref_range))
             # Find the reference slit locations (indexes)
             _ref_idx = np.argwhere(np.logical_and(
                 _diff < ref_hi_cond, _diff > ref_lo_cond)).flatten()
