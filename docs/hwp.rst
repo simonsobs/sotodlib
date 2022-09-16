@@ -59,6 +59,9 @@ Here's an annotated example of yaml config file:
   # Number of slots representing the width of the reference slot
   ref_edges: 2
 
+  # Threshold to take mean value as nominal slit distance [%]
+  slit_width_lim: 0.1
+  
   # Search range of reference slot
   ref_range: 0.1
 
