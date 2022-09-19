@@ -77,6 +77,10 @@ class SimStimulator(Operator):
         help="Observation detdata key for simulated signal",
     )
 
+    stimulator_temperature = Unicode(
+        "stimulator", help="Observation shared key for stimulator temperature"
+    )
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
