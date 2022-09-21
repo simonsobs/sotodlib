@@ -29,7 +29,7 @@ from toast.traits import trait_docs, Int, Unicode, Bool, Quantity, Float, Instan
 
 from toast.ops.operator import Operator
 
-from toast.utils import Environment, Logger, Timer
+from toast.utils import Environment, Logger, Timer, unit_conversion
 
 from toast.observation import default_values as defaults
 
@@ -96,8 +96,12 @@ class SimHWPSS(Operator):
 
         for obs in data.obs:
             dets = obs.select_local_detectors(detectors)
-            obs.detdata.ensure(self.det_data, detectors=dets)
+            obs.detdata.ensure(self.det_data, detectors=dets, create_units=u.K)
+            det_units = obs.detdata[self.det_data].units
+            det_scale = unit_conversion(u.K, det_units)
+
             focalplane = obs.telescope.focalplane
+
             # Get HWP angle
             chi = obs.shared[self.hwp_angle].data
             for det in dets:
@@ -115,7 +119,7 @@ class SimHWPSS(Operator):
                 # Get incident angle
 
                 det_quat = focalplane[det]["quat"]
-                det_theta, det_phi, det_psi = qa.to_angles(det_quat)
+                det_theta, det_phi, det_psi = qa.to_iso_angles(det_quat)
 
                 # Compute Stokes weights
 
@@ -193,7 +197,7 @@ class SimHWPSS(Operator):
 
                 # Co-add with the cached signal
 
-                signal += iquss
+                signal += det_scale * iquss
 
         return
 

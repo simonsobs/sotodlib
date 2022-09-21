@@ -1,5 +1,5 @@
 ===========
-TOAST 
+TOAST
 ===========
 
 The ``sotodlib.toast`` package contains toast operators for use in
@@ -45,7 +45,7 @@ easiest way forward is to use a conda environment.  This is also the
 path to take if you want to use the latest upstream code version.
 
 To begin, make sure you already have a recent conda "base" environment.
-If you are starting from scratch, I recommend running the "miniforge" `installer from conda-forge <https://github.com/conda-forge/miniforge>`_.  
+If you are starting from scratch, I recommend running the "miniforge" `installer from conda-forge <https://github.com/conda-forge/miniforge>`_.
 Make sure your base conda environment is activated::
 
     conda env list
@@ -73,8 +73,8 @@ Now we can install the toast package itself after activating our environment::
     conda activate simons
     ./platforms/conda.sh
 
-Whenever you pull new changes to your git checkout, you can re-run the 
-``platforms/conda.sh`` script to install an updated version of the toast 
+Whenever you pull new changes to your git checkout, you can re-run the
+``platforms/conda.sh`` script to install an updated version of the toast
 package.  Now install ``so3g``::
 
     pip install so3g
@@ -101,12 +101,19 @@ Batch Use
 -------------------
 
 When running workflows in batch mode, we typically use a slightly different
-structure from a notebook.  There are helper functions in toast to parse
-operator options from the commandline and / or a config file, and to automatically
-create named instances of those operators for use in workflow.  There is
-a large-scale workflow in ``sotodlib/workflows/toast_so_sim.py``.  This
-script has nearly every possible operator in its config options, and they
-can be selectively enabled or disabled from the commandline or config file.
+structure from a notebook. There are helper functions in toast to parse
+operator options from the commandline and / or a config file, and to
+automatically create named instances of those operators for use in workflow.
+There is a large-scale simulation and reduction workflow in
+``sotodlib/workflows/toast_so_sim.py``. This script has nearly every possible
+operator in its config options, and they can be selectively enabled or disabled
+from the commandline or config file.
+
+For processing data that already exists on disk, you can use
+``sotodlib/workflows/toast_so_map.py`` as an example workflow. This loads data
+in the native toast HDF5 format and / or L3 books.
+
+.. note:: Loading data from books will be added in PR 183.
 
 
 Reference
@@ -124,6 +131,8 @@ instance usually contains detectors from one readout card / wafer.
 
 .. autoclass:: sotodlib.toast.SOFocalplane
    :members:
+
+.. note::  There are more extensive updates to the S.O. toast instrument classes coming in PR 183.
 
 
 Operators
