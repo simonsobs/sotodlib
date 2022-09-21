@@ -7,19 +7,21 @@ import os
 
 import unittest
 from unittest import TestCase
-
 from collections import OrderedDict
+
+from sotodlib.core import Hardware
+from sotodlib.sim_hardware import sim_nominal
+from sotodlib.vis_hardware import plot_detectors
 
 from ._helpers import create_outdir, mpi_multi
 
-from sotodlib.core import Hardware
+try:
+    import toast
+    from sotodlib.toast import sim_focalplane as toastsf
 
-from sotodlib.sim_hardware import get_example
-
-from sotodlib.sim_hardware import (sim_wafer_detectors,
-                                   sim_telescope_detectors)
-
-from sotodlib.vis_hardware import plot_detectors
+    toast_available = True
+except ImportError:
+    toast_available = False
 
 
 @unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
@@ -34,7 +36,7 @@ class HardwareTest(TestCase):
 
     def test_config_example(self):
         outpath = os.path.join(self.outdir, "hardware_example.toml.gz")
-        hw = get_example()
+        hw = sim_nominal()
         hw.dump(outpath, overwrite=True, compress=True)
         hwcheck = Hardware(outpath)
         checkpath = os.path.join(self.outdir, "hardware_example_check.toml.gz")
@@ -42,7 +44,10 @@ class HardwareTest(TestCase):
         return
 
     def test_sim_wafer(self):
-        hw = get_example()
+        if not toast_available:
+            print("TOAST cannot be imported- skipping unit test", flush=True)
+            return
+        hw = sim_nominal()
         # Simulate some wafers
         for tele, teleprops in hw.data["telescopes"].items():
             if tele != "SAT1":
@@ -58,19 +63,24 @@ class HardwareTest(TestCase):
                         continue
                     outpath = os.path.join(
                         self.outdir, "wafer_{}.toml.gz".format(wafer))
-                    dets = sim_wafer_detectors(hw, wafer, platescale, fwhm)
-                    # replace detectors with this set for dumping
+                    del hw.data["detectors"]
+                    dets = toastsf.sim_wafer_detectors(hw, wafer, platescale, fwhm)
                     hw.data["detectors"] = dets
                     hw.dump(outpath, overwrite=True, compress=True)
                     if not self.skip_plots:
-                        outpath = os.path.join(self.outdir,
-                                            "wafer_{}.pdf".format(wafer))
-                        plot_detectors(dets, outpath, labels=True)
+                        outpath = os.path.join(
+                            self.outdir,
+                            "wafer_{}.pdf".format(wafer)
+                        )
+                        plot_detectors(hw.data["detectors"], outpath, labels=True)
         return
 
     def test_sim_telescope(self):
-        fullhw = get_example()
-        fullhw.data["detectors"] = sim_telescope_detectors(fullhw, "SAT1")
+        if not toast_available:
+            print("TOAST cannot be imported- skipping unit test", flush=True)
+            return
+        fullhw = sim_nominal()
+        toastsf.sim_telescope_detectors(fullhw, "SAT1")
         hw = fullhw.select(match={"wafer_slot": ["w25",],})
         outpath = os.path.join(self.outdir, "telescope_SAT1_w25.toml.gz")
         hw.dump(outpath, overwrite=True, compress=True)
@@ -80,13 +90,14 @@ class HardwareTest(TestCase):
         return
 
     def test_sim_full(self):
-        hw = get_example()
-        hw.data["detectors"] = OrderedDict()
+        if not toast_available:
+            print("TOAST cannot be imported- skipping unit test", flush=True)
+            return
+        hw = sim_nominal()
         for tele, teleprops in hw.data["telescopes"].items():
             if tele != "SAT1":
                 continue
-            dets = sim_telescope_detectors(hw, tele)
-            hw.data["detectors"].update(dets)
+            toastsf.sim_telescope_detectors(hw, tele)
         dbpath = os.path.join(self.outdir, "hardware_SAT1.toml.gz")
         hw.dump(dbpath, overwrite=True, compress=True)
         check = Hardware(dbpath)
