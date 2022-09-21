@@ -386,17 +386,18 @@ following:
 - The entries in the Archive do not need to be per-detector.  You can
   specify results for a whole group of detectors, if that group is
   enumerated in the DetDb (or added to det_info using other metadata).
-  For example, if DetDb contains a column ``band``, the dataset could
-  contain columns ``dets:band`` and ``cal`` and simply report one
-  calibration number for each frequency band.  (On load, the Context
-  Metadata system will automatically broadcast the ``cal`` number so
-  that it has shape ``(n_dets,)`` in the fully populated AxisManager.)
+  For example, if DetDb contains a column ``passband``, the dataset
+  could contain columns ``dets:passband`` and ``cal`` and simply
+  report one calibration number for each frequency band.  (On load,
+  the Context Metadata system will automatically broadcast the ``cal``
+  number so that it has shape ``(n_dets,)`` in the fully populated
+  AxisManager.)
 - You can store all the results (i.e., results for multiple
   ``obs_id``) in a single HDF5 dataset.  This is not usually a good
   idea if your results are per-detector, per-observation... the
   dataset will be huge, and not easy to update incrementally.  But for
   smaller things (one or two numbers per observation, as in the
-  ``dets:band`` example above) it can be convenient.  Doing this
+  ``dets:passband`` example above) it can be convenient.  Doing this
   requires including ``obs:obs_id`` (or some other ObsDb column) in
   the dataset.
 
