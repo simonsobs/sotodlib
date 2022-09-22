@@ -259,6 +259,23 @@ be processed:
   - ``'glitch_flags'`` - optional
 
 
+update-hwp-angle
+----------------
+
+Script for running updates on (or creating) a hwp angle g3 file.
+This script will run periodically even when hwp is not spinning.
+Meaning is designed to work from something like a cronjob.
+The output hwp angle should be synchronized to SMuRF timing outside this script. 
+:ref:`See details here<g3thwp-section>`.
+
+Command line arguments
+``````````````````````
+.. argparse::
+   :module: sotodlib.site_pipeline.update_hwp_angle
+   :func: get_parser
+   :prog: update_hwp_angle
+
+
 Support
 =======
 
