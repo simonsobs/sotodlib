@@ -490,7 +490,11 @@ def reduce_data(job, args, data):
     timer = toast.timing.Timer()
     timer.start()
 
-    # Apply demodulation
+    # Apply demodulation,
+    # optional HWP filter must apply before demodulation
+
+    ops.hwpfilter.apply(data)
+    log.info_rank("HWP-filtered in", comm=world_comm, timer=timer)
 
     ops.demodulate.stokes_weights = ops.weights_radec
     ops.demodulate.hwp_angle = ops.sim_ground.hwp_angle
@@ -790,6 +794,7 @@ def main():
         toast.ops.TimeConstant(
             name="deconvolve_time_constant", deconvolve=True, enabled=False
         ),
+        toast.ops.HWPFilter(name="hwpfilter", enabled=False),
         toast.ops.GroundFilter(name="groundfilter", enabled=False),
         toast.ops.PolyFilter(name="polyfilter1D"),
         toast.ops.PolyFilter2D(name="polyfilter2D", enabled=False),
