@@ -9,9 +9,9 @@ import unittest
 import numpy as np
 
 import astropy.units as u
-import toast
 
 try:
+    import toast
     import sotodlib.toast as sotoast
     import sotodlib.toast.ops as so_ops
     toast_available = True
