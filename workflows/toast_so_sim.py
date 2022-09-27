@@ -496,11 +496,18 @@ def reduce_data(job, args, data):
     ops.hwpfilter.apply(data)
     log.info_rank("HWP-filtered in", comm=world_comm, timer=timer)
 
-    ops.demodulate.stokes_weights = ops.weights_radec
-    ops.demodulate.hwp_angle = ops.sim_ground.hwp_angle
-    ops.demodulate.noise_model = ops.default_model.noise_model
-    ops.demodulate.apply(data)
-    log.info_rank("Demodulated in", comm=world_comm, timer=timer)
+    if ops.demodulate.enabled:
+        # The Demodulation operator is special because it returns a
+        # new TOAST data object
+        ops.demodulate.stokes_weights = ops.weights_radec
+        ops.demodulate.hwp_angle = ops.sim_ground.hwp_angle
+        ops.demodulate.noise_model = ops.default_model.noise_model
+        data = ops.demodulate.apply(data)
+        log.info_rank("Demodulated in", comm=world_comm, timer=timer)
+        demod_weights = toast.ops.StokesWeightsDemod()
+        ops.weights_radec = demod_weights
+        ops.binner.stokes_weights = demod_weights
+        ops.binner_final.stokes_weights = demod_weights
 
     # Apply noise estimation
 
