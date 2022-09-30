@@ -50,8 +50,10 @@ class _HKBundle():
 
         for c in self.data.keys():
             output[c] = core.G3Timestream(np.array(self.data[c][:len(output.times)]))
-
-        self.data = {c: self.data[c][len(output.times):] for c in self.data.keys()}
+            if len(output.times) < len(self.data[c]):
+                self.data[c] = self.data[c][len(output.times):]
+            else:
+                self.data[c] = np.array([])
 
         return output
 
@@ -278,7 +280,7 @@ class FrameProcessor(object):
 
         try:
             hk_data = self.hkbundle.rebundle(flush_time)
-        except:
+        except AttributeError:
             # No az/el encoder data found in HK files
             f['state'] = 3
         else:
@@ -628,6 +630,11 @@ class Bookbinder(object):
                     else:
                         # If there are no more SMuRF files, output remaining SMuRF data
                         self.frameproc.flush_time = self.DEFAULT_TIME
+                        if self.frameproc.hkbundle is not None:
+                            # As long as pos2vel() uses np.ediff1d(), the velocity vector will be 1 sample shorter than position
+                            # Add an extra element to the end of velocity vectors to compensate
+                            self.frameproc.hkbundle.data['Azimuth_Velocity'] = np.append(self.frameproc.hkbundle.data['Azimuth_Velocity'], 0)
+                            self.frameproc.hkbundle.data['Elevation_Velocity'] = np.append(self.frameproc.hkbundle.data['Elevation_Velocity'], 0)
                         output += self.frameproc.flush()
                         output = [o for o in output if len(o['signal'].times) > 0]  # Remove 0-length frames
                         self.write_frames(output + self.metadata)
