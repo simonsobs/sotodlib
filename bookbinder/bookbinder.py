@@ -371,7 +371,6 @@ class Bookbinder(object):
         self._start_time = start_time
         self._end_time = end_time
         self._verbose = verbose
-        self._ancil_files = [op.join(out_root, book_id, f'A_ancil_{i:03d}.g3') for i in range(len(smurf_files))]
         self._frame_splits_file = op.join(out_root, book_id, 'frame_splits.txt')
         self._frame_splits = []
         self._meta_file = op.join(out_root, book_id, f'M_{self._stream_id}.yaml')
