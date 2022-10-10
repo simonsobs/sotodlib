@@ -4,6 +4,7 @@ import os.path as op, os
 from spt3g import core
 import numpy as np
 import so3g
+import itertools
 import yaml
 
 def pos2vel(p):
@@ -139,8 +140,10 @@ class FrameProcessor(object):
         self.smbundle = None
         self.flush_time = None
         self.maxlength = 10000
+        self.FLAGGED_SAMPLE_VALUE = -1
         self.current_state = 0  # default to scan state
         self._frame_splits = []
+        self._hk_gaps = []
 
     def ready(self):
         """
@@ -288,6 +291,15 @@ class FrameProcessor(object):
             cosamp_az = np.interp(smurf_data.times, hk_data.times, hk_data['Azimuth_Corrected'], left=np.nan, right=np.nan)
             cosamp_el = np.interp(smurf_data.times, hk_data.times, hk_data['Elevation_Corrected'], left=np.nan, right=np.nan)
 
+            # Flag any samples falling within a gap in HK data
+            t = np.array([int(_t) for _t in smurf_data.times])
+            flag_hkgap = np.zeros(len(smurf_data.times))
+            for gap_start, gap_end in self._hk_gaps:
+                flag_hkgap = np.logical_or(flag_hkgap, np.logical_and(t > gap_start, t < gap_end))
+            cosamp_az = np.array([self.FLAGGED_SAMPLE_VALUE if flag_hkgap[i] else cosamp_az[i] for i in range(len(cosamp_az))])
+            cosamp_el = np.array([self.FLAGGED_SAMPLE_VALUE if flag_hkgap[i] else cosamp_el[i] for i in range(len(cosamp_el))])
+            f['flag_hkgap'] = core.G3VectorBool(flag_hkgap)
+
             # Ancillary data (co-sampled HK encoder data)
             anc_data = core.G3TimesampleMap()
             anc_data.times = smurf_data.times
@@ -399,18 +411,19 @@ class Bookbinder(object):
                                  "\nStart time: " + str(self._start_time) +
                                  "\nEnd time:   " + str(self._end_time))
 
-        ifile = self._smurf_files.pop(0)
-        if self._verbose: print(f"Bookbinding {ifile}")
-        self.smurf_iter = smurf_reader(ifile)
+        if isinstance(self._smurf_files, list):
+            ifile = self._smurf_files.pop(0)
+            if self._verbose: print(f"Bookbinding {ifile}")
+            self.smurf_iter = smurf_reader(ifile)
 
-        out_bdir = op.join(out_root, book_id)
-        if not op.exists(out_bdir): os.makedirs(out_bdir)
-        ofile = op.join(out_bdir, f'D_{stream_id}_{self.ofile_num:03d}.g3')
-        if self._verbose: print(f"Writing {ofile}")
-        self.writer = core.G3Writer(ofile)
+            out_bdir = op.join(out_root, book_id)
+            if not op.exists(out_bdir): os.makedirs(out_bdir)
+            ofile = op.join(out_bdir, f'D_{stream_id}_{self.ofile_num:03d}.g3')
+            if self._verbose: print(f"Writing {ofile}")
+            self.writer = core.G3Writer(ofile)
 
-        afile = op.join(out_bdir, f'A_ancil_{self.ofile_num:03d}.g3')
-        self.ancil_writer = core.G3Writer(afile)
+            afile = op.join(out_bdir, f'A_ancil_{self.ofile_num:03d}.g3')
+            self.ancil_writer = core.G3Writer(afile)
 
     def add_misc_data(self, f):
         oframe = core.G3Frame(f.type)
@@ -580,6 +593,48 @@ class Bookbinder(object):
 
         return trimmed_frame
 
+    def process_HK_files(self, gap_threshold=0.05):
+        """
+        Subroutine to process any provided Housekeeping (HK) files.
+
+        If no HK files provided, Bookbinder will proceed in default mode.
+        """
+        if self._hk_files is not None:
+            if not isinstance(self._hk_files, list):
+                raise TypeError("Please provide HK files in a list.")
+
+            if not hasattr(self, 'hk_iter'):
+                self.hk_iter = []
+                for hkfile in self._hk_files:
+                    self.hk_iter = itertools.chain(self.hk_iter, core.G3File(hkfile))
+
+            # Initialize variables for gap detection
+            prev_frame_last_sample     = None
+            prev_frame_sample_interval = None
+
+            # Loop over HK frames to look for:
+            # 1. Az/El encoder data; run in default mode otherwise
+            # 2. Gaps in time between frames, which need to be flagged
+            for h in self.hk_iter:
+                if h['hkagg_type'] != 2 or ('ACU_position' not in h['block_names']):
+                    continue
+
+                # Check if a time gap exists since previous frame containing ACU position data
+                acu_pos_index = 0 # assume it's always 0 for now; proper way: get index from block_names
+                t = h['blocks'][acu_pos_index].times
+                if prev_frame_last_sample is not None:
+                    this_frame_first_sample = t[0].time
+                    time_since_prev_frame   = this_frame_first_sample - prev_frame_last_sample
+                    if np.abs(prev_frame_sample_interval/time_since_prev_frame - 1) > gap_threshold:
+                        # Add gap to internal list
+                        self.frameproc._hk_gaps.append((prev_frame_last_sample, this_frame_first_sample))
+                # update values
+                prev_frame_last_sample = t[-1].time
+                prev_frame_sample_interval = (t[-1].time - t[0].time)/(len(t)-1)
+
+                self.default_mode = False
+                self.frameproc(h)
+
     def compile_mfile_dict(self):
         d = {'Book ID':             self._book_id,
              'Session ID':          self._session_id,
@@ -590,15 +645,8 @@ class Bookbinder(object):
         return d
 
     def __call__(self):
-        if self._hk_files is not None:
-            if not isinstance(self._hk_files, list):
-                raise TypeError("Please provide HK files in a list.")
-            for hkfile in self._hk_files:
-                for h in core.G3File(hkfile):
-                    if h['hkagg_type'] != 2 or ('ACU_position' not in h['block_names']):
-                        continue
-                    self.default_mode = False
-                    self.frameproc(h)
+        # Determine if HK files contain az/el encoder data and find any gaps between HK frames
+        self.process_HK_files()
 
         if op.isfile(self._frame_splits_file):
             self._frame_splits = [core.G3Time(t) for t in np.loadtxt(self._frame_splits_file, dtype='int', ndmin=1)]
