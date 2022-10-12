@@ -2140,7 +2140,8 @@ def _get_timestamps(streams, load_type=None, linearize_timestamps=True):
         # determine the desired loading type. Expand as logic as
         # data fields develop
         if "primary" in streams:
-            if np.diff(streams["primary"]["Counter0"]) != 0:
+            if np.diff(io_load.hstack_into(None,
+                                streams["primary"]["Counter0"])).mean() != 0:
                 load_type = TimingParadigm.TimingSystem
             elif "UnixTime" in streams["primary"]:
                 load_type = TimingParadigm.SmurfUnixTime
@@ -2150,11 +2151,12 @@ def _get_timestamps(streams, load_type=None, linearize_timestamps=True):
             load_type = TimingParadigm.G3Timestream
 
     if load_type == TimingParadigm.TimingSystem:
-        s, ns = split_ts_bits(streams["primary"]["Counter2"])
+        s, ns = split_ts_bits(io_load.hstack_into(None,
+                                streams["primary"]["Counter2"]))
         # Add 20 years in seconds (accounting for leap years) to handle
         # offset between EPICS time referenced to 1990 relative to UNIX time.
         counter2 = s + ns*1e-9 + 5*(4*365 - 1)*24*60*60
-        counter0 = streams["primary"]["Counter0"]
+        counter0 = io_load.hstack_into(None,streams["primary"]["Counter0"])
         timestamps = round(counter2 - (counter0 / 480000) ) + counter0 / 480000
         return timestamps
     if load_type == TimingParadigm.SmurfUnixTime:
