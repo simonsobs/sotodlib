@@ -117,7 +117,7 @@ def get_sample_timestamps(frame):
 
 def _file_has_end_frames(filename):
     ended = False
-    
+
     ## Search through file looking for stream closeout
     reader = so3g.G3IndexedReader(filename)
     logger.debug(f"Reading {filename} to look for observation end.")
@@ -344,7 +344,7 @@ class G3tSmurf:
             ## happens if there are no scan frames in file
             file_start = db_file.frames[0].time
             file_stop = db_file.frames[-1].time
-            
+
         db_file.start = file_start
         db_file.stop = file_stop
         db_file.n_channels = total_channels
@@ -701,7 +701,7 @@ class G3tSmurf:
                 obs_id=f"cal_{stream_id}_{session_id}"
             else:
                 obs_id=f"{stream_id}_{session_id}"
-            
+
             # Build Observation
             obs = Observations(
                 obs_id=obs_id,
@@ -752,13 +752,13 @@ class G3tSmurf:
             Files.name.like(prefix + "/"+ str(obs.timestamp)+"%")
         ).order_by(Files.start).all()
 
-        
+
         logger.debug(f"Found {len(flist)} files in {obs.obs_id}")
         if len(flist)==0:
             ## we don't have .g3 files for some reason, shouldn't be possible?
             logger.debug(f"Found no files associated with {obs.obs_id}")
             return
-        
+
         ## set start to be the first scan frame in file/observation
         obs.start = flist[0].start
 
@@ -1069,10 +1069,10 @@ class G3tSmurf:
                         f"Add new Observation: {stream_id}, {ctime}, {obs_path}"
                     )
                     self.add_new_observation(
-                        stream_id, 
-                        action, 
-                        ctime, 
-                        session, 
+                        stream_id,
+                        action,
+                        ctime,
+                        session,
                         calibration=(action in SMURF_ACTIONS["calibrations"])
                     )
                 except Exception as e:
@@ -1352,10 +1352,10 @@ def dump_DetDb(archive, detdb_file):
 def make_DetDb_single_obs(obsfiledb, obs_id):
 
     # find relevant files to get status
-    c = obsfiledb.conn.execute('select name from files ' 
-                         'where obs_id=?' + 
+    c = obsfiledb.conn.execute('select name from files '
+                         'where obs_id=?' +
                          'order by start', (obs_id,))
-                        
+
     flist = [row[0] for row in c]
 
     # load status
@@ -1370,8 +1370,8 @@ def make_DetDb_single_obs(obsfiledb, obs_id):
 
 
     ch_list = np.arange(status.num_chans)
-    ch_map = np.zeros( len(ch_list), dtype = [('idx', int), ('rchannel', np.unicode_,30), 
-                                              ('band', int), ('channel', int), 
+    ch_map = np.zeros( len(ch_list), dtype = [('idx', int), ('rchannel', np.unicode_,30),
+                                              ('band', int), ('channel', int),
                                               ('freqs', float)])
 
     ch_map['idx'] = ch_list
@@ -1860,10 +1860,10 @@ def get_channel_mask(
 
 def _get_tuneset_channel_names(status, ch_map, archive):
     """Update channel maps with name from Tuneset
-    
-    Returns 
+
+    Returns
     ruids: list or None
-        a list of readout_ids that align with ch_map. Returns None if 
+        a list of readout_ids that align with ch_map. Returns None if
         readout_ids cannot be found.
     """
     session = archive.Session()
@@ -2113,6 +2113,14 @@ def _get_sample_info(filenames):
         start += samps
     return out
 
+def split_ts_bits(c):
+    """Split up 64 bit to 2x32 bit
+    """
+    NUM_BITS_PER_INT = 32
+    MAXINT = (1 << NUM_BITS_PER_INT) - 1
+    a = (c >> NUM_BITS_PER_INT) & MAXINT
+    b = c & MAXINT
+    return a, b
 
 def _get_timestamps(streams, load_type=None, linearize_timestamps=True):
     """Calculate the timestamp field for loaded data
@@ -2125,20 +2133,30 @@ def _get_timestamps(streams, load_type=None, linearize_timestamps=True):
             if None, uses highest precision version possible. integer values
             will use the TimingParadigm class for indexing
         linearize_timestamps : bool
-          if true and using unix timing, linearize the timing based on the 
+          if true and using unix timing, linearize the timing based on the
           frame counter
     """
     if load_type is None:
         # determine the desired loading type. Expand as logic as
         # data fields develop
         if "primary" in streams:
-            if "UnixTime" in streams["primary"]:
+            if np.diff(streams["primary"]["Counter0"]) != 0:
+                load_type = TimingParadigm.TimingSystem
+            elif "UnixTime" in streams["primary"]:
                 load_type = TimingParadigm.SmurfUnixTime
             else:
                 load_type = TimingParadigm.G3Timestream
         else:
             load_type = TimingParadigm.G3Timestream
 
+    if load_type == TimingParadigm.TimingSystem:
+        s, ns = split_ts_bits(streams["primary"]["Counter2"])
+        # Add 20 years in seconds (accounting for leap years) to handle
+        # offset between EPICS time referenced to 1990 relative to UNIX time.
+        counter2 = s + ns*1e-9 + 5*(4*365 - 1)*24*60*60
+        counter0 = streams["primary"]["Counter0"]
+        timestamps = round(counter2 - (counter0 / 480000) ) + counter0 / 480000
+        return timestamps
     if load_type == TimingParadigm.SmurfUnixTime:
         timestamps = io_load.hstack_into(None, streams["primary"]["UnixTime"]) / 1e9
         if linearize_timestamps:
@@ -2183,7 +2201,7 @@ def load_file(
       ignore_missing : bool
           If true, will not raise errors if a requested channel is not found
       no_signal : bool
-          If true, will not load the detector signal from files  
+          If true, will not load the detector signal from files
       load_biases : bool
           If true, will load the bias lines for each detector
       load_primary : bool
@@ -2195,7 +2213,7 @@ def load_file(
           first file
       det_axis : name of the axis used for channels / detectors
       linearize_timestamps : bool
-          sent to _get_timestamps. if true and using unix timing, linearize the timing 
+          sent to _get_timestamps. if true and using unix timing, linearize the timing
           based on the frame counter
       merge_det_info : bool
           if true, emulate det_info from file info
@@ -2299,11 +2317,11 @@ def load_file(
 
     if no_signal:
         subreq = [
-            io_load.FieldGroup("data", [], timestamp_field="time")    
+            io_load.FieldGroup("data", [], timestamp_field="time")
         ]
     else:
         subreq = [
-            io_load.FieldGroup("data", ch_info.rchannel, timestamp_field="time")        
+            io_load.FieldGroup("data", ch_info.rchannel, timestamp_field="time")
         ]
     if load_primary:
         subreq.extend(
@@ -2339,8 +2357,8 @@ def load_file(
         core.OffsetAxis("samps", count, sample_start),
     )
     aman.wrap(
-        "timestamps", 
-        _get_timestamps(streams, linearize_timestamps=linearize_timestamps), 
+        "timestamps",
+        _get_timestamps(streams, linearize_timestamps=linearize_timestamps),
         ([(0, "samps")])
     )
     aman.wrap("status", status.aman)
@@ -2357,7 +2375,7 @@ def load_file(
         smurf.wrap("res_frequency", ch_info.frequency, [(0,det_axis)])
         det_info.wrap("smurf", smurf)
         aman.wrap("det_info", det_info)
-        
+
 
     # If readout filter in enabled build iir_params AxisManager
     if status.filter_enabled:
@@ -2366,11 +2384,11 @@ def load_file(
         iir_params.wrap("b", status.filter_b)
         iir_params.wrap("fscale", 1/status.flux_ramp_rate_hz)
         aman.wrap("iir_params", iir_params)
-    
+
     if not no_signal:
         aman.wrap(
-            "signal", 
-            np.zeros((aman[det_axis].count, aman["samps"].count), "float32"), 
+            "signal",
+            np.zeros((aman[det_axis].count, aman["samps"].count), "float32"),
                      [(0, det_axis), (1, "samps")]
         )
         for idx in range(aman[det_axis].count):
@@ -2379,7 +2397,7 @@ def load_file(
         # Conversion from DAC counts to squid phase
         rad_per_count = np.pi / 2 ** 15
         aman.signal *= rad_per_count
-    
+
     temp = core.AxisManager(aman.samps.copy())
     if load_primary:
         for k in streams["primary"].keys():
@@ -2403,15 +2421,15 @@ def load_file(
             i = int(k[4:])
             io_load.hstack_into(aman.biases[i], streams["tes_biases"][k])
     aman.wrap("flags", core.FlagManager.for_tod(aman, det_axis, "samps"))
-    
+
     return aman
 
 
 def load_g3tsmurf_obs(
-    db, 
-    obs_id, 
-    dets=None, 
-    samples=None, 
+    db,
+    obs_id,
+    dets=None,
+    samples=None,
     no_signal=None,
     **kwargs
     ):
@@ -2432,10 +2450,10 @@ def load_g3tsmurf_obs(
     if no_signal is None:
         no_signal=False
     return load_file(
-        flist, 
-        dets, 
-        samples=samples, 
-        obsfiledb=db, 
+        flist,
+        dets,
+        samples=samples,
+        obsfiledb=db,
         no_signal=no_signal,
         merge_det_info=False
     )
