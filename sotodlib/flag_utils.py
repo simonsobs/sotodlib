@@ -5,7 +5,7 @@ import time
 from scipy import stats
 
 def plot_glitch_stats(tod, flags='flags', glitches='glitches', N_bins=30, save_path='./',
-                      save_name='glitch_flag_stats.png'):
+                      save_name='glitch_flag_stats.png', save_plot=True):
     """
     Function for plotting the glitch flags/cut statistics using the built in stats functions
     in the RangesMatrices class.
@@ -18,9 +18,12 @@ def plot_glitch_stats(tod, flags='flags', glitches='glitches', N_bins=30, save_p
     N_bins (int): Number of bins in the histogram.
     save_path (path): Path to directory where plot will be saved
     save_name (str): Name of file to save plot to in save_path
+    save_plot (bool): Determines if plot is saved.
 
     Returns:
-    -------
+    --------
+    fig (matplotlib.figure.Figure): Figure class
+    ax (numpy.ndarray): Numpy array of matplotlib.axes._subplots.AxesSubplot class plot axes.
     frac_samp_glitches (ndarray, float): Array size 1 x N_dets with number of samples flagged
                                          per detector divided by the total number of samples 
                                          converted to percentage. 
@@ -80,5 +83,6 @@ def plot_glitch_stats(tod, flags='flags', glitches='glitches', N_bins=30, save_p
                  fontsize = 18)
     save_ts = str(int(time.time()))
     plt.subplots_adjust(top=0.75, bottom=0.2)
-    plt.savefig(os.path.join(save_path, save_ts+'_'+save_name))
-    return frac_samp_glitches, interval_glitches
+    if save_plot:
+        plt.savefig(os.path.join(save_path, save_ts+'_'+save_name))
+    return fig, ax, frac_samp_glitches, interval_glitches
