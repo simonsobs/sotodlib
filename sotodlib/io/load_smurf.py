@@ -2157,7 +2157,7 @@ def _get_timestamps(streams, load_type=None, linearize_timestamps=True):
         # offset between EPICS time referenced to 1990 relative to UNIX time.
         counter2 = s + ns*1e-9 + 5*(4*365 - 1)*24*60*60
         counter0 = io_load.hstack_into(None,streams["primary"]["Counter0"])
-        timestamps = round(counter2 - (counter0 / 480000) ) + counter0 / 480000
+        timestamps = np.round(counter2 - (counter0 / 480000) ) + counter0 / 480000
         return timestamps
     if load_type == TimingParadigm.SmurfUnixTime:
         timestamps = io_load.hstack_into(None, streams["primary"]["UnixTime"]) / 1e9
