@@ -6,15 +6,20 @@ import numpy as np
 from argparse import ArgumentParser
 
 from detmap.makemap import MapMaker
+import sotodlib
 from sotodlib import core
 from sotodlib.io.metadata import write_dataset
 
 logger = logging.getLogger(__name__)
 
-
 def parse_args():
     parser = ArgumentParser()
-    parser.add_argument('-c', '--config-file', help="Configuration File for running DetMap")
+    parser.add_argument('-c', '--config-file', 
+        help="Configuration File for running DetMap")
+    parser.add_argument('--overwrite', action='store_true', 
+        help="Overwrite existing entries.")
+    parser.add_argument('-v', '--verbose', action='count',
+                        default=0, help="Pass multiple times to increase.")
     args = parser.parse_args()
     return args
 
@@ -22,16 +27,29 @@ def parse_args():
 def main(args=None):
     if args is None:
         args = parse_args()
+    
+    if args.verbose >= 1:
+        logger.setLevel("INFO")
+    if args.verbose >= 2:
+        sotodlib.logger.setLevel("INFO")
+    if args.verbose >= 3:
+        sotodlib.logger.setLevel("DEBUG")
 
     configs = yaml.safe_load(open(args.config_file, "r"))
-
     array_names = [array["name"] for array in configs["arrays"]]
     logger.info(f"Creating Det Info for UFMs-{','.join([array for array in array_names])}")
 
-    scheme = core.metadata.ManifestScheme()
-    scheme.add_range_match('obs:timestamp')
-    scheme.add_data_field('dataset')
-    db = core.metadata.ManifestDb(configs["det_db"], scheme=scheme)
+    if os.path.exists(configs["det_db"]):
+        logger.info(f"Det Info {configs['det_db']} exists, looking for updates")
+        db = core.metadata.ManifestDb(configs["det_db"])
+        existing = list(db.get_entries(["dataset"])["dataset"])
+    else:
+        logger.info(f"Creating Det Info {configs['det_db']}.")
+        scheme = core.metadata.ManifestScheme()
+        scheme.add_range_match('obs:timestamp')
+        scheme.add_data_field('dataset')
+        db = core.metadata.ManifestDb(configs["det_db"], scheme=scheme)
+        existing = []
 
     w = "dets:wafer."
     keys = [
@@ -54,9 +72,15 @@ def main(args=None):
         w + "det_y",
         w + "angle",
     ]
-    det_rs = core.metadata.ResultSet(keys=keys)
 
     for array_name in array_names:
+        # make result set per array
+        if array_name in existing and not args.overwrite:
+            logger.info(f"{array_name} exists in database, pass --overwrite to"
+            " overwrite existing information.")
+            continue
+        det_rs = core.metadata.ResultSet(keys=keys)
+        
         # Initialize a detmap.makemap.MapMaker() instance 
         # that will have ideal/design metadata for this array.
         map_maker = MapMaker(north_is_highband=False,                              
@@ -88,12 +112,12 @@ def main(args=None):
                 w + "angle": np.radians(replace_none(tune.angle_actual_deg)),
             })
 
-    dest_dataset = ",".join(array_names)
-    write_dataset(det_rs, configs["det_info"], dest_dataset)
-    # Update the index.
-    db_data = {'obs:timestamp': [0, 2e11],
-               'dataset': dest_dataset}
-    db.add_entry(db_data, configs["det_info"])
+        write_dataset(det_rs, configs["det_info"], array_name, args.overwrite)
+        # Update the index if it's a new entry
+        if not array_name in existing:
+            db_data = {'obs:timestamp': [0, 2e11],
+                       'dataset': array_name}
+            db.add_entry(db_data, configs["det_info"])
 
     return None
 
