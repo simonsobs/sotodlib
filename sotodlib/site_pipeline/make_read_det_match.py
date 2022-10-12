@@ -37,6 +37,7 @@ def main(args=None):
     configs = yaml.safe_load(open(args.config_file, "r"))
     SMURF = G3tSmurf.from_configs(configs)
     session = SMURF.Session()
+    
     if os.path.exists(configs["read_db"]):
         logger.info(f'Mapping {configs["read_db"]} for the archive index.')
         db = core.metadata.ManifestDb(configs["read_db"])
@@ -47,11 +48,11 @@ def main(args=None):
         scheme.add_data_field('dataset')
         db = core.metadata.ManifestDb(configs["read_db"], scheme=scheme)
 
-    array_names = [array["name"] for array in configs["arrays"]]
-    det_info_group = ",".join(array_names)
+    #array_names = [array["name"] for array in configs["arrays"]]
+    #det_info_group = ",".join(array_names)
     for array in configs["arrays"]:
         # Load Detector Information
-        rs = read_dataset(configs["det_info"], det_info_group)
+        rs = read_dataset(configs["det_info"], array["name"])
         det_rs = core.metadata.merge_det_info(None, rs)
         det_info = core.metadata.loader.convert_det_info(det_rs, dets=det_rs["det_id"])
         det_info.restrict(
