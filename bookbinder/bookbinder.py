@@ -679,7 +679,7 @@ class Bookbinder(object):
                     continue
 
                 # Check if a time gap exists since previous frame containing ACU position data
-                acu_pos_index = 0 # assume it's always 0 for now; proper way: get index from block_names
+                acu_pos_index = list(h['block_names']).index('ACU_position')
                 t = h['blocks'][acu_pos_index].times
                 if prev_frame_last_sample is not None:
                     this_frame_first_sample = t[0].time
