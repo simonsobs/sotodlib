@@ -144,6 +144,11 @@ class FrameProcessor(object):
         self.current_state = 0  # default to scan state
         self._frame_splits = []
         self._hk_gaps = []
+        self._smurf_gaps = []
+        self._prev_smurf_frame_last_sample = None
+        self._prev_smurf_frame_sample_interval = None
+        self._smurf_timestamps = None
+        self._next_expected_smurf_sample_index = 0
 
     def ready(self):
         """
@@ -300,6 +305,12 @@ class FrameProcessor(object):
             cosamp_el = np.array([self.FLAGGED_SAMPLE_VALUE if flag_hkgap[i] else cosamp_el[i] for i in range(len(cosamp_el))])
             f['flag_hkgap'] = core.G3VectorBool(flag_hkgap)
 
+            # Flag any samples falling within a gap in SMuRF data
+            flag_smurfgap = np.zeros(len(smurf_data.times))
+            for gap_start, gap_end in self._smurf_gaps:
+                flag_smurfgap = np.logical_or(flag_smurfgap, np.logical_and(t > gap_start, t < gap_end))
+            f['flag_smurfgap'] = core.G3VectorBool(flag_smurfgap)
+
             # Ancillary data (co-sampled HK encoder data)
             anc_data = core.G3TimesampleMap()
             anc_data.times = smurf_data.times
@@ -320,6 +331,17 @@ class FrameProcessor(object):
         """
         Process a frame
         """
+
+        def generate_missing_smurf_samples(t):
+            frame = core.G3Frame(core.G3FrameType.Scan)
+            data = so3g.G3SuperTimestream()
+            data.times = core.G3VectorTime([core.G3Time(_t) for _t in t])
+            data.names = f['data'].names
+            data.quanta = f['data'].quanta
+            data.data = np.full((len(data.names), len(t)), float(self.FLAGGED_SAMPLE_VALUE))
+            frame['data'] = data
+            return frame
+
         if f.type != core.G3FrameType.Housekeeping and f.type != core.G3FrameType.Scan:
             return [f]
 
@@ -353,6 +375,42 @@ class FrameProcessor(object):
 
             output = []
 
+            # Determine if there is a gap in time between this frame and previous frame
+            t = f['data'].times
+            if self._smurf_timestamps is not None:
+                current_timestamp = t[0].time
+                expected_timestamp = self._smurf_timestamps[self._next_expected_smurf_sample_index]
+                if current_timestamp != expected_timestamp:
+                    current_smurf_sample_index = np.where(self._smurf_timestamps == current_timestamp)[0][0]
+                    gap_nsamples = current_smurf_sample_index - self._next_expected_smurf_sample_index
+                    # Add gap to internal list
+                    self._smurf_gaps.append((self._prev_smurf_frame_last_sample, current_timestamp))
+                    # Insert dummy samples into self.smbundle
+                    gap_times = self._smurf_timestamps[self._next_expected_smurf_sample_index : current_smurf_sample_index]
+                    self.smbundle.add(generate_missing_smurf_samples(gap_times))
+                    # account for missing samples
+                    self._next_expected_smurf_sample_index += gap_nsamples
+                # update values
+                self._prev_smurf_frame_last_sample = t[-1].time
+                self._next_expected_smurf_sample_index += len(t)
+            else:
+                sample_interval = (t[-1].time - t[0].time)/(len(t)-1)
+                if self._prev_smurf_frame_last_sample is not None and self._prev_smurf_frame_sample_interval is not None:
+                    this_smurf_frame_first_sample = t[0].time
+                    time_since_prev_smurf_frame = this_smurf_frame_first_sample - self._prev_smurf_frame_last_sample
+                    if np.abs(self._prev_smurf_frame_sample_interval/time_since_prev_smurf_frame - 1) > 0.05:
+                        # Add gap to internal list
+                        self._smurf_gaps.append((self._prev_smurf_frame_last_sample, this_smurf_frame_first_sample))
+                        # Estimate number of missing samples
+                        gap_nsamples = np.round(time_since_prev_smurf_frame/sample_interval - 1).astype(int)
+                        # Insert dummy samples into self.smbundle
+                        gap_times = (np.arange(gap_nsamples) + 1) * sample_interval + self._prev_smurf_frame_last_sample
+                        self.smbundle.add(generate_missing_smurf_samples(gap_times))
+                # update values
+                self._prev_smurf_frame_last_sample = t[-1].time
+                self._prev_smurf_frame_sample_interval = sample_interval
+
+            # Add current frame
             self.smbundle.add(f)
 
             # If the existing data exceeds the specified maximum length
@@ -373,7 +431,7 @@ class Bookbinder(object):
     Bookbinder
     """
     def __init__(self, smurf_files, hk_files=None, out_root='.', book_id=None, session_id=None, stream_id=None,
-                 start_time=None, end_time=None, max_nchannels=1e3, verbose=True):
+                 start_time=None, end_time=None, smurf_timestamps=None, max_nchannels=1e3, verbose=True):
         self._smurf_files = smurf_files
         self._hk_files = hk_files
         self._book_id = book_id
@@ -396,6 +454,7 @@ class Bookbinder(object):
         self.DEFAULT_TIME = core.G3Time(1e18)  # 1e18 = 2286-11-20T17:46:40.000000000 (in the distant future)
 
         self.frameproc = FrameProcessor()
+        self.frameproc._smurf_timestamps = smurf_timestamps
 
         if isinstance(self._hk_files, str):
             self._hk_files = [self._hk_files]
