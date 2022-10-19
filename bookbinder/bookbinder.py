@@ -431,7 +431,8 @@ class Bookbinder(object):
     Bookbinder
     """
     def __init__(self, smurf_files, hk_files=None, out_root='.', book_id=None, session_id=None, stream_id=None,
-                 start_time=None, end_time=None, smurf_timestamps=None, max_nchannels=1e3, verbose=True):
+                 start_time=None, end_time=None, smurf_timestamps=None, max_nchannels=1e3, overwrite_afile=False,
+                 verbose=True):
         self._smurf_files = smurf_files
         self._hk_files = hk_files
         self._book_id = book_id
@@ -452,6 +453,7 @@ class Bookbinder(object):
         self.MAX_SAMPLES_TOTAL = 1e9
         self.MAX_SAMPLES_PER_CHANNEL = self.MAX_SAMPLES_TOTAL // max_nchannels
         self.DEFAULT_TIME = core.G3Time(1e18)  # 1e18 = 2286-11-20T17:46:40.000000000 (in the distant future)
+        self.OVERWRITE_ANCIL_FILE = overwrite_afile
 
         self.frameproc = FrameProcessor()
         self.frameproc._smurf_timestamps = smurf_timestamps
@@ -475,13 +477,22 @@ class Bookbinder(object):
             if self._verbose: print(f"Bookbinding {ifile}")
             self.smurf_iter = smurf_reader(ifile)
 
-            out_bdir = op.join(out_root, book_id)
-            if not op.exists(out_bdir): os.makedirs(out_bdir)
-            ofile = op.join(out_bdir, f'D_{stream_id}_{self.ofile_num:03d}.g3')
-            if self._verbose: print(f"Writing {ofile}")
-            self.writer = core.G3Writer(ofile)
+            self.create_file_writers()
 
-            afile = op.join(out_bdir, f'A_ancil_{self.ofile_num:03d}.g3')
+    def create_file_writers(self):
+        """
+        Create the G3Writer instances for the output D-file and, if it doesn't already
+        exist, the A-file. Optionally, overwrite the existing A-file setting the
+        OVERWRITE_ANCIL_FILE attribute to True.
+        """
+        out_bdir = op.join(self._out_root, self._book_id)
+        if not op.exists(out_bdir): os.makedirs(out_bdir)
+        ofile = op.join(out_bdir, f'D_{self._stream_id}_{self.ofile_num:03d}.g3')
+        if self._verbose: print(f"Writing {ofile}")
+        self.writer = core.G3Writer(ofile)
+
+        afile = op.join(out_bdir, f'A_ancil_{self.ofile_num:03d}.g3')
+        if not op.exists(afile) or self.OVERWRITE_ANCIL_FILE:
             self.ancil_writer = core.G3Writer(afile)
 
     def add_misc_data(self, f):
@@ -516,16 +527,13 @@ class Bookbinder(object):
                 self.sample_num += nsamples         # cumulative number of samples in current output file
                 if self.sample_num > self.MAX_SAMPLES_PER_CHANNEL:
                     self.ofile_num += 1
-                    ofile = op.join(self._out_root, self._book_id, f'D_{self._stream_id}_{self.ofile_num:03d}.g3')
-                    if self._verbose: print(f"Writing {ofile}")
-                    self.writer = core.G3Writer(ofile)
-                    afile = op.join(self._out_root, self._book_id, f'A_ancil_{self.ofile_num:03d}.g3')
-                    self.ancil_writer = core.G3Writer(afile)
+                    self.create_file_writers()
                     self.sample_num = nsamples      # reset sample number to length of current frame
                     self.frame_num = 0              # reset frame number to 0
             oframe = self.add_misc_data(f)
             self.writer.Process(oframe)
-            self.write_ancil_frames(oframe)
+            if hasattr(self, 'ancil_writer'):
+                self.write_ancil_frames(oframe)
             self.frame_num += 1
 
     def write_ancil_frames(self, f):
