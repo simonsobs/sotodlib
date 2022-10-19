@@ -10,9 +10,11 @@ import argparse
 import logging
 import yaml
 
+import datetime as dt
 from sotodlib.hwp.g3thwp import G3tHWP
 
-logger = logging.getLogger(__name__)
+from sotodlib.site_pipeline import util
+logger = util.init_logger(__name__, 'update-hwp-angle: ')
 
 
 def get_parser():
@@ -24,22 +26,14 @@ def get_parser():
         '-c', '--config-file', default=None, type=str, required=True,
         help="Configuration File for running update_hwp_angle")
     parser.add_argument(
-        '-t', '--time', action='store', default=None, type=int,
-        help='time range (ctime integers), overwrite config time range. \
-            file name/list will be ignored if you specify this. \
-            ex) --time [start timestamp] [end timestamp]',
-        nargs=2)
-    parser.add_argument(
         '-d', '--data-dir', action='store', default=None, type=str,
         help='input data directory, overwrite config data_dir')
     parser.add_argument(
-        '-f', '--file', action='store', default=None, type=str, nargs='*',
-        help='filename or list of filenames (to be loaded in order). \
-            overwrite yaml file list. \
-            ignored if you specify time range by argument.')
-    parser.add_argument(
-        '-o', '--output', action='store', default=None, type=str,
-        help='path to output g3 file')
+        '-o', '--output-dir', action='store', default=None, type=str,
+        help='output data directory, overwrite config output_dir')
+    parser.add_argument('--update-delay', default=2, type=float,
+        help="Days to subtract from now to set as minimum ctime. \
+              Set to 0 to build from scratch",)
     parser.add_argument("--verbose", default=2, type=int,
                         help="increase output verbosity. \
                         0: Error, 1: Warning, 2: Info(default), 3: Debug")
@@ -55,9 +49,16 @@ if __name__ == '__main__':
     logger.info("Starting update_hwp_angle")
 
     configs = yaml.safe_load(open(args.config_file, "r"))
+    if args.data_dir is None:
+        args.data_dir = configs["data_dir"]
+    
+    if args.output_dir is None:
+        args.output_dir = configs["output_dir"]
 
-    logger.debug("instance G3tHWP class")
-    hwp = G3tHWP(args.config_file)
+    if not os.path.exists(args.output_dir):
+        logger.info(f"Making output directory {args.output_dir}")
+        os.mkdir(args.output_dir)
+    
 
     if args.verbose == 0:
         logger.setLevel(logging.ERROR)
@@ -67,33 +68,55 @@ if __name__ == '__main__':
         logger.setLevel(logging.INFO)
     elif args.verbose == 3:
         logger.setLevel(logging.DEBUG)
-
-    # Load data from arguments or config file
-    data = None
-    if args.time is not None and args.data_dir is not None:
-        data = hwp.load_data(
-            args.time[0], args.time[1], archive_path=args.data_dir)
-    elif args.time is not None and args.data_dir is None:
-        data = hwp.load_data(args.time[0], args.time[1])
-    elif args.file is not None:
-        data = hwp.load_file(args.file)
-    elif 'start' in configs.keys() and 'end' in configs.keys():
-        data = hwp.load_data(configs['start'], configs['end'])
-    elif 'file' in configs.keys():
-        data = hwp.load_file(configs['file'])
+    
+    if args.update_delay > 0:
+        min_time = dt.datetime.now() - dt.timedelta(days=args.update_delay)
+        min_ctime = min_time.timestamp()
     else:
-        logger.error("Not specified time range and filenames")
-        sys.exit(1)
+        min_ctime = None
 
-    logger.debug("analyze")
-    solved = hwp.analyze(data)
+    files = []
+    existing = []
+    for root, _, fs in os.walk(args.data_dir):
+        for f in fs:
+            if min_ctime is not None:
+                filetime = int(f.split(".")[0])
+                if filetime < min_ctime:
+                    continue
+            rel_path = os.path.relpath( os.path.join(root, f),args.data_dir)
 
-    logger.debug("write_solution")
-    if args.output is not None:
-        output = args.output
-    elif 'output' in configs.keys():
-        output = configs['output']
-    hwp.write_solution(solved, output)
+            out_file = os.path.join(args.output_dir, rel_path)
+            if os.path.exists( out_file):
+                existing.append(rel_path)
+            else:
+                files.append(rel_path)
+                
 
-    logger.info("output file: " + output)
-    logger.info("Finised update_hwp_angle")
+    ## assume the last existing file was incomplete
+    if len(existing) > 0:
+        files.append( sorted(existing)[-1])
+
+    for f in sorted(files):
+        in_file = os.path.join(args.data_dir, f)
+        out_file = os.path.join(args.output_dir, f)
+
+        try:
+            logger.debug("instance G3tHWP class")
+            hwp = G3tHWP(args.config_file)
+            data = hwp.load_file(in_file)
+            if len(data)==0:
+                logger.info(f"Found no HWP data in {f}")
+                continue
+        
+            logger.debug("analyze")
+            solved = hwp.analyze(data)
+
+            logger.info(f"writing solution {out_file}")
+            if not os.path.exists( os.path.split(out_file)[0]):
+                os.mkdir(os.path.split(out_file)[0])
+            hwp.write_solution(solved, out_file)
+
+        except:
+            logger.error(f"Exception thrown while processing {in_file}")
+            continue
+
