@@ -71,17 +71,17 @@ class _SmurfBundle():
         """
         return len(self.times) > 0 and self.times[-1] >= flush_time
 
-    def createNewSuperTimestream(self, f):
+    def create_new_supertimestream(self, s):
         """
         From the input SuperTimestream, create a new (empty) SuperTimestream
         with the same channels and channel names
         """
-        dtype = np.int32 if (f.data.dtype != np.int64) else np.int64
+        dtype = np.int32 if (s.data.dtype != np.int64) else np.int64
 
         sts = so3g.G3SuperTimestream()
-        sts.names = f.names
+        sts.names = s.names
         sts.times = core.G3VectorTime([])
-        sts.data = np.empty( (len(f.names), 0) , dtype=dtype)
+        sts.data = np.empty( (len(s.names), 0) , dtype=dtype)
 
         return sts
 
@@ -89,19 +89,19 @@ class _SmurfBundle():
         self.times.extend(f['data'].times)
 
         if self.signal is None:
-            self.signal = self.createNewSuperTimestream(f['data'])
+            self.signal = self.create_new_supertimestream(f['data'])
         self.signal.times.extend(f['data'].times)
         self.signal.data = np.hstack((self.signal.data, f['data'].data)).astype(np.int32)
 
         if 'tes_biases' in f.keys():
             if self.bias is None:
-                self.bias = self.createNewSuperTimestream(f['tes_biases'])
+                self.bias = self.create_new_supertimestream(f['tes_biases'])
             self.bias.times.extend(f['tes_biases'].times)
             self.bias.data = np.hstack((self.bias.data, f['tes_biases'].data)).astype(np.int32)
 
         if 'primary' in f.keys():
             if self.primary is None:
-                self.primary = self.createNewSuperTimestream(f['primary'])
+                self.primary = self.create_new_supertimestream(f['primary'])
             self.primary.times.extend(f['primary'].times)
             self.primary.data = np.hstack((self.primary.data, f['primary'].data)).astype(np.int64)
 
@@ -531,19 +531,19 @@ class Bookbinder(object):
                     self.create_file_writers()
                     self.sample_num = nsamples      # reset sample number to length of current frame
                     self.frame_num = 0              # reset frame number to 0
+            # add misc metadata to output frame and write it out
             oframe = self.add_misc_data(f)
             self.writer.Process(oframe)
+            # if ancil_writer exists, write out the ancil frame
             if hasattr(self, 'ancil_writer'):
-                self.write_ancil_frames(oframe)
+                aframe = core.G3Frame(oframe.type)
+                if 'ancil' in oframe.keys():
+                    aframe['ancil'] = f['ancil']
+                if 'sample_range' in oframe.keys():
+                    aframe['sample_range'] = oframe['sample_range']
+                self.ancil_writer(aframe)
+            # update cumulative frame number
             self.frame_num += 1
-
-    def write_ancil_frames(self, f):
-        aframe = core.G3Frame(f.type)
-        if 'ancil' in f.keys():
-            aframe['ancil'] = f['ancil']
-        if 'sample_range' in f.keys():
-            aframe['sample_range'] = f['sample_range']
-        self.ancil_writer(aframe)
 
     def find_frame_splits(self):
         """
