@@ -142,6 +142,7 @@ class FrameProcessor(object):
         self.maxlength = 10000
         self.FLAGGED_SAMPLE_VALUE = -1
         self.current_state = 0  # default to scan state
+        self.GAP_THRESHOLD = 0.05
         self._frame_splits = []
         self._hk_gaps = []
         self._smurf_gaps = []
@@ -398,7 +399,7 @@ class FrameProcessor(object):
                 if self._prev_smurf_frame_last_sample is not None and self._prev_smurf_frame_sample_interval is not None:
                     this_smurf_frame_first_sample = t[0].time
                     time_since_prev_smurf_frame = this_smurf_frame_first_sample - self._prev_smurf_frame_last_sample
-                    if np.abs(self._prev_smurf_frame_sample_interval/time_since_prev_smurf_frame - 1) > 0.05:
+                    if np.abs(self._prev_smurf_frame_sample_interval/time_since_prev_smurf_frame - 1) > self.GAP_THRESHOLD:
                         # Add gap to internal list
                         self._smurf_gaps.append((self._prev_smurf_frame_last_sample, this_smurf_frame_first_sample))
                         # Estimate number of missing samples
@@ -660,7 +661,7 @@ class Bookbinder(object):
 
         return trimmed_frame
 
-    def process_HK_files(self, gap_threshold=0.05):
+    def process_HK_files(self):
         """
         Subroutine to process any provided Housekeeping (HK) files.
 
@@ -692,7 +693,7 @@ class Bookbinder(object):
                 if prev_frame_last_sample is not None:
                     this_frame_first_sample = t[0].time
                     time_since_prev_frame   = this_frame_first_sample - prev_frame_last_sample
-                    if np.abs(prev_frame_sample_interval/time_since_prev_frame - 1) > gap_threshold:
+                    if np.abs(prev_frame_sample_interval/time_since_prev_frame - 1) > self.frameproc.GAP_THRESHOLD:
                         # Add gap to internal list
                         self.frameproc._hk_gaps.append((prev_frame_last_sample, this_frame_first_sample))
                 # update values
