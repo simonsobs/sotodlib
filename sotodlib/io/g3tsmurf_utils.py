@@ -4,13 +4,15 @@
 import os
 import numpy as np
 import logging
+import yaml
+
+from so3g.hk import load_range
 
 from sotodlib.io.load_smurf import load_file, SmurfStatus
 from sotodlib.io.g3tsmurf_db import Observations, Files
-
+from scipy.interpolate import interp1d
 
 logger = logging.getLogger(__name__)
-
 
 def get_obs_folder(obs_id, archive):
     """
@@ -201,4 +203,42 @@ def get_batch(
                     )
     except GeneratorExit:
         pass
+    
+def load_hwp_data(aman, configs=None, data_dir=None):
+    """Load HWP data that will match with aman timestamps and 
+    interpolate angles into hwp_angle
+    
+    Arguments
+    ----------
+    aman : AxisManager
+        AxisManager of loaded SMuRF data
+    configs : (optional) config filename or dictionary containing "hwp_prefix"
+    data_dir : (optional) the "hwp_prefix" data directory. overrides configs
+    
+    Wraps HWP data into aman.hwp_angle
+    """
+    if "hwp_angle" in aman:
+        raise ValueError("hwp_angle already exists in aman")
+        
+    if configs is None and data_dir is None:
+        raise ValueError("Must pass config or data_dir")
+    if data_dir is None:
+        if type(configs)==str:
+            configs = yaml.safe_load( open(configs, "r"))
+        data_dir = configs["hwp_prefix"]
+        
+    data = load_range(
+        float(aman.timestamps[0]-5), float(aman.timestamps[-1]+5), 
+        fields=["hwp.hwp_angle"], data_dir=data_dir
+    )
+    time = data["hwp.hwp_angle"][0]
+    if len(time) == 0:
+        raise ValueError("No HWP data found that overlaps aman")
+    if time[0] > aman.timestamps[0] or time[-1] < aman.timestamps[-1]:
+        logger.warning(f"HWP data does not cover all of AxisManager, extrapolations" /
+                      "may be unstable")
+        
+    hwp = interp1d(data["hwp.hwp_angle"][0],data["hwp.hwp_angle"][1], bounds_error=False,
+                 fill_value="extrapolate" )
+    aman.wrap( "hwp_angle", hwp(aman.timestamps), [(0,"samps")])
     
