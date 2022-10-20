@@ -24,18 +24,12 @@ We can include a time range + data path or a full-path file list of input g3 dat
 Here's an annotated example of yaml config file:
 
 .. code-block:: yaml
-  
-  # start and end time for `update_hwp_angle.load_data` 
-  start: 1618369921
-  end: 1618373521
 
-  # path to L2 HK directory 
-  data_dir: '/mnt/so1/data/ucsd-sat1/hk/'
-   
-  # input file name for `update_hwp_angle.load_file` 
-  file_list:
-  - '/mnt/so1/data/ucsd-sat1/hk/16183/1618383667.g3'
-  - '/mnt/so1/data/ucsd-sat1/hk/16183/1618372860.g3'
+  # path to L2 HK directory
+  data_dir: '/data/prefix/hk/'
+
+  # path to L2.5 HK directory
+  output_dir: '/path/to/save/files/'
 
   # prefix of field name
   field_instance: 'observatory.HBA.feeds.HWPEncoder'
@@ -65,9 +59,6 @@ Here's an annotated example of yaml config file:
   # Search range of reference slot
   ref_range: 0.1
 
-  # path+filename of output g3 file
-  output: output.g3
-   
  
 
 Data Loading 
