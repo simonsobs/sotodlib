@@ -20,7 +20,7 @@ from toast.ops.operator import Operator
 from toast.timing import function_timer
 from toast.traits import (Bool, Float, Instance, Int, Quantity, Unicode,
                           trait_docs)
-from toast.utils import Environment, Logger, Timer
+from toast.utils import Environment, Logger, Timer, unit_conversion
 
 XAXIS, YAXIS, ZAXIS = np.eye(3)
 
@@ -215,7 +215,10 @@ class SimWireGrid(Operator):
             self.get_wiregrid_angle(obs)
 
             dets = obs.select_local_detectors(detectors)
-            obs.detdata.ensure(self.det_data, detectors=dets)
+            obs.detdata.ensure(self.det_data, detectors=dets, create_units=u.K)
+            det_units = obs.detdata[self.det_data].units
+            scale = unit_conversion(u.K, det_units)
+
             focalplane = obs.telescope.focalplane
             for det in dets:
                 signal = obs.detdata[self.det_data][det]
@@ -251,7 +254,7 @@ class SimWireGrid(Operator):
                 else:
                     weights_U = 0
 
-                signal += I * weights_I + Q * weights_Q + U * weights_U
+                signal += scale * (I * weights_I + Q * weights_Q + U * weights_U)
 
         return
 
