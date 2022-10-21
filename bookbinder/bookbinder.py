@@ -8,6 +8,9 @@ import itertools
 import yaml
 
 def pos2vel(p):
+    """
+    From a given position vector, compute the velocity vector
+    """
     return np.ediff1d(p)
 
 def smurf_reader(filename):
@@ -20,6 +23,10 @@ def smurf_reader(filename):
         yield frames[0]
 
 class _HKBundle():
+    """
+    Buffer for Housekeeping data. Use add() to add data and rebundle() to output
+    data up to but not including flush_time.
+    """
     def __init__(self):
         self.times = []
         self.data = None
@@ -32,9 +39,15 @@ class _HKBundle():
         self.elevation_stops = []
 
     def ready(self):
+        """
+        Returns True if a zero-crossing event exists
+        """
         return len(self.azimuth_events) > 0
 
     def add(self, b):
+        """
+        Cache the data from Housekeeping G3TimesampleMap b
+        """
         self.times.extend(b.times)
         if self.data is None:
             self.data = {c: [] for c in b.keys()}
@@ -42,6 +55,22 @@ class _HKBundle():
             self.data[c].extend(b[c])
 
     def rebundle(self, flush_time):
+        """
+        Return the buffered Housekeeping G3TimesampleMap with all samples timestamped up to but
+        not including flush_time. Keep the samples from flush_time onward in buffer.
+
+        If there are no samples to bundle, None is returned.
+
+        Parameters
+        ----------
+        flush_time : G3Time
+            Buffered data up to (but not including) this time will be output, the rest kept
+
+        Returns
+        -------
+        output : G3SuperTimestream or None
+            Output signal timestream
+        """
         if len(self.times) == 0:
             return None
 
@@ -59,6 +88,10 @@ class _HKBundle():
         return output
 
 class _SmurfBundle():
+    """
+    Buffer for SMuRF data. Use add() to add data and rebundle() to output data
+    up to but not including flush_time.
+    """
     def __init__(self):
         self.times = []
         self.signal = None
@@ -75,6 +108,16 @@ class _SmurfBundle():
         """
         From the input SuperTimestream, create a new (empty) SuperTimestream
         with the same channels and channel names
+
+        Parameters
+        ----------
+        s : G3SuperTimestream
+            The input G3SuperTimestream to copy
+
+        Returns
+        -------
+        sts : G3SuperTimestream
+            Empty, except the names
         """
         dtype = np.int32 if (s.data.dtype != np.int64) else np.int64
 
@@ -86,6 +129,14 @@ class _SmurfBundle():
         return sts
 
     def add(self, f):
+        """
+        Cache the data from input SMuRF frame f
+
+        Parameters
+        ----------
+        f : G3Frame
+            Input SMuRF frame to be buffered
+        """
         self.times.extend(f['data'].times)
 
         if self.signal is None:
@@ -107,9 +158,43 @@ class _SmurfBundle():
 
     def rebundle(self, flush_time):
         """
-        Output the buffered data before flush_time, keep the rest in buffer
+        Return the buffered SMuRF G3SuperTimestreams with all samples timestamped up to but
+        not including flush_time. Keep the samples from flush_time onward in buffer.
+
+        If there are no samples to bundle, None is returned.
+
+        Parameters
+        ----------
+        flush_time : G3Time
+            Buffered data up to (but not including) this time will be output, the rest kept
+
+        Returns
+        -------
+        signalout : G3SuperTimestream or None
+            Output signal timestream
+        biasout : G3SuperTimestream or None
+            Output TES bias timestream
+        primout : G3SuperTimestream or None
+            Output primary timestream
         """
+
         def rebundle_sts(sts, flush_time):
+            """
+            Since G3SuperTimestreams cannot be shortened, the data must be copied to
+            a new instance for rebundling of the buffer
+
+            Parameters
+            ----------
+            flush_time : G3Time
+                Output will contain buffered data up to (but not including) this time
+
+            Returns
+            -------
+            stsout : G3SuperTimestream or None
+                The portion of the buffer to be output (before flush_time)
+            newsts : G3SuperTimestream or None
+                The portion of the buffer to be kept (flush_time and onward)
+            """
             if sts is None:
                 return None, sts
 
@@ -135,6 +220,17 @@ class _SmurfBundle():
         return signalout, biasout, primout
 
 class FrameProcessor(object):
+    """
+    Module to process HK and SMuRF frames, adding to and rebundling from their buffers to
+    produce frames for the output Book.
+
+    Parameters
+    ----------
+    flush_time : G3Time
+        Buffered data up to (but not including) this time will be output, the rest kept
+    maxlength : int
+        Maximum allowed length (in samples) of an output frame
+    """
     def __init__(self):
         self.hkbundle = None
         self.smbundle = None
@@ -158,6 +254,29 @@ class FrameProcessor(object):
         return self.hkbundle.ready() if (self.hkbundle is not None) else False
 
     def locate_crossing_events(self, t, dy=0.001, min_gap=200):
+        """
+        Locate places where a noisy vector t changes sign: +ve, -ve, and 0. To handle noise,
+        "zero" is defined to be a threshold region from -dy to +dy. Thus t is said to have a
+        zero-crossing if it fully crosses the threshold region, with the actual crossing
+        approximated as halfway between entering and exiting the region. Entrances and exits
+        without a crossing are also identified (as "stops" and "starts" respectively).
+
+        Parameters
+        ----------
+        dy : float, optional
+            Amplitude of threshold region
+        min_gap : int, optional
+            Length of gap (in samples) longer than which events are considered separate
+
+        Returns
+        -------
+        events : list
+            Full list containing all zero-crossings, starts, and stops
+        starts : list
+            List of places where t exits the threshold region (subset of events)
+        stops : list
+            List of places where t enters the threshold region (subset of events)
+        """
         tmin = np.min(t)
         tmax = np.max(t)
 
@@ -253,6 +372,21 @@ class FrameProcessor(object):
         return events, starts, stops
 
     def determine_state(self, v_az, v_el, dy=0.001):
+        """
+        Determine in which mode the telescope is operating:
+        - Mode 0: Scanning
+        - Mode 1: Stopped
+        - Mode 2: Slewing
+
+        Parameters
+        ----------
+        v_az : numpy.ndarray
+            Azimuth velocity
+        v_el : numpy.ndarray
+            Elevation velocity
+        dy : float, optional
+            Amplitude of the threshold region
+        """
         if np.min(v_el) < -dy or np.max(v_el) > dy:
             # If the el velocity exceeds the threshold region, the telescope is slewing
             state = 2
@@ -267,6 +401,19 @@ class FrameProcessor(object):
         self.current_state = state
 
     def flush(self, flush_time=None):
+        """
+        Produce frames for the output Book, up to but not including flush_time
+
+        Parameters
+        ----------
+        flush_time : G3Time, optional
+            Buffered data up to (but not including) this time will be output, the rest kept
+
+        Returns
+        -------
+        output : list
+            List containing output frames
+        """
         if flush_time == None:
             flush_time = self.flush_time
         output = []
@@ -330,10 +477,35 @@ class FrameProcessor(object):
 
     def __call__(self, f):
         """
-        Process a frame
+        Process a frame. Only Housekeeping and SMuRF frames will be manipulated;
+        others will be passed through untouched.
+
+        Parameters
+        ----------
+        f : G3Frame
+            Input frame to be processed
+
+        Returns
+        -------
+        output : list
+            List containing frames to be entered into output Book
         """
 
         def generate_missing_smurf_samples(t):
+            """
+            Produce a frame filled with the FLAGGED_SAMPLE_VALUE at the timestamps given in t,
+            to be used as fill-in values for missing data.
+
+            Parameters
+            ----------
+            t : numpy.ndarray
+                Vector of timestamps
+
+            Returns
+            -------
+            frame : G3Frame
+                Frame containing a G3SuperTimestream with FLAGGED_SAMPLE_VALUE at each input timestamp
+            """
             frame = core.G3Frame(core.G3FrameType.Scan)
             data = so3g.G3SuperTimestream()
             data.times = core.G3VectorTime([core.G3Time(_t) for _t in t])
@@ -429,7 +601,13 @@ class FrameProcessor(object):
 
 class Bookbinder(object):
     """
-    Bookbinder
+    Bookbinder module. Co-samples and co-frames the provided Housekeeping (HK) and SMuRF data based
+    on telescope scan patterns to create the final, properly formatted archival Book.
+
+    If az/el encoder data exists in the HK file, Bookbinder identifies suitable frame split locations,
+    using this information. When no az/el encoder data is found in HK timestream, Bookbinder will run
+    in default mode, where frames are split once they reach the maximum length (Frameprocessor.MAXLENGTH).
+    HK data is co-sampled with SMuRF data before output.
     """
     def __init__(self, smurf_files, hk_files=None, out_root='.', book_id=None, session_id=None, stream_id=None,
                  start_time=None, end_time=None, smurf_timestamps=None, max_nchannels=1e3, overwrite_afile=False,
@@ -497,6 +675,19 @@ class Bookbinder(object):
             self.ancil_writer = core.G3Writer(afile)
 
     def add_misc_data(self, f):
+        """
+        Insert miscellaneous metadata into frame
+
+        Parameters
+        ----------
+        f : G3Frame
+            Frame to be processed
+
+        Returns
+        -------
+        oframe : G3Frame
+            Output frame with metadata inserted
+        """
         oframe = core.G3Frame(f.type)
         oframe['book_id'] = self._book_id
         for k in f.keys():
@@ -514,6 +705,11 @@ class Bookbinder(object):
     def write_frames(self, frames_list):
         """
         Write frames to file
+
+        Parameters
+        ----------
+        frames_list : list
+            List of frames to be written out
         """
         if not isinstance(frames_list, list):
             frames_list = list(frames_list)
@@ -548,6 +744,11 @@ class Bookbinder(object):
     def find_frame_splits(self):
         """
         Determine the frame boundaries of the output Book
+
+        Returns
+        -------
+        frame_splits : list
+            List of timestamps where the frames should be split in the output Book
         """
         frame_splits = []
 
@@ -611,6 +812,20 @@ class Bookbinder(object):
         return frame_splits
 
     def trim_frame(self, f):
+        """
+        Trim any samples occurring before the specified start time and after the specified
+        end time. If there are no such samples, the frame is passed through untouched.
+
+        Parameters
+        ----------
+        f : G3Frame
+            Input frame to be processed
+
+        Returns
+        -------
+        trimmed_frame : G3Frame
+            Processed frame
+        """
         def trim_sts_start(sts, start_time=self._start_time):
             newsts = so3g.G3SuperTimestream()
             newsts.names = sts.names
@@ -704,6 +919,14 @@ class Bookbinder(object):
                 self.frameproc(h)
 
     def compile_mfile_dict(self):
+        """
+        Compile a dictionary of values to be entered into metadata file (M-file)
+
+        Returns
+        -------
+        d : dict
+            Dictionary of values
+        """
         d = {'Book ID':             self._book_id,
              'Session ID':          self._session_id,
              'Start time':          self._start_time,
@@ -713,9 +936,15 @@ class Bookbinder(object):
         return d
 
     def __call__(self):
+        """
+        Process Housekeeping (if provided) and SMuRF data.
+
+        Write out frame_splits file and metadata file before exiting.
+        """
         # Determine if HK files contain az/el encoder data and find any gaps between HK frames
         self.process_HK_files()
 
+        # If frame splits file exists, load it; if not, determine appropriate split locations
         if op.isfile(self._frame_splits_file):
             self._frame_splits = [core.G3Time(t) for t in np.loadtxt(self._frame_splits_file, dtype='int', ndmin=1)]
         else:
@@ -777,6 +1006,7 @@ class Bookbinder(object):
                     output = []
 
         self._frame_splits += self.frameproc._frame_splits
+        # Write frame splits file if it doesn't already exist
         if not op.isfile(self._frame_splits_file):
             np.savetxt(self._frame_splits_file, np.unique([int(t) for t in self._frame_splits]), fmt='%i')
 
