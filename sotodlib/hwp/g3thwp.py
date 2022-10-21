@@ -468,26 +468,47 @@ class G3tHWP():
         writer.Process(session.session_frame())
         prov_id = session.add_provider('hwp')
         writer.Process(session.status_frame())
-        frame = session.data_frame(prov_id)
 
-        slow_block = core.G3TimesampleMap()
-        slow_block.times = core.G3VectorTime(
-            [core.G3Time(_t * core.G3Units.s) for _t in solved['slow_time']])
-        slow_block['stable'] = core.G3VectorInt(solved['stable'])
-        slow_block['locked'] = core.G3VectorInt(solved['locked'])
-        slow_block['hwp_rate'] = core.G3VectorDouble(solved['hwp_rate'])
-        frame['block_names'].append('slow')
-        frame['blocks'].append(slow_block)
+        # Divide the full time span into equal intervals
+        start_time = solved['slow_time'][0]
+        end_time = solved['slow_time'].max()
+        if len(solved['fast_time']):
+            start_time = min(start_time, solved['fast_time'].min())
+            end_time = max(end_time, solved['fast_time'].max())
+        frame_length = 60  # seconds
 
-        if len(solved['fast_time']) != 0:
-            fast_block = core.G3TimesampleMap()
-            fast_block.times = core.G3VectorTime(
-                [core.G3Time(_t * core.G3Units.s) for _t in solved['fast_time']])
-            fast_block['hwp_angle'] = core.G3VectorDouble(solved['angle'])
-            frame['block_names'].append('fast')
-            frame['blocks'].append(fast_block)
+        while start_time < end_time:
+            t0, t1 = start_time, start_time + frame_length
 
-        writer.Process(frame)
+            # Write a slow frame?
+            s = (t0 <= solved['slow_time']) * (solved['slow_time'] < t1)
+            if np.any(s):
+                frame = session.data_frame(prov_id)
+
+                slow_block = core.G3TimesampleMap()
+                slow_block.times = core.G3VectorTime(
+                    [core.G3Time(_t * core.G3Units.s) for _t in solved['slow_time'][s]])
+                slow_block['stable'] = core.G3VectorInt(solved['stable'][s])
+                slow_block['locked'] = core.G3VectorInt(solved['locked'][s])
+                slow_block['hwp_rate'] = core.G3VectorDouble(solved['hwp_rate'][s])
+                frame['block_names'].append('slow')
+                frame['blocks'].append(slow_block)
+                writer.Process(frame)
+
+            # Write a fast frame?
+            s = (t0 <= solved['fast_time']) * (solved['fast_time'] < t1)
+            if np.any(s):
+                frame = session.data_frame(prov_id)
+
+                fast_block = core.G3TimesampleMap()
+                fast_block.times = core.G3VectorTime(
+                    [core.G3Time(_t * core.G3Units.s) for _t in solved['fast_time'][s]])
+                fast_block['hwp_angle'] = core.G3VectorDouble(solved['angle'][s])
+                frame['block_names'].append('fast')
+                frame['blocks'].append(fast_block)
+                writer.Process(frame)
+
+            start_time += frame_length
 
         return
 
