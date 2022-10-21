@@ -706,8 +706,8 @@ class Bookbinder(object):
     def compile_mfile_dict(self):
         d = {'Book ID':             self._book_id,
              'Session ID':          self._session_id,
-             'Start time':          int(self._start_time),
-             'End time':            int(self._end_time),
+             'Start time':          self._start_time,
+             'End time':            self._end_time,
              'Number of frames':    self.frame_num,
              'Number of samples':   self.sample_num}
         return d
