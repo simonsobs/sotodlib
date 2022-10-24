@@ -198,6 +198,8 @@ class G3tSmurf:
         -----
         configs - dictionary containing `data_prefix` and `g3tsmurf_db` keys
         """
+        if type(configs)==str:
+            configs = yaml.safe_load( open(configs, "r"))
         return cls(os.path.join(configs["data_prefix"], "timestreams"),
                    configs["g3tsmurf_db"],
                    meta_path=os.path.join(configs["data_prefix"],"smurf"))
