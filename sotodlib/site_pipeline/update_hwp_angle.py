@@ -36,7 +36,9 @@ def get_parser():
               Set to 0 to build from scratch",)
     parser.add_argument('--file', default=None, action='append',
         help="Force processing of a specific file, overriding the "
-             "standard selection process. (Do not include the path.)")
+             "standard selection process.  The file must be in the "
+             "usual data tree, though.  You may specify either the file "
+             "basename (1234567890.g3) or the full path.")
     parser.add_argument("--verbose", default=2, type=int,
                         help="increase output verbosity. \
                         0: Error, 1: Warning, 2: Info(default), 3: Debug")
@@ -82,9 +84,12 @@ if __name__ == '__main__':
     existing = []
     for root, _, fs in os.walk(args.data_dir):
         for f in fs:
-            rel_path = os.path.relpath( os.path.join(root, f),args.data_dir)
+            full_path = os.path.join(root, f)
+            rel_path = os.path.relpath(full_path, args.data_dir)
             if args.file is not None:
-                if f in args.file:
+                if f in args.file or \
+                   any([os.path.exists(_f) and os.path.samefile(full_path, _f)
+                        for _f in args.file]):
                     files.append(rel_path)
                 continue
 
@@ -99,6 +104,9 @@ if __name__ == '__main__':
             else:
                 files.append(rel_path)
                 
+    if args.file is not None and len(files) != len(args.file):
+        logger.warning(f"Matched only {len(files)} of the {len(args.file)} "
+                       "files provided with --file.")
 
     ## assume the last existing file was incomplete
     if len(existing) > 0:
