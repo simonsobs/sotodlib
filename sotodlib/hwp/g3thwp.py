@@ -99,7 +99,7 @@ class G3tHWP():
         self._enable_quad = True
         if 'enable_quad' in self.configs.keys():
             self._enable_quad = self.configs['enable_quad']
-
+        
         # Output path + filename
         self._output = None
         if 'output' in self.configs.keys():
@@ -713,7 +713,8 @@ class G3tHWP():
                 fill_value='extrapolate')(
                 self._time),
             interp=True)
-        direction = list(map(lambda x: 1 if x == 0 else -1, quad))
+        direction = 1
+        if self._enable_quad: direction = list(map(lambda x: 1 if x == 0 else -1, quad))
         self._angle = direction * \
             (self._encd_cnt - self._ref_cnt[0]
              ) * self._delta_angle % (2 * np.pi)
