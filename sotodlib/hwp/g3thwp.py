@@ -95,6 +95,11 @@ class G3tHWP():
         if 'slit_width_lim' in self.configs.keys():
             self._slit_width_lim = self.configs['slit_width_lim']
 
+        # Boolean to enable quad
+        self._enable_quad = True
+        if 'enable_quad' in self.configs.keys():
+            self._enable_quad = self.configs['enable_quad']
+
         # Output path + filename
         self._output = None
         if 'output' in self.configs.keys():
@@ -617,6 +622,10 @@ class G3tHWP():
             print(
                 'WARNING: can not find reference points, please adjust ratio parameter!')
             sys.exit(1)
+
+        ## delete unexpected ref slit indexes ##
+        self._ref_indexes = np.delete(self._ref_indexes, np.where(np.diff(self._ref_indexes) < self._num_edges-10)[0])
+
         self._ref_clk = np.take(self._encd_clk, self._ref_indexes)
         self._ref_cnt = np.take(self._encd_cnt, self._ref_indexes)
         logger.debug('found {} reference points'.format(
