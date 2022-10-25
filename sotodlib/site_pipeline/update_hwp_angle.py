@@ -34,6 +34,11 @@ def get_parser():
     parser.add_argument('--update-delay', default=2, type=float,
         help="Days to subtract from now to set as minimum ctime. \
               Set to 0 to build from scratch",)
+    parser.add_argument('--file', default=None, action='append',
+        help="Force processing of a specific file, overriding the "
+             "standard selection process.  The file must be in the "
+             "usual data tree, though.  You may specify either the file "
+             "basename (1234567890.g3) or the full path.")
     parser.add_argument("--verbose", default=2, type=int,
                         help="increase output verbosity. \
                         0: Error, 1: Warning, 2: Info(default), 3: Debug")
@@ -79,11 +84,19 @@ if __name__ == '__main__':
     existing = []
     for root, _, fs in os.walk(args.data_dir):
         for f in fs:
+            full_path = os.path.join(root, f)
+            rel_path = os.path.relpath(full_path, args.data_dir)
+            if args.file is not None:
+                if f in args.file or \
+                   any([os.path.exists(_f) and os.path.samefile(full_path, _f)
+                        for _f in args.file]):
+                    files.append(rel_path)
+                continue
+
             if min_ctime is not None:
                 filetime = int(f.split(".")[0])
                 if filetime < min_ctime:
                     continue
-            rel_path = os.path.relpath( os.path.join(root, f),args.data_dir)
 
             out_file = os.path.join(args.output_dir, rel_path)
             if os.path.exists( out_file):
@@ -91,6 +104,9 @@ if __name__ == '__main__':
             else:
                 files.append(rel_path)
                 
+    if args.file is not None and len(files) != len(args.file):
+        logger.warning(f"Matched only {len(files)} of the {len(args.file)} "
+                       "files provided with --file.")
 
     ## assume the last existing file was incomplete
     if len(existing) > 0:
@@ -99,6 +115,7 @@ if __name__ == '__main__':
     for f in sorted(files):
         in_file = os.path.join(args.data_dir, f)
         out_file = os.path.join(args.output_dir, f)
+        logger.info(f"Processing {in_file}")
 
         try:
             logger.debug("instance G3tHWP class")
