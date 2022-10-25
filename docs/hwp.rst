@@ -59,6 +59,8 @@ Here's an annotated example of yaml config file:
   # Search range of reference slot
   ref_range: 0.1
 
+  # Boolian to enable quad (rotation direction)
+  enable_quad: True
  
 
 Data Loading 
