@@ -227,12 +227,13 @@ Pointing information required for :mod:`sotodlib.coords`.
 * | ``boresight_equ`` `[samps]` - AxisManager with boresight in equitorial
   |  coordinates.
 
+
 HWP information 
 
 * | ``hwp_angle`` `[samps]` - AxisManager with hwp rotation angle required for
   | :mod:`sotodlib.io.g3tsmurf_utils.load_hwp_data`
 * | ``hwpss_ext`` `[dets, samps]` - the fields of extracted HWP synchronous signal
-  | required for :mod:`sotodlib.hwp.extract_hwpss`
+  | derived from :mod:`sotodlib.hwp.extract_hwpss`
 
 ---------
 Reference

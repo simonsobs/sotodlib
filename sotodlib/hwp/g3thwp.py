@@ -99,7 +99,7 @@ class G3tHWP():
         self._enable_quad = True
         if 'enable_quad' in self.configs.keys():
             self._enable_quad = self.configs['enable_quad']
-        
+
         # Output path + filename
         self._output = None
         if 'output' in self.configs.keys():
