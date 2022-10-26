@@ -501,19 +501,27 @@ class AxisManager:
                 output.wrap(k, new_data[k], axis_map)
             else:
                 if other_fields == "exact":
-                    if not np.all([i[k].shape==items[0][k].shape for i in items]):
-                        raise ValueError(
-                            f"The field '{k}' does not share axis '{axis}'; "
-                            f"{k} is not identical across items "
-                            f"pass other_fields='drop' or 'first' or else "
-                            f"remove this field from the targets.")
-                    if not np.all([i[k]==items[0][k] for i in items]):
-                        raise ValueError(
-                            f"The field '{k}' does not share axis '{axis}'; "
-                            f"{k} is not identical across items "
-                            f"pass other_fields='drop' or 'first' or else "
-                            f"remove this field from the targets.")
+                    ## if every item named k is a scalar 
+                    err_msg = (f"The field '{k}' does not share axis '{axis}'; " 
+                              f"{k} is not identical across all items " 
+                              f"pass other_fields='drop' or 'first' or else " 
+                              f"remove this field from the targets.")
+                                
+                    if np.any([np.isscalar(i[k]) for i in items]):
+                        if not np.all([np.isscalar(i[k]) for i in items]):
+                            raise ValueError(err_msg)
+                        if not np.all( [i[k]==items[0][k] for i in items]):
+                            raise ValueError(err_msg)
+                        output.wrap(k, items[0][k], axis_map)
+                        continue
+                        
+                    elif not np.all([i[k].shape==items[0][k].shape for i in items]):
+                        raise ValueError(err_msg)
+                    elif not np.all([i[k]==items[0][k] for i in items]):
+                        raise ValueError(err_msg)
+                        
                     output.wrap(k, items[0][k].copy(), axis_map)
+                    
                 elif other_fields == 'fail':
                     raise ValueError(
                         f"The field '{k}' does not share axis '{axis}'; "
@@ -521,7 +529,10 @@ class AxisManager:
                         f"remove this field from the targets.")
                 elif other_fields == 'first':
                     # Just copy it.
-                    output.wrap(k, items[0][k].copy(), axis_map)
+                    if np.isscalar(items[0][k]):
+                        output.wrap(k, items[0][k], axis_map)
+                    else:
+                        output.wrap(k, items[0][k].copy(), axis_map)
                 elif other_fields == 'drop':
                     pass
         return output
