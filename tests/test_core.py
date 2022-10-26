@@ -190,13 +190,18 @@ class TestAxisManager(unittest.TestCase):
         # ... other_fields="exact"
         aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
         
+        ## add scalars
+        amanA.wrap("ans", 42)
+        amanB.wrap("ans", 42)
+        aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
+        
         # ... other_fields="exact"
         amanB.azimuth[:] = 2.
         with self.assertRaises(ValueError):
             aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
         
-        # ... other_fields="exact"
-        amanB.move("azimuth",None)
+        # ... other_fields="exact" and arrays of different shapes
+        amanB.move("azimuth", None)
         amanB.wrap("azimuth", np.array([43,5,2,3]))
         with self.assertRaises(ValueError):
             aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
