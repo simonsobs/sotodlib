@@ -185,15 +185,37 @@ class TestAxisManager(unittest.TestCase):
 
         # Handling of array that does not share the axis?
         amanA.wrap_new('azimuth', shape=('samps',))[:] = 1.
-        amanB.wrap_new('azimuth', shape=('samps',))[:] = 2.
+        amanB.wrap_new('azimuth', shape=('samps',))[:] = 1.
 
-        # ... other_fields="fail"
+        # ... other_fields="exact"
+        aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
+        
+        # ... other_fields="exact"
+        amanB.azimuth[:] = 2.
         with self.assertRaises(ValueError):
             aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
+        
+        # ... other_fields="exact"
+        amanB.move("azimuth",None)
+        amanB.wrap("azimuth", np.array([43,5,2,3]))
+        with self.assertRaises(ValueError):
+            aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
+        
+        # ... other_fields="fail"
+        amanB.move("azimuth",None)
+        amanB.wrap_new('azimuth', shape=('samps',))[:] = 2.
+        with self.assertRaises(ValueError):
+            aman = core.AxisManager.concatenate([amanA, amanB], axis='dets',
+                                               other_fields='fail')
+        amanB.azimuth[:] = 1.
+        with self.assertRaises(ValueError):
+            aman = core.AxisManager.concatenate([amanA, amanB], axis='dets',
+                                               other_fields='fail')
 
         # ... other_fields="drop"
+        amanB.azimuth[:] = 2.
         aman = core.AxisManager.concatenate([amanA, amanB], axis='dets',
-                                            other_fields='drop')
+                                            other_fields="drop")
         self.assertNotIn('azimuth', aman)
 
         # ... other_fields="first"
