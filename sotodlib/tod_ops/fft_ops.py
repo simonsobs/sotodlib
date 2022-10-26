@@ -186,7 +186,7 @@ def find_superior_integer(target, primes=[2,3,5,7,11,13]):
             best = best_friend * base
     return int(best)
 
-def calc_psd(aman, signal=None, timestamps=None, **kwargs):
+def calc_psd(aman, signal=None, timestamps=None, merge=False **kwargs):
     """Calculates the power spectrum density of an input signal using signal.welch()
     Data defaults to aman.signal and times defaults to aman.timestamps
         Arguments:
@@ -195,6 +195,8 @@ def calc_psd(aman, signal=None, timestamps=None, **kwargs):
             signal: data signal to pass to scipy.signal.welch()
             
             timestamps: timestamps associated with the data signal
+            
+            merge: bool, if true merge results into axismanager
             
             **kwargs: keyword args to be passed to signal.welch()
 
@@ -210,6 +212,10 @@ def calc_psd(aman, signal=None, timestamps=None, **kwargs):
         timestamps = aman.timestamps
         
     freqs, Pxx = welch( signal, 1/np.median(np.diff(timestamps)), **kwargs)
+    if merge:
+        aman.merge( core.AxisManager(core.OffsetAxis("fsamps", len(freqs))))
+        aman.wrap("freqs", [(0,"fsamps")])
+        aman.wrap("Pxx", [(0,"dets"),(1,"fsamps")])
     return freqs, Pxx
 
 def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
