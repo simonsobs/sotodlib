@@ -3,6 +3,7 @@ import os
 import inspect
 import logging
 import time
+import sys
 from astropy import units as u
 
 from .. import core
@@ -251,7 +252,7 @@ def init_logger(name, announce=''):
     logger.propagate = False
     logger.setLevel(logging.DEBUG)
 
-    ch = logging.StreamHandler()
+    ch = logging.StreamHandler(sys.stdout)
     formatter = _ReltimeFormatter('%(asctime)s: %(message)s (%(levelname)s)')
 
     ch.setLevel(logging.INFO)
