@@ -95,11 +95,16 @@ class G3tHWP():
         if 'slit_width_lim' in self.configs.keys():
             self._slit_width_lim = self.configs['slit_width_lim']
 
-        # Boolean to enable quad
-        self._enable_quad = True
-        if 'enable_quad' in self.configs.keys():
-            self._enable_quad = self.configs['enable_quad']
-
+        # force to quad value
+        # 0: use readout quad value (default)
+        # 1: positive rotation direction, -1: negative rotation direction
+        self._force_quad = 0
+        if 'force_quad' in self.configs.keys():
+            self._force_quad = self.configs['force_quad']
+        print (self._force_quad)
+        if self._force_quad !=0 or abs(self._force_quad) != 1:
+            logger.error("force_quad in config file must be 0 or 1 or -1")
+            sys.exit(1)
         # Output path + filename
         self._output = None
         if 'output' in self.configs.keys():
@@ -713,8 +718,9 @@ class G3tHWP():
                 fill_value='extrapolate')(
                 self._time),
             interp=True)
-        direction = 1
-        if self._enable_quad: direction = list(map(lambda x: 1 if x == 0 else -1, quad))
+        if self._force_quad == 0:
+            direction = list(map(lambda x: 1 if x == 0 else -1, quad))
+        else: direction = self._force_quad 
         self._angle = direction * \
             (self._encd_cnt - self._ref_cnt[0]
              ) * self._delta_angle % (2 * np.pi)
