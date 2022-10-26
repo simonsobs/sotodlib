@@ -95,6 +95,16 @@ class G3tHWP():
         if 'slit_width_lim' in self.configs.keys():
             self._slit_width_lim = self.configs['slit_width_lim']
 
+        # force to quad value
+        # 0: use readout quad value (default)
+        # 1: positive rotation direction, -1: negative rotation direction
+        self._force_quad = 0
+        if 'force_quad' in self.configs.keys():
+            self._force_quad = int(self.configs['force_quad'])
+        
+        if np.abs(self._force_quad) > 1:
+            logger.error("force_quad in config file must be 0 or 1 or -1")
+            sys.exit(1)
         # Output path + filename
         self._output = None
         if 'output' in self.configs.keys():
@@ -617,6 +627,10 @@ class G3tHWP():
             print(
                 'WARNING: can not find reference points, please adjust ratio parameter!')
             sys.exit(1)
+
+        ## delete unexpected ref slit indexes ##
+        self._ref_indexes = np.delete(self._ref_indexes, np.where(np.diff(self._ref_indexes) < self._num_edges-10)[0])
+
         self._ref_clk = np.take(self._encd_clk, self._ref_indexes)
         self._ref_cnt = np.take(self._encd_cnt, self._ref_indexes)
         logger.debug('found {} reference points'.format(
@@ -704,7 +718,9 @@ class G3tHWP():
                 fill_value='extrapolate')(
                 self._time),
             interp=True)
-        direction = list(map(lambda x: 1 if x == 0 else -1, quad))
+        if self._force_quad == 0:
+            direction = list(map(lambda x: 1 if x == 0 else -1, quad))
+        else: direction = self._force_quad 
         self._angle = direction * \
             (self._encd_cnt - self._ref_cnt[0]
              ) * self._delta_angle % (2 * np.pi)
