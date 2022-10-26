@@ -186,7 +186,7 @@ def find_superior_integer(target, primes=[2,3,5,7,11,13]):
             best = best_friend * base
     return int(best)
 
-def calc_psd(aman, signal=None, timestamps=None, merge=False **kwargs):
+def calc_psd(aman, signal=None, timestamps=None, merge=False, **kwargs):
     """Calculates the power spectrum density of an input signal using signal.welch()
     Data defaults to aman.signal and times defaults to aman.timestamps
         Arguments:
@@ -242,7 +242,7 @@ def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
         freqs = aman.freqs
 
     if pxx is None:
-        pxx = aman.pxx
+        pxx = aman.Pxx
     
     fmsk = np.all([freqs >= low_f, freqs <= high_f], axis=0 )
     if pxx.ndim == 1:
