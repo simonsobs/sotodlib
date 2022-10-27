@@ -207,7 +207,7 @@ class P:
             return enmap.ndmap(proj.zeros(super_shape), wcs=self.geom.wcs)
 
     def to_map(self, tod=None, dest=None, comps=None, signal=None,
-               det_weights=None, cuts=None):
+               det_weights=None, cuts=None, eigentol=None):
         """Project time-ordered signal into a map.  This performs the operation
 
             m += P d
@@ -225,6 +225,7 @@ class P:
             uniform weights of 1 are applied.
           cuts: Sample cuts to exclude from processing.  If None,
             self.cuts is used.
+          eigentol: This is ignored.
 
         """
         signal = _valid_arg(signal, 'signal', src=tod)
@@ -434,7 +435,7 @@ class P:
             proj = self._get_proj()
 
         if self.threads is False:
-            return proj, cuts
+            return proj, ~cuts
         if self.threads is None:
             self.threads = 'domdir'
         if isinstance(self.threads, str):
