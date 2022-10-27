@@ -51,10 +51,16 @@ class G3tHWP():
         self._data_dir = None
         if 'data_dir' in self.configs.keys():
             self._data_dir = self.configs['data_dir']
-
+        
+        # 1st encoder readout 
         self._field_instance = 'observatory.HBA.feeds.HWPEncoder'
         if 'field_instance' in self.configs.keys():
             self._field_instance = self.configs['field_instance']
+        
+        # 2nd encoder readout 
+        self._field_instance_sub = None
+        if 'field_instance_sub' in self.configs.keys():
+            self._field_instance_sub = self.configs['field_instance_sub']
 
         self._field_list = ['rising_edge_count', 'irig_time', 'counter',
                             'counter_index', 'irig_synch_pulse_clock_time',
@@ -69,7 +75,6 @@ class G3tHWP():
             self._pkt_size = self.configs['packet_size']
 
         # Number of encoder slits per HWP revolution
-
         self._num_edges = 570 * 2
         if 'num_edges' in self.configs.keys():
             self._num_edges = self.configs['num_edges']
@@ -100,11 +105,11 @@ class G3tHWP():
         # 1: positive rotation direction, -1: negative rotation direction
         self._force_quad = 0
         if 'force_quad' in self.configs.keys():
-            self._force_quad = int(self.configs['force_quad'])
-        
+            self._force_quad = self.configs['force_quad']
         if np.abs(self._force_quad) > 1:
             logger.error("force_quad in config file must be 0 or 1 or -1")
             sys.exit(1)
+
         # Output path + filename
         self._output = None
         if 'output' in self.configs.keys():
@@ -125,7 +130,7 @@ class G3tHWP():
             data_dir : str or None
                 path to HK g3 file, overwrite config file
             instance : str or None
-                instance of field list, overwrite config file \n
+                instance of field list, overwrite config file 
                 ex.) 'HBA' or 'observatory.HBA.feeds.HWPEncoder'
 
         Returns
@@ -162,6 +167,7 @@ class G3tHWP():
         logger.info('Loading HK data files ')
         logger.info("input time range: " +
                     str(self._start) + " - " + str(self._end))
+
         hwp_keys = []
         for i in range(len(self._field_list)):
             if 'counter' in self._field_list[i]:
@@ -172,11 +178,24 @@ class G3tHWP():
                                 '.' + self._field_list[i])
         alias = self._field_list
 
+        # 2nd encoder readout 
+        hwp_keys_2 = []
+        alias_2 = []
+        if self._field_instance_sub is not None:
+            for i in range(len(self._field_list)):
+                if 'counter' in self._field_list[i]:
+                    hwp_keys_2.append(self._field_instance_sub +
+                                    '_full.' + self._field_list[i])
+                else:
+                    hwp_keys_2.append(self._field_instance_sub +
+                                    '.' + self._field_list[i])
+            alias_2 = [a + '_2' for a in self._field_list]
+
         data = so3g.hk.load_range(
             self._start,
             self._end,
-            fields=hwp_keys,
-            alias=alias,
+            fields=hwp_keys + hwp_keys_2,
+            alias=alias + alias_2,
             data_dir=self._data_dir)
         if not any(data):
             logger.info('HWP is not spinning in time range {' + str(
@@ -224,8 +243,22 @@ class G3tHWP():
                                 '.' + self._field_list[i])
         alias = self._field_list
 
-        # load housekeeping files with hwp keys
+        # 2nd encoder readout 
+        hwp_keys_2 = []
+        alias_2 = []
+        if self._field_instance_sub is not None:
+            for i in range(len(self._field_list)):
+                if 'counter' in self._field_list[i]:
+                    hwp_keys_2.append(self._field_instance_sub +
+                                    '_full.' + self._field_list[i])
+                else:
+                    hwp_keys_2.append(self._field_instance_sub +
+                                    '.' + self._field_list[i])
+            alias_2 = [a + '_2' for a in self._field_list]
 
+        
+
+        # load housekeeping files with hwp keys
         scanner = so3g.hk.HKArchiveScanner()
         if not (isinstance(self._file_list, list)
                 or isinstance(self._file_list, np.ndarray)):
@@ -240,25 +273,26 @@ class G3tHWP():
 
         arc = scanner.finalize()
         if not any(arc.get_fields()[0]):
-            logger.info("Loading HK data files: {}".format(
-                ' '.join(map(str, self._file_list))))
             self._start = 0
             self._end = 0
             return {}
-
+        
         self._start = arc.simple(
             [key for key in arc.get_fields()[0].keys()][0])[0][0]
         self._end = arc.simple(
             [key for key in arc.get_fields()[0].keys()][0])[0][-1]
         for i in range(len(hwp_keys)):
             if not hwp_keys[i] in arc.get_fields()[0].keys():
-                logger.info("HWP is not spinning in input g3 files \
-                            or can not find field")
-                return {}
-
+                logger.info("HWP is not spinning in input g3 files or can not find field")
+                return {}      
+       
         data = {}
         for i in range(len(alias)):
-            data = dict(**data, **{alias[i]: arc.simple(hwp_keys)[i]})
+            data = dict(**data, **{alias[i]: arc.simple(hwp_keys[i])})
+
+        for i in range(len(alias_2)):
+            if not hwp_keys_2[i] in arc.get_fields()[0].keys(): continue
+            data = dict(**data, **{alias_2[i]: arc.simple(hwp_keys_2[i])})
 
         return data
 
@@ -275,7 +309,7 @@ class G3tHWP():
                 parameter for referelce slit 
                 threshold = 2 slit distances +/- ratio
             irig_type : 0 or 1, optional
-                If 0, use 1 Hz IRIG timing (default) \n
+                If 0, use 1 Hz IRIG timing (default) 
                 If 1, use 10 Hz IRIG timing 
             fast : bool, optional
                 If True, run fast fill_ref algorithm
@@ -309,28 +343,45 @@ class G3tHWP():
             logger.info("no HWP field data")
         ## Analysis parameters ##
         # Fast block
+        counter = []
+        counter_idx = []
+        quad_time = []
+        quad = []
         if 'counter' in data.keys():
             counter = data['counter'][1]
             counter_idx = data['counter_index'][1]
             quad_time = data['quad'][0]
             quad = self._quad_form(data['quad'][1])
-        else:
-            counter = []
-            counter_idx = []
-            quad_time = []
-            quad = []
 
+        irig_time = []
+        rising_edge = []
         if 'irig_time' in data.keys():
             irig_time = data['irig_time'][1]
             rising_edge = data['rising_edge_count'][1]
             if irig_type == 1:
                 irig_time = data['irig_synch_pulse_clock_time'][1]
                 rising_edge = data['irig_synch_pulse_clock_counts'][1]
-        else:
-            irig_time = []
-            rising_edge = []
+            logger.info('IRIG timing quality check.' )
+            irig_time, rising_edge = self._irig_quality_check(irig_time, rising_edge)
+            
+        if 'irig_time_2' in data.keys():
+            logger.info('try 2nd encoder for IRIG timing.' )
+            irig_time_2 = data['irig_time_2'][1]
+            rising_edge_2 = data['rising_edge_count_2'][1]
+            if irig_type == 1:
+                irig_time_2 = data['irig_synch_pulse_clock_time_2'][1]
+                rising_edge_2 = data['irig_synch_pulse_clock_counts_2'][1]
+            irig_time_2, rising_edge_2 = self._irig_quality_check(irig_time_2, rising_edge_2)
 
-        if 'counter' in data.keys() and 'irig_time' in data.keys():
+        if len(irig_time) < len(irig_time_2):
+            logger.info('Use 2nd encoder IRIG timing.' )
+            irig_time = irig_time_2
+            rising_edge = rising_edge_2
+        
+        fast_time = []
+        angle = []
+        hwp_rate = []
+        if np.any(counter) and np.any(irig_time):
             # Reject unexpected counter
             time = scipy.interpolate.interp1d(
                 rising_edge,
@@ -353,13 +404,6 @@ class G3tHWP():
                              for r in range(np.diff(self._ref_indexes)[n])]
             hwp_rate += [0 for i in range(len(fast_time) -
                                           self._ref_indexes[-1])]
-        else:
-            fast_time = []
-            angle = []
-            hwp_rate = []
-        fast_time = np.array(fast_time)
-        angle = np.array(angle)
-        hwp_rate = np.array(hwp_rate)
 
         # Slow block
         # - Time definition -
@@ -624,8 +668,7 @@ class G3tHWP():
 
         self._ref_indexes = np.array(self._ref_indexes)
         if len(self._ref_indexes) == 0:
-            print(
-                'WARNING: can not find reference points, please adjust ratio parameter!')
+            logger.error('can not find reference points, please adjust parameters!')
             sys.exit(1)
 
         ## delete unexpected ref slit indexes ##
@@ -648,7 +691,7 @@ class G3tHWP():
             return
         # Loop over all of the reference slits
         for ii in range(len(self._ref_indexes)):
-            print("\r {:.2f} %".format(
+            logger.debug("\r {:.2f} %".format(
                 100. * ii / len(self._ref_indexes)), end="")
             # Location of this slit
             ref_index = self._ref_indexes[ii]
@@ -669,9 +712,6 @@ class G3tHWP():
             # Adjust the reference index values in front of this one
             # for the added lines
             self._ref_indexes[ii + 1:] += self._ref_edges
-            # print(clks_to_add)
-            # print(cnts_to_add)
-            #print(self._ref_cnt, np.diff(self._ref_cnt), print(self._ref_indexes))
         return
 
     def _fill_refs_fast(self):
@@ -732,7 +772,7 @@ class G3tHWP():
         dropped_samples = np.sum(cnt_diff[cnt_diff >= self._pkt_size])
         self._num_dropped_pkts = dropped_samples // (self._pkt_size - 1)
         if self._num_dropped_pkts > 0:
-            logger.warning('WARNING: {} dropped packets are found.'.format(
+            logger.warning('{} dropped packets are found.'.format(
                 self._num_dropped_pkts))
         return
 
@@ -740,15 +780,15 @@ class G3tHWP():
         cnt_diff = np.diff(self._encd_cnt)
         if np.any(cnt_diff != 1):
             logger.warning(
-                'WARNING: a part of the counter is incorrect, performing the correction process... ')
+                'a part of the counter is incorrect, performing the correction process... ')
             if np.any(cnt_diff < 0):
                 if 1 - self._pkt_size in cnt_diff:
                     logger.warning(
-                        'WARNING: Packet flip found, sorting process performed... ')
+                        'Packet flip found, sorting process performed... ')
                 idx = np.argsort(self._encd_cnt)
                 self._encd_clk = self._encd_clk[idx]
             else:
-                logger.warning('WARNING: maybe packet drop exists ...')
+                logger.warning('maybe packet drop exists ...')
         else:
             logger.debug('no need to fix encoder index')
 
@@ -765,6 +805,21 @@ class G3tHWP():
         quad[(quad > 0) & (quad < 0.5)] = 0
         return quad
 
+    def _irig_quality_check(self, irig_time, rising_edge):
+        idx = np.where(np.diff(irig_time)==1)[0]
+        if len(irig_time) == len(idx):
+            return irig_time, rising_edge
+        elif len(irig_time) > len(idx):
+            logger.warning(
+                'a part of the IRIG time is incorrect, performing the correction process...' )
+            irig_time = irig_time[idx]
+            rising_edge = rising_edge[idx]
+        else:
+            irig_time = None
+            rising_edge = None
+            logger.warning('all IRIG time is incorrect...' )
+        return irig_time, rising_edge
+    
     def interp_smurf(self, smurf_timestamp):
         smurf_angle = scipy.interpolate.interp1d(
             self._time,
