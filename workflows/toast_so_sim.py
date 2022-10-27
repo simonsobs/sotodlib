@@ -12,11 +12,11 @@ used here.
 
 You can see the automatically generated command line options with:
 
-    toast_sim_ground.py --help
+    toast_so_sim.py --help
 
 Or you can dump a config file with all the default values with:
 
-    toast_sim_ground.py --default_toml config.toml
+    toast_so_sim.py --default_toml config.toml
 
 This script contains just comments about what is going on.  For details about all the
 options for a specific Operator, see the documentation or use the help() function from
@@ -42,11 +42,6 @@ import toast
 import toast.ops
 
 from toast.mpi import MPI, Comm
-
-from toast import spt3g as t3g
-
-if t3g.available:
-    from spt3g import core as c3g
 
 import sotodlib.toast.ops as so_ops
 import sotodlib.mapmaking
@@ -89,17 +84,20 @@ def parse_config(operators, templates, comm):
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
         "--telescope",
+        default=None,
         help="Telescope to simulate: LAT, SAT1, SAT2, SAT3, SAT4.",
     )
     group.add_argument(
         "--tube_slots",
+        default=None,
         help="Comma-separated list of optics tube slots: c1 (LAT_UHF), i5 (LAT_UHF), "
         " i6 (LAT_MF), i1 (LAT_MF), i3 (LAT_MF), i4 (LAT_MF), o6 (LAT_LF),"
         " ST1 (SAT_MF), ST2 (SAT_MF), ST3 (SAT_UHF), ST4 (SAT_LF)."
     )
     group.add_argument(
         "--wafer_slots",
-        help="Comma-separated list of optics tube slots. "
+        default=None,
+        help="Comma-separated list of wafer slots. "
     )
 
     parser.add_argument(
@@ -140,6 +138,8 @@ def parse_config(operators, templates, comm):
         templates=templates,
     )
 
+    if comm is not None:
+        comm.barrier()
     # Create our output directory
     if comm is None or comm.rank == 0:
         if not os.path.isdir(args.out_dir):
@@ -221,44 +221,77 @@ def job_create(config, jobargs, telescope, schedule, comm):
     return job, group_size, full_pointing
 
 
-def select_pixelization(job, args):
-    # Select between healpix and flat pixelization
-    ops = job.operators
-    if ops.pixels_wcs_source.enabled:
-        # We are doing source mapping
-        ops.pixels_healpix_radec.enabled = False
-        ops.pixels_wcs_radec.enabled = False
+def select_pointing(job, args):
+    """Select the pixelization scheme for both the solver and final binning."""
 
-        # Set detector pointing
-        ops.pixels_wcs_source.detector_pointing = ops.det_pointing_azel
-        args.pixels_solve = ops.pixels_wcs_source
-        args.pixels_final = ops.pixels_wcs_source
+    ops = job.operators
+
+    n_enabled_solve = np.sum(
+        [
+            ops.pixels_wcs_azel.enabled,
+            ops.pixels_wcs_radec.enabled,
+            ops.pixels_healpix_radec.enabled,
+        ]
+    )
+    if n_enabled_solve != 1:
+        raise RuntimeError(
+            "Only one pixelization operator should be enabled for the solver."
+        )
+
+    n_enabled_final = np.sum(
+        [
+            ops.pixels_wcs_azel_final.enabled,
+            ops.pixels_wcs_radec_final.enabled,
+            ops.pixels_healpix_radec_final.enabled,
+        ]
+    )
+    if n_enabled_final > 1:
+        raise RuntimeError(
+            "At most, one pixelization operator can be enabled for the final binning."
+        )
+
+    # Configure Az/El and RA/DEC boresight and detector pointing and weights
+
+    ops.det_pointing_azel.boresight = ops.sim_ground.boresight_azel
+    ops.det_pointing_radec.boresight = ops.sim_ground.boresight_radec
+
+    ops.pixels_wcs_azel.detector_pointing = ops.det_pointing_azel
+    ops.pixels_wcs_radec.detector_pointing = ops.det_pointing_radec
+    ops.pixels_healpix_radec.detector_pointing = ops.det_pointing_radec
+
+    ops.pixels_wcs_azel_final.detector_pointing = ops.det_pointing_azel
+    ops.pixels_wcs_radec_final.detector_pointing = ops.det_pointing_radec
+    ops.pixels_healpix_radec_final.detector_pointing = ops.det_pointing_radec
+
+    ops.weights_azel.detector_pointing = ops.det_pointing_azel
+    ops.weights_azel.hwp_angle = ops.sim_ground.hwp_angle
+
+    ops.weights_radec.detector_pointing = ops.det_pointing_radec
+    ops.weights_radec.hwp_angle = ops.sim_ground.hwp_angle
+
+    # Select Pixelization and weights for solve and final binning
+
+    if ops.pixels_wcs_azel.enabled:
+        job.pixels_solve = ops.pixels_wcs_azel
+        job.weights_solve = ops.weights_azel
+    elif ops.pixels_wcs_radec.enabled:
+        job.pixels_solve = ops.pixels_wcs_radec
+        job.weights_solve = ops.weights_radec
     else:
-        if ops.pixels_healpix_radec.enabled:
-            if ops.pixels_wcs_radec.enabled:
-                raise RuntimeError("Only one solver pixelization scheme should be enabled")
-            else:
-                args.pixels_solve = ops.pixels_healpix_radec
+        job.pixels_solve = ops.pixels_healpix_radec
+        job.weights_solve = ops.weights_radec
+    job.weights_final = job.weights_solve
+
+    if n_enabled_final == 0:
+        # Use same as solve
+        job.pixels_final = job.pixels_solve
+    else:
+        if ops.pixels_wcs_azel_final.enabled:
+            job.pixels_final = ops.pixels_wcs_azel_final
+        elif ops.pixels_wcs_radec_final.enabled:
+            job.pixels_final = ops.pixels_wcs_radec_final
         else:
-            if ops.pixels_wcs_radec.enabled:
-                args.pixels_solve = ops.pixels_wcs_radec
-            else:
-                raise RuntimeError(
-                    "Exactly one solver pixelization scheme should be enabled"
-                )
-        args.pixels_solve.detector_pointing = ops.det_pointing_radec
-        if ops.pixels_healpix_radec_final.enabled:
-            if ops.pixels_wcs_radec_final.enabled:
-                raise RuntimeError("Only one final pixelization scheme can be enabled")
-            else:
-                args.pixels_final = ops.pixels_healpix_radec_final
-        else:
-            if ops.pixels_wcs_radec_final.enabled:
-                args.pixels_final = ops.pixels_healpix_radec_final
-            else:
-                # Use the same as the solver
-                args.pixels_final = args.pixels_solve
-        args.pixels_solve.detector_pointing = ops.det_pointing_radec
+            job.pixels_final = ops.pixels_healpix_radec_final
 
 
 def simulate_data(job, args, toast_comm, telescope, schedule):
@@ -294,6 +327,7 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
 
     # Apply LAT co-rotation
     ops.corotate_lat.apply(data)
+    log.info_rank("Apply LAT co-rotation in", comm=world_comm, timer=timer)
 
     # Construct a "perfect" noise model just from the focalplane parameters
 
@@ -303,17 +337,14 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     ops.mem_count.prefix = "After default noise model"
     ops.mem_count.apply(data)
 
-    # Set up detector pointing in both Az/El and RA/DEC
+    # Set up pointing, pixelization, and weights
 
-    ops.det_pointing_azel.boresight = ops.sim_ground.boresight_azel
-    ops.det_pointing_radec.boresight = ops.sim_ground.boresight_radec
-
-    ops.weights_azel.detector_pointing = ops.det_pointing_azel
-    ops.weights_azel.hwp_angle = ops.sim_ground.hwp_angle
+    select_pointing(job, args)
 
     # Create the Elevation modulated noise model
 
     ops.elevation_model.noise_model = ops.default_model.noise_model
+    ops.elevation_model.out_model = ops.elevation_model.noise_model
     ops.elevation_model.detector_pointing = ops.det_pointing_azel
     ops.elevation_model.apply(data)
     log.info_rank("Created elevation noise model in", comm=world_comm, timer=timer)
@@ -321,17 +352,13 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     ops.mem_count.prefix = "After elevation noise model"
     ops.mem_count.apply(data)
 
-    # Set up the pointing.  Each pointing matrix operator requires a detector pointing
-    # operator, and each binning operator requires a pointing matrix operator.
+    # Set up pointing matrices for binning operators
 
-    ops.weights_radec.detector_pointing = ops.det_pointing_radec
-    ops.weights_radec.hwp_angle = ops.sim_ground.hwp_angle
+    ops.binner.pixel_pointing = job.pixels_solve
+    ops.binner.stokes_weights = job.weights_solve
 
-    ops.binner.pixel_pointing = args.pixels_solve
-    ops.binner.stokes_weights = ops.weights_radec
-
-    ops.binner_final.pixel_pointing = args.pixels_final
-    ops.binner_final.stokes_weights = ops.weights_radec
+    ops.binner_final.pixel_pointing = job.pixels_final
+    ops.binner_final.stokes_weights = job.weights_final
 
     # If we are not using a different binner for our final binning, use the same one
     # as the solve.
@@ -365,7 +392,7 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     # in case that is different from the solver pointing model.
 
     ops.scan_map.pixel_dist = ops.binner_final.pixel_dist
-    ops.scan_map.pixel_pointing = args.pixels_final
+    ops.scan_map.pixel_pointing = job.pixels_final
     ops.scan_map.stokes_weights = ops.weights_radec
     ops.scan_map.save_pointing = use_full_pointing(job)
     log.info_rank("Simulating sky signal", comm=world_comm)
@@ -398,8 +425,6 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
         comm=world_comm,
         timer=timer,
     )
-    if rank == 0 and ops.sim_source.enabled:
-        print("Source coord = ", data.obs[0].shared["source"].data)
 
     # Simulate Solar System Objects
 
@@ -511,9 +536,9 @@ def reduce_data(job, args, data):
 
     # Apply noise estimation
 
-    ops.noise_estim.detector_pointing = ops.det_pointing_radec
-    ops.noise_estim.pixel_pointing = args.pixels_final
-    ops.noise_estim.stokes_weights = ops.weights_radec
+    ops.noise_estim.detector_pointing = job.pixels_final.detector_pointing
+    ops.noise_estim.pixel_pointing = job.pixels_final
+    ops.noise_estim.stokes_weights = job.weights_final
     ops.noise_estim.pixel_dist = ops.binner_final.pixel_dist
     ops.noise_estim.output_dir = args.out_dir
     ops.noise_estim.apply(data)
@@ -531,7 +556,7 @@ def reduce_data(job, args, data):
 
     # Optional geometric factors
 
-    ops.h_n.pixel_pointing = args.pixels_final
+    ops.h_n.pixel_pointing = job.pixels_final
     ops.h_n.pixel_dist = ops.binner_final.pixel_dist
     ops.h_n.output_dir = args.out_dir
     ops.h_n.apply(data)
@@ -540,7 +565,7 @@ def reduce_data(job, args, data):
     ops.mem_count.prefix = "After h_n map"
     ops.mem_count.apply(data)
 
-    ops.cadence_map.pixel_pointing = args.pixels_final
+    ops.cadence_map.pixel_pointing = job.pixels_final
     ops.cadence_map.pixel_dist = ops.binner_final.pixel_dist
     ops.cadence_map.output_dir = args.out_dir
     ops.cadence_map.apply(data)
@@ -549,7 +574,7 @@ def reduce_data(job, args, data):
     ops.mem_count.prefix = "After cadence map"
     ops.mem_count.apply(data)
 
-    ops.crosslinking.pixel_pointing = args.pixels_final
+    ops.crosslinking.pixel_pointing = job.pixels_final
     ops.crosslinking.pixel_dist = ops.binner_final.pixel_dist
     ops.crosslinking.output_dir = args.out_dir
     ops.crosslinking.apply(data)
@@ -667,7 +692,7 @@ def reduce_data(job, args, data):
 
     if toast.ops.madam.available() and ops.madam.enabled:
         ops.madam.params = toast.ops.madam_params_from_mapmaker(ops.mapmaker)
-        ops.madam.pixel_pointing = args.pixels_final
+        ops.madam.pixel_pointing = job.pixels_final
         ops.madam.stokes_weights = ops.weights_radec
         ops.madam.apply(data)
         log.info_rank("Finished Madam in", comm=world_comm, timer=timer)
@@ -689,7 +714,7 @@ def main():
     env = toast.utils.Environment.get()
     log = toast.utils.Logger.get()
     gt = toast.timing.GlobalTimers.get()
-    gt.start("toast_ground_sim (total)")
+    gt.start("toast_so_sim (total)")
     timer0 = toast.timing.Timer()
     timer0.start()
 
@@ -778,16 +803,15 @@ def main():
         toast.ops.PixelsWCS(
             name="pixels_wcs_radec",
             project="CAR",
-            resolution=(0.01 * u.degree, 0.01 * u.degree),
+            resolution=(0.005 * u.degree, 0.005 * u.degree),
             auto_bounds=True,
             enabled=False,
         ),
         toast.ops.PixelsWCS(
-            name="pixels_wcs_source",
+            name="pixels_wcs_azel",
             project="CAR",
-            resolution=(0.01 * u.degree, 0.01 * u.degree),
+            resolution=(0.005 * u.degree, 0.005 * u.degree),
             auto_bounds=True,
-            center_offset="source",
             enabled=False,
         ),
         toast.ops.StokesWeights(name="weights_radec", mode="IQU"),
@@ -811,6 +835,7 @@ def main():
         toast.ops.MapMaker(name="mapmaker"),
         toast.ops.PixelsHealpix(name="pixels_healpix_radec_final", enabled=False),
         toast.ops.PixelsWCS(name="pixels_wcs_radec_final", enabled=False),
+        toast.ops.PixelsWCS(name="pixels_wcs_azel_final", enabled=False),
         toast.ops.BinMap(
             name="binner_final", enabled=False, pixel_dist="pix_dist_final"
         ),
@@ -834,9 +859,6 @@ def main():
     job, group_size, full_pointing = job_create(
         config, jobargs, telescope, schedule, comm
     )
-
-    # Select pixelization
-    select_pixelization(job, args)
 
     # Create the toast communicator
     toast_comm = toast.Comm(world=comm, groupsize=group_size)

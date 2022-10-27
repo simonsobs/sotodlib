@@ -28,6 +28,7 @@ setup_opts["entry_points"] = {
 
 scripts = [
     "workflows/toast_so_sim.py",
+    "workflows/toast_so_map.py",
     "workflows/get_wafer_offset.py",
 ]
 

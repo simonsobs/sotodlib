@@ -8,7 +8,7 @@ import argparse
 
 from collections import OrderedDict
 
-from ..sim_hardware import get_example, sim_telescope_detectors
+from ..sim_hardware import sim_nominal, sim_detectors_toast
 
 
 def main():
@@ -34,14 +34,12 @@ def main():
 
     args = parser.parse_args()
 
-    print("Getting example config...", flush=True)
-    hw = get_example()
-    hw.data["detectors"] = OrderedDict()
+    print("Getting nominal config...", flush=True)
+    hw = sim_nominal()
     for tele, teleprops in hw.data["telescopes"].items():
         print("Simulating detectors for telescope {}...".format(tele),
               flush=True)
-        dets = sim_telescope_detectors(hw, tele)
-        hw.data["detectors"].update(dets)
+        sim_detectors_toast(hw, tele)
 
     if args.plain:
         outpath = "{}.toml".format(args.out)

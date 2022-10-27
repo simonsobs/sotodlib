@@ -6,28 +6,20 @@ import os
 import pickle
 
 import traitlets
-
 import numpy as np
-
 from astropy import units as u
-
 import ephem
-
 from scipy.interpolate import RectBivariateSpline
 
+import toast
 from toast.timing import function_timer
-
 from toast import qarray as qa
-
 from toast.data import Data
-
 from toast.traits import trait_docs, Int, Unicode, Bool, Quantity, Float, Instance
-
 from toast.ops.operator import Operator
-
 from toast.utils import Environment, Logger, Timer
-
 from toast.observation import default_values as defaults
+from toast.coordinates import azel_to_radec
 
 from . import utils
 
@@ -53,9 +45,7 @@ def to_DJD(t):
 
 @trait_docs
 class SimSSO(Operator):
-    """Operator that generates Solar System Object timestreams.
-    
-    """
+    """Operator that generates Solar System Object timestreams."""
 
     # Class traits
 
@@ -131,6 +121,11 @@ class SimSSO(Operator):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        # Store of per-detector beam properties.  Eventually we could modify the
+        # operator traits to list files per detector, per wafer, per tube, etc.
+        # For now, we use the same beam for all detectors, so this will have only
+        # one entry.
+        self.beam_props = dict()
 
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
@@ -140,9 +135,7 @@ class SimSSO(Operator):
         for trait in "sso_name", "beam_file", "detector_pointing":
             value = getattr(self, trait)
             if value is None:
-                raise RuntimeError(
-                    f"You must set `{trait}` before running SimSSO"
-                )
+                raise RuntimeError(f"You must set `{trait}` before running SimSSO")
 
         for sso_name in self.sso_name.split(","):
             sso = getattr(ephem, sso_name)()
@@ -171,24 +164,49 @@ class SimSSO(Operator):
                 sso_az, sso_el, sso_dist, sso_diameter = self._get_sso_position(
                     data, sso, times, observer
                 )
+                if data.comm.group_rank == 0:
+                    log.debug(
+                        f"{data.comm.group} : {sso_name} at mean "
+                        f"Az {np.mean(sso_az.to_value(u.degree))} deg, "
+                        f"El {np.mean(sso_el.to_value(u.degree))} deg"
+                    )
 
                 # Store the SSO location
-                source_coord = np.column_stack(
-                    [sso_az.to_value(u.degree), sso_el.to_value(u.degree)]
+
+                source_coord_azel = np.column_stack(
+                    [-sso_az.to_value(u.degree), sso_el.to_value(u.degree)]
                 )
+
                 obs.shared.create_column("source", (len(sso_az), 2), dtype=np.float64)
                 if obs.comm.group_rank == 0:
-                    obs.shared["source"].set(source_coord)
+                    obs.shared["source"].set(source_coord_azel)
                 else:
                     obs.shared["source"].set(None)
 
-                # Make sure detector data output exists
+                # Make sure detector data output exists.  If not, create it
+                # with units of Kelvin.
+
                 dets = obs.select_local_detectors(detectors)
-                obs.detdata.ensure(self.det_data, detectors=dets)
+
+                exists = obs.detdata.ensure(
+                    self.det_data, detectors=dets, create_units=u.K
+                )
+
+                det_units = obs.detdata[self.det_data].units
+
+                scale = toast.utils.unit_conversion(u.K, det_units)
 
                 self._observe_sso(
-                    data, obs, sso_name, sso_az, sso_el, sso_dist, sso_diameter,
-                    prefix, dets,
+                    data,
+                    obs,
+                    sso_name,
+                    sso_az,
+                    sso_el,
+                    sso_dist,
+                    sso_diameter,
+                    prefix,
+                    dets,
+                    scale,
                 )
 
             if data.comm.group_rank == 0:
@@ -212,37 +230,41 @@ class SimSSO(Operator):
             freq = np.array(hf.get("freqs_ghz")) * u.GHz
             temp = utils.tb2tcmb(tb, freq)
         else:
-            raise ValueError(
-                f"Unknown planet name: '{sso_name}' not in {hf.keys()}"
-            )
+            raise ValueError(f"Unknown planet name: '{sso_name}' not in {hf.keys()}")
         return freq, temp
 
     def _get_beam_map(self, det, sso_diameter, ttemp_det):
         """
         Construct a 2-dimensional interpolator for the beam
         """
-        # Read in the simulated beam
-        with open(self.beam_file, "rb") as f_t:
-            beam_dic = pickle.load(f_t)
+        # Read in the simulated beam.  We could add operator traits to
+        # specify whether to load different beams based on detector,
+        # wafer, tube, etc and check that key here.
+        if "ALL" in self.beam_props:
+            # We have already read the single beam file.
+            beam_dic = self.beam_props["ALL"]
+        else:
+            with open(self.beam_file, "rb") as f_t:
+                beam_dic = pickle.load(f_t)
+                self.beam_props["ALL"] = beam_dic
         description = beam_dic["size"]  # 2d array [[size, res], [n, 1]]
         model = beam_dic["data"]
         res = description[0][1] * u.degree
-        beam_solid_angle = np.sum(model) * res ** 2
+        beam_solid_angle = np.sum(model) * res**2
 
         n = int(description[1][0])
         size = description[0][0]
         sso_radius_avg = np.average(sso_diameter) / 2
-        sso_solid_angle = np.pi * sso_radius_avg ** 2
+        sso_solid_angle = np.pi * sso_radius_avg**2
         amp = ttemp_det * (
-            sso_solid_angle.to_value(u.rad ** 2)
-            / beam_solid_angle.to_value(u.rad ** 2)
+            sso_solid_angle.to_value(u.rad**2) / beam_solid_angle.to_value(u.rad**2)
         )
         w = np.radians(size / 2)
         x = np.linspace(-w, w, n)
         y = np.linspace(-w, w, n)
         model *= amp
         beam = RectBivariateSpline(x, y, model)
-        r = np.sqrt(w ** 2 + w ** 2)
+        r = np.sqrt(w**2 + w**2)
         return beam, r
 
     @function_timer
@@ -278,16 +300,17 @@ class SimSSO(Operator):
 
     @function_timer
     def _observe_sso(
-            self,
-            data,
-            obs,
-            sso_name,
-            sso_az,
-            sso_el,
-            sso_dist,
-            sso_diameter,
-            prefix,
-            dets,
+        self,
+        data,
+        obs,
+        sso_name,
+        sso_az,
+        sso_el,
+        sso_dist,
+        sso_diameter,
+        prefix,
+        dets,
+        scale,
     ):
         """
         Observe the SSO with each detector in tod
@@ -295,30 +318,33 @@ class SimSSO(Operator):
         log = Logger.get()
         timer = Timer()
 
-        for det in dets:
+        # Get a view of the data which contains just this single
+        # observation
+        obs_data = data.select(obs_name=obs.name)
+
+        zaxis = np.array([0.0, 0.0, 1.0])
+        bore_quat = obs_data.obs[0].shared[defaults.boresight_azel][:]
+        bore_lon, bore_lat, _ = qa.to_lonlat_angles(bore_quat)
+
+        for idet, det in enumerate(dets):
             timer.clear()
             timer.start()
             bandpass = obs.telescope.focalplane.bandpass
             signal = obs.detdata[self.det_data][det]
 
-            # Compute detector quaternions
-
-            obs_data = Data(comm=data.comm)
-            obs_data._internal = data._internal
-            obs_data.obs = [obs]
             self.detector_pointing.apply(obs_data, detectors=[det])
-            obs_data.obs.clear()
-            del obs_data
-
-            azel_quat = obs.detdata[self.detector_pointing.quats][det]
+            det_quat = obs_data.obs[0].detdata[self.detector_pointing.quats][det]
 
             # Convert Az/El quaternion of the detector into angles
-            theta, phi = qa.to_position(azel_quat)
+            theta, phi, _ = qa.to_iso_angles(det_quat)
 
             # Azimuth is measured in the opposite direction
             # than longitude
-            az = 2 * np.pi - phi
+            az = -phi
             el = np.pi / 2 - theta
+
+            mean_az = np.mean(az)
+            mean_el = np.mean(el)
 
             # Convolve the planet SED with the detector bandpass
             planet_freq, planet_temp = self._get_planet_temp(sso_name)
@@ -327,12 +353,14 @@ class SimSSO(Operator):
             beam, radius = self._get_beam_map(det, sso_diameter, det_temp)
 
             # Interpolate the beam map at appropriate locations
+
             x = (az - sso_az.to_value(u.rad)) * np.cos(el)
             y = el - sso_el.to_value(u.rad)
-            r = np.sqrt(x ** 2 + y ** 2)
+            r = np.sqrt(x**2 + y**2)
+
             good = r < radius
             sig = beam(x[good], y[good], grid=False)
-            signal[good] += sig
+            signal[good] += scale * sig
 
             timer.stop()
             if data.comm.world_rank == 0:
@@ -363,3 +391,137 @@ class SimSSO(Operator):
 
     def _accelerators(self):
         return list()
+
+
+# def plot_projected_quats(
+#     outfile, qbore=None, qdet=None, valid=slice(None), scale=1.0, planet=None
+# ):
+#     """Plot a list of quaternion arrays in longitude / latitude."""
+
+#     toast.vis.set_matplotlib_backend()
+#     import matplotlib.pyplot as plt
+
+#     # Convert boresight and detector quaternions to angles
+
+#     qbang = None
+#     if qbore is not None:
+#         qbang = np.zeros((3, qbore.shape[0]), dtype=np.float64)
+#         qbang[0], qbang[1], qbang[2] = qa.to_lonlat_angles(qbore)
+#         qbang[0] *= 180.0 / np.pi
+#         qbang[1] *= 180.0 / np.pi
+#         lon_min = np.amin(qbang[0])
+#         lon_max = np.amax(qbang[0])
+#         lat_min = np.amin(qbang[1])
+#         lat_max = np.amax(qbang[1])
+
+#     qdang = None
+#     if qdet is not None:
+#         qdang = np.zeros((qdet.shape[0], 3, qdet.shape[1]), dtype=np.float64)
+#         for det in range(qdet.shape[0]):
+#             qdang[det, 0], qdang[det, 1], qdang[det, 2] = qa.to_lonlat_angles(qdet[det])
+#             qdang[det, 0] *= 180.0 / np.pi
+#             qdang[det, 1] *= 180.0 / np.pi
+#         lon_min = np.amin(qdang[:, 0])
+#         lon_max = np.amax(qdang[:, 0])
+#         lat_min = np.amin(qdang[:, 1])
+#         lat_max = np.amax(qdang[:, 1])
+
+#     # Set the sizes of shapes based on the plot range
+
+#     span_lon = lon_max - lon_min
+#     span_lat = lat_max - lat_min
+#     span = max(span_lon, span_lat)
+#     # bmag = 0.5 * span * scale
+#     # dmag = 0.2 * span * scale
+#     bmag = 0.2
+#     dmag = 0.1
+
+#     if span_lat > span_lon:
+#         fig_y = 10
+#         fig_x = fig_y * (span_lon / span_lat)
+#         if fig_x < 4:
+#             fig_x = 4
+#     else:
+#         fig_x = 10
+#         fig_y = fig_x * (span_lat / span_lon)
+#         if fig_y < 4:
+#             fig_y = 4
+
+#     figdpi = 100
+
+#     fig = plt.figure(figsize=(fig_x, fig_y), dpi=figdpi)
+#     ax = fig.add_subplot(1, 1, 1, aspect="equal")
+
+#     # Compute the font size to use for detector labels
+#     fontpix = 0.1 * figdpi
+#     fontpt = int(0.75 * fontpix)
+
+#     # Plot source if we have it
+
+#     if planet is not None:
+#         ax.plot(planet[:, 0], planet[:, 1], color="purple", marker="+")
+
+#     # Plot boresight if we have it
+
+#     if qbang is not None:
+#         ax.scatter(qbang[0][valid], qbang[1][valid], color="black", marker="x")
+#         for ln, lt, ps in np.transpose(qbang)[valid]:
+#             wd = 0.05 * bmag
+#             dx = bmag * np.sin(ps)
+#             dy = -bmag * np.cos(ps)
+#             ax.arrow(
+#                 ln,
+#                 lt,
+#                 dx,
+#                 dy,
+#                 width=wd,
+#                 head_width=4.0 * wd,
+#                 head_length=0.2 * bmag,
+#                 length_includes_head=True,
+#                 ec="red",
+#                 fc="red",
+#             )
+
+#     # Plot detectors if we have them
+
+#     if qdang is not None:
+#         for idet, dang in enumerate(qdang):
+#             ax.scatter(dang[0][valid], dang[1][valid], color="blue", marker=".")
+#             for ln, lt, ps in np.transpose(dang)[valid]:
+#                 wd = 0.05 * dmag
+#                 dx = dmag * np.sin(ps)
+#                 dy = -dmag * np.cos(ps)
+#                 ax.arrow(
+#                     ln,
+#                     lt,
+#                     dx,
+#                     dy,
+#                     width=wd,
+#                     head_width=4.0 * wd,
+#                     head_length=0.2 * dmag,
+#                     length_includes_head=True,
+#                     ec="blue",
+#                     fc="blue",
+#                 )
+#             ax.text(
+#                 dang[0][valid][0] + (idet % 2) * 1.5 * dmag,
+#                 dang[1][valid][0] + 1.0 * dmag,
+#                 f"{idet:02d}",
+#                 color="k",
+#                 fontsize=fontpt,
+#                 horizontalalignment="center",
+#                 verticalalignment="center",
+#                 bbox=dict(fc="w", ec="none", pad=1, alpha=0.0),
+#             )
+
+#     # Invert x axis so that longitude reflects what we would see from
+#     # inside the celestial sphere
+#     plt.gca().invert_xaxis()
+
+#     ax.set_xlabel("Longitude Degrees", fontsize="medium")
+#     ax.set_ylabel("Latitude Degrees", fontsize="medium")
+
+#     fig.suptitle("Projected Pointing and Polarization on Sky")
+
+#     plt.savefig(outfile)
+#     plt.close()

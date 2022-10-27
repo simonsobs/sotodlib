@@ -20,7 +20,7 @@ from toast.ops.operator import Operator
 from toast.timing import function_timer
 from toast.traits import (Bool, Float, Instance, Int, Quantity, Unicode,
                           trait_docs)
-from toast.utils import Environment, Logger, Timer
+from toast.utils import Environment, Logger, Timer, unit_conversion
 
 XAXIS, YAXIS, ZAXIS = np.eye(3)
 
@@ -288,7 +288,10 @@ class SimStimulator(Operator):
             self.get_stimulator_temperature(obs)
 
             dets = obs.select_local_detectors(detectors)
-            obs.detdata.ensure(self.det_data, detectors=dets)
+            obs.detdata.ensure(self.det_data, detectors=dets, create_units=u.K)
+            det_units = obs.detdata[self.det_data].units
+            scale = unit_conversion(u.K, det_units)
+
             focalplane = obs.telescope.focalplane
             for det in dets:
                 signal = obs.detdata[self.det_data][det]
@@ -297,7 +300,7 @@ class SimStimulator(Operator):
 
                 stim = self.get_stimulator_signal(obs, band, quat)
 
-                signal += stim
+                signal += scale * stim
 
         return
 

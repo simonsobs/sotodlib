@@ -40,25 +40,27 @@ def main():
         "--reverse", action="store_true", help="Reverse offsets")
     # LAT specific params
     parser.add_argument(
-        "--corotate-lat",
+        "--lat_corotate",
         required=False,
+        default=True,
         action="store_true",
         help="Rotate LAT receiver to maintain focalplane orientation",
         dest="corotate_lat",
     )
     parser.add_argument(
-        "--no-corotate-lat",
+        "--no_lat_corotate",
         required=False,
+        default=True,
         action="store_false",
-        help="Do not Rotate LAT receiver to maintain focalplane orientation",
+        help="Do not rotate LAT receiver to maintain focalplane orientation",
         dest="corotate_lat",
     )
-    parser.set_defaults(corotate_lat=True)
     parser.add_argument(
-        "--elevation-deg",
+        "--lat_elevation_deg",
         required=False,
+        default=None,
         type=float,
-        help="Observing elevation",
+        help="Observing elevation of the LAT if not co-rotating",
     )
     parser.add_argument(
         "--verbose",
@@ -71,7 +73,7 @@ def main():
 
     args = parser.parse_args()
 
-    hw = hardware.get_example()
+    hw = hardware.sim_nominal()
 
     # Which telescope?
 
@@ -99,7 +101,7 @@ def main():
 
     # Which detectors?
 
-    hw.data["detectors"] = hardware.sim_telescope_detectors(hw, telescope)
+    hardware.sim_detectors_toast(hw, telescope)
 
     match = {}
     tube_slots = None
@@ -113,32 +115,33 @@ def main():
 
     # print(f"tube_slots = {tube_slots}, match = {match} leaves {ndet} detectors")
 
-    # Optional corotator rotation
+    # LAT rotation
 
+    lat_rot = None
     if telescope == "LAT":
-        if args.corotate_lat:
-            rot = qa.rotation(ZAXIS, LAT_COROTATOR_OFFSET.to_value(u.rad))
-        else:
-            if args.elevation_deg is None:
+        if not args.corotate_lat:
+            # We are not co-rotating, compute the rotation for the specified
+            # elevation.
+            if args.lat_elevation_deg is None:
                 raise RuntimeError(
-                    "You must set the observing elevation when not co-rotating."
+                    "You must set the LAT observing elevation when not co-rotating."
                 )
-            rot = qa.rotation(
+            lat_ang = args.lat_elevation_deg - LAT_COROTATOR_OFFSET.to_value(u.deg)
+            lat_rot = qa.from_axisangle(
                 ZAXIS,
-                np.radians(args.elevation_deg - 60 + LAT_COROTATOR_OFFSET.to_value(u.deg))
+                np.radians(lat_ang),
             )
     else:
-        if args.elevation_deg is not None:
+        if args.lat_elevation_deg is not None:
             raise RuntimeError("Observing elevation does not matter for SAT")
-        rot = None
 
     # Average detector offset
 
     vec_mean = np.zeros(3)
     for det_name, det_data in hw.data["detectors"].items():
         quat = det_data["quat"]
-        if rot is not None:
-            quat = qa.mult(rot, quat)
+        if lat_rot is not None:
+            quat = qa.mult(lat_rot, det_data["quat"])
         vec = qa.rotate(quat, ZAXIS)
         vec_mean += vec
     vec_mean /= ndet
@@ -148,8 +151,8 @@ def main():
     all_dist = []
     for det_name, det_data in hw.data["detectors"].items():
         quat = det_data["quat"]
-        if rot is not None:
-            quat = qa.mult(rot, quat)
+        if lat_rot is not None:
+            quat = qa.mult(lat_rot, det_data["quat"])
         vec = qa.rotate(quat, ZAXIS)
         all_dist.append(np.degrees(np.arccos(np.dot(vec_mean, vec))))
     dist_max = np.amax(all_dist)

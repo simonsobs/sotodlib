@@ -157,18 +157,18 @@ class Hn(Operator):
                 hwpang = None
             if n == 1:
                 for name in [
-                        self.cos_1_name,
-                        self.sin_1_name,
-                        self.hweight_name,
-                        self.cos_n_name,
-                        self.sin_n_name,
+                    self.cos_1_name,
+                    self.sin_1_name,
+                    self.hweight_name,
+                    self.cos_n_name,
+                    self.sin_n_name,
                 ]:
                     obs.detdata.ensure(name, detectors=[det])
                 # Compute detector quaternions
                 obs_data = data.select(obs_uid=obs.uid)
                 self.pixel_pointing.detector_pointing.apply(obs_data, detectors=[det])
                 quats = obs.detdata[self.pixel_pointing.detector_pointing.quats][det]
-                theta, phi, psi = qa.to_angles(quats)
+                theta, phi, psi = qa.to_iso_angles(quats)
                 cos_n_new = np.cos(psi)
                 sin_n_new = np.sin(psi)
                 obs.detdata[self.cos_1_name][det] = cos_n_new
