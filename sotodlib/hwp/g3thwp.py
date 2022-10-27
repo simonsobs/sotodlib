@@ -363,7 +363,8 @@ class G3tHWP():
                 rising_edge = data['irig_synch_pulse_clock_counts'][1]
             logger.info('IRIG timing quality check.' )
             irig_time, rising_edge = self._irig_quality_check(irig_time, rising_edge)
-            
+        
+        irig_time_2 = None    
         if 'irig_time_2' in data.keys():
             logger.info('try 2nd encoder for IRIG timing.' )
             irig_time_2 = data['irig_time_2'][1]
@@ -372,8 +373,8 @@ class G3tHWP():
                 irig_time_2 = data['irig_synch_pulse_clock_time_2'][1]
                 rising_edge_2 = data['irig_synch_pulse_clock_counts_2'][1]
             irig_time_2, rising_edge_2 = self._irig_quality_check(irig_time_2, rising_edge_2)
-
-        if len(irig_time) < len(irig_time_2):
+        
+        if irig_time_2 is not None and len(irig_time) < len(irig_time_2):
             logger.info('Use 2nd encoder IRIG timing.' )
             irig_time = irig_time_2
             rising_edge = rising_edge_2
