@@ -16,13 +16,13 @@ Welcome to SOTODLib's documentation!
    flagman.rst
    context.rst
    g3tsmurf.rst
+   hwp.rst
    tod_ops.rst
    coords.rst
    toast.rst
    site_pipeline.rst
    reference.rst
    dev.rst
-
 
 Indices and tables
 ==================

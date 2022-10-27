@@ -17,6 +17,12 @@ quick-turnaround data processing at the observatory.
 Pipeline Elements
 =================
 
+update-g3tsmurf-db
+-------------------
+
+This script set up to create and maintain g3tsmurf databases. :ref:`See details
+here<g3tsmurf-update-section>`.
+
 imprinter
 ----------
 
@@ -156,7 +162,118 @@ Here's an annotated example:
 
   # Mask parameters
   mask_params:
+    mask_res: [2, 'arcmin']
     default: {'xyr': [0., 0., 0.1]}
+
+
+make-uncal-beam-map
+-------------------
+
+.. automodule:: sotodlib.site_pipeline.make_uncal_beam_map
+   :members:
+   :undoc-members:
+
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.make_uncal_beam_map
+   :func: _get_parser
+   :prog: make-uncal-beam-map
+
+Config file format
+``````````````````
+
+Here's an annotated example:
+
+.. code-block:: yaml
+
+  # Data source
+  context_file: ./act_uranus/context.yaml
+
+  # Sub-observation data grouping
+  subobs:
+    use: detset
+    label: wafer_slot
+
+  # Database of results
+  archive:
+    index: 'archive.sqlite'
+    policy:
+      type: 'directory'
+      root_dir: './'
+      pattern: 'maps/{product_id}'
+
+  # Output selection and naming
+  output:
+    map_codes: ['solved', 'weights']
+    pattern: '{product_id}_{split}_{map_code}.fits'
+
+  # Plot generation
+  plotting:
+    zoom:
+      f090: [10, arcmin]
+      f150: [10, arcmin]
+
+  # Preprocessing
+  preprocessing:
+    cal_keys: ['abscal', 'relcal']
+    pointing_keys: ['boresight_offset']
+
+  # Mapmaking parameters
+  mapmaking:
+    force_source: Uranus
+    res:
+      f090: [15, arcsec]
+      f150: [15, arcsec]
+
+
+Inputs
+``````
+
+The Context should cause the TOD to be loaded with all supporting
+metadata loaded into the AxisManager.  Here are key members that will
+be processed:
+
+- Deconvolution step:
+
+  - ``'timeconst'``
+  - ``'iir_params'``
+
+- Calibration:
+
+  - Whatever is listed in preprocessing.cal_keys
+
+- Pointing correction:
+
+  - ``'boresight_offset'``
+
+- Demodulation and downsampling:
+
+  - not implemented
+
+- Planet mapmaking:
+
+  - ``'source_flags'``
+  - ``'glitch_flags'`` - optional
+
+
+update-hwp-angle
+----------------
+
+Script for running updates on (or creating) a hwp angle g3 file.
+This script will run periodically even when hwp is not spinning.
+Meaning is designed to work from something like a cronjob.
+The output hwp angle should be synchronized to SMuRF timing outside this script. 
+:ref:`See details here<g3thwp-section>`.
+
+Command line arguments
+``````````````````````
+.. argparse::
+   :module: sotodlib.site_pipeline.update_hwp_angle
+   :func: get_parser
+   :prog: update_hwp_angle
 
 
 Support

@@ -44,7 +44,7 @@ class MetadataTest(unittest.TestCase):
             'a_bad_string': None,
             'a_bad_float': None,
             })
-        self.assertCountEqual(arx.dtype.names, ['another_string', 'another_float'])
+        self.assertEqual(list(arx.dtype.names), ['another_string', 'another_float'])
         self.assertEqual(arx['another_string'].dtype.char, 'U')
 
     def test_001_hdf(self):
@@ -74,7 +74,7 @@ class MetadataTest(unittest.TestCase):
                'obs:obs_id': test_obs_id,
                'dataset': 'timeconst_1ms'}
         data = loader.from_loadspec(req)
-        self.assertCountEqual(data['timeconst'], [TGOOD])
+        self.assertEqual(list(data['timeconst']), [TGOOD])
 
     def test_010_manifest_basics(self):
         """Test that you can create a ManifestScheme and ManifestDb and add
@@ -171,7 +171,15 @@ class MetadataTest(unittest.TestCase):
              'name': 'tau&timeconst'}
         ]
         mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00'}, detdb.props())
-        self.assertCountEqual(mtod['tau'], [T090, T090, T150, T150])
+        self.assertEqual(list(mtod['tau']), [T090, T090, T150, T150])
+
+        # Make sure that also plays well with det specs.
+        mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00', 'dets:band': 'f090'},
+                           detdb.props())
+        self.assertEqual(list(mtod['tau']), [T090, T090])
+        mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00', 'dets:band': 'f150'},
+                           detdb.props())
+        self.assertEqual(list(mtod['tau']), [T150, T150])
 
         # Test 2: ManifestDb specifies polcode, which crosses with
         # dataset band.
@@ -196,7 +204,72 @@ class MetadataTest(unittest.TestCase):
         # Make sure you reinit the loader, to avoid cached dbs.
         loader = metadata.SuperLoader(obsdb=obsdb, detdb=detdb)
         mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00'}, detdb.props())
-        self.assertCountEqual(mtod['tau'], [T090, TBAD, TBAD, T150])
+        self.assertEqual(list(mtod['tau']), [T090, TBAD, TBAD, T150])
+
+        # Make sure that also plays well with det specs.
+        mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00', 'dets:band': 'f090'},
+                           detdb.props())
+        self.assertEqual(list(mtod['tau']), [T090, TBAD])
+        mtod = loader.load(spec_list, {'obs:obs_id': 'obs_00', 'dets:band': 'f150'},
+                           detdb.props())
+        self.assertEqual(list(mtod['tau']), [TBAD, T150])
+
+    def test_030_manipulation(self):
+        """Test some helpers for inspecting and updating ManifestDbs.
+
+        """
+        scheme = metadata.ManifestScheme() \
+                         .add_range_match('obs:timestamp') \
+                         .add_exact_match('wafer') \
+                         .add_data_field('dets:band') \
+                         .add_data_field('dataset')
+
+        mandb = metadata.ManifestDb(scheme=scheme)
+
+        mandb.add_entry({'dets:band': 'f150',
+                         'wafer': 'A',
+                         'obs:timestamp': (1200000000, 1300000000),
+                         'dataset': 'early'}, filename='x')
+        mandb.add_entry({'dets:band': 'f150',
+                         'wafer': 'A',
+                         'obs:timestamp': (1200000000, 1300000001),
+                         'dataset': 'early'}, filename='x')
+        mandb.add_entry({'dets:band': 'f220',
+                         'wafer': 'A',
+                         'obs:timestamp': (1300000000, 1400000001),
+                         'dataset': 'early'}, filename='y')
+
+        # Does .inspect work properly?
+        entries = mandb.inspect({'wafer': 'A'})
+        self.assertEqual(len(entries), 3)
+        self.assertIn('wafer', entries[0])
+
+        entries = mandb.inspect({'dets:band': 'f150'})
+        self.assertEqual(len(entries), 2)
+        entries = mandb.inspect({'filename': 'x'})
+        self.assertEqual(len(entries), 2)
+
+        # Modify an entry
+        entries[1]['wafer'] = 'B'
+        entries[1]['dets:band'] = 'f090'
+        entries[1].pop('filename')
+        mandb.update_entry(entries[1])
+        entries = mandb.inspect({'wafer': 'A'})
+        self.assertEqual(len(entries), 2)
+
+        # Delete an entry
+        entries = mandb.inspect({'dets:band': 'f220'})
+        mandb.remove_entry(entries[0])
+        ## check file unreg'd
+        c = mandb.conn.execute('select count(id) from files where name="y"')
+        self.assertEqual(c.fetchall()[0][0], 0)
+
+        # Delete another entry
+        entries = mandb.inspect()
+        mandb.remove_entry(entries[0])
+        ## check file not unreg'd (because it's used twice)
+        c = mandb.conn.execute('select count(id) from files where name="x"')
+        self.assertEqual(1, c.fetchone()[0])
 
 
 if __name__ == '__main__':

@@ -17,7 +17,6 @@ from enum import Enum
 import logging
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 from .. import core
 from . import load as io_load
@@ -51,7 +50,13 @@ SMURF_ACTIONS = {
         "stream_data_on",
         "take_noise_psd",
         "take_g3_data",
-        "stream_g3_on",
+        "stream_g3_on"
+    ],
+    "calibrations": [
+        "take_iv",
+        "take_bias_steps",
+        "take_bgmap",
+        "take_noise"
     ],
 }
 
@@ -112,7 +117,7 @@ def get_sample_timestamps(frame):
 
 def _file_has_end_frames(filename):
     ended = False
-    
+
     ## Search through file looking for stream closeout
     reader = so3g.G3IndexedReader(filename)
     logger.debug(f"Reading {filename} to look for observation end.")
@@ -121,7 +126,11 @@ def _file_has_end_frames(filename):
         if not frames:
             break
         frame = frames[0]
-        if str(frame.type) == 'Wiring':
+        if frame.type == spt3g_core.G3FrameType.Observation:
+            if frame.get("stream_placement")=="end":
+                ended = True
+                break
+        if frame.type == spt3g_core.G3FrameType.Wiring:
             ## ignore dump frames, they lie (and are at the beginning of observations)
             if frame["dump"]:
                 continue
@@ -174,7 +183,7 @@ class G3tSmurf:
     def _create_frame_types(self):
         session = self.Session()
         if not session.query(FrameType).all():
-            print("Creating FrameType table...")
+            logger.info("Creating FrameType table...")
             for k in type_key:
                 ft = FrameType(type_name=k)
                 session.add(ft)
@@ -189,6 +198,8 @@ class G3tSmurf:
         -----
         configs - dictionary containing `data_prefix` and `g3tsmurf_db` keys
         """
+        if type(configs)==str:
+            configs = yaml.safe_load( open(configs, "r"))
         return cls(os.path.join(configs["data_prefix"], "timestreams"),
                    configs["g3tsmurf_db"],
                    meta_path=os.path.join(configs["data_prefix"],"smurf"))
@@ -331,6 +342,11 @@ class G3tSmurf:
 
             session.add(db_frame)
 
+        if file_start is None:
+            ## happens if there are no scan frames in file
+            file_start = db_file.frames[0].time
+            file_stop = db_file.frames[-1].time
+
         db_file.start = file_start
         db_file.stop = file_stop
         db_file.n_channels = total_channels
@@ -338,11 +354,11 @@ class G3tSmurf:
 
     def index_archive(
         self,
-        verbose=False,
         stop_at_error=False,
         skip_old_format=True,
         min_ctime=None,
         max_ctime=None,
+        show_pb=True,
     ):
         """
         Adds all files from an archive to the File and Frame sqlite tables.
@@ -350,8 +366,6 @@ class G3tSmurf:
 
         Args
         ----
-        verbose: bool
-            Verbose mode
         stop_at_error: bool
             If True, will stop if there is an error indexing a file.
         skip_old_format: bool
@@ -363,6 +377,8 @@ class G3tSmurf:
         max_ctime: int, float, or None
             If set, files with session-ids higher than this ctime will be
             skipped.
+        show_pb: bool
+            If true, will show progress bar for file indexing
         """
         session = self.Session()
         indexed_files = [f[0] for f in session.query(Files.name).all()]
@@ -387,21 +403,20 @@ class G3tSmurf:
                             continue
                     files.append(path)
 
-        if verbose:
-            print(f"Indexing {len(files)} files...")
+        logger.info(f"Indexing {len(files)} files...")
 
-        for f in tqdm(sorted(files)[::-1]):
+        for f in tqdm(sorted(files)[::-1], disable=(not show_pb)):
             try:
                 self.add_file(os.path.join(root, f), session)
                 session.commit()
             except IntegrityError as e:
                 # Database Integrity Errors, such as duplicate entries
                 session.rollback()
-                print(e)
+                logger.warning(f"Integrity error with error {e}")
             except RuntimeError as e:
                 # End of stream errors, for G3Files that were not fully flushed
                 session.rollback()
-                print(f"Failed on file {f} due to end of stream error!")
+                logger.warning(f"Failed on file {f} due to end of stream error!")
             except Exception as e:
                 # This will catch generic errors such as attempting to load
                 # out-of-date files that do not have the required frame
@@ -409,8 +424,7 @@ class G3tSmurf:
                 session.rollback()
                 if stop_at_error:
                     raise e
-                elif verbose:
-                    print(f"Failed on file {f}:\n{e}")
+                logger.warning(f"Failed on file {f}:\n{e}")
         session.close()
 
     def add_new_channel_assignment(self, stream_id, ctime, cha, cha_path, session):
@@ -621,7 +635,7 @@ class G3tSmurf:
         session.commit()
 
     def add_new_observation(
-        self, stream_id, action_name, action_ctime, session, max_early=5, max_wait=100
+        self, stream_id, action_name, action_ctime, session, calibration, max_early=5,
     ):
         """Add new entry to the observation table. Called by the
         index_metadata function.
@@ -635,17 +649,17 @@ class G3tSmurf:
             slightly different than the .g3 session ID
         session : SQLAlchemy Session
             The active session
+        calibration : boolean
+            Boolean that indicates whether the observation is a calibration observation.
         max_early : int
             Buffer time to allow the g3 file to be earlier than the smurf action
-        max_wait : int
-            Maximum amount of time between the streaming start action and the
-            making of .g3 files that belong to an observation
         """
         # Check if observation exists already
         obs = (
             session.query(Observations)
             .filter(
                 Observations.stream_id == stream_id,
+                Observations.action_name == action_name,
                 Observations.action_ctime == action_ctime,
             )
             .one_or_none()
@@ -653,6 +667,7 @@ class G3tSmurf:
         if obs is None:
             x = session.query(Files.name)
             x = x.filter(
+                Files.stream_id == stream_id,
                 Files.start >= dt.datetime.utcfromtimestamp(action_ctime - max_early)
             )
             x = x.order_by(Files.start).first()
@@ -682,18 +697,21 @@ class G3tSmurf:
                 if str(frame.type) == "Observation":
                     assert frame["sostream_id"] == stream_id
                     assert frame["session_id"] == session_id
-                    start = dt.datetime.utcfromtimestamp(
-                        frame["time"].time / spt3g_core.G3Units.s
-                    )
+                    break
+
+            if calibration:
+                obs_id=f"cal_{stream_id}_{session_id}"
+            else:
+                obs_id=f"{stream_id}_{session_id}"
 
             # Build Observation
             obs = Observations(
-                obs_id=f"{stream_id}_{session_id}",
+                obs_id=obs_id,
                 timestamp=session_id,
                 action_ctime=action_ctime,
                 action_name=action_name,
                 stream_id=stream_id,
-                start=start,
+                calibration=calibration,
             )
             session.add(obs)
             session.commit()
@@ -701,11 +719,11 @@ class G3tSmurf:
         # obs.stop is only updated when streaming session is over
         if obs.stop is None:
             self.update_observation_files(
-                obs, session, max_early=max_early, max_wait=max_wait
+                obs, session, max_early=max_early,
             )
 
     def update_observation_files(
-        self, obs, session, max_early=5, max_wait=100, force=False
+        self, obs, session, max_early=5, force=False
     ):
         """Update existing observation. A separate function to make it easier
         to deal with partial data transfers. See add_new_observation for args
@@ -714,9 +732,6 @@ class G3tSmurf:
         -----
         max_early : int
             Buffer time to allow the g3 file to be earlier than the smurf action
-        max_wait : int
-            Maximum amount of time between the streaming start action and the
-            making of .g3 files that belong to an observation
         session : SQLAlchemy Session
             The active session
         force : bool
@@ -728,28 +743,28 @@ class G3tSmurf:
             logger.debug(f"Returning from {obs.obs_id} without updates")
             return
 
-        x = session.query(Files.name).filter(
-            Files.start >= obs.start - dt.timedelta(seconds=max_early)
+        # Prefix is deterministic based on observation details
+        prefix = os.path.join(
+                self.archive_path,
+                str(obs.timestamp)[:5],
+                obs.stream_id
         )
-        x = x.order_by(Files.start).first()
-        if x is None:
-            logger.debug(f"Found no files after start of {obs.obs_id}")
-            ## no files to add at this point
-            return
 
-        x = x[0]
-        session_id, f_num = (x[:-3].split("/")[-1]).split("_")
-        prefix = "/".join(x.split("/")[:-1]) + "/"
-        if int(session_id)-obs.start.timestamp() > max_wait:
-            ## we don't have .g3 files for some reason
+        flist = session.query(Files).filter(
+            Files.name.like(prefix + "/"+ str(obs.timestamp)+"%")
+        ).order_by(Files.start).all()
+
+
+        logger.debug(f"Found {len(flist)} files in {obs.obs_id}")
+        if len(flist)==0:
+            ## we don't have .g3 files for some reason, shouldn't be possible?
             logger.debug(f"Found no files associated with {obs.obs_id}")
             return
 
-        flist = session.query(Files).filter(Files.name.like(prefix + session_id + "%"))
-        flist = flist.order_by(Files.start).all()
-        logger.debug(f"Found {len(flist)} files in {obs.obs_id}")
-        ## Load Status Information
+        ## set start to be the first scan frame in file/observation
+        obs.start = flist[0].start
 
+        ## Load Status Information
         status = SmurfStatus.from_file(flist[0].name)
 
         # Add any tags from the status
@@ -761,7 +776,10 @@ class G3tSmurf:
 
         # Add Tune and Tuneset information
         if status.tune is not None:
-            tune = session.query(Tunes).filter(Tunes.name == status.tune).one_or_none()
+            tune = session.query(Tunes).filter(
+                Tunes.name == status.tune,
+                Tunes.stream_id == obs.stream_id,
+            ).one_or_none()
             if tune is None:
                 logger.warning(
                     f"Tune {status.tune} not found in database, update error?"
@@ -770,7 +788,10 @@ class G3tSmurf:
             else:
                 tuneset = tune.tuneset
         else:
-            tuneset = session.query(TuneSets).filter(TuneSets.start <= obs.start)
+            tuneset = session.query(TuneSets).filter(
+                TuneSets.start <= obs.start,
+                TuneSets.stream_id == obs.stream_id,
+            )
             tuneset = tuneset.order_by(db.desc(TuneSets.start)).first()
 
         already_have = [ts.id for ts in obs.tunesets]
@@ -784,6 +805,8 @@ class G3tSmurf:
             db_file.obs_id = obs.obs_id
             if tuneset is not None:
                 db_file.detset = tuneset.name
+            if tune is not None:
+                db_file.tune_id = tune.id
 
             # this is where I learned sqlite does not accept numpy 32 or 64 bit ints
             file_samps = sum(
@@ -941,7 +964,7 @@ class G3tSmurf:
             session.rollback()
             logger.info(f"Integrity Error at {stream_id}, {ctime}, {path}")
         else:
-            logger.info(f"Unexplained Error at {stream_id}, {ctime}, {path}")
+            logger.info(f"Error of type {type(e).__name__} at {stream_id}, {ctime}, {path}")
         if stop_at_error:
             raise (e)
 
@@ -1041,13 +1064,19 @@ class G3tSmurf:
         for action, stream_id, ctime, path in self.search_metadata_actions(
             min_ctime=min_ctime, max_ctime=max_ctime
         ):
-            if action in SMURF_ACTIONS["observations"]:
+            if action in SMURF_ACTIONS["observations"] or action in SMURF_ACTIONS["calibrations"]:
                 try:
                     obs_path = os.listdir(os.path.join(path, "outputs"))
                     logger.debug(
                         f"Add new Observation: {stream_id}, {ctime}, {obs_path}"
                     )
-                    self.add_new_observation(stream_id, action, ctime, session)
+                    self.add_new_observation(
+                        stream_id,
+                        action,
+                        ctime,
+                        session,
+                        calibration=(action in SMURF_ACTIONS["calibrations"])
+                    )
                 except Exception as e:
                     self._process_index_error(
                         session, e, stream_id, ctime, path, stop_at_error
@@ -1325,10 +1354,10 @@ def dump_DetDb(archive, detdb_file):
 def make_DetDb_single_obs(obsfiledb, obs_id):
 
     # find relevant files to get status
-    c = obsfiledb.conn.execute('select name from files ' 
-                         'where obs_id=?' + 
+    c = obsfiledb.conn.execute('select name from files '
+                         'where obs_id=?' +
                          'order by start', (obs_id,))
-                        
+
     flist = [row[0] for row in c]
 
     # load status
@@ -1343,8 +1372,8 @@ def make_DetDb_single_obs(obsfiledb, obs_id):
 
 
     ch_list = np.arange(status.num_chans)
-    ch_map = np.zeros( len(ch_list), dtype = [('idx', int), ('rchannel', np.unicode_,30), 
-                                              ('band', int), ('channel', int), 
+    ch_map = np.zeros( len(ch_list), dtype = [('idx', int), ('rchannel', np.unicode_,30),
+                                              ('band', int), ('channel', int),
                                               ('freqs', float)])
 
     ch_map['idx'] = ch_list
@@ -1441,6 +1470,7 @@ class SmurfStatus:
         self.status = status
         self.start = self.status.get("start")
         self.stop = self.status.get("stop")
+        self.stream_id = self.status.get("stream_id")
 
         self.aman = core.AxisManager()
 
@@ -1569,6 +1599,7 @@ class SmurfStatus:
                     break
                 frame = frames[0]
                 if str(frame.type) == "Wiring":
+                    status["stream_id"] = frame["sostream_id"]
                     if status.get("start") is None:
                         status["start"] = frame["time"].time / spt3g_core.G3Units.s
                         status["stop"] = frame["time"].time / spt3g_core.G3Units.s
@@ -1658,6 +1689,7 @@ class SmurfStatus:
         status = {
             "start": status_frames[0].time.timestamp(),
             "stop": status_frames[-1].time.timestamp(),
+            "stream_id": stream_id,
         }
         cur_file = None
         for frame_info in tqdm(status_frames, disable=(not show_pb)):
@@ -1721,7 +1753,7 @@ def get_channel_mask(
         List of desired channels the type of each list element is used
         to determine what it is:
 
-        * int : absolute readout channel
+        * int : index of channel in file. Useful for batching.
         * (int, int) : band, channel
         * string : channel name (requires archive or obsfiledb)
         * float : frequency in the smurf status (or should we use channel assignment?)
@@ -1753,10 +1785,12 @@ def get_channel_mask(
     for ch in ch_list:
         if np.isscalar(ch):
             if np.issubdtype(type(ch), np.integer):
-                # this is an absolute readout channel
-                if not ignore_missing and ~np.any(status.mask == ch):
-                    raise ValueError(f"channel {ch} not found")
-                msk[status.mask == ch] = True
+                # this is an absolute readout INDEX (not band*512+ch)
+                if not ignore_missing and ch >= status.num_chans:
+                    raise ValueError(f"Requested Index {ch} > {status.num_chans}")
+                if ch >= status.num_chans:
+                    continue
+                msk[ch] = True
 
             elif np.issubdtype(type(ch), np.floating):
                 # this is a resonator frequency
@@ -1827,31 +1861,41 @@ def get_channel_mask(
 
 
 def _get_tuneset_channel_names(status, ch_map, archive):
-    """Update channel maps with name from Tuneset"""
+    """Update channel maps with name from Tuneset
+
+    Returns
+    ruids: list or None
+        a list of readout_ids that align with ch_map. Returns None if
+        readout_ids cannot be found.
+    """
     session = archive.Session()
 
     # tune file in status
     if status.tune is not None and len(status.tune) > 0:
         tune_file = status.tune.split("/")[-1]
-        tune = session.query(Tunes).filter(Tunes.name == tune_file).one_or_none()
+        tune = session.query(Tunes).filter(
+            Tunes.name == tune_file,
+            Tunes.stream_id == status.stream_id,
+        ).one_or_none()
         if tune is None:
-            logger.info(f"Tune file {tune_file} not found in G3tSmurf archive")
-            return ch_map
+            logger.warning(f"Tune file {tune_file} not found in G3tSmurf archive")
+            return None
         if tune.tuneset is None:
-            logger.info(f"Tune file {tune_file} has no TuneSet in G3tSmurf archive")
-            return ch_map
+            logger.warning(f"Tune file {tune_file} has no TuneSet in G3tSmurf archive")
+            return None
     else:
         logger.info("Tune information not in SmurfStatus, using most recent Tune")
         tune = session.query(Tunes).filter(
-            Tunes.start <= dt.datetime.utcfromtimestamp(status.start)
+            Tunes.start <= dt.datetime.utcfromtimestamp(status.start),
+            Tunes.stream_id == status.stream_id,
         )
         tune = tune.order_by(db.desc(Tunes.start)).first()
         if tune is None:
-            logger.info("Most recent Tune does not exist")
-            return ch_map
+            logger.warning("Most recent Tune does not exist")
+            return None
         if tune.tuneset is None:
-            logger.info(f"Tune file {tune.name} has no TuneSet in G3tSmurf archive")
-            return ch_map
+            logger.warning(f"Tune file {tune.name} has no TuneSet in G3tSmurf archive")
+            return None
 
     bands, channels, names = zip(
         *[(ch.band, ch.channel, ch.name) for ch in tune.tuneset.channels]
@@ -2071,6 +2115,14 @@ def _get_sample_info(filenames):
         start += samps
     return out
 
+def split_ts_bits(c):
+    """Split up 64 bit to 2x32 bit
+    """
+    NUM_BITS_PER_INT = 32
+    MAXINT = (1 << NUM_BITS_PER_INT) - 1
+    a = (c >> NUM_BITS_PER_INT) & MAXINT
+    b = c & MAXINT
+    return a, b
 
 def _get_timestamps(streams, load_type=None, linearize_timestamps=True):
     """Calculate the timestamp field for loaded data
@@ -2083,20 +2135,32 @@ def _get_timestamps(streams, load_type=None, linearize_timestamps=True):
             if None, uses highest precision version possible. integer values
             will use the TimingParadigm class for indexing
         linearize_timestamps : bool
-          if true and using unix timing, linearize the timing based on the 
+          if true and using unix timing, linearize the timing based on the
           frame counter
     """
     if load_type is None:
         # determine the desired loading type. Expand as logic as
         # data fields develop
         if "primary" in streams:
-            if "UnixTime" in streams["primary"]:
+            if np.abs(np.diff(io_load.hstack_into(None,
+                                streams["primary"]["Counter0"]))).mean() != 0:
+                load_type = TimingParadigm.TimingSystem
+            elif "UnixTime" in streams["primary"]:
                 load_type = TimingParadigm.SmurfUnixTime
             else:
                 load_type = TimingParadigm.G3Timestream
         else:
             load_type = TimingParadigm.G3Timestream
 
+    if load_type == TimingParadigm.TimingSystem:
+        s, ns = split_ts_bits(io_load.hstack_into(None,
+                                streams["primary"]["Counter2"]))
+        # Add 20 years in seconds (accounting for leap years) to handle
+        # offset between EPICS time referenced to 1990 relative to UNIX time.
+        counter2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
+        counter0 = io_load.hstack_into(None,streams["primary"]["Counter0"])
+        timestamps = np.round(counter2 - (counter0 / 480000) ) + counter0 / 480000
+        return timestamps
     if load_type == TimingParadigm.SmurfUnixTime:
         timestamps = io_load.hstack_into(None, streams["primary"]["UnixTime"]) / 1e9
         if linearize_timestamps:
@@ -2114,6 +2178,7 @@ def load_file(
     channels=None,
     samples=None,
     ignore_missing=True,
+    no_signal=False,
     load_biases=True,
     load_primary=True,
     status=None,
@@ -2139,6 +2204,8 @@ def load_file(
           being loaded from the list.
       ignore_missing : bool
           If true, will not raise errors if a requested channel is not found
+      no_signal : bool
+          If true, will not load the detector signal from files
       load_biases : bool
           If true, will load the bias lines for each detector
       load_primary : bool
@@ -2150,7 +2217,7 @@ def load_file(
           first file
       det_axis : name of the axis used for channels / detectors
       linearize_timestamps : bool
-          sent to _get_timestamps. if true and using unix timing, linearize the timing 
+          sent to _get_timestamps. if true and using unix timing, linearize the timing
           based on the frame counter
       merge_det_info : bool
           if true, emulate det_info from file info
@@ -2242,17 +2309,24 @@ def load_file(
         stop = sample_stop
         for filename, out in zip(filenames, outs):
             file_start, file_stop = out["sample_range"]
+            if file_stop <= sample_start:
+                continue
             if stop is not None:
-                if file_start > sample_stop:
+                if file_start >= sample_stop:
                     continue
                 stop = sample_stop - file_start
 
             start = max(0, sample_start - file_start)
             flist.append((filename, start, stop))
 
-    subreq = [
-        io_load.FieldGroup("data", ch_info.rchannel, timestamp_field="time"),
-    ]
+    if no_signal:
+        subreq = [
+            io_load.FieldGroup("data", [], timestamp_field="time")
+        ]
+    else:
+        subreq = [
+            io_load.FieldGroup("data", ch_info.rchannel, timestamp_field="time")
+        ]
     if load_primary:
         subreq.extend(
             [io_load.FieldGroup("primary", [io_load.Field("*", wildcard=True)])]
@@ -2287,8 +2361,8 @@ def load_file(
         core.OffsetAxis("samps", count, sample_start),
     )
     aman.wrap(
-        "timestamps", 
-        _get_timestamps(streams, linearize_timestamps=linearize_timestamps), 
+        "timestamps",
+        _get_timestamps(streams, linearize_timestamps=linearize_timestamps),
         ([(0, "samps")])
     )
     aman.wrap("status", status.aman)
@@ -2305,7 +2379,7 @@ def load_file(
         smurf.wrap("res_frequency", ch_info.frequency, [(0,det_axis)])
         det_info.wrap("smurf", smurf)
         aman.wrap("det_info", det_info)
-        
+
 
     # If readout filter in enabled build iir_params AxisManager
     if status.filter_enabled:
@@ -2315,18 +2389,19 @@ def load_file(
         iir_params.wrap("fscale", 1/status.flux_ramp_rate_hz)
         aman.wrap("iir_params", iir_params)
 
-    # Conversion from DAC counts to squid phase
-    aman.wrap(
-        "signal", 
-        np.zeros((aman[det_axis].count, aman["samps"].count), "float32"), 
-                 [(0, det_axis), (1, "samps")]
-    )
-    for idx in range(aman[det_axis].count):
-        io_load.hstack_into(aman.signal[idx], streams["data"][ch_info.rchannel[idx]])
+    if not no_signal:
+        aman.wrap(
+            "signal",
+            np.zeros((aman[det_axis].count, aman["samps"].count), "float32"),
+                     [(0, det_axis), (1, "samps")]
+        )
+        for idx in range(aman[det_axis].count):
+            io_load.hstack_into(aman.signal[idx], streams["data"][ch_info.rchannel[idx]])
 
-    rad_per_count = np.pi / 2 ** 15
-    aman.signal *= rad_per_count
-    
+        # Conversion from DAC counts to squid phase
+        rad_per_count = np.pi / 2 ** 15
+        aman.signal *= rad_per_count
+
     temp = core.AxisManager(aman.samps.copy())
     if load_primary:
         for k in streams["primary"].keys():
@@ -2350,11 +2425,18 @@ def load_file(
             i = int(k[4:])
             io_load.hstack_into(aman.biases[i], streams["tes_biases"][k])
     aman.wrap("flags", core.FlagManager.for_tod(aman, det_axis, "samps"))
-    
+
     return aman
 
 
-def load_g3tsmurf_obs(db, obs_id, dets=None, samples=None, **kwargs):
+def load_g3tsmurf_obs(
+    db,
+    obs_id,
+    dets=None,
+    samples=None,
+    no_signal=None,
+    **kwargs
+    ):
     """Obsloader function for g3tsmurf data archives.
 
     See API template, `sotodlib.core.context.obsloader_template`, for
@@ -2369,7 +2451,16 @@ def load_g3tsmurf_obs(db, obs_id, dets=None, samples=None, **kwargs):
         "select name from files " "where obs_id=?" + "order by start", (obs_id,)
     )
     flist = [row[0] for row in c]
-    return load_file(flist, dets, samples=samples, obsfiledb=db, merge_det_info=False)
+    if no_signal is None:
+        no_signal=False
+    return load_file(
+        flist,
+        dets,
+        samples=samples,
+        obsfiledb=db,
+        no_signal=no_signal,
+        merge_det_info=False
+    )
 
 
 core.OBSLOADER_REGISTRY["g3tsmurf"] = load_g3tsmurf_obs
