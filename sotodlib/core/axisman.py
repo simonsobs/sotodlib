@@ -430,7 +430,7 @@ class AxisManager:
           target axis).
 
         """
-        assert other_fields in ['exact','fail', 'first', 'drop']
+        assert other_fields in ['exact', 'fail', 'first', 'drop']
         if not isinstance(axis, str):
             axis = list(items[0]._axes.keys())[axis]
         fields = []
