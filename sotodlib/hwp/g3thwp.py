@@ -105,7 +105,7 @@ class G3tHWP():
         # 1: positive rotation direction, -1: negative rotation direction
         self._force_quad = 0
         if 'force_quad' in self.configs.keys():
-            self._force_quad = self.configs['force_quad']
+            self._force_quad = int(self.configs['force_quad'])
         if np.abs(self._force_quad) > 1:
             logger.error("force_quad in config file must be 0 or 1 or -1")
             sys.exit(1)
