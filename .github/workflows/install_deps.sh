@@ -10,8 +10,9 @@ python3 -m pip install --upgrade pip
 # We upgrade scipy to fix an incompatibility with numpy
 
 python3 -m pip install --upgrade scipy
-python3 -m pip install nose toml mpi4py toast-cmb quaternionarray pyfftw \
+python3 -m pip install nose toml mpi4py quaternionarray pyfftw \
     skyfield scikit-image
+python3 -m pip install --pre toast
 
 # Install S.O. dependencies
 python3 -m pip install pixell
