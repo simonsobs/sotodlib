@@ -31,8 +31,12 @@ Here's an annotated example of yaml config file:
   # path to L2.5 HK directory
   output_dir: '/path/to/save/files/'
 
-  # prefix of field name
+  # prefix of field name 
+  # for 1st encoder
   field_instance: 'observatory.HBA.feeds.HWPEncoder'
+
+  # for 2nd encoder 
+  field_instance_sub: 'observatory.HBA2.feeds.HWPEncoder'
 
   # name list of HWP_encoder field variable
   field_list:
