@@ -25,25 +25,27 @@ In memory, the hardware configuration is stored as a set of nested dictionaries.
 
 To get an example hardware configuration as a starting point, you can use this function:
 
-.. autofunction:: get_example
+.. autofunction:: sotodlib.sim_hardware.sim_nominal
 
 Simulated Detectors
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-Given a Hardware object loaded from disk or created in memory (for example using :func:`sotodlib.hardware.get_example`), detector properties can be simulated for an entire telescope with:
+Given a Hardware object loaded from disk or created in memory (for example using :func:`sotodlib.hardware.sim_nominal`), detector properties can be simulated for an entire telescope with:
 
-.. autofunction:: sotodlib.sim_hardware.sim_telescope_detectors
+.. autofunction:: sotodlib.sim_hardware.sim_detectors_toast
 
-The resulting detector dictionary can be used independently or can be inserted into the existing Hardware object:
+OR with a more realistic method:
+
+.. autofunction:: sotodlib.sim_hardware.sim_detectors_physical_optics
+
+These functions update the Hardware object in place:
 
 .. code-block:: python
 
-    hw = get_example()
-    dets = sim_telescope_detectors(hw, "LAT")
-    # Replace hardware model detectors with these:
-    hw.data["detectors"] = dets
-    # OR, just append these detectors:
-    hw.data["detectors"].update(dets)
+    hw = sim_nominal()
+    # Adds detectors to input Hardware instance.
+    sim_detectors_toast(hw, "LAT")
+
 
 Visualization
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -61,22 +63,22 @@ To plot only a subset of detectors, first apply a selection to make a reduced ha
 
 Data Processing
 -----------------------
-These modules are used to process detector timestream data within a G3Pipeline. The base class, :class:`DataG3Module`, handles the translation between a G3TimestreamMap and any filtering/conditioning we want to do on the timestreams.  
+These modules are used to process detector timestream data within a G3Pipeline. The base class, :class:`DataG3Module`, handles the translation between a G3TimestreamMap and any filtering/conditioning we want to do on the timestreams.
 
 DataG3Module
-~~~~~~~~~~~~~~~~~~~~~~   
+~~~~~~~~~~~~~~~~~~~~~~
 .. autoclass:: sotodlib.core.g3_core.DataG3Module
     :members:
 
 
 Filters
-~~~~~~~~~~~~~~~~~~~~~~   
+~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: sotodlib.g3_filter
    :members:
-   
+
 Conditioning
-~~~~~~~~~~~~~~~~~~~~~~   
+~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: sotodlib.g3_condition
    :members:
