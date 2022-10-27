@@ -512,10 +512,10 @@ class G3tHWP():
             return
         if output is not None:
             self._output = output
-        if solved['slow_time'].size == 0:
+        if len(solved['slow_time']) == 0:
             logger.error('input data is empty')
             return
-        if solved['fast_time'].size == 0:
+        if len(solved['fast_time']) == 0:
             logger.info('write no rotation data')
             return
         session = so3g.hk.HKSessionHelper(hkagg_version=2)
