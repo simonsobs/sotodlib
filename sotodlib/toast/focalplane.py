@@ -12,7 +12,8 @@ from toast.instrument import Focalplane
 from toast.utils import Logger
 
 from ..core import Hardware
-from ..sim_hardware import get_example, sim_telescope_detectors
+from ..sim_hardware import sim_nominal
+from .sim_focalplane import sim_telescope_detectors
 
 
 FOCALPLANE_RADII = {
@@ -30,7 +31,7 @@ def get_telescope(telescope, wafer_slots, tube_slots):
         return telescope
     # User did not set telescope so we infer it from the
     # tube and wafer slots
-    hwexample = get_example()
+    hwexample = sim_nominal()
     if wafer_slots is not None:
         wafer_slots = wafer_slots.split(",")
         wafer_map = hwexample.wafer_map()
@@ -78,10 +79,10 @@ class SOFocalplane(Focalplane):
             if hwfile is not None:
                 log.info(f"Loading hardware configuration from {hwfile}...")
                 hw = Hardware(hwfile)
-            elif self.telescope in ["LAT", "SAT1", "SAT2", "SAT3"]:
+            elif self.telescope in ["LAT", "SAT1", "SAT2", "SAT3", "SAT4"]:
                 log.info("Simulating default hardware configuration")
-                hw = get_example()
-                hw.data["detectors"] = sim_telescope_detectors(
+                hw = sim_nominal()
+                sim_telescope_detectors(
                     hw,
                     self.telescope,
                 )
@@ -217,7 +218,7 @@ class SOFocalplane(Focalplane):
             # Get noise parameters.  If detector-specific entries are
             # absent, use band averages
             nets.append(
-                get_par_float(det_data, "NET", band_data["NET"]) * u.uK * u.s ** 0.5
+                get_par_float(det_data, "NET", band_data["NET"]) * 1.0e-6 * u.K * u.s ** 0.5
             )
             net_corrs.append(get_par_float(det_data, "NET_corr", band_data["NET_corr"]))
             fknees.append(get_par_float(det_data, "fknee", band_data["fknee"]) * u.mHz)

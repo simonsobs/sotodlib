@@ -5,6 +5,8 @@
 """
 This script runs a basic mapmaking test.
 
+DEPRECATED:  This script is left here for reference, but was only used for debugging.
+
 """
 
 import os

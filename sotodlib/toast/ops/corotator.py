@@ -32,11 +32,22 @@ XAXIS, YAXIS, ZAXIS = np.eye(3)
 
 @trait_docs
 class CoRotator(Operator):
-    """The LAT focalplane projected on the sky rotates as the cryostat
-    (co-rotator) tilts.  Usually the tilt is the same as the observing
-    elevation to maintain constant angle between the mirror and the cryostat.
+    """Compute the LAT focalplane rotation.
 
-    This operator be applied *before* expanding the detector pointing
+    The optical design configuration of the LAT projected on the sky has the "O6" cryo
+    tube in the positive azimuth direction when the telescope is at 60 degrees
+    elevation.
+
+    If corotate_lat is False, then the projected focalplane will rotate on the sky.
+    The saved corotation angle will be zero.  If corotate_lat is True, then the
+    corotation angle is set to compensate for the rotation caused by the observing
+    elevation.
+
+    The rotation of the projected focalplane is given by:
+
+        R = elevation - offset - corotator angle
+
+    This operator should be applied *before* expanding the detector pointing
     from boresight.
 
     """
@@ -60,7 +71,7 @@ class CoRotator(Operator):
     corotator_angle = Unicode(
         "corotator_angle",
         allow_none=True,
-        help="Observation shared key for corotator_angle",
+        help="Observation shared key for corotation angle",
     )
 
     elevation = Unicode(
@@ -70,7 +81,8 @@ class CoRotator(Operator):
     )
 
     corotate_lat = Bool(
-        True, help="Rotate LAT receiver to maintain focalplane orientation"
+        True,
+        help="If True, rotate LAT receiver to maintain projected focalplane orientation"
     )
 
     def __init__(self, **kwargs):
@@ -86,35 +98,66 @@ class CoRotator(Operator):
             if obs.telescope.name != "LAT":
                 continue
 
+            el_rad = obs.shared[self.elevation].data
+
+            if self.corotator_angle not in obs.shared:
+                obs.shared.create_column(
+                    self.corotator_angle,
+                    shape=(obs.n_local_samples,),
+                    dtype=np.float64,
+                )
+
+            corot = None
             if self.corotate_lat:
-                obs["corotator_angle"] = -obs["scan_el"]
+                # We are corotating the receiver.  We set this to a fixed angle
+                # based on the nominal elevation for the scan.
+                if obs.comm_col_rank == 0:
+                    if "scan_el" in obs:
+                        scan_el = obs["scan_el"].to_value(u.radian)
+                    else:
+                        scan_el = np.mean(el_rad)
+                    scan_el_deg = scan_el * 180.0 / np.pi
+                    corot = np.zeros(obs.n_local_samples) + (
+                        scan_el - LAT_COROTATOR_OFFSET.to_value(u.radian)
+                    )
+                    corot_deg = corot * 180.0 / np.pi
+                    msg = f"LAT Co-rotation:  obs {obs.name} at scan El = "
+                    msg += f"{scan_el_deg:0.2f} degrees, rotating by "
+                    msg += f"{np.mean(corot_deg):0.2f} average degrees"
+                    log.info(msg)
+                obs.shared[self.corotator_angle].set(
+                    corot,
+                    offset=(0,),
+                    fromrank=0,
+                )
             else:
-                obs["corotator_angle"] = -60 * u.deg
+                # We are not co-rotating.  Set the angle to zero.
+                if obs.comm_col_rank == 0:
+                    msg = f"LAT Co-rotation:  obs {obs.name} disabled"
+                    log.info(msg)
+                    corot = np.zeros(obs.n_local_samples)
+                obs.shared[self.corotator_angle].set(
+                    corot,
+                    offset=(0,),
+                    fromrank=0,
+                )
 
-            obs.shared.create_column(
-                self.corotator_angle,
-                shape=(obs.n_local_samples,),
-                dtype=np.float64,
-            )
-            corotator_angle = obs.shared[self.corotator_angle]
-            corotator_angle.set(
-                np.zeros(obs.n_local_samples)
-                + obs["corotator_angle"].to_value(u.rad),
-                offset=(0,),
-                fromrank=0,
-            )
+            # Now correct the boresight quaternions
 
-            el = obs.shared[self.elevation]  # In radians
-            rot = qa.rotation(
-                ZAXIS,
-                corotator_angle.data + el.data +
-                LAT_COROTATOR_OFFSET.to_value(u.rad),
-            )
+            rot = None
+            if obs.comm_col_rank == 0:
+                rot = qa.from_axisangle(
+                    ZAXIS,
+                    el_rad - LAT_COROTATOR_OFFSET.to_value(u.rad) - obs.shared[self.corotator_angle].data,
+                )
+
             for name in [self.boresight_radec, self.boresight_azel]:
                 if name is None:
                     continue
                 quats = obs.shared[name]
-                new_quats = qa.mult(quats, rot)
+                new_quats = None
+                if obs.comm_col_rank == 0:
+                    new_quats = qa.mult(rot, quats)
                 quats.set(new_quats, offset=(0, 0), fromrank=0)
 
         return

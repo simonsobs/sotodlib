@@ -64,13 +64,11 @@ def main():
     # Nominal configuration
 
     print("Getting nominal config...", flush=True)
-    hw = hardware.get_example()
-    hw.data["detectors"] = OrderedDict()
+    hw = hardware.sim_nominal()
     for tele, teleprops in hw.data["telescopes"].items():
         print("Simulating detectors for telescope {}...".format(tele),
               flush=True)
-        dets = hardware.sim_telescope_detectors(hw, tele)
-        hw.data["detectors"].update(dets)
+        hardware.sim_detectors_toast(hw, tele)
     write_hw(args.out + '.nominal', hw, plain=args.plain)
 
     # Perturb configuration
