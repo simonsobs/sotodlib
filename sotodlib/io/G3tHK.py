@@ -13,7 +13,7 @@ Base = declarative_base()
 Session = sessionmaker()
 
 # all database definitions for G3tHK
-class HKFeeds(Base):
+class HKFiles(Base):
     """This table is named hkfeeds and serves as a db for holding
     brief information about each HK'ing file.
 
@@ -33,8 +33,8 @@ class HKFeeds(Base):
     )
 
     id = db.Column(db.Integer, primary_key=True)
-    fields = relationship("HKFields", back_populates='hkfeed')
-    filename = db.Column(db.String)
+    fields = relationship("HKFields", back_populates='hkfile')
+    filename = db.Column(db.String, nullable=False, unique=True)
     global_start_time = db.Column(db.Integer)
     path = db.Column(db.String)
     # scanned
@@ -60,8 +60,8 @@ class HKFields(Base):
     """
     __tablename__ = 'hkfields'
     id = db.Column(db.Integer, primary_key=True)
-    feed_id = db.Column(db.Integer, db.ForeignKey('hkfeeds.id'))
-    hkfeed = relationship("HKFeeds", back_populates='fields')
+    feed_id = db.Column(db.Integer, db.ForeignKey('hkfiles.id'))
+    hkfeed = relationship("HKFiles", back_populates='fields')
     field = db.Column(db.String)
     start = db.Column(db.Integer)
     end = db.Column(db.Integer)
@@ -131,7 +131,7 @@ class G3tHK:
 
         return hkfs, starts, ends
 
-    def add_hkfeeds(self, hkarchive_path, hkfile):
+    def add_hkfiles(self, hkarchive_path, hkfile):
         """
         """
         global_start_time = hkfile.split(".")[0]
