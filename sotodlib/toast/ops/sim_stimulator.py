@@ -281,7 +281,7 @@ class SimStimulator(Operator):
             if "STIMULATOR" not in obs.name.upper():
                 log.debug_rank(
                     f"SimStimulator: {obs.name} is not a stimulator calibration observation.",
-                    comm=obs.comm,
+                    comm=obs.comm.comm_group,
                 )
                 continue
             self.get_chopper_state(obs)
