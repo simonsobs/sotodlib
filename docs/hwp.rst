@@ -51,6 +51,10 @@ Here's an annotated example of yaml config file:
   # HWP OCS packet size
   packet_size: 120
 
+  # IRIG type
+  # 0: 1Hz IRIG (default), 1: 10Hz IRIG
+  irig_type: 0
+  
   # number of slots * 2
   num_edges: 1140
 
