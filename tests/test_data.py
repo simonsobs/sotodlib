@@ -16,6 +16,7 @@ from sotodlib.g3_condition import (Detrend, Retrend, MeanSubtract,
 
 import sotodlib.g3_sim as data_sim
 
+@unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
 class DataTest(TestCase):
 
     def setUp(self):
