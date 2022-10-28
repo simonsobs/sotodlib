@@ -11,7 +11,6 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-
 class G3tHWP():
 
     def __init__(self, config_file=None):
@@ -39,50 +38,38 @@ class G3tHWP():
         self._start = 0
         self._end = 0
         self._file_list = None
-        if 'start' in self.configs.keys():
-            self._start = self.configs['start']
-        if 'end' in self.configs.keys():
-            self._end = self.configs['end']
-
-        self._file_list = None
-        if 'file_list' in self.configs.keys():
-            self._file_list = self.configs['file_list']
-
-        self._data_dir = None
-        if 'data_dir' in self.configs.keys():
-            self._data_dir = self.configs['data_dir']
         
-        # 1st encoder readout 
-        self._field_instance = 'observatory.HBA.feeds.HWPEncoder'
-        if 'field_instance' in self.configs.keys():
-            self._field_instance = self.configs['field_instance']
-        
-        # 2nd encoder readout 
-        self._field_instance_sub = None
-        if 'field_instance_sub' in self.configs.keys():
-            self._field_instance_sub = self.configs['field_instance_sub']
+        self._start = self.configs.get('start', None)
+        self._end = self.configs.get('end', None)
 
-        self._field_list = ['rising_edge_count', 'irig_time', 'counter',
-                            'counter_index', 'irig_synch_pulse_clock_time',
-                            'irig_synch_pulse_clock_counts', 'quad']
-        if 'field_list' in self.configs.keys():
-            self._field_list = self.configs['field_list']
+        self._file_list = self.configs.get('file_list', None)
+        self._data_dir = self.configs.get('data_dir', None)
+
+       
+        # 1st/2nd encoder readout 
+        self._field_instance = self.configs.get('field_instance', 
+                                                'observatory.HBA.feeds.HWPEncoder')
+        self._field_instance_sub = self.configs.get('field_instance_sub', 
+                                                    'observatory.HBA2.feeds.HWPEncoder')
+        
+        self._field_list = self.configs.get('field_list',
+                                            ['rising_edge_count', 'irig_time', 'counter',
+                                            'counter_index', 'irig_synch_pulse_clock_time',
+                                            'irig_synch_pulse_clock_counts', 'quad'])
 
         # Size of pakcets sent from the BBB
         # 120 in the latest version, 150 in the previous version
-        self._pkt_size = 120
-        if 'packet_size' in self.configs.keys():
-            self._pkt_size = self.configs['packet_size']
+        self._pkt_size = self.configs.get('pkt_size', 120)
+
+        # IRIG type
+        # 0: 1Hz IRIG (default), 1: 10Hz IRIG
+        self._irig_type = self.configs.get('irig_type', 0)
 
         # Number of encoder slits per HWP revolution
-        self._num_edges = 570 * 2
-        if 'num_edges' in self.configs.keys():
-            self._num_edges = self.configs['num_edges']
+        self._num_edges = self.configs.get('num_edges', 570 * 2)
 
         # Reference slit edgen width
-        self._ref_edges = 2
-        if 'ref_edges' in self.configs.keys():
-            self._ref_edges = self.configs['ref_edges']
+        self._ref_edges = self.configs.get('ref_edges', 2)
 
         # Reference slit angle
         self._delta_angle = 2 * np.pi / self._num_edges
@@ -91,29 +78,21 @@ class G3tHWP():
         self._ref_indexes = []
 
         # Search range of reference slot
-        self._ref_range = 0.1
-        if 'ref_range' in self.configs.keys():
-            self._ref_range = self.configs['ref_range']
+        self._ref_range = self.configs.get('ref_range', 0.1)
 
         # Threshoild for outlier data to calculate nominal slit width
-        self._slit_width_lim = 0.1
-        if 'slit_width_lim' in self.configs.keys():
-            self._slit_width_lim = self.configs['slit_width_lim']
+        self._slit_width_lim = self.configs.get('slit_width_lim', 0.1)
 
         # force to quad value
         # 0: use readout quad value (default)
         # 1: positive rotation direction, -1: negative rotation direction
-        self._force_quad = 0
-        if 'force_quad' in self.configs.keys():
-            self._force_quad = int(self.configs['force_quad'])
+        self._force_quad = int(self.configs.get('force_quad', 0))
         if np.abs(self._force_quad) > 1:
             logger.error("force_quad in config file must be 0 or 1 or -1")
             sys.exit(1)
 
         # Output path + filename
-        self._output = None
-        if 'output' in self.configs.keys():
-            self._output = self.configs['output']
+        self._output = self.configs.get('output', None)
 
     def load_data(self, start=None, end=None,
                   data_dir=None, instance='HBA'):
@@ -296,7 +275,7 @@ class G3tHWP():
 
         return data
 
-    def analyze(self, data, ratio=0.25, irig_type=0, fast=True):
+    def analyze(self, data, ratio=0.25, fast=True):
         """
         Analyze HWP angle solution
         to be checked by hardware that 0 is CW and 1 is CCW from (sky side) consistently for all SAT 
@@ -308,9 +287,6 @@ class G3tHWP():
             ratio : float, optional
                 parameter for referelce slit 
                 threshold = 2 slit distances +/- ratio
-            irig_type : 0 or 1, optional
-                If 0, use 1 Hz IRIG timing (default) 
-                If 1, use 10 Hz IRIG timing 
             fast : bool, optional
                 If True, run fast fill_ref algorithm
 
@@ -343,46 +319,58 @@ class G3tHWP():
             logger.info("no HWP field data")
         ## Analysis parameters ##
         # Fast block
-        counter = []
-        counter_idx = []
-        quad_time = []
-        quad = []
+        counter = np.array([])
+        counter_idx = np.array([])
+        quad_time = np.array([])
+        quad = np.array([])
         if 'counter' in data.keys():
             counter = data['counter'][1]
             counter_idx = data['counter_index'][1]
             quad_time = data['quad'][0]
             quad = self._quad_form(data['quad'][1])
 
-        irig_time = []
-        rising_edge = []
+        irig_time = np.array([])
+        rising_edge = np.array([])
         if 'irig_time' in data.keys():
             irig_time = data['irig_time'][1]
             rising_edge = data['rising_edge_count'][1]
-            if irig_type == 1:
+            if self._irig_type == 1:
                 irig_time = data['irig_synch_pulse_clock_time'][1]
                 rising_edge = data['irig_synch_pulse_clock_counts'][1]
             logger.info('IRIG timing quality check.' )
             irig_time, rising_edge = self._irig_quality_check(irig_time, rising_edge)
+            if len(irig_time) == 0:
+                logger.warning('All IRIG time is not correct in 1st encoder' )
+
         
-        irig_time_2 = None    
-        if 'irig_time_2' in data.keys():
+        irig_time_2 = np.array([])   
+        rising_edge_2 = np.array([])
+        if 'irig_time_2' in data.keys() and 'counter_2' in data.keys():
             logger.info('try 2nd encoder for IRIG timing.' )
             irig_time_2 = data['irig_time_2'][1]
             rising_edge_2 = data['rising_edge_count_2'][1]
-            if irig_type == 1:
+            if self._irig_type == 1:
                 irig_time_2 = data['irig_synch_pulse_clock_time_2'][1]
                 rising_edge_2 = data['irig_synch_pulse_clock_counts_2'][1]
             irig_time_2, rising_edge_2 = self._irig_quality_check(irig_time_2, rising_edge_2)
-        
-        if irig_time_2 is not None and len(irig_time) < len(irig_time_2):
-            logger.info('Use 2nd encoder IRIG timing.' )
+            if len(irig_time_2) == 0:
+                logger.info('All IRIG time is not correct in 2nd encoder' )
+
+        if len(irig_time) == 0 and len(irig_time_2) == 0:
+            logger.warning('There is no correct IRIG timing.')
+        if len(irig_time) < len(irig_time_2):
+            logger.info('Use 2nd encoder IRIG timing.')
             irig_time = irig_time_2
             rising_edge = rising_edge_2
+            counter = data['counter_2']
+            counter_index = data['counter_index_2']
+            quad_time = data['quad_2'][0]
+            quad = self._quad_form(data['quad_2'][1])
         
-        fast_time = []
-        angle = []
-        hwp_rate = []
-        if np.any(counter) and np.any(irig_time):
+        fast_time = np.array([])
+        angle = np.array([])
+        hwp_rate = np.array([])
+        if len(counter)>0 and len(irig_time)>0:
             # Reject unexpected counter
             time = scipy.interpolate.interp1d(
                 rising_edge,
@@ -390,7 +378,7 @@ class G3tHWP():
                 kind='linear',
                 fill_value='extrapolate')(counter)
             idx = np.where(
-                (time >= data['irig_time'][0][0] - 2) & (time <= data['irig_time'][0][-1] + 2))
+                (time >= irig_time[0] - 5) & (time <= irig_time[-1] + 5))
             counter = counter[idx]
             counter_idx = counter_idx[idx]
 
@@ -399,17 +387,17 @@ class G3tHWP():
 
             # hwp speed calc. (approximate using ref)
             hwp_rate_ref = 1 / np.diff(fast_time[self._ref_indexes])
-            hwp_rate = [0 for i in range(self._ref_indexes[0])]
+            hwp_rate = [hwp_rate_ref[0] for i in range(self._ref_indexes[0])]
             for n in range(len(np.diff(self._ref_indexes))):
                 hwp_rate += [hwp_rate_ref[n]
                              for r in range(np.diff(self._ref_indexes)[n])]
-            hwp_rate += [0 for i in range(len(fast_time) -
+            hwp_rate += [hwp_rate_ref[-1] for i in range(len(fast_time) -
                                           self._ref_indexes[-1])]
 
         # Slow block
         # - Time definition -
-        # if fast_time exists, slow_time = fast_time
-        # else if irig_time exists but no fast_time, slow_time = irig_time
+        # if fast_time exists: slow_time = fast_time
+        # elif: irig_time exists but no fast_time, slow_time = irig_time
         # else: slow_time is per 10 sec array
         if len(fast_time) != 0 and len(irig_time) != 0:
             locked = np.ones(len(fast_time), dtype=bool)
@@ -527,7 +515,7 @@ class G3tHWP():
         # Divide the full time span into equal intervals
         start_time = solved['slow_time'][0]
         end_time = solved['slow_time'].max()
-        if len(solved['fast_time']):
+        if np.any(solved['fast_time']):
             start_time = min(start_time, solved['fast_time'].min())
             end_time = max(end_time, solved['fast_time'].max())
         frame_length = 60  # seconds
@@ -735,9 +723,9 @@ class G3tHWP():
         self._encd_clk = np.append(self._encd_clk, lastsub)
 
         self._encd_cnt = self._encd_cnt[0] + np.arange(
-            self._encd_cnt.size + self._ref_indexes.size * self._ref_edges)
-        self._ref_cnt += np.arange(self._ref_cnt.size) * self._ref_edges
-        self._ref_indexes += np.arange(self._ref_indexes.size) * \
+            len(self._encd_cnt) + len(self._ref_indexes) * self._ref_edges)
+        self._ref_cnt += np.arange(len(self._ref_cnt)) * self._ref_edges
+        self._ref_indexes += np.arange(len(self._ref_indexes)) * \
             self._ref_edges
 
         return
@@ -811,14 +799,15 @@ class G3tHWP():
         if len(irig_time) == len(idx):
             return irig_time, rising_edge
         elif len(irig_time) > len(idx):
-            logger.warning(
-                'a part of the IRIG time is incorrect, performing the correction process...' )
+            if np.any(np.diff(irig_time) > 5):
+                logger.warning(
+                    'a part of the IRIG time is incorrect, performing the correction process...' )
             irig_time = irig_time[idx]
             rising_edge = rising_edge[idx]
+            logger.debug('deleted wrong irig_time, indices: ' + str(np.where(np.diff(irig_time)!=1)[0]))
         else:
-            irig_time = None
-            rising_edge = None
-            logger.warning('all IRIG time is incorrect...' )
+            irig_time = np.array([])
+            rising_edge = np.array([])
         return irig_time, rising_edge
     
     def interp_smurf(self, smurf_timestamp):
