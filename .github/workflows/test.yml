@@ -8,20 +8,6 @@ on:
     branches: [ master ]
 
 jobs:
-  so3g:
-    name: Latest so3g container
-    runs-on: ubuntu-latest
-    env:
-      SOTODLIB_TEST_DISABLE_PLOTS: 1
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Pull so3g image
-        run: docker pull simonsobs/so3g:latest
-      - name: Install dependencies
-        run: docker run -v "$(pwd)":/home/sotodlib --name="test_runner" simonsobs/so3g:latest /home/sotodlib/.github/workflows/install_deps.sh && docker commit -m "dependencies" test_runner test_runner:so3g
-      - name: Run Serial and MPI Tests
-        run: docker run -v "$(pwd)":/home/sotodlib test_runner:so3g /home/sotodlib/.github/workflows/run_tests.sh
 
   linux:
     name: Linux with Python-${{ matrix.python }}
@@ -36,6 +22,8 @@ jobs:
         include:
           - python: "3.8"
             pyshort: "38"
+          - python: "3.9"
+            pyshort: "39"
           - python: "3.10"
             pyshort: "310"
     steps:
