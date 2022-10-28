@@ -209,7 +209,7 @@ class SimWireGrid(Operator):
             if "WIREGRID" not in obs.name.upper():
                 log.debug_rank(
                     f"SimWireGrid: {obs.name} is not a wiregrid calibration observation.",
-                    comm=obs.comm,
+                    comm=obs.comm.comm_group,
                 )
                 continue
             self.get_wiregrid_angle(obs)

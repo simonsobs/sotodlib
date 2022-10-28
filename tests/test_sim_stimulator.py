@@ -18,6 +18,8 @@ try:
 except ImportError as e:
     toast_available = False
 
+from ._helpers import toast_site, calibration_schedule
+
 
 class SimStimulatorTest(unittest.TestCase):
     def test_instantiate(self):
@@ -41,34 +43,14 @@ class SimStimulatorTest(unittest.TestCase):
             comm=comm,
         )
 
-        fname_schedule = "schedule.txt"
-        el = 45
-        name = "stimulator_calibration"
-        az = 180
-        with open(fname_schedule, "w") as handle:
-            handle.write(
-                "ATACAMA LAT -22.958 -67.786 5200.0\n"
-            )
-            handle.write(
-                f" 2025-01-01 00:00:00  2025-01-01 00:10:00 "
-                f"0.0 0.0 0.0 "
-                f"{name} {az} {az} {el} "
-                f"S 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 "
-                f"0 0\n"
-            )
-        schedule = toast.schedule.GroundSchedule()
-        schedule.read(fname_schedule, comm=comm)
-
-        site = toast.instrument.GroundSite(
-            schedule.site_name,
-            schedule.site_lat,
-            schedule.site_lon,
-            schedule.site_alt,
-            weather=None,
-        )
+        site = toast_site()
         telescope = toast.instrument.Telescope(
-            schedule.telescope_name, focalplane=focalplane, site=site
+            "SAT1",
+            focalplane=focalplane,
+            site=site,
         )
+
+        schedule = calibration_schedule(telescope)
 
         sim_ground = toast.ops.SimGround(
             name="sim_ground",

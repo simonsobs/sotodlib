@@ -259,6 +259,8 @@ def plot_detectors(
         # between (0.01 and 0.1) times the size of the figure.
         for k, (center, size) in wafer_centers.items():
             fontpix = np.clip(0.7 * size * hpixperdeg, 0.01 * hfigpix, 0.10 * hfigpix)
+            if fontpix < 1.0:
+                fontpix = 1.0
             ax.text(
                 center[0],
                 center[1] + fontpix / hpixperdeg,
@@ -325,6 +327,8 @@ def plot_detectors(
         if labels:
             # Compute the font size to use for detector labels
             fontpix = 0.1 * detradius * hpixperdeg
+            if fontpix < 1.0:
+                fontpix = 1.0
             ax.text(
                 xpos,
                 ypos,
