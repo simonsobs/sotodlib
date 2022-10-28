@@ -346,7 +346,7 @@ class G3tHWP():
         irig_time_2 = np.array([])   
         rising_edge_2 = np.array([])
         if 'irig_time_2' in data.keys() and 'counter_2' in data.keys():
-            logger.info('try 2nd encoder for IRIG timing.' )
+            logger.info('checking 2nd encoder.' )
             irig_time_2 = data['irig_time_2'][1]
             rising_edge_2 = data['rising_edge_count_2'][1]
             if self._irig_type == 1:
@@ -381,7 +381,6 @@ class G3tHWP():
                 (time >= irig_time[0] - 5) & (time <= irig_time[-1] + 5))
             counter = counter[idx]
             counter_idx = counter_idx[idx]
-
             fast_time, angle = self._hwp_angle_calculator(
                 counter, counter_idx, irig_time, rising_edge, quad_time, quad, ratio, fast)
 
@@ -565,7 +564,7 @@ class G3tHWP():
             quad,
             ratio,
             fast):
-
+        
         #   counter: BBB counter values for encoder signal edges
         self._encd_clk = counter
         #   counter_index: index numbers for detected edges by BBB
@@ -578,7 +577,7 @@ class G3tHWP():
         #   quad: quadrature signal to determine rotation direction
         self._quad_time = quad_time
         self._quad = quad
-
+        
         # return arrays
         self._time = []
         self._angle = []
@@ -623,12 +622,13 @@ class G3tHWP():
         # Calculate spacing between all clock values
         diff = np.ediff1d(self._encd_clk, to_begin=0)  # [1:]
         split = int(len(diff) / self._num_edges)
-        diff_split = np.array_split(diff, split)
+        if split == 0: diff_split = np.array([diff])
+        else: diff_split = np.array_split(diff, split)
         offset = 0
         # Conditions for idenfitying the ref slit
         # Slit distance somewhere between 2 slits:
         # 2 slit distances (defined above) +/- 10%
-        for i in range(split):
+        for i in range(len(diff_split)):
             _diff = diff_split[i]
             # eliminate upper/lower _slit_width_lim
             _diff_upperlim = np.percentile(_diff, (1 - self._slit_width_lim)*100)
@@ -657,7 +657,8 @@ class G3tHWP():
 
         self._ref_indexes = np.array(self._ref_indexes)
         if len(self._ref_indexes) == 0:
-            logger.error('can not find reference points, please adjust parameters!')
+            if split == 0: logger.error('can not find reference points, # of data is less than # of slit')
+            else: logger.error('can not find reference points, please adjust parameters!')
             sys.exit(1)
 
         ## delete unexpected ref slit indexes ##
@@ -796,9 +797,9 @@ class G3tHWP():
 
     def _irig_quality_check(self, irig_time, rising_edge):
         idx = np.where(np.diff(irig_time)==1)[0]
-        if len(irig_time) == len(idx):
+        if len(irig_time) - 1 == len(idx):
             return irig_time, rising_edge
-        elif len(irig_time) > len(idx):
+        elif len(irig_time) > len(idx) and len(idx) > 0:
             if np.any(np.diff(irig_time) > 5):
                 logger.warning(
                     'a part of the IRIG time is incorrect, performing the correction process...' )
