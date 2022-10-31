@@ -15,6 +15,9 @@ from numpy.testing import assert_array_equal, assert_allclose
 from sotodlib import core, tod_ops
 import so3g
 
+from ._helpers import mpi_multi
+
+
 SAMPLE_FREQ_HZ = 100.
 
 def get_tod(sig_type='trendy'):
@@ -154,6 +157,8 @@ class FilterTest(unittest.TestCase):
                                        detrend='linear')
         self.assertEqual(sig1f.shape, tod['sig1d'].shape)
 
+
+@unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
 class JumpfindTest(unittest.TestCase):
     def test_jumpfinder(self):
         """Test that jumpfinder finds jumps in white noise."""

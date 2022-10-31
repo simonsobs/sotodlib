@@ -11,15 +11,21 @@ from collections import OrderedDict
 
 import gzip
 
+import astropy.units as u
 import numpy as np
 
 import toml
 
-# The orientation of the projected LAT focalplane on the sky is
-#   `LAT_COROTATOR_OFFSET_DEG` + observing elevation, unless the receiver
-# is being rotated to maintain the orientation.
 
-LAT_COROTATOR_OFFSET_DEG = 90
+# The extra rotation to apply to the projected LAT focalplane on the
+# sky is given by:
+#
+#      R = Elevation - Offset - Corotator
+#
+# and the offset is defined as the "design elevation" which places
+# the focalplane at the correct orientation with no co-rotation.
+
+LAT_COROTATOR_OFFSET = u.Quantity(60.0, u.degree)
 
 
 class Hardware(object):

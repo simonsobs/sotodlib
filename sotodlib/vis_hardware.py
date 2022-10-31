@@ -3,9 +3,18 @@
 """Hardware visualization tools.
 """
 
+import astropy.units as u
 import numpy as np
 import quaternionarray as qa
 import warnings
+
+import toast
+
+from so3g.proj import quat
+
+from .core.hardware import LAT_COROTATOR_OFFSET
+
+from .sim_hardware import sim_nominal
 
 
 default_band_colors = {
@@ -38,7 +47,15 @@ def set_matplotlib_pdf_backend():
 
 
 def plot_detectors(
-    dets, outfile, width=None, height=None, labels=False, bandcolor=None
+    dets,
+    outfile,
+    width=None,
+    height=None,
+    labels=False,
+    bandcolor=None,
+    xieta=False,
+    lat_corotate=True,
+    lat_elevation=None,
 ):
     """Visualize a dictionary of detectors.
 
@@ -54,6 +71,8 @@ def plot_detectors(
         height (float): Height of plot in degrees (None = autoscale).
         labels (bool): If True, label each detector.
         bandcolor (dict, optional): Dictionary of color values for each band.
+        xieta (bool):  If True, plot in Xi / Eta / Gamma coordinates rather
+            than focalplane X / Y / Z.
 
     Returns:
         None
@@ -62,62 +81,135 @@ def plot_detectors(
     try:
         plt = set_matplotlib_pdf_backend()
     except:
-        warnings.warn(
-            """Couldn't set the PDF matplotlib backend,
-focal plane plots will not render properly,
-proceeding with the default matplotlib backend"""
+        wmsg = (
+            "Couldn't set the PDF matplotlib backend, "
+            "focal plane plots will not render properly, "
+            "proceeding with the default matplotlib backend"
         )
+        warnings.warn(wmsg)
         import matplotlib.pyplot as plt
 
-    # If you rotate the zaxis by quat, then the X axis is upwards in
-    # the focal plane and the Y axis is to the right.  (This is what
-    # TOAST expects.)  Below we use "x" and "y" for those directions,
-    # and in plotting functions pass them in the order (y, x).
+    xaxis, yaxis, zaxis = np.eye(3)
 
-    xaxis = np.array([1.0, 0.0, 0.0], dtype=np.float64)
-    zaxis = np.array([0.0, 0.0, 1.0], dtype=np.float64)
-    quats = np.array([p['quat'] for p in dets.values()]).astype(float)
-    pos = qa.rotate(quats, zaxis)  # shape (n_det, 3)
+    # Get wafer to telescope map
+    hw = sim_nominal()
+    wfmap = hw.wafer_map()
+
+    n_det = len(dets)
+    detnames = list(dets.keys())
+    quats = np.array(
+        [dets[detnames[x]]["quat"] for x in range(n_det)], dtype=np.float64
+    )
+
+    lat_rot = None
+    lat_elstr = ""
+
+    have_lat = False
+    for d in range(n_det):
+        dn = detnames[d]
+        tele = wfmap["telescopes"][dets[dn]["wafer_slot"]]
+        if tele == "LAT":
+            have_lat = True
+
+    if have_lat:
+        if not lat_corotate:
+            if lat_elevation is None:
+                raise RuntimeError("Must specify elevation if not co-rotating")
+            lat_elstr = f"({lat_elevation.to_value(u.degree):0.1f} Degrees Elevation)"
+            lat_ang = lat_elevation.to_value(u.rad) - LAT_COROTATOR_OFFSET.to_value(
+                u.rad
+            )
+            lat_rot = qa.rotation(zaxis, lat_ang)
+        for d in range(n_det):
+            dn = detnames[d]
+            tele = wfmap["telescopes"][dets[dn]["wafer_slot"]]
+            if tele == "LAT" and lat_rot is not None:
+                quats[d] = qa.mult(lat_rot, quats[d])
+
+    if n_det == 0:
+        raise RuntimeError("No detectors specified")
 
     # arc_factor returns a scaling that can be used to reproject (X,
     # Y) to units corresponding to the angle subtended from (0,0,1) to
     # (X, Y, sqrt(X^2 + Y^2)).  This is called "ARC" (Zenithal
     # Equidistant) projection in FITS.
     def arc_factor(x, y):
-        r = (x**2 + y**2)**.5
+        r = (x**2 + y**2) ** 0.5
         if r < 1e-6:
-            return 1. + r**2/6
-        return np.arcsin(r)/r
-    detx = {k: p[0] * 180.0 / np.pi * arc_factor(p[0], p[1])
-            for k, p in zip(dets.keys(), pos)}
-    dety = {k: p[1] * 180.0 / np.pi * arc_factor(p[0], p[1])
-            for k, p in zip(dets.keys(), pos)}
+            return 1.0 + r**2 / 6
+        return np.arcsin(r) / r
 
-    # The detang is the polarization angle, measured CCW from vertical.
-    pol = qa.rotate(quats, xaxis)  # shape (n_det, 3)
-    detang = {k: np.arctan2(p[1], p[0])
-              for k, p in zip(dets.keys(), pol)}
+    if xieta:
+        # Plotting as seen from observer in Xi / Eta / Gamma
+        xi, eta, gamma = toast.instrument_coords.quat_to_xieta(quats)
+        # xi, eta, gamma = quat.decompose_xieta(quats)
 
-    wmin = 1.0
-    wmax = -1.0
-    hmin = 1.0
-    hmax = -1.0
+        detx = {
+            detnames[k]: xi[k] * 180.0 / np.pi * arc_factor(xi[k], eta[k])
+            for k in range(n_det)
+        }
+        dety = {
+            detnames[k]: eta[k] * 180.0 / np.pi * arc_factor(xi[k], eta[k])
+            for k in range(n_det)
+        }
+
+        for didx, dn in enumerate(detnames):
+            wf = dets[dn]["wafer_slot"]
+            px = int(dets[dn]["pixel"])
+            if px == 0:
+                q = quats[didx]
+                dd = qa.rotate(q, zaxis)
+
+        # In Xi / Eta coordinates, gamma is measured clockwise from line of
+        # decreasing elevation.  Here we convert into visualization X/Y
+        # coordinatates measured counter clockwise from the X axis.
+        polangs = {detnames[k]: 1.5 * np.pi - gamma[k] for k in range(n_det)}
+    else:
+        # Plotting in focalplane X / Y / Z coordinates.
+        # Compute direction and orientation vectors
+        dir = qa.rotate(quats, zaxis)
+        orient = qa.rotate(quats, xaxis)
+
+        small = np.fabs(1.0 - dir[:, 2]) < 1.0e-6
+        not_small = np.logical_not(small)
+        xp = np.zeros(n_det, dtype=np.float64)
+        yp = np.zeros(n_det, dtype=np.float64)
+
+        mag = np.arccos(dir[not_small, 2])
+        ang = np.arctan2(dir[not_small, 1], dir[not_small, 0])
+        xp[not_small] = mag * np.cos(ang)
+        yp[not_small] = mag * np.sin(ang)
+
+        polangs = {
+            detnames[k]: np.arctan2(orient[k, 1], orient[k, 0]) for k in range(n_det)
+        }
+
+        detx = {
+            detnames[k]: xp[k] * 180.0 / np.pi * arc_factor(xp[k], yp[k])
+            for k in range(n_det)
+        }
+        dety = {
+            detnames[k]: yp[k] * 180.0 / np.pi * arc_factor(xp[k], yp[k])
+            for k in range(n_det)
+        }
+
     if (width is None) or (height is None):
         # We are autoscaling.  Compute the angular extent of all detectors
         # and add some buffer.
-        if len(detx):
-            _y = np.array(list(dety.values()))
-            _x = np.array(list(detx.values()))
-            wmin, wmax = _y.min(), _y.max()
-            hmin, hmax = _x.min(), _x.max()
-        wbuf = 0.1 * (wmax - wmin)
-        hbuf = 0.1 * (hmax - hmin)
+        _y = np.array(list(dety.values()))
+        _x = np.array(list(detx.values()))
+        wmin, wmax = _x.min(), _x.max()
+        hmin, hmax = _y.min(), _y.max()
+        wbuf = 0.2 * (wmax - wmin)
+        hbuf = 0.2 * (hmax - hmin)
         wmin -= wbuf
         wmax += wbuf
         hmin -= hbuf
         hmax += hbuf
         width = wmax - wmin
         height = hmax - hmin
+        half_width = 0.5 * width
+        half_height = 0.5 * height
     else:
         half_width = 0.5 * width
         half_height = 0.5 * height
@@ -152,10 +244,14 @@ proceeding with the default matplotlib backend"""
     fig = plt.figure(figsize=(wfigsize, hfigsize), dpi=figdpi)
     ax = fig.add_subplot(1, 1, 1)
 
-    ax.set_xlabel("Degrees", fontsize="large")
-    ax.set_ylabel("Degrees", fontsize="large")
     ax.set_xlim([wmin, wmax])
     ax.set_ylim([hmin, hmax])
+    if xieta:
+        ax.set_xlabel(r"Boresight $\xi$ Degrees", fontsize="large")
+        ax.set_ylabel(r"Boresight $\eta$ Degrees", fontsize="large")
+    else:
+        ax.set_xlabel("Boresight X Degrees", fontsize="large")
+        ax.set_ylabel("Boresight Y Degrees", fontsize="large")
 
     # Draw wafer labels in the background
     if labels:
@@ -163,10 +259,19 @@ proceeding with the default matplotlib backend"""
         # between (0.01 and 0.1) times the size of the figure.
         for k, (center, size) in wafer_centers.items():
             fontpix = np.clip(0.7 * size * hpixperdeg, 0.01 * hfigpix, 0.10 * hfigpix)
-            ax.text(center[1] + fontpix/hpixperdeg, center[0], k,
-                    color='k', fontsize=fontpix, horizontalalignment='center',
-                    verticalalignment='center', zorder=100,
-                    bbox=dict(fc='white', ec='none', pad=0.2, alpha=1.0))
+            if fontpix < 1.0:
+                fontpix = 1.0
+            ax.text(
+                center[0],
+                center[1] + fontpix / hpixperdeg,
+                k,
+                color="k",
+                fontsize=fontpix,
+                horizontalalignment="center",
+                verticalalignment="center",
+                zorder=100,
+                bbox=dict(fc="white", ec="none", pad=0.2, alpha=1.0),
+            )
 
     for d, props in dets.items():
         band = props["band"]
@@ -180,12 +285,17 @@ proceeding with the default matplotlib backend"""
 
         # Position and polarization angle
         xpos, ypos = detx[d], dety[d]
-        polang = detang[d]
+        polang = polangs[d]
 
         detface = bandcolor[band]
 
-        circ = plt.Circle((ypos, xpos), radius=detradius, fc=detface,
-                          ec="black", linewidth=0.05*detradius)
+        circ = plt.Circle(
+            (xpos, ypos),
+            radius=detradius,
+            fc=detface,
+            ec="black",
+            linewidth=0.05 * detradius,
+        )
         ax.add_artist(circ)
 
         ascale = 1.5
@@ -201,24 +311,103 @@ proceeding with the default matplotlib backend"""
         if pol == "B":
             detcolor = (0.0, 0.0, 1.0, 1.0)
 
-        ax.arrow(ytail, xtail, dy, dx, width=0.1*detradius,
-                 head_width=0.3*detradius, head_length=0.3*detradius,
-                 fc=detcolor, ec="none", length_includes_head=True)
+        ax.arrow(
+            xtail,
+            ytail,
+            dx,
+            dy,
+            width=0.1 * detradius,
+            head_width=0.3 * detradius,
+            head_length=0.3 * detradius,
+            fc=detcolor,
+            ec="none",
+            length_includes_head=True,
+        )
 
         if labels:
             # Compute the font size to use for detector labels
             fontpix = 0.1 * detradius * hpixperdeg
-            ax.text(ypos, xpos, pixel,
-                    color='k', fontsize=fontpix, horizontalalignment='center',
-                    verticalalignment='center',
-                    bbox=dict(fc='white', ec='none', pad=0.2, alpha=1.0))
+            if fontpix < 1.0:
+                fontpix = 1.0
+            ax.text(
+                xpos,
+                ypos,
+                pixel,
+                color="k",
+                fontsize=fontpix,
+                horizontalalignment="center",
+                verticalalignment="center",
+                bbox=dict(fc="white", ec="none", pad=0.2, alpha=1.0),
+            )
             labeloff = fontpix * len(pol) / hpixperdeg
             if dy < 0:
                 labeloff = -labeloff
-            ax.text((ytail+1.0*dy+labeloff), (xtail+1.0*dx), pol,
-                    color='k', fontsize=fontpix, horizontalalignment='center',
-                    verticalalignment='center',
-                    bbox=dict(fc='none', ec='none', pad=0, alpha=1.0))
+            ax.text(
+                (xtail + 1.0 * dx + labeloff),
+                (ytail + 1.0 * dy),
+                pol,
+                color="k",
+                fontsize=fontpix,
+                horizontalalignment="center",
+                verticalalignment="center",
+                bbox=dict(fc="none", ec="none", pad=0, alpha=1.0),
+            )
+
+    # Draw a "mini" coordinate axes for reference
+    shortest = min(half_width, half_height)
+    xmini = -0.7 * half_width
+    ymini = -0.7 * half_height
+    xlen = 0.06 * shortest
+    ylen = 0.06 * shortest
+    mini_width = 0.005 * shortest
+    mini_head_width = 3 * mini_width
+    mini_head_len = 3 * mini_width
+    if xieta:
+        aprops = [
+            (xlen, 0, "-", r"$\xi$"),
+            (0, ylen, "-", r"$\eta$"),
+            (-xlen, 0, "--", "Y"),
+            (0, -ylen, "--", "X"),
+        ]
+    else:
+        aprops = [
+            (xlen, 0, "-", "X"),
+            (0, ylen, "-", "Y"),
+            (-xlen, 0, "--", r"$\eta$"),
+            (0, -ylen, "--", r"$\xi$"),
+        ]
+    for ap in aprops:
+        lx = xmini + 1.5 * ap[0]
+        ly = ymini + 1.5 * ap[1]
+        lw = figdpi / 200.0
+        ax.arrow(
+            xmini,
+            ymini,
+            ap[0],
+            ap[1],
+            width=mini_width,
+            head_width=mini_head_width,
+            head_length=mini_head_len,
+            fc="k",
+            ec="k",
+            linestyle=ap[2],
+            linewidth=lw,
+            length_includes_head=True,
+        )
+        ax.text(
+            lx,
+            ly,
+            ap[3],
+            color="k",
+            fontsize=int(figdpi / 10),
+            horizontalalignment="center",
+            verticalalignment="center",
+        )
+
+    st = f"Focalplane Looking Towards Observer {lat_elstr}"
+    if xieta:
+        st = f"Focalplane on Sky From Observer {lat_elstr}"
+    fig.suptitle(st)
 
     plt.savefig(outfile)
     plt.close()
@@ -256,8 +445,11 @@ def summary_text(hw):
     """
     for obj, props in hw.data.items():
         nsub = len(props)
-        print("{}{:<12}: {}{:5d} objects{}".format(clr.WHITE, obj, clr.RED,
-                                                   nsub, clr.ENDC))
+        print(
+            "{}{:<12}: {}{:5d} objects{}".format(
+                clr.WHITE, obj, clr.RED, nsub, clr.ENDC
+            )
+        )
         if nsub <= 2000:
             line = ""
             for k in list(props.keys()):
@@ -266,8 +458,7 @@ def summary_text(hw):
                     line = ""
                 line = "{}{}, ".format(line, k)
             if len(line) > 0:
-                print("    {}{}{}".format(clr.BLUE, line.rstrip(", "),
-                      clr.ENDC))
+                print("    {}{}{}".format(clr.BLUE, line.rstrip(", "), clr.ENDC))
         else:
             # Too many to print!
             print("    {}(Too many to print){}".format(clr.BLUE, clr.ENDC))

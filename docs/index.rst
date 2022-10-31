@@ -19,6 +19,7 @@ Welcome to SOTODLib's documentation!
    hwp.rst
    tod_ops.rst
    coords.rst
+   toast.rst
    site_pipeline.rst
    reference.rst
    dev.rst
