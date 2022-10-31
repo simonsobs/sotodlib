@@ -39,8 +39,8 @@ class G3tHWP():
         self._end = 0
         self._file_list = None
         
-        self._start = self.configs.get('start', None)
-        self._end = self.configs.get('end', None)
+        self._start = self.configs.get('start', 0)
+        self._end = self.configs.get('end', 0)
 
         self._file_list = self.configs.get('file_list', None)
         self._data_dir = self.configs.get('data_dir', None)
@@ -256,15 +256,14 @@ class G3tHWP():
             self._end = 0
             return {}
         
-        self._start = arc.simple(
-            [key for key in arc.get_fields()[0].keys()][0])[0][0]
-        self._end = arc.simple(
-            [key for key in arc.get_fields()[0].keys()][0])[0][-1]
         for i in range(len(hwp_keys)):
             if not hwp_keys[i] in arc.get_fields()[0].keys():
                 logger.info("HWP is not spinning in input g3 files or can not find field")
                 return {}      
-       
+            elif self._start == 0 and self._end == 0: 
+                self._start = arc.simple(hwp_keys[0])[0][0]
+                self._end = arc.simple(hwp_keys[0])[0][-1]
+
         data = {}
         for i in range(len(alias)):
             data = dict(**data, **{alias[i]: arc.simple(hwp_keys[i])})
@@ -371,16 +370,11 @@ class G3tHWP():
         angle = np.array([])
         hwp_rate = np.array([])
         if len(counter)>0 and len(irig_time)>0:
-            # Reject unexpected counter
             time = scipy.interpolate.interp1d(
                 rising_edge,
                 irig_time,
                 kind='linear',
                 fill_value='extrapolate')(counter)
-            idx = np.where(
-                (time >= irig_time[0] - 5) & (time <= irig_time[-1] + 5))
-            counter = counter[idx]
-            counter_idx = counter_idx[idx]
             fast_time, angle = self._hwp_angle_calculator(
                 counter, counter_idx, irig_time, rising_edge, quad_time, quad, ratio, fast)
 
@@ -399,25 +393,20 @@ class G3tHWP():
         # elif: irig_time exists but no fast_time, slow_time = irig_time
         # else: slow_time is per 10 sec array
         if len(fast_time) != 0 and len(irig_time) != 0:
+            fast_irig_time = fast_time
             locked = np.ones(len(fast_time), dtype=bool)
-            locked[np.where(hwp_rate == 0)] = 0
-            irig_time = irig_time[np.where(
-                (irig_time < fast_time[0]) | (irig_time > fast_time[-1]))]
-            fast_irig_time = np.append(irig_time, fast_time).flatten()
+            locked[np.where(hwp_rate == 0)] = False
+            stable = np.ones(len(fast_time), dtype=bool)
+            
+            irig_only_time = irig_time[np.where(
+                    (irig_time < fast_time[0]) | (irig_time > fast_time[-1]))]
+            irig_only_locked = np.zeros(len(irig_only_time), dtype=bool)
+            irig_only_hwp_rate = np.zeros(len(irig_only_time), dtype=float)
+            fast_irig_time = np.append(irig_only_time, fast_time).flatten()
             fast_irig_idx = np.argsort(fast_irig_time)
             fast_irig_time = fast_irig_time[fast_irig_idx]
-            locked = (
-                np.append(
-                    np.zeros(
-                        len(irig_time),
-                        dtype=bool),
-                    locked).flatten())[fast_irig_idx]
-            hwp_rate = (
-                np.append(
-                    np.zeros(
-                        len(irig_time),
-                        dtype=float),
-                    hwp_rate).flatten())[fast_irig_idx]
+            locked = (np.append(irig_only_locked, locked).flatten())[fast_irig_idx]
+            hwp_rate = (np.append(irig_only_hwp_rate, hwp_rate).flatten())[fast_irig_idx]
             stable = np.ones(len(fast_irig_time), dtype=bool)
         elif len(fast_time) == 0 and len(irig_time) != 0:
             fast_irig_time = irig_time
@@ -429,29 +418,37 @@ class G3tHWP():
             locked = []
             stable = []
             hwp_rate = []
-
-        slow_only_time = (np.arange(self._start, self._end, 10))
+        
+        slow_only_time = np.arange(self._start, self._end, 10)
         if len(fast_irig_time) != 0:
+            irig_only_locked = np.zeros(len(irig_only_time), dtype=bool)
+            irig_only_hwp_rate = np.zeros(len(irig_only_time), dtype=float)
+            fast_irig_time = np.append(irig_only_time, fast_time).flatten()
+            fast_irig_idx = np.argsort(fast_irig_time)
+            fast_irig_time = fast_irig_time[fast_irig_idx]
+            locked = (np.append(irig_only_locked, locked).flatten())[fast_irig_idx]
+            hwp_rate = (np.append(irig_only_hwp_rate, hwp_rate).flatten())[fast_irig_idx]
+            stable = np.ones(len(fast_irig_time), dtype=bool)
+            
             slow_only_time = slow_only_time[np.where(
                 (slow_only_time < fast_irig_time[0]) | (slow_only_time > fast_irig_time[-1]))]
+            slow_only_locked = np.zeros(len(slow_only_time), dtype=bool)
+            slow_only_stable = np.zeros(len(slow_only_time), dtype=bool)
+            slow_only_hwp_rate = np.zeros(len(slow_only_time), dtype=float)
+            
             slow_time = np.append(slow_only_time, fast_irig_time).flatten()
             slow_idx = np.argsort(slow_time)
             slow_time = slow_time[slow_idx]
-            locked = np.append(np.zeros(len(slow_only_time),
-                               dtype=bool), locked)[slow_idx]
-            stable = np.append(np.zeros(len(slow_only_time),
-                               dtype=bool), stable)[slow_idx]
-            hwp_rate = np.append(
-                np.zeros(
-                    len(slow_only_time),
-                    dtype=float),
-                hwp_rate)[slow_idx]
+            locked = (np.append(slow_only_locked, locked).flatten())[slow_idx]
+            stable = (np.append(slow_only_stable, stable).flatten())[slow_idx]
+            hwp_rate = (np.append(slow_only_hwp_rate, hwp_rate).flatten())[slow_idx]
+            locked[np.where(hwp_rate == 0)] = False
         else:
             slow_time = slow_only_time
             locked = np.zeros(len(slow_time), dtype=bool)
             stable = np.zeros(len(slow_time), dtype=bool)
             hwp_rate = np.zeros(len(slow_time), dtype=float)
-
+        
         return {'fast_time': fast_time, 'angle': angle, 'slow_time': slow_time,
                 'stable': stable, 'locked': locked, 'hwp_rate': hwp_rate}
 
@@ -512,7 +509,7 @@ class G3tHWP():
         writer.Process(session.status_frame())
 
         # Divide the full time span into equal intervals
-        start_time = solved['slow_time'][0]
+        start_time = solved['slow_time'].min()
         end_time = solved['slow_time'].max()
         if np.any(solved['fast_time']):
             start_time = min(start_time, solved['fast_time'].min())
@@ -536,7 +533,7 @@ class G3tHWP():
                 frame['block_names'].append('slow')
                 frame['blocks'].append(slow_block)
                 writer.Process(frame)
-
+                
             # Write a fast frame?
             s = (t0 <= solved['fast_time']) * (solved['fast_time'] < t1)
             if np.any(s):
@@ -598,8 +595,19 @@ class G3tHWP():
             self._rising_edge,
             self._irig_time,
             kind='linear',
-            fill_value='extrapolate')(
-            self._encd_clk)
+            fill_value='extrapolate')(self._encd_clk)
+        # Reject unexpected counter
+        idx = np.where(
+            (self._time >= self._irig_time[0] - 3600) & (self._time <= self._irig_time[-1] + 3600))
+        if len(self._time) > len(idx):
+            self._encd_clk = self._encd_clk[idx]
+            self._encd_cnt = self._encd_cnt[idx]
+            self._time = scipy.interpolate.interp1d(
+                self._rising_edge,
+                self._irig_time,
+                kind='linear',
+                fill_value='extrapolate')(self._encd_clk)
+            
         # calculate hwp angle with IRIG timing
         self._calc_angle_linear()
 
