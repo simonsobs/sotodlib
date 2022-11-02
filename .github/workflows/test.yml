@@ -8,19 +8,118 @@ on:
     branches: [ master ]
 
 jobs:
-  so3g:
-    name: Latest so3g container
+
+  linux:
+    name: Linux with Python-${{ matrix.python }}
     runs-on: ubuntu-latest
     env:
       SOTODLIB_TEST_DISABLE_PLOTS: 1
+    strategy:
+      # Ensure that a test continues even if another fails.  Useful for
+      # debugging multiple problems in parallel.
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.8"
+            pyshort: "38"
+          - python: "3.9"
+            pyshort: "39"
+          - python: "3.10"
+            pyshort: "310"
     steps:
+      - name: Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.9.1
+        with:
+          access_token: ${{ github.token }}
+
       - name: Checkout
         uses: actions/checkout@v2
-      - name: Pull so3g image
-        run: docker pull simonsobs/so3g:latest
-      - name: Install dependencies
-        run: docker run -v "$(pwd)":/home/sotodlib --name="test_runner" simonsobs/so3g:latest /home/sotodlib/.github/workflows/install_deps.sh && docker commit -m "dependencies" test_runner test_runner:so3g
-      - name: Run Serial and MPI Tests
-        run: docker run -v "$(pwd)":/home/sotodlib test_runner:so3g /home/sotodlib/.github/workflows/run_tests.sh
 
-# NOTE: eventually add test steps for documentation build.
+      - uses: actions/setup-python@v2
+        name: Install Python
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install MPICH
+        run: |
+          sudo apt update
+          sudo apt install -y libmpich-dev
+
+      - name: Install Dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --upgrade wheel
+          python3 -m pip install mpi4py
+          python3 -m pip install so3g
+          python3 -m pip install --pre toast
+
+      - name: Install sotodlib
+        run: |
+          python3 -m pip install -vvv .
+
+      - name: Run Serial Tests
+        run: |
+          export OMP_NUM_THREADS=2
+          export OPENBLAS_NUM_THREADS=2
+          export MPI_DISABLE=1
+          python3 setup.py test
+
+      - name: Run MPI Tests
+        run: |
+          export OMP_NUM_THREADS=1
+          export OPENBLAS_NUM_THREADS=1
+          mpirun -np 2 python3 setup.py test
+
+  # FIXME:  Re-enable after testing this procedure on a local
+  # apple machine.
+  #
+  # macos-clang:
+  #   name: MacOS (clang) with Python-${{ matrix.python }}
+  #   runs-on: macos-latest
+  #   env:
+  #     SOTODLIB_TEST_DISABLE_PLOTS: 1
+  #   strategy:
+  #     # Ensure that a test continues even if another fails.  Useful for
+  #     # debugging multiple problems in parallel.
+  #     fail-fast: false
+  #     matrix:
+  #       include:
+  #         - python: "3.9"
+  #           pyshort: "39"
+  #         - python: "3.10"
+  #           pyshort: "310"
+  #   steps:
+  #     - name: Cancel Previous Runs
+  #       uses: styfle/cancel-workflow-action@0.9.1
+  #       with:
+  #         access_token: ${{ github.token }}
+
+  #     - name: Checkout
+  #       uses: actions/checkout@v2
+
+  #     - uses: actions/setup-python@v2
+  #       name: Install Python
+  #       with:
+  #         python-version: ${{ matrix.python }}
+
+  #     - name: Install Homebrew Packages
+  #       run: |
+  #         brew install freetype pkg-config libpng
+
+  #     - name: Install Dependencies
+  #       run: |
+  #         python3 -m pip install --upgrade pip
+  #         python3 -m pip install --upgrade wheel
+  #         python3 -m pip install so3g
+  #         python3 -m pip install --pre toast
+
+  #     - name: Install sotodlib
+  #       run: |
+  #         python3 -m pip install -vvv .
+
+  #     - name: Run Serial Tests
+  #       run: |
+  #         export OMP_NUM_THREADS=1
+  #         export OPENBLAS_NUM_THREADS=1
+  #         export MPI_DISABLE=1
+  #         python3 setup.py test
