@@ -5,6 +5,8 @@
 
 import argparse
 
+import astropy.units as u
+
 from ..core import Hardware
 
 from ..vis_hardware import plot_detectors, summary_text
@@ -42,6 +44,27 @@ def main():
         help="Add pixel and polarization labels to the plot."
     )
 
+    parser.add_argument(
+        "--xieta", required=False, default=False, action="store_true",
+        help="Plot in Xi / Eta coordinates."
+    )
+
+    parser.add_argument(
+        "--lat_corotate",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Rotate LAT receiver to maintain focalplane orientation",
+    )
+
+    parser.add_argument(
+        "--lat_elevation_deg",
+        required=False,
+        default=60.0,
+        type=float,
+        help="Observing elevation of the LAT if not co-rotating",
+    )
+
     args = parser.parse_args()
 
     outfile = args.out
@@ -53,8 +76,23 @@ def main():
     hw = Hardware(args.hardware)
     # summary_text(hw)
 
+    width = args.width
+    if width is not None:
+        width = float(width)
+    height = args.height
+    if height is not None:
+        height = float(height)
+
     print("Generating detector plot...", flush=True)
-    plot_detectors(hw.data["detectors"], outfile, width=args.width,
-                   height=args.height, labels=args.labels)
+    plot_detectors(
+        hw.data["detectors"],
+        outfile,
+        width=width,
+        height=height,
+        labels=args.labels,
+        xieta=args.xieta,
+        lat_corotate=args.lat_corotate,
+        lat_elevation=args.lat_elevation_deg * u.degree,
+    )
 
     return
