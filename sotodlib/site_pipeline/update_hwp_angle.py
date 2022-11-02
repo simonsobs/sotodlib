@@ -133,7 +133,7 @@ if __name__ == '__main__':
                 os.mkdir(os.path.split(out_file)[0])
             hwp.write_solution(solved, out_file)
 
-        except:
-            logger.error(f"Exception thrown while processing {in_file}")
+        except Exception as e:
+            logger.error(f"Exception '{e}' thrown while processing {in_file}")
             continue
 
