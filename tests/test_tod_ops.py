@@ -162,22 +162,23 @@ class FilterTest(unittest.TestCase):
 class JumpfindTest(unittest.TestCase):
     def test_jumpfinder(self):
         """Test that jumpfinder finds jumps in white noise."""
+        np.random.seed(0)
         tod = get_tod('white')
         sig_jumps = tod.signal[0]
         jump_locs = np.array([200, 400, 700])
-        sig_jumps[jump_locs[0]:] += 5
-        sig_jumps[jump_locs[1]:] -= 10
-        sig_jumps[jump_locs[2]:] -= 5
+        sig_jumps[jump_locs[0]:] += 10
+        sig_jumps[jump_locs[1]:] -= 13
+        sig_jumps[jump_locs[2]:] -= 8
 
         tod.wrap('sig_jumps', sig_jumps, [(0, 'samps')])
 
         # Find jumps with TV filtering
-        jumps_tv = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=2)
+        jumps_tv = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=5)
         jumps_tv = jumps_tv.ranges().flatten()
 
         # Find jumps with gaussian filtering
         jumps_gauss = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps,
-                                       jumpfinder=tod_ops.jumps.jumpfinder_gaussian, min_size=2)
+                                               jumpfinder=tod_ops.jumps.jumpfinder_gaussian, min_size=5)
         jumps_gauss = jumps_gauss.ranges().flatten()
 
         # Remove double counted jumps and round to remove uncertainty
