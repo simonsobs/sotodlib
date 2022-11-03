@@ -162,6 +162,7 @@ class FilterTest(unittest.TestCase):
 class JumpfindTest(unittest.TestCase):
     def test_jumpfinder(self):
         """Test that jumpfinder finds jumps in white noise."""
+        np.random.seed(0)
         tod = get_tod('white')
         sig_jumps = tod.signal[0]
         jump_locs = np.array([200, 400, 700])
