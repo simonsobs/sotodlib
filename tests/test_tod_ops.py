@@ -178,7 +178,7 @@ class JumpfindTest(unittest.TestCase):
 
         # Find jumps with gaussian filtering
         jumps_gauss = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps,
-                                       jumpfinder=tod_ops.jumps.jumpfinder_gaussian, min_size=5)
+                                               jumpfinder=tod_ops.jumps.jumpfinder_gaussian, min_size=5)
         jumps_gauss = jumps_gauss.ranges().flatten()
 
         # Remove double counted jumps and round to remove uncertainty
