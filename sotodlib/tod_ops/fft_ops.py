@@ -1,6 +1,7 @@
 """FFTs and related operations
 """
 from scipy.signal import welch
+from scipy.fft import set_global_backend
 import numpy as np
 import pyfftw
 
@@ -8,9 +9,17 @@ import so3g
 
 from . import detrend_data
 
+
 def _get_num_threads():
     # Guess how many threads we should be using in FFT ops...
     return so3g.useful_info().get('omp_num_threads', 4)
+
+
+# Setup scipy operations to use fftw
+pyfftw.config.NUM_THREADS = _get_num_threads()
+set_global_backend(pyfftw.interfaces.scipy_fft)
+pyfftw.interfaces.cache.enable()
+
 
 def rfft(aman, detrend='linear', resize='zero_pad', window=np.hanning,
          axis_name='samps', signal_name='signal', delta_t=None):
