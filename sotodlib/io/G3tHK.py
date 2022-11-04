@@ -26,7 +26,7 @@ class HKFiles(Base):
     path : string
         path to the HK file
     """
-    __tablename__ = 'hkfeeds'
+    __tablename__ = 'hkfiles'
     __table_args__ = (
             db.UniqueConstraint('filename'),
             db.UniqueConstraint('global_start_time'),
@@ -60,8 +60,8 @@ class HKFields(Base):
     """
     __tablename__ = 'hkfields'
     id = db.Column(db.Integer, primary_key=True)
-    feed_id = db.Column(db.Integer, db.ForeignKey('hkfiles.id'))
-    hkfeed = relationship("HKFiles", back_populates='fields')
+    file_id = db.Column(db.Integer, db.ForeignKey('hkfiles.id'))
+    hkfile = relationship("HKFiles", back_populates='fields')
     field = db.Column(db.String)
     start = db.Column(db.Integer)
     end = db.Column(db.Integer)
@@ -131,18 +131,20 @@ class G3tHK:
 
         return hkfs, starts, ends
 
-    def add_hkfiles(self, hkarchive_path, hkfile):
+    def add_hkfiles(self, hkarchive_path):
         """
         """
-        global_start_time = hkfile.split(".")[0]
-        global_start_time = int(global_start_time)
+        for root, _, files in os.walk(hkarchive_path):
+            for f in files:
+                path = os.path.join(root, f)
+                filename = path.split("/")[-1]
+                global_start_time = int(filename.split(".")[0])
+                db_file = HKFiles(filename=filename,
+                                  path=hkarchive_path,
+                                  global_start_time=global_start_time)
 
-        db_file = HKFeeds(filename=hkfile,
-                          path=hkarchive_path,
-                          global_start_time=global_start_time)
-
-        self.session.add(db_file)
-        self.session.commit()
+                self.session.add(db_file)
+                self.session.commit()
 
     def add_hkfields(self):
         """
