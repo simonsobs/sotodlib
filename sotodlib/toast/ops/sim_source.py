@@ -52,7 +52,7 @@ def source_spectrum(fc, width, power, gain, amplitude, diameter):
     amplitude = 10**(-amplitude/10)
     power_watts = 10**(power/10)/1000
 
-    freqs = np.linspace(20., 350., 1001.)*1e9 * u.Hz
+    freqs = np.linspace(20., 350., 1001, endpoint=True)*1e9 * u.Hz
     fc = fc.to(u.Hz)
     width = width.to(u.Hz)
     radius = diameter.to(u.meter)/2
@@ -80,9 +80,9 @@ def source_spectrum(fc, width, power, gain, amplitude, diameter):
     out1 = np.ptp(freqs[:idx[0]])
     out2 = np.ptp(freqs[idx[-1]+1:])
 
-    rho_out = power_bw*amplitude/(out1+out2) * u.W
+    rho_out = power_bw*amplitude/(out1+out2)
 
-    signal = np.zeros_like(freqs)
+    signal = np.zeros(len(freqs)) * u.W / u.Hz
 
     signal[:idx[0]] = rho_out
     signal[idx] = rho_bw
@@ -94,7 +94,7 @@ def source_spectrum(fc, width, power, gain, amplitude, diameter):
     
     return freqs, I_nu
 
-class simulate_drone_movement:
+class SimulateDroneMovement:
     
     def __init__(self, params):
 
@@ -184,9 +184,9 @@ class simulate_drone_movement:
 
             time, elevation = self.single_movement(axis = 'elevation',
                                                    direction = direction,
-                                                   axis_0 = self.params['elevation_starting'])
+                                                   axis0 = self.params['elevation_starting'])
 
-            azimuth = np.ones_like(elevation)*self.params['azimuth_starting']
+            azimuth = np.ones(len(elevation))*self.params['azimuth_starting']
 
         elif self.params['scan_type'] == 'azimuth_only_single':
 
@@ -197,9 +197,9 @@ class simulate_drone_movement:
 
             time, azimuth = self.single_movement(axis = 'azimuth',
                                                  direction = direction,
-                                                 axis_0 = self.params['azimuth_starting'])
+                                                 axis0 = self.params['azimuth_starting'])
 
-            elevation = np.ones_like(azimuth)*self.params['elevation_starting']
+            elevation = np.ones(len(azimuth))*self.params['elevation_starting']
 
         elif self.params['scan_type'] == 'grid_scan':
 
@@ -207,27 +207,27 @@ class simulate_drone_movement:
         
         elif self.params['scan_type'] == 'fixed':
 
-            time = np.linspace(0, self.params['scan_type'], 1001, endpoint=True)
-            azimuth = np.ones_like(time)*self.params['azimuth_starting']
-            elevation = np.ones_like(time)*self.params['elevation_starting']
+            time = np.linspace(0, self.params['scan_time'], 1001, endpoint=True)
+            azimuth = np.ones(len(time))*self.params['azimuth_starting']
+            elevation = np.ones(len(time))*self.params['elevation_starting']
 
         if time_interp is not None:
 
-            azimuth = np.interp(time_interp, time, azimuth)
-            elevation = np.interp(time_interp, time, elevation)
+            azimuth = np.interp(time_interp-time_interp[0], time, azimuth)
+            elevation = np.interp(time_interp-time_interp[0], time, elevation)
 
             time = copy.copy(time_interp)
         
         return time, azimuth, elevation
 
-    def single_movement(self, axis=None, direction=1, axis_0=0, step=False, step_value=0):
+    def single_movement(self, axis=None, direction=1, axis0=0, step=False, step_value=0):
 
         """ Calculate the movement along a specific axis for a single movement (i.e. up to down or down to up,
         left to right or right to left).
         Args:
             axis (String): axis along the movement needs to be generated
             direction (Float): value that indicates the direction of movement
-            axis_0 (Quantity): Starting point of the movement
+            axis0 (Quantity): Starting point of the movement
             step (Bool): True is the movement is a stepping movement during a grid scan
             step_value (Quantity): range value of the step
 
@@ -249,14 +249,14 @@ class simulate_drone_movement:
             
         t_acc, t_vel, v_max = self._check_maximum_velocity(delta_axis, vel, acc, direction)
         
-        axis_val = np.array([])
-        time = np.array([])
+        axis_val = np.array([]) * u.rad
+        time = np.array([]) * u.s
         
         time_acc = np.linspace(0, t_acc, 101, endpoint=True)
         time = np.append(time, time_acc)
         
         dx_acc = 0.5*acc*time_acc**2
-        axis_val = np.append(axis_val, axis_0+dx_acc)
+        axis_val = np.append(axis_val, axis0+dx_acc)
 
         if t_vel > 0:
             time_vel = np.linspace(0, t_vel, 101 , endpoint=True)
@@ -285,8 +285,8 @@ class simulate_drone_movement:
             elevation (Quantity): positions during the scan along the elevation axis
         """
         
-        axis_value = np.array([])
-        time = np.array([])
+        axis_value = np.array([]) * u.rad
+        time = np.array([]) * u.s
         
         axis0_string = axis+'_starting'
         
@@ -294,9 +294,9 @@ class simulate_drone_movement:
         t0 = 0
         
         if self.params[axis+'_direction'].lower() == 'decreasing':
-            factor = -1
+            direction = -1
         else:
-            factor = 1
+            direction = 1
             
         self.scan_cycles = 0
         self._scan_idxs = np.array([], dtype=int)
@@ -306,10 +306,10 @@ class simulate_drone_movement:
         
         while True:
             time_temp, axis_temp = self.single_movement(axis=axis,
-                                                        factor=factor,
+                                                        direction=direction,
                                                         axis0 = axis0)
             axis0 = axis_temp[-1]
-            factor *= -1
+            direction *= -1
             
             time = np.append(time, time_temp+t0)
             axis_value = np.append(axis_value, axis_temp)
@@ -325,9 +325,9 @@ class simulate_drone_movement:
                 axis_value = axis_value[:idx+1]
                 self._scan_idxs = np.append(self._scan_idxs, len(time)-1)
                 
-                if factor == 1:
+                if direction == 1:
                     self.scan_cycles += (axis_value[-1]-self.params[start])/self.params[rng]
-                elif factor == -1:
+                elif direction == -1:
                     self.scan_cycles += ((self.params[start]+self.params[rng]-axis_value[-1]))/self.params[rng]
                 
                 break
@@ -338,11 +338,11 @@ class simulate_drone_movement:
         self.scan_time = time
         if axis == 'elevation':
             elevation = axis_value
-            azimuth = np.ones_like(axis_value)*self.params['azimuth_starting']
+            azimuth = np.ones(len(axis_value))*self.params['azimuth_starting']
         if axis == 'azimuth':
             azimuth = axis_value
-            elevation = np.ones_like(axis_value)*self.params['elevation_starting']
-
+            elevation = np.ones(len(axis_value))*self.params['elevation_starting']
+            
         return time, azimuth, elevation
     
     def grid_scan(self):
@@ -362,21 +362,21 @@ class simulate_drone_movement:
         el0 = self.params['elevation_starting']
         
         if self.params['azimuth_direction'].lower() == 'decreasing':
-            azimuth_factor = -1
+            azimuth_direction = -1
         else:
-            azimuth_factor = 1
+            azimuth_direction = 1
         
         if self.params['elevation_direction'].lower() == 'decreasing':
-            elevation_factor = -1
+            elevation_direction = -1
         else:
-            elevation_factor = 1
+            elevation_direction = 1
         
-        el_cumulative = 0
-        t0 = 0
+        el_cumulative = 0 * u.degree
+        t0 = 0 * u.s
         
-        time = np.array([])
-        azimuth_value = np.array([])
-        elevation_value = np.array([])
+        time = np.array([]) * u.s
+        azimuth_value = np.array([]) * u.rad
+        elevation_value = np.array([]) * u.rad
         
         self.scan_cycles = 0
         self._scan_idxs = np.array([], dtype=int)
@@ -384,11 +384,11 @@ class simulate_drone_movement:
         while True:
             
             time_temp, axis_temp = self.single_movement(axis = 'azimuth',
-                                                        factor = azimuth_factor,
+                                                        direction = azimuth_direction,
                                                         axis0 = az0,
                                                         points = 101)
             
-            azimuth_factor *= -1
+            azimuth_direction *= -1
             az0 = copy.copy(axis_temp[-1])
             
             time = np.append(time, time_temp[1:]+t0)
@@ -410,18 +410,18 @@ class simulate_drone_movement:
             
             if el_cumulative >= self.params['elevation_range']:
                 time_temp, axis_temp = self.single_movement(axis='elevation',
-                                                            factor=elevation_factor,
+                                                            direction=elevation_direction,
                                                             axis0=el0,
                                                             step=True,
                                                             step_value=np.abs(self.params['elevation_range']-el_cumulative),
                                                             points=101)
                 el_cumulative = 0
-                elevation_factor *= -1
+                elevation_direction *= -1
                 self.scan_cycles += 1
                 self._scan_idxs = np.append(self._scan_idxs, len(time)+len(time_temp)-1)
             else:
                 time_temp, axis_temp = self.single_movement(axis='elevation',
-                                                            factor=elevation_factor,
+                                                            direction=elevation_direction,
                                                             axis0=el0,
                                                             step=True,
                                                             step_value=el_step,
@@ -444,9 +444,9 @@ class simulate_drone_movement:
                 
                 self._scan_idxs = np.append(self._scan_idxs, len(time)-1)
                 
-                if elevation_factor == 1:
+                if elevation_direction == 1:
                     self.scan_cycles += (elevation_value[-1]-self.params['elevation_starting'])/self.params['elevation_range']
-                elif elevation_factor == -1:
+                elif elevation_direction == -1:
                     self.scan_cycles += ((self.params['elevation_starting']+self.params['elevation_range']-elevation_value[-1]))/self.params['elevation_range']
                 
                 break
@@ -457,7 +457,6 @@ class simulate_drone_movement:
         elevation = elevation_value
 
         return time, azimuth, elevation
-
 
 @trait_docs
 class SimSource(Operator):
@@ -475,7 +474,7 @@ class SimSource(Operator):
     # Drone Position parameters
 
     source_distance = Quantity(
-        u.Quantity(500.0, u.meter),
+        500*u.meter,
         help="Initial distance of the artificial source in meters",
     )
 
@@ -550,10 +549,12 @@ class SimSource(Operator):
     )
 
     source_fc = Quantity(
+        u.Quantity(90e9, u.Hz),
         help = 'Central frequency of the source'
     )
 
     source_width = Quantity(
+        u.Quantity(100e3, u.Hz),
         help = 'Width of the source signal'
     )
 
@@ -783,14 +784,19 @@ class SimSource(Operator):
 
         FoV = self.focalplane.field_of_view
 
+        if self.source_azimuth_range == 0:
+            az_range = FoV/2
+        if self.source_elevation_range == 0:
+            el_range = FoV/2
+
         if scan_type == 'azimuth_only' or scan_type == 'azimuth_only_single':
 
             if self.source_azimuth_direction == 'increasing':
                 az_start = np.amin(np.array(obs.shared[self.azimuth])) * u.rad
-                az_start -= FoV/2
+                az_start -= az_range/2
             else:
                 az_start = np.amax(np.array(obs.shared[self.azimuth])) * u.rad
-                az_start += FoV/2
+                az_start += az_range/2
             
             el_start = np.median(np.array(obs.shared[self.elevation])) * u.rad
 
@@ -798,10 +804,10 @@ class SimSource(Operator):
 
             if self.source_elevation_direction == 'increasing':
                 el_start = np.amin(np.array(obs.shared[self.elevation])) * u.rad
-                el_start -= FoV/2
+                el_start -= el_range/2
             else:
                 el_start = np.amax(np.array(obs.shared[self.elevation])) * u.rad
-                el_start += FoV/2
+                el_start += el_range/2
             
             az_start = np.median(np.array(obs.shared[self.azimuth])) * u.rad
 
@@ -809,17 +815,17 @@ class SimSource(Operator):
 
             if self.source_elevation_direction == 'increasing':
                 el_start = np.amin(np.array(obs.shared[self.elevation])) * u.rad
-                el_start -= FoV/2
+                el_start -= el_range/2
             else:
                 el_start = np.amax(np.array(obs.shared[self.elevation])) * u.rad
-                el_start += FoV/2
+                el_start += el_range/2
 
             if self.source_azimuth_direction == 'increasing':
                 az_start = np.amin(np.array(obs.shared[self.azimuth])) * u.rad
-                az_start -= FoV/2
+                az_start -= az_range/2
             else:
                 az_start = np.amax(np.array(obs.shared[self.azimuth])) * u.rad
-                az_start += FoV/2
+                az_start += az_range/2
 
         source_scan_params = {
             'azimuth_starting': az_start,
@@ -837,7 +843,7 @@ class SimSource(Operator):
             'scan_type': scan_type
         }
 
-        scan = simulate_drone_movement(source_scan_params)
+        scan = SimulateDroneMovement(source_scan_params)
 
         _, source_azimuth, source_elevation = scan.create_scan(time_interp=times*u.s)
 
@@ -1064,10 +1070,6 @@ class SimSource(Operator):
         # observation
         obs_data = data.select(obs_uid=obs.uid)
 
-        # Get a view of the data which contains just this single
-        # observation
-        obs_data = data.select(obs_uid=obs.uid)
-
         for det in dets:
             timer.clear()
             timer.start()
@@ -1076,14 +1078,9 @@ class SimSource(Operator):
 
             # Compute detector quaternions and Stokes weights
 
-            obs_data = Data(comm=data.comm)
-            obs_data._internal = data._internal
-            obs_data.obs = [obs]
             self.detector_pointing.apply(obs_data, detectors=[det])
             if self.detector_weights is not None:
                 self.detector_weights.apply(obs_data, detectors=[det])
-            obs_data.obs.clear()
-            del obs_data
 
             azel_quat = obs.detdata[self.detector_pointing.quats][det]
 
