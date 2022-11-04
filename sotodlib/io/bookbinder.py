@@ -938,12 +938,12 @@ class Bookbinder(object):
         d : dict
             Dictionary of values
         """
-        d = {'Book ID':             self._book_id,
-             'Session ID':          self._session_id,
-             'Start time':          self._start_time.time,
-             'End time':            self._end_time.time,
-             'Number of frames':    self.frame_num,
-             'Number of samples':   self.sample_num}
+        d = {'book_id':    self._book_id,
+             'session_id': self._session_id,
+             'start_time': self._start_time.time,
+             'end_time':   self._end_time.time,
+             'n_frames':   self.frame_num,
+             'n_samples':  self.sample_num}
         return d
 
     def __call__(self):
