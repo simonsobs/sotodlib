@@ -18,7 +18,7 @@ try:
 except ImportError as e:
     toast_available = False
 
-from ._helpers import toast_site, calibration_schedule
+from ._helpers import toast_site, calibration_schedule, close_data_and_comm
 
 
 class SimWireGridTest(unittest.TestCase):
@@ -80,6 +80,8 @@ class SimWireGridTest(unittest.TestCase):
             wiregrid_angular_speed=10.0*u.degree/u.second,
             wiregrid_angular_acceleration=0.1*u.degree/u.second**2,
         ).apply(data)
+
+        close_data_and_comm(data)
 
 if __name__ == '__main__':
     unittest.main()
