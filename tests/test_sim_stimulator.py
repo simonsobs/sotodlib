@@ -18,7 +18,7 @@ try:
 except ImportError as e:
     toast_available = False
 
-from ._helpers import toast_site, calibration_schedule
+from ._helpers import toast_site, calibration_schedule, close_data_and_comm
 
 
 class SimStimulatorTest(unittest.TestCase):
@@ -62,6 +62,8 @@ class SimStimulatorTest(unittest.TestCase):
         sim_ground.apply(data)
 
         so_ops.SimStimulator(name="sim_stimulator").apply(data)
+
+        close_data_and_comm(data)
 
 if __name__ == '__main__':
     unittest.main()

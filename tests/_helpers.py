@@ -78,6 +78,34 @@ def create_outdir(subdir=None, comm=None):
     return retdir
 
 
+def close_data_and_comm(data):
+    """Delete a toast data object AND the input Comm.
+
+    Multiple toast.Data objects can be created from a single toast.Comm,
+    and so the communicators are not freed when deleting the data object.
+    However for unit tests we frequently use a helper function to produce
+    a simulated dataset and then want to fully clean up that along with
+    the communicators that were used.  This is especially true on CI
+    services where repeatedly creating communicators without cleanup seem
+    to cause sporadic deadlocks.  This is a convenience function which
+    does that cleanup.
+
+    Args:
+        data (toast.Data):  The input data object
+
+    Returns:
+        None
+
+    """
+    cm = data.comm
+    if cm.comm_world is not None:
+        cm.comm_world.barrier()
+    data.clear()
+    del data
+    cm.close()
+    del cm
+
+
 # FIXME:  PR #183 has additional helper functions for instrument classes.
 # Just use those once that is merged and delete this.
 def toast_site():
