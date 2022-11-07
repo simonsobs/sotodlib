@@ -31,11 +31,11 @@ from sotodlib.coords import local
 
 from . import utils
 
-def source_spectrum(fc, width, power, gain, amplitude, diameter):
+def source_spectrum(fc, width, power, gain, amplitude, diameter, noise_bw, noise_out):
 
     """Generate a power spectrum for a source.
 
-    The source has a delta-like emission and a top-hat beam in 2D.
+    The source has a delta-like emission.
 
     Args:
         fc (Quantity): Central frequency of the source signal
@@ -44,6 +44,8 @@ def source_spectrum(fc, width, power, gain, amplitude, diameter):
         gain (Float): Antenna gain of the source in dBi
         amplitude (Float): amplitude of the signal with respect to the the base in dB
         diameter (Quantity): source diameter
+        noise_bw (Quantity): in-band noise
+        noise_out (Quantity): out-of-band noise
     Returns:
         I_nu (Quantity): spectrum of the source
 
@@ -83,6 +85,12 @@ def source_spectrum(fc, width, power, gain, amplitude, diameter):
     rho_out = power_bw*amplitude/(out1+out2)
 
     signal = np.zeros(len(freqs)) * u.W / u.Hz
+
+    if noise_bw.value != 0:
+        rho_bw += np.random.normal(0, np.abs(noise_bw), len(rho_bw))
+
+    if noise_out.value != 0:
+        rho_out += np.random.normal(0, np.abs(noise_out), len(rho_out))
 
     signal[:idx[0]] = rho_out
     signal[idx] = rho_bw
@@ -566,6 +574,16 @@ class SimSource(Operator):
         help = 'Gain of the source Antenna in dBi'
     )
 
+    source_noise_bw = Quantity(
+        u.Quantity(0, u.W / u.Hz),
+        help = 'White noise level in the emission band'
+    )
+
+    source_noise_out = Quantity(
+        u.Quantity(0, u.W / u.Hz),
+        help = 'White noise level in the emission band'
+    )
+
     source_pol_angle = Float(
         90,
         help="Angle of the polarization vector emitted by the source in degrees (0 means parallel to the gorund and 90 vertical)",
@@ -1002,8 +1020,10 @@ class SimSource(Operator):
         gain = self.source_gain
         diameter = self.source_size
         amplitude = self.source_amplitude
+        noise_bw = self.source_noise_bw
+        noise_out = self.source_noise_out
         
-        freq, spec = source_spectrum(fc, width, power, gain, amplitude, diameter)
+        freq, spec = source_spectrum(fc, width, power, gain, amplitude, diameter, noise_bw, noise_out)
 
         temp = utils.s2tcmb(spec, freq)
 
