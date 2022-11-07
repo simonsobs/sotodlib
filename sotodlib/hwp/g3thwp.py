@@ -90,8 +90,9 @@ class G3tHWP():
         # 1: positive rotation direction, -1: negative rotation direction
         self._force_quad = int(self.configs.get('force_quad', 0))
         if np.abs(self._force_quad) > 1:
-            logger.error("force_quad in config file must be 0 or 1 or -1")
-            sys.exit(1)
+            logger.warning("force_quad in config file must be 0 or 1 or -1")
+            if self._force_quad > 1: self._force_quad = 1
+            else: self._force_quad = -1
 
         # Output path + filename
         self._output = self.configs.get('output', None)
@@ -124,6 +125,7 @@ class G3tHWP():
             self._end = end
         if self._start is None:
             logger.error("Can not find time range")
+            return {}
 
         if isinstance(start, np.datetime64):
             start = start.timestamp()
@@ -134,7 +136,7 @@ class G3tHWP():
             self._data_dir = data_dir
         if self._data_dir is None:
             logger.error("Can not find data directory")
-            sys.exit(1)
+            return {}
         if instance is not None:
             if 'observatory' in instance:
                 self._field_instance = instance
@@ -142,7 +144,7 @@ class G3tHWP():
                 self._field_instance = 'observatory.' + instance + '.feeds.HWPEncoder'
         else:
             logger.error("Can not find field instance")
-            sys.exit(1)
+            return {}
 
         # load housekeeping data with hwp keys
         logger.info('Loading HK data files ')
@@ -204,7 +206,7 @@ class G3tHWP():
 
         if file_list is None and self._file_list is None:
             logger.error('Can not find input g3 file')
-            sys.exit(1)
+            return {}
         if file_list is not None:
             self._file_list = file_list
 
@@ -245,7 +247,7 @@ class G3tHWP():
         for f in self._file_list:
             if not os.path.exists(f):
                 logger.error('Can not find input g3 file')
-                sys.exit(1)
+                return {}
             scanner.process_file(f)
         logger.info("Loading HK data files: {}".format(
             ' '.join(map(str, self._file_list))))
@@ -359,7 +361,8 @@ class G3tHWP():
                 logger.info('All IRIG time is not correct in 2nd encoder')
 
         if len(irig_time) == 0 and len(irig_time_2) == 0:
-            logger.warning('There is no correct IRIG timing.')
+            logger.warning('There is no correct IRIG timing. Stop analyze.')
+            return {}
         if len(irig_time) < len(irig_time_2):
             logger.info('Use 2nd encoder IRIG timing.')
             irig_time = irig_time_2
@@ -375,7 +378,9 @@ class G3tHWP():
         if len(counter) > 0 and len(irig_time) > 0:
             fast_time, angle = self._hwp_angle_calculator(
                 counter, counter_idx, irig_time, rising_edge, quad_time, quad, ratio, fast)
-
+            if len(fast_time) == 0: 
+                return {}
+            
             # hwp speed calc. (approximate using ref)
             hwp_rate_ref = 1 / np.diff(fast_time[self._ref_indexes])
             hwp_rate = [hwp_rate_ref[0] for i in range(self._ref_indexes[0])]
@@ -495,15 +500,15 @@ class G3tHWP():
             Use placeholder value of 0 for cases when not "locked". 
         """
         if self._output is None and output is None:
-            logger.error('Not specified output file')
+            logger.warning('Not specified output file')
             return
         if output is not None:
             self._output = output
-        if len(solved['slow_time']) == 0:
-            logger.error('input data is empty')
+        if len(solved) == 0:
+            logger.warning('input data is empty, skip writing')
             return
         if len(solved['fast_time']) == 0:
-            logger.info('write no rotation data')
+            logger.info('write no rotation data, skip writing')
             return
         session = so3g.hk.HKSessionHelper(hkagg_version=2)
         writer = core.G3Writer(output)
@@ -603,7 +608,9 @@ class G3tHWP():
             self._time = np.delete(self._time, idx)
 
         # reference finding and fill its angle
-        self._find_refs()
+        _status_find_ref = self._find_refs()
+        if _status_find_ref == -1: 
+            return [], []
         if fast:
             self._fill_refs_fast()
         else:
@@ -628,7 +635,8 @@ class G3tHWP():
         logger.debug('_ref_indexes: ' + str(len(self._ref_indexes)))
 
         if len(self._time) != len(self._angle):
-            raise ValueError('Failed to calculate hwp angle!')
+            logger.warning('Failed to calculate hwp angle!')
+            return None, None
         logger.info('hwp angle calculation is finished.')
         return self._time, self._angle
 
@@ -678,12 +686,12 @@ class G3tHWP():
         self._ref_indexes = np.array(self._ref_indexes)
         if len(self._ref_indexes) == 0:
             if len(diff) < self._num_edges:
-                logger.error(
+                logger.warning(
                     'can not find reference points, # of data is less than # of slit')
             else:
-                logger.error(
+                logger.warning(
                     'can not find reference points, please adjust parameters!')
-            sys.exit(1)
+            return -1
 
         ## delete unexpected ref slit indexes ##
         self._ref_indexes = np.delete(self._ref_indexes, np.where(
@@ -693,7 +701,7 @@ class G3tHWP():
         logger.debug('found {} reference points'.format(
             len(self._ref_indexes)))
 
-        return
+        return 0
 
     def _fill_refs(self):
         """ Fill in the reference edges """
@@ -763,20 +771,20 @@ class G3tHWP():
         return
 
     def _calc_angle_linear(self):
-
+        
         quad = self._quad_form(
-            scipy.interpolate.interp1d(
+                scipy.interpolate.interp1d(
                 self._quad_time,
                 self._quad,
                 kind='linear',
                 fill_value='extrapolate')(
-                self._time),
-            interp=True)
+                self._time))
         if self._force_quad == 0:
             direction = list(map(lambda x: 1 if x == 0 else -1, quad))
         else:
             direction = self._force_quad
 
+        
         self._encd_cnt_split = np.split(self._encd_cnt, self._ref_indexes)
         self._angle = (self._encd_cnt_split[0] - self._ref_cnt[0]) * \
             (2 * np.pi / self._num_edges) % (2 * np.pi)
@@ -787,7 +795,7 @@ class G3tHWP():
                                           (2 * np.pi /
                                             np.diff(self._ref_indexes)[i-1])
                                             % (2 * np.pi)).flatten()
-                                            for i in range(1, len(self._encd_cnt_split)-1)])))
+                                            for i in range(1, len(self._encd_cnt_split)-1)], dtype=object)))
         self._angle = np.append(self._angle,
                                 (self._encd_cnt_split[-1] - self._ref_cnt[-1]) *
                                 (2 * np.pi / self._num_edges) % (2 * np.pi))
@@ -834,17 +842,33 @@ class G3tHWP():
         else:
             logger.debug('no need to fix encoder index')
 
-    def _quad_form(self, quad, interp=False):
-        # treat 30 sec span noise
-        if not interp:
-            quad_diff = np.ediff1d(quad, to_begin=0)
-            for i in np.argwhere(quad_diff == 1).flatten():
-                if i != 0 and i != np.argwhere(quad_diff == 1).flatten()[-1]:
-                    if quad[i - 1] == 0 and quad[i] > 0 and quad[i + 1] == 0:
-                        quad[i] = 0
+    def _quad_form(self, quad):
+        
         # bit process
         quad[(quad >= 0.5)] = 1
-        quad[(quad > 0) & (quad < 0.5)] = 0
+        quad[(quad < 0.5)] = 0
+        offset = 0
+        logger_bit = True
+        for quad_split in np.array_split(quad, len(quad)/100):
+            if quad_split.mean() > 0.1 and quad_split.mean() < 0.9:
+                if logger_bit:
+                    logger.warning("flipping quad is corrected by mean value, please consider to ues force_quad")
+                    logger_bit = False
+                for j in range(len(quad_split)): quad[j + offset] = int(quad_split.mean() + 0.5)
+                offset += len(quad_split)
+                continue
+
+            outlier = np.argwhere(np.abs(quad_split.mean() - quad_split) > 0.5).flatten()
+            for i in outlier:
+                if i == 0: ii, iii = i+1, i+2
+                elif i == outlier[-1]: ii, iii = i-1, i-2
+                else: ii, iii = i-1, i+1
+                if quad_split[i]+quad_split[ii]+quad_split[iii] == 1:
+                    quad[i + offset] = 0
+                if quad_split[i]+quad_split[ii]+quad_split[iii] == 2:
+                    quad[i + offset] = 1
+            offset += len(quad_split)       
+
         return quad
 
     def _irig_quality_check(self, irig_time, rising_edge):
