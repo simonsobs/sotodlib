@@ -4,10 +4,13 @@ from scipy.signal import welch
 from scipy.fft import set_global_backend
 import numpy as np
 import pyfftw
+import logging
 
 import so3g
 
 from . import detrend_data
+
+logger = logging.getLogger(__name__)
 
 
 def _get_num_threads():
@@ -16,9 +19,12 @@ def _get_num_threads():
 
 
 # Setup scipy operations to use fftw
-pyfftw.config.NUM_THREADS = _get_num_threads()
-set_global_backend(pyfftw.interfaces.scipy_fft)
-pyfftw.interfaces.cache.enable()
+try:
+    pyfftw.config.NUM_THREADS = _get_num_threads()
+    set_global_backend(pyfftw.interfaces.scipy_fft)
+    pyfftw.interfaces.cache.enable()
+except ValueError:
+    logger.debug("Unable to set pyffw backend")
 
 
 def rfft(aman, detrend='linear', resize='zero_pad', window=np.hanning,
