@@ -24,7 +24,7 @@ try:
     set_global_backend(pyfftw.interfaces.scipy_fft)
     pyfftw.interfaces.cache.enable()
 except ValueError:
-    logger.debug("Unable to set pyffw backend")
+    logger.debug("Failed to configure pyfftw as scipy fft backend")
 
 
 def rfft(aman, detrend='linear', resize='zero_pad', window=np.hanning,
