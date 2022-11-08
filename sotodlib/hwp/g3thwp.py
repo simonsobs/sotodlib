@@ -14,6 +14,7 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+
 class G3tHWP():
 
     def __init__(self, config_file=None):
@@ -90,8 +91,11 @@ class G3tHWP():
         # 1: positive rotation direction, -1: negative rotation direction
         self._force_quad = int(self.configs.get('force_quad', 0))
         if np.abs(self._force_quad) > 1:
-            logger.error("force_quad in config file must be 0 or 1 or -1")
-            sys.exit(1)
+            logger.warning("force_quad in config file must be 0 or 1 or -1")
+            if self._force_quad > 1:
+                self._force_quad = 1
+            else:
+                self._force_quad = -1
 
         # Output path + filename
         self._output = self.configs.get('output', None)
@@ -99,7 +103,7 @@ class G3tHWP():
     def load_data(self, start=None, end=None,
                   data_dir=None, instance='HBA'):
         """
-        Loads house keeping data for a given time range and 
+        Loads house keeping data for a given time range and
         returns HWP parameters in L2 HK .g3 file
 
         Args
@@ -111,19 +115,20 @@ class G3tHWP():
             data_dir : str or None
                 path to HK g3 file, overwrite config file
             instance : str or None
-                instance of field list, overwrite config file 
+                instance of field list, overwrite config file
                 ex.) 'HBA' or 'observatory.HBA.feeds.HWPEncoder'
 
         Returns
         ----
-        dict 
-            {alias[i] : (time[i], data[i])} 
+        dict
+            {alias[i] : (time[i], data[i])}
         """
         if start is not None and end is not None:
             self._start = start
             self._end = end
         if self._start is None:
             logger.error("Can not find time range")
+            return {}
 
         if isinstance(start, np.datetime64):
             start = start.timestamp()
@@ -134,7 +139,7 @@ class G3tHWP():
             self._data_dir = data_dir
         if self._data_dir is None:
             logger.error("Can not find data directory")
-            sys.exit(1)
+            return {}
         if instance is not None:
             if 'observatory' in instance:
                 self._field_instance = instance
@@ -142,7 +147,7 @@ class G3tHWP():
                 self._field_instance = 'observatory.' + instance + '.feeds.HWPEncoder'
         else:
             logger.error("Can not find field instance")
-            sys.exit(1)
+            return {}
 
         # load housekeeping data with hwp keys
         logger.info('Loading HK data files ')
@@ -198,13 +203,13 @@ class G3tHWP():
                 ex.) 'HBA' or 'observatory.HBA.feeds.HWPEncoder'
         Returns
         ----
-        dict 
-            {alias[i] : (time[i], data[i])} 
+        dict
+            {alias[i] : (time[i], data[i])}
         """
 
         if file_list is None and self._file_list is None:
             logger.error('Can not find input g3 file')
-            sys.exit(1)
+            return {}
         if file_list is not None:
             self._file_list = file_list
 
@@ -245,7 +250,7 @@ class G3tHWP():
         for f in self._file_list:
             if not os.path.exists(f):
                 logger.error('Can not find input g3 file')
-                sys.exit(1)
+                return {}
             scanner.process_file(f)
         logger.info("Loading HK data files: {}".format(
             ' '.join(map(str, self._file_list))))
@@ -279,14 +284,14 @@ class G3tHWP():
     def analyze(self, data, ratio=0.25, fast=True):
         """
         Analyze HWP angle solution
-        to be checked by hardware that 0 is CW and 1 is CCW from (sky side) consistently for all SAT 
+        to be checked by hardware that 0 is CW and 1 is CCW from (sky side) consistently for all SAT
 
         Args
         -----
             data : dict
                 HWP HK data from load_data
             ratio : float, optional
-                parameter for referelce slit 
+                parameter for referelce slit
                 threshold = 2 slit distances +/- ratio
             fast : bool, optional
                 If True, run fast fill_ref algorithm
@@ -304,14 +309,14 @@ class G3tHWP():
                 * angle (float): IRIG synched HWP angle in radian
             * slow_time: timestamp
                 * time list of slow block
-            * stable: bool 
+            * stable: bool
                 * if non-zero, indicates the HWP spin state is known.
                 * i.e. it is either spinning at a measurable rate, or stationary.
                 * When this flag is non-zero, the hwp_rate field can be taken at face value.
             * locked: bool
                 * if non-zero, indicates the HWP is spinning and the position solution is working.
                 * In this case one should find the hwp_angle populated in the fast data block.
-            * hwp_rate: float: 
+            * hwp_rate: float:
                 * the "approximate" HWP spin rate, with sign, in revs / second.
                 * Use placeholder value of 0 for cases when not "stable".
         """
@@ -359,7 +364,8 @@ class G3tHWP():
                 logger.info('All IRIG time is not correct in 2nd encoder')
 
         if len(irig_time) == 0 and len(irig_time_2) == 0:
-            logger.warning('There is no correct IRIG timing.')
+            logger.warning('There is no correct IRIG timing. Stop analyze.')
+            return {}
         if len(irig_time) < len(irig_time_2):
             logger.info('Use 2nd encoder IRIG timing.')
             irig_time = irig_time_2
@@ -375,6 +381,8 @@ class G3tHWP():
         if len(counter) > 0 and len(irig_time) > 0:
             fast_time, angle = self._hwp_angle_calculator(
                 counter, counter_idx, irig_time, rising_edge, quad_time, quad, ratio, fast)
+            if len(fast_time) == 0:
+                return {}
 
             # hwp speed calc. (approximate using ref)
             hwp_rate_ref = 1 / np.diff(fast_time[self._ref_indexes])
@@ -477,33 +485,33 @@ class G3tHWP():
                 * 'hwp.locked'
                 * 'hwp.hwp_rate'
 
-        - fast_time: timestamp 
+        - fast_time: timestamp
             IRIG synched timing (~2kHz)
         - angle: float
             IRIG synched HWP angle in radian
-        - slow_time: timestamp 
+        - slow_time: timestamp
             time list of slow block
         - stable: bool
             if non-zero, indicates the HWP spin state is known. \n
             i.e. it is either spinning at a measurable rate, or stationary. \n
             When this flag is non-zero, the hwp_rate field can be taken at face value. \n
-        - locked: bool 
+        - locked: bool
             if non-zero, indicates the HWP is spinning and the position solution is working. \n
             In this case one should find the hwp_angle populated in the fast data block. \n
         - hwp_rate: float
             the "approximate" HWP spin rate, with sign, in revs / second. \n
-            Use placeholder value of 0 for cases when not "locked". 
+            Use placeholder value of 0 for cases when not "locked".
         """
         if self._output is None and output is None:
-            logger.error('Not specified output file')
+            logger.warning('Not specified output file')
             return
         if output is not None:
             self._output = output
-        if len(solved['slow_time']) == 0:
-            logger.error('input data is empty')
+        if len(solved) == 0:
+            logger.warning('input data is empty, skip writing')
             return
         if len(solved['fast_time']) == 0:
-            logger.info('write no rotation data')
+            logger.info('write no rotation data, skip writing')
             return
         session = so3g.hk.HKSessionHelper(hkagg_version=2)
         writer = core.G3Writer(output)
@@ -595,7 +603,7 @@ class G3tHWP():
             kind='linear',
             fill_value='extrapolate')(self._encd_clk)
         # Reject unexpected counter
-        idx = np.where((1/np.diff(self._time)/self._num_edges) > 5.0)[0]
+        idx = np.where((1 / np.diff(self._time) / self._num_edges) > 5.0)[0]
         if len(idx) > 0:
             self._encd_clk = np.delete(self._encd_clk, idx)
             self._encd_cnt = self._encd_cnt[0] + \
@@ -603,7 +611,9 @@ class G3tHWP():
             self._time = np.delete(self._time, idx)
 
         # reference finding and fill its angle
-        self._find_refs()
+        _status_find_ref = self._find_refs()
+        if _status_find_ref == -1:
+            return [], []
         if fast:
             self._fill_refs_fast()
         else:
@@ -628,7 +638,8 @@ class G3tHWP():
         logger.debug('_ref_indexes: ' + str(len(self._ref_indexes)))
 
         if len(self._time) != len(self._angle):
-            raise ValueError('Failed to calculate hwp angle!')
+            logger.warning('Failed to calculate hwp angle!')
+            return [], []
         logger.info('hwp angle calculation is finished.')
         return self._time, self._angle
 
@@ -640,7 +651,7 @@ class G3tHWP():
         n = 0
         diff_split = []
         for i in range(len(diff)):
-            diff_split.append(diff[n:n+(self._num_edges-2):1])
+            diff_split.append(diff[n:n + (self._num_edges - 2):1])
             n += (self._num_edges - 2)
             if n >= len(diff):
                 break
@@ -652,12 +663,13 @@ class G3tHWP():
             _diff = diff_split[i]
             # eliminate upper/lower _slit_width_lim
             _diff_upperlim = np.percentile(
-                _diff, (1 - self._slit_width_lim)*100)
-            _diff_lowerlim = np.percentile(_diff, self._slit_width_lim*100)
+                _diff, (1 - self._slit_width_lim) * 100)
+            _diff_lowerlim = np.percentile(_diff, self._slit_width_lim * 100)
             __diff = _diff[np.where(
                 (_diff < _diff_upperlim) & (_diff > _diff_lowerlim))]
             # Define mean value as nominal slit distance
-            if len(__diff) == 0: continue
+            if len(__diff) == 0:
+                continue
             slit_dist = np.mean(__diff)
             # Conditions for idenfitying the ref slit
             # Slit distance somewhere between 2 slits:
@@ -669,7 +681,8 @@ class G3tHWP():
             # Find the reference slit locations (indexes)
             _ref_idx = np.argwhere(np.logical_and(
                 _diff < ref_hi_cond, _diff > ref_lo_cond)).flatten()
-            if len(_ref_idx) != 1: continue
+            if len(_ref_idx) != 1:
+                continue
             self._ref_indexes.append(_ref_idx[0] + offset)
             offset += len(diff_split[i])
         # Define the reference slit line to be the line before
@@ -678,22 +691,22 @@ class G3tHWP():
         self._ref_indexes = np.array(self._ref_indexes)
         if len(self._ref_indexes) == 0:
             if len(diff) < self._num_edges:
-                logger.error(
+                logger.warning(
                     'can not find reference points, # of data is less than # of slit')
             else:
-                logger.error(
+                logger.warning(
                     'can not find reference points, please adjust parameters!')
-            sys.exit(1)
+            return -1
 
         ## delete unexpected ref slit indexes ##
         self._ref_indexes = np.delete(self._ref_indexes, np.where(
-            np.diff(self._ref_indexes) < self._num_edges-10)[0])
+            np.diff(self._ref_indexes) < self._num_edges - 10)[0])
         self._ref_clk = self._encd_clk[self._ref_indexes]
         self._ref_cnt = self._encd_cnt[self._ref_indexes]
         logger.debug('found {} reference points'.format(
             len(self._ref_indexes)))
 
-        return
+        return 0
 
     def _fill_refs(self):
         """ Fill in the reference edges """
@@ -770,8 +783,7 @@ class G3tHWP():
                 self._quad,
                 kind='linear',
                 fill_value='extrapolate')(
-                self._time),
-            interp=True)
+                self._time))
         if self._force_quad == 0:
             direction = list(map(lambda x: 1 if x == 0 else -1, quad))
         else:
@@ -785,9 +797,9 @@ class G3tHWP():
                                     np.array(
                                         [((self._encd_cnt_split[i] - self._ref_cnt[i]) *
                                           (2 * np.pi /
-                                            np.diff(self._ref_indexes)[i-1])
+                                            np.diff(self._ref_indexes)[i - 1])
                                             % (2 * np.pi)).flatten()
-                                            for i in range(1, len(self._encd_cnt_split)-1)])))
+                                            for i in range(1, len(self._encd_cnt_split) - 1)], dtype=object)))
         self._angle = np.append(self._angle,
                                 (self._encd_cnt_split[-1] - self._ref_cnt[-1]) *
                                 (2 * np.pi / self._num_edges) % (2 * np.pi))
@@ -810,10 +822,10 @@ class G3tHWP():
             for i in idx:
                 i += offset
                 _diff = np.diff(self._encd_cnt)[i]
-                clk = (self._encd_clk[i+1] - self._encd_clk[i]) / _diff
+                clk = (self._encd_clk[i + 1] - self._encd_clk[i]) / _diff
                 gap = np.array(
-                    [self._encd_clk[i] + clk*ii for ii in range(1, _diff)])
-                self._encd_clk = np.insert(self._encd_clk, i+1, gap)
+                    [self._encd_clk[i] + clk * ii for ii in range(1, _diff)])
+                self._encd_clk = np.insert(self._encd_clk, i + 1, gap)
                 offset += _diff - 1
             self._encd_cnt = self._encd_cnt[0] + np.arange(len(self._encd_clk))
         return
@@ -834,17 +846,41 @@ class G3tHWP():
         else:
             logger.debug('no need to fix encoder index')
 
-    def _quad_form(self, quad, interp=False):
-        # treat 30 sec span noise
-        if not interp:
-            quad_diff = np.ediff1d(quad, to_begin=0)
-            for i in np.argwhere(quad_diff == 1).flatten():
-                if i != 0 and i != np.argwhere(quad_diff == 1).flatten()[-1]:
-                    if quad[i - 1] == 0 and quad[i] > 0 and quad[i + 1] == 0:
-                        quad[i] = 0
+    def _quad_form(self, quad):
+
         # bit process
         quad[(quad >= 0.5)] = 1
-        quad[(quad > 0) & (quad < 0.5)] = 0
+        quad[(quad < 0.5)] = 0
+        offset = 0
+        logger_bit = True
+        for quad_split in np.array_split(quad, len(quad) / 100):
+            if quad_split.mean() > 0.1 and quad_split.mean() < 0.9:
+                if logger_bit:
+                    logger.warning(
+                        "flipping quad is corrected by mean value, please consider to ues force_quad")
+                    logger_bit = False
+                for j in range(len(quad_split)):
+                    quad[j + offset] = int(quad_split.mean() + 0.5)
+                offset += len(quad_split)
+                continue
+
+            outlier = np.argwhere(
+                np.abs(
+                    quad_split.mean() -
+                    quad_split) > 0.5).flatten()
+            for i in outlier:
+                if i == 0:
+                    ii, iii = i + 1, i + 2
+                elif i == outlier[-1]:
+                    ii, iii = i - 1, i - 2
+                else:
+                    ii, iii = i - 1, i + 1
+                if quad_split[i] + quad_split[ii] + quad_split[iii] == 1:
+                    quad[i + offset] = 0
+                if quad_split[i] + quad_split[ii] + quad_split[iii] == 2:
+                    quad[i + offset] = 1
+            offset += len(quad_split)
+
         return quad
 
     def _irig_quality_check(self, irig_time, rising_edge):
