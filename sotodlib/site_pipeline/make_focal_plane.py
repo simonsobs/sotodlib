@@ -59,7 +59,7 @@ def rescale(xy):
     return xy_rs
 
 
-def match_template(focal_plane, template, out_thresh=0, avoid_collision=True):
+def match_template(focal_plane, template, out_thresh=0, avoid_collision=True, priors=None):
     """
     Match fit focal plane againts a template.
 
@@ -77,6 +77,10 @@ def match_template(focal_plane, template, out_thresh=0, avoid_collision=True):
 
         avoid_collision: Try to avoid collisions. May effect performance.
 
+        priors: Priors to apply when matching.
+                Should be be a n by n array where n is the number of points.
+                The priors[i, j] is the prior on the i'th point in template matching the j'th point in focal_plane.
+
     Returns:
 
         mapping: Mapping between elements in template and focal_plane.
@@ -87,13 +91,16 @@ def match_template(focal_plane, template, out_thresh=0, avoid_collision=True):
     """
     reg = AffineRegistration(**{"X": focal_plane, "Y": template})
     reg.register()
+    P = reg.P
 
+    if priors is not None:
+        P *= priors
     if avoid_collision:
         # This should get the maximum probability without collisions
-        inv = np.linalg.pinv(reg.P)
+        inv = np.linalg.pinv(P)
         mapping = np.argmax(inv, axis=0)
     else:
-        mapping = np.argmax(reg.P, axis=1)
+        mapping = np.argmax(P, axis=1)
 
     outliers = np.array([])
     if out_thresh > 0:
