@@ -69,7 +69,7 @@ def match_template(focal_plane, template, out_thresh=0, avoid_collision=True, pr
                      Should have columns: x, y or x, y, pol.
 
         template: Table containing template of focal plane.
-                  Should have columns: x, y os x, y, pol.
+                  Should have columns: x, y or x, y, pol.
 
         out_thresh: Threshold at which points will be considered outliers.
                     Should be in range [0, 1) and is checked against the
