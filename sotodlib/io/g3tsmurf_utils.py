@@ -8,6 +8,7 @@ import yaml
 
 from so3g.hk import load_range
 
+import sotodlib.core as core
 from sotodlib.io.load_smurf import load_file, SmurfStatus
 from sotodlib.io.g3tsmurf_db import Observations, Files
 from scipy.interpolate import interp1d
@@ -219,6 +220,83 @@ def get_batch(
                     )
     except GeneratorExit:
         pass
+
+def remove_detmap_info(aman):
+    aman.det_info.move("det_id", None)
+    aman.det_info.move("wafer", None)
+
+    
+def replace_none(val, dtype, replace_val=np.nan):
+    if dtype == str and (val == "null" or val == "NC"):
+        return replace_val
+    if dtype == float and np.isnan(val) == True:
+        return replace_val
+    if dtype == int and np.isnan(val) == True:
+        return replace_val
+    return val
+
+
+def add_detmap_info(aman, detmap_filename): 
+    """Add detector mapping info into aman.det_info in the format that will be 
+    generally available once this is done through Context
+    
+    Arguments
+    ---------
+    aman: AxisManager
+    detmap_filename: path to file for detmap information. Does just blindly
+        assume you are loading the correct file (sorry).
+    """
+    detmap = np.genfromtxt(detmap_filename, delimiter=',', skip_header=1,
+                           dtype=[('smurf_band', '<f8'), ('res_index', '<f8'), ('freq_mhz', '<f8'), ('is_north', '<f8'), 
+                                  ('is_highband', '<f8'), ('smurf_channel', '<f8'), ('smurf_subband', '<f8'), 
+                                  ('bond_pad', '<f8'), ('mux_band', '<f8'), ('mux_channel', '<f8'), ('mux_subband', '<f8'),
+                                  ('mux_layout_position', '<f8'), ('design_freq_mhz', '<f8'), ('bias_line', '<f8'),
+                                  ('pol', '<U4'), ('bandpass', '<U4'), ('det_row', '<f8'), ('det_col', '<f8'), 
+                                  ('pixel_num', '<f8'), ('pixel_num_pin_skip', '<f8'), ('rhomb', '<f8'), 
+                                  ('is_optical', '<f8'), ('det_x', '<f8'), ('det_y', '<f8'), ('angle_raw_deg', '<f8'), 
+                                  ('angle_actual_deg', '<f8'), ('det_type', '<U4'), ('detector_id', '<U50'), ('flags', '<f8'), 
+                                  ('fit_fr_mhz', '<f8'), ('fit_q', '<f8'), ('fit_qe_real', '<f8'), ('fit_qe_imag', '<f8'), 
+                                  ('fit_delay_ns', '<f8'), ('fit_phi_rad', '<f8'), ('fit_fmin_mhz', '<f8'),
+                                  ('fit_amag', '<f8'), ('fit_aslope', '<f8')])
+    
+
+    if "det_id" in aman:
+        print("det_id key already in AxisManager, have you already run this function?")
+        return
+    aman.det_info.wrap_new("det_id", ("dets",), dtype='<U50')
+    
+    wafer = core.AxisManager( aman.dets )
+    wafer.wrap_new( "pol", ("dets",), dtype="U4")
+    wafer.wrap_new( "det_x", ("dets",), dtype=float)
+    wafer.wrap_new( "det_y", ("dets",), dtype=float)
+    wafer.wrap_new( "angle", ("dets",), dtype=float)
+    wafer.wrap_new( "det_row", ("dets",), dtype=int)
+    wafer.wrap_new( "det_col", ("dets",), dtype=int)
+    wafer.wrap_new( "type", ("dets",), dtype="U4")
+    wafer.wrap_new( "bandpass", ("dets",), dtype="U4")
+
+    for i in range(aman.dets.count):
+        msk = np.all( [aman.det_info.smurf.band[i] == detmap["smurf_band"],
+                       aman.det_info.smurf.channel[i] == detmap["smurf_channel"],], axis=0)
+        if not np.sum(msk)==1:
+            ## probably fine
+            continue
+
+        aman.det_info.det_id[i] = detmap["detector_id"][msk][0]
+        
+        wafer["pol"][i] = replace_none(detmap["pol"][msk][0], str, "NC")
+        wafer["det_x"][i] = replace_none(detmap["det_x"][msk][0], float, np.nan)
+        wafer["det_y"][i] = replace_none(detmap["det_y"][msk][0], float, np.nan)
+        wafer["angle"][i] = replace_none(np.radians(detmap["angle_actual_deg"][msk][0]), float, np.nan)
+        wafer["det_row"][i] = replace_none(detmap["det_row"][msk][0], int, -1)
+        wafer["det_col"][i] = replace_none(detmap["det_col"][msk][0], int, -1)
+        wafer["type"][i] = replace_none(detmap["det_type"][msk][0], str, "NC")
+        bandpass = replace_none(detmap["bandpass"][msk][0], str, "NC")
+        if not bandpass == "NC":
+            bandpass = f"f{bandpass}"
+        wafer["bandpass"][i] = bandpass
+        
+    aman.det_info.wrap("wafer", wafer)
 
 
 def load_hwp_data(aman, configs=None, data_dir=None):
