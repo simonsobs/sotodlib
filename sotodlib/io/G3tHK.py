@@ -146,20 +146,36 @@ class G3tHK:
                 self.session.add(db_file)
                 self.session.commit()
 
-    def add_hkfields(self):
+    def populate_hkfields(self):
         """
         """
-        feed_list = self.session.query(HKFeeds).all()
+        file_list = self.session.query(HKFiles).all()
 
-        for feed in feed_list:
-            fields, starts, ends = self.load_fields(feed.path, feed.filename)
+        for file in file_list:
+            fields, starts, ends = load_fields(file.path, file.filename)
 
             for i in range(len(fields)):
                 db_file = HKFields(field=fields[i],
                                    start=starts[i],
                                    end=ends[i],
-                                   hkfeed=feed)
+                                   hkfile=file)
                 self.session.add(db_file)
+            
+            self.session.commit()
 
-        self.session.commit()
-        # TODO: can be more efficient; will repeat fields as it loops through every HK file every time you run
+    def add_hkfields(self):
+        """
+        """
+        file_list = self.session.query(HKFeeds).all()
+        last_file_id = file_list[-1].id
+
+        hkfields_list = session.query(HKFields).all()
+        # if hkfields table empy, populate table for 1st time
+        if len(hkfields_list) == 0:
+            populate_hkfields()
+
+        # when new .g3 file is written, update table
+        else:
+            last_field_file_id = hkfields_list[-1].file_id
+            if last_file_id > last_field_file_id:
+                populate_hkfields()
