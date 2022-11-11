@@ -23,21 +23,13 @@ update-g3tsmurf-db
 This script set up to create and maintain g3tsmurf databases. :ref:`See details
 here<g3tsmurf-update-section>`.
 
-imprinter
-----------
+update-book-plan
+----------------
 
 This script is designed to help with the bookbinding. It will search a given
 Level 2 G3tSmurf database for observations that overlap in time. The different
 optional arguments will let us pass information from something like the sorunlib
 database to further filter the observations. 
-
-Currently outputs a list of tuples where each tuple is one or more observation
-ids. Each tuple has at least some overlap.
-
-.. argparse::
-   :module: sotodlib.site_pipeline.imprinter
-   :func: get_parser
-
 
 Detector and Readout ID Mapping
 -------------------------------
