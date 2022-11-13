@@ -1,7 +1,8 @@
 import argparse as ap
 import numpy as np
 import pandas as pd
-from sotodlib.core import Context
+from sotodlib.core import AxisManager
+import sotodlib.io.g3tsmurf_utils as g3u
 from scipy.spatial.transform import Rotation as R
 
 from pycpd import AffineRegistration, ConstrainedDeformableRegistration
@@ -155,37 +156,29 @@ def main():
     parser = ap.ArgumentParser()
 
     # NOTE: Eventually all of this should just be metadata I can load from a single context?
+
+    # Making some assumtions about pointing data that aren't currently true:
+    # 1. I am assuming that the HDF5 file is a saved aman not a pandas results set
+    # 2. I am assuming that it contains the measured detector polangs
+    # 3. I am assuming it comtains aman.det_info
     parser.add_argument(
         "pointing_data",
         help="Location of HDF5 file containing pointing for each readout channel",
     )
     parser.add_argument(
-        "context",
-        help="Location of context file which contains the chan map and template",
-    )
-    # NOTE: Why can't det polangs live in the same table as pointing?
-    parser.add_argument(
-        "det_polangs",
-        help="Location of HDF5 file containing det polang for each readout channel",
+        "detmap",
+        help="Location of detmap file",
     )
     parser.add_argument(
-        "bias_groups", help="Location of file mapping bias groups to bands"
-    )
-    parser.add_argument(
-        "-i", "--instrument", help="Instrument mapping from sky to focal plane"
-    )
-    parser.add_argument(
-        "-o", "--observation", help="Which observation to load from context", default=0
+        "-i",
+        "--instrument",
+        help="Instrument mapping from sky to focal plane, feature not currently implemented",
     )
     args = parser.parse_args()
 
     # Load data
-    pointing = pd.read_hdf(args.pointing_data)
-    context = Context(args.context)
-    obs_list = context.obsdb.get()
-    meta = context.get_obs(obs_id=obs_list[args.observation]["obs_id"])
-    # Load polarization data
-    # Load instrument correction if availible
+    aman = AxisManager.load(args.pointing_data)
+    g3u.add_detmap_info(aman, args.detmap)
 
     # Apply instrument to pointing if availible
     # Otherwise try to match from channel map
