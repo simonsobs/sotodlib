@@ -1,11 +1,9 @@
 import argparse as ap
 import numpy as np
-import pandas as pd
-from sotodlib.core import AxisManager
 import sotodlib.io.g3tsmurf_utils as g3u
+from sotodlib.core import AxisManager
 from scipy.spatial.transform import Rotation as R
-
-from pycpd import AffineRegistration, ConstrainedDeformableRegistration
+from pycpd import AffineRegistration
 
 
 def LAT_coord_transform(xy, rot_fp, rot_ufm, r=72.645):
