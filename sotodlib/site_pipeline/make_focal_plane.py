@@ -56,7 +56,51 @@ def rescale(xy):
     return xy_rs
 
 
-def match_template(focal_plane, template, out_thresh=0, avoid_collision=True, priors=None):
+def gen_priors(aman, prior, method="flat", width=1, basis=None):
+    """
+    Generate priors from detmap.
+    Currently priors will be 1 everywhere but the location of the detmap's match.
+    More complicated prior generation will be a part of this function eventually.
+
+    Arguments:
+
+        aman: AxisManager assumed to contain aman.det_info.det_id and aman.det_info.wafer.
+
+        prior: Prior value at locations from the detmap.
+               Should be greater than 1.
+
+        method: What sort of priors to implement.
+                Currently only 'flat' is accepted but at least 'gaussian' will be implemented later.
+
+        width: Width of priors. When gaussian priors are added this will be sigma.
+
+        basis: Basis to calculate width in.
+               Currently not implemented so width will just be along the dets axis.
+               At the very least radial distance will be added.
+
+    Returns:
+
+        priors: The 2d array of priors.
+    """
+
+    def _flat(arr, idx):
+        arr[idx - width // 2 : idx + width // 2 + width % 2] = prior
+
+    if method == "flat":
+        prior_method = _flat
+    else:
+        raise ValueError("Method " + method + " not implemented")
+
+    priors = np.ones((aman.dets.count, aman.dets.count))
+    for i in aman.dets.count:
+        priors[i] = prior_method(priors[i], i, width, prior)
+
+    return priors
+
+
+def match_template(
+    focal_plane, template, out_thresh=0, avoid_collision=True, priors=None
+):
     """
     Match fit focal plane againts a template.
 
