@@ -4,9 +4,6 @@ import pandas as pd
 from sotodlib.core import Context
 from scipy.spatial.transform import Rotation as R
 
-# Should I implement my own version?
-# NOTE: Need this fork for priors https://github.com/agporto/pycpd
-# Should be merged soon https://github.com/siavashk/pycpd/pull/57
 from pycpd import AffineRegistration, ConstrainedDeformableRegistration
 
 
@@ -105,75 +102,6 @@ def match_template(focal_plane, template, out_thresh=0, avoid_collision=True, pr
     outliers = np.array([])
     if out_thresh > 0:
         outliers = np.where(reg.P[range(reg.P.shape[0]), mapping] < out_thresh)[0]
-
-    return mapping, outliers
-
-
-def match_chan_map(pointing, template, out_thresh=0, weight=2, avoid_collision=True):
-    """
-    Fit pointing on sky to focal plane using the channel map and template.
-
-    Arguments:
-
-        pointing: Pointing data. Should be a tuple with elements:
-                  readout_id, [xi_0, eta_0] or readout_id, [xi_0, eta_0, pol].
-                  Where readout_id is an (n,) array and [xi_0, eta_0(, pol)] is (n, 2(3)).
-
-        template: Tuple containing channel map and template with elements:
-                  readout_id, [x, y] or readout_id, [x, y, pol]
-                  Where readout_id is an (n,) array and [x, y(, pol)] is (n, 2(3)).
-
-        out_thresh: Threshold at which points will be considered outliers.
-                    Should be in range [0, 1) and is checked against the
-                    probability that a point matches its mapped point in the template.
-
-        weight: How strongly to weigh the channel map.
-                Should be greater than 0, with a higher number indicating more confidence.
-
-        avoid_collision: Try to avoid collisions. May effect performance.
-
-    Returns:
-
-        mapping: Mapping between elements in template and pointing.
-                 pointing[i] = template[mapping[i]]
-
-        outliers: Indices of points that are outliers.
-                  Note that this is in the basis of mapping and pointing, not template.
-    """
-    # Rescale pointing and template to be [0, 1]
-    pointing_rs = rescale(pointing[1])
-    template_rs = rescale(template[1])
-
-    # Sort to make priors easier
-    p_i = np.argsort(pointing[0])
-    t_i = np.argsort(template[0])
-
-    target_id = np.arange(len(pointing_rs))
-    source_id = np.arange(len(template_rs))
-
-    reg = ConstrainedDeformableRegistration(
-        **{"X": pointing_rs[p_i], "Y": template_rs[t_i]},
-        e_alpha=1.0 / weight,
-        source_id=source_id,
-        target_id=target_id
-    )
-    reg.register()
-
-    # Undo sorting
-    p_ii = np.argsort(p_i)
-    t_ii = np.argsort(t_i)
-    P = reg.P[np.ix_(t_ii, p_ii)]
-
-    if avoid_collision:
-        # This should get the maximum probability without collisions
-        inv = np.linalg.pinv(reg.P)
-        mapping = np.argmax(inv, axis=0)
-    else:
-        mapping = np.argmax(reg.P, axis=1)
-
-    outliers = np.array([])
-    if out_thresh > 0:
-        outliers = np.where(P[range(P.shape[0]), mapping] < out_thresh)[0]
 
     return mapping, outliers
 
