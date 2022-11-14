@@ -173,12 +173,16 @@ def main():
         "--instrument",
         help="Instrument mapping from sky to focal plane, feature not currently implemented",
     )
+    # Should this point to a config file?
+    parser.add_argument(
+        "-p", "--priors", help="Amount to set prior to from detmap", default=1
+    )
     args = parser.parse_args()
 
     # Load data
     aman = AxisManager.load(args.pointing_data)
     g3u.add_detmap_info(aman, args.detmap)
-    bg_map = np.load(bg_path, allow_pickle=True).item()
+    bg_map = np.load(args.bias_map, allow_pickle=True).item()
 
     # TODO: apply instrument to pointing if availible
 
@@ -211,6 +215,41 @@ def main():
         | (bias_group == 10)
         | (bias_group == 11)
     )
+
+    # Prep inputs
+    priors = gen_priors(aman, args.prior, method="flat", width=1, basis=None)
+    focal_plane = np.vstack((aman.xi, aman.eta, aman.polang))
+    template = np.vstack(
+        (
+            aman.det_info.wafer.det_x,
+            aman.det_info.wafer.det_y,
+            aman.det_info.wafer.angle,
+        )
+    )
+
+    # Do actual matching
+    map_bp1, out_bp1 = match_template(
+        focal_plane[:, msk_bp1],
+        template[:, msk_bp1],
+        out_thresh=0,
+        avoid_collision=True,
+        priors=priors[np.ix_(msk_bp1, msk_bp1)],
+    )
+    map_bp2, out_bp2 = match_template(
+        focal_plane[:, msk_bp2],
+        template[:, msk_bp2],
+        out_thresh=0,
+        avoid_collision=True,
+        priors=priors[np.ix_(msk_bp1, msk_bp1)],
+    )
+    det_id = np.zeros(aman.dets.count, dtype=str)
+    det_id[msk_bp1] = aman.det_info.det_id[msk_bp1][map_bp1]
+    det_id[msk_bp2] = aman.det_info.det_id[msk_bp2][map_bp2]
+    aman.wrap("det_id", det_id, [(0, aman.dets)])
+    # TODO: Figure out what to do about outliers
+
+    g3u.remove_detmap_info(aman)
+    aman.save(args.pointing_data, overwrite=True)
 
 
 if __name__ == "__main__":
