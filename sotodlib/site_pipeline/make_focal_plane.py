@@ -92,7 +92,7 @@ def gen_priors(aman, prior, method="flat", width=1, basis=None):
 
     priors = np.ones((aman.dets.count, aman.dets.count))
     for i in aman.dets.count:
-        priors[i] = prior_method(priors[i], i, width, prior)
+        prior_method(priors[i], i, width, prior)
 
     return priors
 
