@@ -174,12 +174,23 @@ def main():
     parser.add_argument(
         "-p", "--priors", help="Amount to set prior to from detmap", default=1
     )
+    parser.add_argument(
+        "-nf",
+        "--no_fit",
+        action="store_true",
+        help="Don't try to fit for mapping between detector positions on array and on sky, just directly copy det_id from detmap",
+    )
     args = parser.parse_args()
 
     # Load data
     aman = AxisManager.load(args.pointing_data)
     g3u.add_detmap_info(aman, args.detmap)
     bg_map = np.load(args.bias_map, allow_pickle=True).item()
+
+    if args.no_fit:
+        aman.wrap("det_id", aman.det_info.det_id, [(0, aman.dets)])
+        g3u.remove_detmap_info(aman)
+        aman.save(args.pointing_data, overwrite=True)
 
     # TODO: apply instrument to pointing if availible
 
