@@ -163,10 +163,7 @@ def main():
         "pointing_data",
         help="Location of HDF5 file containing pointing for each readout channel",
     )
-    parser.add_argument(
-        "detmap",
-        help="Location of detmap file",
-    )
+    parser.add_argument("detmap", help="Location of detmap file")
     parser.add_argument("bias_map", help="Location of bias map file")
     parser.add_argument(
         "-i",
