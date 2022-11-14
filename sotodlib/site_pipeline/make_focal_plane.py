@@ -106,11 +106,13 @@ def match_template(
 
     Arguments:
 
-        focal_plane: Focal plane after either having optics model applied or being fit with channel map.
-                     Should have columns: x, y or x, y, pol.
+        focal_plane: Measured pointing and optionally polarization angle.
+                     Should be a (2, n) or (3, n) array with collums: xi, eta, pol.
+                     Optionally an optics model can be preapplied to this to map the pointing
+                     onto the physical focal plane in which case the collums are: x, y, pol.
 
-        template: Table containing template of focal plane.
-                  Should have columns: x, y or x, y, pol.
+        template: Designed x, y, and polarization angle of each detector.
+                  Should be a (2, n) or (3, n) array with collums: x, y, pol.
 
         out_thresh: Threshold at which points will be considered outliers.
                     Should be in range [0, 1) and is checked against the
