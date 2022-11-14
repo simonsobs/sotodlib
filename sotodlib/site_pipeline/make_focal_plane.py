@@ -1,3 +1,4 @@
+import sys
 import argparse as ap
 import numpy as np
 import sotodlib.io.g3tsmurf_utils as g3u
@@ -191,6 +192,7 @@ def main():
         aman.wrap("det_id", aman.det_info.det_id, [(0, aman.dets)])
         g3u.remove_detmap_info(aman)
         aman.save(args.pointing_data, overwrite=True)
+        sys.exit()
 
     # TODO: apply instrument to pointing if availible
 
