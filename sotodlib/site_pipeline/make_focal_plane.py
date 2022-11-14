@@ -167,6 +167,7 @@ def main():
         "detmap",
         help="Location of detmap file",
     )
+    parser.add_argument("bias_map", help="Location of bias map file")
     parser.add_argument(
         "-i",
         "--instrument",
@@ -177,20 +178,39 @@ def main():
     # Load data
     aman = AxisManager.load(args.pointing_data)
     g3u.add_detmap_info(aman, args.detmap)
+    bg_map = np.load(bg_path, allow_pickle=True).item()
 
-    # Apply instrument to pointing if availible
-    # Otherwise try to match from channel map
+    # TODO: apply instrument to pointing if availible
 
-    # Apply template
-    # Get pixel for each channel
+    # Split up by bandpass
+    bc_aman = (
+        aman.det_info.smurf.band.astype(int) << 32
+    ) + aman.det_info.smurf.channel.astype(int)
+    bc_bgmap = (bg_map["bands"] << 32) + bg_map["channels"]
+    to_add = np.setdiff1d(bc_aman, bc_bgmap)
+    to_remove = np.setdiff1d(bc_bgmap, bc_aman)
+    msk = ~np.isin(bc_bgmap, to_remove)
+    bg_map["bgmap"] = np.append(bg_map["bgmap"], -2 * np.ones(len(to_add)))
+    bc_bgmap = np.append(bc_bgmap[msk], to_add)
+    idx = np.argsort(bc_bgmap)[np.argsort(bc_aman)]
+    bias_group = bg_map["bg_map"][idx]
 
-    # Set band based on chan map
-    # Set pol from wiregrid
-
-    # Add det_id to pointing table
-    # Just an f string?
-    # Add band and pol as well?
-    # Save table
+    msk_bp1 = (
+        (bias_group == 0)
+        | (bias_group == 1)
+        | (bias_group == 4)
+        | (bias_group == 5)
+        | (bias_group == 8)
+        | (bias_group == 9)
+    )
+    msk_bp2 = (
+        (bias_group == 2)
+        | (bias_group == 3)
+        | (bias_group == 6)
+        | (bias_group == 7)
+        | (bias_group == 10)
+        | (bias_group == 11)
+    )
 
 
 if __name__ == "__main__":
