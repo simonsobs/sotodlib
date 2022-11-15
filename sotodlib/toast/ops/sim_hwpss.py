@@ -134,7 +134,6 @@ class SimHWPSS(Operator):
                 obs_data = Data(comm=data.comm)
                 obs_data._internal = data._internal
                 obs_data.obs = [obs]
-                # self.stokes_weights.detector_pointing.apply(obs_data, detectors=[det])
                 self.stokes_weights.apply(obs_data, detectors=[det])
                 obs_data.obs.clear()
                 del obs_data
@@ -142,7 +141,7 @@ class SimHWPSS(Operator):
                 azel_quat = obs.detdata[
                     self.stokes_weights.detector_pointing.quats
                 ][det]
-                theta, phi = qa.to_position(azel_quat)
+                theta, phi, _ = qa.to_iso_angles(azel_quat)
                 el = np.pi / 2 - theta
 
                 # Get polarization weights
