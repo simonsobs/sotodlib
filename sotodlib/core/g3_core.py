@@ -7,6 +7,7 @@ This module contains the core data I/O and processing tools.
 """
 
 from spt3g import core
+import numpy as np
 
 
 class DataG3Module(object):
@@ -44,7 +45,13 @@ class DataG3Module(object):
             processing = core.G3TimestreamMap()
             
             for k in f[self.input].keys():
-                processing[k] = core.G3Timestream( self.process(f[self.input][k], k) )
+                # Note we (maybe) repack the returned data first, as
+                # some spt3g editions will segfault if the strides
+                # aren't trivial.
+                result = self.process(f[self.input][k], k)
+                if isinstance(result, np.ndarray):
+                    result = np.asarray(result, order='C')
+                processing[k] = core.G3Timestream(result)
                                     
             processing.start = f[self.input].start
             processing.stop = f[self.input].stop   
