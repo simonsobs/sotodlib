@@ -700,9 +700,9 @@ class G3tSmurf:
                     break
 
             if calibration:
-                obs_id=f"cal_{stream_id}_{session_id}"
+                obs_id=f"oper_{stream_id}_{session_id}"
             else:
-                obs_id=f"{stream_id}_{session_id}"
+                obs_id=f"obs_{stream_id}_{session_id}"
 
             # Build Observation
             obs = Observations(
