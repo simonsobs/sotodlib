@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
-from spt3g import core
 import numpy as np
-import so3g
+import so3g  # noqa: F401
+from spt3g import core
+
 
 def generate_hk_frame(t):
     session = so3g.hk.HKSessionHelper(hkagg_version=2)
@@ -28,7 +29,7 @@ def generate_smurf_frame(t):
     return frame
 
 def test_hk_gaps():
-    import bookbinder.bookbinder as bb
+    import sotodlib.io.bookbinder as bb
 
     # Create 3 HK frames, with gaps in time in between them
     start_time = 1630470250.75000000
@@ -78,7 +79,7 @@ def test_hk_gaps():
         np.testing.assert_array_equal(output[0]['ancil']['az_enc'], expected_output, verbose=True)
 
 def test_smurf_gaps():
-    import bookbinder.bookbinder as bb
+    import sotodlib.io.bookbinder as bb
 
     # Create 3 HK frames, with NO gaps in time in between them
     start_time = 1630470250.75000000
