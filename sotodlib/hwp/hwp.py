@@ -117,8 +117,8 @@ def demod(aman, signal='signal', name='signal_demod',
         aman.move(name, None)
     
     if bpf_center is None:
-        speed = (np.sum(np.abs((np.diff(aman.hwp_angle) + np.pi)%(2*np.pi) - np.pi)) / 
-                 (aman.timestamps[-1] - aman.timestamps[0]))/ (2 * np.pi)
+        speed = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
+                 (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
         bpf_center = 4 * speed
         
     prelfilt = tod_ops.filters.low_pass_butter4(fc=bpf_center + bpf_width)
