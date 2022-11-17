@@ -79,7 +79,7 @@ def extract_hwpss(aman, signal='signal', name='hwpss_ext',
 
 
 def demod(aman, signal='signal', name='signal_demod',
-          hwp_angle=None, bpf_width=0.5, lpf_cut=0.5):
+          hwp_angle=None, bpf_center=None, bpf_width=0.5, lpf_cut=0.5):
     """
     * Simple demoduation function for AxisManager
     * Demod timstream will be added to AxisManager as aman['name']
@@ -95,6 +95,9 @@ def demod(aman, signal='signal', name='signal_demod',
     hwp_angle: list or None
         HWP reconstructed angle, 
         do not need to input if aman already has this
+    bpf_center: float or None
+        Center frequency of pre-bandpass filter
+        If not specified, it becomes 4*f_HWP
     bpf_width: float
         Width of pre-bandpass filter
     lpf_cut: float
@@ -112,16 +115,19 @@ def demod(aman, signal='signal', name='signal_demod',
         aman.move(name + '_wo_lfilt', None)
     if name in aman.keys():
         aman.move(name, None)
-
-    speed = (np.sum(np.diff(aman.hwp_angle) % (2 * np.pi)) /
-             (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
-    prelfilt = tod_ops.filters.low_pass_butter4(fc=4 * speed + bpf_width)
+    
+    if bpf_center is None:
+        speed = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
+                 (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
+        bpf_center = 4 * speed
+        
+    prelfilt = tod_ops.filters.low_pass_butter4(fc=bpf_center + bpf_width)
     aman.wrap(name + '_prelfilt', 
               tod_ops.fourier_filter(aman, prelfilt, 
                                      detrend=None, 
                                      signal_name=signal), 
               [(0, 'dets'), (1, 'samps')])
-    prehfilt = tod_ops.filters.high_pass_butter4(fc=4 * speed - bpf_width)
+    prehfilt = tod_ops.filters.high_pass_butter4(fc=bpf_center - bpf_width)
     aman.wrap(name + '_prebfilt', 
               tod_ops.fourier_filter(aman, prehfilt, 
                                      detrend=None, 
