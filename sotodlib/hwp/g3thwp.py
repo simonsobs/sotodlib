@@ -803,7 +803,6 @@ class G3tHWP():
         if mod2pi:
             self._angle = self._angle % (2 * np.pi)
 
-        ii = np.where(np.diff(self._ref_indexes) != 1140)[0]
         return
 
     def _find_dropped_packets(self):
