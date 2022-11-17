@@ -101,7 +101,7 @@ class G3tHWP():
         self._output = self.configs.get('output', None)
 
     def load_data(self, start=None, end=None,
-                  data_dir=None, instance='HBA'):
+                  data_dir=None, instance=None):
         """
         Loads house keeping data for a given time range and
         returns HWP parameters in L2 HK .g3 file
@@ -145,9 +145,6 @@ class G3tHWP():
                 self._field_instance = instance
             else:
                 self._field_instance = 'observatory.' + instance + '.feeds.HWPEncoder'
-        else:
-            logger.error("Can not find field instance")
-            return {}
 
         # load housekeeping data with hwp keys
         logger.info('Loading HK data files ')
@@ -281,7 +278,7 @@ class G3tHWP():
 
         return data
 
-    def analyze(self, data, ratio=0.25, fast=True):
+    def analyze(self, data, ratio=0.25, mod2pi=True, fast=True):
         """
         Analyze HWP angle solution
         to be checked by hardware that 0 is CW and 1 is CCW from (sky side) consistently for all SAT
@@ -293,6 +290,8 @@ class G3tHWP():
             ratio : float, optional
                 parameter for referelce slit
                 threshold = 2 slit distances +/- ratio
+            mod2pi : bool, optional
+                If True, return hwp angle % 2pi
             fast : bool, optional
                 If True, run fast fill_ref algorithm
 
@@ -380,7 +379,7 @@ class G3tHWP():
         hwp_rate = np.array([])
         if len(counter) > 0 and len(irig_time) > 0:
             fast_time, angle = self._hwp_angle_calculator(
-                counter, counter_idx, irig_time, rising_edge, quad_time, quad, ratio, fast)
+                counter, counter_idx, irig_time, rising_edge, quad_time, quad, ratio, mod2pi, fast)
             if len(fast_time) == 0:
                 return {}
 
@@ -573,6 +572,7 @@ class G3tHWP():
             quad_time,
             quad,
             ratio,
+            mod2pi,
             fast):
 
         #   counter: BBB counter values for encoder signal edges
@@ -627,7 +627,7 @@ class G3tHWP():
             fill_value='extrapolate')(self._encd_clk)
 
         # calculate hwp angle with IRIG timing
-        self._calc_angle_linear()
+        self._calc_angle_linear(mod2pi)
 
         logger.debug('qualitycheck')
         logger.debug('_time:        ' + str(len(self._time)))
@@ -775,7 +775,7 @@ class G3tHWP():
             self._encd_cnt[(ind + 1):] += -(cnt_diff[ind] - 1)
         return
 
-    def _calc_angle_linear(self):
+    def _calc_angle_linear(self, mod2pi=True):
 
         quad = self._quad_form(
             scipy.interpolate.interp1d(
@@ -790,21 +790,20 @@ class G3tHWP():
             direction = self._force_quad
 
         self._encd_cnt_split = np.split(self._encd_cnt, self._ref_indexes)
-        self._angle = (self._encd_cnt_split[0] - self._ref_cnt[0]) * \
+        angle_first_revolution = (self._encd_cnt_split[0] - self._ref_cnt[0]) * \
             (2 * np.pi / self._num_edges) % (2 * np.pi)
-        self._angle = np.append(self._angle,
-                                np.concatenate(
-                                    np.array(
-                                        [((self._encd_cnt_split[i] - self._ref_cnt[i]) *
-                                          (2 * np.pi /
-                                            np.diff(self._ref_indexes)[i - 1])
-                                            % (2 * np.pi)).flatten()
-                                            for i in range(1, len(self._encd_cnt_split) - 1)], dtype=object)))
-        self._angle = np.append(self._angle,
-                                (self._encd_cnt_split[-1] - self._ref_cnt[-1]) *
-                                (2 * np.pi / self._num_edges) % (2 * np.pi))
-        self._angle = direction * self._angle % (2 * np.pi)
+        angle_last_revolution = (self._encd_cnt_split[-1] - self._ref_cnt[-1]) * \
+            (2 * np.pi / self._num_edges) % (2 * np.pi) + len(self._ref_cnt) * 2 * np.pi
+        self._angle = np.array([((self._encd_cnt_split[i] - self._ref_cnt[i]) * \
+                          (2 * np.pi / np.diff(self._ref_indexes)[i - 1]) \
+                              % (2 * np.pi) + i * 2 * np.pi ).flatten() \
+                                  for i in range(1, len(self._encd_cnt_split) - 1)])
+        self._angle = np.concatenate([angle_first_revolution, self._angle.flatten(), angle_last_revolution])
+        self._angle = direction * self._angle
+        if mod2pi:
+            self._angle = self._angle % (2 * np.pi)
 
+        ii = np.where(np.diff(self._ref_indexes) != 1140)[0]
         return
 
     def _find_dropped_packets(self):
