@@ -655,7 +655,7 @@ class G3tHWP():
             n += (self._num_edges - 2)
             if n >= len(diff):
                 break
-        offset = 0
+        offset = 1
         # Conditions for idenfitying the ref slit
         # Slit distance somewhere between 2 slits:
         # 2 slit distances (defined above) +/- 10%
