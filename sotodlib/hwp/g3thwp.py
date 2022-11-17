@@ -791,9 +791,8 @@ class G3tHWP():
         self._angle = np.append(self._angle,
                                 (self._encd_cnt_split[-1] - self._ref_cnt[-1]) *
                                 (2 * np.pi / self._num_edges) % (2 * np.pi))
-        self._angle = direction * self._angle
+        self._angle = direction * self._angle % (2 * np.pi)
 
-        ii = np.where(np.diff(self._ref_indexes) != 1140)[0]
         return
 
     def _find_dropped_packets(self):
