@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
-
 import os, os.path as op
 import argparse
-from bookbinder import Bookbinder
+from sotodlib.iobookbinder import Bookbinder
 
-if __name__ == '__main__':
+
+def main(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--smurf', dest='smurffiles', nargs='+', type=str, required=True,
                         help='full path to SMuRF files')
@@ -25,7 +24,8 @@ if __name__ == '__main__':
                         help='Timestamp of last sample (inclusive)')
     parser.add_argument('--max-nchannels', dest='max_nchannels', type=int,
                         help='Largest number of channels in Book; used to determine file splits')
-    args = parser.parse_args()
+    if args is None:
+        args = parser.parse_args(args)
 
     book_id = args.prefix
     if args.timestamp is not None:
@@ -46,3 +46,7 @@ if __name__ == '__main__':
                    start_time = args.start_time,
                    end_time = args.end_time)
     B()
+
+
+if __name__ == '__main__':
+    print(main())
