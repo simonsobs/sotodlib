@@ -61,6 +61,7 @@ setup_opts["install_requires"] = [
     'pixell',
     'scikit-image',
     'pyfftw',
+    'typer',
 ]
 
 # Command Class dictionary.
