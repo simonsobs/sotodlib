@@ -2,6 +2,7 @@ import datetime as dt, os.path as op, os
 import numpy as np
 from collections import OrderedDict
 from typing import List
+import yaml
 
 import sqlalchemy as db
 from sqlalchemy import or_, and_, not_
@@ -9,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
-from sotodlib.io.load_smurf import G3tSmurf, Observations as G3tObservations
+from .load_smurf import G3tSmurf, Observations as G3tObservations
 
 ####################
 # useful constants #
@@ -21,17 +22,6 @@ BOUND = 1
 FAILED = 2
 
 # tel tube, stream_id, slot mapping
-SLOTS = {
-    "sat1": [
-        "ufm_mv14",
-        "ufm_mv18",
-        "ufm_mv19",
-        "ufm_mv22",
-        "ufm_mv6",
-        "ufm_mv7",
-        "ufm_mv9"
-    ]
-}
 VALID_OBSTYPES = ['obs', 'oper', 'smurf', 'hk', 'stray', 'misc']
 
 
@@ -97,7 +87,7 @@ class Books(Base):
 ##############
 
 class Imprinter:
-    def __init__(self, db_path, g3tsmurf_config=None, echo=False):
+    def __init__(self, config, g3tsmurf_config=None, echo=False):
         """Imprinter manages the book database.
 
         Parameters
@@ -110,12 +100,19 @@ class Imprinter:
             if True, print all SQL statements
 
         """
-        # check whether db_path directory exists
-        if not op.exists(op.dirname(db_path)):
-            # to create the database, we first make sure that the folder exists
-            os.makedirs(op.abspath(op.dirname(db_path)), exist_ok=True)
+        # load config file and parameters
+        with open(config, "r") as f:
+            self.config = yaml.safe_load(f)
+        self.db_path = self.config['db_path']
+        self.slots = self.config['slots']
+        self.tel_tube = self.config['tel_tube']
 
-        self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo)
+        # check whether db_path directory exists
+        if not op.exists(op.dirname(self.db_path)):
+            # to create the database, we first make sure that the folder exists
+            os.makedirs(op.abspath(op.dirname(self.db_path)), exist_ok=True)
+
+        self.engine = db.create_engine(f"sqlite:///{self.db_path}", echo=echo)
 
         # create all tables or (do nothing if tables exist)
         Base.metadata.create_all(self.engine)
@@ -123,7 +120,7 @@ class Imprinter:
         self.session = None
         self.g3tsmurf_session = None
         self.g3tsmurf_config = g3tsmurf_config
-        self.db_path = db_path
+
 
     def get_session(self):
         """Get a new session or return the existing one
@@ -286,7 +283,7 @@ class Imprinter:
             session.commit()
             print("Book {} failed".format(book.bid))
             raise e
-        
+
 
     def get_book(self, bid, session=None):
         """Get book from database.
@@ -619,7 +616,6 @@ class ObsSet(list):
         assert mode in VALID_OBSTYPES, f"Invalid mode {mode}"
 
         # common values across modes
-        tel_tube = 'sat1'  # FIXME: hardcoded for testing
         # parse observation time and name the book with the first timestamp
         _, timestamp = stream_timestamp(self.obs_ids[0])
 
@@ -627,9 +623,9 @@ class ObsSet(list):
         if mode in ['obs', 'oper']:
             # get slot flags
             slot_flags = ''
-            for slot in SLOTS[tel_tube]:
+            for slot in self.slots[self.tel_tube]:
                 slot_flags += '1' if self.contains_stream(slot) else '0'
-            bid = f"{mode}_{timestamp}_{tel_tube}_{slot_flags}"
+            bid = f"{mode}_{timestamp}_{self.tel_tube}_{slot_flags}"
         else:
             raise NotImplementedError
 

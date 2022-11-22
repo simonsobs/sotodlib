@@ -2,11 +2,11 @@ import datetime as dt
 from typing import Optional
 import typer
 
-from sotodlib.io.imprinter import Imprinter
+from ..io.imprinter import Imprinter
 
 
 def main(
-    bdb: str,
+    config: str,
     g3tsmurf_config: str,
     min_ctime: Optional[float] = None,
     max_ctime: Optional[float] = None,
@@ -21,8 +21,8 @@ def main(
 
     Parameters
     ----------
-    bdb : str
-        Path to the book plan database.
+    config : str
+        Path to config file for imprinter
     g3tsmurf_config : str
         Path to config file for g3tsmurf database.
     min_ctime : Optional[float], optional
@@ -42,7 +42,7 @@ def main(
     """
     if stream_ids is not None:
         stream_ids = stream_ids.split(",")
-    imprinter = Imprinter(bdb, g3tsmurf_config)
+    imprinter = Imprinter(config, g3tsmurf_config)
     # leaving min_ctime and max_ctime as None will go through all available data,
     # so preferreably set them to a reasonable range based on update_delay
     if not from_scratch:
