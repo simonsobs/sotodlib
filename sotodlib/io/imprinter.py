@@ -97,17 +97,15 @@ class Books(Base):
 ##############
 
 class Imprinter:
-    def __init__(self, db_path, g3tsmurf_db=None, data_prefix=None, echo=False):
+    def __init__(self, db_path, g3tsmurf_config=None, echo=False):
         """Imprinter manages the book database.
 
         Parameters
         ----------
         db_path: str
             path to the book database
-        g3tsmurf_db: str
-            path to the g3tsmurf database
-        data_prefix: str
-            path to the data folder
+        g3tsmurf_config: str
+            path to config file for the g3tsmurf database
         echo: boolean
             if True, print all SQL statements
 
@@ -124,8 +122,7 @@ class Imprinter:
 
         self.session = None
         self.g3tsmurf_session = None
-        self.g3tsmurf_db = g3tsmurf_db
-        self.data_prefix = data_prefix
+        self.g3tsmurf_config = g3tsmurf_config
         self.db_path = db_path
 
     def get_session(self):
@@ -150,7 +147,7 @@ class Imprinter:
 
         """
         if self.g3tsmurf_session is None:
-            self.g3tsmurf_session = create_g3tsmurf_session(self.g3tsmurf_db, self.data_prefix)
+            self.g3tsmurf_session = create_g3tsmurf_session(self.g3tsmurf_config)
         return self.g3tsmurf_session
 
     def register_book(self, obsset, bid=None, commit=True, session=None, verbose=True):
@@ -273,7 +270,8 @@ class Imprinter:
                 session_id = book.bid.split('_')[1]
                 first5 = session_id[:5]
                 odir = op.join(output_root, book.type, first5)
-                if not op.exists(odir): os.makedirs(odir)
+                if not op.exists(odir):
+                    os.makedirs(odir)
                 Bookbinder(smurf_files, hk_files=hkfiles, out_root=odir,
                            stream_id=stream_id, session_id=int(session_id),
                            book_id=book.bid, start_time=start_t, end_time=stop_t,
@@ -512,19 +510,14 @@ class Imprinter:
 # Utility functions #
 #####################
 
-def create_g3tsmurf_session(db_path, data_prefix, timestream_folder=None, smurf_folder=None):
+def create_g3tsmurf_session(config):
     """create a connection session to g3tsmurf database
 
     Parameters
     ----------
-    db_path: str
-        path to the g3tsmurf database
-    data_prefix: str
-        path to the data folder
-    timestream_folder: str
-        name of the timestream folder, relative to data_prefix
-    smurf_folder: str
-        name of the smurf folder, relative to data_prefix
+    config: str
+        path to a yaml file that contains g3tsmurf db conn details
+        or it could be a dictionary with keys, etc.
 
     Returns
     -------
@@ -532,17 +525,10 @@ def create_g3tsmurf_session(db_path, data_prefix, timestream_folder=None, smurf_
         a session to the g3tsmurf database
 
     """
-    # reasonable default locations
-    if timestream_folder is None: timestream_folder = op.join(data_prefix, 'timestreams/')
-    if smurf_folder is None: smurf_folder = op.join(data_prefix, 'smurf/')
-
     # create database connection
-    SMURF = G3tSmurf(timestream_folder,
-                     db_path=db_path,
-                     meta_path=smurf_folder)
+    SMURF = G3tSmurf.from_configs(config)
     session = SMURF.Session()
     return session
-
 
 def stream_timestamp(obs_id):
     """parse observation id to obtain a (stream, timestamp) pair

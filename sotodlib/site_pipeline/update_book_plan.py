@@ -5,10 +5,9 @@ import typer
 from sotodlib.io.imprinter import Imprinter
 
 
-def update_book_plan(
+def main(
     bdb: str,
-    g3tsmurf_db: str,
-    data_prefix: str,
+    g3tsmurf_config: str,
     min_ctime: Optional[float] = None,
     max_ctime: Optional[float] = None,
     stream_ids: Optional[str] = None,
@@ -24,10 +23,8 @@ def update_book_plan(
     ----------
     bdb : str
         Path to the book plan database.
-    g3tsmurf_db : str
-        Path to the g3tsmurf database.
-    data_prefix : str
-        The prefix of the data files.
+    g3tsmurf_config : str
+        Path to config file for g3tsmurf database.
     min_ctime : Optional[float], optional
         The minimum ctime to include in the book plan, by default None
     max_ctime : Optional[float], optional
@@ -43,8 +40,9 @@ def update_book_plan(
         If True, start to search from beginning of time, by default False
 
     """
-    stream_ids = stream_ids.split(",")
-    imprinter = Imprinter(bdb, g3tsmurf_db, data_prefix)
+    if stream_ids is not None:
+        stream_ids = stream_ids.split(",")
+    imprinter = Imprinter(bdb, g3tsmurf_config)
     # leaving min_ctime and max_ctime as None will go through all available data,
     # so preferreably set them to a reasonable range based on update_delay
     if not from_scratch:
@@ -55,4 +53,4 @@ def update_book_plan(
                                           force_single_stream=force_single_stream)
 
 if __name__ == "__main__":
-    typer.run(update_book_plan)
+    typer.run(main)
