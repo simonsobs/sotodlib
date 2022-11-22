@@ -1,6 +1,6 @@
 import os, os.path as op
 import argparse
-from sotodlib.iobookbinder import Bookbinder
+from ..io.bookbinder import Bookbinder
 
 
 def main(args=None):
