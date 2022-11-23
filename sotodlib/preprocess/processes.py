@@ -3,6 +3,7 @@ import numpy as np
 import sotodlib.core as core
 import sotodlib.flags as flags
 import sotodlib.tod_ops as tod_ops
+from sotodlib.hwp import hwp
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    count_cuts,
@@ -139,6 +140,55 @@ class Calibrate(_Preprocess):
             raise ValueError(f"Entry '{self.process_cfgs['kind']}'"
                               " not understood")
 
+class HWPSS_Guess(_Preprocess):
+    name = "hwpss_guess"
+
+    def calc_and_save(self, aman, proc_aman):
+        hwpss_guess_aman = hwp.get_hwpss_guess(aman, **self.calc_cfgs)
+        self.save(proc_aman, hwpss_guess_aman)
+
+    def save(self, proc_aman, hwpss_guess_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("hwpss_guess", hwpss_guess_aman)
+
+
+class Estimate_HWPSS(_Preprocess):
+    name = "estimate_hwpss"
+
+    def calc_and_save(self, aman, proc_aman):
+        hwpss_template = hwp.extract_hwpss_template(aman, 
+                                                    proc_aman["hwpss_guess"]['A_guess'], 
+                                                    proc_aman["hwpss_guess"]['B_guess'],
+                                                    **self.calc_cfgs)
+        aman.wrap(self.calc_cfgs['name'], hwpss_template)
+        self.save(proc_aman, hwpss_template)
+
+    def save(self, proc_aman, hwpss_template):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(self.calc_cfgs['name'], hwpss_template)
+
+class Subtract_HWPSS(_Preprocess):
+    name = "subtract_hwpss"
+
+    def process(self, aman):
+        hwp.subtract_hwpss(aman, **self.process_cfgs)
+
+class Apodize(_Preprocess):
+    name = "apodize"
+
+    def process(self, aman):
+        hwp.apodize_cosine(aman, **self.process_cfgs)
+
+class Demodulate(_Preprocess):
+    name = "demodulate"
+
+    def process(self, aman):
+        hwp.demod_tod(aman, **self.process_cfgs)
+
 _Preprocess.register(Trends.name, Trends)
 _Preprocess.register(FFT_Trim.name, FFT_Trim)
 _Preprocess.register(Detrend.name, Detrend)
@@ -146,4 +196,8 @@ _Preprocess.register(Glitch_Detection.name, Glitch_Detection)
 _Preprocess.register(PSD_Calc.name, PSD_Calc)
 _Preprocess.register(Noise.name, Noise)
 _Preprocess.register(Calibrate.name, Calibrate)
-
+_Preprocess.register(HWPSS_Guess.name, HWPSS_Guess)
+_Preprocess.register(Estimate_HWPSS.name, Estimate_HWPSS)
+_Preprocess.register(Subtract_HWPSS.name, Subtract_HWPSS)
+_Preprocess.register(Apodize.name, Apodize)
+_Preprocess.register(Demodulate.name, Demodulate)
