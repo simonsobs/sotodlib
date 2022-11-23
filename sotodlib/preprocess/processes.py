@@ -159,29 +159,32 @@ class Estimate_HWPSS(_Preprocess):
 
     def calc_and_save(self, aman, proc_aman):
         hwpss_template = hwp.extract_hwpss_template(aman, 
-                                                    proc_aman["hwpss_guess"]['A_guess'], 
-                                                    proc_aman["hwpss_guess"]['B_guess'],
+                                                    proc_aman["hwpss_guess"]["A_guess"].T, 
+                                                    proc_aman["hwpss_guess"]["B_guess"].T,
                                                     **self.calc_cfgs)
-        aman.wrap(self.calc_cfgs['name'], hwpss_template)
+        aman.wrap(self.calc_cfgs["name"], hwpss_template)
         self.save(proc_aman, hwpss_template)
 
     def save(self, proc_aman, hwpss_template):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.calc_cfgs['name'], hwpss_template)
+            proc_aman.wrap(self.calc_cfgs["name"], hwpss_template)
 
 class Subtract_HWPSS(_Preprocess):
     name = "subtract_hwpss"
 
     def process(self, aman):
-        hwp.subtract_hwpss(aman, **self.process_cfgs)
+        hwp.construct_hwpss_template(aman, aman[self.process_cfgs["hwpss_template_coeff"]], 
+                                     self.process_cfgs["hwpss_template"])
+        hwp.subtract_hwpss(aman, self.process_cfgs["hwpss_template"], 
+                           self.process_cfgs["subtract_name"])
 
 class Apodize(_Preprocess):
     name = "apodize"
 
     def process(self, aman):
-        hwp.apodize_cosine(aman, **self.process_cfgs)
+        tod_ops.apodize.apodize_cosine(aman, **self.process_cfgs)
 
 class Demodulate(_Preprocess):
     name = "demodulate"
