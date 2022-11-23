@@ -147,3 +147,130 @@ def demod(aman, signal='signal', name='signal_demod',
     aman.move(name + '_prelfilt', None)
     aman.move(name + '_prebfilt', None)
     aman.move(name + '_wo_lfilt', None)
+
+
+def get_hwpss_guess(aman, signal='signal', modes=[2, 4, 6, 8]):
+    """
+    Projects out fourier modes, ``modes`` from ``aman`` and returns them. This
+    can be used as an initial guess for the fitting function.
+
+    Args
+    ----
+    aman (AxisManager):
+    """
+    As = np.asarray([np.sum(aman[signal]*np.sin(m*aman.hwp_angle)\
+                    * np.diff(aman.timestamps).mean(), axis=1)\
+                    / (np.ptp(aman.timestamps)/2) for m in modes])
+    Bs = np.asarray([np.sum(aman[signal]*np.cos(m*aman.hwp_angle)\
+                    * np.diff(aman.timestamps).mean(), axis=1)\
+                    / (np.ptp(aman.timestamps)/2) for m in modes])
+    proc_aman = core.AxisManager().wrap('A_guess', As.T, [(0, core.LabelAxis('dets', aman.dets.vals)),
+                                                          (1, core.IndexAxis('modes'))])
+    proc_aman.wrap('B_guess', Bs.T, [(0, core.LabelAxis('dets', aman.dets.vals)),
+                                     (1, core.IndexAxis('modes'))])
+    return proc_aman
+
+
+def extract_hwpss_template(aman, As, Bs, signal='signal', name='hwpss_ext',
+                           mask_flags=True, modes=[2, 4, 6, 8],
+                           add_to_aman=True):
+    """
+    Function for fitting out the hwpss template given a guess of the fourier
+    coefficients that match the size of the list of ``modes`` intended to fit.
+    This uses ``scipy.optimize.curve_fit`` to fit the template so that you can
+    fit masked versions of the signal to avoid biasing the template estimations
+    by the glitches in the data.
+    Args
+    ----
+    aman (AxisManager):
+    As (float list):
+    Bs (float list):
+    signal (str):
+    name (str):
+    mask_flags (bool):
+    bins (int):
+    """
+    if create_proc_aman:
+        new_As = np.copy(As.T)
+        new_Bs = np.copy(As.T)
+        new_modes = np.copy(As.T)
+        lenm = len(modes)
+    if add_to_aman:
+        if name in aman.keys():
+            aman.move(name, None)
+        aman.wrap_new(name, ('dets', 'samps'))
+    N_modes = len(modes)
+    sins = np.zeros((N_modes, aman.samps.count))
+    coss = np.zeros((N_modes, aman.samps.count))
+    for i, nm in enumerate(modes):
+        sins[i, :] = np.sin(nm*aman.hwp_angle)
+        coss[i, :] = np.cos(nm*aman.hwp_angle)
+
+    def wrapper_fit_func(x, N, sins, coss, *args):
+        a, b, m, a0 = list(args[0][:N]), list(args[0][N:2*N]),\
+                      list(args[0][2*N:3*N]), args[0][-1]
+        return fit_func(x, a0, a, b, m, N, sins, coss)
+
+    def fit_func(x, A0, As, Bs, N_mode, N, sins, coss):
+        y = A0*np.ones(len(x))
+        for i, [a, b] in enumerate(list(zip(As, Bs))):
+            y += a*sins[i] + b*coss[i]
+        return y
+
+    if mask_flags:
+        m = ~aman.flags.glitches.mask()
+    else:
+        m = np.full((aman.dets.count, aman.samps.count), True)
+
+    for i in range(aman.dets.count):
+        params_0 = list(As[:, i]) + list(Bs[:, i]) + list(modes)
+        params_0.append(np.mean(aman[signal][i, m[i]]))
+        popt, pcov = curve_fit(lambda x, *params_0: wrapper_fit_func(aman.hwp_angle[m[i]], N_modes, sins[:,m[i]], coss[:,m[i]], params_0),
+                               aman.hwp_angle[m[i]], aman[signal][i,m[i]], p0=params_0)
+        if add_to_aman:
+            aman[name][i] = wrapper_fit_func(aman.hwp_angle, N_modes, sins,
+                                            coss, popt)
+
+        new_As[i], new_Bs[i], new_modes[i] = popt[0:lenm], popt[lenm:2*lenm], popt[2*lenm:3*lenm]
+
+    aman_proc = core.AxisManager().wrap('A_sine', new_As, [(0, core.LabelAxis('dets', aman.dets.vals)),
+                                                           (1, core.IndexAxis('modes'))])
+    aman_proc.wrap('A_cos', new_Bs, [(0, core.LabelAxis('dets', aman.dets.vals)),
+                                     (1, core.IndexAxis('modes'))])
+    aman_proc.wrap('modes', new_modes, [(0, core.LabelAxis('dets', aman.dets.vals)),
+                                        (1, core.IndexAxis('modes'))])
+    return aman_proc
+
+
+def subtract_hwpss(aman, signal='signal', hwpss_template='hwpss_ext',
+                   subtract_name='hwpss_remove'):
+    """
+    Subtract the hwpss template from the signal in an axis manager.
+    """
+    aman.wrap_new(subtract_name, dtype='float32', shape=('dets', 'samps'))
+    aman[subtract_name] = np.subtract(aman[signal], aman[hwpss_template])
+
+
+def demod_tod(aman, signal='hwpss_remove', fc_lpf=2., width=0.5):
+    """
+    Simple demodulation function
+    Args:
+        signal (str): Axis to demodulate
+        fc_lpf (float): low pass filter cutoff
+        width (float): width of sine^2 low pass filter
+    """
+    aman.wrap_new('demodQ', dtype='float32', shape=('dets', 'samps'))
+    aman.wrap_new('demodU', dtype='float32', shape=('dets', 'samps'))
+    aman.wrap_new('dsT', dtype='float32', shape=('dets', 'samps'))
+
+    phasor = np.exp(4.j * aman.hwp_angle)
+    filt = tod_ops.filters.low_pass_sine2(fc_lpf, width=width)
+
+    demod = aman[signal] * phasor
+    sim.dsT = aman[signal]
+
+    sim['demodQ'] = demod.real
+    sim['demodQ'] = tod_ops.fourier_filter(sim, filt, signal_name='demodQ')
+    sim['demodU'] = demod.imag
+    sim['demodU'] = tod_ops.fourier_filter(sim, filt, signal_name='demodU')
+    sim['dsT'] = tod_ops.fourier_filter(sim, filt, signal_name='dsT')
