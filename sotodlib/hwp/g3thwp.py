@@ -278,25 +278,35 @@ class G3tHWP():
 
         return data
 
-    def data_formatting(self, data, suffix=''):
-        """ Formatting encoder data
-        suffix: '' or '_2'
-            '' is for formatting 1st encoder, '_2' for 2nd encoder
+    def _data_formatting(self, data, suffix=''):
+        """
+        Formatting encoder data
+
+        Args
+        -----
+            data : dict
+                HWP HK data from load_data
+            suffix: Specify whether to use 1st or 2nd encoder, '' or '_2'
+                '' for 1st encoder, '_2' for 2nd encoder
+        Returns
+        --------
+            dict
+                {'rising_edge_count', 'irig_time', 'counter', 'counter_index'}
         """
         keys = ['rising_edge_count', 'irig_time', 'counter', 'counter_index']
         if 'irig_time'+suffix not in data.keys():
-            logger.warning('All IRIG time is not correct in 1st encoder')
+            logger.warning('All IRIG time is not correct')
             return {k:[] for k in keys}
         if 'counter'+suffix not in data.keys():
             logger.warning('No encoder data is available')
             return {k:[] for k in keys}
         out = {k:data[k+suffix][1] for k in keys}
 
-        # quad formatting
+        # quad
         out['quad'] = self._quad_form(data['quad'+suffix][1])
         out['quad_time'] = data['quad'+suffix][0]
 
-        # irig formatting
+        # irig
         if self._irig_type == 1:
             out['irig_time'] = out['irig_synch_pulse_clock_time'+suffix][1]
             out['rising_edge_count'] = out['irig_synch_pulse_clock_counts'+suffix][1]
@@ -307,13 +317,29 @@ class G3tHWP():
 
         return out
 
-    def slowdata_process(self, fast_time, irig_time, hwp_rate):
+    def _slowdata_process(self, fast_time, irig_time):
         """ Diagnose hwp status and output status flags
-         - Time definition -
-         if fast_time exists: slow_time = fast_time
-         elif: irig_time exists but no fast_time, slow_time = irig_time
-         else: slow_time is per 10 sec array
+
+        Returns
+        --------
+            dict
+                {stable, locked, hwp_rate, slow_time}
+
+        Notes
+        ------
+            - Time definition -
+            if fast_time exists: slow_time = fast_time
+            elif: irig_time exists but no fast_time, slow_time = irig_time
+            else: slow_time is per 10 sec array
         """
+        # hwp speed calc. (approximate using ref)
+        hwp_rate_ref = 1 / np.diff(fast_time[self._ref_indexes])
+        hwp_rate = [hwp_rate_ref[0] for i in range(self._ref_indexes[0])]
+        for n in range(len(np.diff(self._ref_indexes))):
+            hwp_rate += [hwp_rate_ref[n]
+                         for r in range(np.diff(self._ref_indexes)[n])]
+        hwp_rate += [hwp_rate_ref[-1] for i in range(len(fast_time) -
+                                                     self._ref_indexes[-1])]
 
         fast_irig_time = fast_time
         locked = np.ones(len(fast_time), dtype=bool)
@@ -398,9 +424,9 @@ class G3tHWP():
         if not any(data):
             logger.info("no HWP field data")
 
-        d = self.data_formatting(data)
+        d = self._data_formatting(data)
         if 'irig_time_2' in data.keys() and 'counter_2' in data.keys():
-            d2 = self.data_formatting(data, suffix='_2')
+            d2 = self._data_formatting(data, suffix='_2')
             if len(d['irig_time']) > len(d2['irig_time']):
                 logger.info('Use 2nd encoder.')
                 d = d2
@@ -419,17 +445,8 @@ class G3tHWP():
         if len(fast_time) == 0:
             logger.warning('analyzed encoder data is None')
 
-        # hwp speed calc. (approximate using ref)
-        hwp_rate_ref = 1 / np.diff(fast_time[self._ref_indexes])
-        hwp_rate = [hwp_rate_ref[0] for i in range(self._ref_indexes[0])]
-        for n in range(len(np.diff(self._ref_indexes))):
-            hwp_rate += [hwp_rate_ref[n]
-                         for r in range(np.diff(self._ref_indexes)[n])]
-        hwp_rate += [hwp_rate_ref[-1] for i in range(len(fast_time) -
-                                                     self._ref_indexes[-1])]
-
         # hwp status calc.
-        out = self.slowdata_process(fast_time, d['irig_time'], hwp_rate)
+        out = self._slowdata_process(fast_time, d['irig_time'])
         out['fast_time'] = fast_time
         out['angle'] = angle
 
