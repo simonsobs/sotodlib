@@ -292,22 +292,16 @@ class G3tHWP():
         Returns
         --------
         dict
-            {'rising_edge_count', 'irig_time', 'counter', 'counter_index'}
+            {'rising_edge_count', 'irig_time', 'counter', 'counter_index', 'quad', 'quad_time'}
         """
-        keys = ['rising_edge_count', 'irig_time', 'counter', 'counter_index']
+        keys = ['rising_edge_count', 'irig_time', 'counter', 'counter_index', 'quad', 'quad_time']
+        out = {k:data[k+suffix][1] if k+suffix in data.keys() else [] for k in keys}
+
+        # irig part
         if 'irig_time'+suffix not in data.keys():
             logger.warning('All IRIG time is not correct')
-            return {k:[] for k in keys}
-        if 'counter'+suffix not in data.keys():
-            logger.warning('No encoder data is available')
-            return {k:[] for k in keys}
-        out = {k:data[k+suffix][1] for k in keys}
+            return out
 
-        # quad
-        out['quad'] = self._quad_form(data['quad'+suffix][1])
-        out['quad_time'] = data['quad'+suffix][0]
-
-        # irig
         if self._irig_type == 1:
             out['irig_time'] = out['irig_synch_pulse_clock_time'+suffix][1]
             out['rising_edge_count'] = out['irig_synch_pulse_clock_counts'+suffix][1]
@@ -315,6 +309,14 @@ class G3tHWP():
         logger.info('IRIG timing quality check.')
         out['irig_time'], out['rising_edge_count'] = self._irig_quality_check(
             out['irig_time'], out['rising_edge_count'])
+
+        # encoder part
+        if 'counter'+suffix not in data.keys():
+            logger.warning('No encoder data is available')
+            return out
+
+        out['quad'] = self._quad_form(data['quad'+suffix][1])
+        out['quad_time'] = data['quad'+suffix][0]
 
         return out
 
