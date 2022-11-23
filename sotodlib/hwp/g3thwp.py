@@ -284,14 +284,15 @@ class G3tHWP():
 
         Args
         -----
-            data : dict
-                HWP HK data from load_data
-            suffix: Specify whether to use 1st or 2nd encoder, '' or '_2'
-                '' for 1st encoder, '_2' for 2nd encoder
+        data : dict
+            HWP HK data from load_data
+        suffix: Specify whether to use 1st or 2nd encoder, '' or '_2'
+            '' for 1st encoder, '_2' for 2nd encoder
+
         Returns
         --------
-            dict
-                {'rising_edge_count', 'irig_time', 'counter', 'counter_index'}
+        dict
+            {'rising_edge_count', 'irig_time', 'counter', 'counter_index'}
         """
         keys = ['rising_edge_count', 'irig_time', 'counter', 'counter_index']
         if 'irig_time'+suffix not in data.keys():
@@ -322,15 +323,15 @@ class G3tHWP():
 
         Returns
         --------
-            dict
-                {stable, locked, hwp_rate, slow_time}
+        dict
+            {stable, locked, hwp_rate, slow_time}
 
         Notes
         ------
-            - Time definition -
-            if fast_time exists: slow_time = fast_time
-            elif: irig_time exists but no fast_time, slow_time = irig_time
-            else: slow_time is per 10 sec array
+        - Time definition -
+        if fast_time exists: slow_time = fast_time
+        elif: irig_time exists but no fast_time, slow_time = irig_time
+        else: slow_time is per 10 sec array
         """
         # hwp speed calc. (approximate using ref)
         hwp_rate_ref = 1 / np.diff(fast_time[self._ref_indexes])
@@ -427,7 +428,7 @@ class G3tHWP():
         d = self._data_formatting(data)
         if 'irig_time_2' in data.keys() and 'counter_2' in data.keys():
             d2 = self._data_formatting(data, suffix='_2')
-            if len(d['irig_time']) > len(d2['irig_time']):
+            if len(d['irig_time']) < len(d2['irig_time']):
                 logger.info('Use 2nd encoder.')
                 d = d2
         if len(d['irig_time']) == 0:
@@ -451,6 +452,45 @@ class G3tHWP():
         out['angle'] = angle
 
         return out
+
+    def eval_angle(self, solved):
+        """
+        Evaluate the non-uniformity of hwp angle and subtract
+
+        Args
+        -----
+        solved: dict
+          dict data from analyze
+        output: dict
+          same format as analyze
+
+        Notes
+        ------
+        non-uniformity of hwp angle comes from following reasons,
+            - non-uniformity of encoder slits
+            - sag of rotor
+            - bad tuning of the comparator threshold of DriverBoard
+            - degradation of LED
+        and the non-uniformity can be time-dependent.
+
+        Need to evaluate and subtract it before interpolating hwp angle into Smurf timestamps.
+        The non-uniformity of encoder slots creates additional hwp angle jitter.
+        The maximum possible additional jitter is comparable to the requirement of angle jitter.
+        """
+
+        """
+        - Temporary Notes -
+        the simple method to subrtact the non-uniformity
+        is to take the average of hwp angle per one revolution.
+        the more carful evaluation method of non-uniformity need to be added.
+        """
+        def moving_average(array, n):
+            return np.convolve(array, np.ones(n), 'valid')/n
+
+        logger.info('Remove non-uniformity from hwp angle and overwrite')
+        solved['fast_time'] = moving_average(solved['fast_time'], self._num_edges)
+        solved['angle'] = moving_average(solved['angle'], self._num_edges)
+        return solved
 
     def write_solution(self, solved, output=None):
         """
