@@ -2,13 +2,10 @@
 # -*- coding: utf-8 -*-
 
 import os
-import sys
 import numpy as np
 import scipy.interpolate
 import so3g
 from spt3g import core
-import argparse
-from tqdm import tqdm
 import logging
 import yaml
 
@@ -794,8 +791,7 @@ class G3tHWP():
 
         self._encd_cnt = self._encd_cnt[0] + np.arange(
             len(self._encd_cnt) + len(self._ref_indexes) * self._ref_edges)
-        self._ref_indexes += np.arange(len(self._ref_indexes)
-                                       ) * self._ref_edges
+        self._ref_indexes += np.arange(len(self._ref_indexes)) * self._ref_edges
         self._ref_cnt = self._encd_cnt[self._ref_indexes]
 
         return
