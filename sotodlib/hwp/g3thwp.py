@@ -302,46 +302,46 @@ class G3tHWP():
         elif: irig_time exists but no fast_time, slow_time = irig_time
         else: slow_time is per 10 sec array
         """
-        keys = ['locked', 'stable', 'hwp_rate']
         slow_time = np.arange(self._start, self._end, 10)
 
         if len(irig_time) == 0:
-            out = {key: np.zeros_like(slow_time, dtype=float) for key in keys}
+            out = {key: np.zeros_like(slow_time, dtype=float) for key in ['locked', 'stable', 'hwp_rate']}
             out['slow_time'] = slow_time
             return out
 
         if len(fast_time) == 0:
-            slow_time = irig_time
-            out = {key: np.zeros_like(slow_time, dtype=float) for key in keys}
-            out['slow_time'] = slow_time
-            return out
+            fast_irig_time = irig_time
+            locked = np.zeros_like(irig_time, dtype=float)
+            stable = np.zeros_like(irig_time, dtype=float)
+            hwp_rate = np.zeros_like(irig_time, dtype=float)
 
-        # hwp speed calc. (approximate using ref)
-        hwp_rate_ref = 1 / np.diff(fast_time[self._ref_indexes])
-        hwp_rate = [hwp_rate_ref[0] for i in range(self._ref_indexes[0])]
-        for n in range(len(np.diff(self._ref_indexes))):
-            hwp_rate += [hwp_rate_ref[n]
-                         for r in range(np.diff(self._ref_indexes)[n])]
-        hwp_rate += [hwp_rate_ref[-1] for i in range(len(fast_time) -
-                                                     self._ref_indexes[-1])]
+        else:
+            # hwp speed calc. (approximate using ref)
+            hwp_rate_ref = 1 / np.diff(fast_time[self._ref_indexes])
+            hwp_rate = [hwp_rate_ref[0] for i in range(self._ref_indexes[0])]
+            for n in range(len(np.diff(self._ref_indexes))):
+                hwp_rate += [hwp_rate_ref[n]
+                             for r in range(np.diff(self._ref_indexes)[n])]
+            hwp_rate += [hwp_rate_ref[-1] for i in range(len(fast_time) -
+                                                         self._ref_indexes[-1])]
 
-        fast_irig_time = fast_time
-        locked = np.ones_like(fast_time, dtype=bool)
-        locked[np.where(hwp_rate == 0)] = False
-        stable = np.ones_like(fast_time, dtype=bool)
+            fast_irig_time = fast_time
+            locked = np.ones_like(fast_time, dtype=bool)
+            locked[np.where(hwp_rate == 0)] = False
+            stable = np.ones_like(fast_time, dtype=bool)
 
-        # irig only status
-        irig_only_time = irig_time[np.where(
-            (irig_time < fast_time[0]) | (irig_time > fast_time[-1]))]
-        irig_only_locked = np.zeros_like(irig_only_time, dtype=bool)
-        irig_only_hwp_rate = np.zeros_like(irig_only_time, dtype=float)
+            # irig only status
+            irig_only_time = irig_time[np.where(
+                (irig_time < fast_time[0]) | (irig_time > fast_time[-1]))]
+            irig_only_locked = np.zeros_like(irig_only_time, dtype=bool)
+            irig_only_hwp_rate = np.zeros_like(irig_only_time, dtype=float)
 
-        fast_irig_time = np.append(irig_only_time, fast_time)
-        fast_irig_idx = np.argsort(fast_irig_time)
-        fast_irig_time = fast_irig_time[fast_irig_idx]
-        locked = np.append(irig_only_locked, locked)[fast_irig_idx]
-        hwp_rate = np.append(irig_only_hwp_rate, hwp_rate)[fast_irig_idx]
-        stable = np.ones_like(fast_irig_time, dtype=bool)
+            fast_irig_time = np.append(irig_only_time, fast_time)
+            fast_irig_idx = np.argsort(fast_irig_time)
+            fast_irig_time = fast_irig_time[fast_irig_idx]
+            locked = np.append(irig_only_locked, locked)[fast_irig_idx]
+            hwp_rate = np.append(irig_only_hwp_rate, hwp_rate)[fast_irig_idx]
+            stable = np.ones_like(fast_irig_time, dtype=bool)
 
         # slow status
         slow_time = slow_time[np.where(
@@ -353,7 +353,6 @@ class G3tHWP():
         slow_time = np.append(slow_time, fast_irig_time)
         slow_idx = np.argsort(slow_time)
         slow_time = slow_time[slow_idx]
-
         locked = np.append(slow_locked, locked)[slow_idx]
         stable = np.append(slow_stable, stable)[slow_idx]
         hwp_rate = np.append(slow_hwp_rate, hwp_rate)[slow_idx]
