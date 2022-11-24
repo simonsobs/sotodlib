@@ -261,12 +261,14 @@ class G3tHWP():
         dict
             {'rising_edge_count', 'irig_time', 'counter', 'counter_index', 'quad', 'quad_time'}
         """
+        enc_key = {'': '1st', '_2': '2nd'}
+
         keys = ['rising_edge_count', 'irig_time', 'counter', 'counter_index', 'quad', 'quad_time']
         out = {k:data[k+suffix][1] if k+suffix in data.keys() else [] for k in keys}
 
         # irig part
         if 'irig_time'+suffix not in data.keys():
-            logger.warning('All IRIG time is not correct')
+            logger.warning(f'All IRIG time is not correct for {enc_key[suffix]} encoder')
             return out
 
         if self._irig_type == 1:
@@ -279,7 +281,7 @@ class G3tHWP():
 
         # encoder part
         if 'counter'+suffix not in data.keys():
-            logger.warning('No encoder data is available')
+            logger.warning(f'No encoder data is available for {enc_key[suffix]} encoder')
             return out
 
         out['quad'] = self._quad_form(data['quad'+suffix][1])
@@ -409,7 +411,7 @@ class G3tHWP():
         d = self._data_formatting(data)
         if 'irig_time_2' in data.keys() and 'counter_2' in data.keys():
             d2 = self._data_formatting(data, suffix='_2')
-            if len(d['irig_time']) < len(d2['irig_time']):
+            if len(d['counter']) < len(d2['counter']):
                 logger.info('Use 2nd encoder.')
                 d = d2
         if len(d['irig_time']) == 0:
@@ -807,9 +809,9 @@ class G3tHWP():
             (2 * np.pi / self._num_edges) % (2 * np.pi)
         angle_last_revolution = (self._encd_cnt_split[-1] - self._ref_cnt[-1]) * \
             (2 * np.pi / self._num_edges) % (2 * np.pi) + len(self._ref_cnt) * 2 * np.pi
-        self._angle = np.array([((self._encd_cnt_split[i] - self._ref_cnt[i]) * \
+        self._angle = np.concatenate([(self._encd_cnt_split[i] - self._ref_cnt[i]) * \
                           (2 * np.pi / np.diff(self._ref_indexes)[i - 1]) \
-                              % (2 * np.pi) + i * 2 * np.pi ).flatten() \
+                              % (2 * np.pi) + i * 2 * np.pi  \
                                   for i in range(1, len(self._encd_cnt_split) - 1)])
         self._angle = np.concatenate([angle_first_revolution, self._angle.flatten(), angle_last_revolution])
         self._angle = direction * self._angle
@@ -867,7 +869,7 @@ class G3tHWP():
             if quad_split.mean() > 0.1 and quad_split.mean() < 0.9:
                 if logger_bit:
                     logger.warning(
-                        "flipping quad is corrected by mean value, please consider to ues force_quad")
+                        "flipping quad is corrected by mean value, please consider to use force_quad")
                     logger_bit = False
                 for j in range(len(quad_split)):
                     quad[j + offset] = int(quad_split.mean() + 0.5)
