@@ -145,37 +145,15 @@ class G3tHWP():
 
         # load housekeeping data with hwp keys
         logger.info('Loading HK data files ')
-        logger.info("input time range: " +
-                    str(self._start) + " - " + str(self._end))
+        logger.info("input time range: " + str(self._start) + " - " + str(self._end))
 
-        hwp_keys = []
-        for i in range(len(self._field_list)):
-            if 'counter' in self._field_list[i]:
-                hwp_keys.append(self._field_instance +
-                                '_full.' + self._field_list[i])
-            else:
-                hwp_keys.append(self._field_instance +
-                                '.' + self._field_list[i])
-        alias = self._field_list
-
-        # 2nd encoder readout
-        hwp_keys_2 = []
-        alias_2 = []
-        if self._field_instance_sub is not None:
-            for i in range(len(self._field_list)):
-                if 'counter' in self._field_list[i]:
-                    hwp_keys_2.append(self._field_instance_sub +
-                                      '_full.' + self._field_list[i])
-                else:
-                    hwp_keys_2.append(self._field_instance_sub +
-                                      '.' + self._field_list[i])
-            alias_2 = [a + '_2' for a in self._field_list]
+        fields, alias = self._key_formatting()
 
         data = so3g.hk.load_range(
             self._start,
             self._end,
-            fields=hwp_keys + hwp_keys_2,
-            alias=alias + alias_2,
+            fields,
+            alias,
             data_dir=self._data_dir)
         if not any(data):
             logger.info('HWP is not spinning in time range {' + str(
@@ -213,28 +191,6 @@ class G3tHWP():
             else:
                 self._field_instance = 'observatory.' + instance + '.feeds.HWPEncoder'
 
-        hwp_keys = []
-        for i in range(len(self._field_list)):
-            if 'counter' in self._field_list[i]:
-                hwp_keys.append(self._field_instance +
-                                '_full.' + self._field_list[i])
-            else:
-                hwp_keys.append(self._field_instance +
-                                '.' + self._field_list[i])
-        alias = self._field_list
-
-        # 2nd encoder readout
-        hwp_keys_2 = []
-        alias_2 = []
-        if self._field_instance_sub is not None:
-            for i in range(len(self._field_list)):
-                if 'counter' in self._field_list[i]:
-                    hwp_keys_2.append(self._field_instance_sub +
-                                      '_full.' + self._field_list[i])
-                else:
-                    hwp_keys_2.append(self._field_instance_sub +
-                                      '.' + self._field_list[i])
-            alias_2 = [a + '_2' for a in self._field_list]
 
         # load housekeeping files with hwp keys
         scanner = so3g.hk.HKArchiveScanner()
@@ -255,25 +211,39 @@ class G3tHWP():
             self._end = 0
             return {}
 
-        for i in range(len(hwp_keys)):
-            if not hwp_keys[i] in arc.get_fields()[0].keys():
-                logger.info(
-                    "HWP is not spinning in input g3 files or can not find field")
-                return {}
-            elif self._start == 0 and self._end == 0:
-                self._start = arc.simple(hwp_keys[0])[0][0]
-                self._end = arc.simple(hwp_keys[0])[0][-1]
+        fields, alias = self._key_formatting()
 
-        data = {}
-        for i in range(len(alias)):
-            data = dict(**data, **{alias[i]: arc.simple(hwp_keys[i])})
+        if not np.any([f in arc.get_fields()[0].keys() for f in fields]):
+            logger.info("HWP is not spinning in input g3 files or can not find field")
+            return {}
+        if self._start == 0 and self._end == 0:
+            self._start = np.min([arc.simple(f)[0][0] for f in fields if f in arc.get_fields()[0].keys()])
+            self._end = np.max([arc.simple(f)[0][-1] for f in fields if f in arc.get_fields()[0].keys()])
 
-        for i in range(len(alias_2)):
-            if not hwp_keys_2[i] in arc.get_fields()[0].keys():
-                continue
-            data = dict(**data, **{alias_2[i]: arc.simple(hwp_keys_2[i])})
+        data = {a: arc.simple(f) for a, f in zip(alias, fields) if f in arc.get_fields()[0].keys()}
 
         return data
+
+    def _key_formatting(self):
+        """
+        Formatting hwp housekeeping field names and aliases
+
+        Return
+        -----
+        fields, alias
+        """
+        # 1st encoder readout
+        fields = [self._field_instance + '_full.' + f if 'counter' in f
+                    else self._field_instance + '.' + f for f in self._field_list]
+        alias = self._field_list
+
+        # 2nd encoder readout
+        if self._field_instance_sub is not None:
+            fields += [self._field_instance_sub + '_full.' + f if 'counter' in f
+                    else self._field_instance_sub + '.' + f for f in self._field_list]
+            alias += [a + '_2' for a in self._field_list]
+
+        return fields, alias
 
     def _data_formatting(self, data, suffix=''):
         """
@@ -460,6 +430,9 @@ class G3tHWP():
         -----
         solved: dict
           dict data from analyze
+
+        Returns
+        --------
         output: dict
           same format as analyze
 
