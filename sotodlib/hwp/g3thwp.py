@@ -307,14 +307,18 @@ class G3tHWP():
         slow_time = np.arange(self._start, self._end, 10)
 
         if len(irig_time) == 0:
-            out = {key: np.zeros_like(slow_time, dtype=float) for key in ['locked', 'stable', 'hwp_rate']}
-            out['slow_time'] = slow_time
+            out = {
+                'locked': np.zeros_like(slow_time, dtype=bool),
+                'stable': np.zeros_like(slow_time, dtype=bool),
+                'hwp_rate': np.zeros_like(slow_time, dtype=float),
+                'slow_time': slow_time,
+            }
             return out
 
         if len(fast_time) == 0:
             fast_irig_time = irig_time
-            locked = np.zeros_like(irig_time, dtype=float)
-            stable = np.zeros_like(irig_time, dtype=float)
+            locked = np.zeros_like(irig_time, dtype=bool)
+            stable = np.zeros_like(irig_time, dtype=bool)
             hwp_rate = np.zeros_like(irig_time, dtype=float)
 
         else:
