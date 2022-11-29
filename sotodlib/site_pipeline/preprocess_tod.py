@@ -96,7 +96,7 @@ def preprocess_tod(obs_id, configs, overwrite=False):
         for process in pipe:
             logger.info(f"Processing {process.name}")
 
-            process.process(aman) ## make changes to aman
+            process.process(aman, proc_aman) ## make changes to aman
             process.calc_and_save(aman, proc_aman) ## calculate data products
 
         policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
@@ -121,7 +121,7 @@ def load_preprocess_det_select(obs_id, configs, context=None):
     meta = context.get_meta(obs_id)
 
     for process in pipe:
-        logger.info(f"Processing {process.name}")
+        logger.info(f"Selecting On {process.name}")
         process.select(meta)
     return meta
 
@@ -133,5 +133,5 @@ def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml", context=None 
     aman = context.get_obs(meta)
     for process in pipe:
         logger.info(f"Processing {process.name}")
-        process.process(aman)
+        process.process(aman, aman.preprocess)
     return aman
