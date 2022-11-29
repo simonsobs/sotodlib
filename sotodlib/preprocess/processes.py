@@ -14,12 +14,12 @@ from .core import _Preprocess
 
 class FFT_Trim(_Preprocess):
     name = "fft_trim"    
-    def process(self, aman):
+    def process(self, aman, proc_aman):
         tod_ops.fft_trim(aman, **self.process_cfgs)
 
 class Detrend(_Preprocess):
     name = "detrend"
-    def process(self, aman):
+    def process(self, aman, proc_aman):
         tod_ops.detrend_tod(aman, **self.process_cfgs)
         
 class Trends(_Preprocess):
@@ -84,7 +84,7 @@ class Glitch_Detection(_Preprocess):
 class PSD_Calc(_Preprocess):
     name = "psd"
     
-    def process(self, aman):
+    def process(self, aman, proc_aman):
         freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, **self.process_cfgs)
         fft_aman = core.AxisManager(
             aman.dets, 
@@ -133,7 +133,7 @@ class Noise(_Preprocess):
 class Calibrate(_Preprocess):
     name = "calibrate"
     
-    def process(self, aman):
+    def process(self, aman, proc_aman):
         if self.process_cfgs["kind"] == "single_value":
             aman.signal *=  self.process_cfgs["val"]
         else:
@@ -174,22 +174,28 @@ class Estimate_HWPSS(_Preprocess):
 class Subtract_HWPSS(_Preprocess):
     name = "subtract_hwpss"
 
-    def process(self, aman):
-        hwp.construct_hwpss_template(aman, aman[self.process_cfgs["hwpss_template_coeff"]], 
-                                     self.process_cfgs["hwpss_template"])
-        hwp.subtract_hwpss(aman, self.process_cfgs["hwpss_template"], 
-                           self.process_cfgs["subtract_name"])
+    def process(self, aman, proc_aman):
+        hwp.construct_hwpss_template(
+            aman, 
+            proc_aman[self.process_cfgs["hwpss_template_coeff"]], 
+            self.process_cfgs["hwpss_template"]
+        )
+        hwp.subtract_hwpss(
+            aman, 
+            hwpss_template = aman[self.process_cfgs["hwpss_template"]], 
+            subtract_name=self.process_cfgs["subtract_name"]
+        )
 
 class Apodize(_Preprocess):
     name = "apodize"
 
-    def process(self, aman):
+    def process(self, aman, proc_aman):
         tod_ops.apodize.apodize_cosine(aman, **self.process_cfgs)
 
 class Demodulate(_Preprocess):
     name = "demodulate"
 
-    def process(self, aman):
+    def process(self, aman, proc_aman):
         hwp.demod_tod(aman, **self.process_cfgs)
 
 _Preprocess.register(Trends.name, Trends)

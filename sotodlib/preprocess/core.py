@@ -10,7 +10,7 @@ class _Preprocess(object):
         self.save_cfgs = step_cfgs.get("save")
         self.select_cfgs = step_cfgs.get("select")
     
-    def process(self, aman):
+    def process(self, aman, proc_aman):
         if self.process_cfgs is None:
             return
         raise NotImplementedError
