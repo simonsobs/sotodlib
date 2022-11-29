@@ -197,6 +197,7 @@ def extract_hwpss_template(aman, As, Bs, signal='signal', name='hwpss_ext',
     N_modes = len(modes)
     sins = np.zeros((N_modes, aman.samps.count))
     coss = np.zeros((N_modes, aman.samps.count))
+    
     for i, nm in enumerate(modes):
         sins[i, :] = np.sin(nm*aman.hwp_angle)
         coss[i, :] = np.cos(nm*aman.hwp_angle)
@@ -237,7 +238,7 @@ def extract_hwpss_template(aman, As, Bs, signal='signal', name='hwpss_ext',
     return aman_proc
 
 
-def construct_hwpss_template(aman, template_coeff_aman, name='hwpss_ext'):
+def construct_hwpss_template(aman, template_coeff_aman, name='hwpss_ext', overwrite=True):
     """
     Adds an axis corresponding to the hwpss template signal to an axis manager
     given an axis manager with hwp angles and a axis manager with the fitted
@@ -261,22 +262,27 @@ def construct_hwpss_template(aman, template_coeff_aman, name='hwpss_ext'):
         sins[i, :] = np.sin(nm*aman.hwp_angle)
         coss[i, :] = np.cos(nm*aman.hwp_angle)
 
-    if name in aman.keys():
+    if name in aman.keys() and overwrite:
         aman.move(name, None)
     aman.wrap_new(name, ('dets', 'samps'))
+    
     for i in range(aman.dets.count):
         aman[name][i] = wrapper_fit_func(aman.hwp_angle, N_modes, sins, coss, 
                                          template_coeff_aman['A_sine'][i]+template_coeff_aman['A_cos'][i]+\
                                          template_coeff_aman['modes'][i])
 
 
-def subtract_hwpss(aman, signal='signal', hwpss_template='hwpss_ext',
+def subtract_hwpss(aman, signal=None, hwpss_template=None,
                    subtract_name='hwpss_remove'):
     """
     Subtract the hwpss template from the signal in an axis manager.
     """
-    aman.wrap_new(subtract_name, dtype='float32', shape=('dets', 'samps'))
-    aman[subtract_name] = np.subtract(aman[signal], aman[hwpss_template])
+    if signal is None:
+        signal = aman.signal
+    if hwpss_template is None:
+        hwpss_template = aman.hwpss_ext
+        
+    aman.wrap(subtract_name, np.subtract(signal, hwpss_template), [(0,'dets'), (1,'samps')])
 
 
 def demod_tod(aman, signal='hwpss_remove', fc_lpf=2., width=0.5):
