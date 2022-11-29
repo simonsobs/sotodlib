@@ -442,7 +442,8 @@ class G3tHWP():
 
     def eval_angle(self, solved):
         """
-        Evaluate the non-uniformity of hwp angle and subtract
+        Evaluate the non-uniformity of hwp angle timestamp and subtract
+        The raw hwp angle timestamp is kept.
 
         Args
         -----
@@ -452,7 +453,7 @@ class G3tHWP():
         Returns
         --------
         output: dict
-          same format as analyze
+            {fast_time, fast_time_raw, angle, slow_time, stable, locked, hwp_rate, fast_time_moving_ave, angle_moving_ave}
 
         Notes
         ------
@@ -466,21 +467,40 @@ class G3tHWP():
         Need to evaluate and subtract it before interpolating hwp angle into Smurf timestamps.
         The non-uniformity of encoder slots creates additional hwp angle jitter.
         The maximum possible additional jitter is comparable to the requirement of angle jitter.
-        """
 
-        """
-        - Temporary Notes -
-        the simple method to subrtact the non-uniformity
-        is to take the average of hwp angle per one revolution.
-        the more carful evaluation method of non-uniformity need to be added.
+        The simple method to subrtact the non-uniformity
+        is to take the moving average of hwp angle per one revolution.
+        The advantages of moving averaging method is is it's simplicity and robustness.
+        The disadvantage is that this method is assuming no real angle fluctuation within one revolution.
+
+        The more carful and accurate method is to make an template of encoder slits,
+        and subtract it from the timestamp.
         """
         def moving_average(array, n):
             return np.convolve(array, np.ones(n), 'valid')/n
 
         logger.info('Remove non-uniformity from hwp angle and overwrite')
-        solved['fast_time'] = moving_average(solved['fast_time'], self._num_edges)
-        solved['angle'] = moving_average(solved['angle'], self._num_edges)
-        return solved
+        solved['fast_time_moving_ave'] = moving_average(solved['fast_time'], self._num_edges)
+        solved['angle_moving_ave'] = moving_average(solved['angle'], self._num_edges)
+
+        ## template subtraction
+        def detrend(array, deg=3):
+            x = np.linspace(-1,1,len(array))
+            p = np.polyfit(x, array, deg=deg)
+            pv = np.polyval(p,x)
+            return array - pv
+
+        ft = solved['fast_time'][self._ref_indexes[0]:self._ref_indexes[-2]+1]
+        # remove rotation frequency drift for making a template of encoder slits
+        ft = detrend(ft, deg=3)
+        # make template
+        template_slit = np.diff(ft).reshape(len(self._ref_indexes)-2,self._num_edges)
+        template_slit = np.average(template_slit, axis=0)
+        average_slit = np.average(template_slit)
+        # subtract template, keep raw timestamp
+        subtract = np.cumsum(np.roll(np.tile(template_slit-average_slit, len(self._ref_indexes)), self._ref_indexes[0] + 1)[:len(solved['fast_time'])])
+        solved['fast_time_raw'] = solved['fast_time']
+        solved['fast_time'] = solved['fast_time'] - subtract
 
     def write_solution(self, solved, output=None):
         """
