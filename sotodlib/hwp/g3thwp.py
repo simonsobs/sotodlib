@@ -145,7 +145,8 @@ class G3tHWP():
 
         # load housekeeping data with hwp keys
         logger.info('Loading HK data files ')
-        logger.info("input time range: " + str(self._start) + " - " + str(self._end))
+        logger.info("input time range: " +
+                    str(self._start) + " - " + str(self._end))
 
         fields, alias = self._key_formatting()
 
@@ -191,7 +192,6 @@ class G3tHWP():
             else:
                 self._field_instance = 'observatory.' + instance + '.feeds.HWPEncoder'
 
-
         # load housekeeping files with hwp keys
         scanner = so3g.hk.HKArchiveScanner()
         if not (isinstance(self._file_list, list)
@@ -214,13 +214,17 @@ class G3tHWP():
         fields, alias = self._key_formatting()
 
         if not np.any([f in arc.get_fields()[0].keys() for f in fields]):
-            logger.info("HWP is not spinning in input g3 files or can not find field")
+            logger.info(
+                "HWP is not spinning in input g3 files or can not find field")
             return {}
         if self._start == 0 and self._end == 0:
-            self._start = np.min([arc.simple(f)[0][0] for f in fields if f in arc.get_fields()[0].keys()])
-            self._end = np.max([arc.simple(f)[0][-1] for f in fields if f in arc.get_fields()[0].keys()])
+            self._start = np.min([arc.simple(f)[0][0]
+                                 for f in fields if f in arc.get_fields()[0].keys()])
+            self._end = np.max([arc.simple(f)[0][-1]
+                               for f in fields if f in arc.get_fields()[0].keys()])
 
-        data = {a: arc.simple(f) for a, f in zip(alias, fields) if f in arc.get_fields()[0].keys()}
+        data = {a: arc.simple(f) for a, f in zip(
+            alias, fields) if f in arc.get_fields()[0].keys()}
 
         return data
 
@@ -234,13 +238,13 @@ class G3tHWP():
         """
         # 1st encoder readout
         fields = [self._field_instance + '_full.' + f if 'counter' in f
-                    else self._field_instance + '.' + f for f in self._field_list]
+                  else self._field_instance + '.' + f for f in self._field_list]
         alias = self._field_list
 
         # 2nd encoder readout
         if self._field_instance_sub is not None:
             fields += [self._field_instance_sub + '_full.' + f if 'counter' in f
-                    else self._field_instance_sub + '.' + f for f in self._field_list]
+                       else self._field_instance_sub + '.' + f for f in self._field_list]
             alias += [a + '_2' for a in self._field_list]
 
         return fields, alias
@@ -263,12 +267,15 @@ class G3tHWP():
         """
         enc_key = {'': '1st', '_2': '2nd'}
 
-        keys = ['rising_edge_count', 'irig_time', 'counter', 'counter_index', 'quad', 'quad_time']
-        out = {k:data[k+suffix][1] if k+suffix in data.keys() else [] for k in keys}
+        keys = ['rising_edge_count', 'irig_time',
+                'counter', 'counter_index', 'quad', 'quad_time']
+        out = {k: data[k+suffix][1] if k+suffix in data.keys() else []
+               for k in keys}
 
         # irig part
         if 'irig_time'+suffix not in data.keys():
-            logger.warning(f'All IRIG time is not correct for {enc_key[suffix]} encoder')
+            logger.warning(
+                f'All IRIG time is not correct for {enc_key[suffix]} encoder')
             return out
 
         if self._irig_type == 1:
@@ -281,7 +288,8 @@ class G3tHWP():
 
         # encoder part
         if 'counter'+suffix not in data.keys():
-            logger.warning(f'No encoder data is available for {enc_key[suffix]} encoder')
+            logger.warning(
+                f'No encoder data is available for {enc_key[suffix]} encoder')
             return out
 
         out['quad'] = self._quad_form(data['quad'+suffix][1])
@@ -480,25 +488,29 @@ class G3tHWP():
             return np.convolve(array, np.ones(n), 'valid')/n
 
         logger.info('Remove non-uniformity from hwp angle and overwrite')
-        solved['fast_time_moving_ave'] = moving_average(solved['fast_time'], self._num_edges)
-        solved['angle_moving_ave'] = moving_average(solved['angle'], self._num_edges)
+        solved['fast_time_moving_ave'] = moving_average(
+            solved['fast_time'], self._num_edges)
+        solved['angle_moving_ave'] = moving_average(
+            solved['angle'], self._num_edges)
 
-        ## template subtraction
+        # template subtraction
         def detrend(array, deg=3):
-            x = np.linspace(-1,1,len(array))
+            x = np.linspace(-1, 1, len(array))
             p = np.polyfit(x, array, deg=deg)
-            pv = np.polyval(p,x)
+            pv = np.polyval(p, x)
             return array - pv
 
         ft = solved['fast_time'][self._ref_indexes[0]:self._ref_indexes[-2]+1]
         # remove rotation frequency drift for making a template of encoder slits
         ft = detrend(ft, deg=3)
         # make template
-        template_slit = np.diff(ft).reshape(len(self._ref_indexes)-2,self._num_edges)
+        template_slit = np.diff(ft).reshape(
+            len(self._ref_indexes)-2, self._num_edges)
         template_slit = np.average(template_slit, axis=0)
         average_slit = np.average(template_slit)
         # subtract template, keep raw timestamp
-        subtract = np.cumsum(np.roll(np.tile(template_slit-average_slit, len(self._ref_indexes)), self._ref_indexes[0] + 1)[:len(solved['fast_time'])])
+        subtract = np.cumsum(np.roll(np.tile(template_slit-average_slit, len(
+            self._ref_indexes)), self._ref_indexes[0] + 1)[:len(solved['fast_time'])])
         solved['fast_time_raw'] = solved['fast_time']
         solved['fast_time'] = solved['fast_time'] - subtract
 
@@ -802,7 +814,8 @@ class G3tHWP():
 
         self._encd_cnt = self._encd_cnt[0] + np.arange(
             len(self._encd_cnt) + len(self._ref_indexes) * self._ref_edges)
-        self._ref_indexes += np.arange(len(self._ref_indexes)) * self._ref_edges
+        self._ref_indexes += np.arange(len(self._ref_indexes)
+                                       ) * self._ref_edges
         self._ref_cnt = self._encd_cnt[self._ref_indexes]
 
         return
@@ -832,12 +845,15 @@ class G3tHWP():
         angle_first_revolution = (self._encd_cnt_split[0] - self._ref_cnt[0]) * \
             (2 * np.pi / self._num_edges) % (2 * np.pi)
         angle_last_revolution = (self._encd_cnt_split[-1] - self._ref_cnt[-1]) * \
-            (2 * np.pi / self._num_edges) % (2 * np.pi) + len(self._ref_cnt) * 2 * np.pi
-        self._angle = np.concatenate([(self._encd_cnt_split[i] - self._ref_cnt[i]) * \
-                          (2 * np.pi / np.diff(self._ref_indexes)[i - 1]) \
-                              % (2 * np.pi) + i * 2 * np.pi  \
-                                  for i in range(1, len(self._encd_cnt_split) - 1)])
-        self._angle = np.concatenate([angle_first_revolution, self._angle.flatten(), angle_last_revolution])
+            (2 * np.pi / self._num_edges) % (2 * np.pi) + \
+            len(self._ref_cnt) * 2 * np.pi
+        self._angle = np.concatenate([(self._encd_cnt_split[i] - self._ref_cnt[i]) *
+                                      (2 * np.pi /
+                                       np.diff(self._ref_indexes)[i - 1])
+                                      % (2 * np.pi) + i * 2 * np.pi
+                                      for i in range(1, len(self._encd_cnt_split) - 1)])
+        self._angle = np.concatenate(
+            [angle_first_revolution, self._angle.flatten(), angle_last_revolution])
         self._angle = direction * self._angle
         if mod2pi:
             self._angle = self._angle % (2 * np.pi)
