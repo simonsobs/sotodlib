@@ -20,6 +20,9 @@ def parse_args():
         help="Overwrite existing entries.")
     parser.add_argument('-v', '--verbose', action='count',
                         default=0, help="Pass multiple times to increase.")
+    parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--log-file', default='make_det_info_wafer.log', help=
+    "Output log filename")
     args = parser.parse_args()
     return args
 
@@ -27,6 +30,22 @@ def parse_args():
 def main(args=None):
     if args is None:
         args = parse_args()
+        
+    if args.debug:
+        logger.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s')
+
+        stdout_handler = logging.StreamHandler(sys.stdout)
+        stdout_handler.setLevel(logging.DEBUG)
+        stdout_handler.setFormatter(formatter)
+
+        file_handler = logging.FileHandler(args.log_file)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+
+
+        logger.addHandler(file_handler)
+        logger.addHandler(stdout_handler)
     
     if args.verbose >= 1:
         logger.setLevel("INFO")
@@ -90,6 +109,9 @@ def main(args=None):
         # iterate over the ideal/design metadata for this array
         for tune in map_maker.grab_metadata():
             
+            bandpass = replace_none(tune.bandpass, str, "NC")
+            if not bandpass == "NC":
+                bandpass = f"f{bandpass}"
             # add detector name to database
             det_rs.append({
                 "dets:det_id": tune.detector_id,
@@ -112,6 +134,27 @@ def main(args=None):
                 w + "angle": np.radians(replace_none(tune.angle_actual_deg)),
             })
 
+        det_rs.append({
+                "dets:det_id": "NO_MATCH",
+                w + "array": array_name,
+                w + "bond_pad": -1,
+                w + "mux_band": -1,
+                w + "mux_channel": -1,
+                w + "mux_subband": -1,
+                w + "mux_position": -1,
+                w + "design_freq_mhz": np.nan,
+                w + "bias_line": -1,
+                w + "pol": "NC",
+                w + "bandpass": "NC",
+                w + "det_row": -1,
+                w + "det_col": -1,
+                w + "rhombus": "NC",
+                w + "type": "NC",
+                w + "det_x": np.nan,
+                w + "det_y": np.nan,
+                w + "angle": np.nan,
+        })
+            
         write_dataset(det_rs, configs["det_info"], array_name, args.overwrite)
         # Update the index if it's a new entry
         if not array_name in existing:
