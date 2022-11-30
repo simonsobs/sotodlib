@@ -17,7 +17,6 @@ from sotodlib.io.metadata import write_dataset, read_dataset
 
 logger = logging.getLogger(__name__)
 
-
 def parse_args():
     parser = ArgumentParser()
     parser.add_argument('-c', '--config-file', help=
@@ -27,6 +26,9 @@ def parse_args():
     parser.add_argument('--max-ctime', type=float, help=
     "Maximum ctime to search for TuneSets")
     parser.add_argument('--overwrite', action='store_true')
+    parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--log-file', default='make_read_det_match.log', help=
+    "Output log filename")
     args = parser.parse_args()
     return args
 
@@ -34,6 +36,23 @@ def parse_args():
 def main(args=None):
     if args is None:
         args = parse_args()
+        
+    if args.debug:
+        logger.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s')
+
+        stdout_handler = logging.StreamHandler(sys.stdout)
+        stdout_handler.setLevel(logging.DEBUG)
+        stdout_handler.setFormatter(formatter)
+
+        file_handler = logging.FileHandler(args.log_file)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+
+
+        logger.addHandler(file_handler)
+        logger.addHandler(stdout_handler)
+    
     configs = yaml.safe_load(open(args.config_file, "r"))
     SMURF = G3tSmurf.from_configs(configs)
     session = SMURF.Session()
@@ -67,11 +86,11 @@ def main(args=None):
             TuneSets.stream_id == array["stream_id"]
         )
         if args.min_ctime is not None:
-            tunesets.filter(
+            tunesets = tunesets.filter(
                 TuneSets.start >= dt.datetime.utcfromtimestamp(args.min_ctime)
             )
         if args.max_ctime is not None:
-            tunesets.filter(
+            tunesets = tunesets.filter(
                 TuneSets.start <= dt.datetime.utcfromtimestamp(args.max_ctime)
             )
         tunesets = tunesets.all()
@@ -88,7 +107,7 @@ def main(args=None):
             map_maker = MapMaker(north_is_highband=array["north_is_highband"],
                                  array_name=array["name"],
                                  mapping_strategy=mapping["strategy"],
-                                 dark_bias_lines=array["dark_bias_lines"],
+                                 # dark_bias_lines=array["dark_bias_lines"],
                                  **mapping["params"])
             logger.info(f"Making Map for {ts.path}")
             try:
@@ -109,7 +128,7 @@ def main(args=None):
                       "dets:readout_id"]
             )
             # loop through detector IDs and find readout ID matches
-            for tune in array_map.get_mux_output(add_back_null=False):
+            for tune in array_map.get_inst_output(add_back_null=False):
                 det_id = tune.detector_id
                 if det_id is None:
                     logger.warning('The DetMap issued "det_id" is should not allowed' +
