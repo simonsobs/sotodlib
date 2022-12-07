@@ -12,17 +12,35 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
 from .core import _Preprocess
 
 
-class FFT_Trim(_Preprocess):
+class FFTTrim(_Preprocess):
+    """Trim the AxisManager to optimize for faster FFTs later in the pipeline.
+    All processing configs go to `fft_trim`
+
+    .. autofunction:: sotodlib.tod_ops.fft_trim
+    """
     name = "fft_trim"    
     def process(self, aman, proc_aman):
         tod_ops.fft_trim(aman, **self.process_cfgs)
 
 class Detrend(_Preprocess):
+    """Detrend the signal. All processing configs go to `detrend_tod`
+
+    .. autofunction:: sotodlib.tod_ops.detrend_tod
+    """
     name = "detrend"
     def process(self, aman, proc_aman):
         tod_ops.detrend_tod(aman, **self.process_cfgs)
         
 class Trends(_Preprocess):
+    """Calculate the trends in the data to look for unlocked detectors. All
+    calculation configs go to `get_trending_flags`.
+
+    Saves results in proc_aman under the "trend" field. 
+
+    Data selection can have key "kind" equal to "any" or "all."
+    
+    .. autofunction:: sotodlib.flags.get_trending_flags
+    """
     name = "trends"
     
     def calc_and_save(self, aman, proc_aman):
@@ -52,7 +70,17 @@ class Trends(_Preprocess):
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
 
-class Glitch_Detection(_Preprocess):
+class GlitchDetection(_Preprocess):
+    """Run glitch detection algorithm to find glitches. All calculation configs
+    go to `get_glitch_flags` 
+
+    Saves retsults in proc_aman under the "glitches" field.
+
+    Data section should define a glitch significant "sig_glitch" and a maximum
+    number of glitches "max_n_glitch."
+
+    .. autofunction:: sotodlib.flags.get_glitch_flags
+    """
     name = "glitches"
     
     def calc_and_save(self, aman, proc_aman):
@@ -81,7 +109,12 @@ class Glitch_Detection(_Preprocess):
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
     
-class PSD_Calc(_Preprocess):
+class PSDCalc(_Preprocess):
+    """ Calculate the PSD of the data and add it to the AxisManager under the
+    "psd" field. All process configs goes to `calc_psd`
+
+    .. autofunction:: sotodlib.tod_ops.fft_ops.calc_psd
+    """
     name = "psd"
     
     def process(self, aman, proc_aman):
@@ -102,6 +135,15 @@ class PSD_Calc(_Preprocess):
             proc_aman.wrap("psd", fft_aman)
 
 class Noise(_Preprocess):
+    """Estimate the white noise levels in the data. Assumes the PSD has been
+    wrapped into the AxisManager. All calculation configs goes to `calc_wn`. 
+
+    Saves the results into the "noise" field of proc_aman. 
+
+    Can run data selection of a "max_noise" value. 
+    
+    .. autofunction:: sotodlib.tod_ops.fft_ops.calc_wn
+    """
     name = "noise"
     
     def calc_and_save(self, aman, proc_aman):
@@ -131,6 +173,15 @@ class Noise(_Preprocess):
         return meta
     
 class Calibrate(_Preprocess):
+    """Calibrate the timestreams based on some provided information.
+
+    Type of calibration is decided by process["kind"]
+
+    1. "single_value" : multiplies entire signal by the single value
+    process["val"]
+
+    2. to be expanded
+    """
     name = "calibrate"
     
     def process(self, aman, proc_aman):
@@ -140,7 +191,12 @@ class Calibrate(_Preprocess):
             raise ValueError(f"Entry '{self.process_cfgs['kind']}'"
                               " not understood")
 
-class HWPSS_Guess(_Preprocess):
+class HWPSSGuess(_Preprocess):
+    """Calculates a guessed HWP Syncronous Signal. All calc configs sent to
+    `get_hwp_guess`. Results saved in the 'hwpss_guess" field of proc_aman.
+
+    .. autofunction:: sotodlib.hwp.hwp.get_hwpss_guess
+    """
     name = "hwpss_guess"
 
     def calc_and_save(self, aman, proc_aman):
@@ -154,7 +210,13 @@ class HWPSS_Guess(_Preprocess):
             proc_aman.wrap("hwpss_guess", hwpss_guess_aman)
 
 
-class Estimate_HWPSS(_Preprocess):
+class EstimateHWPSS(_Preprocess):
+    """Builds a HWPSS Template based on parameters calculated earlier. Assumes
+    proc_aman has the field "hwpss_guess" and all other calc configs go to
+    `extract_hwpss_template`. Results saved if field specified by calc["name"]
+
+    .. autofunction:: sotodlib.hwp.hwp.extract_hwpss_template
+    """
     name = "estimate_hwpss"
 
     def calc_and_save(self, aman, proc_aman):
@@ -171,7 +233,12 @@ class Estimate_HWPSS(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap(self.calc_cfgs["name"], hwpss_template)
 
-class Subtract_HWPSS(_Preprocess):
+class SubtractHWPSS(_Preprocess):
+    """Subtracts a HWPSS template from signal. 
+
+    .. autofunction:: sotodlib.hwp.hwp.construct_hwpss_template
+    .. autofunction:: sotodlib.hwp.hwp.subtract_hwpss
+    """
     name = "subtract_hwpss"
 
     def process(self, aman, proc_aman):
@@ -187,26 +254,34 @@ class Subtract_HWPSS(_Preprocess):
         )
 
 class Apodize(_Preprocess):
+    """Apodize the edges of a signal. All process configs go to `apodize_cosine`
+
+    .. autofunction:: sotodlib.apodize.apodize_cosine
+    """
     name = "apodize"
 
     def process(self, aman, proc_aman):
         tod_ops.apodize.apodize_cosine(aman, **self.process_cfgs)
 
 class Demodulate(_Preprocess):
+    """Demodulate the tod. All process confgis go to `demod_tod`.
+
+    .. autofunction:: sotodlib.hwp.hwp.demod_tod
+    """
     name = "demodulate"
 
     def process(self, aman, proc_aman):
         hwp.demod_tod(aman, **self.process_cfgs)
 
 _Preprocess.register(Trends.name, Trends)
-_Preprocess.register(FFT_Trim.name, FFT_Trim)
+_Preprocess.register(FFTTrim.name, FFTTrim)
 _Preprocess.register(Detrend.name, Detrend)
-_Preprocess.register(Glitch_Detection.name, Glitch_Detection)
-_Preprocess.register(PSD_Calc.name, PSD_Calc)
+_Preprocess.register(GlitchDetection.name, GlitchDetection)
+_Preprocess.register(PSDCalc.name, PSDCalc)
 _Preprocess.register(Noise.name, Noise)
 _Preprocess.register(Calibrate.name, Calibrate)
-_Preprocess.register(HWPSS_Guess.name, HWPSS_Guess)
-_Preprocess.register(Estimate_HWPSS.name, Estimate_HWPSS)
-_Preprocess.register(Subtract_HWPSS.name, Subtract_HWPSS)
+_Preprocess.register(HWPSSGuess.name, HWPSSGuess)
+_Preprocess.register(EstimateHWPSS.name, EstimateHWPSS)
+_Preprocess.register(SubtractHWPSS.name, SubtractHWPSS)
 _Preprocess.register(Apodize.name, Apodize)
 _Preprocess.register(Demodulate.name, Demodulate)
