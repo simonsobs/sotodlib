@@ -49,11 +49,15 @@ def _get_preprocess_context(configs, context=None):
     return configs, context
 
 def preprocess_tod(obs_id, configs, overwrite=False):
-    """
+    """Meant to be run as part of a batched script, this function calls the
+    preprocessing pipeline a specific Observation ID and saves the results in
+    the ManifestDb specified in the congis.   
+
     Arguments
     ----------
     obs_id: obs_id or obs entry (passed to context.get_obs)
     configs: config file or loaded config directory
+
     """
 
     if type(configs) == str:
@@ -115,6 +119,14 @@ def preprocess_tod(obs_id, configs, overwrite=False):
             db.add_entry(db_data, dest_file)
 
 def load_preprocess_det_select(obs_id, configs, context=None):
+    """ Loads the metadata information for the Observation and runs through any
+    data selection specified by the Preprocessing Pipeline.
+
+    Arguments
+    ----------
+    obs_id: obs_id or obs entry (passed to context.get_obs)
+    configs: config file or loaded config directory
+    """
     configs, context = _get_preprocess_context(configs, context)
     
     pipe = _build_pipe_from_configs(configs)
@@ -126,6 +138,17 @@ def load_preprocess_det_select(obs_id, configs, context=None):
     return meta
 
 def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml", context=None ):
+    """ Loads the saved information from the preprocessing pipeline and runs the
+    processing section of the pipeline. 
+
+    Assumes preprocess_tod has already been run on the requested observation. 
+    
+    Arguments
+    ----------
+    obs_id: obs_id or obs entry (passed to context.get_obs)
+    configs: config file or loaded config directory
+    """
+
     configs, context = _get_preprocess_context(configs, context)
     meta = load_preprocess_det_select(obs_id, configs=configs, context=context)
     

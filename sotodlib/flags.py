@@ -134,8 +134,8 @@ def get_trending_flags(aman, max_trend=5*np.pi, n_pieces=1, signal=None,
         
     Returns:
         flag: RangesMatrix object of glitches
-        (slopes, samp_edges) : if full_output is true, calculated slopes and the
-            sample edges where they were calculated. 
+        trends: if full_output is true, calculated slopes and the
+        sample edges where they were calculated. 
     """
     if overwrite and name in aman.flags:
         aman.flags.move(name, None)
