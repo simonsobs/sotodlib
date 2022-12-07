@@ -1,5 +1,7 @@
 .. py:module:: sotodlib.preprocess.core
 
+.. _preprocess-module:
+
 ==========
 Preprocess
 ==========
@@ -123,7 +125,7 @@ TOD Operations
 Flagging and Products
 :::::::::::::::::::::
 .. autoclass:: sotodlib.preprocess.processes.Trends
-.. autoclass:: sotodlib.preprocess.processes.GlitchDetector
+.. autoclass:: sotodlib.preprocess.processes.GlitchDetection
 .. autoclass:: sotodlib.preprocess.processes.Noise
 
 HWP Related
