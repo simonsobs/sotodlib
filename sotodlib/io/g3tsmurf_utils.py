@@ -101,7 +101,7 @@ def get_last_bg_map( my_obs_id, SMURF):
     files = get_obs_outputs(oper.obs_id, SMURF) 
     file = [f for f in files if "bg_map.npy" in f]
     if len(file) != 1:
-        logger.error("fUnable to find analysis file in {get_obs_folder(oper.obs_id, SMURF)}")
+        logger.error(f"Unable to find analysis file in {get_obs_folder(oper.obs_id, SMURF)}")
     session.close()
     return file[0]
 
@@ -125,7 +125,7 @@ def get_last_bias_step( my_obs_id, SMURF):
     files = get_obs_outputs(oper.obs_id, SMURF) 
     file = [f for f in files if "bias_step_analysis.npy" in f]
     if len(file) != 1:
-        logger.error("fUnable to find analysis file in {get_obs_folder(oper.obs_id, SMURF)}")
+        logger.error(f"Unable to find analysis file in {get_obs_folder(oper.obs_id, SMURF)}")
     session.close()
     return file[0]
 
@@ -149,7 +149,7 @@ def get_last_iv( my_obs_id, SMURF):
     files = get_obs_outputs(oper.obs_id, SMURF) 
     file = [f for f in files if "iv_analysis.npy" in f]
     if len(file) != 1:
-        logger.error("fUnable to find analysis file in {get_obs_folder(oper.obs_id, SMURF)}")
+        logger.error(f"Unable to find analysis file in {get_obs_folder(oper.obs_id, SMURF)}")
     session.close()
     return file[0]
 
