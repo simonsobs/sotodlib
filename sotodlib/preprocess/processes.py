@@ -256,7 +256,7 @@ class SubtractHWPSS(_Preprocess):
 class Apodize(_Preprocess):
     """Apodize the edges of a signal. All process configs go to `apodize_cosine`
 
-    .. autofunction:: sotodlib.apodize.apodize_cosine
+    .. autofunction:: sotodlib.tod_ops.apodize.apodize_cosine
     """
     name = "apodize"
 
