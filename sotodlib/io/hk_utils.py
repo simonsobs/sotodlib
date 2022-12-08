@@ -122,7 +122,7 @@ def make_hkaman(grouped_data):
 
         # TODO: make an aman of amans
 
-        return amans
+    return amans
 
 
 # TODO: insert a progress bar for get_grouped_hkdata
