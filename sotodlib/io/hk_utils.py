@@ -66,7 +66,63 @@ def get_grouped_hkdata(start, stop, config):
     return grouped_data
         
 def make_hkaman(grouped_data):
+    """ insert docstrings
     """
-    """
+
+    amans = []
+    for gorup in grouped_data:
+        data = {}
+        aliases = []
+        times = []
+        for field in group:
+            # arrange data per device to input into aman
+            alias = group[field][0]
+            aliases.append(alias)
+
+            time = group[field][1]
+            times.append(time)
+
+            device_data = group[field][2]
+
+            info = {alias: device_data}
+            data.update(info)
+
+        # check whether hk device is cosampled
+        try:
+            assert len(times[0]) == len(times[-1])
+            # TODO: diff of times, and if less than say 10%, treat as cosampled
+        except:
+            # if not, make aman for each field in device/feed
+            print("{} is not cosampled".format('.'.join(field.split('.')[0:3])))
+            for field in group:
+                alias = group[field][0]
+                time = group[field][1]
+                data = group[field][2]
+
+                device_name = field.split('.')[1]
+                device_axis = 'hkdata_' + device_name
+                samps_axis = 'hksamps_' + device_name
+
+                hkaman = core.AxisManager(core.LabelAxis(device_axis, [alias]),
+                                          core.OffsetAxis(samps_axis, len(time))
+                hkaman.wrap('times', time, [(0, samps_axis)])
+                hkaman.wrap(device_name, np.array([data]), [(0, device_axis), (1, samps_axis)])
+                amans.append(hkaman)
+        else:
+            # if yes, make one aman per device
+            device_name = field.split('.')[1]
+            device_axis = 'hkdata_' + device_name
+            samps_axis = 'hksamps_' + device_name
+
+            hkaman_cos = core.AxisManager(core.LabelAxis(device_axis, aliases),
+                                          core.OffsetAxis(samps_axis, len(time)))
+            hkaman_cos.wrap('times', time, [(0, samps_axis)])
+            hkaman_cos.wrap(device_name, np.array([data[alias] for alias in aliases]), [(0, device_axis), (1, samps_axis)])
+            amans.append(hkaman_cos)
+
+        # TODO: make an aman of amans
+
+        return amans
+
 
 # TODO: insert a progress bar for get_grouped_hkdata
