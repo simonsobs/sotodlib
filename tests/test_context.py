@@ -264,6 +264,24 @@ class DatasetSim:
             {'obs:timestamp': [0, 2e9], 'loader': 'unittest_loader'},
             'bands.h5')
 
+        # metadata: det_id.h5
+        _scheme = metadata.ManifestScheme() \
+                  .add_data_field('loader') \
+                  .add_range_match('obs:timestamp')
+        det_id_db = metadata.ManifestDb(scheme=_scheme)
+        det_id_db.add_entry(
+            {'obs:timestamp': [0, 2e9], 'loader': 'unittest_loader'},
+            'det_id.h5')
+
+        # metadata: det_param.h5
+        _scheme = metadata.ManifestScheme() \
+                  .add_data_field('loader') \
+                  .add_range_match('obs:timestamp')
+        det_par_db = metadata.ManifestDb(scheme=_scheme)
+        det_par_db.add_entry(
+            {'obs:timestamp': [0, 2e9], 'loader': 'unittest_loader'},
+            'det_param.h5')
+
         # metadata: abscals.h5
         _scheme = metadata.ManifestScheme() \
                   .add_range_match('obs:timestamp') \
@@ -314,12 +332,18 @@ class DatasetSim:
             {'db': bands_db,
              'det_info': True,
             },
+            {'db': det_id_db,
+             'det_info': True,
+            },
             {'db': abscal_db,
              'name': 'cal&abscal'},
             {'db': flags_db,
              'name': 'flags&'},
             {'db': info_db,
              'name': 'focal_plane'},
+#            {'db': det_par_db,
+#             'det_info': True,
+#            },
         ]
 
         if with_bad_metadata:
@@ -336,6 +360,17 @@ class DatasetSim:
         filename = os.path.split(kw['filename'])[1]
         if filename == 'bands.h5':
             rs = self.dets.subset(keys=['readout_id', 'band'])
+            rs.keys = ['dets:' + k for k in rs.keys]
+            return rs
+        elif filename == 'det_id.h5':
+            rs = self.dets.subset(keys=['readout_id', 'det_id'])
+            rs.keys = ['dets:' + k for k in rs.keys]
+            return rs
+        elif filename == 'det_param.h5':
+            rs = self.dets.subset(keys=['det_id', 'det_param'])
+            # Keep only 1 row with 'NOT_FOUND'
+            while sum(rs['det_id'] == 'NOT_FOUND') > 1:
+                rs.rows.pop(-1)
             rs.keys = ['dets:' + k for k in rs.keys]
             return rs
         elif filename == 'abscal.h5':
