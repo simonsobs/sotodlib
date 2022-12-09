@@ -293,7 +293,7 @@ class Context(odict):
         if loader_type is None:
             loader_type = self.get('obs_loader_type', 'default')
         loader_func = OBSLOADER_REGISTRY[loader_type]  # Register your loader?
-        aman = loader_func(self.obsfiledb, obs_id, dets,
+        aman = loader_func(self.obsfiledb, obs_id, dets=dets,
                            samples=samples, no_signal=no_signal)
 
         if aman is None:
