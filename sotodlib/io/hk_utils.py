@@ -1,19 +1,21 @@
-import so3g.hk as hk
-from so3g.hk import load_range
-from sotodlib import core
+import numpy as np
 import yaml
 import itertools
-from itertools import groupby
+
+from so3g.hk import load_range
+from sotodlib import core
+
 
 def _get_swap_dict(d):
-    """ 
-    Swap dictionary keys and values; useful for organizing fields in 
+    """
+    Swap dictionary keys and values; useful for organizing fields in
     config file by device name instead of alias in get_grouped_hkdata().
     """
     return {v: k for k, v in d.items()}
 
+
 def get_grouped_hkdata(start, stop, config):
-    """ 
+    """
     Takes output from load_range(), reconfigures load_range() dictionary
     slightly. Groups HK field data by corresponding device/feed. Outputs
     that list of data.
@@ -45,15 +47,14 @@ def get_grouped_hkdata(start, stop, config):
 
         info = {field: [alias, time, data]}
         fields_data.update(info)
-    
+
     # now group field names by feed/device
     sorted_fields = sorted(_get_swap_dict(online_fields))
-    
+
     grouped_feeds = []
     key_func = lambda field: field.split('.')[0:4]
     for key, group in itertools.groupby(sorted_fields, key_func):
         grouped_feeds.append(list(group))
-
 
     # use grouped_feeds and fields_data to output a grouped list of data per
     # feed/device, ready to input to an axismanager
@@ -67,7 +68,8 @@ def get_grouped_hkdata(start, stop, config):
         grouped_data.append(device_data)
 
     return grouped_data
-        
+
+
 def make_hkaman(grouped_data):
     """
     Takes data from get_grouped_hkdata(), tests whether feed/device is
@@ -94,9 +96,9 @@ def make_hkaman(grouped_data):
         try:
             # check whether hk device is cosampled
             assert len(times[0]) == len(times[-1])
-            # TODO: diff of times, and if less than say 10%, treat as cosampled
-        except:
-            # if not, make aman for each field in device/feed
+            # TODO: diff of times, if less than say 10%??, treat as cosampled
+        except AssertionError:
+            # if not cosampled, make aman for each field in device/feed
             print("{} is not cosampled".format('.'.join(field.split('.')[0:3])))
             for field in group:
                 alias = group[field][0]
@@ -125,8 +127,7 @@ def make_hkaman(grouped_data):
             amans.append(hkaman_cos)
 
         # TODO: make an aman of amans
-        
-    return amans
 
+    return amans
 
 # TODO: insert a progress bar for get_grouped_hkdata
