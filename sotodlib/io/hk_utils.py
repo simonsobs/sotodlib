@@ -1,19 +1,22 @@
-import numpy as np
 import so3g.hk as hk
-from so3g.hk import tree
-import matplotlib.pyplot as plt
 from so3g.hk import load_range
-import sotodlib.io.load_smurf as ls
 from sotodlib import core
 import yaml
 import itertools
 from itertools import groupby
 
-def get_swap_dict(d):
+def _get_swap_dict(d):
+    """ 
+    Swap dictionary keys and values; useful for organizing fields in 
+    config file by device name instead of alias in get_grouped_hkdata().
+    """
     return {v: k for k, v in d.items()}
 
 def get_grouped_hkdata(start, stop, config):
-    """ insert docstrings
+    """ 
+    Takes output from load_range(), reconfigures load_range() dictionary
+    slightly. Groups HK field data by corresponding device/feed. Outputs
+    that list of data.
     """
     # call load_range()
     print("running load_range()")
@@ -26,7 +29,7 @@ def get_grouped_hkdata(start, stop, config):
     field_dict = hkconfig['field_list']
 
     # output a dict of field name, alias, timestamps, and data
-    # for fields that are online given start, stop, and data from load_range()
+    # for fields that are online given start, stop and keys from load_range()
     hk_aliases = list(hkdata.keys())
 
     online_fields = {}
@@ -44,7 +47,7 @@ def get_grouped_hkdata(start, stop, config):
         fields_data.update(info)
     
     # now group field names by feed/device
-    sorted_fields = sorted(get_swap_dict(online_fields))
+    sorted_fields = sorted(_get_swap_dict(online_fields))
     
     grouped_feeds = []
     key_func = lambda field: field.split('.')[0:4]
@@ -53,7 +56,7 @@ def get_grouped_hkdata(start, stop, config):
 
 
     # use grouped_feeds and fields_data to output a grouped list of data per
-    # feed, ready to input to an axismanager
+    # feed/device, ready to input to an axismanager
     grouped_data = []
     for group in grouped_feeds:
         device_data = {}
@@ -66,11 +69,12 @@ def get_grouped_hkdata(start, stop, config):
     return grouped_data
         
 def make_hkaman(grouped_data):
-    """ insert docstrings
     """
-
+    Takes data from get_grouped_hkdata(), tests whether feed/device is
+    cosampled, outputs axismanager(s) for either case.
+    """
     amans = []
-    for gorup in grouped_data:
+    for group in grouped_data:
         data = {}
         aliases = []
         times = []
@@ -87,8 +91,8 @@ def make_hkaman(grouped_data):
             info = {alias: device_data}
             data.update(info)
 
-        # check whether hk device is cosampled
         try:
+            # check whether hk device is cosampled
             assert len(times[0]) == len(times[-1])
             # TODO: diff of times, and if less than say 10%, treat as cosampled
         except:
@@ -104,7 +108,7 @@ def make_hkaman(grouped_data):
                 samps_axis = 'hksamps_' + device_name
 
                 hkaman = core.AxisManager(core.LabelAxis(device_axis, [alias]),
-                                          core.OffsetAxis(samps_axis, len(time))
+                                          core.OffsetAxis(samps_axis, len(time)))
                 hkaman.wrap('times', time, [(0, samps_axis)])
                 hkaman.wrap(device_name, np.array([data]), [(0, device_axis), (1, samps_axis)])
                 amans.append(hkaman)
@@ -121,7 +125,7 @@ def make_hkaman(grouped_data):
             amans.append(hkaman_cos)
 
         # TODO: make an aman of amans
-
+        
     return amans
 
 
