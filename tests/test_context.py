@@ -79,12 +79,12 @@ class ContextTest(unittest.TestCase):
         n = len(dataset_sim.dets)
         obs_id = dataset_sim.obss['obs_id'][1]
         for selection, count in [
-                ({'dets:readout_id': ['det05']}, 1),
-                ({'dets:readout_id': np.array(['det05'])}, 1),
+                ({'dets:readout_id': ['read05']}, 1),
+                ({'dets:readout_id': np.array(['read05'])}, 1),
                 ({'dets:detset': 'neard'}, 4),
                 ({'dets:detset': ['neard']}, 4),
                 ({'dets:detset': ['neard', 'fard']}, 8),
-                ({'dets:detset': ['neard'], 'dets:readout_id': ['det00', 'det05']}, 1),
+                ({'dets:detset': ['neard'], 'dets:readout_id': ['read00', 'read05']}, 1),
                 ({'dets:band': ['f090']}, 4),
                 ({'dets:band': ['f090'], 'dets:detset': ['neard']}, 2),
         ]:
@@ -188,15 +188,16 @@ class DatasetSim:
     """
     def __init__(self):
         self.dets = metadata.ResultSet(
-            ['readout_id', 'band', 'pol_code', 'x', 'y', 'detset'],
-            [('det00', 'f090', 'A', 0.0, 0.0, 'neard'),
-             ('det01', 'f090', 'B', 0.0, 0.0, 'neard'),
-             ('det02', 'f150', 'A', 0.0, 0.0, 'neard'),
-             ('det03', 'f150', 'B', 0.0, 0.0, 'neard'),
-             ('det04', 'f090', 'A', 1.0, 0.0, 'fard'),
-             ('det05', 'f090', 'B', 1.0, 0.0, 'fard'),
-             ('det06', 'f150', 'A', 1.0, 0.0, 'fard'),
-             ('det07', 'f150', 'B', 1.0, 0.0, 'fard')])
+            ['readout_id', 'band', 'pol_code', 'x', 'y', 'detset', 'det_id', 'det_param'],
+            [('read00', 'f090', 'A', 0.0, 0.0, 'neard', 'det00', 120.),
+             ('read01', 'f090', 'B', 0.0, 0.0, 'neard', 'det01', 121.),
+             ('read02', 'f150', 'A', 0.0, 0.0, 'neard', 'det02', 122.),
+             ('read03', 'f150', 'B', 0.0, 0.0, 'neard', 'det03', 123.),
+             ('read04', 'f090', 'A', 1.0, 0.0, 'fard',  'det04', 124.), 
+             ('read05', 'f090', 'B', 1.0, 0.0, 'fard',  'det05', 125.),
+             ('read06', 'f150', 'A', 1.0, 0.0, 'fard',  'NOT_FOUND', -1.),
+             ('read07', 'f150', 'B', 1.0, 0.0, 'fard',  'NOT_FOUND', -1.),
+            ])
 
         self.obss = metadata.ResultSet(
             ['obs_id', 'timestamp', 'type', 'target'],
@@ -222,7 +223,7 @@ class DatasetSim:
                                     'pol_code string',
                                     'x float',
                                     'y float'])
-        save_for_later = ['band', 'detset']
+        save_for_later = ['band', 'detset', 'det_id', 'det_param']
         for row in self.dets.subset(keys=[k for k in self.dets.keys
                                           if k not in save_for_later]):
             detdb.add_props('base', row['readout_id'], **row)
@@ -312,7 +313,7 @@ class DatasetSim:
         ctx['metadata'] = [
             {'db': bands_db,
              'det_info': True,
-             'dets_key': 'readout_id'},
+            },
             {'db': abscal_db,
              'name': 'cal&abscal'},
             {'db': flags_db,
