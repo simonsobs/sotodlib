@@ -17,7 +17,7 @@ Preprocessing Pipeline
 ----------------------
 
 A preprocessing pipeline is series of modules, each inheriting from
-`_Preprocess`, that are defined through a configuration file and intended to be
+``_Preprocess``, that are defined through a configuration file and intended to be
 run successively on an AxisManager containing time ordered data.
 
 .. autoclass:: sotodlib.preprocess.core._Preprocess
@@ -95,11 +95,11 @@ processing pipeline would look like::
           select:
             max_noise: 2000
 
-This pipeline can be run through the functions saved in `site_pipeline`. Each
+This pipeline can be run through the functions saved in ``site_pipeline``. Each
 entry in "process_pipe" key will be used to generate a Preprocess module based
 on the name it is registered to. These entries will then be run in order through
-the processing pipe. The `process` function is always run before the
-`calc_and_save` function for each module.
+the processing pipe. The ``process`` function is always run before the
+``calc_and_save`` function for each module.
 
 Processing Functions
 --------------------
