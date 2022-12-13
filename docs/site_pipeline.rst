@@ -120,6 +120,11 @@ entries mater.
           det_key: "dets:det_id"
 
 
+preprocess-tod
+--------------
+This script is set up to run a preprocessing pipeline using the preprocess
+module. :ref:`See details here<preprocess-module>`.
+
 make-source-flags
 -----------------
 

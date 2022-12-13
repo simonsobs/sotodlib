@@ -6,3 +6,4 @@ from .gapfill import \
     get_gap_model, get_gap_model_single
 from . import jumps
 from . import pca
+from .apodize import apodize_cosine
