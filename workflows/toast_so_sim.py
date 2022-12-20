@@ -329,6 +329,10 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     ops.corotate_lat.apply(data)
     log.info_rank("Apply LAT co-rotation in", comm=world_comm, timer=timer)
 
+    # Perturb HWP spin
+    ops.perturb_hwp.apply(data)
+    log.info_rank("Perturbed HWP rotation in", comm=world_comm, timer=timer)
+
     # Construct a "perfect" noise model just from the focalplane parameters
 
     ops.default_model.apply(data)
@@ -742,6 +746,7 @@ def main():
     operators = [
         toast.ops.SimGround(name="sim_ground", weather="atacama", detset_key="pixel"),
         so_ops.CoRotator(name="corotate_lat"),
+        toast.ops.PerturbHWP(name="perturb_hwp", enabled=False),
         toast.ops.DefaultNoiseModel(name="default_model", noise_model="noise_model"),
         toast.ops.ElevationNoise(name="elevation_model", out_model="noise_model"),
         toast.ops.PointingDetectorSimple(name="det_pointing_azel", quats="quats_azel"),
