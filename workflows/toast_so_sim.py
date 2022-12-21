@@ -347,13 +347,19 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
 
     # Create the Elevation modulated noise model
 
-    ops.elevation_model.noise_model = ops.default_model.noise_model
-    ops.elevation_model.out_model = ops.elevation_model.noise_model
     ops.elevation_model.detector_pointing = ops.det_pointing_azel
     ops.elevation_model.apply(data)
     log.info_rank("Created elevation noise model in", comm=world_comm, timer=timer)
 
     ops.mem_count.prefix = "After elevation noise model"
+    ops.mem_count.apply(data)
+
+    # Add common noise modes
+
+    ops.common_mode_noise.apply(data)
+    log.info_rank("Added common mode noise model in", comm=world_comm, timer=timer)
+
+    ops.mem_count.prefix = "After common mode noise model"
     ops.mem_count.apply(data)
 
     # Set up pointing matrices for binning operators
@@ -464,7 +470,6 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
 
     # Simulate detector noise
 
-    ops.sim_noise.noise_model = ops.elevation_model.out_model
     if args.realization is not None:
         ops.sim_noise.realization = args.realization
     log.info_rank("Simulating detector noise", comm=world_comm)
@@ -530,7 +535,6 @@ def reduce_data(job, args, data):
         # new TOAST data object
         ops.demodulate.stokes_weights = ops.weights_radec
         ops.demodulate.hwp_angle = ops.sim_ground.hwp_angle
-        ops.demodulate.noise_model = ops.default_model.noise_model
         data = ops.demodulate.apply(data)
         log.info_rank("Demodulated in", comm=world_comm, timer=timer)
         demod_weights = toast.ops.StokesWeightsDemod()
@@ -627,9 +631,6 @@ def reduce_data(job, args, data):
 
     # The map maker requires the the binning operators used for the solve and final,
     # the templates, and the noise model.
-
-    ops.binner.noise_model = ops.elevation_model.out_model
-    ops.binner_final.noise_model = ops.elevation_model.out_model
 
     ops.mapmaker.binning = ops.binner
     ops.mapmaker.template_matrix = toast.ops.TemplateMatrix(templates=[tmpls.baselines])
@@ -749,6 +750,7 @@ def main():
         toast.ops.PerturbHWP(name="perturb_hwp", enabled=False),
         toast.ops.DefaultNoiseModel(name="default_model", noise_model="noise_model"),
         toast.ops.ElevationNoise(name="elevation_model", out_model="noise_model"),
+        toast.ops.CommonModeNoise(name="common_mode_noise"),
         toast.ops.PointingDetectorSimple(name="det_pointing_azel", quats="quats_azel"),
         toast.ops.StokesWeights(
             name="weights_azel", weights="weights_azel", mode="IQU"
