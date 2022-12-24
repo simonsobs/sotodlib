@@ -11,6 +11,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
 from .load_smurf import G3tSmurf, Observations as G3tObservations
+from .bookbinder import Bookbinder
 
 ####################
 # useful constants #
@@ -232,7 +233,6 @@ class Imprinter:
         session: BookDB session
 
         """
-        from sotodlib.io.bookbinder import Bookbinder
         if session is None: session = self.get_session()
         # get book id and book object, depending on whether book id is given or not
         if isinstance(book, Books):
@@ -317,6 +317,20 @@ class Imprinter:
         if session is None: session = self.get_session()
         return session.query(Books).filter(Books.status == UNBOUND).all()
 
+    def get_failed_books(self, sesson=None):
+        """Get all failed books from database
+        
+        Parameters
+        ----------
+        session: BookDB session
+        
+        Returns
+        -------
+        books: list of books
+        
+        """
+        if session is None: session = self.get_session()
+        return session.query(Books).filter(Books.status == FAILED).all()
     def book_exists(self, bid, session=None):
         """Check if a book exists in the database.
 
