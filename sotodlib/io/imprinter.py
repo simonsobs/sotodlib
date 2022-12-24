@@ -113,7 +113,8 @@ class Imprinter:
             # to create the database, we first make sure that the folder exists
             os.makedirs(op.abspath(op.dirname(self.db_path)), exist_ok=True)
 
-        self.engine = db.create_engine(f"sqlite:///{self.db_path}", echo=echo)
+        self.engine = db.create_engine(f"sqlite:///{self.db_path}", echo=echo,
+                                       connect_args={'check_same_thread': False})
 
         # create all tables or (do nothing if tables exist)
         Base.metadata.create_all(self.engine)
