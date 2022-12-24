@@ -442,11 +442,11 @@ class Imprinter:
                 # distinguish different types of books
                 # operation book
                 if get_obs_type(str_obs) == 'oper':
-                    output.append(ObsSet([str_obs], mode="oper"))
+                    output.append(ObsSet([str_obs], mode="oper", slots=self.slots, tel_tube=self.tel_tube))
                 elif get_obs_type(str_obs) == 'obs':
                     # force each observation to be its own book
                     if force_single_stream:
-                        output.append(ObsSet([str_obs], mode="obs"))
+                        output.append(ObsSet([str_obs], mode="obs", slots=self.slots, tel_tube=self.tel_tube))
                     else:
                         # query for all possible types of overlapping observations from other streams
                         q = obs_q.filter(
@@ -460,7 +460,7 @@ class Imprinter:
                         # if we failed to find any overlapping observations
                         if q.count()==0 and not ignore_singles:
                             # append only this one when there's no overlapping segments
-                            output.append(ObsSet([str_obs], mode="obs"))
+                            output.append(ObsSet([str_obs], mode="obs", slots=self.slots, tel_tube=self.tel_tube))
 
                         elif q.count() > 0:
                             # obtain overlapping observations (returned as a tuple of stream_id)
@@ -473,7 +473,7 @@ class Imprinter:
                             if overlap_time.total_seconds() < 0: continue
                             if overlap_time.total_seconds() < min_overlap: continue
                             # add all of the possible overlaps
-                            output.append(ObsSet(obs_list, mode="obs"))
+                            output.append(ObsSet(obs_list, mode="obs", slots=self.slots, tel_tube=self.tel_tube))
 
         # remove exact duplicates in output
         output = drop_duplicates(output)
@@ -580,9 +580,11 @@ def get_obs_type(obs: G3tObservations):
 class ObsSet(list):
     """A thin wrapper around a list of observations that are all
     part of the same book"""
-    def __init__(self, *args, mode="obs", **kwargs):
+    def __init__(self, *args, mode="obs", slots=None, tel_tube=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.mode = mode
+        self.slots = slots
+        self.tel_tube = tel_tube
 
     @property
     def obs_ids(self):
