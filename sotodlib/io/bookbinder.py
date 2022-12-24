@@ -1,19 +1,42 @@
 #!/usr/bin/env python3
 
 import os.path as op, os
+import so3g  # noqa: F401
 from spt3g import core
 import numpy as np
-import so3g
 import itertools
 import yaml
 
+
 def pos2vel(p):
-    """
-    From a given position vector, compute the velocity vector
+    """From a given position vector, compute the velocity vector
+
+    Parameters
+    ----------
+    p : np.ndarray
+        Position vector
+    
+    Returns
+    -------
+    np.ndarray
+        Velocity vector
+
     """
     return np.ediff1d(p)
 
 def smurf_reader(filename):
+    """Generator that yields frames from a smurf file
+    
+    Parameters
+    ----------
+    filename : str
+        Path to smurf file
+
+    Returns
+    -------
+    core.G3Frame
+        Frame from smurf file     
+    """
     reader = so3g.G3IndexedReader(filename)
     while True:
         frames = reader.Process(None)
