@@ -87,7 +87,7 @@ class ContextTest(unittest.TestCase):
                 ({'dets:detset': ['neard'], 'dets:readout_id': ['read00', 'read05']}, 1),
                 ({'dets:band': ['f090']}, 4),
                 ({'dets:band': ['f090'], 'dets:detset': ['neard']}, 2),
-                ({'dets:det_id': ['NOT_FOUND']}, 2),
+                ({'dets:det_id': ['NO_MATCH']}, 2),
         ]:
             meta = ctx.get_meta(obs_id, dets=selection)
             self.assertEqual(meta.dets.count, count, msg=f"{selection}")
@@ -149,9 +149,9 @@ class ContextTest(unittest.TestCase):
         for band, f in zip(tod.det_info['band'], tod.flags):
             # The f090 dets should have 0 flag intervals; f150 have 1
             self.assertEqual(len(f.ranges()), int(band == 'f150'))
-        # Check if NOT_FOUND det_id seemed to broadcast propertly ...
+        # Check if NO_MATCH det_id seemed to broadcast propertly ...
         self.assertEqual(list(tod.det_info['det_param'] == -1),
-                         list(dataset_sim.dets['det_id'] == 'NOT_FOUND'))
+                         list(dataset_sim.dets['det_id'] == 'NO_MATCH'))
 
         tod = ctx.get_obs(obs_id + ':f090')
         self.assertEqual(tod.signal.shape, (n_det // 2, n_samp))
@@ -196,10 +196,10 @@ class DatasetSim:
             [('read00', 'f090', 'A', 0.0, 0.0, 'neard', 'det00', 120.),
              ('read01', 'f090', 'B', 0.0, 0.0, 'neard', 'det01', 121.),
              ('read02', 'f150', 'A', 0.0, 0.0, 'neard', 'det02', 122.),
-             ('read03', 'f150', 'B', 0.0, 0.0, 'neard', 'NOT_FOUND', -1.),
+             ('read03', 'f150', 'B', 0.0, 0.0, 'neard', 'NO_MATCH', -1.),
              ('read04', 'f090', 'A', 1.0, 0.0, 'fard',  'det04', 124.), 
              ('read05', 'f090', 'B', 1.0, 0.0, 'fard',  'det05', 125.),
-             ('read06', 'f150', 'A', 1.0, 0.0, 'fard',  'NOT_FOUND', -1.),
+             ('read06', 'f150', 'A', 1.0, 0.0, 'fard',  'NO_MATCH', -1.),
              ('read07', 'f150', 'B', 1.0, 0.0, 'fard',  'det07', 127.),
             ])
 
@@ -373,9 +373,9 @@ class DatasetSim:
             return rs
         elif filename == 'det_param.h5':
             rs = self.dets.subset(keys=['det_id', 'det_param'])
-            # Keep only 1 row with 'NOT_FOUND'
-            while sum(rs['det_id'] == 'NOT_FOUND') > 1:
-                rs.rows.pop(list(rs['det_id']).index('NOT_FOUND'))
+            # Keep only 1 row with 'NO_MATCH'
+            while sum(rs['det_id'] == 'NO_MATCH') > 1:
+                rs.rows.pop(list(rs['det_id']).index('NO_MATCH'))
             rs.keys = ['dets:' + k for k in rs.keys]
             return rs
         elif filename == 'abscal.h5':
