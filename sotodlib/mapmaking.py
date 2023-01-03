@@ -63,8 +63,14 @@ class MLMapmaker:
         if noise_model is None: noise_model = self.noise_model
         # Build the noise model from the obs unless a fully
         # initialized noise model was passed
-        if noise_model.ready: nmat = noise_model
-        else: nmat = noise_model.build(tod, srate=srate)
+        if noise_model.ready:
+            nmat = noise_model
+        else:
+            try:
+                nmat = noise_model.build(tod, srate=srate)
+            except Exception as e:
+                msg = f"FAILED to build a noise model for observation='{id}' : '{e}'"
+                raise RuntimeError(msg)
         # And apply it to the tod
         tod    = nmat.apply(tod)
         # Add the observation to each of our signals

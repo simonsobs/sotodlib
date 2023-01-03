@@ -685,9 +685,6 @@ def reduce_data(job, args, data):
     ops.mem_count.prefix = "After mapmaker"
     ops.mem_count.apply(data)
 
-    ops.mlmapmaker.apply(data)
-    log.info_rank("Finished ML map-making in", comm=world_comm, timer=timer)
-
     # Optionally run Madam
 
     if toast.ops.madam.available() and ops.madam.enabled:
