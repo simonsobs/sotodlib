@@ -58,10 +58,10 @@ class SimHWPSS(Operator):
         help="Observation detdata key for simulated signal",
     )
 
-    detector_pointing = Instance(
+    stokes_weights = Instance(
         klass=Operator,
         allow_none=True,
-        help="Operator that translates boresight Az/El pointing into detector frame",
+        help="This must be an instance of a Stokes weights operator",
     )
 
     fname_hwpss = Unicode(
@@ -79,7 +79,7 @@ class SimHWPSS(Operator):
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
 
-        for trait in "detector_pointing", :
+        for trait in "stokes_weights",:
             value = getattr(self, trait)
             if value is None:
                 raise RuntimeError(
@@ -134,7 +134,6 @@ class SimHWPSS(Operator):
                 obs_data = Data(comm=data.comm)
                 obs_data._internal = data._internal
                 obs_data.obs = [obs]
-                self.detector_pointing.apply(obs_data, detectors=[det])
                 self.stokes_weights.apply(obs_data, detectors=[det])
                 obs_data.obs.clear()
                 del obs_data
@@ -142,7 +141,7 @@ class SimHWPSS(Operator):
                 azel_quat = obs.detdata[
                     self.stokes_weights.detector_pointing.quats
                 ][det]
-                theta, phi = qa.to_position(azel_quat)
+                theta, phi, _ = qa.to_iso_angles(azel_quat)
                 el = np.pi / 2 - theta
 
                 # Get polarization weights
@@ -207,7 +206,7 @@ class SimHWPSS(Operator):
         return
 
     def _requires(self):
-        req = self.detector_pointing.requires()
+        req = self.stokes_weights.requires()
         req["shared"].append(self.hwp_angle)
         req["detdata"].append(self.weights)
         return req
