@@ -9,8 +9,9 @@ from detmap.makemap import MapMaker
 import sotodlib
 from sotodlib import core
 from sotodlib.io.metadata import write_dataset
+from sotodlib.site_pipeline import util
 
-logger = logging.getLogger(__name__)
+logger = util.init_logger(__name__)
 
 def parse_args():
     parser = ArgumentParser()
@@ -18,41 +19,24 @@ def parse_args():
         help="Configuration File for running DetMap")
     parser.add_argument('--overwrite', action='store_true', 
         help="Overwrite existing entries.")
-    parser.add_argument('-v', '--verbose', action='count',
-                        default=0, help="Pass multiple times to increase.")
     parser.add_argument('--debug', action='store_true')
-    parser.add_argument('--log-file', default='make_det_info_wafer.log', help=
-    "Output log filename")
+    parser.add_argument('--log-file', help="Output log filename")
     args = parser.parse_args()
     return args
-
 
 def main(args=None):
     if args is None:
         args = parse_args()
         
     if args.debug:
-        logger.setLevel(logging.INFO)
-        formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s')
-
-        stdout_handler = logging.StreamHandler(sys.stdout)
-        stdout_handler.setLevel(logging.DEBUG)
-        stdout_handler.setFormatter(formatter)
-
+        logger.setLevel("DEBUG")
+    
+    if args.log_file is not None:
+        formatter = util._ReltimeFormatter('%(asctime)s: %(message)s (%(levelname)s)')
         file_handler = logging.FileHandler(args.log_file)
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(formatter)
-
-
         logger.addHandler(file_handler)
-        logger.addHandler(stdout_handler)
-    
-    if args.verbose >= 1:
-        logger.setLevel("INFO")
-    if args.verbose >= 2:
-        sotodlib.logger.setLevel("INFO")
-    if args.verbose >= 3:
-        sotodlib.logger.setLevel("DEBUG")
 
     configs = yaml.safe_load(open(args.config_file, "r"))
     array_names = [array["name"] for array in configs["arrays"]]
@@ -109,9 +93,6 @@ def main(args=None):
         # iterate over the ideal/design metadata for this array
         for tune in map_maker.grab_metadata():
             
-            bandpass = replace_none(tune.bandpass, str, "NC")
-            if not bandpass == "NC":
-                bandpass = f"f{bandpass}"
             # add detector name to database
             det_rs.append({
                 "dets:det_id": tune.detector_id,
