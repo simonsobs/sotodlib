@@ -148,6 +148,7 @@ class SOFocalplane(Focalplane):
             pixels,
             fwhms,
             pols,
+            pol_types,
             card_slots,
             channels,
             AMCs,
@@ -181,9 +182,11 @@ class SOFocalplane(Focalplane):
             [],
             [],
             [],
+            [],
         )
 
         for det_name, det_data in hw.data["detectors"].items():
+            print(f"{det_name} : {det_data}")  # DEBUG
             names.append(det_name)
             quats.append(np.array([float(x) for x in det_data["quat"]]))
             ids.append(int(det_data["ID"]))
@@ -194,6 +197,7 @@ class SOFocalplane(Focalplane):
             )
             fwhms.append(float(det_data["fwhm"]) * u.arcmin)
             pols.append(det_data["pol"])
+            pol_types.append(det_data["pol_type"])
             card_slots.append(det_data["card_slot"])
             channels.append(det_data["channel"])
             AMCs.append(det_data["AMC"])

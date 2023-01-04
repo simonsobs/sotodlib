@@ -412,6 +412,21 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     ops.mem_count.prefix = "After simulating sky signal"
     ops.mem_count.apply(data)
 
+    # Use the Conviqt operator to generate beam-convolved TOD
+
+    if ops.sim_ground.hwp_angle is None:
+        ops.conviqt.comm = world_comm
+        ops.conviqt.detector_pointing = ops.det_pointing_radec
+        ops.conviqt.apply(data)
+    else:
+        ops.conviqt_teb.comm = world_comm
+        ops.conviqt_teb.detector_pointing = ops.det_pointing_radec
+        ops.conviqt_teb.hwp_angle = ops.sim_ground.hwp_angle
+        ops.conviqt_teb.apply(data)
+
+    ops.mem_count.prefix = "After 4-pi beam convolution"
+    ops.mem_count.apply(data)
+
     # Simulate scan-synchronous signal
 
     ops.sim_sss.detector_pointing = ops.det_pointing_azel
@@ -759,6 +774,8 @@ def main():
             name="det_pointing_radec", quats="quats_radec"
         ),
         toast.ops.ScanHealpixMap(name="scan_map", enabled=False),
+        toast.ops.SimConviqt(name="conviqt", enabled=False),
+        toast.ops.SimTEBConviqt(name="conviqt_teb", enabled=False),
         toast.ops.SimAtmosphere(
             name="sim_atmosphere_coarse",
             add_loading=False,
