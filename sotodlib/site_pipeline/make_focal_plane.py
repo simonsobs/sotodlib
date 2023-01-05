@@ -59,8 +59,6 @@ def rescale(xy):
 def gen_priors(aman, prior, method="flat", width=1, basis=None):
     """
     Generate priors from detmap.
-    Currently priors will be 1 everywhere but the location of the detmap's match.
-    More complicated prior generation will be a part of this function eventually.
 
     Arguments:
 
@@ -70,9 +68,9 @@ def gen_priors(aman, prior, method="flat", width=1, basis=None):
                Should be greater than 1.
 
         method: What sort of priors to implement.
-                Currently only 'flat' is accepted but at least 'gaussian' will be implemented later.
+                Currently only 'flat' and 'gaussian' are accepted.
 
-        width: Width of priors. When gaussian priors are added this will be sigma.
+        width: Width of priors. For gaussian priors this is sigma.
 
         basis: Basis to calculate width in.
                Currently not implemented so width will just be along the dets axis.
@@ -86,8 +84,15 @@ def gen_priors(aman, prior, method="flat", width=1, basis=None):
     def _flat(arr, idx):
         arr[idx - width // 2 : idx + width // 2 + width % 2] = prior
 
+    def _gaussian(arr, idx):
+        arr = prior * np.exp(
+            -0.5 * (np.arange(-1 * idx, len(arr) - idx, len(arr)) / width) ** 2
+        )
+
     if method == "flat":
         prior_method = _flat
+    elif method == "gaussian":
+        prior_method = _gaussian
     else:
         raise ValueError("Method " + method + " not implemented")
 
