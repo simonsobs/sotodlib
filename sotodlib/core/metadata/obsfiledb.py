@@ -239,7 +239,7 @@ class ObsFileDb:
 
         """
         c = self.conn.execute(
-            'select detsets.name as `dets:detset`, det as `dets:readout_id`'
+            'select distinct detsets.name as `dets:detset`, det as `dets:readout_id`'
             'from detsets join files '
             'on files.detset=detsets.name where obs_id=?', (obs_id, ))
         return ResultSet.from_cursor(c)
