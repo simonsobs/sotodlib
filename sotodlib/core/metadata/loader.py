@@ -408,7 +408,8 @@ class SuperLoader:
                     reraise(spec, e)
 
             if spec.get('det_info'):
-                det_info = merge_det_info(det_info, item)
+                det_info = merge_det_info(
+                    det_info, item, multi=spec.get('multi', False))
                 item = None
 
                 det_info, aug_request = check_tags(det_info, aug_request)
@@ -459,7 +460,7 @@ def _filter_items(prefix, d, remove=True):
     return [k[len(prefix)*remove:] for k in d if k.startswith(prefix)]
 
 
-def merge_det_info(det_info, new_info,
+def merge_det_info(det_info, new_info, multi=False,
                    index_columns=['readout_id', 'det_id']):
     """Args:
 
@@ -467,6 +468,10 @@ def merge_det_info(det_info, new_info,
         with columns *without* the 'dets:' prefix.
       new_info (ResultSet): New data to merge/check against
         det_info; only columns with dets: prefix are processed.
+      multi (bool): whether to permit some rows to match multiple
+        rows.
+      index_columns: columns that will be recognized as indexing
+        columns.
 
     Returns:
       A (possibly) new det_info table, containing updates and
@@ -499,7 +504,16 @@ def merge_det_info(det_info, new_info,
     if det_info is None:
         return new_info
 
-    both, i0, i1 = core.util.get_coindices(new_info[match_key], det_info[match_key])
+    if multi:
+        # Permit duplicate keys.
+        i0 = core.util.get_multi_index(
+            new_info[match_key], det_info[match_key])
+        i1 = np.arange(len(det_info[match_key]))
+        i0, i1 = i0[i0>=0], i1[i0>=0]
+    else:
+        both, i0, i1 = core.util.get_coindices(
+            new_info[match_key], det_info[match_key],
+            check_unique=True)
 
     # Common fields need to be in accordance, then drop them.
     common_keys = set(new_info.keys) & set(det_info.keys)

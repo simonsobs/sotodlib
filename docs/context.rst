@@ -849,32 +849,24 @@ contain only the ``obs_id``.  For each item in the context.yaml
 Changing det_info
 -----------------
 
-Metadata entries can be used to change the active ``det_info`` table
-that is used to screen and match metadata results.  This is
-accomplished through special metadata entries with the following
-syntax::
+Metadata entries can be used to augment the  ``det_info`` table
+that is used to screen and match metadata results.  For example::
 
   metadata:
   - ...
   - db: 'more_det_info.sqlite'
     det_info: true
-    det_key: 'dets:name'
   - ...
 
-The boolean ``'det_info': true`` marks this as a special metadata
-entry to update ``det_info``.  The ``det_key`` entry specifies what
-column of the loaded metadata should be used as the index to add the
-information to the existing tracked ``det_info``; that key should
-exist in both the active ``det_info`` and in the result that is loaded
-here.
+The boolean ``'det_info': true`` marks the above as a special metadata
+entry to update ``det_info``.  It is expected that the database
+(``more_det_info.sqlite``) is a standard ManifestDb, which will be
+queried in the usual way except that when we get to the "Wrap
+Metadata" step, instead the following is performed:
 
-It is expected that ``more_det_info.sqlite`` is a standard ManifestDb,
-which will be queried in the usual way except that when we get to the
-"Wrap Metadata" step, instead the following is performed:
-
-  - The index field identified by ``det_key`` is looked up in the
-    current active ``det_info`` (after removing the dets: prefix) and
-    in the new metadata object (with prefix intact).
+  - An index field will be identified in the current active
+    ``det_info`` -- it can be either ``dets:readout_id`` or
+    ``dets:det_id`` -- to match against the new metadata.
   - The columns from the new metadata are merged into the active
     ``det_info``, ensuring that the index field values correspond.
   - Only the rows for which the index field has the same value in the
@@ -882,7 +874,23 @@ which will be queried in the usual way except that when we get to the
 
 As subsequent metadata are processed, they can match against any
 fields that have been added to ``det_info`` by preceding entries in
-the metadata list.
+the metadata list.  However, currently it is only possible to augment
+``det_info`` using ``readout_id`` or ``det_id``.
+
+By default, ``readout_id`` / ``det_id`` are expected to be unique
+indices.  It is often useful to permit multiple matches, especially
+for the special value "NOT_FOUND" in ``det_id``.  To permit this, add
+'multi: true' to the metadata block.  For example::
+
+  metadata:
+  ...
+  - db: 'wafer_det_map.sqlite'   # the 'readout_id' -> 'det_id' mapping
+    det_info: true
+  - db: 'wafer_info.sqlite'      # the 'det_id' -> misc properties table
+    det_info: true
+    multi: true                  # Set multi=true if det_id=NOT_FOUND might
+                                 # need to be broadcast to multiple readout_id
+  ...
 
 
 ------------------------------------
