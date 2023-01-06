@@ -186,7 +186,6 @@ class SOFocalplane(Focalplane):
         )
 
         for det_name, det_data in hw.data["detectors"].items():
-            print(f"{det_name} : {det_data}")  # DEBUG
             names.append(det_name)
             quats.append(np.array([float(x) for x in det_data["quat"]]))
             ids.append(int(det_data["ID"]))
