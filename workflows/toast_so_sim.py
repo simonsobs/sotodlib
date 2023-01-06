@@ -765,7 +765,7 @@ def main():
         toast.ops.PerturbHWP(name="perturb_hwp", enabled=False),
         toast.ops.DefaultNoiseModel(name="default_model", noise_model="noise_model"),
         toast.ops.ElevationNoise(name="elevation_model", out_model="noise_model"),
-        toast.ops.CommonModeNoise(name="common_mode_noise"),
+        toast.ops.CommonModeNoise(name="common_mode_noise", enabled=False),
         toast.ops.PointingDetectorSimple(name="det_pointing_azel", quats="quats_azel"),
         toast.ops.StokesWeights(
             name="weights_azel", weights="weights_azel", mode="IQU"
