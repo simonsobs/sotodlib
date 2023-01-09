@@ -789,6 +789,7 @@ class G3tSmurf:
             else:
                 tuneset = tune.tuneset
         else:
+            tune = None
             tuneset = session.query(TuneSets).filter(
                 TuneSets.start <= obs.start,
                 TuneSets.stream_id == obs.stream_id,
