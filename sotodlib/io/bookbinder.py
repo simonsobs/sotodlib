@@ -24,26 +24,6 @@ def pos2vel(p):
     """
     return np.ediff1d(p)
 
-def smurf_reader(filename):
-    """Generator that yields frames from a smurf file
-    
-    Parameters
-    ----------
-    filename : str
-        Path to smurf file
-
-    Returns
-    -------
-    core.G3Frame
-        Frame from smurf file     
-    """
-    reader = so3g.G3IndexedReader(filename)
-    while True:
-        frames = reader.Process(None)
-        assert len(frames) <= 1
-        if len(frames) == 0:
-            break
-        yield frames[0]
 
 class _HKBundle():
     """
@@ -688,7 +668,7 @@ class Bookbinder(object):
         if isinstance(self._smurf_files, list):
             ifile = self._smurf_files.pop(0)
             if self._verbose: print(f"Bookbinding {ifile}")
-            self.smurf_iter = smurf_reader(ifile)
+            self.smurf_iter = core.G3File(ifile)
 
             self.create_file_writers()
 
@@ -1006,7 +986,7 @@ class Bookbinder(object):
                     if len(self._smurf_files) > 0:
                         ifile = self._smurf_files.pop(0)
                         if self._verbose: print(f"Bookbinding {ifile}")
-                        self.smurf_iter = smurf_reader(ifile)
+                        self.smurf_iter = core.G3File(ifile)
                     else:
                         # If there are no more SMuRF files, output remaining SMuRF data
                         self.frameproc.flush_time = self.DEFAULT_TIME
