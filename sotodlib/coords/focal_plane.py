@@ -1,10 +1,8 @@
-# -*- coding: utf-8 -*-
 """
-To extract sky to secondary focus and secondary focus to array data from ID9 
-locations are taken to be where the central ray crosses a surface
-Also hardcoded is a dictionary between physical design and tube data.
-Requires zemax to be running or set get_data to be False and 
-@author: sdicker
+Map positions on physical focal plane to sky using physical optics.
+Currently only works for the LAT.
+
+LAT code adapted from code provided by Simon Dicker.
 """
 import numpy as np
 import logging
@@ -40,12 +38,33 @@ LAT_TUBES = {
 
 
 def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo=0.0):
-    """Routine to map pixels from arrays to sky
-    x,y = position on focal plane (currently zemax coord)
-    tube = which tube - integer 1 to 13, can look up names with tube_mapping
-    rot = co-rotator position in degrees wrt elevation (TBD sort out where zero is)
-    opt2cryo = the rotation to get from cryostat coordinates to zemax coordinates (TBD, prob 30 deg)
-    Curretly uses global variables...."""
+    """
+    Routine to map pixels from arrays to sky.
+
+    Arguments:
+
+        x: X position on focal plane (currently zemax coord)
+
+        y: Y position on focal plane (currently zemax coord)
+
+        sec2elev: Function that maps positions on secondary to on sky elevation
+
+        sex2xel: Function that maps positions on secondary to on sky xel.
+
+        array2secx: Function that maps positions on tube's focal plane to x position on secondary.
+
+        array2secy: Function that maps positions on tube's focal plane to y position on secondary.
+
+        rot: Co-rotator position in degrees wrt elevation (TBD sort out where zero is).
+
+        opt2cryo: The rotation to get from cryostat coordinates to zemax coordinates (TBD, prob 30 deg).
+
+    Returns:
+
+        elev: The on sky elevation.
+
+        xel: The on sky xel.
+    """
     d2r = np.pi / 180.0
     # TBD - put in check for MASK - values outside circle should not be allowed
     # get into zemax coord
@@ -64,6 +83,20 @@ def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo
 
 
 def LAT_optics(zemax_dat):
+    """
+    Compute mapping from LAT secondary to sky.
+
+    Arguments:
+
+        zemax_dat: LAT optics data from zemax.
+                   Can either be a path to the data file or the dict loaded from the file.
+
+    Returns:
+
+        sec2elev: Function that maps positions on secondary to on sky elevation
+
+        sex2xel: Function that maps positions on secondary to on sky xel.
+    """
     if type(zemax_dat) is str:
         try:
             zemax_dat = np.load(zemax_dat, allow_pickle=True)
@@ -87,6 +120,22 @@ def LAT_optics(zemax_dat):
 
 
 def LATR_optics(zemax_dat, tube):
+    """
+    Compute mapping from LAT secondary to sky.
+
+    Arguments:
+
+        zemax_dat: LATR optics data from zemax.
+                   Can either be a path to the data file or the dict loaded from the file.
+
+        tube: Either the tube name as a string or the tube number as an int.
+
+    Returns:
+
+        array2secx: Function that maps positions on tube's focal plane to x position on secondary.
+
+        array2secy: Function that maps positions on tube's focal plane to y position on secondary.
+    """
     if type(zemax_dat) is str:
         try:
             zemax_dat = np.load(zemax_dat, allow_pickle=True)
