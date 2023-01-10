@@ -4,24 +4,22 @@ Currently only works for the LAT.
 
 LAT code adapted from code provided by Simon Dicker.
 """
-import numpy as np
 import logging
+import numpy as np
 from scipy.interpolate import interp2d
 from scipy.spatial.transform import Rotation as R
 from sotodlib import core
 
 logger = logging.getLogger(__name__)
 
-"""
-Dictionary of zemax tube layout.
-+ve x is to the right as seen from back of the cryostat *need to check*
-          11
-   5    3    4    6
-      1    0    2
-   9    7    8    10
-          12
-Below config assumes a 30 degree rotation
-"""
+# Dictionary of zemax tube layout.
+# +ve x is to the right as seen from back of the cryostat *need to check*
+#           11
+#    5    3    4    6
+#       1    0    2
+#    9    7    8    10
+#           12
+# Below config assumes a 30 degree rotation
 LAT_TUBES = {
     "c": 0,
     "i1": 3,
