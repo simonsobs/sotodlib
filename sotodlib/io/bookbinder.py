@@ -234,14 +234,14 @@ class FrameProcessor(object):
     maxlength : int
         Maximum allowed length (in samples) of an output frame
     """
-    def __init__(self):
+    def __init__(self, **config):
         self.hkbundle = None
         self.smbundle = None
         self.flush_time = None
-        self.maxlength = 10000
-        self.FLAGGED_SAMPLE_VALUE = -1
+        self.maxlength = config.get("maxlength", 10000)
+        self.FLAGGED_SAMPLE_VALUE = config.get("flagged_sample_value", -1)
         self.current_state = 0  # default to scan state
-        self.GAP_THRESHOLD = 0.05
+        self.GAP_THRESHOLD = config.get("gap_threshold", 0.05)
         self._frame_splits = []
         self._hk_gaps = []
         self._smurf_gaps = []
@@ -575,7 +575,7 @@ class FrameProcessor(object):
             else:
                 # if there is only one sample in the frame, then we can't determine the sample rate
                 # try to get it from the previous frame
-                if len(t) - 1 == 0:
+                if len(t) == 1:
                     print("Warning: only one sample in frame. Trying to use the sample rate from previous frame.")
                     sample_interval = self._prev_smurf_frame_sample_interval
                 else:
@@ -623,9 +623,10 @@ class Bookbinder(object):
     in default mode, where frames are split once they reach the maximum length (Frameprocessor.MAXLENGTH).
     HK data is co-sampled with SMuRF data before output.
     """
-    def __init__(self, smurf_files, hk_files=None, out_root='.', book_id=None, session_id=None, stream_id=None,
-                 start_time=None, end_time=None, smurf_timestamps=None, max_nchannels=1e3, overwrite_afile=False,
-                 verbose=True):
+    def __init__(self, smurf_files, hk_files=None, out_root='.',
+                 book_id=None, session_id=None, stream_id=None, start_time=None,
+                 end_time=None, smurf_timestamps=None, verbose=True, readout_ids=None,
+                 **config):
         self._smurf_files = smurf_files
         self._hk_files = hk_files
         self._book_id = book_id
@@ -635,6 +636,7 @@ class Bookbinder(object):
         self._start_time = start_time
         self._end_time = end_time
         self._verbose = verbose
+        self._readout_ids = readout_ids
         self._frame_splits_file = op.join(out_root, book_id, 'frame_splits.txt')
         self._frame_splits = []
         self._meta_file = op.join(out_root, book_id, f'M_index.yaml')
@@ -642,13 +644,14 @@ class Bookbinder(object):
         self.frame_num = 0
         self.sample_num = 0
         self.ofile_num = 0
-        self.default_mode = True
-        self.MAX_SAMPLES_TOTAL = 1e9
-        self.MAX_SAMPLES_PER_CHANNEL = self.MAX_SAMPLES_TOTAL // max_nchannels
+        self.default_mode = True  # True: time-based split; False: scan-based split
+        self.MAX_SAMPLES_TOTAL = int(config.get("max_samples_total", 1e9))
+        self.max_nchannels = int(config.get("max_nchannels", 1e3))
+        self.MAX_SAMPLES_PER_CHANNEL = self.MAX_SAMPLES_TOTAL // self.max_nchannels
         self.DEFAULT_TIME = core.G3Time(1e18)  # 1e18 = 2286-11-20T17:46:40.000000000 (in the distant future)
-        self.OVERWRITE_ANCIL_FILE = overwrite_afile
+        self.OVERWRITE_ANCIL_FILE = config.get("overwrite_afile", False)
 
-        self.frameproc = FrameProcessor()
+        self.frameproc = FrameProcessor(**config.get("frameproc_config", {}))
         self.frameproc._smurf_timestamps = smurf_timestamps
 
         if isinstance(self._hk_files, str):
@@ -767,7 +770,7 @@ class Bookbinder(object):
         frame_splits = []
 
         if self.default_mode:
-            frame_splits += [self.DEFAULT_TIME]
+            frame_splits += [self.DEFAULT_TIME]  # no split, leave frameprocessor to decide based on maxlength
             return frame_splits
 
         # Assign a value to each event based on what occurs at that time: 0 for a zero-crossing,
@@ -900,6 +903,8 @@ class Bookbinder(object):
             if not isinstance(self._hk_files, list):
                 raise TypeError("Please provide HK files in a list.")
 
+            # Chain multiple hkfile iteratables together so that
+            # by using `next` we iterate across all hk files
             if not hasattr(self, 'hk_iter'):
                 self.hk_iter = []
                 for hkfile in self._hk_files:
@@ -919,10 +924,10 @@ class Bookbinder(object):
                 # Check if a time gap exists since previous frame containing ACU position data
                 acu_pos_index = list(h['block_names']).index('ACU_position')
                 t = h['blocks'][acu_pos_index].times
-                if prev_frame_last_sample is not None:
+                if prev_frame_last_sample is not None and prev_frame_sample_interval is not None:
                     this_frame_first_sample = t[0].time
                     time_since_prev_frame   = this_frame_first_sample - prev_frame_last_sample
-                    if np.abs(prev_frame_sample_interval/time_since_prev_frame - 1) > self.frameproc.GAP_THRESHOLD:
+                    if time_since_prev_frame/prev_frame_sample_interval - 1 > self.frameproc.GAP_THRESHOLD:
                         # Add gap to internal list
                         self.frameproc._hk_gaps.append((prev_frame_last_sample, this_frame_first_sample))
                 # update values
@@ -962,6 +967,7 @@ class Bookbinder(object):
         if op.isfile(self._frame_splits_file):
             self._frame_splits = [core.G3Time(t) for t in np.loadtxt(self._frame_splits_file, dtype='int', ndmin=1)]
         else:
+            # note that find_frame_splits depends on process_HK_files having run
             self._frame_splits = self.find_frame_splits()
 
         for event_time in self._frame_splits:
