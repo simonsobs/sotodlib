@@ -7,6 +7,8 @@ LAT code adapted from code provided by Simon Dicker.
 import numpy as np
 import logging
 from scipy.interpolate import interp2d
+from scipy.spatial.transform import Rotation as R
+from sotodlib import core
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,43 @@ LAT_TUBES = {
     "o5": 6,
     "o6": 11,
 }
+
+
+# TODO: Should probably have a lookup table that maps tube/wafer to the correct parameters
+def LAT_coord_transform(x, y, rot_fp, rot_ufm, r=72.645):
+    """
+    Transform from coords internal to wafer to LAT Zemax coords.
+
+    Arguments:
+
+        x: X position in wafer's internal coordinate system
+
+        y: Y position in wafer's internal coordinate system.
+
+        rot_fp: Angle of array location on focal plane in deg.
+
+        rot_ufm: Rotatation of UFM about its center.
+
+        r: Distance from center of focal plane to center of wafer.
+    Returns:
+
+        x: X position on focal plane in zemax coords.
+
+        y: Y position on focal plane in zemax coords.
+    """
+    xy = np.vstack((x, y))
+    xy_trans = np.zeros((xy.shape[1], 3))
+    xy_trans[:, :2] = xy.T
+
+    r1 = R.from_euler("z", rot_fp, degrees=True)
+    shift = r1.apply(np.array([r, 0, 0]))
+
+    r2 = R.from_euler("z", rot_ufm, degrees=True)
+    xy_trans = r2.apply(xy_trans) + shift
+
+    xy_trans = xy_trans.T[:2]
+
+    return xy_trans[0], xy_trans[1]
 
 
 def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo=0.0):
@@ -182,3 +221,58 @@ def LATR_optics(zemax_dat, tube):
     )
 
     return array2secx, array2secy
+
+
+def LAT_focal_plane(
+    aman, zemax_dat, x=None, y=None, rot=0, tube="c", transform_pars=None
+):
+    """
+    Compute focal plane for a wafer in the LAT.
+
+    Arguments:
+
+        aman: AxisManager nominally containing aman.det_info.wafer.
+              If provided focal plane will be stored in aman.focal_plane.
+
+        zemax_dat: LATR optics data from zemax.
+                   Can either be a path to the data file or the dict loaded from the file.
+
+        x: Detector x positions, if provided will override positions loaded from aman.
+
+        y: Detector y positions, if provided will override positions loaded from aman.
+
+        rot: Co-rotator angle.
+
+        tube: Either the tube name as a string or the tube number as an int.
+
+        transform_pars: Parameters to pass to LAT_coord_transform to transform from internal
+                        wafer coordinates to the focal plane's Zemax coordinate system.
+                        If None then no transformation will be applied.
+    Returns:
+
+        xi: Detector elev on sky from physical optics.
+            If aman is provided then will be wrapped as aman.focal_plane.xi.
+
+        eta: Detector xel on sky from physical optics.
+             If aman is provided then will be wrapped as aman.focal_plane.eta.
+    """
+    if x is None:
+        x = aman.det_info.wafer.det_x
+    if y is None:
+        y = aman.det_info.wafer.det_y
+
+    if transform_pars is not None:
+        x, y = LAT_coord_transform(x, y, *transform_pars)
+
+    sec2elev, sec2xel = LAT_optics(zemax_dat)
+    array2secx, array2secy = LATR_optics(zemax_dat, tube)
+
+    xi, eta = LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot)
+
+    if aman is not None:
+        focal_plane = core.AxisManager(aman.dets)
+        focal_plane.wrap("xi", xi, [(0, focal_plane.dets)])
+        focal_plane.wrap("eta", eta, [(0, focal_plane.dets)])
+        aman.wrap("focal_plane", focal_plane)
+
+    return xi, eta
