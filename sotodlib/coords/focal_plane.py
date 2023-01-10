@@ -39,7 +39,7 @@ LAT_TUBES = {
 }
 
 
-def pix2sky(x, y, tube, rot=0, opt2cryo=0.0):
+def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo=0.0):
     """Routine to map pixels from arrays to sky
     x,y = position on focal plane (currently zemax coord)
     tube = which tube - integer 1 to 13, can look up names with tube_mapping
@@ -48,15 +48,16 @@ def pix2sky(x, y, tube, rot=0, opt2cryo=0.0):
     Curretly uses global variables...."""
     d2r = np.pi / 180.0
     # TBD - put in check for MASK - values outside circle should not be allowed
-    xz = x * np.cos(d2r * opt2cryo) - y * np.sin(d2r * opt2cryo)  # get into zemax coord
+    # get into zemax coord
+    xz = x * np.cos(d2r * opt2cryo) - y * np.sin(d2r * opt2cryo)
     yz = y * np.cos(d2r * opt2cryo) + x * np.sin(d2r * opt2cryo)
-    xs = array2secx[tube](
-        xz, yz
-    )  # Where is it on (zemax secondary focal plane wrt LATR)
-    ys = array2secy[tube](xz, yz)
-    rot2 = rot  # may need to add offset here to account for physical vs ZEMAX
-    xrot = xs * np.cos(d2r * rot2) - ys * np.sin(d2r * rot2)  # get into LAT zemax coord
-    yrot = ys * np.cos(d2r * rot2) + xs * np.sin(d2r * rot2)
+    # Where is it on (zemax secondary focal plane wrt LATR)
+    xs = array2secx(xz, yz)
+    ys = array2secy(xz, yz)
+    # get into LAT zemax coord
+    # We may need to add a rotation offset here to account for physical vs ZEMAX
+    xrot = xs * np.cos(d2r * rot) - ys * np.sin(d2r * rot)
+    yrot = ys * np.cos(d2r * rot) + xs * np.sin(d2r * rot)
     elev = sec2elev(xrot, yrot)  # note these are around the telescope boresight
     xel = sec2xel(xrot, yrot)
     return elev, xel
