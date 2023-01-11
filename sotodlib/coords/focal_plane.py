@@ -233,7 +233,8 @@ def LAT_focal_plane(
               If provided focal plane will be stored in aman.focal_plane.
 
         zemax_dat: LATR optics data from zemax.
-                   Can either be a path to the data file or the dict loaded from the file.
+                   Can be a path to the data file, the dict loaded from the file,
+                   or a tuple with (sec2elev, sec2xel, array2secx, array2secy).
 
         x: Detector x positions, if provided will override positions loaded from aman.
 
@@ -262,8 +263,11 @@ def LAT_focal_plane(
     if transform_pars is not None:
         x, y = LAT_coord_transform(x, y, *transform_pars)
 
-    sec2elev, sec2xel = LAT_optics(zemax_dat)
-    array2secx, array2secy = LATR_optics(zemax_dat, tube)
+    if type(zemax_dat) is not str and type(zemax_dat) is not dict:
+        sec2elev, sec2xel, array2secx, array2secy = zemax_dat
+    else:
+        sec2elev, sec2xel = LAT_optics(zemax_dat)
+        array2secx, array2secy = LATR_optics(zemax_dat, tube)
 
     xi, eta = LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot)
 
