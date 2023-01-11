@@ -134,13 +134,13 @@ def LAT_optics(zemax_dat):
 
         sex2xel: Function that maps positions on secondary to on sky xel.
     """
-    if type(zemax_dat) is str:
+    if isinstance(zemax_dat, str):
         try:
             zemax_dat = np.load(zemax_dat, allow_pickle=True)
         except Exception as e:
             logger.error("Can't load data from " + zemax_dat)
             raise e
-    elif type(zemax_dat) is not dict:
+    elif not isinstance(zemax_dat, dict):
         logger.error("zemax_dat should either be a path or a dictionary")
         raise TypeError
     try:
@@ -173,13 +173,13 @@ def LATR_optics(zemax_dat, tube):
 
         array2secy: Function that maps positions on tube's focal plane to y position on secondary.
     """
-    if type(zemax_dat) is str:
+    if isinstance(zemax_dat, str):
         try:
             zemax_dat = np.load(zemax_dat, allow_pickle=True)
         except Exception as e:
             logger.error("Can't load data from " + zemax_dat)
             raise e
-    elif type(zemax_dat) is not dict:
+    elif not isinstance(zemax_dat, dict):
         logger.error("zemax_dat should either be a path or a dictionary")
         raise TypeError
     try:
@@ -188,14 +188,14 @@ def LATR_optics(zemax_dat, tube):
         logger.error("LATR key missing from dictionary")
         raise e
 
-    if type(tube) is str:
+    if isinstance(tube, str):
         tube_name = tube
         try:
             tube_num = LAT_TUBES[tube]
         except Exception as e:
             logger.error("Invalid tube name")
             raise e
-    elif type(tube) is int:
+    elif isinstance(tube, int):
         tube_num = tube
         try:
             tube_name = list(LAT_TUBES.keys())[tube_num]
@@ -263,7 +263,7 @@ def LAT_focal_plane(
     if transform_pars is not None:
         x, y = LAT_coord_transform(x, y, *transform_pars)
 
-    if type(zemax_dat) is not str and type(zemax_dat) is not dict:
+    if not isinstance(zemax_dat, (str, dict)):
         sec2elev, sec2xel, array2secx, array2secy = zemax_dat
     else:
         sec2elev, sec2xel = LAT_optics(zemax_dat)
