@@ -65,7 +65,8 @@ Config file format
 Here's an example configuration file. Many of these values depend on hardware
 setup and readout software setup. Making the detector ID info only requires a
 subset of these parameters but the processes are linked so it is probably worth
-always having the same configuration file.
+always having the same configuration file. Tested mapping strategies include
+``assignment`` and ``map_by_freq``.
 
 .. code-block:: yaml
 
@@ -73,8 +74,8 @@ always having the same configuration file.
     g3tsmurf_db: "/path/to/g3tsmurf.db"
     read_db: "/path/to/readout_2_detector_manifest.db"
     read_info: "/path/to/readout_2_detector_hdf5.h5"
-    det_db : "/path/to/det_info/wafer/manifest.db"
-    det_info : "/path/to/det_info/wafer/hdf5.h5"
+    det_db : "/path/to/det_info/wafer/det_info_manifest.db"
+    det_info : "/path/to/det_info/wafer/det_info_hdf5.h5"
 
     arrays:
       # name must match DetMap array names
@@ -86,7 +87,7 @@ always having the same configuration file.
         # how we want to call DetMap
         mapping :
           version : 0
-          strategy: "map_by_freq"
+          strategy: "assignment"
           # parameters for mapping strategy
           params: {
             "output_parent_dir":"/writable/path/",
@@ -114,10 +115,9 @@ entries mater.
     metadata:
         - db: "/path/to/readout_2_detector_manifest.db"
           det_info: true
-          det_key: "dets:readout_id"
-        - db: "/path/to/det_info/wafer/manifest.db"
+        - db: "/path/to/det_info/wafer/det_info_manifest.db"
           det_info: true
-          det_key: "dets:det_id"
+          multi: true
 
 
 preprocess-tod
