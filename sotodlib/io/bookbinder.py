@@ -108,9 +108,8 @@ class _SmurfBundle():
         return len(self.times) > 0 and self.times[-1] >= flush_time
 
     def get_names(self, s, use_rids=False):
-        if use_rids:
+        if use_rids and self.readout_ids is not None:
             # check compatability
-            assert self.readout_ids is not None
             assert len(s.names) == len(self.readout_ids)
             assert list(s.names) == sorted(s.names)  # name sure things are in our assumed order
             # maybe more checks are needed here...
@@ -961,8 +960,8 @@ class Bookbinder(object):
         """
         d = {'book_id':    self._book_id,
              'session_id': self._session_id,
-             'start_time': self._start_time.time,
-             'end_time':   self._end_time.time,
+             'start_time': self._start_time.time/core.G3Units.s,
+             'end_time':   self._end_time.time/core.G3Units.s,
              'n_frames':   self.frame_num,
              'n_samples':  self.sample_num}
         return d
