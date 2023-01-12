@@ -122,6 +122,7 @@ class Imprinter:
 
         self.session = None
         self.g3tsmurf_session = None
+        self.archive = None
         self.g3tsmurf_config = g3tsmurf_config
 
     def get_session(self):
@@ -137,17 +138,25 @@ class Imprinter:
             self.session = Session()
         return self.session
 
-    def get_g3tsmurf_session(self):
+    def get_g3tsmurf_session(self, return_archive=False):
         """Get a new g3tsmurf session or return an existing one.
+
+        Parameter
+        ---------
+        return_archive: bool
+            whether to return SMURF archive object
 
         Returns
         -------
         session: g3tsmurf session
+        archive: if return_archive is true
 
         """
         if self.g3tsmurf_session is None:
-            self.g3tsmurf_session = create_g3tsmurf_session(self.g3tsmurf_config)
-        return self.g3tsmurf_session
+            self.g3tsmurf_session, self.archive = create_g3tsmurf_session(self.g3tsmurf_config)
+        if not return_archive:
+            return self.g3tsmurf_session
+        return self.g3tsmurf_session, self.archive
 
     def register_book(self, obsset, bid=None, commit=True, session=None, verbose=True):
         """Register book to database
@@ -256,6 +265,7 @@ class Imprinter:
         filedb = self.get_files_for_book(book)
         # get readout ids
         try:
+            print("Retrieving readout_ids...")
             readout_ids = self.get_readout_ids_for_book(book)
         except ValueError:
             pass
@@ -281,7 +291,8 @@ class Imprinter:
                 Bookbinder(smurf_files, hk_files=hkfiles, out_root=odir,
                            stream_id=stream_id, session_id=int(session_id),
                            book_id=book.bid, start_time=start_t, end_time=stop_t,
-                           max_nchannels=book.max_channels, readout_ids=rids)()
+                           max_nchannels=book.max_channels,
+                           frameproc_config={"readout_ids": rids})()
             # not sure if this is the best place to update
             book.status = BOUND
             session.commit()
@@ -325,7 +336,7 @@ class Imprinter:
         if session is None: session = self.get_session()
         return session.query(Books).filter(Books.status == UNBOUND).all()
 
-    def get_failed_books(self, sesson=None):
+    def get_failed_books(self, session=None):
         """Get all failed books from database
         
         Parameters
@@ -539,7 +550,7 @@ class Imprinter:
             {obs_id: [readout_ids...]}}
 
         """
-        SMURF = self.get_g3tsmurf_session(return_archive=True)
+        _, SMURF = self.get_g3tsmurf_session(return_archive=True)
         out = {}
         # load all obs and associated files
         for obs_id, files in self.get_files_for_book(book).items():
@@ -548,8 +559,10 @@ class Imprinter:
             if "readout_id" not in ch_info:
                 raise ValueError(f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing")
             checks = ["NONE" in rid for rid in ch_info.readout_id]
-            if np.any(checks):  # we want to be strict to not have any None in book fieldnames
-                raise ValueError(f"Found {sum(checks)} channels without readout_id. Were fixed tones running?")
+            if np.all(checks):
+                raise ValueError(f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing")
+            if np.any(checks):
+                print(f"Warning: Found {sum(checks)} channels without readout_id. Were fixed tones running?")
             out[obs_id] = ch_info.readout_id
         return out
 
@@ -558,7 +571,7 @@ class Imprinter:
 # Utility functions #
 #####################
 
-def create_g3tsmurf_session(config, return_archive=False):
+def create_g3tsmurf_session(config):
     """create a connection session to g3tsmurf database
 
     Parameters
@@ -576,10 +589,7 @@ def create_g3tsmurf_session(config, return_archive=False):
     # create database connection
     SMURF = G3tSmurf.from_configs(config)
     session = SMURF.Session()
-    if not return_archive:
-        return session
-    else:
-        return SMURF
+    return session, SMURF
 
 def stream_timestamp(obs_id):
     """parse observation id to obtain a (stream, timestamp) pair
