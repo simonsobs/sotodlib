@@ -25,7 +25,7 @@ def func_hwpss_all(x, A1, A2, A3, A4, A5, phi1, phi2, phi3, phi4, phi5):
 
 
 def extract_hwpss(aman, signal='signal', name='hwpss_ext',
-                  hwp_angle=None, mode=0, 
+                  hwp_angle=None, mode=0,
                   prefilt_cutoff=0.1, bins=3601):
     """
     * Extract HWP synchronous signal from given tod (AxisManager)
@@ -39,14 +39,14 @@ def extract_hwpss(aman, signal='signal', name='hwpss_ext',
             name of target timestream data in AxisManager
         name: str
             output timestram name into AxisManager
-        mode: int 
+        mode: int
             0 = 2f&4f, 1 = 2f only, 2 = 4f only, 3 = all up to 5f
         prefit_cutoff: float
             cut off value of pre-lowpass filter
         bins: int
             number of bins for hwpss histogram
     """
-    
+
     filt = tod_ops.filters.high_pass_sine2(cutoff=prefilt_cutoff)
     signal_prefilt = np.array(tod_ops.fourier_filter(
         aman, filt, detrend=None, signal_name=signal))
@@ -83,7 +83,7 @@ def demod(aman, signal='signal', name='signal_demod',
     """
     * Simple demoduation function for AxisManager
     * Demod timstream will be added to AxisManager as aman['name']
-    
+
     Args
     -----
     aman: AxisManager
@@ -93,7 +93,7 @@ def demod(aman, signal='signal', name='signal_demod',
     name: str
         output timestram name into AxisManager
     hwp_angle: list or None
-        HWP reconstructed angle, 
+        HWP reconstructed angle,
         do not need to input if aman already has this
     bpf_center: float or None
         Center frequency of pre-bandpass filter
@@ -115,33 +115,33 @@ def demod(aman, signal='signal', name='signal_demod',
         aman.move(name + '_wo_lfilt', None)
     if name in aman.keys():
         aman.move(name, None)
-    
+
     if bpf_center is None:
         speed = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
                  (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
         bpf_center = 4 * speed
-        
+
     prelfilt = tod_ops.filters.low_pass_butter4(fc=bpf_center + bpf_width)
-    aman.wrap(name + '_prelfilt', 
-              tod_ops.fourier_filter(aman, prelfilt, 
-                                     detrend=None, 
-                                     signal_name=signal), 
+    aman.wrap(name + '_prelfilt',
+              tod_ops.fourier_filter(aman, prelfilt,
+                                     detrend=None,
+                                     signal_name=signal),
               [(0, 'dets'), (1, 'samps')])
     prehfilt = tod_ops.filters.high_pass_butter4(fc=bpf_center - bpf_width)
-    aman.wrap(name + '_prebfilt', 
-              tod_ops.fourier_filter(aman, prehfilt, 
-                                     detrend=None, 
-                                     signal_name=name + '_prelfilt'), 
+    aman.wrap(name + '_prebfilt',
+              tod_ops.fourier_filter(aman, prehfilt,
+                                     detrend=None,
+                                     signal_name=name + '_prelfilt'),
               [(0, 'dets'), (1, 'samps')])
 
-    aman.wrap(name + '_wo_lfilt', 
-              (aman[name + '_prebfilt'] * np.exp(-1j * (4 * aman.hwp_angle))).real, 
+    aman.wrap(name + '_wo_lfilt',
+              (aman[name + '_prebfilt'] * np.exp(-1j * (4 * aman.hwp_angle))).real,
               [(0, 'dets'), (1, 'samps')])
     lfilt = tod_ops.filters.low_pass_butter4(fc=lpf_cut)
     aman.wrap(name,
-              tod_ops.fourier_filter(aman, lfilt, 
-                                     detrend=None, 
-                                     signal_name=name+'_wo_lfilt'), 
+              tod_ops.fourier_filter(aman, lfilt,
+                                     detrend=None,
+                                     signal_name=name+'_wo_lfilt'),
               [(0, 'dets'), (1, 'samps')])
 
     aman.move(name + '_prelfilt', None)
@@ -149,7 +149,7 @@ def demod(aman, signal='signal', name='signal_demod',
     aman.move(name + '_wo_lfilt', None)
 
 
-# Functions to test with preprocessing pipeline added by Max S-F below 
+# Functions to test with preprocessing pipeline added by Max S-F below
 def get_hwpss_guess(aman, signal='signal', modes=[2, 4, 6, 8]):
     """
     Projects out fourier modes, ``modes`` from ``aman`` and returns them. This
@@ -191,13 +191,14 @@ def extract_hwpss_template(aman, As, Bs, signal='signal', name='hwpss_ext',
     mask_flags (bool):
     bins (int):
     """
-    new_As = np.copy(As.T)
-    new_Bs = np.copy(As.T)
-    new_modes = np.copy(As.T)
     N_modes = len(modes)
+    new_As = np.zeros((aman.dets.count, N_modes))
+    new_Bs = np.zeros((aman.dets.count, N_modes))
+    new_A0 = np.zeros(aman.dets.count)
+    new_modes = np.zeros((aman.dets.count, N_modes))
     sins = np.zeros((N_modes, aman.samps.count))
     coss = np.zeros((N_modes, aman.samps.count))
-    
+
     for i, nm in enumerate(modes):
         sins[i, :] = np.sin(nm*aman.hwp_angle)
         coss[i, :] = np.cos(nm*aman.hwp_angle)
@@ -220,11 +221,11 @@ def extract_hwpss_template(aman, As, Bs, signal='signal', name='hwpss_ext',
 
     for i in range(aman.dets.count):
         params_0 = list(As[:, i]) + list(Bs[:, i]) + list(modes)
-        params_0.append(np.mean(aman[signal][i, m[i]]))
+        params_0.append(np.median(aman[signal][i, m[i]]))
         popt, pcov = curve_fit(lambda x, *params_0: wrapper_fit_func(aman.hwp_angle[m[i]], N_modes, sins[:,m[i]], coss[:,m[i]], params_0),
                                aman.hwp_angle[m[i]], aman[signal][i,m[i]], p0=params_0)
 
-        new_As[i], new_Bs[i], new_modes[i] = popt[0:N_modes], popt[N_modes:2*N_modes], popt[2*N_modes:3*N_modes]
+        new_As[i], new_Bs[i], new_modes[i], new_A0[i] = popt[0:N_modes], popt[N_modes:2*N_modes], popt[2*N_modes:3*N_modes], popt[-1]
 
     aman_proc = core.AxisManager().wrap('A_sine', new_As, [(0, core.LabelAxis('dets', aman.dets.vals)),
                                                            (1, core.IndexAxis('modes'))])
@@ -232,6 +233,7 @@ def extract_hwpss_template(aman, As, Bs, signal='signal', name='hwpss_ext',
                                      (1, core.IndexAxis('modes'))])
     aman_proc.wrap('modes', new_modes, [(0, core.LabelAxis('dets', aman.dets.vals)),
                                         (1, core.IndexAxis('modes'))])
+    aman_proc.wrap('A0', new_A0, [(0, core.LabelAxis('dets', aman.dets.vals))])
     if add_to_aman:
         construct_hwpss_template(aman, aman_proc, name=name)
 
@@ -242,7 +244,7 @@ def construct_hwpss_template(aman, template_coeff_aman, name='hwpss_ext', overwr
     """
     Adds an axis corresponding to the hwpss template signal to an axis manager
     given an axis manager with hwp angles and a axis manager with the fitted
-    hwpss template coefficients and modes. 
+    hwpss template coefficients and modes.
     """
     def wrapper_fit_func(x, N, sins, coss, *args):
         a, b, m, a0 = list(args[0][:N]), list(args[0][N:2*N]),\
@@ -265,11 +267,13 @@ def construct_hwpss_template(aman, template_coeff_aman, name='hwpss_ext', overwr
     if name in aman.keys() and overwrite:
         aman.move(name, None)
     aman.wrap_new(name, ('dets', 'samps'))
-    
+
     for i in range(aman.dets.count):
-        aman[name][i] = wrapper_fit_func(aman.hwp_angle, N_modes, sins, coss, 
-                                         template_coeff_aman['A_sine'][i]+template_coeff_aman['A_cos'][i]+\
-                                         template_coeff_aman['modes'][i])
+        aman[name][i] = wrapper_fit_func(aman.hwp_angle, N_modes, sins, coss,
+                                         np.append(np.append(np.append(template_coeff_aman['A_sine'][i],
+                                                   template_coeff_aman['A_cos'][i]),
+                                                   template_coeff_aman['modes'][i]),
+                                                   template_coeff_aman['A0'][i]))
 
 
 def subtract_hwpss(aman, signal=None, hwpss_template=None,
@@ -281,7 +285,7 @@ def subtract_hwpss(aman, signal=None, hwpss_template=None,
         signal = aman.signal
     if hwpss_template is None:
         hwpss_template = aman.hwpss_ext
-        
+
     aman.wrap(subtract_name, np.subtract(signal, hwpss_template), [(0,'dets'), (1,'samps')])
 
 
