@@ -3,6 +3,7 @@ import numpy as np
 from collections import OrderedDict
 from typing import List
 import yaml
+import time
 
 import sqlalchemy as db
 from sqlalchemy import or_, and_, not_
@@ -83,6 +84,8 @@ class Books(Base):
     type = db.Column(db.String)
     status = db.Column(db.Integer)
 
+    def __repr__(self):
+        return f"<Book: {self.bid}>"
 
 ##############
 # main logic #
@@ -265,7 +268,6 @@ class Imprinter:
         filedb = self.get_files_for_book(book)
         # get readout ids
         try:
-            print("Retrieving readout_ids...")
             readout_ids = self.get_readout_ids_for_book(book)
         except ValueError:
             pass
@@ -554,8 +556,14 @@ class Imprinter:
         out = {}
         # load all obs and associated files
         for obs_id, files in self.get_files_for_book(book).items():
+            print(f"Retrieving readout_ids for {obs_id}...")
+            t1 = time.time()
             status = SmurfStatus.from_file(files[0])
+            t2 = time.time()
+            print("=> load status file: {:.2f} s".format(t2-t1))
             ch_info = get_channel_info(status, archive=SMURF)
+            t3 = time.time()
+            print("=> load channel info: {:.2f} s".format(t3-t2))
             if "readout_id" not in ch_info:
                 raise ValueError(f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing")
             checks = ["NONE" in rid for rid in ch_info.readout_id]
