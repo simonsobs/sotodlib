@@ -24,7 +24,6 @@ def pos2vel(p):
     """
     return np.ediff1d(p)
 
-
 class _HKBundle():
     """
     Buffer for Housekeeping data. Use add() to add data and rebundle() to output
@@ -95,7 +94,8 @@ class _SmurfBundle():
     Buffer for SMuRF data. Use add() to add data and rebundle() to output data
     up to but not including flush_time.
     """
-    def __init__(self):
+    def __init__(self, readout_ids=None):
+        self.readout_ids = readout_ids
         self.times = []
         self.signal = None
         self.bias = None
@@ -107,7 +107,18 @@ class _SmurfBundle():
         """
         return len(self.times) > 0 and self.times[-1] >= flush_time
 
-    def create_new_supertimestream(self, s):
+    def get_names(self, s, use_rids=False):
+        if use_rids:
+            # check compatability
+            assert self.readout_ids is not None
+            assert len(s.names) == len(self.readout_ids)
+            assert list(s.names) == sorted(s.names)  # name sure things are in our assumed order
+            # maybe more checks are needed here...
+            return self.readout_ids
+        else:
+            return s.names
+
+    def create_new_supertimestream(self, s, use_rids=False):
         """
         From the input SuperTimestream, create a new (empty) SuperTimestream
         with the same channels and channel names
@@ -125,9 +136,9 @@ class _SmurfBundle():
         dtype = np.int32 if (s.data.dtype != np.int64) else np.int64
 
         sts = so3g.G3SuperTimestream()
-        sts.names = s.names
+        sts.names = self.get_names(s, use_rids=use_rids)
         sts.times = core.G3VectorTime([])
-        sts.data = np.empty( (len(s.names), 0) , dtype=dtype)
+        sts.data = np.empty((len(s.names), 0), dtype=dtype)
 
         return sts
 
@@ -143,7 +154,7 @@ class _SmurfBundle():
         self.times.extend(f['data'].times)
 
         if self.signal is None:
-            self.signal = self.create_new_supertimestream(f['data'])
+            self.signal = self.create_new_supertimestream(f['data'], use_rids=True)
         self.signal.times.extend(f['data'].times)
         self.signal.data = np.hstack((self.signal.data, f['data'].data)).astype(np.int32)
 
@@ -181,7 +192,7 @@ class _SmurfBundle():
             Output primary timestream
         """
 
-        def rebundle_sts(sts, flush_time):
+        def rebundle_sts(sts, flush_time, use_rids=False):
             """
             Since G3SuperTimestreams cannot be shortened, the data must be copied to
             a new instance for rebundling of the buffer
@@ -190,6 +201,8 @@ class _SmurfBundle():
             ----------
             flush_time : G3Time
                 Output will contain buffered data up to (but not including) this time
+            use_rids : bool
+                Whether the `.names` field should be replaced with readout_ids
 
             Returns
             -------
@@ -203,24 +216,26 @@ class _SmurfBundle():
 
             # Output SuperTimestream (to be written to frame)
             stsout = so3g.G3SuperTimestream()
-            stsout.names = sts.names
+            names = self.readout_ids
+            stsout.names = self.get_names(sts, use_rids=use_rids)
             stsout.times = core.G3VectorTime([t for t in sts.times if t < flush_time])
             stsout.data = sts.data[:,:len(stsout.times)]
             # New buffer SuperTimestream
             newsts = so3g.G3SuperTimestream()
-            newsts.names = sts.names
+            newsts.names = self.get_names(sts, use_rids=use_rids)
             newsts.times = core.G3VectorTime([t for t in sts.times if t >= flush_time])
             newsts.data = sts.data[:,len(stsout.times):]
 
             return stsout, newsts
 
-        signalout, self.signal = rebundle_sts(self.signal, flush_time)
+        signalout, self.signal = rebundle_sts(self.signal, flush_time, use_rids=True)
         biasout, self.bias = rebundle_sts(self.bias, flush_time)
         primout, self.primary = rebundle_sts(self.primary, flush_time)
 
         self.times = [t for t in self.times if t >= flush_time]
 
         return signalout, biasout, primout
+
 
 class FrameProcessor(object):
     """
@@ -249,6 +264,7 @@ class FrameProcessor(object):
         self._prev_smurf_frame_sample_interval = None
         self._smurf_timestamps = None
         self._next_expected_smurf_sample_index = 0
+        self._readout_ids = config.get("readout_ids", None)
 
     def ready(self):
         """
@@ -549,7 +565,7 @@ class FrameProcessor(object):
 
         if f.type == core.G3FrameType.Scan:
             if self.smbundle is None:
-                self.smbundle = _SmurfBundle()
+                self.smbundle = _SmurfBundle(readout_ids=self._readout_ids)
 
             output = []
 
@@ -625,8 +641,7 @@ class Bookbinder(object):
     """
     def __init__(self, smurf_files, hk_files=None, out_root='.',
                  book_id=None, session_id=None, stream_id=None, start_time=None,
-                 end_time=None, smurf_timestamps=None, verbose=True, readout_ids=None,
-                 **config):
+                 end_time=None, smurf_timestamps=None, verbose=True, **config):
         self._smurf_files = smurf_files
         self._hk_files = hk_files
         self._book_id = book_id
@@ -636,7 +651,6 @@ class Bookbinder(object):
         self._start_time = start_time
         self._end_time = end_time
         self._verbose = verbose
-        self._readout_ids = readout_ids
         self._frame_splits_file = op.join(out_root, book_id, 'frame_splits.txt')
         self._frame_splits = []
         self._meta_file = op.join(out_root, book_id, f'M_index.yaml')
@@ -650,7 +664,6 @@ class Bookbinder(object):
         self.MAX_SAMPLES_PER_CHANNEL = self.MAX_SAMPLES_TOTAL // self.max_nchannels
         self.DEFAULT_TIME = core.G3Time(1e18)  # 1e18 = 2286-11-20T17:46:40.000000000 (in the distant future)
         self.OVERWRITE_ANCIL_FILE = config.get("overwrite_afile", False)
-
         self.frameproc = FrameProcessor(**config.get("frameproc_config", {}))
         self.frameproc._smurf_timestamps = smurf_timestamps
 
