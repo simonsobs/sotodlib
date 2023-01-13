@@ -47,6 +47,10 @@ def main(
     # so preferreably set them to a reasonable range based on update_delay
     if not from_scratch:
         min_ctime = dt.datetime.now() - dt.timedelta(days=update_delay)
+    if isinstance(min_ctime, dt.datetime):
+        min_ctime = min_ctime.timestamp()
+    if isinstance(max_ctime, dt.datetime):
+        max_ctime = max_ctime.timestamp()
     imprinter.update_bookdb_from_g3tsmurf(min_ctime=min_ctime, max_ctime=max_ctime,
                                           ignore_singles=False,
                                           stream_ids=stream_ids,
