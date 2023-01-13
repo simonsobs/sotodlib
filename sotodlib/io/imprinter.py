@@ -3,7 +3,6 @@ import numpy as np
 from collections import OrderedDict
 from typing import List
 import yaml
-import time
 
 import sqlalchemy as db
 from sqlalchemy import or_, and_, not_
@@ -557,13 +556,8 @@ class Imprinter:
         # load all obs and associated files
         for obs_id, files in self.get_files_for_book(book).items():
             print(f"Retrieving readout_ids for {obs_id}...")
-            t1 = time.time()
             status = SmurfStatus.from_file(files[0])
-            t2 = time.time()
-            print("=> load status file: {:.2f} s".format(t2-t1))
             ch_info = get_channel_info(status, archive=SMURF)
-            t3 = time.time()
-            print("=> load channel info: {:.2f} s".format(t3-t2))
             if "readout_id" not in ch_info:
                 raise ValueError(f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing")
             checks = ["NONE" in rid for rid in ch_info.readout_id]
@@ -571,6 +565,8 @@ class Imprinter:
                 raise ValueError(f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing")
             if np.any(checks):
                 print(f"Warning: Found {sum(checks)} channels without readout_id. Were fixed tones running?")
+            # make sure all rchannel ids are sorted
+            assert list(ch_info.rchannel) == sorted(ch_info.rchannel)
             out[obs_id] = ch_info.readout_id
         return out
 
