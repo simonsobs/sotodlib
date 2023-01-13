@@ -215,7 +215,6 @@ class _SmurfBundle():
 
             # Output SuperTimestream (to be written to frame)
             stsout = so3g.G3SuperTimestream()
-            names = self.readout_ids
             stsout.names = self.get_names(sts, use_rids=use_rids)
             stsout.times = core.G3VectorTime([t for t in sts.times if t < flush_time])
             stsout.data = sts.data[:,:len(stsout.times)]
@@ -570,6 +569,10 @@ class FrameProcessor(object):
 
             # Determine if there is a gap in time between this frame and previous frame
             t = f['data'].times
+
+            if len(t) == 0:
+                return []
+
             if self._smurf_timestamps is not None:
                 current_timestamp = t[0].time
                 expected_timestamp = self._smurf_timestamps[self._next_expected_smurf_sample_index]
@@ -1014,6 +1017,7 @@ class Bookbinder(object):
                             self.frameproc.hkbundle.data['Azimuth_Velocity'] = np.append(self.frameproc.hkbundle.data['Azimuth_Velocity'], 0)
                             self.frameproc.hkbundle.data['Elevation_Velocity'] = np.append(self.frameproc.hkbundle.data['Elevation_Velocity'], 0)
                         output += self.frameproc.flush()
+                        # note that `signal` field only in the product of the FrameProcessor, not the input data
                         output = [o for o in output if len(o['signal'].times) > 0]  # Remove 0-length frames
                         self.write_frames(output + self.metadata)
                         output = []
