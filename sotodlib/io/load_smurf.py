@@ -172,7 +172,8 @@ class G3tSmurf:
         self.archive_path = archive_path
         self.meta_path = meta_path
         self.db_path = db_path
-        self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo)
+        self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo,
+                                       connect_args={'check_same_thread': False})
         Session.configure(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine)
         Base.metadata.create_all(self.engine)
@@ -788,6 +789,7 @@ class G3tSmurf:
             else:
                 tuneset = tune.tuneset
         else:
+            tune = None
             tuneset = session.query(TuneSets).filter(
                 TuneSets.start <= obs.start,
                 TuneSets.stream_id == obs.stream_id,

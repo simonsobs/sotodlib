@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
 
 import os.path as op, os
+import so3g  # noqa: F401
 from spt3g import core
 import numpy as np
-import so3g
 import itertools
 import yaml
 
+
 def pos2vel(p):
-    """
-    From a given position vector, compute the velocity vector
+    """From a given position vector, compute the velocity vector
+
+    Parameters
+    ----------
+    p : np.ndarray
+        Position vector
+    
+    Returns
+    -------
+    np.ndarray
+        Velocity vector
+
     """
     return np.ediff1d(p)
-
-def smurf_reader(filename):
-    reader = so3g.G3IndexedReader(filename)
-    while True:
-        frames = reader.Process(None)
-        assert len(frames) <= 1
-        if len(frames) == 0:
-            break
-        yield frames[0]
 
 class _HKBundle():
     """
@@ -92,7 +94,8 @@ class _SmurfBundle():
     Buffer for SMuRF data. Use add() to add data and rebundle() to output data
     up to but not including flush_time.
     """
-    def __init__(self):
+    def __init__(self, readout_ids=None):
+        self.readout_ids = readout_ids
         self.times = []
         self.signal = None
         self.bias = None
@@ -104,7 +107,17 @@ class _SmurfBundle():
         """
         return len(self.times) > 0 and self.times[-1] >= flush_time
 
-    def create_new_supertimestream(self, s):
+    def get_names(self, s, use_rids=False):
+        if use_rids and self.readout_ids is not None:
+            # check compatability
+            assert len(s.names) == len(self.readout_ids)
+            assert list(s.names) == sorted(s.names)  # name sure things are in our assumed order
+            # maybe more checks are needed here...
+            return self.readout_ids
+        else:
+            return s.names
+
+    def create_new_supertimestream(self, s, use_rids=False):
         """
         From the input SuperTimestream, create a new (empty) SuperTimestream
         with the same channels and channel names
@@ -122,9 +135,9 @@ class _SmurfBundle():
         dtype = np.int32 if (s.data.dtype != np.int64) else np.int64
 
         sts = so3g.G3SuperTimestream()
-        sts.names = s.names
+        sts.names = self.get_names(s, use_rids=use_rids)
         sts.times = core.G3VectorTime([])
-        sts.data = np.empty( (len(s.names), 0) , dtype=dtype)
+        sts.data = np.empty((len(s.names), 0), dtype=dtype)
 
         return sts
 
@@ -140,7 +153,7 @@ class _SmurfBundle():
         self.times.extend(f['data'].times)
 
         if self.signal is None:
-            self.signal = self.create_new_supertimestream(f['data'])
+            self.signal = self.create_new_supertimestream(f['data'], use_rids=True)
         self.signal.times.extend(f['data'].times)
         self.signal.data = np.hstack((self.signal.data, f['data'].data)).astype(np.int32)
 
@@ -178,7 +191,7 @@ class _SmurfBundle():
             Output primary timestream
         """
 
-        def rebundle_sts(sts, flush_time):
+        def rebundle_sts(sts, flush_time, use_rids=False):
             """
             Since G3SuperTimestreams cannot be shortened, the data must be copied to
             a new instance for rebundling of the buffer
@@ -187,6 +200,8 @@ class _SmurfBundle():
             ----------
             flush_time : G3Time
                 Output will contain buffered data up to (but not including) this time
+            use_rids : bool
+                Whether the `.names` field should be replaced with readout_ids
 
             Returns
             -------
@@ -200,24 +215,25 @@ class _SmurfBundle():
 
             # Output SuperTimestream (to be written to frame)
             stsout = so3g.G3SuperTimestream()
-            stsout.names = sts.names
+            stsout.names = self.get_names(sts, use_rids=use_rids)
             stsout.times = core.G3VectorTime([t for t in sts.times if t < flush_time])
             stsout.data = sts.data[:,:len(stsout.times)]
             # New buffer SuperTimestream
             newsts = so3g.G3SuperTimestream()
-            newsts.names = sts.names
+            newsts.names = self.get_names(sts, use_rids=use_rids)
             newsts.times = core.G3VectorTime([t for t in sts.times if t >= flush_time])
             newsts.data = sts.data[:,len(stsout.times):]
 
             return stsout, newsts
 
-        signalout, self.signal = rebundle_sts(self.signal, flush_time)
+        signalout, self.signal = rebundle_sts(self.signal, flush_time, use_rids=True)
         biasout, self.bias = rebundle_sts(self.bias, flush_time)
         primout, self.primary = rebundle_sts(self.primary, flush_time)
 
         self.times = [t for t in self.times if t >= flush_time]
 
         return signalout, biasout, primout
+
 
 class FrameProcessor(object):
     """
@@ -231,14 +247,14 @@ class FrameProcessor(object):
     maxlength : int
         Maximum allowed length (in samples) of an output frame
     """
-    def __init__(self):
+    def __init__(self, **config):
         self.hkbundle = None
         self.smbundle = None
         self.flush_time = None
-        self.maxlength = 10000
-        self.FLAGGED_SAMPLE_VALUE = -1
+        self.maxlength = config.get("maxlength", 10000)
+        self.FLAGGED_SAMPLE_VALUE = config.get("flagged_sample_value", -1)
         self.current_state = 0  # default to scan state
-        self.GAP_THRESHOLD = 0.05
+        self.GAP_THRESHOLD = config.get("gap_threshold", 0.05)
         self._frame_splits = []
         self._hk_gaps = []
         self._smurf_gaps = []
@@ -246,6 +262,7 @@ class FrameProcessor(object):
         self._prev_smurf_frame_sample_interval = None
         self._smurf_timestamps = None
         self._next_expected_smurf_sample_index = 0
+        self._readout_ids = config.get("readout_ids", None)
 
     def ready(self):
         """
@@ -546,12 +563,16 @@ class FrameProcessor(object):
 
         if f.type == core.G3FrameType.Scan:
             if self.smbundle is None:
-                self.smbundle = _SmurfBundle()
+                self.smbundle = _SmurfBundle(readout_ids=self._readout_ids)
 
             output = []
 
             # Determine if there is a gap in time between this frame and previous frame
             t = f['data'].times
+
+            if len(t) == 0:
+                return []
+
             if self._smurf_timestamps is not None:
                 current_timestamp = t[0].time
                 expected_timestamp = self._smurf_timestamps[self._next_expected_smurf_sample_index]
@@ -572,7 +593,7 @@ class FrameProcessor(object):
             else:
                 # if there is only one sample in the frame, then we can't determine the sample rate
                 # try to get it from the previous frame
-                if len(t) - 1 == 0:
+                if len(t) == 1:
                     print("Warning: only one sample in frame. Trying to use the sample rate from previous frame.")
                     sample_interval = self._prev_smurf_frame_sample_interval
                 else:
@@ -620,9 +641,9 @@ class Bookbinder(object):
     in default mode, where frames are split once they reach the maximum length (Frameprocessor.MAXLENGTH).
     HK data is co-sampled with SMuRF data before output.
     """
-    def __init__(self, smurf_files, hk_files=None, out_root='.', book_id=None, session_id=None, stream_id=None,
-                 start_time=None, end_time=None, smurf_timestamps=None, max_nchannels=1e3, overwrite_afile=False,
-                 verbose=True):
+    def __init__(self, smurf_files, hk_files=None, out_root='.',
+                 book_id=None, session_id=None, stream_id=None, start_time=None,
+                 end_time=None, smurf_timestamps=None, verbose=True, **config):
         self._smurf_files = smurf_files
         self._hk_files = hk_files
         self._book_id = book_id
@@ -639,13 +660,13 @@ class Bookbinder(object):
         self.frame_num = 0
         self.sample_num = 0
         self.ofile_num = 0
-        self.default_mode = True
-        self.MAX_SAMPLES_TOTAL = 1e9
-        self.MAX_SAMPLES_PER_CHANNEL = self.MAX_SAMPLES_TOTAL // max_nchannels
+        self.default_mode = True  # True: time-based split; False: scan-based split
+        self.MAX_SAMPLES_TOTAL = int(config.get("max_samples_total", 1e9))
+        self.max_nchannels = int(config.get("max_nchannels", 1e3))
+        self.MAX_SAMPLES_PER_CHANNEL = self.MAX_SAMPLES_TOTAL // self.max_nchannels
         self.DEFAULT_TIME = core.G3Time(1e18)  # 1e18 = 2286-11-20T17:46:40.000000000 (in the distant future)
-        self.OVERWRITE_ANCIL_FILE = overwrite_afile
-
-        self.frameproc = FrameProcessor()
+        self.OVERWRITE_ANCIL_FILE = config.get("overwrite_afile", False)
+        self.frameproc = FrameProcessor(**config.get("frameproc_config", {}))
         self.frameproc._smurf_timestamps = smurf_timestamps
 
         if isinstance(self._hk_files, str):
@@ -665,7 +686,7 @@ class Bookbinder(object):
         if isinstance(self._smurf_files, list):
             ifile = self._smurf_files.pop(0)
             if self._verbose: print(f"Bookbinding {ifile}")
-            self.smurf_iter = smurf_reader(ifile)
+            self.smurf_iter = core.G3File(ifile)
 
             self.create_file_writers()
 
@@ -764,7 +785,7 @@ class Bookbinder(object):
         frame_splits = []
 
         if self.default_mode:
-            frame_splits += [self.DEFAULT_TIME]
+            frame_splits += [self.DEFAULT_TIME]  # no split, leave frameprocessor to decide based on maxlength
             return frame_splits
 
         # Assign a value to each event based on what occurs at that time: 0 for a zero-crossing,
@@ -897,6 +918,8 @@ class Bookbinder(object):
             if not isinstance(self._hk_files, list):
                 raise TypeError("Please provide HK files in a list.")
 
+            # Chain multiple hkfile iteratables together so that
+            # by using `next` we iterate across all hk files
             if not hasattr(self, 'hk_iter'):
                 self.hk_iter = []
                 for hkfile in self._hk_files:
@@ -916,10 +939,10 @@ class Bookbinder(object):
                 # Check if a time gap exists since previous frame containing ACU position data
                 acu_pos_index = list(h['block_names']).index('ACU_position')
                 t = h['blocks'][acu_pos_index].times
-                if prev_frame_last_sample is not None:
+                if prev_frame_last_sample is not None and prev_frame_sample_interval is not None:
                     this_frame_first_sample = t[0].time
                     time_since_prev_frame   = this_frame_first_sample - prev_frame_last_sample
-                    if np.abs(prev_frame_sample_interval/time_since_prev_frame - 1) > self.frameproc.GAP_THRESHOLD:
+                    if time_since_prev_frame/prev_frame_sample_interval - 1 > self.frameproc.GAP_THRESHOLD:
                         # Add gap to internal list
                         self.frameproc._hk_gaps.append((prev_frame_last_sample, this_frame_first_sample))
                 # update values
@@ -940,8 +963,8 @@ class Bookbinder(object):
         """
         d = {'book_id':    self._book_id,
              'session_id': self._session_id,
-             'start_time': self._start_time.time,
-             'end_time':   self._end_time.time,
+             'start_time': self._start_time.time/core.G3Units.s,
+             'end_time':   self._end_time.time/core.G3Units.s,
              'n_frames':   self.frame_num,
              'n_samples':  self.sample_num}
         return d
@@ -959,6 +982,7 @@ class Bookbinder(object):
         if op.isfile(self._frame_splits_file):
             self._frame_splits = [core.G3Time(t) for t in np.loadtxt(self._frame_splits_file, dtype='int', ndmin=1)]
         else:
+            # note that find_frame_splits depends on process_HK_files having run
             self._frame_splits = self.find_frame_splits()
 
         for event_time in self._frame_splits:
@@ -983,7 +1007,7 @@ class Bookbinder(object):
                     if len(self._smurf_files) > 0:
                         ifile = self._smurf_files.pop(0)
                         if self._verbose: print(f"Bookbinding {ifile}")
-                        self.smurf_iter = smurf_reader(ifile)
+                        self.smurf_iter = core.G3File(ifile)
                     else:
                         # If there are no more SMuRF files, output remaining SMuRF data
                         self.frameproc.flush_time = self.DEFAULT_TIME
@@ -993,6 +1017,7 @@ class Bookbinder(object):
                             self.frameproc.hkbundle.data['Azimuth_Velocity'] = np.append(self.frameproc.hkbundle.data['Azimuth_Velocity'], 0)
                             self.frameproc.hkbundle.data['Elevation_Velocity'] = np.append(self.frameproc.hkbundle.data['Elevation_Velocity'], 0)
                         output += self.frameproc.flush()
+                        # note that `signal` field only in the product of the FrameProcessor, not the input data
                         output = [o for o in output if len(o['signal'].times) > 0]  # Remove 0-length frames
                         self.write_frames(output + self.metadata)
                         output = []
