@@ -747,7 +747,6 @@ class Bookbinder(object):
             frames_list = list(frames_list)
 
         if len(frames_list) == 0: return
-        if self._verbose: print(f"=> Writing {len(frames_list)} frames")
 
         for f in frames_list:
             # If the number of samples (per channel) exceeds the max allowed, create a new output file

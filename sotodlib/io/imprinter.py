@@ -269,7 +269,7 @@ class Imprinter:
         try:
             readout_ids = self.get_readout_ids_for_book(book)
         except ValueError:
-            pass
+            readout_ids = None
         hkfiles = []  # fixme: add housekeeping files support
 
         start_t = int(book.start.timestamp()*1e8)
