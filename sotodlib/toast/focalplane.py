@@ -148,6 +148,9 @@ class SOFocalplane(Focalplane):
             pixels,
             fwhms,
             pols,
+            pol_angs,
+            pol_angs_wafer,
+            pol_orientations_wafer,
             card_slots,
             channels,
             AMCs,
@@ -156,6 +159,9 @@ class SOFocalplane(Focalplane):
             bondpads,
             mux_positions,
         ) = (
+            [],
+            [],
+            [],
             [],
             [],
             [],
@@ -194,6 +200,9 @@ class SOFocalplane(Focalplane):
             )
             fwhms.append(float(det_data["fwhm"]) * u.arcmin)
             pols.append(det_data["pol"])
+            pol_angs.append(det_data["pol_ang"])
+            pol_angs_wafer.append(det_data["pol_ang_wafer"])
+            pol_orientations_wafer.append(det_data["pol_orientation_wafer"])
             card_slots.append(det_data["card_slot"])
             channels.append(det_data["channel"])
             AMCs.append(det_data["AMC"])
@@ -255,6 +264,9 @@ class SOFocalplane(Focalplane):
                 bandwidths,
                 pixels,
                 pols,
+                pol_angs,
+                pol_angs_wafer,
+                pol_orientations_wafer,
                 channels,
                 AMCs,
                 biases,
@@ -282,6 +294,9 @@ class SOFocalplane(Focalplane):
                 "bandwidth",
                 "pixel",
                 "pol",
+                "pol_ang",
+                "pol_ang_wafer",
+                "pol_orientation_wafer",
                 "channel",
                 "AMC",
                 "bias",
