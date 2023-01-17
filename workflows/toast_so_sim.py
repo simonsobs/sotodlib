@@ -329,6 +329,10 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     ops.corotate_lat.apply(data)
     log.info_rank("Apply LAT co-rotation in", comm=world_comm, timer=timer)
 
+    # Perturb HWP spin
+    ops.perturb_hwp.apply(data)
+    log.info_rank("Perturbed HWP rotation in", comm=world_comm, timer=timer)
+
     # Construct a "perfect" noise model just from the focalplane parameters
 
     ops.default_model.apply(data)
@@ -343,13 +347,19 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
 
     # Create the Elevation modulated noise model
 
-    ops.elevation_model.noise_model = ops.default_model.noise_model
-    ops.elevation_model.out_model = ops.elevation_model.noise_model
     ops.elevation_model.detector_pointing = ops.det_pointing_azel
     ops.elevation_model.apply(data)
     log.info_rank("Created elevation noise model in", comm=world_comm, timer=timer)
 
     ops.mem_count.prefix = "After elevation noise model"
+    ops.mem_count.apply(data)
+
+    # Add common noise modes
+
+    ops.common_mode_noise.apply(data)
+    log.info_rank("Added common mode noise model in", comm=world_comm, timer=timer)
+
+    ops.mem_count.prefix = "After common mode noise model"
     ops.mem_count.apply(data)
 
     # Set up pointing matrices for binning operators
@@ -400,6 +410,21 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     log.info_rank("Simulated sky signal in", comm=world_comm, timer=timer)
 
     ops.mem_count.prefix = "After simulating sky signal"
+    ops.mem_count.apply(data)
+
+    # Use the Conviqt operator to generate beam-convolved TOD
+
+    if ops.sim_ground.hwp_angle is None:
+        ops.conviqt.comm = world_comm
+        ops.conviqt.detector_pointing = ops.det_pointing_radec
+        ops.conviqt.apply(data)
+    else:
+        ops.conviqt_teb.comm = world_comm
+        ops.conviqt_teb.detector_pointing = ops.det_pointing_radec
+        ops.conviqt_teb.hwp_angle = ops.sim_ground.hwp_angle
+        ops.conviqt_teb.apply(data)
+
+    ops.mem_count.prefix = "After 4-pi beam convolution"
     ops.mem_count.apply(data)
 
     # Simulate scan-synchronous signal
@@ -460,7 +485,6 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
 
     # Simulate detector noise
 
-    ops.sim_noise.noise_model = ops.elevation_model.out_model
     if args.realization is not None:
         ops.sim_noise.realization = args.realization
     log.info_rank("Simulating detector noise", comm=world_comm)
@@ -526,7 +550,6 @@ def reduce_data(job, args, data):
         # new TOAST data object
         ops.demodulate.stokes_weights = ops.weights_radec
         ops.demodulate.hwp_angle = ops.sim_ground.hwp_angle
-        ops.demodulate.noise_model = ops.default_model.noise_model
         data = ops.demodulate.apply(data)
         log.info_rank("Demodulated in", comm=world_comm, timer=timer)
         demod_weights = toast.ops.StokesWeightsDemod()
@@ -623,9 +646,6 @@ def reduce_data(job, args, data):
 
     # The map maker requires the the binning operators used for the solve and final,
     # the templates, and the noise model.
-
-    ops.binner.noise_model = ops.elevation_model.out_model
-    ops.binner_final.noise_model = ops.elevation_model.out_model
 
     ops.mapmaker.binning = ops.binner
     ops.mapmaker.template_matrix = toast.ops.TemplateMatrix(templates=[tmpls.baselines])
@@ -742,8 +762,10 @@ def main():
     operators = [
         toast.ops.SimGround(name="sim_ground", weather="atacama", detset_key="pixel"),
         so_ops.CoRotator(name="corotate_lat"),
+        toast.ops.PerturbHWP(name="perturb_hwp", enabled=False),
         toast.ops.DefaultNoiseModel(name="default_model", noise_model="noise_model"),
         toast.ops.ElevationNoise(name="elevation_model", out_model="noise_model"),
+        toast.ops.CommonModeNoise(name="common_mode_noise", enabled=False),
         toast.ops.PointingDetectorSimple(name="det_pointing_azel", quats="quats_azel"),
         toast.ops.StokesWeights(
             name="weights_azel", weights="weights_azel", mode="IQU"
@@ -752,6 +774,8 @@ def main():
             name="det_pointing_radec", quats="quats_radec"
         ),
         toast.ops.ScanHealpixMap(name="scan_map", enabled=False),
+        toast.ops.SimConviqt(name="conviqt", enabled=False),
+        toast.ops.SimTEBConviqt(name="conviqt_teb", enabled=False),
         toast.ops.SimAtmosphere(
             name="sim_atmosphere_coarse",
             add_loading=False,
