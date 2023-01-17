@@ -352,14 +352,7 @@ def sim_wafer_detectors(
                 [layout_A, layout_B],
                 [pol_A, pol_B],
             ):
-                # Assign the detector a polarization (Q/U) type
-                poloff = np.amin(pol)
-                if np.abs((pol[p]-poloff) % 90) == 0:
-                    ptype = "Q"
-                elif np.abs((pol[p]-poloff) % 90) == 45:
-                    ptype = "U"
-                else:
-                    raise RuntimeError("Unknown polarization type: {pol}")
+                poloff = np.amin(pol)  # Wafer polarization offset
                 dprops = OrderedDict()
                 dprops["wafer_slot"] = wafer_slot
                 dprops["ID"] = idoff + doff
@@ -367,7 +360,12 @@ def sim_wafer_detectors(
                 dprops["band"] = b
                 dprops["fwhm"] = fwhm[b]
                 dprops["pol"] = pl
-                dprops["pol_type"] = ptype
+                # Polarization angle in focalplane basis
+                dprops["pol_ang"] = pol[p]
+                # Polarization angle in wafer basis
+                dprops["pol_ang_wafer"] = pol[p] - poloff
+                # Polarization orientation on wafer is always 0 or 45
+                dprops["pol_orientation_wafer"] = (pol[p] - poloff) % 90
                 if handed is not None:
                     dprops["handed"] = handed[p]
                 # Made-up assignment to readout channels
