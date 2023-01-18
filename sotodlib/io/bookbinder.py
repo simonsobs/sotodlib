@@ -81,7 +81,7 @@ class _HKBundle():
         self.times = [t for t in self.times if t >= flush_time]
 
         for c in self.data.keys():
-            output[c] = core.G3Timestream(np.array(self.data[c][:len(output.times)]))
+            output[c] = core.G3VectorDouble(np.array(self.data[c][:len(output.times)]))
             if len(output.times) < len(self.data[c]):
                 self.data[c] = self.data[c][len(output.times):]
             else:
