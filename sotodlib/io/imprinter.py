@@ -322,6 +322,21 @@ class Imprinter:
         if session is None: session = self.get_session()
         return session.query(Books).filter(Books.bid == bid).first()
 
+    def get_books(self):
+        """Get all books from database.
+
+        Parameters
+        ----------
+        session: BookDB session
+
+        Returns
+        -------
+        books: list of book objects
+
+        """
+        if session is None: session = self.get_session()
+        return session.query(Books).all()
+
     def get_unbound_books(self, session=None):
         """Get all unbound books from database.
 
