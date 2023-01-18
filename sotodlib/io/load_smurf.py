@@ -150,7 +150,7 @@ def _file_has_end_frames(filename):
 
 
 class G3tSmurf:
-    def __init__(self, archive_path, db_path=None, meta_path=None, echo=False):
+    def __init__(self, archive_path, db_path=None, meta_path=None, echo=False, db_args={}):
         """
         Class to manage a smurf data archive.
 
@@ -166,14 +166,15 @@ class G3tSmurf:
                 assignments). Required for full functionality.
             echo: bool, optional
                 If true, all sql statements will print to stdout.
+            db_args: dict, optional
+                Additional arguments to pass to sqlalchemy.create_engine
         """
         if db_path is None:
             db_path = os.path.join(archive_path, "frames.db")
         self.archive_path = archive_path
         self.meta_path = meta_path
         self.db_path = db_path
-        self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo,
-                                       connect_args={'check_same_thread': False})
+        self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo, **db_args)
         Session.configure(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine)
         Base.metadata.create_all(self.engine)
@@ -203,7 +204,8 @@ class G3tSmurf:
             configs = yaml.safe_load( open(configs, "r"))
         return cls(os.path.join(configs["data_prefix"], "timestreams"),
                    configs["g3tsmurf_db"],
-                   meta_path=os.path.join(configs["data_prefix"],"smurf"))
+                   meta_path=os.path.join(configs["data_prefix"],"smurf"),
+                   db_args=configs["db_args"])
 
     @staticmethod
     def _make_datetime(x):
