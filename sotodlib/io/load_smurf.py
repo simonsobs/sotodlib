@@ -205,7 +205,7 @@ class G3tSmurf:
         return cls(os.path.join(configs["data_prefix"], "timestreams"),
                    configs["g3tsmurf_db"],
                    meta_path=os.path.join(configs["data_prefix"],"smurf"),
-                   db_args=configs["db_args"])
+                   db_args=configs.get("db_args", {}))
 
     @staticmethod
     def _make_datetime(x):
