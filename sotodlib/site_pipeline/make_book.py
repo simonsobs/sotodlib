@@ -1,5 +1,6 @@
 from typing import Optional
 import typer
+import traceback
 
 from ..io.imprinter import Imprinter
 
@@ -34,6 +35,7 @@ def main(
             imprinter.bind_book(book, output_root=output_root)
         except Exception as e:
             print(f"Error binding book {book.bid}: {e}")
+            print(traceback.format_exc())
 
     print("Retrying previously failed books") 
     for book in failed_books:
@@ -42,6 +44,7 @@ def main(
             imprinter.bind_book(book, output_root=output_root)
         except Exception as e:
             print(f"Error binding book {book.bid}: {e}")
+            print(traceback.format_exc())
             # it has failed twice, ideally we want people to look at it now
             # do something here
 
