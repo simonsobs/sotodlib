@@ -81,7 +81,7 @@ class _HKBundle():
         self.times = [t for t in self.times if t >= flush_time]
 
         for c in self.data.keys():
-            output[c] = core.G3Timestream(np.array(self.data[c][:len(output.times)]))
+            output[c] = core.G3VectorDouble(np.array(self.data[c][:len(output.times)]))
             if len(output.times) < len(self.data[c]):
                 self.data[c] = self.data[c][len(output.times):]
             else:
@@ -747,7 +747,6 @@ class Bookbinder(object):
             frames_list = list(frames_list)
 
         if len(frames_list) == 0: return
-        if self._verbose: print(f"=> Writing {len(frames_list)} frames")
 
         for f in frames_list:
             # If the number of samples (per channel) exceeds the max allowed, create a new output file
