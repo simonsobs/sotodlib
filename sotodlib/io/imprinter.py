@@ -285,10 +285,7 @@ class Imprinter:
         # a dictionary of {stream_id: [file_paths]}
         filedb = self.get_files_for_book(book)
         # get readout ids
-        try:
-            readout_ids = self.get_readout_ids_for_book(book)
-        except ValueError:
-            readout_ids = None
+        readout_ids = self.get_readout_ids_for_book(book)
         hkfiles = []  # fixme: add housekeeping files support
 
         start_t = int(book.start.timestamp()*1e8)
@@ -335,11 +332,11 @@ class Imprinter:
 
         Returns
         -------
-        book: book object
+        book: book object or None if not found
 
         """
         if session is None: session = self.get_session()
-        return session.query(Books).filter(Books.bid == bid).first()
+        return session.query(Books).filter(Books.bid == bid).one_or_none()
 
     def get_books(self, session=None):
         """Get all books from database.
