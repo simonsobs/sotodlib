@@ -4,7 +4,6 @@ import tempfile
 import yaml
 import os
 from datetime import datetime
-import atexit
 
 from sotodlib.io.imprinter import *
 from sotodlib.io.g3tsmurf_db import Files
