@@ -73,6 +73,8 @@ class Books(Base):
     type: type of book, e.g., "oper", "hk", "obs"
     status: integer, stage of processing, 0 is unbound, 1 is bound,
     message: error message if book failed
+    tel_tube: telescope tube
+    slots: slots in comma separated string
     created_at: time when book was created
     updated_at: time when book was updated
 
@@ -82,7 +84,6 @@ class Books(Base):
     start = db.Column(db.DateTime)
     stop = db.Column(db.DateTime)
     max_channels = db.Column(db.Integer)
-    n_files = db.Column(db.Integer)
     obs = relationship("Observations", back_populates='book')  # one to many
     type = db.Column(db.String)
     status = db.Column(db.String, default=UNBOUND)
