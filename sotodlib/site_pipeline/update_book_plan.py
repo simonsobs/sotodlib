@@ -7,7 +7,6 @@ from ..io.imprinter import Imprinter
 
 def main(
     config: str,
-    g3tsmurf_config: str,
     min_ctime: Optional[float] = None,
     max_ctime: Optional[float] = None,
     stream_ids: Optional[str] = None,
@@ -23,8 +22,6 @@ def main(
     ----------
     config : str
         Path to config file for imprinter
-    g3tsmurf_config : str
-        Path to config file for g3tsmurf database.
     min_ctime : Optional[float], optional
         The minimum ctime to include in the book plan, by default None
     max_ctime : Optional[float], optional
@@ -42,7 +39,7 @@ def main(
     """
     if stream_ids is not None:
         stream_ids = stream_ids.split(",")
-    imprinter = Imprinter(config, g3tsmurf_config)
+    imprinter = Imprinter(config, db_args={'connect_args': {'check_same_thread': False}})
     # leaving min_ctime and max_ctime as None will go through all available data,
     # so preferreably set them to a reasonable range based on update_delay
     if not from_scratch:
@@ -55,6 +52,5 @@ def main(
                                           ignore_singles=False,
                                           stream_ids=stream_ids,
                                           force_single_stream=force_single_stream)
-
 if __name__ == "__main__":
     typer.run(main)

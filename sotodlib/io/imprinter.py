@@ -100,6 +100,13 @@ class Books(Base):
 # main logic #
 ##############
 
+# convenient decorator to repeat a method over all data sources
+def loop_over_sources(method):
+    def wrapper(self, *args, **kwargs):
+        for source in self.sources:
+            method(self, source, *args, **kwargs)
+    return wrapper
+
 class Imprinter:
     def __init__(self, im_config=None, db_args={}):
         """Imprinter manages the book database.
@@ -144,7 +151,7 @@ class Imprinter:
             self.session = Session()
         return self.session
 
-    def get_g3tsmurf_sessions(self, source, return_archive=False):
+    def get_g3tsmurf_session(self, source, return_archive=False):
         """Get a new g3tsmurf session or return an existing one.
 
         Parameter
@@ -436,6 +443,7 @@ class Imprinter:
         if session is None: session = self.get_session()
         session.rollback()
 
+    @loop_over_sources
     def update_bookdb_from_g3tsmurf(self, source, min_ctime=None, max_ctime=None,
                                     min_overlap=30, ignore_singles=False,
                                     stream_ids=None, force_single_stream=False):
@@ -492,8 +500,8 @@ class Imprinter:
                 if get_obs_type(str_obs) == 'oper':
                     output.append(ObsSet([str_obs],
                         mode="oper",
-                        slots=self.sources[self.tel_tube]['slots'],
-                        tel_tube=self.tel_tube))
+                        slots=self.sources[source]['slots'],
+                        tel_tube=source))
                 elif get_obs_type(str_obs) == 'obs':
                     # force each observation to be its own book
                     if force_single_stream:
@@ -524,7 +532,7 @@ class Imprinter:
                             if overlap_time.total_seconds() < 0: continue
                             if overlap_time.total_seconds() < min_overlap: continue
                             # add all of the possible overlaps
-                            output.append(ObsSet(obs_list, mode="obs", slots=self.slots, tel_tube=self.tel_tube))
+                            output.append(ObsSet(obs_list, mode="obs", slots=self.sources[source]['slots'], tel_tube=source))
 
         # remove exact duplicates in output
         output = drop_duplicates(output)
@@ -621,6 +629,9 @@ def create_g3tsmurf_session(config):
 
     """
     # create database connection
+    with open(config, "r") as f:
+        config = yaml.safe_load(f)
+    config['db_args'] = {'connect_args': {'check_same_thread': False}}
     SMURF = G3tSmurf.from_configs(config)
     session = SMURF.Session()
     return session, SMURF
