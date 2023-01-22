@@ -2,7 +2,7 @@ import datetime as dt, os.path as op, os
 import numpy as np
 from collections import OrderedDict
 from typing import List
-import yaml
+import yaml, traceback
 
 import sqlalchemy as db
 from sqlalchemy import or_, and_, not_
@@ -12,6 +12,7 @@ from sqlalchemy.orm import relationship
 
 from .load_smurf import G3tSmurf, Observations as G3tObservations, SmurfStatus, get_channel_info
 from .bookbinder import Bookbinder
+from ..site_pipeline.util import init_logger
 
 
 ####################
@@ -108,8 +109,9 @@ def loop_over_sources(method):
             method(self, source, *args, **kwargs)
     return wrapper
 
+
 class Imprinter:
-    def __init__(self, im_config=None, db_args={}):
+    def __init__(self, im_config=None, db_args={}, logger=None):
         """Imprinter manages the book database.
 
         Parameters
@@ -118,6 +120,8 @@ class Imprinter:
             path to imprinter configuration file
         db_args: dict
             arguments to pass to sqlalchemy.create_engine
+        logger: logger
+            logger object
         """
         # load config file and parameters
         with open(im_config, "r") as f:
@@ -138,6 +142,7 @@ class Imprinter:
         self.session = None
         self.g3tsmurf_sessions = {}
         self.archives = {}
+        self.logger = logger if logger is not None else init_logger("imprinter")
 
     def get_session(self):
         """Get a new session or return the existing one
@@ -174,7 +179,7 @@ class Imprinter:
             return self.g3tsmurf_sessions[source]
         return self.g3tsmurf_sessions[source], self.archives[source]
 
-    def register_book(self, obsset, bid=None, commit=True, session=None, verbose=True):
+    def register_book(self, obsset, bid=None, commit=True, session=None):
         """Register book to database
 
         Parameters
@@ -187,8 +192,6 @@ class Imprinter:
             if True, commit the session
         session: SQLAlchemy session
             BookDB session
-        verbose: boolean
-            verbose output
 
         Returns
         -------
@@ -202,7 +205,7 @@ class Imprinter:
         # check whether book exists in the database
         if self.book_exists(bid, session=session):
             raise BookExistsError(f"Book {bid} already exists in the database")
-        if verbose: print(f"Registering book {obsset} (mode: {obsset.mode})")
+        self.logger.info(f"Registering book {obsset} (mode: {obsset.mode})")
 
         # fill in book attributes: start, end, max_channels
         # start and end are the earliest and latest observation time
@@ -254,7 +257,7 @@ class Imprinter:
             self.register_book(session, bid, obs_list, commit=False)
         if commit: session.commit()
 
-    def bind_book(self, book, session=None, output_root="out"):
+    def bind_book(self, book, session=None, output_root="out", message=""):
         """Bind book using bookbinder
 
         Parameters
@@ -262,6 +265,10 @@ class Imprinter:
         bid: str
             book id
         session: BookDB session
+        output_root: str
+            output root directory
+        message: string
+            message to be added to the book
 
         """
         if session is None: session = self.get_session()
@@ -312,14 +319,16 @@ class Imprinter:
                            frameproc_config={"readout_ids": rids})()
             # not sure if this is the best place to update
             book.status = BOUND
-            session.commit()
-            print("Book {} bound".format(book.bid))
+            self.logger.info("Book {} bound".format(book.bid))
         except Exception as e:
             session.rollback()
             book.status = FAILED
-            session.commit()
-            print("Book {} failed".format(book.bid))
-            raise e
+            self.logger.error("Book {} failed".format(book.bid))
+            err_msg = traceback.format_exc()
+            self.logger.error(err_msg)
+            message = f"{message}\ntrace={err_msg}" if message else err_msg
+        book.message = message
+        session.commit()
 
     def get_book(self, bid, session=None):
         """Get book from database.
@@ -544,10 +553,10 @@ class Imprinter:
             try:
                 self.register_book(oset, commit=False)
             except BookExistsError:
-                print(f"Book already registered: {oset}, skipping")
+                self.logger.warning(f"Book already registered: {oset}, skipping")
                 continue
             except NoFilesError:
-                print(f"No files found for {oset}, skipping")
+                self.logger.warning(f"No files found for {oset}, skipping")
                 continue
         self.commit()
 
@@ -591,7 +600,7 @@ class Imprinter:
         out = {}
         # load all obs and associated files
         for obs_id, files in self.get_files_for_book(book).items():
-            print(f"Retrieving readout_ids for {obs_id}...")
+            self.logger.info(f"Retrieving readout_ids for {obs_id}...")
             status = SmurfStatus.from_file(files[0])
             ch_info = get_channel_info(status, archive=SMURF)
             if "readout_id" not in ch_info:
@@ -600,7 +609,7 @@ class Imprinter:
             if np.all(checks):
                 raise ValueError(f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing")
             if np.any(checks):
-                print(f"Warning: Found {sum(checks)} channels without readout_id. Were fixed tones running?")
+                self.logger.warning(f"Found {sum(checks)} channels without readout_id. Were fixed tones running?")
             # make sure all rchannel ids are sorted
             assert list(ch_info.rchannel) == sorted(ch_info.rchannel)
             out[obs_id] = ch_info.readout_id
