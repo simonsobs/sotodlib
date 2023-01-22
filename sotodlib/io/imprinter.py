@@ -517,7 +517,7 @@ class Imprinter:
                         # if we failed to find any overlapping observations
                         if q.count()==0 and not ignore_singles:
                             # append only this one when there's no overlapping segments
-                            output.append(ObsSet([str_obs], mode="obs", slots=self.slots, tel_tube=self.tel_tube))
+                            output.append(ObsSet([str_obs], mode="obs", slots=self.sources[source]['slots'], tel_tube=source))
 
                         elif q.count() > 0:
                             # obtain overlapping observations (returned as a tuple of stream_id)
