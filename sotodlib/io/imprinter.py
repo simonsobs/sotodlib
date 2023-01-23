@@ -292,7 +292,6 @@ class Imprinter:
         # a dictionary of {stream_id: [file_paths]}
         filedb = self.get_files_for_book(book)
         # get readout ids
-        readout_ids = self.get_readout_ids_for_book(book)
         hkfiles = []  # fixme: add housekeeping files support
 
         start_t = int(book.start.timestamp()*1e8)
@@ -306,11 +305,13 @@ class Imprinter:
 
         # bind book using bookbinder library
         try:
+            readout_ids = self.get_readout_ids_for_book(book)
             for obs_id, smurf_files in filedb.items():
                 # get stream id from observation id
                 stream_id, _ = stream_timestamp(obs_id)
                 # get readout ids
-                rids = readout_ids[obs_id] if readout_ids is not None else None
+                rids = readout_ids[obs_id]
+                assert rids is not None
                 # convert start and stop times into G3Time timestamps (in unit of 1e-8 sec)
                 Bookbinder(smurf_files, hk_files=hkfiles, out_root=odir,
                            stream_id=stream_id, session_id=int(session_id),
