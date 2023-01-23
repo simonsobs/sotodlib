@@ -82,17 +82,18 @@ class SimSSO(Operator):
     @traitlets.validate("sso_name")
     def _check_sso_name(self, proposal):
         sso_names = proposal["value"]
-        try:
-            for sso_name in sso_names.split(","):
-                sso = getattr(ephem, sso_name)()
-        except AttributeError:
-            raise traitlets.TraitError(f"{sso_name} is not a valid SSO name")
+        if sso_names is not None:
+            try:
+                for sso_name in sso_names.split(","):
+                    sso = getattr(ephem, sso_name)()
+            except AttributeError:
+                raise traitlets.TraitError(f"{sso_name} is not a valid SSO name")
         return sso_names
 
     @traitlets.validate("beam_file")
     def _check_beam_file(self, proposal):
         beam_file = proposal["value"]
-        if not os.path.isfile(beam_file):
+        if beam_file is not None and not os.path.isfile(beam_file):
             raise traitlets.TraitError(f"{beam_file} is not a valid beam file")
         return beam_file
 

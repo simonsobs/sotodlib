@@ -229,7 +229,7 @@ class SimSource(Operator):
     @traitlets.validate("beam_file")
     def _check_beam_file(self, proposal):
         beam_file = proposal["value"]
-        if not os.path.isfile(beam_file):
+        if beam_file is not None and not os.path.isfile(beam_file):
             raise traitlets.TraitError(f"{beam_file} is not a valid beam file")
         return beam_file
 
