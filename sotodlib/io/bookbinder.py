@@ -15,7 +15,7 @@ def pos2vel(p):
     ----------
     p : np.ndarray
         Position vector
-    
+
     Returns
     -------
     np.ndarray
@@ -98,7 +98,7 @@ class _SmurfBundle():
         self.readout_ids = readout_ids
         self.times = []
         self.signal = None
-        self.bias = None
+        self.biases = None
         self.primary = None
 
     def ready(self, flush_time):
@@ -158,10 +158,10 @@ class _SmurfBundle():
         self.signal.data = np.hstack((self.signal.data, f['data'].data)).astype(np.int32)
 
         if 'tes_biases' in f.keys():
-            if self.bias is None:
-                self.bias = self.create_new_supertimestream(f['tes_biases'])
-            self.bias.times.extend(f['tes_biases'].times)
-            self.bias.data = np.hstack((self.bias.data, f['tes_biases'].data)).astype(np.int32)
+            if self.biases is None:
+                self.biases = self.create_new_supertimestream(f['tes_biases'])
+            self.biases.times.extend(f['tes_biases'].times)
+            self.biases.data = np.hstack((self.biases.data, f['tes_biases'].data)).astype(np.int32)
 
         if 'primary' in f.keys():
             if self.primary is None:
@@ -186,7 +186,7 @@ class _SmurfBundle():
         signalout : G3SuperTimestream or None
             Output signal timestream
         biasout : G3SuperTimestream or None
-            Output TES bias timestream
+            Output TES biases timestream
         primout : G3SuperTimestream or None
             Output primary timestream
         """
@@ -227,7 +227,7 @@ class _SmurfBundle():
             return stsout, newsts
 
         signalout, self.signal = rebundle_sts(self.signal, flush_time, use_rids=True)
-        biasout, self.bias = rebundle_sts(self.bias, flush_time)
+        biasout, self.biases = rebundle_sts(self.biases, flush_time)
         primout, self.primary = rebundle_sts(self.primary, flush_time)
 
         self.times = [t for t in self.times if t >= flush_time]
@@ -447,7 +447,7 @@ class FrameProcessor(object):
         f = core.G3Frame(core.G3FrameType.Scan)
         f['signal'] = sts
         if smurf_bias is not None:
-            f['tes_bias'] = smurf_bias
+            f['tes_biases'] = smurf_bias
         if smurf_primary is not None:
             f['primary'] = smurf_primary
 
