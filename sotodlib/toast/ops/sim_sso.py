@@ -10,6 +10,7 @@ import numpy as np
 from astropy import units as u
 import ephem
 from scipy.interpolate import RectBivariateSpline
+from scipy.signal import fftconvolve
 
 import toast
 from toast.timing import function_timer
@@ -77,6 +78,10 @@ class SimSSO(Operator):
         klass=Operator,
         allow_none=True,
         help="Operator that translates boresight Az/El pointing into detector frame",
+    )
+
+    finite_sso_radius = Bool(
+        False, help="Treat sources as finite and convolve beam with a disc."
     )
 
     @traitlets.validate("sso_name")
@@ -241,6 +246,7 @@ class SimSSO(Operator):
         # Read in the simulated beam.  We could add operator traits to
         # specify whether to load different beams based on detector,
         # wafer, tube, etc and check that key here.
+        log = Logger.get()
         if "ALL" in self.beam_props:
             # We have already read the single beam file.
             beam_dic = self.beam_props["ALL"]
@@ -263,7 +269,19 @@ class SimSSO(Operator):
         w = np.radians(size / 2)
         x = np.linspace(-w, w, n)
         y = np.linspace(-w, w, n)
-        model *= amp
+        if self.finite_sso_radius:
+            # Convolve the beam model with a disc rather than point-like source
+            X, Y = np.meshgrid(x, y)
+            source = np.zeros_like(model)
+            source[X**2 + Y**2 < sso_radius_avg.to_value(u.rad)**2] = 1
+            source *= amp / np.sum(source)
+            model = fftconvolve(source, model, mode="same")
+        else:
+            # Treat the source as point-like. Reasonable approximation
+            # if SSO radius << FWHM
+            if sso_solid_angle > 0.1 * beam_solid_angle:
+                log.warning("Ignoring non-negligible source diameter.  SSO image will be too narrow.")
+            model *= amp
         beam = RectBivariateSpline(x, y, model)
         r = np.sqrt(w**2 + w**2)
         return beam, r
