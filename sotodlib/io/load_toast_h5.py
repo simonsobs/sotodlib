@@ -19,8 +19,6 @@ def load_toast_h5_obs(db, obs_id, dets=None, samples=None, prefix=None,
     details.
 
     """
-    assert(samples is None)
-
     if prefix is None:
         prefix = db.prefix
         if prefix is None:
@@ -47,12 +45,15 @@ def load_toast_h5_obs(db, obs_id, dets=None, samples=None, prefix=None,
     for detset, files in files_by_detset.items():
         assert(len(files) == 1)
         dets = props.subset(rows=(props['dets:detset'] == detset))['dets:readout_id']
-        components.append(load_toast_h5_file(files[0][0], dets=dets, no_signal=no_signal))
+        components.append(
+            load_toast_h5_file(
+                files[0][0], dets=dets, no_signal=no_signal, samples=samples))
 
     assert(len(components) == 1)
     return components[0]
 
-def load_toast_h5_file(filename, dets=None, no_signal=False, enhance=False):
+def load_toast_h5_file(filename, dets=None, samples=None, no_signal=False,
+                       enhance=False):
     """Reads data from a single HDF5 file.  Returns an AxisManager with
     standard SO field names.  Supports load_toast_h5_obs.
 
@@ -136,5 +137,8 @@ def load_toast_h5_file(filename, dets=None, no_signal=False, enhance=False):
         for key, value in zip(['xi', 'eta', 'gamma'], [xi, eta, gamma]):
             fp.wrap_new(key, shape=('dets', ))[:] = value
         aman.wrap('focal_plane', fp)
+
+    if samples is not None:
+        aman.restrict('samps', samples)
 
     return aman
