@@ -20,7 +20,6 @@ def load_toast_h5_obs(db, obs_id, dets=None, samples=None, prefix=None,
 
     """
     assert(samples is None)
-    assert(no_signal is None)
 
     if prefix is None:
         prefix = db.prefix
@@ -48,12 +47,12 @@ def load_toast_h5_obs(db, obs_id, dets=None, samples=None, prefix=None,
     for detset, files in files_by_detset.items():
         assert(len(files) == 1)
         dets = props.subset(rows=(props['dets:detset'] == detset))['dets:readout_id']
-        components.append(load_toast_h5_file(files[0][0], dets=dets))
+        components.append(load_toast_h5_file(files[0][0], dets=dets, no_signal=no_signal))
 
     assert(len(components) == 1)
     return components[0]
 
-def load_toast_h5_file(filename, dets=None, enhance=False):
+def load_toast_h5_file(filename, dets=None, no_signal=False, enhance=False):
     """Reads data from a single HDF5 file.  Returns an AxisManager with
     standard SO field names.  Supports load_toast_h5_obs.
 
@@ -86,7 +85,6 @@ def load_toast_h5_file(filename, dets=None, enhance=False):
             core.OffsetAxis('samps', count, 0),
         )
 
-        aman.wrap_new('signal', ('dets', 'samps'), dtype='float32')
         aman.wrap_new('timestamps', ('samps', ), dtype='float64')
 
         bman = core.AxisManager(aman.samps.copy())
@@ -97,7 +95,9 @@ def load_toast_h5_file(filename, dets=None, enhance=False):
 
         aman.timestamps[:] = f['shared']['times']
         if dets_mode == 'all':
-            aman.signal[:] = f['detdata']['signal']
+            if not no_signal:
+                aman.wrap_new('signal', ('dets', 'samps'), dtype='float32')
+                aman.signal[:] = f['detdata']['signal']
         else:
             assert(len(dets) == 0)
 
