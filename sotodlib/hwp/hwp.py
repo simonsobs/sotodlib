@@ -150,6 +150,70 @@ def demod(aman, signal='signal', name='signal_demod',
 
 
 # Functions to test with preprocessing pipeline added by Max S-F below
+def hwpss_linreg(aman, signal='signal', modes=[2, 4, 6, 8], mask_flags=True,
+                 add_to_aman=True, name='hwpss_extract'):
+    """
+    Fir out half-waveplate synchronous signal (harmonics of rotation frequency),
+    The harmonics to fit out are defined by ``modes`` and the operation is
+    performed on the ``signal`` axis of the ``aman`` axis manager.
+
+    Args
+    ----
+    aman (AxisManager): Axis manager to perform fit.
+    signal (string): Axis within aman to perform fit on.
+    modes (list): List of hwp rotation frequency harmonics to fit.
+    mask_flags (bool): Mask flagged samples in fit.
+    add_to_aman (bool): Add fitted hwpss to aman.
+    name (string): Axis name for fitted signal if ``add_to_aman`` is True.
+
+    Returns
+    -------
+    aman_proc (AxisManager): Axis manager containing fitted ceofficients.
+    """
+    vects = np.ones( (aman.samps.count,1) )
+    for mode in modes:
+        vects = np.hstack((vects,
+                           np.array( [np.sin(mode*aman.hwp_angle),
+                           np.cos(mode*aman.hwp_angle)]).transpose()))
+    vects = vects.T
+
+    coeffs = np.empty((aman.dets.count, len(vects)))
+
+    if mask_flags:
+        m = ~aman.flags.glitches.mask()
+        vects = vects[:,m]
+    else:
+        vects = vects
+
+    I = np.linalg.inv(np.tensordot(vects, vects, (1,1)))
+
+    for k in range(aman.dets.count):
+        d = aman['signal'][k]
+        if mask_flags:
+            d = d[m]
+        coeffs[k,:] = np.dot(vects, d)
+
+    coeffs = np.dot(I, coeffs.T).T
+
+    fitsig = np.matmul(vects.T, coeffs.T)
+    rss = np.sum((aman[signal]-fitsig.T)**2, axis=1)
+    red_chi2 = rss/len(vects)
+    aman_proc = core.AxisManager().wrap('hwpss_coeffs', coeffs,
+                                        [(0, core.LabelAxis('dets', aman.dets.vals)),
+                                         (1, core.IndexAxis('modes'))])
+    aman_proc.wrap('hwpss_vects', vects, [(0, core.IndexAxis('modes')),
+                                          (1, core.OffsetAxis('samps'))])
+    aman_proc.wrap('hwpss_fit_red_chi2', red_chi2, [(0, core.LabelAxis('dets', aman.dets.vals))])
+    aman_proc.wrap('hwpss_harms', np.asarray(modes), [(0, core.IndexAxis('modes'))])
+
+    if add_to_aman:
+        if name in aman.keys() and overwrite:
+            aman.move(name, None)
+        aman.wrap(name, fitsig.T, [(0, core.LabelAxis('dets', aman.dets.vals)),
+                                   (1, core.OffsetAxis('samps'))])
+    return aman_proc
+
+
 def get_hwpss_guess(aman, signal='signal', modes=[2, 4, 6, 8]):
     """
     Projects out fourier modes, ``modes`` from ``aman`` and returns them. This
@@ -289,13 +353,22 @@ def subtract_hwpss(aman, signal=None, hwpss_template=None,
     aman.wrap(subtract_name, np.subtract(signal, hwpss_template), [(0,'dets'), (1,'samps')])
 
 
-def demod_tod(aman, signal='hwpss_remove', fc_lpf=2., width=0.5):
+def demod_tod(aman, signal='hwpss_remove', fc_lpf=2., width=0.5, bpf=False,
+              bpf_width=2., bpf_center=None):
     """
-    Simple demodulation function
-    Args:
-        signal (str): Axis to demodulate
-        fc_lpf (float): low pass filter cutoff
-        width (float): width of sine^2 low pass filter
+    Simple demodulation function. Wraps new axes demodQ (real part from hwp
+    demodulation), demodU (imag part from hwp demodulation), and dsT (lowpass
+    filtered version of raw signal) into input axis manager ``aman``.
+    Args
+    ----
+    aman (AxisManager): Axis manager to perform fit.
+    signal (str): Axis to demodulate
+    fc_lpf (float): low pass filter cutoff
+    width (float): width of sine^2 low pass filter
+    bpf (bool): Apply bandpass filter before demodulation.
+    bpf_width (float): Width of bandpass filter in Hz.
+    bpf_center (float): Center of bandpass filter, if not passed will
+                        estimate 4*f_HWP from hwp_angles in aman.
     """
     aman.wrap_new('demodQ', dtype='float32', shape=('dets', 'samps'))
     aman.wrap_new('demodU', dtype='float32', shape=('dets', 'samps'))
@@ -304,7 +377,19 @@ def demod_tod(aman, signal='hwpss_remove', fc_lpf=2., width=0.5):
     phasor = np.exp(4.j * aman.hwp_angle)
     filt = tod_ops.filters.low_pass_sine2(fc_lpf, width=width)
 
-    demod = aman[signal] * phasor
+    if bpf:
+        if bpf_center is None:
+            speed = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
+                     (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
+            bpf_center = 4 * speed
+
+        bpf_filt = tod_ops.filters.low_pass_butter4(fc=bpf_center + bpf_width)*\
+                   tod_ops.filters.high_pass_butter4(fc=bpf_center - bpf_width)
+
+        demod = tod_ops.fourier_filter(aman, bpf_filt, detrend=None,
+                                       signal_name=signal) * phasor
+    else:
+        demod = aman[signal] * phasor
     aman.dsT = aman[signal]
 
     aman['demodQ'] = demod.real
