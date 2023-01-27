@@ -30,6 +30,7 @@ import numpy as np
 from collections import OrderedDict
 
 from .. import core
+from .load_toast_h5 import load_toast_h5_obs
 
 
 # Interim, Oct. 2021.  Wait a year, remove this caution.
@@ -585,6 +586,7 @@ def hstack_into(dest, src_arrays):
 core.OBSLOADER_REGISTRY.update(
     {
         'pipe-s0001': load_observation,
+        'toast3-hdf': load_toast_h5_obs,
         'default': load_observation,
     }
 )
