@@ -9,6 +9,7 @@ import traitlets
 import numpy as np
 from astropy import units as u
 import ephem
+from scipy.constants import h, c, k
 from scipy.interpolate import RectBivariateSpline
 from scipy.signal import fftconvolve
 
@@ -224,14 +225,23 @@ class SimSSO(Operator):
 
         return
 
-    def _get_planet_temp(self, sso_name):
+    @function_timer
+    def _get_sso_temperature(self, sso_name):
         """
-        Get the thermodynamic planet temperature given
+        Get the thermodynamic SSO temperature given
         the frequency
         """
+        log = Logger.get()
         dir_path = os.path.dirname(os.path.realpath(__file__))
         hf = h5py.File(os.path.join(dir_path, "data/planet_data.h5"), "r")
-        if sso_name in hf.keys():
+        if sso_name == "Moon":
+            freq = np.linspace(0, 1000, 1001)[1:] * 1e9
+            T = 300 # Kelvin
+            emissivity = 1.0
+            tb = 1 / (k / (h * freq) * np.log(1 + (np.exp(h * freq / (k * T)) - 1) / emissivity))
+            freq = freq * 1e-9 * u.GHz
+            temp = utils.tb2tcmb(tb * u.K, freq)
+        elif sso_name in hf.keys():
             tb = np.array(hf.get(sso_name)) * u.K
             freq = np.array(hf.get("freqs_ghz")) * u.GHz
             temp = utils.tb2tcmb(tb, freq)
@@ -239,6 +249,7 @@ class SimSSO(Operator):
             raise ValueError(f"Unknown planet name: '{sso_name}' not in {hf.keys()}")
         return freq, temp
 
+    @function_timer
     def _get_beam_map(self, det, sso_diameter, ttemp_det):
         """
         Construct a 2-dimensional interpolator for the beam
@@ -260,28 +271,36 @@ class SimSSO(Operator):
         beam_solid_angle = np.sum(model) * res**2
 
         n = int(description[1][0])
-        size = description[0][0]
+        size = description[0][0] * u.degree
         sso_radius_avg = np.average(sso_diameter) / 2
         sso_solid_angle = np.pi * sso_radius_avg**2
         amp = ttemp_det * (
             sso_solid_angle.to_value(u.rad**2) / beam_solid_angle.to_value(u.rad**2)
         )
-        w = np.radians(size / 2)
-        x = np.linspace(-w, w, n)
-        y = np.linspace(-w, w, n)
+        w = size.to_value(u.rad) / 2
         if self.finite_sso_radius:
             # Convolve the beam model with a disc rather than point-like source
-            X, Y = np.meshgrid(x, y)
-            source = np.zeros_like(model)
+            w_sso = sso_radius_avg.to_value(u.rad)
+            n_sso = int(w_sso // res.to_value(u.rad)) * 2 + 3
+            w_sso = (n_sso - 1) // 2 * res.to_value(u.rad)
+            x_sso = np.linspace(-w_sso, w_sso, n_sso)
+            y_sso = np.linspace(-w_sso, w_sso, n_sso)
+            X, Y = np.meshgrid(x_sso, y_sso)
+            source = np.zeros([n_sso, n_sso])
             source[X**2 + Y**2 < sso_radius_avg.to_value(u.rad)**2] = 1
             source *= amp / np.sum(source)
-            model = fftconvolve(source, model, mode="same")
+            model = fftconvolve(source, model, mode="full")
+            # the convolved model is now larger than the pure beam model
+            w += w_sso
+            n += n_sso - 1
         else:
             # Treat the source as point-like. Reasonable approximation
             # if SSO radius << FWHM
             if sso_solid_angle > 0.1 * beam_solid_angle:
                 log.warning("Ignoring non-negligible source diameter.  SSO image will be too narrow.")
             model *= amp
+        x = np.linspace(-w, w, n)
+        y = np.linspace(-w, w, n)
         beam = RectBivariateSpline(x, y, model)
         r = np.sqrt(w**2 + w**2)
         return beam, r
@@ -345,6 +364,7 @@ class SimSSO(Operator):
         bore_quat = obs_data.obs[0].shared[defaults.boresight_azel][:]
         bore_lon, bore_lat, _ = qa.to_lonlat_angles(bore_quat)
 
+        beam = None
         for idet, det in enumerate(dets):
             timer.clear()
             timer.start()
@@ -366,10 +386,11 @@ class SimSSO(Operator):
             mean_el = np.mean(el)
 
             # Convolve the planet SED with the detector bandpass
-            planet_freq, planet_temp = self._get_planet_temp(sso_name)
-            det_temp = bandpass.convolve(det, planet_freq, planet_temp)
+            sso_freq, sso_temp = self._get_sso_temperature(sso_name)
+            det_temp = bandpass.convolve(det, sso_freq, sso_temp)
 
-            beam, radius = self._get_beam_map(det, sso_diameter, det_temp)
+            if beam is None or not "ALL" in self.beam_props:
+                beam, radius = self._get_beam_map(det, sso_diameter, det_temp)
 
             # Interpolate the beam map at appropriate locations
 
