@@ -9,6 +9,7 @@ import traitlets
 import numpy as np
 from astropy import units as u
 import ephem
+from scipy.constants import h, c, k
 from scipy.interpolate import RectBivariateSpline
 from scipy.signal import fftconvolve
 
@@ -234,11 +235,12 @@ class SimSSO(Operator):
         dir_path = os.path.dirname(os.path.realpath(__file__))
         hf = h5py.File(os.path.join(dir_path, "data/planet_data.h5"), "r")
         if sso_name == "Moon":
-            freq = np.linspace(0, 1000, 1001)[1:] * u.GHz
+            freq = np.linspace(0, 1000, 1001)[1:] * 1e9
             T = 300 # Kelvin
             emissivity = 1.0
             tb = 1 / (k / (h * freq) * np.log(1 + (np.exp(h * freq / (k * T)) - 1) / emissivity))
-            temp = utils.tb2tcmb(tb, freq)
+            freq = freq * 1e-9 * u.GHz
+            temp = utils.tb2tcmb(tb * u.K, freq)
         elif sso_name in hf.keys():
             tb = np.array(hf.get(sso_name)) * u.K
             freq = np.array(hf.get("freqs_ghz")) * u.GHz
