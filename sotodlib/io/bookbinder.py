@@ -24,6 +24,94 @@ def pos2vel(p):
     """
     return np.ediff1d(p)
 
+def get_channel_names(s, rids=None):
+    """
+    Retrieve the channel names in a G3SuperTimestream. If provided, matches readout IDs to the
+    associated channels and returns them
+
+    Parameters
+    ----------
+    s : G3SuperTimestream
+        Timestream to query
+    rids : list
+        List of readout IDs
+
+    Returns
+    -------
+    list
+        List of channel names
+    """
+    if rids is not None:
+        # check compatability
+        assert len(s.names) == len(rids)
+        assert list(s.names) == sorted(s.names)  # name sure things are in our assumed order
+        # maybe more checks are needed here...
+        return rids
+    else:
+        return s.names
+
+def get_channel_data_from_name(s, channel_name):
+    """
+    From the channel name of a G3SuperTimestream (as listed in .names), retrieve
+    the associated data vector
+
+    Parameters
+    ----------
+    s : G3SuperTimestream
+        Input timestream
+    channel_name : str
+        The name of the channel, exactly as listed in the .names field
+
+    Returns
+    -------
+    np.ndarray
+        Data vector associated with that channel name
+    """
+    if channel_name not in s.names:
+        raise KeyError(f"{channel_name} not found in this SuperTimestream")
+    idx = list(s.names).index(channel_name)
+    return s.data[idx]
+
+def split_ts_bits(c):
+    """
+    Split up 64 bit to 2x32 bit
+    """
+    NUM_BITS_PER_INT = 32
+    MAXINT = (1 << NUM_BITS_PER_INT) - 1
+    a = (c >> NUM_BITS_PER_INT) & MAXINT
+    b = c & MAXINT
+    return a, b
+
+def get_timestamps(f):
+    """
+    Calculate the timestamp field for loaded data
+
+    Copied from load_smurf.py (Jan 23, 2023)
+
+    Parameters
+    ----------
+    f : G3Frame
+        Input SMuRF frame containing data in G3SuperTimestream format
+
+    Returns
+    -------
+    G3VectorTime
+        The array of computed timestamps, in G3Units
+    """
+    if 'primary' not in f.keys():
+        return f['data'].times
+
+    counter0 = get_channel_data_from_name(f['primary'], 'Counter0')
+    if np.any(counter0):
+        s, ns = split_ts_bits(get_channel_data_from_name(f['primary'], 'Counter2'))
+        # Add 20 years in seconds (accounting for leap years) to handle
+        # offset between EPOCH time referenced to 1990 relative to UNIX time.
+        counter2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
+        timestamps = np.round(counter2 - (counter0 / 480000) ) + counter0 / 480000
+    else:
+        timestamps = f['data'].times
+    return core.G3VectorTime(timestamps * core.G3Units.s)
+
 class _HKBundle():
     """
     Buffer for Housekeeping data. Use add() to add data and rebundle() to output
@@ -94,8 +182,7 @@ class _SmurfBundle():
     Buffer for SMuRF data. Use add() to add data and rebundle() to output data
     up to but not including flush_time.
     """
-    def __init__(self, readout_ids=None):
-        self.readout_ids = readout_ids
+    def __init__(self):
         self.times = []
         self.signal = None
         self.biases = None
@@ -106,40 +193,6 @@ class _SmurfBundle():
         Returns True if the current frame has crossed the flush_time
         """
         return len(self.times) > 0 and self.times[-1] >= flush_time
-
-    def get_names(self, s, use_rids=False):
-        if use_rids and self.readout_ids is not None:
-            # check compatability
-            assert len(s.names) == len(self.readout_ids)
-            assert list(s.names) == sorted(s.names)  # name sure things are in our assumed order
-            # maybe more checks are needed here...
-            return self.readout_ids
-        else:
-            return s.names
-
-    def create_new_supertimestream(self, s, use_rids=False):
-        """
-        From the input SuperTimestream, create a new (empty) SuperTimestream
-        with the same channels and channel names
-
-        Parameters
-        ----------
-        s : G3SuperTimestream
-            The input G3SuperTimestream to copy
-
-        Returns
-        -------
-        sts : G3SuperTimestream
-            Empty, except the names
-        """
-        dtype = np.int32 if (s.data.dtype != np.int64) else np.int64
-
-        sts = so3g.G3SuperTimestream()
-        sts.names = self.get_names(s, use_rids=use_rids)
-        sts.times = core.G3VectorTime([])
-        sts.data = np.empty((len(s.names), 0), dtype=dtype)
-
-        return sts
 
     def add(self, f):
         """
@@ -153,19 +206,22 @@ class _SmurfBundle():
         self.times.extend(f['data'].times)
 
         if self.signal is None:
-            self.signal = self.create_new_supertimestream(f['data'], use_rids=True)
+            self.signal = so3g.G3SuperTimestream(f['data'].names, core.G3VectorTime([]),
+                                    np.empty((len(f['data'].names), 0), dtype=np.int32))
         self.signal.times.extend(f['data'].times)
         self.signal.data = np.hstack((self.signal.data, f['data'].data)).astype(np.int32)
 
         if 'tes_biases' in f.keys():
             if self.biases is None:
-                self.biases = self.create_new_supertimestream(f['tes_biases'])
+                self.biases = so3g.G3SuperTimestream(f['tes_biases'].names, core.G3VectorTime([]),
+                                    np.empty((len(f['tes_biases'].names), 0), dtype=np.int32))
             self.biases.times.extend(f['tes_biases'].times)
             self.biases.data = np.hstack((self.biases.data, f['tes_biases'].data)).astype(np.int32)
 
         if 'primary' in f.keys():
             if self.primary is None:
-                self.primary = self.create_new_supertimestream(f['primary'])
+                self.primary = so3g.G3SuperTimestream(f['primary'].names, core.G3VectorTime([]),
+                                    np.empty((len(f['primary'].names), 0), dtype=np.int64))
             self.primary.times.extend(f['primary'].times)
             self.primary.data = np.hstack((self.primary.data, f['primary'].data)).astype(np.int64)
 
@@ -183,7 +239,7 @@ class _SmurfBundle():
 
         Returns
         -------
-        signalout : G3SuperTimestream or None
+        signalout : G3SuperTimestream
             Output signal timestream
         biasout : G3SuperTimestream or None
             Output TES biases timestream
@@ -191,46 +247,27 @@ class _SmurfBundle():
             Output primary timestream
         """
 
-        def rebundle_sts(sts, flush_time, use_rids=False):
-            """
-            Since G3SuperTimestreams cannot be shortened, the data must be copied to
-            a new instance for rebundling of the buffer
-
-            Parameters
-            ----------
-            flush_time : G3Time
-                Output will contain buffered data up to (but not including) this time
-            use_rids : bool
-                Whether the `.names` field should be replaced with readout_ids
-
-            Returns
-            -------
-            stsout : G3SuperTimestream or None
-                The portion of the buffer to be output (before flush_time)
-            newsts : G3SuperTimestream or None
-                The portion of the buffer to be kept (flush_time and onward)
-            """
-            if sts is None:
-                return None, sts
-
-            # Output SuperTimestream (to be written to frame)
-            stsout = so3g.G3SuperTimestream()
-            stsout.names = self.get_names(sts, use_rids=use_rids)
-            stsout.times = core.G3VectorTime([t for t in sts.times if t < flush_time])
-            stsout.data = sts.data[:,:len(stsout.times)]
-            # New buffer SuperTimestream
-            newsts = so3g.G3SuperTimestream()
-            newsts.names = self.get_names(sts, use_rids=use_rids)
-            newsts.times = core.G3VectorTime([t for t in sts.times if t >= flush_time])
-            newsts.data = sts.data[:,len(stsout.times):]
-
-            return stsout, newsts
-
-        signalout, self.signal = rebundle_sts(self.signal, flush_time, use_rids=True)
-        biasout, self.biases = rebundle_sts(self.biases, flush_time)
-        primout, self.primary = rebundle_sts(self.primary, flush_time)
-
+        # Timestamps to be output and kept in buffer, respectively
+        # (assumes signal, bias, and primary have same timestamps, which is a reasonable assumption)
+        tout       = [t for t in self.times if t < flush_time]
         self.times = [t for t in self.times if t >= flush_time]
+
+        # Since G3SuperTimestreams cannot be shortened, the data must be copied to
+        # a new instance for rebundling of the buffer
+        signalout = so3g.G3SuperTimestream(self.signal.names, tout, self.signal.data[:,:len(tout)])
+        self.signal = so3g.G3SuperTimestream(self.signal.names, self.times, self.signal.data[:,len(tout):])
+
+        if self.biases is not None:
+            biasout = so3g.G3SuperTimestream(self.biases.names, tout, self.biases.data[:,:len(tout)])
+            self.biases = so3g.G3SuperTimestream(self.biases.names, self.times, self.biases.data[:,len(tout):])
+        else:
+            biasout = None
+
+        if self.primary is not None:
+            primout = so3g.G3SuperTimestream(self.primary.names, tout, self.primary.data[:,:len(tout)])
+            self.primary = so3g.G3SuperTimestream(self.primary.names, self.times, self.primary.data[:,len(tout):])
+        else:
+            primout = None
 
         return signalout, biasout, primout
 
@@ -242,12 +279,19 @@ class FrameProcessor(object):
 
     Parameters
     ----------
+    start_time : G3Time, optional
+        Start time for the output Book
+    end_time : G3Time, optional
+        End time for the output Book
+    smurf_timestamps : list, optional
+        Externally provided list of timestamps, used to check for missing samples in
+        current timestream
     flush_time : G3Time
         Buffered data up to (but not including) this time will be output, the rest kept
     maxlength : int
         Maximum allowed length (in samples) of an output frame
     """
-    def __init__(self, **config):
+    def __init__(self, start_time=None, end_time=None, smurf_timestamps=None, **config):
         self.hkbundle = None
         self.smbundle = None
         self.flush_time = None
@@ -255,14 +299,22 @@ class FrameProcessor(object):
         self.FLAGGED_SAMPLE_VALUE = config.get("flagged_sample_value", -1)
         self.current_state = 0  # default to scan state
         self.GAP_THRESHOLD = config.get("gap_threshold", 0.05)
+        self.BOOK_START_TIME = start_time
+        self.BOOK_END_TIME = end_time
         self._frame_splits = []
         self._hk_gaps = []
         self._smurf_gaps = []
         self._prev_smurf_frame_last_sample = None
         self._prev_smurf_frame_sample_interval = None
-        self._smurf_timestamps = None
+        self._smurf_timestamps = smurf_timestamps
         self._next_expected_smurf_sample_index = 0
         self._readout_ids = config.get("readout_ids", None)
+
+        # Ensure start and end times have the correct type
+        if self.BOOK_START_TIME is not None:
+            self.BOOK_START_TIME = core.G3Time(self.BOOK_START_TIME)
+        if self.BOOK_END_TIME is not None:
+            self.BOOK_END_TIME = core.G3Time(self.BOOK_END_TIME)
 
     def ready(self):
         """
@@ -417,6 +469,61 @@ class FrameProcessor(object):
 
         self.current_state = state
 
+    def check_times(self, f):
+        """
+        Retrieve the timestamps for the data, then trim any samples occurring before the Book start
+        time and after the Book end time. If there are no such samples, the frame is passed through
+        untouched.
+
+        Parameters
+        ----------
+        f : G3Frame
+            Input frame to be processed
+
+        Returns
+        -------
+        trimmed_frame : G3Frame
+            Processed frame
+        """
+        if self.BOOK_START_TIME is not None and self.BOOK_END_TIME is not None:
+            assert self.BOOK_START_TIME <= self.BOOK_END_TIME
+
+        # Calculate the timestamps for the current frame, if available, or default to the
+        # recorded times in the 'data' field
+        t = get_timestamps(f)
+
+        # Trim starting samples (if needed)
+        if self.BOOK_START_TIME is not None and t[0] < self.BOOK_START_TIME:
+            trimmed_frame_start = core.G3Frame(f.type)
+            t = core.G3VectorTime([_t for _t in t if _t >= self.BOOK_START_TIME])
+            for k in f.keys():
+                if k in ['data', 'tes_biases', 'primary']:
+                    trimmed_frame_start[k] = so3g.G3SuperTimestream(f[k].names, t, f[k].data[:,(len(f[k].times)-len(t)):])
+                else:
+                    trimmed_frame_start[k] = f[k]
+            trimmed_frame = trimmed_frame_start
+        else:
+            for k in f.keys():
+                if k in ['data', 'tes_biases', 'primary']:
+                    f[k].times = t
+            trimmed_frame = f
+
+        if len(trimmed_frame['data'].times) == 0:
+            return trimmed_frame
+
+        # Trim ending samples (if needed)
+        if self.BOOK_END_TIME is not None and t[-1] > self.BOOK_END_TIME:
+            trimmed_frame_end = core.G3Frame(trimmed_frame.type)
+            t = core.G3VectorTime([_t for _t in t if _t <= self.BOOK_END_TIME])
+            for k in f.keys():
+                if k in ['data', 'tes_biases', 'primary']:
+                    trimmed_frame_end[k] = so3g.G3SuperTimestream(f[k].names, t, f[k].data[:,:len(t)])
+                else:
+                    trimmed_frame_end[k] = trimmed_frame[k]
+            trimmed_frame = trimmed_frame_end
+
+        return trimmed_frame
+
     def flush(self, flush_time=None):
         """
         Produce frames for the output Book, up to but not including flush_time
@@ -437,15 +544,9 @@ class FrameProcessor(object):
 
         smurf_data, smurf_bias, smurf_primary = self.smbundle.rebundle(flush_time)
 
-        # Create SuperTimestream containing SMuRF data
-        sts = so3g.G3SuperTimestream()
-        sts.times = smurf_data.times
-        sts.names = [k for k in smurf_data.names]
-        sts.data = smurf_data.data
-
         # Write signal data to frame
         f = core.G3Frame(core.G3FrameType.Scan)
-        f['signal'] = sts
+        f['signal'] = smurf_data
         if smurf_bias is not None:
             f['tes_biases'] = smurf_bias
         if smurf_primary is not None:
@@ -524,9 +625,7 @@ class FrameProcessor(object):
                 Frame containing a G3SuperTimestream with FLAGGED_SAMPLE_VALUE at each input timestamp
             """
             frame = core.G3Frame(core.G3FrameType.Scan)
-            data = so3g.G3SuperTimestream()
-            data.times = core.G3VectorTime([core.G3Time(_t) for _t in t])
-            data.names = f['data'].names
+            data = so3g.G3SuperTimestream(f['data'].names, core.G3VectorTime([core.G3Time(_t) for _t in t]))
             if dtype in [np.float32, np.float64]:
                 assert f['data'].quanta is not None
                 data.quanta = f['data'].quanta
@@ -563,16 +662,22 @@ class FrameProcessor(object):
 
         if f.type == core.G3FrameType.Scan:
             if self.smbundle is None:
-                self.smbundle = _SmurfBundle(readout_ids=self._readout_ids)
+                self.smbundle = _SmurfBundle()
 
             output = []
 
-            # Determine if there is a gap in time between this frame and previous frame
-            t = f['data'].times
+            # Replace the times in 'data', 'tes_biases', and 'primary' with the correct timestamps
+            # and trim any samples occuring outside the specified start/end times
+            f = self.check_times(f)
+            # Replace the channel names with readout IDs (if available)
+            f['data'].names = get_channel_names(f['data'], rids=self._readout_ids)
 
+            t = f['data'].times
+            # If all the samples have been trimmed, we can ignore this frame
             if len(t) == 0:
                 return []
 
+            # Determine if there is a gap in time between this frame and previous frame
             if self._smurf_timestamps is not None:
                 current_timestamp = t[0].time
                 expected_timestamp = self._smurf_timestamps[self._next_expected_smurf_sample_index]
@@ -666,12 +771,11 @@ class Bookbinder(object):
         self.MAX_SAMPLES_PER_CHANNEL = self.MAX_SAMPLES_TOTAL // self.max_nchannels
         self.DEFAULT_TIME = core.G3Time(1e18)  # 1e18 = 2286-11-20T17:46:40.000000000 (in the distant future)
         self.OVERWRITE_ANCIL_FILE = config.get("overwrite_afile", False)
-        self.frameproc = FrameProcessor(**config.get("frameproc_config", {}))
-        self.frameproc._smurf_timestamps = smurf_timestamps
 
         if isinstance(self._hk_files, str):
             self._hk_files = [self._hk_files]
 
+        # Verify start and end times
         if self._start_time is not None:
             self._start_time = core.G3Time(self._start_time)
         if self._end_time is not None:
@@ -683,6 +787,12 @@ class Bookbinder(object):
                                  "\nStart time: " + str(self._start_time) +
                                  "\nEnd time:   " + str(self._end_time))
 
+        # Set up the FrameProcessor
+        self.frameproc = FrameProcessor(start_time=self._start_time, end_time=self._end_time,
+                                        smurf_timestamps=smurf_timestamps,
+                                        **config.get("frameproc_config", {}))
+
+        # Set up file I/O
         if isinstance(self._smurf_files, list):
             ifile = self._smurf_files.pop(0)
             if self._verbose: print(f"Bookbinding {ifile}")
@@ -842,71 +952,6 @@ class Bookbinder(object):
 
         return frame_splits
 
-    def trim_frame(self, f):
-        """
-        Trim any samples occurring before the specified start time and after the specified
-        end time. If there are no such samples, the frame is passed through untouched.
-
-        Parameters
-        ----------
-        f : G3Frame
-            Input frame to be processed
-
-        Returns
-        -------
-        trimmed_frame : G3Frame
-            Processed frame
-        """
-        def trim_sts_start(sts, start_time=self._start_time):
-            newsts = so3g.G3SuperTimestream()
-            newsts.names = sts.names
-            newsts.times = core.G3VectorTime([t for t in sts.times if t >= start_time])
-            newsts.data = sts.data[:,(len(sts.times)-len(newsts.times)):]
-            return newsts
-
-        def trim_sts_end(sts, end_time=self._end_time):
-            newsts = so3g.G3SuperTimestream()
-            newsts.names = sts.names
-            newsts.times = core.G3VectorTime([t for t in sts.times if t <= end_time])
-            newsts.data = sts.data[:,:len(newsts.times)]
-            return newsts
-
-        if self._start_time is None and self._end_time is None:
-            return f
-
-        # Trim starting samples (if needed)
-        if self._start_time is not None and f['data'].times[0] < self._start_time:
-            trimmed_frame_start = core.G3Frame(f.type)
-            trimmed_frame_start['data'] = trim_sts_start(f['data'])
-            if 'tes_bias' in f.keys():
-                trimmed_frame_start['tes_bias'] = trim_sts_start(f['tes_bias'])
-            if 'primary' in f.keys():
-                trimmed_frame_start['primary'] = trim_sts_start(f['primary'])
-            for k in f.keys():
-                if k not in ['data', 'tes_bias', 'primary']:
-                    trimmed_frame_start[k] = f[k]
-            trimmed_frame = trimmed_frame_start
-        else:
-            trimmed_frame = f
-
-        if len(trimmed_frame['data'].times) == 0:
-            return trimmed_frame
-
-        # Trim ending samples (if needed)
-        if self._end_time is not None and trimmed_frame['data'].times[-1] > self._end_time:
-            trimmed_frame_end = core.G3Frame(trimmed_frame.type)
-            trimmed_frame_end['data'] = trim_sts_end(trimmed_frame['data'])
-            if 'tes_bias' in trimmed_frame.keys():
-                trimmed_frame_end['tes_bias'] = trim_sts_end(trimmed_frame['tes_bias'])
-            if 'primary' in trimmed_frame.keys():
-                trimmed_frame_end['primary'] = trim_sts_end(trimmed_frame['primary'])
-            for k in trimmed_frame.keys():
-                if k not in ['data', 'tes_bias', 'primary']:
-                    trimmed_frame_end[k] = trimmed_frame[k]
-            trimmed_frame = trimmed_frame_end
-
-        return trimmed_frame
-
     def process_HK_files(self):
         """
         Subroutine to process any provided Housekeeping (HK) files.
@@ -1029,7 +1074,7 @@ class Bookbinder(object):
                         else:
                             self.metadata += [f]
                     else:
-                        output += self.frameproc(self.trim_frame(f))  # FrameProcessor returns a list of frames (can be empty)
+                        output += self.frameproc(f)  # FrameProcessor returns a list of frames (can be empty)
                         output = [o for o in output if len(o['signal'].times) > 0]  # Remove 0-length frames
                         # Write out metadata frames only when FrameProcessor outputs one or more (scan) frames
                         if len(output) > 0:
