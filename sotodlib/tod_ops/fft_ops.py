@@ -15,71 +15,71 @@ def _get_num_threads():
 
 def rfft(aman, detrend='linear', resize='zero_pad', window=np.hanning,
          axis_name='samps', signal_name='signal', delta_t=None):
-    """Return the real fft of aman.signal_name along the axis axis_name. 
+    """Return the real fft of aman.signal_name along the axis axis_name.
         Does not change the data in the axis manager.
-    
+
     Arguments:
-    
+
         aman: axis manager
-        
+
         detrend: Method of detrending to be done before ffting. Can
             be 'linear', 'mean', or None.
-            
-        resize: How to resize the axis to increase fft speed. 'zero_pad' 
-            will increase to the next 2**N. 'trim' will cut out so the 
-            factorization of N contains only low primes. None will not 
+
+        resize: How to resize the axis to increase fft speed. 'zero_pad'
+            will increase to the next 2**N. 'trim' will cut out so the
+            factorization of N contains only low primes. None will not
             change the axis length and might be quite slow.
-            
+
         window: a function that takes N are returns an fft window
             Can be None if no windowing
-        
+
         axis_name: name of axis you would like to fft along
-        
+
         signal_name: name of the variable in aman to fft
-        
-        delta_t: if none, it will look for 'timestamps' in the axis manager 
-                and will otherwise assume 1. if not None, it should be the 
+
+        delta_t: if none, it will look for 'timestamps' in the axis manager
+                and will otherwise assume 1. if not None, it should be the
                 sampling rate along the axis you're ffting
-        
+
     Returns:
-    
+
         fft: the fft'd data
-        
+
         freqs: the frequencies it is value at (since resizing is an option)
     """
     if len(aman._assignments[signal_name]) >2:
         raise ValueError('rfft only works for 1D or 2D data streams')
-        
+
     axis = getattr(aman, axis_name)
-    
+
     if len(aman._assignments[signal_name])==1:
         n_det = 1
         main_idx = 0
         other_idx = None
-        
+
     elif len(aman._assignments[signal_name])==2:
         checks = np.array([x==axis_name for x in aman._assignments[signal_name]],dtype='bool')
         main_idx = np.where(checks)[0][0]
         other_idx = np.where(~checks)[0][0]
         other_axis = getattr(aman, aman._assignments[signal_name][other_idx])
         n_det = other_axis.count
-    
+
     if detrend is None:
         signal = np.atleast_2d(getattr(aman, signal_name))
     else:
-        signal = detrend_data(aman, detrend, axis_name=axis_name, 
+        signal = detrend_data(aman, detrend, axis_name=axis_name,
                              signal_name=signal_name)
-    
+
     if other_idx is not None and other_idx != 0:
         signal = signal.transpose()
-     
+
     if window is not None:
         signal = signal*window(axis.count)[None,:]
-    
-    
+
+
     if resize == 'zero_pad':
         k = int(np.ceil(np.log(axis.count)/np.log(2)))
-        n = 2**k 
+        n = 2**k
     elif resize == 'trim':
         n = find_inferior_integer(axis.count)
     elif resize is None:
@@ -95,47 +95,47 @@ def rfft(aman, detrend='linear', resize='zero_pad', window=np.hanning,
         a[:] = signal[:,:n]
     else:
         a[:] = signal[:]
-    
+
     t_fun();
-    
+
     if delta_t is None:
         if 'timestamps' in aman:
             delta_t = (aman.timestamps[-1]-aman.timestamps[0])/axis.count
         else:
             delta_t = 1
     freqs = np.fft.rfftfreq(n, delta_t)
-    
+
     if other_idx is not None and other_idx != 0:
         return b.transpose(), freqs
-    
+
     return b, freqs
-    
-    
+
+
 def build_rfft_object(n_det, n, direction='FFTW_FORWARD', **kwargs):
     """Build PyFFTW object for fft-ing
-    
+
     Arguments:
-        
-        n_det: number of detectors (or just the arr.shape[0] for the 
+
+        n_det: number of detectors (or just the arr.shape[0] for the
             array you are going to fft)
-            
+
         n: number of samples in timestream
-        
+
         direction: fft direction. Can be FFTW_FORWARD, FFTW_BACKWARD, or BOTH
-        
+
         kwargs: additional arguments to pass to pyfftw.FFTW
-        
+
     Returns:
-        
+
         a: array for the real valued side of the fft
-        
+
         b: array for the the complex side of the fft
-        
+
         t_fun: function for performing FFT (two are returned if direction=='BOTH')
     """
     fftargs = {'threads': _get_num_threads(), 'flags': ['FFTW_ESTIMATE']}
     fftargs.update(kwargs)
-    
+
     a = pyfftw.empty_aligned((n_det,n), dtype='float32')
     b = pyfftw.empty_aligned((n_det,(n+2)//2), dtype='complex64')
     if direction == 'FFTW_FORWARD':
@@ -190,23 +190,23 @@ def find_superior_integer(target, primes=[2,3,5,7,11,13]):
 def calc_psd(aman, signal=None, timestamps=None, merge=False, **kwargs):
     """Calculates the power spectrum density of an input signal using signal.welch()
     Data defaults to aman.signal and times defaults to aman.timestamps
-        
+
     Arguments:
         aman: AxisManager with (dets, samps) OR (channels, samps)axes.
         signal: data signal to pass to scipy.signal.welch()
-        timestamps: timestamps associated with the data signal         
+        timestamps: timestamps associated with the data signal
         merge: bool, if true merge results into axismanager
         **kwargs: keyword args to be passed to signal.welch()
 
     Returns:
         freqs: array of frequencies corresponding to PSD calculated from welch
-        Pxx: array of PSD values 
+        Pxx: array of PSD values
     """
     if signal is None:
         signal = aman.signal
     if timestamps is None:
         timestamps = aman.timestamps
-        
+
     freqs, Pxx = welch( signal, 1/np.median(np.diff(timestamps)), **kwargs)
     if merge:
         aman.merge( core.AxisManager(core.OffsetAxis("fsamps", len(freqs))))
@@ -219,24 +219,24 @@ def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
     Function that calculates the white noise level as a median PSD value between
     two frequencies. Defaults to calculation of white noise between 5 and 10Hz.
     Defaults frequency information to a wrapped "freqs" field in aman.
-    
+
     Arguments
     ---------
-        aman (AxisManager): 
+        aman (AxisManager):
             Uses aman.freq as frequency information associated with the PSD, pxx.
-        
-        pxx (Float array): 
+
+        pxx (Float array):
             Psd information to calculate white noise. Defaults to aman.pxx
-        
-        freqs (1d Float array): 
+
+        freqs (1d Float array):
             frequency information related to the psd. Defaults to aman.freqs
-        
-        low_f (Float): 
+
+        low_f (Float):
             low frequency cutoff to calculate median psd value. Defaults to 5Hz
-        
-        high_f (float): 
+
+        high_f (float):
             high frequency cutoff to calculate median psd value. Defaults to 10Hz
-    
+
     Returns
     -------
         wn: Float array of white noise levels for each psd passed into argument.
@@ -246,12 +246,12 @@ def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
 
     if pxx is None:
         pxx = aman.Pxx
-    
+
     fmsk = np.all([freqs >= low_f, freqs <= high_f], axis=0 )
     if pxx.ndim == 1:
         wn2 = np.median(pxx[fmsk])
     else:
         wn2 = np.median(pxx[:,fmsk], axis=1)
-    
+
     wn = np.sqrt(wn2)
     return wn
