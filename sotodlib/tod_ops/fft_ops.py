@@ -5,6 +5,7 @@ import numpy as np
 import pyfftw
 
 import so3g
+from sotodlib import core
 
 from . import detrend_data
 
