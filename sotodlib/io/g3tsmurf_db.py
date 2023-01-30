@@ -79,7 +79,8 @@ class Observations(Base):
     action_name = db.Column(db.String)
     
     stream_id = db.Column(db.String)
-    
+    timing = db.Column(db.Boolean)
+
     # in seconds
     duration = db.Column(db.Float)
     n_samples = db.Column(db.Integer)
@@ -182,7 +183,8 @@ class Files(Base):
     observation = relationship("Observations", back_populates='files')
     
     stream_id = db.Column(db.String)
-    
+    timing = db.Column(db.Boolean)
+
     n_frames = db.Column(db.Integer)
     frames = relationship("Frames", back_populates='file')
     
