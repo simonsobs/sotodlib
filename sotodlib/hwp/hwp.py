@@ -1,6 +1,5 @@
 import numpy as np
 from scipy.optimize import curve_fit
-from spt3g import core
 from sotodlib import core, tod_ops
 import logging
 
@@ -151,9 +150,9 @@ def demod(aman, signal='signal', name='signal_demod',
 
 # Functions to test with preprocessing pipeline added by Max S-F below
 def hwpss_linreg(aman, signal='signal', modes=[2, 4, 6, 8], mask_flags=True,
-                 add_to_aman=True, name='hwpss_extract'):
+                 add_to_aman=True, name='hwpss_extract', return_chi2=True):
     """
-    Fir out half-waveplate synchronous signal (harmonics of rotation frequency),
+    Fit out half-waveplate synchronous signal (harmonics of rotation frequency),
     The harmonics to fit out are defined by ``modes`` and the operation is
     performed on the ``signal`` axis of the ``aman`` axis manager.
 
@@ -161,7 +160,7 @@ def hwpss_linreg(aman, signal='signal', modes=[2, 4, 6, 8], mask_flags=True,
     ----
     aman (AxisManager): Axis manager to perform fit.
     signal (string): Axis within aman to perform fit on.
-    modes (list): List of hwp rotation frequency harmonics to fit.
+    modes (int list): List of hwp rotation frequency harmonics to fit.
     mask_flags (bool): Mask flagged samples in fit.
     add_to_aman (bool): Add fitted hwpss to aman.
     name (string): Axis name for fitted signal if ``add_to_aman`` is True.
@@ -196,14 +195,11 @@ def hwpss_linreg(aman, signal='signal', modes=[2, 4, 6, 8], mask_flags=True,
     coeffs = np.dot(I, coeffs.T).T
 
     fitsig = np.matmul(vects.T, coeffs.T)
-    rss = np.sum((aman[signal]-fitsig.T)**2, axis=1)
-    red_chi2 = rss/len(vects)
     aman_proc = core.AxisManager().wrap('hwpss_coeffs', coeffs,
                                         [(0, core.LabelAxis('dets', aman.dets.vals)),
                                          (1, core.IndexAxis('modes'))])
     aman_proc.wrap('hwpss_vects', vects, [(0, core.IndexAxis('modes')),
                                           (1, core.OffsetAxis('samps'))])
-    aman_proc.wrap('hwpss_fit_red_chi2', red_chi2, [(0, core.LabelAxis('dets', aman.dets.vals))])
     aman_proc.wrap('hwpss_harms', np.asarray(modes), [(0, core.IndexAxis('modes'))])
 
     if add_to_aman:
@@ -211,6 +207,13 @@ def hwpss_linreg(aman, signal='signal', modes=[2, 4, 6, 8], mask_flags=True,
             aman.move(name, None)
         aman.wrap(name, fitsig.T, [(0, core.LabelAxis('dets', aman.dets.vals)),
                                    (1, core.OffsetAxis('samps'))])
+    if return_chi2:
+        rss = np.sum((aman[signal]-fitsig.T)**2, axis=1)
+        _ = tod_ops.fft_ops.calc_psd(aman, merge=True, nperseg=aman.samps.count//2)
+        wn = tod_ops.fft_ops.calc_wn(aman, low_f=20, high_f=30)
+        red_chi2 = rss/wn/(aman.samps.count-aman_proc.modes.count)
+        aman_proc.wrap('hwpss_fit_red_chi2', red_chi2, [(0, core.LabelAxis('dets', aman.dets.vals))])
+
     return aman_proc
 
 
@@ -285,7 +288,7 @@ def extract_hwpss_template(aman, As, Bs, signal='signal', name='hwpss_ext',
 
     for i in range(aman.dets.count):
         params_0 = list(As[:, i]) + list(Bs[:, i]) + list(modes)
-        params_0.append(np.median(aman[signal][i, m[i]]))
+        params_0.append(np.nanmedian(aman[signal][i, m[i]]))
         popt, pcov = curve_fit(lambda x, *params_0: wrapper_fit_func(aman.hwp_angle[m[i]], N_modes, sins[:,m[i]], coss[:,m[i]], params_0),
                                aman.hwp_angle[m[i]], aman[signal][i,m[i]], p0=params_0)
 
