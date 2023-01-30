@@ -62,6 +62,7 @@ setup_opts["install_requires"] = [
     'scikit-image',
     'pyfftw',
     'typer',
+    'influxdb',
 ]
 
 # Command Class dictionary.
