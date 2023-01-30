@@ -42,9 +42,22 @@ def test_check_timestamps():
     np.testing.assert_array_equal(F.check_times(frame)['data'].times, t)
 
     ##################################################
-    # Test 1b: With the primary field present,
-    #          calculate the true timestamps from the
-    #          counters fields
+    # Test 1b: When the timing system is on but the
+    #          timing counters are absent, an
+    #          exception should be raised
+    ##################################################
+    F.timing_system = True
+    c0 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    c1 = c0
+    c2 = c0
+    frame['primary'] = so3g.G3SuperTimestream(["Counter0", "Counter1", "Counter2"],
+                                core.G3VectorTime(t), np.vstack((c0, c1, c2)))
+    np.testing.assert_raises(bb.TimingSystemError, F.check_times, frame)
+
+    ##################################################
+    # Test 1c: When the timing system is on and the
+    #          timing counters are present, calculate
+    #          the true timestamps from the counters
     ##################################################
     c0 = [205909, 208309, 210709, 213109, 215509, 217909, 220309, 222709, 225109, 227509]
     c1 = [4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295,
@@ -55,8 +68,7 @@ def test_check_timestamps():
     true_timestamps = [167330757642897696, 167330757643397728, 167330757643897696, 167330757644397696,
           167330757644897696, 167330757645397696, 167330757645897696, 167330757646397696,
           167330757646897696, 167330757647397696]
-    frame['primary'] = so3g.G3SuperTimestream(["Counter0", "Counter1", "Counter2"],
-                                core.G3VectorTime(t), np.vstack((c0, c1, c2)))
+    frame['primary'].data = np.vstack((c0, c1, c2))
     np.testing.assert_array_equal(F.check_times(frame)['data'].times, true_timestamps)
 
     ##################################################

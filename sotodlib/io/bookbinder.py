@@ -82,7 +82,7 @@ def split_ts_bits(c):
     b = c & MAXINT
     return a, b
 
-def get_timestamps(f):
+def get_timestamps(f, use_counters):
     """
     Calculate the timestamp field for loaded data
 
@@ -92,25 +92,29 @@ def get_timestamps(f):
     ----------
     f : G3Frame
         Input SMuRF frame containing data in G3SuperTimestream format
+    use_counters : bool
+        Whether to calcuate the timestamps from the timing counters.
+        If false, returns the times recorded in the .times field.
 
     Returns
     -------
     G3VectorTime
-        The array of computed timestamps, in G3Units
+        The array of computed timestamps
     """
-    if 'primary' not in f.keys():
-        return f['data'].times
-
-    counter0 = get_channel_data_from_name(f['primary'], 'Counter0')
-    if np.any(counter0):
-        s, ns = split_ts_bits(get_channel_data_from_name(f['primary'], 'Counter2'))
-        # Add 20 years in seconds (accounting for leap years) to handle
-        # offset between EPOCH time referenced to 1990 relative to UNIX time.
-        counter2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
-        timestamps = np.round(counter2 - (counter0 / 480000) ) + counter0 / 480000
+    if use_counters and 'primary' in f.keys():
+        counter0 = get_channel_data_from_name(f['primary'], 'Counter0')
+        if np.any(counter0):
+            s, ns = split_ts_bits(get_channel_data_from_name(f['primary'], 'Counter2'))
+            # Add 20 years in seconds (accounting for leap years) to handle
+            # offset between EPOCH time referenced to 1990 relative to UNIX time.
+            counter2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
+            timestamps = np.round(counter2 - (counter0 / 480000) ) + counter0 / 480000
+            timestamps *= core.G3Units.s
+        else:
+            raise TimingSystemError("No timing counters found")
     else:
         timestamps = f['data'].times
-    return core.G3VectorTime(timestamps * core.G3Units.s)
+    return core.G3VectorTime(timestamps)
 
 class _HKBundle():
     """
@@ -286,12 +290,17 @@ class FrameProcessor(object):
     smurf_timestamps : list, optional
         Externally provided list of timestamps, used to check for missing samples in
         current timestream
+    timing_system : bool
+        Whether the timing system was on during observation. If true, will attempt to use
+        timing counters to calculate correct timestamps; if false, will fall back to using
+        smurf-streamer recorded timestamps in the timestreams
     flush_time : G3Time
         Buffered data up to (but not including) this time will be output, the rest kept
     maxlength : int
         Maximum allowed length (in samples) of an output frame
     """
-    def __init__(self, start_time=None, end_time=None, smurf_timestamps=None, **config):
+    def __init__(self, start_time=None, end_time=None, smurf_timestamps=None,
+                 timing_system=False, **config):
         self.hkbundle = None
         self.smbundle = None
         self.flush_time = None
@@ -301,6 +310,7 @@ class FrameProcessor(object):
         self.GAP_THRESHOLD = config.get("gap_threshold", 0.05)
         self.BOOK_START_TIME = start_time
         self.BOOK_END_TIME = end_time
+        self.timing_system = timing_system
         self._frame_splits = []
         self._hk_gaps = []
         self._smurf_gaps = []
@@ -490,7 +500,7 @@ class FrameProcessor(object):
 
         # Calculate the timestamps for the current frame, if available, or default to the
         # recorded times in the 'data' field
-        t = get_timestamps(f)
+        t = get_timestamps(f, self.timing_system)
 
         # Trim starting samples (if needed)
         if self.BOOK_START_TIME is not None and t[0] < self.BOOK_START_TIME:
@@ -746,9 +756,9 @@ class Bookbinder(object):
     in default mode, where frames are split once they reach the maximum length (Frameprocessor.MAXLENGTH).
     HK data is co-sampled with SMuRF data before output.
     """
-    def __init__(self, smurf_files, hk_files=None, out_root='.',
-                 book_id=None, session_id=None, stream_id=None, start_time=None,
-                 end_time=None, smurf_timestamps=None, verbose=True, **config):
+    def __init__(self, smurf_files, hk_files=None, out_root='.', book_id=None,
+                 session_id=None, stream_id=None, start_time=None, end_time=None,
+                 smurf_timestamps=None, timing_system=False, verbose=True, **config):
         self._smurf_files = smurf_files
         self._hk_files = hk_files
         self._book_id = book_id
@@ -790,6 +800,7 @@ class Bookbinder(object):
         # Set up the FrameProcessor
         self.frameproc = FrameProcessor(start_time=self._start_time, end_time=self._end_time,
                                         smurf_timestamps=smurf_timestamps,
+                                        timing_system=timing_system,
                                         **config.get("frameproc_config", {}))
 
         # Set up file I/O
@@ -1093,3 +1104,12 @@ class Bookbinder(object):
         # Write metadata file ('M-file')
         with open(self._meta_file, 'w') as mfile:
             yaml.dump(self.compile_mfile_dict(), mfile, sort_keys=False)
+
+
+##############
+# exceptions #
+##############
+
+class TimingSystemError(Exception):
+    """Exception raised when the timing system is on but timing counters are not found"""
+    pass
