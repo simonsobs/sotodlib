@@ -619,13 +619,15 @@ class FrameProcessor(object):
             List containing frames to be entered into output Book
         """
 
-        def generate_missing_smurf_samples(t, dtype=np.int64):
+        def generate_missing_smurf_samples(f, t):
             """
             Produce a frame filled with the FLAGGED_SAMPLE_VALUE at the timestamps given in t,
             to be used as fill-in values for missing data.
 
             Parameters
             ----------
+            f : G3Frame
+                A frame from the current timestream, from which to extract metadata
             t : numpy.ndarray
                 Vector of timestamps
 
@@ -635,12 +637,13 @@ class FrameProcessor(object):
                 Frame containing a G3SuperTimestream with FLAGGED_SAMPLE_VALUE at each input timestamp
             """
             frame = core.G3Frame(core.G3FrameType.Scan)
-            data = so3g.G3SuperTimestream(f['data'].names, core.G3VectorTime([core.G3Time(_t) for _t in t]))
-            if dtype in [np.float32, np.float64]:
-                assert f['data'].quanta is not None
-                data.quanta = f['data'].quanta
-            data.data = np.full((len(data.names),len(t)), self.FLAGGED_SAMPLE_VALUE, dtype=dtype)
-            frame['data'] = data
+            for k in set(f.keys()).intersection(['data', 'tes_biases', 'primary']):
+                data = so3g.G3SuperTimestream(f[k].names, core.G3VectorTime([core.G3Time(_t) for _t in t]))
+                if f[k].data.dtype in [np.float32, np.float64]:
+                    assert f[k].quanta is not None
+                    data.quanta = f[k].quanta
+                data.data = np.full((len(data.names),len(t)), self.FLAGGED_SAMPLE_VALUE, dtype=f[k].data.dtype)
+                frame[k] = data
             return frame
 
         if f.type != core.G3FrameType.Housekeeping and f.type != core.G3FrameType.Scan:
@@ -699,7 +702,7 @@ class FrameProcessor(object):
                     self._smurf_gaps.append((self._prev_smurf_frame_last_sample, current_timestamp))
                     # Insert dummy samples into self.smbundle
                     gap_times = self._smurf_timestamps[self._next_expected_smurf_sample_index : current_smurf_sample_index]
-                    self.smbundle.add(generate_missing_smurf_samples(gap_times, dtype=f['data'].dtype))
+                    self.smbundle.add(generate_missing_smurf_samples(f, gap_times))
                     # account for missing samples
                     self._next_expected_smurf_sample_index += gap_nsamples
                 # update values
@@ -723,7 +726,7 @@ class FrameProcessor(object):
                             print("Gap in SMuRF data: {} samples".format(gap_nsamples))
                             # Insert dummy samples into self.smbundle
                             gap_times = (np.arange(gap_nsamples) + 1) * sample_interval + self._prev_smurf_frame_last_sample
-                            self.smbundle.add(generate_missing_smurf_samples(gap_times, dtype=f['data'].dtype))
+                            self.smbundle.add(generate_missing_smurf_samples(f, gap_times))
                             # Add gap to internal list
                             self._smurf_gaps.append((self._prev_smurf_frame_last_sample, this_smurf_frame_first_sample))
                 # update values
