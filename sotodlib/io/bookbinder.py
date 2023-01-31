@@ -112,6 +112,8 @@ def get_timestamps(f, use_counters):
             timestamps *= core.G3Units.s
         else:
             raise TimingSystemError("No timing counters found")
+    elif use_counters and 'primary' not in f.keys():
+        raise TimingSystemError("'primary' field not found")
     else:
         timestamps = f['data'].times
     return core.G3VectorTime(timestamps)

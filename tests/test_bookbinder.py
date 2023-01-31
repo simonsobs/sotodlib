@@ -47,6 +47,7 @@ def test_check_timestamps():
     #          exception should be raised
     ##################################################
     F.timing_system = True
+    np.testing.assert_raises(bb.TimingSystemError, F.check_times, frame)
     c0 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     c1 = c0
     c2 = c0
