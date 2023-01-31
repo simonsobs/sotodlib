@@ -26,7 +26,7 @@ def generate_smurf_frame(t):
     frame['data'] = so3g.G3SuperTimestream(['r0000'], t, np.ones((1, len(t)), dtype=np.int32))
     return frame
 
-def test_check_timestamps():
+def test_replace_times_and_trim_frame():
     import sotodlib.io.bookbinder as bb
 
     F = bb.FrameProcessor()

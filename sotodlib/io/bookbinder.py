@@ -481,11 +481,10 @@ class FrameProcessor(object):
 
         self.current_state = state
 
-    def check_times(self, f):
+    def replace_times_and_trim_frame(self, f):
         """
-        Retrieve the timestamps for the data, then trim any samples occurring before the Book start
-        time and after the Book end time. If there are no such samples, the frame is passed through
-        untouched.
+        Replace the data timestamps with the most accurate available, then trim any samples
+        occurring before the Book start time and after the Book end time.
 
         Parameters
         ----------
@@ -683,7 +682,7 @@ class FrameProcessor(object):
 
             # Replace the times in 'data', 'tes_biases', and 'primary' with the correct timestamps
             # and trim any samples occuring outside the specified start/end times
-            f = self.check_times(f)
+            f = self.replace_times_and_trim_frame(f)
             # Replace the channel names with readout IDs (if available)
             f['data'].names = get_channel_names(f['data'], rids=self._readout_ids)
 
