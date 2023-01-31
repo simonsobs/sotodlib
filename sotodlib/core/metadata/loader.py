@@ -13,6 +13,12 @@ REGISTRY = {
 }
 
 
+class LoaderError(RuntimeError):
+    """
+    Use with two args: (pithy_summary, formatted_detail)
+    """
+
+
 class SuperLoader:
     def __init__(self, context=None, detdb=None, obsdb=None, working_dir=None):
         """Metadata batch loader.
@@ -162,8 +168,8 @@ class SuperLoader:
                 subreqs = det_info.subset(keys=short_keys).distinct()
             except:
                 raise RuntimeError(
-                    f'Decoding spec={spec} with request={request} requires '
-                    f'keys={missing_dets_keys} but det_info={det_info}.')
+                    f'Metadata request requires keys={missing_dets_keys} '
+                    f'but det_info={det_info}.')
             subreqs.keys = missing_dets_keys # back with dets: prefix ...
         else:
             subreqs = ResultSet([], [()])  # length 1!
@@ -179,12 +185,9 @@ class SuperLoader:
                 _lines = man.match(subreq, multi=True, prefix=dbpath)
             except Exception as e:
                 text = str(e)
-                raise RuntimeError(
-                    'An exception was raised while decoding the following spec:\n'
-                    + '  ' + str(spec) + '\n'
-                    + 'with the following request:\n'
-                    + '  ' + str(subreq) + '\n'
-                    + 'The exception is:\n  %s' % text)
+                raise LoaderError('Exception when matching subrequest.',
+                                  f"An exception occurred while processing sub-request:\n\n"
+                                  f"  subreq={subreq}\n\n")
             for _line in _lines:
                 # Now reject any _line if they contradict subreq.
                 if any([subreq.get(k, v) != v for k, v in _line.items()]):
@@ -209,10 +212,11 @@ class SuperLoader:
         # the output.
         if np.all(to_skip):
             if len(to_skip) == 0:
-                raise RuntimeError(
-                    f'The metadata item spec={spec} with request={request} '
-                    f'and det_info={det_info} matched no items in the ManifestDb; '
-                    f'in this case we cannot even return an empty structure.')
+                raise LoaderError(
+                    'No detectors in common.',
+                    f'Metadata item had zero overlap with the detectors in det_info.\n\n'
+                    f'   det_info: {det_info}\n\n')
+
             to_skip[0] = False
 
         # Load each index_line.
@@ -229,7 +233,9 @@ class SuperLoader:
             try:
                 loader_class = REGISTRY[loader]
             except KeyError:
-                raise RuntimeError('No metadata loader registered under name "%s"' % loader)
+                raise LoaderError(
+                    'Loader function not found.',
+                    f'No metadata loader registered under name "{loader}"')
 
             loader_object = loader_class()  # pass obs info?
             mi1 = loader_object.from_loadspec(index_line)
@@ -273,7 +279,8 @@ class SuperLoader:
                     mi2 = mi1.restrict('dets', new_dets[mask])
 
             else:
-                raise RuntimeError(
+                raise LoaderError(
+                    'Invalid metadata carrier.',
                     'Returned object is non-specialized type {}: {}'
                     .format(mi1.__class__, mi1))
 
@@ -340,12 +347,15 @@ class SuperLoader:
             dest.wrap('obs_info', obs_man)
             
         def reraise(spec, e):
-            e.args = e.args + (
-                "\n\nThe above exception arose while processing "
-                "the following metadata spec:\n"
-                f"  spec:    {spec}\n"
-                f"  request: {request}\n\n"
-                "Does your database expose this product for this observation?",)
+            logger.error(
+                f"An error occurred while processing a meta entry:\n\n"
+                f"  spec:    {spec}\n\n"
+                f"  request: {request}\n\n")
+            if isinstance(e, LoaderError):
+                # Present all args to logger instead...
+                for a in e.args[1:]:
+                    logger.error(a)
+                e = LoaderError(e.args[0])
             raise e
 
         def check_tags(det_info, aug_request, final=False):
@@ -381,6 +391,12 @@ class SuperLoader:
                 logger.debug(f' ... free tags / request reduce det_info (row count '
                              f'{len(det_info)} -> {mask.sum()})')
                 det_info = det_info.subset(rows=mask)
+
+            if len(det_info) == 0:
+                logger.warning(f'All detectors have been eliminated from processing.')
+                logger.warning(f'  dets:*: {det_reqs}')
+                logger.warning(f'  free_tags: {free_tags}')
+
             return det_info, aug_request
 
         det_info, aug_request = check_tags(det_info, aug_request)
@@ -401,13 +417,12 @@ class SuperLoader:
                 if check:
                     error = e
                 elif ignore_missing:
-                    logger.warning(f'Failed to load metadata for spec={spec}, '
-                                   f'request={aug_request}; ignoring.')
+                    logger.warning(f'Failed to load metadata for spec={spec}; ignoring.')
                     continue
                 else:
                     reraise(spec, e)
 
-            if spec.get('det_info'):
+            if spec.get('det_info') and error is None:
                 det_info = merge_det_info(
                     det_info, item, multi=spec.get('multi', False))
                 item = None
