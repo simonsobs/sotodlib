@@ -4,16 +4,19 @@ is specifically designed to work when the data is dynamically coming in. Meaning
 is designed to work from something like a cronjob. 
 """
 import os
-
+import yaml
 import datetime as dt
 import numpy as np
 import argparse
 import logging
-from sotodlib.io.load_smurf import G3tSmurf, Observations, dump_DetDb, logger as default_logger
+from sqlalchemy import not_, or_, and_
+
+from sotodlib.site_pipeline.monitor import Monitor
+from sotodlib.io.load_smurf import G3tSmurf, Observations, logger as default_logger
 
 
 def update_g3tsmurf_db(config=None, update_delay=2, from_scratch=False,
-                       verbosity=2, logger=None, check_counters=False):
+                       verbosity=2, logger=None):
 
     show_pb = True if verbosity > 1 else False
 
@@ -28,68 +31,64 @@ def update_g3tsmurf_db(config=None, update_delay=2, from_scratch=False,
     elif verbosity == 3:
         logger.setLevel(logging.DEBUG)
 
-    SMURF = G3tSmurf.from_configs(config)
+    cfgs = yaml.safe_load( open(config, "r"))
+    SMURF = G3tSmurf.from_configs(cfgs)
 
     if from_scratch:
         logger.info("Building Database from Scratch, May take awhile")
         min_time = dt.datetime.utcfromtimestamp(int(1.6e9))
     else:
         min_time = dt.datetime.now() - dt.timedelta(days=update_delay)
+
+    monitor = None
+    if "monitor" in cfgs:
+        logger.info("Will send monitor information to Influx")
+        monitor = Monitor(
+            host=cfgs["monitor"]["host"],
+            port=cfgs["monitor"]["port"],
+            username = cfgs["monitor"]["username"],
+            password = cfgs["monitor"]["password"],
+            path = cfgs["monitor"]["path"],
+            ssl = cfgs["monitor"]["ssl"],
+        )
         
     SMURF.index_archive(min_ctime=min_time.timestamp(), show_pb=show_pb)
     SMURF.index_metadata(min_ctime=min_time.timestamp())
 
     session = SMURF.Session()
 
-    new_obs = session.query(Observations).filter(Observations.start >= min_time,
-                                                 Observations.stop == None).all()
+    new_obs = session.query(Observations).filter(Observations.start >= min_time).all()
+
     for obs in new_obs:
-        if check_counters:
-            temp_overwrite_timing(obs, SMURF, session, check_counters=True)
-        else:
+        if obs.stop is None:
             SMURF.update_observation_files(
                 obs, 
                 session, 
                 force=True,
             )
+        
+        if monitor is not None:
+            if obs.stop is not None:
+                record_timing(monitor, obs, cfgs)
 
-def temp_overwrite_timing(obs, archive, session, check_counters=True):
+def record_timing(monitor, obs, cfgs):
+    """Send a record of the timing status to the Influx QDS database
     """
-    Temporary function for checking timing. Should be made obsolete when
-    https://github.com/simonsobs/smurf-streamer/pull/38 is merged / implemented
-    in the data streams. Data from UCSD from ~Nov. 2022 until it's merger will
-    need to have the counters checked to learn if the timing system is on or
-    not.
-
-    obs: Observation instance
-    archive: G3tSmurf Instance
-    session: active G3tSmurf connection
-    check_counters: boolean
-        if true will check all the frames make sure there are timing counters.
-        will be slow.
-    """
-
-    if not check_counters:
-        for db_file in obs.files:
-            SMURF.add_file(db_file.name, session, overwrite=True)
-    else:
-        timing = True
-        for db_file in obs.files:
-            for frame in spt3g_core.G3File(db_file.name):
-                if frame.type != spt3g_core.G3FrameType.Scan:
-                    continue
-                primary = frame.get("primary")
-                if primary is None:
-                    timing = False
-                    continue
-                timing = ( timing and
-                    np.any(primary.data[list(primary.names).index("Counter0")])
-                )
-            db_file.timing = timing
-            session.commit()
-
-    archive.update_observation_files(obs, session, force=True)
-    return obs.timing
+    tags = [{
+        "tel_tube" : cfgs["monitor"]["tel_tube"], 
+        "stream_id" : obs.stream_id
+    }]
+    log_tags = {"observation": obs.obs_id, "stream_id": obs.stream_id}
+    if not monitor.check("timing_on", obs.obs_id, tags=tags):
+        monitor.record(
+            "timing_on", 
+            [obs.timing], 
+            [obs.timestamp], 
+            tags, 
+            "data_pkg", 
+            log_tags=log_tags
+        )
+        monitor.write()
 
 def get_parser():
     parser = argparse.ArgumentParser()
@@ -100,12 +99,9 @@ def get_parser():
                         action="store_true")
     parser.add_argument("--verbosity", help="increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug",
                        default=2, type=int)
-    parser.add_argument('--check-counters', 
-                        help="Check actual counter values to decide if timing is running",
-                        action="store_true")
     return parser
 
 if __name__ == '__main__':
     parser = get_parser()
     args = parser.parse_args()
-    update_g3tsmurf_db(**args)
+    update_g3tsmurf_db(**vars(args))
