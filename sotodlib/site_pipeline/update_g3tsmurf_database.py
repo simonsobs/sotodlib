@@ -12,8 +12,8 @@ import logging
 from sotodlib.io.load_smurf import G3tSmurf, Observations, dump_DetDb, logger as default_logger
 
 
-def update_g3tsmurf_db(config=None, detdb_filename=None, update_delay=2, from_scratch=False,
-                       verbosity=2, logger=None):
+def update_g3tsmurf_db(config=None, update_delay=2, from_scratch=False,
+                       verbosity=2, logger=None, check_counters=False):
 
     show_pb = True if verbosity > 1 else False
 
@@ -44,26 +44,65 @@ def update_g3tsmurf_db(config=None, detdb_filename=None, update_delay=2, from_sc
     new_obs = session.query(Observations).filter(Observations.start >= min_time,
                                                  Observations.stop == None).all()
     for obs in new_obs:
-        SMURF.update_observation_files(
-            obs, 
-            session, 
-            force=True,
-        )
+        if check_counters:
+            temp_overwrite_timing(obs, SMURF, session, check_counters=True)
+        else:
+            SMURF.update_observation_files(
+                obs, 
+                session, 
+                force=True,
+            )
 
-    if detdb_filename is not None:
-        dump_DetDb(SMURF, detdb_filename)
+def temp_overwrite_timing(obs, archive, session, check_counters=True):
+    """
+    Temporary function for checking timing. Should be made obsolete when
+    https://github.com/simonsobs/smurf-streamer/pull/38 is merged / implemented
+    in the data streams. Data from UCSD from ~Nov. 2022 until it's merger will
+    need to have the counters checked to learn if the timing system is on or
+    not.
 
+    obs: Observation instance
+    archive: G3tSmurf Instance
+    session: active G3tSmurf connection
+    check_counters: boolean
+        if true will check all the frames make sure there are timing counters.
+        will be slow.
+    """
+
+    if not check_counters:
+        for db_file in obs.files:
+            SMURF.add_file(db_file.name, session, overwrite=True)
+    else:
+        timing = True
+        for db_file in obs.files:
+            for frame in spt3g_core.G3File(db_file.name):
+                if frame.type != spt3g_core.G3FrameType.Scan:
+                    continue
+                primary = frame.get("primary")
+                if primary is None:
+                    timing = False
+                    continue
+                timing = ( timing and
+                    np.any(primary.data[list(primary.names).index("Counter0")])
+                )
+            db_file.timing = timing
+            session.commit()
+
+    archive.update_observation_files(obs, session, force=True)
+    return obs.timing
 
 def get_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('config', help="g3tsmurf db configuration file")
-    parser.add_argument('--detdb-filename', help="File for dumping the context detector database")
     parser.add_argument('--update-delay', help="Days to subtract from now to set as minimum ctime",
                         default=2, type=float)
     parser.add_argument('--from-scratch', help="Builds or updates database from scratch",
                         action="store_true")
     parser.add_argument("--verbosity", help="increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug",
                        default=2, type=int)
+    parser.add_argument('--check-counters', 
+                        help="Check actual counter values to decide if timing is running",
+                        action="store_true")
     return parser
 
 if __name__ == '__main__':
