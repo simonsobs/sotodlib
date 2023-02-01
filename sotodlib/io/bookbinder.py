@@ -193,6 +193,7 @@ class _SmurfBundle():
         self.signal = None
         self.biases = None
         self.primary = None
+        self.dtypes = {'data': np.int32, 'tes_biases': np.int32, 'primary': np.int64}
 
     def ready(self, flush_time):
         """
@@ -211,25 +212,28 @@ class _SmurfBundle():
         """
         self.times.extend(f['data'].times)
 
+        assert f['data'].data.dtype == self.dtypes['data']
         if self.signal is None:
             self.signal = so3g.G3SuperTimestream(f['data'].names, core.G3VectorTime([]),
-                                    np.empty((len(f['data'].names), 0), dtype=np.int32))
+                                    np.empty((len(f['data'].names), 0), dtype=self.dtypes['data']))
         self.signal.times.extend(f['data'].times)
-        self.signal.data = np.hstack((self.signal.data, f['data'].data)).astype(np.int32)
+        self.signal.data = np.hstack((self.signal.data, f['data'].data))
 
         if 'tes_biases' in f.keys():
+            assert f['tes_biases'].data.dtype == self.dtypes['tes_biases']
             if self.biases is None:
                 self.biases = so3g.G3SuperTimestream(f['tes_biases'].names, core.G3VectorTime([]),
-                                    np.empty((len(f['tes_biases'].names), 0), dtype=np.int32))
+                                    np.empty((len(f['tes_biases'].names), 0), dtype=self.dtypes['tes_biases']))
             self.biases.times.extend(f['tes_biases'].times)
-            self.biases.data = np.hstack((self.biases.data, f['tes_biases'].data)).astype(np.int32)
+            self.biases.data = np.hstack((self.biases.data, f['tes_biases'].data))
 
         if 'primary' in f.keys():
+            assert f['primary'].data.dtype == self.dtypes['primary']
             if self.primary is None:
                 self.primary = so3g.G3SuperTimestream(f['primary'].names, core.G3VectorTime([]),
-                                    np.empty((len(f['primary'].names), 0), dtype=np.int64))
+                                    np.empty((len(f['primary'].names), 0), dtype=self.dtypes['primary']))
             self.primary.times.extend(f['primary'].times)
-            self.primary.data = np.hstack((self.primary.data, f['primary'].data)).astype(np.int64)
+            self.primary.data = np.hstack((self.primary.data, f['primary'].data))
 
     def rebundle(self, flush_time):
         """
@@ -403,9 +407,9 @@ class FrameProcessor(object):
                 else:
                     c_upper_enter.append(c_upper[i])
 
-        starts = np.sort(np.concatenate((c_lower_exit, c_upper_exit))).astype(np.int64)
-        stops = np.sort(np.concatenate((c_lower_enter, c_upper_enter))).astype(np.int64)
-        events = np.sort(np.concatenate((starts, stops))).astype(np.int64)
+        starts = np.sort(np.concatenate((c_lower_exit, c_upper_exit)))
+        stops = np.sort(np.concatenate((c_lower_enter, c_upper_enter)))
+        events = np.sort(np.concatenate((starts, stops)))
 
         # Look for zero-crossings
         zc = []
