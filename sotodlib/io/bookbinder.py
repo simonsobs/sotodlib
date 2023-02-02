@@ -265,19 +265,19 @@ class _SmurfBundle():
 
         # Since G3SuperTimestreams cannot be shortened, the data must be copied to
         # a new instance for rebundling of the buffer
-        signalstack = np.hstack(self.signal['data'])
+        signalstack = np.hstack(self.signal['data'], dtype=self.dtypes['data'])
         signalout = so3g.G3SuperTimestream(self.signal['names'], tout, signalstack[:,:len(tout)])
         self.signal = {'names': self.signal['names'], 'times': [self.times], 'data': [signalstack[:,len(tout):]]}
 
         if self.biases is not None:
-            biasstack = np.hstack(self.biases['data'])
+            biasstack = np.hstack(self.biases['data'], dtype=self.dtypes['tes_biases'])
             biasout = so3g.G3SuperTimestream(self.biases['names'], tout, biasstack[:,:len(tout)])
             self.biases = {'names': self.biases['names'], 'times': [self.times], 'data': [biasstack[:,len(tout):]]}
         else:
             biasout = None
 
         if self.primary is not None:
-            primstack = np.hstack(self.primary['data'])
+            primstack = np.hstack(self.primary['data'], dtype=self.dtypes['primary'])
             primout = so3g.G3SuperTimestream(self.primary['names'], tout, primstack[:,:len(tout)])
             self.primout = {'names': self.primary['names'], 'times': [self.times], 'data': [primstack[:,len(tout):]]}
         else:
