@@ -43,14 +43,7 @@ def update_g3tsmurf_db(config=None, update_delay=2, from_scratch=False,
     monitor = None
     if "monitor" in cfgs:
         logger.info("Will send monitor information to Influx")
-        monitor = Monitor(
-            host=cfgs["monitor"]["host"],
-            port=cfgs["monitor"]["port"],
-            username = cfgs["monitor"]["username"],
-            password = cfgs["monitor"]["password"],
-            path = cfgs["monitor"]["path"],
-            ssl = cfgs["monitor"]["ssl"],
-        )
+        monitor = Monitor.from_configs(cfgs["monitor"]["connect_configs"])
         
     SMURF.index_archive(min_ctime=min_time.timestamp(), show_pb=show_pb)
     SMURF.index_metadata(min_ctime=min_time.timestamp())
