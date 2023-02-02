@@ -70,16 +70,42 @@ def update_g3tsmurf_db(config=None, update_delay=2, from_scratch=False,
         if monitor is not None:
             if obs.stop is not None:
                 record_timing(monitor, obs, cfgs)
+                record_tuning(monitor, obs, cfgs)
 
-def record_timing(monitor, obs, cfgs):
-    """Send a record of the timing status to the Influx QDS database
-    """
+def _obs_tags(obs, cfgs):
+    
     tags = [{
         "tel_tube" : cfgs["monitor"]["tel_tube"], 
         "stream_id" : obs.stream_id
     }]
+
     log_tags = {"observation": obs.obs_id, "stream_id": obs.stream_id}
-    if not monitor.check("timing_on", obs.obs_id, tags=tags):
+
+    return tags, log_tags
+
+def record_tuning(monitor, obs, cfgs):
+    """Send a record of the Tune Status to the Influx QDS database.
+    Will be used to alter if the database readout_ids are not working.
+    """
+    tags, log_tags = _obs_tags(obs, cfgs)
+    if not monitor.check("timing_on", obs.obs_id, tags=tags[0]):
+        monitor.record(
+            "has_tuneset", 
+            [ len(obs.tunesets)==1 ], 
+            [obs.timestamp], 
+            tags, 
+            "data_pkg", 
+            log_tags=log_tags
+        )
+        monitor.write()
+
+
+def record_timing(monitor, obs, cfgs):
+    """Send a record of the timing status to the Influx QDS database
+    """
+    tags, log_tags = _obs_tags(obs, cfgs)
+
+    if not monitor.check("timing_on", obs.obs_id, tags=tags[0]):
         monitor.record(
             "timing_on", 
             [obs.timing], 
