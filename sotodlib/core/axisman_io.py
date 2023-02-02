@@ -138,7 +138,10 @@ def _save_axisman(axisman, dest, group=None, overwrite=False):
         if v is None or np.isscalar(v):
             item['encoding'] = 'scalar'
         elif isinstance(v, u.quantity.Quantity):
-            item['encoding'] = 'quantity'
+            if v.shape == ():
+                item['encoding'] = 'scalar_quantity'
+            else:
+                item['encoding'] = 'quantity'
         elif isinstance(v, np.ndarray):
             item['encoding'] = 'ndarray'
         elif isinstance(v, AxisInterface):
@@ -221,6 +224,9 @@ def _save_axisman(axisman, dest, group=None, overwrite=False):
         elif item['encoding'] == 'quantity':
             dest.create_dataset(item['name'], data=_retype_for_write(data))
             units[item['name']] = data.unit.to_string()
+        elif item['encoding'] == 'scalar_quantity':
+            scalars[item['name']] = data.value
+            units[item['name']] = data.unit.to_string()
         elif item['encoding'] == 'rangesmatrix':
             g = dest.create_group(item['name'])
             for k, v in flatten_RangesMatrix(data).items():
@@ -295,6 +301,8 @@ def _load_axisman(src, group=None, cls=None):
             axisman.wrap(item['name'], _retype_for_read(src[item['name']][:]), assign)
         elif item['encoding'] == 'quantity':
             axisman.wrap(item['name'], _retype_for_read(src[item['name']][:]) << u.Unit(units[item['name']]), assign)
+        elif item['encoding'] == 'scalar_quantity':
+            axisman.wrap(item['name'], scalars[item['name']] << u.Unit(units[item['name']]), assign)
         elif item['encoding'] == 'axisman':
             x = _load_axisman(src[item['name']])
             if item['subclass'] == 'FlagManager':
@@ -312,4 +320,3 @@ def _load_axisman(src, group=None, cls=None):
             print('No decoder for:', item)
 
     return axisman
-
