@@ -19,6 +19,6 @@ def apodize_cosine(aman, signal='signal', apodize_samps=1600, in_place=True,
     if in_place:
         aman[signal] *= w
     else:
-        sim.wrap_new(apo_axis, dtype='float32', shape=('dets', 'samps'))
+        aman.wrap_new(apo_axis, dtype='float32', shape=('dets', 'samps'))
         aman[apo_axis] = aman[signal]*w
 
