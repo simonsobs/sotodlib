@@ -23,7 +23,7 @@ def generate_smurf_frame(t):
         t = core.G3VectorTime([core.G3Time(_t * core.G3Units.s) for _t in t])
 
     frame = core.G3Frame(core.G3FrameType.Scan)
-    frame['data'] = so3g.G3SuperTimestream(['r0000'], t, np.ones((1, len(t)), dtype=np.int32))
+    frame['data'] = so3g.G3SuperTimestream(['r0000', 'r0001'], t, np.ones((2, len(t)), dtype=np.int32))
     return frame
 
 def test_replace_times_and_trim_frame():

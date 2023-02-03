@@ -214,7 +214,7 @@ class _SmurfBundle():
 
         if self.signal is None:
             self.signal = {'names': f['data'].names, 'times': [], 'data': []}
-        assert np.asarray(f['data'].names) == np.asarray(self.signal['names']) # there's a bug where G3VectorString(x)==G3VectorString(x) returns False
+        assert (np.asarray(f['data'].names) == np.asarray(self.signal['names'])).all() # there's a bug where G3VectorString(x)==G3VectorString(x) returns False
         assert f['data'].data.dtype == self.dtypes['data']
         self.signal['times'].append(f['data'].times)
         self.signal['data'].append(f['data'].data)
@@ -222,7 +222,7 @@ class _SmurfBundle():
         if 'tes_biases' in f.keys():
             if self.biases is None:
                 self.biases = {'names': f['tes_biases'].names, 'times': [], 'data': []}
-            assert np.asarray(f['tes_biases'].names) == np.asarray(self.biases['names'])
+            assert (np.asarray(f['tes_biases'].names) == np.asarray(self.biases['names'])).all()
             assert f['tes_biases'].data.dtype == self.dtypes['tes_biases']
             self.biases['times'].append(f['tes_biases'].times)
             self.biases['data'].append(f['tes_biases'].data)
@@ -231,7 +231,7 @@ class _SmurfBundle():
         if 'primary' in f.keys():
             if self.primary is None:
                 self.primary = {'names': f['primary'].names, 'times': [], 'data': []}
-            assert np.asarray(f['primary'].names) == np.asarray(self.primary['names'])
+            assert (np.asarray(f['primary'].names) == np.asarray(self.primary['names'])).all()
             assert f['primary'].data.dtype == self.dtypes['primary']
             self.primary['times'].append(f['primary'].times)
             self.primary['data'].append(f['primary'].data)
