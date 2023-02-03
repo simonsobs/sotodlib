@@ -60,6 +60,11 @@ class SimCatalog(Operator):
         help="Observation shared key for timestamps",
     )
 
+    hwp_angle = Unicode(
+        defaults.hwp_angle,
+        help="Observation shared key for HWP angle",
+    )
+
     catalog_file = Unicode(
         None,
         allow_none=True,
@@ -238,6 +243,10 @@ class SimCatalog(Operator):
         focalplane = obs.telescope.focalplane
 
         times_mjd = to_MJD(obs.shared[self.times].data)
+        if self.hwp_angle in obs.shared:
+            hwp_angle = obs.shared[self.hwp_angle].data
+        else:
+            hwp_angle = None
         beam = None
 
         for idet, det in enumerate(dets):
@@ -359,7 +368,14 @@ class SimCatalog(Operator):
                 # Modulate the temperature in time
                 temperature = temperature * amplitude
 
-                # FIXME: modulate temperature by polarization
+                # modulate temperature by polarization
+                if pol_frac is not None:
+                    Q = temperature * pol_frac * np.cos(2 * pol_angle)
+                    U = temperature * pol_frac * np.sin(2 * pol_angle)
+                    psi = det_psi[hit]
+                    if hwp_angle is not None:
+                        psi +=  2 * hwp_angle[hit]
+                    temperature += Q * np.cos(2 * psi) + U * np.sin(2 * psi)
 
                 # Interpolate the beam map at appropriate locations
                 source_theta = np.radians(90 - source_dict["dec_deg"])
@@ -397,137 +413,3 @@ class SimCatalog(Operator):
 
     def _accelerators(self):
         return list()
-
-
-# def plot_projected_quats(
-#     outfile, qbore=None, qdet=None, valid=slice(None), scale=1.0, planet=None
-# ):
-#     """Plot a list of quaternion arrays in longitude / latitude."""
-
-#     toast.vis.set_matplotlib_backend()
-#     import matplotlib.pyplot as plt
-
-#     # Convert boresight and detector quaternions to angles
-
-#     qbang = None
-#     if qbore is not None:
-#         qbang = np.zeros((3, qbore.shape[0]), dtype=np.float64)
-#         qbang[0], qbang[1], qbang[2] = qa.to_lonlat_angles(qbore)
-#         qbang[0] *= 180.0 / np.pi
-#         qbang[1] *= 180.0 / np.pi
-#         lon_min = np.amin(qbang[0])
-#         lon_max = np.amax(qbang[0])
-#         lat_min = np.amin(qbang[1])
-#         lat_max = np.amax(qbang[1])
-
-#     qdang = None
-#     if qdet is not None:
-#         qdang = np.zeros((qdet.shape[0], 3, qdet.shape[1]), dtype=np.float64)
-#         for det in range(qdet.shape[0]):
-#             qdang[det, 0], qdang[det, 1], qdang[det, 2] = qa.to_lonlat_angles(qdet[det])
-#             qdang[det, 0] *= 180.0 / np.pi
-#             qdang[det, 1] *= 180.0 / np.pi
-#         lon_min = np.amin(qdang[:, 0])
-#         lon_max = np.amax(qdang[:, 0])
-#         lat_min = np.amin(qdang[:, 1])
-#         lat_max = np.amax(qdang[:, 1])
-
-#     # Set the sizes of shapes based on the plot range
-
-#     span_lon = lon_max - lon_min
-#     span_lat = lat_max - lat_min
-#     span = max(span_lon, span_lat)
-#     # bmag = 0.5 * span * scale
-#     # dmag = 0.2 * span * scale
-#     bmag = 0.2
-#     dmag = 0.1
-
-#     if span_lat > span_lon:
-#         fig_y = 10
-#         fig_x = fig_y * (span_lon / span_lat)
-#         if fig_x < 4:
-#             fig_x = 4
-#     else:
-#         fig_x = 10
-#         fig_y = fig_x * (span_lat / span_lon)
-#         if fig_y < 4:
-#             fig_y = 4
-
-#     figdpi = 100
-
-#     fig = plt.figure(figsize=(fig_x, fig_y), dpi=figdpi)
-#     ax = fig.add_subplot(1, 1, 1, aspect="equal")
-
-#     # Compute the font size to use for detector labels
-#     fontpix = 0.1 * figdpi
-#     fontpt = int(0.75 * fontpix)
-
-#     # Plot source if we have it
-
-#     if planet is not None:
-#         ax.plot(planet[:, 0], planet[:, 1], color="purple", marker="+")
-
-#     # Plot boresight if we have it
-
-#     if qbang is not None:
-#         ax.scatter(qbang[0][valid], qbang[1][valid], color="black", marker="x")
-#         for ln, lt, ps in np.transpose(qbang)[valid]:
-#             wd = 0.05 * bmag
-#             dx = bmag * np.sin(ps)
-#             dy = -bmag * np.cos(ps)
-#             ax.arrow(
-#                 ln,
-#                 lt,
-#                 dx,
-#                 dy,
-#                 width=wd,
-#                 head_width=4.0 * wd,
-#                 head_length=0.2 * bmag,
-#                 length_includes_head=True,
-#                 ec="red",
-#                 fc="red",
-#             )
-
-#     # Plot detectors if we have them
-
-#     if qdang is not None:
-#         for idet, dang in enumerate(qdang):
-#             ax.scatter(dang[0][valid], dang[1][valid], color="blue", marker=".")
-#             for ln, lt, ps in np.transpose(dang)[valid]:
-#                 wd = 0.05 * dmag
-#                 dx = dmag * np.sin(ps)
-#                 dy = -dmag * np.cos(ps)
-#                 ax.arrow(
-#                     ln,
-#                     lt,
-#                     dx,
-#                     dy,
-#                     width=wd,
-#                     head_width=4.0 * wd,
-#                     head_length=0.2 * dmag,
-#                     length_includes_head=True,
-#                     ec="blue",
-#                     fc="blue",
-#                 )
-#             ax.text(
-#                 dang[0][valid][0] + (idet % 2) * 1.5 * dmag,
-#                 dang[1][valid][0] + 1.0 * dmag,
-#                 f"{idet:02d}",
-#                 color="k",
-#                 fontsize=fontpt,
-#                 horizontalalignment="center",
-#                 verticalalignment="center",
-#                 bbox=dict(fc="w", ec="none", pad=1, alpha=0.0),
-#             )
-
-#     # Invert x axis so that longitude reflects what we would see from
-#     # inside the celestial sphere
-#     plt.gca().invert_xaxis()
-
-#     ax.set_xlabel("Longitude Degrees", fontsize="medium")
-#     ax.set_ylabel("Latitude Degrees", fontsize="medium")
-
-#     fig.suptitle("Projected Pointing and Polarization on Sky")
-
-#     plt.savefig(outfile)
-#     plt.close()
