@@ -199,6 +199,14 @@ class SimCatalog(Operator):
         res = description[0][1] * u.degree
         beam_solid_angle = np.sum(model) * res**2
 
+        # DEBUG begin
+        # These commands add a tail to the beam that points towards the horizon
+        #nx, ny = np.shape(model)
+        #nhalf = nx // 2
+        #w = 10
+        #model[nhalf - w : nhalf + w + 1, 0 : nhalf] = 1
+        # DEBUG end
+
         n = int(description[1][0])
         size = description[0][0] * u.degree
         amp = 1 / beam_solid_angle.to_value(u.rad**2)
@@ -227,6 +235,7 @@ class SimCatalog(Operator):
         # Get a view of the data which contains just this single
         # observation
         obs_data = data.select(obs_name=obs.name)
+        focalplane = obs.telescope.focalplane
 
         times_mjd = to_MJD(obs.shared[self.times].data)
         beam = None
@@ -244,6 +253,7 @@ class SimCatalog(Operator):
 
             det_theta, det_phi, det_psi = qa.to_iso_angles(det_quat)
             det_vec = hp.dir2vec(det_theta, det_phi).T.copy()
+            det_psi_pol = focalplane[det]["pol_ang"] * u.deg
 
             if beam is None or not "ALL" in self.beam_props:
                 beam, beam_radius, beam_solid_angle = self._get_beam_map(det)
@@ -356,9 +366,13 @@ class SimCatalog(Operator):
                 source_phi = np.radians(source_dict["ra_deg"])
                 x = (det_phi[hit] - source_phi) * np.cos(np.pi / 2 - det_theta[hit])
                 y = det_theta[hit] - source_theta
+                # Rotate into the beam frame
+                psi = det_psi[hit] - det_psi_pol.to_value(u.rad)
+                x_beam = np.cos(psi) * x - np.sin(psi) * y
+                y_beam = np.sin(psi) * x + np.cos(psi) * y
                 #import pdb
                 #pdb.set_trace()
-                sig = beam(x, y, grid=False) * temperature
+                sig = beam(x_beam, y_beam, grid=False) * temperature
                 signal[hit] += scale * sig
 
         return
