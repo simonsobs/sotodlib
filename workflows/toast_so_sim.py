@@ -461,6 +461,16 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
         timer=timer,
     )
 
+    # Simulate Solar System Objects
+
+    ops.sim_catalog.detector_pointing = ops.det_pointing_radec
+    ops.sim_catalog.apply(data)
+    log.info_rank(
+        "Simulated and observed catalog",
+        comm=world_comm,
+        timer=timer,
+    )
+
     # Simulate wiregrid calibration observations
 
     ops.sim_wiregrid.detector_pointing = ops.det_pointing_azel
@@ -810,6 +820,7 @@ def main():
         ),
         toast.ops.SimScanSynchronousSignal(name="sim_sss", enabled=False),
         so_ops.SimSSO(name="sim_sso", enabled=False),
+        so_ops.SimCatalog(name="sim_catalog", enabled=False),
         so_ops.SimSource(name="sim_source", enabled=False),
         so_ops.SimHWPSS(name="sim_hwpss", enabled=False),
         so_ops.SimWireGrid(name="sim_wiregrid", enabled=False),

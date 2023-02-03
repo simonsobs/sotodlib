@@ -6,6 +6,7 @@
 
 from .corotator import CoRotator
 from .sim_sso import SimSSO
+from .sim_catalog import SimCatalog
 from .sim_hwpss import SimHWPSS
 from .sim_source import SimSource
 from .h_n import Hn
