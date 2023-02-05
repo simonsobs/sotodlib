@@ -98,7 +98,7 @@ def make_hkaman(grouped_data):
 
         try:
             # check whether hk device is cosampled
-            assert len(times[0]) == len(times[-1])
+            assert np.all([len(t)==len(times[0]) for t in times])
             # TODO: diff of times, if less than say 10%??, treat as cosampled
         except AssertionError:
             # if not cosampled, make aman for each field in device/feed
