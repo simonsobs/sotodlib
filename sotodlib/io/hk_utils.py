@@ -8,6 +8,7 @@ from sotodlib import core
 
 logger = logging.getLogger(__name__)
 
+
 def _get_swap_dict(d):
     """
     Swap dictionary keys and values; useful for organizing fields in
@@ -97,11 +98,12 @@ def make_hkaman(grouped_data):
 
         try:
             # check whether hk device is cosampled
-            assert np.all([len(t)==len(times[0]) for t in times])
+            assert np.all([len(t) == len(times[0]) for t in times])
             # TODO: diff of times, if less than say 10%??, treat as cosampled
         except AssertionError:
             # if not cosampled, make aman for each field in device/feed
-            logger.debug("{} is not cosampled. Making separate axis managers for this case".format('.'.join(field.split('.')[0:3])))
+            logger.debug("{} is not cosampled. Making separate axis managers \
+                         for this case".format('.'.join(field.split('.')[0:3])))
             for field in group:
                 alias = group[field][0]
                 time = group[field][1]
@@ -114,7 +116,8 @@ def make_hkaman(grouped_data):
                 hkaman = core.AxisManager(core.LabelAxis(device_axis, [alias]),
                                           core.OffsetAxis(samps_axis, len(time)))
                 hkaman.wrap('times', time, [(0, samps_axis)])
-                hkaman.wrap(device_name, np.array([data]), [(0, device_axis), (1, samps_axis)])
+                hkaman.wrap(device_name, np.array([data]),
+                            [(0, device_axis), (1, samps_axis)])
                 amans.append(hkaman)
         else:
             # if yes, make one aman per device
@@ -132,6 +135,7 @@ def make_hkaman(grouped_data):
 
     return amans
 
+
 def get_hkaman(start, stop, config):
     """
     Combine get_grouped_hkdata() and make_hkaman() to output 1 axismanager of
@@ -139,5 +143,5 @@ def get_hkaman(start, stop, config):
     """
     data = get_grouped_hkdata(start, stop, config)
     hk_amans = make_hkaman(data)
-    return hkamans
+    return hk_amans
 # TODO: insert a progress bar for get_grouped_hkdata
