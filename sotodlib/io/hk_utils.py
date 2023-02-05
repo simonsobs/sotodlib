@@ -139,7 +139,7 @@ def make_hkaman(grouped_data):
 def get_hkaman(start, stop, config):
     """
     Combine get_grouped_hkdata() and make_hkaman() to output 1 axismanager of
-    HK axismanagers to streamline data  analysis purposes
+    HK axismanagers to streamline data analysis
     """
     data = get_grouped_hkdata(start, stop, config)
     hk_amans = make_hkaman(data)
