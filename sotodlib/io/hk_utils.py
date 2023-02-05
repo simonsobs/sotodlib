@@ -6,7 +6,6 @@ import logging
 from so3g.hk import load_range
 from sotodlib import core
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def _get_swap_dict(d):
@@ -24,7 +23,7 @@ def get_grouped_hkdata(start, stop, config):
     that list of data.
     """
     # call load_range()
-    logging.info("running load_range()")
+    logger.debug("running load_range()")
     hkdata = load_range(start, stop, config=config)
 
     # load all fields from config file
@@ -102,7 +101,7 @@ def make_hkaman(grouped_data):
             # TODO: diff of times, if less than say 10%??, treat as cosampled
         except AssertionError:
             # if not cosampled, make aman for each field in device/feed
-            logging.info("{} is not cosampled".format('.'.join(field.split('.')[0:3])))
+            logger.debug("{} is not cosampled. Making separate axis managers for this case".format('.'.join(field.split('.')[0:3])))
             for field in group:
                 alias = group[field][0]
                 time = group[field][1]
