@@ -132,4 +132,12 @@ def make_hkaman(grouped_data):
 
     return amans
 
+def get_hkaman(start, stop, config):
+    """
+    Combine get_grouped_hkdata() and make_hkaman() to output 1 axismanager of
+    HK axismanagers to streamline data  analysis purposes
+    """
+    data = get_grouped_hkdata(start, stop, config)
+    hk_amans = make_hkaman(data)
+    return hkamans
 # TODO: insert a progress bar for get_grouped_hkdata
