@@ -214,9 +214,7 @@ class SimCatalog(Operator):
 
         n = int(description[1][0])
         size = description[0][0] * u.degree
-        amp = 1 / beam_solid_angle.to_value(u.rad**2)
         w = size.to_value(u.rad) / 2
-        model *= amp
         x = np.linspace(-w, w, n)
         y = np.linspace(-w, w, n)
         beam = RectBivariateSpline(x, y, model)
@@ -296,7 +294,7 @@ class SimCatalog(Operator):
                     left_weights = 1 - right_weights
                     # useful shorthands
                     freq = np.array(source_dict["freqs_ghz"]) * u.GHz
-                    seds = np.array(source_dict["flux_density_mjysr"]) * u.MJy / u.sr
+                    seds = np.array(source_dict["flux_density_jysr"]) * u.Jy / u.sr
                     # Mean SED used for bandpass convolution
                     wright = np.mean(right_weights)
                     wleft = 1 - wright
@@ -312,7 +310,7 @@ class SimCatalog(Operator):
                         amp = np.exp(np.interp(
                                 np.log(cfreq.to_value(u.GHz)),
                                 np.log(freq.to_value(u.GHz)),
-                                np.log(sed.to_value(u.MJy / u.sr))
+                                np.log(sed.to_value(u.Jy / u.sr))
                         ))
                         amplitudes.append(amp)
                     amplitudes = np.array(amplitudes)
@@ -344,7 +342,7 @@ class SimCatalog(Operator):
                         pol_angle = None
                 else:
                     freq = np.array(source_dict["freqs_ghz"]) * u.GHz
-                    sed_mean = np.array(source_dict["flux_density_mjysr"]) * u.MJy / u.sr
+                    sed_mean = np.array(source_dict["flux_density_jysr"]) * u.Jy / u.sr
                     if "pol_frac" in source_dict:
                         pol_frac = np.array(source_dict["pol_frac"])
                         pol_angle = np.radians(source_dict["pol_angle_deg"])
@@ -357,12 +355,14 @@ class SimCatalog(Operator):
                 flux_density = bandpass.convolve(
                     det,
                     freq,
-                    sed_mean.to_value(u.MJy / u.sr),
+                    sed_mean.to_value(u.Jy / u.sr),
                 )
+
+                # Convert the flux density to peak temperature
                 temperature = (
                     flux_density
                     / beam_solid_angle.to_value(u.rad**2)
-                    / bandpass.kcmb2mjysr(det)
+                    / bandpass.kcmb2jysr(det)
                 )
 
                 # Modulate the temperature in time
@@ -386,8 +386,6 @@ class SimCatalog(Operator):
                 psi = det_psi[hit] - det_psi_pol.to_value(u.rad)
                 x_beam = np.cos(psi) * x - np.sin(psi) * y
                 y_beam = np.sin(psi) * x + np.cos(psi) * y
-                #import pdb
-                #pdb.set_trace()
                 sig = beam(x_beam, y_beam, grid=False) * temperature
                 signal[hit] += scale * sig
 
