@@ -63,6 +63,11 @@ setup_opts["install_requires"] = [
     'pyfftw',
     'typer',
 ]
+setup_opts["extras_require"] = {
+    "site_pipeline": [
+        "influxdb",
+    ],
+}
 
 # Command Class dictionary.
 # Begin with the versioneer command class dictionary.
