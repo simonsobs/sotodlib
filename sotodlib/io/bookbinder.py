@@ -212,28 +212,29 @@ class _SmurfBundle():
         """
         self.times.extend(f['data'].times)
 
-        assert f['data'].data.dtype == self.dtypes['data']
         if self.signal is None:
-            self.signal = so3g.G3SuperTimestream(f['data'].names, core.G3VectorTime([]),
-                                    np.empty((len(f['data'].names), 0), dtype=self.dtypes['data']))
-        self.signal.times.extend(f['data'].times)
-        self.signal.data = np.hstack((self.signal.data, f['data'].data))
+            self.signal = {'names': f['data'].names, 'times': [], 'data': []}
+        assert (np.asarray(f['data'].names) == np.asarray(self.signal['names'])).all() # there's a bug where G3VectorString(x)==G3VectorString(x) returns False
+        assert f['data'].data.dtype == self.dtypes['data']
+        self.signal['times'].append(f['data'].times)
+        self.signal['data'].append(f['data'].data)
 
         if 'tes_biases' in f.keys():
-            assert f['tes_biases'].data.dtype == self.dtypes['tes_biases']
             if self.biases is None:
-                self.biases = so3g.G3SuperTimestream(f['tes_biases'].names, core.G3VectorTime([]),
-                                    np.empty((len(f['tes_biases'].names), 0), dtype=self.dtypes['tes_biases']))
-            self.biases.times.extend(f['tes_biases'].times)
-            self.biases.data = np.hstack((self.biases.data, f['tes_biases'].data))
+                self.biases = {'names': f['tes_biases'].names, 'times': [], 'data': []}
+            assert (np.asarray(f['tes_biases'].names) == np.asarray(self.biases['names'])).all()
+            assert f['tes_biases'].data.dtype == self.dtypes['tes_biases']
+            self.biases['times'].append(f['tes_biases'].times)
+            self.biases['data'].append(f['tes_biases'].data)
+
 
         if 'primary' in f.keys():
-            assert f['primary'].data.dtype == self.dtypes['primary']
             if self.primary is None:
-                self.primary = so3g.G3SuperTimestream(f['primary'].names, core.G3VectorTime([]),
-                                    np.empty((len(f['primary'].names), 0), dtype=self.dtypes['primary']))
-            self.primary.times.extend(f['primary'].times)
-            self.primary.data = np.hstack((self.primary.data, f['primary'].data))
+                self.primary = {'names': f['primary'].names, 'times': [], 'data': []}
+            assert (np.asarray(f['primary'].names) == np.asarray(self.primary['names'])).all()
+            assert f['primary'].data.dtype == self.dtypes['primary']
+            self.primary['times'].append(f['primary'].times)
+            self.primary['data'].append(f['primary'].data)
 
     def rebundle(self, flush_time):
         """
@@ -264,18 +265,21 @@ class _SmurfBundle():
 
         # Since G3SuperTimestreams cannot be shortened, the data must be copied to
         # a new instance for rebundling of the buffer
-        signalout = so3g.G3SuperTimestream(self.signal.names, tout, self.signal.data[:,:len(tout)])
-        self.signal = so3g.G3SuperTimestream(self.signal.names, self.times, self.signal.data[:,len(tout):])
+        signalstack = np.hstack(self.signal['data'], dtype=self.dtypes['data'])
+        signalout = so3g.G3SuperTimestream(self.signal['names'], tout, signalstack[:,:len(tout)])
+        self.signal = {'names': self.signal['names'], 'times': [self.times], 'data': [signalstack[:,len(tout):]]}
 
         if self.biases is not None:
-            biasout = so3g.G3SuperTimestream(self.biases.names, tout, self.biases.data[:,:len(tout)])
-            self.biases = so3g.G3SuperTimestream(self.biases.names, self.times, self.biases.data[:,len(tout):])
+            biasstack = np.hstack(self.biases['data'], dtype=self.dtypes['tes_biases'])
+            biasout = so3g.G3SuperTimestream(self.biases['names'], tout, biasstack[:,:len(tout)])
+            self.biases = {'names': self.biases['names'], 'times': [self.times], 'data': [biasstack[:,len(tout):]]}
         else:
             biasout = None
 
         if self.primary is not None:
-            primout = so3g.G3SuperTimestream(self.primary.names, tout, self.primary.data[:,:len(tout)])
-            self.primary = so3g.G3SuperTimestream(self.primary.names, self.times, self.primary.data[:,len(tout):])
+            primstack = np.hstack(self.primary['data'], dtype=self.dtypes['primary'])
+            primout = so3g.G3SuperTimestream(self.primary['names'], tout, primstack[:,:len(tout)])
+            self.primout = {'names': self.primary['names'], 'times': [self.times], 'data': [primstack[:,len(tout):]]}
         else:
             primout = None
 
