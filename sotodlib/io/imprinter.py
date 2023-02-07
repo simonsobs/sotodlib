@@ -11,7 +11,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
 from .load_smurf import G3tSmurf, Observations as G3tObservations, SmurfStatus, get_channel_info
-from .bookbinder import Bookbinder
+from .bookbinder import Bookbinder, TimingSystemError
 from ..site_pipeline.util import init_logger
 
 
@@ -78,6 +78,7 @@ class Books(Base):
     slots: slots in comma separated string
     created_at: time when book was created
     updated_at: time when book was updated
+    timing: bool, whether timing system is on
 
     """
     __tablename__ = 'books'
@@ -93,6 +94,7 @@ class Books(Base):
     slots = db.Column(db.String)
     created_at = db.Column(db.DateTime, default=dt.datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+    timing = db.Column(db.Boolean)
 
     def __repr__(self):
         return f"<Book: {self.bid}>"
@@ -216,6 +218,7 @@ class Imprinter:
         start_t = np.max([np.min([f.start for f in o.files]) for o in obsset])
         stop_t = np.min([np.max([f.stop for f in o.files]) for o in obsset])
         max_channels = int(np.max([np.max([f.n_channels for f in o.files]) for o in obsset]))
+        timing_on = np.all([o.timing for o in obsset])
 
         # create observation and book objects
         observations = [Observations(obs_id=obs_id) for obs_id in obsset.obs_ids]
@@ -229,6 +232,7 @@ class Imprinter:
             max_channels=max_channels,
             tel_tube=obsset.tel_tube,
             slots=','.join([s for s in obsset.slots if obsset.contains_stream(s)]),  # not worth having a extra table
+            timing=timing_on,
         )
 
         # add book to database
@@ -316,7 +320,7 @@ class Imprinter:
                 Bookbinder(smurf_files, hk_files=hkfiles, out_root=odir,
                            stream_id=stream_id, session_id=int(session_id),
                            book_id=book.bid, start_time=start_t, end_time=stop_t,
-                           max_nchannels=book.max_channels,
+                           max_nchannels=book.max_channels, timing_system=book.timing,
                            frameproc_config={"readout_ids": rids})()
             # not sure if this is the best place to update
             book.status = BOUND
@@ -328,6 +332,9 @@ class Imprinter:
             err_msg = traceback.format_exc()
             self.logger.error(err_msg)
             message = f"{message}\ntrace={err_msg}" if message else err_msg
+            # if bookbinder complains about timing system, fall back to non-timing mode in the next try
+            if isinstance(e, TimingSystemError):
+                book.timing = False
         book.message = message
         session.commit()
 
