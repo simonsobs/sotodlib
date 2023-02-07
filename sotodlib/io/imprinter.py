@@ -669,7 +669,7 @@ def stream_timestamp(obs_id):
         timestamp of the observation
 
     """
-    return "_".join(obs_id.split("_")[:-1]), obs_id.split("_")[-1]
+    return "_".join(obs_id.split("_")[1:-1]), obs_id.split("_")[-1]
 
 def get_obs_type(obs: G3tObservations):
     """Get the type of observation based on the observation id
