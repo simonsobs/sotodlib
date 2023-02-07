@@ -24,6 +24,7 @@ from ..site_pipeline.util import init_logger
 UNBOUND = "Unbound"
 BOUND = "Bound"
 FAILED = "Failed"
+REBIND = "Rebind"
 
 # tel tube, stream_id, slot mapping
 VALID_OBSTYPES = ['obs', 'oper', 'smurf', 'hk', 'stray', 'misc']
@@ -393,18 +394,33 @@ class Imprinter:
 
     def get_failed_books(self, session=None):
         """Get all failed books from database
-        
+
         Parameters
         ----------
         session: BookDB session
-        
+
         Returns
         -------
         books: list of books
-        
+
         """
         if session is None: session = self.get_session()
         return session.query(Books).filter(Books.status == FAILED).all()
+
+    def get_rebind_books(self, session=None):
+        """Get all books to be rebinded from database
+
+        Parameters
+        ----------
+        session: BookDB session
+
+        Returns
+        -------
+        books: list of books
+
+        """
+        if session is None: session = self.get_session()
+        return session.query(Books).filter(Books.status == REBIND).all()
 
     def book_exists(self, bid, session=None):
         """Check if a book exists in the database.
