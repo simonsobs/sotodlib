@@ -6,6 +6,15 @@ from spt3g import core
 import numpy as np
 import itertools
 import yaml
+from scipy.interpolate import interp1d
+# 
+class HWPFlags:
+    STATIONARY = 2**0
+    UNLOCKED = 2**1
+    UNSTABLE = 2**2
+
+# Minum spin rate before we declare stationary
+MIN_HWP_RATE = 0.2  # Hz
 
 
 def pos2vel(p):
@@ -313,6 +322,7 @@ class FrameProcessor(object):
                  timing_system=False, **config):
         self.hkbundle = None
         self.smbundle = None
+        self.hwp_loader = None
         self.flush_time = None
         self.maxlength = config.get("maxlength", 10000)
         self.FLAGGED_SAMPLE_VALUE = config.get("flagged_sample_value", -1)
@@ -571,6 +581,33 @@ class FrameProcessor(object):
         if smurf_primary is not None:
             f['primary'] = smurf_primary
 
+        # Ancillary data object to be written to disk (co-sampled HK encoder data)
+        anc_data = core.G3TimesampleMap()
+        anc_data.times = smurf_data.times
+
+        ## Adds HWP data if present
+        if self.hwp_loader is not None:
+            ts = np.array(smurf_data.times) / core.G3Units.s
+            hwp_angle = self.hwp_loader.hwp_angle_interp(ts)
+            hwp_angle = np.mod(hwp_angle, 2*np.pi)
+
+            hwp_locked = self.hwp_loader.locked_interp(ts)
+            hwp_stable = self.hwp_loader.stable_interp(ts)
+            hwp_rate = self.hwp_loader.stable_interp(ts)
+
+            flags = np.zeros_like(hwp_angle, dtype=np.int32)
+            m = hwp_rate < MIN_HWP_RATE
+            flags[m] = np.bitwise_or(flags[m], HWPFlags.STATIONARY)
+            m = hwp_locked != 1
+            flags[m] = np.bitwise_or(flags[m], HWPFlags.UNLOCKED)
+            m = hwp_stable != 1
+            flags[m] = np.bitwise_or(flags[m], HWPFlags.UNSTABLE)
+
+            hwp_angle[flags != 0] = -flags[flags != 0]
+
+            anc_data['hwp_enc'] = core.G3VectorDouble(hwp_angle)
+
+
         try:
             hk_data = self.hkbundle.rebundle(flush_time)
         except AttributeError:
@@ -596,18 +633,14 @@ class FrameProcessor(object):
                 flag_smurfgap = np.logical_or(flag_smurfgap, np.logical_and(t > gap_start, t < gap_end))
             f['flag_smurfgap'] = core.G3VectorBool(flag_smurfgap)
 
-            # Ancillary data (co-sampled HK encoder data)
-            anc_data = core.G3TimesampleMap()
-            anc_data.times = smurf_data.times
             anc_data['az_enc'] = core.G3VectorDouble(cosamp_az)
             anc_data['el_enc'] = core.G3VectorDouble(cosamp_el)
-
-            # Write ancillary data to frame
-            f['ancil'] = anc_data
-
             self.determine_state(hk_data['Azimuth_Velocity'], hk_data['Elevation_Velocity'])
             f['state'] = self.current_state
+
         finally:
+            # Write ancillary data to frame
+            f['ancil'] = anc_data
             output += [f]
 
         return output
@@ -770,9 +803,11 @@ class Bookbinder(object):
     """
     def __init__(self, smurf_files, hk_files=None, out_root='.', book_id=None,
                  session_id=None, stream_id=None, start_time=None, end_time=None,
-                 smurf_timestamps=None, timing_system=False, verbose=True, **config):
+                 smurf_timestamps=None, timing_system=False, verbose=True, 
+                 hwp_root=None, **config):
         self._smurf_files = smurf_files
         self._hk_files = hk_files
+        self._hwp_root = hwp_root
         self._book_id = book_id
         self._out_root = out_root
         self._session_id = session_id
@@ -793,6 +828,9 @@ class Bookbinder(object):
         self.MAX_SAMPLES_PER_CHANNEL = self.MAX_SAMPLES_TOTAL // self.max_nchannels
         self.DEFAULT_TIME = core.G3Time(1e18)  # 1e18 = 2286-11-20T17:46:40.000000000 (in the distant future)
         self.OVERWRITE_ANCIL_FILE = config.get("overwrite_afile", False)
+        self.hwp_loader = None
+        self.ancil_writer = None
+        self.writer = None
 
         if isinstance(self._hk_files, str):
             self._hk_files = [self._hk_files]
@@ -823,12 +861,25 @@ class Bookbinder(object):
 
             self.create_file_writers()
 
+    def close_file_writers(self):
+        """
+        Closes G3 file writers if they are open.
+        """
+        if self.ancil_writer is not None:
+            self.ancil_writer(core.G3Frame(core.G3FrameType.EndProcessing))
+        if self.writer is not None:
+            self.writer(core.G3Frame(core.G3FrameType.EndProcessing))
+
     def create_file_writers(self):
         """
         Create the G3Writer instances for the output D-file and, if it doesn't already
         exist, the A-file. Optionally, overwrite the existing A-file setting the
         OVERWRITE_ANCIL_FILE attribute to True.
         """
+
+        # Close existing file writers if open
+        self.close_file_writers()
+
         out_bdir = op.join(self._out_root, self._book_id)
         if not op.exists(out_bdir): os.makedirs(out_bdir)
         ofile = op.join(out_bdir, f'D_{self._stream_id}_{self.ofile_num:03d}.g3')
@@ -895,7 +946,7 @@ class Bookbinder(object):
             oframe = self.add_misc_data(f)
             self.writer.Process(oframe)
             # if ancil_writer exists, write out the ancil frame
-            if hasattr(self, 'ancil_writer'):
+            if self.ancil_writer is not None:
                 aframe = core.G3Frame(oframe.type)
                 if 'ancil' in oframe.keys():
                     aframe['ancil'] = f['ancil']
@@ -1034,6 +1085,10 @@ class Bookbinder(object):
              'end_time':   self._end_time.time/core.G3Units.s,
              'n_frames':   self.frame_num,
              'n_samples':  self.sample_num}
+
+        if self.hwp_loader is not None:
+            d['hwp_rate_hz'] = self.hwp_loader.mean_hwp_rate
+
         return d
 
     def __call__(self):
@@ -1044,6 +1099,11 @@ class Bookbinder(object):
         """
         # Determine if HK files contain az/el encoder data and find any gaps between HK frames
         self.process_HK_files()
+            
+        if self._hwp_root is not None:
+            self.hwp_loader = HWPLoader(self._hwp_root)
+            self.hwp_loader.load_data(self._start_time.time / core.G3Units.s, self._end_time.time / core.G3Units.s)
+            self.frameproc.hwp_loader = self.hwp_loader
 
         # If frame splits file exists, load it; if not, determine appropriate split locations
         if op.isfile(self._frame_splits_file):
@@ -1108,6 +1168,8 @@ class Bookbinder(object):
                     # Clear output buffer after writing
                     output = []
 
+        self.close_file_writers()
+
         self._frame_splits += self.frameproc._frame_splits
         # Write frame splits file if it doesn't already exist
         if not op.isfile(self._frame_splits_file):
@@ -1125,3 +1187,89 @@ class Bookbinder(object):
 class TimingSystemError(Exception):
     """Exception raised when the timing system is on but timing counters are not found"""
     pass
+
+
+class HWPLoader:
+    """
+    Helper class to load in HWP data from data archive.
+    """
+    def __init__(self, root_dir):
+        self.root_dir = root_dir
+        self.files = []
+        self.data = {}
+        self.times = {} 
+
+    def get_files(self, start, stop):
+        """
+        Gets HWP files that may have data between start and stop time
+        """
+        files = []
+        for subdir in os.listdir(self.root_dir):
+            try:
+                tcode = int(subdir)
+            except:
+                continue
+
+            if not ((start//1e5) - 1) < tcode < stop//1e5:
+                continue
+
+            subpath = os.path.join(self.root_dir, subdir)
+            files.extend([os.path.join(subpath, f) for f in os.listdir(subpath)])
+
+        files = np.array(sorted(files))
+        file_times = np.array([int(os.path.basename(f).split('.')[0]) for f in files])
+
+        m = (start <= file_times) & (file_times < stop)
+        # Add file before for good measure
+        i0 = np.where(m)[0][0]
+        if i0 > 0:
+            m[i0 - 1] = 1
+
+        self.files = files[m].tolist()
+        return self.files
+
+    def frame_iter(self):
+        """Iterator that loops through G3 Frames of all files in self.files"""
+        return itertools.chain(*[core.G3File(f) for f in self.files])
+
+    def load_data(self, start, stop):
+        self.get_files(start, stop)
+
+        data = {}  # structured data[block_name][field]
+        times = {}  # structured times[block_name]
+
+        for frame in self.frame_iter():
+            if frame['hkagg_type'] != so3g.HKFrameType.data:
+                continue
+
+            for bname, block in zip(frame['block_names'], frame['blocks']):
+                if bname not in data:
+                    data[bname] = {
+                        k: [] for k in block.keys()
+                    }
+                    times[bname] = []
+
+                ts = np.array(block.times) / core.G3Units.s
+
+                # Includes a sec before and after for interpolation
+                m = ((start - 1) < ts) & (ts < (stop + 1))
+
+                for field, d in block.items():
+                    data[bname][field].append(np.array(d)[m])
+                times[bname].append(ts[m])
+
+        for bname in data:
+            for field in data[bname]:
+                data[bname][field] = np.hstack(data[bname][field])
+            times[bname] = np.hstack(times[bname])
+
+        self.data = data
+        self.times = times
+
+        # Create interpolation functions
+        self.hwp_angle_interp = interp1d(times['fast'], np.unwrap(data['fast']['hwp_angle']), bounds_error=False)
+        self.locked_interp = interp1d(times['slow'], data['slow']['locked'], bounds_error=False)
+        self.stable_interp = interp1d(times['slow'], data['slow']['stable'], bounds_error=False)
+        self.hwp_rate_interp = interp1d(times['slow'], data['slow']['hwp_rate'], bounds_error=False)
+
+        self.mean_hwp_rate = float(np.mean(self.data['slow']['hwp_rate']))
