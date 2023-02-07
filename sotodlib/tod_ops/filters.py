@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def fourier_filter(tod, filt_function,
-                   detrend='linear', resize='zero_pad',
+                   detrend=None, resize='zero_pad',
                    axis_name='samps', signal_name='signal', 
                    time_name='timestamps',
                    **kwargs):
