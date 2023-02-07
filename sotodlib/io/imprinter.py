@@ -95,6 +95,7 @@ class Books(Base):
     created_at = db.Column(db.DateTime, default=dt.datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
     timing = db.Column(db.Boolean)
+    path = db.Column(db.String)
 
     def __repr__(self):
         return f"<Book: {self.bid}>"
@@ -324,6 +325,7 @@ class Imprinter:
                            frameproc_config={"readout_ids": rids})()
             # not sure if this is the best place to update
             book.status = BOUND
+            book.path = op.abspath(op.join(odir, book.bid))
             self.logger.info("Book {} bound".format(book.bid))
         except Exception as e:
             session.rollback()
