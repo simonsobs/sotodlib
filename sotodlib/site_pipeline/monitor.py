@@ -1,3 +1,5 @@
+import yaml
+
 from influxdb import InfluxDBClient
 
 class Monitor:
@@ -33,6 +35,31 @@ class Monitor:
         """
         self.client = Monitor._connect_to_db(host, port, database, username, password, path, ssl)
         self.queue = []
+
+    @classmethod
+    def from_configs(cls, configs):
+        """Create a monitor from a configuration file
+        
+        Parameters
+        ----------
+        configs: dict or string
+            configuration dictionary or string that's a file name that can be
+            loaded by yaml into a configuration dictionary
+
+        Returns
+        -------
+        connected Monitor Instance
+        """
+        if type(configs) == str:
+            configs = yaml.safe_load( open(configs, "r") )    
+        return cls(
+            host = configs["host"],
+            port = configs["port"],
+            username = configs["username"],
+            password = configs["password"],
+            path = configs["path"],
+            ssl = configs["ssl"],
+        )
 
     @staticmethod
     def _connect_to_db(host, port, database, username, password, path, ssl):
