@@ -407,7 +407,7 @@ def demod_tod(aman, signal='hwpss_remove', fc_lpf=2., width=0.5, bpf=False,
     aman.dsT = aman[signal]
 
     aman['demodQ'] = demod.real
-    aman['demodQ'] = tod_ops.fourier_filter(aman, filt, signal_name='demodQ', detrend=None)
+    aman['demodQ'] = tod_ops.fourier_filter(aman, filt, signal_name='demodQ', detrend=None) * 2
     aman['demodU'] = demod.imag
-    aman['demodU'] = tod_ops.fourier_filter(aman, filt, signal_name='demodU', detrend=None)
-    aman['dsT'] = tod_ops.fourier_filter(aman, filt, signal_name='dsT')
+    aman['demodU'] = tod_ops.fourier_filter(aman, filt, signal_name='demodU', detrend=None) * 2
+    aman['dsT'] = tod_ops.fourier_filter(aman, filt, signal_name='dsT', detrend=None)
