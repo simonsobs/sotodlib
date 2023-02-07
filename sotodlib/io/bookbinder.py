@@ -12,6 +12,7 @@ class HWPFlags:
     STATIONARY = 2**0
     UNLOCKED = 2**1
     UNSTABLE = 2**2
+    NO_DATA = 2**3
 
 # Minum spin rate before we declare stationary
 MIN_HWP_RATE = 0.2  # Hz
@@ -587,26 +588,30 @@ class FrameProcessor(object):
 
         ## Adds HWP data if present
         if self.hwp_loader is not None:
-            ts = np.array(smurf_data.times) / core.G3Units.s
-            hwp_angle = self.hwp_loader.hwp_angle_interp(ts)
-            hwp_angle = np.mod(hwp_angle, 2*np.pi)
+            if self.hwp_loader.hwp_angle_interp is not None:
+                ts = np.array(smurf_data.times) / core.G3Units.s
+                hwp_angle = self.hwp_loader.hwp_angle_interp(ts)
+                hwp_angle = np.mod(hwp_angle, 2*np.pi)
 
-            hwp_locked = self.hwp_loader.locked_interp(ts)
-            hwp_stable = self.hwp_loader.stable_interp(ts)
-            hwp_rate = self.hwp_loader.stable_interp(ts)
+                hwp_locked = self.hwp_loader.locked_interp(ts)
+                hwp_stable = self.hwp_loader.stable_interp(ts)
+                hwp_rate = self.hwp_loader.stable_interp(ts)
 
-            flags = np.zeros_like(hwp_angle, dtype=np.int32)
-            m = hwp_rate < MIN_HWP_RATE
-            flags[m] = np.bitwise_or(flags[m], HWPFlags.STATIONARY)
-            m = hwp_locked != 1
-            flags[m] = np.bitwise_or(flags[m], HWPFlags.UNLOCKED)
-            m = hwp_stable != 1
-            flags[m] = np.bitwise_or(flags[m], HWPFlags.UNSTABLE)
+                flags = np.zeros_like(hwp_angle, dtype=np.int32)
+                m = hwp_rate < MIN_HWP_RATE
+                flags[m] = np.bitwise_or(flags[m], HWPFlags.STATIONARY)
+                m = hwp_locked != 1
+                flags[m] = np.bitwise_or(flags[m], HWPFlags.UNLOCKED)
+                m = hwp_stable != 1
+                flags[m] = np.bitwise_or(flags[m], HWPFlags.UNSTABLE)
+                m = np.isnan(hwp_angle)
+                flags[m] = np.bitwise_or(flags[m], HWPFlags.NO_DATA)
 
-            hwp_angle[flags != 0] = -flags[flags != 0]
+                hwp_angle[flags != 0] = -flags[flags != 0]
+            else:
+                hwp_angle = np.full(len(smurf_data.times), -HWPFlags.NO_DATA)
 
             anc_data['hwp_enc'] = core.G3VectorDouble(hwp_angle)
-
 
         try:
             hk_data = self.hkbundle.rebundle(flush_time)
@@ -1087,7 +1092,11 @@ class Bookbinder(object):
              'n_samples':  self.sample_num}
 
         if self.hwp_loader is not None:
-            d['hwp_rate_hz'] = self.hwp_loader.mean_hwp_rate
+            if self.hwp_loader.hwp_angle_interp is not None:  # If there's data
+                hwp_rate = float(np.mean(self.hwp_loader.data['slow']['hwp_rate']))
+            else:
+                hwp_rate = None
+            d['hwp_rate_hz'] = hwp_rate
 
         return d
 
@@ -1199,6 +1208,11 @@ class HWPLoader:
         self.data = {}
         self.times = {} 
 
+        self.hwp_angle_interp = None
+        self.locked_interp = None
+        self.stable_interp = None
+        self.hwp_rate_interp = None
+
     def get_files(self, start, stop):
         """
         Gets HWP files that may have data between start and stop time
@@ -1210,7 +1224,7 @@ class HWPLoader:
             except:
                 continue
 
-            if not ((start//1e5) - 1) < tcode < stop//1e5:
+            if not (((start//1e5) - 1) <= tcode <= stop//1e5):
                 continue
 
             subpath = os.path.join(self.root_dir, subdir)
@@ -1220,6 +1234,10 @@ class HWPLoader:
         file_times = np.array([int(os.path.basename(f).split('.')[0]) for f in files])
 
         m = (start <= file_times) & (file_times < stop)
+        if not np.any(m):
+            self.files = []
+            return self.files
+
         # Add file before for good measure
         i0 = np.where(m)[0][0]
         if i0 > 0:
@@ -1265,11 +1283,18 @@ class HWPLoader:
 
         self.data = data
         self.times = times
-
-        # Create interpolation functions
-        self.hwp_angle_interp = interp1d(times['fast'], np.unwrap(data['fast']['hwp_angle']), bounds_error=False)
-        self.locked_interp = interp1d(times['slow'], data['slow']['locked'], bounds_error=False)
-        self.stable_interp = interp1d(times['slow'], data['slow']['stable'], bounds_error=False)
-        self.hwp_rate_interp = interp1d(times['slow'], data['slow']['hwp_rate'], bounds_error=False)
-
-        self.mean_hwp_rate = float(np.mean(self.data['slow']['hwp_rate']))
+        if len(data) != 0:
+            self.hwp_angle_interp = interp1d(
+                times['fast'], np.unwrap(data['fast']['hwp_angle']), 
+                bounds_error=False)
+            self.locked_interp = interp1d(
+                times['slow'], data['slow']['locked'], bounds_error=False)
+            self.stable_interp = interp1d(
+                times['slow'], data['slow']['stable'], bounds_error=False)
+            self.hwp_rate_interp = interp1d(
+                times['slow'], data['slow']['hwp_rate'], bounds_error=False)
+        else:
+            self.hwp_angle_interp = None
+            self.locked_interp = None
+            self.stable_interp = None
+            self.hwp_rate_interp = None
