@@ -3,6 +3,7 @@ import numpy as np
 from collections import OrderedDict
 from typing import List
 import yaml, traceback
+import shutil
 
 import sqlalchemy as db
 from sqlalchemy import or_, and_, not_
@@ -79,6 +80,7 @@ class Books(Base):
     created_at: time when book was created
     updated_at: time when book was updated
     timing: bool, whether timing system is on
+    path: str, location of book directory
 
     """
     __tablename__ = 'books'
@@ -308,6 +310,8 @@ class Imprinter:
         if not op.exists(odir):
             os.makedirs(odir)
 
+        # it's possible that timing field could be none when no timing information is found
+        timing_system = book.timing if book.timing is not None else False
         # bind book using bookbinder library
         try:
             readout_ids = self.get_readout_ids_for_book(book)
@@ -321,7 +325,7 @@ class Imprinter:
                 Bookbinder(smurf_files, hk_files=hkfiles, out_root=odir,
                            stream_id=stream_id, session_id=int(session_id),
                            book_id=book.bid, start_time=start_t, end_time=stop_t,
-                           max_nchannels=book.max_channels, timing_system=book.timing,
+                           max_nchannels=book.max_channels, timing_system=timing_system,
                            frameproc_config={"readout_ids": rids})()
             # not sure if this is the best place to update
             book.status = BOUND
@@ -625,6 +629,39 @@ class Imprinter:
             out[obs_id] = ch_info.readout_id
         return out
 
+    def get_g3tsmurf_obs_for_book(self, book):
+        """
+        Get all g3tsmurf observations for a book
+
+        Parameters
+        -----------
+        book: Book object
+
+        Returns
+        -------
+        obs: dict
+            {obs_id: G3tObservations}
+
+        """
+        session = self.get_g3tsmurf_session(book.tel_tube)
+        obs_ids = [o.obs_id for o in book.obs]
+        obs = session.query(G3tObservations).filter(G3tObservations.obs_id.in_(obs_ids)).all()
+        return {o.obs_id: o for o in obs}
+
+    def delete_book_files(self, book):
+        """Delete all files associated with a book
+
+        Parameters
+        ----------
+        book: Book object
+
+        """
+        # remove all files within the book
+        try:
+            shutil.rmtree(book.path)
+        except Exception as e:
+            self.logger.warning(f"Failed to remove {book.path}: {e}")
+            self.logger.error(traceback.format_exc())
 
 #####################
 # Utility functions #
