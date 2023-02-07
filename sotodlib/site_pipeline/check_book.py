@@ -4,19 +4,21 @@ This module contains a class for checking obs/oper Books (for internal
 consistency, proper schema, etc).  It can also be run to create/update
 an ObsFileDb for such Books.
 
-The config file for this should look something like this::
+The config file for this should look something like this:
+
+.. code-block:: yaml
 
     # Database setup
-    obsfile_db: './obsfiledb.sqlite',
-    root_path: '/',
+    obsfile_db: './obsfiledb.sqlite'
+    root_path: '/'
 
     # Work-arounds
-    stream_file_pattern: 'D_obs_{stream_id}_{index:03d}.g3',
-    extra_extra_files: ['frame_splits.txt'],
-    sample_range_inclusive_hack: True,
-    tolerate_missing_ancil: True,
-    tolerate_missing_ancil_timestamps: True,
-    tolerate_timestamps_value_discrepancy: False,
+    stream_file_pattern: 'D_obs_{stream_id}_{index:03d}.g3'
+    extra_extra_files: ['frame_splits.txt']
+    sample_range_inclusive_hack: True
+    tolerate_missing_ancil: True
+    tolerate_missing_ancil_timestamps: True
+    tolerate_timestamps_value_discrepancy: False
 
     stream_ids:
       ufm_mv14
@@ -330,7 +332,7 @@ class BookScanner:
           detset_rows: list of implicated detsets, with each entry a
             tuple (detset_name, detset_dets).
           file_rows: list of file table entries; each entry is a dict
-            that can be passed as **kwargs to ObsFileDb.add_file.
+            that can be passed as kwargs to ObsFileDb.add_file.
 
         """
         meta, det_lists, sample_ranges = [
