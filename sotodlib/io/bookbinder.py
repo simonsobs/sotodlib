@@ -588,29 +588,8 @@ class FrameProcessor(object):
 
         ## Adds HWP data if present
         if self.hwp_loader is not None:
-            if self.hwp_loader.hwp_angle_interp is not None:
-                ts = np.array(smurf_data.times) / core.G3Units.s
-                hwp_angle = self.hwp_loader.hwp_angle_interp(ts)
-                hwp_angle = np.mod(hwp_angle, 2*np.pi)
-
-                hwp_locked = self.hwp_loader.locked_interp(ts)
-                hwp_stable = self.hwp_loader.stable_interp(ts)
-                hwp_rate = self.hwp_loader.stable_interp(ts)
-
-                flags = np.zeros_like(hwp_angle, dtype=np.int32)
-                m = hwp_rate < MIN_HWP_RATE
-                flags[m] = np.bitwise_or(flags[m], HWPFlags.STATIONARY)
-                m = hwp_locked != 1
-                flags[m] = np.bitwise_or(flags[m], HWPFlags.UNLOCKED)
-                m = hwp_stable != 1
-                flags[m] = np.bitwise_or(flags[m], HWPFlags.UNSTABLE)
-                m = np.isnan(hwp_angle)
-                flags[m] = np.bitwise_or(flags[m], HWPFlags.NO_DATA)
-
-                hwp_angle[flags != 0] = -flags[flags != 0]
-            else:
-                hwp_angle = np.full(len(smurf_data.times), -HWPFlags.NO_DATA)
-
+            ts = np.array(smurf_data.times) / core.G3Units.s
+            hwp_angle = self.hwp_loader.get_interpolated_data(ts)
             anc_data['hwp_enc'] = core.G3VectorDouble(hwp_angle)
 
         try:
@@ -1093,6 +1072,7 @@ class Bookbinder(object):
 
         if self.hwp_loader is not None:
             if self.hwp_loader.hwp_angle_interp is not None:  # If there's data
+                # Convert to float from numpy dtype for yaml formatting
                 hwp_rate = float(np.mean(self.hwp_loader.data['slow']['hwp_rate']))
             else:
                 hwp_rate = None
@@ -1224,7 +1204,7 @@ class HWPLoader:
             except:
                 continue
 
-            if not (((start//1e5) - 1) <= tcode <= stop//1e5):
+            if not start//1e5 - 1 <= tcode <= stop//1e5 + 1:
                 continue
 
             subpath = os.path.join(self.root_dir, subdir)
@@ -1238,10 +1218,13 @@ class HWPLoader:
             self.files = []
             return self.files
 
-        # Add file before for good measure
-        i0 = np.where(m)[0][0]
+        # Add files before and after for good measure
+        fidxs = np.where(m)[0]
+        i0, i1 = fidxs[0], fidxs[-1]
         if i0 > 0:
             m[i0 - 1] = 1
+        if i1 < len(m) - 1:
+            m[i1 + 1] = 1
 
         self.files = files[m].tolist()
         return self.files
@@ -1256,6 +1239,7 @@ class HWPLoader:
         data = {}  # structured data[block_name][field]
         times = {}  # structured times[block_name]
 
+        bufftime = 30
         for frame in self.frame_iter():
             if frame['hkagg_type'] != so3g.HKFrameType.data:
                 continue
@@ -1269,8 +1253,8 @@ class HWPLoader:
 
                 ts = np.array(block.times) / core.G3Units.s
 
-                # Includes a sec before and after for interpolation
-                m = ((start - 1) < ts) & (ts < (stop + 1))
+                # Includes a buffer before and after for interpolation and timing uncertainty
+                m = ((start - bufftime) < ts) & (ts < (stop + bufftime))
 
                 for field, d in block.items():
                     data[bname][field].append(np.array(d)[m])
@@ -1298,3 +1282,27 @@ class HWPLoader:
             self.locked_interp = None
             self.stable_interp = None
             self.hwp_rate_interp = None
+
+    def get_interpolated_data(self, times):
+        if self.hwp_angle_interp is None:
+            return np.full(len(times), -HWPFlags.NO_DATA)
+            
+        hwp_angle = self.hwp_angle_interp(times)
+        hwp_angle = np.mod(hwp_angle, 2*np.pi)
+
+        hwp_locked = self.locked_interp(times)
+        hwp_stable = self.stable_interp(times)
+        hwp_rate = self.hwp_rate_interp(times)
+
+        flags = np.zeros_like(hwp_angle, dtype=np.int32)
+        m = hwp_rate < MIN_HWP_RATE
+        flags[m] = np.bitwise_or(flags[m], HWPFlags.STATIONARY)
+        m = hwp_locked != 1
+        flags[m] = np.bitwise_or(flags[m], HWPFlags.UNLOCKED)
+        m = hwp_stable != 1
+        flags[m] = np.bitwise_or(flags[m], HWPFlags.UNSTABLE)
+        m = np.isnan(hwp_angle)
+        flags[m] = np.bitwise_or(flags[m], HWPFlags.NO_DATA)
+
+        hwp_angle[flags != 0] = -flags[flags != 0]
+        return hwp_angle
