@@ -332,6 +332,8 @@ class Imprinter:
             book.status = BOUND
             book.path = op.abspath(op.join(odir, book.bid))
             self.logger.info("Book {} bound".format(book.bid))
+            book.message = message
+            session.commit()
         except Exception as e:
             session.rollback()
             book.status = FAILED
@@ -342,8 +344,9 @@ class Imprinter:
             # if bookbinder complains about timing system, fall back to non-timing mode in the next try
             if isinstance(e, TimingSystemError):
                 book.timing = False
-        book.message = message
-        session.commit()
+            book.message = message
+            session.commit()
+            raise e
 
     def get_book(self, bid, session=None):
         """Get book from database.
