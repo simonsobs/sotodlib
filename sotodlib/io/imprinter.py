@@ -265,7 +265,7 @@ class Imprinter:
             self.register_book(session, bid, obs_list, commit=False)
         if commit: session.commit()
 
-    def bind_book(self, book, session=None, output_root="out", message="", hwp_root=None):
+    def bind_book(self, book, session=None, output_root="out", message=""):
         """Bind book using bookbinder
 
         Parameters
@@ -277,8 +277,6 @@ class Imprinter:
             output root directory
         message: string
             message to be added to the book
-        hwp_root: str
-            Root directory of processed hwp g3 files
         """
         if session is None: session = self.get_session()
         # get book id and book object, depending on whether book id is given or not
@@ -295,6 +293,11 @@ class Imprinter:
         # check whether book is already bound
         if book.status == BOUND:
             raise BookBoundError(f"Book {bid} is already bound")
+
+        g3tsmurf_path = self.sources[book.tel_tube]['g3tsmurf']
+        with open(g3tsmurf_path, 'r') as f:
+            g3tsmurf_cfg = yaml.safe_load(f)
+        hwp_root = g3tsmurf_cfg.get('hwp_prefix')
 
         # after sanity checks, now we proceed to bind the book.
         # get files associated with this book, in the form of
