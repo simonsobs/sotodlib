@@ -79,6 +79,7 @@ def make_hkaman(grouped_data):
     cosampled, outputs axismanager(s) for either case.
     """
     amans = []
+    device_names = []
     for group in grouped_data:
         data = {}
         aliases = []
@@ -110,6 +111,7 @@ def make_hkaman(grouped_data):
                 data = group[field][2]
 
                 device_name = field.split('.')[1]
+                device_names.append(device_name)
                 device_axis = 'hkdata_' + device_name
                 samps_axis = 'hksamps_' + device_name
 
@@ -122,6 +124,7 @@ def make_hkaman(grouped_data):
         else:
             # if yes, make one aman per device
             device_name = field.split('.')[1]
+            device_names.append(device_name)
             device_axis = 'hkdata_' + device_name
             samps_axis = 'hksamps_' + device_name
 
