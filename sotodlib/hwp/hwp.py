@@ -395,9 +395,9 @@ def demod_tod(aman, signal='hwpss_remove', fc_lpf=2., width=0.5, bpf=False,
             bpf_filt = tod_ops.filters.low_pass_butter4(fc=bpf_center + bpf_width)*\
                        tod_ops.filters.high_pass_butter4(fc=bpf_center - bpf_width)
         if bpf_type == 'sine2':
-            bpf_filt = tod_ops.filters.low_pass_sine2(fc=bpf_center + bpf_width,
+            bpf_filt = tod_ops.filters.low_pass_sine2(cutoff=bpf_center + bpf_width,
                                                       width=sine2_width)*\
-                       tod_ops.filters.high_pass_sine2(fc=bpf_center - bpf_width,
+                       tod_ops.filters.high_pass_sine2(cutoff=bpf_center - bpf_width,
                                                        width=sine2_width)
 
         demod = tod_ops.fourier_filter(aman, bpf_filt, detrend=None,
