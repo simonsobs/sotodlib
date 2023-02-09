@@ -115,7 +115,7 @@ def make_hkaman(grouped_data):
                 device_axis = 'hklabels_' + device_name
                 samps_axis = 'hksamps_' + device_name
 
-                hkaman = core.AxisManager(core.LabelAxis(device_axis, [alias]),
+                hkaman = core.AxisManager(core.LabelAxis(alias, [alias]),
                                           core.OffsetAxis(samps_axis, len(time)))
                 hkaman.wrap('timestamps', time, [(0, samps_axis)])
                 hkaman.wrap(device_name, np.array([data]),
