@@ -117,7 +117,7 @@ def make_hkaman(grouped_data):
 
                 hkaman = core.AxisManager(core.LabelAxis(device_axis, [alias]),
                                           core.OffsetAxis(samps_axis, len(time)))
-                hkaman.wrap('times', time, [(0, samps_axis)])
+                hkaman.wrap('timestamps', time, [(0, samps_axis)])
                 hkaman.wrap(device_name, np.array([data]),
                             [(0, device_axis), (1, samps_axis)])
                 amans.append(hkaman)
@@ -130,7 +130,7 @@ def make_hkaman(grouped_data):
 
             hkaman_cos = core.AxisManager(core.LabelAxis(device_axis, aliases),
                                           core.OffsetAxis(samps_axis, len(time)))
-            hkaman_cos.wrap('times', time, [(0, samps_axis)])
+            hkaman_cos.wrap('timestamps', time, [(0, samps_axis)])
             hkaman_cos.wrap(device_name, np.array([data[alias] for alias in aliases]), [(0, device_axis), (1, samps_axis)])
             amans.append(hkaman_cos)
 
