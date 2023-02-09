@@ -6,6 +6,7 @@ import logging
 from so3g.hk import load_range
 from sotodlib import core
 
+from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 
@@ -110,8 +111,9 @@ def make_hkaman(grouped_data):
                 time = group[field][1]
                 data = group[field][2]
 
-                device_name = field.split('.')[1]
+                device_name = field.split('.')[1] + '_' + alias
                 device_names.append(device_name)
+                
                 device_axis = 'hklabels_' + device_name
                 samps_axis = 'hksamps_' + device_name
 
@@ -119,7 +121,7 @@ def make_hkaman(grouped_data):
                                           core.OffsetAxis(samps_axis, len(time)))
                 hkaman.wrap('timestamps', time, [(0, samps_axis)])
                 hkaman.wrap(device_name, np.array([data]),
-                            [(0, device_axis), (1, samps_axis)])
+                            [(0, alias), (1, samps_axis)])
                 amans.append(hkaman)
         else:
             # if yes, make one aman per device
