@@ -6,7 +6,6 @@ import logging
 from so3g.hk import load_range
 from sotodlib import core
 
-from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 
@@ -113,7 +112,7 @@ def make_hkaman(grouped_data):
 
                 device_name = field.split('.')[1] + '_' + alias
                 device_names.append(device_name)
-                
+ 
                 device_axis = 'hklabels_' + device_name
                 samps_axis = 'hksamps_' + device_name
 
