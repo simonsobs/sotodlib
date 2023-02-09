@@ -3,6 +3,7 @@ import numpy as np
 from collections import OrderedDict
 from typing import List
 import yaml, traceback
+import shutil
 
 import sqlalchemy as db
 from sqlalchemy import or_, and_, not_
@@ -11,7 +12,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
 from .load_smurf import G3tSmurf, Observations as G3tObservations, SmurfStatus, get_channel_info
-from .bookbinder import Bookbinder
+from .bookbinder import Bookbinder, TimingSystemError
 from ..site_pipeline.util import init_logger
 
 
@@ -23,6 +24,7 @@ from ..site_pipeline.util import init_logger
 UNBOUND = "Unbound"
 BOUND = "Bound"
 FAILED = "Failed"
+REBIND = "Rebind"
 
 # tel tube, stream_id, slot mapping
 VALID_OBSTYPES = ['obs', 'oper', 'smurf', 'hk', 'stray', 'misc']
@@ -78,6 +80,8 @@ class Books(Base):
     slots: slots in comma separated string
     created_at: time when book was created
     updated_at: time when book was updated
+    timing: bool, whether timing system is on
+    path: str, location of book directory
 
     """
     __tablename__ = 'books'
@@ -93,6 +97,8 @@ class Books(Base):
     slots = db.Column(db.String)
     created_at = db.Column(db.DateTime, default=dt.datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+    timing = db.Column(db.Boolean)
+    path = db.Column(db.String)
 
     def __repr__(self):
         return f"<Book: {self.bid}>"
@@ -216,6 +222,7 @@ class Imprinter:
         start_t = np.max([np.min([f.start for f in o.files]) for o in obsset])
         stop_t = np.min([np.max([f.stop for f in o.files]) for o in obsset])
         max_channels = int(np.max([np.max([f.n_channels for f in o.files]) for o in obsset]))
+        timing_on = np.all([o.timing for o in obsset])
 
         # create observation and book objects
         observations = [Observations(obs_id=obs_id) for obs_id in obsset.obs_ids]
@@ -229,6 +236,7 @@ class Imprinter:
             max_channels=max_channels,
             tel_tube=obsset.tel_tube,
             slots=','.join([s for s in obsset.slots if obsset.contains_stream(s)]),  # not worth having a extra table
+            timing=timing_on,
         )
 
         # add book to database
@@ -303,6 +311,8 @@ class Imprinter:
         if not op.exists(odir):
             os.makedirs(odir)
 
+        # it's possible that timing field could be none when no timing information is found
+        timing_system = book.timing if book.timing is not None else False
         # bind book using bookbinder library
         try:
             readout_ids = self.get_readout_ids_for_book(book)
@@ -316,11 +326,14 @@ class Imprinter:
                 Bookbinder(smurf_files, hk_files=hkfiles, out_root=odir,
                            stream_id=stream_id, session_id=int(session_id),
                            book_id=book.bid, start_time=start_t, end_time=stop_t,
-                           max_nchannels=book.max_channels,
+                           max_nchannels=book.max_channels, timing_system=timing_system,
                            frameproc_config={"readout_ids": rids})()
             # not sure if this is the best place to update
             book.status = BOUND
+            book.path = op.abspath(op.join(odir, book.bid))
             self.logger.info("Book {} bound".format(book.bid))
+            book.message = message
+            session.commit()
         except Exception as e:
             session.rollback()
             book.status = FAILED
@@ -328,8 +341,12 @@ class Imprinter:
             err_msg = traceback.format_exc()
             self.logger.error(err_msg)
             message = f"{message}\ntrace={err_msg}" if message else err_msg
-        book.message = message
-        session.commit()
+            # if bookbinder complains about timing system, fall back to non-timing mode in the next try
+            if isinstance(e, TimingSystemError):
+                book.timing = False
+            book.message = message
+            session.commit()
+            raise e
 
     def get_book(self, bid, session=None):
         """Get book from database.
@@ -380,18 +397,33 @@ class Imprinter:
 
     def get_failed_books(self, session=None):
         """Get all failed books from database
-        
+
         Parameters
         ----------
         session: BookDB session
-        
+
         Returns
         -------
         books: list of books
-        
+
         """
         if session is None: session = self.get_session()
         return session.query(Books).filter(Books.status == FAILED).all()
+
+    def get_rebind_books(self, session=None):
+        """Get all books to be rebinded from database
+
+        Parameters
+        ----------
+        session: BookDB session
+
+        Returns
+        -------
+        books: list of books
+
+        """
+        if session is None: session = self.get_session()
+        return session.query(Books).filter(Books.status == REBIND).all()
 
     def book_exists(self, bid, session=None):
         """Check if a book exists in the database.
@@ -616,6 +648,39 @@ class Imprinter:
             out[obs_id] = ch_info.readout_id
         return out
 
+    def get_g3tsmurf_obs_for_book(self, book):
+        """
+        Get all g3tsmurf observations for a book
+
+        Parameters
+        -----------
+        book: Book object
+
+        Returns
+        -------
+        obs: dict
+            {obs_id: G3tObservations}
+
+        """
+        session = self.get_g3tsmurf_session(book.tel_tube)
+        obs_ids = [o.obs_id for o in book.obs]
+        obs = session.query(G3tObservations).filter(G3tObservations.obs_id.in_(obs_ids)).all()
+        return {o.obs_id: o for o in obs}
+
+    def delete_book_files(self, book):
+        """Delete all files associated with a book
+
+        Parameters
+        ----------
+        book: Book object
+
+        """
+        # remove all files within the book
+        try:
+            shutil.rmtree(book.path)
+        except Exception as e:
+            self.logger.warning(f"Failed to remove {book.path}: {e}")
+            self.logger.error(traceback.format_exc())
 
 #####################
 # Utility functions #
@@ -660,7 +725,7 @@ def stream_timestamp(obs_id):
         timestamp of the observation
 
     """
-    return "_".join(obs_id.split("_")[:-1]), obs_id.split("_")[-1]
+    return "_".join(obs_id.split("_")[1:-1]), obs_id.split("_")[-1]
 
 def get_obs_type(obs: G3tObservations):
     """Get the type of observation based on the observation id
