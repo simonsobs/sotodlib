@@ -112,7 +112,7 @@ def make_hkaman(grouped_data):
 
                 device_name = field.split('.')[1]
                 device_names.append(device_name)
-                device_axis = 'hkdata_' + device_name
+                device_axis = 'hklabels_' + device_name
                 samps_axis = 'hksamps_' + device_name
 
                 hkaman = core.AxisManager(core.LabelAxis(device_axis, [alias]),
@@ -125,7 +125,7 @@ def make_hkaman(grouped_data):
             # if yes, make one aman per device
             device_name = field.split('.')[1]
             device_names.append(device_name)
-            device_axis = 'hkdata_' + device_name
+            device_axis = 'hklabels_' + device_name
             samps_axis = 'hksamps_' + device_name
 
             hkaman_cos = core.AxisManager(core.LabelAxis(device_axis, aliases),
