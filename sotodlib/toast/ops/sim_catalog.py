@@ -294,7 +294,7 @@ class SimCatalog(Operator):
                     left_weights = 1 - right_weights
                     # useful shorthands
                     freq = np.array(source_dict["freqs_ghz"]) * u.GHz
-                    seds = np.array(source_dict["flux_density_jysr"]) * u.Jy / u.sr
+                    seds = np.array(source_dict["flux_density_jy"]) * u.Jy
                     # Mean SED used for bandpass convolution
                     wright = np.mean(right_weights)
                     wleft = 1 - wright
@@ -310,7 +310,7 @@ class SimCatalog(Operator):
                         amp = np.exp(np.interp(
                                 np.log(cfreq.to_value(u.GHz)),
                                 np.log(freq.to_value(u.GHz)),
-                                np.log(sed.to_value(u.Jy / u.sr))
+                                np.log(sed.to_value(u.Jy))
                         ))
                         amplitudes.append(amp)
                     amplitudes = np.array(amplitudes)
@@ -342,7 +342,7 @@ class SimCatalog(Operator):
                         pol_angle = None
                 else:
                     freq = np.array(source_dict["freqs_ghz"]) * u.GHz
-                    sed_mean = np.array(source_dict["flux_density_jysr"]) * u.Jy / u.sr
+                    sed_mean = np.array(source_dict["flux_density_jy"]) * u.Jy
                     if "pol_frac" in source_dict:
                         pol_frac = np.array(source_dict["pol_frac"])
                         pol_angle = np.radians(source_dict["pol_angle_deg"])
@@ -355,7 +355,7 @@ class SimCatalog(Operator):
                 flux_density = bandpass.convolve(
                     det,
                     freq,
-                    sed_mean.to_value(u.Jy / u.sr),
+                    sed_mean.to_value(u.Jy),
                 )
 
                 # Convert the flux density to peak temperature
