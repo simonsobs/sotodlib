@@ -134,9 +134,11 @@ def make_hkaman(grouped_data):
             hkaman_cos.wrap(device_name, np.array([data[alias] for alias in aliases]), [(0, device_axis), (1, samps_axis)])
             amans.append(hkaman_cos)
 
-        # TODO: make an aman of amans
+    # make an aman of amans
+    merged_amans = core.AxisManager()
+    [merged_amans.wrap(name, a) for (name, a) in zip(device_names, amans)]
 
-    return amans
+    return merged_amans
 
 
 def get_hkaman(start, stop, config):
