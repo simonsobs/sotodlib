@@ -10,8 +10,12 @@ from sqlalchemy import or_, and_, not_
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
+from spt3g import core
+import itertools
+from scipy.interpolate import interp1d
 
 from .load_smurf import G3tSmurf, Observations as G3tObservations, SmurfStatus, get_channel_info
+from .load_smurf import split_ts_bits
 from .bookbinder import Bookbinder, TimingSystemError
 from ..site_pipeline.util import init_logger
 
@@ -682,9 +686,69 @@ class Imprinter:
             self.logger.warning(f"Failed to remove {book.path}: {e}")
             self.logger.error(traceback.format_exc())
 
+    def get_book_times(self, book):
+        """
+        Returns an array of gap-filled timestamps for a book.
+        """
+        filedb = self.get_files_for_book(book)
+        times = {}
+        for k, files in filedb.items():
+            ts = []
+            for frame in itertools.chain(*[core.G3File(f) for f in files]):
+                if frame.type != core.G3FrameType.Scan:
+                    continue
+                ts.append(get_timestamps(frame))
+            times[k] = fill_gaps(np.hstack(ts))
+
+        t0 = np.max([ts[0] for ts in times.values()] + [book.start.timestamp()])
+        t1 = np.min([ts[-1] for ts in times.values()] + [book.stop.timestamp()])
+
+        # Doesn't matter which we choose because they will all be the same once trimmed
+        ts = list(times.values())[0]
+        m = (t0 <= ts) & (ts <= t1)
+        return ts[m]
+
+
 #####################
 # Utility functions #
 #####################
+def get_timestamps(frame):
+    """
+    Returns an array of timestamps for data in a G3 Frame
+    """
+    c0, c2 = frame['primary'].data[[3, 5]]
+    s, ns = split_ts_bits(c2)
+    # Add 20 years in seconds (accounting for leap years) to handle
+    # offset between EPICS time referenced to 1990 relative to UNIX time.
+    c2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
+    timestamps = np.round(c2 - (c0 / 480000) ) + c0 / 480000
+    return timestamps
+
+def fill_gaps(ts):
+    """
+    Fills gaps in an array of timestamps.
+    """
+    # Find indices where gaps occur and how long each gap is
+    dts = np.diff(ts)
+    dt = np.mean(dts)
+    missing = np.round(dts/dt - 1).astype(int)
+    total_missing = int(np.sum(missing))
+
+    # Create new  array with the correct number of samples
+    new_ts = np.full(len(ts) + total_missing, np.nan)
+
+    # Insert old timestamps into new array with offsets that account for gaps
+    offsets = np.concatenate([[0], np.cumsum(missing)])
+    i0s = np.arange(len(ts))
+    new_ts[i0s + offsets] = ts
+
+    # Use existing data to interpolate and fill holes
+    m = np.isnan(new_ts)
+    xs = np.arange(len(new_ts))
+    interp = interp1d(xs[~m], new_ts[~m])
+    new_ts[m] = interp(xs[m])
+
+    return new_ts
 
 def create_g3tsmurf_session(config):
     """create a connection session to g3tsmurf database
