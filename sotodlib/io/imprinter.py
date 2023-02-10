@@ -688,23 +688,33 @@ class Imprinter:
 
     def get_book_times(self, book):
         """
-        Returns an array of gap-filled timestamps for a book.
+        Given a book of co-sampled data with a timing system, this function will
+        return a gap-filled list of timestamps that should be contained in the book.
+
+        Parameters
+        ----------
+        book: Book object
         """
         filedb = self.get_files_for_book(book)
-        times = {}
-        for k, files in filedb.items():
-            ts = []
-            for frame in itertools.chain(*[core.G3File(f) for f in files]):
-                if frame.type != core.G3FrameType.Scan:
-                    continue
-                ts.append(get_timestamps(frame))
-            times[k] = fill_gaps(np.hstack(ts))
+        t0 = book.start.timestamp()
+        t1 = book.stop.timestamp()
+        for i, files in enumerate(filedb.values()):
+            _files = sorted(files)
+            if i == 0:  # Get full list of timestamps for first file list
+                ts = []
+                for frame in itertools.chain(*[core.G3File(f) for f in _files]):
+                    if frame.type != core.G3FrameType.Scan:
+                        continue
+                    ts.append(get_timestamps(frame))
+                ts = fill_gaps(np.hstack(ts))
 
-        t0 = np.max([ts[0] for ts in times.values()] + [book.start.timestamp()])
-        t1 = np.min([ts[-1] for ts in times.values()] + [book.stop.timestamp()])
+                _t0, _t1 = ts[[0, -1]]
+            else:
+                _t0, _t1 = get_start_and_end(_files)
+            
+            t0 = max(t0, _t0)
+            t1 = min(t1, _t1)
 
-        # Doesn't matter which we choose because they will all be the same once trimmed
-        ts = list(times.values())[0]
         m = (t0 <= ts) & (ts <= t1)
         return ts[m]
 
@@ -715,6 +725,16 @@ class Imprinter:
 def get_timestamps(frame):
     """
     Returns an array of timestamps for data in a G3 Frame
+
+    Parameters
+    -------------
+    frame : G3Frame
+        Scan frame containing detector data
+    
+    Returns
+    -------------
+    timestamps : np.ndarray
+        Array of timestamps (seconds) for samples in the frame
     """
     c0, c2 = frame['primary'].data[[3, 5]]
     s, ns = split_ts_bits(c2)
@@ -727,6 +747,16 @@ def get_timestamps(frame):
 def fill_gaps(ts):
     """
     Fills gaps in an array of timestamps.
+
+    Parameters
+    -------------
+    ts : np.ndarray
+        List of timestamps of length `n`, potentially with gaps
+    
+    Returns
+    --------
+    new_ts : np.ndarray
+        New list of timestamps of length >= n, with gaps filled.
     """
     # Find indices where gaps occur and how long each gap is
     dts = np.diff(ts)
@@ -749,6 +779,39 @@ def fill_gaps(ts):
     new_ts[m] = interp(xs[m])
 
     return new_ts
+
+def get_start_and_end(files):
+    """
+    Gets start and end time for a list of L2 detector data files
+
+    Parameters
+    -------------
+    files : np.ndarray
+        List of L2 G3 files for a single detector set in an observation
+    
+    Returns
+    --------
+    t0 : float
+        Start time of observation
+    t1 : float
+        End time or observation
+    """
+    _files = sorted(files)
+
+    # Get start time
+    for frame in core.G3File(_files[0]):
+        if frame.type == core.G3FrameType.Scan:
+            t0 = get_timestamps(frame)[0]
+            break
+    
+    # Get end time
+    frame = None
+    for _frame in core.G3File(_files[-1]):
+        if _frame.type == core.G3FrameType.Scan:
+            frame = _frame
+    t1 = get_timestamps(frame)[-1]
+    
+    return t0, t1
 
 def create_g3tsmurf_session(config):
     """create a connection session to g3tsmurf database
