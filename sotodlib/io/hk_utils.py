@@ -22,6 +22,14 @@ def get_grouped_hkdata(start, stop, config):
     Takes output from load_range(), reconfigures load_range() dictionary
     slightly. Groups HK field data by corresponding device/feed. Outputs
     that list of data.
+
+    Parameters:
+        start: Earliest time to search for data. Can be datetime objects,
+            unix timestamps, int, floats.
+        stop: Latest time to search for data. See start parameter above for
+            note on time formats.
+        config: Filename of a .yaml file for loading fields and parsing 
+            information for housekeeping devices
     """
     # call load_range()
     logger.debug("running load_range()")
@@ -77,6 +85,10 @@ def make_hkaman(grouped_data):
     """
     Takes data from get_grouped_hkdata(), tests whether feed/device is
     cosampled, outputs axismanager(s) for either case.
+
+    Parameters:
+        grouped_data (list): grouped list of data per HK feed/device; output
+            from get_grouped_hkdata()
     """
     amans = []
     device_names = []
@@ -144,8 +156,16 @@ def make_hkaman(grouped_data):
 
 def get_hkaman(start, stop, config):
     """
-    Combine get_grouped_hkdata() and make_hkaman() to output 1 axismanager of
-    HK axismanagers to streamline data analysis
+    Wrapper to combine get_grouped_hkdata() and make_hkaman() to output one 
+    axismanager of HK axismanagers to streamline data analysis. 
+
+    Parameters:
+        start: Earliest time to search for data. Can be datetime objects,
+            unix timestamps, int, floats. Required for get_grouped_hkdata().
+        stop: Latest time to search for data. See start parameter above for
+            note on time formats. Required for get_grouped_hkdata()
+        config: Filename of a .yaml file for loading fields and aliases. 
+            Required for get_grouped_hkdata()
     """
     data = get_grouped_hkdata(start, stop, config)
     hk_amans = make_hkaman(data)
