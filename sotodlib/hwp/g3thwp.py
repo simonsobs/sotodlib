@@ -493,13 +493,13 @@ class G3tHWP():
         solved['angle_moving_ave'] = moving_average(
             solved['angle'], self._num_edges)
 
-        # template subtraction
         def detrend(array, deg=3):
             x = np.linspace(-1, 1, len(array))
             p = np.polyfit(x, array, deg=deg)
             pv = np.polyval(p, x)
             return array - pv
 
+        # template subtraction
         ft = solved['fast_time'][self._ref_indexes[0]:self._ref_indexes[-2]+1]
         # remove rotation frequency drift for making a template of encoder slits
         ft = detrend(ft, deg=3)
@@ -510,7 +510,7 @@ class G3tHWP():
         average_slit = np.average(template_slit)
         # subtract template, keep raw timestamp
         subtract = np.cumsum(np.roll(np.tile(template_slit-average_slit, len(
-            self._ref_indexes)), self._ref_indexes[0] + 1)[:len(solved['fast_time'])])
+            self._ref_indexes) + 1), self._ref_indexes[0] + 1)[:len(solved['fast_time'])])
         solved['fast_time_raw'] = solved['fast_time']
         solved['fast_time'] = solved['fast_time'] - subtract
 
