@@ -6,9 +6,11 @@ import os
 import sotodlib
 from sotodlib import core
 
-#from . import load
-
 import numpy as np
+
+
+_TES_BIAS_COUNT = 16  # per detset / primary file group
+
 
 def _extract_1d(src, src_offset, dest, dest_offset):
     """Args:
@@ -30,14 +32,14 @@ def _extract_1d(src, src_offset, dest, dest_offset):
     dest[dest_offset:dest_offset+count] = src[samp_slice]
     return src_offset + count
 
-def _extract_2d(src, src_offset, dest, dest_offset, dets):
+def _extract_2d(src, src_offset, dest, dest_offset, dets=None):
     """Args:
       src (G3SuperTimestream)
       src_offset (int): starting index into source.
       dest (ndarray)
       dest_offset (int): offset into dest samples axis.
       dets (list of str): detector names for each index of first axis
-        of dest.
+        of dest.  If None, simple one-to-one match-up is assumed.
 
     Returns:
       Number of samples consumed from src; this includes any samples
@@ -45,14 +47,28 @@ def _extract_2d(src, src_offset, dest, dest_offset, dets):
 
     """
     # What dets do we have here and where do they belong?
-    _, src_idx, dest_idx = core.util.get_coindices(src.names, dets)
     count = min(len(src.times) - src_offset, dest.shape[-1] - dest_offset)
     if count < 0:
         return len(src.times)
     samp_slice = slice(src_offset, src_offset+count)
-    for i0, i1 in zip(src_idx, dest_idx):
-        dest[i1,dest_offset:dest_offset+count] = src.data[i0,samp_slice]
+    if dets is None:
+        # Straight copy should work.
+        dest[:,dest_offset:dest_offset+count] = src.data[:,samp_slice]
+    else:
+        # Copy index-to-index.
+        _, src_idx, dest_idx = core.util.get_coindices(src.names, dets)
+        for i0, i1 in zip(src_idx, dest_idx):
+            dest[i1,dest_offset:dest_offset+count] = src.data[i0,samp_slice]
     return src_offset + count
+
+
+def _check_bias_names(frame):
+    for i, name in enumerate(frame['tes_biases'].names):
+        if name != 'bias%02i' % i:
+            raise RuntimeError(f'Bias at index {i} has unexpected name "{name}"!')
+    stream_id = frame['stream_id']
+    return [f'{stream_id}_b{_i:02d}' for _i in range(i+1)]
+
 
 def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
                   no_signal=None,
@@ -115,7 +131,6 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         core.LabelAxis('dets', [p[1] for p in pairs_req]),
         core.OffsetAxis('samps', samples[1] - samples[0], samples[0], obs_id))
     aman.wrap('primary', core.AxisManager(aman.samps))
-    aman.wrap('tes_bias', core.AxisManager(aman.samps))
     if no_signal:
         aman.wrap('signal', None)
     else:
@@ -125,23 +140,25 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
     det_info = {p[1]: [p[0], p[1]] for p in pairs_req}
 
     primary_fields = None
-    tes_fields = None
+    bias_dest = np.zeros((len(detsets_req), _TES_BIAS_COUNT,
+                          samples[1] - samples[0]), dtype='int32')
+    all_bias_names = []
 
     # Read the signal data, by detset.
-    for detset, files in file_map.items():
+    for detset_index, (detset, files) in enumerate(file_map.items()):
         if no_signal or detset not in detsets_req:
             continue
 
         # Target AxisManagers for special primary fields, to be
         # populated once we can inspect the frames.
         primary_dest = None
-        tes_dest = None
         
         # dest_offset is the index, along samples axis, where next
         # data will be written.
         dest_offset = 0
 
         stream_id = None
+        bias_names = None
 
         for f, i0, i1 in files:
             if i1 <= samples[0]:
@@ -177,29 +194,17 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
                     primary_dest = core.AxisManager(aman.samps)
                     for f in primary_fields:
                         primary_dest.wrap_new(f, ('samps', ), dtype='int64')
-                    aman['primary'].wrap(detset, primary_dest)
+                    aman['primary'].wrap(stream_id, primary_dest)
 
                 primary_block = frame['primary'].data
                 for i, f in enumerate(primary_fields):
                     delta = _extract_1d(primary_block[i], start,
                                         primary_dest[f], dest_offset)
 
-                # Extract "tes_bias", organize by detset.
-                if tes_fields is None:
-                    tes_fields = list(frame['tes_bias'].names)
-                else:
-                    assert(tes_fields == list(frame['tes_bias'].names))
-
-                if tes_dest is None:
-                    tes_dest = core.AxisManager(aman.samps)
-                    for f in tes_fields:
-                        tes_dest.wrap_new(f, ('samps', ), dtype='int32')
-                    aman['tes_bias'].wrap(detset, tes_dest)
-
-                tes_block = frame['tes_bias'].data
-                for i, f in enumerate(tes_fields):
-                    delta = _extract_1d(tes_block[i], start,
-                                        tes_dest[f], dest_offset)
+                # Extract "bias", organize by detset.
+                bias_names = _check_bias_names(frame)
+                delta = _extract_2d(frame['tes_biases'], start,
+                                    bias_dest[detset_index], dest_offset)
 
                 # Extract the main signal
                 if not no_signal:
@@ -215,6 +220,14 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
 
                 if dest_offset >= samples[1] - samples[0]:
                     break
+
+        # Wrap up for detset ...
+        all_bias_names.extend(bias_names)
+
+    # Merge the bias lines.
+    aman.merge(core.AxisManager(core.LabelAxis('bias_lines', all_bias_names)))
+    aman.wrap('biases', bias_dest.reshape((-1, samples[1] - samples[0])),
+              [(0, 'bias_lines'), (1, 'samps')])
 
     det_info = core.metadata.ResultSet(
         ['detset', 'readout_id', 'stream_id'],
