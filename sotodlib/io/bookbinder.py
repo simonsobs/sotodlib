@@ -6,6 +6,7 @@ from spt3g import core
 import numpy as np
 import itertools
 import yaml
+from scipy.interpolate import interp1d
 
 
 def pos2vel(p):
@@ -330,11 +331,8 @@ class FrameProcessor(object):
         self.timing_system = timing_system
         self._frame_splits = []
         self._hk_gaps = []
-        self._smurf_gaps = []
-        self._prev_smurf_frame_last_sample = None
-        self._prev_smurf_frame_sample_interval = None
+        self._prev_smurf_sample = None
         self._smurf_timestamps = smurf_timestamps
-        self._next_expected_smurf_sample_index = 0
         self._readout_ids = config.get("readout_ids", None)
 
         # Ensure start and end times have the correct type
@@ -550,6 +548,84 @@ class FrameProcessor(object):
 
         return trimmed_frame
 
+    def fill_in_missing_samples(self, data, flush_time, return_flags=False):
+        """
+        Locate and patch missing samples in data.
+
+        If a list of timestamps is provided, use it to fill in the missing samples (note: the
+        timestamps present in the input data must exactly match their counterparts in the list).
+        If not, determine the missing samples using an estimate of the sample interval.
+
+        Parameters
+        ----------
+        data : G3SuperTimestream
+            Input data to be screened for missing samples
+        flush_time : G3Time
+            Upper time limit (exclusive) for data to be returned
+        return_flags : bool, optional
+            Whether to return the list of flags indicating filled-in samples
+
+        Return
+        ------
+        dataout : G3SuperTimestream
+            Data G3SuperTimestream with filled-in samples wherever gaps are detected
+        flag_gap : G3VectorBool, optional
+            Array of boolean flags indicating filled-in samples that should not be used for
+            analysis. Set return_flags = True to return.
+        """
+        # There is no _prev_smurf_sample at the beginning of the book
+        if self._prev_smurf_sample is None:
+            prev_frame_end = self.BOOK_START_TIME.time - 1
+        else:
+            prev_frame_end = self._prev_smurf_sample.time
+        # Define a strict upper limit (exclusive) up until which to look/interpolate for missing samples
+        if self.BOOK_END_TIME is not None:
+            end_time = min(flush_time.time, self.BOOK_END_TIME.time)
+        elif self._smurf_timestamps is not None:
+            end_time = min(flush_time.time, self._smurf_timestamps[-1].time + 1)
+        else:
+            end_time = min(flush_time.time, data.times[-1].time + 1)
+
+        # Obtain list of filled-in timestamps, whether from provided list or estimate with fill_time_gaps
+        if self._smurf_timestamps is not None:
+            ts = [_t for _t in self._smurf_timestamps if (prev_frame_end < _t < end_time)]
+        else:
+            assert data.times[0].time >= prev_frame_end
+            # Use fill_time_gaps to fill in any missing samples in the middle, as well as
+            # at the beginning (between previous frame and current frame)
+            dt = np.median(np.diff(data.times))  # estimate sample interval
+            if self._prev_smurf_sample is None:
+                # Use estimated sample interval to fill backward to prev_frame_end = book start time - 1
+                # since book start time does not usually line up with sample interval
+                ts = np.append(np.flip(np.arange(data.times[0].time-dt, prev_frame_end, -dt)), data.times)
+                ts = fill_time_gaps(ts)
+            elif (data.times[0].time - prev_frame_end)/dt > 0.5:
+                ts = fill_time_gaps(np.insert(data.times, 0, prev_frame_end))[1:]
+            else:
+                ts = fill_time_gaps(data.times)
+            # Use estimated sample interval to fill until end_time. Not using fill_time_gaps because
+            # end_time is externally determined and does not usually line up with sample interval
+            ts = np.append(ts, np.arange(data.times[-1].time+dt, end_time, dt))
+
+        # Create new G3SuperTimestream with filled-in samples
+        if len(data.times) < len(ts):
+            m = np.isin(ts, data.times, assume_unique=True)
+            new_data = np.full((data.data.shape[0], len(ts)), self.FLAGGED_SAMPLE_VALUE)
+            new_data[:,m] = data.data
+            dataout = so3g.G3SuperTimestream(data.names, core.G3VectorTime(np.array(ts)), new_data)
+            flag_gap = core.G3VectorBool(~m)
+            print("{} missing samples detected".format(np.sum(~m)))
+        elif len(data.times) > len(ts):
+            raise ValueError("There are more samples in the timestream than in list provided")
+        else:
+            dataout = data
+            flag_gap = core.G3VectorBool(np.zeros(len(ts)))
+
+        if return_flags:
+            return dataout, flag_gap
+        else:
+            return dataout
+
     def flush(self, flush_time=None):
         """
         Produce frames for the output Book, up to but not including flush_time
@@ -570,13 +646,15 @@ class FrameProcessor(object):
 
         smurf_data, smurf_bias, smurf_primary = self.smbundle.rebundle(flush_time)
 
-        # Write signal data to frame
+        # Fill in missing samples and write data to frame
         f = core.G3Frame(core.G3FrameType.Scan)
-        f['signal'] = smurf_data
+        f['signal'], flag_smurfgap = self.fill_in_missing_samples(smurf_data, flush_time, return_flags=True)
         if smurf_bias is not None:
-            f['tes_biases'] = smurf_bias
+            f['tes_biases'] = self.fill_in_missing_samples(smurf_bias, flush_time)
         if smurf_primary is not None:
-            f['primary'] = smurf_primary
+            f['primary'] = self.fill_in_missing_samples(smurf_primary, flush_time)
+        # Update last sample
+        self._prev_smurf_sample = smurf_data.times[-1]
 
         try:
             hk_data = self.hkbundle.rebundle(flush_time)
@@ -597,10 +675,7 @@ class FrameProcessor(object):
             cosamp_el = np.array([self.FLAGGED_SAMPLE_VALUE if flag_hkgap[i] else cosamp_el[i] for i in range(len(cosamp_el))])
             f['flag_hkgap'] = core.G3VectorBool(flag_hkgap)
 
-            # Flag any samples falling within a gap in SMuRF data
-            flag_smurfgap = np.zeros(len(smurf_data.times))
-            for gap_start, gap_end in self._smurf_gaps:
-                flag_smurfgap = np.logical_or(flag_smurfgap, np.logical_and(t > gap_start, t < gap_end))
+            # Gaps in SMuRF data
             f['flag_smurfgap'] = core.G3VectorBool(flag_smurfgap)
 
             # Ancillary data (co-sampled HK encoder data)
@@ -634,33 +709,6 @@ class FrameProcessor(object):
         output : list
             List containing frames to be entered into output Book
         """
-
-        def generate_missing_smurf_samples(f, t):
-            """
-            Produce a frame filled with the FLAGGED_SAMPLE_VALUE at the timestamps given in t,
-            to be used as fill-in values for missing data.
-
-            Parameters
-            ----------
-            f : G3Frame
-                A frame from the current timestream, from which to extract metadata
-            t : numpy.ndarray
-                Vector of timestamps
-
-            Returns
-            -------
-            frame : G3Frame
-                Frame containing a G3SuperTimestream with FLAGGED_SAMPLE_VALUE at each input timestamp
-            """
-            frame = core.G3Frame(core.G3FrameType.Scan)
-            for k in set(f.keys()).intersection(['data', 'tes_biases', 'primary']):
-                data = so3g.G3SuperTimestream(f[k].names, core.G3VectorTime([core.G3Time(_t) for _t in t]))
-                if f[k].data.dtype in [np.float32, np.float64]:
-                    assert f[k].quanta is not None
-                    data.quanta = f[k].quanta
-                data.data = np.full((len(data.names),len(t)), self.FLAGGED_SAMPLE_VALUE, dtype=f[k].data.dtype)
-                frame[k] = data
-            return frame
 
         if f.type != core.G3FrameType.Housekeeping and f.type != core.G3FrameType.Scan:
             return [f]
@@ -705,49 +753,6 @@ class FrameProcessor(object):
             # If all the samples have been trimmed, we can ignore this frame
             if len(t) == 0:
                 return []
-
-            # Determine if there is a gap in time between this frame and previous frame
-            if self._smurf_timestamps is not None:
-                current_timestamp = t[0].time
-                expected_timestamp = self._smurf_timestamps[self._next_expected_smurf_sample_index]
-                if current_timestamp != expected_timestamp:
-                    current_smurf_sample_index = np.where(self._smurf_timestamps == current_timestamp)[0][0]
-                    gap_nsamples = current_smurf_sample_index - self._next_expected_smurf_sample_index
-                    print("Gap in SMuRF data: {} samples".format(gap_nsamples))
-                    # Add gap to internal list
-                    self._smurf_gaps.append((self._prev_smurf_frame_last_sample, current_timestamp))
-                    # Insert dummy samples into self.smbundle
-                    gap_times = self._smurf_timestamps[self._next_expected_smurf_sample_index : current_smurf_sample_index]
-                    self.smbundle.add(generate_missing_smurf_samples(f, gap_times))
-                    # account for missing samples
-                    self._next_expected_smurf_sample_index += gap_nsamples
-                # update values
-                self._prev_smurf_frame_last_sample = t[-1].time
-                self._next_expected_smurf_sample_index += len(t)
-            else:
-                # if there is only one sample in the frame, then we can't determine the sample rate
-                # try to get it from the previous frame
-                if len(t) == 1:
-                    print("Warning: only one sample in frame. Trying to use the sample rate from previous frame.")
-                    sample_interval = self._prev_smurf_frame_sample_interval
-                else:
-                    sample_interval = (t[-1].time - t[0].time)/(len(t)-1)
-                if self._prev_smurf_frame_last_sample is not None and self._prev_smurf_frame_sample_interval is not None:
-                    this_smurf_frame_first_sample = t[0].time
-                    time_since_prev_smurf_frame = this_smurf_frame_first_sample - self._prev_smurf_frame_last_sample
-                    if (1-self._prev_smurf_frame_sample_interval/time_since_prev_smurf_frame) > self.GAP_THRESHOLD:
-                        # Estimate number of missing samples
-                        gap_nsamples = np.round(time_since_prev_smurf_frame/sample_interval - 1).astype(int)
-                        if gap_nsamples > 0:
-                            print("Gap in SMuRF data: {} samples".format(gap_nsamples))
-                            # Insert dummy samples into self.smbundle
-                            gap_times = (np.arange(gap_nsamples) + 1) * sample_interval + self._prev_smurf_frame_last_sample
-                            self.smbundle.add(generate_missing_smurf_samples(f, gap_times))
-                            # Add gap to internal list
-                            self._smurf_gaps.append((self._prev_smurf_frame_last_sample, this_smurf_frame_first_sample))
-                # update values
-                self._prev_smurf_frame_last_sample = t[-1].time
-                self._prev_smurf_frame_sample_interval = sample_interval
 
             # Add current frame
             self.smbundle.add(f)
@@ -1132,3 +1137,44 @@ class Bookbinder(object):
 class TimingSystemError(Exception):
     """Exception raised when the timing system is on but timing counters are not found"""
     pass
+
+
+#####################
+# Utility functions #
+#####################
+
+def fill_time_gaps(ts):
+    """
+    Fills gaps in an array of timestamps.
+
+    Parameters
+    -------------
+    ts : np.ndarray
+        List of timestamps of length `n`, potentially with gaps
+
+    Returns
+    --------
+    new_ts : np.ndarray
+        New list of timestamps of length >= n, with gaps filled.
+    """
+    # Find indices where gaps occur and how long each gap is
+    dts = np.diff(ts)
+    dt = np.median(dts)
+    missing = np.round(dts/dt - 1).astype(int)
+    total_missing = int(np.sum(missing))
+
+    # Create new  array with the correct number of samples
+    new_ts = np.full(len(ts) + total_missing, np.nan)
+
+    # Insert old timestamps into new array with offsets that account for gaps
+    offsets = np.concatenate([[0], np.cumsum(missing)])
+    i0s = np.arange(len(ts))
+    new_ts[i0s + offsets] = ts
+
+    # Use existing data to interpolate and fill holes
+    m = np.isnan(new_ts)
+    xs = np.arange(len(new_ts))
+    interp = interp1d(xs[~m], new_ts[~m])
+    new_ts[m] = interp(xs[m])
+
+    return new_ts

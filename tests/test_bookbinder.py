@@ -101,6 +101,69 @@ def test_replace_times_and_trim_frame():
     F.BOOK_END_TIME   = core.G3Time(true_timestamps[-1] + 1)
     np.testing.assert_array_equal(F.replace_times_and_trim_frame(frame)['data'].times, true_timestamps)
 
+
+def test_fill_missing_samples():
+    import sotodlib.io.bookbinder as bb
+
+    # Test default case: no missing samples; output is equal to input
+    # Create input data frame
+    dt = 100
+    t = np.arange(40)*dt
+    s = generate_smurf_frame(core.G3VectorTime(t))
+
+    start_time = t[0]
+    end_time = t[-1] + 1
+    ref_timestamps = t
+
+    for smts in [ref_timestamps, None]:
+        F = bb.FrameProcessor(start_time=start_time, end_time=end_time, smurf_timestamps=ref_timestamps)
+        sout, flag_gap = F.fill_in_missing_samples(s['data'], F.BOOK_END_TIME, return_flags=True)
+
+        err_msg = f"Default test case failed. Output not equal to input. With ref timestamps: {smts!=None}"
+        np.testing.assert_array_equal(sout.times, t, err_msg=err_msg)
+        np.testing.assert_array_equal(flag_gap, np.zeros(len(t)), err_msg=err_msg)
+        np.testing.assert_array_equal(sout.data, np.tile(np.ones(len(t)), (s['data'].data.shape[0],1)), err_msg=err_msg)
+
+    ##################################################
+    # Test combinations of the following:
+    # - With/out missing samples at beginning/end
+    # - Offset book start/end times
+    # - Whether there's a previous frame or not
+    # - If a list of ref timestamps is provided or not
+    ##################################################
+    # Create input data frame with missing samples
+    t = np.concatenate((np.arange(10), np.arange(20,30), np.arange(35,40)))*dt
+    s = generate_smurf_frame(core.G3VectorTime(t))
+    # First/last samples correspond to those in data or there are missing samples at beginning/end
+    first_samples = [t[0], t[0]-3*dt]
+    last_samples = [t[-1], t[-1]+3*dt]
+    for start_time, end_time in zip(first_samples, last_samples):
+        end_time += 1  # to ensure last sample gets included since flush_time is excluded from output frame
+        ref_timestamps = range(start_time, end_time, dt)  # reference timestamps to check against
+        true_timestamps = ref_timestamps  # for this test, they are the same
+
+        # Book start/end times don't have to line up with first/last samples
+        book_start_times = [start_time, start_time-0.5*dt]
+        book_end_times = [end_time, end_time+0.5*dt]
+        for book_start, book_end in zip(book_start_times, book_end_times):
+            # Check both scenarios where there is a previous frame or not
+            for prev_samp in [None, core.G3Time(start_time-dt)]:
+
+                for smts in [ref_timestamps, None]:
+                    F = bb.FrameProcessor(start_time=book_start, end_time=book_end, smurf_timestamps=smts)
+                    F._prev_smurf_sample = prev_samp
+                    sout, flag_gap = F.fill_in_missing_samples(s['data'], F.BOOK_END_TIME, return_flags=True)
+
+                    err_msg = f"Test failed with: First/last samples {start_time}, {end_time-1};\
+                                Book start/end: {book_start}, {book_end}; With prev frame: {prev_samp!=None};\
+                                With ref timestamps: {smts!=None}."
+                    np.testing.assert_array_equal(sout.times, true_timestamps, err_msg=err_msg)
+                    np.testing.assert_array_equal(flag_gap, np.isin(ref_timestamps, t, assume_unique=True, invert=True), err_msg=err_msg)
+                    expected_data = np.ones(len(true_timestamps))
+                    expected_data[flag_gap] = F.FLAGGED_SAMPLE_VALUE
+                    np.testing.assert_array_equal(sout.data, np.tile(expected_data, (s['data'].data.shape[0],1)), err_msg=err_msg)
+
+
 def test_hk_gaps():
     import sotodlib.io.bookbinder as bb
 
@@ -132,7 +195,8 @@ def test_hk_gaps():
     #          ends in 2nd gap
     ##################################################
     for smurf_frame, expected_output in zip(smurf_frames, expected_outputs):
-        B = bb.Bookbinder(smurf_files=None, book_id='test')
+        B = bb.Bookbinder(smurf_files=None, book_id='test', start_time=t0[0]*core.G3Units.s,
+                          end_time=smurf_frame['data'].times[-1].time+1)
         B._hk_files = []
         B.hk_iter = acu_frames
         B.process_HK_files()
@@ -142,7 +206,7 @@ def test_hk_gaps():
         assert B.frameproc._hk_gaps[1] == (163047025089500000, 163047025092500000)
 
         B.frameproc(smurf_frame)
-        B.frameproc.flush_time = core.G3Time(1e18)
+        B.frameproc.flush_time = B.DEFAULT_TIME
         B.frameproc.hkbundle.data['Azimuth_Velocity'] = np.append(B.frameproc.hkbundle.data['Azimuth_Velocity'], 0)
         B.frameproc.hkbundle.data['Elevation_Velocity'] = np.append(B.frameproc.hkbundle.data['Elevation_Velocity'], 0)
         output = B.frameproc.flush()
@@ -185,7 +249,8 @@ def test_smurf_gaps():
     #          using list of timestamps
     ##################################################
     for tlist in [None, (timestamps * core.G3Units.s).astype(int)]:
-        B = bb.Bookbinder(smurf_files=None, book_id='test')
+        B = bb.Bookbinder(smurf_files=None, book_id='test', start_time=timestamps[0]*core.G3Units.s,
+                          end_time=int(timestamps[-1]*core.G3Units.s)+1)
         B._hk_files = []
         B.hk_iter = acu_frames
         B.process_HK_files()
@@ -194,7 +259,7 @@ def test_smurf_gaps():
 
         for s in smurf_frames:
             B.frameproc(s)
-        B.frameproc.flush_time = core.G3Time(1e18)
+        B.frameproc.flush_time = B.DEFAULT_TIME
         B.frameproc.hkbundle.data['Azimuth_Velocity'] = np.append(B.frameproc.hkbundle.data['Azimuth_Velocity'], 0)
         B.frameproc.hkbundle.data['Elevation_Velocity'] = np.append(B.frameproc.hkbundle.data['Elevation_Velocity'], 0)
         output = B.frameproc.flush()
