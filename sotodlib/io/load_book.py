@@ -146,7 +146,7 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
 
     # Read the signal data, by detset.
     for detset_index, (detset, files) in enumerate(file_map.items()):
-        if no_signal or detset not in detsets_req:
+        if detset not in detsets_req:
             continue
 
         # Target AxisManagers for special primary fields, to be
