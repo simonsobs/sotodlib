@@ -28,19 +28,19 @@ def get_grouped_hkdata(start, stop, config):
             unix timestamps, int, floats.
         stop: Latest time to search for data. See start parameter above for
             note on time formats.
-        config (str): Name of a .yaml file for loading fields and parsing 
+        config (str): Name of a .yaml file for loading fields and parsing
             information for housekeeping devices
 
     Returns:
         get_grouped_data (list): grouped list of data per HK feed/device;
             useful for turning into a grouped set of axismanagers, or for
             other grouped data analysis purposes.
-    
+
     Notes
     -----
 
     An example config file looks like:
-        
+
         data_dir: '/mnt/so1/data/chicago-latrt/hk/'
 
         field_list:
@@ -108,7 +108,7 @@ def make_hkaman(grouped_data):
             from get_grouped_hkdata()
 
     Returns:
-        merged_amans (AxisManager): AxisManager of HK AxisManagers. It can 
+        merged_amans (AxisManager): AxisManager of HK AxisManagers. It can
             contain 1 axismanager per cosmapled device, as well as 1 axismanger
             per 'channel' for a non-cosampled device. All HK AxisManagers are
             wrapped in 1 ultimate axismanager to streamline data analysis, and
@@ -148,7 +148,7 @@ def make_hkaman(grouped_data):
 
                 device_name = field.split('.')[1] + '_' + alias
                 device_names.append(device_name)
- 
+
                 device_axis = 'hklabels_' + device_name
                 samps_axis = 'hksamps_' + device_name
 
@@ -180,7 +180,7 @@ def make_hkaman(grouped_data):
 
 def get_hkaman(start, stop, config):
     """
-    Wrapper to combine get_grouped_hkdata() and make_hkaman() to output one 
+    Wrapper to combine get_grouped_hkdata() and make_hkaman() to output one
     axismanager of HK axismanagers to streamline data analysis.
 
     Parameters:
@@ -188,14 +188,14 @@ def get_hkaman(start, stop, config):
             unix timestamps, int, floats. Required for get_grouped_hkdata().
         stop: Latest time to search for data. See start parameter above for
             note on time formats. Required for get_grouped_hkdata()
-        config: Filename of a .yaml file for loading fields and aliases. 
+        config: Filename of a .yaml file for loading fields and aliases.
             Required for get_grouped_hkdata()
 
     Notes
     -----
 
     An example config file looks like:
-        
+
         data_dir: '/mnt/so1/data/chicago-latrt/hk/'
 
         field_list:
