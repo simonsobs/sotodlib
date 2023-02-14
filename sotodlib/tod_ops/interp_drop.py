@@ -87,7 +87,7 @@ def interp_drop(aman):
     
     if len(drop_idxes) == 0:
         print('no interpolation is applied')
-        return
+        return aman
     new_aman = interp_drop_single_aman(aman, drop_idxes)
     
     new_drop_idxes = drop_idxes + np.arange(0, len(drop_idxes))
