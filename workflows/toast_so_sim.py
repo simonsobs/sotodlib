@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2019-2021 Simons Observatory.
+# Copyright (c) 2019-2023 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 """
@@ -529,6 +529,11 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     ops.gainscrambler.apply(data)
     log.info_rank("Simulated gain errors in", comm=world_comm, timer=timer)
 
+    # Add readout systematics
+
+    ops.sim_readout.apply(data)
+    log.info_rank("Simulated readout systematics in", comm=world_comm, timer=timer)
+
     # Optionally write out the data
     if args.out_dir is not None:
         hdf5_path = os.path.join(args.out_dir, "data")
@@ -844,6 +849,7 @@ def main():
         so_ops.SaveBooks(name="save_books", enabled=False),
         toast.ops.GainScrambler(name="gainscrambler", enabled=False),
         toast.ops.SimNoise(name="sim_noise"),
+        so_ops.SimReadout(name="sim_readout", enabled=False),
         toast.ops.PixelsHealpix(name="pixels_healpix_radec"),
         toast.ops.PixelsWCS(
             name="pixels_wcs_radec",
