@@ -70,7 +70,7 @@ def interp_drop_single_aman(aman, drop_idxes):
             new_aman.wrap(field, data)
     return new_aman
 
-def interp_drop(aman, overwrite=True):
+def interp_drop(aman):
     """
     Function to interpolate axismanager.
     Uses interp_drop_single_aman to enable recursive iteration.
@@ -97,8 +97,4 @@ def interp_drop(aman, overwrite=True):
     flag = Ranges.from_bitmask(mask_interp_drop)
     new_aman.flags.wrap('interp_drop', flag)
     
-    if overwrite==True:
-        aman = new_aman
-        return aman
-    else:
-        return new_aman
+    return new_aman
