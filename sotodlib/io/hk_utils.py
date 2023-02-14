@@ -30,6 +30,18 @@ def get_grouped_hkdata(start, stop, config):
             note on time formats.
         config: Filename of a .yaml file for loading fields and parsing 
             information for housekeeping devices
+    
+    Notes
+    -----
+
+    An example config file looks like:
+        
+        data_dir: '/mnt/so1/data/chicago-latrt/hk/'
+
+        field_list:
+            'bf_4k' : 'observatory.LSA22HG.feeds.temperatures.Channel_06_T'
+            'xy_stage_x': 'observatory.XYWing.feeds.positions.x'
+            'xy_stage_y': 'observatory.XYWing.feeds.positions.y'
     """
     # call load_range()
     logger.debug("running load_range()")
@@ -166,6 +178,18 @@ def get_hkaman(start, stop, config):
             note on time formats. Required for get_grouped_hkdata()
         config: Filename of a .yaml file for loading fields and aliases. 
             Required for get_grouped_hkdata()
+
+    Notes
+    -----
+
+    An example config file looks like:
+        
+        data_dir: '/mnt/so1/data/chicago-latrt/hk/'
+
+        field_list:
+            'bf_4k' : 'observatory.LSA22HG.feeds.temperatures.Channel_06_T'
+            'xy_stage_x': 'observatory.XYWing.feeds.positions.x'
+            'xy_stage_y': 'observatory.XYWing.feeds.positions.y'
     """
     data = get_grouped_hkdata(start, stop, config)
     hk_amans = make_hkaman(data)
