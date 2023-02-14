@@ -2294,8 +2294,10 @@ def load_file(
             obsfiledb=obsfiledb,
             ignore_missing=ignore_missing,
         )
+        is_many_channels = ch_mask.sum() >= len(ch_mask) * 0.5
     else:
         ch_mask = None
+        is_many_channels = True
 
     ch_info = get_channel_info(
         status,
@@ -2338,7 +2340,8 @@ def load_file(
         ]
     else:
         subreq = [
-            io_load.FieldGroup("data", ch_info.rchannel, timestamp_field="time")
+            io_load.FieldGroup("data", ch_info.rchannel, timestamp_field="time",
+                               refs_ok=is_many_channels)
         ]
     if load_primary:
         subreq.extend(
