@@ -28,8 +28,13 @@ def get_grouped_hkdata(start, stop, config):
             unix timestamps, int, floats.
         stop: Latest time to search for data. See start parameter above for
             note on time formats.
-        config: Filename of a .yaml file for loading fields and parsing 
+        config (str): Name of a .yaml file for loading fields and parsing 
             information for housekeeping devices
+
+    Returns:
+        get_grouped_data (list): grouped list of data per HK feed/device;
+            useful for turning into a grouped set of axismanagers, or for
+            other grouped data analysis purposes.
     
     Notes
     -----
@@ -101,6 +106,13 @@ def make_hkaman(grouped_data):
     Parameters:
         grouped_data (list): grouped list of data per HK feed/device; output
             from get_grouped_hkdata()
+
+    Returns:
+        merged_amans (AxisManager): AxisManager of HK AxisManagers. It can 
+            contain 1 axismanager per cosmapled device, as well as 1 axismanger
+            per 'channel' for a non-cosampled device. All HK AxisManagers are
+            wrapped in 1 ultimate axismanager to streamline data analysis, and
+            make it easier to explore axismanager/device keys.
     """
     amans = []
     device_names = []
@@ -169,7 +181,7 @@ def make_hkaman(grouped_data):
 def get_hkaman(start, stop, config):
     """
     Wrapper to combine get_grouped_hkdata() and make_hkaman() to output one 
-    axismanager of HK axismanagers to streamline data analysis. 
+    axismanager of HK axismanagers to streamline data analysis.
 
     Parameters:
         start: Earliest time to search for data. Can be datetime objects,
