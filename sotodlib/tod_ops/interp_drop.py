@@ -79,18 +79,21 @@ def interp_drop(aman):
         new_aman: axismanager object that drops are filled.
     """
     delta_frame_counter = np.median(np.diff(aman.primary.FrameCounter))
-    
     drop_idxes = np.where(np.diff(aman.primary.FrameCounter) > 1.1*delta_frame_counter)[0] + 1
+    
+    consecutive_drop_idxes = np.where(np.diff(aman.primary.FrameCounter)>2.1*delta_frame_counter)[0] + 1
+    if consecutive_drop_idxes.size != 0:
+        raise ValueError(f'Index {consecutive_drop_idxes} drops more than 2 points consecutively')
     
     if len(drop_idxes) == 0:
         print('no interpolation is applied')
         return aman
+    
     new_aman = interp_drop_single_aman(aman, drop_idxes)
     
     new_drop_idxes = drop_idxes + np.arange(0, len(drop_idxes))
     mask_interp_drop = np.zeros(len(new_aman.timestamps), dtype='bool')
     mask_interp_drop[new_drop_idxes] = True
-    
     flag = Ranges.from_bitmask(mask_interp_drop)
     new_aman.flags.wrap('interp_drop', flag)
     
