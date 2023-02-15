@@ -14,21 +14,15 @@ def interp_drop_array(arr, drop_idxes):
     Return:
         new_arr: array that drops are filled.
     """
-    data_dim = len(np.shape(arr))
-    new_arr = np.copy(arr)
     
+    new_arr = np.copy(arr)
     for  i in range(len(drop_idxes)):
-        drop_idx = drop_idxes[i] + i
-        if data_dim == 1:
-            # Such as azimuth or elevation
-            inserted_data = (new_arr[drop_idx-1] + new_arr[drop_idx])/2.
-            new_arr = np.insert(new_arr, drop_idx, inserted_data)
-            
-        elif data_dim == 2:
-            inserted_data = (new_arr[:, drop_idx-1] + new_arr[:, drop_idx])/2.
-            new_arr = np.insert(new_arr, drop_idx, inserted_data, axis=1)
+        drop_idx = drop_idxes[i] + i # '+i' means index shift by previous insertions
+        if arr.ndim >= 3:
+            raise ValueError(f'Unsupported data dimensions (arr.ndim={arr.ndim})')
         else:
-            raise ValueError(f'Unsupported data dimensions ({field})')
+            inserted_data = (new_arr[..., drop_idx-1] + new_arr[..., drop_idx])/2.
+            new_arr = np.insert(new_arr, drop_idx, inserted_data, axis=-1)
  
     return new_arr
 
@@ -74,16 +68,19 @@ def interp_drop(aman):
     """
     Function to interpolate axismanager.
     Uses interp_drop_single_aman to enable recursive iteration.
-    Add 'interp_drop' flag to aman.flags.
+    It checks 'aman.primary.FrameCounter', which is primary timestamps of smurf,
+    as an indicator of data drop, and if there is drops, interpolate the dropped sample
+    with the mean of data of the both side.
+    After making a new axismaneger object, add 'interp_drop' flag to aman.flags.
     
     Args:
         aman: axismanager object.
-        overwrite: If True, aman is update to drop-filled one. 
-        Else returns new drop-filled axismanager object.
     Return:
         new_aman: axismanager object that drops are filled.
     """
-    drop_idxes = np.where(np.diff(aman.primary.FrameCounter) > np.median(np.diff(aman.primary.FrameCounter)))[0] + 1
+    delta_frame_counter = np.median(np.diff(aman.primary.FrameCounter))
+    
+    drop_idxes = np.where(np.diff(aman.primary.FrameCounter) > 1.1*delta_frame_counter)[0] + 1
     
     if len(drop_idxes) == 0:
         print('no interpolation is applied')
