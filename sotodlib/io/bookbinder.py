@@ -323,7 +323,6 @@ class FrameProcessor(object):
     """
     def __init__(self, start_time=None, end_time=None, smurf_timestamps=None,
                  timing_system=False, **config):
-        print("HERE")
         self.hkbundle = None
         self.smbundle = None
         self.hwp_loader = None
@@ -1075,13 +1074,6 @@ class Bookbinder(object):
 
         if self.hwp_loader is not None:
             d.update(self.hwp_loader.get_metadata())
-            self.hwp_loader.get_meta
-            if self.hwp_loader.hwp_angle_interp is not None:  # If there's data
-                # Convert to float from numpy dtype for yaml formatting
-                hwp_rate = float(np.mean(self.hwp_loader.data['slow']['hwp_rate']))
-            else:
-                hwp_rate = None
-            d['hwp_rate_hz'] = hwp_rate
 
         return d
 
@@ -1297,7 +1289,6 @@ class HWPLoader:
 
         hwp_locked = self.locked_interp(times)
         hwp_stable = self.stable_interp(times)
-        hwp_rate = self.hwp_rate_interp(times)
 
         flags = np.zeros_like(hwp_angle, dtype=np.int32)
         m = (hwp_stable == 1) & (hwp_locked != 1)
@@ -1319,9 +1310,12 @@ class HWPLoader:
         step = int(10 * 60 * fsamp)
         meta['hwp_rate'] = np.array([ts, hwp_rates]).T[::step].tolist()
 
-        if np.all(hwp_rates < 0.0001):
+        min_hwp_rate = 0.0001  # Hz
+        hwp_variation_thresh = 0.3  # Hz
+
+        if np.all(hwp_rates < min_hwp_rate):
             meta['hwp_state'] = 'STATIONARY'
-        elif np.ptp(hwp_rates) > 0.3:
+        elif np.ptp(hwp_rates) > hwp_variation_thresh:
             meta['hwp_state'] = 'CHANGING'
         else:
             meta['hwp_state'] = 'CONSTANT'
