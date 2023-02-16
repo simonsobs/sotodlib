@@ -58,62 +58,49 @@ class SimCatalog(Operator):
     Source SED is convolved with the detector bandpass recorded in the
     focalplane table.
 
-    `SimCatalog` parameters are Traitlets
+    Example catalog entries:
 
-    :param time: TOAST shared data key for time stamps
-    :type time: str
-    :param hwp_angle: TOAST shared data key for (optional) HWP angle.
-        Polarized source signal will be appropriately modulated.
-    :type hwp_angle: str, optional
-    :param catalog_file: TOML format catalog with entries like ```
-[example_static_source]
-# Celestial coordinate are always given in degrees
-ra_deg = 30
-dec_deg = -30
-# the SED can be specified using an arbitrary number of
-# frequency bins.  The SED is interpolated in log-log space
-# to convolve with the detector bandpass
-freqs_ghz = [ 1.0, 1000.0,]
-flux_density_jy = [ 10.0, 1.0,]
-# Omitting polarization fraction results in an
-# unpolarized source
-pol_frac = 0.1
-pol_angle_deg = 0
+    .. highlight:: toml
+    .. code-block:: toml
 
-[example_variable_source]
-ra_deg = 30
-dec_deg = -25
-freqs_ghz = [ 1.0, 1000.0,]
-# An arbitrary number of SED vectors can be provided but the
-# location of the frequency bins is fixed.  Effective SED is
-# interpolated between the specified epochs.
-flux_density_jy = [ [ 10.0, 1.0,], [ 30.0, 10.0,], [ 10.0, 1.0,],]
-# Omitting the times_mjd entry resuls in a static source
-times_mjd = [ 59000.0, 60000.0, 61000.0,]
-# The polarization properties can also vary
-pol_frac = [ 0.05, 0.15, 0.05,]
-pol_angle_deg = [ 45, 45, 45,]
+        [example_static_source]
+        # Celestial coordinate are always given in degrees
+        ra_deg = 30
+        dec_deg = -30
+        # the SED can be specified using an arbitrary number of
+        # frequency bins.  The SED is interpolated in log-log space to
+        # convolve with the detector bandpass
+        freqs_ghz = [ 1.0, 1000.0,]
+        flux_density_jy = [ 10.0, 1.0,]
+        # Omitting polarization fraction results in an
+        # unpolarized source
+        pol_frac = 0.1
+        pol_angle_deg = 0
 
-[example_transient_source]
-ra_deg = 30
-dec_deg = -20
-freqs_ghz = [ 1.0, 1000.0,]
-flux_density_jy = [ [ 10.0, 1.0,], [ 30.0, 10.0,],]
-# Difference between a variable and transient source is
-# simply that the specified epochs do not cover the entire
-# simulation time span.  The operator will not extrapolate
-# outside the epochs.
-times_mjd = [ 59410.0, 59411.0,]```
-    :type catalog_file: str
-    :param beam_file: an SO pickle file containing the beam map.
-        Exact file format is subject to change.  Support for
-        per-detector beams is pending.
-    :type beam_file: str
-    :param det_data: TOAST detector data key
-    :type det_data: str
-    :param detector_pointing: TOAST operator to use to expand boresight
-        pointing into detector frame.
-    :type detector_pointing: class:`toast.operator`
+        [example_variable_source]
+        ra_deg = 30
+        dec_deg = -25
+        freqs_ghz = [ 1.0, 1000.0,]
+        # An arbitrary number of SED vectors can be provided but the
+        # location of the frequency bins is fixed.  Effective SED is
+        # interpolated between the specified epochs.
+        flux_density_jy = [ [ 10.0, 1.0,], [ 30.0, 10.0,], [ 10.0, 1.0,],]
+        # Omitting the times_mjd entry resuls in a static source
+        times_mjd = [ 59000.0, 60000.0, 61000.0,]
+        # The polarization properties can also vary
+        pol_frac = [ 0.05, 0.15, 0.05,]
+        pol_angle_deg = [ 45, 45, 45,]
+
+        [example_transient_source]
+        ra_deg = 30
+        dec_deg = -20
+        freqs_ghz = [ 1.0, 1000.0,]
+        flux_density_jy = [ [ 10.0, 1.0,], [ 30.0, 10.0,],]
+        # Difference between a variable and transient source is
+        # simply that the specified epochs do not cover the entire
+        # simulation time span.  The operator will not extrapolate
+        # outside the epochs.
+        times_mjd = [ 59410.0, 59411.0,]
     """
 
     # Class traits
