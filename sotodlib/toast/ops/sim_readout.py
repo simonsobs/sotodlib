@@ -62,6 +62,18 @@ class SimReadout(Operator):
 
     simulate_glitches = Bool(True, help="Enable glitch simulation")
 
+    jump_rate = Quantity(0.001 * u.Hz, help="Jump occurrence rate")
+
+    jump_amplitude_center = Quantity(
+        0 * u.mK, help="Center of Gaussian distribution for jump amplitude"
+    )
+
+    jump_amplitude_sigma = Quantity(
+        1 * u.mK, help="Width of Gaussian distribution for jump amplitude"
+    )
+
+    simulate_jumps = Bool(True, help="Enable jump simulation")
+
     misidentify_bolometers = Bool(True, help="Enable bolometer misidentification")
 
     misidentification_width = Quantity(
@@ -78,9 +90,11 @@ class SimReadout(Operator):
         """Simulate glitches"""
         if not self.simulate_glitches:
             return
+        log = Logger.get()
         fsample = focalplane.sample_rate
         events_per_sample = self.glitch_rate.to_value(u.Hz) / fsample.to_value(u.Hz)
         nsample = times.size
+        nglitch = 0
         for det in local_dets:
             det_id = focalplane[det]["uid"]
             sig = signal[det]
@@ -99,13 +113,43 @@ class SimReadout(Operator):
             events = amplitudes.to_value(signal.units) \
                      * event_counts[event_indices]
             sig[event_indices] += events
+            nglitch += np.sum(event_counts)
+        nglitch = comm.allreduce(nglitch)
+        log.debug_rank(f"Simulated {nglitch} glitches", comm=comm)
         return
 
     @function_timer
     def _add_jumps(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank):
         """Simulate baseline jumps"""
+        if not self.simulate_jumps:
+            return
+        log = Logger.get()
+        fsample = focalplane.sample_rate
+        events_per_sample = self.jump_rate.to_value(u.Hz) / fsample.to_value(u.Hz)
+        nsample = times.size
+        njump = 0
         for det in local_dets:
+            det_id = focalplane[det]["uid"]
             sig = signal[det]
+            np.random.seed(
+                int(obs_id + det_id  + self.realization + 45835364) % 2**32
+            )
+            event_counts = np.random.poisson(events_per_sample, nsample)
+            event_indices = np.argwhere(event_counts).ravel()
+            nindex = event_indices.size
+            # Drawing amplitudes for every affected sample is not the
+            # same as drawing amplitudes for every event but it is fast.
+            # If we routinely have more than one event occurring during
+            # the same time stamp we are in trouble
+            amplitudes = self.jump_amplitude_center \
+                         + np.random.randn(nindex) * self.jump_amplitude_sigma
+            events = amplitudes.to_value(signal.units) \
+                     * event_counts[event_indices]
+            for index, event in zip(event_indices, events):
+                sig[index:] += event
+            njump += np.sum(event_counts)
+        njump = comm.allreduce(njump)
+        log.debug_rank(f"Simulated {njump} jumps", comm=comm)
         return
 
     @function_timer
@@ -116,10 +160,12 @@ class SimReadout(Operator):
         return
 
     @function_timer
-    def _misidentify_channels(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank):
+    def _misidentify_bolometers(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank):
         """Swap detector data between two confused readout channels"""
-        np.random.seed(int(obs_id + self.realization) % 2**32)
+        if not self.misidentify_bolometers:
+            return
         log = Logger.get()
+        np.random.seed(int(obs_id + self.realization) % 2**32)
         nhit = 0
         for det1 in all_dets:
             for det2 in all_dets:
@@ -189,10 +235,18 @@ class SimReadout(Operator):
             focalplane = obs.telescope.focalplane
             signal = obs.detdata[self.det_data]
     
-            self._add_glitches(comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank)
-            self._add_jumps(comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank)
-            self._fail_bolometers(comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank)
-            self._misidentify_channels(comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank)
+            self._add_glitches(
+                comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank
+            )
+            self._add_jumps(
+                comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank
+            )
+            self._fail_bolometers(
+                comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank
+            )
+            self._misidentify_bolometers(
+                comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank
+            )
             
         return
 
