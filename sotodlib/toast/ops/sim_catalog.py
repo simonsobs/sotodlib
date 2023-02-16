@@ -58,10 +58,13 @@ class SimCatalog(Operator):
     Source SED is convolved with the detector bandpass recorded in the
     focalplane table.
 
-    Traits:
+    `SimCatalog` parameters are Traitlets
+
     :param time: TOAST shared data key for time stamps
+    :type time: str
     :param hwp_angle: TOAST shared data key for (optional) HWP angle.
         Polarized source signal will be appropriately modulated.
+    :type hwp_angle: str, optional
     :param catalog_file: TOML format catalog with entries like ```
 [example_static_source]
 # Celestial coordinate are always given in degrees
@@ -101,12 +104,16 @@ flux_density_jy = [ [ 10.0, 1.0,], [ 30.0, 10.0,],]
 # simulation time span.  The operator will not extrapolate
 # outside the epochs.
 times_mjd = [ 59410.0, 59411.0,]```
+    :type catalog_file: str
     :param beam_file: an SO pickle file containing the beam map.
         Exact file format is subject to change.  Support for
         per-detector beams is pending.
+    :type beam_file: str
     :param det_data: TOAST detector data key
+    :type det_data: str
     :param detector_pointing: TOAST operator to use to expand boresight
         pointing into detector frame.
+    :type detector_pointing: class:`toast.operator`
     """
 
     # Class traits
