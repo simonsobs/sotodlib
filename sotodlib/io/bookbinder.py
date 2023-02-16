@@ -9,13 +9,15 @@ import yaml
 from scipy.interpolate import interp1d
 # 
 class HWPFlags:
+    # STATIONARY is used to flag samples where data is being received by IRIG
+    # and the HWP agent, however the angle cannot be reconstructed because the HWP
+    # is not spinning.
     STATIONARY = 2**0
-    UNLOCKED = 2**1
-    UNSTABLE = 2**2
-    NO_DATA = 2**3
 
-# Minum spin rate before we declare stationary
-MIN_HWP_RATE = 0.2  # Hz
+    # NO_DATA is used to flag samples where no HWP data is present in the
+    # hk files. This causes the `slow` field of the HWP g3 files to have
+    # `stable=False`.
+    NO_DATA = 2**1
 
 
 def pos2vel(p):
@@ -321,6 +323,7 @@ class FrameProcessor(object):
     """
     def __init__(self, start_time=None, end_time=None, smurf_timestamps=None,
                  timing_system=False, **config):
+        print("HERE")
         self.hkbundle = None
         self.smbundle = None
         self.hwp_loader = None
@@ -1071,6 +1074,8 @@ class Bookbinder(object):
              'n_samples':  self.sample_num}
 
         if self.hwp_loader is not None:
+            d.update(self.hwp_loader.get_metadata())
+            self.hwp_loader.get_meta
             if self.hwp_loader.hwp_angle_interp is not None:  # If there's data
                 # Convert to float from numpy dtype for yaml formatting
                 hwp_rate = float(np.mean(self.hwp_loader.data['slow']['hwp_rate']))
@@ -1295,14 +1300,30 @@ class HWPLoader:
         hwp_rate = self.hwp_rate_interp(times)
 
         flags = np.zeros_like(hwp_angle, dtype=np.int32)
-        m = hwp_rate < MIN_HWP_RATE
+        m = (hwp_stable == 1) & (hwp_locked != 1)
         flags[m] = np.bitwise_or(flags[m], HWPFlags.STATIONARY)
-        m = hwp_locked != 1
-        flags[m] = np.bitwise_or(flags[m], HWPFlags.UNLOCKED)
         m = hwp_stable != 1
-        flags[m] = np.bitwise_or(flags[m], HWPFlags.UNSTABLE)
-        m = np.isnan(hwp_angle)
         flags[m] = np.bitwise_or(flags[m], HWPFlags.NO_DATA)
 
         hwp_angle[flags != 0] = -flags[flags != 0]
         return hwp_angle
+
+    def get_metadata(self):
+        meta = {}
+
+        hwp_rates = self.data['slow']['hwp_rate']
+        ts = self.times['slow']
+
+        # Report hwp rate every 10 minutes
+        fsamp = 1./np.median(np.diff(ts))
+        step = int(10 * 60 * fsamp)
+        meta['hwp_rate'] = np.array([ts, hwp_rates]).T[::step].tolist()
+
+        if np.all(hwp_rates < 0.0001):
+            meta['hwp_state'] = 'STATIONARY'
+        elif np.ptp(hwp_rates) > 0.3:
+            meta['hwp_state'] = 'CHANGING'
+        else:
+            meta['hwp_state'] = 'CONSTANT'
+
+        return meta
