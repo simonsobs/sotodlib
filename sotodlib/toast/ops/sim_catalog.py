@@ -59,11 +59,10 @@ class SimCatalog(Operator):
     focalplane table.
 
     Traits:
-        `times` : TOAST shared data key for time stamps
-        `hwp_angle` : TOAST shared data key for (optional) HWP angle.
-            Polarized source signal will be appropriately modulated.
-        `catalog_file` : TOML format catalog with entries like
-```
+    :param time: TOAST shared data key for time stamps
+    :param hwp_angle: TOAST shared data key for (optional) HWP angle.
+        Polarized source signal will be appropriately modulated.
+    :param catalog_file: TOML format catalog with entries like ```
 [example_static_source]
 # Celestial coordinate are always given in degrees
 ra_deg = 30
@@ -101,14 +100,13 @@ flux_density_jy = [ [ 10.0, 1.0,], [ 30.0, 10.0,],]
 # simply that the specified epochs do not cover the entire
 # simulation time span.  The operator will not extrapolate
 # outside the epochs.
-times_mjd = [ 59410.0, 59411.0,]
-```
-        `beam_file` : an SO pickle file containing the beam map.
-            Exact file format is subject to change.  Support for
-            per-detector beams is pending.
-        `det_data` : TOAST detector data key
-        `detector_pointing` : TOAST operator to use to expand boresight
-            pointing into detector frame.
+times_mjd = [ 59410.0, 59411.0,]```
+    :param beam_file: an SO pickle file containing the beam map.
+        Exact file format is subject to change.  Support for
+        per-detector beams is pending.
+    :param det_data: TOAST detector data key
+    :param detector_pointing: TOAST operator to use to expand boresight
+        pointing into detector frame.
     """
 
     # Class traits
