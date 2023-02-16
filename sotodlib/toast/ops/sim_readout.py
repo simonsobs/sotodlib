@@ -62,18 +62,26 @@ class SimReadout(Operator):
 
     simulate_glitches = Bool(True, help="Enable glitch simulation")
 
+    misidentify_bolometers = Bool(True, help="Enable bolometer misidentification")
+
+    misidentification_width = Quantity(
+        1.0 * u.deg,
+        help="Probability of misidentifying two channels is a Gaussian "
+        "function of their distance on the focalplane.",
+    )
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
     @function_timer
-    def _add_glitches(self, obs_id, times, focalplane, signal, dets):
+    def _add_glitches(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank):
         """Simulate glitches"""
         if not self.simulate_glitches:
             return
         fsample = focalplane.sample_rate
         events_per_sample = self.glitch_rate.to_value(u.Hz) / fsample.to_value(u.Hz)
         nsample = times.size
-        for det in dets:
+        for det in local_dets:
             det_id = focalplane[det]["uid"]
             sig = signal[det]
             np.random.seed(
@@ -94,24 +102,66 @@ class SimReadout(Operator):
         return
 
     @function_timer
-    def _add_jumps(self, obs_id, times, focalplane, signal, dets):
+    def _add_jumps(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank):
         """Simulate baseline jumps"""
-        for det in dets:
+        for det in local_dets:
             sig = signal[det]
         return
 
     @function_timer
-    def _fail_bolometers(self, obs_id, times, focalplane, signal, dets):
+    def _fail_bolometers(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank):
         """Simulate bolometers that fail to bias or otherwise are unusable"""
-        for det in dets:
+        for det in local_dets:
             sig = signal[det]
         return
 
     @function_timer
-    def _misidentify_channels(self, obs_id, times, focalplane, signal, dets):
+    def _misidentify_channels(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank):
         """Swap detector data between two confused readout channels"""
-        for det in dets:
-            sig = signal[det]
+        np.random.seed(int(obs_id + self.realization) % 2**32)
+        log = Logger.get()
+        nhit = 0
+        for det1 in all_dets:
+            for det2 in all_dets:
+                if det1 == det2:
+                    continue
+                matched = True
+                # Misidentification requires several properties to agree
+                for prop in ["band", "card_slot", "wafer_slot", "bias", "pol"]:
+                    if focalplane[det1][prop] != focalplane[det2][prop]:
+                        matched = False
+                        break
+                if not matched:
+                    continue
+                # Detectors are matched, see if they get misidentified
+                quat1 = focalplane[det1]["quat"]
+                quat2 = focalplane[det2]["quat"]
+                vec1 = qa.rotate(quat1, ZAXIS)
+                vec2 = qa.rotate(quat2, ZAXIS)
+                dist = np.arccos(np.dot(vec1, vec2))
+                x = np.random.randn() * self.misidentification_width.to_value(u.rad)
+                if np.abs(x) > dist:
+                    nhit += 1
+                    # Swap the signals.  This may require MPI communication
+                    if det1 in local_dets and det2 in local_dets:
+                        # Local operation
+                        temp = signal[det1].copy()
+                        signal[det1] = signal[det2]
+                        signal[det2] = temp
+                    elif det1 in local_dets:
+                        # Send and receive signal
+                        target = det2rank[det2]
+                        comm.Send(signal[det1], dest=target, tag=nhit)
+                        comm.Recv(signal[det1], source=target, tag=nhit)
+                    elif det2 in local_dets:
+                        # Receive and send signal
+                        target = det2rank[det1]
+                        sig2 = signal[det2].copy()
+                        comm.Recv(signal[det2], source=target, tag=nhit)
+                        comm.Send(sig2, dest=target, tag=nhit)
+        ndet = len(all_dets)
+        npair = ndet * (ndet - 1) // 2
+        log.debug_rank(f"Misidentified {nhit} / {npair} detector pairs", comm=comm)
         return
 
     @function_timer
@@ -124,20 +174,25 @@ class SimReadout(Operator):
                 raise RuntimeError(f"You must set `{trait}` before running SimReadout")
 
         for obs in data.obs:
+            comm = obs.comm.comm_group
             obs_id = obs.uid
             times = obs.shared[self.times].data
-            dets = obs.select_local_detectors(detectors)
-            obs.detdata.ensure(self.det_data, detectors=dets, create_units=u.K)
-            det_units = obs.detdata[self.det_data].units
-            scale = unit_conversion(u.K, det_units)
+            all_dets = obs.all_detectors
+            local_dets = obs.select_local_detectors(detectors)
+            obs.detdata.ensure(self.det_data, detectors=local_dets, create_units=u.K)
 
+            # Map detectors to their owning processes
+            det2rank = {}
+            for rank, dets in enumerate(obs.dist.dets):
+                for det in dets:
+                    det2rank[det] = rank
             focalplane = obs.telescope.focalplane
             signal = obs.detdata[self.det_data]
     
-            self._add_glitches(obs_id, times, focalplane, signal, dets)
-            self._add_jumps(obs_id, times, focalplane, signal, dets)
-            self._fail_bolometers(obs_id, times, focalplane, signal, dets)
-            self._misidentify_channels(obs_id, times, focalplane, signal, dets)
+            self._add_glitches(comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank)
+            self._add_jumps(comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank)
+            self._fail_bolometers(comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank)
+            self._misidentify_channels(comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank)
             
         return
 
