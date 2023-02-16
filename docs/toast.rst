@@ -147,6 +147,9 @@ the standard operators in toast.
 .. autoclass:: sotodlib.toast.ops.SimSSO
    :members:
 
+.. autoclass:: sotodlib.toast.ops.SimCatalog
+   :members:
+
 .. autoclass:: sotodlib.toast.ops.SimHWPSS
    :members:
 
@@ -157,6 +160,12 @@ the standard operators in toast.
    :members:
 
 .. autoclass:: sotodlib.toast.ops.MLMapmaker
+   :members:
+
+.. autoclass:: sotodlib.toast.ops.SimWireGrid
+   :members:
+
+.. autoclass:: sotodlib.toast.ops.SimStimulator
    :members:
 
 
