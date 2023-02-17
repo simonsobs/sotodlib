@@ -10,13 +10,13 @@ from sqlalchemy import or_, and_, not_
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
+import so3g
 from spt3g import core
 import itertools
 from scipy.interpolate import interp1d
 
 from .load_smurf import G3tSmurf, Observations as G3tObservations, SmurfStatus, get_channel_info
-from .load_smurf import split_ts_bits
-from .bookbinder import Bookbinder, TimingSystemError
+from .bookbinder import Bookbinder, TimingSystemError, counters_to_timestamps
 from ..site_pipeline.util import init_logger
 
 
@@ -689,15 +689,15 @@ class Imprinter:
     def get_book_times(self, book):
         """
         Given a book of co-sampled data with a timing system, this function will
-        return a gap-filled list of timestamps that should be contained in the book.
+        return a gap-filled list of timestamps that should be contained in the
+        book.  The data will be trimmed such that the start all active wafers
+        have data inside the returned time-range.
 
         Parameters
         ----------
         book: Book object
         """
         filedb = self.get_files_for_book(book)
-        t0 = book.start.timestamp()
-        t1 = book.stop.timestamp()
         for i, files in enumerate(filedb.values()):
             _files = sorted(files)
             if i == 0:  # Get full list of timestamps for first file list
@@ -705,15 +705,14 @@ class Imprinter:
                 for frame in itertools.chain(*[core.G3File(f) for f in _files]):
                     if frame.type != core.G3FrameType.Scan:
                         continue
-                    ts.append(get_timestamps(frame))
-                ts = fill_gaps(np.hstack(ts))
 
-                _t0, _t1 = ts[[0, -1]]
+                    ts.append(get_frame_times(frame)[1])
+                ts = fill_time_gaps(np.hstack(ts))
+                t0, t1 = ts[[0, -1]]
             else:
                 _t0, _t1 = get_start_and_end(_files)
-            
-            t0 = max(t0, _t0)
-            t1 = min(t1, _t1)
+                t0 = max(t0, _t0)
+                t1 = min(t1, _t1)
 
         m = (t0 <= ts) & (ts <= t1)
         return ts[m]
@@ -722,29 +721,40 @@ class Imprinter:
 #####################
 # Utility functions #
 #####################
-def get_timestamps(frame):
+_primary_idx_map = {}
+def get_frame_times(frame):
     """
-    Returns an array of timestamps for data in a G3 Frame
+    Returns timestamps for a G3Frame of detector data.
 
     Parameters
-    -------------
+    --------------
     frame : G3Frame
         Scan frame containing detector data
-    
-    Returns
-    -------------
-    timestamps : np.ndarray
-        Array of timestamps (seconds) for samples in the frame
-    """
-    c0, c2 = frame['primary'].data[[3, 5]]
-    s, ns = split_ts_bits(c2)
-    # Add 20 years in seconds (accounting for leap years) to handle
-    # offset between EPICS time referenced to 1990 relative to UNIX time.
-    c2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
-    timestamps = np.round(c2 - (c0 / 480000) ) + c0 / 480000
-    return timestamps
 
-def fill_gaps(ts):
+    Returns
+    --------------
+    high_precision : bool
+        If true, timestamps are computed from timing counters. If not, they are
+        software timestamps
+    
+    timestamps : np.ndarray
+        Array of timestamps (sec) for samples in the frame
+
+    """
+    if len(_primary_idx_map) == 0:
+        for i, name in enumerate(frame['primary'].names):
+            _primary_idx_map[name] = i
+    
+    c0 = frame['primary'].data[_primary_idx_map['Counter0']]
+    c2 = frame['primary'].data[_primary_idx_map['Counter2']]
+
+    if np.any(c0):
+        return True, counters_to_timestamps(c0, c2)
+    else:
+        return False, np.array(frame['data'].times) / core.G3Units.s
+
+
+def fill_time_gaps(ts):
     """
     Fills gaps in an array of timestamps.
 
@@ -801,7 +811,7 @@ def get_start_and_end(files):
     # Get start time
     for frame in core.G3File(_files[0]):
         if frame.type == core.G3FrameType.Scan:
-            t0 = get_timestamps(frame)[0]
+            t0 = get_frame_times(frame)[1][0]
             break
     
     # Get end time
@@ -809,7 +819,7 @@ def get_start_and_end(files):
     for _frame in core.G3File(_files[-1]):
         if _frame.type == core.G3FrameType.Scan:
             frame = _frame
-    t1 = get_timestamps(frame)[-1]
+    t1 = get_frame_times(frame)[1][-1]
     
     return t0, t1
 

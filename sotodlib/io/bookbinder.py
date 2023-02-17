@@ -82,6 +82,16 @@ def split_ts_bits(c):
     b = c & MAXINT
     return a, b
 
+def counters_to_timestamps(c0, c2):
+    s, ns = split_ts_bits(c2)
+
+    # Add 20 years in seconds (accounting for leap years) to handle
+    # offset between EPOCH time referenced to 1990 relative to UNIX time.
+    c2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
+    ts = np.round(c2 - (c0 / 480000) ) + c0 / 480000
+    return ts
+
+
 def get_timestamps(f, use_counters):
     """
     Calculate the timestamp field for loaded data
@@ -104,11 +114,8 @@ def get_timestamps(f, use_counters):
     if use_counters and 'primary' in f.keys():
         counter0 = get_channel_data_from_name(f['primary'], 'Counter0')
         if np.any(counter0):
-            s, ns = split_ts_bits(get_channel_data_from_name(f['primary'], 'Counter2'))
-            # Add 20 years in seconds (accounting for leap years) to handle
-            # offset between EPOCH time referenced to 1990 relative to UNIX time.
-            counter2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
-            timestamps = np.round(counter2 - (counter0 / 480000) ) + counter0 / 480000
+            counter2 = get_channel_data_from_name(f['primary'], 'Counter2')
+            timestamps = counters_to_timestamps(counter0, counter2)
             timestamps *= core.G3Units.s
         else:
             raise TimingSystemError("No timing counters found")
