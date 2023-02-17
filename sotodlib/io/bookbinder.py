@@ -7,124 +7,8 @@ import numpy as np
 import itertools
 import yaml
 from scipy.interpolate import interp1d
+from .load_smurf import split_ts_bits
 
-
-def pos2vel(p):
-    """From a given position vector, compute the velocity vector
-
-    Parameters
-    ----------
-    p : np.ndarray
-        Position vector
-
-    Returns
-    -------
-    np.ndarray
-        Velocity vector
-
-    """
-    return np.ediff1d(p)
-
-def get_channel_names(s, rids=None):
-    """
-    Retrieve the channel names in a G3SuperTimestream. If provided, matches readout IDs to the
-    associated channels and returns them
-
-    Parameters
-    ----------
-    s : G3SuperTimestream
-        Timestream to query
-    rids : list
-        List of readout IDs
-
-    Returns
-    -------
-    list
-        List of channel names
-    """
-    if rids is not None:
-        # check compatability
-        assert len(s.names) == len(rids)
-        assert list(s.names) == sorted(s.names)  # name sure things are in our assumed order
-        # maybe more checks are needed here...
-        return rids
-    else:
-        return s.names
-
-def get_channel_data_from_name(s, channel_name):
-    """
-    From the channel name of a G3SuperTimestream (as listed in .names), retrieve
-    the associated data vector
-
-    Parameters
-    ----------
-    s : G3SuperTimestream
-        Input timestream
-    channel_name : str
-        The name of the channel, exactly as listed in the .names field
-
-    Returns
-    -------
-    np.ndarray
-        Data vector associated with that channel name
-    """
-    if channel_name not in s.names:
-        raise KeyError(f"{channel_name} not found in this SuperTimestream")
-    idx = list(s.names).index(channel_name)
-    return s.data[idx]
-
-def split_ts_bits(c):
-    """
-    Split up 64 bit to 2x32 bit
-    """
-    NUM_BITS_PER_INT = 32
-    MAXINT = (1 << NUM_BITS_PER_INT) - 1
-    a = (c >> NUM_BITS_PER_INT) & MAXINT
-    b = c & MAXINT
-    return a, b
-
-def counters_to_timestamps(c0, c2):
-    s, ns = split_ts_bits(c2)
-
-    # Add 20 years in seconds (accounting for leap years) to handle
-    # offset between EPOCH time referenced to 1990 relative to UNIX time.
-    c2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
-    ts = np.round(c2 - (c0 / 480000) ) + c0 / 480000
-    return ts
-
-
-def get_timestamps(f, use_counters):
-    """
-    Calculate the timestamp field for loaded data
-
-    Copied from load_smurf.py (Jan 23, 2023)
-
-    Parameters
-    ----------
-    f : G3Frame
-        Input SMuRF frame containing data in G3SuperTimestream format
-    use_counters : bool
-        Whether to calcuate the timestamps from the timing counters.
-        If false, returns the times recorded in the .times field.
-
-    Returns
-    -------
-    G3VectorTime
-        The array of computed timestamps
-    """
-    if use_counters and 'primary' in f.keys():
-        counter0 = get_channel_data_from_name(f['primary'], 'Counter0')
-        if np.any(counter0):
-            counter2 = get_channel_data_from_name(f['primary'], 'Counter2')
-            timestamps = counters_to_timestamps(counter0, counter2)
-            timestamps *= core.G3Units.s
-        else:
-            raise TimingSystemError("No timing counters found")
-    elif use_counters and 'primary' not in f.keys():
-        raise TimingSystemError("'primary' field not found")
-    else:
-        timestamps = f['data'].times
-    return core.G3VectorTime(timestamps)
 
 class _HKBundle():
     """
@@ -1142,6 +1026,112 @@ class TimingSystemError(Exception):
 #####################
 # Utility functions #
 #####################
+
+def pos2vel(p):
+    """From a given position vector, compute the velocity vector
+
+    Parameters
+    ----------
+    p : np.ndarray
+        Position vector
+
+    Returns
+    -------
+    np.ndarray
+        Velocity vector
+
+    """
+    return np.ediff1d(p)
+
+def get_channel_names(s, rids=None):
+    """
+    Retrieve the channel names in a G3SuperTimestream. If provided, matches readout IDs to the
+    associated channels and returns them
+
+    Parameters
+    ----------
+    s : G3SuperTimestream
+        Timestream to query
+    rids : list
+        List of readout IDs
+
+    Returns
+    -------
+    list
+        List of channel names
+    """
+    if rids is not None:
+        # check compatability
+        assert len(s.names) == len(rids)
+        assert list(s.names) == sorted(s.names)  # name sure things are in our assumed order
+        # maybe more checks are needed here...
+        return rids
+    else:
+        return s.names
+
+def get_channel_data_from_name(s, channel_name):
+    """
+    From the channel name of a G3SuperTimestream (as listed in .names), retrieve
+    the associated data vector
+
+    Parameters
+    ----------
+    s : G3SuperTimestream
+        Input timestream
+    channel_name : str
+        The name of the channel, exactly as listed in the .names field
+
+    Returns
+    -------
+    np.ndarray
+        Data vector associated with that channel name
+    """
+    if channel_name not in s.names:
+        raise KeyError(f"{channel_name} not found in this SuperTimestream")
+    idx = list(s.names).index(channel_name)
+    return s.data[idx]
+
+def counters_to_timestamps(c0, c2):
+    s, ns = split_ts_bits(c2)
+
+    # Add 20 years in seconds (accounting for leap years) to handle
+    # offset between EPICS time referenced to 1990 relative to UNIX time.
+    c2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
+    ts = np.round(c2 - (c0 / 480000) ) + c0 / 480000
+    return ts
+
+def get_timestamps(f, use_counters):
+    """
+    Calculate the timestamp field for loaded data
+
+    Copied from load_smurf.py (Jan 23, 2023)
+
+    Parameters
+    ----------
+    f : G3Frame
+        Input SMuRF frame containing data in G3SuperTimestream format
+    use_counters : bool
+        Whether to calcuate the timestamps from the timing counters.
+        If false, returns the times recorded in the .times field.
+
+    Returns
+    -------
+    G3VectorTime
+        The array of computed timestamps
+    """
+    if use_counters and 'primary' in f.keys():
+        counter0 = get_channel_data_from_name(f['primary'], 'Counter0')
+        if np.any(counter0):
+            counter2 = get_channel_data_from_name(f['primary'], 'Counter2')
+            timestamps = counters_to_timestamps(counter0, counter2)
+            timestamps *= core.G3Units.s
+        else:
+            raise TimingSystemError("No timing counters found")
+    elif use_counters and 'primary' not in f.keys():
+        raise TimingSystemError("'primary' field not found")
+    else:
+        timestamps = f['data'].times
+    return core.G3VectorTime(timestamps)
 
 def fill_time_gaps(ts):
     """
