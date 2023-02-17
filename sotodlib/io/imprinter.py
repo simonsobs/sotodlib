@@ -770,7 +770,7 @@ def fill_time_gaps(ts):
     """
     # Find indices where gaps occur and how long each gap is
     dts = np.diff(ts)
-    dt = np.mean(dts)
+    dt = np.median(dts)
     missing = np.round(dts/dt - 1).astype(int)
     total_missing = int(np.sum(missing))
 
