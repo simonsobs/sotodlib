@@ -284,10 +284,18 @@ def export_obs_ancil(
                 obs.shared[boresight_radec].data[slc, :]
             )
 
-        # FIXME:  boresight / corotation should be extracted from obs metadata
-
         if hwp_angle is not None and hwp_angle in obs.shared:
             ancil["hwp_enc"] = c3g.G3VectorDouble(obs.shared[hwp_angle].data[slc])
+
+        if corotator_angle is not None and corotator_angle in obs.shared:
+            ancil["corotation_enc"] = c3g.G3VectorDouble(
+                obs.shared[corotator_angle].data[slc]
+            )
+
+        if boresight_angle is not None and boresight_angle in obs.shared:
+            ancil["boresight_enc"] = c3g.G3VectorDouble(
+                obs.shared[boresight_angle].data[slc]
+            )
 
         frame["ancil"] = ancil
         output.append(frame)

@@ -23,8 +23,7 @@ from ._helpers import calibration_schedule, close_data_and_comm, simulation_test
 
 
 class SimStimulatorTest(unittest.TestCase):
-    def test_instantiate(self):
-        """Test instantiating a simulation operator."""
+    def test_sim_stimulator(self):
         if not toast_available:
             print("toast cannot be imported- skipping unit tests", flush=True)
             return
