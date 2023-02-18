@@ -256,7 +256,7 @@ class SaveBooks(Operator):
                     frame_intervals=frame_intervals,
                     redist_sampsets=redist_sampsets,
                 )
-                if ob.comm.comm_group is None:
+                if ob.comm.comm_group is not None:
                     ob.comm.comm_group.barrier()
 
             # Delete our temporary frame interval if we created it
