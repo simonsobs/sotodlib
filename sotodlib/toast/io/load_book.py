@@ -178,49 +178,59 @@ class DataSpreader(object):
                 # Each sample set contains exactly one frame
                 self.frame_target[foff] = iproc
                 foff += 1
-        # print(f"DataSpreader obs = {obs}, frame_target = {self.frame_target}", flush=True)
         self.cur_frame = 0
         self.cur_proc = 0
-        self.frame_buffer = list()
+        self.send_buffer = list()
+        self.recv_buffer = list()
 
     def __call__(self, frame):
+        # This function will only be called on rank 0
+        if frame is not None and frame.type == c3g.G3FrameType.Scan:
+            # Accumulate scan frame to send buffer
+            if self.frame_target[self.cur_frame] != self.cur_proc:
+                # Done with this process
+                if self.cur_proc == 0:
+                    # Copy to our own receive buffer
+                    self.recv_buffer = [x for x in self.send_buffer]
+                else:
+                    self.obs.comm.comm_group.send(
+                        self.send_buffer, self.cur_proc, tag=self.cur_proc
+                    )
+                self.cur_proc = self.frame_target[self.cur_frame]
+                self.send_buffer.clear()
+            self.send_buffer.append(frame)
+            self.cur_frame += 1
+
+    def flush(self):
         if self.obs.comm.group_rank != 0:
             # Wait to receive our list of frames.  This code only runs if the group
             # has more than one process, so no need to check comm for None.
-            received = self.obs.comm.recv(source=0, tag=self.obs.comm.group_rank)
-            self._unpack_frames(received)
-        elif frame is not None:
-            if frame.type == c3g.G3FrameType.EndProcessing:
-                # Flush the remaining frame buffer
-                if len(self.frame_buffer) > 0:
-                    if self.cur_proc == 0:
-                        # Process our own frames
-                        self._unpack_frames(self.frame_buffer)
-                    else:
-                        # Send them.  This will only happen if there are multiple
-                        # processes in the group.  No need to check comm for None.
-                        self.obs.comm.comm_group.send(
-                            self.frame_buffer, self.cur_proc, tag=self.cur_proc
-                        )
-            elif frame.type == c3g.G3FrameType.Scan:
-                # Accumulate scan frame to buffer
-                if self.frame_target[self.cur_frame] != self.cur_proc:
-                    # Done with this process
-                    if self.cur_proc == 0:
-                        # Process our own frames
-                        self._unpack_frames(self.frame_buffer)
-                    else:
-                        # Send them.  This will only happen if there are multiple
-                        # processes in the group.  No need to check comm for None.
-                        self.obs.comm.comm_group.send(
-                            self.frame_buffer, self.cur_proc, tag=self.cur_proc
-                        )
-                    self.cur_proc = self.frame_target[self.cur_frame]
-                    self.frame_buffer.clear()
-                self.frame_buffer.append(frame)
-                self.cur_frame += 1
+            self.recv_buffer = self.obs.comm.comm_group.recv(
+                source=0,
+                tag=self.obs.comm.group_rank,
+            )
+            self._unpack_frames(self.recv_buffer)
+        else:
+            # Root process flushes remaining buffer
+            if self.cur_proc == 0:
+                # This means there was only one process- just unpack the
+                # send buffer.
+                self._unpack_frames(self.send_buffer)
+            else:
+                # We were accumulating the buffer for another process when
+                # the frame stream ended.  Send it now.
+                self.obs.comm.comm_group.send(
+                    self.send_buffer, self.cur_proc, tag=self.cur_proc
+                )
+                # Also unpack our own frames
+                self._unpack_frames(self.recv_buffer)
+        # Reset counters
+        self.cur_frame = 0
+        self.cur_proc = 0
+        self.recv_buffer = list()
+        self.send_buffer = list()
 
-    def _unpack_frames(self, received):
+    def _unpack_frames(self, buffer):
         # Since the data is distributed in the sample direction, every process has
         # exclusive use of the column shared objects.  This means it is safe to
         # set those buffers directly.
@@ -229,17 +239,17 @@ class DataSpreader(object):
         # print(f"UNPACK frames for telescope {self.obs.telescope.name}", flush=True)
         fpdata = self.obs.telescope.focalplane.detector_data
         # print(f"  FPDATA = {fpdata[:3]}", flush=True)
-        for frm in received:
+        for frm in buffer:
             ancil = frm["ancil"]
             times = t3g.from_g3_time(ancil.times)
             n = len(times)
             self.obs.shared[self.obs_fields["times"]].data[off : off + n] = times
-            self.obs.shared[self.obs_fields["azimuth"]].data[
-                off : off + n
-            ] = np.array(ancil["az_enc"], copy=False)
-            self.obs.shared[self.obs_fields["elevation"]].data[
-                off : off + n
-            ] = ancil["el_enc"]
+            self.obs.shared[self.obs_fields["azimuth"]].data[off : off + n] = np.array(
+                ancil["az_enc"], copy=False
+            )
+            self.obs.shared[self.obs_fields["elevation"]].data[off : off + n] = ancil[
+                "el_enc"
+            ]
             if "flags" in ancil:
                 self.obs.shared[self.obs_fields["shared_flags"]].data[
                     off : off + n
@@ -271,16 +281,16 @@ class DataSpreader(object):
                 # print(f"{self.obs.name} detmap = {detmap}")
             # print(f"DBG LOAD frame {off}:{off+n} signal = {frm['signal'].data[:5,:]}")
             # print(f"LOAD frame {off}:{off+n} signal = {frm['signal'].data[detmap,:]}")
-            self.obs.detdata[self.obs_fields["det_data"]][:, off:off+n] = frm["signal"].data[
-                detmap, :
-            ]
+            self.obs.detdata[self.obs_fields["det_data"]][:, off : off + n] = frm[
+                "signal"
+            ].data[detmap, :]
             if "signal_units" in frm and frm["signal_units"] is not None:
                 # We have some unit information
                 # print(f"Frame units = {frm['signal_units']}")
                 self.obs.detdata[self.obs_fields["det_data"]].update_units(
                     t3g.from_g3_unit(frm["signal_units"])
                 )
-            self.obs.detdata[self.obs_fields["det_flags"]][:, off:off+n] = np.array(
+            self.obs.detdata[self.obs_fields["det_flags"]][:, off : off + n] = np.array(
                 frm["flags"].data[detmap, :], dtype=np.uint8
             )
 
@@ -367,9 +377,8 @@ def import_obs_data(
             load_pipe.Add(c3g.G3Reader(ffile))
             load_pipe.Add(spreader)
             load_pipe.Run()
-    else:
-        # Receive
-        spreader(None)
+    # Unpack local frames
+    spreader.flush()
 
 
 @toast.timing.function_timer
@@ -541,6 +550,9 @@ def read_book(
         framefiles = glob.glob(os.path.join(book_dir, f"D_{wafer}_*.g3"))
         framefiles.extend(glob.glob(os.path.join(book_dir, f"D_{wafer}_*.g3.gz")))
 
+        # Esure that frame files are processed in order!
+        framefiles.sort()
+
         # One process gets the D-frame info
         frame_sizes = None
         readout_ids = None
@@ -602,7 +614,9 @@ def read_book(
                 wafer,
                 bnd,
             )
-            telescope = Telescope(tele_name, uid=tele_uid, focalplane=focalplane, site=site)
+            telescope = Telescope(
+                tele_name, uid=tele_uid, focalplane=focalplane, site=site
+            )
             obs_name = f"{session.name}_{tele_name}"
 
             # Create the observation
@@ -635,6 +649,25 @@ def read_book(
             position, velocity = site.position_velocity(obs.shared[obs_fields["times"]])
             obs.shared[defaults.position].data[:] = position
             obs.shared[defaults.velocity].data[:] = velocity
+
+            if noise_dir is not None:
+                # FIXME: we could regex match on a glob here to find the
+                # observation key name to use.
+                noise_file = os.path.join(
+                    noise_dir, f"{book_name}_{wafer}_{bnd}_noise_model.h5"
+                )
+                # print(f"Loading focalplane {fp_file}", flush=True)
+                if os.path.isfile(noise_file):
+                    # We have a file, load it
+                    nse = toast.noise.Noise()
+                    with toast.io.H5File(noise_file, "r", comm=comm.comm_group) as f:
+                        nse.load_hdf5(f.handle, obs)
+                    obs["noise_model"] = nse
+                else:
+                    log.warning_rank(
+                        f"Noise model file {noise_file} does not exist, skipping",
+                        comm=comm.comm_group,
+                    )
 
             session_obs.append(obs)
 
