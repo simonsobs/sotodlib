@@ -43,7 +43,7 @@ jobs:
       - name: Install MPICH
         run: |
           sudo apt update
-          sudo apt install -y libmpich-dev
+          sudo apt install -y libopenmpi-dev
 
       - name: Install Dependencies
         run: |
