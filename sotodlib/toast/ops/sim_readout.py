@@ -82,6 +82,16 @@ class SimReadout(Operator):
         "function of their distance on the focalplane.",
     )
 
+    yield_center = Float(
+        0.8, help="Center of Gaussian distribution for detector yield"
+    )
+
+    yield_sigma = Float(
+        0.1, help="Width of Gaussian distribution for detector yield"
+    )
+
+    simulate_yield = Bool(True, help="Simulate failed bolometers")
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -155,8 +165,36 @@ class SimReadout(Operator):
     @function_timer
     def _fail_bolometers(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank):
         """Simulate bolometers that fail to bias or otherwise are unusable"""
+        if not self.simulate_yield:
+            return
+        log = Logger.get()
+        np.random.seed(int(obs_id + self.realization + 59127574) % 2**32)
+        yield_ = self.yield_center + np.random.randn() * self.yield_sigma
+        yield_ = min(1, max(0, yield_))
+        nfail = 0
         for det in local_dets:
-            sig = signal[det]
+            det_id = focalplane[det]["uid"]
+            np.random.seed(int(obs_id + self.realization + 59127574 + det_id) % 2**32)
+            x = np.random.rand()
+            if x > yield_:
+                # FIXME: We should choose between various failure modes here
+                #
+                # Fail the bolometer by replacing the signal with
+                # a linear trend.  We do *not* record the failure in the
+                # detector flags so the data *cannot* be reduced without
+                # some sort of mitigation
+                start, stop = np.random.rand(2) * 10 * u.K
+                x = (times - times[0]) / (times[-1] - times[0])
+                trend = start + (stop - start) * x
+                signal[det] = trend
+                nfail += 1
+        nfail = comm.allreduce(nfail)
+        ndet = len(all_dets)
+        log.debug_rank(
+            f"Failed {nfail} / {ndet} = {nfail/ndet:.3f} bolometers.  "
+            f"Target yield was {yield_:.3f}",
+            comm=comm,
+        )
         return
 
     @function_timer
