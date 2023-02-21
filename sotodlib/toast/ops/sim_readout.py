@@ -20,7 +20,7 @@ from toast.ops.operator import Operator
 from toast.timing import function_timer
 from toast.traits import (Bool, Float, Instance, Int, Quantity, Unicode,
                           trait_docs)
-from toast.utils import Environment, Logger, Timer, unit_conversion
+from toast.utils import Environment, Logger, Timer, unit_conversion, name_UID
 
 XAXIS, YAXIS, ZAXIS = np.eye(3)
 
@@ -50,7 +50,7 @@ class SimReadout(Operator):
         help="Observation detdata key for simulated signal",
     )
 
-    glitch_rate = Quantity(1.0 * u.Hz, help="Glitch occurrence rate")
+    glitch_rate = Quantity(0.1 * u.Hz, help="Glitch occurrence rate")
 
     glitch_amplitude_center = Quantity(
         1 * u.K, help="Center of Gaussian distribution for glitch amplitude"
@@ -58,6 +58,22 @@ class SimReadout(Operator):
 
     glitch_amplitude_sigma = Quantity(
         1 * u.K, help="Width of Gaussian distribution for glitch amplitude"
+    )
+
+    bias_line_glitch_rate = Quantity(0.1 * u.Hz, help="Glitch occurrence rate")
+
+    bias_line_glitch_amplitude_center = Quantity(
+        1 * u.K, help="Center of Gaussian distribution for glitch amplitude"
+    )
+
+    bias_line_glitch_amplitude_sigma = Quantity(
+        1 * u.K, help="Width of Gaussian distribution for glitch amplitude"
+    )
+
+    bias_line_glitch_amplitude_scatter = Float(
+        1.0,
+        help="Width of Gaussian distribution for *relative* glitch amplitude.  "
+        "Negative factors get cropped."
     )
 
     simulate_glitches = Bool(True, help="Enable glitch simulation")
@@ -70,6 +86,22 @@ class SimReadout(Operator):
 
     jump_amplitude_sigma = Quantity(
         1 * u.mK, help="Width of Gaussian distribution for jump amplitude"
+    )
+
+    bias_line_jump_rate = Quantity(0.001 * u.Hz, help="Jump occurrence rate")
+
+    bias_line_jump_amplitude_center = Quantity(
+        0 * u.mK, help="Center of Gaussian distribution for jump amplitude"
+    )
+
+    bias_line_jump_amplitude_sigma = Quantity(
+        1 * u.mK, help="Width of Gaussian distribution for jump amplitude"
+    )
+
+    bias_line_jump_amplitude_scatter = Float(
+        1.0,
+        help="Width of Gaussian distribution for *relative* jump amplitude.  "
+        "Negative factors get cropped."
     )
 
     simulate_jumps = Bool(True, help="Enable jump simulation")
@@ -95,75 +127,174 @@ class SimReadout(Operator):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+    def _simulate_events(self, seed, nsample, events_per_sample):
+        """Simulate a Poissonian distribution of events"""
+        np.random.seed(int(seed) % 2**32)
+        event_counts = np.random.poisson(events_per_sample, nsample)
+        event_indices = np.argwhere(event_counts).ravel()
+        event_counts = event_counts[event_indices].copy()
+        return event_counts, event_indices
+
+    def _simulate_amplitudes(self, seed, event_counts, amplitude_center, amplitude_sigma):
+        """Simulate Gaussian event amplitudes"""
+        # Drawing amplitudes for every affected sample is not the
+        # same as drawing amplitudes for every event but it is fast.
+        # If we routinely have more than one event occurring during
+        # the same time stamp we are in trouble
+        np.random.seed(int(seed) % 2**32)
+        n = event_counts.size
+        amplitudes = amplitude_center + np.random.randn(n) * amplitude_sigma
+        events = amplitudes * event_counts
+        return events
+
     @function_timer
-    def _add_glitches(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank):
+    def _add_glitches(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det):
         """Simulate glitches"""
         if not self.simulate_glitches:
             return
         log = Logger.get()
         fsample = focalplane.sample_rate
-        events_per_sample = self.glitch_rate.to_value(u.Hz) / fsample.to_value(u.Hz)
         nsample = times.size
+
+        # Uncorrelated glitches
+        events_per_sample = self.glitch_rate.to_value(u.Hz) / fsample.to_value(u.Hz)
         nglitch = 0
         for det in local_dets:
             det_id = focalplane[det]["uid"]
             sig = signal[det]
-            np.random.seed(
-                int(obs_id + det_id  + self.realization) % 2**32
+            event_counts, event_indices = self._simulate_events(
+                obs_id + det_id  + self.realization + 8123765,
+                nsample,
+                events_per_sample,
             )
-            event_counts = np.random.poisson(events_per_sample, nsample)
-            event_indices = np.argwhere(event_counts).ravel()
-            nindex = event_indices.size
-            # Drawing amplitudes for every affected sample is not the
-            # same as drawing amplitudes for every event but it is fast.
-            # If we routinely have more than one event occurring during
-            # the same time stamp we are in trouble
-            amplitudes = self.glitch_amplitude_center \
-                         + np.random.randn(nindex) * self.glitch_amplitude_sigma
-            events = amplitudes.to_value(signal.units) \
-                     * event_counts[event_indices]
+            events = self._simulate_amplitudes(
+                obs_id + det_id  + self.realization + 150243972,
+                event_counts,
+                self.glitch_amplitude_center.to_value(signal.units),
+                self.glitch_amplitude_sigma.to_value(signal.units),
+            )
+            # Add delta-function glitches
             sig[event_indices] += events
             nglitch += np.sum(event_counts)
         nglitch = comm.allreduce(nglitch)
-        log.debug_rank(f"Simulated {nglitch} glitches", comm=comm)
+        log.debug_rank(f"Simulated {nglitch} uncorrelated glitches", comm=comm)
+
+        # Bias line glitches
+        events_per_sample = self.bias_line_glitch_rate.to_value(u.Hz) / fsample.to_value(u.Hz)
+        nglitch = 0
+        for tube, wafers in bias2det.items():
+            tube_id = name_UID(tube)
+            for wafer, biases in wafers.items():
+                wafer_id = name_UID(wafer)
+                for bias, dets in biases.items():
+                    # The event locations on the bias line are shared
+                    event_counts, event_indices = self._simulate_events(
+                        obs_id + tube_id + wafer_id + bias  + self.realization + 5295629,
+                        nsample,
+                        events_per_sample,
+                    )
+                    # Base amplitude is shared ...
+                    events = self._simulate_amplitudes(
+                        obs_id + tube_id + wafer_id  + self.realization + 150243972,
+                        event_counts,
+                        self.bias_line_glitch_amplitude_center.to_value(signal.units),
+                        self.bias_line_glitch_amplitude_sigma.to_value(signal.units),
+                    )
+                    # ... but modulated at the detector level
+                    for det in dets:
+                        det_id = focalplane[det]["uid"]
+                        sig = signal[det]
+                        scale = self._simulate_amplitudes(
+                            obs_id + det_id  + self.realization + 74712734,
+                            event_counts,
+                            1,
+                            self.bias_line_glitch_amplitude_scatter,
+                        )
+                        scale[scale < 0] = 0
+                        # Add delta-function glitches
+                        sig[event_indices] += events * scale
+                    nglitch += np.sum(event_counts)
+        nglitch = comm.allreduce(nglitch)
+        log.debug_rank(f"Simulated {nglitch} correlated glitches", comm=comm)
+
         return
 
     @function_timer
-    def _add_jumps(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank):
+    def _add_jumps(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det):
         """Simulate baseline jumps"""
         if not self.simulate_jumps:
             return
         log = Logger.get()
         fsample = focalplane.sample_rate
-        events_per_sample = self.jump_rate.to_value(u.Hz) / fsample.to_value(u.Hz)
         nsample = times.size
+
+        # Uncorrelated jumps
+        events_per_sample = self.jump_rate.to_value(u.Hz) / fsample.to_value(u.Hz)
         njump = 0
         for det in local_dets:
             det_id = focalplane[det]["uid"]
             sig = signal[det]
-            np.random.seed(
-                int(obs_id + det_id  + self.realization + 45835364) % 2**32
+            event_counts, event_indices = self._simulate_events(
+                obs_id + det_id  + self.realization + 45835364,
+                nsample,
+                events_per_sample,
             )
-            event_counts = np.random.poisson(events_per_sample, nsample)
-            event_indices = np.argwhere(event_counts).ravel()
-            nindex = event_indices.size
-            # Drawing amplitudes for every affected sample is not the
-            # same as drawing amplitudes for every event but it is fast.
-            # If we routinely have more than one event occurring during
-            # the same time stamp we are in trouble
-            amplitudes = self.jump_amplitude_center \
-                         + np.random.randn(nindex) * self.jump_amplitude_sigma
-            events = amplitudes.to_value(signal.units) \
-                     * event_counts[event_indices]
+            events = self._simulate_amplitudes(
+                obs_id + det_id  + self.realization + 250243972,
+                event_counts,
+                self.jump_amplitude_center.to_value(signal.units),
+                self.jump_amplitude_sigma.to_value(signal.units),
+            )
+            # Change baseline at every event
             for index, event in zip(event_indices, events):
                 sig[index:] += event
             njump += np.sum(event_counts)
         njump = comm.allreduce(njump)
-        log.debug_rank(f"Simulated {njump} jumps", comm=comm)
+        log.debug_rank(f"Simulated {njump} uncorrelated jumps", comm=comm)
+
+        # Bias line jumps
+        events_per_sample = self.bias_line_jump_rate.to_value(u.Hz) / fsample.to_value(u.Hz)
+        njump = 0
+        for tube, wafers in bias2det.items():
+            tube_id = name_UID(tube)
+            for wafer, biases in wafers.items():
+                wafer_id = name_UID(wafer)
+                for bias, dets in biases.items():
+                    # The event locations on the bias line are shared
+                    event_counts, event_indices = self._simulate_events(
+                        obs_id + tube_id + wafer_id + bias  + self.realization + 936582,
+                        nsample,
+                        events_per_sample,
+                    )
+                    # Base amplitude is shared ...
+                    events = self._simulate_amplitudes(
+                        obs_id + tube_id + wafer_id  + self.realization + 1295723,
+                        event_counts,
+                        self.bias_line_jump_amplitude_center.to_value(signal.units),
+                        self.bias_line_jump_amplitude_sigma.to_value(signal.units),
+                    )
+                    # ... but modulated at the detector level
+                    for det in dets:
+                        det_id = focalplane[det]["uid"]
+                        sig = signal[det]
+                        scale = self._simulate_amplitudes(
+                            obs_id + det_id  + self.realization + 83276345,
+                            event_counts,
+                            1,
+                            self.bias_line_jump_amplitude_scatter,
+                        )
+                        scale[scale < 0] = 0
+                        # Change baseline at every event
+                        for index, event in zip(event_indices, events * scale):
+                            sig[index:] += event
+                    njump += np.sum(event_counts)
+        njump = comm.allreduce(njump)
+        log.debug_rank(f"Simulated {njump} correlated jumps", comm=comm)
+
         return
 
     @function_timer
-    def _fail_bolometers(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank):
+    def _fail_bolometers(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det):
         """Simulate bolometers that fail to bias or otherwise are unusable"""
         if not self.simulate_yield:
             return
@@ -198,7 +329,7 @@ class SimReadout(Operator):
         return
 
     @function_timer
-    def _misidentify_bolometers(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank):
+    def _misidentify_bolometers(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det):
         """Swap detector data between two confused readout channels"""
         if not self.misidentify_bolometers:
             return
@@ -272,18 +403,32 @@ class SimReadout(Operator):
                     det2rank[det] = rank
             focalplane = obs.telescope.focalplane
             signal = obs.detdata[self.det_data]
+
+            # Map bias lines to detectors
+            bias2det = {}
+            for det in local_dets:
+                tube = focalplane[det]["tube_slot"]
+                if tube not in bias2det:
+                    bias2det[tube] = {}
+                wafer = focalplane[det]["wafer_slot"]
+                if wafer not in bias2det[tube]:
+                    bias2det[tube][wafer] = {}
+                bias = focalplane[det]["bias"]
+                if bias not in bias2det[tube][wafer]:
+                    bias2det[tube][wafer][bias] = []
+                bias2det[tube][wafer][bias].append(det)
     
             self._add_glitches(
-                comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank
+                comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det
             )
             self._add_jumps(
-                comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank
+                comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det
             )
             self._fail_bolometers(
-                comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank
+                comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det
             )
             self._misidentify_bolometers(
-                comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank
+                comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det
             )
             
         return
