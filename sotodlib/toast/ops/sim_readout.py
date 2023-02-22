@@ -147,16 +147,10 @@ class SimReadout(Operator):
         events = amplitudes * event_counts
         return events
 
-    @function_timer
-    def _add_glitches(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det):
-        """Simulate glitches"""
-        if not self.simulate_glitches:
-            return
+    def _add_uncorrelated_glitches(self, comm, signal, obs_id, focalplane, fsample, nsample, local_dets):
+        """Simulate uncorrelated electronic glitches"""
         log = Logger.get()
-        fsample = focalplane.sample_rate
-        nsample = times.size
 
-        # Uncorrelated glitches
         events_per_sample = self.glitch_rate.to_value(u.Hz) / fsample.to_value(u.Hz)
         nglitch = 0
         for det in local_dets:
@@ -179,7 +173,12 @@ class SimReadout(Operator):
         nglitch = comm.allreduce(nglitch)
         log.debug_rank(f"Simulated {nglitch} uncorrelated glitches", comm=comm)
 
-        # Bias line glitches
+        return
+
+    def _add_correlated_glitches(self, comm, signal, obs_id, focalplane, fsample, nsample, bias2det):
+        """Simulate bias line glitches"""
+        log = Logger.get()
+
         events_per_sample = self.bias_line_glitch_rate.to_value(u.Hz) / fsample.to_value(u.Hz)
         nglitch = 0
         for tube, wafers in bias2det.items():
@@ -216,6 +215,33 @@ class SimReadout(Operator):
                     nglitch += np.sum(event_counts)
         nglitch = comm.allreduce(nglitch)
         log.debug_rank(f"Simulated {nglitch} correlated glitches", comm=comm)
+
+        return
+
+    def _add_cosmic_ray_glitches(self, comm, signal, obs_id, focalplane, fsample, nsample):
+        """Simulate cosmic ray glitches
+
+        This is the only glitch population to be convolved with a time constant
+        """
+        return
+
+    @function_timer
+    def _add_glitches(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det):
+        """Simulate glitches"""
+        if not self.simulate_glitches:
+            return
+
+        fsample = focalplane.sample_rate
+        nsample = times.size
+
+        if self.glitch_rate != 0:
+            self._add_uncorrelated_glitches(comm, signal, obs_id, focalplane, fsample, nsample, local_dets)
+
+        if self.bias_line_glitch_rate != 0:
+            self._add_correlated_glitches(comm, signal, obs_id, focalplane, fsample, nsample, bias2det)
+
+        #if self.cosmic_ray_glitch_rate != 0:
+        #    self._add_cosmic_ray_glitches(comm, signal, obs_id, focalplane, fsample, nsample)
 
         return
 
@@ -417,7 +443,7 @@ class SimReadout(Operator):
                 if bias not in bias2det[tube][wafer]:
                     bias2det[tube][wafer][bias] = []
                 bias2det[tube][wafer][bias].append(det)
-    
+
             self._add_glitches(
                 comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det
             )
@@ -430,7 +456,7 @@ class SimReadout(Operator):
             self._misidentify_bolometers(
                 comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det
             )
-            
+
         return
 
     def _finalize(self, data, **kwargs):
