@@ -394,6 +394,8 @@ class SOFocalplane(Focalplane):
             sample_rate=sample_rate,
         )
 
+        self.platescale = hw.data["telescopes"][self.telescope]["platescale"] * u.deg / u.mm
+
 
 def update_creation_time(det_data, creation_time):
     """Update the readout_id column of a focalplane with a new creation time.

@@ -76,6 +76,28 @@ class SimReadout(Operator):
         "Negative factors get cropped."
     )
 
+    cosmic_ray_glitch_rate = Quantity(
+        0.000001 * u.Hz / u.mm**2,
+        help="Cosmic ray glitch rate *either* per unit focalplane area "
+        "e.g. [Hz / mm^2] *or* rate per the entire focalplane [Hz]",
+    )
+
+    cosmic_ray_glitch_amplitude_center = Quantity(
+        1 * u.K, help="Center of Gaussian distribution for glitch amplitude"
+    )
+
+    cosmic_ray_glitch_amplitude_sigma = Quantity(
+        1 * u.K, help="Width of Gaussian distribution for glitch amplitude"
+    )
+
+    cosmic_ray_correlation_length = Quantity(
+        10 * u.mm, help="Distance scale of cosmic ray events on the focalplane"
+    )
+
+    cosmic_ray_time_constant = Quantity(
+        1.0 * u.s, help="Dissipation time of cosmic ray events on the focaplane"
+    )
+
     simulate_glitches = Bool(True, help="Enable glitch simulation")
 
     jump_rate = Quantity(0.001 * u.Hz, help="Jump occurrence rate")
@@ -218,15 +240,92 @@ class SimReadout(Operator):
 
         return
 
-    def _add_cosmic_ray_glitches(self, comm, signal, obs_id, focalplane, fsample, nsample):
+    def _add_cosmic_ray_glitches(self, comm, signal, obs_id, focalplane, fsample, nsample, local_dets, det2position):
         """Simulate cosmic ray glitches
 
         This is the only glitch population to be convolved with a time constant
         """
+        log = Logger.get()
+
+        platescale = focalplane.platescale.to_value(u.deg / u.mm)
+        fov = focalplane.field_of_view.to_value(u.deg)
+        diameter = fov / platescale
+
+        # Glitches are simulated over a square grid and individual
+        # detectors are affected based on their proximity to the event
+        area = diameter**2
+        ratio = np.pi / 4  # square to disc area ratio
+        try:
+            # Did the user supply a rate for the entire focaplane?
+            glitch_rate = self.cosmic_ray_glitch_rate.to_value(u.Hz)
+            # Increase the rate to sample the glitches across a square area
+            glitch_rate /= ratio
+        except u.UnitConversionError:
+            # Nope, it must be per unit area
+            glitch_rate = self.cosmic_ray_glitch_rate.to_value(u.Hz / u.mm**2)
+            glitch_rate *= area
+
+        log.debug_rank(
+            f"FOV = {fov:.2f} deg, platescale = {platescale:.6f} deg/mm, \n"
+            f"focalplane diameter = {diameter} mm, area = {area * ratio:.3f} mm^2\n"
+            f"glitch_rate = {glitch_rate / area:.6f} Hz/mm^2, \n"
+            f"glitch_rate = {glitch_rate * ratio:.6f} Hz / focalplane",
+            comm=comm,
+        )
+
+        events_per_sample = glitch_rate / fsample.to_value(u.Hz)
+        event_counts, event_indices = self._simulate_events(
+            obs_id + self.realization + 98552896,
+            nsample,
+            events_per_sample,
+        )
+
+        # Generate a glitch profile that we will re-use
+        tau = self.cosmic_ray_time_constant
+        wtemplate = int(10 * tau.to_value(u.s) * fsample.to_value(u.Hz))
+        log.debug_rank(f"Width of the glitch template is {wtemplate}", comm=comm)
+        t = np.arange(wtemplate) / fsample.to_value(u.Hz)
+        template = np.exp(-t / tau.to_value(u.s))
+
+        # For every event, we need a location
+        sqradius = (0.5 * diameter)**2
+        center = self.cosmic_ray_glitch_amplitude_center.to_value(signal.units)
+        sigma = self.cosmic_ray_glitch_amplitude_sigma.to_value(signal.units)
+        corr_length = self.cosmic_ray_correlation_length.to_value(u.mm)
+        nglitch = 0
+        ndet = 0
+        for start, count in zip(event_indices, event_counts):
+            stop = min(start + wtemplate, nsample)
+            ind = slice(start, stop)
+            templ = template[:stop - start]
+            for i in range(count):
+                amp = center + np.random.randn() * sigma
+                x = (np.random.rand() - .5) * diameter
+                y = (np.random.rand() - .5) * diameter
+                if x**2 + y**2 > sqradius:
+                    continue
+                nglitch += 1
+                # Observe the glitch with the local detectors
+                for det in local_dets:
+                    xdet, ydet = det2position[det]
+                    dist = np.sqrt((x - xdet)**2 + (y - ydet)**2)
+                    if dist > 4 * corr_length:
+                        # This detector is to far to register
+                        continue
+                    ndet += 1
+                    amp_det = amp * np.exp(-dist / corr_length)
+                    signal[det][ind] += amp_det * templ
+        ndet = comm.allreduce(ndet)
+        log.debug_rank(
+            f"Simulated {nglitch} cosmic ray glitches and {ndet} "
+            f"detector events",
+            comm=comm,
+        )
+
         return
 
     @function_timer
-    def _add_glitches(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det):
+    def _add_glitches(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, bias2det, det2position):
         """Simulate glitches"""
         if not self.simulate_glitches:
             return
@@ -240,13 +339,13 @@ class SimReadout(Operator):
         if self.bias_line_glitch_rate != 0:
             self._add_correlated_glitches(comm, signal, obs_id, focalplane, fsample, nsample, bias2det)
 
-        #if self.cosmic_ray_glitch_rate != 0:
-        #    self._add_cosmic_ray_glitches(comm, signal, obs_id, focalplane, fsample, nsample)
+        if self.cosmic_ray_glitch_rate != 0:
+            self._add_cosmic_ray_glitches(comm, signal, obs_id, focalplane, fsample, nsample, local_dets, det2position)
 
         return
 
     @function_timer
-    def _add_jumps(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det):
+    def _add_jumps(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, bias2det):
         """Simulate baseline jumps"""
         if not self.simulate_jumps:
             return
@@ -320,7 +419,7 @@ class SimReadout(Operator):
         return
 
     @function_timer
-    def _fail_bolometers(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det):
+    def _fail_bolometers(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, bias2det):
         """Simulate bolometers that fail to bias or otherwise are unusable"""
         if not self.simulate_yield:
             return
@@ -355,7 +454,7 @@ class SimReadout(Operator):
         return
 
     @function_timer
-    def _misidentify_bolometers(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det):
+    def _misidentify_bolometers(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank):
         """Swap detector data between two confused readout channels"""
         if not self.misidentify_bolometers:
             return
@@ -444,17 +543,31 @@ class SimReadout(Operator):
                     bias2det[tube][wafer][bias] = []
                 bias2det[tube][wafer][bias].append(det)
 
+            # Map detectors to their physical position on the focalplane
+            platescale = focalplane.platescale.to_value(u.deg / u.mm)
+            det2position = {}
+            import matplotlib.pyplot as plt
+            xrot = qa.rotation(YAXIS, np.pi / 2)
+            for det in local_dets:
+                quat = focalplane[det]["quat"]
+                vec = qa.rotate(qa.mult(xrot, quat), ZAXIS)
+                lon, lat = hp.vec2dir(vec, lonlat=True)
+                x = lon / platescale
+                y = lat / platescale
+                plt.plot(x, y, 'o')
+                det2position[det] = (x, y)
+
             self._add_glitches(
-                comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det
+                comm, obs_id, times, focalplane, signal, all_dets, local_dets, bias2det, det2position,
             )
             self._add_jumps(
-                comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det
+                comm, obs_id, times, focalplane, signal, all_dets, local_dets, bias2det
             )
             self._fail_bolometers(
-                comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det
+                comm, obs_id, times, focalplane, signal, all_dets, local_dets, bias2det
             )
             self._misidentify_bolometers(
-                comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank, bias2det
+                comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank
             )
 
         return
