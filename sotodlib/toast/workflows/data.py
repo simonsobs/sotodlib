@@ -3,6 +3,7 @@
 """Data I/O operations.
 """
 
+import os
 import numpy as np
 from astropy import units as u
 import toast
@@ -22,12 +23,12 @@ def setup_load_data_context(operators):
         None
 
     """
-    raise NotImplementedError("LoadContext operator not yet merged.")
-    # operators.append(
-    #     so_ops.LoadContext(
-    #         name="load_context",
-    #     )
-    # )
+    operators.append(
+        so_ops.LoadContext(
+            name="load_context",
+            enabled=False,
+        )
+    )
     return
 
 
@@ -45,7 +46,6 @@ def load_data_context(job, otherargs, runargs, data):
         None
 
     """
-    raise NotImplementedError("LoadContext operator not yet merged.")
     # Configured operators for this job
     job_ops = job.operators
 
@@ -154,8 +154,11 @@ def save_data_hdf5(job, otherargs, runargs, data):
     # Configured operators for this job
     job_ops = job.operators
 
-    # Load it
+    # Dump it
     if job_ops.save_hdf5.enabled:
+        if hasattr(otherargs, "out_dir"):
+            hdf5_out = os.path.join(otherargs.out_dir, "data")
+            job_ops.save_hdf5.volume = hdf5_out
         job_ops.save_hdf5.apply(data)
 
 
