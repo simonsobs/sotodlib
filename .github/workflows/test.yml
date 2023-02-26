@@ -40,7 +40,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      - name: Install MPICH
+      - name: Install OpenMPI for Tests
         run: |
           sudo apt update
           sudo apt install -y libopenmpi-dev
