@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2019-2021 Simons Observatory.
+# Copyright (c) 2023-2023 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 """
@@ -209,6 +209,10 @@ def main():
 
     # We enforce only one process group for this job
     group_size = comm.size
+    if jobargs.group_size != group_size:
+        raise RuntimeError(
+            "This conversion script only works with a single process group"
+        )
 
     # Create the toast communicator
     toast_comm = toast.Comm(world=comm, groupsize=group_size)
