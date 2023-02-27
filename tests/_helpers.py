@@ -253,6 +253,12 @@ def simulation_test_data(
     # Create the communicator
     toastcomm = create_comm(mpicomm)
 
+    hwp_rpm = 120.0
+    hwp_name = defaults.hwp_angle
+    if telescope_name == "LAT":
+        hwp_name = None
+        hwp_rpm = None
+
     # Simulated telescope
     telescope = sotoast.simulated_telescope(
         hw=None,
@@ -279,8 +285,8 @@ def simulation_test_data(
         telescope=telescope,
         session_split_key="tele_wf_band",
         schedule=schedule,
-        hwp_angle=defaults.hwp_angle,
-        hwp_rpm=120.0,
+        hwp_angle=hwp_name,
+        hwp_rpm=hwp_rpm,
         weather="atacama",
         median_weather=True,
         detset_key=detset_key,
