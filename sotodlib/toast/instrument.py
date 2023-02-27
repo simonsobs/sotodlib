@@ -320,6 +320,9 @@ class SOFocalplane(Focalplane):
             bandcenters.append(0.5 * (lower + upper))
             bandwidths.append(upper - lower)
 
+        meta["platescale"] = hw.data["telescopes"][meta["telescope"]]["platescale"] \
+                             * u.deg / u.mm
+
         detdata = QTable(
             [
                 readout_id,
@@ -393,8 +396,6 @@ class SOFocalplane(Focalplane):
             field_of_view=field_of_view,
             sample_rate=sample_rate,
         )
-
-        self.platescale = hw.data["telescopes"][self.telescope]["platescale"] * u.deg / u.mm
 
 
 def update_creation_time(det_data, creation_time):

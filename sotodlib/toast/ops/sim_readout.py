@@ -247,7 +247,7 @@ class SimReadout(Operator):
         """
         log = Logger.get()
 
-        platescale = focalplane.platescale.to_value(u.deg / u.mm)
+        platescale = focalplane.detector_data.meta["platescale"].to_value(u.deg / u.mm)
         fov = focalplane.field_of_view.to_value(u.deg)
         diameter = fov / platescale
 
@@ -544,7 +544,9 @@ class SimReadout(Operator):
                 bias2det[tube][wafer][bias].append(det)
 
             # Map detectors to their physical position on the focalplane
-            platescale = focalplane.platescale.to_value(u.deg / u.mm)
+            platescale = focalplane.detector_data.meta[
+                "platescale"
+            ].to_value(u.deg / u.mm)
             det2position = {}
             import matplotlib.pyplot as plt
             xrot = qa.rotation(YAXIS, np.pi / 2)
