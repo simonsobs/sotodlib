@@ -3,7 +3,6 @@
 
 import h5py
 import os
-import pickle
 
 import traitlets
 import numpy as np
@@ -67,7 +66,7 @@ class SimSSO(Operator):
     beam_file = Unicode(
         None,
         allow_none=True,
-        help="Pickle file that stores the simulated beam",
+        help="HDF5 file that stores the simulated beam",
     )
 
     det_data = Unicode(
@@ -262,8 +261,10 @@ class SimSSO(Operator):
             # We have already read the single beam file.
             beam_dic = self.beam_props["ALL"]
         else:
-            with open(self.beam_file, "rb") as f_t:
-                beam_dic = pickle.load(f_t)
+            with h5py(self._beam_file, 'r') as f_t:
+                beam_dic = {}
+                beam_dic["data"] = f_t["beam"][:]
+                beam_dic["size"] = [[f_t["beam"].attrs["size"], f_t["beam"].attrs["res"]], [f_t["beam"].attrs["npix"], 1]]
                 self.beam_props["ALL"] = beam_dic
         description = beam_dic["size"]  # 2d array [[size, res], [n, 1]]
         model = beam_dic["data"]
