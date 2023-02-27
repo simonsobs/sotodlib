@@ -66,7 +66,7 @@ class SimSSO(Operator):
     beam_file = Unicode(
         None,
         allow_none=True,
-        help="Pickle file that stores the simulated beam",
+        help="HDF5 file that stores the simulated beam",
     )
 
     det_data = Unicode(
