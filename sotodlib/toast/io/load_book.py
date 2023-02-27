@@ -267,9 +267,17 @@ class DataSpreader(object):
             if "hwp_enc" in ancil:
                 self.obs.shared[self.obs_fields["hwp_angle"]].data[
                     off : off + n
-                ] = np.array(ancil["hwp_enc"]).astype(np.uint8)
+                ] = np.array(ancil["hwp_enc"]).astype(np.float64)
 
-            # FIXME:  How to handle boresight angle and corotator?
+            if "corotation_enc" in ancil:
+                self.obs.shared[self.obs_fields["corotator_angle"]].data[
+                    off : off + n
+                ] = np.array(ancil["corotation_enc"]).astype(np.float64)
+
+            if "boresight_enc" in ancil:
+                self.obs.shared[self.obs_fields["boresight_angle"]].data[
+                    off : off + n
+                ] = np.array(ancil["boresight_enc"]).astype(np.float64)
 
             if detmap is None:
                 # Compute the mapping between observation detectors and rows of the

@@ -536,9 +536,11 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
             if not os.path.isdir(hdf5_path):
                 os.makedirs(hdf5_path)
         ops.save_hdf5.volume = hdf5_path
-
+        ops.save_books.book_dir = os.path.join(args.out_dir, "books")
     ops.save_hdf5.apply(data)
     log.info_rank("Saved HDF5 data in", comm=world_comm, timer=timer)
+    ops.save_books.apply(data)
+    log.info_rank("Saved book data in", comm=world_comm, timer=timer)
 
     return data
 
@@ -839,6 +841,7 @@ def main():
             name="convolve_time_constant", deconvolve=False, enabled=False
         ),
         toast.ops.SaveHDF5(name="save_hdf5", enabled=False),
+        so_ops.SaveBooks(name="save_books", enabled=False),
         toast.ops.GainScrambler(name="gainscrambler", enabled=False),
         toast.ops.SimNoise(name="sim_noise"),
         toast.ops.PixelsHealpix(name="pixels_healpix_radec"),

@@ -94,15 +94,21 @@ class LoadBooks(Operator):
 
     corotator_angle = Unicode(
         defaults.corotator_angle,
+        allow_none=True,
         help="Observation shared key for corotator_angle (if it is used)",
     )
 
     boresight_angle = Unicode(
         defaults.boresight_angle,
+        allow_none=True,
         help="Observation shared key for boresight rotation angle (if it is used)",
     )
 
-    hwp_angle = Unicode(defaults.hwp_angle, help="Observation shared key for HWP angle")
+    hwp_angle = Unicode(
+        defaults.hwp_angle, 
+        allow_none=True, 
+        help="Observation shared key for HWP angle",
+    )
 
     frame_intervals = Unicode(
         None,

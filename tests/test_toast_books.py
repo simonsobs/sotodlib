@@ -71,6 +71,10 @@ class ToastBooksTest(TestCase):
         sim_noise = toast.ops.SimNoise()
         sim_noise.apply(data)
 
+        # Corotation
+        corotator = so_ops.CoRotator()
+        corotator.apply(data)
+
         # Purge intervals.  The book format currently does not support things
         # like this.  We would have to reconstruct those from the flag information
         # for now.  Make a copy for later comparison
@@ -94,9 +98,7 @@ class ToastBooksTest(TestCase):
             noise_dir=noise_dir,
             frame_intervals=None,
             gzip=True,
-            # FIXME:  Add these back
-            hwp_angle=None,
-            corotator_angle=None,
+            hwp_angle=None, # This is LAT data
         )
 
         # Save the data
@@ -111,6 +113,9 @@ class ToastBooksTest(TestCase):
             focalplane_dir=focalplane_dir,
             noise_dir=noise_dir,
             detset_key="pixel",
+            hwp_angle=None,
+            corotator_angle=defaults.corotator_angle,
+            boresight_angle=None,
         )
         load.apply(new_data)
         # new_data.info()
@@ -130,13 +135,6 @@ class ToastBooksTest(TestCase):
             orig.telescope.name = re.sub(r"^LAT_", "", orig.telescope.name)
 
             ob = new_data.obs[new_order[orig.name]]
-            # FIXME:  Leave these in for the comparison eventually
-            del orig.shared["hwp_angle"]
-            del orig.shared["boresight_angle"]
-            del orig.shared["corotator_angle"]
-            del ob.shared["hwp_angle"]
-            del ob.shared["boresight_angle"]
-            del ob.shared["corotator_angle"]
 
             # FIXME:  Leave these in if we want to check general metadata
             # handling.
