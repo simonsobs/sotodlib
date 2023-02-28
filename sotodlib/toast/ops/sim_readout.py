@@ -196,7 +196,9 @@ class SimReadout(Operator):
             # Add delta-function glitches
             sig[event_indices] += events
             nglitch += np.sum(event_counts)
-        nglitch = comm.allreduce(nglitch)
+
+        if comm is not None:
+            nglitch = comm.allreduce(nglitch)
         log.debug_rank(f"Simulated {nglitch} uncorrelated glitches", comm=comm)
 
         return
@@ -243,7 +245,9 @@ class SimReadout(Operator):
                         # Add delta-function glitches
                         sig[event_indices] += events * scale
                     nglitch += np.sum(event_counts)
-        nglitch = comm.allreduce(nglitch)
+
+        if comm is not None:
+            nglitch = comm.allreduce(nglitch)
         log.debug_rank(f"Simulated {nglitch} correlated glitches", comm=comm)
 
         return
@@ -333,7 +337,9 @@ class SimReadout(Operator):
                     ndet += 1
                     amp_det = amp * np.exp(-dist / corr_length)
                     signal[det][ind] += amp_det * templ
-        ndet = comm.allreduce(ndet)
+
+        if comm is not None:
+            ndet = comm.allreduce(ndet)
         log.debug_rank(
             f"Simulated {nglitch} cosmic ray glitches and {ndet} "
             f"detector events",
@@ -426,7 +432,9 @@ class SimReadout(Operator):
             for index, event in zip(event_indices, events):
                 sig[index:] += event
             njump += np.sum(event_counts)
-        njump = comm.allreduce(njump)
+
+        if comm is not None:
+            njump = comm.allreduce(njump)
         log.debug_rank(f"Simulated {njump} uncorrelated jumps", comm=comm)
 
         # Bias line jumps
@@ -466,7 +474,9 @@ class SimReadout(Operator):
                         for index, event in zip(event_indices, events * scale):
                             sig[index:] += event
                     njump += np.sum(event_counts)
-        njump = comm.allreduce(njump)
+
+        if comm is not None:
+            njump = comm.allreduce(njump)
         log.debug_rank(f"Simulated {njump} correlated jumps", comm=comm)
 
         return
@@ -507,7 +517,9 @@ class SimReadout(Operator):
                 trend = start + (stop - start) * x
                 signal[det] = trend
                 nfail += 1
-        nfail = comm.allreduce(nfail)
+
+        if comm is not None:
+            nfail = comm.allreduce(nfail)
         ndet = len(all_dets)
         log.debug_rank(
             f"Failed {nfail} / {ndet} = {nfail/ndet:.3f} bolometers.  "
