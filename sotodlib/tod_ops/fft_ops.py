@@ -6,6 +6,7 @@ import pyfftw
 
 import so3g
 
+from sotodlib import core
 from . import detrend_data
 
 def _get_num_threads():
@@ -209,8 +210,8 @@ def calc_psd(aman, signal=None, timestamps=None, merge=False, **kwargs):
     freqs, Pxx = welch( signal, 1/np.median(np.diff(timestamps)), **kwargs)
     if merge:
         aman.merge( core.AxisManager(core.OffsetAxis("fsamps", len(freqs))))
-        aman.wrap("freqs", [(0,"fsamps")])
-        aman.wrap("Pxx", [(0,"dets"),(1,"fsamps")])
+        aman.wrap("freqs", freqs, [(0,"fsamps")])
+        aman.wrap("Pxx", Pxx, [(0,"dets"),(1,"fsamps")])
     return freqs, Pxx
 
 def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
