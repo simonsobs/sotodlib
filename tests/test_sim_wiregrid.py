@@ -11,60 +11,39 @@ import numpy as np
 import astropy.units as u
 
 try:
-    import toast
+    # Import sotodlib toast module first, which sets global toast defaults
     import sotodlib.toast as sotoast
     import sotodlib.toast.ops as so_ops
+    import toast
+    from toast.observation import default_values as defaults
     toast_available = True
 except ImportError as e:
     toast_available = False
 
-from ._helpers import toast_site, calibration_schedule, close_data_and_comm
+from ._helpers import calibration_schedule, close_data_and_comm, simulation_test_data
 
 
 class SimWireGridTest(unittest.TestCase):
-    def test_instantiate(self):
-        """Test instantiating a simulation operator."""
+    def test_sim_wiregrid(self):
         if not toast_available:
             print("toast cannot be imported- skipping unit tests", flush=True)
             return
 
         comm, procs, rank = toast.get_world()
-        toast_comm = toast.Comm(world=comm, groupsize=procs)
-        data = toast.Data(comm=toast_comm)
-
-        focalplane = sotoast.SOFocalplane(
-            hwfile=None,
-            telescope="SAT1",
-            sample_rate=10 * u.Hz,
+        data = simulation_test_data(
+            comm,
+            telescope_name="SAT1",
+            wafer_slot=None,
             bands="SAT_f090",
-            wafer_slots=None,
-            tube_slots=None,
-            thinfp=16,
-            comm=comm,
+            sample_rate=10.0 * u.Hz,
+            thin_fp=16,
+            cal_schedule=True,
         )
-
-        site = toast_site()
-        telescope = toast.instrument.Telescope(
-            "SAT1",
-            focalplane=focalplane,
-            site=site,
-        )
-
-        schedule = calibration_schedule(telescope)
-
-        sim_ground = toast.ops.SimGround(
-            name="sim_ground",
-            weather="atacama",
-            detset_key="pixel",
-            telescope=telescope,
-            schedule=schedule,
-        )
-        sim_ground.apply(data)
 
         pointing = toast.ops.PointingDetectorSimple(
             name="det_pointing_azel",
             quats="quats_azel",
-            boresight=sim_ground.boresight_azel,
+            boresight=defaults.boresight_azel,
         )
         weights = toast.ops.StokesWeights(
             name="weights_azel",
