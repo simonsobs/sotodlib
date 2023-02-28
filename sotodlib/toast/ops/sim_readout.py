@@ -157,7 +157,9 @@ class SimReadout(Operator):
         event_counts = event_counts[event_indices].copy()
         return event_counts, event_indices
 
-    def _simulate_amplitudes(self, seed, event_counts, amplitude_center, amplitude_sigma):
+    def _simulate_amplitudes(
+            self, seed, event_counts, amplitude_center, amplitude_sigma
+    ):
         """Simulate Gaussian event amplitudes"""
         # Drawing amplitudes for every affected sample is not the
         # same as drawing amplitudes for every event but it is fast.
@@ -169,7 +171,9 @@ class SimReadout(Operator):
         events = amplitudes * event_counts
         return events
 
-    def _add_uncorrelated_glitches(self, comm, signal, obs_id, focalplane, fsample, nsample, local_dets):
+    def _add_uncorrelated_glitches(
+            self, comm, signal, obs_id, focalplane, fsample, nsample, local_dets
+    ):
         """Simulate uncorrelated electronic glitches"""
         log = Logger.get()
 
@@ -197,11 +201,14 @@ class SimReadout(Operator):
 
         return
 
-    def _add_correlated_glitches(self, comm, signal, obs_id, focalplane, fsample, nsample, bias2det):
+    def _add_correlated_glitches(
+            self, comm, signal, obs_id, focalplane, fsample, nsample, bias2det
+    ):
         """Simulate bias line glitches"""
         log = Logger.get()
 
-        events_per_sample = self.bias_line_glitch_rate.to_value(u.Hz) / fsample.to_value(u.Hz)
+        events_per_sample = self.bias_line_glitch_rate.to_value(u.Hz) \
+                            / fsample.to_value(u.Hz)
         nglitch = 0
         for tube, wafers in bias2det.items():
             tube_id = name_UID(tube)
@@ -210,7 +217,8 @@ class SimReadout(Operator):
                 for bias, dets in biases.items():
                     # The event locations on the bias line are shared
                     event_counts, event_indices = self._simulate_events(
-                        obs_id + tube_id + wafer_id + bias  + self.realization + 5295629,
+                        obs_id + tube_id + wafer_id + bias  + self.realization \
+                        + 5295629,
                         nsample,
                         events_per_sample,
                     )
@@ -240,7 +248,17 @@ class SimReadout(Operator):
 
         return
 
-    def _add_cosmic_ray_glitches(self, comm, signal, obs_id, focalplane, fsample, nsample, local_dets, det2position):
+    def _add_cosmic_ray_glitches(
+            self,
+            comm,
+            signal,
+            obs_id,
+            focalplane,
+            fsample,
+            nsample,
+            local_dets,
+            det2position,
+    ):
         """Simulate cosmic ray glitches
 
         This is the only glitch population to be convolved with a time constant
@@ -325,7 +343,18 @@ class SimReadout(Operator):
         return
 
     @function_timer
-    def _add_glitches(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, bias2det, det2position):
+    def _add_glitches(
+            self,
+            comm,
+            obs_id,
+            times,
+            focalplane,
+            signal,
+            all_dets,
+            local_dets,
+            bias2det,
+            det2position,
+    ):
         """Simulate glitches"""
         if not self.simulate_glitches:
             return
@@ -334,18 +363,41 @@ class SimReadout(Operator):
         nsample = times.size
 
         if self.glitch_rate != 0:
-            self._add_uncorrelated_glitches(comm, signal, obs_id, focalplane, fsample, nsample, local_dets)
+            self._add_uncorrelated_glitches(
+                comm, signal, obs_id, focalplane, fsample, nsample, local_dets
+            )
 
         if self.bias_line_glitch_rate != 0:
-            self._add_correlated_glitches(comm, signal, obs_id, focalplane, fsample, nsample, bias2det)
+            self._add_correlated_glitches(
+                comm, signal, obs_id, focalplane, fsample, nsample, bias2det
+            )
 
         if self.cosmic_ray_glitch_rate != 0:
-            self._add_cosmic_ray_glitches(comm, signal, obs_id, focalplane, fsample, nsample, local_dets, det2position)
+            self._add_cosmic_ray_glitches(
+                comm,
+                signal,
+                obs_id,
+                focalplane,
+                fsample,
+                nsample,
+                local_dets,
+                det2position,
+            )
 
         return
 
     @function_timer
-    def _add_jumps(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, bias2det):
+    def _add_jumps(
+            self,
+            comm,
+            obs_id,
+            times,
+            focalplane,
+            signal,
+            all_dets,
+            local_dets,
+            bias2det,
+    ):
         """Simulate baseline jumps"""
         if not self.simulate_jumps:
             return
@@ -378,7 +430,8 @@ class SimReadout(Operator):
         log.debug_rank(f"Simulated {njump} uncorrelated jumps", comm=comm)
 
         # Bias line jumps
-        events_per_sample = self.bias_line_jump_rate.to_value(u.Hz) / fsample.to_value(u.Hz)
+        events_per_sample = self.bias_line_jump_rate.to_value(u.Hz) \
+                            / fsample.to_value(u.Hz)
         njump = 0
         for tube, wafers in bias2det.items():
             tube_id = name_UID(tube)
@@ -419,7 +472,17 @@ class SimReadout(Operator):
         return
 
     @function_timer
-    def _fail_bolometers(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, bias2det):
+    def _fail_bolometers(
+            self,
+            comm,
+            obs_id,
+            times,
+            focalplane,
+            signal,
+            all_dets,
+            local_dets,
+            bias2det,
+    ):
         """Simulate bolometers that fail to bias or otherwise are unusable"""
         if not self.simulate_yield:
             return
@@ -454,7 +517,17 @@ class SimReadout(Operator):
         return
 
     @function_timer
-    def _misidentify_bolometers(self, comm, obs_id, times, focalplane, signal, all_dets, local_dets, det2rank):
+    def _misidentify_bolometers(
+            self,
+            comm,
+            obs_id,
+            times,
+            focalplane,
+            signal,
+            all_dets,
+            local_dets,
+            det2rank,
+    ):
         """Swap detector data between two confused readout channels"""
         if not self.misidentify_bolometers:
             return
@@ -548,7 +621,6 @@ class SimReadout(Operator):
                 "platescale"
             ].to_value(u.deg / u.mm)
             det2position = {}
-            import matplotlib.pyplot as plt
             xrot = qa.rotation(YAXIS, np.pi / 2)
             for det in local_dets:
                 quat = focalplane[det]["quat"]
@@ -556,11 +628,18 @@ class SimReadout(Operator):
                 lon, lat = hp.vec2dir(vec, lonlat=True)
                 x = lon / platescale
                 y = lat / platescale
-                plt.plot(x, y, 'o')
                 det2position[det] = (x, y)
 
             self._add_glitches(
-                comm, obs_id, times, focalplane, signal, all_dets, local_dets, bias2det, det2position,
+                comm,
+                obs_id,
+                times,
+                focalplane,
+                signal,
+                all_dets,
+                local_dets,
+                bias2det,
+                det2position,
             )
             self._add_jumps(
                 comm, obs_id, times, focalplane, signal, all_dets, local_dets, bias2det
