@@ -321,8 +321,14 @@ def main():
     out_msk[msk_bp1][out_bp1] = 2
     out_msk[msk_bp2][out_bp2] = 2
     for aman, out, path in zip(pointings, outliers, pointing_paths):
-        aman.wrap("det_id", det_id, [(0, aman.dets)])
-        aman.wrap("pointing_outliers", out + out_msk, [(0, aman.dets)])
+        _, avg_srt, srt = np.intersect1d(
+            readout_ids, aman.det_info.readout_id, return_indices=True
+        )
+        rid_map = np.argsort(srt)
+        aman.wrap("det_id", det_id[avg_srt][rid_map], [(0, aman.dets)])
+        aman.wrap(
+            "pointing_outliers", out + out_msk[avg_srt][rid_map], [(0, aman.dets)]
+        )
         g3u.remove_detmap_info(aman)
         aman.save(config["pointing_data"], overwrite=True)
 
