@@ -249,7 +249,7 @@ def main():
             template[:, msk_bp2],
             out_thresh=0,
             avoid_collision=True,
-            priors=priors[np.ix_(msk_bp1, msk_bp1)],
+            priors=priors[np.ix_(msk_bp2, msk_bp2)],
         )
         out_msk = np.zeros(aman.dets.count)
         out_msk[msk_bp1][out_bp1] = True
@@ -291,7 +291,7 @@ def main():
         template[:, msk_bp2],
         out_thresh=0,
         avoid_collision=True,
-        priors=priors[np.ix_(msk_bp1, msk_bp1)],
+        priors=priors[np.ix_(msk_bp2, msk_bp2)],
     )
     det_id = np.zeros(aman.dets.count, dtype=str)
     det_id[msk_bp1] = aman.det_info.det_id[msk_bp1][map_bp1]
