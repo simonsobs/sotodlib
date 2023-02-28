@@ -174,61 +174,111 @@ def main():
     # Open config file
     with open(args.config_path, "r") as file:
         config = yaml.safe_load(file)
+    pointing_paths = np.atleast_1d(config["pointing_data"])
+
     # Load data
-    aman = AxisManager.load(config["pointing_data"])
-    g3u.add_detmap_info(aman, config["detmap"])
+    pointings = []
+    for path in pointing_paths:
+        aman = AxisManager.load(path)
+        g3u.add_detmap_info(aman, config["detmap"])
+        pointings.append(aman)
     bg_map = np.load(config["bias_map"], allow_pickle=True).item()
 
     if config["no_fit"]:
-        aman.wrap("det_id", aman.det_info.det_id, [(0, aman.dets)])
-        g3u.remove_detmap_info(aman)
-        aman.save(config["pointing_data"], overwrite=True)
+        for aman, path in zip(pointings, pointing_paths):
+            aman.wrap("det_id", aman.det_info.det_id, [(0, aman.dets)])
+            g3u.remove_detmap_info(aman)
+            aman.save(path, overwrite=True)
         sys.exit()
 
     # TODO: apply instrument to pointing if availible
 
-    # Split up by bandpass
-    bc_aman = (
-        aman.det_info.smurf.band.astype(int) << 32
-    ) + aman.det_info.smurf.channel.astype(int)
-    bc_bgmap = (bg_map["bands"] << 32) + bg_map["channels"]
-    to_add = np.setdiff1d(bc_aman, bc_bgmap)
-    to_remove = np.setdiff1d(bc_bgmap, bc_aman)
-    msk = ~np.isin(bc_bgmap, to_remove)
-    bg_map["bgmap"] = np.append(bg_map["bgmap"], -2 * np.ones(len(to_add)))
-    bc_bgmap = np.append(bc_bgmap[msk], to_add)
-    idx = np.argsort(bc_bgmap)[np.argsort(bc_aman)]
-    bias_group = bg_map["bg_map"][idx]
+    avg_fp = {}
+    for aman in pointings:
+        # Split up by bandpass
+        bc_aman = (
+            aman.det_info.smurf.band.astype(int) << 32
+        ) + aman.det_info.smurf.channel.astype(int)
+        bc_bgmap = (bg_map["bands"] << 32) + bg_map["channels"]
+        to_add = np.setdiff1d(bc_aman, bc_bgmap)
+        to_remove = np.setdiff1d(bc_bgmap, bc_aman)
+        msk = ~np.isin(bc_bgmap, to_remove)
+        bg_map["bgmap"] = np.append(bg_map["bgmap"], -2 * np.ones(len(to_add)))
+        bc_bgmap = np.append(bc_bgmap[msk], to_add)
+        idx = np.argsort(bc_bgmap)[np.argsort(bc_aman)]
+        bias_group = bg_map["bg_map"][idx]
 
-    msk_bp1 = (
-        (bias_group == 0)
-        | (bias_group == 1)
-        | (bias_group == 4)
-        | (bias_group == 5)
-        | (bias_group == 8)
-        | (bias_group == 9)
-    )
-    msk_bp2 = (
-        (bias_group == 2)
-        | (bias_group == 3)
-        | (bias_group == 6)
-        | (bias_group == 7)
-        | (bias_group == 10)
-        | (bias_group == 11)
-    )
-
-    # Prep inputs
-    priors = gen_priors(aman, config["prior"], method="flat", width=1, basis=None)
-    focal_plane = np.vstack((aman.xi, aman.eta, aman.polang))
-    template = np.vstack(
-        (
-            aman.det_info.wafer.det_x,
-            aman.det_info.wafer.det_y,
-            aman.det_info.wafer.angle,
+        msk_bp1 = (
+            (bias_group == 0)
+            | (bias_group == 1)
+            | (bias_group == 4)
+            | (bias_group == 5)
+            | (bias_group == 8)
+            | (bias_group == 9)
         )
-    )
+        msk_bp2 = (
+            (bias_group == 2)
+            | (bias_group == 3)
+            | (bias_group == 6)
+            | (bias_group == 7)
+            | (bias_group == 10)
+            | (bias_group == 11)
+        )
 
-    # Do actual matching
+        # Prep inputs
+        priors = gen_priors(aman, config["prior"], method="flat", width=1, basis=None)
+        focal_plane = np.vstack((aman.xi, aman.eta, aman.polang))
+        template = np.vstack(
+            (
+                aman.det_info.wafer.det_x,
+                aman.det_info.wafer.det_y,
+                aman.det_info.wafer.angle,
+            )
+        )
+
+        # Do actual matching
+        map_bp1, out_bp1 = match_template(
+            focal_plane[:, msk_bp1],
+            template[:, msk_bp1],
+            out_thresh=0,
+            avoid_collision=True,
+            priors=priors[np.ix_(msk_bp1, msk_bp1)],
+        )
+        map_bp2, out_bp2 = match_template(
+            focal_plane[:, msk_bp2],
+            template[:, msk_bp2],
+            out_thresh=0,
+            avoid_collision=True,
+            priors=priors[np.ix_(msk_bp1, msk_bp1)],
+        )
+        out_msk = np.zeros(aman.dets.count)
+        out_msk[msk_bp1][out_bp1] = True
+        out_msk[msk_bp2][out_bp2] = True
+        focal_plane = focal_plane.T
+        focal_plane[out_msk] = np.nan
+        for ri, fp in zip(aman.det_info.readout_id, focal_plane):
+            try:
+                avg_fp[ri].append(fp)
+            except KeyError:
+                avg_fp[ri] = [fp]
+
+    if len(pointing_paths) == 1:
+        det_id = np.zeros(aman.dets.count, dtype=str)
+        det_id[msk_bp1] = aman.det_info.det_id[msk_bp1][map_bp1]
+        det_id[msk_bp2] = aman.det_info.det_id[msk_bp2][map_bp2]
+        aman.wrap("det_id", det_id, [(0, aman.dets)])
+        # TODO: Figure out what to do about outliers
+
+        g3u.remove_detmap_info(aman)
+        aman.save(config["pointing_data"], overwrite=True)
+
+    focal_plane = []
+    for rid in avg_fp.keys():
+        avg_pointing = np.nanmedian(np.vstack(avg_fp[rid]), axis=0)
+        focal_plane.append(avg_pointing)
+    focal_plane = np.vstack(focal_plane).T
+
+    # Do final matching
     map_bp1, out_bp1 = match_template(
         focal_plane[:, msk_bp1],
         template[:, msk_bp1],
@@ -246,11 +296,10 @@ def main():
     det_id = np.zeros(aman.dets.count, dtype=str)
     det_id[msk_bp1] = aman.det_info.det_id[msk_bp1][map_bp1]
     det_id[msk_bp2] = aman.det_info.det_id[msk_bp2][map_bp2]
-    aman.wrap("det_id", det_id, [(0, aman.dets)])
-    # TODO: Figure out what to do about outliers
-
-    g3u.remove_detmap_info(aman)
-    aman.save(config["pointing_data"], overwrite=True)
+    for aman, path in zip(pointings, pointing_paths):
+        aman.wrap("det_id", det_id, [(0, aman.dets)])
+        g3u.remove_detmap_info(aman)
+        aman.save(config["pointing_data"], overwrite=True)
 
 
 if __name__ == "__main__":
