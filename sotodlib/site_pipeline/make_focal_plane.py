@@ -104,25 +104,19 @@ def gen_priors(aman, prior, method="flat", width=1, basis=None):
     return priors
 
 
-def match_template(
-    focal_plane,
-    template,
-    out_thresh=config["out_thresh"],
-    avoid_collision=True,
-    priors=None,
-):
+def match_template( focal_plane, template, out_thresh=0, avoid_collision=True, priors=None,):
     """
     Match fit focal plane againts a template.
 
     Arguments:
 
         focal_plane: Measured pointing and optionally polarization angle.
-                     Should be a (2, n) or (3, n) array with collums: xi, eta, pol.
+                     Should be a (2, n) or (3, n) array with columns: xi, eta, pol.
                      Optionally an optics model can be preapplied to this to map the pointing
-                     onto the physical focal plane in which case the collums are: x, y, pol.
+                     onto the physical focal plane in which case the columns are: x, y, pol.
 
         template: Designed x, y, and polarization angle of each detector.
-                  Should be a (2, n) or (3, n) array with collums: x, y, pol.
+                  Should be a (2, n) or (3, n) array with columns: x, y, pol.
 
         out_thresh: Threshold at which points will be considered outliers.
                     Should be in range [0, 1) and is checked against the
