@@ -105,7 +105,11 @@ def gen_priors(aman, prior, method="flat", width=1, basis=None):
 
 
 def match_template(
-    focal_plane, template, out_thresh=config["out_thresh"], avoid_collision=True, priors=None
+    focal_plane,
+    template,
+    out_thresh=config["out_thresh"],
+    avoid_collision=True,
+    priors=None,
 ):
     """
     Match fit focal plane againts a template.
@@ -183,6 +187,7 @@ def main():
         g3u.add_detmap_info(aman, config["detmap"])
         pointings.append(aman)
     bg_map = np.load(config["bias_map"], allow_pickle=True).item()
+    bc_bgmap = (bg_map["bands"] << 32) + bg_map["channels"]
 
     if config["no_fit"]:
         for aman, path in zip(pointings, pointing_paths):
@@ -199,7 +204,6 @@ def main():
         bc_aman = (
             aman.det_info.smurf.band.astype(int) << 32
         ) + aman.det_info.smurf.channel.astype(int)
-        bc_bgmap = (bg_map["bands"] << 32) + bg_map["channels"]
         to_add = np.setdiff1d(bc_aman, bc_bgmap)
         to_remove = np.setdiff1d(bc_bgmap, bc_aman)
         msk = ~np.isin(bc_bgmap, to_remove)
@@ -251,9 +255,14 @@ def main():
             avoid_collision=True,
             priors=priors[np.ix_(msk_bp2, msk_bp2)],
         )
+
         out_msk = np.zeros(aman.dets.count)
         out_msk[msk_bp1][out_bp1] = True
         out_msk[msk_bp2][out_bp2] = True
+        bp_msk = np.zeros(aman.dets.count)
+        bp_msk[msk_bp1] = 1
+        bp_msk[msk_bp2] = 2
+        focal_plane = np.vstack((focal_plane, bp_msk))
         focal_plane = focal_plane.T
         focal_plane[out_msk] = np.nan
         for ri, fp in zip(aman.det_info.readout_id, focal_plane):
@@ -277,6 +286,10 @@ def main():
         avg_pointing = np.nanmedian(np.vstack(avg_fp[rid]), axis=0)
         focal_plane.append(avg_pointing)
     focal_plane = np.vstack(focal_plane).T
+    bp_msk = focal_plane[-1].astype(int)
+    msk_bp1 = bp_msk == 1
+    msk_bp2 = bp_msk == 2
+    focal_plane = focal_plane[:-1]
 
     # Do final matching
     map_bp1, out_bp1 = match_template(
