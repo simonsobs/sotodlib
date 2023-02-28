@@ -104,7 +104,13 @@ def gen_priors(aman, prior, method="flat", width=1, basis=None):
     return priors
 
 
-def match_template( focal_plane, template, out_thresh=0, avoid_collision=True, priors=None,):
+def match_template(
+    focal_plane,
+    template,
+    out_thresh=0,
+    avoid_collision=True,
+    priors=None,
+):
     """
     Match fit focal plane againts a template.
 
@@ -193,6 +199,7 @@ def main():
     # TODO: apply instrument to pointing if availible
 
     avg_fp = {}
+    outliers = []
     for aman in pointings:
         # Split up by bandpass
         bc_aman = (
@@ -250,9 +257,10 @@ def main():
             priors=priors[np.ix_(msk_bp2, msk_bp2)],
         )
 
-        out_msk = np.zeros(aman.dets.count)
+        out_msk = np.zeros(aman.dets.count, dtype=bool)
         out_msk[msk_bp1][out_bp1] = True
         out_msk[msk_bp2][out_bp2] = True
+        outliers.append(out_msk)
         bp_msk = np.zeros(aman.dets.count)
         bp_msk[msk_bp1] = 1
         bp_msk[msk_bp2] = 2
@@ -270,8 +278,7 @@ def main():
         det_id[msk_bp1] = aman.det_info.det_id[msk_bp1][map_bp1]
         det_id[msk_bp2] = aman.det_info.det_id[msk_bp2][map_bp2]
         aman.wrap("det_id", det_id, [(0, aman.dets)])
-        # TODO: Figure out what to do about outliers
-
+        aman.wrap("pointing_outliers", out_msk.astype(int), [(0, aman.dets)])
         g3u.remove_detmap_info(aman)
         aman.save(config["pointing_data"], overwrite=True)
 
@@ -303,8 +310,12 @@ def main():
     det_id = np.zeros(aman.dets.count, dtype=str)
     det_id[msk_bp1] = aman.det_info.det_id[msk_bp1][map_bp1]
     det_id[msk_bp2] = aman.det_info.det_id[msk_bp2][map_bp2]
-    for aman, path in zip(pointings, pointing_paths):
+    out_msk = np.zeros(aman.dets.count, dtype=int)
+    out_msk[msk_bp1][out_bp1] = 2
+    out_msk[msk_bp2][out_bp2] = 2
+    for aman, out, path in zip(pointings, outliers, pointing_paths):
         aman.wrap("det_id", det_id, [(0, aman.dets)])
+        aman.wrap("pointing_outliers", out + out_msk, [(0, aman.dets)])
         g3u.remove_detmap_info(aman)
         aman.save(config["pointing_data"], overwrite=True)
 
