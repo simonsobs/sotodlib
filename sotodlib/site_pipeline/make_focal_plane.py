@@ -1,6 +1,7 @@
 import sys
 import argparse as ap
 import numpy as np
+import yaml
 import sotodlib.io.g3tsmurf_utils as g3u
 from sotodlib.core import AxisManager
 from scipy.spatial.transform import Rotation as R
@@ -167,38 +168,21 @@ def main():
     # 1. I am assuming that the HDF5 file is a saved aman not a pandas results set
     # 2. I am assuming that it contains the measured detector polangs
     # 3. I am assuming it comtains aman.det_info
-    parser.add_argument(
-        "pointing_data",
-        help="Location of HDF5 file containing pointing for each readout channel",
-    )
-    parser.add_argument("detmap", help="Location of detmap file")
-    parser.add_argument("bias_map", help="Location of bias map file")
-    parser.add_argument(
-        "-i",
-        "--instrument",
-        help="Instrument mapping from sky to focal plane, feature not currently implemented",
-    )
-    # Should this point to a config file?
-    parser.add_argument(
-        "-p", "--priors", help="Amount to set prior to from detmap", default=1
-    )
-    parser.add_argument(
-        "-nf",
-        "--no_fit",
-        action="store_true",
-        help="Don't try to fit for mapping between detector positions on array and on sky, just directly copy det_id from detmap",
-    )
+    parser.add_argument("config_path", help="Location of the config file")
     args = parser.parse_args()
 
+    # Open config file
+    with open(args.config_path, "r") as file:
+        config = yaml.safe_load(file)
     # Load data
-    aman = AxisManager.load(args.pointing_data)
-    g3u.add_detmap_info(aman, args.detmap)
-    bg_map = np.load(args.bias_map, allow_pickle=True).item()
+    aman = AxisManager.load(config["pointing_data"])
+    g3u.add_detmap_info(aman, config["detmap"])
+    bg_map = np.load(config["bias_map"], allow_pickle=True).item()
 
-    if args.no_fit:
+    if config["no_fit"]:
         aman.wrap("det_id", aman.det_info.det_id, [(0, aman.dets)])
         g3u.remove_detmap_info(aman)
-        aman.save(args.pointing_data, overwrite=True)
+        aman.save(config["pointing_data"], overwrite=True)
         sys.exit()
 
     # TODO: apply instrument to pointing if availible
@@ -234,7 +218,7 @@ def main():
     )
 
     # Prep inputs
-    priors = gen_priors(aman, args.prior, method="flat", width=1, basis=None)
+    priors = gen_priors(aman, config["prior"], method="flat", width=1, basis=None)
     focal_plane = np.vstack((aman.xi, aman.eta, aman.polang))
     template = np.vstack(
         (
@@ -266,7 +250,7 @@ def main():
     # TODO: Figure out what to do about outliers
 
     g3u.remove_detmap_info(aman)
-    aman.save(args.pointing_data, overwrite=True)
+    aman.save(config["pointing_data"], overwrite=True)
 
 
 if __name__ == "__main__":
