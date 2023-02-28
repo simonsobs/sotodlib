@@ -105,7 +105,7 @@ def gen_priors(aman, prior, method="flat", width=1, basis=None):
 
 
 def match_template(
-    focal_plane, template, out_thresh=0, avoid_collision=True, priors=None
+    focal_plane, template, out_thresh=config["out_thresh"], avoid_collision=True, priors=None
 ):
     """
     Match fit focal plane againts a template.
@@ -240,14 +240,14 @@ def main():
         map_bp1, out_bp1 = match_template(
             focal_plane[:, msk_bp1],
             template[:, msk_bp1],
-            out_thresh=0,
+            out_thresh=config["out_thresh"],
             avoid_collision=True,
             priors=priors[np.ix_(msk_bp1, msk_bp1)],
         )
         map_bp2, out_bp2 = match_template(
             focal_plane[:, msk_bp2],
             template[:, msk_bp2],
-            out_thresh=0,
+            out_thresh=config["out_thresh"],
             avoid_collision=True,
             priors=priors[np.ix_(msk_bp2, msk_bp2)],
         )
@@ -282,14 +282,14 @@ def main():
     map_bp1, out_bp1 = match_template(
         focal_plane[:, msk_bp1],
         template[:, msk_bp1],
-        out_thresh=0,
+        out_thresh=config["out_thresh"],
         avoid_collision=True,
         priors=priors[np.ix_(msk_bp1, msk_bp1)],
     )
     map_bp2, out_bp2 = match_template(
         focal_plane[:, msk_bp2],
         template[:, msk_bp2],
-        out_thresh=0,
+        out_thresh=config["out_thresh"],
         avoid_collision=True,
         priors=priors[np.ix_(msk_bp2, msk_bp2)],
     )
