@@ -200,6 +200,7 @@ def main():
 
     avg_fp = {}
     outliers = []
+    master_template = []
     for aman in pointings:
         # Split up by bandpass
         bc_aman = (
@@ -240,6 +241,7 @@ def main():
                 aman.det_info.wafer.angle,
             )
         )
+        master_template.append(np.vstack((template, aman.det_info.det_id)))
 
         # Do actual matching
         map_bp1, out_bp1 = match_template(
@@ -283,7 +285,8 @@ def main():
         aman.save(config["pointing_data"], overwrite=True)
 
     focal_plane = []
-    for rid in avg_fp.keys():
+    readout_ids = np.array(list(avg_fp.keys()))
+    for rid in readout_ids:
         avg_pointing = np.nanmedian(np.vstack(avg_fp[rid]), axis=0)
         focal_plane.append(avg_pointing)
     focal_plane = np.vstack(focal_plane).T
@@ -293,6 +296,10 @@ def main():
     focal_plane = focal_plane[:-1]
 
     # Do final matching
+    template = np.unique(np.hstack(master_template), axis=1)
+    det_ids = template[-1]
+    template = template[:-1]
+
     map_bp1, out_bp1 = match_template(
         focal_plane[:, msk_bp1],
         template[:, msk_bp1],
@@ -307,10 +314,10 @@ def main():
         avoid_collision=True,
         priors=priors[np.ix_(msk_bp2, msk_bp2)],
     )
-    det_id = np.zeros(aman.dets.count, dtype=str)
-    det_id[msk_bp1] = aman.det_info.det_id[msk_bp1][map_bp1]
-    det_id[msk_bp2] = aman.det_info.det_id[msk_bp2][map_bp2]
-    out_msk = np.zeros(aman.dets.count, dtype=int)
+    det_id = np.zeros(len(det_ids), dtype=str)
+    det_id[msk_bp1] = det_ids[msk_bp1][map_bp1]
+    det_id[msk_bp2] = det_ids[msk_bp2][map_bp2]
+    out_msk = np.zeros(len(det_ids), dtype=int)
     out_msk[msk_bp1][out_bp1] = 2
     out_msk[msk_bp2][out_bp2] = 2
     for aman, out, path in zip(pointings, outliers, pointing_paths):
