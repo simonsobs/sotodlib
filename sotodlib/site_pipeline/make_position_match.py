@@ -6,6 +6,7 @@ import sotodlib.io.g3tsmurf_utils as g3u
 from sotodlib.core import AxisManager
 from scipy.spatial.transform import Rotation as R
 from pycpd import AffineRegistration
+from detmap.inst_model import InstModel
 
 
 def LAT_coord_transform(xy, rot_fp, rot_ufm, r=72.645):
@@ -198,6 +199,27 @@ def main():
 
     # TODO: apply instrument to pointing if availible
 
+    gen_template = "gen_template" in config
+    if gen_template:
+        ufm = config["gen_template"]
+        inst_model = InstModel(use_solution=False, array_names=(ufm))
+        wafer = inst_model.map_makers[ufm].wafer_layout_data.wafer_info
+        det_x = []
+        det_y = []
+        polang = []
+        det_ids = []
+        for mlp in wafer.values():
+            for det in mlp.values():
+                if not det.is_optical:
+                    continue
+                det_x.append(det.det_x)
+                det_y.append(det.det_y)
+                polang.append(det.angle_actual_deg)
+                did = f"{ufm}_f{int(det.bandpass):03}_{det.rhomb}r{det.det_row:02}c{det.det_col:02}{det.pol}"
+                det_ids.append(did)
+        template = np.vstack((np.array(det_x), np.array(det_y), np.array(polang)))
+        det_ids = np.array(det_ids)
+
     avg_fp = {}
     outliers = []
     master_template = []
@@ -234,14 +256,15 @@ def main():
         # Prep inputs
         priors = gen_priors(aman, config["prior"], method="flat", width=1, basis=None)
         focal_plane = np.vstack((aman.xi, aman.eta, aman.polang))
-        template = np.vstack(
-            (
-                aman.det_info.wafer.det_x,
-                aman.det_info.wafer.det_y,
-                aman.det_info.wafer.angle,
+        if not gen_template:
+            template = np.vstack(
+                (
+                    aman.det_info.wafer.det_x,
+                    aman.det_info.wafer.det_y,
+                    aman.det_info.wafer.angle,
+                )
             )
-        )
-        master_template.append(np.vstack((template, aman.det_info.det_id)))
+            master_template.append(np.vstack((template, aman.det_info.det_id)))
 
         # Do actual matching
         map_bp1, out_bp1 = match_template(
@@ -296,9 +319,10 @@ def main():
     focal_plane = focal_plane[:-1]
 
     # Do final matching
-    template = np.unique(np.hstack(master_template), axis=1)
-    det_ids = template[-1]
-    template = template[:-1]
+    if not gen_template:
+        template = np.unique(np.hstack(master_template), axis=1)
+        det_ids = template[-1]
+        template = template[:-1].astype(float)
 
     map_bp1, out_bp1 = match_template(
         focal_plane[:, msk_bp1],
