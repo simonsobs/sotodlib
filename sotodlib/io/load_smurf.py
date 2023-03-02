@@ -150,7 +150,7 @@ def _file_has_end_frames(filename):
 
 
 class G3tSmurf:
-    def __init__(self, archive_path, db_path=None, meta_path=None, echo=False):
+    def __init__(self, archive_path, db_path=None, meta_path=None, echo=False, db_args={}):
         """
         Class to manage a smurf data archive.
 
@@ -166,13 +166,15 @@ class G3tSmurf:
                 assignments). Required for full functionality.
             echo: bool, optional
                 If true, all sql statements will print to stdout.
+            db_args: dict, optional
+                Additional arguments to pass to sqlalchemy.create_engine
         """
         if db_path is None:
             db_path = os.path.join(archive_path, "frames.db")
         self.archive_path = archive_path
         self.meta_path = meta_path
         self.db_path = db_path
-        self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo)
+        self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo, **db_args)
         Session.configure(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine)
         Base.metadata.create_all(self.engine)
@@ -202,7 +204,8 @@ class G3tSmurf:
             configs = yaml.safe_load( open(configs, "r"))
         return cls(os.path.join(configs["data_prefix"], "timestreams"),
                    configs["g3tsmurf_db"],
-                   meta_path=os.path.join(configs["data_prefix"],"smurf"))
+                   meta_path=os.path.join(configs["data_prefix"],"smurf"),
+                   db_args=configs.get("db_args", {}))
 
     @staticmethod
     def _make_datetime(x):
@@ -275,6 +278,8 @@ class G3tSmurf:
         total_channels = 0
         file_start, file_stop = None, None
         frame_idx = -1
+        timing = None
+
         while True:
 
             try:
@@ -325,6 +330,11 @@ class G3tSmurf:
                     db_frame.stop = dt.datetime.utcfromtimestamp(
                         data.times[-1].time / spt3g_core.G3Units.s
                     )
+                    if timing is None:
+                        timing = frame.get("timing_paradigm", "") == "High Precision"
+                    else:
+                        timing = timing and (frame.get("timing_paradigm", "") == "High Precision")
+
                 else:
                     db_frame.n_samples = data.n_samples
                     db_frame.n_channels = len(data)
@@ -351,6 +361,7 @@ class G3tSmurf:
         db_file.stop = file_stop
         db_file.n_channels = total_channels
         db_file.n_frames = frame_idx
+        db_file.timing = timing
 
     def index_archive(
         self,
@@ -788,6 +799,7 @@ class G3tSmurf:
             else:
                 tuneset = tune.tuneset
         else:
+            tune = None
             tuneset = session.query(TuneSets).filter(
                 TuneSets.start <= obs.start,
                 TuneSets.stream_id == obs.stream_id,
@@ -823,7 +835,7 @@ class G3tSmurf:
         if obs.stop is None and not obs_ended and (force or flist[-1].stop <=
                                                     dt.datetime.now()-dt.timedelta(hours=1)):
             ## try to brute force find the end if it's been awhile
-            for f in flist[::-1]:
+            for f in flist[::-1][:3]:
                 if not obs_ended:
                     obs_ended = _file_has_end_frames(f.name)
 
@@ -832,6 +844,7 @@ class G3tSmurf:
             obs.n_samples = obs_samps
             obs.duration = flist[-1].stop.timestamp() - flist[0].start.timestamp()
             obs.stop = flist[-1].stop
+            obs.timing = np.all([f.timing for f in flist])
             logger.debug(f"Setting {obs.obs_id} stop time to {obs.stop}")
         session.commit()
 
@@ -2281,8 +2294,10 @@ def load_file(
             obsfiledb=obsfiledb,
             ignore_missing=ignore_missing,
         )
+        is_many_channels = ch_mask.sum() >= len(ch_mask) * 0.5
     else:
         ch_mask = None
+        is_many_channels = True
 
     ch_info = get_channel_info(
         status,
@@ -2325,7 +2340,8 @@ def load_file(
         ]
     else:
         subreq = [
-            io_load.FieldGroup("data", ch_info.rchannel, timestamp_field="time")
+            io_load.FieldGroup("data", ch_info.rchannel, timestamp_field="time",
+                               refs_ok=is_many_channels)
         ]
     if load_primary:
         subreq.extend(

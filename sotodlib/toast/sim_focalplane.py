@@ -196,6 +196,9 @@ def sim_wafer_detectors(
             pos_rotate=pol_B * u.degree,
             killpos=kill,
         )
+        # Expand pol_A and pol_B to npix instead of nrhombus
+        pol_A = np.tile(pol_A, 3)
+        pol_B = np.tile(pol_B, 3)
     elif wprops["packing"] == "S":
         # Sinuous (Berkeley style)
         # This is the center-center distance along the vertex-vertex axis
@@ -349,6 +352,7 @@ def sim_wafer_detectors(
                 [layout_A, layout_B],
                 [pol_A, pol_B],
             ):
+                poloff = np.amin(pol)  # Wafer polarization offset
                 dprops = OrderedDict()
                 dprops["wafer_slot"] = wafer_slot
                 dprops["ID"] = idoff + doff
@@ -356,6 +360,12 @@ def sim_wafer_detectors(
                 dprops["band"] = b
                 dprops["fwhm"] = fwhm[b]
                 dprops["pol"] = pl
+                # Polarization angle in focalplane basis
+                dprops["pol_ang"] = pol[p]
+                # Polarization angle in wafer basis
+                dprops["pol_ang_wafer"] = pol[p] - poloff
+                # Polarization orientation on wafer is always 0 or 45
+                dprops["pol_orientation_wafer"] = (pol[p] - poloff) % 90
                 if handed is not None:
                     dprops["handed"] = handed[p]
                 # Made-up assignment to readout channels

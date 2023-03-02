@@ -49,6 +49,9 @@ class Observations(Base):
         The stream_id of this observation. Generally corresponds to UFM or Smurf
         slot. Column is implemented since level 2 data is not perfectly co-sampled 
         across stream_ids.
+    timing : bool
+        If true, the files of the entry observation were made with times
+        referenced to the timing system.
     duration : float
         The total observation time in seconds
     n_samples : integer
@@ -79,7 +82,8 @@ class Observations(Base):
     action_name = db.Column(db.String)
     
     stream_id = db.Column(db.String)
-    
+    timing = db.Column(db.Boolean)
+
     # in seconds
     duration = db.Column(db.Float)
     n_samples = db.Column(db.Integer)
@@ -148,6 +152,8 @@ class Files(Base):
     observation : SQLAlchemy Observation Instance
     stream_id : The stream_id for the file. Generally of the form crateXslotY.
         These are expected to map one per UXM.
+    timing : bool
+        If true, every frame in the file has times that are referenced to the timing system
     n_frames : Integer
         Number of frames in the .g3 file
     frames : list of SQLALchemy Frame Instances
@@ -182,7 +188,8 @@ class Files(Base):
     observation = relationship("Observations", back_populates='files')
     
     stream_id = db.Column(db.String)
-    
+    timing = db.Column(db.Boolean)
+
     n_frames = db.Column(db.Integer)
     frames = relationship("Frames", back_populates='file')
     

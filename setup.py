@@ -29,6 +29,7 @@ setup_opts["entry_points"] = {
 scripts = [
     "workflows/toast_so_sim.py",
     "workflows/toast_so_map.py",
+    "workflows/toast_so_convert.py",
     "workflows/get_wafer_offset.py",
 ]
 
@@ -63,6 +64,11 @@ setup_opts["install_requires"] = [
     'pyfftw',
     'typer',
 ]
+setup_opts["extras_require"] = {
+    "site_pipeline": [
+        "influxdb",
+    ],
+}
 
 # Command Class dictionary.
 # Begin with the versioneer command class dictionary.

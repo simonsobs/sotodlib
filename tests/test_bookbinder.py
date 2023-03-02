@@ -19,14 +19,87 @@ def generate_hk_frame(t):
     return frame
 
 def generate_smurf_frame(t):
+    if not isinstance(t, core.G3VectorTime):
+        t = core.G3VectorTime([core.G3Time(_t * core.G3Units.s) for _t in t])
+
     frame = core.G3Frame(core.G3FrameType.Scan)
-    data = so3g.G3SuperTimestream()
-    data.times = core.G3VectorTime([core.G3Time(_t * core.G3Units.s) for _t in t])
-    data.names = ['r0000']
-    data.quanta = np.ones(len(data.names), dtype=np.double)
-    data.data = np.ones((len(data.names), len(data.times)))
-    frame['data'] = data
+    frame['data'] = so3g.G3SuperTimestream(['r0000', 'r0001'], t, np.ones((2, len(t)), dtype=np.int32))
     return frame
+
+def test_replace_times_and_trim_frame():
+    import sotodlib.io.bookbinder as bb
+
+    F = bb.FrameProcessor()
+
+    ##################################################
+    # Test 1a: When the primary timestream is not
+    #          available, it should default to the
+    #          times recorded in the .times field
+    ##################################################
+    t = np.full(10, 167330757642916600) + np.array([0, 499600, 1001200, 1499500, 2000600,
+                                            2501300, 3001400, 3503100, 4001100, 4499000])
+    frame = generate_smurf_frame(core.G3VectorTime(t))
+    np.testing.assert_array_equal(F.replace_times_and_trim_frame(frame)['data'].times, t)
+
+    ##################################################
+    # Test 1b: When the timing system is on but the
+    #          timing counters are absent, an
+    #          exception should be raised
+    ##################################################
+    F.timing_system = True
+    np.testing.assert_raises(bb.TimingSystemError, F.replace_times_and_trim_frame, frame)
+    c0 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    c1 = c0
+    c2 = c0
+    frame['primary'] = so3g.G3SuperTimestream(["Counter0", "Counter1", "Counter2"],
+                                core.G3VectorTime(t), np.vstack((c0, c1, c2)))
+    np.testing.assert_raises(bb.TimingSystemError, F.replace_times_and_trim_frame, frame)
+
+    ##################################################
+    # Test 1c: When the timing system is on and the
+    #          timing counters are present, calculate
+    #          the true timestamps from the counters
+    ##################################################
+    c0 = [205909, 208309, 210709, 213109, 215509, 217909, 220309, 222709, 225109, 227509]
+    c1 = [4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295,
+          4294967295, 4294967295, 4294967295]
+    c2 = [4476024116700374110, 4476024116705374055, 4476024116710373999, 4476024116715373944,
+          4476024116720373889, 4476024116725373834, 4476024116730373779, 4476024116735373723,
+          4476024116740373668, 4476024116745373613]
+    true_timestamps = [167330757642897696, 167330757643397728, 167330757643897696, 167330757644397696,
+          167330757644897696, 167330757645397696, 167330757645897696, 167330757646397696,
+          167330757646897696, 167330757647397696]
+    frame['primary'].data = np.vstack((c0, c1, c2))
+    np.testing.assert_array_equal(F.replace_times_and_trim_frame(frame)['data'].times, true_timestamps)
+
+    ##################################################
+    # Test 2: Trim the samples outside start/end times
+    ##################################################
+    # Start/end times in middle of frame
+    F.BOOK_START_TIME = core.G3Time(true_timestamps[1] + 1)
+    F.BOOK_END_TIME   = None
+    np.testing.assert_array_equal(F.replace_times_and_trim_frame(frame)['data'].times, true_timestamps[2:])
+    F.BOOK_END_TIME   = core.G3Time(true_timestamps[-1] - 1)
+    np.testing.assert_array_equal(F.replace_times_and_trim_frame(frame)['data'].times, true_timestamps[2:-1])
+
+    # Start time after end of frame
+    F.BOOK_START_TIME = core.G3Time(true_timestamps[-1] + 1)
+    F.BOOK_END_TIME   = None
+    np.testing.assert_array_equal(F.replace_times_and_trim_frame(frame)['data'].times, [])
+    F.BOOK_END_TIME   = core.G3Time(true_timestamps[-1] + 2)
+    np.testing.assert_array_equal(F.replace_times_and_trim_frame(frame)['data'].times, [])
+
+    # End time before start of frame
+    F.BOOK_START_TIME = None
+    F.BOOK_END_TIME   = core.G3Time(true_timestamps[0] - 1)
+    np.testing.assert_array_equal(F.replace_times_and_trim_frame(frame)['data'].times, [])
+    F.BOOK_START_TIME = core.G3Time(true_timestamps[0] - 2)
+    np.testing.assert_array_equal(F.replace_times_and_trim_frame(frame)['data'].times, [])
+
+    # Frame contained well within start/end times
+    F.BOOK_START_TIME = core.G3Time(true_timestamps[0] - 1)
+    F.BOOK_END_TIME   = core.G3Time(true_timestamps[-1] + 1)
+    np.testing.assert_array_equal(F.replace_times_and_trim_frame(frame)['data'].times, true_timestamps)
 
 def test_hk_gaps():
     import sotodlib.io.bookbinder as bb
