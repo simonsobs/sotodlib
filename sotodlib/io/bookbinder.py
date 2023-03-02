@@ -472,8 +472,11 @@ class FrameProcessor(object):
 
         # Obtain list of filled-in timestamps, whether from provided list or estimate with fill_time_gaps
         if self._smurf_timestamps is not None:
-            ts = [_t for _t in self._smurf_timestamps if (prev_frame_end < _t < end_time)]
+            # trim the list of timestamps to the current frame
+            m_ = np.logical_and(self._smurf_timestamps < end_time, self._smurf_timestamps > prev_frame_end)
+            ts = self._smurf_timestamps[m_]
         else:
+            # fallback when no timestamp is provided. We switch to estimate sample interval based on data
             assert data.times[0].time >= prev_frame_end
             # Use fill_time_gaps to fill in any missing samples in the middle, as well as
             # at the beginning (between previous frame and current frame)
@@ -493,10 +496,12 @@ class FrameProcessor(object):
 
         # Create new G3SuperTimestream with filled-in samples
         if len(data.times) < len(ts):
-            m = np.isin(ts, data.times, assume_unique=True)
+            t_missing = find_missing_samples(ts, np.array(data.times))
+            m = np.isin(ts, t_missing, assume_unique=True, invert=True)
+            assert np.sum(m) == len(data.times)
             new_data = np.full((data.data.shape[0], len(ts)), self.FLAGGED_SAMPLE_VALUE)
             new_data[:,m] = data.data
-            dataout = so3g.G3SuperTimestream(data.names, core.G3VectorTime(np.array(ts)), new_data)
+            dataout = so3g.G3SuperTimestream(data.names, core.G3VectorTime(ts), new_data)
             flag_gap = core.G3VectorBool(~m)
             print("{} missing samples detected".format(np.sum(~m)))
         elif len(data.times) > len(ts):
@@ -1168,3 +1173,36 @@ def fill_time_gaps(ts):
     new_ts[m] = interp(xs[m])
 
     return new_ts
+
+def find_missing_samples(refs, vs, atol=0.5):
+    """
+    Find missing samples in a list of timestamps (vs) given a list of
+    reference timestamps (refs). The reference timestamps are assumed
+    to be the "true" timestamps, and the list of timestamps (vs) are
+    assumed to be missing some of the samples. The function returns
+    the missing samples in the list of timestamps (vs).
+
+    Parameters
+    ----------
+    refs : array_like
+        List of reference timestamps
+    vs : array_like
+        List of timestamps
+    atol : float
+        Absolute tolerance for the difference between the reference
+
+    Returns
+    -------
+    missing : array_like
+        List of missing samples in the list of timestamps (vs)
+    """
+    # Find the indices of the samples in the list of timestamps (vs)
+    # that are closest to the reference timestamps
+    idx = np.searchsorted(vs, refs, side='left')
+    idx = np.clip(idx, 1, len(vs)-1)
+    # shift indices to the closest sample
+    left = vs[idx-1]
+    right = vs[idx]
+    idx -= refs - left < right - refs
+    missing = np.where(np.abs(vs[idx] - refs) > atol)[0]
+    return refs[missing]

@@ -139,7 +139,7 @@ def test_fill_missing_samples():
     last_samples = [t[-1], t[-1]+3*dt]
     for start_time, end_time in zip(first_samples, last_samples):
         end_time += 1  # to ensure last sample gets included since flush_time is excluded from output frame
-        ref_timestamps = range(start_time, end_time, dt)  # reference timestamps to check against
+        ref_timestamps = np.arange(start_time, end_time, dt)  # reference timestamps to check against
         true_timestamps = ref_timestamps  # for this test, they are the same
 
         # Book start/end times don't have to line up with first/last samples
@@ -273,3 +273,15 @@ def test_smurf_gaps():
                                                               np.full(5, B.frameproc.FLAGGED_SAMPLE_VALUE),
                                                               np.ones(15))))
         np.testing.assert_array_equal(output[0]['signal'].data[0], expected_output, verbose=True)
+
+
+def test_find_missing_samples():
+    import sotodlib.io.bookbinder as bb
+
+    ref = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    vs = np.array([1, 1.9, 3, 4.1, 6, 7.1, 8, 10])
+    assert np.array_equal(bb.find_missing_samples(ref, vs), [5, 9])
+
+    ref = np.array([1, 2.1, 3, 4, 5.1, 6, 7, 8, 9, 10])
+    vs = np.array([1.9, 3, 4.1, 6, 7.1, 8, 9.1])
+    assert np.array_equal(bb.find_missing_samples(ref, vs), [1, 5.1, 10])
