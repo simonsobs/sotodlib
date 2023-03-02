@@ -223,7 +223,7 @@ def hwpss_linreg(aman, signal='signal', modes=[2, 4, 6, 8], mask_flags=True,
                                    (1, core.OffsetAxis('samps'))])
     if return_fitstats:
         rss = np.sum((aman[signal]-fitsig.T)**2, axis=1)
-        varreg = rss/(aman.samps.count-aman_proc.modes.count-1)
+        varreg = rss/(aman.samps.count-aman_proc.modes.count)
         vardat = np.var(aman[signal], axis=1)
         r2 = 1-rss/(aman.samps.count-1)/vardat
         redchi2 = varreg
