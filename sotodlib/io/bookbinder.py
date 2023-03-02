@@ -473,7 +473,7 @@ class FrameProcessor(object):
         # Obtain list of filled-in timestamps, whether from provided list or estimate with fill_time_gaps
         if self._smurf_timestamps is not None:
             # trim the list of timestamps to the current frame
-            m_ = np.logical_and(self._smurf_timestamps < end_time, self._smurf_timestamps > prev_frame_end)
+            m_ = np.logical_and(self._smurf_timestamps <= end_time, self._smurf_timestamps >= prev_frame_end)
             ts = self._smurf_timestamps[m_]
         else:
             # fallback when no timestamp is provided. We switch to estimate sample interval based on data
@@ -493,13 +493,11 @@ class FrameProcessor(object):
             # Use estimated sample interval to fill until end_time. Not using fill_time_gaps because
             # end_time is externally determined and does not usually line up with sample interval
             ts = np.append(ts, np.arange(data.times[-1].time+dt, end_time, dt))
-            # for consistency with smurf_timestamps
-            ts /= core.G3Units.s
 
         # Create new G3SuperTimestream with filled-in samples
         if len(data.times) < len(ts):
             dt = np.median(np.diff(ts))
-            i_missing, _ = find_missing_samples(ts, np.array(data.times)/core.G3Units.s, atol=dt/2)
+            i_missing, _ = find_missing_samples(ts, np.array(data.times), atol=dt/2)
             m = np.ones(len(ts), dtype=bool)
             m[i_missing] = False
             assert np.sum(m) == len(data.times)
@@ -1212,3 +1210,4 @@ def find_missing_samples(refs, vs, atol=0.5):
     idx -= refs - left < right - refs
     missing = np.where(np.abs(vs[idx] - refs) > atol)[0]
     return missing, refs[missing]
+

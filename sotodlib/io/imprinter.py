@@ -764,9 +764,9 @@ def get_frame_times(frame):
     c2 = frame['primary'].data[_primary_idx_map['Counter2']]
 
     if np.any(c0):
-        return True, counters_to_timestamps(c0, c2)
+        return True, counters_to_timestamps(c0, c2) * core.G3Units.s
     else:
-        return False, np.array(frame['data'].times) / core.G3Units.s
+        return False, np.array(frame['data'].times)
 
 def get_start_and_end(files):
     """
