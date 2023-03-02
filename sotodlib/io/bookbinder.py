@@ -498,7 +498,8 @@ class FrameProcessor(object):
 
         # Create new G3SuperTimestream with filled-in samples
         if len(data.times) < len(ts):
-            i_missing, _ = find_missing_samples(ts, np.array(data.times)/core.G3Units.s)
+            dt = np.median(np.diff(ts))
+            i_missing, _ = find_missing_samples(ts, np.array(data.times)/core.G3Units.s, atol=dt/2)
             m = np.ones(len(ts), dtype=bool)
             m[i_missing] = False
             assert np.sum(m) == len(data.times)
