@@ -16,6 +16,8 @@ from sotodlib.vis_hardware import plot_detectors
 from ._helpers import create_outdir, mpi_multi
 
 try:
+    # Import sotodlib toast module first, which sets global toast defaults
+    import sotodlib.toast as sotoast
     import toast
     from sotodlib.toast import sim_focalplane as toastsf
 

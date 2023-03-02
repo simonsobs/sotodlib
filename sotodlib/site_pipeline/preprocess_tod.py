@@ -35,6 +35,9 @@ def _get_preprocess_context(configs, context=None):
     # if context doesn't have the preprocess archive it in add it
     # allows us to use same context before and after calculations
     found=False
+    if context.get("metadata") is None:
+        context["metadata"] = []
+
     for key in context.get("metadata"):
         if key.get("name") == "preprocess":
             found=True
@@ -86,6 +89,7 @@ def preprocess_tod(obs_id, configs, overwrite=False):
                      "archive index.")
         scheme = core.metadata.ManifestScheme()
         scheme.add_exact_match('obs:obs_id')
+        scheme.add_data_field('dets:' + group_by)
         scheme.add_data_field('dataset')
         db = core.metadata.ManifestDb(
             configs['archive']['index'],
@@ -109,6 +113,8 @@ def preprocess_tod(obs_id, configs, overwrite=False):
         dest_file, dest_dataset = policy.get_dest(obs_id)
         if group_by == 'detset':
             dest_dataset += '_' + group
+        else:
+            dest_dataset += "_" + group_by + "_" + str(group)
         proc_aman.save(dest_file, dest_dataset, overwrite=overwrite)
 
         logger.info("Saving to database")

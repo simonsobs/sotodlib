@@ -791,6 +791,16 @@ class AxisManager:
         same name will be intersected.
 
         """
+        # Before messing with anything, check for key interference.
+        fields = set(self._fields.keys())
+        for aman in amans:
+            newf = set(aman._fields.keys())
+            both = fields.intersection(newf)
+            if len(both):
+                raise ValueError(f'Key conflict: more than one merge target '
+                                 f'shares keys: {both}')
+            fields.update(newf)
+
         # Get the intersected axis descriptions.
         axes_out = self.intersection_info(self, *amans)
         # Reduce the data in self, update our axes.
@@ -802,9 +812,7 @@ class AxisManager:
                 if k not in self._axes:
                     self._axes[k] = v
             for k, v in aman._fields.items():
-                if k in self._fields:
-                    raise ValueError(f'Key: {k} found in {self} and {aman}')
-                assert(k not in self._fields)
+                assert(k not in self._fields)  # Should have been caught in pre-check
                 self._fields[k] = v
             self._assignments.update(aman._assignments)
         return self
