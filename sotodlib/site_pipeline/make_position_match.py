@@ -4,6 +4,7 @@ import numpy as np
 import yaml
 import sotodlib.io.g3tsmurf_utils as g3u
 from sotodlib.core import AxisManager
+from sotodlib.io.metadata import read_dataset
 from scipy.spatial.transform import Rotation as R
 from pycpd import AffineRegistration
 from detmap.inst_model import InstModel
@@ -183,8 +184,7 @@ def main():
 
     # Making some assumtions about pointing data that aren't currently true:
     # 1. I am assuming that the HDF5 file is a saved aman not a pandas results set
-    # 2. I am assuming that it contains the measured detector polangs
-    # 3. I am assuming it comtains aman.det_info
+    # 2. I am assuming it comtains aman.det_info
     parser.add_argument("config_path", help="Location of the config file")
     args = parser.parse_args()
 
@@ -192,13 +192,24 @@ def main():
     with open(args.config_path, "r") as file:
         config = yaml.safe_load(file)
     pointing_paths = np.atleast_1d(config["pointing_data"])
+    polangs_paths = np.atleast_1d(config["polangs"])
 
     # Load data
     pointings = []
-    for path in pointing_paths:
-        aman = AxisManager.load(path)
+    polangs = []
+    for point_path, pol_path in zip(pointing_paths, polangs_paths):
+        aman = AxisManager.load(point_path)
         g3u.add_detmap_info(aman, config["detmap"])
+
+        rset = read_dataset(pol_path, "polarization_angle")
+        pol_rid = rset["dets:readout_id"]
+        pols = rset["polarization_angle"]
+        rid_map = np.argsort(np.argsort(aman.det_info.readout_id))
+        rid_sort = np.argsort(pol_rid)
+        pols = pols[rid_sort][rid_map]
+
         pointings.append(aman)
+        polangs.append(pols)
     bg_map = np.load(config["bias_map"], allow_pickle=True).item()
     bc_bgmap = (bg_map["bands"] << 32) + bg_map["channels"]
 
@@ -242,7 +253,7 @@ def main():
     avg_fp = {}
     outliers = []
     master_template = []
-    for aman in pointings:
+    for aman, pol in zip(pointings, polangs):
         # Split up by bandpass
         bc_aman = (
             aman.det_info.smurf.band.astype(int) << 32
@@ -259,7 +270,7 @@ def main():
         msk_bp2 = np.isin(bias_group, bp2_bg)
 
         # Prep inputs
-        focal_plane = np.vstack((aman.xi, aman.eta, aman.polang))
+        focal_plane = np.vstack((aman.xi, aman.eta, pol))
         if not gen_template:
             template = np.vstack(
                 (
