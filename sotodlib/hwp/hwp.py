@@ -378,9 +378,10 @@ def subtract_hwpss(aman, signal=None, hwpss_template=None,
     aman.wrap(subtract_name, np.subtract(signal, hwpss_template), [(0,'dets'), (1,'samps')])
 
 
-def demod_tod(aman, signal='hwpss_remove', fc_lpf=2., width=0.5, bpf=False,
-              bpf_width=2., bpf_center=None, bpf_type='sine2', 
-              sine2_width=None):
+def demod_tod(aman, signal='hwpss_remove', 
+              fc_lpf=2., lpf_sin2_width=0.5, 
+              bpf=False, bpf_width=2., bpf_center=None, 
+              bpf_type='sine2', bpf_sine2_width=None):
     """
     Simple demodulation function. Wraps new axes demodQ (real part from hwp
     demodulation), demodU (imag part from hwp demodulation), and dsT (lowpass
@@ -390,20 +391,20 @@ def demod_tod(aman, signal='hwpss_remove', fc_lpf=2., width=0.5, bpf=False,
     aman (AxisManager): Axis manager to perform fit.
     signal (str): Axis to demodulate
     fc_lpf (float): low pass filter cutoff
-    width (float): width of sine^2 low pass filter
+    lpf_sin2_width (float): width of sine^2 low pass filter
     bpf (bool): Apply bandpass filter before demodulation.
     bpf_width (float): Width of bandpass filter in Hz.
     bpf_center (float): Center of bandpass filter, if not passed will
                         estimate 4*f_HWP from hwp_angles in aman.
     bpf_type (str): Either 'butter' or 'sine2' type filters.
-    sine2_width (float): Width parameter if using 'sine2' bpf.
+    bpf_sine2_width (float): Width parameter if using 'sine2' bpf.
     """
     aman.wrap_new('demodQ', dtype='float32', shape=('dets', 'samps'))
     aman.wrap_new('demodU', dtype='float32', shape=('dets', 'samps'))
     aman.wrap_new('dsT', dtype='float32', shape=('dets', 'samps'))
 
     phasor = np.exp(4.j * aman.hwp_angle)
-    filt = tod_ops.filters.low_pass_sine2(fc_lpf, width=width)
+    filt = tod_ops.filters.low_pass_sine2(fc_lpf, width=lpf_sin2_width)
 
     if bpf:
         if bpf_center is None:
@@ -416,9 +417,9 @@ def demod_tod(aman, signal='hwpss_remove', fc_lpf=2., width=0.5, bpf=False,
                        tod_ops.filters.high_pass_butter4(fc=bpf_center - bpf_width)
         if bpf_type == 'sine2':
             bpf_filt = tod_ops.filters.low_pass_sine2(cutoff=bpf_center + bpf_width,
-                                                      width=sine2_width)*\
+                                                      width=bpf_sine2_width)*\
                        tod_ops.filters.high_pass_sine2(cutoff=bpf_center - bpf_width,
-                                                       width=sine2_width)
+                                                       width=bpf_sine2_width)
 
         demod = tod_ops.fourier_filter(aman, bpf_filt, detrend=None,
                                        signal_name=signal) * phasor
