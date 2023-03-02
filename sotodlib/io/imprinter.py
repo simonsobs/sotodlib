@@ -221,7 +221,7 @@ class Imprinter:
         # max_channels is the maximum number of channels in the book
         if any([len(o.files) == 0 for o in obsset]):
             raise NoFilesError(f"No files found for observations in {bid}")
-        # get start and end times
+        # get start and end times (initial guess)
         start_t = np.max([np.min([f.start for f in o.files]) for o in obsset])
         stop_t = np.min([np.max([f.stop for f in o.files]) for o in obsset])
         max_channels = int(np.max([np.max([f.n_channels for f in o.files]) for o in obsset]))
@@ -241,6 +241,15 @@ class Imprinter:
             slots=','.join([s for s in obsset.slots if obsset.contains_stream(s)]),  # not worth having a extra table
             timing=timing_on,
         )
+
+        # try to get more accurate time
+        try:
+            ts = self.get_book_times(book)
+            book.start = dt.datetime.utcfromtimestamp(ts[0])
+            book.stop = dt.datetime.utcfromtimestamp(ts[1])
+        except Exception as e:
+            self.logger.warning(f"Failed to get more accurate time: {e}")
+            self.logger.warning(traceback.format_exc())
 
         # add book to database
         session.add(book)
@@ -319,6 +328,7 @@ class Imprinter:
         # bind book using bookbinder library
         try:
             readout_ids = self.get_readout_ids_for_book(book)
+            timestamps = self.get_book_times(book)  # TODO: add a fallback when this fails
             for obs_id, smurf_files in filedb.items():
                 # get stream id from observation id
                 stream_id, _ = stream_timestamp(obs_id)
@@ -330,6 +340,7 @@ class Imprinter:
                            stream_id=stream_id, session_id=int(session_id),
                            book_id=book.bid, start_time=start_t, end_time=stop_t,
                            max_nchannels=book.max_channels, timing_system=timing_system,
+                           smurf_timestamps=timestamps,
                            frameproc_config={"readout_ids": rids})()
             # not sure if this is the best place to update
             book.status = BOUND
@@ -695,6 +706,11 @@ class Imprinter:
         Parameters
         ----------
         book: Book object
+
+        Returns
+        -------
+        ts: np.ndarray
+            Gap-filled list of timestamps
         """
         filedb = self.get_files_for_book(book)
         for i, files in enumerate(filedb.values()):
