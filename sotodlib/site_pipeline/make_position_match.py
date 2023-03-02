@@ -255,22 +255,8 @@ def main():
         idx = np.argsort(bc_bgmap)[np.argsort(bc_aman)]
         bias_group = bg_map["bg_map"][idx]
 
-        msk_bp1 = (
-            (bias_group == 0)
-            | (bias_group == 1)
-            | (bias_group == 4)
-            | (bias_group == 5)
-            | (bias_group == 8)
-            | (bias_group == 9)
-        )
-        msk_bp2 = (
-            (bias_group == 2)
-            | (bias_group == 3)
-            | (bias_group == 6)
-            | (bias_group == 7)
-            | (bias_group == 10)
-            | (bias_group == 11)
-        )
+        msk_bp1 = np.isin(bias_group, bp1_bg)
+        msk_bp2 = np.isin(bias_group, bp2_bg)
 
         # Prep inputs
         focal_plane = np.vstack((aman.xi, aman.eta, aman.polang))
