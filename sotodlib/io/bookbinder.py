@@ -496,8 +496,9 @@ class FrameProcessor(object):
 
         # Create new G3SuperTimestream with filled-in samples
         if len(data.times) < len(ts):
-            t_missing = find_missing_samples(ts, np.array(data.times))
-            m = np.isin(ts, t_missing, assume_unique=True, invert=True)
+            i_missing, _ = find_missing_samples(ts, np.array(data.times))
+            m = np.ones(len(ts), dtype=bool)
+            m[i_missing] = False
             assert np.sum(m) == len(data.times)
             new_data = np.full((data.data.shape[0], len(ts)), self.FLAGGED_SAMPLE_VALUE)
             new_data[:,m] = data.data
@@ -1193,8 +1194,10 @@ def find_missing_samples(refs, vs, atol=0.5):
 
     Returns
     -------
-    missing : array_like
-        List of missing samples in the list of timestamps (vs)
+    i_missing : array_like
+        indices (in refs) of the missing samples in vs
+    t_missing : array_like
+        values (in refs) of the missing samples in vs
     """
     # Find the indices of the samples in the list of timestamps (vs)
     # that are closest to the reference timestamps
@@ -1205,4 +1208,4 @@ def find_missing_samples(refs, vs, atol=0.5):
     right = vs[idx]
     idx -= refs - left < right - refs
     missing = np.where(np.abs(vs[idx] - refs) > atol)[0]
-    return refs[missing]
+    return missing, refs[missing]

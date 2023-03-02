@@ -280,8 +280,12 @@ def test_find_missing_samples():
 
     ref = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     vs = np.array([1, 1.9, 3, 4.1, 6, 7.1, 8, 10])
-    assert np.array_equal(bb.find_missing_samples(ref, vs), [5, 9])
+    i_missing, t_missing = bb.find_missing_samples(ref, vs)
+    assert np.array_equal(i_missing, [4, 8])
+    assert np.array_equal(t_missing, [5, 9])
 
     ref = np.array([1, 2.1, 3, 4, 5.1, 6, 7, 8, 9, 10])
     vs = np.array([1.9, 3, 4.1, 6, 7.1, 8, 9.1])
-    assert np.array_equal(bb.find_missing_samples(ref, vs), [1, 5.1, 10])
+    i_missing, t_missing = bb.find_missing_samples(ref, vs)
+    assert np.array_equal(i_missing, [0,4,9])
+    assert np.array_equal(t_missing, [1, 5.1, 10])
