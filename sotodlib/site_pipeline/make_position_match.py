@@ -58,13 +58,15 @@ def rescale(xy):
     return xy_rs
 
 
-def gen_priors(aman, prior, method="flat", width=1, basis=None):
+def gen_priors(aman, template_det_ids, prior, method="flat", width=1, basis=None):
     """
     Generate priors from detmap.
 
     Arguments:
 
         aman: AxisManager assumed to contain aman.det_info.det_id and aman.det_info.wafer.
+
+        template_det_ids: Array of det_ids in the same order as the template.
 
         prior: Prior value at locations from the detmap.
                Should be greater than 1.
@@ -102,7 +104,17 @@ def gen_priors(aman, prior, method="flat", width=1, basis=None):
     for i in aman.dets.count:
         prior_method(priors[i], i)
 
-    return priors
+    if np.array_equal(det_ids, template_det_ids):
+        return priors
+
+    det_ids = aman.det_info.det_ids
+    missing = np.setdiff1d(template_det_ids, det_ids)
+    det_ids = np.concatenate(missing)
+    priors = np.concatenate((priors, np.ones((len(missing), aman.dets.count))))
+    asort = np.argsort(det_ids)
+    template_map = np.argsort(np.argsort(template_det_ids))
+
+    return priors[asort][template_map]
 
 
 def match_template(
@@ -199,6 +211,9 @@ def main():
 
     # TODO: apply instrument to pointing if availible
 
+    bp1_bg = (0, 1, 4, 5, 8, 9)
+    bp2_bg = (2, 3, 6, 7, 10, 11)
+
     gen_template = "gen_template" in config
     if gen_template:
         ufm = config["gen_template"]
@@ -208,6 +223,7 @@ def main():
         det_y = []
         polang = []
         det_ids = []
+        template_bg = []
         for mlp in wafer.values():
             for det in mlp.values():
                 if not det.is_optical:
@@ -217,8 +233,11 @@ def main():
                 polang.append(det.angle_actual_deg)
                 did = f"{ufm}_f{int(det.bandpass):03}_{det.rhomb}r{det.det_row:02}c{det.det_col:02}{det.pol}"
                 det_ids.append(did)
+                template_bg.append(det.bias_line)
         template = np.vstack((np.array(det_x), np.array(det_y), np.array(polang)))
         det_ids = np.array(det_ids)
+        template_bp1 = np.isin(template_bg, bp1_bg)
+        template_bp2 = np.isin(template_bg, bp2_bg)
 
     avg_fp = {}
     outliers = []
@@ -254,7 +273,6 @@ def main():
         )
 
         # Prep inputs
-        priors = gen_priors(aman, config["prior"], method="flat", width=1, basis=None)
         focal_plane = np.vstack((aman.xi, aman.eta, aman.polang))
         if not gen_template:
             template = np.vstack(
@@ -265,21 +283,27 @@ def main():
                 )
             )
             master_template.append(np.vstack((template, aman.det_info.det_id)))
+            template_bp1 = msk_bp1
+            template_bp2 = msk_bp2
+            det_ids = aman.det_info.det_id
+        priors = gen_priors(
+            aman, det_ids, config["prior"], method="flat", width=1, basis=None
+        )
 
         # Do actual matching
         map_bp1, out_bp1 = match_template(
             focal_plane[:, msk_bp1],
-            template[:, msk_bp1],
+            template[:, template_bp1],
             out_thresh=config["out_thresh"],
             avoid_collision=True,
-            priors=priors[np.ix_(msk_bp1, msk_bp1)],
+            priors=priors[np.ix_(template_bp1, msk_bp1)],
         )
         map_bp2, out_bp2 = match_template(
             focal_plane[:, msk_bp2],
-            template[:, msk_bp2],
+            template[:, template_bp2],
             out_thresh=config["out_thresh"],
             avoid_collision=True,
-            priors=priors[np.ix_(msk_bp2, msk_bp2)],
+            priors=priors[np.ix_(template_bp2, msk_bp2)],
         )
 
         out_msk = np.zeros(aman.dets.count, dtype=bool)
@@ -300,8 +324,8 @@ def main():
 
     if len(pointing_paths) == 1:
         det_id = np.zeros(aman.dets.count, dtype=str)
-        det_id[msk_bp1] = aman.det_info.det_id[msk_bp1][map_bp1]
-        det_id[msk_bp2] = aman.det_info.det_id[msk_bp2][map_bp2]
+        det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
+        det_id[msk_bp2] = det_ids[template_bp2][map_bp2]
         aman.wrap("det_id", det_id, [(0, aman.dets)])
         aman.wrap("pointing_outliers", out_msk.astype(int), [(0, aman.dets)])
         g3u.remove_detmap_info(aman)
@@ -326,22 +350,22 @@ def main():
 
     map_bp1, out_bp1 = match_template(
         focal_plane[:, msk_bp1],
-        template[:, msk_bp1],
+        template[:, template_bp1],
         out_thresh=config["out_thresh"],
         avoid_collision=True,
-        priors=priors[np.ix_(msk_bp1, msk_bp1)],
+        priors=priors[np.ix_(template_bp1, msk_bp1)],
     )
     map_bp2, out_bp2 = match_template(
         focal_plane[:, msk_bp2],
-        template[:, msk_bp2],
+        template[:, template_bp2],
         out_thresh=config["out_thresh"],
         avoid_collision=True,
-        priors=priors[np.ix_(msk_bp2, msk_bp2)],
+        priors=priors[np.ix_(template_bp2, msk_bp2)],
     )
-    det_id = np.zeros(len(det_ids), dtype=str)
-    det_id[msk_bp1] = det_ids[msk_bp1][map_bp1]
-    det_id[msk_bp2] = det_ids[msk_bp2][map_bp2]
-    out_msk = np.zeros(len(det_ids), dtype=int)
+    det_id = np.zeros(len(readout_ids), dtype=str)
+    det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
+    det_id[msk_bp2] = det_ids[template_bp2][map_bp2]
+    out_msk = np.zeros(len(readout_ids), dtype=int)
     out_msk[msk_bp1][out_bp1] = 2
     out_msk[msk_bp2][out_bp2] = 2
     for aman, out, path in zip(pointings, outliers, pointing_paths):
