@@ -493,10 +493,12 @@ class FrameProcessor(object):
             # Use estimated sample interval to fill until end_time. Not using fill_time_gaps because
             # end_time is externally determined and does not usually line up with sample interval
             ts = np.append(ts, np.arange(data.times[-1].time+dt, end_time, dt))
+            # for consistency with smurf_timestamps
+            ts /= core.G3Units.s
 
         # Create new G3SuperTimestream with filled-in samples
         if len(data.times) < len(ts):
-            i_missing, _ = find_missing_samples(ts, np.array(data.times))
+            i_missing, _ = find_missing_samples(ts, np.array(data.times)/core.G3Units.s)
             m = np.ones(len(ts), dtype=bool)
             m[i_missing] = False
             assert np.sum(m) == len(data.times)
