@@ -3,8 +3,8 @@ import argparse as ap
 import numpy as np
 import yaml
 import sotodlib.io.g3tsmurf_utils as g3u
-from sotodlib.core import AxisManager
-from sotodlib.io.metadata import read_dataset
+from sotodlib.core import AxisManager, metadata
+from sotodlib.io.metadata import read_dataset, write_dataset
 from scipy.spatial.transform import Rotation as R
 from pycpd import AffineRegistration
 from detmap.inst_model import InstModel
@@ -319,14 +319,32 @@ def main():
             except KeyError:
                 avg_fp[ri] = [fp]
 
+    rset_paths = metadata.ResultSet(
+        keys=["pointing_path", "polang_path"],
+        src=np.vstack((pointing_paths, polangs_paths)).T,
+    )
+    write_dataset(rset_paths, config["out_path"], "input_data_paths", overwrite=True)
     if len(pointing_paths) == 1:
         det_id = np.zeros(aman.dets.count, dtype=str)
         det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
         det_id[msk_bp2] = det_ids[template_bp2][map_bp2]
+        data_out = np.vstack(
+            (det_id, aman.det_info.readout_id, out_msk.astype(float), focal_plane[:-1])
+        ).T
+        rset_data = metadata.ResultSet(
+            keys=[
+                "dets:det_id",
+                "dets:readout_id",
+                "outliers",
+                "avg_xi",
+                "avg_eta",
+                "avg_polang",
+            ],
+            src=data_out,
+        )
+        write_dataset(rset_data, config["out_path"], "focal_plane", overwrite=True)
         aman.wrap("det_id", det_id, [(0, aman.dets)])
         aman.wrap("pointing_outliers", out_msk.astype(int), [(0, aman.dets)])
-        g3u.remove_detmap_info(aman)
-        aman.save(config["pointing_data"], overwrite=True)
 
     focal_plane = []
     readout_ids = np.array(list(avg_fp.keys()))
@@ -359,23 +377,27 @@ def main():
         avoid_collision=True,
         priors=priors[np.ix_(template_bp2, msk_bp2)],
     )
+
     det_id = np.zeros(len(readout_ids), dtype=str)
     det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
     det_id[msk_bp2] = det_ids[template_bp2][map_bp2]
-    out_msk = np.zeros(len(readout_ids), dtype=int)
-    out_msk[msk_bp1][out_bp1] = 2
-    out_msk[msk_bp2][out_bp2] = 2
-    for aman, out, path in zip(pointings, outliers, pointing_paths):
-        _, avg_srt, srt = np.intersect1d(
-            readout_ids, aman.det_info.readout_id, return_indices=True
-        )
-        rid_map = np.argsort(srt)
-        aman.wrap("det_id", det_id[avg_srt][rid_map], [(0, aman.dets)])
-        aman.wrap(
-            "pointing_outliers", out + out_msk[avg_srt][rid_map], [(0, aman.dets)]
-        )
-        g3u.remove_detmap_info(aman)
-        aman.save(config["pointing_data"], overwrite=True)
+    out_msk = np.zeros(len(readout_ids))
+    out_msk[msk_bp1][out_bp1] = 1.0
+    out_msk[msk_bp2][out_bp2] = 1.0
+
+    data_out = np.vstack((det_id, readout_ids, out_msk, focal_plane)).T
+    rset_data = metadata.ResultSet(
+        keys=[
+            "dets:det_id",
+            "dets:readout_id",
+            "outliers",
+            "avg_xi",
+            "avg_eta",
+            "avg_polang",
+        ],
+        src=data_out,
+    )
+    write_dataset(rset_data, config["out_path"], "focal_plane", overwrite=True)
 
 
 if __name__ == "__main__":
