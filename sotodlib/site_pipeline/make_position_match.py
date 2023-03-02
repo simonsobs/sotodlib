@@ -105,10 +105,10 @@ def gen_priors(aman, template_det_ids, prior, method="flat", width=1, basis=None
     for i in aman.dets.count:
         prior_method(priors[i], i)
 
+    det_ids = aman.det_info.det_ids
     if np.array_equal(det_ids, template_det_ids):
         return priors
 
-    det_ids = aman.det_info.det_ids
     missing = np.setdiff1d(template_det_ids, det_ids)
     det_ids = np.concatenate(missing)
     priors = np.concatenate((priors, np.ones((len(missing), aman.dets.count))))
