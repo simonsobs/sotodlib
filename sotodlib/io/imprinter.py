@@ -722,7 +722,7 @@ class Imprinter:
                         continue
 
                     ts.append(get_frame_times(frame)[1])
-                ts = fill_time_gaps(np.hstack(ts))
+                ts = fill_time_gaps(np.hstack(ts)).astype(int)
                 t0, t1 = ts[[0, -1]]
             else:
                 _t0, _t1 = get_start_and_end(_files)

@@ -466,7 +466,7 @@ class FrameProcessor(object):
         if self.BOOK_END_TIME is not None:
             end_time = min(flush_time.time, self.BOOK_END_TIME.time)
         elif self._smurf_timestamps is not None:
-            end_time = min(flush_time.time, self._smurf_timestamps[-1].time + 1)
+            end_time = min(flush_time.time, self._smurf_timestamps[-1] + 1)
         else:
             end_time = min(flush_time.time, data.times[-1].time + 1)
 
