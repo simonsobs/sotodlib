@@ -201,6 +201,8 @@ def main():
         aman = AxisManager.load(point_path)
         g3u.add_detmap_info(aman, config["detmap"])
 
+        # NOTE: Assuming some standin structure for the pol data
+        # This may change in the future
         rset = read_dataset(pol_path, "polarization_angle")
         pol_rid = rset["dets:readout_id"]
         pols = rset["polarization_angle"]
@@ -213,11 +215,51 @@ def main():
     bg_map = np.load(config["bias_map"], allow_pickle=True).item()
     bc_bgmap = (bg_map["bands"] << 32) + bg_map["channels"]
 
+    # Save the input paths for later reference
+    rset_paths = metadata.ResultSet(
+        keys=["pointing_path", "polang_path"],
+        src=np.vstack((pointing_paths, polangs_paths)).T,
+    )
+    write_dataset(rset_paths, config["out_path"], "input_data_paths", overwrite=True)
+
+    # If we are to just use the detmap results
     if config["no_fit"]:
-        for aman, path in zip(pointings, pointing_paths):
-            aman.wrap("det_id", aman.det_info.det_id, [(0, aman.dets)])
-            g3u.remove_detmap_info(aman)
-            aman.save(path, overwrite=True)
+        # Compute the average focal plane
+        full_fp = {}
+        det_ids = []
+        for aman, pol in zip(pointings, polangs):
+            focal_plane = np.vstack((aman.xi, aman.eta, pol)).T
+            for ri, di, fp in zip(
+                aman.det_info.readout_id, aman.det_info.det_id, focal_plane
+            ):
+                try:
+                    full_fp[ri].append(fp)
+                except KeyError:
+                    full_fp[ri] = [fp]
+                    det_ids.append(di)
+        focal_plane = []
+        readout_ids = np.array(list(full_fp.keys()))
+        for rid in readout_ids:
+            avg_pointing = np.nanmedian(np.vstack(full_fp[rid]), axis=0)
+            focal_plane.append(avg_pointing)
+        focal_plane = np.vstack(focal_plane).T
+
+        # Save the average focal plane with the detmap results
+        data_out = np.vstack(
+            (det_ids, readout_ids, np.zeros(len(det_ids)), focal_plane)
+        ).T
+        rset_data = metadata.ResultSet(
+            keys=[
+                "dets:det_id",
+                "dets:readout_id",
+                "outliers",
+                "avg_xi",
+                "avg_eta",
+                "avg_polang",
+            ],
+            src=data_out,
+        )
+        write_dataset(rset_data, config["out_path"], "focal_plane", overwrite=True)
         sys.exit()
 
     # TODO: apply instrument to pointing if availible
@@ -225,6 +267,7 @@ def main():
     bp1_bg = (0, 1, 4, 5, 8, 9)
     bp2_bg = (2, 3, 6, 7, 10, 11)
 
+    # If requested generate a template for the UFM with the instrument model
     gen_template = "gen_template" in config
     if gen_template:
         ufm = config["gen_template"]
@@ -303,6 +346,7 @@ def main():
             priors=priors[np.ix_(template_bp2, msk_bp2)],
         )
 
+        # Store outputs for now
         out_msk = np.zeros(aman.dets.count, dtype=bool)
         out_msk[msk_bp1][out_bp1] = True
         out_msk[msk_bp2][out_bp2] = True
@@ -319,11 +363,7 @@ def main():
             except KeyError:
                 avg_fp[ri] = [fp]
 
-    rset_paths = metadata.ResultSet(
-        keys=["pointing_path", "polang_path"],
-        src=np.vstack((pointing_paths, polangs_paths)).T,
-    )
-    write_dataset(rset_paths, config["out_path"], "input_data_paths", overwrite=True)
+    # It we only have a single dataset
     if len(pointing_paths) == 1:
         det_id = np.zeros(aman.dets.count, dtype=str)
         det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
@@ -343,9 +383,8 @@ def main():
             src=data_out,
         )
         write_dataset(rset_data, config["out_path"], "focal_plane", overwrite=True)
-        aman.wrap("det_id", det_id, [(0, aman.dets)])
-        aman.wrap("pointing_outliers", out_msk.astype(int), [(0, aman.dets)])
 
+    # Compute the average focal plane while ignoring outliers
     focal_plane = []
     readout_ids = np.array(list(avg_fp.keys()))
     for rid in readout_ids:
@@ -378,6 +417,7 @@ def main():
         priors=priors[np.ix_(template_bp2, msk_bp2)],
     )
 
+    # Make final outputs and save
     det_id = np.zeros(len(readout_ids), dtype=str)
     det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
     det_id[msk_bp2] = det_ids[template_bp2][map_bp2]
