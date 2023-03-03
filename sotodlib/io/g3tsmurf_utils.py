@@ -403,25 +403,29 @@ def replace_none(val, dtype, replace_val=np.nan):
     return val
 
 
-def add_detmap_info(aman, detmap_filename): 
+def add_detmap_info(aman, detmap_filename, columns=None): 
     """Add detector mapping info into aman.det_info in the format that will be 
     generally available once this is done through Context
     
     Arguments
     ---------
     aman: AxisManager
-    detmap_filename: path to file for detmap information. Does just blindly
+    detmap_filename : string
+        path to file for detmap information. Does just blindly
         assume you are loading the correct file (sorry).
+    columns : list of strings
+        Optional list of columns to include in addition to main columns
+             
     """
     detmap = np.genfromtxt(detmap_filename, delimiter=',', skip_header=1,
-                           dtype=[('smurf_band', '<f8'), ('res_index', '<f8'), ('freq_mhz', '<f8'), ('is_north', '<f8'), 
-                                  ('is_highband', '<f8'), ('smurf_channel', '<f8'), ('smurf_subband', '<f8'), 
-                                  ('bond_pad', '<f8'), ('mux_band', '<f8'), ('mux_channel', '<f8'), ('mux_subband', '<f8'),
+                           dtype=[('smurf_band', '<f8'), ('res_index', '<f8'), ('freq_mhz', '<f8'), ('is_north', '<U5'), 
+                                  ('is_highband', '<U5'), ('smurf_channel', '<f8'), ('smurf_subband', '<f8'), 
+                                  ('bond_pad', '<f8'), ('mux_band', '<f8'), ('mux_channel', '<f8'), ('mux_subband', '<U4'),
                                   ('mux_layout_position', '<f8'), ('design_freq_mhz', '<f8'), ('bias_line', '<f8'),
                                   ('pol', '<U4'), ('bandpass', '<U4'), ('det_row', '<f8'), ('det_col', '<f8'), 
-                                  ('pixel_num', '<f8'), ('pixel_num_pin_skip', '<f8'), ('rhomb', '<f8'), 
-                                  ('is_optical', '<f8'), ('det_x', '<f8'), ('det_y', '<f8'), ('angle_raw_deg', '<f8'), 
-                                  ('angle_actual_deg', '<f8'), ('det_type', '<U4'), ('detector_id', '<U50'), ('flags', '<f8'), 
+                                  ('pixel_num', '<f8'), ('pixel_num_pin_skip', '<f8'), ('rhomb', '<U4'), 
+                                  ('is_optical', '<U5'), ('det_x', '<f8'), ('det_y', '<f8'), ('angle_raw_deg', '<f8'), 
+                                  ('angle_actual_deg', '<f8'), ('det_type', '<U4'), ('detector_id', '<U50'), ('flags', '<U50'), 
                                   ('fit_fr_mhz', '<f8'), ('fit_q', '<f8'), ('fit_qe_real', '<f8'), ('fit_qe_imag', '<f8'), 
                                   ('fit_delay_ns', '<f8'), ('fit_phi_rad', '<f8'), ('fit_fmin_mhz', '<f8'),
                                   ('fit_amag', '<f8'), ('fit_aslope', '<f8')])
@@ -432,6 +436,10 @@ def add_detmap_info(aman, detmap_filename):
         return
     aman.det_info.wrap_new("det_id", ("dets",), dtype='<U50')
     
+    strings = ["is_north", "is_highband", "mux_subband", "rhomb", "is_optical", "det_type", "detector_id", "flags"]
+    ints = ["smurf_band", "res_index", "smurf_channel", "smurf_subband", "bond_pad", "mux_band", "mux_channel",
+            "mux_layout_position", "bias_line", "pixel_num", "pixel_num_pin_skip"]
+    
     wafer = core.AxisManager( aman.dets )
     wafer.wrap_new( "pol", ("dets",), dtype="U4")
     wafer.wrap_new( "det_x", ("dets",), dtype=float)
@@ -441,6 +449,14 @@ def add_detmap_info(aman, detmap_filename):
     wafer.wrap_new( "det_col", ("dets",), dtype=int)
     wafer.wrap_new( "type", ("dets",), dtype="U4")
     wafer.wrap_new( "bandpass", ("dets",), dtype="U4")
+    if columns is not None:
+        for col in columns:
+            if col in strings:
+                wafer.wrap_new( col, ("dets", ), dtype="U50")
+            elif col in ints:
+                wafer.wrap_new( col, ("dets", ), dtype=int)
+            else:
+                wafer.wrap_new( col, ("dets",), dtype=float)
 
     for i in range(aman.dets.count):
         msk = np.all( [aman.det_info.smurf.band[i] == detmap["smurf_band"],
@@ -462,6 +478,14 @@ def add_detmap_info(aman, detmap_filename):
         if not bandpass == "NC":
             bandpass = f"f{bandpass}"
         wafer["bandpass"][i] = bandpass
+        if columns is not None:
+            for col in columns:
+                if col in strings:
+                    wafer[col][i] = replace_none(detmap[col][msk][0], str, "NC")
+                elif col in ints:
+                    wafer[col][i] = replace_none(detmap[col][msk][0], int, -1)
+                else:
+                    wafer[col][i] = replace_none(detmap[col][msk][0], float, np.nan)
         
     aman.det_info.wrap("wafer", wafer)
 
