@@ -59,6 +59,55 @@ def rescale(xy):
     return xy_rs
 
 
+def priors_from_result(
+    fp_det_ids,
+    template_det_ids,
+    final_fp_det_ids,
+    final_template_det_ids,
+    liklihoods,
+    normalization=0.2,
+):
+    """
+    Generate priors from a previous run of the template matching.
+
+    Arguments:
+
+        fp_det_ids: Array of det_ids in the basis of the focal plane that was already matched.
+
+        template_det_ids: Array of det_ids in the basis of the template that was already matched.
+
+        final_fp_det_ids: Array of det_ids in the basis of the focal plane that will be matched.
+
+        final_template_det_ids: Array of det_ids in the basis of the template that will be matched.
+
+        liklihoods: Liklihood array from template matching.
+
+        normalization: Value to normalize liklihoods to. The maximum prior will be 1+normalization.
+
+    Returns:
+
+        priors: The 2d array of priors in the basis of the focal plane and template that are too be matched.
+    """
+    liklihoods *= normalization / np.max(liklihoods)
+    priors = 1 + liklihoods
+
+    missing = np.setdiff1d(final_template_det_ids, template_det_ids)
+    template_det_ids = np.concatenate(missing)
+    priors = np.concatenate((priors, np.ones((len(missing), len(fp_det_ids)))))
+    asort = np.argsort(template_det_ids)
+    template_map = np.argsort(np.argsort(final_template_det_ids))
+    priors = priors[asort][template_map]
+
+    missing = np.setdiff1d(final_fp_det_ids, fp_det_ids)
+    fp_det_ids = np.concatenate(missing)
+    priors = np.concatenate((priors.T, np.ones((len(missing), len(template_det_ids)))))
+    asort = np.argsort(fp_det_ids)
+    fp_map = np.argsort(np.argsort(final_fp_det_ids))
+    priors = priors[asort][fp_map].T
+
+    return priors
+
+
 def gen_priors(aman, template_det_ids, prior, method="flat", width=1, basis=None):
     """
     Generate priors from detmap.
