@@ -281,7 +281,6 @@ class Imprinter:
             output root directory
         message: string
             message to be added to the book
-
         """
         if session is None: session = self.get_session()
         # get book id and book object, depending on whether book id is given or not
@@ -298,6 +297,11 @@ class Imprinter:
         # check whether book is already bound
         if book.status == BOUND:
             raise BookBoundError(f"Book {bid} is already bound")
+
+        g3tsmurf_path = self.sources[book.tel_tube]['g3tsmurf']
+        with open(g3tsmurf_path, 'r') as f:
+            g3tsmurf_cfg = yaml.safe_load(f)
+        hwp_root = g3tsmurf_cfg.get('hwp_prefix')
 
         # after sanity checks, now we proceed to bind the book.
         # get files associated with this book, in the form of
@@ -330,7 +334,8 @@ class Imprinter:
                 Bookbinder(smurf_files, hk_files=hkfiles, out_root=odir,
                            stream_id=stream_id, session_id=int(session_id),
                            book_id=book.bid, start_time=start_t, end_time=stop_t,
-                           max_nchannels=book.max_channels, timing_system=timing_system,
+                           max_nchannels=book.max_channels, hwp_root=hwp_root,
+                           timing_system=timing_system,
                            frameproc_config={"readout_ids": rids})()
             # not sure if this is the best place to update
             book.status = BOUND
