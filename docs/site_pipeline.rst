@@ -276,6 +276,69 @@ Command line arguments
    :prog: update_hwp_angle
 
 
+make-position-match
+-------------------
+
+This element builds a `readout_id` to `detector_id` mapping by matching measured pointing and polarization angles against a template.
+It is capable of taking multiple measurements from the same tuning epoch and combining them to produce a single mapping and an average focal plane.
+
+.. automodule:: sotodlib.site_pipeline.make_position_match
+   :members:
+   :undoc-members:
+
+
+Config file format
+``````````````````
+
+Here's an annotated example:
+
+.. code-block:: yaml
+
+  # Data sources
+  pointing_data:
+    - "pointing_res_1.h5"
+    - "pointing_res_2.h5"
+  # Note here that the number of pointing results match the number of polang results
+  # It is currently assumed that this is true, and that the i'th file for each are associated
+  # If the numbers do not match files can be repeated
+  polangs:
+    - "polang_res_1.h5"
+    - "polang_res_2.h5"
+  detmap: "detmap_results.csv"
+  bias_map: "bias_map_results.npz"
+
+  # Configuration options
+  no_fit: False # If True the detmap results will be taken as truth
+  # If an array name is given it will be used to generate the template to match against
+  # If this parameter is not provided the detmap will be used as the template
+  gen_template: "Mv6" 
+  # Settings to generate priors from detmap
+  # Do not include if you dont want priors
+  priors:
+    val: 1.5
+    method: "flat"
+    width: 1
+    basis: None
+  # Value that liklihoods are normalized to when making priors from them.
+  prior_normalization: .2
+  out_thresh: .75 # Liklihood below which things will be considered outliers
+
+  out_path: "results.h5"
+
+
+Ouput file format
+`````````````````
+
+The results of `make_position_match` are stored in an HDF5 file containing two datasets.
+The datasets are made using the `ResultSet` class and can be loaded back as such.
+
+The first dataset is called `input_data_paths` and has two columns: `pointing_path` and `polang_path`.
+It contains the list of input files used to produce the output.
+
+The second dataset is called `focal_plane` and has columns: `dets:det_id`, `dets:readout_id`, `outliers`, `avg_xi`, `avg_eta`, and `avg_polang`.
+It contains the `readout_id` to `det_id` mapping, a flag showing which detectors looked like outliers, and an averaged focal plane produded using all the provided pointings and polarization angles.
+
+
 Support
 =======
 
