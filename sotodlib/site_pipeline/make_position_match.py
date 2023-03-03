@@ -204,6 +204,8 @@ def match_template(
 
         outliers: Indices of points that are outliers.
                   Note that this is in the basis of mapping and focal_plane, not template.
+
+        P: The liklihood array.
     """
     reg = AffineRegistration(**{"X": focal_plane, "Y": template})
     reg.register()
@@ -222,7 +224,7 @@ def match_template(
     if out_thresh > 0:
         outliers = np.where(reg.P[range(reg.P.shape[0]), mapping] < out_thresh)[0]
 
-    return mapping, outliers
+    return mapping, outliers, P
 
 
 def main():
@@ -345,6 +347,7 @@ def main():
     avg_fp = {}
     outliers = []
     master_template = []
+    results = [[], [], []]
     for aman, pol in zip(pointings, polangs):
         # Split up by bandpass
         bc_aman = (
@@ -380,14 +383,14 @@ def main():
         )
 
         # Do actual matching
-        map_bp1, out_bp1 = match_template(
+        map_bp1, out_bp1, P_bp1 = match_template(
             focal_plane[:, msk_bp1],
             template[:, template_bp1],
             out_thresh=config["out_thresh"],
             avoid_collision=True,
             priors=priors[np.ix_(template_bp1, msk_bp1)],
         )
-        map_bp2, out_bp2 = match_template(
+        map_bp2, out_bp2, P_bp2 = match_template(
             focal_plane[:, msk_bp2],
             template[:, template_bp2],
             out_thresh=config["out_thresh"],
@@ -396,6 +399,12 @@ def main():
         )
 
         # Store outputs for now
+        results[0].append(aman.det_info.det_id)
+        results[1].append(det_ids)
+        P = np.zeros(priors.shape, dtype=bool)
+        P[np.ix_(template_bp1, msk_bp1)] = P_bp1
+        P[np.ix_(template_bp2, msk_bp2)] = P_bp2
+        results[2].append(P)
         out_msk = np.zeros(aman.dets.count, dtype=bool)
         out_msk[msk_bp1][out_bp1] = True
         out_msk[msk_bp2][out_bp2] = True
@@ -445,12 +454,24 @@ def main():
     msk_bp2 = bp_msk == 2
     focal_plane = focal_plane[:-1]
 
-    # Do final matching
     if not gen_template:
         template = np.unique(np.hstack(master_template), axis=1)
         det_ids = template[-1]
         template = template[:-1].astype(float)
 
+    # Build priors from previous results
+    priors = 1
+    for fp_det_id, template_det_id, P in zip(*results):
+        priors *= priors_from_result(
+            fp_det_id,
+            template_det_id,
+            det_ids,
+            det_ids,
+            P,
+            config["prior_normalization"],
+        )
+
+    # Do final matching
     map_bp1, out_bp1 = match_template(
         focal_plane[:, msk_bp1],
         template[:, template_bp1],
