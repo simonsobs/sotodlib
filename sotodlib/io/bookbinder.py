@@ -473,7 +473,7 @@ class FrameProcessor(object):
         # Obtain list of filled-in timestamps, whether from provided list or estimate with fill_time_gaps
         if self._smurf_timestamps is not None:
             # trim the list of timestamps to the current frame
-            m_ = np.logical_and(self._smurf_timestamps <= end_time, self._smurf_timestamps >= prev_frame_end)
+            m_ = np.logical_and(self._smurf_timestamps < end_time, self._smurf_timestamps > prev_frame_end)
             ts = self._smurf_timestamps[m_]
         else:
             # fallback when no timestamp is provided. We switch to estimate sample interval based on data
