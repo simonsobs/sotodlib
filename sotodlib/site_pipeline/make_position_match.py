@@ -72,11 +72,11 @@ def priors_from_result(
 
     Arguments:
 
-        fp_det_ids: Array of det_ids in the basis of the focal plane that was already matched.
+        fp_readout_ids: Array of readout_ids in the basis of the focal plane that was already matched.
 
         template_det_ids: Array of det_ids in the basis of the template that was already matched.
 
-        final_fp_det_ids: Array of det_ids in the basis of the focal plane that will be matched.
+        final_fp_readout_ids: Array of readout_ids in the basis of the focal plane that will be matched.
 
         final_template_det_ids: Array of det_ids in the basis of the template that will be matched.
 
@@ -86,23 +86,23 @@ def priors_from_result(
 
     Returns:
 
-        priors: The 2d array of priors in the basis of the focal plane and template that are too be matched.
+        priors: The 2d array of priors in the basis of the focal plane and template that are to be matched.
     """
     liklihoods *= normalization / np.max(liklihoods)
     priors = 1 + liklihoods
 
     missing = np.setdiff1d(final_template_det_ids, template_det_ids)
     template_det_ids = np.concatenate(missing)
-    priors = np.concatenate((priors, np.ones((len(missing), len(fp_det_ids)))))
+    priors = np.concatenate((priors, np.ones((len(missing), len(fp_readout_ids)))))
     asort = np.argsort(template_det_ids)
     template_map = np.argsort(np.argsort(final_template_det_ids))
     priors = priors[asort][template_map]
 
-    missing = np.setdiff1d(final_fp_det_ids, fp_det_ids)
-    fp_det_ids = np.concatenate(missing)
+    missing = np.setdiff1d(final_fp_readout_ids, fp_readout_ids)
+    fp_readout_ids = np.concatenate(missing)
     priors = np.concatenate((priors.T, np.ones((len(missing), len(template_det_ids)))))
-    asort = np.argsort(fp_det_ids)
-    fp_map = np.argsort(np.argsort(final_fp_det_ids))
+    asort = np.argsort(fp_readout_ids)
+    fp_map = np.argsort(np.argsort(final_fp_readout_ids))
     priors = priors[asort][fp_map].T
 
     return priors
@@ -399,7 +399,7 @@ def main():
         )
 
         # Store outputs for now
-        results[0].append(aman.det_info.det_id)
+        results[0].append(aman.det_info.readout_id)
         results[1].append(det_ids)
         P = np.zeros(priors.shape, dtype=bool)
         P[np.ix_(template_bp1, msk_bp1)] = P_bp1
@@ -461,11 +461,11 @@ def main():
 
     # Build priors from previous results
     priors = 1
-    for fp_det_id, template_det_id, P in zip(*results):
+    for fp_readout_id, template_det_id, P in zip(*results):
         priors *= priors_from_result(
-            fp_det_id,
+            fp_readout_id,
             template_det_id,
-            det_ids,
+            readout_ids,
             det_ids,
             P,
             config["prior_normalization"],
