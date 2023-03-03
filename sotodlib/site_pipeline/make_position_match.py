@@ -344,6 +344,9 @@ def main():
         template_bp1 = np.isin(template_bg, bp1_bg)
         template_bp2 = np.isin(template_bg, bp2_bg)
 
+    make_priors = "priors" in config
+    priors_bp1 = None
+    priors_bp2 = None
     avg_fp = {}
     outliers = []
     master_template = []
@@ -378,9 +381,17 @@ def main():
             template_bp1 = msk_bp1
             template_bp2 = msk_bp2
             det_ids = aman.det_info.det_id
-        priors = gen_priors(
-            aman, det_ids, config["prior"], method="flat", width=1, basis=None
-        )
+        if make_priors:
+            priors = gen_priors(
+                aman,
+                det_ids,
+                config["priors"]["val"],
+                config["priors"]["method"],
+                config["priors"]["width"],
+                config["priors"]["basis"],
+            )
+            priors_bp1 = (priors[np.ix_(template_bp1, msk_bp1)],)
+            priors_bp2 = (priors[np.ix_(template_bp2, msk_bp2)],)
 
         # Do actual matching
         map_bp1, out_bp1, P_bp1 = match_template(
@@ -388,14 +399,14 @@ def main():
             template[:, template_bp1],
             out_thresh=config["out_thresh"],
             avoid_collision=True,
-            priors=priors[np.ix_(template_bp1, msk_bp1)],
+            priors=priors_bp1,
         )
         map_bp2, out_bp2, P_bp2 = match_template(
             focal_plane[:, msk_bp2],
             template[:, template_bp2],
             out_thresh=config["out_thresh"],
             avoid_collision=True,
-            priors=priors[np.ix_(template_bp2, msk_bp2)],
+            priors=priors_bp2,
         )
 
         # Store outputs for now
