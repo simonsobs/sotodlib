@@ -484,7 +484,7 @@ class FrameProcessor(object):
             if self._prev_smurf_sample is None:
                 # Use estimated sample interval to fill backward to prev_frame_end = book start time - 1
                 # since book start time does not usually line up with sample interval
-                ts = np.append(np.flip(np.arange(data.times[0].time-dt, prev_frame_end, -dt)), data.times)
+                ts = np.append(np.flip(np.arange(data.times[0].time-dt, prev_frame_end, -dt, dtype=int)), data.times)
                 ts = fill_time_gaps(ts)
             elif (data.times[0].time - prev_frame_end)/dt > 0.5:
                 ts = fill_time_gaps(np.insert(data.times, 0, prev_frame_end))[1:]
@@ -492,7 +492,7 @@ class FrameProcessor(object):
                 ts = fill_time_gaps(data.times)
             # Use estimated sample interval to fill until end_time. Not using fill_time_gaps because
             # end_time is externally determined and does not usually line up with sample interval
-            ts = np.append(ts, np.arange(data.times[-1].time+dt, end_time, dt))
+            ts = np.append(ts, np.arange(data.times[-1].time+dt, end_time, dt, dtype=int))
 
         # Create new G3SuperTimestream with filled-in samples
         if len(data.times) < len(ts):
@@ -1161,7 +1161,7 @@ def fill_time_gaps(ts):
     total_missing = int(np.sum(missing))
 
     # Create new  array with the correct number of samples
-    new_ts = np.full(len(ts) + total_missing, np.nan)
+    new_ts = np.full(len(ts) + total_missing, np.nan, dtype=ts.dtype)
 
     # Insert old timestamps into new array with offsets that account for gaps
     offsets = np.concatenate([[0], np.cumsum(missing)])
