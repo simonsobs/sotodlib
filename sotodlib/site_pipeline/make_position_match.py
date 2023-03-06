@@ -60,9 +60,9 @@ def rescale(xy):
 
 
 def priors_from_result(
-    fp_det_ids,
+    fp_readout_ids,
     template_det_ids,
-    final_fp_det_ids,
+    final_fp_readout_ids,
     final_template_det_ids,
     liklihoods,
     normalization=0.2,
