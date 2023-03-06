@@ -489,7 +489,7 @@ class FrameProcessor(object):
             elif (data.times[0].time - prev_frame_end)/dt > 0.5:
                 ts = fill_time_gaps(np.insert(data.times, 0, prev_frame_end))[1:]
             else:
-                ts = fill_time_gaps(data.times)
+                ts = fill_time_gaps(np.asarray(data.times))
             # Use estimated sample interval to fill until end_time. Not using fill_time_gaps because
             # end_time is externally determined and does not usually line up with sample interval
             ts = np.append(ts, np.arange(data.times[-1].time+dt, end_time, dt, dtype=int))
@@ -501,7 +501,7 @@ class FrameProcessor(object):
             m = np.ones(len(ts), dtype=bool)
             m[i_missing] = False
             assert np.sum(m) == len(data.times)
-            new_data = np.full((data.data.shape[0], len(ts)), self.FLAGGED_SAMPLE_VALUE)
+            new_data = np.full((data.data.shape[0], len(ts)), self.FLAGGED_SAMPLE_VALUE, dtype=data.data.dtype)
             new_data[:,m] = data.data
             # Filling in missing samples can cause frame to exceed max length
             if len(ts) >= self.maxlength:
@@ -1174,7 +1174,7 @@ def fill_time_gaps(ts):
     total_missing = int(np.sum(missing))
 
     # Create new  array with the correct number of samples
-    new_ts = np.full(len(ts) + total_missing, np.nan, dtype=ts.dtype)
+    new_ts = np.full(len(ts) + total_missing, -1, dtype=ts.dtype)
 
     # Insert old timestamps into new array with offsets that account for gaps
     offsets = np.concatenate([[0], np.cumsum(missing)])
@@ -1182,7 +1182,7 @@ def fill_time_gaps(ts):
     new_ts[i0s + offsets] = ts
 
     # Use existing data to interpolate and fill holes
-    m = np.isnan(new_ts)
+    m = (new_ts < 0)
     xs = np.arange(len(new_ts))
     interp = interp1d(xs[~m], new_ts[~m])
     new_ts[m] = interp(xs[m])
