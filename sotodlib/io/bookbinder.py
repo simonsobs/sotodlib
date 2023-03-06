@@ -432,7 +432,7 @@ class FrameProcessor(object):
 
         return trimmed_frame
 
-    def fill_in_missing_samples(self, data, flush_time, return_flags=False):
+    def fill_in_missing_samples(self, data, flush_time, field, return_flags=False):
         """
         Locate and patch missing samples in data.
 
@@ -503,14 +503,28 @@ class FrameProcessor(object):
             assert np.sum(m) == len(data.times)
             new_data = np.full((data.data.shape[0], len(ts)), self.FLAGGED_SAMPLE_VALUE)
             new_data[:,m] = data.data
+            # Filling in missing samples can cause frame to exceed max length
+            if len(ts) >= self.maxlength:
+                ts_excess = core.G3VectorTime(ts[self.maxlength:])
+                data_excess = new_data[:,self.maxlength:]
+                excess = {'names': getattr(self.smbundle, field)['names'], 'times': [ts_excess]+getattr(self.smbundle, field)['times'], 'data': [data_excess]+getattr(self.smbundle, field)['data']}
+                setattr(self.smbundle, field, excess)
+                if field == 'signal':  # only prepend smbundle.times once
+                    self.smbundle.times = [t for t in ts_excess]+self.smbundle.times
+                ts = ts[:self.maxlength]
+                new_data = new_data[:,:self.maxlength]
             dataout = so3g.G3SuperTimestream(data.names, core.G3VectorTime(ts), new_data)
-            flag_gap = core.G3VectorBool(~m)
+            flag_gap = core.G3VectorBool(~m)[:self.maxlength]
             print("{} missing samples detected".format(np.sum(~m)))
         elif len(data.times) > len(ts):
             raise ValueError("There are more samples in the timestream than in list provided")
         else:
             dataout = data
             flag_gap = core.G3VectorBool(np.zeros(len(ts)))
+
+        assert len(ts) <= self.maxlength
+        if field == 'signal' and len(ts) == self.maxlength:
+            self._frame_splits.append(ts[-1] + 1)
 
         if return_flags:
             return dataout, flag_gap
@@ -539,13 +553,13 @@ class FrameProcessor(object):
 
         # Fill in missing samples and write data to frame
         f = core.G3Frame(core.G3FrameType.Scan)
-        f['signal'], flag_smurfgap = self.fill_in_missing_samples(smurf_data, flush_time, return_flags=True)
+        f['signal'], flag_smurfgap = self.fill_in_missing_samples(smurf_data, flush_time, 'signal', return_flags=True)
         if smurf_bias is not None:
-            f['tes_biases'] = self.fill_in_missing_samples(smurf_bias, flush_time)
+            f['tes_biases'] = self.fill_in_missing_samples(smurf_bias, flush_time, 'biases')
         if smurf_primary is not None:
-            f['primary'] = self.fill_in_missing_samples(smurf_primary, flush_time)
+            f['primary'] = self.fill_in_missing_samples(smurf_primary, flush_time, 'primary')
         # Update last sample
-        self._prev_smurf_sample = smurf_data.times[-1]
+        self._prev_smurf_sample = f['signal'].times[-1]
 
         try:
             hk_data = self.hkbundle.rebundle(flush_time)
@@ -650,9 +664,8 @@ class FrameProcessor(object):
 
             # If the existing data exceeds the specified maximum length
             while len(self.smbundle.times) >= self.maxlength:
-                split_time = self.smbundle.times[self.maxlength-1]
-                self._frame_splits.append(split_time)
-                output += self.flush(split_time + 1)
+                split_time = self.smbundle.times[self.maxlength-1] + 1
+                output += self.flush(split_time)
                 if self.flush_time is not None and split_time >= self.flush_time:
                     return output
             # If a frame split event has been reached
