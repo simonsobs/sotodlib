@@ -88,7 +88,7 @@ def priors_from_result(
 
         priors: The 2d array of priors in the basis of the focal plane and template that are to be matched.
     """
-    liklihoods *= normalization / np.max(liklihoods)
+    liklihoods *= normalization
     priors = 1 + liklihoods
 
     missing = np.setdiff1d(final_template_det_ids, template_det_ids)
