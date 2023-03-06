@@ -127,21 +127,24 @@ def gen_priors(aman, template_det_ids, prior, method="flat", width=1, basis=None
         width: Width of priors. For gaussian priors this is sigma.
 
         basis: Basis to calculate width in.
-               Currently not implemented so width will just be along the dets axis.
-               At the very least radial distance will be added.
+               Nominally will load values from aman.det_info.wafer.
+               Pass in None to use the indices as the basis.
 
     Returns:
 
         priors: The 2d array of priors.
     """
 
-    def _flat(arr, idx):
-        arr[idx - width // 2 : idx + width // 2 + width % 2] = prior
+    def _flat(x_axis, idx):
+        arr = np.ones_like(x_axis)
+        lower_bound = x_axis[idx] - width // 2
+        upper_bound = x_axis[idx] + width // 2 + width % 2
+        prior_range = np.where((x_axis >= lower_bound) & (x_axis < upper_bound))[0]
+        arr[prior_range] = prior
+        return arr
 
-    def _gaussian(arr, idx):
-        arr = prior * np.exp(
-            -0.5 * (np.arange(-1 * idx, len(arr) - idx, len(arr)) / width) ** 2
-        )
+    def _gaussian(x_axis, idx):
+        return prior * np.exp(-0.5 * ((x_axis - x_axis[idx]) ** 2) / (width ** 2))
 
     if method == "flat":
         prior_method = _flat
@@ -150,9 +153,14 @@ def gen_priors(aman, template_det_ids, prior, method="flat", width=1, basis=None
     else:
         raise ValueError("Method " + method + " not implemented")
 
+    if basis is None:
+        x_axis = np.arange(aman.dets.count)
+    else:
+        x_axis = aman.det_info.wafer[basis]
+
     priors = np.ones((aman.dets.count, aman.dets.count))
-    for i in aman.dets.count:
-        prior_method(priors[i], i)
+    for i in range(aman.dets.count):
+        priors[i] = prior_method(x_axis, i)
 
     det_ids = aman.det_info.det_ids
     if np.array_equal(det_ids, template_det_ids):
