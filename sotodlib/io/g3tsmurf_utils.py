@@ -414,7 +414,8 @@ def add_detmap_info(aman, detmap_filename, columns=None):
         path to file for detmap information. Does just blindly
         assume you are loading the correct file (sorry).
     columns : list of strings
-        Optional list of columns to include in addition to main columns
+        Optional list of columns to include in addition to main columns.
+        Set columns='all' to include all columns.
              
     """
     detmap = np.genfromtxt(detmap_filename, delimiter=',', skip_header=1,
@@ -439,6 +440,8 @@ def add_detmap_info(aman, detmap_filename, columns=None):
     strings = ["is_north", "is_highband", "mux_subband", "rhomb", "is_optical", "det_type", "detector_id", "flags"]
     ints = ["smurf_band", "res_index", "smurf_channel", "smurf_subband", "bond_pad", "mux_band", "mux_channel",
             "mux_layout_position", "bias_line", "pixel_num", "pixel_num_pin_skip"]
+    floats = ["freq_mhz", "design_freq_mhz", "angle_raw_deg", "fit_fr_mhz", "fit_q", "fit_qe_real", "fit_qe_imag",
+              "fit_delay_ns", "fit_phi_rad", "fit_fmin_mhz", "fit_amag", "fit_aslope"]
     
     wafer = core.AxisManager( aman.dets )
     wafer.wrap_new( "pol", ("dets",), dtype="U4")
@@ -449,6 +452,8 @@ def add_detmap_info(aman, detmap_filename, columns=None):
     wafer.wrap_new( "det_col", ("dets",), dtype=int)
     wafer.wrap_new( "type", ("dets",), dtype="U4")
     wafer.wrap_new( "bandpass", ("dets",), dtype="U4")
+    if columns == "all":
+        columns = strings+ints+floats
     if columns is not None:
         for col in columns:
             if col in strings:
