@@ -251,7 +251,11 @@ def main():
     with open(args.config_path, "r") as file:
         config = yaml.safe_load(file)
     pointing_paths = np.atleast_1d(config["pointing_data"])
-    polangs_paths = np.atleast_1d(config["polangs"])
+    if "polangs" in config:
+        polangs_paths = np.atleast_1d(config["polangs"])
+        polangs = []
+    else:
+        polangs_paths = np.zeros(len(pointing_paths), dtype=bool)
 
     # Load data
     pointings = []
@@ -259,7 +263,11 @@ def main():
     for point_path, pol_path in zip(pointing_paths, polangs_paths):
         aman = AxisManager.load(point_path)
         g3u.add_detmap_info(aman, config["detmap"])
-
+        pointings.append(aman)
+        
+        if not pol_path:
+            polangs.append(False)
+            continue
         # NOTE: Assuming some standin structure for the pol data
         # This may change in the future
         rset = read_dataset(pol_path, "polarization_angle")
@@ -268,8 +276,6 @@ def main():
         rid_map = np.argsort(np.argsort(aman.det_info.readout_id))
         rid_sort = np.argsort(pol_rid)
         pols = pols[rid_sort][rid_map]
-
-        pointings.append(aman)
         polangs.append(pols)
     bg_map = np.load(config["bias_map"], allow_pickle=True).item()
     bc_bgmap = (bg_map["bands"] << 32) + bg_map["channels"]
@@ -287,7 +293,10 @@ def main():
         full_fp = {}
         det_ids = []
         for aman, pol in zip(pointings, polangs):
-            focal_plane = np.vstack((aman.xi, aman.eta, pol)).T
+            if pol:
+                focal_plane = np.vstack((aman.xi, aman.eta, pol)).T
+            else:
+                focal_plane = np.vstack((aman.xi, aman.eta, np.zeros_like(aman.eta) + np.nan)).T
             for ri, di, fp in zip(
                 aman.det_info.readout_id, aman.det_info.det_id, focal_plane
             ):
@@ -376,7 +385,6 @@ def main():
         msk_bp2 = np.isin(bias_group, bp2_bg)
 
         # Prep inputs
-        focal_plane = np.vstack((aman.xi, aman.eta, pol))
         if not gen_template:
             template = np.vstack(
                 (
@@ -401,16 +409,24 @@ def main():
             priors_bp1 = (priors[np.ix_(template_bp1, msk_bp1)],)
             priors_bp2 = (priors[np.ix_(template_bp2, msk_bp2)],)
 
+        if not pol:
+            focal_plane = np.vstack((aman.xi, aman.eta, pol))
+            _focal_plane = focal_plane
+        else:
+            focal_plane = np.vstack((aman.xi, aman.eta, np.zeros_like(aman.eta) + np.nan))
+            _focal_plane = focal_plane[:-1]
+            template = template[:-1]
+
         # Do actual matching
         map_bp1, out_bp1, P_bp1 = match_template(
-            focal_plane[:, msk_bp1],
+            _focal_plane[:, msk_bp1],
             template[:, template_bp1],
             out_thresh=config["out_thresh"],
             avoid_collision=True,
             priors=priors_bp1,
         )
         map_bp2, out_bp2, P_bp2 = match_template(
-            focal_plane[:, msk_bp2],
+            _focal_plane[:, msk_bp2],
             template[:, template_bp2],
             out_thresh=config["out_thresh"],
             avoid_collision=True,
@@ -461,6 +477,11 @@ def main():
         )
         write_dataset(rset_data, config["out_path"], "focal_plane", overwrite=True)
 
+    if not gen_template:
+        template = np.unique(np.hstack(master_template), axis=1)
+        det_ids = template[-1]
+        template = template[:-1].astype(float)
+
     # Compute the average focal plane while ignoring outliers
     focal_plane = []
     readout_ids = np.array(list(avg_fp.keys()))
@@ -472,11 +493,10 @@ def main():
     msk_bp1 = bp_msk == 1
     msk_bp2 = bp_msk == 2
     focal_plane = focal_plane[:-1]
-
-    if not gen_template:
-        template = np.unique(np.hstack(master_template), axis=1)
-        det_ids = template[-1]
-        template = template[:-1].astype(float)
+    _focal_plane = focal_plane
+    if np.isnan(focal_plane[-1]).all():
+        _focal_plane = focal_plane[:-1]
+        template = template[:-1]
 
     # Build priors from previous results
     priors = 1
@@ -492,14 +512,14 @@ def main():
 
     # Do final matching
     map_bp1, out_bp1 = match_template(
-        focal_plane[:, msk_bp1],
+        _focal_plane[:, msk_bp1],
         template[:, template_bp1],
         out_thresh=config["out_thresh"],
         avoid_collision=True,
         priors=priors[np.ix_(template_bp1, msk_bp1)],
     )
     map_bp2, out_bp2 = match_template(
-        focal_plane[:, msk_bp2],
+        _focal_plane[:, msk_bp2],
         template[:, template_bp2],
         out_thresh=config["out_thresh"],
         avoid_collision=True,

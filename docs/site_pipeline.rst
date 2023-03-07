@@ -300,7 +300,8 @@ Here's an annotated example:
     - "pointing_res_2.h5"
   # Note here that the number of pointing results match the number of polang results
   # It is currently assumed that this is true, and that the i'th file for each are associated
-  # If the numbers do not match files can be repeated
+  # If the numbers do not match files can be repeated or "" can be given to skip polangs for that pointing
+  # Polangs can also be fully omitted in which case do not include the "polangs" key in the file
   polangs:
     - "polang_res_1.h5"
     - "polang_res_2.h5"
