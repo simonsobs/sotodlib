@@ -128,6 +128,43 @@ class _SmurfBundle():
             self.primary['times'].append(f['primary'].times)
             self.primary['data'].append(f['primary'].data)
 
+    def prepend(self, f):
+        """
+        Cache the data from input SMuRF frame f at the beginning of the buffer
+
+        Parameters
+        ----------
+        f : G3Frame
+            Input SMuRF frame to be buffered
+        """
+        if f['data'] is None:
+            return
+
+        if len(self.times) == 0:
+            self.add(f)
+            return
+
+        # Original buffered data
+        t_orig = self.times
+        signal_orig = self.signal
+        biases_orig = self.biases
+        primary_orig = self.primary
+
+        # Clear buffers, add f, then append original data
+        self.__init__()
+        self.add(f)
+
+        self.times.extend(t_orig)
+
+        self.signal['times'] += signal_orig['times']
+        self.signal['data'] += signal_orig['data']
+        if biases_orig is not None:
+            self.biases['times'] += biases_orig['times']
+            self.biases['data'] += biases_orig['data']
+        if primary_orig is not None:
+            self.primary['times'] += primary_orig['times']
+            self.primary['data'] += primary_orig['data']
+
     def rebundle(self, flush_time):
         """
         Return the buffered SMuRF G3SuperTimestreams with all samples timestamped up to but
@@ -432,7 +469,7 @@ class FrameProcessor(object):
 
         return trimmed_frame
 
-    def fill_in_missing_samples(self, data, flush_time, field, return_flags=False):
+    def fill_in_missing_samples(self, data, flush_time, return_flags=False):
         """
         Locate and patch missing samples in data.
 
@@ -503,16 +540,6 @@ class FrameProcessor(object):
             assert np.sum(m) == len(data.times)
             new_data = np.full((data.data.shape[0], len(ts)), self.FLAGGED_SAMPLE_VALUE, dtype=data.data.dtype)
             new_data[:,m] = data.data
-            # Filling in missing samples can cause frame to exceed max length
-            if len(ts) >= self.maxlength:
-                ts_excess = core.G3VectorTime(ts[self.maxlength:])
-                data_excess = new_data[:,self.maxlength:]
-                excess = {'names': getattr(self.smbundle, field)['names'], 'times': [ts_excess]+getattr(self.smbundle, field)['times'], 'data': [data_excess]+getattr(self.smbundle, field)['data']}
-                setattr(self.smbundle, field, excess)
-                if field == 'signal':  # only prepend smbundle.times once
-                    self.smbundle.times = [t for t in ts_excess]+self.smbundle.times
-                ts = ts[:self.maxlength]
-                new_data = new_data[:,:self.maxlength]
             dataout = so3g.G3SuperTimestream(data.names, core.G3VectorTime(ts), new_data)
             flag_gap = core.G3VectorBool(~m)[:self.maxlength]
             print("{} missing samples detected".format(np.sum(~m)))
@@ -521,10 +548,6 @@ class FrameProcessor(object):
         else:
             dataout = data
             flag_gap = core.G3VectorBool(np.zeros(len(ts)))
-
-        assert len(ts) <= self.maxlength
-        if field == 'signal' and len(ts) == self.maxlength:
-            self._frame_splits.append(ts[-1] + 1)
 
         if return_flags:
             return dataout, flag_gap
@@ -553,11 +576,20 @@ class FrameProcessor(object):
 
         # Fill in missing samples and write data to frame
         f = core.G3Frame(core.G3FrameType.Scan)
-        f['signal'], flag_smurfgap = self.fill_in_missing_samples(smurf_data, flush_time, 'signal', return_flags=True)
+        smurf_data, flag_smurfgap = self.fill_in_missing_samples(smurf_data, flush_time, return_flags=True)
+        f['signal'], data_excess = split_supertimestream(smurf_data, self.maxlength)
+        fx = {'data': data_excess}  # note input data use 'data' instead of 'signal'
         if smurf_bias is not None:
-            f['tes_biases'] = self.fill_in_missing_samples(smurf_bias, flush_time, 'biases')
+            smurf_bias = self.fill_in_missing_samples(smurf_bias, flush_time)
+            f['tes_biases'], fx['tes_biases'] = split_supertimestream(smurf_bias, self.maxlength)
         if smurf_primary is not None:
-            f['primary'] = self.fill_in_missing_samples(smurf_primary, flush_time, 'primary')
+            smurf_primary = self.fill_in_missing_samples(smurf_primary, flush_time)
+            f['primary'], fx['primary'] = split_supertimestream(smurf_primary, self.maxlength)
+        # Put any excess samples back in the buffer
+        self.smbundle.prepend(fx)
+        if data_excess is not None:
+            flush_time = f['signal'].times[-1] + 1
+            self._frame_splits.append(flush_time)
         # Update last sample
         self._prev_smurf_sample = f['signal'].times[-1]
 
@@ -1224,3 +1256,26 @@ def find_missing_samples(refs, vs, atol=0.5):
     missing = np.where(np.abs(vs[idx] - refs) > atol)[0]
     return missing, refs[missing]
 
+def split_supertimestream(st, idx):
+    """
+    Split a G3SuperTimestream at a specific index
+
+    Parameters
+    ----------
+    st : G3SuperTimestream
+        Input timestream to be split
+    idx : int
+        Index at which to split the timestream
+
+    Returns
+    -------
+    st0, st1 : G3SuperTimestream, G3SuperTimestream
+        Arrays formed by splitting input array st at index idx
+    """
+    if idx >= len(st.times):
+        return st, None
+
+    st0 = so3g.G3SuperTimestream(st.names, st.times[:idx], st.data[:,:idx])
+    st1 = so3g.G3SuperTimestream(st.names, st.times[idx:], st.data[:,idx:])
+
+    return st0, st1
