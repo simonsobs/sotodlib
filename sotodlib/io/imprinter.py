@@ -323,8 +323,9 @@ class Imprinter:
         timing_system = book.timing if book.timing is not None else False
 
         book_path = os.path.join(odir, book.bid)
+        meta_files = None
         if book.type == 'oper':
-            self.copy_smurf_files_to_book(book, book_path)
+            _, meta_files = self.copy_smurf_files_to_book(book, book_path)
 
         # bind book using bookbinder library
         try:
@@ -342,6 +343,16 @@ class Imprinter:
                            max_nchannels=book.max_channels,
                            timing_system=timing_system,
                            frameproc_config={"readout_ids": rids})()
+
+            # Add meta files to M_index
+            if (book.type == 'oper') and meta_files:
+                mfile = os.path.join(book_path, 'M_index.yaml')
+                with open(mfile, 'r') as f:
+                    meta = yaml.safe_load(f)
+                meta['meta_files'] = meta_files
+                with open(mfile, 'w') as f:
+                    yaml.dump(meta, f)
+
             # not sure if this is the best place to update
             book.status = BOUND
             book.path = op.abspath(op.join(odir, book.bid))
@@ -680,6 +691,14 @@ class Imprinter:
             book object
         book_path : path
             Output path of book
+
+        Returns
+        ---------
+        files : List[path]
+            list of all metadata files copied to the book
+        meta : dict[path]
+            Dictionary of destination paths of important metadata such as
+            tunes, bgmaps, or IVs.
         """
         if book.type != 'oper':
             raise TypeError("Book must have type 'oper'")
@@ -698,11 +717,22 @@ class Imprinter:
         if not os.path.exists(dirname):
             os.makedirs(dirname)
 
+        meta_files = {}
         for f in files:
-            dest = os.path.join(dirname, os.path.basename(f))
+            basename = os.path.basename(f) 
+            dest = os.path.join(book_path, basename)
             shutil.copyfile(f, dest)
 
-        return files
+            if f.endswith('iv_analysis.npy'):
+                meta_files['iv'] = basename
+            elif f.endswith('bg_map.npy'):
+                meta_files['bgmap'] = basename
+            elif f.endswith('bias_step_analysis.npy'):
+                meta_files['bias_steps'] = basename
+            elif f.endswith('take_noise.npy'):
+                meta_files['noise'] = basename
+
+        return files, meta_files
 
     def get_g3tsmurf_obs_for_book(self, book):
         """
@@ -774,7 +804,7 @@ class Imprinter:
 # Utility functions #
 #####################
 
-def get_smurf_files(obs, meta_path):
+def get_smurf_files(obs, meta_path, all_files=False):
     """
     Returns a list of smurf files that should be copied into a book.
 
@@ -784,6 +814,8 @@ def get_smurf_files(obs, meta_path):
         Observation to pull files from
     meta_path : path
         Smurf metadata path
+    all_files : bool
+        If true will return all found metadata files
 
     Returns
     -----------
@@ -792,6 +824,8 @@ def get_smurf_files(obs, meta_path):
     """
 
     def copy_to_book(file):
+        if all_files:
+            return True
         return file.endswith('npy')
 
     tscode = int(obs.action_ctime//1e5)
