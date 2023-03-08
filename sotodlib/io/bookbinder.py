@@ -8,7 +8,7 @@ import itertools
 import yaml
 from scipy.interpolate import interp1d
 from .load_smurf import split_ts_bits
-# 
+#
 class HWPFlags:
     # STATIONARY is used to flag samples where data is being received by IRIG
     # and the HWP agent, however the angle cannot be reconstructed because the HWP
@@ -737,7 +737,7 @@ class Bookbinder(object):
     """
     def __init__(self, smurf_files, hk_files=None, out_root='.', book_id=None,
                  session_id=None, stream_id=None, start_time=None, end_time=None,
-                 smurf_timestamps=None, timing_system=False, verbose=True, 
+                 smurf_timestamps=None, timing_system=False, verbose=True,
                  hwp_root=None, **config):
         self._smurf_files = smurf_files
         self._hk_files = hk_files
@@ -1033,7 +1033,7 @@ class Bookbinder(object):
         """
         # Determine if HK files contain az/el encoder data and find any gaps between HK frames
         self.process_HK_files()
-            
+
         if self._hwp_root is not None:
             self.hwp_loader = HWPLoader(self._hwp_root)
             self.hwp_loader.load_data(self._start_time.time / core.G3Units.s, self._end_time.time / core.G3Units.s)
@@ -1340,7 +1340,7 @@ class HWPLoader:
         self.root_dir = root_dir
         self.files = []
         self.data = {}
-        self.times = {} 
+        self.times = {}
 
         self.hwp_angle_interp = None
         self.locked_interp = None
@@ -1423,7 +1423,7 @@ class HWPLoader:
         self.times = times
         if len(data) != 0:
             self.hwp_angle_interp = interp1d(
-                times['fast'], np.unwrap(data['fast']['hwp_angle']), 
+                times['fast'], np.unwrap(data['fast']['hwp_angle']),
                 bounds_error=False)
             self.locked_interp = interp1d(
                 times['slow'], data['slow']['locked'], bounds_error=False)
@@ -1440,7 +1440,7 @@ class HWPLoader:
     def get_interpolated_data(self, times):
         if self.hwp_angle_interp is None:
             return np.full(len(times), -HWPFlags.NO_DATA)
-            
+
         hwp_angle = self.hwp_angle_interp(times)
         hwp_angle = np.mod(hwp_angle, 2*np.pi)
 

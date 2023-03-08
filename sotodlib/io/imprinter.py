@@ -382,7 +382,7 @@ class Imprinter:
             if isinstance(e, TimingSystemError):
                 book.timing = False
             book.message = message
-    
+
             if not test_mode:
                 session.commit()
             else:
@@ -728,7 +728,7 @@ class Imprinter:
 
         meta_files = {}
         for f in files:
-            basename = os.path.basename(f) 
+            basename = os.path.basename(f)
             dest = os.path.join(book_path, basename)
             shutil.copyfile(f, dest)
 
@@ -846,10 +846,10 @@ def get_smurf_files(obs, meta_path, all_files=False):
     files = []
 
     # check adjacent folders in case action falls on a boundary
-    for tc in [tscode-1, tscode, tscode + 1]:  
+    for tc in [tscode-1, tscode, tscode + 1]:
         action_dir = os.path.join(
             meta_path,
-            str(tc), 
+            str(tc),
             obs.stream_id,
             f'{obs.action_ctime}_{obs.action_name}'
         )
@@ -859,7 +859,7 @@ def get_smurf_files(obs, meta_path, all_files=False):
 
         for root, _, fs in os.walk(action_dir):
             files.extend([os.path.join(root, f) for f in fs])
-    
+
     return [f for f in files if copy_to_book(f)]
 
 _primary_idx_map = {}
