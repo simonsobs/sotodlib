@@ -593,6 +593,9 @@ class FrameProcessor(object):
         # Update last sample
         self._prev_smurf_sample = f['signal'].times[-1]
 
+        # Gaps in SMuRF data
+        f['flag_smurfgap'] = core.G3VectorBool(flag_smurfgap[:len(f['signal'].times)])
+
         try:
             hk_data = self.hkbundle.rebundle(flush_time)
         except AttributeError:
@@ -600,24 +603,21 @@ class FrameProcessor(object):
             f['state'] = 3
         else:
             # Co-sampled (interpolated) az/el encoder data
-            cosamp_az = np.interp(smurf_data.times, hk_data.times, hk_data['Azimuth_Corrected'], left=np.nan, right=np.nan)
-            cosamp_el = np.interp(smurf_data.times, hk_data.times, hk_data['Elevation_Corrected'], left=np.nan, right=np.nan)
+            cosamp_az = np.interp(f['signal'].times, hk_data.times, hk_data['Azimuth_Corrected'], left=np.nan, right=np.nan)
+            cosamp_el = np.interp(f['signal'].times, hk_data.times, hk_data['Elevation_Corrected'], left=np.nan, right=np.nan)
 
             # Flag any samples falling within a gap in HK data
-            t = np.array([int(_t) for _t in smurf_data.times])
-            flag_hkgap = np.zeros(len(smurf_data.times))
+            t = np.array([int(_t) for _t in f['signal'].times])
+            flag_hkgap = np.zeros(len(f['signal'].times))
             for gap_start, gap_end in self._hk_gaps:
                 flag_hkgap = np.logical_or(flag_hkgap, np.logical_and(t > gap_start, t < gap_end))
             cosamp_az = np.array([self.FLAGGED_SAMPLE_VALUE if flag_hkgap[i] else cosamp_az[i] for i in range(len(cosamp_az))])
             cosamp_el = np.array([self.FLAGGED_SAMPLE_VALUE if flag_hkgap[i] else cosamp_el[i] for i in range(len(cosamp_el))])
             f['flag_hkgap'] = core.G3VectorBool(flag_hkgap)
 
-            # Gaps in SMuRF data
-            f['flag_smurfgap'] = core.G3VectorBool(flag_smurfgap)
-
             # Ancillary data (co-sampled HK encoder data)
             anc_data = core.G3TimesampleMap()
-            anc_data.times = smurf_data.times
+            anc_data.times = f['signal'].times
             anc_data['az_enc'] = core.G3VectorDouble(cosamp_az)
             anc_data['el_enc'] = core.G3VectorDouble(cosamp_el)
 
