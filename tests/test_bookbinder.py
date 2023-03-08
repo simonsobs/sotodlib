@@ -132,7 +132,7 @@ def test_fill_missing_samples():
     # - If a list of ref timestamps is provided or not
     ##################################################
     # Create input data frame with missing samples
-    t = np.concatenate((np.arange(10), np.arange(20,30), np.arange(35,40)))*dt
+    t = np.concatenate((np.arange(10), np.arange(20,30), np.arange(35,40)))*dt + 1e8  # need a large +ve offset to avoid -ve times
     s = generate_smurf_frame(core.G3VectorTime(t))
     # First/last samples correspond to those in data or there are missing samples at beginning/end
     first_samples = [t[0], t[0]-3*dt]
@@ -195,7 +195,7 @@ def test_hk_gaps():
     #          ends in 2nd gap
     ##################################################
     for smurf_frame, expected_output in zip(smurf_frames, expected_outputs):
-        B = bb.Bookbinder(smurf_files=None, book_id='test', start_time=t0[0]*core.G3Units.s,
+        B = bb.Bookbinder(smurf_files=None, book_id='test', start_time=smurf_frame['data'].times[0],
                           end_time=smurf_frame['data'].times[-1].time+1)
         B._hk_files = []
         B.hk_iter = acu_frames
