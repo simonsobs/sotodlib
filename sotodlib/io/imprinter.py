@@ -269,7 +269,8 @@ class Imprinter:
             self.register_book(session, bid, obs_list, commit=False)
         if commit: session.commit()
 
-    def bind_book(self, book, session=None, output_root="out", message=""):
+    def bind_book(self, book, session=None, output_root="out", message="",
+                  test_mode=False):
         """Bind book using bookbinder
 
         Parameters
@@ -281,6 +282,10 @@ class Imprinter:
             output root directory
         message: string
             message to be added to the book
+        test_mode : bool
+            If in test_mode, this function will still run on already copied
+            books, and will not update any db fields in the db. This is useful
+            for testing purposes.
         """
         if session is None: session = self.get_session()
         # get book id and book object, depending on whether book id is given or not
@@ -295,13 +300,8 @@ class Imprinter:
         if not self.book_exists(bid, session=session):
             raise BookExistsError(f"Book {bid} does not exist in the database")
         # check whether book is already bound
-        if book.status == BOUND:
+        if (book.status == BOUND) and (not test_mode):
             raise BookBoundError(f"Book {bid} is already bound")
-
-        g3tsmurf_path = self.sources[book.tel_tube]['g3tsmurf']
-        with open(g3tsmurf_path, 'r') as f:
-            g3tsmurf_cfg = yaml.safe_load(f)
-        hwp_root = g3tsmurf_cfg.get('hwp_prefix')
 
         # after sanity checks, now we proceed to bind the book.
         # get files associated with this book, in the form of
@@ -321,6 +321,12 @@ class Imprinter:
 
         # it's possible that timing field could be none when no timing information is found
         timing_system = book.timing if book.timing is not None else False
+
+        book_path = os.path.join(odir, book.bid)
+        meta_files = None
+        if book.type == 'oper':
+            _, meta_files = self.copy_smurf_files_to_book(book, book_path)
+
         # bind book using bookbinder library
         try:
             readout_ids = self.get_readout_ids_for_book(book)
@@ -334,15 +340,28 @@ class Imprinter:
                 Bookbinder(smurf_files, hk_files=hkfiles, out_root=odir,
                            stream_id=stream_id, session_id=int(session_id),
                            book_id=book.bid, start_time=start_t, end_time=stop_t,
-                           max_nchannels=book.max_channels, hwp_root=hwp_root,
+                           max_nchannels=book.max_channels,
                            timing_system=timing_system,
                            frameproc_config={"readout_ids": rids})()
+
+            # Add meta files to M_index
+            if (book.type == 'oper') and meta_files:
+                mfile = os.path.join(book_path, 'M_index.yaml')
+                with open(mfile, 'r') as f:
+                    meta = yaml.safe_load(f)
+                meta['meta_files'] = meta_files
+                with open(mfile, 'w') as f:
+                    yaml.dump(meta, f)
+
             # not sure if this is the best place to update
             book.status = BOUND
             book.path = op.abspath(op.join(odir, book.bid))
             self.logger.info("Book {} bound".format(book.bid))
             book.message = message
-            session.commit()
+            if not test_mode:
+                session.commit()
+            else:
+                session.rollback()
         except Exception as e:
             session.rollback()
             book.status = FAILED
@@ -354,7 +373,12 @@ class Imprinter:
             if isinstance(e, TimingSystemError):
                 book.timing = False
             book.message = message
-            session.commit()
+    
+            if not test_mode:
+                session.commit()
+            else:
+                session.rollback()
+
             raise e
 
     def get_book(self, bid, session=None):
@@ -657,6 +681,59 @@ class Imprinter:
             out[obs_id] = ch_info.readout_id
         return out
 
+    def copy_smurf_files_to_book(self, book, book_path):
+        """
+        Copies smurf ancillary files to an operation book.
+
+        Parameters
+        -----------
+        book : Books
+            book object
+        book_path : path
+            Output path of book
+
+        Returns
+        ---------
+        files : List[path]
+            list of all metadata files copied to the book
+        meta : dict[path]
+            Dictionary of destination paths of important metadata such as
+            tunes, bgmaps, or IVs.
+        """
+        if book.type != 'oper':
+            raise TypeError("Book must have type 'oper'")
+
+        session, arc = self.get_g3tsmurf_session(book.tel_tube, return_archive=True)
+
+        obs_ids = [o.obs_id for o in book.obs]
+        obs = session.query(G3tObservations) \
+                     .filter(G3tObservations.obs_id.in_(obs_ids)).all()
+
+        files = []
+        for ob in obs:
+            files.extend(get_smurf_files(ob, arc.meta_path))
+
+        dirname = os.path.join(book_path, 'smurf')
+        if not os.path.exists(dirname):
+            os.makedirs(dirname)
+
+        meta_files = {}
+        for f in files:
+            basename = os.path.basename(f) 
+            dest = os.path.join(book_path, basename)
+            shutil.copyfile(f, dest)
+
+            if f.endswith('iv_analysis.npy'):
+                meta_files['iv'] = basename
+            elif f.endswith('bg_map.npy'):
+                meta_files['bgmap'] = basename
+            elif f.endswith('bias_step_analysis.npy'):
+                meta_files['bias_steps'] = basename
+            elif f.endswith('take_noise.npy'):
+                meta_files['noise'] = basename
+
+        return files, meta_files
+
     def get_g3tsmurf_obs_for_book(self, book):
         """
         Get all g3tsmurf observations for a book
@@ -726,6 +803,51 @@ class Imprinter:
 #####################
 # Utility functions #
 #####################
+
+def get_smurf_files(obs, meta_path, all_files=False):
+    """
+    Returns a list of smurf files that should be copied into a book.
+
+    Parameters
+    ------------
+    obs : G3tObservations
+        Observation to pull files from
+    meta_path : path
+        Smurf metadata path
+    all_files : bool
+        If true will return all found metadata files
+
+    Returns
+    -----------
+    files : List[path]
+        List of copyable files
+    """
+
+    def copy_to_book(file):
+        if all_files:
+            return True
+        return file.endswith('npy')
+
+    tscode = int(obs.action_ctime//1e5)
+    files = []
+
+    # check adjacent folders in case action falls on a boundary
+    for tc in [tscode-1, tscode, tscode + 1]:  
+        action_dir = os.path.join(
+            meta_path,
+            str(tc), 
+            obs.stream_id,
+            f'{obs.action_ctime}_{obs.action_name}'
+        )
+
+        if not os.path.exists(action_dir):
+            continue
+
+        for root, _, fs in os.walk(action_dir):
+            files.extend([os.path.join(root, f) for f in fs])
+    
+    return [f for f in files if copy_to_book(f)]
+
 _primary_idx_map = {}
 def get_frame_times(frame):
     """
