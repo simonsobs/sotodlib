@@ -753,7 +753,7 @@ def get_frame_times(frame):
         software timestamps
 
     timestamps : np.ndarray
-        Array of timestamps (sec) for samples in the frame
+        Array of timestamps for samples in the frame, in G3Time units (1e-8 sec)
 
     """
     if len(_primary_idx_map) == 0:

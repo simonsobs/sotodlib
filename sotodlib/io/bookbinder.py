@@ -585,8 +585,9 @@ class FrameProcessor(object):
         if smurf_primary is not None:
             smurf_primary = self.fill_in_missing_samples(smurf_primary, flush_time)
             f['primary'], fx['primary'] = split_supertimestream(smurf_primary, self.maxlength)
-        # Put any excess samples back in the buffer
+        # Put any excess samples (those beyond max length) back in the buffer
         self.smbundle.prepend(fx)
+        # Update (local) flush time if necessary
         if data_excess is not None:
             flush_time = f['signal'].times[-1] + 1
             self._frame_splits.append(flush_time)
@@ -1144,6 +1145,11 @@ def get_channel_data_from_name(s, channel_name):
     return s.data[idx]
 
 def counters_to_timestamps(c0, c2):
+    """
+    Convert timing counter values into timestamp values (sec)
+
+    Copied from load_smurf.py (Jan 23, 2023)
+    """
     s, ns = split_ts_bits(c2)
 
     # Add 20 years in seconds (accounting for leap years) to handle
@@ -1155,8 +1161,6 @@ def counters_to_timestamps(c0, c2):
 def get_timestamps(f, use_counters):
     """
     Calculate the timestamp field for loaded data
-
-    Copied from load_smurf.py (Jan 23, 2023)
 
     Parameters
     ----------
@@ -1205,7 +1209,8 @@ def fill_time_gaps(ts):
     missing = np.round(dts/dt - 1).astype(int)
     total_missing = int(np.sum(missing))
 
-    # Create new  array with the correct number of samples
+    # Create new array with the correct number of samples
+    # Fill with -1 assuming timestamps always > 0
     new_ts = np.full(len(ts) + total_missing, -1, dtype=ts.dtype)
 
     # Insert old timestamps into new array with offsets that account for gaps
