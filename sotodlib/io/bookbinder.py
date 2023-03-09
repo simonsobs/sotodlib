@@ -602,7 +602,7 @@ class FrameProcessor(object):
         # Update (local) flush time if necessary
         if data_excess is not None:
             flush_time = f['signal'].times[-1] + 1
-            self._frame_splits.append(flush_time)
+            self._frame_splits[-1] = flush_time  # update the most recently added split time
         # Update last sample
         self._prev_smurf_sample = f['signal'].times[-1]
 
@@ -716,6 +716,7 @@ class FrameProcessor(object):
             # If the existing data exceeds the specified maximum length
             while len(self.smbundle.times) >= self.maxlength:
                 split_time = self.smbundle.times[self.maxlength-1] + 1
+                self._frame_splits.append(split_time)
                 output += self.flush(split_time)
                 if self.flush_time is not None and split_time >= self.flush_time:
                     return output
