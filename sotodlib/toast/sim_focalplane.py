@@ -20,6 +20,9 @@ from toast.instrument_sim import (
 )
 import toast.qarray as qa
 
+from sotodlib.io.metadata import read_dataset
+import sotodlib.core.metadata.loader as loader
+
 
 def rhombus_hex_layout(rhombus_npos, rhombus_width, gap, pos_rotate=None, killpos=None):
     """
@@ -391,8 +394,171 @@ def sim_wafer_detectors(
     return dets
 
 
-def sim_telescope_detectors(hw, tele, tube_slots=None):
-    """Update hardware model with simulated detector positions.
+def load_wafer_data(filename, array_name, sub_array_name=None):
+    """Load a Det_Info file (like those made by make-det-info-wafer) and return
+    a specific array. 
+    
+    Allows you to replace an array name with a different one (since we 
+    currently do not have a complete set of array hardware mappings) and 
+    uses the replacement name pattern to replace bandpass information. If using
+    the sub_array_name it assumes array_name is an MF array
+    
+    filename(str): path to det_info hdf5 file
+    array_name(str): array name to load from the file
+    sub_array_name(str): work-around to change the array name while we only have some arrays
+    """
+
+    rs = read_dataset(filename, array_name)
+    rs.keys = loader._filter_items("dets:", rs.keys)
+
+    bp= rs.keys.index("wafer.bandpass")
+    
+    
+    if sub_array_name is not None:
+        switches = {
+            "L" : { "f090":"f030", "f150":"f040"},
+            "U" : { "f090":"f230", "f150":"f290"}
+        }
+        for i in range( len(rs) ):
+            row = rs.rows[i]
+            rs.rows[i] = tuple([r.replace(array_name, sub_array_name) for r in row[:2]]) + row[2:]
+            
+            if rs.rows[i][bp] =='NC' or "M" in sub_array_name:
+                continue
+            if "L" in sub_array_name:
+                rs.rows[i] = tuple([
+                                rs.rows[i][0].replace(rs.rows[i][bp],switches["L"][rs.rows[i][bp]]), 
+                                rs.rows[i][1]
+                            ])+ rs.rows[i][2:bp] + \
+                            tuple([switches["L"][rs.rows[i][bp]]] ) + rs.rows[i][bp+1:]
+            elif "U" in sub_array_name:
+                rs.rows[i] = tuple([
+                                rs.rows[i][0].replace(rs.rows[i][bp],switches["U"][rs.rows[i][bp]]), 
+                                rs.rows[i][1]
+                            ]) + rs.rows[i][2:bp] + \
+                            tuple([switches["U"][rs.rows[i][bp]]]) + rs.rows[i][bp+1:]
+
+    wafer = loader.convert_det_info(
+        rs,
+        rs["det_id"]
+            
+    ).wafer
+    return wafer
+
+
+def load_wafer_detectors(
+    hw, 
+    wafer_slot, 
+    platescale, 
+    fwhm, 
+    det_info_file,
+    array_name,
+    sub_array_name=None,
+    band=None, 
+    center=None,
+    no_darks=False
+):
+
+    """Load detector properties for a wafer. Meant to act similarly to
+    sim_wafer_detectors
+
+    Given a Hardware configuration, load all detector properties for
+    the specified wafer and optionally only the specified band.
+
+    Args:
+        hw (Hardware): The hardware properties.
+        wafer_slot (str): The wafer slot name.
+        platescale (float): The plate scale in degrees / mm.
+        fwhm (dict): Dictionary of nominal FWHM values in arcminutes for
+            each band.
+        det_info_file (str): filename of detector info file
+        array_name (str): array to load from file
+        sub_array_name (str, optional): array to change to, defaults to 
+            hw.data["wafer_slots"][slot]["wafer_name"] if not set
+        band (str, optional): Optionally only use this band.
+        center (array, optional): The quaternion offset of the center.
+        no_darks (bool, optional): if true, will not return dark detectors
+
+    Returns:
+        (OrderedDict): The properties of all selected detectors.
+
+    """
+    zaxis = np.array([0, 0, 1], dtype=np.float64)
+
+    # The properties of this wafer
+    wprops = hw.data["wafer_slots"][wafer_slot]
+    tele = wprops["type"].split("_")[0]
+    
+    # The readout card and its properties
+    card_slot = wprops["card_slot"]
+    cardprops = hw.data["card_slots"][card_slot]
+
+    # The bands
+    bands = wprops["bands"]
+    if band is not None:
+        if band in bands:
+            bands = [band]
+        else:
+            raise RuntimeError(
+                "band '{}' not valid for wafer '{}'".format(band, wafer_slot)
+            )
+    
+    if sub_array_name is None:
+        sub_array_name = wprops["wafer_name"]
+    wafer = load_wafer_data(det_info_file, array_name, sub_array_name)
+
+    dets = OrderedDict()
+
+    for i in range(wafer.dets.count):
+        dprops = OrderedDict()
+        dprops["wafer_slot"] = wafer_slot
+        dprops["ID"] = wafer.dets.vals[i]
+        dprops["pixel"] = wafer.dets.vals[i].split("_")[-1][:-1]
+        dprops["band"] = f"{tele[:3]}_{wafer.bandpass[i]}" if wafer.bandpass[i] != "NC" else "NC"
+
+        if dprops["band"] not in bands and dprops["band"] != "NC":
+            continue
+        if no_darks and dprops["band"] == "NC":
+            continue
+
+        dprops["fwhm"] = fwhm[dprops["band"]] if dprops["band"] in fwhm else np.nan
+        dprops["pol"] = wafer.pol[i]
+
+        ### angle I'll need help to calculate based on slot
+        dprops["pol_ang"] = wafer.angle[i]
+        ### I'm pretty sure this is the angle in our files
+        dprops["pol_ang_wafer"] = wafer.angle[i] 
+        ### angle I'll need help to calculate based on slot
+        dprops["pol_orientation_wafer"] = np.nan
+
+
+        ## readout related info
+        dprops["bias"] = wafer.bias_line[i]
+        dprops["readout_freq_GHz"] = wafer.design_freq_mhz[i]/1000
+        dprops["bondpad"] = wafer.bond_pad[i]
+        dprops["mux_position"] = wafer.mux_position[i]
+
+
+        quant = xieta_to_quat( 
+            wafer.det_x[i]*platescale,
+            wafer.det_y[i]*platescale,
+            wafer.angle[i]
+        )
+
+        if center is not None:
+            dprops["quat"] = qa.mult( center, quant).flatten()
+        else:
+            dprops["qant"] = quant.flatten()
+
+        dprops["detector_name"] = dprops["ID"]
+        dets[ dprops["detector_name"] ] = dprops
+        
+    return dets
+
+
+
+def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None):
+    """Update hardware model with simulated or loaded detector positions.
 
     Given a Hardware model, generate all detector properties for the specified
     telescope and optionally a subset of optics tube slots (for the LAT).  The
@@ -405,7 +571,8 @@ def sim_telescope_detectors(hw, tele, tube_slots=None):
         hw (Hardware): The hardware object to update.
         tele (str): The telescope name.
         tube_slots (list, optional): The optional list of tube slots to include.
-
+        det_info (tuple, optional): Detector info database used to load real
+            array hardware.
     Returns:
         None
 
@@ -452,9 +619,16 @@ def sim_telescope_detectors(hw, tele, tube_slots=None):
 
         windx = 0
         for wafer_slot in tubeprops["wafer_slots"]:
-            dets = sim_wafer_detectors(
-                hw, wafer_slot, platescale, fwhm, center=centers[windx]
-            )
+            if det_info is not None:
+                dets = load_wafer_detectors(
+                    hw, wafer_slot, platescale, fwhm, 
+                    det_info[0], det_info[1], center=centers[windx]
+                )
+            else:
+                dets = sim_wafer_detectors(
+                    hw, wafer_slot, platescale, fwhm, center=centers[windx]
+                )            
+
             alldets.update(dets)
             windx += 1
     else:
@@ -498,16 +672,16 @@ def sim_telescope_detectors(hw, tele, tube_slots=None):
 
             windx = 0
             for wafer_slot in tubeprops["wafer_slots"]:
-                dets = sim_wafer_detectors(
-                    hw, wafer_slot, platescale, fwhm, center=centers[windx]
-                )
-                # dname = list(dets.keys())[0]
-                # dquat = dets[dname]["quat"]
-                # ddir = qa.rotate(dquat, zaxis)
-                # dxi, deta, dgamma = quat_to_xieta(dquat)
-                # print(
-                #     f"tube {tube_slot} ({location}), wafer {wafer_slot}, det 0 dir = {ddir}, xi/eta/gamma = {dxi}, {deta}, {dgamma}"
-                # )
+                if det_info is not None:
+                    dets = load_wafer_detectors(
+                        hw, wafer_slot, platescale, fwhm, 
+                        det_info[0], det_info[1], center=centers[windx]
+                    )
+                else:
+                    dets = sim_wafer_detectors(
+                        hw, wafer_slot, platescale, fwhm, center=centers[windx]
+                    )                
+
                 alldets.update(dets)
                 windx += 1
             tindx += 1
