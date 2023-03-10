@@ -265,7 +265,7 @@ def main():
         aman = AxisManager.load(point_path)
         g3u.add_detmap_info(aman, config["detmap"])
         pointings.append(aman)
-        
+
         if not pol_path:
             polangs.append(False)
             continue
@@ -297,7 +297,9 @@ def main():
             if pol:
                 focal_plane = np.vstack((aman.xi, aman.eta, pol)).T
             else:
-                focal_plane = np.vstack((aman.xi, aman.eta, np.zeros_like(aman.eta) + np.nan)).T
+                focal_plane = np.vstack(
+                    (aman.xi, aman.eta, np.zeros_like(aman.eta) + np.nan)
+                ).T
             for ri, di, fp in zip(
                 aman.det_info.readout_id, aman.det_info.det_id, focal_plane
             ):
@@ -370,6 +372,13 @@ def main():
     master_template = []
     results = [[], [], []]
     for aman, pol in zip(pointings, polangs):
+        # Do a radial cut
+        r = np.sqrt(
+            (aman.xi - np.median(aman.xi)) ** 2 + (aman.eta - np.median(aman.eta)) ** 2
+        )
+        r_msk = r < config["radial_thresh"] * np.median(r)
+        aman = aman.restrict("dets", aman.dets.vals[r_msk])
+
         # Split up by bandpass
         bc_aman = (
             aman.det_info.smurf.band.astype(int) << 32
@@ -411,10 +420,12 @@ def main():
             priors_bp2 = priors[np.ix_(template_bp2, msk_bp2)]
 
         if pol:
-            focal_plane = np.vstack((aman.xi, aman.eta, pol))
+            focal_plane = np.vstack((aman.xi, aman.eta, pol[r_msk]))
             _focal_plane = focal_plane
         else:
-            focal_plane = np.vstack((aman.xi, aman.eta, np.zeros_like(aman.eta) + np.nan))
+            focal_plane = np.vstack(
+                (aman.xi, aman.eta, np.zeros_like(aman.eta) + np.nan)
+            )
             _focal_plane = focal_plane[:-1]
             template = template[:-1]
 
@@ -459,11 +470,16 @@ def main():
 
     # It we only have a single dataset
     if len(pointing_paths) == 1:
-        det_id = np.zeros(aman.dets.count, dtype=np.dtype(('U', len(det_ids[0]))))
+        det_id = np.zeros(aman.dets.count, dtype=np.dtype(("U", len(det_ids[0]))))
         det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
         det_id[msk_bp2] = det_ids[template_bp2][map_bp2]
         data_out = np.vstack(
-            (det_id, aman.det_info.readout_id, out_msk.astype(float), focal_plane.T[:-1])
+            (
+                det_id,
+                aman.det_info.readout_id,
+                out_msk.astype(float),
+                focal_plane.T[:-1],
+            )
         ).T
         rset_data = metadata.ResultSet(
             keys=[
@@ -529,7 +545,7 @@ def main():
     )
 
     # Make final outputs and save
-    det_id = np.zeros(len(readout_ids), dtype=np.dtype(('U', len(det_ids[0]))))
+    det_id = np.zeros(len(readout_ids), dtype=np.dtype(("U", len(det_ids[0]))))
     det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
     det_id[msk_bp2] = det_ids[template_bp2][map_bp2]
     out_msk = np.zeros(len(readout_ids))
