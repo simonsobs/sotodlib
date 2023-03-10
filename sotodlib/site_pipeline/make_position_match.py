@@ -162,13 +162,14 @@ def gen_priors(aman, template_det_ids, prior, method="flat", width=1, basis=None
     for i in range(aman.dets.count):
         priors[i] = prior_method(x_axis, i)
 
-    det_ids = aman.det_info.det_ids
+    det_ids = aman.det_info.det_id
     if np.array_equal(det_ids, template_det_ids):
         return priors
 
     missing = np.setdiff1d(template_det_ids, det_ids)
-    det_ids = np.concatenate(missing)
-    priors = np.concatenate((priors, np.ones((len(missing), aman.dets.count))))
+    if len(missing):
+        det_ids = np.concatenate((det_ids, missing))
+        priors = np.concatenate((priors, np.ones((len(missing), aman.dets.count))))
     asort = np.argsort(det_ids)
     template_map = np.argsort(np.argsort(template_det_ids))
 
@@ -215,7 +216,7 @@ def match_template(
 
         P: The liklihood array.
     """
-    reg = AffineRegistration(**{"X": focal_plane, "Y": template})
+    reg = AffineRegistration(**{"X": focal_plane.T, "Y": template.T})
     reg.register()
     P = reg.P
 
@@ -224,13 +225,13 @@ def match_template(
     if avoid_collision:
         # This should get the maximum probability without collisions
         inv = np.linalg.pinv(P)
-        mapping = np.argmax(inv, axis=0)
+        mapping = np.argmax(inv, axis=1)
     else:
-        mapping = np.argmax(P, axis=1)
+        mapping = np.argmax(P, axis=0)
 
     outliers = np.array([])
     if out_thresh > 0:
-        outliers = np.where(reg.P[range(reg.P.shape[0]), mapping] < out_thresh)[0]
+        outliers = np.where(P[mapping, range(P.shape[1])] < out_thresh)[0]
 
     return mapping, outliers, P
 
@@ -339,7 +340,7 @@ def main():
     gen_template = "gen_template" in config
     if gen_template:
         ufm = config["gen_template"]
-        inst_model = InstModel(use_solution=False, array_names=(ufm))
+        inst_model = InstModel(use_solution=False, array_names=(ufm,))
         wafer = inst_model.map_makers[ufm].wafer_layout_data.wafer_info
         det_x = []
         det_y = []
@@ -379,7 +380,7 @@ def main():
         bg_map["bgmap"] = np.append(bg_map["bgmap"], -2 * np.ones(len(to_add)))
         bc_bgmap = np.append(bc_bgmap[msk], to_add)
         idx = np.argsort(bc_bgmap)[np.argsort(bc_aman)]
-        bias_group = bg_map["bg_map"][idx]
+        bias_group = bg_map["bgmap"][idx]
 
         msk_bp1 = np.isin(bias_group, bp1_bg)
         msk_bp2 = np.isin(bias_group, bp2_bg)
@@ -406,10 +407,10 @@ def main():
                 config["priors"]["width"],
                 config["priors"]["basis"],
             )
-            priors_bp1 = (priors[np.ix_(template_bp1, msk_bp1)],)
-            priors_bp2 = (priors[np.ix_(template_bp2, msk_bp2)],)
+            priors_bp1 = priors[np.ix_(template_bp1, msk_bp1)]
+            priors_bp2 = priors[np.ix_(template_bp2, msk_bp2)]
 
-        if not pol:
+        if pol:
             focal_plane = np.vstack((aman.xi, aman.eta, pol))
             _focal_plane = focal_plane
         else:
@@ -458,11 +459,11 @@ def main():
 
     # It we only have a single dataset
     if len(pointing_paths) == 1:
-        det_id = np.zeros(aman.dets.count, dtype=str)
+        det_id = np.zeros(aman.dets.count, dtype=np.dtype(('U', len(det_ids[0]))))
         det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
         det_id[msk_bp2] = det_ids[template_bp2][map_bp2]
         data_out = np.vstack(
-            (det_id, aman.det_info.readout_id, out_msk.astype(float), focal_plane[:-1])
+            (det_id, aman.det_info.readout_id, out_msk.astype(float), focal_plane.T[:-1])
         ).T
         rset_data = metadata.ResultSet(
             keys=[
@@ -476,6 +477,7 @@ def main():
             src=data_out,
         )
         write_dataset(rset_data, config["out_path"], "focal_plane", overwrite=True)
+        sys.exit()
 
     if not gen_template:
         template = np.unique(np.hstack(master_template), axis=1)
@@ -527,7 +529,7 @@ def main():
     )
 
     # Make final outputs and save
-    det_id = np.zeros(len(readout_ids), dtype=str)
+    det_id = np.zeros(len(readout_ids), dtype=np.dtype(('U', len(det_ids[0]))))
     det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
     det_id[msk_bp2] = det_ids[template_bp2][map_bp2]
     out_msk = np.zeros(len(readout_ids))
