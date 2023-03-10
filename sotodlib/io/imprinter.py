@@ -936,16 +936,28 @@ def get_start_and_end(files):
     _files = sorted(files)
 
     # Get start time
-    for frame in core.G3File(_files[0]):
-        if frame.type == core.G3FrameType.Scan:
-            t0 = get_frame_times(frame)[1][0]
+    found_scan = False
+    for file in _files:
+        for frame in core.G3File(file):
+            if frame.type == core.G3FrameType.Scan:
+                t0 = get_frame_times(frame)[1][0]
+                found_scan=True
+                break
+        if found_scan:
             break
     
     # Get end time
     frame = None
-    for _frame in core.G3File(_files[-1]):
-        if _frame.type == core.G3FrameType.Scan:
-            frame = _frame
+    found_scan = False
+    for file in _files[::-1]:
+        for _frame in core.G3File(file):
+            if _frame.type == core.G3FrameType.Scan:
+                frame = _frame
+                found_scan = True
+
+        if found_scan: 
+            break
+
     t1 = get_frame_times(frame)[1][-1]
     
     return t0, t1
