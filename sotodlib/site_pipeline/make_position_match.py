@@ -1,8 +1,10 @@
 import sys
 import argparse as ap
 import numpy as np
+import matplotlib.pyplot as plt
 import yaml
 import sotodlib.io.g3tsmurf_utils as g3u
+from functools import partial
 from sotodlib.core import AxisManager, metadata
 from sotodlib.io.metadata import read_dataset, write_dataset
 from scipy.spatial.transform import Rotation as R
@@ -248,12 +250,47 @@ def transform_from_detmap(aman):
     aman.eta = transformed[:, 1]
 
 
+def visualize(iteration, error, X, Y, ax):
+    """
+    Visualize CPD matching process.
+    Lifted from the pycpd example scripts.
+
+    Arguments:
+
+        iteration: The iteration of the fit.
+
+        error: The current q value.
+
+        X: The target points.
+
+        Y: The source points.
+
+        ax: Axis to use for plots.
+    """
+    plt.cla()
+    ax.scatter(X[:, 0], X[:, 1], color="red", label="Target")
+    ax.scatter(Y[:, 0], Y[:, 1], color="blue", label="Source")
+    plt.text(
+        0.87,
+        0.92,
+        "Iteration: {:d}\nQ: {:06.4f}".format(iteration, error),
+        horizontalalignment="center",
+        verticalalignment="center",
+        transform=ax.transAxes,
+        fontsize="x-large",
+    )
+    ax.legend(loc="upper left", fontsize="x-large")
+    plt.draw()
+    plt.pause(0.00001)
+
+
 def match_template(
     focal_plane,
     template,
     out_thresh=0,
     avoid_collision=True,
     priors=None,
+    vis=False,
 ):
     """
     Match fit focal plane againts a template.
@@ -278,6 +315,9 @@ def match_template(
                 Should be be a n by n array where n is the number of points.
                 The priors[i, j] is the prior on the i'th point in template matching the j'th point in focal_plane.
 
+        vis: If true generate plots to watch the matching process.
+             Should only be used for debugging with human interaction.
+
     Returns:
 
         mapping: Mapping between elements in template and focal_plane.
@@ -288,8 +328,19 @@ def match_template(
 
         P: The liklihood array.
     """
-    reg = AffineRegistration(**{"X": focal_plane.T, "Y": template.T})
-    reg.register()
+    reg = AffineRegistration(
+        **{"X": focal_plane.T, "Y": template.T, "max_iterations": 1000}
+    )
+
+    if vis:
+        fig = plt.figure()
+        fig.add_axes([0, 0, 1, 1])
+        callback = partial(visualize, ax=fig.axes[0])
+        reg.register(callback)
+        plt.show()
+    else:
+        reg.register()
+
     P = reg.P
 
     if priors is not None:
@@ -518,6 +569,7 @@ def main():
             out_thresh=config["out_thresh"],
             avoid_collision=True,
             priors=priors_bp1,
+            vis=config["matching"]["visualize"],
         )
         map_bp2, out_bp2, P_bp2 = match_template(
             _focal_plane[:, msk_bp2],
@@ -525,6 +577,7 @@ def main():
             out_thresh=config["out_thresh"],
             avoid_collision=True,
             priors=priors_bp2,
+            vis=config["matching"]["visualize"],
         )
 
         # Store outputs for now
@@ -617,6 +670,7 @@ def main():
         out_thresh=config["out_thresh"],
         avoid_collision=True,
         priors=priors[np.ix_(template_bp1, msk_bp1)],
+        vis=config["matching"]["visualize"],
     )
     map_bp2, out_bp2 = match_template(
         _focal_plane[:, msk_bp2],
@@ -624,6 +678,7 @@ def main():
         out_thresh=config["out_thresh"],
         avoid_collision=True,
         priors=priors[np.ix_(template_bp2, msk_bp2)],
+        vis=config["matching"]["visualize"],
     )
 
     # Make final outputs and save
