@@ -176,6 +176,78 @@ def gen_priors(aman, template_det_ids, prior, method="flat", width=1, basis=None
     return priors[asort][template_map]
 
 
+def transform_from_detmap(aman):
+    """
+    Do an approximate transformation of the pointing back to
+    the focal plane using the mapping from the loaded detmap.
+
+    Arguments:
+
+        aman: AxisManager containing both pointing and datmap results.
+    """
+    xi_0 = np.nanmedian(aman.xi)
+    eta_0 = np.nanmedian(aman.eta)
+    msk_1 = (aman.xi > xi_0) & (aman.eta > eta_0)
+    p1_fp = np.array(
+        (
+            np.nanmedian(aman.xi[msk_1]),
+            np.nanmedian(aman.eta[msk_1]),
+            1,
+        )
+    )
+    msk_2 = (aman.xi < xi_0) & (aman.eta > eta_0)
+    p2_fp = np.array(
+        (
+            np.nanmedian(aman.xi[msk_2]),
+            np.nanmedian(aman.eta[msk_2]),
+            1,
+        )
+    )
+    msk_3 = aman.eta < eta_0
+    p3_fp = np.array(
+        (
+            np.nanmedian(aman.xi[msk_3]),
+            np.nanmedian(aman.eta[msk_3]),
+            1,
+        )
+    )
+    X = np.transpose(np.matrix([p1_fp, p2_fp, p3_fp]))
+
+    p1_dm = np.array(
+        (
+            np.nanmedian(aman.det_info.wafer.det_x[msk_1]),
+            np.nanmedian(aman.det_info.wafer.det_y[msk_1]),
+            1,
+        )
+    )
+    p2_dm = np.array(
+        (
+            np.nanmedian(aman.det_info.wafer.det_x[msk_2]),
+            np.nanmedian(aman.det_info.wafer.det_y[msk_2]),
+            1,
+        )
+    )
+    p3_dm = np.array(
+        (
+            np.nanmedian(aman.det_info.wafer.det_x[msk_3]),
+            np.nanmedian(aman.det_info.wafer.det_y[msk_3]),
+            1,
+        )
+    )
+    Y = np.transpose(np.matrix([p1_dm, p2_dm, p3_dm]))
+
+    A2 = Y * X.I
+
+    coords = np.vstack((aman.xi, aman.eta)).T
+    transformed = [
+        (A2 * np.vstack((np.matrix(pt).reshape(2, 1), 1)))[0:2, :] for pt in coords
+    ]
+    transformed = np.reshape(transformed, coords.shape)
+
+    aman.xi = transformed[:, 0]
+    aman.eta = transformed[:, 1]
+
+
 def match_template(
     focal_plane,
     template,
@@ -379,6 +451,9 @@ def main():
         r_msk = r < config["radial_thresh"] * np.median(r)
         aman = aman.restrict("dets", aman.dets.vals[r_msk])
 
+        if config["dm_transform"]:
+            transform_from_detmap(aman)
+
         # Split up by bandpass
         bc_aman = (
             aman.det_info.smurf.band.astype(int) << 32
@@ -396,17 +471,24 @@ def main():
 
         # Prep inputs
         if not gen_template:
+            dm_msk = (
+                np.isfinite(aman.det_info.wafer.det_x)
+                | np.isfinite(aman.det_info.wafer.det_y)
+                | np.isfinite(aman.det_info.wafer.angle)
+            )
+            dm_aman = aman.restrict("dets", aman.dets.vals[dm_msk], False)
+
             template = np.vstack(
                 (
-                    aman.det_info.wafer.det_x,
-                    aman.det_info.wafer.det_y,
-                    aman.det_info.wafer.angle,
+                    dm_aman.det_info.wafer.det_x,
+                    dm_aman.det_info.wafer.det_y,
+                    dm_aman.det_info.wafer.angle,
                 )
             )
-            master_template.append(np.vstack((template, aman.det_info.det_id)))
-            template_bp1 = msk_bp1
-            template_bp2 = msk_bp2
-            det_ids = aman.det_info.det_id
+            master_template.append(np.vstack((template, dm_aman.det_info.det_id)))
+            template_bp1 = msk_bp1[dm_msk]
+            template_bp2 = msk_bp2[dm_msk]
+            det_ids = dm_aman.det_info.det_id
         if make_priors:
             priors = gen_priors(
                 aman,
