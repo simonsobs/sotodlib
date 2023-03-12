@@ -291,6 +291,7 @@ def match_template(
     out_thresh=0,
     invert=True,
     vis=False,
+    cpd_args={},
 ):
     """
     Match fit focal plane againts a template.
@@ -318,6 +319,8 @@ def match_template(
         vis: If true generate plots to watch the matching process.
              Should only be used for debugging with human interaction.
 
+        cpd_args: Dictionairy containing kwargs to be passed into AffineRegistration.
+                  See the pycpd docs for what these can be.
     Returns:
 
         mapping: Mapping between elements in template and focal_plane.
@@ -328,9 +331,8 @@ def match_template(
 
         P: The liklihood array.
     """
-    reg = AffineRegistration(
-        **{"X": focal_plane.T, "Y": template.T, "max_iterations": 1000}
-    )
+    cpd_args.update({"X": focal_plane.T, "Y": template.T})
+    reg = AffineRegistration(**cpd_args)
 
     if vis:
         fig = plt.figure()
