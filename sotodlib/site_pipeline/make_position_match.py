@@ -146,7 +146,10 @@ def gen_priors(aman, template_det_ids, prior, method="flat", width=1, basis=None
         return arr
 
     def _gaussian(x_axis, idx):
-        return prior * np.exp(-0.5 * ((x_axis - x_axis[idx]) ** 2) / (width ** 2))
+        arr = 1 + (prior - 1) * np.exp(
+            -0.5 * ((x_axis - x_axis[idx]) ** 2) / (width ** 2)
+        )
+        return arr
 
     if method == "flat":
         prior_method = _flat
@@ -388,7 +391,7 @@ def main():
     polangs = []
     for point_path, pol_path in zip(pointing_paths, polangs_paths):
         aman = AxisManager.load(point_path)
-        g3u.add_detmap_info(aman, config["detmap"])
+        g3u.add_detmap_info(aman, config["detmap"], columns="all")
         pointings.append(aman)
 
         if not pol_path:
