@@ -287,9 +287,9 @@ def visualize(iteration, error, X, Y, ax):
 def match_template(
     focal_plane,
     template,
-    out_thresh=0,
-    avoid_collision=True,
     priors=None,
+    out_thresh=0,
+    invert=True,
     vis=False,
 ):
     """
@@ -305,15 +305,15 @@ def match_template(
         template: Designed x, y, and polarization angle of each detector.
                   Should be a (2, n) or (3, n) array with columns: x, y, pol.
 
+        priors: Priors to apply when matching.
+                Should be be a n by n array where n is the number of points.
+                The priors[i, j] is the prior on the i'th point in template matching the j'th point in focal_plane.
+
         out_thresh: Threshold at which points will be considered outliers.
                     Should be in range [0, 1) and is checked against the
                     probability that a point matches its mapped point in the template.
 
-        avoid_collision: Try to avoid collisions. May effect performance.
-
-        priors: Priors to apply when matching.
-                Should be be a n by n array where n is the number of points.
-                The priors[i, j] is the prior on the i'th point in template matching the j'th point in focal_plane.
+        invert: Invert the likelihood array to try and find the maximum likelihood solution.
 
         vis: If true generate plots to watch the matching process.
              Should only be used for debugging with human interaction.
@@ -345,7 +345,7 @@ def match_template(
 
     if priors is not None:
         P *= priors
-    if avoid_collision:
+    if invert:
         # This should get the maximum probability without collisions
         inv = np.linalg.pinv(P)
         mapping = np.argmax(inv, axis=1)
@@ -566,18 +566,14 @@ def main():
         map_bp1, out_bp1, P_bp1 = match_template(
             _focal_plane[:, msk_bp1],
             template[:, template_bp1],
-            out_thresh=config["out_thresh"],
-            avoid_collision=True,
             priors=priors_bp1,
-            vis=config["matching"]["visualize"],
+            **config["matching"],
         )
         map_bp2, out_bp2, P_bp2 = match_template(
             _focal_plane[:, msk_bp2],
             template[:, template_bp2],
-            out_thresh=config["out_thresh"],
-            avoid_collision=True,
             priors=priors_bp2,
-            vis=config["matching"]["visualize"],
+            **config["matching"],
         )
 
         # Store outputs for now
@@ -667,18 +663,14 @@ def main():
     map_bp1, out_bp1 = match_template(
         _focal_plane[:, msk_bp1],
         template[:, template_bp1],
-        out_thresh=config["out_thresh"],
-        avoid_collision=True,
         priors=priors[np.ix_(template_bp1, msk_bp1)],
-        vis=config["matching"]["visualize"],
+        **config["matching"],
     )
     map_bp2, out_bp2 = match_template(
         _focal_plane[:, msk_bp2],
         template[:, template_bp2],
-        out_thresh=config["out_thresh"],
-        avoid_collision=True,
         priors=priors[np.ix_(template_bp2, msk_bp2)],
-        vis=config["matching"]["visualize"],
+        **config["matching"],
     )
 
     # Make final outputs and save
