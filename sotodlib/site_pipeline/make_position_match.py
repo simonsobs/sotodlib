@@ -7,9 +7,12 @@ import sotodlib.io.g3tsmurf_utils as g3u
 from functools import partial
 from sotodlib.core import AxisManager, metadata
 from sotodlib.io.metadata import read_dataset, write_dataset
+from sotodlib.site_pipeline import util
 from scipy.spatial.transform import Rotation as R
 from pycpd import AffineRegistration
 from detmap.inst_model import InstModel
+
+logger = util.init_logger(__name__, "make_position_match: ")
 
 
 def LAT_coord_transform(xy, rot_fp, rot_ufm, r=72.645):
@@ -390,15 +393,18 @@ def main():
     pointings = []
     polangs = []
     for point_path, pol_path in zip(pointing_paths, polangs_paths):
+        logger.info("Loading pointing from: " + point_path)
         aman = AxisManager.load(point_path)
         g3u.add_detmap_info(aman, config["detmap"], columns="all")
         pointings.append(aman)
 
         if not pol_path:
+            logger.warning("No polang associated with this pointing")
             polangs.append(False)
             continue
         # NOTE: Assuming some standin structure for the pol data
         # This may change in the future
+        logger.info("Loading polangs from: " + pol_path)
         rset = read_dataset(pol_path, "polarization_angle")
         pol_rid = rset["dets:readout_id"]
         pols = rset["polarization_angle"]
@@ -470,6 +476,7 @@ def main():
     gen_template = "gen_template" in config
     if gen_template:
         ufm = config["gen_template"]
+        logger.info("Generating template for " + ufm)
         inst_model = InstModel(use_solution=False, array_names=(ufm,))
         wafer = inst_model.map_makers[ufm].wafer_layout_data.wafer_info
         det_x = []
@@ -499,15 +506,18 @@ def main():
     outliers = []
     master_template = []
     results = [[], [], []]
-    for aman, pol in zip(pointings, polangs):
+    for i, (aman, pol) in enumerate(zip(pointings, polangs)):
+        logger.info("Starting match number " + str(i))
         # Do a radial cut
         r = np.sqrt(
             (aman.xi - np.median(aman.xi)) ** 2 + (aman.eta - np.median(aman.eta)) ** 2
         )
         r_msk = r < config["radial_thresh"] * np.median(r)
         aman = aman.restrict("dets", aman.dets.vals[r_msk])
+        logger.info("\tCut " + str(np.sum(~r_msk)) + " detectors with bad pointing")
 
         if config["dm_transform"]:
+            logger.info("\tApplying transformation from detmap")
             transform_from_detmap(aman)
 
         # Split up by bandpass
@@ -526,6 +536,7 @@ def main():
         msk_bp2 = np.isin(bias_group, bp2_bg)
 
         # Prep inputs
+        dm_msk = None
         if not gen_template:
             dm_msk = (
                 np.isfinite(aman.det_info.wafer.det_x)
@@ -580,6 +591,11 @@ def main():
             priors=priors_bp2,
             **config["matching"],
         )
+        P_avg = (
+            np.median(P_bp1[map_bp1, range(P_bp1.shape[1])])
+            + np.median(P_bp2[map_bp2, range(P_bp2.shape[1])])
+        ) / 2
+        logger.info("\tAverage matched liklihood = " + str(P_avg))
 
         # Store outputs for now
         results[0].append(aman.det_info.readout_id)
@@ -609,6 +625,11 @@ def main():
         det_id = np.zeros(aman.dets.count, dtype=np.dtype(("U", len(det_ids[0]))))
         det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
         det_id[msk_bp2] = det_ids[template_bp2][map_bp2]
+
+        logger.info(str(np.sum(msk_bp1 | msk_bp2)) + " detectors matched")
+        logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
+        logger.info(str(np.sum(det_id[dm_msk] == det_ids)) + " match with detmap")
+
         data_out = np.vstack(
             (
                 det_id,
@@ -685,6 +706,9 @@ def main():
     out_msk = np.zeros(len(readout_ids))
     out_msk[msk_bp1][out_bp1] = 1.0
     out_msk[msk_bp2][out_bp2] = 1.0
+
+    logger.info(str(np.sum(msk_bp1 | msk_bp2)) + " detectors matched")
+    logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
 
     data_out = np.vstack((det_id, readout_ids, out_msk, focal_plane)).T
     rset_data = metadata.ResultSet(
