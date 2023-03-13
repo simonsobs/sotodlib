@@ -99,6 +99,12 @@ def main(args=None):
             else:
                 bp = f"f{str(tune.bandpass).rjust(3,'0')}" 
 
+            # some dark detectors are reporting non-nan angles            
+            if str(tune.det_type) == "OPTC":
+                angle = np.radians(replace_none(tune.angle_actual_deg))
+            else:
+                angle = np.nan
+
             # add detector name to database
             det_rs.append({
                 "dets:det_id": tune.detector_id,
@@ -118,7 +124,7 @@ def main(args=None):
                 w + "type": str(tune.det_type),
                 w + "det_x": replace_none(tune.det_x),
                 w + "det_y": replace_none(tune.det_y),
-                w + "angle": np.radians(replace_none(tune.angle_actual_deg)),
+                w + "angle": angle,
                 w + "coax" : "N" if tune.is_north else "S",
             })
 
