@@ -397,13 +397,13 @@ def sim_wafer_detectors(
 
 def load_wafer_data(filename, array_name, sub_array_name=None):
     """Load a Det_Info file (like those made by make-det-info-wafer) and return
-    a specific array. 
-    
-    Allows you to replace an array name with a different one (since we 
-    currently do not have a complete set of array hardware mappings) and 
+    a specific array.
+
+    Allows you to replace an array name with a different one (since we
+    currently do not have a complete set of array hardware mappings) and
     uses the replacement name pattern to replace bandpass information. If using
     the sub_array_name it assumes array_name is an MF array
-    
+
     filename(str): path to det_info hdf5 file
     array_name(str): array name to load from the file
     sub_array_name(str): work-around to change the array name while we only have some arrays
@@ -413,8 +413,8 @@ def load_wafer_data(filename, array_name, sub_array_name=None):
     rs.keys = loader._filter_items("dets:", rs.keys)
 
     bp= rs.keys.index("wafer.bandpass")
-    
-    
+
+
     if sub_array_name is not None:
         switches = {
             "L" : { "f090":"f030", "f150":"f040"},
@@ -423,18 +423,18 @@ def load_wafer_data(filename, array_name, sub_array_name=None):
         for i in range( len(rs) ):
             row = rs.rows[i]
             rs.rows[i] = tuple([r.replace(array_name, sub_array_name) for r in row[:2]]) + row[2:]
-            
+
             if rs.rows[i][bp] =='NC' or "M" in sub_array_name:
                 continue
             if "L" in sub_array_name:
                 rs.rows[i] = tuple([
-                                rs.rows[i][0].replace(rs.rows[i][bp],switches["L"][rs.rows[i][bp]]), 
+                                rs.rows[i][0].replace(rs.rows[i][bp],switches["L"][rs.rows[i][bp]]),
                                 rs.rows[i][1]
                             ])+ rs.rows[i][2:bp] + \
                             tuple([switches["L"][rs.rows[i][bp]]] ) + rs.rows[i][bp+1:]
             elif "U" in sub_array_name:
                 rs.rows[i] = tuple([
-                                rs.rows[i][0].replace(rs.rows[i][bp],switches["U"][rs.rows[i][bp]]), 
+                                rs.rows[i][0].replace(rs.rows[i][bp],switches["U"][rs.rows[i][bp]]),
                                 rs.rows[i][1]
                             ]) + rs.rows[i][2:bp] + \
                             tuple([switches["U"][rs.rows[i][bp]]]) + rs.rows[i][bp+1:]
@@ -442,20 +442,20 @@ def load_wafer_data(filename, array_name, sub_array_name=None):
     wafer = loader.convert_det_info(
         rs,
         rs["det_id"]
-            
+
     ).wafer
     return wafer
 
 
 def load_wafer_detectors(
-    hw, 
-    wafer_slot, 
-    platescale, 
-    fwhm, 
+    hw,
+    wafer_slot,
+    platescale,
+    fwhm,
     det_info_file,
     array_name,
     sub_array_name=None,
-    band=None, 
+    band=None,
     center=None,
     no_darks=False
 ):
@@ -474,7 +474,7 @@ def load_wafer_detectors(
             each band.
         det_info_file (str): filename of detector info file
         array_name (str): array to load from file
-        sub_array_name (str, optional): array to change to, defaults to 
+        sub_array_name (str, optional): array to change to, defaults to
             hw.data["wafer_slots"][slot]["wafer_name"] if not set
         band (str, optional): Optionally only use this band.
         center (array, optional): The quaternion offset of the center.
@@ -484,12 +484,11 @@ def load_wafer_detectors(
         (OrderedDict): The properties of all selected detectors.
 
     """
-    zaxis = np.array([0, 0, 1], dtype=np.float64)
 
     # The properties of this wafer
     wprops = hw.data["wafer_slots"][wafer_slot]
     tele = wprops["type"].split("_")[0]
-    
+
     # The readout card and its properties
     card_slot = wprops["card_slot"]
     cardprops = hw.data["card_slots"][card_slot]
@@ -500,15 +499,16 @@ def load_wafer_detectors(
         if band in bands:
             bands = [band]
         else:
-            raise RuntimeError(
-                "band '{}' not valid for wafer '{}'".format(band, wafer_slot)
-            )
-    
+            msg = f"band '{band}' not valid for wafer '{wafer_slot}'"
+            raise RuntimeError(msg)
+
     if sub_array_name is None:
         sub_array_name = wprops["wafer_name"]
     wafer = load_wafer_data(det_info_file, array_name, sub_array_name)
 
     dets = OrderedDict()
+    # FIXME: double check this
+    poloff = np.degrees(np.nanmin(wafer.angle)) - 22.5
 
     for i, detname in enumerate(wafer.dets.vals):
         if wafer.dets.vals[i] == 'NO_MATCH':
@@ -528,42 +528,41 @@ def load_wafer_detectors(
         dprops["fwhm"] = fwhm[dprops["band"]] if dprops["band"] in fwhm else np.nan
         dprops["pol"] = wafer.pol[i]
 
-        ### angle I'll need help to calculate based on slot
-        dprops["pol_ang"] = wafer.angle[i]
-        ### I'm pretty sure this is the angle in our files
-        dprops["pol_ang_wafer"] = wafer.angle[i] 
-        ### angle I'll need help to calculate based on slot
-        dprops["pol_orientation_wafer"] = np.nan
-        
+        # Full polarization angle
+        dprops["pol_ang"] = np.round(np.degrees(wafer.angle[i]), 2)
+        # Polarization angle in the wafer coordinate system
+        dprops["pol_ang_wafer"] = np.round(np.degrees(wafer.angle[i]) - poloff, 2)
+        # This angle seems meaningless for wafers assembled out of rhomboids
+        dprops["pol_orientation_wafer"] = dprops["pol_ang_wafer"] % 90
+
         ## channels aren't assigned until Tunes are made, so just ints
         ## with tunes this will be 512*smurf_band + smurf_channel. not available
         ## with just hardware mapping files.
-        dprops["channel"] = i 
+        dprops["channel"] = i
         ## card slot will be the stream_id name for the wafer slot
         dprops["card_slot"] = f"stream_id_{wafer_slot}"
 
         ## readout related info
         dprops["bias"] = wafer.bias_line[i]
-        dprops["AMC"] = 0 if wafer.coax[i] == "N" else 1
-        dprops["readout_freq_GHz"] = wafer.design_freq_mhz[i]/1000
+        dprops["AMC"] = {"N" : 0, "S" : 1}[wafer.coax[i]]
+        dprops["readout_freq_GHz"] = wafer.design_freq_mhz[i] / 1000
         dprops["bondpad"] = wafer.bond_pad[i]
         dprops["mux_position"] = wafer.mux_position[i]
 
-
-        quant = xieta_to_quat( 
-            wafer.det_x[i]*platescale,
-            wafer.det_y[i]*platescale,
+        quat = xieta_to_quat(
+            wafer.det_x[i] * platescale,
+            wafer.det_y[i] * platescale,
             wafer.angle[i]
         )
 
         if center is not None:
-            dprops["quat"] = qa.mult(center, quant).flatten()
+            dprops["quat"] = qa.mult(center, quat).flatten()
         else:
-            dprops["qant"] = quant.flatten()
+            dprops["quat"] = quat.flatten()
 
         dprops["detector_name"] = detname
         dets[dprops["detector_name"]] = dprops
-        
+
     return dets
 
 
@@ -632,13 +631,13 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None):
         for wafer_slot in tubeprops["wafer_slots"]:
             if det_info is not None:
                 dets = load_wafer_detectors(
-                    hw, wafer_slot, platescale, fwhm, 
+                    hw, wafer_slot, platescale, fwhm,
                     det_info[0], det_info[1], center=centers[windx]
                 )
             else:
                 dets = sim_wafer_detectors(
                     hw, wafer_slot, platescale, fwhm, center=centers[windx]
-                )            
+                )
 
             alldets.update(dets)
             windx += 1
@@ -685,13 +684,13 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None):
             for wafer_slot in tubeprops["wafer_slots"]:
                 if det_info is not None:
                     dets = load_wafer_detectors(
-                        hw, wafer_slot, platescale, fwhm, 
+                        hw, wafer_slot, platescale, fwhm,
                         det_info[0], det_info[1], center=centers[windx]
                     )
                 else:
                     dets = sim_wafer_detectors(
                         hw, wafer_slot, platescale, fwhm, center=centers[windx]
-                    )                
+                    )
 
                 alldets.update(dets)
                 windx += 1
