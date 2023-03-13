@@ -19,6 +19,7 @@ from toast.instrument_sim import (
     rhomb_gamma_angles_qu,
 )
 import toast.qarray as qa
+import toast.utils
 
 from sotodlib.io.metadata import read_dataset
 import sotodlib.core.metadata.loader as loader
@@ -509,11 +510,11 @@ def load_wafer_detectors(
 
     dets = OrderedDict()
 
-    for i in range(wafer.dets.count):
+    for i, detname in enumerate(wafer.dets.vals):
         dprops = OrderedDict()
         dprops["wafer_slot"] = wafer_slot
-        dprops["ID"] = wafer.dets.vals[i]
-        dprops["pixel"] = wafer.dets.vals[i].split("_")[-1][:-1]
+        dprops["ID"] = toast.utils.name_UID("detname")
+        dprops["pixel"] = detname.split("_")[-1][:-1]
         dprops["band"] = f"{tele[:3]}_{wafer.bandpass[i]}" if wafer.bandpass[i] != "NC" else "NC"
 
         if dprops["band"] not in bands and dprops["band"] != "NC":
@@ -530,7 +531,10 @@ def load_wafer_detectors(
         dprops["pol_ang_wafer"] = wafer.angle[i] 
         ### angle I'll need help to calculate based on slot
         dprops["pol_orientation_wafer"] = np.nan
-
+        ### Need to figure out the channel ID, card slot, AMC
+        dprops["channel"] = i % cardprops["nchannel"]
+        dprops["card_slot"] = 0
+        dprops["AMC"] = 0
 
         ## readout related info
         dprops["bias"] = wafer.bias_line[i]
@@ -546,12 +550,12 @@ def load_wafer_detectors(
         )
 
         if center is not None:
-            dprops["quat"] = qa.mult( center, quant).flatten()
+            dprops["quat"] = qa.mult(center, quant).flatten()
         else:
             dprops["qant"] = quant.flatten()
 
-        dprops["detector_name"] = dprops["ID"]
-        dets[ dprops["detector_name"] ] = dprops
+        dprops["detector_name"] = detname
+        dets[dprops["detector_name"]] = dprops
         
     return dets
 
