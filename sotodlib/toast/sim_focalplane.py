@@ -510,7 +510,6 @@ def load_wafer_detectors(
 
     dets = OrderedDict()
 
-    doff = 0
     for i, detname in enumerate(wafer.dets.vals):
         if wafer.dets.vals[i] == 'NO_MATCH':
             continue
@@ -537,14 +536,15 @@ def load_wafer_detectors(
         dprops["pol_orientation_wafer"] = np.nan
         
         ## channels aren't assigned until Tunes are made, so just ints
-        dprops["channel"] = doff
-        doff += 1
+        ## with tunes this will be 512*smurf_band + smurf_channel. not available
+        ## with just hardware mapping files.
+        dprops["channel"] = i 
         ## card slot will be the stream_id name for the wafer slot
         dprops["card_slot"] = f"stream_id_{wafer_slot}"
 
         ## readout related info
         dprops["bias"] = wafer.bias_line[i]
-        dprops["AMC"] = 0 if wafer.coax[i] == "N" else "S"
+        dprops["AMC"] = 0 if wafer.coax[i] == "N" else 1
         dprops["readout_freq_GHz"] = wafer.design_freq_mhz[i]/1000
         dprops["bondpad"] = wafer.bond_pad[i]
         dprops["mux_position"] = wafer.mux_position[i]
