@@ -74,6 +74,7 @@ def main(args=None):
         w + "det_x",
         w + "det_y",
         w + "angle",
+        w + "coax",
     ]
 
     for array_name in array_names:
@@ -118,6 +119,7 @@ def main(args=None):
                 w + "det_x": replace_none(tune.det_x),
                 w + "det_y": replace_none(tune.det_y),
                 w + "angle": np.radians(replace_none(tune.angle_actual_deg)),
+                w + "coax" : "N" if tune.is_north else "S",
             })
 
         det_rs.append({
@@ -139,6 +141,7 @@ def main(args=None):
                 w + "det_x": np.nan,
                 w + "det_y": np.nan,
                 w + "angle": np.nan,
+                w + "coax" : "X",
         })
             
         write_dataset(det_rs, configs["det_info"], array_name, args.overwrite)
