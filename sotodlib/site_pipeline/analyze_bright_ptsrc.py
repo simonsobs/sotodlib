@@ -6,6 +6,8 @@ from sotodlib import core
 from sotodlib.io.load import load_file
 import toast
 from sotodlib.toast.ops import sim_sso
+from sotodlib.core import metadata
+from sotodlib.io.metadata import write_dataset, read_dataset
 
 import h5py
 import numpy as np
@@ -19,9 +21,10 @@ from datetime import datetime
 import argparse as ap
 import pandas as pd
 from mpi4py import MPI
+import re
 
 opj = os.path.join
-INITIAL_PARA_FILE = "/home/zhileixu/shared/initial_parameters.hdf5"
+INITIAL_PARA_FILE = "/home/zhileixu/shared/initial_parameters.h5"
 
 
 def highpass_filter(data, cutoff, fs, order=5):
@@ -221,24 +224,33 @@ def define_fit_params(band, tele, return_beamsize=False):
     initial_guess, bounds : arguments for the least square fits
 
     """
-
-    hf = h5py.File(INITIAL_PARA_FILE, "r")
-    # band=bytes(f"{band}", encoding="utf-8")
-    ## unecessary / write differently
-    if tele != "LAT":
-        import re
-
-        tele = re.split("(\d+)", tele)[0]
-    try:
-        idx = list(hf.get(tele)["frequency-band name"]).index(band)
-    except:
-        raise KeyError("Telescope name must be one of LAT,SAT")
-
-    beamsize = (hf.get(tele)["beam size"])[idx]
-    amp = (hf.get(tele)["detector response"])[idx]
-    ## perhaps reconsider this bound
+    
+    init_rs = read_dataset(INITIAL_PARA_FILE, tele[:3])
+    
+    idx_t = np.where(init_rs['frequency-band name'] == band.encode(encoding='UTF-8'))[0][0]
+    beamsize = init_rs[idx_t]["beam size"] # in arcmin
+    amp = init_rs[idx_t]["detector response"]
     beamsize = np.radians(beamsize / 60)
     offset_bound = 2 * beamsize
+    
+
+#     hf = h5py.File(INITIAL_PARA_FILE, "r")
+#     # band=bytes(f"{band}", encoding="utf-8")
+#     ## unecessary / write differently
+#     print(band)
+#     print(list(hf.get(tele)["frequency-band name"]))
+#     if tele != "LAT":
+#         tele = re.split("(\d+)", tele)[0]
+#     try:
+#         idx = list(hf.get(tele)["frequency-band name"]).index(band)
+#     except:
+#         raise KeyError("Telescope name must be one of LAT,SAT")
+
+#     beamsize = (hf.get(tele)["beam size"])[idx]
+#     amp = (hf.get(tele)["detector response"])[idx]
+#     ## perhaps reconsider this bound
+#     beamsize = np.radians(beamsize / 60)
+#     offset_bound = 2 * beamsize
 
     ## allow for max 10% bias
     ## 10% is large but allowing for a large bias helps tracking down
@@ -253,12 +265,7 @@ def define_fit_params(band, tele, return_beamsize=False):
 
     bounds_min = (0, -offset_bound, -offset_bound, fwhm_min, fwhm_min, 0.0, 1e-3)
     bounds_max = (2 * amp, offset_bound, offset_bound, fwhm_max, fwhm_max, np.pi, 10e-3)
-    bounds = np.array(
-        (
-            bounds_min,
-            bounds_max,
-        )
-    )
+    bounds = np.array((bounds_min, bounds_max,))
 
     return initial_guess, bounds, offset_bound
 
