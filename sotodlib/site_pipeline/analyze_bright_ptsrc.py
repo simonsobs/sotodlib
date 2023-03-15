@@ -232,25 +232,6 @@ def define_fit_params(band, tele, return_beamsize=False):
     amp = init_rs[idx_t]["detector response"]
     beamsize = np.radians(beamsize / 60)
     offset_bound = 2 * beamsize
-    
-
-#     hf = h5py.File(INITIAL_PARA_FILE, "r")
-#     # band=bytes(f"{band}", encoding="utf-8")
-#     ## unecessary / write differently
-#     print(band)
-#     print(list(hf.get(tele)["frequency-band name"]))
-#     if tele != "LAT":
-#         tele = re.split("(\d+)", tele)[0]
-#     try:
-#         idx = list(hf.get(tele)["frequency-band name"]).index(band)
-#     except:
-#         raise KeyError("Telescope name must be one of LAT,SAT")
-
-#     beamsize = (hf.get(tele)["beam size"])[idx]
-#     amp = (hf.get(tele)["detector response"])[idx]
-#     ## perhaps reconsider this bound
-#     beamsize = np.radians(beamsize / 60)
-#     offset_bound = 2 * beamsize
 
     ## allow for max 10% bias
     ## 10% is large but allowing for a large bias helps tracking down
