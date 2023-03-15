@@ -413,7 +413,6 @@ def main():
         pols = pols[rid_sort][rid_map]
         polangs.append(pols)
     bg_map = np.load(config["bias_map"], allow_pickle=True).item()
-    bc_bgmap = (bg_map["bands"] << 32) + bg_map["channels"]
 
     # Save the input paths for later reference
     rset_paths = metadata.ResultSet(
@@ -508,6 +507,7 @@ def main():
     results = [[], [], []]
     for i, (aman, pol) in enumerate(zip(pointings, polangs)):
         logger.info("Starting match number " + str(i))
+
         # Do a radial cut
         r = np.sqrt(
             (aman.xi - np.median(aman.xi)) ** 2 + (aman.eta - np.median(aman.eta)) ** 2
@@ -520,22 +520,31 @@ def main():
             logger.info("\tApplying transformation from detmap")
             transform_from_detmap(aman)
 
-        # Split up by bandpass
-        bc_aman = (
-            aman.det_info.smurf.band.astype(int) << 32
-        ) + aman.det_info.smurf.channel.astype(int)
-        to_add = np.setdiff1d(bc_aman, bc_bgmap)
-        to_remove = np.setdiff1d(bc_bgmap, bc_aman)
-        msk = ~np.isin(bc_bgmap, to_remove)
-        bg_map["bgmap"] = np.append(bg_map["bgmap"], -2 * np.ones(len(to_add)))
-        bc_bgmap = np.append(bc_bgmap[msk], to_add)
-        idx = np.argsort(bc_bgmap)[np.argsort(bc_aman)]
-        bias_group = bg_map["bgmap"][idx]
+        bias_group = np.zeros(aman.dets.count) - 1
+        for i in range(aman.dets.count):
+            msk = np.all(
+                [
+                    aman.det_info.smurf.band[i] == bg_map["bands"],
+                    aman.det_info.smurf.channel[i] == bg_map["channels"],
+                ],
+                axis=0,
+            )
+            bias_group[i] = bg_map["bgmap"][msk][0]
 
         msk_bp1 = np.isin(bias_group, bp1_bg)
         msk_bp2 = np.isin(bias_group, bp2_bg)
 
+        bl_diff = np.sum(~(bias_group == aman.det_info.wafer.bias_line)) - np.sum(
+            ~(msk_bp1 | msk_bp2)
+        )
+        logger.info(
+            "\t"
+            + str(bl_diff)
+            + " detectors have bias lines that don't match the detmap"
+        )
+
         # Prep inputs
+        dm_msk = slice(None)
         if not gen_template:
             dm_msk = (
                 np.isfinite(aman.det_info.wafer.det_x)
@@ -552,9 +561,10 @@ def main():
                 )
             )
             master_template.append(np.vstack((template, dm_aman.det_info.det_id)))
-            template_bp1 = msk_bp1[dm_msk]
-            template_bp2 = msk_bp2[dm_msk]
+            template_bp1 = np.isin(dm_aman.det_info.wafer.bias_line, bp1_bg)
+            template_bp2 = np.isin(dm_aman.det_info.wafer.bias_line, bp2_bg)
             det_ids = dm_aman.det_info.det_id
+
         if make_priors:
             priors = gen_priors(
                 aman,
