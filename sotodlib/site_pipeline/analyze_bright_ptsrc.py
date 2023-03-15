@@ -4,7 +4,8 @@ from so3g.proj import coords, quat
 import sotodlib.coords.planets as planets
 from sotodlib import core
 from sotodlib.io.load import load_file
-from sotodlib.toast import sim_sso
+import toast
+from sotodlib.toast.ops import sim_sso
 
 import h5py
 import numpy as np
@@ -20,7 +21,7 @@ import pandas as pd
 from mpi4py import MPI
 
 opj = os.path.join
-INITIAL_PARA_FILE = "data/initial_parameters.hdf5"
+INITIAL_PARA_FILE = "/home/zhileixu/shared/initial_parameters.hdf5"
 
 
 def highpass_filter(data, cutoff, fs, order=5):
