@@ -519,7 +519,6 @@ def main():
     results = [[], [], []]
     for i, (aman, pol) in enumerate(zip(pointings, polangs)):
         logger.info("Starting match number " + str(i))
-
         # Do a radial cut
         r = np.sqrt(
             (aman.xi - np.median(aman.xi)) ** 2 + (aman.eta - np.median(aman.eta)) ** 2
