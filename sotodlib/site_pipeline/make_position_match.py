@@ -618,6 +618,10 @@ def main():
         transformed[msk_bp1, :ndim] = TY_bp1
         transformed[msk_bp2, :ndim] = TY_bp2
 
+        P_mapped = np.zeros(aman.dets.count)
+        P_mapped[msk_bp1] = P_bp1[map_bp1, range(P_bp1.shape[1])]
+        P_mapped[msk_bp2] = P_bp2[map_bp2, range(P_bp2.shape[1])]
+
         data_out = np.vstack(
             (
                 det_id,
@@ -625,6 +629,7 @@ def main():
                 out_msk.astype(float),
                 focal_plane.T[:3],
                 transformed.T,
+                P_mapped,
             )
         ).T
         rset_data = metadata.ResultSet(
@@ -638,6 +643,7 @@ def main():
                 "meas_x",
                 "meas_y",
                 "meas_pol",
+                "likelihood",
             ],
             src=data_out,
         )
@@ -693,23 +699,30 @@ def main():
         **config["matching"],
     )
 
+    # Make final outputs and save
     transformed = np.nan + np.zeros((len(readout_ids), 3))
     transformed[msk_bp1, :ndim] = TY_bp1
     transformed[msk_bp2, :ndim] = TY_bp2
 
-    # Make final outputs and save
     det_id = np.zeros(len(readout_ids), dtype=np.dtype(("U", len(det_ids[0]))))
     det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
     det_id[msk_bp2] = det_ids[template_bp2][map_bp2]
+
     out_msk = np.zeros(len(readout_ids))
     out_msk[msk_bp1][out_bp1] = 1.0
     out_msk[msk_bp2][out_bp2] = 1.0
     out_msk[~(msk_bp1 | msk_bp2)] = 1.0
 
+    P_mapped = np.zeros(len(readout_ids))
+    P_mapped[msk_bp1] = P_bp1[map_bp1, range(P_bp1.shape[1])]
+    P_mapped[msk_bp2] = P_bp2[map_bp2, range(P_bp2.shape[1])]
+
     logger.info(str(np.sum(msk_bp1 | msk_bp2)) + " detectors matched")
     logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
 
-    data_out = np.vstack((det_id, readout_ids, out_msk, avg_pointing, transformed.T)).T
+    data_out = np.vstack(
+        (det_id, readout_ids, out_msk, avg_pointing, transformed.T, P_mapped)
+    ).T
     rset_data = metadata.ResultSet(
         keys=[
             "dets:det_id",
@@ -721,6 +734,7 @@ def main():
             "meas_x",
             "meas_y",
             "meas_pol",
+            "likelihood",
         ],
         src=data_out,
     )
