@@ -69,7 +69,7 @@ def priors_from_result(
     template_det_ids,
     final_fp_readout_ids,
     final_template_det_ids,
-    liklihoods,
+    likelihoods,
     normalization=0.2,
 ):
     """
@@ -85,16 +85,16 @@ def priors_from_result(
 
         final_template_det_ids: Array of det_ids in the basis of the template that will be matched.
 
-        liklihoods: Liklihood array from template matching.
+        likelihoods: Liklihood array from template matching.
 
-        normalization: Value to normalize liklihoods to. The maximum prior will be 1+normalization.
+        normalization: Value to normalize likelihoods to. The maximum prior will be 1+normalization.
 
     Returns:
 
         priors: The 2d array of priors in the basis of the focal plane and template that are to be matched.
     """
-    liklihoods *= normalization
-    priors = 1 + liklihoods
+    likelihoods *= normalization
+    priors = 1 + likelihoods
 
     missing = np.setdiff1d(final_template_det_ids, template_det_ids)
     template_det_ids = np.concatenate(missing)
@@ -338,7 +338,7 @@ def match_template(
         outliers: Indices of points that are outliers.
                   Note that this is in the basis of mapping and focal_plane, not template.
 
-        P: The liklihood array without priors applied.
+        P: The likelihood array without priors applied.
 
         TY: The transformed points.
     """
@@ -577,7 +577,7 @@ def main():
             np.median(P_bp1[map_bp1, range(P_bp1.shape[1])])
             + np.median(P_bp2[map_bp2, range(P_bp2.shape[1])])
         ) / 2
-        logger.info("\tAverage matched liklihood = " + str(P_avg))
+        logger.info("\tAverage matched likelihood = " + str(P_avg))
 
         # Store outputs for now
         results[0].append(aman.det_info.readout_id)
