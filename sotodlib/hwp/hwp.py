@@ -5,7 +5,105 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Functions to test with preprocessing pipeline added by Max S-F below
+def extract_hwpss(aman, signal=None,
+                  bin_signal=True, bins=360, 
+                  linear_regression=True, modes=[2, 4, 6, 8], 
+                  mask_flags=True, add_to_aman=True, name='hwpss_extract'):
+    
+    if signal is None:
+        if apply_prefilt: 
+            filt = tod_ops.filters.high_pass_sine2(cutoff=prefilt_cutoff)
+            signal = np.array(tod_ops.fourier_filter(aman, filt, detrend='linear', signal_name='signal'))
+        else:
+            signal = aman.signal
+            
+    if bin_signal:
+        aman_proc = binning_signal(aman, signal, hwp_angle=None, bins=bins, mask_flags=mask_flags)
+        if linear_regression:
+            #hoge
+        else:
+            #hoge
+        
+    else:
+        if linear_regression:
+            #hoge
+        else:
+            #hoge
+    
+    return #aman_proc
+
+    
+    
+def binning_signal(aman, signal=None, hwp_angle=None,
+                   bins=360, mask_flags=False):
+    """
+    Bin time-ordered data by the HWP angle and return the binned signal and its standard deviation.
+
+    Parameters
+    ----------
+    aman : TOD
+        The Axismanager object to be binned.
+    signal : str, optional
+        The name of the signal to be binned. Defaults to aman.signal if not specified.
+    hwp_angle : str, optional
+        The name of the timestream of hwp_angle. Defaults to aman.hwp_angle if not specified.
+    bins : int, optional
+        The number of HWP angle bins to use. Default is 360.
+    mask_flags : bool, optional
+        Flag indicating whether to exclude flagged samples when binning the signal. Default is False.
+
+    Returns
+    ---
+    aman_proc:
+        The AxisManager object which contains
+        * center of each bin of hwp_angle
+        * binned hwp synchrounous signal
+        * estimated sigma of binned signal
+    """
+    if signal is None:
+        signal = aman.signal
+    if hwp_angle is None:
+        hwp_angle = aman.hwp_angle
+    
+    # binning hwp_angle tod
+    hwpss_denom, hwp_angle_bins = np.histogram(hwp_angle, bins=bins, range=[0, 2 * np.pi])
+    
+    # convert bin edges into bin centers
+    hwp_angle_bin_centers = (hwp_angle_bins[1]-hwp_angle_bins[0])/2 + hwp_angle_bins[:-1]
+    
+    # prepare binned signals
+    binned_hwpss = np.zeros((aman.dets.count, bins), dtype='float32')
+    binned_hwpss_squared_mean = np.zeros((aman.dets.count, bins), dtype='float32')
+    binned_hwpss_sigma = np.zeros((aman.dets.count, bins), dtype='float32')
+    
+    # get mask from aman
+    if mask_flags:
+        m = ~aman.flags.glitches.mask()
+    else:
+        m = np.ones([aman.dets.count, aman.samps.count], dtype=bool)
+        
+    # binning tod
+    for i in range(aman.dets.count):
+        binned_hwpss[i][:] = np.histogram(hwp_angle[m[i]], bins=bins, range=[0,2*np.pi],
+                               weights=signal[i][m[i]])[0] / np.where(hwpss_denom==0, 1, hwpss_denom)
+    
+        binned_hwpss_squared_mean[i][:] = np.histogram(hwp_angle[m[i]], bins=bins, range=[0,2*np.pi],
+                                   weights=signal[i][m[i]]**2)[0] / np.where(hwpss_denom==0, 1, hwpss_denom)
+    
+    # get sigma of each bin
+    binned_hwpss_sigma = np.sqrt( np.abs(binned_hwpss_squared_mean - binned_hwpss**2)) / np.sqrt(np.where(hwpss_denom==0, 1, hwpss_denom))
+    # use median of sigma of each bin as uniform sigma for a detector
+    hwpss_sigma = np.median(binned_hwpss_sigma, axis=-1)
+    
+    # get aman_proc
+    aman_proc = core.AxisManager(aman.dets, core.IndexAxis('bin_samps', count=bins))
+    aman_proc.wrap('hwp_angle_bin_centers', hwp_angle_bin_centers, [(0, 'bin_samps')])
+    aman_proc.wrap('binned_hwpss', binned_hwpss, [(0, 'dets'), (1, 'bin_samps')])
+    aman_proc.wrap('hwpss_sigma', hwpss_sigma, [(0, 'dets')])
+    
+    return aman_proc
+    
+
 def hwpss_linreg(aman, signal='signal', modes=[2, 4, 6, 8], mask_flags=True,
                  add_to_aman=True, name='hwpss_extract', return_fitstats=True):
     """
