@@ -550,16 +550,14 @@ def load_wafer_detectors(
         dprops["mux_position"] = wafer.mux_position[i]
 
         quat = xieta_to_quat(
-            wafer.det_x[i] * platescale,
-            wafer.det_y[i] * platescale,
-            wafer.angle[i]
+            wafer.det_x[i] * platescale *np.pi/180,
+            wafer.det_y[i] * platescale *np.pi/180,
+            wafer.angle[i],
         )
-
         if center is not None:
             dprops["quat"] = qa.mult(center, quat).flatten()
         else:
             dprops["quat"] = quat.flatten()
-
         dprops["detector_name"] = detname
         dets[dprops["detector_name"]] = dprops
 
