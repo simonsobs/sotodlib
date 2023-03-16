@@ -431,53 +431,6 @@ def main():
     )
     write_dataset(rset_paths, config["out_path"], "input_data_paths", overwrite=True)
 
-    # If we are to just use the detmap results
-    if config["no_fit"]:
-        # Compute the average focal plane
-        full_fp = {}
-        det_ids = []
-        for aman, pol in zip(pointings, polangs):
-            if pol:
-                focal_plane = np.vstack((aman.xi, aman.eta, pol)).T
-            else:
-                focal_plane = np.vstack(
-                    (aman.xi, aman.eta, np.zeros_like(aman.eta) + np.nan)
-                ).T
-            for ri, di, fp in zip(
-                aman.det_info.readout_id, aman.det_info.det_id, focal_plane
-            ):
-                try:
-                    full_fp[ri].append(fp)
-                except KeyError:
-                    full_fp[ri] = [fp]
-                    det_ids.append(di)
-        focal_plane = []
-        readout_ids = np.array(list(full_fp.keys()))
-        for rid in readout_ids:
-            avg_pointing = np.nanmedian(np.vstack(full_fp[rid]), axis=0)
-            focal_plane.append(avg_pointing)
-        focal_plane = np.vstack(focal_plane).T
-
-        # Save the average focal plane with the detmap results
-        data_out = np.vstack(
-            (det_ids, readout_ids, np.zeros(len(det_ids)), focal_plane)
-        ).T
-        rset_data = metadata.ResultSet(
-            keys=[
-                "dets:det_id",
-                "dets:readout_id",
-                "outliers",
-                "avg_xi",
-                "avg_eta",
-                "avg_polang",
-            ],
-            src=data_out,
-        )
-        write_dataset(rset_data, config["out_path"], "focal_plane", overwrite=True)
-        sys.exit()
-
-    # TODO: apply instrument to pointing if availible
-
     bp1_bg = (0, 1, 4, 5, 8, 9)
     bp2_bg = (2, 3, 6, 7, 10, 11)
 
@@ -517,7 +470,6 @@ def main():
     priors_bp1 = None
     priors_bp2 = None
     avg_fp = {}
-    outliers = []
     master_template = []
     results = [[], [], []]
     for i, (aman, pol) in enumerate(zip(pointings, polangs)):
