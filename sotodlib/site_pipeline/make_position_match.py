@@ -296,6 +296,7 @@ def match_template(
     priors=None,
     out_thresh=0,
     invert=True,
+    reverse=False,
     vis=False,
     cpd_args={},
 ):
@@ -322,6 +323,8 @@ def match_template(
 
         invert: Invert the likelihood array to try and find the maximum likelihood solution.
 
+        reverse: Reverse dirction of match.
+
         vis: If true generate plots to watch the matching process.
              Should only be used for debugging with human interaction.
 
@@ -335,9 +338,14 @@ def match_template(
         outliers: Indices of points that are outliers.
                   Note that this is in the basis of mapping and focal_plane, not template.
 
-        P: The liklihood array.
+        P: The liklihood array without priors applied.
+
+        TY: The transformed points.
     """
-    cpd_args.update({"X": focal_plane.T, "Y": template.T})
+    if reverse:
+        cpd_args.update({"X": focal_plane.T, "Y": template.T})
+    else:
+        cpd_args.update({"Y": focal_plane.T, "X": template.T})
     reg = AffineRegistration(**cpd_args)
 
     if vis:
@@ -349,22 +357,24 @@ def match_template(
     else:
         reg.register()
 
-    P = reg.P
+    P = reg.P.T
+    if reverse:
+        P = reg.P
 
-    if priors is not None:
-        P *= priors
+    if priors is None:
+        priors = 1
     if invert:
         # This should get the maximum probability without collisions
-        inv = np.linalg.pinv(P)
+        inv = np.linalg.pinv(P * priors)
         mapping = np.argmax(inv, axis=1)
     else:
-        mapping = np.argmax(P, axis=0)
+        mapping = np.argmax(P * priors, axis=0)
 
     outliers = np.array([])
     if out_thresh > 0:
         outliers = np.where(P[mapping, range(P.shape[1])] < out_thresh)[0]
 
-    return mapping, outliers, P
+    return mapping, outliers, P, reg.TY
 
 
 def main():
@@ -498,6 +508,8 @@ def main():
         template_bp1 = np.isin(template_bg, bp1_bg)
         template_bp2 = np.isin(template_bg, bp2_bg)
 
+    if config["matching"].get("reverse", False):
+        logger.warning("Matching running in reverse mode. meas_x and meas_y will actually be fit pointing.")
     make_priors = "priors" in config
     priors_bp1 = None
     priors_bp2 = None
@@ -588,13 +600,13 @@ def main():
             template = template[:-1]
 
         # Do actual matching
-        map_bp1, out_bp1, P_bp1 = match_template(
+        map_bp1, out_bp1, P_bp1, TY_bp1 = match_template(
             _focal_plane[:, msk_bp1],
             template[:, template_bp1],
             priors=priors_bp1,
             **config["matching"],
         )
-        map_bp2, out_bp2, P_bp2 = match_template(
+        map_bp2, out_bp2, P_bp2, TY_bp2 = match_template(
             _focal_plane[:, msk_bp2],
             template[:, template_bp2],
             priors=priors_bp2,
@@ -695,13 +707,13 @@ def main():
         )
 
     # Do final matching
-    map_bp1, out_bp1 = match_template(
+    map_bp1, out_bp1, P_bp1, TY_bp1 = match_template(
         _focal_plane[:, msk_bp1],
         template[:, template_bp1],
         priors=priors[np.ix_(template_bp1, msk_bp1)],
         **config["matching"],
     )
-    map_bp2, out_bp2 = match_template(
+    map_bp2, out_bp2, P_bp1, TY_bp2 = match_template(
         _focal_plane[:, msk_bp2],
         template[:, template_bp2],
         priors=priors[np.ix_(template_bp2, msk_bp2)],
