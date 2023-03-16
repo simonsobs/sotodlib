@@ -5,6 +5,10 @@ import logging
 
 from so3g.hk import load_range
 from sotodlib import core
+import sotodlib.io.load_smurf as ls
+from sotodlib.io.load_smurf import Observations
+
+from scipy.interpolate import interp1d
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +192,7 @@ def get_hkaman(start, stop, config):
             unix timestamps, int, floats. Required for get_grouped_hkdata().
         stop: Latest time to search for data. See start parameter above for
             note on time formats. Required for get_grouped_hkdata()
-        config: Filename of a .yaml file for loading fields and aliases.
+        config (str): Filename of a .yaml file for loading fields and aliases.
             Required for get_grouped_hkdata()
 
     Notes
@@ -206,4 +210,78 @@ def get_hkaman(start, stop, config):
     data = get_grouped_hkdata(start, stop, config)
     hk_amans = make_hkaman(data)
     return hk_amans
+
+
+def detcosample_hkamans(hkconfig, detconfig, obs_id):
+    """
+    Given a detector observation, output an HK axismanager that cosampled
+    with detector timestreams.
+
+    Parameters:
+        hkconfig (str): The.yaml filename for loading HK fields and aliases.
+        detconfig (str): The .yaml config file matching readout id and detector ids.
+        obs_id (str): The observation id for a detector UFM. Helps determine
+                      the detector start and stop times needed for interpolation.
+
+    Notes
+    -----
+
+    An example detconfig file looks like:
+
+        data_prefix : "/mnt/so1/data/chicago-latrt"
+        hwp_prefix : "/mnt/so1/shared/site-pipeline/data_pkg/chicago-latrt/hwp/"
+        g3tsmurf_db: "/mnt/so1/shared/site-pipeline/data_pkg/chicago-latrt/g3tsmurf.db"
+    """
+    # load detector timestamps
+    SMURF = ls.G3tSmurf.from_configs(detconfig)
+    session = SMURF.Session()
+    obs = session.query(Observations).filter(Observations.obs_id == obs_id).one()
+    det_aman = ls.load_file([f.name for f in obs.files], archive=SMURF)
+
+    grouped_data = get_grouped_hkdata(obs.start, obs.stop, hkconfig)
+
+    amans = []
+    device_names = []
+    for group in grouped_data:
+        data = {}
+        aliases = []
+        times = {}
+        for field in group:
+            # arrange data per device for making an aman per hk device
+            alias = group[field][0]
+            aliases.append(alias)
+
+            time = group[field][1]
+            time_info = {alias: time}
+            times.update(time_info)
+
+            device_data = group[field][2]
+
+            info = {alias: device_data}
+            data.update(info)
+
+        # make an aman per device
+        device_name = field.split('.')[1]
+        device_names.append(device_name)
+        device_axis = 'hklabels_' + device_name
+
+        data_interp = {}
+        for alias in times:
+            f_hkvals = interp1d(times[alias], data[alias], fill_value='extrapolate')
+            hkdata_interp = f_hkvals(det_aman.timestamps)
+
+            info = {alias: hkdata_interp}
+            data_interp.update(info)
+
+        hkaman = core.AxisManager(core.LabelAxis(device_axis, aliases),
+                                  core.OffsetAxis('detector_timestamps', len(det_aman.timestamps)))
+        hkaman.wrap('timestamps', det_aman.timestamps, [(0, 'detector_timestamps')])
+        hkaman.wrap(device_name, np.array([data_interp[alias] for alias in aliases]),
+                    [(0, device_axis), (1, 'detector_timestamps')])
+        amans.append(hkaman)
+
+    merged_detcos_hkamans = core.AxisManager()
+    [merged_detcos_hkamans.wrap(name, a) for (name, a) in zip(device_names, amans)]
+
+    return merged_detcos_hkamans
 # TODO: insert a progress bar for get_grouped_hkdata
