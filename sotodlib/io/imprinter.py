@@ -13,10 +13,9 @@ from sqlalchemy.orm import relationship
 import so3g
 from spt3g import core
 import itertools
-from scipy.interpolate import interp1d
 
 from .load_smurf import G3tSmurf, Observations as G3tObservations, SmurfStatus, get_channel_info
-from .bookbinder import Bookbinder, TimingSystemError, counters_to_timestamps
+from .bookbinder import Bookbinder, TimingSystemError, counters_to_timestamps, fill_time_gaps
 from ..site_pipeline.util import init_logger
 
 
@@ -222,7 +221,7 @@ class Imprinter:
         # max_channels is the maximum number of channels in the book
         if any([len(o.files) == 0 for o in obsset]):
             raise NoFilesError(f"No files found for observations in {bid}")
-        # get start and end times
+        # get start and end times (initial guess)
         start_t = np.max([np.min([f.start for f in o.files]) for o in obsset])
         stop_t = np.min([np.max([f.stop for f in o.files]) for o in obsset])
         max_channels = int(np.max([np.max([f.n_channels for f in o.files]) for o in obsset]))
@@ -242,6 +241,15 @@ class Imprinter:
             slots=','.join([s for s in obsset.slots if obsset.contains_stream(s)]),  # not worth having a extra table
             timing=timing_on,
         )
+
+        # try to get more accurate time
+        try:
+            ts = self.get_book_times(book)
+            book.start = dt.datetime.utcfromtimestamp(ts[0])
+            book.stop = dt.datetime.utcfromtimestamp(ts[1])
+        except Exception as e:
+            self.logger.warning(f"Failed to get more accurate time: {e}")
+            self.logger.warning(traceback.format_exc())
 
         # add book to database
         session.add(book)
@@ -330,6 +338,7 @@ class Imprinter:
         # bind book using bookbinder library
         try:
             readout_ids = self.get_readout_ids_for_book(book)
+            timestamps = self.get_book_times(book)  # TODO: add a fallback when this fails
             for obs_id, smurf_files in filedb.items():
                 # get stream id from observation id
                 stream_id, _ = stream_timestamp(obs_id)
@@ -340,8 +349,8 @@ class Imprinter:
                 Bookbinder(smurf_files, hk_files=hkfiles, out_root=odir,
                            stream_id=stream_id, session_id=int(session_id),
                            book_id=book.bid, start_time=start_t, end_time=stop_t,
-                           max_nchannels=book.max_channels,
-                           timing_system=timing_system,
+                           max_nchannels=book.max_channels, timing_system=timing_system,
+                           smurf_timestamps=timestamps,
                            frameproc_config={"readout_ids": rids})()
 
             # Add meta files to M_index
@@ -373,7 +382,7 @@ class Imprinter:
             if isinstance(e, TimingSystemError):
                 book.timing = False
             book.message = message
-    
+
             if not test_mode:
                 session.commit()
             else:
@@ -719,7 +728,7 @@ class Imprinter:
 
         meta_files = {}
         for f in files:
-            basename = os.path.basename(f) 
+            basename = os.path.basename(f)
             dest = os.path.join(book_path, basename)
             shutil.copyfile(f, dest)
 
@@ -778,6 +787,11 @@ class Imprinter:
         Parameters
         ----------
         book: Book object
+
+        Returns
+        -------
+        ts: np.ndarray
+            Gap-filled list of timestamps
         """
         filedb = self.get_files_for_book(book)
         for i, files in enumerate(filedb.values()):
@@ -789,7 +803,7 @@ class Imprinter:
                         continue
 
                     ts.append(get_frame_times(frame)[1])
-                ts = fill_time_gaps(np.hstack(ts))
+                ts = fill_time_gaps(np.hstack(ts)).astype(int)
                 t0, t1 = ts[[0, -1]]
             else:
                 _t0, _t1 = get_start_and_end(_files)
@@ -832,10 +846,10 @@ def get_smurf_files(obs, meta_path, all_files=False):
     files = []
 
     # check adjacent folders in case action falls on a boundary
-    for tc in [tscode-1, tscode, tscode + 1]:  
+    for tc in [tscode-1, tscode, tscode + 1]:
         action_dir = os.path.join(
             meta_path,
-            str(tc), 
+            str(tc),
             obs.stream_id,
             f'{obs.action_ctime}_{obs.action_name}'
         )
@@ -845,7 +859,7 @@ def get_smurf_files(obs, meta_path, all_files=False):
 
         for root, _, fs in os.walk(action_dir):
             files.extend([os.path.join(root, f) for f in fs])
-    
+
     return [f for f in files if copy_to_book(f)]
 
 _primary_idx_map = {}
@@ -863,59 +877,22 @@ def get_frame_times(frame):
     high_precision : bool
         If true, timestamps are computed from timing counters. If not, they are
         software timestamps
-    
+
     timestamps : np.ndarray
-        Array of timestamps (sec) for samples in the frame
+        Array of timestamps for samples in the frame, in G3Time units (1e-8 sec)
 
     """
     if len(_primary_idx_map) == 0:
         for i, name in enumerate(frame['primary'].names):
             _primary_idx_map[name] = i
-    
+
     c0 = frame['primary'].data[_primary_idx_map['Counter0']]
     c2 = frame['primary'].data[_primary_idx_map['Counter2']]
 
     if np.any(c0):
-        return True, counters_to_timestamps(c0, c2)
+        return True, counters_to_timestamps(c0, c2) * core.G3Units.s
     else:
-        return False, np.array(frame['data'].times) / core.G3Units.s
-
-
-def fill_time_gaps(ts):
-    """
-    Fills gaps in an array of timestamps.
-
-    Parameters
-    -------------
-    ts : np.ndarray
-        List of timestamps of length `n`, potentially with gaps
-    
-    Returns
-    --------
-    new_ts : np.ndarray
-        New list of timestamps of length >= n, with gaps filled.
-    """
-    # Find indices where gaps occur and how long each gap is
-    dts = np.diff(ts)
-    dt = np.median(dts)
-    missing = np.round(dts/dt - 1).astype(int)
-    total_missing = int(np.sum(missing))
-
-    # Create new  array with the correct number of samples
-    new_ts = np.full(len(ts) + total_missing, np.nan)
-
-    # Insert old timestamps into new array with offsets that account for gaps
-    offsets = np.concatenate([[0], np.cumsum(missing)])
-    i0s = np.arange(len(ts))
-    new_ts[i0s + offsets] = ts
-
-    # Use existing data to interpolate and fill holes
-    m = np.isnan(new_ts)
-    xs = np.arange(len(new_ts))
-    interp = interp1d(xs[~m], new_ts[~m])
-    new_ts[m] = interp(xs[m])
-
-    return new_ts
+        return False, np.array(frame['data'].times)
 
 def get_start_and_end(files):
     """
@@ -925,7 +902,7 @@ def get_start_and_end(files):
     -------------
     files : np.ndarray
         List of L2 G3 files for a single detector set in an observation
-    
+
     Returns
     --------
     t0 : float
@@ -945,7 +922,7 @@ def get_start_and_end(files):
                 break
         if found_scan:
             break
-    
+
     # Get end time
     frame = None
     found_scan = False
@@ -959,7 +936,7 @@ def get_start_and_end(files):
             break
 
     t1 = get_frame_times(frame)[1][-1]
-    
+
     return t0, t1
 
 def create_g3tsmurf_session(config):
