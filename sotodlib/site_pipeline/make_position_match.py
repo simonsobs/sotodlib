@@ -192,10 +192,6 @@ def transform_from_detmap(aman):
     Arguments:
 
         aman: AxisManager containing both pointing and datmap results.
-
-    returns:
-
-        inv_trans: The inverse transformation.
     """
     xi_0 = np.nanmedian(aman.xi)
     eta_0 = np.nanmedian(aman.eta)
@@ -258,8 +254,6 @@ def transform_from_detmap(aman):
 
     aman.xi = transformed[:, 0]
     aman.eta = transformed[:, 1]
-
-    return A2.I
 
 
 def visualize(iteration, error, X, Y, ax):
@@ -539,7 +533,7 @@ def main():
         if config["dm_transform"]:
             logger.info("\tApplying transformation from detmap")
             original = aman.copy()
-            inv_dm_trans = transform_from_detmap(aman)
+            transform_from_detmap(aman)
 
         bias_group = np.zeros(aman.dets.count) - 1
         for i in range(aman.dets.count):
@@ -644,7 +638,7 @@ def main():
         out_msk = np.zeros(aman.dets.count, dtype=bool)
         out_msk[msk_bp1][out_bp1] = True
         out_msk[msk_bp2][out_bp2] = True
-        outliers.append(out_msk)
+        out_msk[~(msk_bp1 | msk_bp2)] = True
 
         bp_msk = np.zeros(aman.dets.count)
         bp_msk[msk_bp1] = 1
@@ -758,6 +752,7 @@ def main():
     out_msk = np.zeros(len(readout_ids))
     out_msk[msk_bp1][out_bp1] = 1.0
     out_msk[msk_bp2][out_bp2] = 1.0
+    out_msk[~(msk_bp1 | msk_bp2)] = 1.0
 
     logger.info(str(np.sum(msk_bp1 | msk_bp2)) + " detectors matched")
     logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
