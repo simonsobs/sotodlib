@@ -5,9 +5,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def extract_hwpss(aman, signal=None,
+def extract_hwpss(aman, signal=None, hwp_angle=None,
                   bin_signal=True, bins=360, 
-                  linear_regression=True, modes=[2, 4, 6, 8], 
+                  lin_reg=True, modes=[2, 4, 6, 8],
+                  apply_prefilt=True, prefilt_cutoff=0.5,
                   mask_flags=True, add_to_aman=True, name='hwpss_extract'):
     
     if signal is None:
@@ -17,20 +18,35 @@ def extract_hwpss(aman, signal=None,
         else:
             signal = aman.signal
             
+    if hwp_angle is None:
+        hwp_angle = aman.hwp_angle
+            
     if bin_signal:
         aman_proc = binning_signal(aman, signal, hwp_angle=None, bins=bins, mask_flags=mask_flags)
-        if linear_regression:
-            #hoge
+        x = aman_proc['hwp_angle_bin_centers']
+        ys = aman_proc['binned_hwpss']
+        yerrs = aman_proc['hwpss_sigma']
+        if lin_reg:
+            fitsig, coeffs, covar, redchi2 = hwpss_linreg(x, ys, yerrs, modes)
         else:
-            #hoge
+            print('hoge')
         
     else:
-        if linear_regression:
-            #hoge
+        if mask_flags:
+            m = ~aman.flags.glitches.mask()
         else:
-            #hoge
+            m = np.ones([aman.dets.count, aman.samps.count], dtype=bool)
+        x = hwp_angle
+        ys = signal
+        yerrs = np.std(signal, axis=-1) #!!!!!! FIX ME !!!!!!!!
+        
+        if lin_reg:
+            fitsig, coeffs, covar, redchi2 = hwpss_linreg(x, ys, yerrs, modes)
+            
+        else:
+            print('hoge')
     
-    return #aman_proc
+    return fitsig, coeffs, covar, redchi2
 
 def binning_signal(aman, signal=None, hwp_angle=None,
                    bins=360, mask_flags=False):
@@ -101,7 +117,7 @@ def binning_signal(aman, signal=None, hwp_angle=None,
     
     return aman_proc
     
-def hwpss_linreg(x, ys, yerrs):
+def hwpss_linreg(x, ys, yerrs, modes):
     vects = np.zeros([2*len(modes), x.shape[0]], dtype='float32')
     for i, mode in enumerate(modes):
         vects[2*i, :] = np.sin(mode*x)
