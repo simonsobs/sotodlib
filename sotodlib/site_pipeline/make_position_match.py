@@ -192,6 +192,10 @@ def transform_from_detmap(aman):
     Arguments:
 
         aman: AxisManager containing both pointing and datmap results.
+
+    returns:
+
+        inv_trans: The inverse transformation.
     """
     xi_0 = np.nanmedian(aman.xi)
     eta_0 = np.nanmedian(aman.eta)
@@ -254,6 +258,8 @@ def transform_from_detmap(aman):
 
     aman.xi = transformed[:, 0]
     aman.eta = transformed[:, 1]
+
+    return A2.I
 
 
 def visualize(iteration, error, X, Y, ax):
@@ -508,8 +514,11 @@ def main():
         template_bp1 = np.isin(template_bg, bp1_bg)
         template_bp2 = np.isin(template_bg, bp2_bg)
 
-    if config["matching"].get("reverse", False):
-        logger.warning("Matching running in reverse mode. meas_x and meas_y will actually be fit pointing.")
+    reverse = config["matching"].get("reverse", False)
+    if reverse:
+        logger.warning(
+            "Matching running in reverse mode. meas_x and meas_y will actually be fit pointing."
+        )
     make_priors = "priors" in config
     priors_bp1 = None
     priors_bp2 = None
@@ -529,7 +538,7 @@ def main():
 
         if config["dm_transform"]:
             logger.info("\tApplying transformation from detmap")
-            transform_from_detmap(aman)
+            inv_dm_trans = transform_from_detmap(aman)
 
         bias_group = np.zeros(aman.dets.count) - 1
         for i in range(aman.dets.count):
@@ -591,12 +600,14 @@ def main():
         if pol:
             focal_plane = np.vstack((aman.xi, aman.eta, pol[r_msk]))
             _focal_plane = focal_plane
+            ndim = 3
         else:
             focal_plane = np.vstack(
                 (aman.xi, aman.eta, np.zeros_like(aman.eta) + np.nan)
             )
             _focal_plane = focal_plane[:-1]
             template = template[:-1]
+            ndim = 2
 
         # Do actual matching
         map_bp1, out_bp1, P_bp1, TY_bp1 = match_template(
@@ -624,10 +635,12 @@ def main():
         P[np.ix_(template_bp1, msk_bp1)] = P_bp1
         P[np.ix_(template_bp2, msk_bp2)] = P_bp2
         results[2].append(P)
+
         out_msk = np.zeros(aman.dets.count, dtype=bool)
         out_msk[msk_bp1][out_bp1] = True
         out_msk[msk_bp2][out_bp2] = True
         outliers.append(out_msk)
+
         bp_msk = np.zeros(aman.dets.count)
         bp_msk[msk_bp1] = 1
         bp_msk[msk_bp2] = 2
@@ -650,12 +663,34 @@ def main():
         logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
         logger.info(str(np.sum(det_id == aman.det_info.det_id)) + " match with detmap")
 
+        # Undo detmap transform
+        if (not reverse) and config["dm_transform"]:
+            coords_bp1 = TY_bp1[:, :2]
+            transformed_bp1 = [
+                (inv_dm_trans * np.vstack((np.matrix(pt).reshape(2, 1), 1)))[0:2, :]
+                for pt in coords_bp1
+            ]
+            transformed_bp1 = np.reshape(transformed_bp1, coords_bp1.shape)
+            TY_bp1[:, :2] = transformed_bp1
+
+            coords_bp2 = TY_bp2[:, :2]
+            transformed_bp2 = [
+                (inv_dm_trans * np.vstack((np.matrix(pt).reshape(2, 1), 1)))[0:2, :]
+                for pt in coords_bp2
+            ]
+            transformed_bp2 = np.reshape(transformed_bp2, coords_bp2.shape)
+            TY_bp2[:, :2] = transformed_bp2
+        transformed = np.nan + np.zeros((aman.dets.count, 3))
+        transformed[msk_bp1, :ndim] = TY_bp1
+        transformed[msk_bp2, :ndim] = TY_bp2
+
         data_out = np.vstack(
             (
                 det_id,
                 aman.det_info.readout_id,
                 out_msk.astype(float),
                 focal_plane.T[:-1],
+                transformed.T,
             )
         ).T
         rset_data = metadata.ResultSet(
@@ -666,6 +701,9 @@ def main():
                 "avg_xi",
                 "avg_eta",
                 "avg_polang",
+                "meas_x",
+                "meas_y",
+                "meas_pol",
             ],
             src=data_out,
         )
@@ -689,9 +727,11 @@ def main():
     msk_bp2 = bp_msk == 2
     focal_plane = focal_plane[:-1]
     _focal_plane = focal_plane
+    ndim = 3
     if np.isnan(focal_plane[-1]).all():
         _focal_plane = focal_plane[:-1]
         template = template[:-1]
+        ndim = 2
 
     # Build priors from previous results
     priors = 1
@@ -719,6 +759,27 @@ def main():
         **config["matching"],
     )
 
+    # Undo detmap transform
+    if (not reverse) and config["dm_transform"]:
+        coords_bp1 = TY_bp1[:, :2]
+        transformed_bp1 = [
+            (inv_dm_trans * np.vstack((np.matrix(pt).reshape(2, 1), 1)))[0:2, :]
+            for pt in coords_bp1
+        ]
+        transformed_bp1 = np.reshape(transformed_bp1, coords_bp1.shape)
+        TY_bp1[:, :2] = transformed_bp1
+
+        coords_bp2 = TY_bp2[:, :2]
+        transformed_bp2 = [
+            (inv_dm_trans * np.vstack((np.matrix(pt).reshape(2, 1), 1)))[0:2, :]
+            for pt in coords_bp2
+        ]
+        transformed_bp2 = np.reshape(transformed_bp2, coords_bp2.shape)
+        TY_bp2[:, :2] = transformed_bp2
+    transformed = np.nan + np.zeros((len(readout_ids), 3))
+    transformed[msk_bp1, :ndim] = TY_bp1
+    transformed[msk_bp2, :ndim] = TY_bp2
+
     # Make final outputs and save
     det_id = np.zeros(len(readout_ids), dtype=np.dtype(("U", len(det_ids[0]))))
     det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
@@ -730,7 +791,7 @@ def main():
     logger.info(str(np.sum(msk_bp1 | msk_bp2)) + " detectors matched")
     logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
 
-    data_out = np.vstack((det_id, readout_ids, out_msk, focal_plane)).T
+    data_out = np.vstack((det_id, readout_ids, out_msk, focal_plane, transformed.T)).T
     rset_data = metadata.ResultSet(
         keys=[
             "dets:det_id",
@@ -739,6 +800,9 @@ def main():
             "avg_xi",
             "avg_eta",
             "avg_polang",
+            "meas_x",
+            "meas_y",
+            "meas_pol",
         ],
         src=data_out,
     )
