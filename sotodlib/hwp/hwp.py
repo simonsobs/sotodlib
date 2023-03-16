@@ -32,8 +32,6 @@ def extract_hwpss(aman, signal=None,
     
     return #aman_proc
 
-    
-    
 def binning_signal(aman, signal=None, hwp_angle=None,
                    bins=360, mask_flags=False):
     """
@@ -103,95 +101,26 @@ def binning_signal(aman, signal=None, hwp_angle=None,
     
     return aman_proc
     
-
-def hwpss_linreg(aman, signal='signal', modes=[2, 4, 6, 8], mask_flags=True,
-                 add_to_aman=True, name='hwpss_extract', return_fitstats=True):
-    """
-    Fit out half-waveplate synchronous signal (harmonics of rotation frequency),
-    The harmonics to fit out are defined by ``modes`` and the operation is
-    performed on the ``signal`` axis of the ``aman`` axis manager.
-
-    Fitted function is:
-    y = a_0 + a_1*sin(modes[0]*aman.hwp_angle) + a_2*cos(modes[0]*aman.hwp_angle) + 
-        a_3*sin(modes[1]*aman.hwp_angle) + a_4*cos(modes[1]*aman.hwp_angle)) + ...
-        a_(2n+1)*sin(modes[n]*aman.hwp_angle) + a_(2n+2)*cos(modes[n+1]*aman.hwp_angle)
-
-    The returned proc_aman['coeffs'] is an array shaped n_dets x (n_modes + 1)
-    containing the a_0, a_1, ... a_(2n+2) coeffients of the harmonic expansion y.
-
-    Args
-    ----
-    aman (AxisManager): Axis manager to perform fit.
-    signal (string): Axis within aman to perform fit on.
-    modes (int list): List of hwp rotation frequency harmonics to fit.
-    mask_flags (bool): Mask flagged samples in fit.
-    add_to_aman (bool): Add fitted hwpss to aman.
-    name (string): Axis name for fitted signal if ``add_to_aman`` is True.
-    return_fitstats (bool): If true calculates the covariance matrix of the fit,
-                            reduced chi^2 of the fit, and R^2 of the fit.
-
-    Returns
-    -------
-    aman_proc (AxisManager): Axis manager containing fitted ceofficients.
-    """
-    vects = np.ones( (aman.samps.count,1) )
-    for mode in modes:
-        vects = np.hstack((vects,
-                           np.array( [np.sin(mode*aman.hwp_angle),
-                           np.cos(mode*aman.hwp_angle)]).transpose()))
-    vects = vects.T
-
-    coeffs = np.empty((aman.dets.count, len(vects)))
-
-    if mask_flags:
-        m = ~aman.flags.glitches.mask()
-        vects = vects[:,m]
-    else:
-        vects = vects
+def hwpss_linreg(x, ys, yerrs):
+    vects = np.zeros([2*len(modes), x.shape[0]], dtype='float32')
+    for i, mode in enumerate(modes):
+        vects[2*i, :] = np.sin(mode*x)
+        vects[2*i+1, :] = np.cos(mode*x)
 
     I = np.linalg.inv(np.tensordot(vects, vects, (1,1)))
-
-    for k in range(aman.dets.count):
-        d = aman['signal'][k]
-        if mask_flags:
-            d = d[m]
-        coeffs[k,:] = np.dot(vects, d)
-
+    coeffs = np.matmul(ys, vects.T)
     coeffs = np.dot(I, coeffs.T).T
-
-    fitsig = np.matmul(vects.T, coeffs.T)
-    aman_proc = core.AxisManager().wrap('hwpss_coeffs', coeffs,
-                                        [(0, core.LabelAxis('dets', aman.dets.vals)),
-                                         (1, core.IndexAxis('modes'))])
-    aman_proc.wrap('hwpss_vects', vects, [(0, core.IndexAxis('modes')),
-                                          (1, core.OffsetAxis('samps'))])
-    modes_out = np.zeros(2*len(modes)+1)
-    modes_out[0] = 0
-    modes_out[1::2] = modes
-    modes_out[2::2] = modes
-    aman_proc.wrap('hwpss_harms', modes_out, [(0, core.IndexAxis('modes'))])
-
-    if add_to_aman:
-        if name in aman.keys() and overwrite:
-            aman.move(name, None)
-        aman.wrap(name, fitsig.T, [(0, core.LabelAxis('dets', aman.dets.vals)),
-                                   (1, core.OffsetAxis('samps'))])
-    if return_fitstats:
-        rss = np.sum((aman[signal]-fitsig.T)**2, axis=1)
-        varreg = rss/(aman.samps.count-aman_proc.modes.count)
-        vardat = np.var(aman[signal], axis=1)
-        r2 = 1-rss/(aman.samps.count-1)/vardat
-        redchi2 = varreg
-        cov = np.zeros((aman.dets.count,aman_proc.modes.count,aman_proc.modes.count))
-        for v in range(len(varreg)):
-            cov[v,:,:] = I*varreg[v]
-        aman_proc.wrap('hwpss_fit_covariance', cov, [(0, core.LabelAxis('dets', aman.dets.vals)),
-                                                     (1, core.IndexAxis('modes')),
-                                                     (2, core.IndexAxis('modes'))])
-        aman_proc.wrap('hwpss_redchi2', redchi2, [(0,core.LabelAxis('dets', aman.dets.vals))])
-        aman_proc.wrap('hwpss_r2', r2, [(0,core.LabelAxis('dets', aman.dets.vals))])
-
-    return aman_proc
+    fitsig = np.matmul(vects.T, coeffs.T).T
+    
+    # covariance of coefficients
+    covar = np.zeros((ys.shape[0], 2*len(modes), 2*len(modes)))    
+    for det_idx in range(ys.shape[0]):
+        covar[det_idx, :, :] = I * yerrs[det_idx]
+    
+    # reduced chi-square
+    redchi2 = np.sum(((ys - fitsig)/yerrs[:, np.newaxis])**2, axis=-1) / (x.shape[0] - 2*len(modes))
+    
+    return fitsig, coeffs, covar, redchi2
 
 
 def get_hwpss_guess(aman, signal='signal', modes=[2, 4, 6, 8]):
