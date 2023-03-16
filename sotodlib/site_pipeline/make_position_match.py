@@ -538,6 +538,7 @@ def main():
 
         if config["dm_transform"]:
             logger.info("\tApplying transformation from detmap")
+            original = aman.copy()
             inv_dm_trans = transform_from_detmap(aman)
 
         bias_group = np.zeros(aman.dets.count) - 1
@@ -599,11 +600,15 @@ def main():
 
         if pol:
             focal_plane = np.vstack((aman.xi, aman.eta, pol[r_msk]))
+            original_focal_plane = np.vstack((original.xi, original.eta, pol[r_msk]))
             _focal_plane = focal_plane
             ndim = 3
         else:
             focal_plane = np.vstack(
                 (aman.xi, aman.eta, np.zeros_like(aman.eta) + np.nan)
+            )
+            original_focal_plane = np.vstack(
+                (original.xi, original.eta, np.zeros_like(original.eta) + np.nan)
             )
             _focal_plane = focal_plane[:-1]
             template = template[:-1]
@@ -644,7 +649,7 @@ def main():
         bp_msk = np.zeros(aman.dets.count)
         bp_msk[msk_bp1] = 1
         bp_msk[msk_bp2] = 2
-        focal_plane = np.vstack((focal_plane, bp_msk))
+        focal_plane = np.vstack((original_focal_plane, focal_plane, bp_msk))
         focal_plane = focal_plane.T
         focal_plane[out_msk] = np.nan
         for ri, fp in zip(aman.det_info.readout_id, focal_plane):
@@ -663,23 +668,6 @@ def main():
         logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
         logger.info(str(np.sum(det_id == aman.det_info.det_id)) + " match with detmap")
 
-        # Undo detmap transform
-        if (not reverse) and config["dm_transform"]:
-            coords_bp1 = TY_bp1[:, :2]
-            transformed_bp1 = [
-                (inv_dm_trans * np.vstack((np.matrix(pt).reshape(2, 1), 1)))[0:2, :]
-                for pt in coords_bp1
-            ]
-            transformed_bp1 = np.reshape(transformed_bp1, coords_bp1.shape)
-            TY_bp1[:, :2] = transformed_bp1
-
-            coords_bp2 = TY_bp2[:, :2]
-            transformed_bp2 = [
-                (inv_dm_trans * np.vstack((np.matrix(pt).reshape(2, 1), 1)))[0:2, :]
-                for pt in coords_bp2
-            ]
-            transformed_bp2 = np.reshape(transformed_bp2, coords_bp2.shape)
-            TY_bp2[:, :2] = transformed_bp2
         transformed = np.nan + np.zeros((aman.dets.count, 3))
         transformed[msk_bp1, :ndim] = TY_bp1
         transformed[msk_bp2, :ndim] = TY_bp2
@@ -689,7 +677,7 @@ def main():
                 det_id,
                 aman.det_info.readout_id,
                 out_msk.astype(float),
-                focal_plane.T[:-1],
+                focal_plane.T[:3],
                 transformed.T,
             )
         ).T
@@ -725,11 +713,11 @@ def main():
     bp_msk = focal_plane[-1].astype(int)
     msk_bp1 = bp_msk == 1
     msk_bp2 = bp_msk == 2
-    focal_plane = focal_plane[:-1]
-    _focal_plane = focal_plane
+    avg_pointing = focal_plane[:3]
+    focal_plane = focal_plane[3:6]
     ndim = 3
     if np.isnan(focal_plane[-1]).all():
-        _focal_plane = focal_plane[:-1]
+        focal_plane = focal_plane[:-1]
         template = template[:-1]
         ndim = 2
 
@@ -747,35 +735,18 @@ def main():
 
     # Do final matching
     map_bp1, out_bp1, P_bp1, TY_bp1 = match_template(
-        _focal_plane[:, msk_bp1],
+        focal_plane[:, msk_bp1],
         template[:, template_bp1],
         priors=priors[np.ix_(template_bp1, msk_bp1)],
         **config["matching"],
     )
     map_bp2, out_bp2, P_bp1, TY_bp2 = match_template(
-        _focal_plane[:, msk_bp2],
+        focal_plane[:, msk_bp2],
         template[:, template_bp2],
         priors=priors[np.ix_(template_bp2, msk_bp2)],
         **config["matching"],
     )
 
-    # Undo detmap transform
-    if (not reverse) and config["dm_transform"]:
-        coords_bp1 = TY_bp1[:, :2]
-        transformed_bp1 = [
-            (inv_dm_trans * np.vstack((np.matrix(pt).reshape(2, 1), 1)))[0:2, :]
-            for pt in coords_bp1
-        ]
-        transformed_bp1 = np.reshape(transformed_bp1, coords_bp1.shape)
-        TY_bp1[:, :2] = transformed_bp1
-
-        coords_bp2 = TY_bp2[:, :2]
-        transformed_bp2 = [
-            (inv_dm_trans * np.vstack((np.matrix(pt).reshape(2, 1), 1)))[0:2, :]
-            for pt in coords_bp2
-        ]
-        transformed_bp2 = np.reshape(transformed_bp2, coords_bp2.shape)
-        TY_bp2[:, :2] = transformed_bp2
     transformed = np.nan + np.zeros((len(readout_ids), 3))
     transformed[msk_bp1, :ndim] = TY_bp1
     transformed[msk_bp2, :ndim] = TY_bp2
@@ -791,7 +762,7 @@ def main():
     logger.info(str(np.sum(msk_bp1 | msk_bp2)) + " detectors matched")
     logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
 
-    data_out = np.vstack((det_id, readout_ids, out_msk, focal_plane, transformed.T)).T
+    data_out = np.vstack((det_id, readout_ids, out_msk, avg_pointing, transformed.T)).T
     rset_data = metadata.ResultSet(
         keys=[
             "dets:det_id",
