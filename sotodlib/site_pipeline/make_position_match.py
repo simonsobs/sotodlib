@@ -595,7 +595,15 @@ def main():
         bp_msk = np.zeros(aman.dets.count)
         bp_msk[msk_bp1] = 1
         bp_msk[msk_bp2] = 2
-        focal_plane = np.vstack((original_focal_plane, focal_plane, bp_msk))
+        focal_plane = np.vstack(
+            (
+                aman.det_info.smurf.band,
+                aman.det_info.smurf.channel,
+                original_focal_plane,
+                focal_plane,
+                bp_msk,
+            )
+        )
         focal_plane = focal_plane.T
         focal_plane[out_msk] = np.nan
         for ri, fp in zip(aman.det_info.readout_id, focal_plane):
@@ -627,7 +635,7 @@ def main():
                 det_id,
                 aman.det_info.readout_id,
                 out_msk.astype(float),
-                focal_plane.T[:3],
+                focal_plane.T[:5],
                 transformed.T,
                 P_mapped,
             )
@@ -637,6 +645,8 @@ def main():
                 "dets:det_id",
                 "dets:readout_id",
                 "outliers",
+                "band",
+                "channel",
                 "avg_xi",
                 "avg_eta",
                 "avg_polang",
@@ -665,8 +675,8 @@ def main():
     bp_msk = focal_plane[-1].astype(int)
     msk_bp1 = bp_msk == 1
     msk_bp2 = bp_msk == 2
-    avg_pointing = focal_plane[:3]
-    focal_plane = focal_plane[3:6]
+    bc_avg_pointing = focal_plane[:5]
+    focal_plane = focal_plane[5:8]
     ndim = 3
     if np.isnan(focal_plane[-1]).all():
         focal_plane = focal_plane[:-1]
@@ -721,13 +731,15 @@ def main():
     logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
 
     data_out = np.vstack(
-        (det_id, readout_ids, out_msk, avg_pointing, transformed.T, P_mapped)
+        (det_id, readout_ids, out_msk, bc_avg_pointing, transformed.T, P_mapped)
     ).T
     rset_data = metadata.ResultSet(
         keys=[
             "dets:det_id",
             "dets:readout_id",
             "outliers",
+            "band",
+            "channel",
             "avg_xi",
             "avg_eta",
             "avg_polang",
