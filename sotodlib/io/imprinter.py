@@ -353,14 +353,22 @@ class Imprinter:
                            smurf_timestamps=timestamps,
                            frameproc_config={"readout_ids": rids})()
 
-            # Add meta files to M_index
+            # update metadata in M_index file
+            mfile = os.path.join(book_path, 'M_index.yaml')
+            with open(mfile, 'r') as f:
+                meta = yaml.safe_load(f)
+
+            meta['telescope'] = book.tel_tube
+            meta['book_type'] = book.type
+            meta['stream_ids'] = book.slots.split(',')
+
+            # add meta files
             if (book.type == 'oper') and meta_files:
-                mfile = os.path.join(book_path, 'M_index.yaml')
-                with open(mfile, 'r') as f:
-                    meta = yaml.safe_load(f)
                 meta['meta_files'] = meta_files
-                with open(mfile, 'w') as f:
-                    yaml.dump(meta, f)
+
+            # write back to M_index file
+            with open(mfile, 'w') as f:
+                yaml.dump(meta, f)
 
             # not sure if this is the best place to update
             book.status = BOUND
