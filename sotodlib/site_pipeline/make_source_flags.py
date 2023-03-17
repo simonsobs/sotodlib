@@ -11,8 +11,9 @@ from . import util
 
 logger = logging.getLogger(__name__)
 
-def get_parser():
-    parser = ArgumentParser()
+def get_parser(parser=None):
+    if parser is None:
+        parser = ArgumentParser()
     parser.add_argument('obs_id',help=
                         "Observation for which to generate flags.")
     parser.add_argument('-c', '--config-file', help=
@@ -28,10 +29,8 @@ def get_config(args):
     return cfg
 
 def main(args=None):
-    if args is None:
-        args = sys.argv[1:]
-    parser = get_parser()
-    config = get_config(parser.parse_args(args))
+    args = util.get_args(args, get_parser)
+    config = get_config(args)
 
     if config['verbose'] >= 1:
         logger.setLevel('INFO')

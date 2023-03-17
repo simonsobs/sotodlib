@@ -21,11 +21,12 @@ from sotodlib import core, coords, site_pipeline, tod_ops
 
 from . import util
 
-logger = util.init_logger(__name__, 'make_uncal_beam_map: ')
+logger = None
 
 
-def _get_parser():
-    parser = ArgumentParser()
+def get_parser(parser=None):
+    if parser is None:
+        parser = ArgumentParser()
     parser.add_argument('-c', '--config-file', help=
                         "Configuration file.")
     parser.add_argument('-v', '--verbose', action='count',
@@ -206,11 +207,10 @@ def _adjust_focal_plane(tod, focal_plane=None, boresight_offset=None):
 
 def main(args=None):
     """Entry point."""
-    if args is None:
-        args = sys.argv[1:]
-    parser = _get_parser()
-    config = _get_config(parser.parse_args(args))
+    args = util.get_args(args, get_parser)
+    config = _get_config(args)
 
+    logger = util.init_logger(__name__, 'make_uncal_beam_map: ')
     if config['verbose'] >= 1:
         logger.setLevel('INFO')
     if config['verbose'] >= 2:

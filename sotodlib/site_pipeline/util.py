@@ -4,6 +4,8 @@ import inspect
 import logging
 import time
 import sys
+import argparse
+
 from astropy import units as u
 
 from .. import core
@@ -265,3 +267,17 @@ def init_logger(name, announce=''):
     logger.info(f'{announce}Log timestamps are relative to {text}')
 
     return logger
+
+def get_args(args=None, get_parser=None):
+    """Process args into an argparse.Namespace, using sys.argv and a
+    get_parser function if need be.
+
+    This is a utility function for site_pipeline scripts so they can
+    be called from the wrapping cli or locally.
+
+    """
+    if isinstance(args, argparse.Namespace):
+        return args
+    if args is None:
+        args = sys.argv[1:]
+    return get_parser().parse_args(args)
