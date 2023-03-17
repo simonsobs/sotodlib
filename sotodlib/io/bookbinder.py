@@ -755,7 +755,9 @@ class Bookbinder(object):
         self._meta_file = op.join(out_root, book_id, f'M_index.yaml')
         self.metadata = []
         self.frame_num = 0
-        self.sample_num = 0
+        self.file_sample_counter = 0
+        self.prev_file_last_sample_num = 0
+        self.file_sample_ranges = []
         self.ofile_num = 0
         self.default_mode = True  # True: time-based split; False: scan-based split
         self.MAX_SAMPLES_TOTAL = int(config.get("max_samples_total", 1e9))
@@ -850,7 +852,7 @@ class Bookbinder(object):
         if self._stream_id is not None:
             oframe['stream_id'] = core.G3String(self._stream_id)
         if oframe.type == core.G3FrameType.Scan:
-            oframe['sample_range'] = core.G3VectorInt([self.sample_num-len(f['signal'].times), self.sample_num-1])
+            oframe['sample_range'] = core.G3VectorInt([self.file_sample_counter-len(f['signal'].times), self.file_sample_counter])
         return oframe
 
     def write_frames(self, frames_list):
@@ -871,11 +873,17 @@ class Bookbinder(object):
             # If the number of samples (per channel) exceeds the max allowed, create a new output file
             if f.type == core.G3FrameType.Scan:
                 nsamples = len(f['signal'].times)   # number of samples in current frame
-                self.sample_num += nsamples         # cumulative number of samples in current output file
-                if self.sample_num > self.MAX_SAMPLES_PER_CHANNEL:
+                # if cumulative sample number exceeds max allowed, create new file to
+                # store the current frame and restart the sample number counter
+                if self.file_sample_counter+nsamples > self.MAX_SAMPLES_PER_CHANNEL:
                     self.ofile_num += 1
+                    curr_file_last_sample_num = self.prev_file_last_sample_num+self.file_sample_counter
+                    self.file_sample_ranges.append(
+                        [self.prev_file_last_sample_num, curr_file_last_sample_num]
+                    )
+                    self.prev_file_last_sample_num = curr_file_last_sample_num
                     self.create_file_writers()
-                    self.sample_num = nsamples      # reset sample number to length of current frame
+                    self.file_sample_counter = nsamples      # reset sample number to length of current frame
                     self.frame_num = 0              # reset frame number to 0
             # add misc metadata to output frame and write it out
             oframe = self.add_misc_data(f)
@@ -1019,7 +1027,7 @@ class Bookbinder(object):
              'start_time': self._start_time.time/core.G3Units.s,
              'end_time':   self._end_time.time/core.G3Units.s,
              'n_frames':   self.frame_num,
-             'n_samples':  self.sample_num}
+             'n_samples':  self.file_sample_counter}
 
         if self.hwp_loader is not None:
             d.update(self.hwp_loader.get_metadata())
