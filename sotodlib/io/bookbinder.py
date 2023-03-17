@@ -885,6 +885,8 @@ class Bookbinder(object):
                     self.create_file_writers()
                     self.file_sample_counter = nsamples      # reset sample number to length of current frame
                     self.frame_num = 0              # reset frame number to 0
+                else:
+                    self.file_sample_counter += nsamples
             # add misc metadata to output frame and write it out
             oframe = self.add_misc_data(f)
             self.writer.Process(oframe)
