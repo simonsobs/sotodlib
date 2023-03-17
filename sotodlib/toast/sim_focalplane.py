@@ -565,7 +565,7 @@ def load_wafer_detectors(
 
 
 
-def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None):
+def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=False):
     """Update hardware model with simulated or loaded detector positions.
 
     Given a Hardware model, generate all detector properties for the specified
@@ -630,7 +630,8 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None):
             if det_info is not None:
                 dets = load_wafer_detectors(
                     hw, wafer_slot, platescale, fwhm,
-                    det_info[0], det_info[1], center=centers[windx]
+                    det_info[0], det_info[1], center=centers[windx],
+                    no_darks=no_darks,
                 )
             else:
                 dets = sim_wafer_detectors(
@@ -668,11 +669,18 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None):
             location = tubeprops["toast_hex_pos"]
 
             wradius = 0.5 * (waferspace * platescale * np.pi / 180.0)
-            qwcenters = [
-                xieta_to_quat(-wradius, wradius / np.sqrt(3.0), thirty * 4),
-                xieta_to_quat(0.0, -2.0 * wradius / np.sqrt(3.0), 0.0),
-                xieta_to_quat(wradius, wradius / np.sqrt(3.0), -thirty * 4),
-            ]
+            if det_info is None:
+                qwcenters = [
+                    xieta_to_quat(-wradius, wradius / np.sqrt(3.0), thirty * 4),
+                    xieta_to_quat(0.0, -2.0 * wradius / np.sqrt(3.0), 0.0),
+                    xieta_to_quat(wradius, wradius / np.sqrt(3.0), -thirty * 4),
+                ]
+            else:
+                qwcenters = [
+                    xieta_to_quat(-wradius, wradius / np.sqrt(3.0), thirty * 5),
+                    xieta_to_quat(0.0, -2.0 * wradius / np.sqrt(3.0), thirty),
+                    xieta_to_quat(wradius, wradius / np.sqrt(3.0), -thirty * 3),
+                ]
 
             centers = list()
             for qwc in qwcenters:
@@ -683,7 +691,8 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None):
                 if det_info is not None:
                     dets = load_wafer_detectors(
                         hw, wafer_slot, platescale, fwhm,
-                        det_info[0], det_info[1], center=centers[windx]
+                        det_info[0], det_info[1], center=centers[windx],
+                        no_darks=no_darks,
                     )
                 else:
                     dets = sim_wafer_detectors(
