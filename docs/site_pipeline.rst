@@ -19,6 +19,10 @@ be invoked as::
 
   so-site-pipeline make-source-flags [options]
 
+To configure tab-completion of element names, in bash, run::
+
+  eval `so-site-pipeline --bash-completion`
+
 
 Pipeline Elements
 =================
