@@ -9,7 +9,7 @@ The config file for this should look something like this:
 .. code-block:: yaml
 
     # Database setup
-    obsfile_db: './obsfiledb.sqlite'
+    obsfiledb: './obsfiledb.sqlite'
     root_path: '/'
 
     # Work-arounds
@@ -66,6 +66,7 @@ DEFAULT_CONFIG = {
 
     # Work-arounds.
     'sample_range_inclusive_hack': False,
+    'tolerate_sample_range_resetting': False,
     'tolerate_missing_ancil': False,
     'tolerate_missing_ancil_timestamps': False,
     'tolerate_timestamps_value_discrepancy': False,
@@ -257,7 +258,8 @@ class BookScanner:
                             # This is first frame in new file and
                             # "start" is expected first sample index.
                             if a == 0 and start != 0:
-                                self._err(basename, 'sample_range is resetting on file boundaries.')
+                                self._err(basename, 'sample_range is resetting on file boundaries.',
+                                          warn=self.config['tolerate_sample_range_resetting'])
                                 hack_offset = start
                             if a != start - hack_offset:
                                 self._err(basename, f'sample_range entries are not abutting: '
@@ -308,7 +310,9 @@ class BookScanner:
                     if len(timestamps) != len(timestamps_master):
                         self._err(None, f'Timestamps length discrepancy.')
                     elif not (timestamps == timestamps_master).all():
-                        self._err(None, f'Timestamps value discrepancy.',
+                        dmax_us = np.max(abs(timestamps - timestamps_master)) \
+                                  / core.G3Units.microseconds
+                        self._err(None, f'Timestamps value discrepancy (up to {dmax_us:.3} us).',
                                   warn=self.config['tolerate_timestamps_value_discrepancy'])
 
         # If metadata included sample_ranges, check that.
