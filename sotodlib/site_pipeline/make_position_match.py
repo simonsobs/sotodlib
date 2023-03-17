@@ -634,17 +634,16 @@ def main():
             (
                 det_id,
                 aman.det_info.readout_id,
-                out_msk.astype(float),
                 focal_plane.T[:5],
                 transformed.T,
                 P_mapped,
+                out_msk.astype(float),
             )
         ).T
         rset_data = metadata.ResultSet(
             keys=[
                 "dets:det_id",
                 "dets:readout_id",
-                "outliers",
                 "band",
                 "channel",
                 "avg_xi",
@@ -654,6 +653,7 @@ def main():
                 "meas_y",
                 "meas_pol",
                 "likelihood",
+                "outliers",
             ],
             src=data_out,
         )
@@ -731,13 +731,12 @@ def main():
     logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
 
     data_out = np.vstack(
-        (det_id, readout_ids, out_msk, bc_avg_pointing, transformed.T, P_mapped)
+        (det_id, readout_ids, bc_avg_pointing, transformed.T, P_mapped, out_msk)
     ).T
     rset_data = metadata.ResultSet(
         keys=[
             "dets:det_id",
             "dets:readout_id",
-            "outliers",
             "band",
             "channel",
             "avg_xi",
@@ -747,6 +746,7 @@ def main():
             "meas_y",
             "meas_pol",
             "likelihood",
+            "outliers",
         ],
         src=data_out,
     )
