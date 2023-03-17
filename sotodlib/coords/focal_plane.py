@@ -108,14 +108,14 @@ def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo
     xz = x * np.cos(d2r * opt2cryo) - y * np.sin(d2r * opt2cryo)
     yz = y * np.cos(d2r * opt2cryo) + x * np.sin(d2r * opt2cryo)
     # Where is it on (zemax secondary focal plane wrt LATR)
-    xs = array2secx(xz, yz)
-    ys = array2secy(xz, yz)
+    xs = array2secx(xz, yz)[0, :]
+    ys = array2secy(xz, yz)[0, :]
     # get into LAT zemax coord
     # We may need to add a rotation offset here to account for physical vs ZEMAX
     xrot = xs * np.cos(d2r * rot) - ys * np.sin(d2r * rot)
     yrot = ys * np.cos(d2r * rot) + xs * np.sin(d2r * rot)
-    elev = sec2elev(xrot, yrot)  # note these are around the telescope boresight
-    xel = sec2xel(xrot, yrot)
+    elev = sec2elev(xrot, yrot)[0, :]  # note these are around the telescope boresight
+    xel = sec2xel(xrot, yrot)[0, :]
     return elev, xel
 
 
