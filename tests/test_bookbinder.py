@@ -112,12 +112,12 @@ def test_fill_missing_samples():
     s = generate_smurf_frame(core.G3VectorTime(t))
 
     start_time = t[0]
-    end_time = t[-1] + 1
+    end_time = t[-1]
     ref_timestamps = t
 
     for smts in [ref_timestamps, None]:
         F = bb.FrameProcessor(start_time=start_time, end_time=end_time, smurf_timestamps=ref_timestamps)
-        sout, flag_gap = F.fill_in_missing_samples(s['data'], F.BOOK_END_TIME, return_flags=True)
+        sout, flag_gap = F.fill_in_missing_samples(s['data'], flush_time=F.BOOK_END_TIME+1, return_flags=True)
 
         err_msg = f"Default test case failed. Output not equal to input. With ref timestamps: {smts!=None}"
         np.testing.assert_array_equal(sout.times, t, err_msg=err_msg)
@@ -138,8 +138,7 @@ def test_fill_missing_samples():
     first_samples = [t[0], t[0]-3*dt]
     last_samples = [t[-1], t[-1]+3*dt]
     for start_time, end_time in zip(first_samples, last_samples):
-        end_time += 1  # to ensure last sample gets included since flush_time is excluded from output frame
-        ref_timestamps = np.arange(start_time, end_time, dt)  # reference timestamps to check against
+        ref_timestamps = np.arange(start_time, end_time+1, dt)  # reference timestamps to check against
         true_timestamps = ref_timestamps  # for this test, they are the same
 
         # Book start/end times don't have to line up with first/last samples
@@ -152,7 +151,7 @@ def test_fill_missing_samples():
                 for smts in [ref_timestamps, None]:
                     F = bb.FrameProcessor(start_time=book_start, end_time=book_end, smurf_timestamps=smts)
                     F._prev_smurf_sample = prev_samp
-                    sout, flag_gap = F.fill_in_missing_samples(s['data'], F.BOOK_END_TIME, return_flags=True)
+                    sout, flag_gap = F.fill_in_missing_samples(s['data'], flush_time=F.BOOK_END_TIME+1, return_flags=True)
 
                     err_msg = f"Test failed with: First/last samples {start_time}, {end_time-1};\
                                 Book start/end: {book_start}, {book_end}; With prev frame: {prev_samp!=None};\
