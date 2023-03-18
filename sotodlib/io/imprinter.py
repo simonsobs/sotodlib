@@ -4,6 +4,7 @@ from collections import OrderedDict
 from typing import List
 import yaml, traceback
 import shutil
+import sotodlib
 
 import sqlalchemy as db
 from sqlalchemy import or_, and_, not_
@@ -354,8 +355,8 @@ class Imprinter:
                            frameproc_config={"readout_ids": rids})()
 
             # update metadata in M_index file
-            mfile = os.path.join(book_path, 'M_index.yaml')
-            with open(mfile, 'r') as f:
+            m_index_file = os.path.join(book_path, 'M_index.yaml')
+            with open(m_index_file, 'r') as f:
                 meta = yaml.safe_load(f)
 
             meta['telescope'] = book.tel_tube
@@ -367,8 +368,26 @@ class Imprinter:
                 meta['meta_files'] = meta_files
 
             # write back to M_index file
-            with open(mfile, 'w') as f:
+            with open(m_index_file, 'w') as f:
                 yaml.dump(meta, f)
+
+            # write M_book file
+            m_book_file = os.path.join(book_path, 'M_book.yaml')
+            book_meta = {}
+            book_meta['book'] = {
+                "type": book.type,
+                "schema_version": "v0",
+                "book_id": book.bid,
+                "finalized_at": dt.datetime.utcnow().isoformat(),
+            }
+            book_meta['bookbinder'] = {
+                "codebase": sotodlib.__file__,
+                "version": sotodlib.__version__,
+                "context": self.config.get('context', 'unknown')
+            }
+
+            with open(m_book_file, 'w') as f:
+                yaml.dump(book_meta, f)
 
             # not sure if this is the best place to update
             book.status = BOUND
