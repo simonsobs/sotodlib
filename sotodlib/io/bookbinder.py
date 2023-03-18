@@ -513,7 +513,7 @@ class FrameProcessor(object):
             prev_frame_end = self._prev_smurf_sample.time
         # Define a strict upper limit (exclusive) up until which to look/interpolate for missing samples
         if self.BOOK_END_TIME is not None:
-            end_time = min(flush_time.time, self.BOOK_END_TIME.time)
+            end_time = min(flush_time.time, self.BOOK_END_TIME.time + 1)
         elif self._smurf_timestamps is not None:
             end_time = min(flush_time.time, self._smurf_timestamps[-1] + 1)
         else:
