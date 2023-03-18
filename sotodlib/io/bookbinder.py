@@ -852,7 +852,9 @@ class Bookbinder(object):
         if self._stream_id is not None:
             oframe['stream_id'] = core.G3String(self._stream_id)
         if oframe.type == core.G3FrameType.Scan:
-            oframe['sample_range'] = core.G3VectorInt([self.file_sample_counter-len(f['signal'].times), self.file_sample_counter])
+            range_start = self.prev_file_last_sample_num + self.file_sample_counter - len(f['signal'].times)
+            range_stop  = self.prev_file_last_sample_num + self.file_sample_counter
+            oframe['sample_range'] = core.G3VectorInt([range_start, range_stop])
         return oframe
 
     def write_frames(self, frames_list):
