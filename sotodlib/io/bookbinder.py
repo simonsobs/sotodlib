@@ -757,7 +757,7 @@ class Bookbinder(object):
         self.frame_num = 0
         self.file_sample_counter = 0
         self.prev_file_last_sample_num = 0
-        self.file_sample_ranges = []
+        self.file_sample_ranges = [[0,0]]
         self.ofile_num = 0
         self.default_mode = True  # True: time-based split; False: scan-based split
         self.MAX_SAMPLES_TOTAL = int(config.get("max_samples_total", 1e9))
@@ -878,15 +878,19 @@ class Bookbinder(object):
                 if self.file_sample_counter+nsamples > self.MAX_SAMPLES_PER_CHANNEL:
                     self.ofile_num += 1
                     curr_file_last_sample_num = self.prev_file_last_sample_num+self.file_sample_counter
-                    self.file_sample_ranges.append(
-                        [self.prev_file_last_sample_num, curr_file_last_sample_num]
-                    )
                     self.prev_file_last_sample_num = curr_file_last_sample_num
-                    self.create_file_writers()
                     self.file_sample_counter = nsamples      # reset sample number to length of current frame
+                    self.file_sample_ranges.append([
+                        curr_file_last_sample_num,
+                        curr_file_last_sample_num+self.file_sample_counter
+                    ])
                     self.frame_num = 0              # reset frame number to 0
+                    self.create_file_writers()
                 else:
                     self.file_sample_counter += nsamples
+                    # keep file ranges up to date as we go
+                    self.file_sample_ranges[-1][1] = self.file_sample_counter + self.file_sample_ranges[-1][0]
+
             # add misc metadata to output frame and write it out
             oframe = self.add_misc_data(f)
             self.writer.Process(oframe)
@@ -1029,7 +1033,8 @@ class Bookbinder(object):
              'start_time': self._start_time.time/core.G3Units.s,
              'end_time':   self._end_time.time/core.G3Units.s,
              'n_frames':   self.frame_num,
-             'n_samples':  self.file_sample_counter}
+             'sample_ranges': self.file_sample_ranges,
+             'n_samples':  self.file_sample_ranges[-1][-1]}
 
         if self.hwp_loader is not None:
             d.update(self.hwp_loader.get_metadata())
