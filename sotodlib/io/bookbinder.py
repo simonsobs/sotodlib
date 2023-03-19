@@ -601,7 +601,7 @@ class FrameProcessor(object):
         self.smbundle.prepend(fx)
         # Update (local) flush time if necessary
         if data_excess is not None:
-            flush_time = f['signal'].times[-1] + 1
+            flush_time = data_excess.times[0]
             self._frame_splits[-1] = flush_time  # update the most recently added split time
         # Update last sample
         self._prev_smurf_sample = f['signal'].times[-1]
@@ -713,14 +713,16 @@ class FrameProcessor(object):
             # Add current frame
             self.smbundle.add(f)
 
-            # If the existing data exceeds the specified maximum length
-            while len(self.smbundle.times) >= self.maxlength:
-                split_time = self.smbundle.times[self.maxlength-1] + 1
+            # If the existing data exceeds the specified maximum length, split the frame into frames
+            # less than maxlength and record the frame split time(s)
+            while len(self.smbundle.times) > self.maxlength:
+                split_time = self.smbundle.times[self.maxlength]
+                # If flush_time occurs before split_time, exit loop for handling in following block
+                if self.flush_time is not None and self.flush_time <= split_time:
+                    break
                 self._frame_splits.append(split_time)
                 output += self.flush(split_time)
-                if self.flush_time is not None and split_time >= self.flush_time:
-                    return output
-            # If a frame split event has been reached
+            # If a frame split event has been reached, output a frame with samples up until flush_time
             if self.flush_time is not None and self.smbundle.ready(self.flush_time):
                 output += self.flush()
 
