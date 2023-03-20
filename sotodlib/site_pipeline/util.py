@@ -268,16 +268,22 @@ def init_logger(name, announce=''):
 
     return logger
 
-def get_args(args=None, get_parser=None):
-    """Process args into an argparse.Namespace, using sys.argv and a
-    get_parser function if need be.
+def main_launcher(main_func, parser_func, args=None):
+    """Launch an element's main entry point function, after generating
+    a parser and executing it on the command line arguments (or args
+    if it is passed in).
 
-    This is a utility function for site_pipeline scripts so they can
-    be called from the wrapping cli or locally.
+    Args:
+      main_func: the main entry point for a pipeline element.
+      parser_func: the argument parser generation function for a pipeline
+        element.
+      args (list of str): arguments to parse (default is None, which
+        will lead to sys.argv[1:]).
+
+    Returns:
+      Whatever main_func returns.
 
     """
-    if isinstance(args, argparse.Namespace):
-        return args
     if args is None:
         args = sys.argv[1:]
-    return get_parser().parse_args(args)
+    return main_func(**vars(parser_func().parse_args(args=args)))

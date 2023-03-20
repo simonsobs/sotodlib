@@ -109,8 +109,9 @@ def record_timing(monitor, obs, cfgs):
         )
         monitor.write()
 
-def get_parser():
-    parser = argparse.ArgumentParser()
+def get_parser(parser=None):
+    if parser is None:
+        parser = argparse.ArgumentParser()
     parser.add_argument('config', help="g3tsmurf db configuration file")
     parser.add_argument('--update-delay', help="Days to subtract from now to set as minimum ctime",
                         default=2, type=float)
@@ -120,7 +121,10 @@ def get_parser():
                        default=2, type=int)
     return parser
 
+def main(args):
+    update_g3tsmurf_db(**vars(args))
+
 if __name__ == '__main__':
-    parser = get_parser()
+    parser = get_parser(parser=None)
     args = parser.parse_args()
     update_g3tsmurf_db(**vars(args))
