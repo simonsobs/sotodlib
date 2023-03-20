@@ -13,6 +13,14 @@ quick-turnaround data processing at the observatory.
   here will be on operation; command line parameters and config file
   syntax.
 
+
+Command line interface
+======================
+
+
+Usage
+-----
+
 To execute a pipeline element from the command line, use the
 ``so-site-pipeline`` command.  For example, ``make-source-flags`` can
 be invoked as::
@@ -22,6 +30,12 @@ be invoked as::
 To configure tab-completion of element names, in bash, run::
 
   eval `so-site-pipeline --bash-completion`
+
+
+Wrapping a pipeline script
+--------------------------
+
+.. automodule:: sotodlib.site_pipeline.cli
 
 
 Pipeline Elements
