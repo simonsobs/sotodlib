@@ -757,7 +757,7 @@ class Bookbinder(object):
         self.frame_num = 0
         self.file_sample_counter = 0
         self.prev_file_last_sample_num = 0
-        self.file_sample_ranges = [[0,0]]
+        self.file_sample_ranges = [[0, 0]]
         self.ofile_num = 0
         self.default_mode = True  # True: time-based split; False: scan-based split
         self.MAX_SAMPLES_TOTAL = int(config.get("max_samples_total", 1e9))
@@ -877,14 +877,14 @@ class Bookbinder(object):
                 nsamples = len(f['signal'].times)   # number of samples in current frame
                 # if cumulative sample number exceeds max allowed, create new file to
                 # store the current frame and restart the sample number counter
-                if self.file_sample_counter+nsamples > self.MAX_SAMPLES_PER_CHANNEL:
+                if self.file_sample_counter + nsamples > self.MAX_SAMPLES_PER_CHANNEL:
                     self.ofile_num += 1
-                    curr_file_last_sample_num = self.prev_file_last_sample_num+self.file_sample_counter
+                    curr_file_last_sample_num = self.prev_file_last_sample_num + self.file_sample_counter
                     self.prev_file_last_sample_num = curr_file_last_sample_num
                     self.file_sample_counter = nsamples      # reset sample number to length of current frame
                     self.file_sample_ranges.append([
                         curr_file_last_sample_num,
-                        curr_file_last_sample_num+self.file_sample_counter
+                        curr_file_last_sample_num + self.file_sample_counter
                     ])
                     self.frame_num = 0              # reset frame number to 0
                     self.create_file_writers()
