@@ -550,8 +550,8 @@ def load_wafer_detectors(
         dprops["mux_position"] = wafer.mux_position[i]
 
         quat = xieta_to_quat(
-            wafer.det_x[i] * platescale *np.pi/180,
-            wafer.det_y[i] * platescale *np.pi/180,
+            np.radians(wafer.det_x[i] * platescale),
+            np.radians(wafer.det_y[i] * platescale),
             wafer.angle[i],
         )
         if center is not None:
@@ -621,9 +621,18 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
             np.zeros(7) * u.degree,
         )
         centers = np.zeros((7, 4), dtype=np.float64)
-        qrot = qa.from_axisangle(zaxis, -np.pi / 6)
+        if det_info is None:
+            qrot = qa.from_axisangle(zaxis, -thirty)
+        else:
+            qrot = qa.from_axisangle(zaxis, thirty)
         for p, q in wcenters.items():
-            centers[int(p), :] = qa.mult(qrot, q["quat"])
+            quat = q["quat"]
+            if det_info is not None:
+                # Add an additional rotation of the wafer before
+                # repositioning the wafer center
+                quat2 = qa.from_axisangle(zaxis, -thirty)
+                quat = qa.mult(quat, quat2)
+            centers[int(p), :] = qa.mult(qrot, quat)
 
         windx = 0
         for wafer_slot in tubeprops["wafer_slots"]:
