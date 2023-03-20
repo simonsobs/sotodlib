@@ -8,6 +8,7 @@ import toast
 from sotodlib.toast.ops import sim_sso
 from sotodlib.core import metadata
 from sotodlib.io.metadata import write_dataset, read_dataset
+from astropy import units as u
 
 import h5py
 import numpy as np
@@ -722,13 +723,13 @@ def run(
         full_df["rel_cal"] = amp / np.mean(amp)
 
         beam_file = "/mnt/so1/shared/site-pipeline/bcp/%s_%s_beam.h5" % (tele, band)
-        sso_obj = sim_sso.OpSimSSO(sso_name, beam_file)
-
-        sso_obj._get_planet_temp(sso_name)
+        sso_obj = sim_sso.SimSSO(beam_file=beam_file, sso_name=sso_name)
+        freq_arr_GHz, temp_arr = sso_obj._get_sso_temperature(sso_name)
         datestr = "%s-%02d-%02d" % (year, int(month), int(day))
-        sso_obj.sso.compute(datestr)
-        ttemp = np.interp(float(band[1:]), sso_obj.t_freqs, sso_obj.ttemp)
-        beam, _ = sso_obj._get_beam_map(sso_obj.sso.size, ttemp)
+        sso_ephem = getattr(ephem, sso_name)()
+        sso_ephem.compute(datestr)
+        ttemp = np.interp(float(band[1:])*u.GHz, freq_arr_GHz, temp_arr)
+        beam, _ = sso_obj._get_beam_map(None, sso_ephem.size*u.arcsec, ttemp)
         amp_ref = beam(0, 0)[0][0]
         full_df["abs_cal"] = amp / amp_ref
 
