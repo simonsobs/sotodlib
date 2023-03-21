@@ -201,7 +201,7 @@ def _adjust_focal_plane(tod, focal_plane=None, boresight_offset=None):
     fp.eta[:] = eta
     fp.gamma[:] = gamma
 
-def main(config_file=None, obs_id=None, verbose=0):
+def main(config_file=None, obs_id=None, verbose=0, test=False):
     """Entry point."""
     config = _get_config(config_file)
 
@@ -258,7 +258,7 @@ def main(config_file=None, obs_id=None, verbose=0):
             continue
 
         # Modify dets axis for testing
-        if config['_args'].test:
+        if test:
             logger.warning(f'Decimating focal plane (--test).')
             dets = tod.dets.vals[::10]
             tod.restrict('dets', dets)
