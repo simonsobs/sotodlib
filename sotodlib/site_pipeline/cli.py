@@ -81,6 +81,7 @@ def main():
     top_args = {k: v for k, v in vars(args).items()
                 if k[0] == '_'}
     [delattr(args, k) for k in top_args]
+    top_args = argparse.Namespace(**top_args)
 
     if top_args._bash_completion:
         names = list(ELEMENTS.keys())
@@ -91,4 +92,4 @@ def main():
         parser.error('First argument must be a sub-command.')
 
     module = ELEMENTS[top_args._pipemod]
-    module.main(args)
+    module.main(**vars(args))

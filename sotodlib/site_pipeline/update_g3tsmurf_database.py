@@ -121,8 +121,8 @@ def get_parser(parser=None):
                        default=2, type=int)
     return parser
 
-def main(args):
-    update_g3tsmurf_db(**vars(args))
+main = update_g3tsmurf_db
+
 
 if __name__ == '__main__':
     parser = get_parser(parser=None)
