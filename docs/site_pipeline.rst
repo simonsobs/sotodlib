@@ -307,22 +307,40 @@ Here's an annotated example:
     - "polang_res_2.h5"
   detmap: "detmap_results.csv"
   bias_map: "bias_map_results.npz"
-
+  
+  g3tsmurf:
+    obs_id: "obs_ufm_uv8_1677778438"
+    paths:
+        archive_path: "/mnt/so1/data/chicago-latrt/timestreams/"
+        meta_path: "/mnt/so1/data/chicago-latrt/smurf/"
+        db_path: "/mnt/so1/shared/site-pipeline/data_pkg/chicago-latrt/g3tsmurf.db"
+  
   # Configuration options
-  no_fit: False # If True the detmap results will be taken as truth
+  radial_thresh: 2.0 # Threshoud at which to dut detectors based on their pointing
+  dm_transform: True # Apply an initial transformation based on the detmap
+
   # If an array name is given it will be used to generate the template to match against
   # If this parameter is not provided the detmap will be used as the template
-  gen_template: "Mv6" 
+  gen_template: "Uv8"
+
   # Settings to generate priors from detmap
   # Do not include if you dont want priors
   priors:
     val: 1.5
-    method: "flat"
+    method: "gaussian"
     width: 1
-    basis: None
+    basis: "fit_fr_mhz"
   # Value that liklihoods are normalized to when making priors from them.
   prior_normalization: .2
-  out_thresh: .75 # Liklihood below which things will be considered outliers
+
+  # Settings for the matching processes
+  matching:
+    out_thresh: .4 # Liklihood below which things will be considered outliers
+    invert: False # Invert the likelihood array
+    reverse: False # Reverse the match direction
+    vis: False # Play an animation of match iterations
+    cpd_args: # Args to pass pycpd
+      max_iterations: 1000
 
   out_path: "results.h5"
 
@@ -333,11 +351,32 @@ Ouput file format
 The results of `make_position_match` are stored in an HDF5 file containing two datasets.
 The datasets are made using the `ResultSet` class and can be loaded back as such.
 
-The first dataset is called `input_data_paths` and has two columns: `pointing_path` and `polang_path`.
-It contains the list of input files used to produce the output.
+The first dataset is called `input_data_paths` and has two columns: `type` and `path`.
+It contains the list of input files used to produce the output, with `type` being the type of input
+and `path` being the actual path.
 
-The second dataset is called `focal_plane` and has columns: `dets:det_id`, `dets:readout_id`, `outliers`, `avg_xi`, `avg_eta`, and `avg_polang`.
-It contains the `readout_id` to `det_id` mapping, a flag showing which detectors looked like outliers, and an averaged focal plane produded using all the provided pointings and polarization angles.
+The current types of paths are:
+
+- config
+- tunefile
+- bgmap
+- pointing
+- polang
+
+The second dataset is called `focal_plane` and has columns:
+
+- `dets:det_id`, the detector id as matched by this element.
+- `dets:readout_id`, the readout id.
+- `band`, the SMuRF band.
+- `channel`, the SMuRF channel.
+- `avg_xi`, average xi for each detector.
+- `avg_eta`, average eta for each detector.
+- `avg_polang`, average polarization angle for each detector.
+- `meas_x`, the measured x position of each detector on the array.
+- `meas_y`, the measured y position of each detector on the array.
+- `meas_pol`, the measured polarization angle of each detector on the array.
+- `likelihood`, the liklihood of the match for each detector.
+- `outliers`, flag that shows which detectors look like outliers.
 
 
 Support
