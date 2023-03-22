@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import yaml
 import sotodlib.io.g3tsmurf_utils as g3u
+import sotodlib.io.load_smurf as ls
 from functools import partial
 from sotodlib.core import AxisManager, metadata
 from sotodlib.io.metadata import read_dataset, write_dataset
@@ -424,10 +425,27 @@ def main():
         polangs.append(pols)
     bg_map = np.load(config["bias_map"], allow_pickle=True).item()
 
+    # Figure out the tuneset
+    SMURF = ls.G3tSmurf(**config["g3tsmurf"]["paths"])
+    ses = SMURF.Session()
+    obs = (
+        ses.query(ls.Observations)
+        .filter(ls.Observations.obs_id == config["g3tsmurf"]["obs_id"])
+        .one()
+    )
+    tunefile = obs.tunesets[0].path
+
     # Save the input paths for later reference
+    types = ["config", "tunefile", "bgmap"]
+    paths = [args.config_path, tunefile, config["bias_map"]]
+    types += ["pointing"] * len(pointing_paths)
+    paths += list(pointing_paths)
+    if "polangs" in config:
+        types += ["polang"] * len(polangs)
+        paths += list(pointing_paths)
     rset_paths = metadata.ResultSet(
-        keys=["pointing_path", "polang_path"],
-        src=np.vstack((pointing_paths, polangs_paths)).T,
+        keys=["type", "path"],
+        src=np.vstack((types, paths)).T,
     )
     write_dataset(rset_paths, config["out_path"], "input_data_paths", overwrite=True)
 
