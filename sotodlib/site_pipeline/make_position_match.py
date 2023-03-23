@@ -693,24 +693,9 @@ def main():
                 out_msk,
             ),
             out_dt,
+            count=len(det_id),
         )
-        rset_data = metadata.ResultSet(
-            keys=[
-                "dets:det_id",
-                "dets:readout_id",
-                "band",
-                "channel",
-                "avg_xi",
-                "avg_eta",
-                "avg_polang",
-                "meas_x",
-                "meas_y",
-                "meas_pol",
-                "likelihood",
-                "outliers",
-            ],
-            src=data_out,
-        )
+        rset_data = metadata.ResultSet.from_friend(data_out)
         write_dataset(rset_data, config["out_path"], "focal_plane", overwrite=True)
         sys.exit()
 
@@ -790,24 +775,9 @@ def main():
     data_out = np.fromiter(
         zip(det_id, readout_ids, *bc_avg_pointing, *transformed.T, P_mapped, out_msk),
         out_dt,
+        count=len(det_id),
     )
-    rset_data = metadata.ResultSet(
-        keys=[
-            "dets:det_id",
-            "dets:readout_id",
-            "band",
-            "channel",
-            "avg_xi",
-            "avg_eta",
-            "avg_polang",
-            "meas_x",
-            "meas_y",
-            "meas_pol",
-            "likelihood",
-            "outliers",
-        ],
-        src=data_out,
-    )
+    rset_data = metadata.ResultSet.from_friend(data_out)
     write_dataset(rset_data, config["out_path"], "focal_plane", overwrite=True)
 
 
