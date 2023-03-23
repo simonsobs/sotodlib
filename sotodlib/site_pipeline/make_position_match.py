@@ -379,6 +379,24 @@ def match_template(
 
 
 def main():
+    # Define output dtype
+    out_dt = np.dtype(
+        [
+            ("dets:det_id", str),
+            ("dets:readout_id", str),
+            ("band", int),
+            ("channel", int),
+            ("avg_xi", float),
+            ("avg_eta", float),
+            ("avg_polang", float),
+            ("meas_x", float),
+            ("meas_y", float),
+            ("meas_pol", float),
+            ("likelihood", float),
+            ("outliers", bool),
+        ]
+    )
+
     # Read in input pars
     parser = ap.ArgumentParser()
 
@@ -630,9 +648,26 @@ def main():
             except KeyError:
                 avg_fp[ri] = [fp]
 
+    out_dt = np.dtype(
+        [
+            ("dets:det_id", det_ids.dtype),
+            ("dets:readout_id", aman.det_info.readout_id.dtype),
+            ("band", int),
+            ("channel", int),
+            ("avg_xi", float),
+            ("avg_eta", float),
+            ("avg_polang", float),
+            ("meas_x", float),
+            ("meas_y", float),
+            ("meas_pol", float),
+            ("likelihood", float),
+            ("outliers", bool),
+        ]
+    )
+
     # It we only have a single dataset
     if len(pointing_paths) == 1:
-        det_id = np.zeros(aman.dets.count, dtype=np.dtype(("U", len(det_ids[0]))))
+        det_id = np.zeros(aman.dets.count, dtype=det_ids.dtype)
         det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
         det_id[msk_bp2] = det_ids[template_bp2][map_bp2]
 
@@ -648,16 +683,17 @@ def main():
         P_mapped[msk_bp1] = P_bp1[map_bp1, range(P_bp1.shape[1])]
         P_mapped[msk_bp2] = P_bp2[map_bp2, range(P_bp2.shape[1])]
 
-        data_out = np.vstack(
-            (
+        data_out = np.fromiter(
+            zip(
                 det_id,
                 aman.det_info.readout_id,
-                focal_plane.T[:5],
-                transformed.T,
+                *focal_plane.T[:5],
+                *transformed.T,
                 P_mapped,
-                out_msk.astype(float),
-            )
-        ).T
+                out_msk,
+            ),
+            out_dt,
+        )
         rset_data = metadata.ResultSet(
             keys=[
                 "dets:det_id",
@@ -736,10 +772,10 @@ def main():
     det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
     det_id[msk_bp2] = det_ids[template_bp2][map_bp2]
 
-    out_msk = np.zeros(len(readout_ids))
-    out_msk[msk_bp1][out_bp1] = 1.0
-    out_msk[msk_bp2][out_bp2] = 1.0
-    out_msk[~(msk_bp1 | msk_bp2)] = 1.0
+    out_msk = np.zeros(len(readout_ids), dtype=bool)
+    out_msk[msk_bp1][out_bp1] = True
+    out_msk[msk_bp2][out_bp2] = True
+    out_msk[~(msk_bp1 | msk_bp2)] = True
 
     P_mapped = np.zeros(len(readout_ids))
     P_mapped[msk_bp1] = P_bp1[map_bp1, range(P_bp1.shape[1])]
@@ -751,6 +787,10 @@ def main():
     data_out = np.vstack(
         (det_id, readout_ids, bc_avg_pointing, transformed.T, P_mapped, out_msk)
     ).T
+    data_out = np.fromiter(
+        zip(det_id, readout_ids, *bc_avg_pointing, *transformed.T, P_mapped, out_msk),
+        out_dt,
+    )
     rset_data = metadata.ResultSet(
         keys=[
             "dets:det_id",
