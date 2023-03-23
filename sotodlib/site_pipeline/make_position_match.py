@@ -633,8 +633,8 @@ def main():
         results[2].append(P)
 
         out_msk = np.zeros(aman.dets.count, dtype=bool)
-        out_msk[msk_bp1][out_bp1] = True
-        out_msk[msk_bp2][out_bp2] = True
+        out_msk[np.flatnonzero(msk_bp1)[out_bp1]] = True
+        out_msk[np.flatnonzero(msk_bp2)[out_bp2]] = True
         out_msk[~(msk_bp1 | msk_bp2)] = True
 
         bp_msk = np.zeros(aman.dets.count)
@@ -649,7 +649,7 @@ def main():
                 bp_msk,
             )
         )
-        focal_plane[out_msk] = np.nan
+        focal_plane[out_msk, 2:] = np.nan
         for ri, fp in zip(aman.det_info.readout_id, focal_plane):
             try:
                 avg_fp[ri].append(fp)
@@ -766,8 +766,8 @@ def main():
     det_id[msk_bp2] = det_ids[template_bp2][map_bp2]
 
     out_msk = np.zeros(len(readout_ids), dtype=bool)
-    out_msk[msk_bp1][out_bp1] = True
-    out_msk[msk_bp2][out_bp2] = True
+    out_msk[np.flatnonzero(msk_bp1)[out_bp1]] = True
+    out_msk[np.flatnonzero(msk_bp2)[out_bp2]] = True
     out_msk[~(msk_bp1 | msk_bp2)] = True
 
     P_mapped = np.zeros(len(readout_ids))
