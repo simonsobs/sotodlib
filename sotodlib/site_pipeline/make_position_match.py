@@ -1,3 +1,4 @@
+import os
 import sys
 import argparse as ap
 import numpy as np
@@ -418,6 +419,23 @@ def main():
     else:
         polangs_paths = np.zeros(len(pointing_paths), dtype=bool)
 
+    # Figure out the tuneset
+    SMURF = ls.G3tSmurf(**config["g3tsmurf"]["paths"])
+    ses = SMURF.Session()
+    obs = (
+        ses.query(ls.Observations)
+        .filter(ls.Observations.obs_id == config["g3tsmurf"]["obs_id"])
+        .one()
+    )
+    tunefile = obs.tunesets[0].path
+
+    # Build output path
+    ufm = config["ufm"]
+    append = ""
+    if "append" in config:
+        append = "_" + config["append"]
+    outpath = os.path.join(config["outdir"], f"{ufm}_{obs.tunesets[0].id}{append}.h5")
+
     # Load data
     pointings = []
     polangs = []
@@ -443,16 +461,6 @@ def main():
         polangs.append(pols)
     bg_map = np.load(config["bias_map"], allow_pickle=True).item()
 
-    # Figure out the tuneset
-    SMURF = ls.G3tSmurf(**config["g3tsmurf"]["paths"])
-    ses = SMURF.Session()
-    obs = (
-        ses.query(ls.Observations)
-        .filter(ls.Observations.obs_id == config["g3tsmurf"]["obs_id"])
-        .one()
-    )
-    tunefile = obs.tunesets[0].path
-
     # Save the input paths for later reference
     types = ["config", "tunefile", "bgmap"]
     paths = [args.config_path, tunefile, config["bias_map"]]
@@ -465,15 +473,14 @@ def main():
         keys=["type", "path"],
         src=np.vstack((types, paths)).T,
     )
-    write_dataset(rset_paths, config["out_path"], "input_data_paths", overwrite=True)
+    write_dataset(rset_paths, outpath, "input_data_paths", overwrite=True)
 
     bp1_bg = (0, 1, 4, 5, 8, 9)
     bp2_bg = (2, 3, 6, 7, 10, 11)
 
     # If requested generate a template for the UFM with the instrument model
-    gen_template = "gen_template" in config
+    gen_template = config["gen_template"]
     if gen_template:
-        ufm = config["gen_template"]
         logger.info("Generating template for " + ufm)
         inst_model = InstModel(use_solution=False, array_names=(ufm,))
         wafer = inst_model.map_makers[ufm].wafer_layout_data.wafer_info
@@ -697,7 +704,7 @@ def main():
             count=len(det_id),
         )
         rset_data = metadata.ResultSet.from_friend(data_out)
-        write_dataset(rset_data, config["out_path"], "focal_plane", overwrite=True)
+        write_dataset(rset_data, outpath, "focal_plane", overwrite=True)
         sys.exit()
 
     if not gen_template:
@@ -776,7 +783,7 @@ def main():
         count=len(det_id),
     )
     rset_data = metadata.ResultSet.from_friend(data_out)
-    write_dataset(rset_data, config["out_path"], "focal_plane", overwrite=True)
+    write_dataset(rset_data, outpath, "focal_plane", overwrite=True)
 
 
 if __name__ == "__main__":
