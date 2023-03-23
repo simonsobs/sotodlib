@@ -183,7 +183,8 @@ def load_instrument_and_schedule(args, comm):
         thinfp=args.thinfp,
         comm=comm,
     )
-    log.info_rank("Loaded focalplane in", comm=comm, timer=timer)
+    ndet = len(telescope.focalplane.detectors)
+    log.info_rank(f"Loaded focalplane with {ndet} detectors in", comm=comm, timer=timer)
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"After loading focalplane:  {mem}", comm)
 
