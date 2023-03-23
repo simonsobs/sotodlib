@@ -316,12 +316,10 @@ Here's an annotated example:
         db_path: "/mnt/so1/shared/site-pipeline/data_pkg/chicago-latrt/g3tsmurf.db"
   
   # Configuration options
+  ufm: "Uv8"
+  gen_template: False # Generate template using InstModel
   radial_thresh: 2.0 # Threshoud at which to dut detectors based on their pointing
   dm_transform: True # Apply an initial transformation based on the detmap
-
-  # If an array name is given it will be used to generate the template to match against
-  # If this parameter is not provided the detmap will be used as the template
-  gen_template: "Uv8"
 
   # Settings to generate priors from detmap
   # Do not include if you dont want priors
@@ -342,8 +340,10 @@ Here's an annotated example:
     cpd_args: # Args to pass pycpd
       max_iterations: 1000
 
-  out_path: "results.h5"
-
+  outdir: "."
+  # Optional string to be appended to output filename.
+  # Will have a "_" before it.
+  append: "test" 
 
 Ouput file format
 `````````````````
