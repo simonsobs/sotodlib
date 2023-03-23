@@ -344,9 +344,9 @@ def match_template(
         TY: The transformed points.
     """
     if reverse:
-        cpd_args.update({"X": focal_plane.T, "Y": template.T})
+        cpd_args.update({"X": focal_plane, "Y": template})
     else:
-        cpd_args.update({"Y": focal_plane.T, "X": template.T})
+        cpd_args.update({"Y": focal_plane, "X": template})
     reg = AffineRegistration(**cpd_args)
 
     if vis:
@@ -492,7 +492,7 @@ def main():
                 did = f"{ufm}_f{int(det.bandpass):03}_{det.rhomb}r{det.det_row:02}c{det.det_col:02}{det.pol}"
                 det_ids.append(did)
                 template_bg.append(det.bias_line)
-        template = np.vstack((np.array(det_x), np.array(det_y), np.array(polang)))
+        template = np.column_stack((np.array(det_x), np.array(det_y), np.array(polang)))
         det_ids = np.array(det_ids)
         template_bp1 = np.isin(template_bg, bp1_bg)
         template_bp2 = np.isin(template_bg, bp2_bg)
@@ -556,14 +556,14 @@ def main():
             )
             dm_aman = aman.restrict("dets", aman.dets.vals[dm_msk], False)
 
-            template = np.vstack(
+            template = np.column_stack(
                 (
                     dm_aman.det_info.wafer.det_x,
                     dm_aman.det_info.wafer.det_y,
                     dm_aman.det_info.wafer.angle,
                 )
             )
-            master_template.append(np.vstack((template, dm_aman.det_info.det_id)))
+            master_template.append(np.column_stack((template, dm_aman.det_info.det_id)))
             template_bp1 = np.isin(dm_aman.det_info.wafer.bias_line, bp1_bg)
             template_bp2 = np.isin(dm_aman.det_info.wafer.bias_line, bp2_bg)
             det_ids = dm_aman.det_info.det_id
@@ -581,31 +581,33 @@ def main():
             priors_bp2 = priors[np.ix_(template_bp2, msk_bp2)]
 
         if pol:
-            focal_plane = np.vstack((aman.xi, aman.eta, pol[r_msk]))
-            original_focal_plane = np.vstack((original.xi, original.eta, pol[r_msk]))
+            focal_plane = np.column_stack((aman.xi, aman.eta, pol[r_msk]))
+            original_focal_plane = np.column_stack(
+                (original.xi, original.eta, pol[r_msk])
+            )
             _focal_plane = focal_plane
             ndim = 3
         else:
-            focal_plane = np.vstack(
+            focal_plane = np.column_stack(
                 (aman.xi, aman.eta, np.zeros_like(aman.eta) + np.nan)
             )
-            original_focal_plane = np.vstack(
+            original_focal_plane = np.column_stack(
                 (original.xi, original.eta, np.zeros_like(original.eta) + np.nan)
             )
-            _focal_plane = focal_plane[:-1]
-            template = template[:-1]
+            _focal_plane = focal_plane[:, :-1]
+            template = template[:, :-1]
             ndim = 2
 
         # Do actual matching
         map_bp1, out_bp1, P_bp1, TY_bp1 = match_template(
-            _focal_plane[:, msk_bp1],
-            template[:, template_bp1],
+            _focal_plane[msk_bp1],
+            template[template_bp1],
             priors=priors_bp1,
             **config["matching"],
         )
         map_bp2, out_bp2, P_bp2, TY_bp2 = match_template(
-            _focal_plane[:, msk_bp2],
-            template[:, template_bp2],
+            _focal_plane[msk_bp2],
+            template[template_bp2],
             priors=priors_bp2,
             **config["matching"],
         )
@@ -631,7 +633,7 @@ def main():
         bp_msk = np.zeros(aman.dets.count)
         bp_msk[msk_bp1] = 1
         bp_msk[msk_bp2] = 2
-        focal_plane = np.vstack(
+        focal_plane = np.column_stack(
             (
                 aman.det_info.smurf.band,
                 aman.det_info.smurf.channel,
@@ -640,7 +642,6 @@ def main():
                 bp_msk,
             )
         )
-        focal_plane = focal_plane.T
         focal_plane[out_msk] = np.nan
         for ri, fp in zip(aman.det_info.readout_id, focal_plane):
             try:
@@ -700,9 +701,9 @@ def main():
         sys.exit()
 
     if not gen_template:
-        template = np.unique(np.hstack(master_template), axis=1)
-        det_ids = template[-1]
-        template = template[:-1].astype(float)
+        template = np.unique(np.vstack(master_template), axis=0)
+        det_ids = template[:, -1]
+        template = template[:, :-1].astype(float)
 
     # Compute the average focal plane while ignoring outliers
     focal_plane = []
@@ -710,16 +711,16 @@ def main():
     for rid in readout_ids:
         avg_pointing = np.nanmedian(np.vstack(avg_fp[rid]), axis=0)
         focal_plane.append(avg_pointing)
-    focal_plane = np.vstack(focal_plane).T
+    focal_plane = np.column_stack(focal_plane)
     bp_msk = focal_plane[-1].astype(int)
     msk_bp1 = bp_msk == 1
     msk_bp2 = bp_msk == 2
     bc_avg_pointing = focal_plane[:5]
-    focal_plane = focal_plane[5:8]
+    focal_plane = focal_plane[5:8].T
     ndim = 3
-    if np.isnan(focal_plane[-1]).all():
-        focal_plane = focal_plane[:-1]
-        template = template[:-1]
+    if np.isnan(focal_plane[:, -1]).all():
+        focal_plane = focal_plane[:, :-1]
+        template = template[:, :-1]
         ndim = 2
 
     # Build priors from previous results
@@ -736,14 +737,14 @@ def main():
 
     # Do final matching
     map_bp1, out_bp1, P_bp1, TY_bp1 = match_template(
-        focal_plane[:, msk_bp1],
-        template[:, template_bp1],
+        focal_plane[msk_bp1],
+        template[template_bp1],
         priors=priors[np.ix_(template_bp1, msk_bp1)],
         **config["matching"],
     )
     map_bp2, out_bp2, P_bp1, TY_bp2 = match_template(
-        focal_plane[:, msk_bp2],
-        template[:, template_bp2],
+        focal_plane[msk_bp2],
+        template[template_bp2],
         priors=priors[np.ix_(template_bp2, msk_bp2)],
         **config["matching"],
     )
@@ -769,9 +770,6 @@ def main():
     logger.info(str(np.sum(msk_bp1 | msk_bp2)) + " detectors matched")
     logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
 
-    data_out = np.vstack(
-        (det_id, readout_ids, bc_avg_pointing, transformed.T, P_mapped, out_msk)
-    ).T
     data_out = np.fromiter(
         zip(det_id, readout_ids, *bc_avg_pointing, *transformed.T, P_mapped, out_msk),
         out_dt,
