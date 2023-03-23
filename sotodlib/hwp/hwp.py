@@ -6,11 +6,47 @@ import logging
 logger = logging.getLogger(__name__)
 
 def extract_hwpss(aman, signal=None, hwp_angle=None,
-                  bin_signal=True, bins=360, 
-                  lin_reg=True, modes=[2, 4, 6, 8],
-                  apply_prefilt=True, prefilt_cutoff=0.5,
+                  bin_signal=True, bins=3600, 
+                  lin_reg=True, modes=[1, 2, 3, 4, 6, 8],
+                  apply_prefilt=True, prefilt_cutoff=1.0,
                   mask_flags=True, add_to_aman=True, name='hwpss_extract'):
-    
+    """
+    Extracts HWP synchronous signal (HWPSS) from a time-ordered data (TOD) using linear regression or curve-fitting.
+
+    Parameters:
+    ----------
+    aman : AxisManager object
+        The TOD to extract HWPSS from.
+    signal : array-like, optional
+        The TOD signal to use. If not provided, aman.signal will be used
+    hwp_angle : array-like, optional
+        The HWP angle for each sample in aman. aman.hwp_angle will be used
+    bin_signal : bool, optional
+        Whether to bin the TOD signal into HWP angle bins before extracting HWPSS. Default is True.
+    bins : int, optional
+        The number of HWP angle bins to use if `bin_signal` is True. Default is 3600.
+    lin_reg : bool, optional
+        Whether to use linear regression to extract HWPSS from the binned signal. If False, curve-fitting will be used instead.
+        Default is True.
+    modes : list of int, optional
+        The HWPSS harmonic modes to extract. Default is [1, 2, 3, 4, 6, 8].
+    apply_prefilt : bool, optional
+        Whether to apply a high-pass filter to signal before extracting HWPSS. Default is True.
+    prefilt_cutoff : float, optional
+        The cutoff frequency of the high-pass filter, in Hz. Only used if `apply_prefilt` is True. Default is 1.0.
+    mask_flags : bool, optional
+        Whether to mask out flagged samples before extracting HWPSS. Default is True.
+    add_to_aman : bool, optional
+        Whether to add the extracted HWPSS to `aman` as a new signal axis. Default is True.
+    name : str, optional
+        The name to use for the new signal axis if `add_to_aman` is True. Default is 'hwpss_extract'.
+
+    Returns:
+    -------
+    aman_proc : AxisManager object
+        The processed TOD with the extracted HWPSS and associated statistics.
+    """
+
     if signal is None:
         if apply_prefilt: 
             filt = tod_ops.filters.high_pass_sine2(cutoff=prefilt_cutoff)
@@ -21,35 +57,60 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
     if hwp_angle is None:
         hwp_angle = aman.hwp_angle
             
+    # define aman_proc
+    mode_names = []
+    for mode in modes:
+        mode_names.append(f'S{mode}')
+        mode_names.append(f'C{mode}')
+    
+    aman_proc = core.AxisManager(aman.dets, aman.samps, core.LabelAxis(name='modes', vals=np.array(mode_names, dtype='<U3')))
     if bin_signal:
-        x, ys, yerrs = binning_signal(aman, signal, hwp_angle=None, bins=bins, mask_flags=mask_flags)
+        hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = binning_signal(aman, signal, hwp_angle=None, bins=bins, mask_flags=mask_flags)
+        aman_proc.wrap('hwp_angle_bin_centers', hwp_angle_bin_centers, [(0, core.IndexAxis('bin_samps', count=bins))])
+        aman_proc.wrap('binned_hwpss', binned_hwpss, [(0, 'dets'), (1, 'bin_samps')])
+        aman_proc.wrap('hwpss_sigma_bin', hwpss_sigma_bin, [(0, 'dets')])
+    
         if lin_reg:
-            fitsig_binned, coeffs, covars, redchi2s = hwpss_linreg(x, ys, yerrs, modes)
+            fitsig_binned, coeffs, covars, redchi2s = hwpss_linreg(x=hwp_angle_bin_centers, ys=binned_hwpss, yerrs=hwpss_sigma_bin, modes=modes)
         else:
-            Params_init = guess_hwpss_params(x, ys, modes)
-            fitsig_binned, coeffs, covars, redchi2s = hwpss_curvefit(x, ys, yerrs, modes, Params_init=Params_init)
-            
+            Params_init = guess_hwpss_params(x=hwp_angle_bin_centers, ys=binned_hwpss, modes=modes)
+            fitsig_binned, coeffs, covars, redchi2s = hwpss_curvefit(x=hwp_angle_bin_centers, ys=binned_hwpss, yerrs=hwpss_sigma_bin,
+                                                                     modes=modes, Params_init=Params_init)    
         # tod template
         fitsig_tod = harms_func(hwp_angle, modes, coeffs)
+        
+        # wrap the optimal values and stats
+        aman_proc.wrap('fitsig_binned', fitsig_binned, [(0, 'dets'), (1, 'bin_samps')])
+        aman_proc.wrap('coeffs', coeffs, [(0, 'dets'), (1, 'modes')])
+        aman_proc.wrap('covars', covars, [(0, 'dets'), (1, 'modes'), (2, 'modes')])
+        aman_proc.wrap('redchi2s', redchi2s, [(0, 'dets')])
+        aman_proc.wrap('fitsig_tod', fitsig_tod, [(0, 'dets'), (1, 'samps')])
         
     else:
         if mask_flags:
             m = ~aman.flags.glitches.mask()
         else:
             m = np.ones([aman.dets.count, aman.samps.count], dtype=bool)
-        x = hwp_angle
-        ys = signal
-        yerrs = np.std(signal, axis=-1) #!!!!!! FIX ME !!!!!!!!
+        
+        hwpss_sigma_tod = estimate_sigma_tod(signal, hwp_angle)
+        aman_proc.wrap('hwpss_sigma_tod', hwpss_sigma_tod, [(0, 'dets')])
         
         if lin_reg:
-            fitsig_tod, coeffs, covars, redchi2s = hwpss_linreg(x, ys, yerrs, modes)
+            fitsig_tod, coeffs, covars, redchi2s = hwpss_linreg(x=hwp_angle, ys=signal, yerrs=hwpss_sigma_tod, modes=modes)
             
         else:
             raise ValueError('Curve-fitting for TOD are specified.' + \
                              'It will take too long time and return meaningless result.' + \
                              'Specify (bin_signal, lin_reg) = (True, True) or (True, False) or (False, True)')
+            
+        aman_proc.wrap('coeffs', coeffs, [(0, 'dets'), (1, 'modes')])
+        aman_proc.wrap('covars', covars, [(0, 'dets'), (1, 'modes'), (2, 'modes')])
+        aman_proc.wrap('redchi2s', redchi2s, [(0, 'dets')])
+        aman_proc.wrap('fitsig_tod', fitsig_tod, [(0, 'dets'), (1, 'samps')])
     
-    return fitsig_tod, coeffs, covars, redchi2s
+    if add_to_aman:
+        aman.wrap(name, fitsig_tod, [(0, 'dets'), (1, 'samps')])
+    return aman_proc
 
 def binning_signal(aman, signal=None, hwp_angle=None,
                    bins=360, mask_flags=False):
@@ -110,11 +171,38 @@ def binning_signal(aman, signal=None, hwp_angle=None,
     # get sigma of each bin
     binned_hwpss_sigma = np.sqrt( np.abs(binned_hwpss_squared_mean - binned_hwpss**2)) / np.sqrt(np.where(hwpss_denom==0, 1, hwpss_denom))
     # use median of sigma of each bin as uniform sigma for a detector
-    hwpss_sigma = np.median(binned_hwpss_sigma, axis=-1)
+    hwpss_sigma = np.nanmedian(binned_hwpss_sigma, axis=-1)
     
     return hwp_angle_bin_centers, binned_hwpss, hwpss_sigma
     
 def hwpss_linreg(x, ys, yerrs, modes):
+    """
+    Performs a linear regression of the input data ys as a function of x, using a set of sine and cosine
+    basis functions defined by the input modes. Returns the fitted signal, the coefficients of the
+    basis functions, their covariance matrix, and the reduced chi-square.
+
+    Parameters:
+    -----------
+    x : numpy.ndarray
+        The independent variable values of the data points to fit.
+    ys : numpy.ndarray
+        The dependent variable values of the data points to fit.
+    yerrs : numpy.ndarray
+        The error estimates of the dependent variable values.
+    modes : list of int
+        The frequencies of the sine and cosine basis functions to use.
+
+    Returns:
+    --------
+    fitsig : numpy.ndarray
+        The fitted signal, obtained by evaluating the model with the optimal coefficients.
+    coeffs : numpy.ndarray
+        The coefficients of the sine and cosine basis functions that best fit the data.
+    covars : numpy.ndarray
+        The covariance matrix of the coefficients, estimated from the data errors.
+    redchi2s : numpy.ndarray
+        The reduced chi-square statistic of the fit, computed for each data point.
+    """
     vects = np.zeros([2*len(modes), x.shape[0]], dtype='float32')
     for i, mode in enumerate(modes):
         vects[2*i, :] = np.sin(mode*x)
@@ -128,7 +216,7 @@ def hwpss_linreg(x, ys, yerrs, modes):
     # covariance of coefficients
     covars = np.zeros((ys.shape[0], 2*len(modes), 2*len(modes)))    
     for det_idx in range(ys.shape[0]):
-        covars[det_idx, :, :] = I * yerrs[det_idx]
+        covars[det_idx, :, :] = I * yerrs[det_idx]**2
     
     # reduced chi-square
     redchi2s = np.sum(((ys - fitsig)/yerrs[:, np.newaxis])**2, axis=-1) / (x.shape[0] - 2*len(modes))
@@ -137,10 +225,40 @@ def hwpss_linreg(x, ys, yerrs, modes):
 
 
 def wrapper_harms_func(x, modes, *args):
+    """
+    A wrapper function for the harmonics function to be used for fitting data using Scipy's curve-fitting algorithm.
+    Parameters:
+    -----------
+    x : array-like
+        The x-values of the data points to be fitted.
+
+    modes : array-like
+        An array of integers representing the modes of the harmonics function.
+
+    *args : tuple
+        A tuple of arguments. The first argument should be an array of coefficients used to calculate the harmonics function.
+
+    Returns:
+    --------
+    y : array-like
+        An array of the same length as x representing the values of the harmonics function evaluated at x using the given 
+        modes and coefficients.
+    """
     coeffs = np.array(args[0])
     return harms_func(x, modes, coeffs) 
 
 def harms_func(x, modes, coeffs):
+    """
+    calculates the harmonics function given the input values, modes and coefficients.
+
+    Parameters:
+    x (numpy.ndarray): Input values
+    modes (list): List of modes to be used in the harmonics function
+    coeffs (numpy.ndarray): Coefficients of the harmonics function
+
+    Returns:
+    numpy.ndarray: The calculated harmonics function.
+    """
     vects = np.zeros([2*len(modes), x.shape[0]], dtype='float32')
     for i, mode in enumerate(modes):
         vects[2*i, :] = np.sin(mode*x)
@@ -150,6 +268,21 @@ def harms_func(x, modes, coeffs):
     return harmonics
 
 def guess_hwpss_params(x, ys, modes):
+    """
+    Compute initial guess for the coefficients of a harmonics-based fit to data.
+
+    Parameters
+    ----------
+    x : array-like of shape (nsamps,)
+    ys : array-like of shape (ndets, nsamps)
+    modes : array-like of shape (nmodes,)
+        List of modes to use in the fit.
+
+    Returns
+    -------
+    Params_init : ndarray of shape (m, 2*p)
+        Initial guess for the coefficients of a harmonics-based fit to the data.
+    """
     vects = np.zeros([2*len(modes), x.shape[0]], dtype='float32')
     for i, mode in enumerate(modes):
         vects[2*i, :] = np.sin(mode*x)
@@ -158,6 +291,39 @@ def guess_hwpss_params(x, ys, modes):
     return Params_init
 
 def hwpss_curvefit(x, ys, yerrs, modes, Params_init=None):
+    """
+    Fit harmonics to input data using scipy's curve_fit method.
+
+    Parameters
+    ----------
+    x : array_like
+        1-D array of x values.
+    ys : array_like
+        2-D array of y values for each detector.
+    yerrs : array_like
+        1-D array of the standard deviation of the y values for each detector.
+    modes : array_like
+        1-D array of mode numbers to be fitted.
+    Params_init : array_like, optional
+        2-D array of initial parameter values for each detector. Default is None.
+
+    Returns
+    -------
+    fitsig : ndarray
+        2-D array of the fitted values for each detector.
+    coeffs : ndarray
+        2-D array of the fitted coefficients for each detector.
+    covars : ndarray
+        3-D array of the covariance matrix of the fitted coefficients for each detector.
+    redchi2s : ndarray
+        1-D array of the reduced chi-square values for each detector.
+
+    Notes
+    -----
+    This function fits a set of harmonic functions to the input data using scipy's curve_fit method.
+    The `modes` parameter specifies the mode numbers to be fitted.
+    The `Params_init` parameter can be used to provide initial guesses for the fit parameters.
+    """
     N_dets = ys.shape[0]
     N_samps = ys.shape[-1]
     N_modes = len(modes)
@@ -185,6 +351,36 @@ def hwpss_curvefit(x, ys, yerrs, modes, Params_init=None):
         
     return fitsig, coeffs, covars, redchi2s
 
+def estimate_sigma_tod(signal, hwp_angle):
+    """
+    Estimate the noise level of a signal in a time-ordered data (TOD) using a half-wave plate (HWP) modulation.
+
+    Parameters
+    ----------
+    signal : ndarray
+        A 2D numpy array of shape (n_dets, n_samps) containing the TOD of each detector.
+    hwp_angle : ndarray
+        A 1D numpy array containing the HWP angles in degrees.
+
+    Returns
+    -------
+    hwpss_sigma_tod : ndarray
+        A 1D numpy array containing the estimated noise level for each detector.
+
+    Notes
+    -----
+    This function computes the mean of the signal in each period of HWP rotation and multiplies it
+    by the square root of the number of samples in that period. The standard deviation of the
+    resulting values for all periods is then computed and returned as the estimated sigma of each data point.
+    """
+    hwp_zeros_idxes = np.where(np.abs(np.diff(hwp_angle)) > 5)[0][:] + 1
+    hwpss_sigma_tod = np.zeros((signal.shape[0], hwp_zeros_idxes.shape[0] - 1 ))
+
+    for i, (init_idx, end_idx) in enumerate(zip(hwp_zeros_idxes[:-1], hwp_zeros_idxes[1:])):
+        hwpss_sigma_tod[:, i] = np.mean(signal[:, init_idx:end_idx], axis=-1) * np.sqrt(end_idx - init_idx)
+    hwpss_sigma_tod = np.std(hwpss_sigma_tod, axis=-1)
+    return hwpss_sigma_tod
+
 def subtract_hwpss(aman, signal=None, hwpss_template=None,
                    subtract_name='hwpss_remove'):
     """
@@ -193,7 +389,7 @@ def subtract_hwpss(aman, signal=None, hwpss_template=None,
     if signal is None:
         signal = aman.signal
     if hwpss_template is None:
-        hwpss_template = aman.hwpss_ext
+        hwpss_template = aman['hwpss_extract']
 
     aman.wrap(subtract_name, np.subtract(signal, hwpss_template), [(0,'dets'), (1,'samps')])
 
