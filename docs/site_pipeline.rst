@@ -334,7 +334,6 @@ Here's an annotated example:
   # Settings for the matching processes
   matching:
     out_thresh: .4 # Liklihood below which things will be considered outliers
-    invert: False # Invert the likelihood array
     reverse: False # Reverse the match direction
     vis: False # Play an animation of match iterations
     cpd_args: # Args to pass pycpd
