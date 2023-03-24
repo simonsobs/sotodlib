@@ -359,8 +359,24 @@ class Imprinter:
             with open(m_index_file, 'r') as f:
                 meta = yaml.safe_load(f)
 
-            meta['telescope'] = book.tel_tube
-            meta['book_type'] = book.type
+            meta['telescope'] = book.tel_tube[:3].lower()
+            # parse e.g., sat1 -> st1, latc1 -> c1
+            meta['tube_slot'] = book.tel_tube.lower().replace("sat","satst")[3:]
+            meta['type'] = book.type
+            detsets = []
+            tags = []
+            for _, g3tobs in self.get_g3tsmurf_obs_for_book(book).items():
+                detsets.append(g3tobs.tunesets[0].name)
+                tags.append(g3tobs.tag)
+            meta['detsets'] = detsets
+            # make sure all tags are the same for obs in the same book
+            tags = list(set(tags))
+            assert len(tags) == 1
+            tags = tags[0].split(',')
+            # book should have at least one tag
+            assert len(tags) > 0
+            meta['subtype'] = tags[1] if len(tags) > 1 else ""
+            meta['tags'] = tags[2:]
             meta['stream_ids'] = book.slots.split(',')
 
             # add meta files
@@ -376,7 +392,7 @@ class Imprinter:
             book_meta = {}
             book_meta['book'] = {
                 "type": book.type,
-                "schema_version": "v0",
+                "schema_version": 0,
                 "book_id": book.bid,
                 "finalized_at": dt.datetime.utcnow().isoformat(),
             }
