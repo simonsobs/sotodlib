@@ -645,7 +645,7 @@ def main():
         # Store outputs for now
         results[0].append(aman.det_info.readout_id)
         results[1].append(det_ids)
-        P = np.zeros(priors.shape, dtype=bool)
+        P = np.zeros((len(template), len(focal_plane)), dtype=bool)
         P[np.ix_(template_bp1, msk_bp1)] = P_bp1
         P[np.ix_(template_bp2, msk_bp2)] = P_bp2
         results[2].append(P)
