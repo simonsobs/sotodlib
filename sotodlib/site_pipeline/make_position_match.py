@@ -276,8 +276,23 @@ def visualize(iteration, error, X, Y, ax):
         ax: Axis to use for plots.
     """
     plt.cla()
-    ax.scatter(X[:, 0], X[:, 1], color="red", label="Target")
-    ax.scatter(Y[:, 0], Y[:, 1], color="blue", label="Source")
+    ax.scatter(
+        X[:, 1],
+        X[:, 2],
+        c=np.around(X[:, 0]) / 11.0,
+        cmap="Set3",
+        alpha=0.5,
+        label="Target",
+    )
+    ax.scatter(
+        Y[:, 1],
+        Y[:, 2],
+        c=np.around(Y[:, 0]) / 11.0,
+        cmap="Set3",
+        alpha=1.0,
+        marker="X",
+        label="Source",
+    )
     plt.text(
         0.87,
         0.92,
@@ -499,7 +514,9 @@ def main():
                 did = f"{ufm}_f{int(det.bandpass):03}_{det.rhomb}r{det.det_row:02}c{det.det_col:02}{det.pol}"
                 det_ids.append(did)
                 template_bg.append(det.bias_line)
-        template = np.column_stack((np.array(det_x), np.array(det_y), np.array(polang)))
+        template = np.column_stack(
+            (np.array(template_bg), np.array(det_x), np.array(det_y), np.array(polang))
+        )
         det_ids = np.array(det_ids)
         template_bp1 = np.isin(template_bg, bp1_bg)
         template_bp2 = np.isin(template_bg, bp2_bg)
@@ -565,6 +582,7 @@ def main():
 
             template = np.column_stack(
                 (
+                    dm_aman.det_info.wafer.bias_line,
                     dm_aman.det_info.wafer.det_x,
                     dm_aman.det_info.wafer.det_y,
                     dm_aman.det_info.wafer.angle,
@@ -588,7 +606,7 @@ def main():
             priors_bp2 = priors[np.ix_(template_bp2, msk_bp2)]
 
         if pol:
-            focal_plane = np.column_stack((aman.xi, aman.eta, pol[r_msk]))
+            focal_plane = np.column_stack((bias_group, aman.xi, aman.eta, pol[r_msk]))
             original_focal_plane = np.column_stack(
                 (original.xi, original.eta, pol[r_msk])
             )
@@ -596,7 +614,7 @@ def main():
             ndim = 3
         else:
             focal_plane = np.column_stack(
-                (aman.xi, aman.eta, np.zeros_like(aman.eta) + np.nan)
+                (bias_group, aman.xi, aman.eta, np.zeros_like(aman.eta) + np.nan)
             )
             original_focal_plane = np.column_stack(
                 (original.xi, original.eta, np.zeros_like(original.eta) + np.nan)
@@ -684,8 +702,8 @@ def main():
         logger.info(str(np.sum(det_id == aman.det_info.det_id)) + " match with detmap")
 
         transformed = np.nan + np.zeros((aman.dets.count, 3))
-        transformed[msk_bp1, :ndim] = TY_bp1
-        transformed[msk_bp2, :ndim] = TY_bp2
+        transformed[msk_bp1, :ndim] = TY_bp1[:, 1:]
+        transformed[msk_bp2, :ndim] = TY_bp2[:, 1:]
 
         P_mapped = np.zeros(aman.dets.count)
         P_mapped[msk_bp1] = P_bp1[map_bp1, range(P_bp1.shape[1])]
@@ -723,7 +741,7 @@ def main():
     msk_bp1 = bp_msk == 1
     msk_bp2 = bp_msk == 2
     bc_avg_pointing = focal_plane[:5]
-    focal_plane = focal_plane[5:8].T
+    focal_plane = focal_plane[5:9].T
     ndim = 3
     if np.isnan(focal_plane[:, -1]).all():
         focal_plane = focal_plane[:, :-1]
@@ -758,8 +776,8 @@ def main():
 
     # Make final outputs and save
     transformed = np.nan + np.zeros((len(readout_ids), 3))
-    transformed[msk_bp1, :ndim] = TY_bp1
-    transformed[msk_bp2, :ndim] = TY_bp2
+    transformed[msk_bp1, :ndim] = TY_bp1[:, 1:]
+    transformed[msk_bp2, :ndim] = TY_bp2[:, 1:]
 
     det_id = np.zeros(len(readout_ids), dtype=np.dtype(("U", len(det_ids[0]))))
     det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
