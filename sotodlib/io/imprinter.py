@@ -4,6 +4,7 @@ from collections import OrderedDict
 from typing import List
 import yaml, traceback
 import shutil
+import sotodlib
 
 import sqlalchemy as db
 from sqlalchemy import or_, and_, not_
@@ -353,14 +354,56 @@ class Imprinter:
                            smurf_timestamps=timestamps,
                            frameproc_config={"readout_ids": rids})()
 
-            # Add meta files to M_index
+            # update metadata in M_index file
+            m_index_file = os.path.join(book_path, 'M_index.yaml')
+            with open(m_index_file, 'r') as f:
+                meta = yaml.safe_load(f)
+
+            meta['telescope'] = book.tel_tube[:3].lower()
+            # parse e.g., sat1 -> st1, latc1 -> c1
+            meta['tube_slot'] = book.tel_tube.lower().replace("sat","satst")[3:]
+            meta['type'] = book.type
+            detsets = []
+            tags = []
+            for _, g3tobs in self.get_g3tsmurf_obs_for_book(book).items():
+                detsets.append(g3tobs.tunesets[0].name)
+                tags.append(g3tobs.tag)
+            meta['detsets'] = detsets
+            # make sure all tags are the same for obs in the same book
+            tags = list(set(tags))
+            assert len(tags) == 1
+            tags = tags[0].split(',')
+            # book should have at least one tag
+            assert len(tags) > 0
+            meta['subtype'] = tags[1] if len(tags) > 1 else ""
+            meta['tags'] = tags[2:]
+            meta['stream_ids'] = book.slots.split(',')
+
+            # add meta files
             if (book.type == 'oper') and meta_files:
-                mfile = os.path.join(book_path, 'M_index.yaml')
-                with open(mfile, 'r') as f:
-                    meta = yaml.safe_load(f)
                 meta['meta_files'] = meta_files
-                with open(mfile, 'w') as f:
-                    yaml.dump(meta, f)
+
+            # write back to M_index file
+            with open(m_index_file, 'w') as f:
+                yaml.dump(meta, f)
+
+            # write M_book file
+            m_book_file = os.path.join(book_path, 'M_book.yaml')
+            book_meta = {}
+            book_meta['book'] = {
+                "type": book.type,
+                "schema_version": 0,
+                "book_id": book.bid,
+                "finalized_at": dt.datetime.utcnow().isoformat(),
+            }
+            book_meta['bookbinder'] = {
+                "codebase": sotodlib.__file__,
+                "version": sotodlib.__version__,
+                "context": self.config.get('context', 'unknown')
+            }
+
+            with open(m_book_file, 'w') as f:
+                yaml.dump(book_meta, f)
 
             # not sure if this is the best place to update
             book.status = BOUND
