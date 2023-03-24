@@ -11,6 +11,7 @@ from sotodlib.core import AxisManager, metadata
 from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
 from scipy.spatial.transform import Rotation as R
+from scipy.optimize import linear_sum_assignment
 from pycpd import AffineRegistration
 from detmap.inst_model import InstModel
 
@@ -338,8 +339,6 @@ def match_template(
                     Should be in range [0, 1) and is checked against the
                     probability that a point matches its mapped point in the template.
 
-        invert: Invert the likelihood array to try and find the maximum likelihood solution.
-
         reverse: Reverse dirction of match.
 
         vis: If true generate plots to watch the matching process.
@@ -380,12 +379,10 @@ def match_template(
 
     if priors is None:
         priors = 1
-    if invert:
-        # This should get the maximum probability without collisions
-        inv = np.linalg.pinv(P * priors)
-        mapping = np.argmax(inv, axis=1)
-    else:
-        mapping = np.argmax(P * priors, axis=0)
+
+    # Solve the assignment problem
+    row_ind, col_ind = linear_sum_assignment(P * priors, True)
+    mapping = row_ind[np.argsort(col_ind)]
 
     outliers = np.array([])
     if out_thresh > 0:
