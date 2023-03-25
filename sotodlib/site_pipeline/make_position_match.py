@@ -313,7 +313,6 @@ def match_template(
     template,
     priors=None,
     out_thresh=0,
-    invert=True,
     reverse=False,
     vis=False,
     cpd_args={},
@@ -416,8 +415,8 @@ def main():
     # NOTE: Eventually all of this should just be metadata I can load from a single context?
 
     # Making some assumtions about pointing data that aren't currently true:
-    # 1. I am assuming that the HDF5 file is a saved aman not a pandas results set
-    # 2. I am assuming it comtains aman.det_info
+    # 1. I am assuming that the HDF5 file is a ResultSet
+    # 2. I am assuming it contains aman.det_info
     parser.add_argument("config_path", help="Location of the config file")
     args = parser.parse_args()
 
