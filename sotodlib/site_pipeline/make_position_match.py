@@ -259,7 +259,7 @@ def transform_from_detmap(aman):
     aman.eta = transformed[:, 1]
 
 
-def visualize(iteration, error, X, Y, ax):
+def visualize(iteration, error, X, Y, ax, bias_lines):
     """
     Visualize CPD matching process.
     Lifted from the pycpd example scripts.
@@ -275,24 +275,23 @@ def visualize(iteration, error, X, Y, ax):
         Y: The source points.
 
         ax: Axis to use for plots.
+
+        bias_lines: True if bias lines are included in points.
     """
+    if bias_lines:
+        x = 1
+        y = 2
+        c_t = np.around(X[:, 0]) / 11.0
+        c_s = np.around(Y[:, 0]) / 11.0
+    else:
+        x = 0
+        y = 1
+        c_t = 0.0
+        c_s = 1.0
     plt.cla()
+    ax.scatter(X[:, x], X[:, y], c=c_t, cmap="Set3", alpha=0.1, label="Target")
     ax.scatter(
-        X[:, 1],
-        X[:, 2],
-        c=np.around(X[:, 0]) / 11.0,
-        cmap="Set3",
-        alpha=0.5,
-        label="Target",
-    )
-    ax.scatter(
-        Y[:, 1],
-        Y[:, 2],
-        c=np.around(Y[:, 0]) / 11.0,
-        cmap="Set3",
-        alpha=1.0,
-        marker="X",
-        label="Source",
+        Y[:, x], Y[:, y], c=c_s, cmap="Set3", alpha=1.0, marker="X", label="Source"
     )
     plt.text(
         0.87,
@@ -313,6 +312,7 @@ def match_template(
     template,
     priors=None,
     out_thresh=0,
+    bias_lines=True,
     reverse=False,
     vis=False,
     cpd_args={},
@@ -338,6 +338,8 @@ def match_template(
                     Should be in range [0, 1) and is checked against the
                     probability that a point matches its mapped point in the template.
 
+        bias_lines: Include bias lines in matching.
+
         reverse: Reverse dirction of match.
 
         vis: If true generate plots to watch the matching process.
@@ -357,6 +359,9 @@ def match_template(
 
         TY: The transformed points.
     """
+    if not bias_lines:
+        focal_plane = focal_plane[:, 1:]
+        template = template[:, 1:]
     if reverse:
         cpd_args.update({"X": focal_plane, "Y": template})
     else:
@@ -366,7 +371,7 @@ def match_template(
     if vis:
         fig = plt.figure()
         fig.add_axes([0, 0, 1, 1])
-        callback = partial(visualize, ax=fig.axes[0])
+        callback = partial(visualize, ax=fig.axes[0], bias_lines=bias_lines)
         reg.register(callback)
         plt.show()
     else:
@@ -375,6 +380,9 @@ def match_template(
     P = reg.P.T
     if reverse:
         P = reg.P
+    TY = reg.TY
+    if not bias_lines:
+        TY = np.column_stack((np.zeros(len(TY)), TY))
 
     if priors is None:
         priors = 1
@@ -387,7 +395,7 @@ def match_template(
     if out_thresh > 0:
         outliers = np.where(P[mapping, range(P.shape[1])] < out_thresh)[0]
 
-    return mapping, outliers, P, reg.TY
+    return mapping, outliers, P, TY
 
 
 def main():
