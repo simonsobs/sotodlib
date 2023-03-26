@@ -494,8 +494,7 @@ def main():
     )
     write_dataset(rset_paths, outpath, "input_data_paths", overwrite=True)
 
-    bp1_bg = (0, 1, 4, 5, 8, 9)
-    bp2_bg = (2, 3, 6, 7, 10, 11)
+    valid_bg = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
 
     # If requested generate a template for the UFM with the instrument model
     gen_template = config["gen_template"]
@@ -507,6 +506,7 @@ def main():
         polang = []
         det_ids = []
         template_bg = []
+        is_north = []
         for det in wafer.grab_metadata():
             if not det.is_optical:
                 continue
@@ -515,12 +515,14 @@ def main():
             polang.append(det.angle_actual_deg)
             det_ids.append(det.detector_id)
             template_bg.append(det.bias_line)
+            is_north.append(det.is_north)
         template = np.column_stack(
             (np.array(template_bg), np.array(det_x), np.array(det_y), np.array(polang))
         )
         det_ids = np.array(det_ids)
-        template_bp1 = np.isin(template_bg, bp1_bg)
-        template_bp2 = np.isin(template_bg, bp2_bg)
+        template_msk = np.isin(template_bg, valid_bg)
+        template_n = np.array(is_north) & template_msk
+        template_s = ~np.array(is_north) & template_msk
 
     reverse = config["matching"].get("reverse", False)
     if reverse:
@@ -528,8 +530,8 @@ def main():
             "Matching running in reverse mode. meas_x and meas_y will actually be fit pointing."
         )
     make_priors = "priors" in config
-    priors_bp1 = None
-    priors_bp2 = None
+    priors_n = None
+    priors_s = None
     avg_fp = {}
     master_template = []
     results = [[], [], []]
@@ -559,17 +561,20 @@ def main():
             )
             bias_group[i] = bg_map["bgmap"][msk][0]
 
-        msk_bp1 = np.isin(bias_group, bp1_bg)
-        msk_bp2 = np.isin(bias_group, bp2_bg)
+        msk_bp = np.isin(bias_group, valid_bg)
 
         bl_diff = np.sum(~(bias_group == aman.det_info.wafer.bias_line)) - np.sum(
-            ~(msk_bp1 | msk_bp2)
+            ~(msk_bp)
         )
         logger.info(
             "\t"
             + str(bl_diff)
             + " detectors have bias lines that don't match the detmap"
         )
+
+        north = np.isin(aman.det_info.smurf.band.astype(int), (0, 1, 2, 3))
+        msk_n = north & msk_bp
+        msk_s = (~north) & msk_bp
 
         # Prep inputs
         dm_msk = slice(None)
@@ -590,9 +595,10 @@ def main():
                 )
             )
             master_template.append(np.column_stack((template, dm_aman.det_info.det_id)))
-            template_bp1 = np.isin(dm_aman.det_info.wafer.bias_line, bp1_bg)
-            template_bp2 = np.isin(dm_aman.det_info.wafer.bias_line, bp2_bg)
             det_ids = dm_aman.det_info.det_id
+            template_msk = np.isin(dm_aman.det_info.wafer.bias_line, valid_bg)
+            template_n = dm_aman.det_info.wafer.is_north & template_msk
+            template_s = ~(dm_aman.det_info.wafer.is_north) & template_msk
 
         if make_priors:
             priors = gen_priors(
@@ -603,8 +609,8 @@ def main():
                 config["priors"]["width"],
                 config["priors"]["basis"],
             )
-            priors_bp1 = priors[np.ix_(template_bp1, msk_bp1)]
-            priors_bp2 = priors[np.ix_(template_bp2, msk_bp2)]
+            priors_n = priors[np.ix_(template_n, msk_n)]
+            priors_s = priors[np.ix_(template_s, msk_s)]
 
         if pol:
             focal_plane = np.column_stack((bias_group, aman.xi, aman.eta, pol[r_msk]))
@@ -625,21 +631,21 @@ def main():
             ndim = 2
 
         # Do actual matching
-        map_bp1, out_bp1, P_bp1, TY_bp1 = match_template(
-            _focal_plane[msk_bp1],
-            template[template_bp1],
-            priors=priors_bp1,
+        map_n, out_n, P_n, TY_n = match_template(
+            _focal_plane[msk_n],
+            template[template_n],
+            priors=priors_n,
             **config["matching"],
         )
-        map_bp2, out_bp2, P_bp2, TY_bp2 = match_template(
-            _focal_plane[msk_bp2],
-            template[template_bp2],
-            priors=priors_bp2,
+        map_s, out_s, P_s, TY_s = match_template(
+            _focal_plane[msk_s],
+            template[template_s],
+            priors=priors_s,
             **config["matching"],
         )
         P_avg = (
-            np.median(P_bp1[map_bp1, range(P_bp1.shape[1])])
-            + np.median(P_bp2[map_bp2, range(P_bp2.shape[1])])
+            np.median(P_n[map_n, range(P_n.shape[1])])
+            + np.median(P_s[map_s, range(P_s.shape[1])])
         ) / 2
         logger.info("\tAverage matched likelihood = " + str(P_avg))
 
@@ -647,25 +653,24 @@ def main():
         results[0].append(aman.det_info.readout_id)
         results[1].append(det_ids)
         P = np.zeros((len(template), len(focal_plane)), dtype=bool)
-        P[np.ix_(template_bp1, msk_bp1)] = P_bp1
-        P[np.ix_(template_bp2, msk_bp2)] = P_bp2
+        P[np.ix_(template_n, msk_n)] = P_n
+        P[np.ix_(template_s, msk_s)] = P_s
         results[2].append(P)
 
         out_msk = np.zeros(aman.dets.count, dtype=bool)
-        out_msk[np.flatnonzero(msk_bp1)[out_bp1]] = True
-        out_msk[np.flatnonzero(msk_bp2)[out_bp2]] = True
-        out_msk[~(msk_bp1 | msk_bp2)] = True
+        out_msk[np.flatnonzero(msk_n)[out_n]] = True
+        out_msk[np.flatnonzero(msk_s)[out_s]] = True
+        out_msk[~(msk_n | msk_s)] = True
 
-        bp_msk = np.zeros(aman.dets.count)
-        bp_msk[msk_bp1] = 1
-        bp_msk[msk_bp2] = 2
+        ns_msk = np.zeros(aman.dets.count)
+        ns_msk[msk_n] = 1
         focal_plane = np.column_stack(
             (
                 aman.det_info.smurf.band,
                 aman.det_info.smurf.channel,
                 original_focal_plane,
                 focal_plane,
-                bp_msk,
+                ns_msk,
             )
         )
         focal_plane[out_msk, 2:] = np.nan
@@ -695,20 +700,20 @@ def main():
     # It we only have a single dataset
     if len(pointing_paths) == 1:
         det_id = np.zeros(aman.dets.count, dtype=det_ids.dtype)
-        det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
-        det_id[msk_bp2] = det_ids[template_bp2][map_bp2]
+        det_id[msk_n] = det_ids[template_n][map_n]
+        det_id[msk_s] = det_ids[template_s][map_s]
 
-        logger.info(str(np.sum(msk_bp1 | msk_bp2)) + " detectors matched")
+        logger.info(str(np.sum(msk_n | msk_s)) + " detectors matched")
         logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
         logger.info(str(np.sum(det_id == aman.det_info.det_id)) + " match with detmap")
 
         transformed = np.nan + np.zeros((aman.dets.count, 3))
-        transformed[msk_bp1, :ndim] = TY_bp1[:, 1:]
-        transformed[msk_bp2, :ndim] = TY_bp2[:, 1:]
+        transformed[msk_n, :ndim] = TY_n[:, 1:]
+        transformed[msk_s, :ndim] = TY_s[:, 1:]
 
         P_mapped = np.zeros(aman.dets.count)
-        P_mapped[msk_bp1] = P_bp1[map_bp1, range(P_bp1.shape[1])]
-        P_mapped[msk_bp2] = P_bp2[map_bp2, range(P_bp2.shape[1])]
+        P_mapped[msk_n] = P_n[map_n, range(P_n.shape[1])]
+        P_mapped[msk_s] = P_s[map_s, range(P_s.shape[1])]
 
         data_out = np.fromiter(
             zip(
@@ -738,9 +743,8 @@ def main():
         avg_pointing = np.nanmedian(np.vstack(avg_fp[rid]), axis=0)
         focal_plane.append(avg_pointing)
     focal_plane = np.column_stack(focal_plane)
-    bp_msk = focal_plane[-1].astype(int)
-    msk_bp1 = bp_msk == 1
-    msk_bp2 = bp_msk == 2
+    msk_n = focal_plane[-1].astype(bool)
+    msk_s = ~msk_n
     bc_avg_pointing = focal_plane[:5]
     focal_plane = focal_plane[5:9].T
     ndim = 3
@@ -762,38 +766,38 @@ def main():
         )
 
     # Do final matching
-    map_bp1, out_bp1, P_bp1, TY_bp1 = match_template(
-        focal_plane[msk_bp1],
-        template[template_bp1],
-        priors=priors[np.ix_(template_bp1, msk_bp1)],
+    map_n, out_n, P_n, TY_n = match_template(
+        focal_plane[msk_n],
+        template[template_n],
+        priors=priors[np.ix_(template_n, msk_n)],
         **config["matching"],
     )
-    map_bp2, out_bp2, P_bp1, TY_bp2 = match_template(
-        focal_plane[msk_bp2],
-        template[template_bp2],
-        priors=priors[np.ix_(template_bp2, msk_bp2)],
+    map_s, out_s, P_n, TY_s = match_template(
+        focal_plane[msk_s],
+        template[template_s],
+        priors=priors[np.ix_(template_s, msk_s)],
         **config["matching"],
     )
 
     # Make final outputs and save
     transformed = np.nan + np.zeros((len(readout_ids), 3))
-    transformed[msk_bp1, :ndim] = TY_bp1[:, 1:]
-    transformed[msk_bp2, :ndim] = TY_bp2[:, 1:]
+    transformed[msk_n, :ndim] = TY_n[:, 1:]
+    transformed[msk_s, :ndim] = TY_s[:, 1:]
 
     det_id = np.zeros(len(readout_ids), dtype=np.dtype(("U", len(det_ids[0]))))
-    det_id[msk_bp1] = det_ids[template_bp1][map_bp1]
-    det_id[msk_bp2] = det_ids[template_bp2][map_bp2]
+    det_id[msk_n] = det_ids[template_n][map_n]
+    det_id[msk_s] = det_ids[template_s][map_s]
 
     out_msk = np.zeros(len(readout_ids), dtype=bool)
-    out_msk[np.flatnonzero(msk_bp1)[out_bp1]] = True
-    out_msk[np.flatnonzero(msk_bp2)[out_bp2]] = True
-    out_msk[~(msk_bp1 | msk_bp2)] = True
+    out_msk[np.flatnonzero(msk_n)[out_n]] = True
+    out_msk[np.flatnonzero(msk_s)[out_s]] = True
+    out_msk[~(msk_n | msk_s)] = True
 
     P_mapped = np.zeros(len(readout_ids))
-    P_mapped[msk_bp1] = P_bp1[map_bp1, range(P_bp1.shape[1])]
-    P_mapped[msk_bp2] = P_bp2[map_bp2, range(P_bp2.shape[1])]
+    P_mapped[msk_n] = P_n[map_n, range(P_n.shape[1])]
+    P_mapped[msk_s] = P_s[map_s, range(P_s.shape[1])]
 
-    logger.info(str(np.sum(msk_bp1 | msk_bp2)) + " detectors matched")
+    logger.info(str(np.sum(msk_n | msk_s)) + " detectors matched")
     logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
 
     data_out = np.fromiter(
