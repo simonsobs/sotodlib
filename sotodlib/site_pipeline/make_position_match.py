@@ -13,7 +13,7 @@ from sotodlib.site_pipeline import util
 from scipy.spatial.transform import Rotation as R
 from scipy.optimize import linear_sum_assignment
 from pycpd import AffineRegistration
-from detmap.inst_model import InstModel
+from detmap.makemap import MapMaker
 
 logger = util.init_logger(__name__, "make_position_match: ")
 
@@ -501,23 +501,20 @@ def main():
     gen_template = config["gen_template"]
     if gen_template:
         logger.info("Generating template for " + ufm)
-        inst_model = InstModel(use_solution=False, array_names=(ufm,))
-        wafer = inst_model.map_makers[ufm].wafer_layout_data.wafer_info
+        wafer = MapMaker(north_is_highband=False, array_name=ufm)
         det_x = []
         det_y = []
         polang = []
         det_ids = []
         template_bg = []
-        for mlp in wafer.values():
-            for det in mlp.values():
-                if not det.is_optical:
-                    continue
-                det_x.append(det.det_x)
-                det_y.append(det.det_y)
-                polang.append(det.angle_actual_deg)
-                did = f"{ufm}_f{int(det.bandpass):03}_{det.rhomb}r{det.det_row:02}c{det.det_col:02}{det.pol}"
-                det_ids.append(did)
-                template_bg.append(det.bias_line)
+        for det in wafer.grab_metadata():
+            if not det.is_optical:
+                continue
+            det_x.append(det.det_x)
+            det_y.append(det.det_y)
+            polang.append(det.angle_actual_deg)
+            det_ids.append(det.detector_id)
+            template_bg.append(det.bias_line)
         template = np.column_stack(
             (np.array(template_bg), np.array(det_x), np.array(det_y), np.array(polang))
         )
