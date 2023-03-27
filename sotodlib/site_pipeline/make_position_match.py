@@ -481,13 +481,14 @@ def main():
     bg_map = np.load(config["bias_map"], allow_pickle=True).item()
 
     # Save the input paths for later reference
-    types = ["config", "tunefile", "bgmap"]
-    paths = [args.config_path, tunefile, config["bias_map"]]
+    types = ["config", "tunefile", "bgmap", "results"]
+    paths = [args.config_path, tunefile, config["bias_map"], outpath]
     types += ["pointing"] * len(pointing_paths)
     paths += list(pointing_paths)
     if "polangs" in config:
         types += ["polang"] * len(polangs)
         paths += list(pointing_paths)
+    paths = [os.path.abspath(p) for p in paths]
     rset_paths = metadata.ResultSet(
         keys=["type", "path"],
         src=np.vstack((types, paths)).T,
