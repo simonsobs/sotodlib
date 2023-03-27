@@ -60,8 +60,8 @@ def make_map(tod,
     mQ_weighted = PQU.to_map(tod=tod, signal=tod[demodQ_name])
     mU_weighted = PQU.to_map(tod=tod, signal=tod[demodU_name])
     mQU_weighted = PQU.zeros()
-    mQU_weighted[0][:] = mQ_weighted[0] - mU_weighted[1] # (= Q_{boresight coord}*cos(2 theta_pa) - U_{boresight coord}*sin(2 theta_pa) )
-    mQU_weighted[1][:] = mQ_weighted[1] + mU_weighted[0] # (= Q_{boresight coord}*sin(2 theta_pa) + U_{boresight coord}*cos(2 theta_pa) )
+    mQU_weighted[0][:] = mQ_weighted[0] - mU_weighted[1] # (= Q_{flipped detector coord}*cos(2 theta_pa) - U_{flipped detector coord}*sin(2 theta_pa) )
+    mQU_weighted[1][:] = mQ_weighted[1] + mU_weighted[0] # (= Q_{flipped detector coord}*sin(2 theta_pa) + U_{flipped detector coord}*cos(2 theta_pa) )
     #, where theta_pa is detector's prallactic angle
     
     # QU weights
