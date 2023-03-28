@@ -169,22 +169,16 @@ def gen_priors(aman, template_det_ids, prior, method="flat", width=1, basis=None
     else:
         x_axis = aman.det_info.wafer[basis]
 
-    priors = np.ones((aman.dets.count, aman.dets.count))
+    priors = np.ones((aman.dets.count, len(template_det_ids)))
+    # TODO: Could probably vectorize this
     for i in range(aman.dets.count):
-        priors[i] = prior_method(x_axis, i)
+        _prior = prior_method(x_axis, i)
+        _, msk, template_msk = np.intersect1d(
+            aman.det_info.det_id, template_det_ids, return_indices=True
+        )
+        priors[i, template_msk] = _prior[msk]
 
-    det_ids = aman.det_info.det_id
-    if np.array_equal(det_ids, template_det_ids):
-        return priors
-
-    missing = np.setdiff1d(template_det_ids, det_ids)
-    if len(missing):
-        det_ids = np.concatenate((det_ids, missing))
-        priors = np.concatenate((priors, np.ones((len(missing), aman.dets.count))))
-    asort = np.argsort(det_ids)
-    template_map = np.argsort(np.argsort(template_det_ids))
-
-    return priors[asort][template_map]
+    return priors.T
 
 
 def transform_from_detmap(aman):
