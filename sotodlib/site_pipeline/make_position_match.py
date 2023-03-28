@@ -559,11 +559,13 @@ def main():
             template_bg.append(det.bias_line)
             is_north.append(det.is_north)
         det_ids = np.array(det_ids)
+        template_bg = np.array(template_bg)
         template_msk = np.isin(template_bg, valid_bg)
         template_n = np.array(is_north) & template_msk
         template_s = ~np.array(is_north) & template_msk
+        template_bg[template_bg % 2 == 1] *= -1
         template = np.column_stack(
-            (np.array(template_bg), np.array(det_x), np.array(det_y), np.array(polang))
+            (template_bg, np.array(det_x), np.array(det_y), np.array(polang))
         )
 
     reverse = config["matching"].get("reverse", False)
@@ -617,6 +619,7 @@ def main():
         north = np.isin(aman.det_info.smurf.band.astype(int), (0, 1, 2, 3))
         msk_n = north & msk_bp
         msk_s = (~north) & msk_bp
+        bias_group[bias_group % 2 == 1] *= -1
 
         # Prep inputs
         dm_msk = slice(None)
