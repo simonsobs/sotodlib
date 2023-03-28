@@ -278,20 +278,62 @@ def visualize(iteration, error, X, Y, ax, bias_lines):
 
         bias_lines: True if bias lines are included in points.
     """
+    cmap = "Set3"
     if bias_lines:
         x = 1
         y = 2
-        c_t = np.around(X[:, 0]) / 11.0
-        c_s = np.around(Y[:, 0]) / 11.0
+        c_t = np.around(np.abs(X[:, 0])) / 11.0
+        c_s = np.around(np.abs(Y[:, 0])) / 11.0
+        srt = np.lexsort(X.T[1:3])
     else:
         x = 0
         y = 1
-        c_t = 0.0
-        c_s = 1.0
+        c_t = np.zeros(len(X))
+        c_s = np.ones(len(Y))
+        srt = np.lexsort(X.T[0:2])
     plt.cla()
-    ax.scatter(X[:, x], X[:, y], c=c_t, cmap="Set3", alpha=0.1, label="Target")
     ax.scatter(
-        Y[:, x], Y[:, y], c=c_s, cmap="Set3", alpha=1.0, marker="X", label="Source"
+        X[:, x][srt[0::4]],
+        X[:, y][srt[0::4]],
+        c=c_t[srt[0::4]],
+        cmap=cmap,
+        alpha=0.5,
+        marker=4,
+        vmin=0,
+        vmax=1,
+    )
+    ax.scatter(
+        X[:, x][srt[1::4]],
+        X[:, y][srt[1::4]],
+        c=c_t[srt[1::4]],
+        cmap=cmap,
+        alpha=0.5,
+        marker=5,
+        vmin=0,
+        vmax=1,
+    )
+    ax.scatter(
+        X[:, x][srt[2::4]],
+        X[:, y][srt[2::4]],
+        c=c_t[srt[2::4]],
+        cmap=cmap,
+        alpha=0.5,
+        marker=6,
+        vmin=0,
+        vmax=1,
+    )
+    ax.scatter(
+        X[:, x][srt[3::4]],
+        X[:, y][srt[3::4]],
+        c=c_t[srt[3::4]],
+        cmap=cmap,
+        alpha=0.5,
+        marker=7,
+        vmin=0,
+        vmax=1,
+    )
+    ax.scatter(
+        Y[:, x], Y[:, y], c=c_s, cmap=cmap, alpha=0.5, marker="X", vmin=0, vmax=1
     )
     plt.text(
         0.87,
@@ -302,7 +344,6 @@ def visualize(iteration, error, X, Y, ax, bias_lines):
         transform=ax.transAxes,
         fontsize="x-large",
     )
-    ax.legend(loc="upper left", fontsize="x-large")
     plt.draw()
     plt.pause(0.00001)
 
@@ -517,13 +558,13 @@ def main():
             det_ids.append(det.detector_id)
             template_bg.append(det.bias_line)
             is_north.append(det.is_north)
-        template = np.column_stack(
-            (np.array(template_bg), np.array(det_x), np.array(det_y), np.array(polang))
-        )
         det_ids = np.array(det_ids)
         template_msk = np.isin(template_bg, valid_bg)
         template_n = np.array(is_north) & template_msk
         template_s = ~np.array(is_north) & template_msk
+        template = np.column_stack(
+            (np.array(template_bg), np.array(det_x), np.array(det_y), np.array(polang))
+        )
 
     reverse = config["matching"].get("reverse", False)
     if reverse:
