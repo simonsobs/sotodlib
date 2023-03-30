@@ -182,7 +182,7 @@ class SmurfStreamProcessor:
         ts = []
         frame_idxs = []
         frame_idx = 0
-        for frame in self.frame_iter():
+        for frame in get_frame_iter(self.files):
             if frame.type != core.G3FrameType.Scan:
                 continue
 
