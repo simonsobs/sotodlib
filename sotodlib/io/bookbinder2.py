@@ -281,7 +281,7 @@ class SmurfStreamProcessor:
                 insamps = in_offset_samp_idxs[m]
 
                 split_idxs = 1 + np.where((np.diff(outsamps) > 1) \
-                                        & (np.diff(insamps) > 1))[0]
+                                        | (np.diff(insamps) > 1))[0]
                 outsplits = np.split(outsamps, split_idxs)
                 insplits = np.split(insamps, split_idxs)
                 for i in range(len(outsplits)):
@@ -302,7 +302,6 @@ class SmurfStreamProcessor:
                 else:
                     break
             
-            print(np.sum(filled)-len(filled))
             oframe = core.G3Frame(core.G3FrameType.Scan)
             ts = core.G3VectorTime(ts * core.G3Units.s)
             oframe['data'] = so3g.G3SuperTimestream(self.chan_names, ts, data)
