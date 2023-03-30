@@ -625,12 +625,14 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
             qrot = qa.from_axisangle(zaxis, -thirty)
         else:
             qrot = qa.from_axisangle(zaxis, thirty)
+            rots = [thirty, thirty, -thirty, -3*thirty, 5*thirty, 3*thirty, thirty]
+        
         for p, q in wcenters.items():
             quat = q["quat"]
             if det_info is not None:
                 # Add an additional rotation of the wafer before
                 # repositioning the wafer center
-                quat2 = qa.from_axisangle(zaxis, -thirty)
+                quat2 = qa.from_axisangle(zaxis, rots[int(p)])
                 quat = qa.mult(quat, quat2)
             centers[int(p), :] = qa.mult(qrot, quat)
 
@@ -686,9 +688,9 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
                 ]
             else:
                 qwcenters = [
-                    xieta_to_quat(-wradius, wradius / np.sqrt(3.0), thirty * 5),
-                    xieta_to_quat(0.0, -2.0 * wradius / np.sqrt(3.0), thirty),
-                    xieta_to_quat(wradius, wradius / np.sqrt(3.0), -thirty * 3),
+                    xieta_to_quat(-wradius, wradius / np.sqrt(3.0), 7*thirty),
+                    xieta_to_quat(0.0, -2.0 * wradius / np.sqrt(3.0), 3*thirty),
+                    xieta_to_quat(wradius, wradius / np.sqrt(3.0), -thirty ),
                 ]
 
             centers = list()
