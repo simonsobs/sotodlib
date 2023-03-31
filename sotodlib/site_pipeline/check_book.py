@@ -61,7 +61,7 @@ DEFAULT_CONFIG = {
     'ancil_file_pattern': 'A_ancil_{index:03d}.g3',
 
     # Schema ...
-    'extra_files': ['M_index.yaml'],
+    'extra_files': ['M_index.yaml', 'M_book.yaml'],
     'extra_extra_files': [],
 
     # Work-arounds.
@@ -144,7 +144,7 @@ class BookScanner:
         meta = yaml.safe_load(open(self._get_filename('M_index.yaml'), 'rb'))
         self.results['metadata'] = meta
 
-        keys = ['book_id', 'obs_type', 'telescope', 'stream_ids', 'sample_ranges']
+        keys = ['book_id', 'type', 'telescope', 'stream_ids', 'sample_ranges']
         for k in keys:
             if k not in meta:
                 self._err('M_index.yaml', f'Missing entry for "{k}".', warn=True)
@@ -159,8 +159,8 @@ class BookScanner:
         if 'book_id' not in meta:
             meta['book_id'] = os.path.split(self.book_dir)[1]
         tokens = meta['book_id'].split('_')  # type, time, tel, slot-flags
-        if 'obs_type' not in meta:
-            meta['obs_type'] = tokens[0]
+        if 'type' not in meta:
+            meta['type'] = tokens[0]
         if 'telescope' not in meta:
             meta['telescope'] = tokens[2]
         if 'stream_ids' not in meta:
@@ -177,8 +177,11 @@ class BookScanner:
 
         if 'detsets' not in meta:
             assert 'detset_map' in self.config
-            meta['detsets'] = {k: self.config['detset_map'][k]
-                               for k in meta['stream_ids']}
+            meta['detsets'] = [self.config['detset_map'][k]
+                               for k in meta['stream_ids']]
+
+        # Check that detsets and stream_ids are same length.
+        assert len(meta['detsets']) == len(meta['stream_ids'])
 
         # Don't check sample_ranges here, do it later when we're
         # reading the files for per-frame sample ranges.
@@ -215,7 +218,7 @@ class BookScanner:
             self._err(None, f'Inconsistent file counts: {file_counts}')
 
         _file_count = file_count if 'sample_ranges' not in meta \
-                      else len(meta['samples_ranges'])
+                      else len(meta['sample_ranges'])
         if _file_count != file_count:
             self._err(None, f'File counts {file_counts} do not agree with '
                       'sample_ranges entry {_file_count}')
@@ -319,7 +322,7 @@ class BookScanner:
         _sample_ranges = meta.get('sample_ranges')
         if _sample_ranges is not None:
             A, B = np.array(_sample_ranges), np.array(sample_ranges)
-            if A.shape != B.shape or np.any(A != BN):
+            if A.shape != B.shape or np.any(A != B):
                 self._err(None, f'sample_ranges from metadata is not as found in files.')
         self.results['sample_ranges'] = sample_ranges
 
@@ -344,7 +347,7 @@ class BookScanner:
         detset_rows = []
         file_rows = []
 
-        for stream_id, detset in meta['detsets'].items():
+        for stream_id, detset in zip(meta['stream_ids'], meta['detsets']):
             detset_rows.append((detset, det_lists[stream_id]))
             for index in range(meta['file_count']):
                 pattern = self.config['stream_file_pattern']
