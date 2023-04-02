@@ -424,7 +424,11 @@ def match_template(
 
     # Solve the assignment problem
     row_ind, col_ind = linear_sum_assignment(P * priors, True)
-    mapping = row_ind[np.argsort(col_ind)]
+    if len(row_ind) < len(focal_plane):
+        mapping = np.argmax(P * priors, axis=0)
+        mapping[col_ind] = row_ind
+    else:
+        mapping = row_ind[np.argsort(col_ind)]
 
     outliers = np.array([])
     if out_thresh > 0:
@@ -625,9 +629,13 @@ def main():
             )
             dm_aman = aman.restrict("dets", aman.dets.vals[dm_msk], False)
 
+            template_msk = np.isin(dm_aman.det_info.wafer.bias_line, valid_bg)
+            bias_line = dm_aman.det_info.wafer.bias_line
+            bias_line[bias_line % 2 == 1] *= -1
+
             template = np.column_stack(
                 (
-                    dm_aman.det_info.wafer.bias_line,
+                    bias_line,
                     dm_aman.det_info.wafer.det_x,
                     dm_aman.det_info.wafer.det_y,
                     dm_aman.det_info.wafer.angle,
@@ -635,9 +643,14 @@ def main():
             )
             master_template.append(np.column_stack((template, dm_aman.det_info.det_id)))
             det_ids = dm_aman.det_info.det_id
-            template_msk = np.isin(dm_aman.det_info.wafer.bias_line, valid_bg)
-            template_n = dm_aman.det_info.wafer.is_north & template_msk
-            template_s = ~(dm_aman.det_info.wafer.is_north) & template_msk
+            is_north = dm_aman.det_info.wafer.is_north == "True"
+            template_n = is_north & template_msk
+            template_s = ~(is_north) & template_msk
+
+            if np.sum(template_n | template_n) < np.sum(msk_n | msk_s):
+                logger.warning(
+                    "\tTemplate is smaller than input pointing, uniqueness of mapping is no longer gauranteed"
+                )
 
         if make_priors:
             priors = gen_priors(
