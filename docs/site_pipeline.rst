@@ -34,12 +34,16 @@ database to further filter the observations.
 check-book
 ----------
 
+For a description and documentation of the config file format, see
+:mod:`sotodlib.site_pipeline.check_book` module autodocumentation below.
+
 Command line arguments
 ``````````````````````
 
 .. argparse::
    :module: sotodlib.site_pipeline.check_book
    :func: get_parser
+   :prog: check-book
 
 Module documentation
 ````````````````````

@@ -4,12 +4,18 @@ This module contains a class for checking obs/oper Books (for internal
 consistency, proper schema, etc).  It can also be run to create/update
 an ObsFileDb for such Books.
 
-The config file for this should look something like this:
+When checking and indexing *compliant* books, a configuration file is
+not strictly necessary.  But the example below shows how to override /
+work-around a bunch of different things that appeared it early
+versions of Books.
 
 .. code-block:: yaml
 
-    # Database setup
+    # Database setup (this is the default).
     obsfiledb: './obsfiledb.sqlite'
+
+    # For obsdb filenames, path relative to which those names should
+    # be specified.  (/ is the default.)
     root_path: '/'
 
     # Work-arounds
@@ -20,6 +26,7 @@ The config file for this should look something like this:
     tolerate_missing_ancil_timestamps: True
     tolerate_timestamps_value_discrepancy: False
 
+    # If stream_ids are not provided in metadata, list them here.
     stream_ids:
       ufm_mv14
       ufm_mv18
@@ -29,6 +36,8 @@ The config file for this should look something like this:
       ufm_mv7 
       ufm_mv9 
 
+    # If detset names are not provided in metadata, provide a map from
+    # stream_id to detset name here.
     detset_map:
       ufm_mv14: sch_mv14
       ufm_mv18: sch_mv18
@@ -38,8 +47,6 @@ The config file for this should look something like this:
       ufm_mv7:  sch_mv7
       ufm_mv9:  sch_mv9
 
-
-The "work-arounds" should eventually not be necessary!
 
 """
 
@@ -55,6 +62,9 @@ from sotodlib.core import metadata
 import numpy as np
 import argparse
 
+
+# This default config only includes stuff used by BookScanner, and not
+# obsfiledb / local path setup.
 
 DEFAULT_CONFIG = {
     'stream_file_pattern': 'D_{stream_id}_{index:03d}.g3',
@@ -382,8 +392,15 @@ class BookScanner:
         for err in self.results['errors']:
             print(err)
         
+
 def get_parser():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(usage="""
+    %(prog)s [options] book_dir
+
+    Scan an "obs" or "oper" book and check for schema compliance;
+    update an obsfiledb.
+
+    """)
     parser.add_argument('book_dir',
                         help="Path to the Book.")
     parser.add_argument('--config', '-c',
@@ -391,6 +408,7 @@ def get_parser():
     parser.add_argument('--test', action='store_true',
                         help="Just inspect the Book, do not try to add it to obsfiledb.")
     return parser
+
 
 if __name__ == '__main__':
     parser = get_parser()
