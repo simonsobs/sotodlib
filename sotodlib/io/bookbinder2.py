@@ -165,7 +165,7 @@ class AncilProcessor:
         file_idxs : np.ndarray
             Array mapping output frame idx to output file idx
         """
-        self.log.info("Binding ancilary data")
+        self.log.info("Binding ancillary data")
 
         # Handle file writers
         writer = None
@@ -218,7 +218,7 @@ class AncilProcessor:
         
 
 class SmurfStreamProcessor:
-    def __init__(self, obs_id, files, book_id, readout_ids=None, log=None):
+    def __init__(self, obs_id, files, book_id, readout_ids, log=None):
         self.files = files
         self.obs_id = obs_id
         self.stream_id = None
@@ -258,8 +258,6 @@ class SmurfStreamProcessor:
             if frame.type != core.G3FrameType.Scan:
                 continue
 
-            if self.readout_ids is None:
-                self.readout_ids = frame['data'].names
 
             if self.nchans is None:
                 self.nchans = len(self.readout_ids)
@@ -400,7 +398,7 @@ class SmurfStreamProcessor:
                     filled[out0:out1] = 1
 
                 # If there are any remaining samples in the next in_frame, pull it and repeat
-                if np.any((oframe_idxs == oframe_idx) & (iframe_idxs == iframe_idx + 1)):
+                if np.any((oframe_idxs == oframe_idx) & (iframe_idxs > iframe_idx)):
                     iframe, interm_frames = next_scan(inframe_iter)
                     iframe_idx += 1
                     pbar.update()
@@ -409,7 +407,12 @@ class SmurfStreamProcessor:
                     break
 
             # Interpolate data where there are gaps
-            if np.any(~filled):
+            if np.all(~filled):
+                self.log.error(
+                    f"No samples properly mapped in oframe frame {oframe_idx}!"
+                    "Cannot properly interpolate for this frame."
+                )
+            elif np.any(~filled):
                 self.log.debug(
                     f"{np.sum(~filled)} missing samples in out-frame {oframe_idx}"
                 )
@@ -490,8 +493,8 @@ class BookBinder:
     file_idxs : np.ndarray
         Array of output file indices for all output frames in the book
     """
-    def __init__(self, book, obsdb, filedb, hkfiles, outdir, max_samps_per_frame=10_000,
-                 max_file_size=1e9, readout_ids=None):
+    def __init__(self, book, obsdb, filedb, hkfiles, readout_ids, outdir,
+                 max_samps_per_frame=10_000, max_file_size=1e9):
         self.filedb = filedb
         self.book = book
         self.hkfiles = hkfiles
@@ -510,14 +513,9 @@ class BookBinder:
         self.ancil = AncilProcessor(hkfiles, book.bid, log=self.log)
         self.streams = {}
         for obs_id, files in filedb.items():
-            if readout_ids is not None:
-                rids = readout_ids[obs_id]
-            else:
-                rids = None
-
             stream_id = '_'.join(obs_id.split('_')[1:-1])
             self.streams[stream_id] = SmurfStreamProcessor(
-                obs_id, files, book.bid, readout_ids=rids, log=self.log
+                obs_id, files, book.bid, readout_ids[obs_id], log=self.log
             )
 
         self.times = None
@@ -561,6 +559,8 @@ class BookBinder:
             idx = np.where(frame_idxs == fr)[0][-1]
             file_idxs.append(totsize[idx] // self.max_file_size)
         file_idxs = np.array(file_idxs, dtype=int)
+
+        self.log.info("Finished preprocessing data")
 
         self.times = ts
         self.frame_idxs = frame_idxs
@@ -621,6 +621,7 @@ class BookBinder:
         """
         self.preprocess()
 
+        self.log.info(f"Binding data to {self.outdir}")
         if not os.path.exists(self.outdir):
             os.makedirs(self.outdir)
 
@@ -637,6 +638,9 @@ class BookBinder:
         for stream in self.streams.values():
             stream.bind(self.outdir, self.times, self.frame_idxs,
                         self.file_idxs, pbar=pbar, ancil=self.ancil)
+
+        self.log.info("Finished binding data. Exiting.")
+        return True
 
 
 def fill_time_gaps(ts):

@@ -14,6 +14,7 @@ from sqlalchemy.orm import relationship
 import so3g
 from spt3g import core
 import itertools
+import logging
 
 from .load_smurf import G3tSmurf, Observations as G3tObservations, SmurfStatus, get_channel_info
 from .bookbinder import Bookbinder, TimingSystemError, counters_to_timestamps, fill_time_gaps
@@ -152,7 +153,12 @@ class Imprinter:
         self.session = None
         self.g3tsmurf_sessions = {}
         self.archives = {}
-        self.logger = logger if logger is not None else init_logger("imprinter")
+
+        self.logger = logger
+        if logger is None:
+            self.logger = logging.getLogger("imprinter")
+            if not self.logger.hasHandlers():
+                self.logger = init_logger("imprinter")
 
     def get_session(self):
         """Get a new session or return the existing one
