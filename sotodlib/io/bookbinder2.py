@@ -9,6 +9,7 @@ import os
 import yaml
 import logging
 import sys
+import shutil
 from sotodlib.site_pipeline.util import init_logger
 
 
@@ -493,11 +494,16 @@ class BookBinder:
     file_idxs : np.ndarray
         Array of output file indices for all output frames in the book
     """
-    def __init__(self, book, obsdb, filedb, hkfiles, readout_ids, outdir,
-                 max_samps_per_frame=10_000, max_file_size=1e9):
+    def __init__(self, book, obsdb, filedb, data_root, readout_ids, outdir,
+                 max_samps_per_frame=50_000, max_file_size=1e9):
         self.filedb = filedb
         self.book = book
-        self.hkfiles = hkfiles
+        self.data_root = data_root
+        self.hk_root = os.path.join(data_root, 'hk')
+        self.meta_root = os.path.join(data_root, 'smurf')
+        self.hkfiles = get_hk_files(os.path.join(data_root, 'hk'), 
+                                    book.start.timestamp(),
+                                    book.stop.timestamp())
         self.obsdb = obsdb
         self.outdir = outdir
 
@@ -510,7 +516,7 @@ class BookBinder:
         logfile = os.path.join(outdir, 'Z_bookbinder_log.txt')
         self.log = setup_logger(logfile)
 
-        self.ancil = AncilProcessor(hkfiles, book.bid, log=self.log)
+        self.ancil = AncilProcessor(self.hkfiles, book.bid, log=self.log)
         self.streams = {}
         for obs_id, files in filedb.items():
             stream_id = '_'.join(obs_id.split('_')[1:-1])
@@ -521,6 +527,7 @@ class BookBinder:
         self.times = None
         self.frame_idxs = None
         self.file_idxs = None
+        self.meta_files = None
         
     def preprocess(self):
         """
@@ -566,6 +573,36 @@ class BookBinder:
         self.frame_idxs = frame_idxs
         self.file_idxs = file_idxs
 
+    def copy_smurf_files_to_book(self):
+        """
+        Copies smurf ancillary files to an operation book.
+        """
+        if self.book.type != 'oper':
+            return
+
+        self.log.info("Copying smurf ancillary files to book")
+
+        files = []
+        for obs in self.obsdb.values():
+            files.extend(get_smurf_files(obs, self.meta_root))
+
+        meta_files = {}
+        for f in files:
+            basename = os.path.basename(f)
+            dest = os.path.join(self.outdir, basename)
+            shutil.copyfile(f, dest)
+
+            if f.endswith('iv_analysis.npy'):
+                meta_files['iv'] = basename
+            elif f.endswith('bg_map.npy'):
+                meta_files['bgmap'] = basename
+            elif f.endswith('bias_step_analysis.npy'):
+                meta_files['bias_steps'] = basename
+            elif f.endswith('take_noise.npy'):
+                meta_files['noise'] = basename
+
+        self.meta_files = meta_files
+
     def get_metadata(self):
         """
         Returns metadata dict for the book
@@ -607,6 +644,8 @@ class BookBinder:
         meta['subtype'] = tags[1] if len(tags) > 1 else ""
         meta['tags'] = tags[2:]
         meta['stream_ids'] = self.book.slots.split(',')
+        if (self.book.type == 'oper') and self.meta_files:
+            meta['meta_files'] = self.meta_files
         return meta
 
     def bind(self, pbar=False):
@@ -624,6 +663,9 @@ class BookBinder:
         self.log.info(f"Binding data to {self.outdir}")
         if not os.path.exists(self.outdir):
             os.makedirs(self.outdir)
+
+        # Copy smurf ancillary files if they exist
+        self.copy_smurf_files_to_book()
 
         # Write M_file
         mfile = os.path.join(self.outdir, 'M_index.yaml')
@@ -933,3 +975,47 @@ def find_frame_splits(ancil):
     idxs = locate_scan_events(az, filter_window=100)[0]
     return ancil.times[idxs]
 
+
+def get_smurf_files(obs, meta_path, all_files=False):
+    """
+    Returns a list of smurf files that should be copied into a book.
+
+    Parameters
+    ------------
+    obs : G3tObservations
+        Observation to pull files from
+    meta_path : path
+        Smurf metadata path
+    all_files : bool
+        If true will return all found metadata files
+
+    Returns
+    -----------
+    files : List[path]
+        List of copyable files
+    """
+
+    def copy_to_book(file):
+        if all_files:
+            return True
+        return file.endswith('npy')
+
+    tscode = int(obs.action_ctime//1e5)
+    files = []
+
+    # check adjacent folders in case action falls on a boundary
+    for tc in [tscode-1, tscode, tscode + 1]:
+        action_dir = os.path.join(
+            meta_path,
+            str(tc),
+            obs.stream_id,
+            f'{obs.action_ctime}_{obs.action_name}'
+        )
+
+        if not os.path.exists(action_dir):
+            continue
+
+        for root, _, fs in os.walk(action_dir):
+            files.extend([os.path.join(root, f) for f in fs])
+
+    return [f for f in files if copy_to_book(f)]
