@@ -590,6 +590,7 @@ class BookBinder:
         for f in files:
             basename = os.path.basename(f)
             dest = os.path.join(self.outdir, basename)
+            self.log.info(f"Copying to {dest}")
             shutil.copyfile(f, dest)
 
             if f.endswith('iv_analysis.npy'):
