@@ -311,14 +311,14 @@ Here's an annotated example:
   g3tsmurf:
     obs_id: "obs_ufm_uv8_1677778438"
     paths:
-        archive_path: "/mnt/so1/data/chicago-latrt/timestreams/"
-        meta_path: "/mnt/so1/data/chicago-latrt/smurf/"
-        db_path: "/mnt/so1/shared/site-pipeline/data_pkg/chicago-latrt/g3tsmurf.db"
+        archive_path: "/path/to/timestreams/"
+        meta_path: "/path/to/smurf/"
+        db_path: "/path/to/g3tsmurf.db"
   
   # Configuration options
   ufm: "Uv8"
   gen_template: False # Generate template using InstModel
-  radial_thresh: 2.0 # Threshoud at which to dut detectors based on their pointing
+  radial_thresh: 2.0 # Threshold at which to cut detectors based on their pointing
   dm_transform: True # Apply an initial transformation based on the detmap
 
   # Settings to generate priors from detmap
