@@ -145,9 +145,11 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
     all_bias_names = []
 
     # Read the signal data, by detset.
-    for detset_index, (detset, files) in enumerate(file_map.items()):
+    detset_index = -1
+    for detset, files in file_map.items():
         if detset not in detsets_req:
             continue
+        detset_index += 1
 
         # Target AxisManagers for special primary fields, to be
         # populated once we can inspect the frames.
