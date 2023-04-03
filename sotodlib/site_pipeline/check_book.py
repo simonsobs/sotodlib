@@ -1,13 +1,32 @@
 """check_book.py
 
-This module contains a class for checking obs/oper Books (for internal
-consistency, proper schema, etc).  It can also be run to create/update
-an ObsFileDb for such Books.
+This module an entry point to io.check_book, for checking obs/oper
+Books for internal consistency & proper schema.  It may also be used
+to create/update an ObsFileDb for such Books.
 
-When checking and indexing *compliant* books, a configuration file is
-not strictly necessary.  But the example below shows how to override /
-work-around a bunch of different things that appeared it early
-versions of Books.
+A configuration file can be used to set the ObsFileDb filename and
+root path for ObsFileDb entries.
+
+The config file can also be used to enable work-arounds and bypass
+certain exceptions (which should not be necessary on compliant books.)
+
+At the of this writing a minimal config file might be simply:
+
+.. code-block:: yaml
+
+    # Database setup (this is the default).
+    obsfiledb: './obsfiledb.sqlite'
+
+    # For obsdb filenames, path relative to which those names should
+    # be specified.  (/ is the default.)
+    root_path: '/'
+
+    # Work-arounds
+    extra_extra_files: ['frame_splits.txt']
+
+
+But here is a more complete example, with lots of work-arounds
+enabled:
 
 .. code-block:: yaml
 
@@ -47,366 +66,33 @@ versions of Books.
       ufm_mv7:  sch_mv7
       ufm_mv9:  sch_mv9
 
-
 """
-
-import so3g
-from spt3g import core
-import yaml
-import os
-import glob
 
 import sotodlib
 from sotodlib.core import metadata
+from sotodlib.io import check_book
 
-import numpy as np
 import argparse
+import yaml
 
-
-# This default config only includes stuff used by BookScanner, and not
-# obsfiledb / local path setup.
-
-DEFAULT_CONFIG = {
-    'stream_file_pattern': 'D_{stream_id}_{index:03d}.g3',
-    'ancil_file_pattern': 'A_ancil_{index:03d}.g3',
-
-    # Schema ...
-    'extra_files': ['M_index.yaml', 'M_book.yaml'],
-    'extra_extra_files': [],
-
-    # Work-arounds.
-    'sample_range_inclusive_hack': False,
-    'tolerate_sample_range_resetting': False,
-    'tolerate_missing_ancil': False,
-    'tolerate_missing_ancil_timestamps': False,
-    'tolerate_timestamps_value_discrepancy': False,
-}
-    
-
-class _compact_list(list):
-    # list with abbreviated repr.
-    def __repr__(self):
-        others = len(self) - 5
-        if len(self) > 10:
-            return '[' + ', '.join([repr(x) for x in self[:5]]) + f', and {others} other items ...]'
-        else:
-            return super.__repr__(self)
-
-
-class BookScanner:
-    def __init__(self, book_dir, config={}):
-        self.config = dict(DEFAULT_CONFIG, **config)
-        self.book_dir = book_dir
-        self.results = {
-            'errors': [],
-            'warnings': [],
-            'det_lists': {},
-            'sample_ranges': None,
-            'ready': False,
-            'metadata': None,
-        }
-
-    def go(self):
-        """Scan a book for completeness and consistency; record misc. metadata
-        to help with ObsFileDb registration.
-
-        """
-        # 1. Check metadata completeness.
-        try:
-            self.check_meta()
-            self.gapfill_meta()
-        except Exception as e:
-            print('Failed in section 1!')
-            self.report()
-            raise e
-
-        # 2. Verify file presence
-        try:
-            self.check_file_presence()
-        except Exception as e:
-            print('Failed in section 2!')
-            self.report()
-            raise e
-
-        try:
-            # 3. Check sample range, timestamp alignment, etc.
-            self.check_frames()
-        except Exception as e:
-            print('Failed in section 3!')
-            self.report()
-            raise e
-
-    def _err(self, filename, msg, warn=False):
-        if warn:
-            self.results['warnings'].append((filename, msg))
-        else:
-            self.results['errors'].append((filename, msg))
-
-    def _get_filename(self, basename, **kw):
-        basename = basename.format(**kw)
-        return os.path.join(self.book_dir, basename)
-
-    def check_meta(self):
-        """Extract essential metadata from the M_index.yaml.
-
-        """
-        err, warn = self.results['errors'], self.results['warnings']
-        meta = yaml.safe_load(open(self._get_filename('M_index.yaml'), 'rb'))
-        self.results['metadata'] = meta
-
-        keys = ['book_id', 'type', 'telescope', 'stream_ids', 'sample_ranges']
-        for k in keys:
-            if k not in meta:
-                self._err('M_index.yaml', f'Missing entry for "{k}".', warn=True)
-
-    def gapfill_meta(self):
-        """If some metadata are missing, try to guess them from the filenames
-        and stuff.
-
-        """
-        meta = self.results['metadata']
-
-        if 'book_id' not in meta:
-            meta['book_id'] = os.path.split(self.book_dir)[1]
-        tokens = meta['book_id'].split('_')  # type, time, tel, slot-flags
-        if 'type' not in meta:
-            meta['type'] = tokens[0]
-        if 'telescope' not in meta:
-            meta['telescope'] = tokens[2]
-        if 'stream_ids' not in meta:
-            assert 'stream_ids' in self.config  # needed to patch missing stream_id info
-            meta['stream_ids'] = []
-            for sid, f in zip(self.config['stream_ids'], tokens[3]):
-                if f == '0':
-                    continue
-                elif f == '1':
-                    meta['stream_ids'].append(sid)
-                else:
-                    self._err(
-                        None, f'Invalid stream_flags in book name: {tokens[3]}.')
-
-        if 'detsets' not in meta:
-            assert 'detset_map' in self.config
-            meta['detsets'] = [self.config['detset_map'][k]
-                               for k in meta['stream_ids']]
-
-        # Check that detsets and stream_ids are same length.
-        assert len(meta['detsets']) == len(meta['stream_ids'])
-
-        # Don't check sample_ranges here, do it later when we're
-        # reading the files for per-frame sample ranges.
-
-    def check_file_presence(self):
-        """See if all expected files are there; compare number of files in
-        each file group.
-
-        """
-        strays = glob.glob(self._get_filename('*'))
-        for basename in self.config['extra_files'] + self.config['extra_extra_files']:
-            fn = self._get_filename(basename)
-            strays.remove(fn)
-        
-        meta = self.results['metadata']
-        file_counts = []
-
-        for stream_id in meta['stream_ids'] + ['ancil']:
-            if stream_id == 'ancil':
-                pattern = self.config['ancil_file_pattern']
-            else:
-                pattern = self.config['stream_file_pattern']
-            index = 0
-            while True:
-                fn = self._get_filename(pattern, stream_id=stream_id, index=index)
-                if not os.path.exists(fn):
-                    break
-                strays.remove(fn)
-                index += 1
-            file_counts.append(index)
-
-        file_count = file_counts[0]
-        if any([f != file_count for f in file_counts]):
-            self._err(None, f'Inconsistent file counts: {file_counts}')
-
-        _file_count = file_count if 'sample_ranges' not in meta \
-                      else len(meta['sample_ranges'])
-        if _file_count != file_count:
-            self._err(None, f'File counts {file_counts} do not agree with '
-                      'sample_ranges entry {_file_count}')
-        meta['file_count'] = file_count
-        if len(strays):
-            self._err(None, f'Extra files found in book dir: {strays}')
-
-    def check_frames(self):
-        """Read the "Scan" frames from all files and check structure /
-        consistency.
-
-        """
-        meta = self.results['metadata']
-        to_check = ['ancil'] + meta['stream_ids']
-
-        timestamps_master = None
-        sample_ranges = []
-        for stream_id in to_check:
-            if stream_id == 'ancil':
-                pattern = self.config['ancil_file_pattern']
-            else:
-                pattern = self.config['stream_file_pattern']
-
-            timestamps = []
-            start, end = 0, None
-            hack_offset = 0
-            dets = None
-
-            for index in range(meta['file_count']):
-                filename = self._get_filename(pattern, stream_id=stream_id, index=index)
-                basename = os.path.split(filename)[1]
-                for frame in core.G3File(filename):
-                    if frame.type == core.G3FrameType.Scan:
-                        a, b = list(frame['sample_range'])
-                        if self.config['sample_range_inclusive_hack']:
-                            # Change (0, 999) into (0, 1000).
-                            b = b + 1  # schema hack
-
-                        if end is None:
-                            # This is first frame in new file and
-                            # "start" is expected first sample index.
-                            if a == 0 and start != 0:
-                                self._err(basename, 'sample_range is resetting on file boundaries.',
-                                          warn=self.config['tolerate_sample_range_resetting'])
-                                hack_offset = start
-                            if a != start - hack_offset:
-                                self._err(basename, f'sample_range entries are not abutting: '
-                                          f'[..., {start - hack_offset}] -> [{a}, {b}].')
-                                raise RuntimeError()
-                        else:
-                            # This is not the first frame, "end" from
-                            # last frame should match start of this one.
-                            if a != end - hack_offset:
-                                self._err(basename, f'sample_range entries are not abutting: '
-                                          f'[..., {end - hack_offset}] -> [{a}, {b}].')
-                                raise RuntimeError()
-                        end = b + hack_offset
-
-                        if 'ancil' in frame:
-                            timestamps.append(np.asarray(frame['ancil'].times))
-                        else:
-                            self._err(basename, f'No "ancil" entry',
-                                      warn=self.config['tolerate_missing_ancil'])
-                            if 'primary' in frame:
-                                timestamps.append(np.asarray(frame['primary'].times))
-
-                        if 'signal' in frame and dets is None:
-                            dets = _compact_list(frame['signal'].names)
-
-                # Wrap up this file
-                if index >= len(sample_ranges):
-                    sample_ranges.append((start, end))
-                else:
-                    if sample_ranges[index] != (start, end):
-                        self._err(basename, f'sample_range discrepancy, {(start, end)} '
-                                  f'instead of {sample_ranges[index]}')
-
-                # For next file, requeue expectations.
-                start, end = end, None
-
-            # Check / record stuff for the stream_id.
-            self.results['det_lists'][stream_id] = dets
-
-            if len(timestamps) == 0:
-                self._err(None, f'No timestamps in fileset.',
-                          warn=(stream_id == 'ancil' and self.config['tolerate_missing_ancil_timestamps']))
-            else:
-                timestamps = np.hstack(timestamps)
-                if timestamps_master is None:
-                    timestamps_master = timestamps
-                else:
-                    if len(timestamps) != len(timestamps_master):
-                        self._err(None, f'Timestamps length discrepancy.')
-                    elif not (timestamps == timestamps_master).all():
-                        dmax_us = np.max(abs(timestamps - timestamps_master)) \
-                                  / core.G3Units.microseconds
-                        self._err(None, f'Timestamps value discrepancy (up to {dmax_us:.3} us).',
-                                  warn=self.config['tolerate_timestamps_value_discrepancy'])
-
-        # If metadata included sample_ranges, check that.
-        _sample_ranges = meta.get('sample_ranges')
-        if _sample_ranges is not None:
-            A, B = np.array(_sample_ranges), np.array(sample_ranges)
-            if A.shape != B.shape or np.any(A != B):
-                self._err(None, f'sample_ranges from metadata is not as found in files.')
-        self.results['sample_ranges'] = sample_ranges
-
-    def prep_obsfiledb(self, filebase_root, db=None):
-        """Get entries ready for obsfiledb addition.
-
-        Args:
-          filebase_root (str): Path relative to which the file paths should
-            be specified.  If this is '/' then an absolute path will
-            be recorded.
-          db (ObsFileDb): database to commit the results to, if you want.
-
-        Returns:
-          detset_rows: list of implicated detsets, with each entry a
-            tuple (detset_name, detset_dets).
-          file_rows: list of file table entries; each entry is a dict
-            that can be passed as kwargs to ObsFileDb.add_file.
-
-        """
-        meta, det_lists, sample_ranges = [
-            self.results[k] for k in ['metadata', 'det_lists', 'sample_ranges']]
-        detset_rows = []
-        file_rows = []
-
-        for stream_id, detset in zip(meta['stream_ids'], meta['detsets']):
-            detset_rows.append((detset, det_lists[stream_id]))
-            for index in range(meta['file_count']):
-                pattern = self.config['stream_file_pattern']
-                path = self._get_filename(
-                    pattern, stream_id=stream_id, index=index)
-                if filebase_root == '/':
-                    relpath = os.path.abspath(path)
-                else:
-                    relpath = os.path.relpath(path, filebase_root)
-                file_rows.append(
-                    {'filename': relpath,
-                     'obs_id': meta['book_id'],
-                     'detset': detset,
-                     'sample_start': sample_ranges[index][0],
-                     'sample_stop': sample_ranges[index][1],
-                     })
-
-        if db is not None:
-            for name, dets in detset_rows:
-                if len(db.get_dets(name)) == 0:
-                    db.add_detset(name, dets)
-            for row in file_rows:
-                db.add_obsfile(**row)
-
-        return detset_rows, file_rows
-    
-    def report(self):
-        print('Warnings:')
-        for err in self.results['warnings']:
-            print(err)
-        print('Errors:')
-        for err in self.results['errors']:
-            print(err)
-        
 
 def get_parser():
     parser = argparse.ArgumentParser(usage="""
     %(prog)s [options] book_dir
 
     Scan an "obs" or "oper" book and check for schema compliance;
-    update an obsfiledb.
+    optionally update an obsfiledb.
 
     """)
     parser.add_argument('book_dir',
                         help="Path to the Book.")
     parser.add_argument('--config', '-c',
-                        help="Path to config file with analysis instructions.")
-    parser.add_argument('--test', action='store_true',
-                        help="Just inspect the Book, do not try to add it to obsfiledb.")
+                        help="Path to config file with work-arounds and ObsFileDb config.")
+    parser.add_argument('--add', action='store_true',
+                        help="After inspecting the book, add it to the ObsFileDb.")
+    parser.add_argument('--overwrite', action='store_true',
+                        help="If adding to ObsFileDb, remove existing references "
+                        "to this obs first (prevents 'UNIQUE constraint' error).")
     return parser
 
 
@@ -421,7 +107,7 @@ if __name__ == '__main__':
         print(f'Loading config from {args.config}')
         config = yaml.safe_load(open(args.config, 'rb'))
 
-    bs = BookScanner(args.book_dir, config)
+    bs = check_book.BookScanner(args.book_dir, config)
 
     bs.go()
     bs.report()
@@ -430,18 +116,25 @@ if __name__ == '__main__':
         print('Cannot register this obs due to errors.')
         parser.exit(1)
 
-    if args.test:
+    if not args.add:
         parser.exit(0)
 
     detset_rows, file_rows = bs.prep_obsfiledb(config.get('root_path', '/'))
 
-    # Write an obsfiledb
-    db = metadata.ObsFileDb(config.get('obsfiledb', 'obsfiledb.sqlite'))
+    # Write to obsfiledb
+    obsfiledb_file = config.get('obsfiledb', 'obsfiledb.sqlite')
+    print('Updating %s ...' % obsfiledb_file)
+    db = metadata.ObsFileDb(obsfiledb_file)
 
+    if args.overwrite:
+        # Note this only drops the obs ... if detsets need to be
+        # rewritten, you'd better start over entirely.
+        print(' -- removing any existing references.')
+        db.drop_obs(file_rows[0]['obs_id'])
+
+    print(' -- adding %i detsets and %i file refs' % (len(detset_rows), len(file_rows)))
     for name, dets in detset_rows:
         if len(db.get_dets(name)) == 0:
             db.add_detset(name, dets)
     for row in file_rows:
         db.add_obsfile(**row)
-
-    db.to_file('obsfiledb.sqlite')
