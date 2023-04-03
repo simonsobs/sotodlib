@@ -3,17 +3,43 @@ from spt3g import core
 import itertools
 import numpy as np
 from scipy.interpolate import interp1d
+from scipy.signal import convolve
 from tqdm.auto import tqdm
 import os
 import yaml
 import logging
-
+import sys
 from sotodlib.site_pipeline.util import init_logger
 
 
 log = logging.getLogger('bookbinder')
 if not log.hasHandlers():
-    log = init_logger('bookbinder')
+    init_logger('bookbinder')
+
+
+def setup_logger(logfile=None):
+    """
+    This setups up a logger for bookbinder. If a logfile is passed, it will
+    write to that file as well as stdout. It is useful to create a one-off
+    logger here instead of using `getLogger` because it allows us to set
+    a separate log-file for each bookbinder instance.
+    """
+    fmt = '%(asctime)s: %(message)s (%(levelname)s)'
+    log = logging.Logger('bookbinder', level=logging.DEBUG)
+
+    ch = logging.StreamHandler(sys.stdout)
+    formatter = logging.Formatter(fmt)
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(formatter)
+    log.addHandler(ch)
+
+    if logfile is not None:
+        ch = logging.FileHandler(logfile)
+        ch.setLevel(logging.DEBUG)
+        ch.setFormatter(formatter)
+        log.addHandler(ch)
+
+    return log
 
 
 def get_frame_iter(files):
@@ -67,17 +93,24 @@ class AncilProcessor:
         populated on bind and should be used to add copies of the anc data to
         the detector frames. 
     """
-    def __init__(self, files):
+    def __init__(self, files, book_id, log=None):
         self.files = files
         self.times = None
         self.data = None
         self.anc_frame_data = None
+        self.out_files = []
+        self.book_id = book_id
+
+        if log is None:
+            self.log = logging.getLogger('bookbinder')
+        else:
+            self.log = log
     
-    def preprocess(self):
+    def preprocess(self, start=None, stop=None):
         """
         Preprocesses HK data and populates the `data` and `times` objects.
         """
-        log.info("Preprocessing HK Data")
+        self.log.info("Preprocessing HK Data")
         frame_iter = get_frame_iter(self.files)
 
         data = {}
@@ -92,7 +125,15 @@ class AncilProcessor:
                 block_idx = list(fr['block_names']).index('ACU_broadcast')
 
             block = fr['blocks'][block_idx]
-            times.append(np.array(block.times) / core.G3Units.s)
+            ts = np.array(block.times) / core.G3Units.s
+            if start is not None:
+                if ts[-1] < start:
+                    continue
+            if stop is not None:
+                if ts[0] >= stop:
+                    continue
+
+            times.append(ts)
             for k, v in block.items():
                 if k not in data:
                     data[k] = []
@@ -124,36 +165,60 @@ class AncilProcessor:
         file_idxs : np.ndarray
             Array mapping output frame idx to output file idx
         """
-        log.info("Binding ancilary data")
+        self.log.info("Binding ancilary data")
 
         # Handle file writers
         writer = None
         cur_file_idx = None
+        out_files = []
+
+        az, el, boresight, corotation = None, None, None, None
+        if 'Corrected_Azimuth' in self.data:
+            az = np.interp(times, self.times, self.data['Corrected_Azimuth'])
+            el = np.interp(times, self.times, self.data['Corrected_Elevation'])
+        if 'Corrected_Boresight' in self.data:
+            boresight = np.interp(times, self.times, self.data['Corrected_Boresight'])
+        if 'Corrected_Corotation' in self.data:
+            corotation = np.interp(times, self.times, self.data['Corrected_Corotation'])
 
         anc_frame_data = []
         for oframe_idx in np.unique(frame_idxs):
             if file_idxs[oframe_idx] != cur_file_idx:
                 close_writer(writer)
                 cur_file_idx = file_idxs[oframe_idx]
-                fname = f'A_ancil_{cur_file_idx:0>3}.g3'
-                writer = core.G3Writer(os.path.join(outdir, fname))
+                fname = os.path.join(outdir, f'A_ancil_{cur_file_idx:0>3}.g3')
+                out_files.append(fname)
+                writer = core.G3Writer(fname)
 
-            m = np.where(frame_idxs == oframe_idx)
+            m = frame_idxs == oframe_idx
             ts = times[m]
 
             oframe = core.G3Frame(core.G3FrameType.Scan)
+
+            i0, i1 = np.where(m)[0][[0, -1]]
+            oframe['sample_range'] = core.G3VectorInt([int(i0), int(i1+1)])
+            oframe['book_id'] = self.book_id
+
             anc_data = core.G3TimesampleMap()
             anc_data.times = core.G3VectorTime(ts * core.G3Units.s)
+            if az is not None:
+                anc_data['az_enc'] = core.G3VectorDouble(az[m])
+                anc_data['el_enc'] = core.G3VectorDouble(el[m])
+            if boresight is not None:
+                anc_data['boresight_enc'] = core.G3VectorDouble(boresight[m])
+            if corotation is not None:
+                anc_data['corotation_enc'] = core.G3VectorDouble(corotation[m])
             oframe['ancil'] = anc_data
             writer(oframe)
             anc_frame_data.append(anc_data)
 
         # Save this to be added to detector files
         self.anc_frame_data = anc_frame_data
+        self.out_files = out_files
         
 
 class SmurfStreamProcessor:
-    def __init__(self, obs_id, files):
+    def __init__(self, obs_id, files, book_id, readout_ids=None, log=None):
         self.files = files
         self.obs_id = obs_id
         self.stream_id = None
@@ -161,13 +226,20 @@ class SmurfStreamProcessor:
         self.frame_idxs = None
         self.nchans = None
         self.nframes = None
-        self.chan_names = None
         self.bias_names = None
         self.primary_names = None
         self.timing_paradigm = None
         self.session_id = None
         self.slow_primary = None
         self.sostream_version = None
+        self.readout_ids = readout_ids
+        self.out_files = []
+        self.book_id = book_id
+
+        if log is None:
+            self.log = logging.getLogger('bookbinder')
+        else:
+            self.log = log
 
     def preprocess(self):
         """
@@ -176,7 +248,7 @@ class SmurfStreamProcessor:
         if self.times is not None:  # Already preprocessed
             return
 
-        log.info(f"Preprocessing smurf obsid {self.obs_id}")
+        self.log.info(f"Preprocessing smurf obsid {self.obs_id}")
 
         self.nframes = 0
         ts = []
@@ -186,14 +258,17 @@ class SmurfStreamProcessor:
             if frame.type != core.G3FrameType.Scan:
                 continue
 
+            if self.readout_ids is None:
+                self.readout_ids = frame['data'].names
+
             if self.nchans is None:
-                self.chan_names = frame['data'].names
-                self.nchans = len(self.chan_names)
+                self.nchans = len(self.readout_ids)
                 self.primary_names = frame['primary'].names
                 self.bias_names = frame['tes_biases'].names
                 self.timing_paradigm = frame['timing_paradigm']
                 self.session_id = frame['session_id']
-                self.slow_primary = frame['slow_primary']
+                if 'slow_primary' in frame:
+                    self.slow_primary = frame['slow_primary']
                 self.sostream_version = frame['sostream_version']
                 self.stream_id = frame['sostream_id']
 
@@ -208,34 +283,61 @@ class SmurfStreamProcessor:
         self.frame_idxs = np.hstack(frame_idxs)
         self.preprocessed = True
 
-    def bind(self, outdir, times, frame_idxs, file_idxs, pbar=False, ancil=None):
+    def bind(self, outdir, times, frame_idxs, file_idxs, pbar=False, ancil=None,
+             atol=1e-4):
+        """
+        Binds SMuRF data
+        
+        Params
+        ------ 
+        outdir : str
+            Output directory to put bound files
+        times : np.ndarray
+            Full array of timestamps that should be contained in the books
+        frame_idxs : np.ndarray
+            Output frame idx for each specified timestamp
+        file_idxs : np.ndarray
+            Output file idx for each specified output frame
+        pbar : bool or tqdm.tqdm
+            If True, will create a new progress bar. If False, will disable.
+            If a progress bar is passed, will use that.
+        ancil : AncilProcessor
+            Ancillary processor object (must be already bound). Ancil data will
+            be copied into the output frames.
+        atol : float
+            Absolute tolerance between smurf-timestamps and book-timestamps.
+            Samples mapped to times that are further away than atol will
+            be considered unmapped.
+        """
         if pbar is True:
             pbar = tqdm(total=self.nframes)
         elif pbar is False:
             pbar = tqdm(total=self.nframes, disable=True)
+
         pbar.set_description(f"Binding {self.stream_id}")
 
-        log.info(f"Binding smurf obsid {self.obs_id}")
+        self.log.info(f"Binding smurf obsid {self.obs_id}")
 
         # Mapping to input sample idx to output sample idx
-        atol = 0.001
-        out_sample_map = find_ref_idxs(times, self.times)
-        mapped = np.abs(times[out_sample_map] - self.times) < atol
-        _, out_frame_offsets = np.unique(frame_idxs, return_index=True)
-        # Map from input sample idx to output frame idx
-        oframe_idxs = frame_idxs[out_sample_map]
+        atol = 1e-4
+        sample_map = find_ref_idxs(times, self.times)
+        mapped = np.abs(times[sample_map] - self.times) < atol
+
+        oframe_idxs = frame_idxs[sample_map]  # out-frame idx for each in sample
         oframe_idxs[~mapped] = -1 
+        _, offsets = np.unique(frame_idxs, return_index=True)
+        # Sample idx within each out-frame for every input sample
+        out_offset_idxs = sample_map - offsets[frame_idxs[sample_map]]
 
-        iframe_idxs = self.frame_idxs
-
-        # Map from input sample idx to output sample idx relative to the out frame it belongs to
-        out_offset_samp_idxs = out_sample_map - out_frame_offsets[frame_idxs[out_sample_map]]
-
+        iframe_idxs = self.frame_idxs  #in-frame idx for each in sample
         _, offsets = np.unique(self.frame_idxs, return_index=True)
-        in_offset_samp_idxs = np.arange(len(self.times)) - offsets[self.frame_idxs]
+        # Sample idx within each in-frame for every input sample
+        in_offset_idxs = np.arange(len(self.times)) - offsets[self.frame_idxs]
+
         # Handle file writers
         writer = None
         cur_file_idx = None
+        out_files = []
 
         inframe_iter = get_frame_iter(self.files)
         iframe, interm_frames = next_scan(inframe_iter)
@@ -248,8 +350,10 @@ class SmurfStreamProcessor:
             if file_idxs[oframe_idx] != cur_file_idx:
                 close_writer(writer)
                 cur_file_idx = file_idxs[oframe_idx]
-                fname = f'D_{self.stream_id}_{cur_file_idx:0>3}.g3'
-                writer = core.G3Writer(os.path.join(outdir, fname))
+                fname = os.path.join(
+                    outdir, f'D_{self.stream_id}_{cur_file_idx:0>3}.g3')
+                out_files.append(fname)
+                writer = core.G3Writer(fname)
 
             # Initialize stuff
             m = frame_idxs == oframe_idx
@@ -271,20 +375,22 @@ class SmurfStreamProcessor:
                     writer(fr)
 
                 m = (oframe_idxs == oframe_idx) & (iframe_idxs == iframe_idx)
+                outsamps = out_offset_idxs[m]
+                insamps = in_offset_idxs[m]
 
-                # The fastest way to copy data into a numpy array is to use
-                # direct slicing like ``arr_out[o0:o1] = arr_in[i0:i1]`` since
-                # it doesn't need to create a temporary copy of the array, and
-                # can just do a direct mem-map. Doing this speeds up the binding
-                # by a factor of 3-4x compared to other methods I've tried.
-                outsamps = out_offset_samp_idxs[m]
-                insamps = in_offset_samp_idxs[m]
-
-                split_idxs = 1 + np.where((np.diff(outsamps) > 1) \
-                                        | (np.diff(insamps) > 1))[0]
+                # A fast way to copy data into a numpy array is to use direct
+                # slicing like ``arr_out[o0:o1] = arr_in[i0:i1]`` since it doesn't
+                # need to create a temporary copy of the array, and can just do a
+                # direct mem-map. Doing this speeds up the binding by a factor of
+                # 3-4x compared to other methods I've tried.
+                split_idxs = 1 + np.where(
+                    (np.diff(outsamps) > 1) | (np.diff(insamps) > 1))[0]
                 outsplits = np.split(outsamps, split_idxs)
                 insplits = np.split(insamps, split_idxs)
                 for i in range(len(outsplits)):
+                    if len(insplits[i]) == 0:
+                        continue
+
                     in0, in1 = insplits[i][0], insplits[i][-1] + 1
                     out0, out1 = outsplits[i][0], outsplits[i][-1] + 1
 
@@ -301,92 +407,169 @@ class SmurfStreamProcessor:
                     continue
                 else:
                     break
-            
+
+            # Interpolate data where there are gaps
+            if np.any(~filled):
+                self.log.debug(
+                    f"{np.sum(~filled)} missing samples in out-frame {oframe_idx}"
+                )
+                # Missing samples at the beginning / end of a frame will be
+                # filled with the first / last sample in the frame
+                fill_value = (data[:, filled][:, 0], data[:, filled][:, -1])
+                data[:, ~filled] = interp1d(
+                    ts[filled], data[:, filled], axis=1, assume_sorted=True,
+                    kind='linear', fill_value=fill_value, bounds_error=False
+                )(ts[~filled])
+
+            m = frame_idxs == oframe_idx
+            i0, i1 = np.where(m)[0][[0, -1]]
+
             oframe = core.G3Frame(core.G3FrameType.Scan)
             ts = core.G3VectorTime(ts * core.G3Units.s)
-            oframe['data'] = so3g.G3SuperTimestream(self.chan_names, ts, data)
-            oframe['primary'] = so3g.G3SuperTimestream(self.primary_names, ts, primary)
-            oframe['tes_biases'] = so3g.G3SuperTimestream(self.bias_names, ts, biases)
-            oframe['timing_paradigm'] = self.timing_paradigm
-            oframe['session_id'] = self.session_id
-            oframe['slow_primary'] = self.slow_primary
-            oframe['sostream_version'] = self.sostream_version
-            oframe['sostream_id'] = self.stream_id
-            oframe['frame_num'] = oframe_num
-            oframe['num_samples'] = len(ts)
+            oframe['book_id'] = self.book_id 
+            oframe['sample_range'] = core.G3VectorInt([int(i0), int(i1+1)])
             if ancil is not None:
                 oframe['ancil'] = ancil.anc_frame_data[oframe_idx]
 
-            oframe_num += 1
+            oframe['flag_smurfgaps'] = core.G3VectorBool(filled)
+            oframe['signal'] = so3g.G3SuperTimestream(self.readout_ids, ts, data)
+            oframe['primary'] = so3g.G3SuperTimestream(self.primary_names, ts, primary)
+            oframe['tes_biases'] = so3g.G3SuperTimestream(self.bias_names, ts, biases)
+            oframe['stream_id'] = self.stream_id
+            oframe['frame_num'] = oframe_num
 
+            oframe_num += 1
             writer(oframe)
-            
+        
         close_writer(writer)
+        self.out_files = out_files
+
+        # In case there were remaining frames left over
+        pbar.update(self.nframes - iframe_idx - 1)
         if pbar.n >= pbar.total:
             pbar.close()
 
 
 class BookBinder:
-    def __init__(self, book, obsdb, filedb, hkfiles, max_samps_per_frame=10_000):
+    """
+    Class for combining smurf and hk L2 data to create books.
+
+    Parameters
+    ----------
+    book : sotodlib.io.imprinter.Books
+        Book object to bind
+    obsdb : dict
+        Result of imprinter.get_g3tsmurf_obs_for_book. This should be a dict
+        from obs-id to G3tSmurf Observations.
+    filedb : dict
+        Result of imprinter.get_files_for_book. This should be a dict from
+        obs-id to the list of smurf-files for that observation.
+    hkfiles : list
+        List of HK files to process.
+    max_samps_per_frame : int
+        Max number of samples per frame. This will be used to split frames
+        when the ACU data isn't present or cannot be used.
+    max_file_size : int
+        Max file size in bytes. This will be used to rotate files.
+    readout_ids : dict, optional
+        Dict of readout_ids to use for each stream_id. If provided, these
+        will be used to set the `names` in the signal frames. If not provided,
+        names will be taken from the input frames.
+
+    
+    Attributes
+    -----------
+    ancil : AncilProcessor
+        Processor for ancillary data
+    streams : dict
+        Dict of SmurfStreamProcessor objects, keyed by stream_id
+    times : np.ndarray
+        Array of times for all samples in the book
+    frame_idxs : np.ndarray
+        Array of output frame indices for all samples in the book
+    file_idxs : np.ndarray
+        Array of output file indices for all output frames in the book
+    """
+    def __init__(self, book, obsdb, filedb, hkfiles, outdir, max_samps_per_frame=10_000,
+                 max_file_size=1e9, readout_ids=None):
         self.filedb = filedb
         self.book = book
         self.hkfiles = hkfiles
         self.obsdb = obsdb
+        self.outdir = outdir
 
         self.max_samps_per_frame = max_samps_per_frame
-        self.ancil = AncilProcessor(hkfiles)
+        self.max_file_size = max_file_size
+
+        if not os.path.exists(outdir):
+            os.makedirs(outdir)
+
+        logfile = os.path.join(outdir, 'Z_bookbinder_log.txt')
+        self.log = setup_logger(logfile)
+
+        self.ancil = AncilProcessor(hkfiles, book.bid, log=self.log)
         self.streams = {}
         for obs_id, files in filedb.items():
+            if readout_ids is not None:
+                rids = readout_ids[obs_id]
+            else:
+                rids = None
+
             stream_id = '_'.join(obs_id.split('_')[1:-1])
-            self.streams[stream_id] = SmurfStreamProcessor(obs_id, files)
+            self.streams[stream_id] = SmurfStreamProcessor(
+                obs_id, files, book.bid, readout_ids=rids, log=self.log
+            )
 
         self.times = None
         self.frame_idxs = None
         self.file_idxs = None
         
-    def _get_full_times(self):
-        for stream in self.streams.values():
-            stream.preprocess()
-
-        t0 = np.max([s.times[0] for s in self.streams.values()])
-        t1 = np.min([s.times[-1] for s in self.streams.values()])
-
-        mask, times = None, None
-        for x in self.streams.values():
-            ts, filled = fill_time_gaps(x.times)
-            m = (t0 < ts) & (ts < t1)
-            if times is None:
-                times = ts[m]
-                mask = filled[m]
-            else:
-                gaps = ~mask
-                times[gaps] = ts[m][gaps]
-                mask[gaps] = filled[m][gaps]
-
-        return times, mask
-    
     def preprocess(self):
+        """
+        Runs preprocessing steps for the book. Preprocesses smurf and ancillary
+        data. Creates full list of book-times, the output frame idx for each
+        sample, and the output file idx for each frame.
+        """
         if self.times is not None:
             return
 
         for stream in self.streams.values():
             stream.preprocess()
-        self.ancil.preprocess()
 
-        times, _ = self._get_full_times()
+        t0 = np.max([s.times[0] for s in self.streams.values()])
+        t1 = np.min([s.times[-1] for s in self.streams.values()])
+        ts, _ = fill_time_gaps(stream.times)
+        m = (t0 < ts) & (ts < t1)
+        ts = ts[m]
+
+        self.ancil.preprocess(start=ts[0]-1, stop=ts[-1]+1)
 
         # Divide up frames
-        nsamps = len(times)
-        frame_idxs = np.arange(nsamps) // self.max_samps_per_frame
+        frame_splits = find_frame_splits(self.ancil)
+        if frame_splits is None:
+            frame_idxs = np.arange(len(ts)) // self.max_samps_per_frame
+        else:
+            frame_idxs = np.digitize(ts, frame_splits)
+            frame_idxs -= frame_idxs[0]
 
-        nframes = len(np.unique(frame_idxs))
-        file_idxs = [0 for _ in range(nframes)]
+        # Divide up files
+        samp_size = 4 # bytes
+        max_chans = np.max([s.nchans for s in self.streams.values()])
+        totsize = samp_size * max_chans * np.arange(len(ts))
+        file_idxs = []
+        for fr in np.unique(frame_idxs):
+            idx = np.where(frame_idxs == fr)[0][-1]
+            file_idxs.append(totsize[idx] // self.max_file_size)
+        file_idxs = np.array(file_idxs, dtype=int)
 
-        self.times = times
+        self.times = ts
         self.frame_idxs = frame_idxs
         self.file_idxs = file_idxs
 
     def get_metadata(self):
+        """
+        Returns metadata dict for the book
+        """
         self.preprocess()
 
         meta = {}
@@ -426,28 +609,34 @@ class BookBinder:
         meta['stream_ids'] = self.book.slots.split(',')
         return meta
 
-    def bind(self, outdir, pbar=False):
+    def bind(self, pbar=False):
         """
-        Binds 
+        Binds data.
+
+        Params
+        ---------
+        outdir : str
+            Output directory to write bound files. If this does not exist, the
+            directory will be created.
         """
         self.preprocess()
 
-        if not os.path.exists(outdir):
-            os.makedirs(outdir)
+        if not os.path.exists(self.outdir):
+            os.makedirs(self.outdir)
 
         # Write M_file
-        mfile = os.path.join(outdir, 'M_index.yaml')
+        mfile = os.path.join(self.outdir, 'M_index.yaml')
         with open(mfile, 'w') as f:
             yaml.dump(self.get_metadata(), f)
 
         # Bind Ancil Data
-        self.ancil.bind(outdir, self.times, self.frame_idxs, self.file_idxs)
+        self.ancil.bind(self.outdir, self.times, self.frame_idxs, self.file_idxs)
         
         tot = np.sum([s.nframes for s in self.streams.values()])
         pbar = tqdm(total=tot, disable=(not pbar))
         for stream in self.streams.values():
-            stream.bind(outdir, self.times, self.frame_idxs, self.file_idxs,
-                        pbar=pbar, ancil=self.ancil)
+            stream.bind(self.outdir, self.times, self.frame_idxs,
+                        self.file_idxs, pbar=pbar, ancil=self.ancil)
 
 
 def fill_time_gaps(ts):
@@ -575,3 +764,168 @@ def find_ref_idxs(refs, vs, atol=0.5):
     right = refs[idx]
     idx -= vs - left < right - vs
     return idx
+
+def get_hk_files(hkdir, start, stop, tbuff=10*60):
+    """
+    Gets HK files for dat between start and stop dirHWP files that may have data
+    between start and stop time
+    """
+    files = []
+    for subdir in os.listdir(hkdir):
+        try:
+            tcode = int(subdir)
+        except:
+            continue
+
+        if not start//1e5 - 1 <= tcode <= stop//1e5 + 1:
+            continue
+
+        subpath = os.path.join(hkdir, subdir)
+        files.extend([os.path.join(subpath, f) for f in os.listdir(subpath)])
+
+    files = np.array(sorted(files))
+    file_times = np.array([int(os.path.basename(f).split('.')[0]) for f in files])
+
+    m = (start-tbuff <= file_times) & (file_times < stop+tbuff)
+    if not np.any(m):
+        return []
+
+    # Add files before and after for good measure
+    fidxs = np.where(m)[0]
+    i0, i1 = fidxs[0], fidxs[-1]
+    if i0 > 0:
+        m[i0 - 1] = 1
+    if i1 < len(m) - 1:
+        m[i1 + 1] = 1
+
+    return files[m].tolist()
+
+def locate_scan_events(az, dy=0.001, min_gap=200, filter_window=100):
+    """
+    Locate places where a noisy vector t changes sign: +ve, -ve, and 0. To
+    handle noise, "zero" is defined to be a threshold region from -dy to +dy.
+    Thus t is said to have a zero-crossing if it fully crosses the threshold
+    region, with the actual crossing approximated as halfway between entering
+    and exiting the region. Entrances and exits without a crossing are also
+    identified (as "stops" and "starts" respectively).
+
+    Parameters
+    ----------
+    dy : float, optional
+        Amplitude of threshold region
+    min_gap : int, optional
+        Length of gap (in samples) longer than which events are considered separate
+
+    Returns
+    -------
+    events : list
+        Full list containing all zero-crossings, starts, and stops
+    starts : list
+        List of places where t exits the threshold region (subset of events)
+    stops : list
+        List of places where t enters the threshold region (subset of events)
+    """
+
+    offset = 0
+    if filter_window is not None:
+        boxcar = np.ones(filter_window) / filter_window
+        az = convolve(az, boxcar, mode='same')[filter_window:-filter_window]
+        offset = filter_window
+    
+    t = np.diff(az)
+
+    tmin = np.min(t)
+    tmax = np.max(t)
+
+    if len(t) == 0:
+        return [], [], []
+
+    if np.sign(tmax) == np.sign(tmin):
+        return [], [], []
+
+    # If the data does not entirely cross the threshold region,
+    # do not consider it a sign change
+    if tmin > -dy and tmax < dy:
+        return [], [], []
+
+    # Find where the data crosses the lower and upper boundaries of the threshold region
+    c_lower = (np.where(np.sign(t[:-1]+dy) != np.sign(t[1:]+dy))[0] + 1)
+    c_upper = (np.where(np.sign(t[:-1]-dy) != np.sign(t[1:]-dy))[0] + 1)
+
+    # Classify each crossing as entering or exiting the threshold region
+    c_lower_enter = []; c_lower_exit = []
+    c_upper_enter = []; c_upper_exit = []
+
+    # Noise handling:
+    # If there are multiple crossings of the same boundary (upper or lower) in
+    # quick succession (i.e., less than min_gap), it is mostly likely due to
+    # noise. In this case, take the average of each group of crossings.
+    if len(c_lower) > 0:
+        spl = np.array_split(c_lower, np.where(np.ediff1d(c_lower) > min_gap)[0] + 1)
+        c_lower = np.array([int(np.ceil(np.mean(s))) for s in spl])
+        # Determine if this crossing is entering or exiting threshold region
+        for i, s in enumerate(spl):
+            if t[s[0]-1] < t[s[-1]+1]:
+                c_lower_enter.append(c_lower[i])
+            else:
+                c_lower_exit.append(c_lower[i])
+    if len(c_upper) > 0:
+        spu = np.array_split(c_upper, np.where(np.ediff1d(c_upper) > min_gap)[0] + 1)
+        c_upper = np.array([int(np.ceil(np.mean(s))) for s in spu])
+        # Determine if this crossing is entering or exiting threshold region
+        for i, s in enumerate(spu):
+            if t[s[0]-1] < t[s[-1]+1]:
+                c_upper_exit.append(c_upper[i])
+            else:
+                c_upper_enter.append(c_upper[i])
+
+    starts = np.sort(np.concatenate((c_lower_exit, c_upper_exit)))
+    stops = np.sort(np.concatenate((c_lower_enter, c_upper_enter)))
+    events = np.sort(np.concatenate((starts, stops)))
+    
+    # Look for zero-crossings
+    zc = []
+    while len(c_lower) > 0 and len(c_upper) > 0:
+        # Crossing from -ve to +ve
+        if c_lower[0] < c_upper[0]:
+            b = c_lower[c_lower < c_upper[0]]
+            zc.append(int( np.ceil(np.mean([b[-1], c_upper[0]])) ))
+            c_lower = c_lower[len(b):]
+        # Crossing from +ve to -ve
+        elif c_upper[0] < c_lower[0]:
+            b = c_upper[c_upper < c_lower[0]]
+            zc.append(int( np.ceil(np.mean([b[-1], c_lower[0]])) ))
+            c_upper = c_upper[len(b):]
+
+    # Replace all upper and lower crossings that contain a zero-crossing in
+    # between with the zero-crossing itself, but ONLY if those three events
+    # happen in quick succession (i.e., shorter than min_gap). Otherwise, they
+    # are separate events -- there is likely a stop state in between; in this
+    # case, do NOT perform the replacement.
+    for z in zc:
+        before_z = events[events < z]
+        after_z  = events[events > z]
+        if (after_z[0] - before_z[-1]) < min_gap:
+            events = np.concatenate((before_z[:-1], [z], after_z[1:]))
+
+    # Ignore first / last event if it is too close to the start or end
+    if (len(t) - events[-1] < min_gap) and events[-1] not in zc:
+        events = events[:-1]
+
+    if events[0] < min_gap:
+        events = events[1:]
+
+    return events + offset, starts + offset, stops + offset
+
+def find_frame_splits(ancil):
+    """
+    Determines timestamps of frame-splits from ACU data. If it cannot determine
+    frame-splits, returns None.
+    """
+    if 'Corrected_Azimuth' not in ancil.data:
+        return None 
+
+    az = ancil.data['Corrected_Azimuth']
+    idxs = locate_scan_events(az, filter_window=100)[0]
+    return ancil.times[idxs]
+
