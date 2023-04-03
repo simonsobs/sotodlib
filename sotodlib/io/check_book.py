@@ -177,8 +177,11 @@ class BookScanner:
         strays = glob.glob(self._get_filename('*'))
         for basename in self.config['extra_files'] + self.config['extra_extra_files']:
             fn = self._get_filename(basename)
-            strays.remove(fn)
-        
+            try:
+                strays.remove(fn)
+            except ValueError:
+                self._err(basename, 'Expected "extra file" and did not find it.')
+
         meta = self.results['metadata']
         file_counts = []
 
