@@ -1,6 +1,7 @@
 import os
 import yaml
 import numpy as np
+import argparse
 
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
@@ -51,6 +52,18 @@ def _get_preprocess_context(configs, context=None):
         )
     return configs, context
 
+def _get_groups(obs_id, configs, context):
+    group_by = configs['subobs'].get('use', 'detset')
+    if group_by.startswith('dets:'):
+        group_by = group_by.split(':',1)[1]
+
+    if group_by == 'detset':
+        groups = context.obsfiledb.get_detsets(obs_id)
+    else:
+        det_info = context.get_det_info(obs_id)
+        groups = det_info.subset(keys=[group_by]).distinct()[group_by]
+    return group_by, groups
+
 def preprocess_tod(obs_id, configs, overwrite=False):
     """Meant to be run as part of a batched script, this function calls the
     preprocessing pipeline a specific Observation ID and saves the results in
@@ -69,16 +82,7 @@ def preprocess_tod(obs_id, configs, overwrite=False):
         configs = yaml.safe_load(open(configs, "r"))
 
     context = core.Context(configs["context_file"])
-
-    group_by = configs['subobs'].get('use', 'detset')
-    if group_by.startswith('dets:'):
-        group_by = group_by.split(':',1)[1]
-
-    if group_by == 'detset':
-        groups = context.obsfiledb.get_detsets(obs_id)
-    else:
-        det_info = context.get_det_info(obs_id)
-        groups = det_info.subset(keys=[group_by]).distinct()[group_by]
+    group_by, groups = _get_groups(obs_id, configs, context)
 
     if os.path.exists(configs['archive']['index']):
         logger.info(f"Mapping {configs['archive']['index']} for the "
@@ -101,7 +105,7 @@ def preprocess_tod(obs_id, configs, overwrite=False):
     for group in groups:
 
         aman = context.get_obs(obs_id, dets={group_by:group})
-        run_preprocess(aman, pipe)
+        aman, proc_aman = run_preprocess(aman, pipe)
 
         policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
         dest_file, dest_dataset = policy.get_dest(obs_id)
@@ -115,8 +119,8 @@ def preprocess_tod(obs_id, configs, overwrite=False):
         # Update the index.
         db_data = {'obs:obs_id': obs_id,
                    'dataset': dest_dataset}
-        if group_by != 'detset':
-            db_data['dets:'+group_by] = group
+        db_data['dets:'+group_by] = group
+        
         if db.match(db_data) is None:
             db.add_entry(db_data, dest_file)
 
@@ -193,3 +197,42 @@ def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml", context=None 
         logger.info(f"Processing {process.name}")
         process.process(aman, aman.preprocess)
     return aman
+
+
+def get_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('configs', help="Preprocessing Configuration File")
+    parser.add_argument(
+        '--query', 
+        help="Query to pass to the observation list", 
+        default=2, 
+        type=str
+    )
+    return parser
+
+def main(configs, query=None ):
+    configs, context = _get_preprocess_context(configs)
+    obs_list = context.obsdb.query(query)
+    run_list = []
+
+    if not os.path.exists(configs['archive']['index']):
+        #run on all if database doesn't exist
+        run_list = obs_list
+    else:
+        db = core.metadata.ManifestDb(configs['archive']['index'])
+        for obs in obs_list:
+            x = db.match({'obs:obs_id': obs["obs_id"]})    
+            group_by, groups = _get_groups(obs["obs_id"], configs, context)
+            if x is None or len(x) != len(groups):
+                run_list.append(obs)
+
+    logger.info(f"Beginning to run preprocessing on {len(run_list)} observations")
+    for obs in run_list:
+        preprocess_tod(obs["obs_id"], configs)
+            
+
+if __name__ == '__main__':
+    parser = get_parser()
+    args = parser.parse_args()
+    main(**vars(args))
+
