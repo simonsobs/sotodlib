@@ -14,6 +14,30 @@ quick-turnaround data processing at the observatory.
   syntax.
 
 
+Command line interface
+======================
+
+
+Usage
+-----
+
+To execute a pipeline element from the command line, use the
+``so-site-pipeline`` command.  For example, ``make-source-flags`` can
+be invoked as::
+
+  so-site-pipeline make-source-flags [options]
+
+To configure tab-completion of element names, in bash, run::
+
+  eval `so-site-pipeline --bash-completion`
+
+
+Wrapping a pipeline script
+--------------------------
+
+.. automodule:: sotodlib.site_pipeline.cli
+
+
 Pipeline Elements
 =================
 
@@ -134,6 +158,8 @@ Command line arguments
 .. argparse::
    :module: sotodlib.site_pipeline.make_source_flags
    :func: get_parser
+   :prog: make-source-flags
+
 
 Config file format
 ``````````````````
@@ -176,7 +202,7 @@ Command line arguments
 
 .. argparse::
    :module: sotodlib.site_pipeline.make_uncal_beam_map
-   :func: _get_parser
+   :func: get_parser
    :prog: make-uncal-beam-map
 
 Config file format
