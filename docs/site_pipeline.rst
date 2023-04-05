@@ -154,8 +154,9 @@ This module includes the functions designed to be run as part of a batch script
 for automated analysis as well as options for loading AxisManagers that have all
 the preprocessing steps applied to them.
 
-.. automodule:: sotodlib.site_pipeline.preprocess_tod
-   :members:
+.. argparse::
+   :module: sotodlib.site_pipeline.preprocess_tod
+   :func: get_parser
 
 make-source-flags
 -----------------
