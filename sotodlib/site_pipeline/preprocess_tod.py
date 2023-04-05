@@ -199,8 +199,9 @@ def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml", context=None 
     return aman
 
 
-def get_parser():
-    parser = argparse.ArgumentParser()
+def get_parser(parser=None):
+    if parser is None:
+        parser = argparse.ArgumentParser()
     parser.add_argument('configs', help="Preprocessing Configuration File")
     parser.add_argument(
         '--query', 
@@ -221,7 +222,7 @@ def main(configs, query=None ):
     else:
         db = core.metadata.ManifestDb(configs['archive']['index'])
         for obs in obs_list:
-            x = db.match({'obs:obs_id': obs["obs_id"]})    
+            x = db.match({'obs:obs_id': obs["obs_id"]}, multi=True)
             group_by, groups = _get_groups(obs["obs_id"], configs, context)
             if x is None or len(x) != len(groups):
                 run_list.append(obs)
@@ -232,7 +233,4 @@ def main(configs, query=None ):
             
 
 if __name__ == '__main__':
-    parser = get_parser()
-    args = parser.parse_args()
-    main(**vars(args))
-
+    sp_util.main_launcher(main, get_parser)
