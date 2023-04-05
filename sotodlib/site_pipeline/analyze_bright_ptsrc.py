@@ -635,7 +635,7 @@ def run(
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
-    size = comm.Get_size()
+    ntask = comm.Get_size()
 
     ## Standardize output names
     file_name = "calobs_%s_%s_%s_%s_%s_%s-%02d-%02d" % (
@@ -656,26 +656,28 @@ def run(
     init_params = define_fit_params(band, tele)
     ctime, az, el = tod.timestamps, tod.boresight.az, tod.boresight.el
 
-    N = len(tod["dets"].vals)
-    rank_batchsize = int(np.floor(N / size))
-    quotient, remainder = divmod(N, size)
+    ndet = len(tod["dets"].vals)
+    nsample_task = ndet // ntask + 1
+#     quotient, remainder = divmod(N, size)
 
-    # given potential mismatch between number of detectors and processes
-    # correct for non-indentical batch sizes, by adding extra values to
-    # lower ranks starting with zero rank
+#     # given potential mismatch between number of detectors and processes
+#     # correct for non-indentical batch sizes, by adding extra values to
+#     # lower ranks starting with zero rank
 
-    if rank <= (remainder - 1):
-        rank_batchsize += 1
+#     if rank <= (remainder - 1):
+#         rank_batchsize += 1
 
-    # create iterable vector based on individual process batch size
-    batch = np.arange(0, rank_batchsize, dtype=np.int32)
-    # modify iterable by shifting array to correct position for process split
-    batch += rank * (rank_batchsize)
-    # given potential mismatch between number of detectors and processes correct
-    # for non-identical batch sizes
-    if rank > remainder:
-        batch += int(remainder)
-
+#     # create iterable vector based on individual process batch size
+#     batch = np.arange(0, rank_batchsize, dtype=np.int32)
+#     # modify iterable by shifting array to correct position for process split
+#     batch += rank * (rank_batchsize)
+#     # given potential mismatch between number of detectors and processes correct
+#     # for non-identical batch sizes
+#     if rank > remainder:
+#         batch += int(remainder)
+    det_idx_rng = np.arange(rank * nsample_task,
+                            min((rank + 1) * nsample_task, ndet -1))
+    
     df = pd.DataFrame(
         columns=[
             "amp",
@@ -685,13 +687,13 @@ def run(
             "fwhm_eta",
             "phi",
             "tau",
-            "det_name",
+            "dets:readout_id",
             "snr",
         ],
-        index=batch,
+        index=det_idx_rng,
     )
 
-    for det in batch:
+    for det in det_idx_rng:
         params = fit_params(
             tod, ctime, az, el, band, sso_name, det, highpass, cutoff, init_params
         )
@@ -701,7 +703,7 @@ def run(
     if rank == 0:
         full_df = pd.concat(all_dfs)
         full_df.dropna()
-        full_df = full_df.set_index(full_df["det_name"])
+        full_df = full_df.set_index(full_df["dets:readout_id"])
 
         ## Convert to structured array and store file - minor problem with string encoding
         # dt = h5py.special_dtype(vlen=str)
@@ -713,7 +715,7 @@ def run(
             "fwhm_eta": np.float64,
             "phi": np.float64,
             "tau": np.float64,
-            "det_name": str,
+            "dets:readout_id": str,
             "snr": np.float64,
         }
         full_df = full_df.astype(new_dtypes)
@@ -751,14 +753,17 @@ def run(
         # hf.close()
 
         ## Assert tables dependency is properly satisfied
-        out_folder = opj(outdir, tele, tube, wafer)
+        out_folder = opj(outdir, tele)
         if not os.path.exists(out_folder):
             # Create a new directory because it does not exist
             os.makedirs(out_folder)
-        full_df.to_hdf(opj(out_folder, h_name + ".h5"), key="parameter_table", mode="w")
+        result_arr = full_df.to_records(index=False)
+        result_rs = metadata.ResultSet.from_friend(result_arr)
+        write_dataset(result_rs, opj(out_folder,'cal_obs_%s.h5'%tele), obs_id, overwrite=True)
+#         full_df.to_hdf(opj(out_folder, h_name + ".h5"), key="parameter_table", mode="w")
 
         t2 = time.time()
-        print("Time to run fittings for a full wafer is {} seconds".format(t2 - t1))
+        print("Time to run fittings for %s is %.2f seconds."%(obs_id , t2 - t1))
 
         ## check why the mapmaker was working only with context and fix this issue
         if map_make and f_format == "context" and n_modes is not None:
