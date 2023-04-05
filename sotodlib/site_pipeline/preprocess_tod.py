@@ -101,13 +101,7 @@ def preprocess_tod(obs_id, configs, overwrite=False):
     for group in groups:
 
         aman = context.get_obs(obs_id, dets={group_by:group})
-        proc_aman = core.AxisManager( aman.dets, aman.samps)
-
-        for process in pipe:
-            logger.info(f"Processing {process.name}")
-
-            process.process(aman, proc_aman) ## make changes to aman
-            process.calc_and_save(aman, proc_aman) ## calculate data products
+        run_preprocess(aman, pipe)
 
         policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
         dest_file, dest_dataset = policy.get_dest(obs_id)
@@ -126,14 +120,42 @@ def preprocess_tod(obs_id, configs, overwrite=False):
         if db.match(db_data) is None:
             db.add_entry(db_data, dest_file)
 
+def run_preprocess(aman, pipe=None, configs=None):
+    """Run preprocessing on any loaded AxisManager. Broken out so
+    the pipeline can be easily run without databases.
+
+    Arguments
+    ---------
+    aman: AxisManager
+        loaded AxisManager
+    pipe: list
+        pipeline list as built by _build_pipe_from_configs 
+    configs: string or dict 
+        a preprocessing config file or loaded config dictionary
+    """
+    if pipe is None:
+        if configs is None:
+            raise ValueError("Either pipe or configs must be specified")
+        pipe = _build_pipe_from_configs(configs)
+
+    proc_aman = core.AxisManager( aman.dets, aman.samps)
+
+    for process in pipe:
+        logger.info(f"Processing {process.name}")
+
+        process.process(aman, proc_aman) ## make changes to aman
+        process.calc_and_save(aman, proc_aman) ## calculate data products
+    return aman, proc_aman
+
 def load_preprocess_det_select(obs_id, configs, context=None):
     """ Loads the metadata information for the Observation and runs through any
     data selection specified by the Preprocessing Pipeline.
 
     Arguments
     ----------
-    obs_id: string or ResultSet entry
-        obs_id or obs entry that is passed to context.get_obs
+    obs_id: multiple
+        passed to `context.get_obs` to load AxisManager, see Notes for 
+        `context.get_obs`
     configs: string or dictionary
         config file or loaded config directory
     """
@@ -155,8 +177,9 @@ def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml", context=None 
     
     Arguments
     ----------
-    obs_id: string or ResultSet entry
-        obs_id or obs entry that is passed to context.get_obs
+    obs_id: multiple
+        passed to `context.get_obs` to load AxisManager, see Notes for 
+        `context.get_obs`
     configs: string or dictionary
         config file or loaded config directory
     """
