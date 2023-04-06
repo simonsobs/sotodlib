@@ -273,7 +273,7 @@ class SmurfStreamProcessor:
 
             t = get_frame_times(frame)[1]
             ts.append(t)
-            frame_idxs.append(np.full(len(t), frame_idx, dtype=np.int))
+            frame_idxs.append(np.full(len(t), frame_idx, dtype=np.int32))
 
             self.nframes += 1
             frame_idx += 1
