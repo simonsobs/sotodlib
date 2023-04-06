@@ -205,15 +205,55 @@ def get_parser(parser=None):
     parser.add_argument('configs', help="Preprocessing Configuration File")
     parser.add_argument(
         '--query', 
-        help="Query to pass to the observation list", 
-        default=2, 
+        help="Query to pass to the observation list",  
         type=str
+    )
+    parser.add_argument(
+        '--obs-id',
+        help="obs-id of particular observation if we want to run on just one"
+    )
+    parser.add_argument(
+        '--overwrite',
+        help="If true, overwrites existing entries in the database",
+        action='store_true',
+    )
+    parser.add_argument(
+        '--min-ctime',
+        help="Minimum timestamp for the beginning of an observation list",
+    )
+    parser.add_argument(
+        '--max-ctime',
+        help="Maximum timestamp for the beginning of an observation list",
     )
     return parser
 
-def main(configs, query=None ):
+def main(
+    configs, 
+    query=None, 
+    obs_id=None, 
+    overwrite=False,
+    min_ctime=None,
+    max_ctime=None
+ ):
     configs, context = _get_preprocess_context(configs)
-    obs_list = context.obsdb.query(query)
+
+    if obs_id is not None:
+        tot_query = f"obs_id=='{obs_id}'"
+    else:
+        tot_query = "and "
+        if min_ctime is not None:
+            tot_query += f"timestamp>={min_ctime} and "
+        if max_ctime is not None:
+            tot_query += f"timestamp<={max_ctime} and "
+        if query is not None:
+            tot_query += query + " and "
+        tot_query = tot_query[4:-4]
+        if tot_query=="":
+            tot_query="1"
+    
+    obs_list = context.obsdb.query(tot_query)
+    if len(obs_list)==0:
+        logger.warning(f"No observations returned from query: {query}")
     run_list = []
 
     if not os.path.exists(configs['archive']['index']):
@@ -224,12 +264,12 @@ def main(configs, query=None ):
         for obs in obs_list:
             x = db.match({'obs:obs_id': obs["obs_id"]}, multi=True)
             group_by, groups = _get_groups(obs["obs_id"], configs, context)
-            if x is None or len(x) != len(groups):
+            if overwrite or (x is None or len(x) != len(groups)):
                 run_list.append(obs)
 
     logger.info(f"Beginning to run preprocessing on {len(run_list)} observations")
     for obs in run_list:
-        preprocess_tod(obs["obs_id"], configs)
+        preprocess_tod(obs["obs_id"], configs, overwrite=overwrite)
             
 
 if __name__ == '__main__':
