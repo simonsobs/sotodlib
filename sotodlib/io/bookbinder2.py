@@ -280,7 +280,6 @@ class SmurfStreamProcessor:
 
         self.times = np.hstack(ts)
         self.frame_idxs = np.hstack(frame_idxs)
-        self.preprocessed = True
 
     def bind(self, outdir, times, frame_idxs, file_idxs, pbar=False, ancil=None,
              atol=1e-4):
