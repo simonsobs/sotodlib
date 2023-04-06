@@ -147,7 +147,16 @@ entries mater.
 preprocess-tod
 --------------
 This script is set up to run a preprocessing pipeline using the preprocess
-module. :ref:`See details here<preprocess-module>`.
+module. See details in :ref:`See details here<preprocess-module>` for how to
+build a preprocessing pipeline. 
+
+This module includes the functions designed to be run as part of a batch script
+for automated analysis as well as options for loading AxisManagers that have all
+the preprocessing steps applied to them.
+
+.. argparse::
+   :module: sotodlib.site_pipeline.preprocess_tod
+   :func: get_parser
 
 make-source-flags
 -----------------
