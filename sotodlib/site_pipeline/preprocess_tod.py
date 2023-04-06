@@ -7,7 +7,6 @@ from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
 from sotodlib.preprocess import _Preprocess, PIPELINE, processes
 
-logger = sp_util.init_logger("preprocess")
 
 def _build_pipe_from_configs(configs):
     pipe = []
@@ -64,7 +63,7 @@ def _get_groups(obs_id, configs, context):
         groups = det_info.subset(keys=[group_by]).distinct()[group_by]
     return group_by, groups
 
-def preprocess_tod(obs_id, configs, overwrite=False):
+def preprocess_tod(obs_id, configs, overwrite=False, logger=None):
     """Meant to be run as part of a batched script, this function calls the
     preprocessing pipeline a specific Observation ID and saves the results in
     the ManifestDb specified in the configs.   
@@ -75,9 +74,13 @@ def preprocess_tod(obs_id, configs, overwrite=False):
         obs_id or obs entry that is passed to context.get_obs
     configs: string or dictionary
         config file or loaded config directory
-
+    logger: logging instance
+        the logger to print to
     """
 
+    if logger is None: 
+        logger = sp_util.init_logger("preprocess")
+    
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
 
@@ -105,7 +108,7 @@ def preprocess_tod(obs_id, configs, overwrite=False):
     for group in groups:
 
         aman = context.get_obs(obs_id, dets={group_by:group})
-        aman, proc_aman = run_preprocess(aman, pipe)
+        aman, proc_aman = run_preprocess(aman, pipe, logger=logger)
 
         policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
         dest_file, dest_dataset = policy.get_dest(obs_id)
@@ -124,7 +127,7 @@ def preprocess_tod(obs_id, configs, overwrite=False):
         if db.match(db_data) is None:
             db.add_entry(db_data, dest_file)
 
-def run_preprocess(aman, pipe=None, configs=None):
+def run_preprocess(aman, pipe=None, configs=None, logger=None):
     """Run preprocessing on any loaded AxisManager. Broken out so
     the pipeline can be easily run without databases.
 
@@ -137,6 +140,9 @@ def run_preprocess(aman, pipe=None, configs=None):
     configs: string or dict 
         a preprocessing config file or loaded config dictionary
     """
+    if logger is None: 
+        logger = sp_util.init_logger("preprocess")
+    
     if pipe is None:
         if configs is None:
             raise ValueError("Either pipe or configs must be specified")
@@ -233,9 +239,12 @@ def main(
     obs_id=None, 
     overwrite=False,
     min_ctime=None,
-    max_ctime=None
+    max_ctime=None,
+    logger=None,
  ):
     configs, context = _get_preprocess_context(configs)
+    if logger is None: 
+        logger = sp_util.init_logger("preprocess")
 
     if obs_id is not None:
         tot_query = f"obs_id=='{obs_id}'"
@@ -269,7 +278,7 @@ def main(
 
     logger.info(f"Beginning to run preprocessing on {len(run_list)} observations")
     for obs in run_list:
-        preprocess_tod(obs["obs_id"], configs, overwrite=overwrite)
+        preprocess_tod(obs["obs_id"], configs, overwrite=overwrite,logger=logger)
             
 
 if __name__ == '__main__':
