@@ -18,6 +18,27 @@ from detmap.makemap import MapMaker
 logger = util.init_logger(__name__, "make_position_match: ")
 
 
+def create_db(filename):
+    """
+    Create db for storing results if it doesn't already exist
+
+    Arguments:
+
+        filename: Path where database should be made.
+    """
+    if os.path.isfile(filename):
+        return
+    if not os.path.isdir(os.path.dirname(filename)):
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+    scheme = metadata.ManifestScheme()
+    scheme.add_exact_match("obs:obs_id")
+    scheme.add_data_field("dataset")
+    scheme.add_data_field("input_paths")
+
+    metadata.ManifestDb(scheme=scheme).to_file(filename)
+
+
 def LAT_coord_transform(xy, rot_fp, rot_ufm, r=72.645):
     """
     Transform from instrument model coords to LAT Zemax coords
@@ -438,24 +459,6 @@ def match_template(
 
 
 def main():
-    # Define output dtype
-    out_dt = np.dtype(
-        [
-            ("dets:det_id", str),
-            ("dets:readout_id", str),
-            ("band", int),
-            ("channel", int),
-            ("avg_xi", float),
-            ("avg_eta", float),
-            ("avg_polang", float),
-            ("meas_x", float),
-            ("meas_y", float),
-            ("meas_pol", float),
-            ("likelihood", float),
-            ("outliers", bool),
-        ]
-    )
-
     # Read in input pars
     parser = ap.ArgumentParser()
 
@@ -487,13 +490,6 @@ def main():
     )
     tunefile = obs.tunesets[0].path
 
-    # Build output path
-    ufm = config["ufm"]
-    append = ""
-    if "append" in config:
-        append = "_" + config["append"]
-    outpath = os.path.join(config["outdir"], f"{ufm}_{obs.tunesets[0].id}{append}.h5")
-
     # Load data
     pointings = []
     polangs = []
@@ -519,7 +515,28 @@ def main():
         polangs.append(pols)
     bg_map = np.load(config["bias_map"], allow_pickle=True).item()
 
-    # Save the input paths for later reference
+    # Build output path
+    ufm = config["ufm"]
+    append = ""
+    if "append" in config:
+        append = "_" + config["append"]
+    if len(pointings) == 1:
+        create_db(config["manifest_db"])
+        db = metadata.ManifestDb(config["manifest_db"])
+        outpath = os.path.join(
+            config["outdir"], f"{ufm}_{str(obs.timestamp)[:5]}{append}.h5"
+        )
+        dataset = obs.obs_id + "/focal_plane"
+        input_paths = obs.obs_id + "/input_data_paths"
+    else:
+        outpath = os.path.join(
+            config["outdir"], f"{ufm}_{obs.tunesets[0].id}{append}.h5"
+        )
+        dataset = "focal_plane"
+        input_paths = "input_data_paths"
+    outpath = os.path.abspath(outpath)
+
+    # Make ResultSet of input paths for later reference
     types = ["config", "tunefile", "bgmap", "results"]
     paths = [args.config_path, tunefile, config["bias_map"], outpath]
     types += ["pointing"] * len(pointing_paths)
@@ -532,7 +549,6 @@ def main():
         keys=["type", "path"],
         src=np.vstack((types, paths)).T,
     )
-    write_dataset(rset_paths, outpath, "input_data_paths", overwrite=True)
 
     valid_bg = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
 
@@ -736,16 +752,16 @@ def main():
         [
             ("dets:det_id", det_ids.dtype),
             ("dets:readout_id", aman.det_info.readout_id.dtype),
-            ("band", int),
-            ("channel", int),
-            ("avg_xi", float),
-            ("avg_eta", float),
-            ("avg_polang", float),
-            ("meas_x", float),
-            ("meas_y", float),
-            ("meas_pol", float),
-            ("likelihood", float),
-            ("outliers", bool),
+            ("dets:band", int),
+            ("dets:channel", int),
+            ("dets:avg_xi", float),
+            ("dets:avg_eta", float),
+            ("dets:avg_polang", float),
+            ("dets:meas_x", float),
+            ("dets:meas_y", float),
+            ("dets:meas_pol", float),
+            ("dets:likelihood", float),
+            ("dets:outliers", bool),
         ]
     )
 
@@ -780,7 +796,13 @@ def main():
             count=len(det_id),
         )
         rset_data = metadata.ResultSet.from_friend(data_out)
-        write_dataset(rset_data, outpath, "focal_plane", overwrite=True)
+        write_dataset(rset_data, outpath, dataset, overwrite=True)
+        write_dataset(rset_paths, outpath, input_paths, overwrite=True)
+        db.add_entry(
+            {"obs:obs_id": obs.obs_id, "dataset": dataset, "input_paths": input_paths},
+            outpath,
+            replace=True,
+        )
         sys.exit()
 
     if not gen_template:
@@ -858,7 +880,8 @@ def main():
         count=len(det_id),
     )
     rset_data = metadata.ResultSet.from_friend(data_out)
-    write_dataset(rset_data, outpath, "focal_plane", overwrite=True)
+    write_dataset(rset_data, outpath, dataset, overwrite=True)
+    write_dataset(rset_paths, outpath, input_paths, overwrite=True)
 
 
 if __name__ == "__main__":
