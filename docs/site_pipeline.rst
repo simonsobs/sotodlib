@@ -343,6 +343,7 @@ Here's an annotated example:
   # Optional string to be appended to output filename.
   # Will have a "_" before it.
   append: "test" 
+  manifest_db: "path.sqlite"
 
 Ouput file format
 `````````````````
@@ -366,17 +367,20 @@ The second dataset is called `focal_plane` and has columns:
 
 - `dets:det_id`, the detector id as matched by this element.
 - `dets:readout_id`, the readout id.
-- `band`, the SMuRF band.
-- `channel`, the SMuRF channel.
-- `avg_xi`, average xi for each detector.
-- `avg_eta`, average eta for each detector.
-- `avg_polang`, average polarization angle for each detector.
-- `meas_x`, the measured x position of each detector on the array.
-- `meas_y`, the measured y position of each detector on the array.
-- `meas_pol`, the measured polarization angle of each detector on the array.
-- `likelihood`, the liklihood of the match for each detector.
-- `outliers`, flag that shows which detectors look like outliers.
+- `dets:band`, the SMuRF band.
+- `dets:channel`, the SMuRF channel.
+- `dets:avg_xi`, average xi for each detector.
+- `dets:avg_eta`, average eta for each detector.
+- `dets:avg_polang`, average polarization angle for each detector.
+- `dets:meas_x`, the measured x position of each detector on the array.
+- `dets:meas_y`, the measured y position of each detector on the array.
+- `dets:meas_pol`, the measured polarization angle of each detector on the array.
+- `dets:likelihood`, the liklihood of the match for each detector.
+- `dets:outliers`, flag that shows which detectors look like outliers.
 
+In the case where this element is run on a single observation the datasets will be
+contained in a group named after the `obs_id`. In this case the results can be found
+using the ManifestDb specified in the config file, this ManifestDb is indexed by `obs_id`.
 
 Support
 =======
