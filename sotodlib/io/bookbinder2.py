@@ -317,8 +317,9 @@ class SmurfStreamProcessor:
 
         self.log.info(f"Binding smurf obsid {self.obs_id}")
 
-        # Mapping to input sample idx to output sample idx
-        atol = 1e-4
+        # Here `times` is the full array of times in the book (gapless reference
+        # times) and `self.times`` is timestamps from the pre-processed L2 data
+        # (may contain gaps)
         sample_map = find_ref_idxs(times, self.times)
         mapped = np.abs(times[sample_map] - self.times) < atol
 
@@ -377,11 +378,19 @@ class SmurfStreamProcessor:
                 outsamps = out_offset_idxs[m]
                 insamps = in_offset_idxs[m]
 
-                # A fast way to copy data into a numpy array is to use direct
-                # slicing like ``arr_out[o0:o1] = arr_in[i0:i1]`` since it doesn't
-                # need to create a temporary copy of the array, and can just do a
-                # direct mem-map. Doing this speeds up the binding by a factor of
-                # 3-4x compared to other methods I've tried.
+                # Below is equivalent to:
+                #    >> data[:, outsamps] = iframe['data'][:, insamps]
+                #    >> ...
+                # However it is much faster to copy arrays by mapping contiguous
+                # chunks to contiguous chunks using slices, like:
+                #    >> arr_out[:, o0:o1] = arr_in[:, i0:i1]
+                # since numpy does not need to create a temporary copy of the
+                # data, and can just do a direct mem-map. This speeds up binding
+                # by a factory of ~4.
+                #
+                # Here we are splitting outsamps and insamps into a list
+                # of ranges where both arrays are contiguous. Then we loop
+                # through each sub-range and copy data via slicing.
                 split_idxs = 1 + np.where(
                     (np.diff(outsamps) > 1) | (np.diff(insamps) > 1))[0]
                 outsplits = np.split(outsamps, split_idxs)
@@ -658,9 +667,8 @@ class BookBinder:
 
         Params
         ---------
-        outdir : str
-            Output directory to write bound files. If this does not exist, the
-            directory will be created.
+        pbar : bool
+            If True, will enable a progress bar.
         """
         self.preprocess()
 
@@ -702,6 +710,10 @@ def fill_time_gaps(ts):
     --------
     new_ts : np.ndarray
         New list of timestamps of length >= n, with gaps filled.
+    mask : np.ndarray
+        Returns a mask that tells you which elements of `new_ts` are
+        taken from real data and which are interpolated. `~mask` gives
+        the indices of the interpolated elements.
     """
     # Find indices where gaps occur and how long each gap is
     dts = np.diff(ts)
@@ -709,7 +721,7 @@ def fill_time_gaps(ts):
     missing = np.round(dts/dt - 1).astype(int)
     total_missing = int(np.sum(missing))
 
-    # Create new  array with the correct number of samples
+    # Create new array with the correct number of samples
     new_ts = np.full(len(ts) + total_missing, np.nan)
 
     # Insert old timestamps into new array with offsets that account for gaps
@@ -780,13 +792,13 @@ def counters_to_timestamps(c0, c2):
     return ts
 
 
-def find_ref_idxs(refs, vs, atol=0.5):
+def find_ref_idxs(refs, vs):
     """
-    Find missing samples in a list of timestamps (vs) given a list of
-    reference timestamps (refs). The reference timestamps are assumed
-    to be the "true" timestamps, and the list of timestamps (vs) are
-    assumed to be missing some of the samples. The function returns
-    the missing samples in the list of timestamps (vs).
+    Creates a mapping from a list of timestamps (vs) to a list of reference
+    timestamps (refs). Returns an index-map of shape `vs.shape`, that maps each
+    timestamp of the array `vs` to the closest timestamp in the array `refs`.
+
+    This assumes that `refs` and `vs` are sorted in ascending order.
 
     Parameters
     ----------
@@ -794,17 +806,13 @@ def find_ref_idxs(refs, vs, atol=0.5):
         List of reference timestamps
     vs : array_like
         List of timestamps
-    atol : float
-        Absolute tolerance for the difference between the reference
 
     Returns
     -------
-    i_missing : array_like
-        indices (in refs) of the missing samples in vs
-    t_missing : array_like
-        values (in refs) of the missing samples in vs
+    idxs : array_like
+        Map of shape `vs.shape` that maps each element of `vs` to the closest
+        element in `refs`.
     """
-    # return
     # Find the indices of the samples in the list of timestamps (vs)
     # that are closest to the reference timestamps
     idx = np.searchsorted(refs, vs, side='left')
