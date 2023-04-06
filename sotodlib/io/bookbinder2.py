@@ -585,22 +585,25 @@ class BookBinder:
         files = []
         for obs in self.obsdb.values():
             files.extend(get_smurf_files(obs, self.meta_root))
+        
+        smurf_dirname = 'Z_smurf'
+        os.makedirs(os.path.join(self.outdir, smurf_dirname), exist_ok=True)
 
         meta_files = {}
         for f in files:
-            basename = os.path.basename(f)
-            dest = os.path.join(self.outdir, basename)
+            relpath = os.path.join(smurf_dirname, os.path.basename(f))
+            dest = os.path.join(self.outdir, relpath)
             self.log.info(f"Copying to {dest}")
             shutil.copyfile(f, dest)
 
             if f.endswith('iv_analysis.npy'):
-                meta_files['iv'] = basename
+                meta_files['iv'] = relpath
             elif f.endswith('bg_map.npy'):
-                meta_files['bgmap'] = basename
+                meta_files['bgmap'] = relpath
             elif f.endswith('bias_step_analysis.npy'):
-                meta_files['bias_steps'] = basename
+                meta_files['bias_steps'] = relpath
             elif f.endswith('take_noise.npy'):
-                meta_files['noise'] = basename
+                meta_files['noise'] = relpath
 
         self.meta_files = meta_files
 
