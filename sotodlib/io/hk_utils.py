@@ -5,8 +5,6 @@ import logging
 
 from so3g.hk import load_range
 from sotodlib import core
-import sotodlib.io.load_smurf as ls
-from sotodlib.io.load_smurf import Observations
 
 from scipy.interpolate import interp1d
 
@@ -102,7 +100,7 @@ def get_grouped_hkdata(start, stop, config):
     return grouped_data
 
 
-def make_hkaman(grouped_data, det_cosamped=False, det_aman=None):
+def make_hkaman(grouped_data, det_cosampled=False, det_aman=None):
     """
     Takes data from get_grouped_hkdata(), tests whether feed/device is
     cosampled, outputs axismanager(s) for either case.
@@ -139,7 +137,7 @@ def make_hkaman(grouped_data, det_cosamped=False, det_aman=None):
             aliases.append(alias)
 
             time = group[field][1]
-            times.append(time)
+            times_hk.append(time)
 
             time_info = {alias: time}
             times_det.update(time_info)
@@ -148,9 +146,9 @@ def make_hkaman(grouped_data, det_cosamped=False, det_aman=None):
 
             info = {alias: device_data}
             data.update(info)
-        
+
         # only want HK data, checking for cases where HK data is cosampled
-        if det_cosamped == False:
+        if det_cosampled is False:
             try:
                 # check for cosampled HK devices
                 assert np.all([len(t) == len(times_hk[0]) for t in times_hk])
@@ -189,7 +187,7 @@ def make_hkaman(grouped_data, det_cosamped=False, det_aman=None):
                 hkaman_cos.wrap(device_name, np.array([data[alias] for alias in aliases]),
                                 [(0, device_axis), (1, samps_axis)])
                 amans.append(hkaman_cos)
-        
+
         # want HK data cosampled to detector timestreams
         # not concerned with cosampeld HK devices here
         else:
@@ -250,6 +248,7 @@ def get_hkaman(start, stop, config):
     hk_amans = make_hkaman(data)
     return hk_amans
 
+
 def get_detcosamp_hkaman(config, det_aman):
     """
     Wrapper to combine get_grouped_hkdata() and make_hkaman() to output one
@@ -272,8 +271,8 @@ def get_detcosamp_hkaman(config, det_aman):
             'xy_stage_x': 'observatory.XYWing.feeds.positions.x'
             'xy_stage_y': 'observatory.XYWing.feeds.positions.y'
     """
-    start = det_aman.timestamps[0]
-    stop = det_aman.timestamps[1]
+    start = float(det_aman.timestamps[0])
+    stop = float(det_aman.timestamps[-1])
     data = get_grouped_hkdata(start, stop, config)
 
     hkamans_detcosamp = make_hkaman(data, det_cosampled=True, det_aman=det_aman)
