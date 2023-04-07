@@ -13,10 +13,17 @@ _TES_BIAS_COUNT = 16  # per detset / primary file group
 
 
 def _extract_1d(src, src_offset, dest, dest_offset):
-    """Args:
-      src (sliceable)
+    """Assist with unloading frames into a destination array.  Copies as
+    much data as possible from src[src_offset:] into
+    dest[dest_offset:].  "As possible" accounts for the possibility
+    that src_offset is beyond the end of src.  The return value is
+    used to update src_offset (and, with a bit of additional care,
+    dest_offset) for next frame.
+
+    Args:
+      src (sliceable): source vector.
       src_offset (int): starting index into source.
-      dest (ndarray)
+      dest (ndarray): destination buffer.
       dest_offset (int): offset into dest samples axis.
 
     Returns:
@@ -24,19 +31,22 @@ def _extract_1d(src, src_offset, dest, dest_offset):
       discarded in order to "seek" to src_offset.
 
     """
-    # What dets do we have here and where do they belong?
-    count = min(len(src) - src_offset, dest.shape[-1] - dest_offset)
+    count = min(len(src) - src_offset, len(dest) - dest_offset)
     if count < 0:
         return len(src)
     samp_slice = slice(src_offset, src_offset+count)
     dest[dest_offset:dest_offset+count] = src[samp_slice]
     return src_offset + count
 
+
 def _extract_2d(src, src_offset, dest, dest_offset, dets=None):
-    """Args:
-      src (G3SuperTimestream)
+    """Unpack certain elements of a G3SuperTimestream into a 2d array.
+    Equivalent to running _extract_1d, row by row, on src and dest.
+
+    Args:
+      src (G3SuperTimestream): source frame object.
       src_offset (int): starting index into source.
-      dest (ndarray)
+      dest (ndarray): destination buffer.
       dest_offset (int): offset into dest samples axis.
       dets (list of str): detector names for each index of first axis
         of dest.  If None, simple one-to-one match-up is assumed.
@@ -63,6 +73,10 @@ def _extract_2d(src, src_offset, dest, dest_offset, dets=None):
 
 
 def _check_bias_names(frame):
+    """Verify the frame has TES biases with expected names; return the
+    modified names that include stream_id.
+
+    """
     for i, name in enumerate(frame['tes_biases'].names):
         if name != 'bias%02i' % i:
             raise RuntimeError(f'Bias at index {i} has unexpected name "{name}"!')
@@ -73,6 +87,12 @@ def _check_bias_names(frame):
 def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
                   no_signal=None,
                   **kwargs):
+    """Obsloader function for SO "Level 3" obs/oper Books.
+
+    See API template, `sotodlib.core.context.obsloader_template`, for
+    details of all supported arguments.
+
+    """
     if any([v is not None for v in kwargs.values()]):
         raise RuntimeError(
             f"This loader function does not understand these kwargs: f{kwargs}")

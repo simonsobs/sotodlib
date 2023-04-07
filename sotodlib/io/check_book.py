@@ -41,14 +41,18 @@ class _compact_list(list):
     def __repr__(self):
         others = len(self) - 5
         if len(self) > 10:
-            return '[' + ', '.join([repr(x) for x in self[:5]]) + f', and {others} other items ...]'
+            return '[' + ', '.join([repr(x) for x in self[:5]]) \
+                + f', and {others} other items ...]'
         else:
             return super.__repr__(self)
 
 
 class BookScanner:
-    """
-    The BookScanner is used like this::
+    """The BookScanner helps to catalog the contents of an obs/oper book,
+    validate that the contents look right, and produce entries for
+    ObsFileDb.
+
+    It is used like this::
 
       # Instantiate with path to a obs/oper Book.
       bs = BookScanner(book_dir)
@@ -361,6 +365,7 @@ class BookScanner:
         return detset_rows, file_rows
     
     def report(self):
+        """Print a summary of warning and error messages."""
         print('Warnings:')
         for err in self.results['warnings']:
             print(err)
