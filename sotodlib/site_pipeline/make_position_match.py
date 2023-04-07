@@ -3,6 +3,7 @@ import sys
 import argparse as ap
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.animation as ani
 import yaml
 import sotodlib.io.g3tsmurf_utils as g3u
 import sotodlib.io.load_smurf as ls
@@ -274,25 +275,22 @@ def transform_from_detmap(aman):
     aman.eta = transformed[:, 1]
 
 
-def visualize(iteration, error, X, Y, ax, bias_lines):
+def visualize(frame, frames, ax, bias_lines):
     """
     Visualize CPD matching process.
-    Lifted from the pycpd example scripts.
+    Modified from the pycpd example scripts.
 
     Arguments:
 
-        iteration: The iteration of the fit.
+        frame: The frame to display.
 
-        error: The current q value.
-
-        X: The target points.
-
-        Y: The source points.
+        frames: List of frames, each frame should be [iteration, error, X, Y]
 
         ax: Axis to use for plots.
 
         bias_lines: True if bias lines are included in points.
     """
+    iteration, error, X, Y = frames[frame]
     cmap = "Set3"
     if bias_lines:
         x = 1
@@ -359,8 +357,6 @@ def visualize(iteration, error, X, Y, ax, bias_lines):
         transform=ax.transAxes,
         fontsize="x-large",
     )
-    plt.draw()
-    plt.pause(0.00001)
 
 
 def match_template(
@@ -396,7 +392,7 @@ def match_template(
 
         bias_lines: Include bias lines in matching.
 
-        reverse: Reverse dirction of match.
+        reverse: Reverse direction of match.
 
         vis: If true generate plots to watch the matching process.
              Should only be used for debugging with human interaction.
@@ -425,10 +421,23 @@ def match_template(
     reg = AffineRegistration(**cpd_args)
 
     if vis:
+        frames = []
+
+        def store_frames(frames, iteration, error, X, Y):
+            frames += [[iteration, error, X, Y]]
+
         fig = plt.figure()
         fig.add_axes([0, 0, 1, 1])
-        callback = partial(visualize, ax=fig.axes[0], bias_lines=bias_lines)
+        callback = partial(store_frames, frames=frames)
         reg.register(callback)
+        anim = ani.FuncAnimation(
+            fig=fig,
+            func=partial(
+                visualize, frames=frames, ax=fig.axes[0], bias_lines=bias_lines
+            ),
+            frames=len(frames),
+            interval=200,
+        )
         plt.show()
     else:
         reg.register()
