@@ -73,17 +73,19 @@ from sotodlib.core import metadata
 from sotodlib.io import check_book
 
 import argparse
+import sys
 import yaml
 
 
-def get_parser():
-    parser = argparse.ArgumentParser(usage="""
-    %(prog)s [options] book_dir
+def get_parser(parser=None):
+    if parser is None:
+        parser = argparse.ArgumentParser()
+    parser.description = """
 
-    Scan an "obs" or "oper" book and check for schema compliance;
-    optionally update an obsfiledb.
+        Scan an "obs" or "oper" book and check for schema compliance;
+        optionally update an obsfiledb.
 
-    """)
+    """
     parser.add_argument('book_dir',
                         help="Path to the Book.")
     parser.add_argument('--config', '-c',
@@ -96,28 +98,25 @@ def get_parser():
     return parser
 
 
-if __name__ == '__main__':
-    parser = get_parser()
-    args = parser.parse_args()
+def main(book_dir, config=None, add=None, overwrite=None):
+    print(f'Examining {book_dir}')
 
-    print(f'Examining {args.book_dir}')
-
-    config = {}
-    if args.config:
-        print(f'Loading config from {args.config}')
-        config = yaml.safe_load(open(args.config, 'rb'))
-
-    bs = check_book.BookScanner(args.book_dir, config)
+    if config is not None:
+        print(f'Loading config from {config}')
+        config = yaml.safe_load(open(config, 'rb'))
+    else:
+        config = {}
+    bs = check_book.BookScanner(book_dir, config)
 
     bs.go()
     bs.report()
 
     if len(bs.results['errors']):
         print('Cannot register this obs due to errors.')
-        parser.exit(1)
+        sys.exit(1)
 
-    if not args.add:
-        parser.exit(0)
+    if not add:
+        sys.exit(0)
 
     detset_rows, file_rows = bs.prep_obsfiledb(config.get('root_path', '/'))
 
@@ -126,7 +125,7 @@ if __name__ == '__main__':
     print('Updating %s ...' % obsfiledb_file)
     db = metadata.ObsFileDb(obsfiledb_file)
 
-    if args.overwrite:
+    if overwrite:
         # Note this only drops the obs ... if detsets need to be
         # rewritten, you'd better start over entirely.
         print(' -- removing any existing references.')
@@ -138,3 +137,7 @@ if __name__ == '__main__':
             db.add_detset(name, dets)
     for row in file_rows:
         db.add_obsfile(**row)
+
+
+if __name__ == '__main__':
+    util.main_launcher(main, get_parser)
