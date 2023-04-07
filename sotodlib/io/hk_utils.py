@@ -249,4 +249,33 @@ def get_hkaman(start, stop, config):
     data = get_grouped_hkdata(start, stop, config)
     hk_amans = make_hkaman(data)
     return hk_amans
+
+def get_detcosamp_hkaman(config, det_aman):
+    """
+    Wrapper to combine get_grouped_hkdata() and make_hkaman() to output one
+    axismanager of HK axismanagers that are cosampled to detector timestreams.
+
+    Parameters:
+        config (str): Filename of a .yaml file for loading HK fields and aliases.
+            Required for get_grouped_hkdata().
+        det_aman (AxisManager): detector data AxisManager from load_smurf().
+
+    Notes
+    -----
+
+    An example config file looks like:
+
+        data_dir: '/mnt/so1/data/chicago-latrt/hk/'
+
+        field_list:
+            'bf_4k' : 'observatory.LSA22HG.feeds.temperatures.Channel_06_T'
+            'xy_stage_x': 'observatory.XYWing.feeds.positions.x'
+            'xy_stage_y': 'observatory.XYWing.feeds.positions.y'
+    """
+    start = det_aman.timestamps[0]
+    stop = det_aman.timestamps[1]
+    data = get_grouped_hkdata(start, stop, config)
+
+    hkamans_detcosamp = make_hkaman(data, det_cosampled=True, det_aman=det_aman)
+    return hkamans_detcosamp
 # TODO: insert a progress bar for get_grouped_hkdata
