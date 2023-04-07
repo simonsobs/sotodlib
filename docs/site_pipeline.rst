@@ -14,6 +14,30 @@ quick-turnaround data processing at the observatory.
   syntax.
 
 
+Command line interface
+======================
+
+
+Usage
+-----
+
+To execute a pipeline element from the command line, use the
+``so-site-pipeline`` command.  For example, ``make-source-flags`` can
+be invoked as::
+
+  so-site-pipeline make-source-flags [options]
+
+To configure tab-completion of element names, in bash, run::
+
+  eval `so-site-pipeline --bash-completion`
+
+
+Wrapping a pipeline script
+--------------------------
+
+.. automodule:: sotodlib.site_pipeline.cli
+
+
 Pipeline Elements
 =================
 
@@ -145,7 +169,16 @@ entries mater.
 preprocess-tod
 --------------
 This script is set up to run a preprocessing pipeline using the preprocess
-module. :ref:`See details here<preprocess-module>`.
+module. See details in :ref:`See details here<preprocess-module>` for how to
+build a preprocessing pipeline. 
+
+This module includes the functions designed to be run as part of a batch script
+for automated analysis as well as options for loading AxisManagers that have all
+the preprocessing steps applied to them.
+
+.. argparse::
+   :module: sotodlib.site_pipeline.preprocess_tod
+   :func: get_parser
 
 make-source-flags
 -----------------
@@ -156,6 +189,8 @@ Command line arguments
 .. argparse::
    :module: sotodlib.site_pipeline.make_source_flags
    :func: get_parser
+   :prog: make-source-flags
+
 
 Config file format
 ``````````````````
@@ -198,7 +233,7 @@ Command line arguments
 
 .. argparse::
    :module: sotodlib.site_pipeline.make_uncal_beam_map
-   :func: _get_parser
+   :func: get_parser
    :prog: make-uncal-beam-map
 
 Config file format

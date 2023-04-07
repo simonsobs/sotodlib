@@ -85,7 +85,7 @@ class SimStimulator(Operator):
         super().__init__(**kwargs)
 
     @function_timer
-    def get_chopper_state(self, obs):
+    def _get_chopper_state(self, obs):
         """Chopper modulates the stimulator signal"""
 
         my_times = obs.shared[self.times].data
@@ -237,7 +237,7 @@ class SimStimulator(Operator):
         return
 
     @function_timer
-    def get_stimulator_temperature(self, obs):
+    def _get_stimulator_temperature(self, obs):
         """Time-dependent stimulator temperature"""
         times = obs.shared[self.times].data
 
@@ -253,7 +253,7 @@ class SimStimulator(Operator):
 
         return
 
-    def get_stimulator_signal(self, obs, band, quat):
+    def _get_stimulator_signal(self, obs, band, quat):
 
         # FIXME: figure out the actual amplitude of the signal in K_CMB
 
@@ -284,8 +284,8 @@ class SimStimulator(Operator):
                     comm=obs.comm.comm_group,
                 )
                 continue
-            self.get_chopper_state(obs)
-            self.get_stimulator_temperature(obs)
+            self._get_chopper_state(obs)
+            self._get_stimulator_temperature(obs)
 
             dets = obs.select_local_detectors(detectors)
             obs.detdata.ensure(self.det_data, detectors=dets, create_units=u.K)
@@ -298,7 +298,7 @@ class SimStimulator(Operator):
                 band = focalplane[det]["band"]
                 quat = focalplane[det]["quat"]
 
-                stim = self.get_stimulator_signal(obs, band, quat)
+                stim = self._get_stimulator_signal(obs, band, quat)
 
                 signal += scale * stim
 

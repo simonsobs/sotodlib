@@ -106,6 +106,8 @@ Processing Functions
 
 .. autofunction:: sotodlib.site_pipeline.preprocess_tod.preprocess_tod
 
+.. autofunction:: sotodlib.site_pipeline.preprocess_tod.run_preprocess
+
 .. autofunction:: sotodlib.site_pipeline.preprocess_tod.load_preprocess_det_select
 
 .. autofunction:: sotodlib.site_pipeline.preprocess_tod.load_preprocess_tod

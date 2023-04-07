@@ -6,117 +6,20 @@ from spt3g import core
 import numpy as np
 import itertools
 import yaml
+from scipy.interpolate import interp1d
+from .load_smurf import split_ts_bits
+#
+class HWPFlags:
+    # STATIONARY is used to flag samples where data is being received by IRIG
+    # and the HWP agent, however the angle cannot be reconstructed because the HWP
+    # is not spinning.
+    STATIONARY = 2**0
 
+    # NO_DATA is used to flag samples where no HWP data is present in the
+    # hk files. This causes the `slow` field of the HWP g3 files to have
+    # `stable=False`.
+    NO_DATA = 2**1
 
-def pos2vel(p):
-    """From a given position vector, compute the velocity vector
-
-    Parameters
-    ----------
-    p : np.ndarray
-        Position vector
-
-    Returns
-    -------
-    np.ndarray
-        Velocity vector
-
-    """
-    return np.ediff1d(p)
-
-def get_channel_names(s, rids=None):
-    """
-    Retrieve the channel names in a G3SuperTimestream. If provided, matches readout IDs to the
-    associated channels and returns them
-
-    Parameters
-    ----------
-    s : G3SuperTimestream
-        Timestream to query
-    rids : list
-        List of readout IDs
-
-    Returns
-    -------
-    list
-        List of channel names
-    """
-    if rids is not None:
-        # check compatability
-        assert len(s.names) == len(rids)
-        assert list(s.names) == sorted(s.names)  # name sure things are in our assumed order
-        # maybe more checks are needed here...
-        return rids
-    else:
-        return s.names
-
-def get_channel_data_from_name(s, channel_name):
-    """
-    From the channel name of a G3SuperTimestream (as listed in .names), retrieve
-    the associated data vector
-
-    Parameters
-    ----------
-    s : G3SuperTimestream
-        Input timestream
-    channel_name : str
-        The name of the channel, exactly as listed in the .names field
-
-    Returns
-    -------
-    np.ndarray
-        Data vector associated with that channel name
-    """
-    if channel_name not in s.names:
-        raise KeyError(f"{channel_name} not found in this SuperTimestream")
-    idx = list(s.names).index(channel_name)
-    return s.data[idx]
-
-def split_ts_bits(c):
-    """
-    Split up 64 bit to 2x32 bit
-    """
-    NUM_BITS_PER_INT = 32
-    MAXINT = (1 << NUM_BITS_PER_INT) - 1
-    a = (c >> NUM_BITS_PER_INT) & MAXINT
-    b = c & MAXINT
-    return a, b
-
-def get_timestamps(f, use_counters):
-    """
-    Calculate the timestamp field for loaded data
-
-    Copied from load_smurf.py (Jan 23, 2023)
-
-    Parameters
-    ----------
-    f : G3Frame
-        Input SMuRF frame containing data in G3SuperTimestream format
-    use_counters : bool
-        Whether to calcuate the timestamps from the timing counters.
-        If false, returns the times recorded in the .times field.
-
-    Returns
-    -------
-    G3VectorTime
-        The array of computed timestamps
-    """
-    if use_counters and 'primary' in f.keys():
-        counter0 = get_channel_data_from_name(f['primary'], 'Counter0')
-        if np.any(counter0):
-            s, ns = split_ts_bits(get_channel_data_from_name(f['primary'], 'Counter2'))
-            # Add 20 years in seconds (accounting for leap years) to handle
-            # offset between EPOCH time referenced to 1990 relative to UNIX time.
-            counter2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
-            timestamps = np.round(counter2 - (counter0 / 480000) ) + counter0 / 480000
-            timestamps *= core.G3Units.s
-        else:
-            raise TimingSystemError("No timing counters found")
-    elif use_counters and 'primary' not in f.keys():
-        raise TimingSystemError("'primary' field not found")
-    else:
-        timestamps = f['data'].times
-    return core.G3VectorTime(timestamps)
 
 class _HKBundle():
     """
@@ -236,6 +139,43 @@ class _SmurfBundle():
             self.primary['times'].append(f['primary'].times)
             self.primary['data'].append(f['primary'].data)
 
+    def prepend(self, f):
+        """
+        Cache the data from input SMuRF frame f at the beginning of the buffer
+
+        Parameters
+        ----------
+        f : G3Frame
+            Input SMuRF frame to be buffered
+        """
+        if f['data'] is None:
+            return
+
+        if len(self.times) == 0:
+            self.add(f)
+            return
+
+        # Original buffered data
+        t_orig = self.times
+        signal_orig = self.signal
+        biases_orig = self.biases
+        primary_orig = self.primary
+
+        # Clear buffers, add f, then append original data
+        self.__init__()
+        self.add(f)
+
+        self.times.extend(t_orig)
+
+        self.signal['times'] += signal_orig['times']
+        self.signal['data'] += signal_orig['data']
+        if biases_orig is not None:
+            self.biases['times'] += biases_orig['times']
+            self.biases['data'] += biases_orig['data']
+        if primary_orig is not None:
+            self.primary['times'] += primary_orig['times']
+            self.primary['data'] += primary_orig['data']
+
     def rebundle(self, flush_time):
         """
         Return the buffered SMuRF G3SuperTimestreams with all samples timestamped up to but
@@ -265,19 +205,19 @@ class _SmurfBundle():
 
         # Since G3SuperTimestreams cannot be shortened, the data must be copied to
         # a new instance for rebundling of the buffer
-        signalstack = np.hstack(self.signal['data'], dtype=self.dtypes['data'])
+        signalstack = np.hstack(self.signal['data'])
         signalout = so3g.G3SuperTimestream(self.signal['names'], tout, signalstack[:,:len(tout)])
         self.signal = {'names': self.signal['names'], 'times': [self.times], 'data': [signalstack[:,len(tout):]]}
 
         if self.biases is not None:
-            biasstack = np.hstack(self.biases['data'], dtype=self.dtypes['tes_biases'])
+            biasstack = np.hstack(self.biases['data'])
             biasout = so3g.G3SuperTimestream(self.biases['names'], tout, biasstack[:,:len(tout)])
             self.biases = {'names': self.biases['names'], 'times': [self.times], 'data': [biasstack[:,len(tout):]]}
         else:
             biasout = None
 
         if self.primary is not None:
-            primstack = np.hstack(self.primary['data'], dtype=self.dtypes['primary'])
+            primstack = np.hstack(self.primary['data'])
             primout = so3g.G3SuperTimestream(self.primary['names'], tout, primstack[:,:len(tout)])
             self.primout = {'names': self.primary['names'], 'times': [self.times], 'data': [primstack[:,len(tout):]]}
         else:
@@ -313,6 +253,7 @@ class FrameProcessor(object):
                  timing_system=False, **config):
         self.hkbundle = None
         self.smbundle = None
+        self.hwp_loader = None
         self.flush_time = None
         self.maxlength = config.get("maxlength", 10000)
         self.FLAGGED_SAMPLE_VALUE = config.get("flagged_sample_value", -1)
@@ -323,11 +264,8 @@ class FrameProcessor(object):
         self.timing_system = timing_system
         self._frame_splits = []
         self._hk_gaps = []
-        self._smurf_gaps = []
-        self._prev_smurf_frame_last_sample = None
-        self._prev_smurf_frame_sample_interval = None
+        self._prev_smurf_sample = None
         self._smurf_timestamps = smurf_timestamps
-        self._next_expected_smurf_sample_index = 0
         self._readout_ids = config.get("readout_ids", None)
 
         # Ensure start and end times have the correct type
@@ -543,6 +481,91 @@ class FrameProcessor(object):
 
         return trimmed_frame
 
+    def fill_in_missing_samples(self, data, flush_time, return_flags=False):
+        """
+        Locate and patch missing samples in data.
+
+        If a list of timestamps is provided, use it to fill in the missing samples (note: the
+        timestamps present in the input data must exactly match their counterparts in the list).
+        If not, determine the missing samples using an estimate of the sample interval.
+
+        Parameters
+        ----------
+        data : G3SuperTimestream
+            Input data to be screened for missing samples
+        flush_time : G3Time
+            Upper time limit (exclusive) for data to be returned
+        return_flags : bool, optional
+            Whether to return the list of flags indicating filled-in samples
+
+        Return
+        ------
+        dataout : G3SuperTimestream
+            Data G3SuperTimestream with filled-in samples wherever gaps are detected
+        flag_gap : G3VectorBool, optional
+            Array of boolean flags indicating filled-in samples that should not be used for
+            analysis. Set return_flags = True to return.
+        """
+        # There is no _prev_smurf_sample at the beginning of the book
+        if self._prev_smurf_sample is None:
+            prev_frame_end = self.BOOK_START_TIME.time - 1
+        else:
+            prev_frame_end = self._prev_smurf_sample.time
+        # Define a strict upper limit (exclusive) up until which to look/interpolate for missing samples
+        if self.BOOK_END_TIME is not None:
+            end_time = min(flush_time.time, self.BOOK_END_TIME.time + 1)
+        elif self._smurf_timestamps is not None:
+            end_time = min(flush_time.time, self._smurf_timestamps[-1] + 1)
+        else:
+            end_time = min(flush_time.time, data.times[-1].time + 1)
+
+        # Obtain list of filled-in timestamps, whether from provided list or estimate with fill_time_gaps
+        if self._smurf_timestamps is not None:
+            # trim the list of timestamps to the current frame
+            m_ = np.logical_and(self._smurf_timestamps < end_time, self._smurf_timestamps > prev_frame_end)
+            ts = self._smurf_timestamps[m_]
+        else:
+            # fallback when no timestamp is provided. We switch to estimate sample interval based on data
+            assert data.times[0].time >= prev_frame_end
+            # Use fill_time_gaps to fill in any missing samples in the middle, as well as
+            # at the beginning (between previous frame and current frame)
+            dt = np.median(np.diff(data.times))  # estimate sample interval
+            if self._prev_smurf_sample is None:
+                # Use estimated sample interval to fill backward to prev_frame_end = book start time - 1
+                # since book start time does not usually line up with sample interval
+                ts = np.append(np.flip(np.arange(data.times[0].time-dt, prev_frame_end, -dt, dtype=int)), data.times)
+                ts = fill_time_gaps(ts)
+            elif (data.times[0].time - prev_frame_end)/dt > 0.5:
+                ts = fill_time_gaps(np.insert(data.times, 0, prev_frame_end))[1:]
+            else:
+                ts = fill_time_gaps(np.asarray(data.times))
+            # Use estimated sample interval to fill until end_time. Not using fill_time_gaps because
+            # end_time is externally determined and does not usually line up with sample interval
+            ts = np.append(ts, np.arange(data.times[-1].time+dt, end_time, dt, dtype=int))
+
+        # Create new G3SuperTimestream with filled-in samples
+        if len(data.times) < len(ts):
+            dt = np.median(np.diff(ts))
+            i_missing, _ = find_missing_samples(ts, np.array(data.times), atol=dt/2)
+            m = np.ones(len(ts), dtype=bool)
+            m[i_missing] = False
+            assert np.sum(m) == len(data.times)
+            new_data = np.full((data.data.shape[0], len(ts)), self.FLAGGED_SAMPLE_VALUE, dtype=data.data.dtype)
+            new_data[:,m] = data.data
+            dataout = so3g.G3SuperTimestream(data.names, core.G3VectorTime(ts), new_data)
+            flag_gap = core.G3VectorBool(~m)[:self.maxlength]
+            print("{} missing samples detected".format(np.sum(~m)))
+        elif len(data.times) > len(ts):
+            raise ValueError("There are more samples in the timestream than in list provided")
+        else:
+            dataout = data
+            flag_gap = core.G3VectorBool(np.zeros(len(ts)))
+
+        if return_flags:
+            return dataout, flag_gap
+        else:
+            return dataout
+
     def flush(self, flush_time=None):
         """
         Produce frames for the output Book, up to but not including flush_time
@@ -563,13 +586,38 @@ class FrameProcessor(object):
 
         smurf_data, smurf_bias, smurf_primary = self.smbundle.rebundle(flush_time)
 
-        # Write signal data to frame
+        # Fill in missing samples and write data to frame
         f = core.G3Frame(core.G3FrameType.Scan)
-        f['signal'] = smurf_data
+        smurf_data, flag_smurfgap = self.fill_in_missing_samples(smurf_data, flush_time, return_flags=True)
+        f['signal'], data_excess = split_supertimestream(smurf_data, self.maxlength)
+        fx = {'data': data_excess}  # note input data use 'data' instead of 'signal'
         if smurf_bias is not None:
-            f['tes_biases'] = smurf_bias
+            smurf_bias = self.fill_in_missing_samples(smurf_bias, flush_time)
+            f['tes_biases'], fx['tes_biases'] = split_supertimestream(smurf_bias, self.maxlength)
         if smurf_primary is not None:
-            f['primary'] = smurf_primary
+            smurf_primary = self.fill_in_missing_samples(smurf_primary, flush_time)
+            f['primary'], fx['primary'] = split_supertimestream(smurf_primary, self.maxlength)
+        # Put any excess samples (those beyond max length) back in the buffer
+        self.smbundle.prepend(fx)
+        # Update (local) flush time if necessary
+        if data_excess is not None:
+            flush_time = data_excess.times[0]
+            self._frame_splits[-1] = flush_time  # update the most recently added split time
+        # Update last sample
+        self._prev_smurf_sample = f['signal'].times[-1]
+
+        # Gaps in SMuRF data
+        f['flag_smurfgap'] = core.G3VectorBool(flag_smurfgap[:len(f['signal'].times)])
+
+        # Ancillary data object to be written to frame
+        anc_data = core.G3TimesampleMap()
+        anc_data.times = f['signal'].times
+
+        ## Adds HWP data if present
+        if self.hwp_loader is not None:
+            ts = np.array(f['signal'].times) / core.G3Units.s
+            hwp_angle = self.hwp_loader.get_interpolated_data(ts)
+            anc_data['hwp_enc'] = core.G3VectorDouble(hwp_angle)
 
         try:
             hk_data = self.hkbundle.rebundle(flush_time)
@@ -578,36 +626,26 @@ class FrameProcessor(object):
             f['state'] = 3
         else:
             # Co-sampled (interpolated) az/el encoder data
-            cosamp_az = np.interp(smurf_data.times, hk_data.times, hk_data['Azimuth_Corrected'], left=np.nan, right=np.nan)
-            cosamp_el = np.interp(smurf_data.times, hk_data.times, hk_data['Elevation_Corrected'], left=np.nan, right=np.nan)
+            cosamp_az = np.interp(f['signal'].times, hk_data.times, hk_data['Azimuth_Corrected'], left=np.nan, right=np.nan)
+            cosamp_el = np.interp(f['signal'].times, hk_data.times, hk_data['Elevation_Corrected'], left=np.nan, right=np.nan)
 
             # Flag any samples falling within a gap in HK data
-            t = np.array([int(_t) for _t in smurf_data.times])
-            flag_hkgap = np.zeros(len(smurf_data.times))
+            t = np.array([int(_t) for _t in f['signal'].times])
+            flag_hkgap = np.zeros(len(f['signal'].times))
             for gap_start, gap_end in self._hk_gaps:
                 flag_hkgap = np.logical_or(flag_hkgap, np.logical_and(t > gap_start, t < gap_end))
             cosamp_az = np.array([self.FLAGGED_SAMPLE_VALUE if flag_hkgap[i] else cosamp_az[i] for i in range(len(cosamp_az))])
             cosamp_el = np.array([self.FLAGGED_SAMPLE_VALUE if flag_hkgap[i] else cosamp_el[i] for i in range(len(cosamp_el))])
             f['flag_hkgap'] = core.G3VectorBool(flag_hkgap)
 
-            # Flag any samples falling within a gap in SMuRF data
-            flag_smurfgap = np.zeros(len(smurf_data.times))
-            for gap_start, gap_end in self._smurf_gaps:
-                flag_smurfgap = np.logical_or(flag_smurfgap, np.logical_and(t > gap_start, t < gap_end))
-            f['flag_smurfgap'] = core.G3VectorBool(flag_smurfgap)
-
-            # Ancillary data (co-sampled HK encoder data)
-            anc_data = core.G3TimesampleMap()
-            anc_data.times = smurf_data.times
             anc_data['az_enc'] = core.G3VectorDouble(cosamp_az)
             anc_data['el_enc'] = core.G3VectorDouble(cosamp_el)
-
-            # Write ancillary data to frame
-            f['ancil'] = anc_data
-
             self.determine_state(hk_data['Azimuth_Velocity'], hk_data['Elevation_Velocity'])
             f['state'] = self.current_state
+
         finally:
+            # Write ancillary data to frame
+            f['ancil'] = anc_data
             output += [f]
 
         return output
@@ -627,33 +665,6 @@ class FrameProcessor(object):
         output : list
             List containing frames to be entered into output Book
         """
-
-        def generate_missing_smurf_samples(f, t):
-            """
-            Produce a frame filled with the FLAGGED_SAMPLE_VALUE at the timestamps given in t,
-            to be used as fill-in values for missing data.
-
-            Parameters
-            ----------
-            f : G3Frame
-                A frame from the current timestream, from which to extract metadata
-            t : numpy.ndarray
-                Vector of timestamps
-
-            Returns
-            -------
-            frame : G3Frame
-                Frame containing a G3SuperTimestream with FLAGGED_SAMPLE_VALUE at each input timestamp
-            """
-            frame = core.G3Frame(core.G3FrameType.Scan)
-            for k in set(f.keys()).intersection(['data', 'tes_biases', 'primary']):
-                data = so3g.G3SuperTimestream(f[k].names, core.G3VectorTime([core.G3Time(_t) for _t in t]))
-                if f[k].data.dtype in [np.float32, np.float64]:
-                    assert f[k].quanta is not None
-                    data.quanta = f[k].quanta
-                data.data = np.full((len(data.names),len(t)), self.FLAGGED_SAMPLE_VALUE, dtype=f[k].data.dtype)
-                frame[k] = data
-            return frame
 
         if f.type != core.G3FrameType.Housekeeping and f.type != core.G3FrameType.Scan:
             return [f]
@@ -699,60 +710,19 @@ class FrameProcessor(object):
             if len(t) == 0:
                 return []
 
-            # Determine if there is a gap in time between this frame and previous frame
-            if self._smurf_timestamps is not None:
-                current_timestamp = t[0].time
-                expected_timestamp = self._smurf_timestamps[self._next_expected_smurf_sample_index]
-                if current_timestamp != expected_timestamp:
-                    current_smurf_sample_index = np.where(self._smurf_timestamps == current_timestamp)[0][0]
-                    gap_nsamples = current_smurf_sample_index - self._next_expected_smurf_sample_index
-                    print("Gap in SMuRF data: {} samples".format(gap_nsamples))
-                    # Add gap to internal list
-                    self._smurf_gaps.append((self._prev_smurf_frame_last_sample, current_timestamp))
-                    # Insert dummy samples into self.smbundle
-                    gap_times = self._smurf_timestamps[self._next_expected_smurf_sample_index : current_smurf_sample_index]
-                    self.smbundle.add(generate_missing_smurf_samples(f, gap_times))
-                    # account for missing samples
-                    self._next_expected_smurf_sample_index += gap_nsamples
-                # update values
-                self._prev_smurf_frame_last_sample = t[-1].time
-                self._next_expected_smurf_sample_index += len(t)
-            else:
-                # if there is only one sample in the frame, then we can't determine the sample rate
-                # try to get it from the previous frame
-                if len(t) == 1:
-                    print("Warning: only one sample in frame. Trying to use the sample rate from previous frame.")
-                    sample_interval = self._prev_smurf_frame_sample_interval
-                else:
-                    sample_interval = (t[-1].time - t[0].time)/(len(t)-1)
-                if self._prev_smurf_frame_last_sample is not None and self._prev_smurf_frame_sample_interval is not None:
-                    this_smurf_frame_first_sample = t[0].time
-                    time_since_prev_smurf_frame = this_smurf_frame_first_sample - self._prev_smurf_frame_last_sample
-                    if (1-self._prev_smurf_frame_sample_interval/time_since_prev_smurf_frame) > self.GAP_THRESHOLD:
-                        # Estimate number of missing samples
-                        gap_nsamples = np.round(time_since_prev_smurf_frame/sample_interval - 1).astype(int)
-                        if gap_nsamples > 0:
-                            print("Gap in SMuRF data: {} samples".format(gap_nsamples))
-                            # Insert dummy samples into self.smbundle
-                            gap_times = (np.arange(gap_nsamples) + 1) * sample_interval + self._prev_smurf_frame_last_sample
-                            self.smbundle.add(generate_missing_smurf_samples(f, gap_times))
-                            # Add gap to internal list
-                            self._smurf_gaps.append((self._prev_smurf_frame_last_sample, this_smurf_frame_first_sample))
-                # update values
-                self._prev_smurf_frame_last_sample = t[-1].time
-                self._prev_smurf_frame_sample_interval = sample_interval
-
             # Add current frame
             self.smbundle.add(f)
 
-            # If the existing data exceeds the specified maximum length
-            while len(self.smbundle.times) >= self.maxlength:
-                split_time = self.smbundle.times[self.maxlength-1]
+            # If the existing data exceeds the specified maximum length, split the frame into frames
+            # less than maxlength and record the frame split time(s)
+            while len(self.smbundle.times) > self.maxlength:
+                split_time = self.smbundle.times[self.maxlength]
+                # If flush_time occurs before split_time, exit loop for handling in following block
+                if self.flush_time is not None and self.flush_time <= split_time:
+                    break
                 self._frame_splits.append(split_time)
-                output += self.flush(split_time + 1)
-                if self.flush_time is not None and split_time >= self.flush_time:
-                    return output
-            # If a frame split event has been reached
+                output += self.flush(split_time)
+            # If a frame split event has been reached, output a frame with samples up until flush_time
             if self.flush_time is not None and self.smbundle.ready(self.flush_time):
                 output += self.flush()
 
@@ -770,9 +740,11 @@ class Bookbinder(object):
     """
     def __init__(self, smurf_files, hk_files=None, out_root='.', book_id=None,
                  session_id=None, stream_id=None, start_time=None, end_time=None,
-                 smurf_timestamps=None, timing_system=False, verbose=True, **config):
+                 smurf_timestamps=None, timing_system=False, verbose=True,
+                 hwp_root=None, **config):
         self._smurf_files = smurf_files
         self._hk_files = hk_files
+        self._hwp_root = hwp_root
         self._book_id = book_id
         self._out_root = out_root
         self._session_id = session_id
@@ -785,7 +757,9 @@ class Bookbinder(object):
         self._meta_file = op.join(out_root, book_id, f'M_index.yaml')
         self.metadata = []
         self.frame_num = 0
-        self.sample_num = 0
+        self.file_sample_counter = 0
+        self.prev_file_last_sample_num = 0
+        self.file_sample_ranges = [[0, 0]]
         self.ofile_num = 0
         self.default_mode = True  # True: time-based split; False: scan-based split
         self.MAX_SAMPLES_TOTAL = int(config.get("max_samples_total", 1e9))
@@ -793,6 +767,9 @@ class Bookbinder(object):
         self.MAX_SAMPLES_PER_CHANNEL = self.MAX_SAMPLES_TOTAL // self.max_nchannels
         self.DEFAULT_TIME = core.G3Time(1e18)  # 1e18 = 2286-11-20T17:46:40.000000000 (in the distant future)
         self.OVERWRITE_ANCIL_FILE = config.get("overwrite_afile", False)
+        self.hwp_loader = None
+        self.ancil_writer = None
+        self.writer = None
 
         if isinstance(self._hk_files, str):
             self._hk_files = [self._hk_files]
@@ -823,12 +800,25 @@ class Bookbinder(object):
 
             self.create_file_writers()
 
+    def close_file_writers(self):
+        """
+        Closes G3 file writers if they are open.
+        """
+        if self.ancil_writer is not None:
+            self.ancil_writer(core.G3Frame(core.G3FrameType.EndProcessing))
+        if self.writer is not None:
+            self.writer(core.G3Frame(core.G3FrameType.EndProcessing))
+
     def create_file_writers(self):
         """
         Create the G3Writer instances for the output D-file and, if it doesn't already
         exist, the A-file. Optionally, overwrite the existing A-file setting the
         OVERWRITE_ANCIL_FILE attribute to True.
         """
+
+        # Close existing file writers if open
+        self.close_file_writers()
+
         out_bdir = op.join(self._out_root, self._book_id)
         if not op.exists(out_bdir): os.makedirs(out_bdir)
         ofile = op.join(out_bdir, f'D_{self._stream_id}_{self.ofile_num:03d}.g3')
@@ -864,7 +854,9 @@ class Bookbinder(object):
         if self._stream_id is not None:
             oframe['stream_id'] = core.G3String(self._stream_id)
         if oframe.type == core.G3FrameType.Scan:
-            oframe['sample_range'] = core.G3VectorInt([self.sample_num-len(f['signal'].times), self.sample_num-1])
+            range_start = self.prev_file_last_sample_num + self.file_sample_counter - len(f['signal'].times)
+            range_stop  = self.prev_file_last_sample_num + self.file_sample_counter
+            oframe['sample_range'] = core.G3VectorInt([range_start, range_stop])
         return oframe
 
     def write_frames(self, frames_list):
@@ -885,17 +877,29 @@ class Bookbinder(object):
             # If the number of samples (per channel) exceeds the max allowed, create a new output file
             if f.type == core.G3FrameType.Scan:
                 nsamples = len(f['signal'].times)   # number of samples in current frame
-                self.sample_num += nsamples         # cumulative number of samples in current output file
-                if self.sample_num > self.MAX_SAMPLES_PER_CHANNEL:
+                # if cumulative sample number exceeds max allowed, create new file to
+                # store the current frame and restart the sample number counter
+                if self.file_sample_counter + nsamples > self.MAX_SAMPLES_PER_CHANNEL:
                     self.ofile_num += 1
-                    self.create_file_writers()
-                    self.sample_num = nsamples      # reset sample number to length of current frame
+                    curr_file_last_sample_num = self.prev_file_last_sample_num + self.file_sample_counter
+                    self.prev_file_last_sample_num = curr_file_last_sample_num
+                    self.file_sample_counter = nsamples      # reset sample number to length of current frame
+                    self.file_sample_ranges.append([
+                        curr_file_last_sample_num,
+                        curr_file_last_sample_num + self.file_sample_counter
+                    ])
                     self.frame_num = 0              # reset frame number to 0
+                    self.create_file_writers()
+                else:
+                    self.file_sample_counter += nsamples
+                    # keep file ranges up to date as we go
+                    self.file_sample_ranges[-1][1] = self.file_sample_counter + self.file_sample_ranges[-1][0]
+
             # add misc metadata to output frame and write it out
             oframe = self.add_misc_data(f)
             self.writer.Process(oframe)
             # if ancil_writer exists, write out the ancil frame
-            if hasattr(self, 'ancil_writer'):
+            if self.ancil_writer is not None:
                 aframe = core.G3Frame(oframe.type)
                 if 'ancil' in oframe.keys():
                     aframe['ancil'] = f['ancil']
@@ -1033,7 +1037,12 @@ class Bookbinder(object):
              'start_time': self._start_time.time/core.G3Units.s,
              'end_time':   self._end_time.time/core.G3Units.s,
              'n_frames':   self.frame_num,
-             'n_samples':  self.sample_num}
+             'sample_ranges': self.file_sample_ranges,
+             'n_samples':  self.file_sample_ranges[-1][-1]}
+
+        if self.hwp_loader is not None:
+            d.update(self.hwp_loader.get_metadata())
+
         return d
 
     def __call__(self):
@@ -1044,6 +1053,11 @@ class Bookbinder(object):
         """
         # Determine if HK files contain az/el encoder data and find any gaps between HK frames
         self.process_HK_files()
+
+        if self._hwp_root is not None:
+            self.hwp_loader = HWPLoader(self._hwp_root)
+            self.hwp_loader.load_data(self._start_time.time / core.G3Units.s, self._end_time.time / core.G3Units.s)
+            self.frameproc.hwp_loader = self.hwp_loader
 
         # If frame splits file exists, load it; if not, determine appropriate split locations
         if op.isfile(self._frame_splits_file):
@@ -1108,6 +1122,8 @@ class Bookbinder(object):
                     # Clear output buffer after writing
                     output = []
 
+        self.close_file_writers()
+
         self._frame_splits += self.frameproc._frame_splits
         # Write frame splits file if it doesn't already exist
         if not op.isfile(self._frame_splits_file):
@@ -1125,3 +1141,360 @@ class Bookbinder(object):
 class TimingSystemError(Exception):
     """Exception raised when the timing system is on but timing counters are not found"""
     pass
+
+
+#####################
+# Utility functions #
+#####################
+
+def pos2vel(p):
+    """From a given position vector, compute the velocity vector
+
+    Parameters
+    ----------
+    p : np.ndarray
+        Position vector
+
+    Returns
+    -------
+    np.ndarray
+        Velocity vector
+
+    """
+    return np.ediff1d(p)
+
+def get_channel_names(s, rids=None):
+    """
+    Retrieve the channel names in a G3SuperTimestream. If provided, matches readout IDs to the
+    associated channels and returns them
+
+    Parameters
+    ----------
+    s : G3SuperTimestream
+        Timestream to query
+    rids : list
+        List of readout IDs
+
+    Returns
+    -------
+    list
+        List of channel names
+    """
+    if rids is not None:
+        # check compatability
+        assert len(s.names) == len(rids)
+        assert list(s.names) == sorted(s.names)  # name sure things are in our assumed order
+        # maybe more checks are needed here...
+        return rids
+    else:
+        return s.names
+
+def get_channel_data_from_name(s, channel_name):
+    """
+    From the channel name of a G3SuperTimestream (as listed in .names), retrieve
+    the associated data vector
+
+    Parameters
+    ----------
+    s : G3SuperTimestream
+        Input timestream
+    channel_name : str
+        The name of the channel, exactly as listed in the .names field
+
+    Returns
+    -------
+    np.ndarray
+        Data vector associated with that channel name
+    """
+    if channel_name not in s.names:
+        raise KeyError(f"{channel_name} not found in this SuperTimestream")
+    idx = list(s.names).index(channel_name)
+    return s.data[idx]
+
+def counters_to_timestamps(c0, c2):
+    """
+    Convert timing counter values into timestamp values (sec)
+
+    Copied from load_smurf.py (Jan 23, 2023)
+    """
+    s, ns = split_ts_bits(c2)
+
+    # Add 20 years in seconds (accounting for leap years) to handle
+    # offset between EPICS time referenced to 1990 relative to UNIX time.
+    c2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
+    ts = np.round(c2 - (c0 / 480000) ) + c0 / 480000
+    return ts
+
+def get_timestamps(f, use_counters):
+    """
+    Calculate the timestamp field for loaded data
+
+    Parameters
+    ----------
+    f : G3Frame
+        Input SMuRF frame containing data in G3SuperTimestream format
+    use_counters : bool
+        Whether to calcuate the timestamps from the timing counters.
+        If false, returns the times recorded in the .times field.
+
+    Returns
+    -------
+    G3VectorTime
+        The array of computed timestamps
+    """
+    if use_counters and 'primary' in f.keys():
+        counter0 = get_channel_data_from_name(f['primary'], 'Counter0')
+        if np.any(counter0):
+            counter2 = get_channel_data_from_name(f['primary'], 'Counter2')
+            timestamps = counters_to_timestamps(counter0, counter2)
+            timestamps *= core.G3Units.s
+        else:
+            raise TimingSystemError("No timing counters found")
+    elif use_counters and 'primary' not in f.keys():
+        raise TimingSystemError("'primary' field not found")
+    else:
+        timestamps = f['data'].times
+    return core.G3VectorTime(timestamps)
+
+def fill_time_gaps(ts):
+    """
+    Fills gaps in an array of timestamps.
+
+    Parameters
+    -------------
+    ts : np.ndarray
+        List of timestamps of length `n`, potentially with gaps
+
+    Returns
+    --------
+    new_ts : np.ndarray
+        New list of timestamps of length >= n, with gaps filled.
+    """
+    # Find indices where gaps occur and how long each gap is
+    dts = np.diff(ts)
+    dt = np.median(dts)
+    missing = np.round(dts/dt - 1).astype(int)
+    total_missing = int(np.sum(missing))
+
+    # Create new array with the correct number of samples
+    # Fill with -1 assuming timestamps always > 0
+    new_ts = np.full(len(ts) + total_missing, -1, dtype=ts.dtype)
+
+    # Insert old timestamps into new array with offsets that account for gaps
+    offsets = np.concatenate([[0], np.cumsum(missing)])
+    i0s = np.arange(len(ts))
+    new_ts[i0s + offsets] = ts
+
+    # Use existing data to interpolate and fill holes
+    m = (new_ts < 0)
+    xs = np.arange(len(new_ts))
+    interp = interp1d(xs[~m], new_ts[~m])
+    new_ts[m] = interp(xs[m])
+
+    return new_ts
+
+def find_missing_samples(refs, vs, atol=0.5):
+    """
+    Find missing samples in a list of timestamps (vs) given a list of
+    reference timestamps (refs). The reference timestamps are assumed
+    to be the "true" timestamps, and the list of timestamps (vs) are
+    assumed to be missing some of the samples. The function returns
+    the missing samples in the list of timestamps (vs).
+
+    Parameters
+    ----------
+    refs : array_like
+        List of reference timestamps
+    vs : array_like
+        List of timestamps
+    atol : float
+        Absolute tolerance for the difference between the reference
+
+    Returns
+    -------
+    i_missing : array_like
+        indices (in refs) of the missing samples in vs
+    t_missing : array_like
+        values (in refs) of the missing samples in vs
+    """
+    # Find the indices of the samples in the list of timestamps (vs)
+    # that are closest to the reference timestamps
+    idx = np.searchsorted(vs, refs, side='left')
+    idx = np.clip(idx, 1, len(vs)-1)
+    # shift indices to the closest sample
+    left = vs[idx-1]
+    right = vs[idx]
+    idx -= refs - left < right - refs
+    missing = np.where(np.abs(vs[idx] - refs) > atol)[0]
+    return missing, refs[missing]
+
+def split_supertimestream(st, idx):
+    """
+    Split a G3SuperTimestream at a specific index
+
+    Parameters
+    ----------
+    st : G3SuperTimestream
+        Input timestream to be split
+    idx : int
+        Index at which to split the timestream
+
+    Returns
+    -------
+    st0, st1 : G3SuperTimestream, G3SuperTimestream
+        Arrays formed by splitting input array st at index idx
+    """
+    if idx >= len(st.times):
+        return st, None
+
+    st0 = so3g.G3SuperTimestream(st.names, st.times[:idx], st.data[:,:idx])
+    st1 = so3g.G3SuperTimestream(st.names, st.times[idx:], st.data[:,idx:])
+
+    return st0, st1
+
+class HWPLoader:
+    """
+    Helper class to load in HWP data from data archive.
+    """
+    def __init__(self, root_dir):
+        self.root_dir = root_dir
+        self.files = []
+        self.data = {}
+        self.times = {}
+
+        self.hwp_angle_interp = None
+        self.locked_interp = None
+        self.stable_interp = None
+        self.hwp_rate_interp = None
+
+    def get_files(self, start, stop):
+        """
+        Gets HWP files that may have data between start and stop time
+        """
+        files = []
+        for subdir in os.listdir(self.root_dir):
+            try:
+                tcode = int(subdir)
+            except:
+                continue
+
+            if not start//1e5 - 1 <= tcode <= stop//1e5 + 1:
+                continue
+
+            subpath = os.path.join(self.root_dir, subdir)
+            files.extend([os.path.join(subpath, f) for f in os.listdir(subpath)])
+
+        files = np.array(sorted(files))
+        file_times = np.array([int(os.path.basename(f).split('.')[0]) for f in files])
+
+        m = (start <= file_times) & (file_times < stop)
+        if not np.any(m):
+            self.files = []
+            return self.files
+
+        # Add files before and after for good measure
+        fidxs = np.where(m)[0]
+        i0, i1 = fidxs[0], fidxs[-1]
+        if i0 > 0:
+            m[i0 - 1] = 1
+        if i1 < len(m) - 1:
+            m[i1 + 1] = 1
+
+        self.files = files[m].tolist()
+        return self.files
+
+    def frame_iter(self):
+        """Iterator that loops through G3 Frames of all files in self.files"""
+        return itertools.chain(*[core.G3File(f) for f in self.files])
+
+    def load_data(self, start, stop):
+        self.get_files(start, stop)
+
+        data = {}  # structured data[block_name][field]
+        times = {}  # structured times[block_name]
+
+        bufftime = 30
+        for frame in self.frame_iter():
+            if frame['hkagg_type'] != so3g.HKFrameType.data:
+                continue
+
+            for bname, block in zip(frame['block_names'], frame['blocks']):
+                if bname not in data:
+                    data[bname] = {
+                        k: [] for k in block.keys()
+                    }
+                    times[bname] = []
+
+                ts = np.array(block.times) / core.G3Units.s
+
+                # Includes a buffer before and after for interpolation and timing uncertainty
+                m = ((start - bufftime) < ts) & (ts < (stop + bufftime))
+
+                for field, d in block.items():
+                    data[bname][field].append(np.array(d)[m])
+                times[bname].append(ts[m])
+
+        for bname in data:
+            for field in data[bname]:
+                data[bname][field] = np.hstack(data[bname][field])
+            times[bname] = np.hstack(times[bname])
+
+        self.data = data
+        self.times = times
+        if len(data) != 0:
+            self.hwp_angle_interp = interp1d(
+                times['fast'], np.unwrap(data['fast']['hwp_angle']),
+                bounds_error=False)
+            self.locked_interp = interp1d(
+                times['slow'], data['slow']['locked'], bounds_error=False)
+            self.stable_interp = interp1d(
+                times['slow'], data['slow']['stable'], bounds_error=False)
+            self.hwp_rate_interp = interp1d(
+                times['slow'], data['slow']['hwp_rate'], bounds_error=False)
+        else:
+            self.hwp_angle_interp = None
+            self.locked_interp = None
+            self.stable_interp = None
+            self.hwp_rate_interp = None
+
+    def get_interpolated_data(self, times):
+        if self.hwp_angle_interp is None:
+            return np.full(len(times), -HWPFlags.NO_DATA)
+
+        hwp_angle = self.hwp_angle_interp(times)
+        hwp_angle = np.mod(hwp_angle, 2*np.pi)
+
+        hwp_locked = self.locked_interp(times)
+        hwp_stable = self.stable_interp(times)
+
+        flags = np.zeros_like(hwp_angle, dtype=np.int32)
+        m = (hwp_stable == 1) & (hwp_locked != 1)
+        flags[m] = np.bitwise_or(flags[m], HWPFlags.STATIONARY)
+        m = hwp_stable != 1
+        flags[m] = np.bitwise_or(flags[m], HWPFlags.NO_DATA)
+
+        hwp_angle[flags != 0] = -flags[flags != 0]
+        return hwp_angle
+
+    def get_metadata(self):
+        meta = {}
+
+        hwp_rates = self.data['slow']['hwp_rate']
+        ts = self.times['slow']
+
+        # Report hwp rate every 10 minutes
+        fsamp = 1./np.median(np.diff(ts))
+        step = int(10 * 60 * fsamp)
+        meta['hwp_rate'] = np.array([ts, hwp_rates]).T[::step].tolist()
+
+        min_hwp_rate = 0.0001  # Hz
+        hwp_variation_thresh = 0.3  # Hz
+
+        if np.all(hwp_rates < min_hwp_rate):
+            meta['hwp_state'] = 'STATIONARY'
+        elif np.ptp(hwp_rates) > hwp_variation_thresh:
+            meta['hwp_state'] = 'CHANGING'
+        else:
+            meta['hwp_state'] = 'CONSTANT'
+
+        return meta

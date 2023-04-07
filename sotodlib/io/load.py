@@ -78,7 +78,7 @@ class FieldGroup(list):
 
     """
     def __init__(self, name, items=None, timestamp_field=None,
-                 compression=False):
+                 compression=False, refs_ok=True):
         """Arguments:
           name (str): The key in the parent G3FrameObject at which to
             find the specified items.
@@ -89,12 +89,20 @@ class FieldGroup(list):
           compression (bool): If the requested item is a
             G3TimestreamMap with offset+gain compression implemented,
             then say so here.
+          refs_ok (bool): If True, then extraction code will be
+            instructed that it is ok to collect a bunch of 1-d
+            references to the same large 2-d array, rather than
+            copying out the 1-d subarrays of interest so big 2-d
+            FrameObjects can be freed.  If False, copies will be
+            forced (this is efficient in the limit that small number
+            of available channels is being collected).
 
         """
         super().__init__()
         self.name = name
         self.compression = compression
         self.timestamp_field = timestamp_field
+        self.refs_ok = refs_ok
         if items is not None:
             self.extend(items)
 
@@ -181,7 +189,7 @@ class Field:
 
 
 def unpack_frame_object(fo, field_request, streams, compression_info=None,
-                        offset=0, max_count=None):
+                        offset=0, max_count=None, refs_ok=True):
     """Unpack requested fields from a G3FrameObject, and update a data structure.
     
     Arguments:
@@ -237,7 +245,8 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None,
                 comp_info = None
             target = fo[item.name]
             _consumed = unpack_frame_object(target, item, streams[item.name], comp_info,
-                                            offset=offset, max_count=max_count)
+                                            offset=offset, max_count=max_count,
+                                            refs_ok=item.refs_ok)
             _n, sl = our_slice(_consumed, 1)
             # Check and slice timestamp field independently -- must
             # work even if no dets requested led to _n=0 above.
@@ -275,7 +284,10 @@ def unpack_frame_object(fo, field_request, streams, compression_info=None,
         _n, sl = our_slice(_consumed, item.oversample)
 
         if _n:
-            streams[key].append(v[sl])
+            if refs_ok:
+                streams[key].append(v[sl])
+            else:
+                streams[key].append(np.copy(v[sl]))
     return _consumed
 
 def unpack_frames(filename, field_request, streams, samples=None):
