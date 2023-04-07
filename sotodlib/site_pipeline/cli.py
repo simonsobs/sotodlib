@@ -40,6 +40,7 @@ command line wrapper, edit ``cli.py`` and see comments inline.
 import argparse
 
 from . import (
+    check_book,
     make_source_flags,
     make_uncal_beam_map,
     update_g3tsmurf_database,
@@ -52,6 +53,7 @@ from . import (
 # the module comments above.
 
 ELEMENTS = {
+    'check-book': check_book,
     'make-source-flags': make_source_flags,
     'make-uncal-beam-map': make_uncal_beam_map,
     'update-g3tsmurf-database': update_g3tsmurf_database,
