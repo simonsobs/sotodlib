@@ -278,6 +278,8 @@ class G3tSmurf:
         total_channels = 0
         file_start, file_stop = None, None
         frame_idx = -1
+        timing = None
+
         while True:
 
             try:
@@ -328,6 +330,11 @@ class G3tSmurf:
                     db_frame.stop = dt.datetime.utcfromtimestamp(
                         data.times[-1].time / spt3g_core.G3Units.s
                     )
+                    if timing is None:
+                        timing = frame.get("timing_paradigm", "") == "High Precision"
+                    else:
+                        timing = timing and (frame.get("timing_paradigm", "") == "High Precision")
+
                 else:
                     db_frame.n_samples = data.n_samples
                     db_frame.n_channels = len(data)
@@ -354,6 +361,7 @@ class G3tSmurf:
         db_file.stop = file_stop
         db_file.n_channels = total_channels
         db_file.n_frames = frame_idx
+        db_file.timing = timing
 
     def index_archive(
         self,
@@ -827,7 +835,7 @@ class G3tSmurf:
         if obs.stop is None and not obs_ended and (force or flist[-1].stop <=
                                                     dt.datetime.now()-dt.timedelta(hours=1)):
             ## try to brute force find the end if it's been awhile
-            for f in flist[::-1]:
+            for f in flist[::-1][:3]:
                 if not obs_ended:
                     obs_ended = _file_has_end_frames(f.name)
 
@@ -836,6 +844,7 @@ class G3tSmurf:
             obs.n_samples = obs_samps
             obs.duration = flist[-1].stop.timestamp() - flist[0].start.timestamp()
             obs.stop = flist[-1].stop
+            obs.timing = np.all([f.timing for f in flist])
             logger.debug(f"Setting {obs.obs_id} stop time to {obs.stop}")
         session.commit()
 
@@ -2285,8 +2294,10 @@ def load_file(
             obsfiledb=obsfiledb,
             ignore_missing=ignore_missing,
         )
+        is_many_channels = ch_mask.sum() >= len(ch_mask) * 0.5
     else:
         ch_mask = None
+        is_many_channels = True
 
     ch_info = get_channel_info(
         status,
@@ -2329,7 +2340,8 @@ def load_file(
         ]
     else:
         subreq = [
-            io_load.FieldGroup("data", ch_info.rchannel, timestamp_field="time")
+            io_load.FieldGroup("data", ch_info.rchannel, timestamp_field="time",
+                               refs_ok=is_many_channels)
         ]
     if load_primary:
         subreq.extend(
