@@ -80,8 +80,24 @@ class SimSSO(Operator):
         help="Operator that translates boresight Az/El pointing into detector frame",
     )
 
+    detector_weights = Instance(
+        klass=Operator,
+        allow_none=True,
+        help="Operator that translates boresight Az/El pointing into detector weights",
+    )
+
     finite_sso_radius = Bool(
         False, help="Treat sources as finite and convolve beam with a disc."
+    )
+
+    polarization_fraction = Float(
+        0, help="Polarization fraction for all simulated SSOs",
+    )
+
+    polarization_angle = Quantity(
+        0 * u.deg,
+        help="Polarization angle for all simulated SSOs. Measured in the same "
+        "as `detector_weights`",
     )
 
     @traitlets.validate("sso_name")
@@ -124,6 +140,26 @@ class SimSSO(Operator):
                     msg = f"detector_pointing operator should have a '{trt}' trait"
                     raise traitlets.TraitError(msg)
         return detpointing
+
+    @traitlets.validate("detector_weights")
+    def _check_detector_weights(self, proposal):
+        detweights = proposal["value"]
+        if detweights is not None:
+            if not isinstance(detweights, Operator):
+                raise traitlets.TraitError(
+                    "detector_weights should be an Operator instance"
+                )
+            # Check that this operator has the traits we expect
+            for trt in [
+                "view",
+                "quats",
+                "weights",
+                "mode",
+            ]:
+                if not detweights.has_trait(trt):
+                    msg = f"detector_weights operator should have a '{trt}' trait"
+                    raise traitlets.TraitError(msg)
+        return detweights
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -261,7 +297,7 @@ class SimSSO(Operator):
             # We have already read the single beam file.
             beam_dic = self.beam_props["ALL"]
         else:
-            with h5py(self.beam_file, 'r') as f_t:
+            with h5py.File(self.beam_file, 'r') as f_t:
                 beam_dic = {}
                 beam_dic["data"] = f_t["beam"][:]
                 beam_dic["size"] = [[f_t["beam"].attrs["size"], f_t["beam"].attrs["res"]], [f_t["beam"].attrs["npix"], 1]]
@@ -357,6 +393,11 @@ class SimSSO(Operator):
         log = Logger.get()
         timer = Timer()
 
+        if self.polarization_fraction != 0 and self.detector_weights is None:
+            raise RuntimeError(
+                "Cannot simulate polarized SSOs without detector weights"
+            )
+
         # Get a view of the data which contains just this single
         # observation
         obs_data = data.select(obs_name=obs.name)
@@ -373,6 +414,8 @@ class SimSSO(Operator):
             signal = obs.detdata[self.det_data][det]
 
             self.detector_pointing.apply(obs_data, detectors=[det])
+            if self.polarization_fraction != 0:
+                self.detector_weights.apply(obs_data, detectors=[det])
             det_quat = obs_data.obs[0].detdata[self.detector_pointing.quats][det]
 
             # Convert Az/El quaternion of the detector into angles
@@ -401,6 +444,8 @@ class SimSSO(Operator):
 
             good = r < radius
             sig = beam(x[good], y[good], grid=False)
+            if self.polarization_fraction != 0:
+                self._observe_polarization(sig, obs, det, good)
             signal[good] += scale * sig
 
             timer.stop()
@@ -411,6 +456,35 @@ class SimSSO(Operator):
                 )
 
         return
+
+    def _observe_polarization(self, sig, obs, det, good):
+        # Stokes weights for observing polarized source
+        weights = obs.detdata[self.detector_weights.weights][det]
+        weight_mode = self.detector_weights.mode
+        if "I" in weight_mode:
+            ind = weight_mode.index("I")
+            weights_I = weights[good, ind].copy()
+        else:
+            weights_I = 0
+        if "Q" in weight_mode:
+            ind = weight_mode.index("Q")
+            weights_Q = weights[good, ind].copy()
+        else:
+            weights_Q = 0
+        if "U" in weight_mode:
+            ind = weight_mode.index("U")
+            weights_U = weights[good, ind].copy()
+        else:
+            weights_U = 0
+
+        pfrac = self.polarization_fraction
+        angle = self.polarization_angle.to_value(u.radian)
+
+        sig *= weights_I + pfrac * (
+            np.cos(angle) * weights_Q + np.sin(angle) * weights_U
+        )
+        return
+
 
     def _finalize(self, data, **kwargs):
         return
