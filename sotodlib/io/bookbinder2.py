@@ -73,6 +73,34 @@ def next_scan(it):
     return None, interm_frames
 
 
+class HKBlock:
+    def __init__(self, name):
+        self.name = name
+        self.data = {}
+        self.times = []
+    
+    def process_frame(self, frame):
+        if self.name not in frame['block_names']:
+            return
+        idx = list(frame['block_names']).index(self.name)
+        block = frame['blocks'][idx]
+
+        self.times.append(np.array(block.times) / core.G3Units.s)
+        for k, v in block.items():
+            if k not in self.data:
+                self.data[k] = []
+            self.data[k].append(v)
+    
+    def finalize(self):
+        if self.times:
+            self.times = np.hstack(self.times)
+            for k, v in self.data.items():
+                self.data[k] = np.hstack(v)
+        else:
+            self.times = np.array([], dtype=np.float32)
+            self.data = {}
+
+
 class AncilProcessor:
     """
     Processor for ancillary (ACU) data
@@ -97,7 +125,10 @@ class AncilProcessor:
     def __init__(self, files, book_id, log=None):
         self.files = files
         self.times = None
-        self.data = None
+        self.blocks = {
+            name: HKBlock(name) 
+            for name in ['ACU_broadcast', 'ACU_summary_output']
+        }
         self.anc_frame_data = None
         self.out_files = []
         self.book_id = book_id
@@ -107,49 +138,23 @@ class AncilProcessor:
         else:
             self.log = log
     
-    def preprocess(self, start=None, stop=None):
+    def preprocess(self):
         """
         Preprocesses HK data and populates the `data` and `times` objects.
         """
         self.log.info("Preprocessing HK Data")
         frame_iter = get_frame_iter(self.files)
 
-        data = {}
-        times = []
-        block_idx = None
         for fr in frame_iter:
             if fr['hkagg_type'] != 2:
                 continue
-            if 'ACU_broadcast' not in fr['block_names']:
-                continue
-            if block_idx is None:
-                block_idx = list(fr['block_names']).index('ACU_broadcast')
 
-            block = fr['blocks'][block_idx]
-            ts = np.array(block.times) / core.G3Units.s
-            if start is not None:
-                if ts[-1] < start:
-                    continue
-            if stop is not None:
-                if ts[0] >= stop:
-                    continue
+            for block in self.blocks.values():
+                block.process_frame(fr)
 
-            times.append(ts)
-            for k, v in block.items():
-                if k not in data:
-                    data[k] = []
-                data[k].append(v)
-        
-        if not times:
-            times = np.array([], dtype=np.float64)
-            data = {}
-        else:
-            times = np.hstack(times)
-            for k, v in data.items():
-                data[k] = np.hstack(v)
+        for block in self.blocks.values():
+            block.finalize()
 
-        self.data = data
-        self.times = times
     
     def bind(self, outdir, times, frame_idxs, file_idxs):
         """
@@ -174,13 +179,14 @@ class AncilProcessor:
         out_files = []
 
         az, el, boresight, corotation = None, None, None, None
-        if 'Corrected_Azimuth' in self.data:
-            az = np.interp(times, self.times, self.data['Corrected_Azimuth'])
-            el = np.interp(times, self.times, self.data['Corrected_Elevation'])
-        if 'Corrected_Boresight' in self.data:
-            boresight = np.interp(times, self.times, self.data['Corrected_Boresight'])
-        if 'Corrected_Corotation' in self.data:
-            corotation = np.interp(times, self.times, self.data['Corrected_Corotation'])
+        block = self.blocks['ACU_broadcast']
+        if 'Corrected_Azimuth' in block.data:
+            az = np.interp(times, block.times, block.data['Corrected_Azimuth'])
+            el = np.interp(times, block.times, block.data['Corrected_Elevation'])
+        if 'Corrected_Corotation' in block.data:
+            boresight = np.interp(times, block.times, block.data['Corrected_Boresight'])
+        if 'Corrected_Corotation' in block.data:
+            corotation = np.interp(times, block.times, block.data['Corrected_Corotation'])
 
         anc_frame_data = []
         for oframe_idx in np.unique(frame_idxs):
@@ -213,11 +219,61 @@ class AncilProcessor:
             writer(oframe)
             anc_frame_data.append(anc_data)
 
+            self.add_acu_summary_info(oframe, ts[0], ts[-1])
+
         # Save this to be added to detector files
         self.anc_frame_data = anc_frame_data
         self.out_files = out_files
-        
+    
+    def add_acu_summary_info(self, frame, t0, t1):
+        """
+        Adds ACU summary information to a G3Frame. This will add the following
+        info if data is present in the HK dataset::
+            - azimuth_mode: (str)
+                Azimuth_mode, pulled from the ACU summary data. `ProgramTrack`
+                means that this frame contains scan data, and `Preset` means the
+                telescope is slewing.
+            - azimuth_velocity_mean / azimuth_velocity_std: (float / float)
+                Mean and standard deviation of the az velocity (deg / sec)
+            - elevation_velocity_mean / elevaction_velocity_std: (float / float)
+                Mean and standard deviation of the el velocity (deg / sec)
+            
+        Params
+        ----------
+        frame : G3Frame
+            Frame to add data to
+        t0 : float
+            Start time of frame (unix time)
+        t1 : float
+            Stop time of frame (unix time)
+        """
+        bl = self.blocks.get('ACU_summary_output')
+        if bl is not None:
+            az_mode = bl.data["Azimuth_mode"]
+            acu_summary_times = bl.times
+            m = (t0 < acu_summary_times) & (acu_summary_times <= t1)
+            if not np.any(m):
+                frame['azimuth_mode'] = 'None'
+            elif 'ProgramTrack' in az_mode[m]:
+                frame['azimuth_mode'] = 'ProgramTrack'  # Scanning
+            else:
+                frame['azimuth_mode'] = 'Preset'  # "Slewing"
 
+        bl = self.blocks.get('ACU_broadcast')
+        if bl is not None:
+            az = bl.data["Corrected_Azimuth"]
+            el = bl.data["Corrected_Elevation"]
+            m = (t0 < bl.times) & (bl.times <= t1)
+            dt = np.diff(bl.times[m]).mean()
+            az_vel = np.diff(az[m]) / dt
+            el_vel = np.diff(el[m]) / dt
+
+            frame['azimuth_velocity_mean'] = np.mean(az_vel)
+            frame['azimuth_velocity_stdev'] = np.std(az_vel)
+            frame['elevation_velocity_mean'] = np.mean(el_vel)
+            frame['elevation_velocity_stdev'] = np.std(el_vel)
+
+        
 class SmurfStreamProcessor:
     def __init__(self, obs_id, files, book_id, readout_ids, log=None):
         self.files = files
@@ -437,13 +493,17 @@ class SmurfStreamProcessor:
             i0, i1 = np.where(m)[0][[0, -1]]
 
             oframe = core.G3Frame(core.G3FrameType.Scan)
-            ts = core.G3VectorTime(ts * core.G3Units.s)
+
+            if ancil is not None:
+                t0, t1 = ts[0], ts[-1]
+                oframe['ancil'] = ancil.anc_frame_data[oframe_idx]
+                ancil.add_acu_summary_info(oframe, t0, t1)
+
             oframe['book_id'] = self.book_id 
             oframe['sample_range'] = core.G3VectorInt([int(i0), int(i1+1)])
-            if ancil is not None:
-                oframe['ancil'] = ancil.anc_frame_data[oframe_idx]
-
             oframe['flag_smurfgaps'] = core.G3VectorBool(filled)
+
+            ts = core.G3VectorTime(ts * core.G3Units.s)
             oframe['signal'] = so3g.G3SuperTimestream(self.readout_ids, ts, data)
             oframe['primary'] = so3g.G3SuperTimestream(self.primary_names, ts, primary)
             oframe['tes_biases'] = so3g.G3SuperTimestream(self.bias_names, ts, biases)
@@ -555,7 +615,7 @@ class BookBinder:
         m = (t0 < ts) & (ts < t1)
         ts = ts[m]
 
-        self.ancil.preprocess(start=ts[0]-1, stop=ts[-1]+1)
+        self.ancil.preprocess()
 
         # Divide up frames
         frame_splits = find_frame_splits(self.ancil)
@@ -979,12 +1039,13 @@ def find_frame_splits(ancil):
     Determines timestamps of frame-splits from ACU data. If it cannot determine
     frame-splits, returns None.
     """
-    if 'Corrected_Azimuth' not in ancil.data:
+    block = ancil.blocks['ACU_broadcast']
+    if 'Corrected_Azimuth' not in block.data:
         return None 
 
-    az = ancil.data['Corrected_Azimuth']
+    az = block.data['Corrected_Azimuth']
     idxs = locate_scan_events(az, filter_window=100)[0]
-    return ancil.times[idxs]
+    return block.times[idxs]
 
 
 def get_smurf_files(obs, meta_path, all_files=False):
