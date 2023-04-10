@@ -127,7 +127,8 @@ class AncilProcessor:
         self.times = None
         self.blocks = {
             name: HKBlock(name) 
-            for name in ['ACU_broadcast', 'ACU_summary_output']
+            for name in ['ACU_broadcast', 'ACU_summary_output', 
+                         'HWPEncoder_freq']
         }
         self.anc_frame_data = None
         self.out_files = []
@@ -248,7 +249,7 @@ class AncilProcessor:
             Stop time of frame (unix time)
         """
         bl = self.blocks.get('ACU_summary_output')
-        if bl is not None:
+        if bl.data:
             az_mode = bl.data["Azimuth_mode"]
             acu_summary_times = bl.times
             m = (t0 < acu_summary_times) & (acu_summary_times <= t1)
@@ -259,8 +260,8 @@ class AncilProcessor:
             else:
                 frame['azimuth_mode'] = 'Preset'  # "Slewing"
 
-        bl = self.blocks.get('ACU_broadcast')
-        if bl is not None:
+        bl = self.blocks['ACU_broadcast']
+        if bl.data:
             az = bl.data["Corrected_Azimuth"]
             el = bl.data["Corrected_Elevation"]
             m = (t0 < bl.times) & (bl.times <= t1)
@@ -707,6 +708,30 @@ class BookBinder:
             detsets.append(g3tobs.tunesets[0].name)
             tags.append(g3tobs.tag)
         meta['detsets'] = detsets
+
+        block = self.ancil.blocks['HWPEncoder_freq']
+        meta['hwp_freq_mean'] = None
+        meta['hwp_freq_stdev'] = None
+        t0, t1 = self.times[0], self.times[-1]
+        if 'approx_hwp_freq' in block.data:
+            hwp_freq = block.data['approx_hwp_freq']
+            m = (t0 < block.times) & (block.times < t1)
+            if m.any():
+                meta['hwp_freq_mean'] = np.mean(hwp_freq[m])
+                meta['hwp_freq_stdev'] = np.std(hwp_freq[m])
+        
+        meta['az_speed_mean'] = None
+        meta['az_speed_stdev'] = None
+        block = self.ancil.blocks['ACU_broadcast']
+        if 'Corrected_Azimuth' in block.data:
+            m = (t0 < block.times) & (block.times <= t1)
+            dt = np.diff(block.times[m]).mean()
+            az = block.data['Corrected_Azimuth']
+            az_speed = np.abs(np.diff(az[m]) / dt)
+            if m.any():
+                meta['az_speed_mean'] = np.mean(az_speed)
+                meta['az_speed_stdev'] = np.std(az_speed)
+
         # make sure all tags are the same for obs in the same book
         tags = list(set(tags))
         assert len(tags) == 1
