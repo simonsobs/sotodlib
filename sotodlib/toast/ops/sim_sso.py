@@ -481,7 +481,7 @@ class SimSSO(Operator):
         angle = self.polarization_angle.to_value(u.radian)
 
         sig *= weights_I + pfrac * (
-            np.cos(angle) * weights_Q + np.sin(angle) * weights_U
+            np.cos(2 * angle) * weights_Q + np.sin(2 * angle) * weights_U
         )
         return
 
