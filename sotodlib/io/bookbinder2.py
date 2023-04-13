@@ -717,8 +717,8 @@ class BookBinder:
             hwp_freq = block.data['approx_hwp_freq']
             m = (t0 < block.times) & (block.times < t1)
             if m.any():
-                meta['hwp_freq_mean'] = np.mean(hwp_freq[m])
-                meta['hwp_freq_stdev'] = np.std(hwp_freq[m])
+                meta['hwp_freq_mean'] = float(np.mean(hwp_freq[m]))
+                meta['hwp_freq_stdev'] = float(np.std(hwp_freq[m]))
         
         meta['az_speed_mean'] = None
         meta['az_speed_stdev'] = None
@@ -729,8 +729,8 @@ class BookBinder:
             az = block.data['Corrected_Azimuth']
             az_speed = np.abs(np.diff(az[m]) / dt)
             if m.any():
-                meta['az_speed_mean'] = np.mean(az_speed)
-                meta['az_speed_stdev'] = np.std(az_speed)
+                meta['az_speed_mean'] = float(np.mean(az_speed))
+                meta['az_speed_stdev'] = float(np.std(az_speed))
 
         # make sure all tags are the same for obs in the same book
         tags = list(set(tags))
