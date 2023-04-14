@@ -76,6 +76,8 @@ import argparse
 import sys
 import yaml
 
+from . import util
+
 
 def get_parser(parser=None):
     if parser is None:
