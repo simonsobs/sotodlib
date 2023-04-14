@@ -9,7 +9,7 @@ from sotodlib import core
 import numpy as np
 
 
-_TES_BIAS_COUNT = 16  # per detset / primary file group
+_TES_BIAS_COUNT = 12  # per detset / primary file group
 
 
 def _extract_1d(src, src_offset, dest, dest_offset):
@@ -223,10 +223,12 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
                     delta = _extract_1d(primary_block[i], start,
                                         primary_dest[f], dest_offset)
 
-                # Extract "bias", organize by detset.
-                bias_names = _check_bias_names(frame)
+                # Extract "bias", organize by detset (note input bias
+                # arrays might have 20 instead of 12 entries...)
+                bias_names = _check_bias_names(frame)[:_TES_BIAS_COUNT]
                 delta = _extract_2d(frame['tes_biases'], start,
-                                    bias_dest[detset_index], dest_offset)
+                                    bias_dest[detset_index], dest_offset,
+                                    bias_names)
 
                 # Extract the main signal
                 if not no_signal:
