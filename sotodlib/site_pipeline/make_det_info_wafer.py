@@ -74,6 +74,7 @@ def main(args=None):
         w + "det_x",
         w + "det_y",
         w + "angle",
+        w + "coax",
     ]
 
     for array_name in array_names:
@@ -93,6 +94,17 @@ def main(args=None):
         # iterate over the ideal/design metadata for this array
         for tune in map_maker.grab_metadata():
             
+            if tune.bandpass is None or (type(tune.bandpass)==str and "NC" in tune.bandpass):
+                bp = "NC"    
+            else:
+                bp = f"f{str(tune.bandpass).rjust(3,'0')}" 
+
+            # some dark detectors are reporting non-nan angles            
+            if str(tune.det_type) == "OPTC":
+                angle = np.radians(replace_none(tune.angle_actual_deg))
+            else:
+                angle = np.nan
+
             # add detector name to database
             det_rs.append({
                 "dets:det_id": tune.detector_id,
@@ -105,14 +117,15 @@ def main(args=None):
                 w + "design_freq_mhz": replace_none(tune.design_freq_mhz),
                 w + "bias_line": replace_none(tune.bias_line, -1),
                 w + "pol": str(tune.pol),
-                w + "bandpass": f"f{tune.bandpass}" if tune.bandpass is not None else "NC",
+                w + "bandpass": bp,
                 w + "det_row": replace_none(tune.det_row, -1),
                 w + "det_col": replace_none(tune.det_col, -1),
                 w + "rhombus": str(tune.rhomb),
                 w + "type": str(tune.det_type),
                 w + "det_x": replace_none(tune.det_x),
                 w + "det_y": replace_none(tune.det_y),
-                w + "angle": np.radians(replace_none(tune.angle_actual_deg)),
+                w + "angle": angle,
+                w + "coax" : "N" if tune.is_north else "S",
             })
 
         det_rs.append({
@@ -134,6 +147,7 @@ def main(args=None):
                 w + "det_x": np.nan,
                 w + "det_y": np.nan,
                 w + "angle": np.nan,
+                w + "coax" : "X",
         })
             
         write_dataset(det_rs, configs["det_info"], array_name, args.overwrite)
