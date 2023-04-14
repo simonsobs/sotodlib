@@ -84,7 +84,7 @@ def read_toast_h5(filename):
 def read_context(filename):
     """Convert Context to AxisManager object"""
 
-    ctx = Context(opj(filename, "context", "context.yaml"))
+    ctx = core.Context(opj(filename, "context", "context.yaml"))
     obs_id = ctx.obsdb.get()[0]["obs_id"]
     tod = ctx.get_obs(obs_id)
 
@@ -125,13 +125,14 @@ def load_data(path, suffix, f_format=None):
 
     Args
     ------
-    path: location of the simulation
+    path: str
+            location of the simulation
             to be loaded
-    band: frequency bands available 'f030', 'f040',
-            'f090', 'f150', 'f230', 'f290'
-    tele: telescope name to be chosen from 'LAT',
-            'SAT1', 'SAT2', 'SAT3' (, 'SAT4')
-
+    suffix: str,
+            suffix for the data
+    f_format: str
+            'g3', 'h5', or 'context'
+            
     Return
     ------
     full tod AxisManager object
@@ -150,7 +151,7 @@ def load_data(path, suffix, f_format=None):
             tod = load_file(sorted(glob(full_path)))
         elif f_format == "h5":
             tod = read_toast_h5(path)
-        else:
+        elif f_format == 'context':
             tod = read_context(path)
 
     except:
@@ -395,28 +396,31 @@ def tod_sim_all(space_time, a, xi0, eta0, fwhm_xi, fwhm_eta, phi, tau):
 
 
 def fit_params(
-    tod, ctime, az, el, band, sso_name, det_idx, highpass, cutoff, init_params
+    ctx, obs_id, ctime, az, el, band, sso_name, rd_id, highpass, cutoff, init_params
 ):
     """Function that fits individual time-streams and returns the parameters
 
     Args
     ----
-    tod: AxisManager
-        The tod loaded simulation object
+    ctx: context
+        context object 
+    obs_id: obs_id
+        obs_id for loading the tod
     band: string
         The frequency-band
     sso_name: string
         Name of the celestial source
-    det_idx: int
-        The index of the detector as ordered in the AxisManager object
+    rd_id: str
+        The string of the detector
     highpass: bool
         If True use a butterworth filter on the data
     """
-
+    tod = ctx.get_obs(obs_id, dets=[rd_id])
+    
     initial_guess, bounds, radius_main = init_params
     radius_cut = 2 * radius_main
 
-    data = tod.signal[det_idx, :]
+    data = tod.signal.squeeze()
     data -= np.mean(data)
     sample_rate = 1.0 / np.mean(np.diff(tod.timestamps))
 
@@ -578,7 +582,7 @@ def fit_params(
     noise = np.nanstd(data[np.where(radius > radius_cut)[0]])
     snr = popt[0] / noise
 
-    all_params = np.array([*popt, tod.dets.vals[det_idx], snr])
+    all_params = np.array([*popt, tod.dets.vals.squeeze(), snr])
 
     return all_params
 
@@ -638,26 +642,36 @@ def run(
     ntask = comm.Get_size()
 
     ## Standardize output names
-    file_name = "calobs_%s_%s_%s_%s_%s_%s-%02d-%02d" % (
-        tele,
-        tube,
-        band,
-        wafer,
-        sso_name,
-        year,
-        int(month),
-        int(day),
-    )
-    suffix = "tod/CES-Atacama-" + tele + "-" + sso_name + "-1-0/*.g3"
-    path = opj(indir, file_name)
-    tod = load_data(path, suffix, f_format)
+#     file_name = "calobs_%s_%s_%s_%s_%s_%s-%02d-%02d" % (
+#         tele,
+#         tube,
+#         band,
+#         wafer,
+#         sso_name,
+#         year,
+#         int(month),
+#         int(day),
+#     )
+#     suffix = "tod/CES-Atacama-" + tele + "-" + sso_name + "-1-0/*.g3"
+#     path = opj(indir, file_name)
+#     tod = load_data(path, suffix, f_format)
+#     tod = load_data(path, None, f_format)
+    ctx = core.Context(indir)
+    obs = ctx.obsdb.query('telescope=="%s" and '%tele+\
+                          'tel_tube=="i1" and '+\
+                          'target="%s"'%sso_name.lower())
+    print(obs)
+    obs_id = obs[-1]['obs_id']
+    tod = ctx.get_obs(obs_id, dets={'band': band, 'wafer_slot': wafer}, 
+                      no_signal=True)
+    rd_ids = tod.dets.vals
 
     ## Get the initial parameters
     init_params = define_fit_params(band, tele)
     ctime, az, el = tod.timestamps, tod.boresight.az, tod.boresight.el
 
-    ndet = len(tod["dets"].vals)
-    nsample_task = ndet // ntask + 1
+    nrd = len(rd_ids)
+    nsample_task = nrd // ntask + 1
 #     quotient, remainder = divmod(N, size)
 
 #     # given potential mismatch between number of detectors and processes
@@ -675,8 +689,8 @@ def run(
 #     # for non-identical batch sizes
 #     if rank > remainder:
 #         batch += int(remainder)
-    det_idx_rng = np.arange(rank * nsample_task,
-                            min((rank + 1) * nsample_task, ndet -1))
+    rd_idx_rng = np.arange(rank * nsample_task,
+                            min((rank + 1) * nsample_task, nrd -1))
     
     df = pd.DataFrame(
         columns=[
@@ -690,14 +704,15 @@ def run(
             "dets:readout_id",
             "snr",
         ],
-        index=det_idx_rng,
+        index=rd_idx_rng,
     )
 
-    for det in det_idx_rng:
+    for rd_idx in rd_idx_rng:
+        rd_id = rd_ids[rd_idx]
         params = fit_params(
-            tod, ctime, az, el, band, sso_name, det, highpass, cutoff, init_params
+            ctx, obs_id, ctime, az, el, band, sso_name, rd_id, highpass, cutoff, init_params
         )
-        df.loc[det, :] = np.array(params)
+        df.loc[rd_idx, :] = np.array(params)
     all_dfs = comm.gather(df, root=0)
 
     if rank == 0:
@@ -736,17 +751,17 @@ def run(
         full_df["abs_cal"] = amp / amp_ref
 
         ### Again need to decide on the naming convention
-        obs_id = "%s_%s_%s_%s_%s_%s-%02d-%02d" % (
-            tele,
-            tube,
-            band,
-            wafer,
-            sso_name,
-            year,
-            int(month),
-            int(day),
-        )
-        h_name = "fitting_table_" + obs_id
+#         obs_id = "%s_%s_%s_%s_%s_%s-%02d-%02d" % (
+#             tele,
+#             tube,
+#             band,
+#             wafer,
+#             sso_name,
+#             year,
+#             int(month),
+#             int(day),
+#         )
+#         h_name = "fitting_table_" + obs_id
 
         # hf = h5py.File(opj(outdir, h_name), 'w')
         # hf.create_dataset('fitted_params_'+obs_id, data=summary_data)
