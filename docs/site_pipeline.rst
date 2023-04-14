@@ -55,6 +55,28 @@ Level 2 G3tSmurf database for observations that overlap in time. The different
 optional arguments will let us pass information from something like the sorunlib
 database to further filter the observations. 
 
+check-book
+----------
+
+For a description and documentation of the config file format, see
+:mod:`sotodlib.site_pipeline.check_book` module autodocumentation below.
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.check_book
+   :func: get_parser
+   :prog: check-book
+
+Module documentation
+````````````````````
+
+.. automodule:: sotodlib.site_pipeline.check_book
+   :members:
+   :undoc-members:
+
+
 Detector and Readout ID Mapping
 -------------------------------
 
