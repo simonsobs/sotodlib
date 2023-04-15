@@ -185,7 +185,7 @@ def get_xieta_src_centered(ctime, az, el, data, sso_name, threshold=5):
 
     csl = so3g.proj.CelestialSightLine.az_el(ctime, az, el, weather="typical")
     q_bore = csl.Q
-
+    
     ### Signal strength criterion - a chance to flag detectors (should be extra rare)
     peaks, _ = scipy.signal.find_peaks(data, height=threshold * np.std(data))
     if not list(peaks):
@@ -658,11 +658,16 @@ def run(
 #     tod = load_data(path, None, f_format)
     ctx = core.Context(indir)
     obs = ctx.obsdb.query('telescope=="%s" and '%tele+\
-                          'tel_tube=="i1" and '+\
+                          'tel_tube=="%s" and '%tube+\
                           'target="%s"'%sso_name.lower())
-    print(obs)
-    obs_id = obs[-1]['obs_id']
-    tod = ctx.get_obs(obs_id, dets={'band': band, 'wafer_slot': wafer}, 
+#     print(obs)
+#     print('highpass flag:', highpass)
+    obs_id = obs[1]['obs_id']
+    tod = ctx.get_obs(obs_id, 
+#                       dets={
+#                                     'band': band, 
+#                                     'wafer_slot': wafer
+#                                    }, 
                       no_signal=True)
     rd_ids = tod.dets.vals
 
@@ -774,6 +779,8 @@ def run(
             os.makedirs(out_folder)
         result_arr = full_df.to_records(index=False)
         result_rs = metadata.ResultSet.from_friend(result_arr)
+        print(opj(out_folder,'cal_obs_%s.h5'%tele))
+        print(obs_id)
         write_dataset(result_rs, opj(out_folder,'cal_obs_%s.h5'%tele), obs_id, overwrite=True)
 #         full_df.to_hdf(opj(out_folder, h_name + ".h5"), key="parameter_table", mode="w")
 
