@@ -97,7 +97,7 @@ class HKBlock:
             for k, v in self.data.items():
                 self.data[k] = np.hstack(v)
         else:
-            self.times = np.array([], dtype=np.float32)
+            self.times = np.array([], dtype=np.float64)
             self.data = {}
 
 
@@ -112,9 +112,9 @@ class AncilProcessor:
 
     Attributes
     -----------
-    data : dict
-        Dict containing ancillary data timestreams read from HK files. This
-        will be populated after preprocess.
+    blocks : dict
+        Dict containing ancillary blocks of co-sampled data, read from HK files.
+        This will be populated during preprocess.
     times : np.ndarray
         Timestamps for anc data. This will be populated after preprocess.
     anc_frame_data : List[G3TimestreamMap]
@@ -133,6 +133,7 @@ class AncilProcessor:
         self.anc_frame_data = None
         self.out_files = []
         self.book_id = book_id
+        self.preprocessed = False
 
         if log is None:
             self.log = logging.getLogger('bookbinder')
@@ -143,6 +144,9 @@ class AncilProcessor:
         """
         Preprocesses HK data and populates the `data` and `times` objects.
         """
+        if self.preprocessed:
+            return
+
         self.log.info("Preprocessing HK Data")
         frame_iter = get_frame_iter(self.files)
 
@@ -155,6 +159,7 @@ class AncilProcessor:
 
         for block in self.blocks.values():
             block.finalize()
+        self.preprocessed = True
 
     
     def bind(self, outdir, times, frame_idxs, file_idxs):
@@ -191,6 +196,7 @@ class AncilProcessor:
 
         anc_frame_data = []
         for oframe_idx in np.unique(frame_idxs):
+            # Update file writer if starting a new output file
             if file_idxs[oframe_idx] != cur_file_idx:
                 close_writer(writer)
                 cur_file_idx = file_idxs[oframe_idx]
@@ -244,15 +250,15 @@ class AncilProcessor:
         frame : G3Frame
             Frame to add data to
         t0 : float
-            Start time of frame (unix time)
+            Start time of frame (unix time), inclusive
         t1 : float
-            Stop time of frame (unix time)
+            Stop time of frame (unix time), inclusive
         """
         bl = self.blocks.get('ACU_summary_output')
         if bl.data:
             az_mode = bl.data["Azimuth_mode"]
             acu_summary_times = bl.times
-            m = (t0 < acu_summary_times) & (acu_summary_times <= t1)
+            m = (t0 <= acu_summary_times) & (acu_summary_times <= t1)
             if not np.any(m):
                 frame['azimuth_mode'] = 'None'
             elif 'ProgramTrack' in az_mode[m]:
@@ -264,7 +270,7 @@ class AncilProcessor:
         if bl.data:
             az = bl.data["Corrected_Azimuth"]
             el = bl.data["Corrected_Elevation"]
-            m = (t0 < bl.times) & (bl.times <= t1)
+            m = (t0 <= bl.times) & (bl.times <= t1)
             dt = np.diff(bl.times[m]).mean()
             az_vel = np.diff(az[m]) / dt
             el_vel = np.diff(el[m]) / dt
@@ -301,7 +307,7 @@ class SmurfStreamProcessor:
 
     def preprocess(self):
         """
-        Extracts file times, nchans, and nnframes from file list
+        Extracts file times, nchans, and nframes from file list
         """
         if self.times is not None:  # Already preprocessed
             return
@@ -316,7 +322,7 @@ class SmurfStreamProcessor:
             if frame.type != core.G3FrameType.Scan:
                 continue
 
-
+            # Populate attributes from the first scan frame
             if self.nchans is None:
                 self.nchans = len(self.readout_ids)
                 self.primary_names = frame['primary'].names
@@ -502,7 +508,7 @@ class SmurfStreamProcessor:
 
             oframe['book_id'] = self.book_id 
             oframe['sample_range'] = core.G3VectorInt([int(i0), int(i1+1)])
-            oframe['flag_smurfgaps'] = core.G3VectorBool(filled)
+            oframe['flag_smurfgaps'] = core.G3VectorBool(~filled)
 
             ts = core.G3VectorTime(ts * core.G3Units.s)
             oframe['signal'] = so3g.G3SuperTimestream(self.readout_ids, ts, data)
@@ -613,7 +619,7 @@ class BookBinder:
         t0 = np.max([s.times[0] for s in self.streams.values()])
         t1 = np.min([s.times[-1] for s in self.streams.values()])
         ts, _ = fill_time_gaps(stream.times)
-        m = (t0 < ts) & (ts < t1)
+        m = (t0 <= ts) & (ts <= t1)
         ts = ts[m]
 
         self.ancil.preprocess()
@@ -625,6 +631,12 @@ class BookBinder:
         else:
             frame_idxs = np.digitize(ts, frame_splits)
             frame_idxs -= frame_idxs[0]
+            new_frame_idxs = frame_idxs.copy()
+            # Divide up frames that are too long
+            for fidx in np.unique(frame_idxs):
+                m = frame_idxs == fidx
+                new_frame_idxs += np.cumsum(m) // self.max_samps_per_frame
+            frame_idxs = new_frame_idxs
 
         # Divide up files
         samp_size = 4 # bytes
