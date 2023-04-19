@@ -322,8 +322,8 @@ maps and stores the result.
 Inputs
 ``````
 
-Pixell maps
-Configuration file with initial fit parameters
+- Pixell maps
+- Configuration file with initial fit parameters
 
 Config file format
 ``````````````````
