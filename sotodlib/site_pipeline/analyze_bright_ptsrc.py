@@ -25,7 +25,7 @@ from mpi4py import MPI
 import re
 
 opj = os.path.join
-INITIAL_PARA_FILE = "/home/zhileixu/shared/initial_parameters.h5"
+INITIAL_PARA_FILE = "/mnt/so1/shared/site-pipeline/bcp/initial_parameters.h5"
 
 
 def highpass_filter(data, cutoff, fs, order=5):
@@ -615,16 +615,14 @@ def make_maps(path, outdir, ofilename, sso_name, beamsize, n_modes):
 
 
 def run(
-    indir,
+    ctx_file,
+    ctx_idx,
     outdir,
     f_format,
     tube,
     band,
     wafer,
     sso_name,
-    year,
-    month,
-    day,
     tele,
     highpass,
     cutoff,
@@ -641,28 +639,12 @@ def run(
     rank = comm.Get_rank()
     ntask = comm.Get_size()
 
-    ## Standardize output names
-#     file_name = "calobs_%s_%s_%s_%s_%s_%s-%02d-%02d" % (
-#         tele,
-#         tube,
-#         band,
-#         wafer,
-#         sso_name,
-#         year,
-#         int(month),
-#         int(day),
-#     )
-#     suffix = "tod/CES-Atacama-" + tele + "-" + sso_name + "-1-0/*.g3"
-#     path = opj(indir, file_name)
-#     tod = load_data(path, suffix, f_format)
-#     tod = load_data(path, None, f_format)
-    ctx = core.Context(indir)
+    ctx = core.Context(ctx_file)
     obs = ctx.obsdb.query('telescope=="%s" and '%tele+\
                           'tel_tube=="%s" and '%tube+\
                           'target="%s"'%sso_name.lower())
-#     print(obs)
-#     print('highpass flag:', highpass)
-    obs_id = obs[1]['obs_id']
+
+    obs_id = obs[ctx_idx]['obs_id']
     tod = ctx.get_obs(obs_id, 
 #                       dets={
 #                                     'band': band, 
@@ -677,23 +659,6 @@ def run(
 
     nrd = len(rd_ids)
     nsample_task = nrd // ntask + 1
-#     quotient, remainder = divmod(N, size)
-
-#     # given potential mismatch between number of detectors and processes
-#     # correct for non-indentical batch sizes, by adding extra values to
-#     # lower ranks starting with zero rank
-
-#     if rank <= (remainder - 1):
-#         rank_batchsize += 1
-
-#     # create iterable vector based on individual process batch size
-#     batch = np.arange(0, rank_batchsize, dtype=np.int32)
-#     # modify iterable by shifting array to correct position for process split
-#     batch += rank * (rank_batchsize)
-#     # given potential mismatch between number of detectors and processes correct
-#     # for non-identical batch sizes
-#     if rank > remainder:
-#         batch += int(remainder)
     rd_idx_rng = np.arange(rank * nsample_task,
                             min((rank + 1) * nsample_task, nrd -1))
     
@@ -747,30 +712,13 @@ def run(
         beam_file = "/mnt/so1/shared/site-pipeline/bcp/%s_%s_beam.h5" % (tele, band)
         sso_obj = sim_sso.SimSSO(beam_file=beam_file, sso_name=sso_name)
         freq_arr_GHz, temp_arr = sso_obj._get_sso_temperature(sso_name)
-        datestr = "%s-%02d-%02d" % (year, int(month), int(day))
+        dt_obs = datetime.fromtimestamp(np.average(tod.timestamps))
         sso_ephem = getattr(ephem, sso_name)()
-        sso_ephem.compute(datestr)
+        sso_ephem.compute(dt_obs.strftime('%Y-%m-%d'))
         ttemp = np.interp(float(band[1:])*u.GHz, freq_arr_GHz, temp_arr)
         beam, _ = sso_obj._get_beam_map(None, sso_ephem.size*u.arcsec, ttemp)
         amp_ref = beam(0, 0)[0][0]
         full_df["abs_cal"] = amp / amp_ref
-
-        ### Again need to decide on the naming convention
-#         obs_id = "%s_%s_%s_%s_%s_%s-%02d-%02d" % (
-#             tele,
-#             tube,
-#             band,
-#             wafer,
-#             sso_name,
-#             year,
-#             int(month),
-#             int(day),
-#         )
-#         h_name = "fitting_table_" + obs_id
-
-        # hf = h5py.File(opj(outdir, h_name), 'w')
-        # hf.create_dataset('fitted_params_'+obs_id, data=summary_data)
-        # hf.close()
 
         ## Assert tables dependency is properly satisfied
         out_folder = opj(outdir, tele)
@@ -780,9 +728,7 @@ def run(
         result_arr = full_df.to_records(index=False)
         result_rs = metadata.ResultSet.from_friend(result_arr)
         print(opj(out_folder,'cal_obs_%s.h5'%tele))
-        print(obs_id)
         write_dataset(result_rs, opj(out_folder,'cal_obs_%s.h5'%tele), obs_id, overwrite=True)
-#         full_df.to_hdf(opj(out_folder, h_name + ".h5"), key="parameter_table", mode="w")
 
         t2 = time.time()
         print("Time to run fittings for %s is %.2f seconds."%(obs_id , t2 - t1))
@@ -796,11 +742,20 @@ def run(
 def main():
     parser = ap.ArgumentParser(formatter_class=ap.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
-        "--indir",
+        "--ctx_file",
         action="store",
-        dest="indir",
-        help="The location of the simulated files.",
+        dest="ctx_file",
+        help="The location of the context file.",
     )
+    
+    parser.add_argument(
+        "--ctx_idx",
+        action="store",
+        dest="ctx_idx",
+        help="Index of the observation in the context file.",
+        type=int,
+    )
+    
     parser.add_argument(
         "--outdir",
         action="store",
@@ -841,26 +796,6 @@ def main():
         dest="sso_name",
         help="Calibration source (astrophysical only for the time being).",
     )
-    parser.add_argument(
-        "--year",
-        action="store",
-        dest="year",
-        help="The year of the calibration observation.",
-    )
-    parser.add_argument(
-        "--month",
-        action="store",
-        dest="month",
-        help="The month of the calibration observation.",
-    )
-    parser.add_argument(
-        "--day",
-        action="store",
-        dest="day",
-        help="The day of the calibration observation",
-    )
-    ## The telescope can be defined from the wafer name
-    ## No need for extra parser argument --fix later
 
     parser.add_argument(
         "--highpass",
@@ -896,16 +831,14 @@ def main():
     args = parser.parse_args()
 
     run(
-        args.indir,
+        args.ctx_file,
+        args.ctx_idx,
         args.outdir,
         args.f_format,
         args.tube,
         args.band,
         args.wafer,
         args.sso_name,
-        args.year,
-        args.month,
-        args.day,
         args.tele,
         args.highpass,
         args.cutoff,
