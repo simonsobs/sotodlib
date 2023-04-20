@@ -17,7 +17,7 @@ import itertools
 import logging
 
 
-from sotodlib.io.bookbinder2 import BookBinder, get_hk_files
+from sotodlib.io.bookbinder import BookBinder
 from .load_smurf import G3tSmurf, Observations as G3tObservations, SmurfStatus, get_channel_info
 from ..site_pipeline.util import init_logger
 
