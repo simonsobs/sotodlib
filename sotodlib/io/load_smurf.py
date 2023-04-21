@@ -782,8 +782,8 @@ class G3tSmurf:
         if len(status.tags) > 0:
             for tag in status.tags:
                 new_tag = Tags(obs_id=obs.obs_id, tag=tag)
+                session.add(new_tag)
             obs.tag = ",".join(status.tags)
-            session.add(new_tag)
 
         # Add Tune and Tuneset information
         if status.tune is not None:
