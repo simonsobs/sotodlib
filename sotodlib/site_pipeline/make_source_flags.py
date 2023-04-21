@@ -22,11 +22,8 @@ def get_parser(parser=None):
                         default=0, help="Pass multiple times to increase.")
     return parser
 
-def get_config(config_file, obs_id=None, verbose=None):
-    cfg = yaml.safe_load(open(config_file, 'r'))
-    for k in ['obs_id', 'verbose']:
-        cfg[k] = getattr(args, k)
-    return cfg
+def get_config(config_file):
+    return yaml.safe_load(open(config_file, 'r'))
 
 def main(config_file=None, verbose=0, obs_id=None):
     config = get_config(config_file)
@@ -65,7 +62,7 @@ def main(config_file=None, verbose=0, obs_id=None):
 
     detsets = ctx.obsfiledb.get_detsets(obs_id)
     for detset in detsets:
-        logger.info(f'Loading {config["obs_id"]}:detset={detset}')
+        logger.info(f'Loading {obs_id}:detset={detset}')
         # Load pointing and dets axis; we don't need signal though.
         tod = ctx.get_obs(obs_id, detsets=[detset],
                           no_signal=True)

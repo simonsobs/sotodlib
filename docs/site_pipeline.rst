@@ -613,6 +613,15 @@ Here's an annotated example:
     default: {'xyr': [0., 0., 0.1]}
 
 
+The output from this script can be loaded as metadata if registered in
+the context.yaml.  That entry would look like this:
+
+.. code-block:: yaml
+
+  - db: './source_flags.sqlite'
+    name: 'source_flags&'
+
+
 make-uncal-beam-map
 -------------------
 
