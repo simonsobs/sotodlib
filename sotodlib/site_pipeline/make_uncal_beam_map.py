@@ -31,10 +31,12 @@ def get_parser(parser=None):
                         "Configuration file.")
     parser.add_argument('-v', '--verbose', action='count',
                         default=0, help="Pass multiple times to increase.")
-    parser.add_argument('obs_id',help=
+    parser.add_argument('obs_id', nargs='?', help=
                         "Observation for which to make source map.")
     parser.add_argument('--test', action='store_true', help=
                         "Reduce detector count for quick tests.")
+    parser.add_argument('--force-source', help=
+                        "Specify which source to target (when ambiguous).")
 
     return parser
 
@@ -201,7 +203,8 @@ def _adjust_focal_plane(tod, focal_plane=None, boresight_offset=None):
     fp.eta[:] = eta
     fp.gamma[:] = gamma
 
-def main(config_file=None, obs_id=None, verbose=0, test=False):
+def main(config_file=None, obs_id=None, verbose=0, test=False,
+         force_source=None):
     """Entry point."""
     config = _get_config(config_file)
 
@@ -224,6 +227,10 @@ def main(config_file=None, obs_id=None, verbose=0, test=False):
     else:
         det_info = ctx.get_det_info(obs_id)
         groups = det_info.subset(keys=[group_by]).distinct()[group_by]
+
+    if len(groups) == 0:
+        logger.error(f'Invalid obs_id, "{obs_id}"')
+        sys.exit(1)
 
     # Ignore some values?
     groups = [g for g in groups if g not in config['subobs'].get('ignore_vals', [])]
@@ -271,8 +278,11 @@ def main(config_file=None, obs_id=None, verbose=0, test=False):
         # Determine what source to map.
         ## To-do: have a mode where it maps all sources it finds.
         source_name = config['mapmaking'].get('force_source')
+        if force_source is not None:
+            source_name = force_source
         if source_name is None:
             sources = coords.planets.get_nearby_sources(tod)
+            logger.info(f"Mappable sources in this region: {sources}")
             if len(sources) == 1:
                 source_name = sources[0][0]
             elif len(sources) == 0:
@@ -282,6 +292,8 @@ def main(config_file=None, obs_id=None, verbose=0, test=False):
                 logger.error("Multiple sources in footprint: %s" %
                              ([n for n, s in sources],))
                 sys.exit(1)
+
+        logger.info(f"Map will center on source: {source_name}")
         map_info['source_name'] = source_name
 
         # Plan to split on frequency band
@@ -325,6 +337,15 @@ def main(config_file=None, obs_id=None, verbose=0, test=False):
         assert(all([r == reses[0] for r in reses]))  # Resolution conflict
         res_deg = util.parse_quantity(reses[0], 'deg').value
 
+        # Map size can be specified
+        if 'map_size' in config['mapmaking']: # not quite right ...
+            sizes = [
+                util.lookup_conditional(config['mapmaking'], 'map_size', tags=[b])
+                for b in band_splits.keys()]
+            size_rad = util.parse_quantity(sizes[0], 'rad').value
+        else:
+            size_rad = None
+
         # Where to put things.
         policy = util.ArchivePolicy.from_params(
             config['archive']['policy'])
@@ -341,6 +362,7 @@ def main(config_file=None, obs_id=None, verbose=0, test=False):
         cuts = tod.get('glitch_flags', None)
         output = coords.planets.make_map(tod, center_on=source_name,
                                          res=res_deg*coords.DEG,
+                                         size=size_rad,
                                          data_splits=band_splits,
                                          cuts=cuts,
                                          info=map_info,
