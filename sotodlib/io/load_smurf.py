@@ -435,7 +435,9 @@ class G3tSmurf:
 
         logger.info(f"Indexing {len(files)} files...")
 
-        for f in tqdm(sorted(files)[::-1], disable=(not show_pb)):
+        ## files must be updated in sequencial order. otherwise we may end up
+        ## with more TuneSets than are necessary
+        for f in tqdm(sorted(files), disable=(not show_pb)):
             try:
                 self.add_file(os.path.join(root, f), session)
                 session.commit()
@@ -862,7 +864,7 @@ class G3tSmurf:
             obs.tag = ",".join(status.tags)
 
         # Add Tune and Tuneset information
-        if status.tune is not None:
+        if status.tune is not None and status.tune != "":
             tune = session.query(Tunes).filter(
                 Tunes.name == Tunes.get_name_from_status(status),
                 Tunes.stream_id == obs.stream_id,
