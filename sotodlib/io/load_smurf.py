@@ -265,6 +265,21 @@ class G3tSmurf:
             db_frames = db_file.frames
             [session.delete(frame) for frame in db_frames]
             session.commit()
+        
+        status = SmurfStatus.from_file(db_file.name)
+        if len(status.tags)>0:
+            if status.tags[0]=="obs" or status.tags[0]=="oper":
+                ## this is where I tell it to make an observation
+                print(f"file {db_file.name} is an observation")
+
+        if status.tune is None or status.tune == "":
+            my_tune = None
+        else:
+            tune_name = status.stream_id+"_"+status.tune.strip(".npy")
+            my_tune = session.query(Tunes).filter(Tunes.name==tune_name).one_or_none()
+        if my_tune is not None:
+            ## tune has been found in streamed data. 
+            self.add_tuneset_to_file(my_tune, db_file, session)
 
         try:
             splits = path.split("/")
@@ -467,10 +482,25 @@ class G3tSmurf:
         ch_assign = ch_assign.one_or_none()
         if ch_assign is None:
             ch_assign = ChanAssignments(
-                ctime=ctime, path=cha_path, name=cha, stream_id=stream_id, band=band
+                ctime=ctime, 
+                path=cha_path, 
+                name=cha, 
+                stream_id=stream_id, 
+                band=band
             )
             session.add(ch_assign)
+            session.commit()
 
+    def add_channels_from_assignment(self, ch_assign, session):
+        """Add the channels that are associated with a particular channel
+        assignment entry
+
+        Args
+        ----
+        ch_assign: ChanAssignment instance
+        session: session used to find ch_assign    
+        """
+                
         notches = np.atleast_2d(np.genfromtxt(ch_assign.path, delimiter=","))
         if np.sum([notches[:, 2] != -1]) != len(ch_assign.channels):
             ch_made = [c.channel for c in ch_assign.channels]
@@ -482,7 +512,10 @@ class G3tSmurf:
                     continue
 
                 ch_name = "sch_{}_{:10d}_{:01d}_{:03d}".format(
-                    stream_id, ctime, band, int(notch[2])
+                    ch_assign.stream_id, 
+                    ch_assign.ctime, 
+                    ch_assign.band, 
+                    int(notch[2])
                 )
                 ch = Channels(
                     subband=int(notch[1]),
@@ -490,7 +523,7 @@ class G3tSmurf:
                     frequency=notch[0],
                     name=ch_name,
                     chan_assignment=ch_assign,
-                    band=band,
+                    band=ch_assign.band,
                 )
 
                 if ch.channel == -1:
@@ -569,8 +602,7 @@ class G3tSmurf:
         return assign_set
 
     def add_new_tuning(self, stream_id, ctime, tune_path, session):
-        """Add new entry to the Tune table, check if needed to add to the
-        TunesSet table. Called by the index_metadata function.
+        """Add new entry to the Tune table, Called by the index_metadata function.
 
         Args
         -------
@@ -598,53 +630,72 @@ class G3tSmurf:
             )
             session.add(tune)
             session.commit()
+    
+    def add_tuneset_to_file(self, db_tune, db_file, session):
+        """Uses tune found in file to decide we should create a tuneset. Assigns
+        both tune and tuneset to the file entry. called by add_file
 
-        # assign set is the set of channel assignments that make up this tune
-        # file
-        assign_set = self._assign_set_from_file(
-            tune_path, ctime=ctime, stream_id=stream_id, session=session
-        )
-
-        tuneset = None
-        tunesets = session.query(TuneSets)
-        # tunesets with any channel assignments matching list
-        tunesets = tunesets.filter(
-            TuneSets.chan_assignments.any(
-                ChanAssignments.id.in_([a.id for a in assign_set])
+        Args
+        ----
+        db_tune: Tunes instance for tune in file
+        db_file: File instance for file
+        session: sqlalchemy session used to create instances
+        """
+        
+        if db_tune.tuneset is None:
+            # assign set is the set of channel assignments that make up this tune file
+            assign_set = self._assign_set_from_file(
+                db_tune.path, stream_id=db_tune.stream_id, session=session
             )
-        ).all()
 
-        if len(tunesets) > 0:
-            for ts in tunesets:
-                if np.all(
-                    sorted([ca.id for ca in ts.chan_assignments])
-                    == sorted([a.id for a in assign_set])
-                ):
-                    tuneset = ts
+            tuneset = None
+            tunesets = session.query(TuneSets)
+            # tunesets with any channel assignments matching list
+            tunesets = tunesets.filter(
+                TuneSets.chan_assignments.any(
+                    ChanAssignments.id.in_([a.id for a in assign_set])
+                )
+            ).all()
 
-        if tuneset is None:
-            logger.debug(
-                f"New Tuneset Detected {stream_id}, {ctime}, {[[a.name for a in assign_set]]}"
-            )
-            tuneset = TuneSets(
-                name=name,
-                path=tune_path,
-                stream_id=stream_id,
-                start=dt.datetime.utcfromtimestamp(ctime),
-            )
-            session.add(tuneset)
+            if len(tunesets) > 0:
+                for ts in tunesets:
+                    if np.all(
+                        sorted([ca.id for ca in ts.chan_assignments])
+                        == sorted([a.id for a in assign_set])
+                    ):
+                        tuneset = ts
+
+            if tuneset is None:
+                logger.debug(
+                    f"New Tuneset Detected {db_tune.name},"
+                    f" {[[a.name for a in assign_set]]}"
+                )
+                tuneset = TuneSets(
+                    name=db_tune.name,
+                    path=db_tune.path,
+                    stream_id=db_tune.stream_id,
+                    start=db_tune.start,
+                )
+                session.add(tuneset)
+                session.commit()
+
+                # add a the assignments and channels to the detector set
+                for db_cha in assign_set:
+                    ## make channels now that the channel assignment is part
+                    ## of a tuneset
+                    self.add_channels_from_assignment(db_cha, session=session)
+                    tuneset.chan_assignments.append(db_cha)
+                    for ch in db_cha.channels:
+                        tuneset.channels.append(ch)
+                session.commit()
+
+            db_tune.tuneset = tuneset
             session.commit()
 
-            # add a the assignments and channels to the detector set
-            for db_cha in assign_set:
-                tuneset.chan_assignments.append(db_cha)
-                for ch in db_cha.channels:
-                    tuneset.channels.append(ch)
-            session.commit()
-
-        tune.tuneset = tuneset
+        db_file.tune = db_tune
+        db_file.tuneset = db_tune.tuneset
         session.commit()
-
+        
     def add_new_observation(
         self, stream_id, action_name, action_ctime, session, calibration, max_early=5,
     ):
@@ -1134,6 +1185,7 @@ class G3tSmurf:
             max_ctime=max_ctime,
             stop_at_error=stop_at_error,
         )
+        """
         logger.debug("Indexing Observations")
         self.index_observations(
             session,
@@ -1141,7 +1193,7 @@ class G3tSmurf:
             max_ctime=max_ctime,
             stop_at_error=stop_at_error,
         )
-
+        """
         session.close()
 
     def lookup_file(self, filename, fail_ok=False):
