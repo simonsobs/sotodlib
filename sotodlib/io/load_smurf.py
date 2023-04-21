@@ -583,7 +583,7 @@ class G3tSmurf:
         session : SQLAlchemy Session
             The active session
         """
-        name = tune_path.split("/")[-1]
+        name = stream_id+"_"+tune_path.split("/")[-1].strip(".npy")
         tune = (
             session.query(Tunes)
             .filter(Tunes.name == name, Tunes.stream_id == stream_id)
