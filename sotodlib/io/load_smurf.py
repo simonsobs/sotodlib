@@ -267,16 +267,13 @@ class G3tSmurf:
             session.commit()
         
         status = SmurfStatus.from_file(db_file.name)
-        if len(status.tags)>0:
-            if status.tags[0]=="obs" or status.tags[0]=="oper":
-                ## this is where I tell it to make an observation
-                print(f"file {db_file.name} is an observation")
 
         if status.tune is None or status.tune == "":
             my_tune = None
         else:
-            tune_name = status.stream_id+"_"+status.tune.strip(".npy")
-            my_tune = session.query(Tunes).filter(Tunes.name==tune_name).one_or_none()
+            my_tune = session.query(Tunes).filter(
+                Tunes.name==Tunes.get_name_from_status(status)
+            ).one_or_none()
         if my_tune is not None:
             ## tune has been found in streamed data. 
             self.add_tuneset_to_file(my_tune, db_file, session)
@@ -377,7 +374,14 @@ class G3tSmurf:
         db_file.n_channels = total_channels
         db_file.n_frames = frame_idx
         db_file.timing = timing
+        session.commit()
 
+        if len(status.tags)>0:
+            if status.tags[0]=="obs" or status.tags[0]=="oper":
+                ## this is where I tell it to make an observation
+                logger.debug(f"file {db_file.name} is an observation")
+                self.add_new_observation_from_status(status, session)
+    
     def index_archive(
         self,
         stop_at_error=False,
@@ -696,6 +700,27 @@ class G3tSmurf:
         db_file.tuneset = db_tune.tuneset
         session.commit()
         
+    
+    def add_new_observation_from_status(self, status, session):
+        """Wrapper to pull required information from SmurfStatus and create a 
+        new observation. Works based on tags in Status frame, so may not work
+        with older files.
+        
+        Args 
+        ----
+        status : SmurfStatus instance
+        session : SQLAlchemy Session
+            The active session
+        """
+        
+        self.add_new_observation(
+            status.stream_id,
+            status.action,
+            status.action_timestamp,
+            session,
+            calibration = (status.tags[0] == "oper")
+        )
+
     def add_new_observation(
         self, stream_id, action_name, action_ctime, session, calibration, max_early=5,
     ):
@@ -839,7 +864,7 @@ class G3tSmurf:
         # Add Tune and Tuneset information
         if status.tune is not None:
             tune = session.query(Tunes).filter(
-                Tunes.name == status.tune,
+                Tunes.name == Tunes.get_name_from_status(status),
                 Tunes.stream_id == obs.stream_id,
             ).one_or_none()
             if tune is None:
@@ -866,9 +891,9 @@ class G3tSmurf:
         # Update file entries
         for db_file in flist:
             db_file.obs_id = obs.obs_id
-            if tuneset is not None:
+            if db_file.tuneset is not None and tuneset is not None:
                 db_file.detset = tuneset.name
-            if tune is not None:
+            if db_file.tune is not None and tune is not None:
                 db_file.tune_id = tune.id
 
             # this is where I learned sqlite does not accept numpy 32 or 64 bit ints
@@ -1059,7 +1084,8 @@ class G3tSmurf:
             if pattern in fpattern:
                 try:
                     # decide if this is the last channel assignment in the directory
-                    # needed because we often get multiple channel assignments in the same folder
+                    # needed because we often get multiple channel assignments in the 
+                    #same folder
                     root = os.path.join("/", *path.split("/")[:-1])
                     fname = path.split('/')[-1]
                     fband = int(re.findall('b\d.txt', fname)[0][1])
@@ -1168,7 +1194,6 @@ class G3tSmurf:
             )
 
         session = self.Session()
-
         logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
 
         logger.debug("Indexing Channel Assignments")
@@ -1185,7 +1210,29 @@ class G3tSmurf:
             max_ctime=max_ctime,
             stop_at_error=stop_at_error,
         )
+        
+        session.close()
+
+    def index_action_observations(
+        self, min_ctime=16000 * 1e5, max_ctime=None, stop_at_error=False
+    ):
+        """Looks through Action folders to build Observations not built off of
+        tags in add_file. This function is a hold-over from when tags were not
+        used to find Observations (change made ~Jan. 2023)
+        
+        Args
+        ----
+        min_ctime : int
+            Lowest ctime to start looking for new metadata
+        max_ctime : None or int
+            Highest ctime to look for new metadata
+        stop_at_error: bool
+           If True, will stop if there is an error indexing a file.
         """
+         
+        session = self.Session()
+        logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
+        
         logger.debug("Indexing Observations")
         self.index_observations(
             session,
@@ -1193,7 +1240,6 @@ class G3tSmurf:
             max_ctime=max_ctime,
             stop_at_error=stop_at_error,
         )
-        """
         session.close()
 
     def lookup_file(self, filename, fail_ok=False):

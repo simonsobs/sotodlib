@@ -45,8 +45,9 @@ def update_g3tsmurf_db(config=None, update_delay=2, from_scratch=False,
         logger.info("Will send monitor information to Influx")
         monitor = Monitor.from_configs(cfgs["monitor"]["connect_configs"])
         
-    SMURF.index_archive(min_ctime=min_time.timestamp(), show_pb=show_pb)
     SMURF.index_metadata(min_ctime=min_time.timestamp())
+    SMURF.index_archive(min_ctime=min_time.timestamp(), show_pb=show_pb)
+    SMURF.index_action_observations(min_ctime=min_time.timestamp())    
 
     session = SMURF.Session()
 
