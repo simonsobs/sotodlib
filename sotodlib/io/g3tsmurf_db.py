@@ -247,7 +247,13 @@ class Tunes(Base):
     ## one to many
     tuneset_id = db.Column(db.Integer, db.ForeignKey('tunesets.id'))
     tuneset = relationship("TuneSets", back_populates='tunes')
-    
+   
+    @staticmethod
+    def get_name_from_status(status):
+        """Return the name format expected from SmurfStatus instance
+        """
+        return status.stream_id+"_"+status.tune.strip(".npy")
+ 
 class TuneSets(Base):
     """Indexing of 'tunes sets' available during observations. Should
     correspond to the tune files where new_master_assignment=True. TuneSets
