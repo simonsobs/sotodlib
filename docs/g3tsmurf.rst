@@ -299,13 +299,15 @@ In this setup, the main G3tSmurf database is both the ObsFileDb and the ObsDb.
 A minimal example context yaml file is::
 
     tags:
-    g3tsmurf_dir: '/path/to/things/smurf_context'
+        g3tsmurf_dir: '/path/to/things/smurf_context'
 
     obsfiledb: '{g3tsmurf_dir}/g3t_smurf_db.db'
     obsdb: '{g3tsmurf_dir}/g3t_smurf_db.db'
 
     imports:
     - sotodlib.io.load_smurf
+
+    context_hooks: 'obs_detdb_load'
 
     obs_loader_type: 'g3tsmurf'
 
