@@ -47,7 +47,7 @@ def highpass_filter(data, cutoff, fs, order=5):
     y = scipy.signal.filtfilt(b, a, data)
     return y
 
-
+'''
 def read_toast_h5(filename):
     """Convert h5 file to AxisManager object"""
 
@@ -79,8 +79,8 @@ def read_toast_h5(filename):
     aman.wrap("toast_focalplane", f["instrument"]["focalplane"], [(0, "dets")])
 
     return aman
-
-
+'''
+'''
 def read_context(filename):
     """Convert Context to AxisManager object"""
 
@@ -117,7 +117,6 @@ def read_context(filename):
     aman.wrap("toast_focalplane", bman)
 
     return aman
-
 
 def load_data(path, suffix, f_format=None):
     """Load simulation from folder/database
@@ -161,7 +160,7 @@ def load_data(path, suffix, f_format=None):
         raise NameError("The requested simulation is not in database")
 
     return tod
-
+'''
 
 def get_xieta_src_centered(ctime, az, el, data, sso_name, threshold=5):
     """Create a planet centered coordinate system for single detector data
@@ -237,14 +236,13 @@ def define_fit_params(band, tele, return_beamsize=False):
 
     ## allow for max 10% bias
     ## 10% is large but allowing for a large bias helps tracking down
-    ## problems in the fitting method
-    ## outliers should be eliminated afterwards
-    ## We can make this a user input parameter
-    fwhm_bound = 0.1 * beamsize
+    fwhm_bound_frac = 0.1
+    fwhm_bound = fwhm_bound_frac * beamsize
     fwhm_min = beamsize - fwhm_bound
     fwhm_max = beamsize + fwhm_bound
-
-    initial_guess = [amp, 0, 0, beamsize, beamsize, np.pi / 6, 3e-3]
+    
+    tau_init = 3e-3 # seconds
+    initial_guess = [amp, 0, 0, beamsize, beamsize, np.pi / 6, tau_init]
 
     bounds_min = (0, -offset_bound, -offset_bound, fwhm_min, fwhm_min, 0.0, 1e-3)
     bounds_max = (2 * amp, offset_bound, offset_bound, fwhm_max, fwhm_max, np.pi, 10e-3)
@@ -426,8 +424,6 @@ def fit_params(
 
     if highpass and (cutoff is not None):
         data = highpass_filter(data, cutoff, sample_rate)
-        # Eliminate the phase delay caused by the filter in a more
-        # elegant way
         data[data < 0] = 0
     coord_transforms = get_xieta_src_centered(ctime, az, el, data, sso_name)
 
@@ -442,8 +438,6 @@ def fit_params(
     xi0, eta0 = peak_coords
     radius = np.sqrt(xi_det_center ** 2 + eta_det_center ** 2)
 
-    ## We can get away with much less subdivisions of the data
-    ## This can be changed after agreed upon
     idx_band = np.where(abs(eta_det_center) < radius_cut)[0]
 
     ctime_band = ctime[idx_band.min() : idx_band.max()]
@@ -618,7 +612,6 @@ def run(
     ctx_file,
     ctx_idx,
     outdir,
-    f_format,
     tube,
     band,
     wafer,
@@ -640,16 +633,13 @@ def run(
     ntask = comm.Get_size()
 
     ctx = core.Context(ctx_file)
-    obs = ctx.obsdb.query('telescope=="%s" and '%tele+\
-                          'tel_tube=="%s" and '%tube+\
-                          'target="%s"'%sso_name.lower())
+#     obs = ctx.obsdb.query('telescope=="%s" and '%tele+\
+#                           'tel_tube=="%s" and '%tube+\
+#                           'target="%s"'%sso_name.lower())
+    obs = ctx.obsdb.query()
 
     obs_id = obs[ctx_idx]['obs_id']
     tod = ctx.get_obs(obs_id, 
-#                       dets={
-#                                     'band': band, 
-#                                     'wafer_slot': wafer
-#                                    }, 
                       no_signal=True)
     rd_ids = tod.dets.vals
 
@@ -690,8 +680,6 @@ def run(
         full_df.dropna()
         full_df = full_df.set_index(full_df["dets:readout_id"])
 
-        ## Convert to structured array and store file - minor problem with string encoding
-        # dt = h5py.special_dtype(vlen=str)
         new_dtypes = {
             "amp": np.float64,
             "xi0": np.float64,
@@ -734,13 +722,14 @@ def run(
         print("Time to run fittings for %s is %.2f seconds."%(obs_id , t2 - t1))
 
         ## check why the mapmaker was working only with context and fix this issue
-        if map_make and f_format == "context" and n_modes is not None:
+        if map_make and n_modes is not None:
             beamsize = np.degrees(init_params[2]) / 2
             make_maps(path, outdir, obs_id, sso_name, beamsize, n_modes)
 
 
 def main():
     parser = ap.ArgumentParser(formatter_class=ap.ArgumentDefaultsHelpFormatter)
+    
     parser.add_argument(
         "--ctx_file",
         action="store",
@@ -762,12 +751,14 @@ def main():
         dest="outdir",
         help="The location for the .h5 output files to be stored.",
     )
+    '''
     parser.add_argument(
         "--f_format",
         action="store",
         dest="f_format",
         help="The format of the simulations [g3, h5, context].",
     )
+    '''
     parser.add_argument(
         "--tele", action="store", dest="tele", help="The telescope name [LAT, SAT]."
     )
@@ -790,19 +781,21 @@ def main():
         help="The wafer name [wafers number increases from the center and \
     anti-clockwise] across the focalplane.",
     )
+    
     parser.add_argument(
         "--sso_name",
         action="store",
         dest="sso_name",
         help="Calibration source (astrophysical only for the time being).",
     )
-
+    
     parser.add_argument(
         "--highpass",
         action="store_true",
         dest="highpass",
         help="If True, use highpass butterworth filters (especially useful for SATs).",
     )
+    
     parser.add_argument(
         "--cutoff",
         action="store",
@@ -811,14 +804,14 @@ def main():
         help="The cutoff frequency to be used in the filtering.",
         type=float,
     )
-    # parser.add_argument('--sample_rate', action='store', dest='sample_rate', default=None,
-    # help='Sampling rate of the observation.', type=int)
+    
     parser.add_argument(
         "--map_make",
         action="store_true",
         dest="map_make",
         help="Make planet maps of the simulations fitted.",
     )
+    
     parser.add_argument(
         "--n_modes",
         action="store",
@@ -834,7 +827,7 @@ def main():
         args.ctx_file,
         args.ctx_idx,
         args.outdir,
-        args.f_format,
+        #args.f_format,
         args.tube,
         args.band,
         args.wafer,
