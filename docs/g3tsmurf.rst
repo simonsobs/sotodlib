@@ -273,7 +273,7 @@ Loading long large observations into memory at once can cause issues with memory
 usage, especially on smaller computing facilities. This function is a generator
 than can be called to automatically split observations into smaller sections.
 
-.. autofuction:: sotodlib.io.g3tsmurf_utils.get_batch
+.. autofunction:: sotodlib.io.g3tsmurf_utils.get_batch
 
 Observation Files
 ==================
