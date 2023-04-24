@@ -720,11 +720,19 @@ class G3tSmurf:
             status.action,
             status.action_timestamp,
             session,
-            calibration = (status.tags[0] == "oper")
+            calibration = (status.tags[0] == "oper"),
+            session_id = status.session_id
         )
 
     def add_new_observation(
-        self, stream_id, action_name, action_ctime, session, calibration, max_early=5,
+        self, 
+        stream_id, 
+        action_name, 
+        action_ctime, 
+        session, 
+        calibration, 
+        session_id=None,
+        max_early=5,
     ):
         """Add new entry to the observation table. Called by the
         index_metadata function.
@@ -740,20 +748,13 @@ class G3tSmurf:
             The active session
         calibration : boolean
             Boolean that indicates whether the observation is a calibration observation.
-        max_early : int
+        session_id : int (optional, but much more efficient)
+            session id, if known, for timestream files that should go with the observations
+        max_early : int (optional)
             Buffer time to allow the g3 file to be earlier than the smurf action
         """
-        # Check if observation exists already
-        obs = (
-            session.query(Observations)
-            .filter(
-                Observations.stream_id == stream_id,
-                Observations.action_name == action_name,
-                Observations.action_ctime == action_ctime,
-            )
-            .one_or_none()
-        )
-        if obs is None:
+                
+        if session_id is None:
             x = session.query(Files.name)
             x = x.filter(
                 Files.stream_id == stream_id,
@@ -768,7 +769,32 @@ class G3tSmurf:
                 return
 
             session_id = int((x.name[:-3].split("/")[-1]).split("_")[0])
+        
+        if calibration:
+            obs_id=f"oper_{stream_id}_{session_id}"
+        else:
+            obs_id=f"obs_{stream_id}_{session_id}"
 
+        # Check if observation exists already
+        obs = (
+            session.query(Observations)
+            .filter(
+                Observations.obs_id == obs_id,
+                Observations.stream_id == stream_id,
+                Observations.action_name == action_name,
+                Observations.action_ctime == action_ctime,
+            )
+            .one_or_none()
+        )
+
+        if obs is None:
+            x = session.query(Files.name)
+            x = x.filter(
+                Files.stream_id == stream_id,
+                Files.name.like(f"%{session_id}%")
+            )
+            x = x.order_by(Files.start).first()
+            
             # Verify the files we found match with Observation
             status = SmurfStatus.from_file(x.name)
             if status.action is not None:
@@ -788,10 +814,6 @@ class G3tSmurf:
                     assert frame["session_id"] == session_id
                     break
 
-            if calibration:
-                obs_id=f"oper_{stream_id}_{session_id}"
-            else:
-                obs_id=f"obs_{stream_id}_{session_id}"
 
             # Build Observation
             obs = Observations(
@@ -1584,6 +1606,7 @@ class SmurfStatus:
         self.start = self.status.get("start")
         self.stop = self.status.get("stop")
         self.stream_id = self.status.get("stream_id")
+        self.session_id = self.status.get("session_id")
 
         self.aman = core.AxisManager()
 
@@ -1712,7 +1735,8 @@ class SmurfStatus:
                     break
                 frame = frames[0]
                 if str(frame.type) == "Wiring":
-                    status["stream_id"] = frame["sostream_id"]
+                    status["stream_id"] = frame.get("sostream_id")
+                    status["session_id"] = frame.get("session_id")
                     if status.get("start") is None:
                         status["start"] = frame["time"].time / spt3g_core.G3Units.s
                         status["stop"] = frame["time"].time / spt3g_core.G3Units.s
@@ -1803,6 +1827,7 @@ class SmurfStatus:
             "start": status_frames[0].time.timestamp(),
             "stop": status_frames[-1].time.timestamp(),
             "stream_id": stream_id,
+            "session_id": status_frames[0].get("session_id"),
         }
         cur_file = None
         for frame_info in tqdm(status_frames, disable=(not show_pb)):
