@@ -1518,19 +1518,28 @@ def make_DetDb_single_obs(obsfiledb, obs_id):
     # right now, require specific path to detdb, no helping userf
     detdb = core.metadata.DetDb()
 
-    column_defs = [
+    base_defs = [
                 "'readout_id' str",
-                "'smurf_band' int",
-                "'smurf_channel' int",
+    ]
+    column_defs = [
+                "'band' int",
+                "'channel' int",
                 "'res_frequency' float",
     ]
 
-    detdb.create_table('base',column_defs)
+    detdb.create_table('base', base_defs)
+    detdb.create_table('smurf',column_defs)
 
     for i, ch in tqdm(enumerate(ch_map)):
         detdb.get_id(ruids[i])
-        detdb.add_props('base',ruids[i],readout_id=ruids[i],smurf_band=ch['band'].item(),
-                        smurf_channel=ch['channel'].item(),res_frequency=ch['freqs'].item(),commit=False)
+        detdb.add_props('base',ruids[i],readout_id=ruids[i],commit=False)
+        detdb.add_props(
+            'smurf',ruids[i],
+            band=ch['band'].item(),
+            channel=ch['channel'].item(),
+            res_frequency=ch['freqs'].item(),
+            commit=False
+        )
 
     detdb.conn.commit()
     return detdb
@@ -2063,7 +2072,7 @@ def _get_detset_channel_names(status, ch_map, obsfiledb):
     # tune file in status
     if status.tune is not None and len(status.tune) > 0:
         c = obsfiledb.conn.execute(
-            "select tuneset_id from tunes " "where name=?", (status.tune,)
+            "select tuneset_id from tunes " "where name=?",(Tunes.get_name_from_status(status),)
         )
         tuneset_id = [r[0] for r in c][0]
 
