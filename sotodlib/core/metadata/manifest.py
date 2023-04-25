@@ -673,6 +673,17 @@ def get_parser(parser=None):
         endpoint fields.  (This mode is chosen by default.)
         """)
 
+    # "table"
+    p = cmdsubp.add_parser(
+        'table', usage="""Syntax:
+
+    %(prog)s
+
+        This will print every row of the metadata map table,
+        including the filename.
+        """)
+
+
     # "files"
     p = cmdsubp.add_parser(
         'files', usage="""Syntax:
@@ -809,27 +820,47 @@ def main(args=None):
 
         print()
 
+    elif args.mode == 'table':
+        # Print the table of entries.
+        schema = db.scheme.as_resultset()
+        keys = []
+        for purp in ['in', 'out']:
+            for s in schema:
+                if s['purpose'] != purp:
+                    continue
+                if s['col_type'] == 'range':
+                    keys.extend([s['field'] + '__lo',
+                                 s['field'] + '__hi'])
+                else:
+                    keys.append(s['field'])
+        keys.append('filename')
+        print(keys)
+        print(['-'] * len(keys))
+        for row in db.conn.execute('select map.*, files.name as filename from '
+                                   'map join files where map.file_id=files.id'):
+            print([row[k] for k in keys])
+
     elif args.mode == 'files':
         # Get all files.
         rows = db.conn.execute(
-            'select files.name as filename, count(map.id) '
+            'select files.id, files.name as filename, count(map.id) '
             'from map join files on '
             'map.file_id==files.id group by filename').fetchall()
 
         if args.clean:
-            for filename, count in rows:
+            for _id, filename, count in rows:
                 print(filename)
         else:
-            fmt = '  {count:>7} {filename}'
-            hdr = fmt.format(count="Count", filename="Filename")
+            fmt = '  {_id:>7} {count:>7} {filename}'
+            hdr = fmt.format(_id="file_id", count="Count", filename="Filename")
             print(hdr)
             print('-' * (len(hdr) + 20))
             n = len(rows)
-            super_count = sum([r[1] for r in rows])
+            super_count = sum([r[2] for r in rows])
             if n > 20 and not args.all:
                 rows = rows[:10]
-            for filename, count in rows:
-                print(fmt.format(filename=filename, count=count))
+            for _id, filename, count in rows:
+                print(fmt.format(_id=_id, filename=filename, count=count))
             if len(rows) < n:
                 other_count = super_count - sum([r[1] for r in rows])
                 print(fmt.format(count=other_count, filename='...'))
