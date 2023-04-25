@@ -649,10 +649,11 @@ class ManifestDb:
         return False
 
 
-def get_parser():
-    parser = argparse.ArgumentParser(
-        epilog="""For details of individual modes, pass a dummy database argument
-        followed by the mode and -h, e.g.: "%(prog)s x files -h" """)
+def get_parser(parser=None):
+    if parser is None:
+        parser = argparse.ArgumentParser(
+            epilog="""For details of individual modes, pass a dummy database argument
+            followed by the mode and -h, e.g.: "%(prog)s x files -h" """)
 
     parser.add_argument('filename', help="Path to a ManifestDb.",
                         metavar='my_db.sqlite')
@@ -763,8 +764,9 @@ def main(args=None):
     """Entry point for the so-metadata tool."""
     if args is None:
         args = sys.argv[1:]
-    parser = get_parser()
-    args = parser.parse_args(args)
+    if not isinstance(args, argparse.Namespace):
+        parser = get_parser()
+        args = parser.parse_args(args)
 
     if args.mode is None:
         args.mode = 'summary'
