@@ -68,8 +68,31 @@ class ContextTest(unittest.TestCase):
             name, _ = self._open_new('db.sqlite', 'create')
             db.to_file(name)
             cd[key] = name
-            ctx = Context(self._write_context(cd))
+            ctx_file = self._write_context(cd)
+            ctx = Context(ctx_file)
             self.assertIsInstance(getattr(ctx, key), cls)
+            metadata.cli.main(args=['context', ctx_file])
+
+    def test_010_cli(self):
+        def save_db(src, k, suffix=''):
+            if src.get(k) is None:
+                return
+            if isinstance(src[k], str):
+                return
+            db_file, _ = self._open_new(k + suffix, 'create')
+            src[k].to_file(db_file)
+            src[k] = db_file
+
+        dataset_sim = DatasetSim()
+        ctx = dataset_sim.get_context()
+        for _db in ['obsfiledb', 'obsdb', 'detdb']:
+            print(ctx)
+            save_db(ctx, _db)
+        for i, entry in enumerate(ctx.get('metadata', [])):
+            save_db(entry, 'db', str(i))
+
+        ctx_file = self._write_context(dict(ctx))
+        metadata.cli.main(args=['context', ctx_file])
 
     def test_100_loads(self):
         dataset_sim = DatasetSim()
