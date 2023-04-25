@@ -1559,3 +1559,14 @@ Here's the class documentation for ResultSetHdfLoader:
 .. autoclass:: sotodlib.io.metadata.ResultSetHdfLoader
    :inherited-members: __init__
    :members:
+
+-----------------
+Command Line Tool
+-----------------
+
+.. argparse::
+   :module: sotodlib.core.metadata.cli
+   :func: get_parser
+   :prog: so-metadata
+
+
