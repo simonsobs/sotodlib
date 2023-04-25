@@ -1,26 +1,14 @@
-"""Command-line interface for inspecting Context, obsdb and obsfiledb.
-
-This program can be used to inspect the contents of ObsFileDb, ObsDb,
-and ManifestDb ("metadata") sqlite3 databases.  In the case of
-ObsFileDb and ManifestDb, it can also be used to perform batch updates
-of filenames.
-
-To summarize a database, pass the db type and then either the path to
-the db file, or the path to the context.yaml file; some examples::
-
-  %(prog)s obsdb /path/to/context.yaml
-  %(prog)s obsfiledb /path/to/context/obsfiledb.sqlite
-
+"""Command-line interface for inspecting Context, ObsFileDb, ObsDb,
+ManifestDb.
 
 """
 
 import argparse
 import os
+import sys
 
-from .. import Context
-from . import ObsDb
-from . import manifest
-from . import obsfiledb
+from .. import context
+from . import manifest, obsdb, obsfiledb, ObsDb
 
 
 CLI_NAME = 'so-metadata'
@@ -39,6 +27,12 @@ def get_parser():
 
     sps = parser.add_subparsers(dest='_subcmd')
 
+    # context
+    sp = sps.add_parser('context', description=
+                        'Inspect a context file and print out a few things about it.')
+    sp.add_argument('ctx_file', help='Path to Context yaml file.')
+
+    # obsdb
     sp = sps.add_parser('obsdb', description=
                         'Inspect an ObsDb.  By default, prints out summary information.  '
                         'Pass --list to see a list of all observations; or pass an obs_id '
@@ -56,11 +50,13 @@ def get_parser():
                     'in addition to obs_id.')
     sp.add_argument('obs_id', nargs='?')
 
-    sp = sps.add_parser('metadata', description="Inspect (or modify) a ManifestDb.")
-    manifest.get_parser(sp)
-
+    # obsfiledb
     sp = sps.add_parser('obsfiledb')
     obsfiledb.get_parser(sp)
+
+    # metadata
+    sp = sps.add_parser('metadata', description="Inspect (or modify) a ManifestDb.")
+    manifest.get_parser(sp)
 
     return parser
 
@@ -78,18 +74,47 @@ def _set_type(args):
     return args.type
 
 
-def main():
-    parser = get_parser()
-    args = parser.parse_args()
+def main(args=None):
+    if args is None:
+        args = sys.argv[1:]
 
-    if args._subcmd == 'obsdb':
+    parser = get_parser()
+    args = parser.parse_args(args=args)
+
+    if args._subcmd == 'context':
+        ctx = context.Context(args.ctx_file)
+        base_path = os.path.split(ctx.filename)[0]
+
+        print('Resolving DB paths:')
+        for db in ['obsfiledb', 'obsdb', 'detdb']:
+            if ctx.get(db) is not None:
+                db_path = os.path.abspath(os.path.join(base_path, ctx[db]))
+            else:
+                db_path = '(none declared)'
+            print(f'  {db:<10}: {db_path}')
+        print()
+        print('Resolving metadata paths:')
+        for entry in ctx.get('metadata', []):
+            if entry.get('db'):
+                db_path = os.path.abspath(os.path.join(base_path, entry['db']))
+            else:
+                db_path = '(no db filename)'
+            name = entry.get('name')
+            if name is None:
+                name = '(unnamed)'
+            if entry.get('det_info'):
+                name += ' -- [det_info]'
+            print(f'  {name:<30}: {db_path}')
+        print()
+
+    elif args._subcmd == 'obsdb':
         _set_type(args)
 
         if args.type == 'context':
-            ctx = Context(args.db_file)
+            ctx = context.Context(args.db_file)
             db = ctx.obsdb
         elif args.type == 'db':
-            db = ObsDb(args.db_file)
+            db = obsdb.ObsDb(args.db_file)
 
         # Summary mode?
         if args.obs_id is None:
@@ -132,14 +157,14 @@ def main():
                 for k, v in db.get(args.obs_id).items():
                     print(f'  {k:<20}: {v}')
 
+    elif args._subcmd == 'obsfiledb':
+        obsfiledb.main(args, parser=parser)
+
     elif args._subcmd == 'metadata':
         manifest.main(args)
 
-    elif args._mode == 'obsfiledb':
-        obsfiledb.main(args, parser=parser)
-
     else:
-        parser.error('Not implemented: {args._subcmd}')
+        parser.error(f'Provide a subcmd.')
 
 if __name__ == '__main__':
     main()
