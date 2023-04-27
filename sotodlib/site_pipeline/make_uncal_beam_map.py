@@ -313,22 +313,20 @@ def main(config_file=None, obs_id=None, verbose=0, test=False,
 
         # Demodulation & downsampling.
         demodQU = None
+        unmirror_det_angles = None
         comps = None
         if 'hwp_angle' in tod:
             logger.info('Demodulating HWP...')
-            hwp.demod_tod(tod, signal='signal')
+            hwp.demod_tod(tod, signal_name='signal')
             demodQU = [tod['demodQ'], tod['demodU']]
             comps = 'T'
 
-            # Hotwire the focal plane to include the pol angle
-            # reflection due to HWP.  You might not want to do this,
-            # if e.g. you're working with a sim that didn't include
-            # the effect.
-            if config['preprocessing'].get('enable_hwp_gamma_flip', True):
-                logger.info('Flipping detector pol angle for HWP.')
-                fp = tod.focal_plane
-                fp.move('gamma', 'gamma_nohwp')
-                fp.wrap_new('gamma', shape=('dets',))[:] = -fp['gamma_nohwp']
+            # You should set this True only if your sim, or whatever,
+            # did not account for the reflection effect of the HWP.
+            unmirror_det_angles = config['preprocessing'].get('unmirror_det_angles', False)
+            if unmirror_det_angles:
+                logger.warning('Unmirroring detector angles, by request '
+                               '(probably for a broken sim).')
 
         # Fix pointing.
         logger.info('Applying pointing corrections.')
@@ -383,6 +381,7 @@ def main(config_file=None, obs_id=None, verbose=0, test=False,
                                          cuts=cuts,
                                          comps=comps,
                                          demodQU=demodQU,
+                                         unmirror_det_angles=unmirror_det_angles,
                                          info=map_info,
                                          thread_algo='domdir')
 

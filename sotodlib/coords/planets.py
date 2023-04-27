@@ -151,7 +151,7 @@ def get_scan_P(tod, planet, refq=None, res=None, size=None, **kw):
     if size is not None:
         # Trim to a local square
         mz = P.zeros(comps='T').submap([[-size/2, size/2], [size/2, -size/2]])
-        P.geom = enmap.Geometry(shape=mz.shape, wcs=mz.wcs)
+        P.geom = enmap.Geometry(shape=mz.shape[-2:], wcs=mz.wcs)
     return P, X
 
 
@@ -625,13 +625,14 @@ def write_det_weights(tod, filename, dataset, det_weights=None):
 
 
 def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
-             res=0.01*coords.DEG, size=None, wcs_kernel=None, comps='TQU',
+             res=0.01*coords.DEG, size=None, wcs_kernel=None, comps=None,
              signal=None,
              det_weights=None,
              filename=None, source_flags=None, cuts=None,
              data_splits=None,
              low_pass=None, n_modes=10,
              demodQU=None,
+             unmirror_det_angles=None,
              eigentol=1e-3, info={}):
     """Make a compact source map from the TOD.  Specify filename to write
     things to disk; this should be a format string, for example
@@ -660,6 +661,9 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
     class MmTimer(coords.Timer):
         PRINT_FUNC = logger.info
         FMT = 'make_map: {msg}: {elapsed:.3f} seconds'
+
+    if comps is None:
+        comps = 'TQU'
 
     if signal is None:
         signal = tod.signal
@@ -707,47 +711,41 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
             logger.info(f'Mapping split "{group_label}"')
             if base_cuts is not None:
                 group_cuts = group_cuts + base_cuts
-            with MmTimer('getting weights'):
-                w = P.to_weights(cuts=group_cuts, det_weights=det_weights)
-            with MmTimer('getting map and applying inverse weights'):
-                m = P.remove_weights(
-                    tod=tod, signal=signal, weights_map=w, cuts=group_cuts,
-                    det_weights=det_weights, eigentol=eigentol)
-
-            output['splits'][group_label] = {
-                'binned': None,
-                'weights': w.astype('float32'),
-                'solved': m.astype('float32'),
-            }
-
             if demodQU:
-                with MmTimer('mapping demod signals'):
-                    m1 = P.to_map(tod, signal=demodQU[0], comps='TQU',
-                                  cuts=group_cuts, det_weights=det_weights)
-                    m2 = P.to_map(tod, signal=demodQU[1], comps='TQU',
-                                  cuts=group_cuts, det_weights=det_weights)
-                    w1 = P.to_weights(tod, comps='TQU',
-                                  cuts=group_cuts, det_weights=det_weights)
+                # Yes HWP.
+                with MmTimer('calling demod mapmaker'):
+                    # Note we pass in tod.signal in place of dsT,
+                    # here.  We want to use the signal we cleaned
+                    # using correlations rather than the one the
+                    # demodulation code returned (which can be
+                    # over-filtered).
+                    qumaps = coords.demod.make_map(
+                        tod, P=P,
+                        dsT=tod.signal,
+                        demodQ=demodQU[0], demodU=demodQU[1],
+                        cuts=group_cuts,
+                        det_weights=det_weights,
+                        wrong_definition=unmirror_det_angles)
 
-                with MmTimer('solving demod maps'):
-                    # This matrix rotates the demodU binned map so it can
-                    # be coadded.
-                    remix = np.array([[ 1, 0, 0],
-                                      [ 0, 0,-1],
-                                      [ 0, 1, 0]])
-                    m1 += np.tensordot(remix, m2, [[1],[0]])
-                    # Per-pixel, w2 = R . w1 . R^T
-                    w2 = np.tensordot(
-                        remix,
-                        np.tensordot(w1, remix.T, [[1],[0]]),
-                        [[1],[0]]
-                    ).transpose([0,3,1,2])
-                    w1 += w2
-                    mt = P.remove_weights(signal_map=m1, weights_map=w1)
+                output['splits'][group_label] = {
+                    'solved':  qumaps['map'],
+                    'weights': qumaps['weight'],
+                    'binned': None}
 
-                # Replace the T component.
-                mt[0] = m
-                output['splits'][group_label]['solved'] = mt
+            else:
+                # No HWP.
+                with MmTimer('getting weights'):
+                    w = P.to_weights(cuts=group_cuts, det_weights=det_weights)
+                with MmTimer('getting map and applying inverse weights'):
+                    m = P.remove_weights(
+                        tod=tod, signal=signal, weights_map=w, cuts=group_cuts,
+                        det_weights=det_weights, eigentol=eigentol)
+
+                output['splits'][group_label] = {
+                    'binned': None,
+                    'weights': w.astype('float32'),
+                    'solved': m.astype('float32'),
+                }
 
             if filename is not None:
                 m.astype('float32').write(
