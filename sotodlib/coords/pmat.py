@@ -256,7 +256,7 @@ class P:
         return dest
 
     def to_weights(self, tod=None, dest=None, comps=None, signal=None,
-                   det_weights=None, cuts=None):
+                   det_weights=None, cuts=None, full_matrix=False):
         """Computes the weights matrix for the uncorrelated noise model and
         returns it.  I.e.:
 
@@ -265,6 +265,12 @@ class P:
         and returns W.  Here the inverse noise covariance has shape
         (n_dets), and carries a single weight (1/var) value for each
         detector.
+
+        *Note!* Because at each pixel W is a symmetric matrix, it
+        might not be populated in the lower triangle.  Downstream code
+        in this module (such as to_inverse_weights and remove_weights)
+        is hip to this, but you can pass full_matrix=True if you need
+        a fully populated weights matrix.
 
         Args:
           tod (AxisManager): possible source for det_weights.
@@ -276,6 +282,9 @@ class P:
             uniform weights of 1 are applied.
           cuts: Sample cuts to exclude from processing.  If None,
             self.cuts is used.
+          full_matrix (bool): Populate the lower triangle of each
+            pixel's weights submatrix (otherwise, the elements may be
+            left as zero).
 
         """
         det_weights = _not_both(det_weights, self.det_weights,
@@ -291,6 +300,12 @@ class P:
         proj, threads = self._get_proj_threads(cuts=cuts)
         proj.to_weights(self._get_asm(), output=self._prepare_map(dest),
                 det_weights=det_weights, comps=comps, threads=unwrap_ranges(threads))
+
+        if full_matrix and _n > 1:
+            temp = dest.reshape((_n, _n, -1)).transpose((2, 0, 1))
+            temp = np.triu(temp) + np.triu(temp, 1).transpose((0, 2, 1))
+            dest[:] = temp.transpose((1, 2, 0)).reshape(dest.shape)
+
         return dest
 
     def to_inverse_weights(self, weights_map=None, tod=None, dest=None,
@@ -337,7 +352,7 @@ class P:
           weights_map: the matrix W.  Shape should be (n_comp, n_comp,
             n_row, n_col), but only the upper diagonal in the first
             two dimensions needs to be populated.  If this is None,
-            then W will be computed by a call to
+            then W will be computed using self.to_weights.
 
         """
         if inverse_weights_map is None:
