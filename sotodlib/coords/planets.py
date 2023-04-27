@@ -631,12 +631,20 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
              filename=None, source_flags=None, cuts=None,
              data_splits=None,
              low_pass=None, n_modes=10,
+             demodQU=None,
              eigentol=1e-3, info={}):
     """Make a compact source map from the TOD.  Specify filename to write
     things to disk; this should be a format string, for example
     '{obs_id}_{map}.fits', where 'map' will be given values of
     ['binned', 'solved', 'weights'] and any other keys (obs_id in this
     case) must be passed through info.
+
+    To map demodulated timestreams, pass demodQU as a list containing
+    demodQ and demodU signal matrices, and pass comps='T'.  The
+    temperature map will then be computed from the signal input,
+    treating the detectors as insensitive to polarization; the
+    polarized part of the map will be solved by mapping the demodQ and
+    demodU timestreams and combining them properly.
 
     """
     assert (center_on is not None)  # Pass in the source name, e.g. 'uranus'
@@ -673,6 +681,7 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
                                  cuts=cuts,
                                  threads=thread_algo,
                                  wcs_kernel=wcsk)
+
     with MmTimer('get_proj_threads'):
         P._get_proj_threads()
 
@@ -704,17 +713,50 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
                 m = P.remove_weights(
                     tod=tod, signal=signal, weights_map=w, cuts=group_cuts,
                     det_weights=det_weights, eigentol=eigentol)
+
             output['splits'][group_label] = {
                 'binned': None,
                 'weights': w.astype('float32'),
                 'solved': m.astype('float32'),
             }
+
+            if demodQU:
+                with MmTimer('mapping demod signals'):
+                    m1 = P.to_map(tod, signal=demodQU[0], comps='TQU',
+                                  cuts=group_cuts, det_weights=det_weights)
+                    m2 = P.to_map(tod, signal=demodQU[1], comps='TQU',
+                                  cuts=group_cuts, det_weights=det_weights)
+                    w1 = P.to_weights(tod, comps='TQU',
+                                  cuts=group_cuts, det_weights=det_weights)
+
+                with MmTimer('solving demod maps'):
+                    # This matrix rotates the demodU binned map so it can
+                    # be coadded.
+                    remix = np.array([[ 1, 0, 0],
+                                      [ 0, 0,-1],
+                                      [ 0, 1, 0]])
+                    m1 += np.tensordot(remix, m2, [[1],[0]])
+                    # Per-pixel, w2 = R . w1 . R^T
+                    w2 = np.tensordot(
+                        remix,
+                        np.tensordot(w1, remix.T, [[1],[0]]),
+                        [[1],[0]]
+                    ).transpose([0,3,1,2])
+                    w1 += w2
+                    mt = P.remove_weights(signal_map=m1, weights_map=w1)
+
+                # Replace the T component.
+                mt[0] = m
+                output['splits'][group_label]['solved'] = mt
+
             if filename is not None:
                 m.astype('float32').write(
                     filename.format(map=f'{group_label}_map', **info))
                 w.astype('float32').write(
                     filename.format(map=f'{group_label}_weights', **info))
         return output
+
+    assert demodQU is None  # sry, only supported when data_splitting ...
 
     with MmTimer('project signal and weight maps'):
         map1 = P.to_map(tod, signal=signal, det_weights=det_weights)

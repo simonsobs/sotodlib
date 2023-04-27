@@ -17,7 +17,7 @@ import yaml
 
 import sotodlib
 import so3g
-from sotodlib import core, coords, site_pipeline, tod_ops
+from sotodlib import core, coords, site_pipeline, tod_ops, hwp
 
 from . import util
 
@@ -312,7 +312,23 @@ def main(config_file=None, obs_id=None, verbose=0, test=False,
         tod.signal[:] = tod_ops.fourier_filter(tod, filt, resize=None, detrend=None)
 
         # Demodulation & downsampling.
-        # ...
+        demodQU = None
+        comps = None
+        if 'hwp_angle' in tod:
+            logger.info('Demodulating HWP...')
+            hwp.demod_tod(tod, signal='signal')
+            demodQU = [tod['demodQ'], tod['demodU']]
+            comps = 'T'
+
+            # Hotwire the focal plane to include the pol angle
+            # reflection due to HWP.  You might not want to do this,
+            # if e.g. you're working with a sim that didn't include
+            # the effect.
+            if config['preprocessing'].get('enable_hwp_gamma_flip', True):
+                logger.info('Flipping detector pol angle for HWP.')
+                fp = tod.focal_plane
+                fp.move('gamma', 'gamma_nohwp')
+                fp.wrap_new('gamma', shape=('dets',))[:] = -fp['gamma_nohwp']
 
         # Fix pointing.
         logger.info('Applying pointing corrections.')
@@ -365,6 +381,8 @@ def main(config_file=None, obs_id=None, verbose=0, test=False,
                                          size=size_rad,
                                          data_splits=band_splits,
                                          cuts=cuts,
+                                         comps=comps,
+                                         demodQU=demodQU,
                                          info=map_info,
                                          thread_algo='domdir')
 

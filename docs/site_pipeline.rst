@@ -685,6 +685,56 @@ Here's an annotated example:
       f150: [15, arcsec]
 
 
+Here's an example more closely matched to SAT:
+
+.. code-block:: yaml
+
+  # Data source
+  context_file: context-sat-polized.yaml
+
+  # Sub-observation data grouping
+  subobs:
+    use: detset
+    label: wafer_slot
+
+  # Database of results
+  archive:
+    index: 'archive.sqlite'
+    policy:
+      type: 'directory'
+      root_dir: './'
+      pattern: 'maps/{product_id}'
+
+  # Output selection and naming
+  output:
+    map_codes: ['solved', 'weights']
+    pattern: '{product_id}_{split}_{map_code}.fits'
+
+  # Plot generation
+  plotting:
+    zoom:
+      f090: [2, deg]
+      f150: [2, deg]
+
+  # Preprocessing
+  preprocessing:
+    cal_keys: ['abscal', 'relcal']
+    pointing_keys: ['boresight_offset']
+    # When mapping a sim that doesn't include HWP's U/-U reflection,
+    # suppress the "gamma flip".
+    # enable_hwp_gamma_flip: false
+
+  # Mapmaking parameters
+  mapmaking:
+    #force_source: Uranus
+    res:
+      f090: [2, arcmin]
+      f150: [2, arcmin]
+    map_size:
+      f090: '4 deg'
+      f150: '4 deg'
+
+
 Inputs
 ``````
 
