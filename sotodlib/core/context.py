@@ -299,7 +299,7 @@ class Context(odict):
         if aman is None:
             return meta
         if meta is not None:
-            if 'det_info' in aman:
+            if 'det_info' in aman and 'det_info' in meta:
                 # If the loader added det_info, then perform a special
                 # merge.  Duplicate keys should be avoided, because
                 # checking the values are the same is annoying.
@@ -312,7 +312,7 @@ class Context(odict):
                                        f'observation loader as well as in metadata '
                                        f'databases; dropping the loader version.')
                     else:
-                        meta.wrap(k, _det_info[k])
+                        meta['det_info'].wrap(k, _det_info[k])
             aman.merge(meta)
         return aman
 
