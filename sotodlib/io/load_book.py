@@ -39,7 +39,8 @@ def _extract_1d(src, src_offset, dest, dest_offset):
     return src_offset + count
 
 
-def _extract_2d(src, src_offset, dest, dest_offset, dets=None):
+def _extract_2d(src, src_offset, dest, dest_offset, dets=None,
+    dest_time=None):
     """Unpack certain elements of a G3SuperTimestream into a 2d array.
     Equivalent to running _extract_1d, row by row, on src and dest.
 
@@ -69,6 +70,9 @@ def _extract_2d(src, src_offset, dest, dest_offset, dets=None):
         _, src_idx, dest_idx = core.util.get_coindices(src.names, dets)
         for i0, i1 in zip(src_idx, dest_idx):
             dest[i1,dest_offset:dest_offset+count] = src.data[i0,samp_slice]
+    
+    if dest_time is not None:
+        dest_time[dest_offset:dest_offset+count] = np.array(src.times)[samp_slice]/spt3g_core.G3Units.sec
     return src_offset + count
 
 
@@ -151,6 +155,8 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         core.LabelAxis('dets', [p[1] for p in pairs_req]),
         core.OffsetAxis('samps', samples[1] - samples[0], samples[0], obs_id))
     aman.wrap('primary', core.AxisManager(aman.samps))
+    aman.wrap_new('timestamps', ('samps',), dtype='float32')
+
     if no_signal:
         aman.wrap('signal', None)
     else:
@@ -232,8 +238,17 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
 
                 # Extract the main signal
                 if not no_signal:
-                    delta = _extract_2d(frame['signal'], start,
-                                        aman['signal'], dest_offset, aman.dets.vals)
+                    delta = _extract_2d(
+                        frame['signal'], 
+                        start,
+                        aman['signal'], 
+                        dest_offset, 
+                        aman.dets.vals,
+                        dest_time = aman['timestamps']
+                    )
+                else:
+                    ## do we still want times without signal?
+                    pass
                 
                 # How many samples were added to dest?
                 if delta > start:
@@ -258,4 +273,5 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         src=list(det_info.values()))
     aman.wrap('det_info', det_info.to_axismanager(axis_key='_readout_id'))
     aman.wrap("flags", core.FlagManager.for_tod(aman, "dets", "samps"))
+
     return aman
