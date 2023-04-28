@@ -188,8 +188,8 @@ class Context(odict):
 
         Args:
           obs_id (multiple): The observation to load (see Notes).
-          dets (list, dict or ResultSet): The detectors to read.  If
-            None, all dets will be read.
+          dets (list, array, dict or ResultSet): The detectors to
+            read.  If None, all dets will be read.
           samples (tuple of ints): The start and stop sample indices.
             If None, read all samples.  (Note that some loader
             functions might not support this argument.)
@@ -198,8 +198,8 @@ class Context(odict):
             obsfiledb, but this shortcut will automatically determine
             the obs_id and the detector and sample range selections
             that correspond to this single file.
-          detsets (list): The detsets to read (with None equivalent to
-            requesting all detsets).
+          detsets (list, array): The detsets to read (with None
+            equivalent to requesting all detsets).
           meta (AxisManager): An AxisManager returned by get_meta
             (though possibly with additional axis restrictions
             applied) to use as a starting point for detector selection
@@ -442,17 +442,23 @@ class Context(odict):
         request = {'obs:obs_id': obs_id}
         if detsets is not None:
             request['dets:detset'] = detsets
-        if isinstance(dets, list):
-            request['dets:readout_id'] = dets
-        elif isinstance(dets, metadata.ResultSet):
-            request['dets:readout_id'] = dets['readout_id']
-        elif dets is not None:
+
+        # Convert dets argument to request entry(s)
+        if isinstance(dets, dict):
             for k, v in dets.items():
                 if not k.startswith('dets:'):
                     k = 'dets:' + k
                 if k in request:
                     raise ValueError(f'Duplicate specification of dets field "{k}"')
                 request[k] = v
+        elif isinstance(dets, metadata.ResultSet):
+            request['dets:readout_id'] = dets['readout_id']
+        elif hasattr(dets, '__getitem__'):
+            # lists, tuples, arrays ...
+            request['dets:readout_id'] = dets
+        elif dets is not None:
+            # Try a cast ...
+            request['dets:readout_id'] = list(dets)
 
         metadata_list = self._get_warn_missing('metadata', [])
         meta = self.loader.load(metadata_list, request, det_info=det_info, check=check,
