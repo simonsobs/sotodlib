@@ -51,7 +51,9 @@ def get_parser():
     sp.add_argument('obs_id', nargs='?')
 
     # obsfiledb
-    sp = sps.add_parser('obsfiledb')
+    sp = sps.add_parser('obsfiledb', description=
+                        'Inspect an ObsFileDb.  This can be used to list all files, '
+                        'and to perform batch updates of filenames.')
     obsfiledb.get_parser(sp)
 
     # metadata
