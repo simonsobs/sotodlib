@@ -72,7 +72,7 @@ def _extract_2d(src, src_offset, dest, dest_offset, dets=None,
             dest[i1,dest_offset:dest_offset+count] = src.data[i0,samp_slice]
     
     if dest_time is not None:
-        dest_time[dest_offset:dest_offset+count] = np.array(src.times)[samp_slice]/spt3g_core.G3Units.sec
+        dest_time[dest_offset:dest_offset+count] = np.array(src.times,dtype='float64')[samp_slice]/spt3g_core.G3Units.sec
     return src_offset + count
 
 
@@ -155,7 +155,7 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         core.LabelAxis('dets', [p[1] for p in pairs_req]),
         core.OffsetAxis('samps', samples[1] - samples[0], samples[0], obs_id))
     aman.wrap('primary', core.AxisManager(aman.samps))
-    aman.wrap_new('timestamps', ('samps',), dtype='float32')
+    aman.wrap_new('timestamps', ('samps',), dtype='float64')
 
     if no_signal:
         aman.wrap('signal', None)
