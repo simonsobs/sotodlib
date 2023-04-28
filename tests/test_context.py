@@ -79,6 +79,9 @@ class ContextTest(unittest.TestCase):
         n = len(dataset_sim.dets)
         obs_id = dataset_sim.obss['obs_id'][1]
         for selection, count in [
+                (['read05'], 1),
+                (np.array(['read05']), 1),
+                (metadata.ResultSet(['readout_id'], [['read05']]), 1),
                 ({'dets:readout_id': ['read05']}, 1),
                 ({'dets:readout_id': np.array(['read05'])}, 1),
                 ({'dets:detset': 'neard'}, 4),
@@ -90,6 +93,17 @@ class ContextTest(unittest.TestCase):
                 ({'dets:det_id': ['NO_MATCH']}, 2),
         ]:
             meta = ctx.get_meta(obs_id, dets=selection)
+            self.assertEqual(meta.dets.count, count, msg=f"{selection}")
+            self.assertTrue('cal' in meta)
+            self.assertTrue('flags' in meta)
+
+        # And tolerance of the detsets argument ...
+        for selection, count in [
+                ('neard', 4),
+                (['neard'], 4),
+                (np.array(['neard', 'fard']), 8),
+        ]:
+            meta = ctx.get_meta(obs_id, detsets=selection)
             self.assertEqual(meta.dets.count, count, msg=f"{selection}")
             self.assertTrue('cal' in meta)
             self.assertTrue('flags' in meta)
