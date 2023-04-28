@@ -78,6 +78,11 @@ class TestObsDb(unittest.TestCase):
             print('  -- removing.')
             os.remove(fn)
 
+    def test_info(self):
+        """Check the .info method."""
+        db0 = get_example()
+        db0.info()
+
 
 if __name__ == '__main__':
     unittest.main()
