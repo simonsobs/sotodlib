@@ -1,3 +1,4 @@
+import numpy as np
 import so3g
 from pixell import enmap
 
@@ -31,10 +32,6 @@ def make_map(tod,
     cuts : RangesMatrix or None, optional
         A RangesMatrix that identifies samples that should be excluded from projection operations.
         If None, no cuts will be applied.
-    det_weights_predemod : array-like or None, optional
-        The pre-demodulation detector weights to use in the map-making.
-        If provided, `det_weights_dsT` and `det_weights_demod` will be calculated from `det_weights_predemod`.
-        If None, `det_weights_dsT` and `det_weights_demod` must be provided.
     det_weights_dsT : array-like or None, optional
         The detector weights to use in the map-making for the dsT timestream.
         If None, uniform detector weights will be used.
@@ -62,19 +59,14 @@ def make_map(tod,
     
     PQU = coords.P.for_tod(tod=tod, wcs_kernel=wcs_kernel, cuts=cuts, comps='QU')
 
-    if (det_weights_predemod is not None) and (det_weights_dsT is None) and (det_weights_demod is None):
-        det_weights_dsT = det_weights_predemod
-        det_weights_demod = det_weights_predemod / 2.
-        # Use det weights derived from pre-demod timestream
-    elif (det_weights_dsT is not None) and (det_weights_demod is not None):
-        # Use separate det weights for dsT and demodQ,U, respectively.
-        pass
-    elif (det_weights_dsT is None) and (det_weights_demod is None):
-        # use uniform detector weights
-        pass
+    if det_weights_dsT is None:
+        if det_weights_demod is None:
+            det_weights_demod = np.ones(tod.dets.count, dtype='float32')
+        det_weights_dsT = det_weights_demod * 2.
     else:
-        raise ValueError('Spcify either `det_weights_predemod` or (`det_weights_dsT` and `det_weights_demod`)')
-        
+        if det_weights_demod is None:
+            det_weights_demod = det_weights_dsT / 2.
+    
     # T map and weight
     mT_weighted = PQU.to_map(tod=tod, signal=dsT, comps='T', det_weights=det_weights_dsT)
     wT = PQU.to_weights(tod, signal=dsT, comps='T', det_weights=det_weights_dsT)
