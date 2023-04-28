@@ -299,6 +299,20 @@ class Context(odict):
         if aman is None:
             return meta
         if meta is not None:
+            if 'det_info' in aman:
+                # If the loader added det_info, then perform a special
+                # merge.  Duplicate keys should be avoided, because
+                # checking the values are the same is annoying.
+                _det_info = aman['det_info']
+                del aman['det_info']
+                _det_info.restrict_axes([meta.dets])
+                for k in _det_info._fields:
+                    if k in meta['det_info']:
+                        logger.warning(f'Key "{k}" is present in det_info returned by '
+                                       f'observation loader as well as in metadata '
+                                       f'databases; dropping the loader version.')
+                    else:
+                        meta.wrap(k, _det_info[k])
             aman.merge(meta)
         return aman
 
