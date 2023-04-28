@@ -257,4 +257,5 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         ['detset_book', '_readout_id', 'stream_id'],
         src=list(det_info.values()))
     aman.wrap('det_info', det_info.to_axismanager(axis_key='_readout_id'))
+    aman.wrap("flags", core.FlagManager.for_tod(aman, "dets", "samps"))
     return aman
