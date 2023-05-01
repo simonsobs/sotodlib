@@ -38,6 +38,7 @@ def detrend_data(tod, method='linear', axis_name='samps',
     n_samps = signal.shape[axis_idx]
     
     # Ensure last axis is the one to detrend.
+    # note that any axis re-ordering is not the slow part of this function
     if axis_idx != signal.ndim - 1:
         # Note this reordering is its own inverse; e.g. [0, 1, -1, 3, 4, 2]
         axis_reorder = list(range(signal.ndim))
@@ -52,14 +53,24 @@ def detrend_data(tod, method='linear', axis_name='samps',
         x = np.linspace(0, 1, n_samps)
         count = max(1, min(count, signal.shape[-1] // 2))
         slopes = signal[...,-count:].mean(axis=-1)-signal[...,:count].mean(axis=-1)
-        signal = signal - slopes[...,None] * x
+        if len(signal.shape)>2:
+            signal -= slopes[...,None] * x
+        ## the 2d loop is significantly faster if possible
+        else:
+            for i in range(signal.shape[0]):
+                signal[i,:] -= slopes[i]*x
         signal -= np.mean(signal, axis=-1)[...,None]
     else:
         raise ValueError("method flag must be linear, mean, or median")
 
     if axis_idx != signal.ndim - 1:
         signal = signal.transpose(tuple(axis_reorder))
-    return signal.astype(dtype_in)
+
+    if signal.dtype != dtype_in:
+        # .astype takes awhile on long arrays, only cast if necessary
+        return signal.astype(dtype_in)
+    else:
+        return signal
 
 def detrend_tod(tod, method='linear', signal_name='signal', axis_name='samps', count=10, out_name=None):
     """simple wrapper: to be more verbose"""
