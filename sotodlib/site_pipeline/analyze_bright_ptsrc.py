@@ -636,14 +636,7 @@ def main():
         dest="outdir",
         help="The location for the .h5 output files to be stored.",
     )
-    '''
-    parser.add_argument(
-        "--f_format",
-        action="store",
-        dest="f_format",
-        help="The format of the simulations [g3, h5, context].",
-    )
-    '''
+
     parser.add_argument(
         "--tele", action="store", dest="tele", help="The telescope name [LAT, SAT]."
     )
@@ -712,7 +705,6 @@ def main():
         args.ctx_file,
         args.ctx_idx,
         args.outdir,
-        #args.f_format,
         args.tube,
         args.band,
         args.wafer,
