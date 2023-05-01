@@ -489,12 +489,15 @@ class ManifestDb:
             raise ValueError('Matched multiple rows with index data: %s' % rows)
         return rows[0]
 
-    def inspect(self, params={}):
+    def inspect(self, params={}, strict=True):
         """Given (partial) Index Data and Endpoint Data, find and return the
         complete matching records.
 
         Arguments:
           params (dict): any mix of Index Data and Endpoint Data.
+          strict (bool): if True, a ValueError will be raised if
+            params contains any keys that aren't recognized as Index
+            or Endpoint data.
 
         Returns:
           A list of results matching the query.  Each result in the
@@ -506,7 +509,7 @@ class ManifestDb:
         params = dict(params)
         filename = params.pop('filename', None)
 
-        q, p, rp = self.scheme.get_match_query(params, partial=True, strict=True)
+        q, p, rp = self.scheme.get_match_query(params, partial=True, strict=strict)
         cols = ['map`.`id', 'files`.`name'] + list(rp)
         rp = ['_id', 'filename'] + rp
         c = self.conn.cursor()
