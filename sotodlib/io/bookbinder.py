@@ -697,7 +697,7 @@ class BookBinder:
         meta = {}
         meta['book_id'] = self.book.bid
         meta['start_time'] = float(self.times[0])
-        meta['end_time'] = float(self.times[-1])
+        meta['stop_time'] = float(self.times[-1])
         meta['n_frames'] = len(np.unique(self.frame_idxs))
         meta['n_samples'] = len(self.times)
         meta['session_id'] = self.book.bid.split('_')[1]
