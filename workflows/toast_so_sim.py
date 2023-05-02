@@ -66,6 +66,18 @@ def parse_config(operators, templates, comm):
         "--hardware", required=False, default=None, help="Input hardware file"
     )
     parser.add_argument(
+        "--det_info_file",
+        required=False,
+        default=None,
+        help="Input detector info file for real hardware maps",
+    )
+    parser.add_argument(
+        "--det_info_version",
+        required=False,
+        default=None,
+        help="Detector info file version such as 'Cv4'",
+    )
+    parser.add_argument(
         "--thinfp",
         required=False,
         type=int,
@@ -175,6 +187,8 @@ def load_instrument_and_schedule(args, comm):
 
     telescope = sotoast.simulated_telescope(
         hwfile=args.hardware,
+        det_info_file=args.det_info_file,
+        det_info_version=args.det_info_version,
         telescope_name=args.telescope,
         sample_rate=args.sample_rate * u.Hz,
         bands=args.bands,

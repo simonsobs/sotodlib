@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2022 Simons Observatory.
+# Copyright (c) 2018-2023 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Focalplane simulation tools.
 """
