@@ -53,12 +53,12 @@ def detrend_data(tod, method='linear', axis_name='samps',
         x = np.linspace(0, 1, n_samps)
         count = max(1, min(count, signal.shape[-1] // 2))
         slopes = signal[...,-count:].mean(axis=-1)-signal[...,:count].mean(axis=-1)
-        if len(signal.shape)>2:
-            signal -= slopes[...,None] * x
         ## the 2d loop is significantly faster if possible
-        else:
+        if len(signal.shape) == 2:
             for i in range(signal.shape[0]):
                 signal[i,:] -= slopes[i]*x
+        else:
+            signal -= slopes[...,None] * x
         signal -= np.mean(signal, axis=-1)[...,None]
     else:
         raise ValueError("method flag must be linear, mean, or median")
