@@ -3,9 +3,11 @@
 from scipy.signal import welch
 import numpy as np
 import pyfftw
+from sotodlib import core
 
 import so3g
 
+from sotodlib import core
 from . import detrend_data
 
 def _get_num_threads():
@@ -186,57 +188,67 @@ def find_superior_integer(target, primes=[2,3,5,7,11,13]):
             best = best_friend * base
     return int(best)
 
-def calc_psd(aman, signal=None, timestamps=None, **kwargs):
+def calc_psd(aman, signal=None, timestamps=None, merge=False, 
+             overwrite=True, **kwargs):
     """Calculates the power spectrum density of an input signal using signal.welch()
     Data defaults to aman.signal and times defaults to aman.timestamps
-        Arguments:
-            aman: AxisManager with (dets, samps) OR (channels, samps)axes.
+        
+    Arguments:
+        aman (AxisManager): with (dets, samps) OR (channels, samps)axes.
+        signal (float ndarray): data signal to pass to scipy.signal.welch()
+        timestamps (float ndarray): timestamps associated with the data signal         
+        merge (bool): if true merge results into axismanager
+        overwrite (bool): if true will overwrite f, pxx axes.
+        **kwargs: keyword args to be passed to signal.welch()
 
-            signal: data signal to pass to scipy.signal.welch()
-            
-            timestamps: timestamps associated with the data signal
-            
-            **kwargs: keyword args to be passed to signal.welch()
-
-        Returns two numpy arrays:
-            freqs:
-                array of frequencies corresponding to PSD calculated from welch
-            Pxx:
-                array of PSD values 
+    Returns:
+        freqs: array of frequencies corresponding to PSD calculated from welch
+        Pxx: array of PSD values 
     """
     if signal is None:
         signal = aman.signal
     if timestamps is None:
         timestamps = aman.timestamps
         
-    freqs, Pxx = welch( signal, 1/np.median(np.diff(timestamps)), **kwargs)
+    freqs, Pxx = welch( signal, 1/np.nanmedian(np.diff(timestamps)), **kwargs)
+    if merge:
+        aman.merge( core.AxisManager(core.OffsetAxis("fsamps", len(freqs))))
+        aman.wrap("freqs", freqs, [(0,"fsamps")])
+        aman.wrap("Pxx", Pxx, [(0,"dets"),(1,"fsamps")])
     return freqs, Pxx
 
 def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
     """
-    Function that calculates the white noise level as a median PSD value between two frequencies.
-    Defaults to calculation of white noise between 5 and 10Hz.
+    Function that calculates the white noise level as a median PSD value between
+    two frequencies. Defaults to calculation of white noise between 5 and 10Hz.
     Defaults frequency information to a wrapped "freqs" field in aman.
-    Args:
-    - aman: Axis manager 
-        Uses aman.freq as frequency information associated with the PSD, pxx.
-    - pxx: Float array
-        Psd information to calculate white noise. Defaults to aman.pxx
-    - freqs: 1d Float array
-        frequency information related to the psd. Defaults to aman.freqs
-    - low_f: Floating point number
-        low frequency cutoff to calculate median psd value. Defaults to 5Hz
-    - high_f: Floating point number
-        high frequency cutoff to calculate median psd value. Defaults to 10Hz
-    Returns:
-    wn: Float array 
-        array of white noise levels for each psd passed into argument.
+    
+    Arguments
+    ---------
+        aman (AxisManager): 
+            Uses aman.freq as frequency information associated with the PSD, pxx.
+        
+        pxx (Float array): 
+            Psd information to calculate white noise. Defaults to aman.pxx
+        
+        freqs (1d Float array): 
+            frequency information related to the psd. Defaults to aman.freqs
+        
+        low_f (Float): 
+            low frequency cutoff to calculate median psd value. Defaults to 5Hz
+        
+        high_f (float): 
+            high frequency cutoff to calculate median psd value. Defaults to 10Hz
+    
+    Returns
+    -------
+        wn: Float array of white noise levels for each psd passed into argument.
     """
     if freqs is None:
         freqs = aman.freqs
 
     if pxx is None:
-        pxx = aman.pxx
+        pxx = aman.Pxx
     
     fmsk = np.all([freqs >= low_f, freqs <= high_f], axis=0 )
     if pxx.ndim == 1:

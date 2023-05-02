@@ -4,6 +4,7 @@ import os
 import shutil
 
 import numpy as np
+import astropy.units as u
 from sotodlib import core
 import sotodlib.core.axisman_util as amutil
 import so3g
@@ -185,15 +186,42 @@ class TestAxisManager(unittest.TestCase):
 
         # Handling of array that does not share the axis?
         amanA.wrap_new('azimuth', shape=('samps',))[:] = 1.
-        amanB.wrap_new('azimuth', shape=('samps',))[:] = 2.
+        amanB.wrap_new('azimuth', shape=('samps',))[:] = 1.
 
-        # ... other_fields="fail"
+        # ... other_fields="exact"
+        aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
+        
+        ## add scalars
+        amanA.wrap("ans", 42)
+        amanB.wrap("ans", 42)
+        aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
+        
+        # ... other_fields="exact"
+        amanB.azimuth[:] = 2.
         with self.assertRaises(ValueError):
             aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
+        
+        # ... other_fields="exact" and arrays of different shapes
+        amanB.move("azimuth", None)
+        amanB.wrap("azimuth", np.array([43,5,2,3]))
+        with self.assertRaises(ValueError):
+            aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
+        
+        # ... other_fields="fail"
+        amanB.move("azimuth",None)
+        amanB.wrap_new('azimuth', shape=('samps',))[:] = 2.
+        with self.assertRaises(ValueError):
+            aman = core.AxisManager.concatenate([amanA, amanB], axis='dets',
+                                               other_fields='fail')
+        amanB.azimuth[:] = 1.
+        with self.assertRaises(ValueError):
+            aman = core.AxisManager.concatenate([amanA, amanB], axis='dets',
+                                               other_fields='fail')
 
         # ... other_fields="drop"
+        amanB.azimuth[:] = 2.
         aman = core.AxisManager.concatenate([amanA, amanB], axis='dets',
-                                            other_fields='drop')
+                                            other_fields="drop")
         self.assertNotIn('azimuth', aman)
 
         # ... other_fields="first"
@@ -349,6 +377,9 @@ class TestAxisManager(unittest.TestCase):
 
         aman.wrap('sparse', csr_array( ((8,3), ([0,1], [1,54])), 
                                       shape=(aman.dets.count, aman.samps.count)))
+
+        aman.wrap('quantity', np.ones(5) << u.m)
+        aman.wrap('quantity2', (np.ones(1) << u.m)[0])
 
         # Make sure the saving / clobbering / readback logic works
         # equally for simple group name, root group, None->root group.

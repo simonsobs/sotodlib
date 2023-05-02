@@ -214,5 +214,63 @@ class MetadataTest(unittest.TestCase):
                            detdb.props())
         self.assertEqual(list(mtod['tau']), [TBAD, T150])
 
+    def test_030_manipulation(self):
+        """Test some helpers for inspecting and updating ManifestDbs.
+
+        """
+        scheme = metadata.ManifestScheme() \
+                         .add_range_match('obs:timestamp') \
+                         .add_exact_match('wafer') \
+                         .add_data_field('dets:band') \
+                         .add_data_field('dataset')
+
+        mandb = metadata.ManifestDb(scheme=scheme)
+
+        mandb.add_entry({'dets:band': 'f150',
+                         'wafer': 'A',
+                         'obs:timestamp': (1200000000, 1300000000),
+                         'dataset': 'early'}, filename='x')
+        mandb.add_entry({'dets:band': 'f150',
+                         'wafer': 'A',
+                         'obs:timestamp': (1200000000, 1300000001),
+                         'dataset': 'early'}, filename='x')
+        mandb.add_entry({'dets:band': 'f220',
+                         'wafer': 'A',
+                         'obs:timestamp': (1300000000, 1400000001),
+                         'dataset': 'early'}, filename='y')
+
+        # Does .inspect work properly?
+        entries = mandb.inspect({'wafer': 'A'})
+        self.assertEqual(len(entries), 3)
+        self.assertIn('wafer', entries[0])
+
+        entries = mandb.inspect({'dets:band': 'f150'})
+        self.assertEqual(len(entries), 2)
+        entries = mandb.inspect({'filename': 'x'})
+        self.assertEqual(len(entries), 2)
+
+        # Modify an entry
+        entries[1]['wafer'] = 'B'
+        entries[1]['dets:band'] = 'f090'
+        entries[1].pop('filename')
+        mandb.update_entry(entries[1])
+        entries = mandb.inspect({'wafer': 'A'})
+        self.assertEqual(len(entries), 2)
+
+        # Delete an entry
+        entries = mandb.inspect({'dets:band': 'f220'})
+        mandb.remove_entry(entries[0])
+        ## check file unreg'd
+        c = mandb.conn.execute('select count(id) from files where name="y"')
+        self.assertEqual(c.fetchall()[0][0], 0)
+
+        # Delete another entry
+        entries = mandb.inspect()
+        mandb.remove_entry(entries[0])
+        ## check file not unreg'd (because it's used twice)
+        c = mandb.conn.execute('select count(id) from files where name="x"')
+        self.assertEqual(1, c.fetchone()[0])
+
+
 if __name__ == '__main__':
     unittest.main()

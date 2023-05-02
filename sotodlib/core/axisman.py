@@ -407,7 +407,7 @@ class AxisManager:
                 + ', '.join(stuff).replace('[]', '') + ")")
 
     @staticmethod
-    def concatenate(items, axis=0, other_fields='fail'):
+    def concatenate(items, axis=0, other_fields='exact'):
         """Concatenate multiple AxisManagers along the specified axis, which
         can be an integer (corresponding to the order in
         items[0]._axes) or the string name of the axis.
@@ -419,6 +419,9 @@ class AxisManager:
         share the target axis, will be treated as follows depending on
         the value of other_fields:
 
+        - If other_fields='exact' will compare entries in all items
+          and if they're identical will add it. Otherwise will fail with
+          a ValueError.
         - If other_fields='fail', the function will fail with a ValueError.
         - If other_fields='first', the values from the first element
           of items will be copied into the output.
@@ -427,7 +430,7 @@ class AxisManager:
           target axis).
 
         """
-        assert other_fields in ['fail', 'first', 'drop']
+        assert other_fields in ['exact', 'fail', 'first', 'drop']
         if not isinstance(axis, str):
             axis = list(items[0]._axes.keys())[axis]
         fields = []
@@ -497,14 +500,39 @@ class AxisManager:
             if k in new_data:
                 output.wrap(k, new_data[k], axis_map)
             else:
-                if other_fields == 'fail':
+                if other_fields == "exact":
+                    ## if every item named k is a scalar 
+                    err_msg = (f"The field '{k}' does not share axis '{axis}'; " 
+                              f"{k} is not identical across all items " 
+                              f"pass other_fields='drop' or 'first' or else " 
+                              f"remove this field from the targets.")
+                                
+                    if np.any([np.isscalar(i[k]) for i in items]):
+                        if not np.all([np.isscalar(i[k]) for i in items]):
+                            raise ValueError(err_msg)
+                        if not np.all( [i[k]==items[0][k] for i in items]):
+                            raise ValueError(err_msg)
+                        output.wrap(k, items[0][k], axis_map)
+                        continue
+                        
+                    elif not np.all([i[k].shape==items[0][k].shape for i in items]):
+                        raise ValueError(err_msg)
+                    elif not np.all([i[k]==items[0][k] for i in items]):
+                        raise ValueError(err_msg)
+                        
+                    output.wrap(k, items[0][k].copy(), axis_map)
+                    
+                elif other_fields == 'fail':
                     raise ValueError(
                         f"The field '{k}' does not share axis '{axis}'; "
                         f"pass other_fields='drop' or 'first' or else "
                         f"remove this field from the targets.")
                 elif other_fields == 'first':
                     # Just copy it.
-                    output.wrap(k, items[0][k].copy(), axis_map)
+                    if np.isscalar(items[0][k]):
+                        output.wrap(k, items[0][k], axis_map)
+                    else:
+                        output.wrap(k, items[0][k].copy(), axis_map)
                 elif other_fields == 'drop':
                     pass
         return output
@@ -763,6 +791,16 @@ class AxisManager:
         same name will be intersected.
 
         """
+        # Before messing with anything, check for key interference.
+        fields = set(self._fields.keys())
+        for aman in amans:
+            newf = set(aman._fields.keys())
+            both = fields.intersection(newf)
+            if len(both):
+                raise ValueError(f'Key conflict: more than one merge target '
+                                 f'shares keys: {both}')
+            fields.update(newf)
+
         # Get the intersected axis descriptions.
         axes_out = self.intersection_info(self, *amans)
         # Reduce the data in self, update our axes.
@@ -774,9 +812,7 @@ class AxisManager:
                 if k not in self._axes:
                     self._axes[k] = v
             for k, v in aman._fields.items():
-                if k in self._fields:
-                    raise ValueError(f'Key: {k} found in {self} and {aman}')
-                assert(k not in self._fields)
+                assert(k not in self._fields)  # Should have been caught in pre-check
                 self._fields[k] = v
             self._assignments.update(aman._assignments)
         return self

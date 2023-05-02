@@ -9,6 +9,7 @@ except ImportError:
 
 from so3g.proj import Ranges, RangesMatrix
 
+from . import core
 from .tod_ops import filters
 from .tod_ops import fourier_filter
 
@@ -49,7 +50,7 @@ def get_turnaround_flags(tod, qlim=1, az=None, merge=True,
 def get_glitch_flags(aman, t_glitch=0.002, hp_fc=0.5, n_sig=10, buffer=200,
                      signal=None, merge=True,
                      overwrite=False, name='glitches',
-                     full_output=True):
+                     full_output=False):
     """ Find glitches with fourier filtering
     Translation from moby2 as starting point
 
@@ -103,27 +104,38 @@ def get_glitch_flags(aman, t_glitch=0.002, hp_fc=0.5, n_sig=10, buffer=200,
                                 for i in range(aman.dets.count)  ])
         smat = csr_array( (data, indices, indptr),
                          shape=( aman.dets.count, aman.samps.count))
-        return flag, smat
+        glitches = core.AxisManager( 
+            aman.dets, 
+            aman.samps,
+        )
+        glitches.wrap("glitch_flags", flag, [(0,"dets"),(1,"samps")])
+        glitches.wrap("glitch_detection", smat, [(0, 'dets'), (1,'samps')])
+        return flag, glitches
 
     return flag
 
 def get_trending_flags(aman, max_trend=5*np.pi, n_pieces=1, signal=None,
-                 merge=True, overwrite=True, name='trends'):
-    """ Flag Detectors with trends larger than max_trend.
+                     merge=True, overwrite=True, name='trends',
+                     full_output=False):
+    """ Flag Detectors with trends larger than max_trend. Note, this is really
+    a max-min calculator.
 
     Args:
         aman (AxisManager): the tod
         max_trend: maxmimum amount to always the detectors to change by.
-            The default is pi for use in phase units.
+            The default is for use with phase units.
         n_pieces: number of pieces to cut the timestream in to to look for
                     trends
         signal: Signal to use to generate flags, default is aman.signal.
         merge (bool): if true, merges the generated flag into aman
         overwrite (bool): if true, write over flag. if false, don't
         name (string): name of flag to add to aman.flags if merge is True
-
+        full_output(bool): if true, returns calculated slope sizes
+        
     Returns:
         flag: RangesMatrix object of glitches
+        trends: if full_output is true, calculated slopes and the
+        sample edges where they were calculated. 
     """
     if overwrite and name in aman.flags:
         aman.flags.move(name, None)
@@ -149,7 +161,7 @@ def get_trending_flags(aman, max_trend=5*np.pi, n_pieces=1, signal=None,
             clear = np.where(bad_slopes[d])[0]
             for c in clear:
                 if c == n_pieces-1:
-                    cut[d].add_interval(int(c*piece_size), cut.ranges[d].count-1)
+                    cut[d].add_interval(int(c*piece_size), cut.ranges[d].count)
                 else:
                     cut[d].add_interval(int(c*piece_size), int((c+1)*piece_size))
     if merge:
@@ -159,3 +171,17 @@ def get_trending_flags(aman, max_trend=5*np.pi, n_pieces=1, signal=None,
             aman.flags[name] = cut
         else:
             aman.flags.wrap(name, cut)
+    
+    if full_output:
+        samp_edges = np.linspace(0, piece_size*n_pieces, n_pieces+1)
+        trends = core.AxisManager( 
+            aman.dets, 
+            aman.samps,
+            core.OffsetAxis("trend_bins", len(samp_edges)-1),
+        )
+        trends.wrap("samp_start", samp_edges[:-1], [(0,"trend_bins")])
+        trends.wrap("trends", slopes, [(0,"dets"),(1,"trend_bins")])
+        trends.wrap("trend_flags", cut, [(0,"dets"),(1,"samps")])
+        return cut, trends
+    
+    return cut

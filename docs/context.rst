@@ -385,18 +385,19 @@ following:
   See examples in :ref:`metadata-indexes`.
 - The entries in the Archive do not need to be per-detector.  You can
   specify results for a whole group of detectors, if that group is
-  enumerated in the DetDb.  For example, if DetDb contains a column
-  ``band``, the dataset could contain columns ``dets:band`` and
-  ``cal`` and simply report one calibration number for each frequency
-  band.  (On load, the Context Metadata system will automatically
-  broadcast the ``cal`` number so that it has shape ``(n_dets,)`` in
-  the fully populated AxisManager.)
+  enumerated in the DetDb (or added to det_info using other metadata).
+  For example, if DetDb contains a column ``passband``, the dataset
+  could contain columns ``dets:passband`` and ``cal`` and simply
+  report one calibration number for each frequency band.  (On load,
+  the Context Metadata system will automatically broadcast the ``cal``
+  number so that it has shape ``(n_dets,)`` in the fully populated
+  AxisManager.)
 - You can store all the results (i.e., results for multiple
   ``obs_id``) in a single HDF5 dataset.  This is not usually a good
   idea if your results are per-detector, per-observation... the
   dataset will be huge, and not easy to update incrementally.  But for
   smaller things (one or two numbers per observation, as in the
-  ``dets:band`` example above) it can be convenient.  Doing this
+  ``dets:passband`` example above) it can be convenient.  Doing this
   requires including ``obs:obs_id`` (or some other ObsDb column) in
   the dataset.
 
@@ -600,6 +601,7 @@ Please see the class documentation for :class:`ManifestDb` and
 :class:`ManifestScheme`.  The remainder of this section demonstrates
 some basic usage patterns.
 
+
 Examples
 --------
 
@@ -629,7 +631,44 @@ rows, and write the database (including the scheme) to disk::
                filename='test2.h5')
   db.to_file('timeconst.gz')
 
-Example 2: Timestamp
+
+Example 2: Inspecting and modifying the index
+`````````````````````````````````````````````
+
+Starting from the previous example, suppose we were updating the Index
+in a cronjob and needed to first check whether we had already entered
+some entry.  We can use :func:`ManifestDb.inspect` to retrieve
+records, matching on *any* fields (they don't have to be index
+fields).  Here's a quick set of examples::
+
+  # Do we have any items in the file called "test2.h5"?
+  entries = db.inspect({'filename': 'test2.h5'})
+  if len(entries) > 0:
+    # yes, we do ...
+
+  # Have we already added the item for obs_id='obs123787'?
+  entries = db.inspect({'obs:obs_id': 'obs123787'})
+  if len(entries) == 0:
+    # no, so add it ...
+
+Entries retrieved using inspect are dicts and contain an '_id' element
+that allows you to modify or delte those records from the Index, using
+:func:`ManifestDb.update_entry` and :func:`ManifestDb.remove_entry`.
+For example::
+
+  # Delete all entries that refer to test2.h5.
+  for entry in db.inspect({'filename': 'test2.h5'}):
+    db.remove_entry(entry)
+
+  # Change the spelling of 'timeconst' in the 'dataset' field of all records.
+  for entry in db.inspect({}):
+    entry['dataset'] = entry['dataset'].replace('timeconst', 'TimECOnSt')
+    # currently it's not possible to change the filename, so don't mention it...
+    del entry['filename']
+    db.update_entry(entry)
+
+
+Example 3: Timestamp
 ````````````````````
 
 Another common use case is to map to a result based on an
@@ -655,7 +694,7 @@ In the this case, when we add entries to the ManifestDb, we pass a
 tuple of timestamps (lower inclusive limit, higher non-inclusive
 limit) for the key ``obs:timestamp``.
 
-Example 3: Other observation selectors
+Example 4: Other observation selectors
 ``````````````````````````````````````
 
 Other fields from ObsDb can be used to build the Metadata Index.
@@ -705,23 +744,6 @@ The context.yaml metadata entry would probably look like this::
       name: 'cal_remove_bad&cal'
     ...
 
-
-
-so-metadata tool
-----------------
-
-The ``so-metadata`` script is a tool for inspecting and manipulating
-ManifestDbs stored on disk.  For example, it can show you what files
-are referred to by the ManifestDb, and what kind of information is
-used to index the database.
-
-If you need to change the filenames in a ManifestDb, the "reroot" mode
-might be helpful.
-
-
-.. argparse::
-   :module: sotodlib.core.metadata.manifest
-   :func: get_parser
 
 
 ManifestDb reference
@@ -810,32 +832,24 @@ contain only the ``obs_id``.  For each item in the context.yaml
 Changing det_info
 -----------------
 
-Metadata entries can be used to change the active ``det_info`` table
-that is used to screen and match metadata results.  This is
-accomplished through special metadata entries with the following
-syntax::
+Metadata entries can be used to augment the  ``det_info`` table
+that is used to screen and match metadata results.  For example::
 
   metadata:
   - ...
   - db: 'more_det_info.sqlite'
     det_info: true
-    det_key: 'dets:name'
   - ...
 
-The boolean ``'det_info': true`` marks this as a special metadata
-entry to update ``det_info``.  The ``det_key`` entry specifies what
-column of the loaded metadata should be used as the index to add the
-information to the existing tracked ``det_info``; that key should
-exist in both the active ``det_info`` and in the result that is loaded
-here.
+The boolean ``'det_info': true`` marks the above as a special metadata
+entry to update ``det_info``.  It is expected that the database
+(``more_det_info.sqlite``) is a standard ManifestDb, which will be
+queried in the usual way except that when we get to the "Wrap
+Metadata" step, instead the following is performed:
 
-It is expected that ``more_det_info.sqlite`` is a standard ManifestDb,
-which will be queried in the usual way except that when we get to the
-"Wrap Metadata" step, instead the following is performed:
-
-  - The index field identified by ``det_key`` is looked up in the
-    current active ``det_info`` (after removing the dets: prefix) and
-    in the new metadata object (with prefix intact).
+  - An index field will be identified in the current active
+    ``det_info`` -- it can be either ``dets:readout_id`` or
+    ``dets:det_id`` -- to match against the new metadata.
   - The columns from the new metadata are merged into the active
     ``det_info``, ensuring that the index field values correspond.
   - Only the rows for which the index field has the same value in the
@@ -843,7 +857,23 @@ which will be queried in the usual way except that when we get to the
 
 As subsequent metadata are processed, they can match against any
 fields that have been added to ``det_info`` by preceding entries in
-the metadata list.
+the metadata list.  However, currently it is only possible to augment
+``det_info`` using ``readout_id`` or ``det_id``.
+
+By default, ``readout_id`` / ``det_id`` are expected to be unique
+indices.  It is often useful to permit multiple matches, especially
+for the special value "NOT_FOUND" in ``det_id``.  To permit this, add
+'multi: true' to the metadata block.  For example::
+
+  metadata:
+  ...
+  - db: 'wafer_det_map.sqlite'   # the 'readout_id' -> 'det_id' mapping
+    det_info: true
+  - db: 'wafer_info.sqlite'      # the 'det_id' -> misc properties table
+    det_info: true
+    multi: true                  # Set multi=true if det_id=NOT_FOUND might
+                                 # need to be broadcast to multiple readout_id
+  ...
 
 
 ------------------------------------
@@ -1512,3 +1542,38 @@ Here's the class documentation for ResultSetHdfLoader:
 .. autoclass:: sotodlib.io.metadata.ResultSetHdfLoader
    :inherited-members: __init__
    :members:
+
+-----------------
+Command Line Tool
+-----------------
+
+
+The `so-metadata` script is a tool that can be used to inspect and
+alter the contents of ObsFileDb, ObsDb, and ManifestDb ("metadata")
+sqlite3 databases.  In the case of ObsFileDb and ManifestDb, it can
+also be used to perform batch filename updates.
+
+To summarize a database, pass the db type and then the path to the db
+file.  It might be convenient to start by printing a summary of the
+context.yaml file, as this will give full paths to the various
+databases, that can be copied and pasted::
+
+  so-metadata context /path/to/context.yaml
+
+
+Analyzing individual databases::
+
+  so-metadata obsdb /path/to/context/obsdb.
+  so-metadata obsfiledb /path/to/context/obsfiledb.sqlite
+  so-metadata metadata /path/to/context/some_metadata.sqlite
+
+
+Usage
+=====
+
+.. argparse::
+   :module: sotodlib.core.metadata.cli
+   :func: get_parser
+   :prog: so-metadata
+
+
