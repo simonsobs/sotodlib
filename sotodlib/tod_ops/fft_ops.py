@@ -188,8 +188,16 @@ def find_superior_integer(target, primes=[2,3,5,7,11,13]):
             best = best_friend * base
     return int(best)
 
-def calc_psd(aman, signal=None, timestamps=None, merge=False, 
-             overwrite=True, **kwargs):
+def calc_psd(
+    aman, 
+    signal=None, 
+    timestamps=None, 
+    max_samples=2**18,
+    prefer='center',
+    merge=False, 
+    overwrite=True, 
+    **kwargs
+):
     """Calculates the power spectrum density of an input signal using signal.welch()
     Data defaults to aman.signal and times defaults to aman.timestamps
         
@@ -197,6 +205,10 @@ def calc_psd(aman, signal=None, timestamps=None, merge=False,
         aman (AxisManager): with (dets, samps) OR (channels, samps)axes.
         signal (float ndarray): data signal to pass to scipy.signal.welch()
         timestamps (float ndarray): timestamps associated with the data signal         
+        max_samples (int): maximum samples along sample axis to send to welch
+        prefer (str): One of ['left', 'right', 'center'], indicating what
+            part of the array we would like to send to welch if cuts are
+            required
         merge (bool): if true merge results into axismanager
         overwrite (bool): if true will overwrite f, pxx axes.
         **kwargs: keyword args to be passed to signal.welch()
@@ -209,8 +221,30 @@ def calc_psd(aman, signal=None, timestamps=None, merge=False,
         signal = aman.signal
     if timestamps is None:
         timestamps = aman.timestamps
-        
-    freqs, Pxx = welch( signal, 1/np.nanmedian(np.diff(timestamps)), **kwargs)
+    
+    n_samps = signal.shape[-1]
+    if n_samps <= max_samples:
+        start = 0 
+        stop = n_samps
+    else:
+        offset = n_samps-max_samples
+        if prefer == 'left':
+            offset=0
+        elif prefer == 'center':
+            offset //= 2
+        elif prefer == 'right':
+            pass
+        else:
+            raise ValueError(f"Invalid choise prefer='{prefer}'")
+        start = offset
+        stop = offset + max_samples
+    
+            
+    freqs, Pxx = welch( 
+        signal[:,start:stop], 
+        1/np.nanmedian(np.diff(timestamps[start:stop])), 
+        **kwargs
+    )
     if merge:
         aman.merge( core.AxisManager(core.OffsetAxis("fsamps", len(freqs))))
         aman.wrap("freqs", freqs, [(0,"fsamps")])
