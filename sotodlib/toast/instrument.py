@@ -11,7 +11,7 @@ import numpy as np
 import astropy.units as u
 from astropy.table import QTable
 from toast.instrument import Focalplane, GroundSite, Telescope
-from toast.utils import Logger
+from toast.utils import Logger, name_UID
 
 from ..core.hardware import Hardware, build_readout_id, parse_readout_id
 from ..sim_hardware import sim_nominal
@@ -169,7 +169,11 @@ class SOFocalplane(Focalplane):
                     dets = list(hw.data["detectors"].keys())
                     for det in dets:
                         pixel = hw.data["detectors"][det]["pixel"]
-                        if int(pixel) % thinfp != 0:
+                        try:
+                            pixel_id = int(pixel)
+                        except ValueError:
+                            pixel_id = name_UID(pixel)
+                        if pixel_id % thinfp != 0:
                             del hw.data["detectors"][det]
 
                 ndet = len(hw.data["detectors"])

@@ -412,32 +412,37 @@ def load_wafer_data(filename, array_name, sub_array_name=None):
     rs = read_dataset(filename, array_name)
     rs.keys = loader._filter_items("dets:", rs.keys)
 
-    bp= rs.keys.index("wafer.bandpass")
-
+    bp = rs.keys.index("wafer.bandpass")
 
     if sub_array_name is not None:
         switches = {
-            "L" : { "f090":"f030", "f150":"f040"},
-            "U" : { "f090":"f230", "f150":"f290"}
+            "L" : {"f090" : "f030", "f150" : "f040"},
+            "U" : {"f090" : "f230", "f150" : "f290"},
         }
-        for i in range( len(rs) ):
+        for i in range(len(rs)):
             row = rs.rows[i]
-            rs.rows[i] = tuple([r.replace(array_name, sub_array_name) for r in row[:2]]) + row[2:]
+            rs.rows[i] = tuple([
+                r.replace(array_name, sub_array_name) for r in row[:2]
+            ]) + row[2:]
 
-            if rs.rows[i][bp] =='NC' or "M" in sub_array_name:
+            if rs.rows[i][bp] == "NC" or "M" in sub_array_name:
                 continue
             if "L" in sub_array_name:
                 rs.rows[i] = tuple([
-                                rs.rows[i][0].replace(rs.rows[i][bp],switches["L"][rs.rows[i][bp]]),
-                                rs.rows[i][1]
-                            ])+ rs.rows[i][2:bp] + \
-                            tuple([switches["L"][rs.rows[i][bp]]] ) + rs.rows[i][bp+1:]
+                    rs.rows[i][0].replace(
+                        rs.rows[i][bp], switches["L"][rs.rows[i][bp]]
+                    ),
+                    rs.rows[i][1]
+                ]) + rs.rows[i][2:bp] \
+                + tuple([switches["L"][rs.rows[i][bp]]]) + rs.rows[i][bp+1:]
             elif "U" in sub_array_name:
                 rs.rows[i] = tuple([
-                                rs.rows[i][0].replace(rs.rows[i][bp],switches["U"][rs.rows[i][bp]]),
-                                rs.rows[i][1]
-                            ]) + rs.rows[i][2:bp] + \
-                            tuple([switches["U"][rs.rows[i][bp]]]) + rs.rows[i][bp+1:]
+                    rs.rows[i][0].replace(
+                        rs.rows[i][bp], switches["U"][rs.rows[i][bp]]
+                    ),
+                    rs.rows[i][1]
+                ]) + rs.rows[i][2:bp] + \
+                tuple([switches["U"][rs.rows[i][bp]]]) + rs.rows[i][bp + 1:]
 
     wafer = loader.convert_det_info(
         rs,
@@ -516,9 +521,12 @@ def load_wafer_detectors(
 
         dprops = OrderedDict()
         dprops["wafer_slot"] = wafer_slot
-        dprops["ID"] = toast.utils.name_UID("detname")
+        dprops["ID"] = toast.utils.name_UID(detname)
         dprops["pixel"] = detname.split("_")[-1][:-1]
-        dprops["band"] = f"{tele[:3]}_{wafer.bandpass[i]}" if wafer.bandpass[i] != "NC" else "NC"
+        if wafer.bandpass[i] != "NC":
+            dprops["band"] = f"{tele[:3]}_{wafer.bandpass[i]}"
+        else:
+            dprops["band"] = "NC"
 
         if dprops["band"] not in bands and dprops["band"] != "NC":
             continue
@@ -558,7 +566,7 @@ def load_wafer_detectors(
             dprops["quat"] = qa.mult(center, quat).flatten()
         else:
             dprops["quat"] = quat.flatten()
-        dprops["detector_name"] = detname
+        dprops["detector_name"] = f"{wafer_slot}{detname}"
         dets[dprops["detector_name"]] = dprops
 
     return dets
@@ -601,9 +609,8 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
     else:
         for t in tube_slots:
             if t not in alltubes:
-                raise RuntimeError(
-                    "Invalid tube_slot '{}' for telescope '{}'".format(t, tele)
-                )
+                msg = f"Invalid tube_slot '{t}' for telescope '{tele}'"
+                raise RuntimeError(msg)
 
     alldets = OrderedDict()
     if ntube == 1:
