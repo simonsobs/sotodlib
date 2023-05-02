@@ -305,7 +305,7 @@ class Context(odict):
                 # merge.  Duplicate keys should be avoided, because
                 # checking the values are the same is annoying.
                 _det_info = aman['det_info']
-                aman.move('det_info', None)
+                del aman['det_info']
                 _det_info.restrict_axes([meta.dets])
                 for k in meta.det_info._fields:
                     if k in _det_info._fields:
@@ -318,8 +318,8 @@ class Context(odict):
                             pass
                         logger.error(f'Key "{k}" is present in det_info returned by '
                                      f'observation loader as well as in metadata '
-                                     f'databases; The two versions are different.' 
-                                     f' dropping the loader version.')
+                                     f'databases; The two versions are not '
+                                     f'comparable. dropping the loader version.')
                         _det_info.move(k, None)
                 meta.det_info.merge(_det_info)
             aman.merge(meta)
