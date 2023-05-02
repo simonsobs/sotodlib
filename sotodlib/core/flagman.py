@@ -5,6 +5,11 @@ from collections import OrderedDict as odict
 from so3g.proj import Ranges, RangesMatrix
 from . import AxisManager
 
+try:
+    from scipy.sparse import csr_array
+except ImportError:
+    from scipy.sparse import csr_matrix as csr_array
+
 class FlagManager(AxisManager):
     """An extension of the AxisManager class to make functions 
     more specifically associated with cuts and flags.
@@ -262,3 +267,35 @@ def _get_shape(data):
     except:
         ### catches if a detector mask is just a list
         return np.shape(data)
+
+def has_any_cuts(flag):
+    return np.array([len(x.ranges())>0 for x in flag], dtype='bool')
+def has_all_cut(flag):
+    return np.array(
+        [len(x.complement().ranges())==0 for x in flag],
+        dtype='bool'
+    )
+def count_cuts(flag):
+    return np.array([len(x.ranges()) for x in flag], dtype='int')
+
+def sparse_to_ranges_matrix(arr, buffer=0, close_gaps=0, val=True):
+    """Convert a csr sparse array into a ranges matrix
+    
+    Arguments:
+    
+    arr: sparse csr boolean array
+    buffer: integer samples to buffer around Ranges
+    close_gaps: any integer sample gaps to close in the Ranges
+    val: what value in the boolean array indicates a flag
+    """
+    x = RangesMatrix.zeros(arr.shape)
+    for i in range(arr.shape[0]):
+        slc = arr.indices[arr.indptr[i]:arr.indptr[i+1]]
+        if not np.all(arr.data[arr.indptr[i]:arr.indptr[i+1]]==val):
+            raise
+        for s in slc:
+            x[i].append_interval_no_check(int(s),int(s+1))
+        x[i].buffer(buffer)
+        x[i].close_gaps(close_gaps)
+    return x
+

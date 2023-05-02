@@ -67,6 +67,11 @@ TABLE_DEFS = {
     ],
 }
 
+# Because sqlite will let you store anything anywhere, the most
+# sensible default column type is "numeric" -- this will automatically
+# cast number-like strings to numbers (while accepting strings).
+DEFAULT_DTYPE = 'numeric'
+
 
 class ManifestScheme:
     def __init__(self):
@@ -74,14 +79,14 @@ class ManifestScheme:
 
     # Methods for constructing table.
 
-    def add_exact_match(self, name, dtype='varchar(16)'):
+    def add_exact_match(self, name, dtype=DEFAULT_DTYPE):
         """
         Add a field to the scheme, that must be matched exactly.
         """
         self.cols.append((name, 'in', 'exact', dtype))
         return self
 
-    def add_range_match(self, name, purpose='in', dtype='varchar(16)'):
+    def add_range_match(self, name, purpose='in', dtype=DEFAULT_DTYPE):
         """
         Add a field to the scheme, that represents a range of values to be
         matched by a single input value.
@@ -89,7 +94,7 @@ class ManifestScheme:
         self.cols.append((name, purpose, 'range', dtype))
         return self
 
-    def add_data_field(self, name, dtype='varchar(16)'):
+    def add_data_field(self, name, dtype=DEFAULT_DTYPE):
         """
         Add a field to the scheme that is returned along with the matched
         filename.
@@ -143,6 +148,21 @@ class ManifestScheme:
         entries.append('UNIQUE(' + ','.join(uniques) + ')')
         return entries
 
+    def _format_row(self, r):
+        """Rewrite a dict of index and/or endpoint data from the database so
+        that it is compatible with the format expected by
+        ManifestDb.add_entry / update_entry.
+
+        This modifies the provided object (and also returns it).
+
+        """
+        for c in self.cols:
+            name, purpose, match, dtype = c
+            if match == 'range':
+                a, b = r.pop('%s__lo' % name), r.pop('%s__hi' % name)
+                r[name] = (a, b)
+        return r
+
     @classmethod
     def from_database(cls, conn, table_name='input_scheme'):
         """
@@ -160,22 +180,49 @@ class ManifestScheme:
                 raise ValueError("Bad ctype '%s'" % match)
         return self
 
-    def get_match_query(self, params):
-        """
+    def get_match_query(self, params, partial=False, strict=False):
+        """Get sql query fragments for this ManifestDb.
+
         Arguments:
           params: a dict of values to match against.
+          partial: if True, then operate in "inspection" mode (see notes).
+          strict: if True, then reject any requests that include
+            entries in params that are not known to the schema.
 
         Returns:
           (where_string, values_tuple, ret_cols)
+
+        Notes:
+          The normal mode (partial=False) requires that every "in"
+          column in the scheme has a key=value pair in the params
+          dict, and the ret_cols are the "out" columns.  In inspection
+          mode (partial=True), then any column can be matched against
+          the params, and the complete row data of all matching rows
+          is returned.
+
         """
         qs = []
         vals = []
         ret_cols = []
+        unassigned = dict(params)
+        assert('filename' not in params)
+
         for col in self.cols:
             (name, purpose, match, dtype) = col
-            if purpose == 'in':
-                if not name in params:
+            purposes = [purpose]
+
+            if partial:
+                # in/out direction is entirely determined by whether
+                # user passed a value.
+                if name in params:
+                    purposes = ['in', 'out']
+                else:
+                    purposes = ['out']
+            else:
+                if 'in' in purposes and name not in params:
                     raise ValueError('Parameter %s is not optional.' % name)
+
+            if 'in' in purposes:
                 if match == 'exact':
                     qs.append('`%s`=?' % name)
                     vals.append(params[name])
@@ -184,12 +231,27 @@ class ManifestScheme:
                     vals.extend([params[name], params[name]])
                 else:
                     raise ValueError("Bad ctype '%s'" % match)
-            if purpose == 'out':
+                unassigned.pop(name)
+            if 'out' in purposes:
                 # Include that column's value in result.
-                ret_cols.append(name)
+                if match == 'range':
+                    ret_cols.extend(['%s__lo' % name, '%s__hi' % name])
+                else:
+                    ret_cols.append(name)
+        if strict and len(unassigned):
+            raise ValueError(f'Failed to match params: {unassigned}')
+            assert(len(unassigned) == 0)
         return (' and '.join(qs), tuple(vals), ret_cols)
 
     def get_insertion_query(self, params):
+        """Get sql query fragments for inserting a new entry with the provided
+        params.
+
+        Returns:
+          (fields, values) where fields is a string with the field
+          names (comma-delimited) and values is a tuple of values.
+
+        """
         qs = []
         vals = []
         unassigned = list(params.keys())
@@ -209,6 +271,34 @@ class ManifestScheme:
         if len(unassigned):
             raise ValueError('Attempting to add data for unknown fields: %s' % unassigned)
         return ','.join(qs), tuple(vals)
+
+    def get_update_query(self, params):
+        """Get sql query fragments for updating an entry.
+
+        Returns:
+          (setstring, values) where setstring is of the form
+          "A=?,...,Z=?" and values is the corresponding tuple of values.
+
+        """
+        keys = []
+        vals = []
+        unassigned = [k for k in params.keys() if k not in '_id']
+        for col in self.cols:
+            (name, purpose, match, dtype) = col
+            if not name in params:
+                continue
+            unassigned.remove(name)
+            if match == 'exact':
+                keys.append('`%s`' % name)
+                vals.append(params[name])
+            elif match == 'range':
+                keys.extend(['`%s__lo`' % name, '`%s__hi`' % name])
+                vals.extend(params[name])
+            else:
+                raise ValueError("Bad ctype '%s'" % match)
+        if len(unassigned):
+            raise ValueError('Attempting to update data for unknown fields: %s' % unassigned)
+        return ','.join([f'{k}=?' for k in keys]), tuple(vals)
 
     def get_required_params(self):
         """
@@ -366,11 +456,12 @@ class ManifestDb:
         """Given Index Data, return Endpoint Data.
 
         Arguments:
-
-          params: a dict of Index Data.
+          params (dict): Index Data.
+          multi (bool): Whether more than one result may be returned.
+          prefix (str or None): If set, it will be os.path.join-ed to
+            the filename from the db.
 
         Returns:
-
           A dict of Endpoint Data, or None if no match was found.  If
           multi=True then a list is returned, which could have 0, 1,
           or more items.
@@ -397,6 +488,41 @@ class ManifestDb:
         if len(rows) > 1:
             raise ValueError('Matched multiple rows with index data: %s' % rows)
         return rows[0]
+
+    def inspect(self, params={}):
+        """Given (partial) Index Data and Endpoint Data, find and return the
+        complete matching records.
+
+        Arguments:
+          params (dict): any mix of Index Data and Endpoint Data.
+
+        Returns:
+          A list of results matching the query.  Each result in the
+          list is a dict, containing complete entry data.  A special
+          entry, '_id', is the database row id and can be used to
+          update or remove specific entries.
+
+        """
+        params = dict(params)
+        filename = params.pop('filename', None)
+
+        q, p, rp = self.scheme.get_match_query(params, partial=True, strict=True)
+        cols = ['map`.`id', 'files`.`name'] + list(rp)
+        rp = ['_id', 'filename'] + rp
+        c = self.conn.cursor()
+        where_str = ''
+
+        if len(q):
+            where_str = 'where %s' % q
+
+        c.execute('select `%s` ' % ('`,`'.join(cols)) +
+                  'from map join files on map.file_id=files.id %s' % where_str, p)
+        rows = c.fetchall()
+        rows = [self.scheme._format_row(dict(zip(rp, r))) for r in rows]
+        if filename:
+            # manual filter...
+            rows = [r for r in rows if r['filename'] == filename]
+        return rows
 
     def add_entry(self, params, filename=None, create=True, commit=True,
                   replace=False):
@@ -438,8 +564,62 @@ class ManifestDb:
         c.execute(query, p + (file_id,))
         if commit:
             self.conn.commit()
-    
+
+    def update_entry(self, params, filename=None, commit=True):
+        """Update an existing entry.
+
+        Arguments:
+          params: Index data to change.  This must include key '_id',
+            with the value corresponding to an existing row in the
+            table.
+
+        Notes:
+
+          Only columns expressly included in params will be updated.
+          The params can include 'filename', in which case a new value
+          is set.
+
+        """
+        # Validate the input data.
+        q, p = self.scheme.get_update_query(params)
+        _id = params.get('_id')
+        # Are we changing the filename?  Hope not ...
+        assert(filename is None and 'filename' not in params)
+        if filename is None:
+            filename = params.get('filename')
+
+        c = self.conn.cursor()
+        marks = ','.join('?' * len(p))
+        c = self.conn.cursor()
+        query = 'update map set %s where id=?' % q
+        c.execute(query, p + (_id,))# + (file_id,))
+        if commit:
+            self.conn.commit()
+
+    def remove_entry(self, _id, commit=True):
+        """Remove the entry identified by row id _id.
+
+        If _id is a dict, _id['_id'] is used.  Entries returned by
+        .inspect() should have _id populated in this way, and thus can
+        be passed directly into this function.
+
+        """
+        if isinstance(_id, dict):
+            _id = _id['_id']
+        c = self.conn.cursor()
+        file_id = c.execute('select file_id from map where id=?',
+                             (_id, )).fetchall()
+        if len(file_id) == 0:
+            raise ValueError(f'Row with id={_id} does not exist!')
+        file_id = file_id[0][0]
+        c.execute('delete from map where id=?', (_id, ))
+        if len(c.execute('select id from map where file_id=?', (file_id, )).fetchall()) == 0:
+            c.execute('delete from files where id=?', (file_id, ))
+        if commit:
+            self.conn.commit()
+
     def get_entries(self, fields):
+
         """Return list of all entry names in database
         that are in the listed fields
 
@@ -469,10 +649,11 @@ class ManifestDb:
         return False
 
 
-def get_parser():
-    parser = argparse.ArgumentParser(
-        epilog="""For details of individual modes, pass a dummy database argument
-        followed by the mode and -h, e.g.: "%(prog)s x files -h" """)
+def get_parser(parser=None):
+    if parser is None:
+        parser = argparse.ArgumentParser(
+            epilog="""For details of individual modes, pass a dummy database argument
+            followed by the mode and -h, e.g.: "%(prog)s x files -h" """)
 
     parser.add_argument('filename', help="Path to a ManifestDb.",
                         metavar='my_db.sqlite')
@@ -491,6 +672,17 @@ def get_parser():
         This will print a summary of the index fields and
         endpoint fields.  (This mode is chosen by default.)
         """)
+
+    # "table"
+    p = cmdsubp.add_parser(
+        'table', usage="""Syntax:
+
+    %(prog)s
+
+        This will print every row of the metadata map table,
+        including the filename.
+        """)
+
 
     # "files"
     p = cmdsubp.add_parser(
@@ -583,8 +775,9 @@ def main(args=None):
     """Entry point for the so-metadata tool."""
     if args is None:
         args = sys.argv[1:]
-    parser = get_parser()
-    args = parser.parse_args(args)
+    if not isinstance(args, argparse.Namespace):
+        parser = get_parser()
+        args = parser.parse_args(args)
 
     if args.mode is None:
         args.mode = 'summary'
@@ -627,27 +820,47 @@ def main(args=None):
 
         print()
 
+    elif args.mode == 'table':
+        # Print the table of entries.
+        schema = db.scheme.as_resultset()
+        keys = []
+        for purp in ['in', 'out']:
+            for s in schema:
+                if s['purpose'] != purp:
+                    continue
+                if s['col_type'] == 'range':
+                    keys.extend([s['field'] + '__lo',
+                                 s['field'] + '__hi'])
+                else:
+                    keys.append(s['field'])
+        keys.append('filename')
+        print(keys)
+        print(['-'] * len(keys))
+        for row in db.conn.execute('select map.*, files.name as filename from '
+                                   'map join files where map.file_id=files.id'):
+            print([row[k] for k in keys])
+
     elif args.mode == 'files':
         # Get all files.
         rows = db.conn.execute(
-            'select files.name as filename, count(map.id) '
+            'select files.id, files.name as filename, count(map.id) '
             'from map join files on '
             'map.file_id==files.id group by filename').fetchall()
 
         if args.clean:
-            for filename, count in rows:
+            for _id, filename, count in rows:
                 print(filename)
         else:
-            fmt = '  {count:>7} {filename}'
-            hdr = fmt.format(count="Count", filename="Filename")
+            fmt = '  {_id:>7} {count:>7} {filename}'
+            hdr = fmt.format(_id="file_id", count="Count", filename="Filename")
             print(hdr)
             print('-' * (len(hdr) + 20))
             n = len(rows)
-            super_count = sum([r[1] for r in rows])
+            super_count = sum([r[2] for r in rows])
             if n > 20 and not args.all:
                 rows = rows[:10]
-            for filename, count in rows:
-                print(fmt.format(filename=filename, count=count))
+            for _id, filename, count in rows:
+                print(fmt.format(_id=_id, filename=filename, count=count))
             if len(rows) < n:
                 other_count = super_count - sum([r[1] for r in rows])
                 print(fmt.format(count=other_count, filename='...'))

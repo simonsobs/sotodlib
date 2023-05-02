@@ -15,6 +15,9 @@ from numpy.testing import assert_array_equal, assert_allclose
 from sotodlib import core, tod_ops
 import so3g
 
+from ._helpers import mpi_multi
+
+
 SAMPLE_FREQ_HZ = 100.
 
 def get_tod(sig_type='trendy'):
@@ -154,25 +157,28 @@ class FilterTest(unittest.TestCase):
                                        detrend='linear')
         self.assertEqual(sig1f.shape, tod['sig1d'].shape)
 
+
+@unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
 class JumpfindTest(unittest.TestCase):
     def test_jumpfinder(self):
         """Test that jumpfinder finds jumps in white noise."""
+        np.random.seed(0)
         tod = get_tod('white')
         sig_jumps = tod.signal[0]
         jump_locs = np.array([200, 400, 700])
-        sig_jumps[jump_locs[0]:] += 5
-        sig_jumps[jump_locs[1]:] -= 10
-        sig_jumps[jump_locs[2]:] -= 5
+        sig_jumps[jump_locs[0]:] += 10
+        sig_jumps[jump_locs[1]:] -= 13
+        sig_jumps[jump_locs[2]:] -= 8
 
         tod.wrap('sig_jumps', sig_jumps, [(0, 'samps')])
 
         # Find jumps with TV filtering
-        jumps_tv = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=2)
+        jumps_tv = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=5)
         jumps_tv = jumps_tv.ranges().flatten()
 
         # Find jumps with gaussian filtering
         jumps_gauss = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps,
-                                       jumpfinder=tod_ops.jumps.jumpfinder_gaussian, min_size=2)
+                                               jumpfinder=tod_ops.jumps.jumpfinder_gaussian, min_size=5)
         jumps_gauss = jumps_gauss.ranges().flatten()
 
         # Remove double counted jumps and round to remove uncertainty

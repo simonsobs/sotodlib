@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def fourier_filter(tod, filt_function,
-                   detrend='linear', resize='zero_pad',
+                   detrend=None, resize='zero_pad',
                    axis_name='samps', signal_name='signal', 
                    time_name='timestamps',
                    **kwargs):
@@ -83,6 +83,7 @@ def fourier_filter(tod, filt_function,
         raise ValueError('resize must be "zero_pad", "trim", or None')
 
     if detrend is not None:
+        logger.info('fourier_filter: detrending.')
         signal = detrend_data(tod, detrend, axis_name=axis_name,
                              signal_name=signal_name)
     else:
@@ -94,6 +95,7 @@ def fourier_filter(tod, filt_function,
         signal = signal.copy()
 
     else:
+        logger.info('fourier_filter: initializing rfft object.')
         a, b, t_1, t_2 = fft_ops.build_rfft_object(n_det, n, 'BOTH')
 
         if other_idx is not None and other_idx != 0:
@@ -101,17 +103,21 @@ def fourier_filter(tod, filt_function,
             signal = signal.transpose()
 
         # This copy is valid for all modes of "resize"
+        logger.info('fourier_filter: copying in data.')
         a[:,:min(n, axis.count)] = signal[:,:min(n, axis.count)]
         a[:,min(n, axis.count):] = 0
 
         ## FFT Signal
+        logger.info('fourier_filter: FFT.')
         t_1()
 
         ## Get Filter
+        logger.info('fourier_filter: applying filter.')
         freqs = np.fft.rfftfreq(n, delta_t)
         filt_function.apply(freqs, tod, b, **kwargs)
 
         ## FFT Back
+        logger.info('fourier_filter: IFFT.')
         t_2()
 
         # Un-pad?

@@ -1,5 +1,7 @@
 import sqlite3
 import os
+import sys
+import argparse
 from collections import OrderedDict
 import numpy as np
 
@@ -239,7 +241,7 @@ class ObsFileDb:
 
         """
         c = self.conn.execute(
-            'select detsets.name as `dets:detset`, det as `dets:readout_id`'
+            'select distinct detsets.name as `dets:detset`, det as `dets:readout_id`'
             'from detsets join files '
             'on files.detset=detsets.name where obs_id=?', (obs_id, ))
         return ResultSet.from_cursor(c)
@@ -475,3 +477,156 @@ class ObsFileDb:
             for line in output:
                 fout.write(line+'\n')
         return output
+
+
+def get_parser(parser=None):
+    if parser is None:
+        parser = argparse.ArgumentParser(
+            epilog="""For details of individual modes, pass a dummy database argument
+            followed by the mode and -h, e.g.: "%(prog)s x files -h" """)
+
+    parser.add_argument('filename', help="Path to an ObsFileDb.",
+                        metavar='obsfiledb.sqlite')
+
+    cmdsubp = parser.add_subparsers(
+        dest='mode')
+
+    # "files"
+    p = cmdsubp.add_parser(
+        'files', usage="""Syntax:
+
+    %(prog)s
+    %(prog)s --all
+    %(prog)s --clean
+
+        This will print out a list of the files in the db,
+        along with obs_id and detset.  Only a few lines
+        will be shown, unless --all is passed.  To get a
+        simple list of all files (for rsync or something),
+        pass --clean.
+        """,
+        help="List the files referenced in the database.")
+
+    p.add_argument('--clean', action='store_true',
+                   help="Print a simple list of all files (for script digestion).")
+    p.add_argument('--all', action='store_true',
+                   help="Print all files, not an abbreviated list.")
+
+    # "reroot"
+    p = cmdsubp.add_parser(
+        'reroot', help=
+        "Batch change filenames (by prefix) in the database.",
+        usage="""Syntax:
+
+    %(prog)s old_prefix new_prefix [output options]
+
+Examples:
+
+    %(prog)s /path/on/system1 /path/on/system2 -o my_new_manifest.sqlite
+    %(prog)s /path/on/system1 /new_path/on/system1 --overwrite
+    %(prog)s ./result1/obs_12345.h5 ./result2/obs_12345.h5 --overwrite
+
+        These operations will create a duplicate of the source
+        ObsFileDb, with only the filenames (potentially) altered.  Any
+        filename that starts with the first argument will be changed,
+        in the output, to instead start with the second argument.
+        When you do this you must either say where to write the output
+        (-o) or give the program permission to overwrite your input
+        database file.  Note that the first argument need not match
+        all entries in the database; you can use it to pick out a
+        subset (even a single entry).  """)
+    p.add_argument('old_prefix', help=
+                   "Prefix to match in current database.")
+    p.add_argument('new_prefix', help=
+                   "Prefix to replace it with.")
+    p.add_argument('--overwrite', action='store_true', help=
+                   "Store modified database in the same file.")
+    p.add_argument('--output-db', '-o', help=
+                   "Store modified database in this file.")
+    p.add_argument('--dry-run', action='store_true', help=
+                   "Run the conversion steps but do not write the results anywhere.")
+
+    return parser
+
+def main(args=None, parser=None):
+    """Entry point for the so-metadata tool."""
+    if args is None:
+        args = sys.argv[1:]
+    elif not isinstance(args, argparse.Namespace):
+        parser = get_parser()
+        args = parser.parse_args(args)
+
+    if args.mode is None:
+        args.mode = 'summary'
+
+    db = ObsFileDb.from_file(args.filename, force_new_db=False)
+
+    if args.mode == 'files':
+        # Get all files.
+        rows = db.conn.execute(
+            'select obs_id, name, detset from files '
+            'order by obs_id, detset, name').fetchall()
+
+        if args.clean:
+            for obs_id, filename, detset in rows:
+                print(filename)
+        else:
+            fmt = '  {obs_id} {detset} {filename}'
+            hdr = fmt.format(obs_id="obs_id", detset="detset", filename="Filename")
+            print(hdr)
+            print('-' * (len(hdr) + 20))
+            n = len(rows)
+            if n > 20 and not args.all:
+                rows = rows[:10]
+            for obs_id, filename, detset in rows:
+                print(fmt.format(obs_id=obs_id, filename=filename, detset=detset))
+            if len(rows) < n:
+                print(fmt.format(obs_id='...', filename='+%i others' % (n - len(rows)), detset=''))
+                print('(Pass --all to show all results.)')
+            print()
+
+    elif args.mode == 'reroot':
+        # Reconnect with write?
+        if args.overwrite:
+            if args.output_db:
+                parser.error("Specify only one of --overwrite or --output-db.")
+            db = ObsFileDb.from_file(args.filename, force_new_db=True)
+            args.output_db = args.filename
+        else:
+            if args.output_db is None:
+                parser.error("Specify an output database name with --output-db, "
+                             "or pass --overwrite to clobber.")
+            db = ObsFileDb.from_file(args.filename, force_new_db=True)
+
+        # Get all files matching this prefix ...
+        c = db.conn.execute('select name from files '
+                            'where name like "%s%%"' % (args.old_prefix))
+        rows = c.fetchall()
+        print('Found %i records matching prefix ...'
+               % len(rows))
+
+        print('Converting to new prefix ...')
+        n_examples = 1
+
+        if not args.dry_run:
+            c = db.conn.cursor()
+
+        for (name, ) in rows:
+            new_name = args.new_prefix + name[len(args.old_prefix):]
+            if n_examples > 0:
+                print(f'  Example: converting filename\n'
+                      f'      "{name}"\n'
+                      f'    to\n'
+                      f'      "{new_name}"')
+                n_examples -= 1
+            if not args.dry_run:
+                c.execute('update files set name=? where name=?', (new_name, name))
+
+        print('Saving to %s' % args.output_db)
+        if not args.dry_run:
+            db.conn.commit()
+            c.execute('vacuum')
+            db.to_file(args.output_db)
+
+    else:
+        parser.error(f'Unimplemented mode, "{args.mode}".')

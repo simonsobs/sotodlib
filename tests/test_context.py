@@ -68,8 +68,31 @@ class ContextTest(unittest.TestCase):
             name, _ = self._open_new('db.sqlite', 'create')
             db.to_file(name)
             cd[key] = name
-            ctx = Context(self._write_context(cd))
+            ctx_file = self._write_context(cd)
+            ctx = Context(ctx_file)
             self.assertIsInstance(getattr(ctx, key), cls)
+            metadata.cli.main(args=['context', ctx_file])
+
+    def test_010_cli(self):
+        def save_db(src, k, suffix=''):
+            if src.get(k) is None:
+                return
+            if isinstance(src[k], str):
+                return
+            db_file, _ = self._open_new(k + suffix, 'create')
+            src[k].to_file(db_file)
+            src[k] = db_file
+
+        dataset_sim = DatasetSim()
+        ctx = dataset_sim.get_context()
+        for _db in ['obsfiledb', 'obsdb', 'detdb']:
+            print(ctx)
+            save_db(ctx, _db)
+        for i, entry in enumerate(ctx.get('metadata', [])):
+            save_db(entry, 'db', str(i))
+
+        ctx_file = self._write_context(dict(ctx))
+        metadata.cli.main(args=['context', ctx_file])
 
     def test_100_loads(self):
         dataset_sim = DatasetSim()
@@ -79,16 +102,31 @@ class ContextTest(unittest.TestCase):
         n = len(dataset_sim.dets)
         obs_id = dataset_sim.obss['obs_id'][1]
         for selection, count in [
-                ({'dets:readout_id': ['det05']}, 1),
-                ({'dets:readout_id': np.array(['det05'])}, 1),
+                (['read05'], 1),
+                (np.array(['read05']), 1),
+                (metadata.ResultSet(['readout_id'], [['read05']]), 1),
+                ({'dets:readout_id': ['read05']}, 1),
+                ({'dets:readout_id': np.array(['read05'])}, 1),
                 ({'dets:detset': 'neard'}, 4),
                 ({'dets:detset': ['neard']}, 4),
                 ({'dets:detset': ['neard', 'fard']}, 8),
-                ({'dets:detset': ['neard'], 'dets:readout_id': ['det00', 'det05']}, 1),
+                ({'dets:detset': ['neard'], 'dets:readout_id': ['read00', 'read05']}, 1),
                 ({'dets:band': ['f090']}, 4),
                 ({'dets:band': ['f090'], 'dets:detset': ['neard']}, 2),
+                ({'dets:det_id': ['NO_MATCH']}, 2),
         ]:
             meta = ctx.get_meta(obs_id, dets=selection)
+            self.assertEqual(meta.dets.count, count, msg=f"{selection}")
+            self.assertTrue('cal' in meta)
+            self.assertTrue('flags' in meta)
+
+        # And tolerance of the detsets argument ...
+        for selection, count in [
+                ('neard', 4),
+                (['neard'], 4),
+                (np.array(['neard', 'fard']), 8),
+        ]:
+            meta = ctx.get_meta(obs_id, detsets=selection)
             self.assertEqual(meta.dets.count, count, msg=f"{selection}")
             self.assertTrue('cal' in meta)
             self.assertTrue('flags' in meta)
@@ -148,6 +186,9 @@ class ContextTest(unittest.TestCase):
         for band, f in zip(tod.det_info['band'], tod.flags):
             # The f090 dets should have 0 flag intervals; f150 have 1
             self.assertEqual(len(f.ranges()), int(band == 'f150'))
+        # Check if NO_MATCH det_id seemed to broadcast propertly ...
+        self.assertEqual(list(tod.det_info['det_param'] == -1),
+                         list(dataset_sim.dets['det_id'] == 'NO_MATCH'))
 
         tod = ctx.get_obs(obs_id + ':f090')
         self.assertEqual(tod.signal.shape, (n_det // 2, n_samp))
@@ -188,15 +229,16 @@ class DatasetSim:
     """
     def __init__(self):
         self.dets = metadata.ResultSet(
-            ['readout_id', 'band', 'pol_code', 'x', 'y', 'detset'],
-            [('det00', 'f090', 'A', 0.0, 0.0, 'neard'),
-             ('det01', 'f090', 'B', 0.0, 0.0, 'neard'),
-             ('det02', 'f150', 'A', 0.0, 0.0, 'neard'),
-             ('det03', 'f150', 'B', 0.0, 0.0, 'neard'),
-             ('det04', 'f090', 'A', 1.0, 0.0, 'fard'),
-             ('det05', 'f090', 'B', 1.0, 0.0, 'fard'),
-             ('det06', 'f150', 'A', 1.0, 0.0, 'fard'),
-             ('det07', 'f150', 'B', 1.0, 0.0, 'fard')])
+            ['readout_id', 'band', 'pol_code', 'x', 'y', 'detset', 'det_id', 'det_param'],
+            [('read00', 'f090', 'A', 0.0, 0.0, 'neard', 'det00', 120.),
+             ('read01', 'f090', 'B', 0.0, 0.0, 'neard', 'det01', 121.),
+             ('read02', 'f150', 'A', 0.0, 0.0, 'neard', 'det02', 122.),
+             ('read03', 'f150', 'B', 0.0, 0.0, 'neard', 'NO_MATCH', -1.),
+             ('read04', 'f090', 'A', 1.0, 0.0, 'fard',  'det04', 124.), 
+             ('read05', 'f090', 'B', 1.0, 0.0, 'fard',  'det05', 125.),
+             ('read06', 'f150', 'A', 1.0, 0.0, 'fard',  'NO_MATCH', -1.),
+             ('read07', 'f150', 'B', 1.0, 0.0, 'fard',  'det07', 127.),
+            ])
 
         self.obss = metadata.ResultSet(
             ['obs_id', 'timestamp', 'type', 'target'],
@@ -222,7 +264,7 @@ class DatasetSim:
                                     'pol_code string',
                                     'x float',
                                     'y float'])
-        save_for_later = ['band', 'detset']
+        save_for_later = ['band', 'detset', 'det_id', 'det_param']
         for row in self.dets.subset(keys=[k for k in self.dets.keys
                                           if k not in save_for_later]):
             detdb.add_props('base', row['readout_id'], **row)
@@ -262,6 +304,24 @@ class DatasetSim:
         bands_db.add_entry(
             {'obs:timestamp': [0, 2e9], 'loader': 'unittest_loader'},
             'bands.h5')
+
+        # metadata: det_id.h5
+        _scheme = metadata.ManifestScheme() \
+                  .add_data_field('loader') \
+                  .add_range_match('obs:timestamp')
+        det_id_db = metadata.ManifestDb(scheme=_scheme)
+        det_id_db.add_entry(
+            {'obs:timestamp': [0, 2e9], 'loader': 'unittest_loader'},
+            'det_id.h5')
+
+        # metadata: det_param.h5
+        _scheme = metadata.ManifestScheme() \
+                  .add_data_field('loader') \
+                  .add_range_match('obs:timestamp')
+        det_par_db = metadata.ManifestDb(scheme=_scheme)
+        det_par_db.add_entry(
+            {'obs:timestamp': [0, 2e9], 'loader': 'unittest_loader'},
+            'det_param.h5')
 
         # metadata: abscals.h5
         _scheme = metadata.ManifestScheme() \
@@ -312,13 +372,20 @@ class DatasetSim:
         ctx['metadata'] = [
             {'db': bands_db,
              'det_info': True,
-             'dets_key': 'readout_id'},
+            },
+            {'db': det_id_db,
+             'det_info': True,
+            },
             {'db': abscal_db,
              'name': 'cal&abscal'},
             {'db': flags_db,
              'name': 'flags&'},
             {'db': info_db,
              'name': 'focal_plane'},
+            {'db': det_par_db,
+             'det_info': True,
+             'multi': True,
+            },
         ]
 
         if with_bad_metadata:
@@ -335,6 +402,17 @@ class DatasetSim:
         filename = os.path.split(kw['filename'])[1]
         if filename == 'bands.h5':
             rs = self.dets.subset(keys=['readout_id', 'band'])
+            rs.keys = ['dets:' + k for k in rs.keys]
+            return rs
+        elif filename == 'det_id.h5':
+            rs = self.dets.subset(keys=['readout_id', 'det_id'])
+            rs.keys = ['dets:' + k for k in rs.keys]
+            return rs
+        elif filename == 'det_param.h5':
+            rs = self.dets.subset(keys=['det_id', 'det_param'])
+            # Keep only 1 row with 'NO_MATCH'
+            while sum(rs['det_id'] == 'NO_MATCH') > 1:
+                rs.rows.pop(list(rs['det_id']).index('NO_MATCH'))
             rs.keys = ['dets:' + k for k in rs.keys]
             return rs
         elif filename == 'abscal.h5':

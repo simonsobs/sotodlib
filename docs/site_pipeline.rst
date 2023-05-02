@@ -14,6 +14,30 @@ quick-turnaround data processing at the observatory.
   syntax.
 
 
+Command line interface
+======================
+
+
+Usage
+-----
+
+To execute a pipeline element from the command line, use the
+``so-site-pipeline`` command.  For example, ``make-source-flags`` can
+be invoked as::
+
+  so-site-pipeline make-source-flags [options]
+
+To configure tab-completion of element names, in bash, run::
+
+  eval `so-site-pipeline --bash-completion`
+
+
+Wrapping a pipeline script
+--------------------------
+
+.. automodule:: sotodlib.site_pipeline.cli
+
+
 Pipeline Elements
 =================
 
@@ -23,20 +47,34 @@ update-g3tsmurf-db
 This script set up to create and maintain g3tsmurf databases. :ref:`See details
 here<g3tsmurf-update-section>`.
 
-imprinter
-----------
+update-book-plan
+----------------
 
 This script is designed to help with the bookbinding. It will search a given
 Level 2 G3tSmurf database for observations that overlap in time. The different
 optional arguments will let us pass information from something like the sorunlib
 database to further filter the observations. 
 
-Currently outputs a list of tuples where each tuple is one or more observation
-ids. Each tuple has at least some overlap.
+check-book
+----------
+
+For a description and documentation of the config file format, see
+:mod:`sotodlib.site_pipeline.check_book` module autodocumentation below.
+
+Command line arguments
+``````````````````````
 
 .. argparse::
-   :module: sotodlib.site_pipeline.imprinter
+   :module: sotodlib.site_pipeline.check_book
    :func: get_parser
+   :prog: check-book
+
+Module documentation
+````````````````````
+
+.. automodule:: sotodlib.site_pipeline.check_book
+   :members:
+   :undoc-members:
 
 
 Detector and Readout ID Mapping
@@ -73,7 +111,8 @@ Config file format
 Here's an example configuration file. Many of these values depend on hardware
 setup and readout software setup. Making the detector ID info only requires a
 subset of these parameters but the processes are linked so it is probably worth
-always having the same configuration file.
+always having the same configuration file. Tested mapping strategies include
+``assignment`` and ``map_by_freq``.
 
 .. code-block:: yaml
 
@@ -81,8 +120,8 @@ always having the same configuration file.
     g3tsmurf_db: "/path/to/g3tsmurf.db"
     read_db: "/path/to/readout_2_detector_manifest.db"
     read_info: "/path/to/readout_2_detector_hdf5.h5"
-    det_db : "/path/to/det_info/wafer/manifest.db"
-    det_info : "/path/to/det_info/wafer/hdf5.h5"
+    det_db : "/path/to/det_info/wafer/det_info_manifest.db"
+    det_info : "/path/to/det_info/wafer/det_info_hdf5.h5"
 
     arrays:
       # name must match DetMap array names
@@ -94,7 +133,7 @@ always having the same configuration file.
         # how we want to call DetMap
         mapping :
           version : 0
-          strategy: "map_by_freq"
+          strategy: "assignment"
           # parameters for mapping strategy
           params: {
             "output_parent_dir":"/writable/path/",
@@ -122,11 +161,24 @@ entries mater.
     metadata:
         - db: "/path/to/readout_2_detector_manifest.db"
           det_info: true
-          det_key: "dets:readout_id"
-        - db: "/path/to/det_info/wafer/manifest.db"
+        - db: "/path/to/det_info/wafer/det_info_manifest.db"
           det_info: true
-          det_key: "dets:det_id"
+          multi: true
 
+
+preprocess-tod
+--------------
+This script is set up to run a preprocessing pipeline using the preprocess
+module. See details in :ref:`See details here<preprocess-module>` for how to
+build a preprocessing pipeline. 
+
+This module includes the functions designed to be run as part of a batch script
+for automated analysis as well as options for loading AxisManagers that have all
+the preprocessing steps applied to them.
+
+.. argparse::
+   :module: sotodlib.site_pipeline.preprocess_tod
+   :func: get_parser
 
 make-source-flags
 -----------------
@@ -137,6 +189,8 @@ Command line arguments
 .. argparse::
    :module: sotodlib.site_pipeline.make_source_flags
    :func: get_parser
+   :prog: make-source-flags
+
 
 Config file format
 ``````````````````
@@ -179,7 +233,7 @@ Command line arguments
 
 .. argparse::
    :module: sotodlib.site_pipeline.make_uncal_beam_map
-   :func: _get_parser
+   :func: get_parser
    :prog: make-uncal-beam-map
 
 Config file format
@@ -258,6 +312,253 @@ be processed:
   - ``'source_flags'``
   - ``'glitch_flags'`` - optional
 
+
+update-hwp-angle
+----------------
+
+Script for running updates on (or creating) a hwp angle g3 file.
+This script will run periodically even when hwp is not spinning.
+Meaning is designed to work from something like a cronjob.
+The output hwp angle should be synchronized to SMuRF timing outside this script. 
+:ref:`See details here<g3thwp-section>`.
+
+Command line arguments
+``````````````````````
+.. argparse::
+   :module: sotodlib.site_pipeline.update_hwp_angle
+   :func: get_parser
+   :prog: update_hwp_angle
+
+QDS Monitor
+===========
+The QDS Monitor is meant to be a simple to use class that allows users to
+publish the results of their calculations to a live monitor. The live monitor
+backend is an Influx Database, which is used with the SO Data Acquisition
+system, known as the Observatory Control System. This allows us to use the same
+live monitoring interface, Grafana.
+
+Overview
+--------
+The ``Monitor`` class wraps the InfluxDB interface, and provide a few simple
+methods -- ``check``, ``record``, and ``write`` -- detailed in the
+:ref:`API section <monitor_api>`.
+
+``check`` is meant to be used to check if the calculation already has been
+performed for the given observation/tag set. This can be used to ensure
+expensive calculations are not repeated when running batch jobs. ``record``
+takes your calculations, timestamps, and a set of identifying tags, and queues
+them for batch writing to the InfluxDB. Finally, ``write`` will write your
+recorded results to the InfluxDB, clearing the queue.
+
+This perhaps is best demonstrated with some examples, shown in the next section.
+
+Examples
+--------
+Simple Pseudocode
+`````````````````
+The general outline we're aiming for is as follows::
+
+    from sotodlib.site_pipeline.monitor import Monitor
+    
+    # Initialize DB Connection
+    monitor = Monitor('localhost', 8086, 'qdsDB')
+    
+    # Load observation
+    tod = so_data_load.load_observation(context,                       
+              observation_id, detectors_list)
+    
+    # Compute statistic
+    result = interesting_calculation(tod)
+    
+    # Tag and write to DB
+    tags = {'telescope': 'LAT', 'wafer': wafer_name}
+    monitor.record('white_noise_level', result, timestamp, tags)
+    monitor.write()
+
+Real World Example
+``````````````````
+
+The following is a real world example of the ``Monitor`` in action. We'll walk
+through the important parts, omitting some descriptive print statements. The
+full script is included below.
+
+To start, we will import the module and create our ``Monitor`` object.
+You will need to know the address and port for your InfluxDB, as well as the
+name of the database within InfluxDB that you want to write to.::
+
+    from sotodlib.site_pipeline.monitor import Monitor
+
+    monitor = Monitor('localhost', 8086, 'qds')
+
+.. note::
+    Secure connection to an external InfluxDB is supported. To connect use to
+    https://example.com/influxdb/ use::
+
+        monitor = Monitor(host='example.com',
+                          port=443,
+                          username=u'username',
+                          password=u'ENTER PASSWORD HERE',
+                          path='influxdb',
+                          ssl=True)
+
+Let's say we want to load some of the sims, we'll create our Context and get
+the observations with::
+
+    context = core.Context('pipe_s0001_v2.yaml')
+    observations = context.obsfiledb.get_obs()
+
+Then we can, for example, loop over all observations, determining the detectors
+and wafers in each observation::
+
+    for obs_id in observations:
+        c = context.obsfiledb.conn.execute('select distinct DS.name, DS.det from detsets DS '
+                        'join files on DS.name=files.detset '
+                        'where obs_id=?', (obs_id,))
+        dets_in_obs = [tuple(r) for r in c.fetchall()]
+        wafers = np.unique([x[0] for x in dets_in_obs])
+
+We'll run our calculation for each wafer, so let's loop over those now,
+building a detector list for the wafer, and loading the TOD for just those
+detectors and computing their FFTs::
+
+    for wafer in wafers:
+        det_list = build_det_list(dets_in_obs, wafer)
+        tod = so_data_load.load_observation(context.obsfiledb, obs_id, dets=det_list)
+
+        # Compute ffts
+        ffts, freqs = rfft(tod)
+        det_white_noise = calculate_noise(tod, ffts, freqs)
+
+Now we want to save our results to the monitor. To do this, we'll need two
+other lists, one for the timestamps associated with each noise value (in this
+case, these are all the same, and use the first timestamp in the TOD), and one
+for the tags for each noise value (in this example we tag each detector
+individually with their detector ID, along with the wafer it is on and what
+telescope we're working with -- this probably is in the context somewhere, but
+I'm just writing in SAT1)::
+
+        timestamps = np.ones(len(det_white_noise))*tod.timestamps[0]
+        base_tags = {'telescope': 'SAT1', 'wafer': wafer}
+        tag_list = []
+        for det in det_list:
+            det_tag = dict(base_tags)
+            det_tag['detector'] = det
+            tag_list.append(det_tag)
+        log_tags = {'observation': obs_id, 'wafer': wafer}
+        monitor.record('white_noise_level', det_white_noise, timestamps, tag_list, 'detector_stats', log_tags=log_tags)
+        monitor.write()
+
+We also include a set of log tags, these are to record that we've completed
+this calculation for this observation and wafer. Lastly we record the
+measurement, giving it the name "white_noise_level", passing our three lists of
+equal length (``det_white_noise``, ``timestamps``, ``tag_list``), and recording
+the measurement as completed in the "detector_stats" log with the observation ID
+and wafer log tags.
+
+Where these log tags could come in handy is if we need to stop and restart our
+calculation and want to skip recomputing the results. Since we saved the wafer
+along with the observation ID it would make sense to check at the wafer level
+loop::
+
+    for wafer in wafers:
+        # Check calculation completed for this wafer
+        check_tags = {'wafer': wafer} 
+        if monitor.check('white_noise_level', obs_id, check_tags):
+            continue
+
+Add this to the top of our wafer loop would skip already recorded wafers for
+this observation id.
+
+The example script in its entirety is shown here:
+
+.. code-block:: python
+
+    # Largely based on 20200514_FCT_Software_Example.ipynb from the pwg-fct
+    import numpy as np
+    
+    from sotodlib import core
+    import sotodlib.io.load as so_data_load
+    
+    from sotodlib.tod_ops import rfft
+    
+    import qds
+    
+    monitor = qds.Monitor('localhost', 56777, 'qds')
+    
+    context = core.Context('pipe_s0001_v2.yaml')
+    observations = context.obsfiledb.get_obs()
+    print('Found {} Observations'.format(len(observations)))
+    o_list = range(len(observations)) # all observations
+    
+    for o in o_list:
+        obs_id = observations[o]
+        print('Looking at observation #{} named {}'.format(o,obs_id))
+        
+        c = context.obsfiledb.conn.execute('select distinct DS.name, DS.det from detsets DS '
+                                'join files on DS.name=files.detset '
+                                'where obs_id=?', (obs_id,))
+        dets_in_obs = [tuple(r) for r in c.fetchall()]
+        wafers = np.unique([x[0] for x in dets_in_obs])
+        
+        print('There are {} detectors on {} wafers in this observation'.format(len(dets_in_obs), len(wafers)))
+        
+        for wafer in wafers:
+            # Check calculation completed for this wafer
+            check_tags = {'wafer': wafer}
+            if monitor.check('white_noise_level', obs_id, check_tags):
+                continue
+    
+            # Process Obs+Wafer
+            # Build detector list for this wafer
+            det_list = []
+            for det in dets_in_obs:
+                if det[0] == wafer:
+                    det_list.append(det[1])
+            print('{} detectors on this wafer'.format(len(det_list)))
+    
+            tod = so_data_load.load_observation(context.obsfiledb, obs_id, dets=det_list )
+    
+            print('This observation is {} minutes long. Has {} detectors and {} samples'.format(round((tod.timestamps[-1]-tod.timestamps[0])/60.,2),
+                                                                                  tod.dets.count, tod.samps.count))
+    
+            print('This TOD AxisManager has Axes: ')
+            for k in tod._axes:
+                print('\t{} with {} entries'.format(tod[k].name, tod[k].count ) )
+    
+            print('This TOD  AxisManager has fields : [axes]')
+            for k in tod._fields:
+                print('\t{} : {}'.format(k, tod._assignments[k]) )
+                if type(tod._fields[k]) is core.AxisManager:
+                    for kk in tod[k]._fields:
+                        print('\t\t {} : {}'.format(kk, tod[k]._assignments[kk] ))
+    
+            # Compute the FFT and detector white noise levels
+            ffts, freqs = rfft(tod)
+    
+            tsamp = np.median(np.diff(tod.timestamps))
+            norm_fact = (1.0/tsamp)*np.sum(np.abs(np.hanning(tod.samps.count))**2)
+    
+            fmsk = freqs > 10
+            det_white_noise = 1e6*np.median(np.sqrt(np.abs(ffts[:,fmsk])**2/norm_fact), axis=1)
+    
+            # Publish to monitor
+            timestamps = np.ones(len(det_white_noise))*tod.timestamps[0]
+            base_tags = {'telescope': 'LAT', 'wafer': wafer}
+            tag_list = []
+            for det in det_list:
+                det_tag = dict(base_tags)
+                det_tag['detector'] = det
+                tag_list.append(det_tag)
+            log_tags = {'observation': obs_id, 'wafer': wafer}
+            monitor.record('white_noise_level', det_white_noise, timestamps, tag_list, 'detector_stats', log_tags=log_tags)
+            monitor.write()
+    
+.. _monitor_api:
+
+API
+---
+.. autoclass:: sotodlib.site_pipeline.monitor.Monitor
+    :members:
 
 Support
 =======
