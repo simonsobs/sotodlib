@@ -250,18 +250,10 @@ class Imprinter:
             timing=timing_on,
         )
 
-        # try to get more accurate time
-        try:
-            ts = self.get_book_times(book)
-            book.start = dt.datetime.utcfromtimestamp(ts[0])
-            book.stop = dt.datetime.utcfromtimestamp(ts[1])
-        except Exception as e:
-            self.logger.warning(f"Failed to get more accurate time: {e}")
-            self.logger.warning(traceback.format_exc())
-
         # add book to database
         session.add(book)
-        if commit: session.commit()
+        if commit:
+            session.commit()
         return book
 
     def register_books(self, bids, obs_lists, commit=True, session=None):
@@ -775,42 +767,6 @@ class Imprinter:
         except Exception as e:
             self.logger.warning(f"Failed to remove {book.path}: {e}")
             self.logger.error(traceback.format_exc())
-
-    def get_book_times(self, book):
-        """
-        Given a book of co-sampled data with a timing system, this function will
-        return a gap-filled list of timestamps that should be contained in the
-        book.  The data will be trimmed such that the start all active wafers
-        have data inside the returned time-range.
-
-        Parameters
-        ----------
-        book: Book object
-
-        Returns
-        -------
-        ts: np.ndarray
-            Gap-filled list of timestamps
-        """
-        filedb = self.get_files_for_book(book)
-        for i, files in enumerate(filedb.values()):
-            _files = sorted(files)
-            if i == 0:  # Get full list of timestamps for first file list
-                ts = []
-                for frame in itertools.chain(*[core.G3File(f) for f in _files]):
-                    if frame.type != core.G3FrameType.Scan:
-                        continue
-
-                    ts.append(get_frame_times(frame)[1])
-                ts = fill_time_gaps(np.hstack(ts)).astype(int)
-                t0, t1 = ts[[0, -1]]
-            else:
-                _t0, _t1 = get_start_and_end(_files)
-                t0 = max(t0, _t0)
-                t1 = min(t1, _t1)
-
-        m = (t0 <= ts) & (ts <= t1)
-        return ts[m]
 
 
 #####################
