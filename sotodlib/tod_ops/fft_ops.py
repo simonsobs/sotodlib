@@ -8,7 +8,7 @@ from sotodlib import core
 import so3g
 
 from sotodlib import core
-from . import detrend_data
+from . import detrend_tod
 
 def _get_num_threads():
     # Guess how many threads we should be using in FFT ops...
@@ -24,7 +24,8 @@ def rfft(aman, detrend='linear', resize='zero_pad', window=np.hanning,
         aman: axis manager
         
         detrend: Method of detrending to be done before ffting. Can
-            be 'linear', 'mean', or None.
+            be 'linear', 'mean', or None. Note that detrending here can be slow
+            for large arrays.
             
         resize: How to resize the axis to increase fft speed. 'zero_pad' 
             will increase to the next 2**N. 'trim' will cut out so the 
@@ -68,8 +69,8 @@ def rfft(aman, detrend='linear', resize='zero_pad', window=np.hanning,
     if detrend is None:
         signal = np.atleast_2d(getattr(aman, signal_name))
     else:
-        signal = detrend_data(aman, detrend, axis_name=axis_name, 
-                             signal_name=signal_name)
+        signal = detrend_tod(aman, detrend, axis_name=axis_name, 
+                             signal_name=signal_name, in_place=True)
     
     if other_idx is not None and other_idx != 0:
         signal = signal.transpose()

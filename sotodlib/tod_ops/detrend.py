@@ -1,10 +1,19 @@
 import numpy as np
 
-def detrend_data(tod, method='linear', axis_name='samps', 
-                 signal_name='signal', count=10):
+def detrend_tod(
+    tod, 
+    method='linear', 
+    axis_name='samps', 
+    signal_name='signal', 
+    in_place=True,
+    wrap_name=None,
+    count=10
+):
     
-    """Returns detrended data. Decide for yourself if it goes
-        into the axis manager. Generally intended for use before filter.
+    """Returns detrended data. Detrends data in place by default but pass
+        in_place=False if you would like a copied array (such as if you're just
+        looking to use this in an FFT).
+
         Using this with method ='mean' and axis_name='dets' will remove a 
         common mode from the detectors
         Using this with method ='median' and axis_name='dets' will remove a 
@@ -20,6 +29,12 @@ def detrend_data(tod, method='linear', axis_name='samps',
         
         signal_name: the name of the signal to detrend. defaults to 'signal'.
             Can have any shape as long as axis_name can be resolved.
+        
+        in_place: bool. if False it makes a copy of signal before detrending and
+            returns the copy
+    
+        wrap_name: str. or None. if not None, wrap the detrended data into tod
+            with this name.
 
         count: Number of samples to use, on each end, when measuring
             mean level for 'linear' detrend.  Values larger than 1
@@ -27,11 +42,12 @@ def detrend_data(tod, method='linear', axis_name='samps',
 
     Returns:
         
-        detrended signal: does not actually detrend the data in the axis
-            manager, let's you decide if you want to do that.
+        detrended signal. Done in place or on a copy depend on in_place arg.
 
     """
     signal = tod[signal_name]
+    if not in_place:
+        signal = signal.copy()
     dtype_in = signal.dtype
 
     axis_idx = list(tod._assignments[signal_name]).index(axis_name)
@@ -50,9 +66,9 @@ def detrend_data(tod, method='linear', axis_name='samps',
     elif method == 'median':
         signal = signal - np.median(signal, axis=-1)[...,None]
     elif method == 'linear':
-        x = np.linspace(0, 1, n_samps)
+        x = np.linspace(0, 1, n_samps, dtype=dtype_in)
         count = max(1, min(count, signal.shape[-1] // 2))
-        slopes = signal[...,-count:].mean(axis=-1)-signal[...,:count].mean(axis=-1)
+        slopes = signal[...,-count:].mean(axis=-1,dtype=dtype_in)-signal[...,:count].mean(axis=-1,dtype=dtype_in)
         ## the 2d loop is significantly faster if possible
         if len(signal.shape) == 2:
             for i in range(signal.shape[0]):
@@ -66,22 +82,10 @@ def detrend_data(tod, method='linear', axis_name='samps',
     if axis_idx != signal.ndim - 1:
         signal = signal.transpose(tuple(axis_reorder))
 
-    if signal.dtype != dtype_in:
-        # .astype takes awhile on long arrays, only cast if necessary
-        return signal.astype(dtype_in)
-    else:
-        return signal
-
-def detrend_tod(tod, method='linear', signal_name='signal', axis_name='samps', count=10, out_name=None):
-    """simple wrapper: to be more verbose"""
-    if out_name is None:
-        out_name = signal_name
-        
-    signal = detrend_data(tod, method=method, 
-                          axis_name=axis_name, 
-                          signal_name=signal_name,
-                          count=count)
-
-    tod[out_name] = signal
+    assert signal.dtype == dtype_in
     
-    return tod
+    if wrap_name is not None:
+        axis_map = [(i,x) for i,x in enumerate(tod._assignments[signal_name])] 
+        tod.wrap( wrap_name, signal, axis_map) 
+
+    return signal
