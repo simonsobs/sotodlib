@@ -46,7 +46,6 @@ def get_turnaround_flags(tod, qlim=1, az=None, merge=True,
             tod.flags.wrap(name, flag)
     return flag
 
-@profile
 def get_glitch_flags(
     aman, 
     t_glitch=0.002, 
