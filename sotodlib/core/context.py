@@ -3,6 +3,7 @@ import yaml
 import os
 import importlib
 import logging
+import numpy as np
 
 from . import metadata
 from .axisman import AxisManager, OffsetAxis, AxisInterface
@@ -295,24 +296,32 @@ class Context(odict):
         loader_func = OBSLOADER_REGISTRY[loader_type]  # Register your loader?
         aman = loader_func(self.obsfiledb, obs_id, dets=dets,
                            samples=samples, no_signal=no_signal)
-
+ 
         if aman is None:
             return meta
         if meta is not None:
-            if 'det_info' in aman:
+            if 'det_info' in aman and 'det_info' in meta:
                 # If the loader added det_info, then perform a special
                 # merge.  Duplicate keys should be avoided, because
                 # checking the values are the same is annoying.
                 _det_info = aman['det_info']
                 del aman['det_info']
                 _det_info.restrict_axes([meta.dets])
-                for k in _det_info._fields:
-                    if k in meta['det_info']:
-                        logger.warning(f'Key "{k}" is present in det_info returned by '
-                                       f'observation loader as well as in metadata '
-                                       f'databases; dropping the loader version.')
-                    else:
-                        meta.wrap(k, _det_info[k])
+                for k in meta.det_info._fields:
+                    if k in _det_info._fields:
+                        try:
+                            check = np.all([meta['det_info'][k] ==_det_info[k]])
+                            if check:
+                                _det_info.move(k, None)
+                                continue
+                        except Exception as e:
+                            pass
+                        logger.error(f'Key "{k}" is present in det_info returned by '
+                                     f'observation loader as well as in metadata '
+                                     f'databases; The two versions are not '
+                                     f'comparable. dropping the loader version.')
+                        _det_info.move(k, None)
+                meta.det_info.merge(_det_info)
             aman.merge(meta)
         return aman
 

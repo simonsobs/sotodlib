@@ -164,10 +164,28 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
                           samples[1] - samples[0]), dtype='int32')
     all_bias_names = []
 
+    # Temporary storage of G3 timestamp vector
+    g3_times = np.zeros(aman.samps.count, 'int64')
+
     # Read the signal data, by detset.
     detset_index = -1
+
+    # When there are no dets being loaded, get "ancil" information from the ancil files.
+    if len(detsets_req) == 0:
+        def _rewrite_entry(row):
+            f, etc = row[0], row[1:]
+            p, b = os.path.split(f)
+            tokens = b.split('_')
+            a = os.path.join(p, 'A_ancil_' + tokens[-1])
+            return tuple([a] + list(etc))
+        _one_fileset = next(iter(file_map.values()))
+        file_map = {'(ancil)': [_rewrite_entry(x) for x in _one_fileset]}
+
+    # On the first pass through the loop we will load ancillary info.
+    first_pass = True
+
     for detset, files in file_map.items():
-        if detset not in detsets_req:
+        if detset not in detsets_req and detset != '(ancil)':
             continue
         detset_index += 1
 
@@ -180,26 +198,20 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         dest_offset = 0
 
         stream_id = None
-        bias_names = None
+        bias_names = []
 
-        for f, i0, i1 in files:
-            if i1 <= samples[0]:
-                continue
-            if i0 >= samples[1]:
-                break
+        for frame, start in _frames_iterator(files, prefix, samples):
 
-            # "start" is the offset from which we should start copying
-            # data.  It is updated after each frame is processed.
-            # Initially, it could be larger than the number of samples
-            # in the frame we're looking at.  Eventually, it could be
-            # zero.
-            start = max(0, samples[0] - i0)
+            # This should get set in at least one block below...
+            delta = None
 
-            filename = os.path.join(prefix, f)
-            for frame in spt3g_core.G3File(filename):
-                if frame.type is not spt3g_core.G3FrameType.Scan:
-                    continue
+            # Anything in ancil should be identical across
+            # filesets, so only process it once.
+            if first_pass:
+                delta = _extract_1d(frame['ancil'].times, start,
+                                    g3_times, dest_offset)
 
+            if 'primary' in frame:
                 if stream_id is None:
                     stream_id = frame['stream_id']
                     for p in pairs_req:
@@ -215,7 +227,7 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
                 if primary_dest is None:
                     primary_dest = core.AxisManager(aman.samps)
                     for f in primary_fields:
-                        primary_dest.wrap_new(f, ('samps', ), dtype='int64')
+                        primary_dest.wrap_new(f, ('samps', ), dtype='uint64')
                     aman['primary'].wrap(stream_id, primary_dest)
 
                 primary_block = frame['primary'].data
@@ -225,28 +237,40 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
 
                 # Extract "bias", organize by detset (note input bias
                 # arrays might have 20 instead of 12 entries...)
-                bias_names = _check_bias_names(frame)[:_TES_BIAS_COUNT]
-                delta = _extract_2d(frame['tes_biases'], start,
-                                    bias_dest[detset_index], dest_offset,
-                                    bias_names)
+                if len(bias_dest):
+                    bias_names = _check_bias_names(frame)[:_TES_BIAS_COUNT]
+                    delta = _extract_2d(frame['tes_biases'], start,
+                                        bias_dest[detset_index], dest_offset,
+                                        bias_names)
 
                 # Extract the main signal
                 if not no_signal:
-                    delta = _extract_2d(frame['signal'], start,
-                                        aman['signal'], dest_offset, aman.dets.vals)
+                    delta = _extract_2d(
+                        frame['signal'],
+                        start,
+                        aman['signal'],
+                        dest_offset,
+                        aman.dets.vals,
+                    )
                 
-                # How many samples were added to dest?
-                if delta > start:
-                    dest_offset += (delta - start)
-                    start = 0
-                else:
-                    start -= delta
+            # How many samples were added to dest?
+            if delta > start:
+                dest_offset += (delta - start)
+                start = 0
+            else:
+                start -= delta
 
-                if dest_offset >= samples[1] - samples[0]:
-                    break
+            if dest_offset >= samples[1] - samples[0]:
+                break
 
         # Wrap up for detset ...
         all_bias_names.extend(bias_names)
+
+        first_pass = False
+
+    # Convert timestamps
+    aman.wrap('timestamps', g3_times / spt3g_core.G3Units.sec,
+              [(0, 'samps')])
 
     # Merge the bias lines.
     aman.merge(core.AxisManager(core.LabelAxis('bias_lines', all_bias_names)))
@@ -254,7 +278,37 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
               [(0, 'bias_lines'), (1, 'samps')])
 
     det_info = core.metadata.ResultSet(
-        ['detset_book', 'readout_id_book', 'stream_id'],
+        ['detset', '_readout_id', 'stream_id'],
         src=list(det_info.values()))
-    aman.wrap('det_info', det_info.to_axismanager(axis_key='readout_id_book'))
+    aman.wrap('det_info', det_info.to_axismanager(axis_key='_readout_id'))
+    aman.wrap("flags", core.FlagManager.for_tod(aman, "dets", "samps"))
+
     return aman
+
+
+def _frames_iterator(files, prefix, samples):
+    """Iterates over all the frames in files.
+
+    Yields each (frame, start), start is the offset into the frame
+    from which data should be taken.  Note this offset could be beyond
+    the end of the frame, indicating the frame should be ignored.
+
+    """
+    for f, i0, i1 in files:
+        if i1 <= samples[0]:
+            continue
+        if i0 >= samples[1]:
+            break
+
+        # "start" is the offset from which we should start copying
+        # data.  It is updated after each frame is processed.
+        # Initially, it could be larger than the number of samples
+        # in the frame we're looking at.  Eventually, it could be
+        # zero.
+        start = max(0, samples[0] - i0)
+
+        filename = os.path.join(prefix, f)
+        for frame in spt3g_core.G3File(filename):
+            if frame.type is not spt3g_core.G3FrameType.Scan:
+                continue
+            yield frame, start
