@@ -97,7 +97,7 @@ def preprocess_tod(obs_id, configs, overwrite=False, logger=None):
                      "archive index.")
         scheme = core.metadata.ManifestScheme()
         scheme.add_exact_match('obs:obs_id')
-        scheme.add_data_field('dets:' + group_by)
+        scheme.add_exact_match('dets:' + group_by)
         scheme.add_data_field('dataset')
         db = core.metadata.ManifestDb(
             configs['archive']['index'],
@@ -118,14 +118,15 @@ def preprocess_tod(obs_id, configs, overwrite=False, logger=None):
             dest_dataset += '_' + group
         else:
             dest_dataset += "_" + group_by + "_" + str(group)
+        logger.info(f"Saving data to {dest_file}:{dest_dataset}")
         proc_aman.save(dest_file, dest_dataset, overwrite=overwrite)
 
-        logger.info("Saving to database")
         # Update the index.
         db_data = {'obs:obs_id': obs_id,
                    'dataset': dest_dataset}
         db_data['dets:'+group_by] = group
         
+        logger.info(f"Saving to database under {db_data}")
         if db.match(db_data) is None:
             db.add_entry(db_data, dest_file)
 
