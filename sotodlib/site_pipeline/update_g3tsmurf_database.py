@@ -58,7 +58,7 @@ def update_g3tsmurf_db(config=None, update_delay=2, from_scratch=False,
     new_obs = session.query(Observations).filter(Observations.start >= min_time).all()
 
     for obs in new_obs:
-        if obs.stop is None:
+        if obs.stop is None or len(obs.tunesets)==0:
             SMURF.update_observation_files(
                 obs, 
                 session, 
