@@ -300,7 +300,7 @@ class Context(odict):
         loader_func = OBSLOADER_REGISTRY[loader_type]  # Register your loader?
         aman = loader_func(self.obsfiledb, obs_id, dets=dets,
                            samples=samples, no_signal=no_signal)
- 
+
         if aman is None:
             return meta
         if meta is not None:
@@ -339,7 +339,7 @@ class Context(odict):
                  free_tags=None,
                  check=False,
                  ignore_missing=False,
-                 ignore_missing_dets=True,
+                 ignore_missing_dets=False,
                  det_info_scan=False):
         """Load supporting metadata for an observation and return it in an
         AxisManager.
@@ -450,16 +450,11 @@ class Context(odict):
         # Incorporate detset info from obsfiledb.
         detsets_info = self.obsfiledb.get_det_table(obs_id)
         det_info = metadata.merge_det_info(det_info, detsets_info)
-        expected_dets = det_info.copy()
 
         # Make the request for SuperLoader
         request = {'obs:obs_id': obs_id}
         if detsets is not None:
             request['dets:detset'] = detsets
-            msk = np.where(
-                [x in detsets for x in expected_dets['dets:detset']]
-            )[0]
-            expected_dets = expected_dets.subset(rows=msk)
 
         # Convert dets argument to request entry(s)
         if isinstance(dets, dict):
@@ -477,30 +472,12 @@ class Context(odict):
         elif dets is not None:
             # Try a cast ...
             request['dets:readout_id'] = list(dets)
-        
-        if 'dets:readout_id' in request:
-            msk = np.where(
-                [x in request['dets:readout_id'] for x in
-                expected_dets['dets:readout_id']]
-            )[0]
-            expected_dets = expected_dets.subset(rows=msk)         
-            
+
         metadata_list = self._get_warn_missing('metadata', [])
         meta = self.loader.load(metadata_list, request, det_info=det_info, check=check,
                                 free_tags=free_tags, free_tag_fields=free_tag_fields,
-                                det_info_scan=det_info_scan, ignore_missing=ignore_missing)
-        
-        if meta.dets.count < len(expected_dets):
-            diff = len(expected_dets) - meta.dets.count
-            if ignore_missing_dets:
-                logger.warning(f"{diff} detectors did not have requested "
-                               f"metadata and are removed from loaded "
-                               f"AxisManager")
-            else:
-                raise ValueError(
-                    f"{diff} detectors missing requested metadata."
-                )
-
+                                det_info_scan=det_info_scan,ignore_missing=ignore_missing,
+                                ignore_missing_dets=ignore_missing_dets)
         if check:
             return meta
 
