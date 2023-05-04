@@ -171,6 +171,20 @@ class ContextTest(unittest.TestCase):
             ctx.get_meta(obs_id)
         ctx.get_meta(obs_id, ignore_missing=True)
 
+        # Check detector info with missing entries
+        ctx = dataset_sim.get_context(with_bad_det_info_data=True)
+        with self.assertRaises(Exception):
+            ctx.get_meta(obs_id)
+        ctx.get_meta(obs_id, ignore_missing_dets=True)
+
+        # Check missing metadata
+        ctx = dataset_sim.get_context(with_incomplete_metadata=True)
+        with self.assertRaises(Exception):
+            ctx.get_meta('obs_number_12')
+        ctx.get_meta('obs_number_13')
+        ctx.get_meta('obs_number_12', ignore_missing_dets=True)
+        ctx.get_meta('obs_number_13', ignore_missing_dets=True)
+
     def test_110_more_loads(self):
         dataset_sim = DatasetSim()
         n_det, n_samp = dataset_sim.det_count, dataset_sim.sample_count
@@ -258,7 +272,8 @@ class DatasetSim:
         metadata.SuperLoader.register_metadata('unittest_loader', _TestML)
 
     def get_context(self, with_detdb=True, with_metadata=True,
-                    with_bad_metadata=False):
+                    with_bad_metadata=False, with_bad_det_info_data=False,
+                    with_incomplete_metadata=False):
         detdb = metadata.DetDb()
         detdb.create_table('base', ['readout_id string',
                                     'pol_code string',
@@ -425,8 +440,48 @@ class DatasetSim:
                 'db': 'not-a-file.sqlite',
                 'name': 'important_info&',
             })
+        
+        if with_bad_det_info_data:
+            # metadata: incomplete_det_info.h5
+            ## This is an incomplete dataset.
+            _scheme = metadata.ManifestScheme() \
+                      .add_range_match('obs:timestamp') \
+                      .add_data_field('loader')
+            bad_det_info_db = metadata.ManifestDb(scheme=_scheme)
+            bad_det_info_db.add_entry(
+                {'obs:timestamp': [0, 2e9], 'loader': 'unittest_loader'},
+                 'incomplete_det_info.h5'
+            )
+            # This should cause metadata load error
+            ctx['metadata'].insert(0, {
+                'db': bad_det_info_db,
+                'det_info': True,
+                'name': 'newcal' 
+            })    
 
-        return ctx
+        if with_incomplete_metadata:
+            # metadata: incomplete_metadata.h5
+            ## This is an incomplete dataset.
+            _scheme = metadata.ManifestScheme() \
+                      .add_exact_match('obs:obs_id') \
+                      .add_data_field('loader')
+            bad_meta_db = metadata.ManifestDb(scheme=_scheme)
+            bad_meta_db.add_entry(
+                {'obs:obs_id': 'obs_number_12', 'loader': 'unittest_loader'},
+                 'incomplete_metadata.h5'
+            )
+            bad_meta_db.add_entry(
+                {'obs:obs_id': 'obs_number_13', 'loader': 'unittest_loader'},
+                 'incomplete_metadata.h5'
+            )
+            # This should cause metadata load error
+            ctx['metadata'].insert(0, {
+                'db': bad_meta_db,
+                'name': 'othercal'
+            })    
+
+        return ctx 
+
 
     def metadata_loader(self, kw):
         # For Superloader.
@@ -509,6 +564,28 @@ class DatasetSim:
             for row in self.dets.subset(rows=self.dets['detset'] == kw['dataset']):
                 rs.append({'dets:det_id': row['det_id'],
                            'dets:farness': farness})
+        elif filename == 'incomplete_det_info.h5':
+            rs = metadata.ResultSet(['dets:readout_id', 'dets:newcal'])
+            for row in self.dets.subset(rows=[0,1,2]):
+                rs.append({'dets:readout_id': row['readout_id'],
+                           'dets:newcal':20})
+            return rs
+        elif filename == 'incomplete_metadata.h5':
+            rs = metadata.ResultSet([
+                'obs:obs_id',
+                'dets:readout_id', 
+                'othercal'
+            ])
+            if kw['obs:obs_id']=='obs_number_12': 
+                for row in self.dets.subset(rows=[0,1,2]):
+                    rs.append({'obs:obs_id': 'obs_number_12',
+                               'dets:readout_id': row['readout_id'],
+                               'othercal':40})
+            elif kw['obs:obs_id'] =='obs_number_13': 
+                for row in self.dets:
+                    rs.append({'obs:obs_id': 'obs_number_13',
+                               'dets:readout_id': row['readout_id'],
+                               'othercal':40})
             return rs
         else:
             raise ValueError(f'metadata request for "{filename}"')
