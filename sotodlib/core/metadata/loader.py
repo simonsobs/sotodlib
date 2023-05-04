@@ -297,7 +297,7 @@ class SuperLoader:
 
     def load(self, spec_list, request, det_info=None, free_tags=[],
              free_tag_fields=[], dest=None, check=False, det_info_scan=False,
-             ignore_missing=False):
+             ignore_missing=False, ignore_missing_dets=False):
         """Loads metadata objects and processes them into a single
         AxisManager.
 
@@ -319,7 +319,9 @@ class SuperLoader:
             directly update det_info.
           ignore_missing (bool): If True, don't fail when a metadata
             item can't be loaded, just try to proceed without it.
-
+          ignore_missing_dets (bool): If True, don't fail with a metadata
+            entry _that is not used for detector selection_ does not contain
+            information for any subset of detectors.
         Returns:
           In normal mode, an AxisManager containing the metadata
           (dest).  In check mode, a list of tuples (spec, exception).
@@ -337,6 +339,10 @@ class SuperLoader:
         # Augmented request -- note that dets:* restrictions from
         # request will be added back into this by check tags.
         aug_request = _filter_items('obs:', request, False)
+        # detector fields in request to know if data selection could be
+        # happening
+        det_request_fields = _filter_items('dets:', request.keys(), True)
+
         if self.obsdb is not None and 'obs:obs_id' in request:
             obs_info = self.obsdb.get(request['obs:obs_id'], add_prefix='obs:')
             if obs_info is not None:
@@ -348,7 +354,7 @@ class SuperLoader:
             for k, v in _filter_items('obs:', obs_info).items():
                 obs_man.wrap(k, v)
             dest.wrap('obs_info', obs_man)
-            
+
         def reraise(spec, e):
             logger.error(
                 f"An error occurred while processing a meta entry:\n\n"
@@ -403,8 +409,9 @@ class SuperLoader:
             return det_info, aug_request
 
         det_info, aug_request = check_tags(det_info, aug_request)
+        n_dets = len(det_info)
 
-        # Process each item.
+        # process each item
         items = []
         for spec in spec_list:
             if det_info_scan and not spec.get('det_info'):
@@ -426,11 +433,27 @@ class SuperLoader:
                     reraise(spec, e)
 
             if spec.get('det_info') and error is None:
+                item_keys = _filter_items('dets:', item.keys)
+                new_keys = [k for k in item_keys if k not in det_info.keys]
                 det_info = merge_det_info(
                     det_info, item, multi=spec.get('multi', False))
                 item = None
-
                 det_info, aug_request = check_tags(det_info, aug_request)
+                if (np.any([k in free_tag_fields for k in new_keys]) or
+                    np.any([k in det_request_fields for k in new_keys])):
+                    # free_tag_fields and det_request_fielsa are fields where
+                    # detector selection could be made. So we have to assume
+                    # THESE metadata are known to be complete
+                    n_dets = len(det_info)
+                if len(det_info) < n_dets:
+                    if ignore_missing_dets:
+                        logger.warning(f"{n_dets-len(det_info)} detectors are "
+                                       f"missing metadata information in "
+                                       f"spec={spec}. ")
+                    else:
+                        raise ValueError(f"{n_dets-len(det_info)} detectors are "
+                                         f"missing metadata information in "
+                                         f"spec={spec}. ")
 
             if check:
                 items.append((spec, error))
@@ -458,6 +481,16 @@ class SuperLoader:
                 reraise(spec, e)
 
             logger.debug(f'load(): dest now has shape {dest.shape}')
+
+            if dest.dets.count < n_dets:
+                if ignore_missing_dets:
+                    logger.warning(f"{n_dets-dest.dets.count} detectors are "
+                                   f"missing metadata information in "
+                                   f"spec={spec}. ")
+                else:
+                    raise ValueError(f"{n_dets-dest.dets.count} detectors are "
+                                     f"missing metadata information in "
+                                     f"spec={spec}. ")
 
         check_tags(det_info, aug_request, final=True)
 
