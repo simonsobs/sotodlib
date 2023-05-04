@@ -64,7 +64,13 @@ def _get_groups(obs_id, configs, context):
         groups = det_info.subset(keys=[group_by]).distinct()[group_by]
     return group_by, groups
 
-def preprocess_tod(obs_id, configs, overwrite=False, logger=None):
+def preprocess_tod(
+    obs_id, 
+    configs, 
+    group_list=None, 
+    overwrite=False, 
+    logger=None
+):
     """Meant to be run as part of a batched script, this function calls the
     preprocessing pipeline a specific Observation ID and saves the results in
     the ManifestDb specified in the configs.   
@@ -75,6 +81,10 @@ def preprocess_tod(obs_id, configs, overwrite=False, logger=None):
         obs_id or obs entry that is passed to context.get_obs
     configs: string or dictionary
         config file or loaded config directory
+    group_list: None or list
+        list of groups to run if you only want to run a partial update
+    overwrite: bool
+        if True, overwrite existing entries in ManifestDb
     logger: logging instance
         the logger to print to
     """
@@ -88,6 +98,18 @@ def preprocess_tod(obs_id, configs, overwrite=False, logger=None):
     context = core.Context(configs["context_file"])
     group_by, groups = _get_groups(obs_id, configs, context)
 
+    all_groups = groups.copy()
+    if group_list is not None:
+        for g in all_groups:
+            if g not in group_list:
+                groups.remove(g)
+
+        if len(groups) == 0:
+            logger.warning(f"group_list:{group_list} contains no overlap with "
+                           f"groups in observation: {obs_id}:{all_groups}. "
+                           f"No analysis to run.")
+            return
+ 
     if os.path.exists(configs['archive']['index']):
         logger.info(f"Mapping {configs['archive']['index']} for the "
                     "archive index.")
@@ -105,7 +127,8 @@ def preprocess_tod(obs_id, configs, overwrite=False, logger=None):
         )
 
     pipe = _build_pipe_from_configs(configs)
-
+    
+    logger.info(f"{len(groups)} groups to run for {obs_id}")
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
 
@@ -272,21 +295,25 @@ def main(
         logger.warning(f"No observations returned from query: {query}")
     run_list = []
 
-    if not os.path.exists(configs['archive']['index']):
+    if overwrite or not os.path.exists(configs['archive']['index']):
         #run on all if database doesn't exist
-        run_list = obs_list
+        run_list = [ (o,None) for o in obs_list]
     else:
         db = core.metadata.ManifestDb(configs['archive']['index'])
         for obs in obs_list:
-            x = db.match({'obs:obs_id': obs["obs_id"]}, multi=True)
+            x = db.inspect({'obs:obs_id': obs["obs_id"]})
             group_by, groups = _get_groups(obs["obs_id"], configs, context)
-            if overwrite or (x is None or len(x) != len(groups)):
-                run_list.append(obs)
+            if x is None or len(x) == 0:
+                run_list.append( (obs, None) )
+            elif len(x) != len(groups):
+                [groups.remove(a['dets:detset']) for a in x]
+                run_list.append( (obs, groups) )
 
     logger.info(f"Beginning to run preprocessing on {len(run_list)} observations")
-    for obs in run_list:
+    for obs, groups in run_list:
         logger.info(f"Processing obs_id: {obs_id}")
-        preprocess_tod(obs["obs_id"], configs, overwrite=overwrite,logger=logger)
+        preprocess_tod(obs["obs_id"], configs, overwrite=overwrite,
+                       group_list=groups, logger=logger)
             
 
 if __name__ == '__main__':
