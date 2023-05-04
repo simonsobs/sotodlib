@@ -327,7 +327,7 @@ class SuperLoader:
           ignore_missing (bool): If True, don't fail when a metadata
             item can't be loaded, just try to proceed without it.
           ignore_missing_dets (bool): If True, don't fail with a metadata
-            entry _that is not used for detector selection_ does not contain
+            entry *that is not used for detector selection* does not contain
             information for any subset of detectors.
         Returns:
           In normal mode, an AxisManager containing the metadata
