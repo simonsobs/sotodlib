@@ -759,18 +759,18 @@ def main():
 
     out_dt = np.dtype(
         [
-            ("dets:det_id", det_ids.dtype),
             ("dets:readout_id", aman.det_info.readout_id.dtype),
-            ("dets:band", int),
-            ("dets:channel", int),
-            ("dets:avg_xi", np.float32),
-            ("dets:avg_eta", np.float32),
-            ("dets:avg_polang", np.float32),
-            ("dets:meas_x", np.float32),
-            ("dets:meas_y", np.float32),
-            ("dets:meas_pol", np.float32),
-            ("dets:likelihood", np.float16),
-            ("dets:outliers", bool),
+            ("matched_det_id", det_ids.dtype),
+            ("band", int),
+            ("channel", int),
+            ("xi", np.float32),
+            ("eta", np.float32),
+            ("polang", np.float32),
+            ("meas_x", np.float32),
+            ("meas_y", np.float32),
+            ("meas_pol", np.float32),
+            ("likelihood", np.float16),
+            ("outliers", bool),
         ]
     )
 
@@ -794,8 +794,8 @@ def main():
 
         data_out = np.fromiter(
             zip(
-                det_id,
                 aman.det_info.readout_id,
+                det_id,
                 *focal_plane.T[:5],
                 *transformed.T,
                 P_mapped,
@@ -884,7 +884,7 @@ def main():
     logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
 
     data_out = np.fromiter(
-        zip(det_id, readout_ids, *bc_avg_pointing, *transformed.T, P_mapped, out_msk),
+        zip(readout_ids, det_id, *bc_avg_pointing, *transformed.T, P_mapped, out_msk),
         out_dt,
         count=len(det_id),
     )
