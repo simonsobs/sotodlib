@@ -459,8 +459,10 @@ class SuperLoader:
                 if len(det_info) < n_dets:
                     if ignore_missing_dets:
                         logger.warning(f"{n_dets-len(det_info)} detectors are "
-                                       f"missing metadata information in "
+                                       f"missing det_info information in "
                                        f"spec={spec}. ")
+                        # reset count so warning doesn't propagate
+                        n_dets = len(det_info) 
                     else:
                         raise ValueError(f"{n_dets-len(det_info)} detectors are "
                                          f"missing metadata information in "
@@ -498,6 +500,8 @@ class SuperLoader:
                     logger.warning(f"{n_dets-dest.dets.count} detectors are "
                                    f"missing metadata information in "
                                    f"spec={spec}. ")
+                    # reset count so warning doesn't propagate
+                    n_dets = dest.dets.count 
                 else:
                     raise ValueError(f"{n_dets-dest.dets.count} detectors are "
                                      f"missing metadata information in "
