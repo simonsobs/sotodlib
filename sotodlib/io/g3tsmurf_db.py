@@ -32,11 +32,13 @@ class Observations(Base):
     
     Dec. 2021 -- The definitions of obs_id and timestamp changed to better 
     match the operation of the smurf-streamer / sodetlib / pysmurf.
+    Oct. 2022 -- The definition of obs_id changed again to include obs or oper
+    tags based on if the observation is an sodetlib operation or not.
     
     Attributes 
     -----------
     obs_id : string
-        <stream_id>_<session_id>. 
+        <obs|oper>_<stream_id>_<session_id>. 
     timestamp : integer
         The .g3 session_id, which is also the ctime the .g3 streaming started
         and the first part .g3 file name.
