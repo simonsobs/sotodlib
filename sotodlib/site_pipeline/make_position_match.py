@@ -40,55 +40,6 @@ def create_db(filename):
     metadata.ManifestDb(scheme=scheme).to_file(filename)
 
 
-def LAT_coord_transform(xy, rot_fp, rot_ufm, r=72.645):
-    """
-    Transform from instrument model coords to LAT Zemax coords
-
-    Arguments:
-
-        xy: XY coords from instrument model.
-            Should be a (2, n) array.
-
-        rot_fp: Angle of array location on focal plane in deg.
-
-        rot_ufm: Rotatation of UFM about its center.
-
-    Returns:
-
-        xy_trans: Transformed coords.
-    """
-    xy_trans = np.zeros((xy.shape[1], 3))
-    xy_trans[:, :2] = xy.T
-
-    r1 = R.from_euler("z", rot_fp, degrees=True)
-    shift = r1.apply(np.array([r, 0, 0]))
-
-    r2 = R.from_euler("z", rot_ufm, degrees=True)
-    xy_trans = r2.apply(xy_trans) + shift
-
-    return xy_trans.T[:2]
-
-
-def rescale(xy):
-    """
-    Rescale pointing or template to [0, 1]
-
-    Arguments:
-
-        xy: Pointing or template, should have two columns.
-
-    Returns:
-
-        xy_rs: Rescaled array.
-    """
-    xy_rs = xy.copy()
-    xy_rs[:, 0] /= xy[:, 0].max() - xy[:, 0].min()
-    xy_rs[:, 0] -= xy_rs[:, 0].min()
-    xy_rs[:, 1] /= xy[:, 1].max() - xy[:, 1].min()
-    xy_rs[:, 1] -= xy_rs[:, 1].min()
-    return xy_rs
-
-
 def priors_from_result(
     fp_readout_ids,
     template_det_ids,
@@ -175,7 +126,7 @@ def gen_priors(aman, template_det_ids, prior, method="flat", width=1, basis=None
 
     def _gaussian(x_axis, idx):
         arr = 1 + (prior - 1) * np.exp(
-            -0.5 * ((x_axis - x_axis[idx]) ** 2) / (width ** 2)
+            -0.5 * ((x_axis - x_axis[idx]) ** 2) / (width**2)
         )
         return arr
 
@@ -532,9 +483,7 @@ def main():
     if len(pointings) == 1:
         create_db(config["manifest_db"])
         db = metadata.ManifestDb(config["manifest_db"])
-        outpath = os.path.join(
-            config["outdir"], f"{ufm}_{obs.obs_id}{append}.h5"
-        )
+        outpath = os.path.join(config["outdir"], f"{ufm}_{obs.obs_id}{append}.h5")
     else:
         outpath = os.path.join(
             config["outdir"], f"{ufm}_{obs.tunesets[0].id}{append}.h5"
