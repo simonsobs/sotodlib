@@ -533,16 +533,14 @@ def main():
         create_db(config["manifest_db"])
         db = metadata.ManifestDb(config["manifest_db"])
         outpath = os.path.join(
-            config["outdir"], f"{ufm}_{str(obs.timestamp)[:5]}{append}.h5"
+            config["outdir"], f"{ufm}_{obs.obs_id}{append}.h5"
         )
-        dataset = obs.obs_id + "/focal_plane"
-        input_paths = obs.obs_id + "/input_data_paths"
     else:
         outpath = os.path.join(
             config["outdir"], f"{ufm}_{obs.tunesets[0].id}{append}.h5"
         )
-        dataset = "focal_plane"
-        input_paths = "input_data_paths"
+    dataset = "focal_plane"
+    input_paths = "input_data_paths"
     outpath = os.path.abspath(outpath)
 
     # Make ResultSet of input paths for later reference
