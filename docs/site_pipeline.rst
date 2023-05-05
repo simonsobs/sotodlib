@@ -378,8 +378,7 @@ The second dataset is called `focal_plane` and has columns:
 - `likelihood`, the liklihood of the match for each detector.
 - `outliers`, flag that shows which detectors look like outliers.
 
-In the case where this element is run on a single observation the datasets will be
-contained in a group named after the `obs_id`. In this case the results can be found
+If the input contained only a single observation the results can be found
 using the ManifestDb specified in the config file, this ManifestDb is indexed by `obs_id`.
 
 Support
