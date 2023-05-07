@@ -6,9 +6,10 @@ LAT code adapted from code provided by Simon Dicker.
 """
 import logging
 import numpy as np
-from scipy.interpolate import interp2d
+from scipy.interpolate import interp2d, interp1d
 from scipy.spatial.transform import Rotation as R
 from sotodlib import core
+from so3g.proj import quat
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,15 @@ LAT_TUBES = {
     "o5": 6,
     "o6": 11,
 }
+
+# SAT Optics
+# TODO: Maybe we want these to be provided in a config file?
+SAT_X = np.array(
+    [0.00000, 29.7580, 59.4574, 89.5745, 120.550, 152.821, 163.986, 181.218]
+)
+SAT_THETA = np.array(
+    [0.00000, 2.99999, 5.99999, 8.99999, 12.0000, 14.9999, 15.9999, 17.4999]
+)
 
 
 # TODO: Should probably have a lookup table that maps tube/wafer to the correct parameters
@@ -272,6 +282,49 @@ def LAT_focal_plane(
         array2secx, array2secy = LATR_optics(zemax_dat, tube)
 
     xi, eta = LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot)
+
+    if aman is not None:
+        focal_plane = core.AxisManager(aman.dets)
+        focal_plane.wrap("xi", xi, [(0, focal_plane.dets)])
+        focal_plane.wrap("eta", eta, [(0, focal_plane.dets)])
+        aman.wrap("focal_plane", focal_plane)
+
+    return xi, eta
+
+
+def SAT_focal_plane(aman, x=None, y=None):
+    """
+    Compute focal plane for a wafer in the SAT.
+
+    Arguments:
+
+        aman: AxisManager nominally containing aman.det_info.wafer.
+              If provided focal plane will be stored in aman.focal_plane.
+
+        x: Detector x positions, if provided will override positions loaded from aman.
+
+        y: Detector y positions, if provided will override positions loaded from aman.
+
+    Returns:
+
+        xi: Detector elev on sky from physical optics.
+            If aman is provided then will be wrapped as aman.focal_plane.xi.
+
+        eta: Detector xel on sky from physical optics.
+             If aman is provided then will be wrapped as aman.focal_plane.eta.
+    """
+    if x is None:
+        x = aman.det_info.wafer.det_x
+    if y is None:
+        y = aman.det_info.wafer.det_y
+
+    # TODO: Need a convenient way to automatically transform from wafer to focal plane coords
+
+    fp_to_sky = interp1d(SAT_X, SAT_THETA, fill_value="extrapolate")
+    # NOTE: The -1 does the flip about the origin
+    theta = -1 * np.sign(x) * fp_to_sky(np.abs(x))
+    phi = -1 * np.sign(y) * fp_to_sky(np.abs(y))
+    xi, eta, gamma = quat.decompose_xieta(quat.rotation_iso(theta, phi))
 
     if aman is not None:
         focal_plane = core.AxisManager(aman.dets)
