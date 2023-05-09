@@ -368,7 +368,8 @@ def fit_params(
         )
     except:
         all_params = np.empty(9)
-        all_params[:] = np.nan
+        all_params[0] = tod.dets.vals.squeeze()
+        all_params[1:] = np.nan
         return all_params
 
     p0[0] = popt_pointing[0]
@@ -430,7 +431,8 @@ def fit_params(
         )
     except:
         all_params = np.empty(9)
-        all_params[:] = np.nan
+        all_params[0] = tod.dets.vals.squeeze()
+        all_params[1:] = np.nan
         return all_params
 
     p0[3] = popt_beam[0]  # fwhm_xi
@@ -452,7 +454,8 @@ def fit_params(
 
     except:
         all_params = np.empty(9)
-        all_params[:] = np.nan
+        all_params[0] = tod.dets.vals.squeeze()
+        all_params[1:] = np.nan
         return all_params
 
     q_t = quat.rotation_xieta(xi_t, eta_t)
@@ -461,7 +464,7 @@ def fit_params(
     noise = np.nanstd(data[np.where(radius > radius_cut)[0]])
     snr = popt[0] / noise
 
-    all_params = np.array([*popt, tod.dets.vals.squeeze(), snr])
+    all_params = np.array([tod.dets.vals.squeeze(), *popt, snr])
 
     return all_params
 
@@ -539,6 +542,7 @@ def run(
     
     df = pd.DataFrame(
         columns=[
+            "dets:readout_id",
             "amp",
             "xi0",
             "eta0",
@@ -546,17 +550,14 @@ def run(
             "fwhm_eta",
             "phi",
             "tau",
-            "dets:readout_id",
             "snr",
-        ],
-        index=rd_idx_rng,
-    )
+        ], index=rd_idx_rng,)
 
     for rd_idx in rd_idx_rng:
         rd_id = rd_ids[rd_idx]
-        params = fit_params(
-            ctx, obs_id, ctime, az, el, band, sso_name, rd_id, highpass, cutoff, init_params
-        )
+        params = fit_params(ctx, obs_id, ctime, az, el, 
+                            band, sso_name, rd_id, 
+                            highpass, cutoff, init_params)
         df.loc[rd_idx, :] = np.array(params)
     all_dfs = comm.gather(df, root=0)
 
@@ -566,6 +567,7 @@ def run(
         full_df = full_df.set_index(full_df["dets:readout_id"])
 
         new_dtypes = {
+            "dets:readout_id": str,
             "amp": np.float64,
             "xi0": np.float64,
             "eta0": np.float64,
@@ -573,7 +575,6 @@ def run(
             "fwhm_eta": np.float64,
             "phi": np.float64,
             "tau": np.float64,
-            "dets:readout_id": str,
             "snr": np.float64,
         }
         full_df = full_df.astype(new_dtypes)
