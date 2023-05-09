@@ -16,6 +16,7 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
 from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 from ..core import AxisManager
+from ..tod_ops import glitch as gl
 
 
 class FFTTrim(_Preprocess):
@@ -1645,6 +1646,46 @@ class PointingModel(_Preprocess):
         if self.process_cfgs:
             pointing_model.apply_pointing_model(aman)
 
+
+class GlitchAggregate(_Preprocess):
+    """Collect glitches across detectors and compute relevant stats for
+    understanding the nature of each glitch
+    """
+    name = "glitch_aggregate"
+
+    def process(self, aman, proc_aman):
+        assert "glitches" in aman
+
+        n_thres = self.process_cfgs.get("n_thres", 2)
+        n_buffer = self.process_cfgs.get("n_buffer", 5)
+
+        glitches = aman.glitches
+        flags = glitches.glitch_flags
+
+        # get the number of detectors affected by each glitch
+        n_affected = np.zeros(glitches.shape[1], dtype=int)
+        for r in flags:
+            n_affected += r.mask()
+
+        # get the ranges when >= `n_thres` detectors are affected
+        ranges_affected = gl.ranges_from_n_affected(n_affected, n_thres=n_thres, buffer=n_buffer)
+
+        # compile list of dets in each range
+        dets_affected = gl.dets_in_ranges(flags, ranges_affected)
+
+        # compile slices for each range
+        slices = gl.ranges2slices(ranges_affected, offset=glitches.samps.offset)
+
+        # build snippet layouts each of which is an axis manager containing
+        # restricted axes
+        snippet_layouts = gl.build_snippet_layouts(aman, slices, dets_affected)
+
+        # if we need extract snippets from aman, here's how to do it:
+        snippets = gl.extract_snippets(aman, snippet_layouts)
+
+        # TODO: save them for later
+
+
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
@@ -1680,3 +1721,4 @@ _Preprocess.register(RotateQU)
 _Preprocess.register(SubtractQUCommonMode) 
 _Preprocess.register(FocalplaneNanFlags) 
 _Preprocess.register(PointingModel) 
+_Preprocess.register(GlitchAggregate)
