@@ -538,7 +538,7 @@ def run(
     nrd = len(rd_ids)
     nsample_task = nrd // ntask + 1
     rd_idx_rng = np.arange(rank * nsample_task,
-                            min((rank + 1) * nsample_task, nrd -1))
+                            min((rank + 1) * nsample_task, nrd))
     
     df = pd.DataFrame(
         columns=[
