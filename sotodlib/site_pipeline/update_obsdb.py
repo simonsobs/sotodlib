@@ -50,14 +50,26 @@ def update_obsdb(base_dir, recency=2., verbosity=2, preexist_obsdb=None):
             bookcart.append(dirpath)
     #Check the books for obsdb
     for bookpath in bookcart:
-        if check_meta_type(bookpath)=="obsdb":
-            context = Context(os.path.join(bookpath, "M_index.yaml"), "rb")
-            single_obsdb = context.obsdb 
-            singe_obsfiledb = context.obsfiledb
-            bookcartobsdb.update_obs(single_obsdb)
-            #bookcartobsfiledb.add_obsfile()
+        if check_meta_type(bookpath)=="obs":
+            index = yaml.safe_load(open(os.path.join(bookpath, "M_index.yaml"), "rb"))
+            obs_id = index.pop("book_id")
+            tags = index.pop("tags")
+            detsets = index.pop("detsets")
+            col_list = []
+            clean = {key:val for key, val in index.items() if val is not None}
+            very_clean = {key:val for key, val in clean.items() if type(val) is not list}
+            for key, val in very_clean.items():
+                col_list.append(key+" "+type(val).__name__)
+            bookcartobsdb.add_obs_columns(col_list)
+            if tags[0] != '':
+                bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
+            else:
+                bookcartobsdb.update_obs(obs_id, very_clean)
+            #bookcartobsfiledb.add_obsfile(bookpath, obs_id, detsets)
         else:
             bookcart.remove(bookpath)
+
+
 
 def get_parser(parser=None):
     if parser is None:
