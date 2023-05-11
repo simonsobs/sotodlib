@@ -192,4 +192,4 @@ HWPSS
 Demodulation
 ============
 
-.. autofunction:: sotodlib.hwp.hwp.demod
+.. autofunction:: sotodlib.hwp.hwp.demod_tod
