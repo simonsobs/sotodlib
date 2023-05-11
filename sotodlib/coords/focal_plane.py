@@ -5,6 +5,7 @@ Currently only works for the LAT.
 LAT code adapted from code provided by Simon Dicker.
 """
 import logging
+from functools import cache
 import numpy as np
 from scipy.interpolate import interp2d, interp1d
 from scipy.spatial.transform import Rotation as R
@@ -39,12 +40,8 @@ LAT_TUBES = {
 
 # SAT Optics
 # TODO: Maybe we want these to be provided in a config file?
-SAT_X = np.array(
-    [0.00000, 29.7580, 59.4574, 89.5745, 120.550, 152.821, 163.986, 181.218]
-)
-SAT_THETA = np.array(
-    [0.00000, 2.99999, 5.99999, 8.99999, 12.0000, 14.9999, 15.9999, 17.4999]
-)
+SAT_X = (0.00000, 29.7580, 59.4574, 89.5745, 120.550, 152.821, 163.986, 181.218)
+SAT_THETA = (0.00000, 2.99999, 5.99999, 8.99999, 12.0000, 14.9999, 15.9999, 17.4999)
 
 
 # TODO: Should probably have a lookup table that maps tube/wafer to the correct parameters
@@ -131,14 +128,35 @@ def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo
     return elev, xel
 
 
-def LAT_optics(zemax_dat):
+@cache
+def load_zemax(path):
+    """
+    Load zemax_dat from path
+
+    Arguments:
+
+        path: Path to zemax data
+
+    Returns:
+
+        zemax_dat: Dictionairy with data from zemax
+    """
+    try:
+        zemax_dat = np.load(path, allow_pickle=True)
+    except Exception as e:
+        logger.error("Can't load data from " + path)
+        raise e
+    return dict(zemax_dat)
+
+
+@cache
+def LAT_optics(zemax_path):
     """
     Compute mapping from LAT secondary to sky.
 
     Arguments:
 
-        zemax_dat: LAT optics data from zemax.
-                   Can either be a path to the data file or the dict loaded from the file.
+        zemax_path: Path to LAT optics data from zemax.
 
     Returns:
 
@@ -146,15 +164,7 @@ def LAT_optics(zemax_dat):
 
         sex2xel: Function that maps positions on secondary to on sky xel.
     """
-    if isinstance(zemax_dat, str):
-        try:
-            zemax_dat = np.load(zemax_dat, allow_pickle=True)
-        except Exception as e:
-            logger.error("Can't load data from " + zemax_dat)
-            raise e
-    elif not isinstance(zemax_dat, dict):
-        logger.error("zemax_dat should either be a path or a dictionary")
-        raise TypeError
+    zemax_dat = load_zemax(zemax_path)
     try:
         LAT = zemax_dat["LAT"][()]
     except Exception as e:
@@ -168,14 +178,14 @@ def LAT_optics(zemax_dat):
     return sec2elev, sec2xel
 
 
-def LATR_optics(zemax_dat, tube):
+@cache
+def LATR_optics(zemax_path, tube):
     """
     Compute mapping from LAT secondary to sky.
 
     Arguments:
 
-        zemax_dat: LATR optics data from zemax.
-                   Can either be a path to the data file or the dict loaded from the file.
+        zemax_path: Path to LATR optics data from zemax.
 
         tube: Either the tube name as a string or the tube number as an int.
 
@@ -185,15 +195,7 @@ def LATR_optics(zemax_dat, tube):
 
         array2secy: Function that maps positions on tube's focal plane to y position on secondary.
     """
-    if isinstance(zemax_dat, str):
-        try:
-            zemax_dat = np.load(zemax_dat, allow_pickle=True)
-        except Exception as e:
-            logger.error("Can't load data from " + zemax_dat)
-            raise e
-    elif not isinstance(zemax_dat, dict):
-        logger.error("zemax_dat should either be a path or a dictionary")
-        raise TypeError
+    zemax_dat = load_zemax(zemax_path)
     try:
         LATR = zemax_dat["LATR"][()]
     except Exception as e:
@@ -234,7 +236,7 @@ def LATR_optics(zemax_dat, tube):
 
 
 def LAT_focal_plane(
-    aman, zemax_dat, x=None, y=None, rot=0, tube="c", transform_pars=None
+    aman, zemax_path, x=None, y=None, rot=0, tube="c", transform_pars=None
 ):
     """
     Compute focal plane for a wafer in the LAT.
@@ -244,9 +246,7 @@ def LAT_focal_plane(
         aman: AxisManager nominally containing aman.det_info.wafer.
               If provided focal plane will be stored in aman.focal_plane.
 
-        zemax_dat: LATR optics data from zemax.
-                   Can be a path to the data file, the dict loaded from the file,
-                   or a tuple with (sec2elev, sec2xel, array2secx, array2secy).
+        zemax_path: Path to LATR optics data from zemax.
 
         x: Detector x positions, if provided will override positions loaded from aman.
 
@@ -275,11 +275,8 @@ def LAT_focal_plane(
     if transform_pars is not None:
         x, y = LAT_coord_transform(x, y, *transform_pars)
 
-    if not isinstance(zemax_dat, (str, dict)):
-        sec2elev, sec2xel, array2secx, array2secy = zemax_dat
-    else:
-        sec2elev, sec2xel = LAT_optics(zemax_dat)
-        array2secx, array2secy = LATR_optics(zemax_dat, tube)
+    sec2elev, sec2xel = LAT_optics(zemax_path)
+    array2secx, array2secy = LATR_optics(zemax_path, tube)
 
     xi, eta = LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot)
 
@@ -292,7 +289,25 @@ def LAT_focal_plane(
     return xi, eta
 
 
-def SAT_focal_plane(aman, x=None, y=None, fp_to_sky=None):
+@cache
+def sat_to_sky(x, theta):
+    """
+    Interpolate x and theta values to create mapping from SAT focal plane to sky.
+    This function is a wrapper whose main purpose is the cache this mapping.
+
+    Arguments:
+        x: X values in mm, should be all positive.
+
+        theta: Theta values in deg, should be all positive.
+               Theta is defined by ISO coordinates.
+
+    Return:
+        sat_to_sky: Interp object with the mapping from the focal plane to sky.
+    """
+    return interp1d(x, theta, fill_value="extrapolate")
+
+
+def SAT_focal_plane(aman, x=None, y=None, mapping_data=None):
     """
     Compute focal plane for a wafer in the SAT.
 
@@ -305,8 +320,8 @@ def SAT_focal_plane(aman, x=None, y=None, fp_to_sky=None):
 
         y: Detector y positions, if provided will override positions loaded from aman.
 
-        fp_to_sky: Interp object that maps x to theta (equivalent to y to phi).
-                   Leave as None to use the default mapping.
+        mapping_data: Tuple of (x, theta) that can be interpolated to map the focal plane to the sky.
+                      Leave as None to use the default mapping.
 
     Returns:
 
@@ -323,8 +338,11 @@ def SAT_focal_plane(aman, x=None, y=None, fp_to_sky=None):
 
     # TODO: Need a convenient way to automatically transform from wafer to focal plane coords
 
-    if fp_to_sky is None:
-        fp_to_sky = interp1d(SAT_X, SAT_THETA, fill_value="extrapolate")
+    if mapping_data is None:
+        fp_to_sky = sat_to_sky(SAT_X, SAT_THETA)
+    else:
+        mapping_data = (tuple(val) for val in fp_to_sky)
+        fp_to_sky = sat_to_sky(*mapping_data)
     # NOTE: The -1 does the flip about the origin
     theta = -1 * np.sign(x) * fp_to_sky(np.abs(x))
     phi = -1 * np.sign(y) * fp_to_sky(np.abs(y))
