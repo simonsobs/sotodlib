@@ -191,25 +191,6 @@ class Calibrate(_Preprocess):
             raise ValueError(f"Entry '{self.process_cfgs['kind']}'"
                               " not understood")
 
-class HWPSSGuess(_Preprocess):
-    """Calculates a guessed HWP Syncronous Signal. All calc configs sent to
-    `get_hwp_guess`. Results saved in the 'hwpss_guess" field of proc_aman.
-
-    .. autofunction:: sotodlib.hwp.hwp.get_hwpss_guess
-    """
-    name = "hwpss_guess"
-
-    def calc_and_save(self, aman, proc_aman):
-        hwpss_guess_aman = hwp.get_hwpss_guess(aman, **self.calc_cfgs)
-        self.save(proc_aman, hwpss_guess_aman)
-
-    def save(self, proc_aman, hwpss_guess_aman):
-        if self.save_cfgs is None:
-            return
-        if self.save_cfgs:
-            proc_aman.wrap("hwpss_guess", hwpss_guess_aman)
-
-
 class EstimateHWPSS(_Preprocess):
     """Builds a HWPSS Template based on parameters calculated earlier. Assumes
     proc_aman has the field "hwpss_guess" and all other calc configs go to
@@ -280,7 +261,6 @@ _Preprocess.register(GlitchDetection.name, GlitchDetection)
 _Preprocess.register(PSDCalc.name, PSDCalc)
 _Preprocess.register(Noise.name, Noise)
 _Preprocess.register(Calibrate.name, Calibrate)
-_Preprocess.register(HWPSSGuess.name, HWPSSGuess)
 _Preprocess.register(EstimateHWPSS.name, EstimateHWPSS)
 _Preprocess.register(SubtractHWPSS.name, SubtractHWPSS)
 _Preprocess.register(Apodize.name, Apodize)
