@@ -425,7 +425,7 @@ def subtract_hwpss(aman, signal=None, hwpss_template=None,
 
 
 def demod_tod(aman, signal_name='signal', demod_mode=4,
-              bpf=None, lpf=None):
+              bpf_cfg=None, lpf_cfg=None):
     """
     Demodulate TOD based on HWP angle
 
@@ -437,12 +437,12 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
         Axis name of the demodulated signal in aman. Default is 'signal'.
     demod_mode : int, optional
         Demodulation mode. Default is 4.
-    bpf : filter function of the sotodlib.tod_ops.filters
-        Band-pass filter applied to the TOD data before demodulation. If not specified,
-        a 4th-order Butterworth filter of (demod_mode * HWP speed) +/- 0.95*(HWP speed)
-        is used.
-    lpf : np.ndarray, optional
-        Low-pass filter applied to the demodulated TOD data. If not specified,
+    bpf_cfg : dict
+        Configuration for Band-pass filter applied to the TOD data before demodulation.
+        If not specified, a 4th-order Butterworth filter of 
+        (demod_mode * HWP speed) +/- 0.95*(HWP speed) is used.
+    lpf_cfg : dict
+        Configuration for Low-pass filter applied to the demodulated TOD data. If not specified,
         a 4th-order Butterworth filter with a cutoff frequency of 0.95*(HWP speed)
         is used.
 
@@ -459,15 +459,19 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
     speed = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
             (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
     
-    if bpf is None:
+    if bpf_cfg is None:
         bpf_center = demod_mode * speed
         bpf_width = speed * 2. * 0.95
-        bpf = tod_ops.filters.low_pass_butter4(fc=bpf_center + bpf_width/2.) *\
-            tod_ops.filters.high_pass_butter4(fc=bpf_center - bpf_width/2.)
+        bpf_cfg = {'type': 'butter4',
+                   'center': bpf_center,
+                   'width': bpf_width}
+        bpf = get_bpf(bpf_cfg)
     
-    if lpf is None:
+    if lpf_cfg is None:
         lpf_cutoff = speed * 0.95
-        lpf = tod_ops.filters.low_pass_butter4(fc=lpf_cutoff)
+        lpf_cfg = {'type': 'butter4',
+                  'cutoff': lpf_cutoff}
+        lpf = get_lpf(lpf_cfg)
         
     phasor = np.exp(demod_mode * 1.j * aman.hwp_angle)
     demod = tod_ops.fourier_filter(aman, bpf, detrend=None,
@@ -488,4 +492,62 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
     aman['demodU'] = demod.imag
     aman['demodU'] = tod_ops.fourier_filter(
         aman, lpf, signal_name='demodU', detrend=None) * 2.
-    
+
+def get_lpf(lpf_cfg):
+    """
+    Returns a low-pass filter based on the configuration.
+
+    Args:
+        lpf_cfg (dict): A dictionary containing the low-pass filter configuration.
+            It must have the following keys:
+            - "type": A string specifying the type of low-pass filter. Supported values are "butter4" and "sine2".
+            - "cutoff": A float specifying the cutoff frequency of the low-pass filter.
+            - "trans_width": A float specifying the transition width of the low-pass filter (only for "sine2" type).
+
+    Returns:
+        numpy.ndarray: A 1D array representing the filter coefficients of the low-pass filter.
+    """
+    if lpf_cfg['type'] == 'butter4':
+        cutoff = lpf_cfg['cutoff']
+        return tod_ops.filters.low_pass_butter4(fc=cutoff)
+    elif lpf_cfg['type'] == 'sine2':
+        cutoff = lpf_cfg['cutoff']
+        trans_width = lpf_cfg['trans_width']
+        return tod_ops.filters.low_pass_sine2(cutoff=cutoff, width=trans_width)
+    else:
+        raise ValueError('Unsupported filter type. Supported filters are `butter4` and `sine2`')
+
+
+def get_bpf(bpf_cfg):
+    """
+    Returns a band-pass filter based on the configuration.
+
+    Args:
+        bpf_cfg (dict): A dictionary containing the band-pass filter configuration.
+            It must have the following keys:
+            - "type": A string specifying the type of band-pass filter. Supported values are "butter4" and "sine2".
+            - "center": A float specifying the center frequency of the band-pass filter.
+            - "width": A float specifying the width of the band-pass filter.
+            - "trans_width": A float specifying the transition width of the band-pass filter (only for "sine2" type).
+
+    Returns:
+        numpy.ndarray: A 1D array representing the filter coefficients of the band-pass filter.
+    """
+    if bpf_cfg['type'] == 'butter4':
+        center = bpf_cfg['center']
+        width = bpf_cfg['width']
+        return tod_ops.filters.low_pass_butter4(fc=center + width/2.) *\
+                tod_ops.filters.high_pass_butter4(fc=center - width/2.)
+    elif bpf_cfg['type'] == 'sine2':
+        center = bpf_cfg['center']
+        width = bpf_cfg['width']
+        trans_width = bpf_cfg['trans_width']
+        return tod_ops.filters.low_pass_sine2(cutoff=center + width/2., width=trans_width)*\
+                tod_ops.filters.high_pass_sine2(cutoff=center - width/2., width=trans_width)
+    else:
+        raise ValueError('Unsupported filter type. Supported filters are `butter4` and `sine2`')
+
+
+        
+        
+        
