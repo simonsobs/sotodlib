@@ -10,7 +10,9 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
                   bin_signal=True, bins=3600,
                   lin_reg=True, modes=[1, 2, 3, 4, 6, 8],
                   apply_prefilt=True, prefilt_cutoff=1.0,
-                  mask_flags=True, add_to_aman=True, name='hwpss_extract'):
+                  mask_flags=True,
+                  add_stats_to_aman=True, hwpss_stats_name='hwpss_stats',
+                  add_extracted_to_aman=True, hwpss_extract_name='hwpss_extract'):
     """
     Extracts HWP synchronous signal (HWPSS) from a time-ordered data (TOD) using linear regression or curve-fitting.
 
@@ -44,7 +46,7 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
 
     Returns
     -------
-    aman_proc : AxisManager object
+    hwpss_stats : AxisManager object
         The processed TOD with the extracted HWPSS and associated statistics.
     """
 
@@ -59,22 +61,22 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
     if hwp_angle is None:
         hwp_angle = aman.hwp_angle
 
-    # define aman_proc
+    # define hwpss_stats
     mode_names = []
     for mode in modes:
         mode_names.append(f'S{mode}')
         mode_names.append(f'C{mode}')
 
-    aman_proc = core.AxisManager(aman.dets, aman.samps, core.LabelAxis(
+    hwpss_stats = core.AxisManager(aman.dets, aman.samps, core.LabelAxis(
         name='modes', vals=np.array(mode_names, dtype='<U3')))
     if bin_signal:
         hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = binning_signal(
             aman, signal, hwp_angle=None, bins=bins, mask_flags=mask_flags)
-        aman_proc.wrap('hwp_angle_bin_centers', hwp_angle_bin_centers, [
+        hwpss_stats.wrap('hwp_angle_bin_centers', hwp_angle_bin_centers, [
                        (0, core.IndexAxis('bin_samps', count=bins))])
-        aman_proc.wrap('binned_hwpss', binned_hwpss, [
+        hwpss_stats.wrap('binned_hwpss', binned_hwpss, [
                        (0, 'dets'), (1, 'bin_samps')])
-        aman_proc.wrap('hwpss_sigma_bin', hwpss_sigma_bin, [(0, 'dets')])
+        hwpss_stats.wrap('hwpss_sigma_bin', hwpss_sigma_bin, [(0, 'dets')])
 
         if lin_reg:
             fitsig_binned, coeffs, covars, redchi2s = hwpss_linreg(
@@ -88,13 +90,12 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
         fitsig_tod = harms_func(hwp_angle, modes, coeffs)
 
         # wrap the optimal values and stats
-        aman_proc.wrap('fitsig_binned', fitsig_binned,
+        hwpss_stats.wrap('fitsig_binned', fitsig_binned,
                        [(0, 'dets'), (1, 'bin_samps')])
-        aman_proc.wrap('coeffs', coeffs, [(0, 'dets'), (1, 'modes')])
-        aman_proc.wrap('covars', covars, [
+        hwpss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, 'modes')])
+        hwpss_stats.wrap('covars', covars, [
                        (0, 'dets'), (1, 'modes'), (2, 'modes')])
-        aman_proc.wrap('redchi2s', redchi2s, [(0, 'dets')])
-        aman_proc.wrap('fitsig_tod', fitsig_tod, [(0, 'dets'), (1, 'samps')])
+        hwpss_stats.wrap('redchi2s', redchi2s, [(0, 'dets')])
 
     else:
         if mask_flags:
@@ -103,7 +104,7 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
             m = np.ones([aman.dets.count, aman.samps.count], dtype=bool)
 
         hwpss_sigma_tod = estimate_sigma_tod(signal, hwp_angle)
-        aman_proc.wrap('hwpss_sigma_tod', hwpss_sigma_tod, [(0, 'dets')])
+        hwpss_stats.wrap('hwpss_sigma_tod', hwpss_sigma_tod, [(0, 'dets')])
 
         if lin_reg:
             fitsig_tod, coeffs, covars, redchi2s = hwpss_linreg(
@@ -114,15 +115,16 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
                              'It will take too long time and return meaningless result.' +
                              'Specify (bin_signal, lin_reg) = (True, True) or (True, False) or (False, True)')
 
-        aman_proc.wrap('coeffs', coeffs, [(0, 'dets'), (1, 'modes')])
-        aman_proc.wrap('covars', covars, [
+        hwpss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, 'modes')])
+        hwpss_stats.wrap('covars', covars, [
                        (0, 'dets'), (1, 'modes'), (2, 'modes')])
-        aman_proc.wrap('redchi2s', redchi2s, [(0, 'dets')])
-        aman_proc.wrap('fitsig_tod', fitsig_tod, [(0, 'dets'), (1, 'samps')])
-
-    if add_to_aman:
-        aman.wrap(name, fitsig_tod, [(0, 'dets'), (1, 'samps')])
-    return aman_proc
+        hwpss_stats.wrap('redchi2s', redchi2s, [(0, 'dets')])
+    
+    if add_stats_to_aman:
+        aman.wrap(hwpss_stats_name, hwpss_stats)
+    if add_extracted_to_aman:
+        aman.wrap(hwpss_extract_name, fitsig_tod, [(0, 'dets'), (1, 'samps')])
+    return hwpss_stats
 
 
 def binning_signal(aman, signal=None, hwp_angle=None,
@@ -465,13 +467,13 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
         bpf_cfg = {'type': 'butter4',
                    'center': bpf_center,
                    'width': bpf_width}
-        bpf = get_bpf(bpf_cfg)
+    bpf = get_bpf(bpf_cfg)
     
     if lpf_cfg is None:
         lpf_cutoff = speed * 0.95
         lpf_cfg = {'type': 'butter4',
                   'cutoff': lpf_cutoff}
-        lpf = get_lpf(lpf_cfg)
+    lpf = get_lpf(lpf_cfg)
         
     phasor = np.exp(demod_mode * 1.j * aman.hwp_angle)
     demod = tod_ops.fourier_filter(aman, bpf, detrend=None,

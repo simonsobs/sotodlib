@@ -193,23 +193,22 @@ class Calibrate(_Preprocess):
 
 class EstimateHWPSS(_Preprocess):
     """
-    Builds a HWPSS Template. Calc configs go to `extract_hwpss_template`.
-    Results saved if field specified by calc["name"]
+    Builds a HWPSS Template. Calc configs go to `extract_hwpss`.
+    Results of fitting saved if field specified by calc["name"]
 
     .. autofunction:: sotodlib.hwp.hwp.extract_hwpss
     """
     name = "estimate_hwpss"
 
     def calc_and_save(self, aman, proc_aman):
-        hwpss_template = hwp.extract_hwpss(aman, **self.calc_cfgs)
-        aman.wrap(self.calc_cfgs["name"], hwpss_template)
-        self.save(proc_aman, hwpss_template)
+        hwpss_stats = hwp.extract_hwpss(aman, **self.calc_cfgs)
+        self.save(proc_aman, hwpss_stats)
 
-    def save(self, proc_aman, hwpss_template):
+    def save(self, proc_aman, hwpss_stats):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.calc_cfgs["name"], hwpss_template)
+            proc_aman.wrap(self.calc_cfgs["hwpss_stats_name"], hwpss_stats)
 
 class SubtractHWPSS(_Preprocess):
     """Subtracts a HWPSS template from signal. 
@@ -220,9 +219,9 @@ class SubtractHWPSS(_Preprocess):
 
     def process(self, aman, proc_aman):
         hwp.subtract_hwpss(
-            aman, 
-            hwpss_template = aman[self.process_cfgs["hwpss_template"]], 
-            subtract_name=self.process_cfgs["subtract_name"]
+            aman,
+            hwpss_template = aman[self.process_cfgs["hwpss_extract"]],
+            subtract_name = self.process_cfgs["subtract_name"]
         )
 
 class Apodize(_Preprocess):
