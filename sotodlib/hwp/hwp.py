@@ -5,15 +5,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 def extract_hwpss(aman, signal=None, hwp_angle=None,
-                  bin_signal=True, bins=3600, 
+                  bin_signal=True, bins=3600,
                   lin_reg=True, modes=[1, 2, 3, 4, 6, 8],
                   apply_prefilt=True, prefilt_cutoff=1.0,
                   mask_flags=True, add_to_aman=True, name='hwpss_extract'):
     """
     Extracts HWP synchronous signal (HWPSS) from a time-ordered data (TOD) using linear regression or curve-fitting.
 
-    Parameters:
+    Parameters
     ----------
     aman : AxisManager object
         The TOD to extract HWPSS from.
@@ -41,76 +42,88 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
     name : str, optional
         The name to use for the new signal axis if `add_to_aman` is True. Default is 'hwpss_extract'.
 
-    Returns:
+    Returns
     -------
     aman_proc : AxisManager object
         The processed TOD with the extracted HWPSS and associated statistics.
     """
 
     if signal is None:
-        if apply_prefilt: 
+        if apply_prefilt:
             filt = tod_ops.filters.high_pass_sine2(cutoff=prefilt_cutoff)
-            signal = np.array(tod_ops.fourier_filter(aman, filt, detrend='linear', signal_name='signal'))
+            signal = np.array(tod_ops.fourier_filter(
+                aman, filt, detrend='linear', signal_name='signal'))
         else:
             signal = aman.signal
-            
+
     if hwp_angle is None:
         hwp_angle = aman.hwp_angle
-            
+
     # define aman_proc
     mode_names = []
     for mode in modes:
         mode_names.append(f'S{mode}')
         mode_names.append(f'C{mode}')
-    
-    aman_proc = core.AxisManager(aman.dets, aman.samps, core.LabelAxis(name='modes', vals=np.array(mode_names, dtype='<U3')))
+
+    aman_proc = core.AxisManager(aman.dets, aman.samps, core.LabelAxis(
+        name='modes', vals=np.array(mode_names, dtype='<U3')))
     if bin_signal:
-        hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = binning_signal(aman, signal, hwp_angle=None, bins=bins, mask_flags=mask_flags)
-        aman_proc.wrap('hwp_angle_bin_centers', hwp_angle_bin_centers, [(0, core.IndexAxis('bin_samps', count=bins))])
-        aman_proc.wrap('binned_hwpss', binned_hwpss, [(0, 'dets'), (1, 'bin_samps')])
+        hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = binning_signal(
+            aman, signal, hwp_angle=None, bins=bins, mask_flags=mask_flags)
+        aman_proc.wrap('hwp_angle_bin_centers', hwp_angle_bin_centers, [
+                       (0, core.IndexAxis('bin_samps', count=bins))])
+        aman_proc.wrap('binned_hwpss', binned_hwpss, [
+                       (0, 'dets'), (1, 'bin_samps')])
         aman_proc.wrap('hwpss_sigma_bin', hwpss_sigma_bin, [(0, 'dets')])
-    
+
         if lin_reg:
-            fitsig_binned, coeffs, covars, redchi2s = hwpss_linreg(x=hwp_angle_bin_centers, ys=binned_hwpss, yerrs=hwpss_sigma_bin, modes=modes)
+            fitsig_binned, coeffs, covars, redchi2s = hwpss_linreg(
+                x=hwp_angle_bin_centers, ys=binned_hwpss, yerrs=hwpss_sigma_bin, modes=modes)
         else:
-            Params_init = guess_hwpss_params(x=hwp_angle_bin_centers, ys=binned_hwpss, modes=modes)
+            Params_init = guess_hwpss_params(
+                x=hwp_angle_bin_centers, ys=binned_hwpss, modes=modes)
             fitsig_binned, coeffs, covars, redchi2s = hwpss_curvefit(x=hwp_angle_bin_centers, ys=binned_hwpss, yerrs=hwpss_sigma_bin,
-                                                                     modes=modes, Params_init=Params_init)    
+                                                                     modes=modes, Params_init=Params_init)
         # tod template
         fitsig_tod = harms_func(hwp_angle, modes, coeffs)
-        
+
         # wrap the optimal values and stats
-        aman_proc.wrap('fitsig_binned', fitsig_binned, [(0, 'dets'), (1, 'bin_samps')])
+        aman_proc.wrap('fitsig_binned', fitsig_binned,
+                       [(0, 'dets'), (1, 'bin_samps')])
         aman_proc.wrap('coeffs', coeffs, [(0, 'dets'), (1, 'modes')])
-        aman_proc.wrap('covars', covars, [(0, 'dets'), (1, 'modes'), (2, 'modes')])
+        aman_proc.wrap('covars', covars, [
+                       (0, 'dets'), (1, 'modes'), (2, 'modes')])
         aman_proc.wrap('redchi2s', redchi2s, [(0, 'dets')])
         aman_proc.wrap('fitsig_tod', fitsig_tod, [(0, 'dets'), (1, 'samps')])
-        
+
     else:
         if mask_flags:
             m = ~aman.flags.glitches.mask()
         else:
             m = np.ones([aman.dets.count, aman.samps.count], dtype=bool)
-        
+
         hwpss_sigma_tod = estimate_sigma_tod(signal, hwp_angle)
         aman_proc.wrap('hwpss_sigma_tod', hwpss_sigma_tod, [(0, 'dets')])
-        
+
         if lin_reg:
-            fitsig_tod, coeffs, covars, redchi2s = hwpss_linreg(x=hwp_angle, ys=signal, yerrs=hwpss_sigma_tod, modes=modes)
-            
+            fitsig_tod, coeffs, covars, redchi2s = hwpss_linreg(
+                x=hwp_angle, ys=signal, yerrs=hwpss_sigma_tod, modes=modes)
+
         else:
-            raise ValueError('Curve-fitting for TOD are specified.' + \
-                             'It will take too long time and return meaningless result.' + \
+            raise ValueError('Curve-fitting for TOD are specified.' +
+                             'It will take too long time and return meaningless result.' +
                              'Specify (bin_signal, lin_reg) = (True, True) or (True, False) or (False, True)')
-            
+
         aman_proc.wrap('coeffs', coeffs, [(0, 'dets'), (1, 'modes')])
-        aman_proc.wrap('covars', covars, [(0, 'dets'), (1, 'modes'), (2, 'modes')])
+        aman_proc.wrap('covars', covars, [
+                       (0, 'dets'), (1, 'modes'), (2, 'modes')])
         aman_proc.wrap('redchi2s', redchi2s, [(0, 'dets')])
         aman_proc.wrap('fitsig_tod', fitsig_tod, [(0, 'dets'), (1, 'samps')])
-    
+
     if add_to_aman:
         aman.wrap(name, fitsig_tod, [(0, 'dets'), (1, 'samps')])
     return aman_proc
+
 
 def binning_signal(aman, signal=None, hwp_angle=None,
                    bins=360, mask_flags=False):
@@ -131,7 +144,7 @@ def binning_signal(aman, signal=None, hwp_angle=None,
         Flag indicating whether to exclude flagged samples when binning the signal. Default is False.
 
     Returns
-    ---
+    -------
     aman_proc:
         The AxisManager object which contains
         * center of each bin of hwp_angle
@@ -142,46 +155,51 @@ def binning_signal(aman, signal=None, hwp_angle=None,
         signal = aman.signal
     if hwp_angle is None:
         hwp_angle = aman.hwp_angle
-    
+
     # binning hwp_angle tod
-    hwpss_denom, hwp_angle_bins = np.histogram(hwp_angle, bins=bins, range=[0, 2 * np.pi])
-    
+    hwpss_denom, hwp_angle_bins = np.histogram(
+        hwp_angle, bins=bins, range=[0, 2 * np.pi])
+
     # convert bin edges into bin centers
-    hwp_angle_bin_centers = (hwp_angle_bins[1]-hwp_angle_bins[0])/2 + hwp_angle_bins[:-1]
-    
+    hwp_angle_bin_centers = (
+        hwp_angle_bins[1]-hwp_angle_bins[0])/2 + hwp_angle_bins[:-1]
+
     # prepare binned signals
     binned_hwpss = np.zeros((aman.dets.count, bins), dtype='float32')
-    binned_hwpss_squared_mean = np.zeros((aman.dets.count, bins), dtype='float32')
+    binned_hwpss_squared_mean = np.zeros(
+        (aman.dets.count, bins), dtype='float32')
     binned_hwpss_sigma = np.zeros((aman.dets.count, bins), dtype='float32')
-    
+
     # get mask from aman
     if mask_flags:
         m = ~aman.flags.glitches.mask()
     else:
         m = np.ones([aman.dets.count, aman.samps.count], dtype=bool)
-        
+
     # binning tod
     for i in range(aman.dets.count):
-        binned_hwpss[i][:] = np.histogram(hwp_angle[m[i]], bins=bins, range=[0,2*np.pi],
-                               weights=signal[i][m[i]])[0] / np.where(hwpss_denom==0, 1, hwpss_denom)
-    
-        binned_hwpss_squared_mean[i][:] = np.histogram(hwp_angle[m[i]], bins=bins, range=[0,2*np.pi],
-                                   weights=signal[i][m[i]]**2)[0] / np.where(hwpss_denom==0, 1, hwpss_denom)
-    
+        binned_hwpss[i][:] = np.histogram(hwp_angle[m[i]], bins=bins, range=[0, 2*np.pi],
+                                          weights=signal[i][m[i]])[0] / np.where(hwpss_denom == 0, 1, hwpss_denom)
+
+        binned_hwpss_squared_mean[i][:] = np.histogram(hwp_angle[m[i]], bins=bins, range=[0, 2*np.pi],
+                                                       weights=signal[i][m[i]]**2)[0] / np.where(hwpss_denom == 0, 1, hwpss_denom)
+
     # get sigma of each bin
-    binned_hwpss_sigma = np.sqrt( np.abs(binned_hwpss_squared_mean - binned_hwpss**2)) / np.sqrt(np.where(hwpss_denom==0, 1, hwpss_denom))
+    binned_hwpss_sigma = np.sqrt(np.abs(binned_hwpss_squared_mean - binned_hwpss**2)
+                                 ) / np.sqrt(np.where(hwpss_denom == 0, 1, hwpss_denom))
     # use median of sigma of each bin as uniform sigma for a detector
     hwpss_sigma = np.nanmedian(binned_hwpss_sigma, axis=-1)
-    
+
     return hwp_angle_bin_centers, binned_hwpss, hwpss_sigma
-    
+
+
 def hwpss_linreg(x, ys, yerrs, modes):
     """
     Performs a linear regression of the input data ys as a function of x, using a set of sine and cosine
     basis functions defined by the input modes. Returns the fitted signal, the coefficients of the
     basis functions, their covariance matrix, and the reduced chi-square.
 
-    Parameters:
+    Parameters
     -----------
     x : numpy.ndarray
         The independent variable values of the data points to fit.
@@ -192,8 +210,8 @@ def hwpss_linreg(x, ys, yerrs, modes):
     modes : list of int
         The frequencies of the sine and cosine basis functions to use.
 
-    Returns:
-    --------
+    Returns
+    -------
     fitsig : numpy.ndarray
         The fitted signal, obtained by evaluating the model with the optimal coefficients.
     coeffs : numpy.ndarray
@@ -208,27 +226,28 @@ def hwpss_linreg(x, ys, yerrs, modes):
         vects[2*i, :] = np.sin(mode*x)
         vects[2*i+1, :] = np.cos(mode*x)
 
-    I = np.linalg.inv(np.tensordot(vects, vects, (1,1)))
+    I = np.linalg.inv(np.tensordot(vects, vects, (1, 1)))
     coeffs = np.matmul(ys, vects.T)
     coeffs = np.dot(I, coeffs.T).T
     fitsig = np.matmul(vects.T, coeffs.T).T
-    
+
     # covariance of coefficients
-    covars = np.zeros((ys.shape[0], 2*len(modes), 2*len(modes)))    
+    covars = np.zeros((ys.shape[0], 2*len(modes), 2*len(modes)))
     for det_idx in range(ys.shape[0]):
         covars[det_idx, :, :] = I * yerrs[det_idx]**2
-    
+
     # reduced chi-square
-    redchi2s = np.sum(((ys - fitsig)/yerrs[:, np.newaxis])**2, axis=-1) / (x.shape[0] - 2*len(modes))
-    
+    redchi2s = np.sum(
+        ((ys - fitsig)/yerrs[:, np.newaxis])**2, axis=-1) / (x.shape[0] - 2*len(modes))
+
     return fitsig, coeffs, covars, redchi2s
 
 
 def wrapper_harms_func(x, modes, *args):
     """
     A wrapper function for the harmonics function to be used for fitting data using Scipy's curve-fitting algorithm.
-    Parameters:
-    -----------
+    Parameters
+    ----------
     x : array-like
         The x-values of the data points to be fitted.
 
@@ -238,34 +257,38 @@ def wrapper_harms_func(x, modes, *args):
     *args : tuple
         A tuple of arguments. The first argument should be an array of coefficients used to calculate the harmonics function.
 
-    Returns:
-    --------
+    Returns
+    -------
     y : array-like
         An array of the same length as x representing the values of the harmonics function evaluated at x using the given 
         modes and coefficients.
     """
     coeffs = np.array(args[0])
-    return harms_func(x, modes, coeffs) 
+    return harms_func(x, modes, coeffs)
+
 
 def harms_func(x, modes, coeffs):
     """
     calculates the harmonics function given the input values, modes and coefficients.
 
-    Parameters:
+    Parameters
+    ----------
     x (numpy.ndarray): Input values
     modes (list): List of modes to be used in the harmonics function
     coeffs (numpy.ndarray): Coefficients of the harmonics function
 
-    Returns:
+    Returns
+    -------
     numpy.ndarray: The calculated harmonics function.
     """
     vects = np.zeros([2*len(modes), x.shape[0]], dtype='float32')
     for i, mode in enumerate(modes):
         vects[2*i, :] = np.sin(mode*x)
         vects[2*i+1, :] = np.cos(mode*x)
-        
+
     harmonics = np.matmul(vects.T, coeffs.T).T
     return harmonics
+
 
 def guess_hwpss_params(x, ys, modes):
     """
@@ -287,8 +310,9 @@ def guess_hwpss_params(x, ys, modes):
     for i, mode in enumerate(modes):
         vects[2*i, :] = np.sin(mode*x)
         vects[2*i+1, :] = np.cos(mode*x)
-    Params_init = 2 * np.matmul(ys,vects.T) / x.shape[0]
+    Params_init = 2 * np.matmul(ys, vects.T) / x.shape[0]
     return Params_init
+
 
 def hwpss_curvefit(x, ys, yerrs, modes, Params_init=None):
     """
@@ -327,29 +351,32 @@ def hwpss_curvefit(x, ys, yerrs, modes, Params_init=None):
     N_dets = ys.shape[0]
     N_samps = ys.shape[-1]
     N_modes = len(modes)
-    
+
     if Params_init is None:
         Params_init = np.zeros((N_dets, 2*N_modes))
-    
+
     coeffs = np.zeros((N_dets, 2*len(modes)))
     covars = np.zeros((N_dets, 2*len(modes), 2*len(modes)))
     redchi2s = np.zeros(N_dets)
     fitsig = np.zeros((N_dets, N_samps))
-    
+
     for det_idx in range(N_dets):
         params_init = Params_init[det_idx]
         coeff, covar = curve_fit(lambda x, *params_init: wrapper_harms_func(x, modes, params_init),
-                               x, ys[det_idx], p0=params_init, sigma=yerrs[det_idx] * np.ones_like(ys[det_idx]), 
-                               absolute_sigma=True)
-        
+                                 x, ys[det_idx], p0=params_init, sigma=yerrs[det_idx] *
+                                 np.ones_like(ys[det_idx]),
+                                 absolute_sigma=True)
+
         coeffs[det_idx, :] = coeff
         covars[det_idx, :] = covar
-        
+
         yfit = harms_func(x, modes, coeff)
         fitsig[det_idx, :] = yfit
-        redchi2s[det_idx] = np.sum( ((ys[det_idx] - yfit) / yerrs[det_idx])**2 ) / (x.shape[0] - 2*len(modes))
-        
+        redchi2s[det_idx] = np.sum(
+            ((ys[det_idx] - yfit) / yerrs[det_idx])**2) / (x.shape[0] - 2*len(modes))
+
     return fitsig, coeffs, covars, redchi2s
+
 
 def estimate_sigma_tod(signal, hwp_angle):
     """
@@ -374,12 +401,14 @@ def estimate_sigma_tod(signal, hwp_angle):
     resulting values for all periods is then computed and returned as the estimated sigma of each data point.
     """
     hwp_zeros_idxes = np.where(np.abs(np.diff(hwp_angle)) > 5)[0][:] + 1
-    hwpss_sigma_tod = np.zeros((signal.shape[0], hwp_zeros_idxes.shape[0] - 1 ))
+    hwpss_sigma_tod = np.zeros((signal.shape[0], hwp_zeros_idxes.shape[0] - 1))
 
     for i, (init_idx, end_idx) in enumerate(zip(hwp_zeros_idxes[:-1], hwp_zeros_idxes[1:])):
-        hwpss_sigma_tod[:, i] = np.mean(signal[:, init_idx:end_idx], axis=-1) * np.sqrt(end_idx - init_idx)
+        hwpss_sigma_tod[:, i] = np.mean(
+            signal[:, init_idx:end_idx], axis=-1) * np.sqrt(end_idx - init_idx)
     hwpss_sigma_tod = np.std(hwpss_sigma_tod, axis=-1)
     return hwpss_sigma_tod
+
 
 def subtract_hwpss(aman, signal=None, hwpss_template=None,
                    subtract_name='hwpss_remove'):
@@ -391,12 +420,13 @@ def subtract_hwpss(aman, signal=None, hwpss_template=None,
     if hwpss_template is None:
         hwpss_template = aman['hwpss_extract']
 
-    aman.wrap(subtract_name, np.subtract(signal, hwpss_template), [(0,'dets'), (1,'samps')])
+    aman.wrap(subtract_name, np.subtract(
+        signal, hwpss_template), [(0, 'dets'), (1, 'samps')])
 
 
-def demod_tod(aman, signal='hwpss_remove', 
-              fc_lpf=2., lpf_sin2_width=0.5, 
-              bpf=False, bpf_width=2., bpf_center=None, 
+def demod_tod(aman, signal='hwpss_remove',
+              fc_lpf=2., lpf_sin2_width=0.5,
+              bpf=False, bpf_width=2., bpf_center=None,
               bpf_type='sine2', bpf_sine2_width=None):
     """
     Simple demodulation function. Wraps new axes demodQ (real part from hwp
@@ -429,13 +459,13 @@ def demod_tod(aman, signal='hwpss_remove',
             bpf_center = 4 * speed
 
         if bpf_type == 'butter':
-            bpf_filt = tod_ops.filters.low_pass_butter4(fc=bpf_center + bpf_width)*\
-                       tod_ops.filters.high_pass_butter4(fc=bpf_center - bpf_width)
+            bpf_filt = tod_ops.filters.low_pass_butter4(fc=bpf_center + bpf_width) *\
+                tod_ops.filters.high_pass_butter4(fc=bpf_center - bpf_width)
         if bpf_type == 'sine2':
             bpf_filt = tod_ops.filters.low_pass_sine2(cutoff=bpf_center + bpf_width,
-                                                      width=bpf_sine2_width)*\
-                       tod_ops.filters.high_pass_sine2(cutoff=bpf_center - bpf_width,
-                                                       width=bpf_sine2_width)
+                                                      width=bpf_sine2_width) *\
+                tod_ops.filters.high_pass_sine2(cutoff=bpf_center - bpf_width,
+                                                width=bpf_sine2_width)
 
         demod = tod_ops.fourier_filter(aman, bpf_filt, detrend=None,
                                        signal_name=signal) * phasor
@@ -444,7 +474,10 @@ def demod_tod(aman, signal='hwpss_remove',
     aman.dsT = aman[signal]
 
     aman['demodQ'] = demod.real
-    aman['demodQ'] = tod_ops.fourier_filter(aman, filt, signal_name='demodQ', detrend=None) * 2
+    aman['demodQ'] = tod_ops.fourier_filter(
+        aman, filt, signal_name='demodQ', detrend=None) * 2
     aman['demodU'] = demod.imag
-    aman['demodU'] = tod_ops.fourier_filter(aman, filt, signal_name='demodU', detrend=None) * 2
-    aman['dsT'] = tod_ops.fourier_filter(aman, filt, signal_name='dsT', detrend=None)
+    aman['demodU'] = tod_ops.fourier_filter(
+        aman, filt, signal_name='demodU', detrend=None) * 2
+    aman['dsT'] = tod_ops.fourier_filter(
+        aman, filt, signal_name='dsT', detrend=None)
