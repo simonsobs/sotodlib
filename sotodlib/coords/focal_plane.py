@@ -292,7 +292,7 @@ def LAT_focal_plane(
     return xi, eta
 
 
-def SAT_focal_plane(aman, x=None, y=None):
+def SAT_focal_plane(aman, x=None, y=None, fp_to_sky=None):
     """
     Compute focal plane for a wafer in the SAT.
 
@@ -304,6 +304,9 @@ def SAT_focal_plane(aman, x=None, y=None):
         x: Detector x positions, if provided will override positions loaded from aman.
 
         y: Detector y positions, if provided will override positions loaded from aman.
+
+        fp_to_sky: Interp object that maps x to theta (equivalent to y to phi).
+                   Leave as None to use the default mapping.
 
     Returns:
 
@@ -320,7 +323,8 @@ def SAT_focal_plane(aman, x=None, y=None):
 
     # TODO: Need a convenient way to automatically transform from wafer to focal plane coords
 
-    fp_to_sky = interp1d(SAT_X, SAT_THETA, fill_value="extrapolate")
+    if fp_to_sky is None:
+        fp_to_sky = interp1d(SAT_X, SAT_THETA, fill_value="extrapolate")
     # NOTE: The -1 does the flip about the origin
     theta = -1 * np.sign(x) * fp_to_sky(np.abs(x))
     phi = -1 * np.sign(y) * fp_to_sky(np.abs(y))
