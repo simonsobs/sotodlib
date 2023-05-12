@@ -21,33 +21,37 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
     aman : AxisManager object
         The TOD to extract HWPSS from.
     signal : array-like, optional
-        The TOD signal to use. If not provided, aman.signal will be used
+        The TOD signal to use. If not provided, `aman.signal` will be used.
     hwp_angle : array-like, optional
-        The HWP angle for each sample in aman. aman.hwp_angle will be used
+        The HWP angle for each sample in `aman`. If not provided, `aman.hwp_angle` will be used.
     bin_signal : bool, optional
-        Whether to bin the TOD signal into HWP angle bins before extracting HWPSS. Default is True.
+        Whether to bin the TOD signal into HWP angle bins before extracting HWPSS. Default is `True`.
     bins : int, optional
-        The number of HWP angle bins to use if `bin_signal` is True. Default is 3600.
+        The number of HWP angle bins to use if `bin_signal` is `True`. Default is 3600.
     lin_reg : bool, optional
-        Whether to use linear regression to extract HWPSS from the binned signal. If False, curve-fitting will be used instead.
-        Default is True.
+        Whether to use linear regression to extract HWPSS from the binned signal. If `False`, curve-fitting will be used instead.
+        Default is `True`.
     modes : list of int, optional
         The HWPSS harmonic modes to extract. Default is [1, 2, 3, 4, 6, 8].
     apply_prefilt : bool, optional
-        Whether to apply a high-pass filter to signal before extracting HWPSS. Default is True.
+        Whether to apply a high-pass filter to signal before extracting HWPSS. Default is `True`.
     prefilt_cutoff : float, optional
-        The cutoff frequency of the high-pass filter, in Hz. Only used if `apply_prefilt` is True. Default is 1.0.
+        The cutoff frequency of the high-pass filter, in Hz. Only used if `apply_prefilt` is `True`. Default is 1.0.
     mask_flags : bool, optional
-        Whether to mask out flagged samples before extracting HWPSS. Default is True.
-    add_to_aman : bool, optional
-        Whether to add the extracted HWPSS to `aman` as a new signal axis. Default is True.
-    name : str, optional
-        The name to use for the new signal axis if `add_to_aman` is True. Default is 'hwpss_extract'.
+        Whether to mask out flagged samples before extracting HWPSS. Default is `True`.
+    add_stats_to_aman : bool, optional
+        Whether to add the extracted HWPSS statistics to `aman` as new axes. Default is `True`.
+    hwpss_stats_name : str, optional
+        The name to use for the new axis containing the HWPSS statistics if `add_stats_to_aman` is `True`. Default is 'hwpss_stats'.
+    add_extracted_to_aman : bool, optional
+        Whether to add the extracted HWPSS to `aman` as a new signal axis. Default is `True`.
+    hwpss_extract_name : str, optional
+        The name to use for the new signal axis containing the extracted HWPSS if `add_extracted_to_aman` is `True`. Default is 'hwpss_extract'.
 
     Returns
     -------
     hwpss_stats : AxisManager object
-        The processed TOD with the extracted HWPSS and associated statistics.
+        The extracted HWPSS and its statistics.
     """
 
     if signal is None:
@@ -415,7 +419,28 @@ def estimate_sigma_tod(signal, hwp_angle):
 def subtract_hwpss(aman, signal=None, hwpss_template=None,
                    subtract_name='hwpss_remove'):
     """
-    Subtract the hwpss template from the signal in an axis manager.
+    Subtract the half-wave plate synchronous signal (HWPSS) template from the
+    signal in the given axis manager.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        The axis manager containing the signal to which the HWPSS template will
+        be applied.
+    signal : ndarray, optional
+        The signal to which the HWPSS template will be applied. If `signal` is
+        None (default), the signal contained in the axis manager will be used.
+    hwpss_template : ndarray, optional
+        The HWPSS template to be subtracted from the signal. If `hwpss_template`
+        is None (default), the HWPSS template stored in the axis manager under
+        the key 'hwpss_extract' will be used.
+    subtract_name : str, optional
+        The name of the output axis manager that will contain the HWPSS-
+        subtracted signal. Defaults to 'hwpss_remove'.
+
+    Returns
+    -------
+    None
     """
     if signal is None:
         signal = aman.signal
