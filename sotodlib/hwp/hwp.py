@@ -443,10 +443,12 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
         Configuration for Band-pass filter applied to the TOD data before demodulation.
         If not specified, a 4th-order Butterworth filter of 
         (demod_mode * HWP speed) +/- 0.95*(HWP speed) is used.
+        Example) bpf_cfg = {'type': 'butter4', 'center': 8.0, 'width': 3.8}
     lpf_cfg : dict
         Configuration for Low-pass filter applied to the demodulated TOD data. If not specified,
         a 4th-order Butterworth filter with a cutoff frequency of 0.95*(HWP speed)
         is used.
+        Example) lpf_cfg = {'type': 'butter4', 'cutoff': 1.9}
 
     Returns
     -------
