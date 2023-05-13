@@ -227,7 +227,7 @@ class G3thk:
         """
         file_list = self.session.query(HKFiles).all()
         if len(file_list) == 0:
-            G3thk.populate_hkfiles()
+            self.populate_hkfiles()
         else:
             last_file_id = file_list[-1].id
             # TODO: if statement for populating files when .g3 file written
@@ -284,13 +284,13 @@ class G3thk:
 
         #  if hkagents table empty, populate table for the first time
         if len(hkagents_list) == 0:
-            G3thk.populate_hkagents()
+            self.populate_hkagents()
 
         #  when new.g3 file is written, update the table
         else:
             last_agent_file_id = hkagents_list[-1].file_id
             if last_file_id > last_agent_file_id:
-                G3thk.populate_hkagents()
+                self.populate_hkagents()
 
     def populate_hkfields(self):
         """
@@ -324,10 +324,10 @@ class G3thk:
         hkfields_list = self.session.query(HKFields).all()
         # if hkfields table empy, populate table for 1st time
         if len(hkfields_list) == 0:
-            G3thk.populate_hkfields()
+            self.populate_hkfields()
 
         # when new .g3 file is written, update table
         else:
             last_field_file_id = hkfields_list[-1].file_id
             if last_file_id > last_field_file_id:
-                G3thk.populate_hkfields()
+                self.populate_hkfields()
