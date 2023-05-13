@@ -8,7 +8,7 @@ from sotodlib import core
 import so3g
 
 from sotodlib import core
-from . import detrend_data
+from . import detrend_tod
 
 def _get_num_threads():
     # Guess how many threads we should be using in FFT ops...
@@ -24,7 +24,8 @@ def rfft(aman, detrend='linear', resize='zero_pad', window=np.hanning,
         aman: axis manager
         
         detrend: Method of detrending to be done before ffting. Can
-            be 'linear', 'mean', or None.
+            be 'linear', 'mean', or None. Note that detrending here can be slow
+            for large arrays.
             
         resize: How to resize the axis to increase fft speed. 'zero_pad' 
             will increase to the next 2**N. 'trim' will cut out so the 
@@ -68,8 +69,8 @@ def rfft(aman, detrend='linear', resize='zero_pad', window=np.hanning,
     if detrend is None:
         signal = np.atleast_2d(getattr(aman, signal_name))
     else:
-        signal = detrend_data(aman, detrend, axis_name=axis_name, 
-                             signal_name=signal_name)
+        signal = detrend_tod(aman, detrend, axis_name=axis_name, 
+                             signal_name=signal_name, in_place=True)
     
     if other_idx is not None and other_idx != 0:
         signal = signal.transpose()
@@ -188,8 +189,16 @@ def find_superior_integer(target, primes=[2,3,5,7,11,13]):
             best = best_friend * base
     return int(best)
 
-def calc_psd(aman, signal=None, timestamps=None, merge=False, 
-             overwrite=True, **kwargs):
+def calc_psd(
+    aman, 
+    signal=None, 
+    timestamps=None, 
+    max_samples=2**18,
+    prefer='center',
+    merge=False, 
+    overwrite=True, 
+    **kwargs
+):
     """Calculates the power spectrum density of an input signal using signal.welch()
     Data defaults to aman.signal and times defaults to aman.timestamps
         
@@ -197,6 +206,10 @@ def calc_psd(aman, signal=None, timestamps=None, merge=False,
         aman (AxisManager): with (dets, samps) OR (channels, samps)axes.
         signal (float ndarray): data signal to pass to scipy.signal.welch()
         timestamps (float ndarray): timestamps associated with the data signal         
+        max_samples (int): maximum samples along sample axis to send to welch
+        prefer (str): One of ['left', 'right', 'center'], indicating what
+            part of the array we would like to send to welch if cuts are
+            required
         merge (bool): if true merge results into axismanager
         overwrite (bool): if true will overwrite f, pxx axes.
         **kwargs: keyword args to be passed to signal.welch()
@@ -209,8 +222,30 @@ def calc_psd(aman, signal=None, timestamps=None, merge=False,
         signal = aman.signal
     if timestamps is None:
         timestamps = aman.timestamps
-        
-    freqs, Pxx = welch( signal, 1/np.nanmedian(np.diff(timestamps)), **kwargs)
+    
+    n_samps = signal.shape[-1]
+    if n_samps <= max_samples:
+        start = 0 
+        stop = n_samps
+    else:
+        offset = n_samps-max_samples
+        if prefer == 'left':
+            offset=0
+        elif prefer == 'center':
+            offset //= 2
+        elif prefer == 'right':
+            pass
+        else:
+            raise ValueError(f"Invalid choise prefer='{prefer}'")
+        start = offset
+        stop = offset + max_samples
+    
+            
+    freqs, Pxx = welch( 
+        signal[:,start:stop], 
+        1/np.nanmedian(np.diff(timestamps[start:stop])), 
+        **kwargs
+    )
     if merge:
         aman.merge( core.AxisManager(core.OffsetAxis("fsamps", len(freqs))))
         aman.wrap("freqs", freqs, [(0,"fsamps")])
