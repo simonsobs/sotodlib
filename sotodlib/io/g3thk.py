@@ -72,6 +72,9 @@ class HKAgents(Base):
     file_id = db.Column(db.Integer, db.ForeignKey('hkfiles.id'))
     hkfile = relationship("HKFiles", back_populates='agents')
 
+    instance_id = db.Column(db.String)
+    alias = db.Column(db.String)
+
     start = db.Column(db.Integer)
     stop = db.Column(db.Integer)
 
@@ -212,7 +215,7 @@ class G3thk:
                 path = os.path.join(root, f)
                 filename = path.split("/")[-1]
                 global_start_time = int(filename.split(".")[0])
-                aggregator = G3thk.get_agg(self.hkarchivepath, f)
+                aggregator = self.get_agg(f)
 
                 db_file = HKFiles(filename=filename,
                                   path=self.hkarchive_path,
@@ -238,7 +241,7 @@ class G3thk:
         file_list = self.session.query(HKFiles).all()
 
         for file in file_list:
-            fields, starts, ends = G3thk.load_fields(file.path, file.filename)
+            fields, starts, ends = self.load_fields(file.path, file.filename)
             agents = []
             for field in fields:
                 agent = field.split('.')[1]
@@ -262,17 +265,17 @@ class G3thk:
 
                     #  from the starts_agent and ends_agent, extract start
                     #  and stop time for the agent
-                    agent_start = np.min(starts_agent)
-                    agent_stop = np.max(ends_agent)
+                agent_start = np.min(starts_agent)
+                agent_stop = np.max(ends_agent)
 
                     #  populate the HKAgents table
-                    db_file = HKAgents(instance_id=agent,
-                                       start=agent_start,
-                                       stop=agent_stop,
-                                       hkfile=file)
-                    self.session.add(db_file)
+                db_file = HKAgents(instance_id=agent,
+                                    start=agent_start,
+                                    stop=agent_stop,
+                                    hkfile=file)
+                self.session.add(db_file)
 
-                self.session.commit()
+            self.session.commit()
 
     def add_hkagents(self):
         """
@@ -298,7 +301,7 @@ class G3thk:
         file_list = self.session.query(HKFiles).all()
 
         for file in file_list:
-            fields, starts, ends = G3thk.load_fields(file.path, file.filename)
+            fields, starts, ends = self.load_fields(file.path, file.filename)
 
             for i in range(len(fields)):
                 agentname = fields[i].split('.')[1]
