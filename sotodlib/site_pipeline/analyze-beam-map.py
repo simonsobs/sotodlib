@@ -29,7 +29,7 @@ def find_nearest(array, value):
     return idx
 
 
-def read_enmaps(map_path, rescale, smooth, pk_normalise=True, **kwargs):
+def read_enmaps(map_path, rescale, smooth, pk_normalise=True, pol=False, **kwargs):
     """Read enmap and rescale/smooth if requested upon calling.
     Peak-normalise by default"""
 
@@ -54,8 +54,10 @@ def read_enmaps(map_path, rescale, smooth, pk_normalise=True, **kwargs):
             pmap.posmap()[0], pmap.posmap()[1] = array_ra, array_dec
         if pk_normalise:
             array_map /= np.nanmax(array_map)
-        pmap[0, :, :] = array_map
+        pmap[:, :, :] = array_map
         enmaps.append(pmap)
+    if pol is False:
+        enmaps = [enmaps[i][np.newaxis,0,:,:] for i in range(len(enmaps))]
     return enmaps
 
 
@@ -104,9 +106,9 @@ def trim_single_map(pmap, pixbox=None, skybox=None, **kwargs):
 
     """
 
-    if 'pixbox' in kwargs:
+    if 'pixbox' in kwargs.keys():
         pixbox = kwargs['pixbox']
-    elif 'skybox' in kwargs:
+    elif 'skybox' in kwargs.keys():
         skybox = kwargs['skybox']
 
     if pixbox is not None and skybox is None:
@@ -122,37 +124,38 @@ def trim_single_map(pmap, pixbox=None, skybox=None, **kwargs):
 
 
 def trim_multiple_maps(pmaps, pixbox=None, skybox=None,
-                       make_equal=False, **kwargs):
+                       **kwargs):
     """Function that trims the input maps to some user-specified
         limits or adjusts them to have the same size """
 
-    if 'pixbox' in kwargs:
+    if 'pixbox' in kwargs.keys():
         pixbox = kwargs['pixbox']
-    elif 'skybox' in kwargs:
+    elif 'skybox' in kwargs.keys():
         skybox = kwargs['skybox']
-    if 'make_equal' in kwargs:
-        make_equal = kwargs['make_equal']
 
+    if pixbox is None and skybox is None:
+        same_dimension = all(map_i.shape == pmaps[0].shape for map_i in pmaps)
+
+        if not same_dimension:
+            min_ra_idx = np.argmin([map_i.shape[1] for map_i in pmaps])
+            min_dec_idx = np.argmin([map_i.shape[2] for map_i in pmaps])
+                        
+            ra_min_range = pmaps[min_ra_idx].posmap()[0]
+            dec_min_range = pmaps[min_dec_idx].posmap()[1]
+            
+            ra_min, ra_max = ra_min_range.min(), ra_min_range.max()
+            dec_min, dec_max = dec_min_range.min(), dec_min_range.max()
+            
+            skybox = [[ra_min, dec_min], [ra_max, dec_max]]
+            
     if pixbox is not None or skybox is not None:
         enmaps_trimmed = [trim_single_map(map_i, pixbox=pixbox, skybox=skybox)
                           for map_i in pmaps]
-
-    if make_equal:
-        if np.any([map_i.shape == pmaps[0].shape for map_i in pmaps]) == False:
-            min_grid = np.min([np.shape(map_i for map_i in pmaps)])
-            lim_ra_pix, lim_dec_pix = int(
-                min_grid[0] / 2), int(min_grid[1] / 2)
-            pixbox = np.asarray([[-lim_ra_pix, -lim_dec_pix],
-                                 [lim_ra_pix, lim_dec_pix]])
-
-            enmaps_trimmed = []
-            for map_i in pmaps:
-                skybox = enmap.pixbox2skybox(map_i.shape, map_i.wcs, pixbox)
-                enmaps_trimmed.append(enmap.submap(map_i, skybox))
+        
     return enmaps_trimmed
 
 
-def coadd_maps(pmaps):
+def coadd_maps(pmaps, res_precision=.000001):
     """Coadd an array of maps to increase the flux
 
     Args
@@ -163,21 +166,29 @@ def coadd_maps(pmaps):
     -------
     The coadded map as an ndmap object
     """
+    
+    same_dimension = all(map_i.shape == pmaps[0].shape for map_i in pmaps)
+    same_resolution = np.logical_and(all(map_i.wcs.wcs.cdelt[0]-enmaps[0].wcs.wcs.cdelt[0]<res_precision for map_i in enmaps),
+                                     all(map_i.wcs.wcs.cdelt[1]-enmaps[0].wcs.wcs.cdelt[1]<res_precision for map_i in enmaps))
+
+    if not same_dimension or not same_resolution:
+        raise ValueError("The maps have different dimensions/resolution")
 
     coadd_map = np.zeros_like((pmaps[0]))
-    coadd_ra, coadd_dec = [np.zeros_like((pmaps)) for i in range(2)]
-
+    coadd_ra, coadd_dec = [np.zeros((len(pmaps),pmaps[0].shape[1],pmaps[0].shape[2]))
+                           for i in range(2)]
+    
     for t, map_i in enumerate(pmaps):
         coadd_map += map_i
         coords = map_i.posmap()
-        coadd_ra[t], coadd_dec[t] = coords[0], coords[1]
+        coadd_ra[t,:,:], coadd_dec[t,:,:] = coords[0], coords[1]
 
     coadded_enmap = enmap.zeros(map_i.shape, map_i.wcs, dtype=np.float64)
     coadded_enmap[:] = coadd_map
     coadded_enmap.posmap()[0], coadded_enmap.posmap()[1] = np.nanmean(
         coadd_ra, axis=0), np.nanmean(coadd_dec, axis=0)
+    
     return coadded_enmap
-
 
 def correct_background(bins, prof, nsamps):
     """Subtract the average value of the data sample with
@@ -197,9 +208,13 @@ def correct_background(bins, prof, nsamps):
 
     grad = []
     for i in range(len(chunk_idxs[:-1])):
-        grad.append(
-            np.mean(np.gradient(prof[int(chunk_idxs[i]):
-                                     int(chunk_idxs[i + 1])])))
+        try:
+            grad.append(
+                np.mean(np.gradient(prof[int(chunk_idxs[i]):
+                                         int(chunk_idxs[i + 1])])))
+        except:
+            raise ValueError("The requested number of samples is large \
+                              compared to the profile resolution")
     min_samp = find_nearest(grad, 0)
     offset = np.mean(prof[int(chunk_idxs[min_samp]):
                           int(chunk_idxs[min_samp + 1])])
@@ -669,8 +684,19 @@ def full_beam_fit(bins, prof, widx, wedge, downsample_f, minimize=False):
     # Downsample
     # Scipy Univariate spline does not work well with numbers between 0,1 so
     # multiply with some constant
-    spline1d = UnivariateSpline(
-        bins[:widx][::downsample_f], prof[:widx][::downsample_f] * 10**4)
+    try:
+        spline1d = UnivariateSpline(
+            bins[:widx][::downsample_f], prof[:widx][::downsample_f] * 10**4)
+    except:
+        warnings.warn('The downsampling factor is too large')
+        # try increasing the number of sampling points
+        try:
+            if downsample_f>2:
+                downsample_f -= 2
+            spline1d = UnivariateSpline(
+                bins[:widx][::downsample_f], prof[:widx][::downsample_f] * 10**4)
+        except:
+            return
 
     # Increase the resolution again
     bins_near_lobes = bins[:widx]
@@ -843,10 +869,10 @@ def fit_single_map(pmap, theta_max, acc, trim_factor, n_iter, wing_cutoff,
     return fitted_values_cp, [binsall[:wedge], line1d(binsall[:wedge])], bl_fit
 
 
-def run_fit(tele, band, map_path, rescale, smooth, pk_normalise, init_params,
-            test_init_cond, init_dependence, theta_max, acc, trim_factor,
-            n_iter, wing_cutoff, res, lmax, downsample_f, make_plots,
-            save_stats, write_beam, outdir, prefix, **kwargs):
+def run_fit(tele, band, map_path, rescale, smooth, pk_normalise, pol,
+            init_params, test_init_cond, init_dependence, theta_max, acc, 
+            trim_factor, n_iter, wing_cutoff, res, lmax, downsample_f, 
+            make_plots, save_stats, write_beam, outdir, prefix, **kwargs):
     """Read the maps, perform the fits, gather all fitted parameters,
        beam profiles and transfer functions and store/plot the results
 
@@ -862,6 +888,7 @@ def run_fit(tele, band, map_path, rescale, smooth, pk_normalise, init_params,
                          rescale,
                          smooth,
                          pk_normalise,
+                         pol,
                          **kwargs)
 
     if init_params is None:
@@ -870,6 +897,44 @@ def run_fit(tele, band, map_path, rescale, smooth, pk_normalise, init_params,
                 kwargs['initial_parameters_file'], tele, band)
         except BaseException:
             raise ValueError('Missing arguments')
+
+    #     for map_i in enmaps:
+#         if not source_included:
+#             enmaps.remove(map_i)
+
+    if coadd_maps:
+        pmaps_trimmed = trim_multiple_maps(enmaps, **kwargs)
+        coadded_map = coadd_maps(pmaps_trimmed)
+        
+        fitted_params, [rb, prof], bl = fit_single_map(pmap=enmaps[map_idx],
+                                                       theta_max=theta_max,
+                                                       acc=acc,
+                                                       trim_factor=trim_factor,
+                                                       init_params=init_params,
+                                                       n_iter=n_iter,
+                                                       test_init_cond=test_init_cond,
+                                                       init_dependence=init_dependence,
+                                                       wing_cutoff=wing_cutoff,
+                                                       res=res,
+                                                       lmax=lmax,
+                                                       downsample_f=downsample_f,
+                                                       **kwargs)
+
+        np.savetxt(opj(outdir, prefix + '_prof_coadded.txt'), [rb, prof])
+        np.savetxt(opj(outdir, prefix + '_bl_coadded.txt'), bl)
+
+        plot_profile(bins,
+                     prof,
+                     np.zeros_like(prof),
+                     img_file=opj(
+                     outdir,
+                     prefix +'_prof_coadded.png'))
+        plot_bls(bl, 
+                 np.zeros_like(bl), 
+                 img_file=opj(outdir, 
+                              prefix + 
+                              '_bl_coadded.png'))
+        return
 
     map_names = os.listdir(map_path)
     comm = MPI.COMM_WORLD
@@ -1024,6 +1089,11 @@ def get_parser():
                         dest='pk_normalise',
                         default=True,
                         help='If True, peak-normalise the maps')
+    parser.add_argument('--pol',
+                        action='store_true',
+                        dest='pol',
+                        default=False,
+                        help='If False, only fit for temperature')
     parser.add_argument('--init_params',
                         action='store',
                         dest='init_params',
@@ -1193,6 +1263,7 @@ def main():
             rescale=args.rescale,
             smooth=args.smooth,
             pk_normalise=args.pk_normalise,
+            pol=args.pol,
             init_params=args.init_params,
             test_init_cond=args.test_init_cond,
             init_dependence=args.init_dependence,
