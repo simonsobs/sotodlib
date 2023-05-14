@@ -920,6 +920,11 @@ def run_fit(tele, band, map_path, rescale, smooth, pk_normalise, pol,
                                                        downsample_f=downsample_f,
                                                        **kwargs)
 
+        h = h5py.File(opj(outdir, prefix + '_stats' + '_coadded.h5'),'w')
+        for k, v in fitted_params.items():
+            h.create_dataset(k, data=np.array(v))
+        h.close()
+
         np.savetxt(opj(outdir, prefix + '_prof_coadded.txt'), [rb, prof])
         np.savetxt(opj(outdir, prefix + '_bl_coadded.txt'), bl)
 
