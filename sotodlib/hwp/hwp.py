@@ -495,13 +495,13 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
         bpf_cfg = {'type': 'butter4',
                    'center': bpf_center,
                    'width': bpf_width}
-    bpf = get_bpf(bpf_cfg)
+    bpf = tod_ops.filters.get_bpf(bpf_cfg)
     
     if lpf_cfg is None:
         lpf_cutoff = speed * 0.95
         lpf_cfg = {'type': 'butter4',
                   'cutoff': lpf_cutoff}
-    lpf = get_lpf(lpf_cfg)
+    lpf = tod_ops.filters.get_lpf(lpf_cfg)
         
     phasor = np.exp(demod_mode * 1.j * aman.hwp_angle)
     demod = tod_ops.fourier_filter(aman, bpf, detrend=None,
@@ -523,59 +523,7 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
     aman['demodU'] = tod_ops.fourier_filter(
         aman, lpf, signal_name='demodU', detrend=None) * 2.
 
-def get_lpf(lpf_cfg):
-    """
-    Returns a low-pass filter based on the configuration.
 
-    Args:
-        lpf_cfg (dict): A dictionary containing the low-pass filter configuration.
-            It must have the following keys:
-            - "type": A string specifying the type of low-pass filter. Supported values are "butter4" and "sine2".
-            - "cutoff": A float specifying the cutoff frequency of the low-pass filter.
-            - "trans_width": A float specifying the transition width of the low-pass filter (only for "sine2" type).
-
-    Returns:
-        numpy.ndarray: A 1D array representing the filter coefficients of the low-pass filter.
-    """
-    if lpf_cfg['type'] == 'butter4':
-        cutoff = lpf_cfg['cutoff']
-        return tod_ops.filters.low_pass_butter4(fc=cutoff)
-    elif lpf_cfg['type'] == 'sine2':
-        cutoff = lpf_cfg['cutoff']
-        trans_width = lpf_cfg['trans_width']
-        return tod_ops.filters.low_pass_sine2(cutoff=cutoff, width=trans_width)
-    else:
-        raise ValueError('Unsupported filter type. Supported filters are `butter4` and `sine2`')
-
-
-def get_bpf(bpf_cfg):
-    """
-    Returns a band-pass filter based on the configuration.
-
-    Args:
-        bpf_cfg (dict): A dictionary containing the band-pass filter configuration.
-            It must have the following keys:
-            - "type": A string specifying the type of band-pass filter. Supported values are "butter4" and "sine2".
-            - "center": A float specifying the center frequency of the band-pass filter.
-            - "width": A float specifying the width of the band-pass filter.
-            - "trans_width": A float specifying the transition width of the band-pass filter (only for "sine2" type).
-
-    Returns:
-        numpy.ndarray: A 1D array representing the filter coefficients of the band-pass filter.
-    """
-    if bpf_cfg['type'] == 'butter4':
-        center = bpf_cfg['center']
-        width = bpf_cfg['width']
-        return tod_ops.filters.low_pass_butter4(fc=center + width/2.) *\
-                tod_ops.filters.high_pass_butter4(fc=center - width/2.)
-    elif bpf_cfg['type'] == 'sine2':
-        center = bpf_cfg['center']
-        width = bpf_cfg['width']
-        trans_width = bpf_cfg['trans_width']
-        return tod_ops.filters.low_pass_sine2(cutoff=center + width/2., width=trans_width)*\
-                tod_ops.filters.high_pass_sine2(cutoff=center - width/2., width=trans_width)
-    else:
-        raise ValueError('Unsupported filter type. Supported filters are `butter4` and `sine2`')
 
 
         
