@@ -34,10 +34,10 @@ def make_map(tod,
         If None, no cuts will be applied.
     det_weights_dsT : array-like or None, optional
         The detector weights to use in the map-making for the dsT timestream.
-        If None, uniform detector weights will be used.
     det_weights_demod : array-like or None, optional
         The detector weights to use in the map-making for the demodulated Q and U timestreams.
-        If None, uniform detector weights will be used.
+        If both of `det_weights_dsT` and `det_weights_demod` are None, uniform detector weights will be used.
+        If only one of two are provided, the other weight is provided by `det_weights_dsT` = 2 * `det_weights_demod`.
 
     Returns
     -------
@@ -85,7 +85,7 @@ def make_map(tod,
     wQU = PQU.to_weights(tod, signal=demodQ, comps='T', det_weights=det_weights_demod)
     
     # combine mT_weighted and mQU_weighted into mTQU_weighted
-    mTQU_weighted = enmap.zeros((3,) + PQU.geom.shape, wcs=PQU.geom.wcs)
+    mTQU_weighted = PQU.zeros(super_shape=3)
     mTQU_weighted[0] = mT_weighted
     mTQU_weighted[1] = mQU_weighted[0]
     mTQU_weighted[2] = mQU_weighted[1]
