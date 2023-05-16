@@ -71,7 +71,7 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
         mode_names.append(f'S{mode}')
         mode_names.append(f'C{mode}')
 
-    hwpss_stats = core.AxisManager(aman.dets, aman.samps, core.LabelAxis(
+    hwpss_stats = core.AxisManager(aman.dets, core.LabelAxis(
         name='modes', vals=np.array(mode_names, dtype='<U3')))
     if bin_signal:
         hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = binning_signal(
