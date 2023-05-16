@@ -10,7 +10,7 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
                   bin_signal=True, bins=3600,
                   lin_reg=True, modes=[1, 2, 3, 4, 6, 8],
                   apply_prefilt=True, prefilt_cutoff=1.0,
-                  mask_flags=True,
+                  flags=None,
                   merge_stats=True, hwpss_stats_name='hwpss_stats',
                   merge_extract=True, hwpss_extract_name='hwpss_extract'):
     """
@@ -37,8 +37,8 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
         Whether to apply a high-pass filter to signal before extracting HWPSS. Default is `True`.
     prefilt_cutoff : float, optional
         The cutoff frequency of the high-pass filter, in Hz. Only used if `apply_prefilt` is `True`. Default is 1.0.
-    mask_flags : bool, optional
-        Whether to mask out flagged samples before extracting HWPSS. Default is `True`.
+    flags : RangesMatrix, optional
+        Flags to be masked out before extracting HWPSS. If Default is None, and no mask will be applied.
     merge_stats : bool, optional
         Whether to add the extracted HWPSS statistics to `aman` as new axes. Default is `True`.
     hwpss_stats_name : str, optional
@@ -75,7 +75,7 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
         name='modes', vals=np.array(mode_names, dtype='<U3')))
     if bin_signal:
         hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = binning_signal(
-            aman, signal, hwp_angle=None, bins=bins, mask_flags=mask_flags)
+            aman, signal, hwp_angle=None, bins=bins, flags=flags)
         hwpss_stats.wrap('hwp_angle_bin_centers', hwp_angle_bin_centers, [
                        (0, core.IndexAxis('bin_samps', count=bins))])
         hwpss_stats.wrap('binned_hwpss', binned_hwpss, [
@@ -102,10 +102,10 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
         hwpss_stats.wrap('redchi2s', redchi2s, [(0, 'dets')])
 
     else:
-        if mask_flags:
-            m = ~aman.flags.glitches.mask()
-        else:
+        if flags is None:
             m = np.ones([aman.dets.count, aman.samps.count], dtype=bool)
+        else:
+            m = ~flags.mask()
 
         hwpss_sigma_tod = estimate_sigma_tod(signal, hwp_angle)
         hwpss_stats.wrap('hwpss_sigma_tod', hwpss_sigma_tod, [(0, 'dets')])
@@ -132,7 +132,7 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
 
 
 def binning_signal(aman, signal=None, hwp_angle=None,
-                   bins=360, mask_flags=False):
+                   bins=360, flags=None):
     """
     Bin time-ordered data by the HWP angle and return the binned signal and its standard deviation.
 
@@ -146,8 +146,9 @@ def binning_signal(aman, signal=None, hwp_angle=None,
         The name of the timestream of hwp_angle. Defaults to aman.hwp_angle if not specified.
     bins : int, optional
         The number of HWP angle bins to use. Default is 360.
-    mask_flags : bool, optional
-        Flag indicating whether to exclude flagged samples when binning the signal. Default is False.
+    flags : None or RangesMatrix
+        Flag indicating whether to exclude flagged samples when binning the signal.
+        Default is no mask applied.
 
     Returns
     -------
@@ -176,11 +177,11 @@ def binning_signal(aman, signal=None, hwp_angle=None,
         (aman.dets.count, bins), dtype='float32')
     binned_hwpss_sigma = np.zeros((aman.dets.count, bins), dtype='float32')
 
-    # get mask from aman
-    if mask_flags:
-        m = ~aman.flags.glitches.mask()
-    else:
+    # get mask from flags
+    if flags is None:
         m = np.ones([aman.dets.count, aman.samps.count], dtype=bool)
+    else:
+        m = ~flags.mask()
 
     # binning tod
     for i in range(aman.dets.count):
