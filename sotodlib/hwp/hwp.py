@@ -11,8 +11,8 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
                   lin_reg=True, modes=[1, 2, 3, 4, 6, 8],
                   apply_prefilt=True, prefilt_cutoff=1.0,
                   mask_flags=True,
-                  add_stats_to_aman=True, hwpss_stats_name='hwpss_stats',
-                  add_extracted_to_aman=True, hwpss_extract_name='hwpss_extract'):
+                  merge_stats=True, hwpss_stats_name='hwpss_stats',
+                  merge_extract=True, hwpss_extract_name='hwpss_extract'):
     """
     Extracts HWP synchronous signal (HWPSS) from a time-ordered data (TOD) using linear regression or curve-fitting.
 
@@ -39,14 +39,14 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
         The cutoff frequency of the high-pass filter, in Hz. Only used if `apply_prefilt` is `True`. Default is 1.0.
     mask_flags : bool, optional
         Whether to mask out flagged samples before extracting HWPSS. Default is `True`.
-    add_stats_to_aman : bool, optional
+    merge_stats : bool, optional
         Whether to add the extracted HWPSS statistics to `aman` as new axes. Default is `True`.
     hwpss_stats_name : str, optional
-        The name to use for the new axis containing the HWPSS statistics if `add_stats_to_aman` is `True`. Default is 'hwpss_stats'.
-    add_extracted_to_aman : bool, optional
-        Whether to add the extracted HWPSS to `aman` as a new signal axis. Default is `True`.
+        The name to use for the new field containing the HWPSS statistics if `merge_stats` is `True`. Default is 'hwpss_stats'.
+    merge_extract : bool, optional
+        Whether to add the extracted HWPSS to `aman` as a new signal field. Default is `True`.
     hwpss_extract_name : str, optional
-        The name to use for the new signal axis containing the extracted HWPSS if `add_extracted_to_aman` is `True`. Default is 'hwpss_extract'.
+        The name to use for the new signal field containing the extracted HWPSS if `merge_extract` is `True`. Default is 'hwpss_extract'.
 
     Returns
     -------
@@ -124,9 +124,9 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
                        (0, 'dets'), (1, 'modes'), (2, 'modes')])
         hwpss_stats.wrap('redchi2s', redchi2s, [(0, 'dets')])
     
-    if add_stats_to_aman:
+    if merge_stats:
         aman.wrap(hwpss_stats_name, hwpss_stats)
-    if add_extracted_to_aman:
+    if merge_extract:
         aman.wrap(hwpss_extract_name, fitsig_tod, [(0, 'dets'), (1, 'samps')])
     return hwpss_stats
 
