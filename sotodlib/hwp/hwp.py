@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 def extract_hwpss(aman, signal=None, hwp_angle=None,
                   bin_signal=True, bins=3600,
                   lin_reg=True, modes=[1, 2, 3, 4, 6, 8],
-                  apply_prefilt=True, prefilt_cutoff=1.0,
+                  apply_prefilt=True, prefilt_cutoff=1.0, prefilt_detrend='linear',
                   flags=None,
                   merge_stats=True, hwpss_stats_name='hwpss_stats',
                   merge_extract=True, hwpss_extract_name='hwpss_extract'):
@@ -37,6 +37,9 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
         Whether to apply a high-pass filter to signal before extracting HWPSS. Default is `True`.
     prefilt_cutoff : float, optional
         The cutoff frequency of the high-pass filter, in Hz. Only used if `apply_prefilt` is `True`. Default is 1.0.
+    prefilt_detrend: str or None
+        Method of detrending when you apply prefilter. Default is `linear`. If data is already detrended or you do not want to detrend,
+        set it to `None`.
     flags : RangesMatrix, optional
         Flags to be masked out before extracting HWPSS. If Default is None, and no mask will be applied.
     merge_stats : bool, optional
@@ -58,7 +61,7 @@ def extract_hwpss(aman, signal=None, hwp_angle=None,
         if apply_prefilt:
             filt = tod_ops.filters.high_pass_sine2(cutoff=prefilt_cutoff)
             signal = np.array(tod_ops.fourier_filter(
-                aman, filt, detrend='linear', signal_name='signal'))
+                aman, filt, detrend=prefilt_detrend, signal_name='signal'))
         else:
             signal = aman.signal
 
@@ -470,11 +473,13 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
         If not specified, a 4th-order Butterworth filter of 
         (demod_mode * HWP speed) +/- 0.95*(HWP speed) is used.
         Example) bpf_cfg = {'type': 'butter4', 'center': 8.0, 'width': 3.8}
+        See tod_ops.filters.get_bpf for details.
     lpf_cfg : dict
         Configuration for Low-pass filter applied to the demodulated TOD data. If not specified,
         a 4th-order Butterworth filter with a cutoff frequency of 0.95*(HWP speed)
         is used.
         Example) lpf_cfg = {'type': 'butter4', 'cutoff': 1.9}
+        See tod_ops.filters.get_lpf for details.
 
     Returns
     -------
@@ -522,10 +527,3 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
     aman['demodU'] = demod.imag
     aman['demodU'] = tod_ops.fourier_filter(
         aman, lpf, signal_name='demodU', detrend=None) * 2.
-
-
-
-
-        
-        
-        
