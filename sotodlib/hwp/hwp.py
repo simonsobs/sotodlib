@@ -6,13 +6,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def extract_hwpss(aman, signal=None, hwp_angle=None,
-                  bin_signal=True, bins=3600,
-                  lin_reg=True, modes=[1, 2, 3, 4, 6, 8],
-                  apply_prefilt=True, prefilt_cutoff=1.0, prefilt_detrend='linear',
-                  flags=None,
-                  merge_stats=True, hwpss_stats_name='hwpss_stats',
-                  merge_extract=True, hwpss_extract_name='hwpss_extract'):
+def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=3600,
+              lin_reg=True, modes=[1, 2, 3, 4, 6, 8], apply_prefilt=True, 
+              prefilt_cutoff=1.0, prefilt_detrend='linear', flags=None,
+              merge_stats=True, hwpss_stats_name='hwpss_stats',
+              merge_extract=True, hwpss_extract_name='hwpss_extract'):
     """
     Extracts HWP synchronous signal (HWPSS) from a time-ordered data (TOD) using linear regression or curve-fitting.
 
