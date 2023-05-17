@@ -95,7 +95,7 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=3600,
     hwpss_stats = core.AxisManager(aman.dets, core.LabelAxis(
         name='modes', vals=np.array(mode_names, dtype='<U3')))
     if bin_signal:
-        hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = bin_signal(
+        hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = get_binned_signal(
             aman, signal, hwp_angle=None, bins=bins, flags=flags)
         hwpss_stats.wrap('binned_angle', hwp_angle_bin_centers, [
                        (0, core.IndexAxis('bin_samps', count=bins))])
@@ -152,7 +152,7 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=3600,
     return hwpss_stats
 
 
-def bin_signal(aman, signal=None, hwp_angle=None,
+def get_binned_signal(aman, signal=None, hwp_angle=None,
                bins=360, flags=None):
     """
     Bin time-ordered data by the HWP angle and return the binned signal and its standard deviation.
@@ -188,16 +188,19 @@ def bin_signal(aman, signal=None, hwp_angle=None,
     hwpss_denom, hwp_angle_bins = np.histogram(
         hwp_angle, bins=bins, range=[0, 2 * np.pi])
     bin_counts = np.where(hwpss_denom == 0, 1, hwpss_denom)
+    # find bins with non-zero counts
+    mcnts = bin_counts > 1
+    nzbins = len(np.where(mcnts)[0])
 
     # convert bin edges into bin centers
     hwp_angle_bin_centers = (
         hwp_angle_bins[1]-hwp_angle_bins[0])/2 + hwp_angle_bins[:-1]
 
     # prepare binned signals
-    binned_hwpss = np.zeros((aman.dets.count, bins), dtype='float32')
-    binned_hwpss_squared_mean = np.zeros(
-        (aman.dets.count, bins), dtype='float32')
-    binned_hwpss_sigma = np.zeros((aman.dets.count, bins), dtype='float32')
+    binned_hwpss = np.full([aman.dets.count, bins], np.nan)
+    binned_hwpss_squared_mean = np.full(
+        [aman.dets.count, bins], np.nan)
+    binned_hwpss_sigma = np.full([aman.dets.count, bins], np.nan)
 
     # get mask from flags
     if flags is None:
@@ -207,15 +210,15 @@ def bin_signal(aman, signal=None, hwp_angle=None,
 
     # binning tod
     for i in range(aman.dets.count):
-        binned_hwpss[i][:] = np.histogram(hwp_angle[m[i]], bins=bins, range=[0, 2*np.pi],
-                                          weights=signal[i][m[i]])[0] / bin_counts
+        binned_hwpss[i][mcnts] = np.histogram(hwp_angle[m[i]], bins=bins, range=[0, 2*np.pi],
+                                          weights=signal[i][m[i]])[0][mcnts] / bin_counts[mcnts]
 
-        binned_hwpss_squared_mean[i][:] = np.histogram(hwp_angle[m[i]], bins=bins, range=[0, 2*np.pi],
-                                                       weights=signal[i][m[i]]**2)[0] / bin_counts
+        binned_hwpss_squared_mean[i][mcnts] = np.histogram(hwp_angle[m[i]], bins=bins, range=[0, 2*np.pi],
+                                                       weights=signal[i][m[i]]**2)[0][mcnts] / bin_counts[mcnts]
 
     # get sigma of each bin
-    binned_hwpss_sigma = np.sqrt(np.abs(binned_hwpss_squared_mean - binned_hwpss**2)
-                                 ) / np.sqrt(bin_counts)
+    binned_hwpss_sigma[:, mcnts] = np.sqrt(np.abs(binned_hwpss_squared_mean[:,mcnts] - binned_hwpss[:,mcnts]**2)
+                                 ) / np.sqrt(bin_counts[mcnts])
     # use median of sigma of each bin as uniform sigma for a detector
     hwpss_sigma = np.nanmedian(binned_hwpss_sigma, axis=-1)
 
@@ -250,6 +253,11 @@ def hwpss_linreg(x, ys, yerrs, modes):
     redchi2s : numpy.ndarray
         The reduced chi-square statistic of the fit, computed for each data point.
     """
+    m = np.isnan(ys[0][:])
+    xn = np.copy(x)
+    x = x[~m]
+    ys = ys[:,~m]
+
     vects = np.zeros([2*len(modes), x.shape[0]], dtype='float32')
     for i, mode in enumerate(modes):
         vects[2*i, :] = np.sin(mode*x)
@@ -258,7 +266,7 @@ def hwpss_linreg(x, ys, yerrs, modes):
     I = np.linalg.inv(np.tensordot(vects, vects, (1, 1)))
     coeffs = np.matmul(ys, vects.T)
     coeffs = np.dot(I, coeffs.T).T
-    fitsig = np.matmul(vects.T, coeffs.T).T
+    fitsig = harms_func(x, modes, coeffs)
 
     # covariance of coefficients
     covars = np.zeros((ys.shape[0], 2*len(modes), 2*len(modes)))
@@ -269,6 +277,7 @@ def hwpss_linreg(x, ys, yerrs, modes):
     redchi2s = np.sum(
         ((ys - fitsig)/yerrs[:, np.newaxis])**2, axis=-1) / (x.shape[0] - 2*len(modes))
 
+    fitsig = harms_func(xn, modes, coeffs)
     return fitsig, coeffs, covars, redchi2s
 
 
