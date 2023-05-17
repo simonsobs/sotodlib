@@ -187,6 +187,7 @@ def bin_signal(aman, signal=None, hwp_angle=None,
     # binning hwp_angle tod
     hwpss_denom, hwp_angle_bins = np.histogram(
         hwp_angle, bins=bins, range=[0, 2 * np.pi])
+    bin_counts = np.where(hwpss_denom == 0, 1, hwpss_denom)
 
     # convert bin edges into bin centers
     hwp_angle_bin_centers = (
@@ -207,14 +208,14 @@ def bin_signal(aman, signal=None, hwp_angle=None,
     # binning tod
     for i in range(aman.dets.count):
         binned_hwpss[i][:] = np.histogram(hwp_angle[m[i]], bins=bins, range=[0, 2*np.pi],
-                                          weights=signal[i][m[i]])[0] / np.where(hwpss_denom == 0, 1, hwpss_denom)
+                                          weights=signal[i][m[i]])[0] / bin_counts
 
         binned_hwpss_squared_mean[i][:] = np.histogram(hwp_angle[m[i]], bins=bins, range=[0, 2*np.pi],
-                                                       weights=signal[i][m[i]]**2)[0] / np.where(hwpss_denom == 0, 1, hwpss_denom)
+                                                       weights=signal[i][m[i]]**2)[0] / bin_counts
 
     # get sigma of each bin
     binned_hwpss_sigma = np.sqrt(np.abs(binned_hwpss_squared_mean - binned_hwpss**2)
-                                 ) / np.sqrt(np.where(hwpss_denom == 0, 1, hwpss_denom))
+                                 ) / np.sqrt(bin_counts)
     # use median of sigma of each bin as uniform sigma for a detector
     hwpss_sigma = np.nanmedian(binned_hwpss_sigma, axis=-1)
 
