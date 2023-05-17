@@ -10,7 +10,7 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=3600,
               lin_reg=True, modes=[1, 2, 3, 4, 6, 8], apply_prefilt=True,
               prefilt_cutoff=1.0, prefilt_detrend='linear', flags=None,
               merge_stats=True, hwpss_stats_name='hwpss_stats',
-              merge_extract=True, hwpss_extract_name='hwpss_extract'):
+              merge_model=True, hwpss_model_name='hwpss_model'):
     """
     Extracts HWP synchronous signal (HWPSS) from a time-ordered data (TOD)
     using linear regression or curve-fitting. The curve-fitting or linear
@@ -56,7 +56,23 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=3600,
     Returns
     -------
     hwpss_stats : AxisManager object
-        The extracted HWPSS and its statistics.
+        The extracted HWPSS and its statistics. The statistics include:
+            - coeffs (n_dets x n_modes) coefficients of the model
+                Sum_n coeffs[2*n]*sin(modes[n]*hwp_angle) + coeffs[2*n+1]*cos(modes[n]*hwp_angle)
+                where the sum on n range(len(modes))
+                Note: n_modes is 2*len(modes)
+            - covars (n_dets x n_modes x n_modes) variance covariance matrix
+                of the fitted coefficients for each detector.
+            - redchi2 (n_dets) reduced chi^2 of the fit for each detector.
+        In the binned case the following are returned:
+            - binned_angle (n_bins) binned version of hwp_angle in range (0, 2pi]
+                with number of bins set by bins argument.
+            - binned_signal (n_dets x n_bins) binned signal for each detector.
+            - sigma_bin (n_dets) average over all bins of the standard 
+                deviation of the signal within each bin.
+        In the non-binned case the following are returned:
+            - sigma_tod (n_dets) estimate of the standard deviation of the
+                signal using function ``estimate_sigma_tod``
     """
 
     if signal is None:
@@ -81,11 +97,11 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=3600,
     if bin_signal:
         hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = binning_signal(
             aman, signal, hwp_angle=None, bins=bins, flags=flags)
-        hwpss_stats.wrap('hwp_angle_bin_centers', hwp_angle_bin_centers, [
+        hwpss_stats.wrap('binned_angle', hwp_angle_bin_centers, [
                        (0, core.IndexAxis('bin_samps', count=bins))])
-        hwpss_stats.wrap('binned_hwpss', binned_hwpss, [
+        hwpss_stats.wrap('binned_signal', binned_hwpss, [
                        (0, 'dets'), (1, 'bin_samps')])
-        hwpss_stats.wrap('hwpss_sigma_bin', hwpss_sigma_bin, [(0, 'dets')])
+        hwpss_stats.wrap('sigma_bin', hwpss_sigma_bin, [(0, 'dets')])
 
         if lin_reg:
             fitsig_binned, coeffs, covars, redchi2s = hwpss_linreg(
@@ -99,7 +115,7 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=3600,
         fitsig_tod = harms_func(hwp_angle, modes, coeffs)
 
         # wrap the optimal values and stats
-        hwpss_stats.wrap('fitsig_binned', fitsig_binned,
+        hwpss_stats.wrap('binned_model', fitsig_binned,
                        [(0, 'dets'), (1, 'bin_samps')])
         hwpss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, 'modes')])
         hwpss_stats.wrap('covars', covars, [
@@ -113,7 +129,7 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=3600,
             m = ~flags.mask()
 
         hwpss_sigma_tod = estimate_sigma_tod(signal, hwp_angle)
-        hwpss_stats.wrap('hwpss_sigma_tod', hwpss_sigma_tod, [(0, 'dets')])
+        hwpss_stats.wrap('sigma_tod', hwpss_sigma_tod, [(0, 'dets')])
 
         if lin_reg:
             fitsig_tod, coeffs, covars, redchi2s = hwpss_linreg(
@@ -131,8 +147,8 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=3600,
     
     if merge_stats:
         aman.wrap(hwpss_stats_name, hwpss_stats)
-    if merge_extract:
-        aman.wrap(hwpss_extract_name, fitsig_tod, [(0, 'dets'), (1, 'samps')])
+    if merge_model:
+        aman.wrap(hwpss_model_name, fitsig_tod, [(0, 'dets'), (1, 'samps')])
     return hwpss_stats
 
 
