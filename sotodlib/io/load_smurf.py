@@ -2019,7 +2019,7 @@ def _get_tuneset_channel_names(status, ch_map, archive):
 
     # tune file in status
     if status.tune is not None and len(status.tune) > 0:
-        tune_file = status.tune.split("/")[-1]
+        tune_file = Tunes.get_name_from_status(status)
         tune = session.query(Tunes).filter(
             Tunes.name == tune_file,
             Tunes.stream_id == status.stream_id,
