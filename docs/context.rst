@@ -746,23 +746,6 @@ The context.yaml metadata entry would probably look like this::
 
 
 
-so-metadata tool
-----------------
-
-The ``so-metadata`` script is a tool for inspecting and manipulating
-ManifestDbs stored on disk.  For example, it can show you what files
-are referred to by the ManifestDb, and what kind of information is
-used to index the database.
-
-If you need to change the filenames in a ManifestDb, the "reroot" mode
-might be helpful.
-
-
-.. argparse::
-   :module: sotodlib.core.metadata.manifest
-   :func: get_parser
-
-
 ManifestDb reference
 --------------------
 
@@ -1559,3 +1542,38 @@ Here's the class documentation for ResultSetHdfLoader:
 .. autoclass:: sotodlib.io.metadata.ResultSetHdfLoader
    :inherited-members: __init__
    :members:
+
+-----------------
+Command Line Tool
+-----------------
+
+
+The `so-metadata` script is a tool that can be used to inspect and
+alter the contents of ObsFileDb, ObsDb, and ManifestDb ("metadata")
+sqlite3 databases.  In the case of ObsFileDb and ManifestDb, it can
+also be used to perform batch filename updates.
+
+To summarize a database, pass the db type and then the path to the db
+file.  It might be convenient to start by printing a summary of the
+context.yaml file, as this will give full paths to the various
+databases, that can be copied and pasted::
+
+  so-metadata context /path/to/context.yaml
+
+
+Analyzing individual databases::
+
+  so-metadata obsdb /path/to/context/obsdb.
+  so-metadata obsfiledb /path/to/context/obsfiledb.sqlite
+  so-metadata metadata /path/to/context/some_metadata.sqlite
+
+
+Usage
+=====
+
+.. argparse::
+   :module: sotodlib.core.metadata.cli
+   :func: get_parser
+   :prog: so-metadata
+
+
