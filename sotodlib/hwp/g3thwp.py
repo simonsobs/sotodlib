@@ -127,10 +127,12 @@ class G3tHWP():
         if self._start is None:
             logger.error("Can not find time range")
             return {}
+
         if isinstance(start, datetime.datetime):
-            self._start = start.timestamp()
+            self.start = start.timestamp()
         if isinstance(end, datetime.datetime):
-            self._end = end.timestamp()
+            self.end = end.timestamp()
+
         if data_dir is not None:
             self._data_dir = data_dir
         if self._data_dir is None:
@@ -141,12 +143,14 @@ class G3tHWP():
                 self._field_instance = instance
             else:
                 self._field_instance = 'observatory.' + instance + '.feeds.HWPEncoder'
+
         # load housekeeping data with hwp keys
         logger.info('Loading HK data files ')
         logger.info("input time range: " +
                     str(self._start) + " - " + str(self._end))
 
         fields, alias = self._key_formatting()
+
         data = so3g.hk.load_range(
             self._start,
             self._end,
@@ -342,7 +346,8 @@ class G3tHWP():
             stable = np.ones_like(fast_time, dtype=bool)
 
             # irig only status
-            irig_only_time = irig_time[np.where(irig_time < fast_time[0])]
+            irig_only_time = irig_time[np.where(
+                (irig_time < fast_time[0]) | (irig_time > fast_time[-1]))]
             irig_only_locked = np.zeros_like(irig_only_time, dtype=bool)
             irig_only_hwp_rate = np.zeros_like(irig_only_time, dtype=float)
 
@@ -354,7 +359,8 @@ class G3tHWP():
             stable = np.ones_like(fast_irig_time, dtype=bool)
 
         # slow status
-        slow_time = slow_time[np.where(slow_time < fast_irig_time[0])]
+        slow_time = slow_time[np.where(
+            (slow_time < fast_irig_time[0]) | (slow_time > fast_irig_time[-1]))]
         slow_locked = np.zeros_like(slow_time, dtype=bool)
         slow_stable = np.zeros_like(slow_time, dtype=bool)
         slow_hwp_rate = np.zeros_like(slow_time, dtype=float)
@@ -649,7 +655,7 @@ class G3tHWP():
             kind='linear',
             fill_value='extrapolate')(self._encd_clk)
         # Reject unexpected counter
-        idx = np.where((5.0 * np.diff(self._time) * self._num_edges) < 1)[0]
+        idx = np.where((1 / np.diff(self._time) / self._num_edges) > 5.0)[0]
         if len(idx) > 0:
             self._encd_clk = np.delete(self._encd_clk, idx)
             self._encd_cnt = self._encd_cnt[0] + \
