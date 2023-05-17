@@ -515,15 +515,17 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
     if bpf_cfg is None:
         bpf_center = demod_mode * speed
         bpf_width = speed * 2. * 0.95
-        bpf_cfg = {'type': 'butter4',
+        bpf_cfg = {'type': 'sine2',
                    'center': bpf_center,
-                   'width': bpf_width}
+                   'width': bpf_width,
+                   'trans_width': 0.1}
     bpf = tod_ops.filters.get_bpf(bpf_cfg)
     
     if lpf_cfg is None:
         lpf_cutoff = speed * 0.95
-        lpf_cfg = {'type': 'butter4',
-                  'cutoff': lpf_cutoff}
+        lpf_cfg = {'type': 'sine2',
+                   'cutoff': lpf_cutoff,
+                   'trans_width': 0.1}
     lpf = tod_ops.filters.get_lpf(lpf_cfg)
         
     phasor = np.exp(demod_mode * 1.j * aman.hwp_angle)
