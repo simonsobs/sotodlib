@@ -8,6 +8,7 @@ import so3g
 from spt3g import core
 import logging
 import yaml
+import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -105,9 +106,9 @@ class G3tHWP():
 
         Args
         -----
-            start : timestamp or DateTime
+            start : timestamp or datetime
                 start time for data, assumed to be in UTC unless specified
-            end :  timestamp or DateTime
+            end :  timestamp or datetime
                 end time for data, assumed to be in UTC unless specified
             data_dir : str or None
                 path to HK g3 file, overwrite config file
@@ -126,12 +127,10 @@ class G3tHWP():
         if self._start is None:
             logger.error("Can not find time range")
             return {}
-
-        if isinstance(start, np.datetime64):
-            start = start.timestamp()
-        if isinstance(end, np.datetime64):
-            end = end.timestamp()
-
+        if isinstance(start, datetime.datetime):
+            self._start = start.timestamp()
+        if isinstance(end, datetime.datetime):
+            self._end = end.timestamp()
         if data_dir is not None:
             self._data_dir = data_dir
         if self._data_dir is None:
@@ -142,14 +141,12 @@ class G3tHWP():
                 self._field_instance = instance
             else:
                 self._field_instance = 'observatory.' + instance + '.feeds.HWPEncoder'
-
         # load housekeeping data with hwp keys
         logger.info('Loading HK data files ')
         logger.info("input time range: " +
                     str(self._start) + " - " + str(self._end))
 
         fields, alias = self._key_formatting()
-
         data = so3g.hk.load_range(
             self._start,
             self._end,
