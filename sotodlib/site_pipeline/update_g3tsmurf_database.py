@@ -43,17 +43,22 @@ def update_g3tsmurf_db(config=None, update_delay=2, from_scratch=False,
     monitor = None
     if "monitor" in cfgs:
         logger.info("Will send monitor information to Influx")
-        monitor = Monitor.from_configs(cfgs["monitor"]["connect_configs"])
+        try:
+            monitor = Monitor.from_configs(cfgs["monitor"]["connect_configs"])
+        except Exception as e:
+            logger.error(f"Monitor connectioned failed {e}")
+            monitor = None
         
-    SMURF.index_archive(min_ctime=min_time.timestamp(), show_pb=show_pb)
     SMURF.index_metadata(min_ctime=min_time.timestamp())
+    SMURF.index_archive(min_ctime=min_time.timestamp(), show_pb=show_pb)
+    SMURF.index_action_observations(min_ctime=min_time.timestamp())    
 
     session = SMURF.Session()
 
     new_obs = session.query(Observations).filter(Observations.start >= min_time).all()
 
     for obs in new_obs:
-        if obs.stop is None:
+        if obs.stop is None or len(obs.tunesets)==0:
             SMURF.update_observation_files(
                 obs, 
                 session, 
@@ -62,8 +67,11 @@ def update_g3tsmurf_db(config=None, update_delay=2, from_scratch=False,
         
         if monitor is not None:
             if obs.stop is not None:
-                record_timing(monitor, obs, cfgs)
-                record_tuning(monitor, obs, cfgs)
+                try:
+                    record_timing(monitor, obs, cfgs)
+                    record_tuning(monitor, obs, cfgs)
+                except Exception as e:
+                    logger.error(f"Monitor Update failed for {obs.obs_id} with {e}")
 
 def _obs_tags(obs, cfgs):
     
@@ -109,8 +117,9 @@ def record_timing(monitor, obs, cfgs):
         )
         monitor.write()
 
-def get_parser():
-    parser = argparse.ArgumentParser()
+def get_parser(parser=None):
+    if parser is None:
+        parser = argparse.ArgumentParser()
     parser.add_argument('config', help="g3tsmurf db configuration file")
     parser.add_argument('--update-delay', help="Days to subtract from now to set as minimum ctime",
                         default=2, type=float)
@@ -120,7 +129,10 @@ def get_parser():
                        default=2, type=int)
     return parser
 
+main = update_g3tsmurf_db
+
+
 if __name__ == '__main__':
-    parser = get_parser()
+    parser = get_parser(parser=None)
     args = parser.parse_args()
     update_g3tsmurf_db(**vars(args))

@@ -86,7 +86,7 @@ class SimWireGrid(Operator):
         super().__init__(**kwargs)
 
     @function_timer
-    def get_wiregrid_angle(self, obs):
+    def _get_wiregrid_angle(self, obs):
         """Simulate the motion of the wiregrid and raise appropriate telescope flags"""
         times = obs.shared[self.times].data
 
@@ -212,7 +212,7 @@ class SimWireGrid(Operator):
                     comm=obs.comm.comm_group,
                 )
                 continue
-            self.get_wiregrid_angle(obs)
+            self._get_wiregrid_angle(obs)
 
             dets = obs.select_local_detectors(detectors)
             obs.detdata.ensure(self.det_data, detectors=dets, create_units=u.K)

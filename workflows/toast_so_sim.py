@@ -117,6 +117,22 @@ def parse_config(operators, templates, comm):
     )
 
     parser.add_argument(
+        "--save_books",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Save simulated data to L3 book format.",
+    )
+
+    parser.add_argument(
+        "--save_hdf5",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Save simulated data to TOAST native HDF5 format.",
+    )
+
+    parser.add_argument(
         "--obsmaps",
         required=False,
         default=False,
@@ -157,9 +173,9 @@ def load_instrument_and_schedule(args, comm):
     timer = toast.timing.Timer()
     timer.start()
 
-    focalplane = sotoast.SOFocalplane(
+    telescope = sotoast.simulated_telescope(
         hwfile=args.hardware,
-        telescope=args.telescope,
+        telescope_name=args.telescope,
         sample_rate=args.sample_rate * u.Hz,
         bands=args.bands,
         wafer_slots=args.wafer_slots,
@@ -178,17 +194,6 @@ def load_instrument_and_schedule(args, comm):
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"After loading schedule:  {mem}", comm)
 
-    # FIXME : hardcode site parameters?
-    site = toast.instrument.GroundSite(
-        schedule.site_name,
-        schedule.site_lat,
-        schedule.site_lon,
-        schedule.site_alt,
-        weather=None,
-    )
-    telescope = toast.instrument.Telescope(
-        schedule.telescope_name, focalplane=focalplane, site=site
-    )
     return telescope, schedule
 
 
@@ -454,9 +459,20 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     # Simulate Solar System Objects
 
     ops.sim_sso.detector_pointing = ops.det_pointing_azel
+    ops.sim_sso.detector_weights = ops.weights_radec
     ops.sim_sso.apply(data)
     log.info_rank(
         "Simulated and observed solar system objects",
+        comm=world_comm,
+        timer=timer,
+    )
+
+    # Simulate Solar System Objects
+
+    ops.sim_catalog.detector_pointing = ops.det_pointing_radec
+    ops.sim_catalog.apply(data)
+    log.info_rank(
+        "Simulated and observed catalog",
         comm=world_comm,
         timer=timer,
     )
@@ -521,9 +537,11 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
             if not os.path.isdir(hdf5_path):
                 os.makedirs(hdf5_path)
         ops.save_hdf5.volume = hdf5_path
-
+        ops.save_books.book_dir = os.path.join(args.out_dir, "books")
     ops.save_hdf5.apply(data)
     log.info_rank("Saved HDF5 data in", comm=world_comm, timer=timer)
+    ops.save_books.apply(data)
+    log.info_rank("Saved book data in", comm=world_comm, timer=timer)
 
     return data
 
@@ -760,7 +778,12 @@ def main():
     # operator is disabled by default.
 
     operators = [
-        toast.ops.SimGround(name="sim_ground", weather="atacama", detset_key="pixel"),
+        toast.ops.SimGround(
+            name="sim_ground",
+            weather="atacama",
+            detset_key="pixel",
+            session_split_key="tube_slot",
+        ),
         so_ops.CoRotator(name="corotate_lat"),
         toast.ops.PerturbHWP(name="perturb_hwp", enabled=False),
         toast.ops.DefaultNoiseModel(name="default_model", noise_model="noise_model"),
@@ -810,6 +833,7 @@ def main():
         ),
         toast.ops.SimScanSynchronousSignal(name="sim_sss", enabled=False),
         so_ops.SimSSO(name="sim_sso", enabled=False),
+        so_ops.SimCatalog(name="sim_catalog", enabled=False),
         so_ops.SimSource(name="sim_source", enabled=False),
         so_ops.SimHWPSS(name="sim_hwpss", enabled=False),
         so_ops.SimWireGrid(name="sim_wiregrid", enabled=False),
@@ -818,6 +842,7 @@ def main():
             name="convolve_time_constant", deconvolve=False, enabled=False
         ),
         toast.ops.SaveHDF5(name="save_hdf5", enabled=False),
+        so_ops.SaveBooks(name="save_books", enabled=False),
         toast.ops.GainScrambler(name="gainscrambler", enabled=False),
         toast.ops.SimNoise(name="sim_noise"),
         toast.ops.PixelsHealpix(name="pixels_healpix_radec"),

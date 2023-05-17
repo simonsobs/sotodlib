@@ -68,13 +68,19 @@ class PcaTest(unittest.TestCase):
         tod.wrap('sig1d', tod.signal[0], [(0, 'samps')])
         tod.wrap('sig1e', tod.signal[:,0], [(0, 'dets')])
         tod.wrap('sig3d', tod.signal[None], [(1, 'dets'), (2, 'samps')])
-        tod_ops.detrend_data(tod)
-        tod_ops.detrend_data(tod, signal_name='sig1d')
-        tod_ops.detrend_data(tod, signal_name='sig1e', axis_name='dets')
-        tod_ops.detrend_data(tod, signal_name='sig3d')
-        tod_ops.detrend_data(tod, signal_name='sig3d', axis_name='dets')
+        tod_ops.detrend_tod(tod, signal_name='signal', in_place=False, wrap_name='detrended')
+        self.assertTrue( np.all(np.mean(tod.signal,axis=-1) != np.mean(tod.detrended, axis=-1)))
+
+        dx = tod_ops.detrend_tod(tod, signal_name='signal', in_place=False, wrap_name=None)
+        self.assertTrue( np.all(np.mean(tod.detrended,axis=-1) == np.mean(dx,axis=-1)))
+        
+        tod_ops.detrend_tod(tod)
+        tod_ops.detrend_tod(tod, signal_name='sig1d')
+        tod_ops.detrend_tod(tod, signal_name='sig1e', axis_name='dets')
+        tod_ops.detrend_tod(tod, signal_name='sig3d')
+        tod_ops.detrend_tod(tod, signal_name='sig3d', axis_name='dets')
         with self.assertRaises(ValueError):
-            tod_ops.detrend_data(tod, signal_name='sig1e')
+            tod_ops.detrend_tod(tod, signal_name='sig1e')
 
 class GapFillTest(unittest.TestCase):
     def test_basic(self):
