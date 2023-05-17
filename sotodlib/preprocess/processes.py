@@ -193,15 +193,15 @@ class Calibrate(_Preprocess):
 
 class EstimateHWPSS(_Preprocess):
     """
-    Builds a HWPSS Template. Calc configs go to `extract_hwpss`.
+    Builds a HWPSS Template. Calc configs go to ``hwpss_model``.
     Results of fitting saved if field specified by calc["name"]
 
-    .. autofunction:: sotodlib.hwp.hwp.extract_hwpss
+    .. autofunction:: sotodlib.hwp.hwp.get_hwpss
     """
     name = "estimate_hwpss"
 
     def calc_and_save(self, aman, proc_aman):
-        hwpss_stats = hwp.extract_hwpss(aman, **self.calc_cfgs)
+        hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
         self.save(proc_aman, hwpss_stats)
 
     def save(self, proc_aman, hwpss_stats):
