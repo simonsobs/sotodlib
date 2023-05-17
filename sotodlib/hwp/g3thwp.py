@@ -8,6 +8,7 @@ import so3g
 from spt3g import core
 import logging
 import yaml
+import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -105,9 +106,9 @@ class G3tHWP():
 
         Args
         -----
-            start : timestamp or DateTime
+            start : timestamp or datetime
                 start time for data, assumed to be in UTC unless specified
-            end :  timestamp or DateTime
+            end :  timestamp or datetime
                 end time for data, assumed to be in UTC unless specified
             data_dir : str or None
                 path to HK g3 file, overwrite config file
@@ -127,10 +128,10 @@ class G3tHWP():
             logger.error("Can not find time range")
             return {}
 
-        if isinstance(start, np.datetime64):
-            start = start.timestamp()
-        if isinstance(end, np.datetime64):
-            end = end.timestamp()
+        if isinstance(start, datetime.datetime):
+            self._start = start.timestamp()
+        if isinstance(end, datetime.datetime):
+            self._end = end.timestamp()
 
         if data_dir is not None:
             self._data_dir = data_dir
