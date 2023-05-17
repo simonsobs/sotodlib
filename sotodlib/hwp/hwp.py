@@ -95,7 +95,7 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=3600,
     hwpss_stats = core.AxisManager(aman.dets, core.LabelAxis(
         name='modes', vals=np.array(mode_names, dtype='<U3')))
     if bin_signal:
-        hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = binning_signal(
+        hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = bin_signal(
             aman, signal, hwp_angle=None, bins=bins, flags=flags)
         hwpss_stats.wrap('binned_angle', hwp_angle_bin_centers, [
                        (0, core.IndexAxis('bin_samps', count=bins))])
@@ -152,8 +152,8 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=3600,
     return hwpss_stats
 
 
-def binning_signal(aman, signal=None, hwp_angle=None,
-                   bins=360, flags=None):
+def bin_signal(aman, signal=None, hwp_angle=None,
+               bins=360, flags=None):
     """
     Bin time-ordered data by the HWP angle and return the binned signal and its standard deviation.
 
