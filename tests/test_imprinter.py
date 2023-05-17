@@ -42,10 +42,10 @@ def obsset():
     file.stop = dt_t1
     file.n_channels = 10
     obs1 = create_autospec(G3tObservations)
-    obs1.obs_id = f"slot1_{t0}"
+    obs1.obs_id = f"oper_slot1_{t0}"
     obs1.files = [file]*2
     obs2 = create_autospec(G3tObservations)
-    obs2.obs_id = f"slot2_{t0}"
+    obs2.obs_id = f"oper_slot2_{t0}"
     obs2.files = [file]*2
     obsset = ObsSet([obs1, obs2], mode="oper", slots=["slot1", "slot2", "slot3"], tel_tube="lat")
     return obsset
@@ -54,7 +54,7 @@ def test_ObsSet(obsset):
     assert obsset.mode == "oper"
     assert obsset.slots == ["slot1", "slot2", "slot3"]
     assert obsset.tel_tube == "lat"
-    assert obsset.obs_ids == ["slot1_1674090159", "slot2_1674090159"]
+    assert obsset.obs_ids == ["oper_slot1_1674090159", "oper_slot2_1674090159"]
     assert obsset.get_id() == "oper_1674090159_lat_110"
     assert obsset.contains_stream("slot1") == True
     assert obsset.contains_stream("slot2") == True
@@ -64,8 +64,8 @@ def test_register_book(imprinter, obsset):
     book = imprinter.register_book(obsset)
     assert book.bid == "oper_1674090159_lat_110"
     assert book.status == UNBOUND
-    assert book.obs[0].obs_id == "slot1_1674090159"
-    assert book.obs[1].obs_id == "slot2_1674090159"
+    assert book.obs[0].obs_id == "oper_slot1_1674090159"
+    assert book.obs[1].obs_id == "oper_slot2_1674090159"
     assert book.tel_tube == "lat"
     assert book.type == "oper"
     assert book.start == datetime.utcfromtimestamp(1674090159)
@@ -115,7 +115,7 @@ def test_book_bound(imprinter):
     assert imprinter.book_bound(books[0].bid) == False
 
 def test_stream_timestamp():
-    obs_id = 'stream1_1674090159'
+    obs_id = 'oper_stream1_1674090159'
     stream, timestamp = stream_timestamp(obs_id)
     assert stream == 'stream1'
     assert timestamp == '1674090159'

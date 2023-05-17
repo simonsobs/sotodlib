@@ -279,8 +279,8 @@ class G3tHWP():
             return out
 
         if self._irig_type == 1:
-            out['irig_time'] = out['irig_synch_pulse_clock_time'+suffix][1]
-            out['rising_edge_count'] = out['irig_synch_pulse_clock_counts'+suffix][1]
+            out['irig_time'] = data['irig_synch_pulse_clock_time'+suffix][1]
+            out['rising_edge_count'] = data['irig_synch_pulse_clock_counts'+suffix][1]
 
         logger.info('IRIG timing quality check.')
         out['irig_time'], out['rising_edge_count'] = self._irig_quality_check(
@@ -446,7 +446,7 @@ class G3tHWP():
 
         return out
 
-    def eval_angle(self, solved):
+    def eval_angle(self, solved, poly_order=3):
         """
         Evaluate the non-uniformity of hwp angle timestamp and subtract
         The raw hwp angle timestamp is kept.
@@ -491,13 +491,13 @@ class G3tHWP():
         solved['angle_moving_ave'] = moving_average(
             solved['angle'], self._num_edges)
 
-        # template subtraction
-        def detrend(array, deg=3):
+        def detrend(array, deg=poly_order):
             x = np.linspace(-1, 1, len(array))
             p = np.polyfit(x, array, deg=deg)
             pv = np.polyval(p, x)
             return array - pv
 
+        # template subtraction
         ft = solved['fast_time'][self._ref_indexes[0]:self._ref_indexes[-2]+1]
         # remove rotation frequency drift for making a template of encoder slits
         ft = detrend(ft, deg=3)
@@ -508,7 +508,7 @@ class G3tHWP():
         average_slit = np.average(template_slit)
         # subtract template, keep raw timestamp
         subtract = np.cumsum(np.roll(np.tile(template_slit-average_slit, len(
-            self._ref_indexes)), self._ref_indexes[0] + 1)[:len(solved['fast_time'])])
+            self._ref_indexes) + 1), self._ref_indexes[0] + 1)[:len(solved['fast_time'])])
         solved['fast_time_raw'] = solved['fast_time']
         solved['fast_time'] = solved['fast_time'] - subtract
 
@@ -935,6 +935,8 @@ class G3tHWP():
 
     def _irig_quality_check(self, irig_time, rising_edge):
         idx = np.where(np.diff(irig_time) == 1)[0]
+        if self._irig_type == 1:
+            idx = np.where(np.isclose(np.diff(irig_time), np.full(len(irig_time)-1, 0.1)))[0]
         if len(irig_time) - 1 == len(idx):
             return irig_time, rising_edge
         elif len(irig_time) > len(idx) and len(idx) > 0:

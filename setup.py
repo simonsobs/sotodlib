@@ -22,13 +22,15 @@ setup_opts["entry_points"] = {
         "so_hardware_plot = sotodlib.scripts.hardware_plot:main",
         "so_hardware_trim = sotodlib.scripts.hardware_trim:main",
         "so_hardware_info = sotodlib.scripts.hardware_info:main",
-        "so-metadata = sotodlib.core.metadata.manifest:main",
+        "so-metadata = sotodlib.core.metadata.cli:main",
+        "so-site-pipeline = sotodlib.site_pipeline.cli:main",
     ]
 }
 
 scripts = [
     "workflows/toast_so_sim.py",
     "workflows/toast_so_map.py",
+    "workflows/toast_so_convert.py",
     "workflows/get_wafer_offset.py",
 ]
 
