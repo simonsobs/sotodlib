@@ -5,7 +5,7 @@ import scipy.signal as signal
 
 import logging
 
-from . import detrend_data
+from . import detrend_tod
 from . import fft_ops
 from sotodlib import core
 
@@ -29,7 +29,8 @@ def fourier_filter(tod, filt_function,
             fourier space
         
         detrend: Method of detrending to be done before ffting. Can
-            be 'linear', 'mean', or None.
+            be 'linear', 'mean', or None. Note that detrending here can be slow
+            for large arrays
             
         resize: How to resize the axis to increase fft
             speed. 'zero_pad' will increase to the next nice number (a
@@ -84,8 +85,8 @@ def fourier_filter(tod, filt_function,
 
     if detrend is not None:
         logger.info('fourier_filter: detrending.')
-        signal = detrend_data(tod, detrend, axis_name=axis_name,
-                             signal_name=signal_name)
+        signal = detrend_tod(tod, detrend, axis_name=axis_name,
+                             signal_name=signal_name, in_place=False)
     else:
         signal = tod[signal_name]
     signal = np.atleast_2d(signal)

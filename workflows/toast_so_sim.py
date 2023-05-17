@@ -459,6 +459,7 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     # Simulate Solar System Objects
 
     ops.sim_sso.detector_pointing = ops.det_pointing_azel
+    ops.sim_sso.detector_weights = ops.weights_radec
     ops.sim_sso.apply(data)
     log.info_rank(
         "Simulated and observed solar system objects",

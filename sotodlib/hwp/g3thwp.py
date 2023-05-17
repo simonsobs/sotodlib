@@ -8,6 +8,7 @@ import so3g
 from spt3g import core
 import logging
 import yaml
+import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -105,9 +106,9 @@ class G3tHWP():
 
         Args
         -----
-            start : timestamp or DateTime
+            start : timestamp or datetime
                 start time for data, assumed to be in UTC unless specified
-            end :  timestamp or DateTime
+            end :  timestamp or datetime
                 end time for data, assumed to be in UTC unless specified
             data_dir : str or None
                 path to HK g3 file, overwrite config file
@@ -127,10 +128,10 @@ class G3tHWP():
             logger.error("Can not find time range")
             return {}
 
-        if isinstance(start, np.datetime64):
-            start = start.timestamp()
-        if isinstance(end, np.datetime64):
-            end = end.timestamp()
+        if isinstance(start, datetime.datetime):
+            self._start = start.timestamp()
+        if isinstance(end, datetime.datetime):
+            self._end = end.timestamp()
 
         if data_dir is not None:
             self._data_dir = data_dir
@@ -279,8 +280,8 @@ class G3tHWP():
             return out
 
         if self._irig_type == 1:
-            out['irig_time'] = out['irig_synch_pulse_clock_time'+suffix][1]
-            out['rising_edge_count'] = out['irig_synch_pulse_clock_counts'+suffix][1]
+            out['irig_time'] = data['irig_synch_pulse_clock_time'+suffix][1]
+            out['rising_edge_count'] = data['irig_synch_pulse_clock_counts'+suffix][1]
 
         logger.info('IRIG timing quality check.')
         out['irig_time'], out['rising_edge_count'] = self._irig_quality_check(
@@ -448,7 +449,7 @@ class G3tHWP():
 
         return out
 
-    def eval_angle(self, solved):
+    def eval_angle(self, solved, poly_order=3):
         """
         Evaluate the non-uniformity of hwp angle timestamp and subtract
         The raw hwp angle timestamp is kept.
@@ -493,7 +494,7 @@ class G3tHWP():
         solved['angle_moving_ave'] = moving_average(
             solved['angle'], self._num_edges)
 
-        def detrend(array, deg=3):
+        def detrend(array, deg=poly_order):
             x = np.linspace(-1, 1, len(array))
             p = np.polyfit(x, array, deg=deg)
             pv = np.polyval(p, x)
@@ -937,6 +938,8 @@ class G3tHWP():
 
     def _irig_quality_check(self, irig_time, rising_edge):
         idx = np.where(np.diff(irig_time) == 1)[0]
+        if self._irig_type == 1:
+            idx = np.where(np.isclose(np.diff(irig_time), np.full(len(irig_time)-1, 0.1)))[0]
         if len(irig_time) - 1 == len(idx):
             return irig_time, rising_edge
         elif len(irig_time) > len(idx) and len(idx) > 0:

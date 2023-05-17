@@ -4,6 +4,7 @@ from collections import OrderedDict
 from typing import List
 import yaml, traceback
 import shutil
+import sotodlib
 
 import sqlalchemy as db
 from sqlalchemy import or_, and_, not_
@@ -13,10 +14,11 @@ from sqlalchemy.orm import relationship
 import so3g
 from spt3g import core
 import itertools
-from scipy.interpolate import interp1d
+import logging
 
+
+from sotodlib.io.bookbinder import BookBinder
 from .load_smurf import G3tSmurf, Observations as G3tObservations, SmurfStatus, get_channel_info
-from .bookbinder import Bookbinder, TimingSystemError, counters_to_timestamps
 from ..site_pipeline.util import init_logger
 
 
@@ -152,7 +154,12 @@ class Imprinter:
         self.session = None
         self.g3tsmurf_sessions = {}
         self.archives = {}
-        self.logger = logger if logger is not None else init_logger("imprinter")
+
+        self.logger = logger
+        if logger is None:
+            self.logger = logging.getLogger("imprinter")
+            if not self.logger.hasHandlers():
+                self.logger = init_logger("imprinter")
 
     def get_session(self):
         """Get a new session or return the existing one
@@ -222,7 +229,7 @@ class Imprinter:
         # max_channels is the maximum number of channels in the book
         if any([len(o.files) == 0 for o in obsset]):
             raise NoFilesError(f"No files found for observations in {bid}")
-        # get start and end times
+        # get start and end times (initial guess)
         start_t = np.max([np.min([f.start for f in o.files]) for o in obsset])
         stop_t = np.min([np.max([f.stop for f in o.files]) for o in obsset])
         max_channels = int(np.max([np.max([f.n_channels for f in o.files]) for o in obsset]))
@@ -245,7 +252,8 @@ class Imprinter:
 
         # add book to database
         session.add(book)
-        if commit: session.commit()
+        if commit:
+            session.commit()
         return book
 
     def register_books(self, bids, obs_lists, commit=True, session=None):
@@ -270,7 +278,7 @@ class Imprinter:
         if commit: session.commit()
 
     def bind_book(self, book, session=None, output_root="out", message="",
-                  test_mode=False):
+                  test_mode=False, pbar=False):
         """Bind book using bookbinder
 
         Parameters
@@ -303,55 +311,50 @@ class Imprinter:
         if (book.status == BOUND) and (not test_mode):
             raise BookBoundError(f"Book {bid} is already bound")
 
+        assert book.type in VALID_OBSTYPES
+
         # after sanity checks, now we proceed to bind the book.
         # get files associated with this book, in the form of
         # a dictionary of {stream_id: [file_paths]}
         filedb = self.get_files_for_book(book)
-        # get readout ids
-        hkfiles = []  # fixme: add housekeeping files support
+        obsdb = self.get_g3tsmurf_obs_for_book(book)
+        readout_ids = self.get_readout_ids_for_book(book)
 
-        start_t = int(book.start.timestamp()*1e8)
-        stop_t = int(book.stop.timestamp()*1e8)
-        assert book.type in VALID_OBSTYPES
+        g3tsmurf_cfg_file = self.sources[book.tel_tube]['g3tsmurf']
+        with open(g3tsmurf_cfg_file, 'r') as f:
+            g3tsmurf_cfg = yaml.safe_load(f)
+        data_root = g3tsmurf_cfg['data_prefix']
+
         session_id = book.bid.split('_')[1]
         first5 = session_id[:5]
         odir = op.join(output_root, book.type, first5)
         if not op.exists(odir):
             os.makedirs(odir)
-
-        # it's possible that timing field could be none when no timing information is found
-        timing_system = book.timing if book.timing is not None else False
-
         book_path = os.path.join(odir, book.bid)
-        meta_files = None
-        if book.type == 'oper':
-            _, meta_files = self.copy_smurf_files_to_book(book, book_path)
 
         # bind book using bookbinder library
+        bookbinder = BookBinder(book, obsdb, filedb, data_root, readout_ids,
+                                book_path)
         try:
-            readout_ids = self.get_readout_ids_for_book(book)
-            for obs_id, smurf_files in filedb.items():
-                # get stream id from observation id
-                stream_id, _ = stream_timestamp(obs_id)
-                # get readout ids
-                rids = readout_ids[obs_id]
-                assert rids is not None
-                # convert start and stop times into G3Time timestamps (in unit of 1e-8 sec)
-                Bookbinder(smurf_files, hk_files=hkfiles, out_root=odir,
-                           stream_id=stream_id, session_id=int(session_id),
-                           book_id=book.bid, start_time=start_t, end_time=stop_t,
-                           max_nchannels=book.max_channels,
-                           timing_system=timing_system,
-                           frameproc_config={"readout_ids": rids})()
+            bookbinder.bind(pbar=pbar)
 
-            # Add meta files to M_index
-            if (book.type == 'oper') and meta_files:
-                mfile = os.path.join(book_path, 'M_index.yaml')
-                with open(mfile, 'r') as f:
-                    meta = yaml.safe_load(f)
-                meta['meta_files'] = meta_files
-                with open(mfile, 'w') as f:
-                    yaml.dump(meta, f)
+            # write M_book file
+            m_book_file = os.path.join(book_path, 'M_book.yaml')
+            book_meta = {}
+            book_meta['book'] = {
+                "type": book.type,
+                "schema_version": 0,
+                "book_id": book.bid,
+                "finalized_at": dt.datetime.utcnow().isoformat(),
+            }
+            book_meta['bookbinder'] = {
+                "codebase": sotodlib.__file__,
+                "version": sotodlib.__version__,
+                "context": self.config.get('context', 'unknown')
+            }
+
+            with open(m_book_file, 'w') as f:
+                yaml.dump(book_meta, f)
 
             # not sure if this is the best place to update
             book.status = BOUND
@@ -369,11 +372,8 @@ class Imprinter:
             err_msg = traceback.format_exc()
             self.logger.error(err_msg)
             message = f"{message}\ntrace={err_msg}" if message else err_msg
-            # if bookbinder complains about timing system, fall back to non-timing mode in the next try
-            if isinstance(e, TimingSystemError):
-                book.timing = False
             book.message = message
-    
+
             if not test_mode:
                 session.commit()
             else:
@@ -719,7 +719,7 @@ class Imprinter:
 
         meta_files = {}
         for f in files:
-            basename = os.path.basename(f) 
+            basename = os.path.basename(f)
             dest = os.path.join(book_path, basename)
             shutil.copyfile(f, dest)
 
@@ -768,85 +768,11 @@ class Imprinter:
             self.logger.warning(f"Failed to remove {book.path}: {e}")
             self.logger.error(traceback.format_exc())
 
-    def get_book_times(self, book):
-        """
-        Given a book of co-sampled data with a timing system, this function will
-        return a gap-filled list of timestamps that should be contained in the
-        book.  The data will be trimmed such that the start all active wafers
-        have data inside the returned time-range.
-
-        Parameters
-        ----------
-        book: Book object
-        """
-        filedb = self.get_files_for_book(book)
-        for i, files in enumerate(filedb.values()):
-            _files = sorted(files)
-            if i == 0:  # Get full list of timestamps for first file list
-                ts = []
-                for frame in itertools.chain(*[core.G3File(f) for f in _files]):
-                    if frame.type != core.G3FrameType.Scan:
-                        continue
-
-                    ts.append(get_frame_times(frame)[1])
-                ts = fill_time_gaps(np.hstack(ts))
-                t0, t1 = ts[[0, -1]]
-            else:
-                _t0, _t1 = get_start_and_end(_files)
-                t0 = max(t0, _t0)
-                t1 = min(t1, _t1)
-
-        m = (t0 <= ts) & (ts <= t1)
-        return ts[m]
-
 
 #####################
 # Utility functions #
 #####################
 
-def get_smurf_files(obs, meta_path, all_files=False):
-    """
-    Returns a list of smurf files that should be copied into a book.
-
-    Parameters
-    ------------
-    obs : G3tObservations
-        Observation to pull files from
-    meta_path : path
-        Smurf metadata path
-    all_files : bool
-        If true will return all found metadata files
-
-    Returns
-    -----------
-    files : List[path]
-        List of copyable files
-    """
-
-    def copy_to_book(file):
-        if all_files:
-            return True
-        return file.endswith('npy')
-
-    tscode = int(obs.action_ctime//1e5)
-    files = []
-
-    # check adjacent folders in case action falls on a boundary
-    for tc in [tscode-1, tscode, tscode + 1]:  
-        action_dir = os.path.join(
-            meta_path,
-            str(tc), 
-            obs.stream_id,
-            f'{obs.action_ctime}_{obs.action_name}'
-        )
-
-        if not os.path.exists(action_dir):
-            continue
-
-        for root, _, fs in os.walk(action_dir):
-            files.extend([os.path.join(root, f) for f in fs])
-    
-    return [f for f in files if copy_to_book(f)]
 
 _primary_idx_map = {}
 def get_frame_times(frame):
@@ -863,59 +789,22 @@ def get_frame_times(frame):
     high_precision : bool
         If true, timestamps are computed from timing counters. If not, they are
         software timestamps
-    
+
     timestamps : np.ndarray
-        Array of timestamps (sec) for samples in the frame
+        Array of timestamps for samples in the frame, in G3Time units (1e-8 sec)
 
     """
     if len(_primary_idx_map) == 0:
         for i, name in enumerate(frame['primary'].names):
             _primary_idx_map[name] = i
-    
+
     c0 = frame['primary'].data[_primary_idx_map['Counter0']]
     c2 = frame['primary'].data[_primary_idx_map['Counter2']]
 
     if np.any(c0):
-        return True, counters_to_timestamps(c0, c2)
+        return True, counters_to_timestamps(c0, c2) * core.G3Units.s
     else:
-        return False, np.array(frame['data'].times) / core.G3Units.s
-
-
-def fill_time_gaps(ts):
-    """
-    Fills gaps in an array of timestamps.
-
-    Parameters
-    -------------
-    ts : np.ndarray
-        List of timestamps of length `n`, potentially with gaps
-    
-    Returns
-    --------
-    new_ts : np.ndarray
-        New list of timestamps of length >= n, with gaps filled.
-    """
-    # Find indices where gaps occur and how long each gap is
-    dts = np.diff(ts)
-    dt = np.median(dts)
-    missing = np.round(dts/dt - 1).astype(int)
-    total_missing = int(np.sum(missing))
-
-    # Create new  array with the correct number of samples
-    new_ts = np.full(len(ts) + total_missing, np.nan)
-
-    # Insert old timestamps into new array with offsets that account for gaps
-    offsets = np.concatenate([[0], np.cumsum(missing)])
-    i0s = np.arange(len(ts))
-    new_ts[i0s + offsets] = ts
-
-    # Use existing data to interpolate and fill holes
-    m = np.isnan(new_ts)
-    xs = np.arange(len(new_ts))
-    interp = interp1d(xs[~m], new_ts[~m])
-    new_ts[m] = interp(xs[m])
-
-    return new_ts
+        return False, np.array(frame['data'].times)
 
 def get_start_and_end(files):
     """
@@ -925,7 +814,7 @@ def get_start_and_end(files):
     -------------
     files : np.ndarray
         List of L2 G3 files for a single detector set in an observation
-    
+
     Returns
     --------
     t0 : float
@@ -945,7 +834,7 @@ def get_start_and_end(files):
                 break
         if found_scan:
             break
-    
+
     # Get end time
     frame = None
     found_scan = False
@@ -959,7 +848,7 @@ def get_start_and_end(files):
             break
 
     t1 = get_frame_times(frame)[1][-1]
-    
+
     return t0, t1
 
 def create_g3tsmurf_session(config):
