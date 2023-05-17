@@ -129,9 +129,9 @@ class G3tHWP():
             return {}
 
         if isinstance(start, datetime.datetime):
-            self.start = start.timestamp()
+            self._start = start.timestamp()
         if isinstance(end, datetime.datetime):
-            self.end = end.timestamp()
+            self._end = end.timestamp()
 
         if data_dir is not None:
             self._data_dir = data_dir
