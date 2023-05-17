@@ -99,7 +99,7 @@ def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo
 
         array2secy: Function that maps positions on tube's focal plane to y position on secondary.
 
-        rot: Co-rotator position in degrees wrt elevation (TBD sort out where zero is).
+        rot: Rotation about the line of site = elev - 60 - corotator.
 
         opt2cryo: The rotation to get from cryostat coordinates to zemax coordinates (TBD, prob 30 deg).
 
@@ -252,7 +252,7 @@ def LAT_focal_plane(
 
         y: Detector y positions, if provided will override positions loaded from aman.
 
-        rot: Co-rotator angle.
+        rot: Rotation about the line of site = elev - 60 - corotator.
 
         tube: Either the tube name as a string or the tube number as an int.
 
