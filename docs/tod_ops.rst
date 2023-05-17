@@ -51,6 +51,7 @@ be auto-documented here.
 .. autofunction:: iir_filter
 
 Some types of low, high, and band pass filters can be derived by wrapper functions below.
+
 .. autofunction:: get_lpf
 .. autofunction:: get_hpf
 .. autofunction:: get_bpf
