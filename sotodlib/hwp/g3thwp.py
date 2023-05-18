@@ -129,8 +129,14 @@ class G3tHWP():
             return {}
 
         if isinstance(start, datetime.datetime):
+            if start.tzinfo is None:
+                logger.warning('No tzinfo info in start argument, set to utc timezone')
+                start = start.replace(tzinfo=datetime.timezone.utc)
             self._start = start.timestamp()
         if isinstance(end, datetime.datetime):
+            if end.tzinfo is None:
+                logger.warning('No tzinfo info in end argument, set to utc timezone')
+                end = start.replace(tzinfo=datetime.timezone.utc)
             self._end = end.timestamp()
 
         if data_dir is not None:
@@ -346,8 +352,7 @@ class G3tHWP():
             stable = np.ones_like(fast_time, dtype=bool)
 
             # irig only status
-            irig_only_time = irig_time[np.where(
-                (irig_time < fast_time[0]) | (irig_time > fast_time[-1]))]
+            irig_only_time = irig_time[np.where(irig_time < fast_time[0])]
             irig_only_locked = np.zeros_like(irig_only_time, dtype=bool)
             irig_only_hwp_rate = np.zeros_like(irig_only_time, dtype=float)
 
@@ -359,8 +364,7 @@ class G3tHWP():
             stable = np.ones_like(fast_irig_time, dtype=bool)
 
         # slow status
-        slow_time = slow_time[np.where(
-            (slow_time < fast_irig_time[0]) | (slow_time > fast_irig_time[-1]))]
+        slow_time = slow_time[np.where(slow_time < fast_irig_time[0])]
         slow_locked = np.zeros_like(slow_time, dtype=bool)
         slow_stable = np.zeros_like(slow_time, dtype=bool)
         slow_hwp_rate = np.zeros_like(slow_time, dtype=float)
