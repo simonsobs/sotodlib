@@ -107,10 +107,10 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=3600,
             fitsig_binned, coeffs, covars, redchi2s = hwpss_linreg(
                 x=hwp_angle_bin_centers, ys=binned_hwpss, yerrs=hwpss_sigma_bin, modes=modes)
         else:
-            Params_init = guess_hwpss_params(
+            params_init = guess_hwpss_params(
                 x=hwp_angle_bin_centers, ys=binned_hwpss, modes=modes)
             fitsig_binned, coeffs, covars, redchi2s = hwpss_curvefit(x=hwp_angle_bin_centers, ys=binned_hwpss, yerrs=hwpss_sigma_bin,
-                                                                     modes=modes, Params_init=Params_init)
+                                                                     modes=modes, params_init=params_init)
         # tod template
         fitsig_tod = harms_func(hwp_angle, modes, coeffs)
 
@@ -190,7 +190,6 @@ def get_binned_signal(aman, signal=None, hwp_angle=None,
     bin_counts = np.where(hwpss_denom == 0, 1, hwpss_denom)
     # find bins with non-zero counts
     mcnts = bin_counts > 1
-    nzbins = len(np.where(mcnts)[0])
 
     # convert bin edges into bin centers
     hwp_angle_bin_centers = (
@@ -256,7 +255,7 @@ def hwpss_linreg(x, ys, yerrs, modes):
     m = np.isnan(ys[0][:])
     xn = np.copy(x)
     x = x[~m]
-    ys = ys[:,~m]
+    ys = ys[:, ~m]
 
     vects = np.zeros([2*len(modes), x.shape[0]], dtype='float32')
     for i, mode in enumerate(modes):
@@ -281,30 +280,6 @@ def hwpss_linreg(x, ys, yerrs, modes):
     return fitsig, coeffs, covars, redchi2s
 
 
-def wrapper_harms_func(x, modes, *args):
-    """
-    A wrapper function for the harmonics function to be used for fitting data using Scipy's curve-fitting algorithm.
-    Parameters
-    ----------
-    x : array-like
-        The x-values of the data points to be fitted.
-
-    modes : array-like
-        An array of integers representing the modes of the harmonics function.
-
-    *args : tuple
-        A tuple of arguments. The first argument should be an array of coefficients used to calculate the harmonics function.
-
-    Returns
-    -------
-    y : array-like
-        An array of the same length as x representing the values of the harmonics function evaluated at x using the given 
-        modes and coefficients.
-    """
-    coeffs = np.array(args[0])
-    return harms_func(x, modes, coeffs)
-
-
 def harms_func(x, modes, coeffs):
     """
     calculates the harmonics function given the input values, modes and coefficients.
@@ -324,8 +299,11 @@ def harms_func(x, modes, coeffs):
         vects[2*i, :] = np.sin(mode*x)
         vects[2*i+1, :] = np.cos(mode*x)
 
-    harmonics = np.matmul(vects.T, coeffs.T).T
-    return harmonics
+    if coeffs is None:
+        return vects
+    else:
+        harmonics = np.matmul(coeffs, vects)
+        return harmonics
 
 
 def guess_hwpss_params(x, ys, modes):
@@ -344,15 +322,19 @@ def guess_hwpss_params(x, ys, modes):
     Params_init : ndarray of shape (m, 2*p)
         Initial guess for the coefficients of a harmonics-based fit to the data.
     """
-    vects = np.zeros([2*len(modes), x.shape[0]], dtype='float32')
+    m = np.isnan(ys[0][:])
+    x = x[~m]
+    ys = ys[:, ~m]
+
+    vects = harms_func(x, modes, coeffs=None)
     for i, mode in enumerate(modes):
         vects[2*i, :] = np.sin(mode*x)
         vects[2*i+1, :] = np.cos(mode*x)
-    Params_init = 2 * np.matmul(ys, vects.T) / x.shape[0]
-    return Params_init
+    params_init = 2 * np.matmul(ys, vects.T) / x.shape[0]
+    return params_init
 
 
-def hwpss_curvefit(x, ys, yerrs, modes, Params_init=None):
+def hwpss_curvefit(x, ys, yerrs, modes, params_init=None):
     """
     Fit harmonics to input data using scipy's curve_fit method.
 
@@ -366,7 +348,7 @@ def hwpss_curvefit(x, ys, yerrs, modes, Params_init=None):
         1-D array of the standard deviation of the y values for each detector.
     modes : array_like
         1-D array of mode numbers to be fitted.
-    Params_init : array_like, optional
+    params_init : array_like, optional
         2-D array of initial parameter values for each detector. Default is None.
 
     Returns
@@ -384,14 +366,20 @@ def hwpss_curvefit(x, ys, yerrs, modes, Params_init=None):
     -----
     This function fits a set of harmonic functions to the input data using scipy's curve_fit method.
     The `modes` parameter specifies the mode numbers to be fitted.
-    The `Params_init` parameter can be used to provide initial guesses for the fit parameters.
+    The `params_init` parameter can be used to provide initial guesses for the fit parameters.
     """
     N_dets = ys.shape[0]
     N_samps = ys.shape[-1]
     N_modes = len(modes)
-
-    if Params_init is None:
-        Params_init = np.zeros((N_dets, 2*N_modes))
+    
+    # Handle binned data w/ 0 counts in a bin.
+    m = np.isnan(ys[0][:])
+    xn = np.copy(x)
+    x = x[~m]
+    ys = ys[:, ~m]
+  
+    if params_init is None:
+        params_init = np.zeros((N_dets, 2*N_modes))
 
     coeffs = np.zeros((N_dets, 2*len(modes)))
     covars = np.zeros((N_dets, 2*len(modes), 2*len(modes)))
@@ -399,9 +387,9 @@ def hwpss_curvefit(x, ys, yerrs, modes, Params_init=None):
     fitsig = np.zeros((N_dets, N_samps))
 
     for det_idx in range(N_dets):
-        params_init = Params_init[det_idx]
-        coeff, covar = curve_fit(lambda x, *params_init: wrapper_harms_func(x, modes, params_init),
-                                 x, ys[det_idx], p0=params_init, sigma=yerrs[det_idx] *
+        p0 = params_init[det_idx]
+        coeff, covar = curve_fit(lambda x, *params_init: harms_func(x, modes, np.array(p0)),
+                                 x, ys[det_idx], p0=p0, sigma=yerrs[det_idx] *
                                  np.ones_like(ys[det_idx]),
                                  absolute_sigma=True)
 
@@ -409,7 +397,7 @@ def hwpss_curvefit(x, ys, yerrs, modes, Params_init=None):
         covars[det_idx, :] = covar
 
         yfit = harms_func(x, modes, coeff)
-        fitsig[det_idx, :] = yfit
+        fitsig[det_idx, :] = harms_func(xn, modes, coeff)
         redchi2s[det_idx] = np.sum(
             ((ys[det_idx] - yfit) / yerrs[det_idx])**2) / (x.shape[0] - 2*len(modes))
 
