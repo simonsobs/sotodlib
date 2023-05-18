@@ -129,8 +129,14 @@ class G3tHWP():
             return {}
 
         if isinstance(start, datetime.datetime):
+            if start.tzinfo is None:
+                logger.warning('No tzinfo info in start argument, set to utc timezone')
+                start = start.replace(tzinfo=datetime.timezone.utc)
             self._start = start.timestamp()
         if isinstance(end, datetime.datetime):
+            if end.tzinfo is None:
+                logger.warning('No tzinfo info in end argument, set to utc timezone')
+                end = start.replace(tzinfo=datetime.timezone.utc)
             self._end = end.timestamp()
 
         if data_dir is not None:
