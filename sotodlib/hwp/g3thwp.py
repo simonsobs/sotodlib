@@ -352,7 +352,8 @@ class G3tHWP():
             stable = np.ones_like(fast_time, dtype=bool)
 
             # irig only status
-            irig_only_time = irig_time[np.where(irig_time < fast_time[0])]
+            irig_only_time = irig_time[np.where(
+                (irig_time < fast_time[0]) | (irig_time > fast_time[-1]))]
             irig_only_locked = np.zeros_like(irig_only_time, dtype=bool)
             irig_only_hwp_rate = np.zeros_like(irig_only_time, dtype=float)
 
@@ -364,7 +365,8 @@ class G3tHWP():
             stable = np.ones_like(fast_irig_time, dtype=bool)
 
         # slow status
-        slow_time = slow_time[np.where(slow_time < fast_irig_time[0])]
+        slow_time = slow_time[np.where(
+            (slow_time < fast_irig_time[0]) | (slow_time > fast_irig_time[-1]))]
         slow_locked = np.zeros_like(slow_time, dtype=bool)
         slow_stable = np.zeros_like(slow_time, dtype=bool)
         slow_hwp_rate = np.zeros_like(slow_time, dtype=float)
