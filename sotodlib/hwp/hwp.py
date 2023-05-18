@@ -39,7 +39,7 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
         Whether to apply a high-pass filter to signal before extracting HWPSS. Default is `True`.
     prefilt_cfg : dict, optional
         The configuration of the high-pass filter, in Hz. Only used if `apply_prefilt` is `True`.
-        Default is sine2 filter of with cutoff frequency of 1.0 Hz and trans_width of 0.5 Hz.
+        Default is sine2 filter of with cutoff frequency of 1.0 Hz and trans_width of 1.0 Hz.
     prefilt_detrend: str or None
         Method of detrending when you apply prefilter. Default is `linear`. If data is already detrended or you do not want to detrend,
         set it to `None`.
@@ -100,6 +100,15 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
     if bin_signal:
         hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = get_binned_signal(
             aman, signal, hwp_angle=None, bins=bins, flags=flags)
+        
+        # check bin count
+        num_invalid_bins = np.count_nonzero(np.isnan(binned_hwpss[0][:]))
+        if num_invalid_bins > 0:
+            logger.warning(f'There are {num_invalid_bins} bins with zero samples. ' + 
+                             'You maybe using simulation data whose hwp speed is perfectly constant, ' + 
+                             'or your specification of number of bins is too large.')
+        
+        # wrap
         hwpss_stats.wrap('binned_angle', hwp_angle_bin_centers, [
                        (0, core.IndexAxis('bin_samps', count=bins))])
         hwpss_stats.wrap('binned_signal', binned_hwpss, [
