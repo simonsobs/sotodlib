@@ -14,8 +14,9 @@ import argparse as ap
 import matplotlib.pyplot as plt
 import numpy as np
 from lmfit import Model, Parameters
-from pixell import enmap
+from pixell import enmap, curvedsky
 import os
+import h5py
 import matplotlib
 matplotlib.use('agg')
 
@@ -29,9 +30,15 @@ def find_nearest(array, value):
     return idx
 
 
-def read_enmaps(map_path, rescale, smooth, pk_normalise=True, pol=False, **kwargs):
+def read_enmaps(
+        map_path,
+        rescale,
+        smooth,
+        pk_normalize=True,
+        pol=False,
+        **kwargs):
     """Read enmap and rescale/smooth if requested upon calling.
-    Peak-normalise by default"""
+    Peak-normalize by default"""
 
     map_names = os.listdir(map_path)
     enmaps = []
@@ -52,12 +59,12 @@ def read_enmaps(map_path, rescale, smooth, pk_normalise=True, pol=False, **kwarg
                                                              array_dec],
                                                             kwargs['scale'])
             pmap.posmap()[0], pmap.posmap()[1] = array_ra, array_dec
-        if pk_normalise:
+        if pk_normalize:
             array_map /= np.nanmax(array_map)
         pmap[:, :, :] = array_map
         enmaps.append(pmap)
     if pol is False:
-        enmaps = [enmaps[i][np.newaxis,0,:,:] for i in range(len(enmaps))]
+        enmaps = [enmaps[i][np.newaxis, 0, :, :] for i in range(len(enmaps))]
     return enmaps
 
 
@@ -87,18 +94,36 @@ def smooth_map(pmap, sigma=0.5):
     return enmap.smooth_gauss(pmap, sigma=sigma)
 
 
-def trim_single_map(pmap, pixbox=None, skybox=None, **kwargs):
+def dummy_source_detection(map_path, pmaps, threshold=100, npoints=10):
+    """Function that assigns a source included to the map if
+       max_map/std_map > threshold"""
+
+    pmaps_source, pmaps_source_names = [], []
+    for pmap, pmap_name in zip(pmaps, os.listdir(map_path)):
+        pmap_1d = pmap[0].reshape(pmap.shape[1] * pmap.shape[2])
+
+        sigma = np.std(pmap_1d)
+        plt.imshow(pmap[0])
+        plt.show()
+        plt.close()
+        av_max = np.mean(np.sort(pmap_1d)[::-1][:npoints])
+
+        if av_max > threshold * sigma:
+            pmaps_source.append(pmap)
+            pmaps_source_names.append(pmap_name)
+
+    return pmaps_source_names, pmaps_source
+
+
+def trim_single_map(pmap, skybox=None):
     """Function that trims the input maps to some user-specified
         limits
 
     Args
     ----
     maps: array of ndmap objects
-    pixbox: Tuple of ra and dec limits in terms of number of pixels
-            e.g. pixbox=(np.asarray([[ra_pix_min, dec_pix_min],
-                                     [ra_pix_max, dec_pix_max]]))
     skybox: Tuple of ra and dec physical limits
-            e.g. skybox=np.degrees(np.asarray([[ra0, dec0], [ra1, dec1]]))
+            e.g. skybox=np.asarray([[ra0, dec0], [ra1, dec1]])
 
     Returns
     -------
@@ -106,53 +131,45 @@ def trim_single_map(pmap, pixbox=None, skybox=None, **kwargs):
 
     """
 
-    if 'pixbox' in kwargs.keys():
-        pixbox = kwargs['pixbox']
-    elif 'skybox' in kwargs.keys():
-        skybox = kwargs['skybox']
-
-    if pixbox is not None and skybox is None:
-        skybox = enmap.pixbox2skybox(pmap.shape, pmap.wcs, pixbox)
-
     if skybox is not None:
-        submap = enmap.submap(pmap, skybox, mode=None, wrap="auto", iwcs=None)
+        submap = enmap.submap(pmap, box=skybox)
         return submap
 
-    if skybox is None and pixbox is None:
+    else:
         raise ValueError('map limits should be given either in physical \
                           or pixel coordinates')
 
 
-def trim_multiple_maps(pmaps, pixbox=None, skybox=None,
-                       **kwargs):
+def trim_multiple_maps(pmaps, skybox=None):
     """Function that trims the input maps to some user-specified
         limits or adjusts them to have the same size """
 
-    if 'pixbox' in kwargs.keys():
-        pixbox = kwargs['pixbox']
-    elif 'skybox' in kwargs.keys():
-        skybox = kwargs['skybox']
-
-    if pixbox is None and skybox is None:
+    if skybox is None:
+        # this should refer to source-centred maps only!
         same_dimension = all(map_i.shape == pmaps[0].shape for map_i in pmaps)
 
         if not same_dimension:
             min_ra_idx = np.argmin([map_i.shape[1] for map_i in pmaps])
             min_dec_idx = np.argmin([map_i.shape[2] for map_i in pmaps])
-                        
+
             ra_min_range = pmaps[min_ra_idx].posmap()[0]
             dec_min_range = pmaps[min_dec_idx].posmap()[1]
-            
+
             ra_min, ra_max = ra_min_range.min(), ra_min_range.max()
             dec_min, dec_max = dec_min_range.min(), dec_min_range.max()
-            
-            skybox = [[ra_min, dec_min], [ra_max, dec_max]]
-            
-    if pixbox is not None or skybox is not None:
-        enmaps_trimmed = [trim_single_map(map_i, pixbox=pixbox, skybox=skybox)
+
+            skybox_ = [[ra_min, dec_min], [ra_max, dec_max]]
+
+    else:
+        skybox_ = [[skybox[0], skybox[1]], [skybox[2], skybox[3]]]
+
+    if skybox_ is not None:
+        enmaps_trimmed = [trim_single_map(map_i, skybox=skybox_)
                           for map_i in pmaps]
-        
-    return enmaps_trimmed
+        return enmaps_trimmed
+
+    else:
+        return pmaps
 
 
 def coadd_maps(pmaps, res_precision=.000001):
@@ -166,29 +183,36 @@ def coadd_maps(pmaps, res_precision=.000001):
     -------
     The coadded map as an ndmap object
     """
-    
+
     same_dimension = all(map_i.shape == pmaps[0].shape for map_i in pmaps)
-    same_resolution = np.logical_and(all(map_i.wcs.wcs.cdelt[0]-enmaps[0].wcs.wcs.cdelt[0]<res_precision for map_i in enmaps),
-                                     all(map_i.wcs.wcs.cdelt[1]-enmaps[0].wcs.wcs.cdelt[1]<res_precision for map_i in enmaps))
+    same_resolution = np.logical_and(
+        all(
+            map_i.wcs.wcs.cdelt[0] -
+            pmaps[0].wcs.wcs.cdelt[0] < res_precision for map_i in pmaps),
+        all(
+            map_i.wcs.wcs.cdelt[1] -
+            pmaps[0].wcs.wcs.cdelt[1] < res_precision for map_i in pmaps))
 
     if not same_dimension or not same_resolution:
         raise ValueError("The maps have different dimensions/resolution")
 
     coadd_map = np.zeros_like((pmaps[0]))
-    coadd_ra, coadd_dec = [np.zeros((len(pmaps),pmaps[0].shape[1],pmaps[0].shape[2]))
-                           for i in range(2)]
-    
+    coadd_ra, coadd_dec = [
+        np.zeros(
+            (len(pmaps), pmaps[0].shape[1], pmaps[0].shape[2])) for i in range(2)]
+
     for t, map_i in enumerate(pmaps):
         coadd_map += map_i
         coords = map_i.posmap()
-        coadd_ra[t,:,:], coadd_dec[t,:,:] = coords[0], coords[1]
+        coadd_ra[t, :, :], coadd_dec[t, :, :] = coords[0], coords[1]
 
     coadded_enmap = enmap.zeros(map_i.shape, map_i.wcs, dtype=np.float64)
     coadded_enmap[:] = coadd_map
     coadded_enmap.posmap()[0], coadded_enmap.posmap()[1] = np.nanmean(
         coadd_ra, axis=0), np.nanmean(coadd_dec, axis=0)
-    
+
     return coadded_enmap
+
 
 def correct_background(bins, prof, nsamps):
     """Subtract the average value of the data sample with
@@ -212,7 +236,7 @@ def correct_background(bins, prof, nsamps):
             grad.append(
                 np.mean(np.gradient(prof[int(chunk_idxs[i]):
                                          int(chunk_idxs[i + 1])])))
-        except:
+        except BaseException:
             raise ValueError("The requested number of samples is large \
                               compared to the profile resolution")
     min_samp = find_nearest(grad, 0)
@@ -325,18 +349,24 @@ def airy_disc(x, y, amp, x0, y0, R, theta):
     return amp * airy
 
 
-def get_input_params(INITIAL_PARA_FILE, tele, band):
-    """Get the initial parameters configuration from a .yaml
-    file for telescope 'tele' and frequency band 'band'"""
+def get_config_file(cfg_fname):
+    """Read yaml file"""
 
-    with open(INITIAL_PARA_FILE, "r") as stream:
+    with open(cfg_fname, "r") as stream:
         try:
             config_file = yaml.safe_load(stream)
         except yaml.YAMLError as exc:
             print(exc)
+    return config_file
 
+
+def get_input_params(INITIAL_PARA_FILE, tele, band):
+    """Get the initial parameters configuration from a .yaml
+    file for telescope 'tele' and frequency band 'band'"""
+
+    config_file = get_config_file(INITIAL_PARA_FILE)
     band_idx = config_file['telescopes'][tele]['bands'].index(band)
-    beamsize = config_file['telescopes'][tele]['beamsize'][band_idx] 
+    beamsize = config_file['telescopes'][tele]['beamsize'][band_idx]
     band_c = config_file['telescopes'][tele]['band_c'][band_idx]
     d = config_file['telescopes'][tele]['aperture']
 
@@ -687,15 +717,15 @@ def full_beam_fit(bins, prof, widx, wedge, downsample_f, minimize=False):
     try:
         spline1d = UnivariateSpline(
             bins[:widx][::downsample_f], prof[:widx][::downsample_f] * 10**4)
-    except:
+    except BaseException:
         warnings.warn('The downsampling factor is too large')
         # try increasing the number of sampling points
         try:
-            if downsample_f>2:
+            if downsample_f > 2:
                 downsample_f -= 2
             spline1d = UnivariateSpline(
                 bins[:widx][::downsample_f], prof[:widx][::downsample_f] * 10**4)
-        except:
+        except BaseException:
             return
 
     # Increase the resolution again
@@ -729,9 +759,13 @@ def full_beam_fit(bins, prof, widx, wedge, downsample_f, minimize=False):
     full_bins = np.concatenate((bins[:widx - 1 - int(downsample_f / 2)],
                                 new_bins_between,
                                 bins[widx + int(downsample_f / 2):wedge + 1]))
-    full_prof = np.concatenate((prof_near_lobes[:widx - 1 - int(downsample_f / 2)],
-                                new_prof_between,
-                                prof_wing[int(downsample_f / 2):wedge + 1 - widx]))
+    full_prof = np.concatenate((prof_near_lobes[:widx -
+                                                1 -
+                                                int(downsample_f /
+                                                    2)], new_prof_between, prof_wing[int(downsample_f /
+                                                                                         2):wedge +
+                                                                                     1 -
+                                                                                     widx]))
 
     fit_res = ((np.linspace(0, 1, len(full_prof))[
                ::-1]) * ((full_prof - prof[:wedge + 1])**2)).sum()
@@ -743,7 +777,7 @@ def full_beam_fit(bins, prof, widx, wedge, downsample_f, minimize=False):
 
 def fit_single_map(pmap, theta_max, acc, trim_factor, n_iter, wing_cutoff,
                    res, lmax, downsample_f, init_params, test_init_cond,
-                   init_dependence, **kwargs):
+                   init_dependence, dB_thresh=None, **kwargs):
     """Correct for the background, do map operations, optimize the wing scale
        and fit a single map
 
@@ -825,7 +859,7 @@ def fit_single_map(pmap, theta_max, acc, trim_factor, n_iter, wing_cutoff,
     # Define the wing scale within a range -- fit everything before with
     # splines
     if wing_cutoff is None:
-        widx_min, widx_max, widx_samples = -40, -25, 5
+        widx_min, widx_max, widx_samples = -50, -35, 10
     else:
         widx_min, widx_max, widx_samples = wing_cutoff
 
@@ -861,7 +895,13 @@ def fit_single_map(pmap, theta_max, acc, trim_factor, n_iter, wing_cutoff,
     fitted_values_cp['omega'] = omega
 
     # Compute harmonic transform
-    bl_fit = hp.beam2bl(full_prof, full_bins, lmax=lmax)
+    if dB_thresh is not None:
+        w_db_t = find_nearest(10 * np.log10(np.abs(full_prof)), dB_thresh)
+    else:
+        w_db_t = -1
+    bl_fit = curvedsky.profile2harm(
+        full_prof[:w_db_t], full_bins[:w_db_t], lmax=lmax)
+    # bl_fit = hp.beam2bl(full_prof[:w_db_t], full_bins[:w_db_t], lmax=lmax)
 
     # Interpolate profile to the initial resolution
     line1d = interp1d(full_bins, full_prof, fill_value='extrapoate')
@@ -869,10 +909,35 @@ def fit_single_map(pmap, theta_max, acc, trim_factor, n_iter, wing_cutoff,
     return fitted_values_cp, [binsall[:wedge], line1d(binsall[:wedge])], bl_fit
 
 
-def run_fit(tele, band, map_path, rescale, smooth, pk_normalise, pol,
-            init_params, test_init_cond, init_dependence, theta_max, acc, 
-            trim_factor, n_iter, wing_cutoff, res, lmax, downsample_f, 
-            make_plots, save_stats, write_beam, outdir, prefix, **kwargs):
+def run_fit(
+        tele,
+        band,
+        map_path,
+        rescale,
+        smooth,
+        pk_normalize,
+        threshold,
+        coadd,
+        skybox,
+        pol,
+        init_params,
+        test_init_cond,
+        init_dependence,
+        theta_max,
+        acc,
+        trim_factor,
+        n_iter,
+        wing_cutoff,
+        res,
+        lmax,
+        downsample_f,
+        make_plots,
+        save_stats,
+        write_beam,
+        outdir,
+        prefix,
+        dB_thresh,
+        **kwargs):
     """Read the maps, perform the fits, gather all fitted parameters,
        beam profiles and transfer functions and store/plot the results
 
@@ -887,9 +952,13 @@ def run_fit(tele, band, map_path, rescale, smooth, pk_normalise, pol,
     enmaps = read_enmaps(map_path,
                          rescale,
                          smooth,
-                         pk_normalise,
+                         pk_normalize,
                          pol,
                          **kwargs)
+
+    map_names, enmaps = dummy_source_detection(map_path,
+                                               enmaps,
+                                               threshold=threshold)
 
     if init_params is None:
         try:
@@ -898,15 +967,14 @@ def run_fit(tele, band, map_path, rescale, smooth, pk_normalise, pol,
         except BaseException:
             raise ValueError('Missing arguments')
 
-    #     for map_i in enmaps:
-#         if not source_included:
-#             enmaps.remove(map_i)
-
-    if coadd_maps:
-        pmaps_trimmed = trim_multiple_maps(enmaps, **kwargs)
+    if coadd:
+        pmaps_trimmed = trim_multiple_maps(enmaps, skybox)
         coadded_map = coadd_maps(pmaps_trimmed)
-        
-        fitted_params, [rb, prof], bl = fit_single_map(pmap=enmaps[map_idx],
+
+        if pk_normalize:
+            coadded_map /= np.nanmax(coadded_map)
+
+        fitted_params, [rb, prof], bl = fit_single_map(pmap=coadded_map,
                                                        theta_max=theta_max,
                                                        acc=acc,
                                                        trim_factor=trim_factor,
@@ -918,9 +986,12 @@ def run_fit(tele, band, map_path, rescale, smooth, pk_normalise, pol,
                                                        res=res,
                                                        lmax=lmax,
                                                        downsample_f=downsample_f,
+                                                       dB_thresh=dB_thresh,
                                                        **kwargs)
 
-        h = h5py.File(opj(outdir, prefix + '_stats' + '_coadded.h5'),'w')
+        bl /= np.nanmax(bl)
+
+        h = h5py.File(opj(outdir, prefix + '_stats' + '_coadded.h5'), 'w')
         for k, v in fitted_params.items():
             h.create_dataset(k, data=np.array(v))
         h.close()
@@ -928,20 +999,19 @@ def run_fit(tele, band, map_path, rescale, smooth, pk_normalise, pol,
         np.savetxt(opj(outdir, prefix + '_prof_coadded.txt'), [rb, prof])
         np.savetxt(opj(outdir, prefix + '_bl_coadded.txt'), bl)
 
-        plot_profile(bins,
+        plot_profile(rb,
                      prof,
                      np.zeros_like(prof),
                      img_file=opj(
-                     outdir,
-                     prefix +'_prof_coadded.png'))
-        plot_bls(bl, 
-                 np.zeros_like(bl), 
-                 img_file=opj(outdir, 
-                              prefix + 
+                         outdir,
+                         prefix + '_prof_coadded.png'))
+        plot_bls(bl,
+                 np.zeros_like(bl),
+                 img_file=opj(outdir,
+                              prefix +
                               '_bl_coadded.png'))
         return
 
-    map_names = os.listdir(map_path)
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     size = comm.Get_size()
@@ -999,6 +1069,7 @@ def run_fit(tele, band, map_path, rescale, smooth, pk_normalise, pol,
                                                        res=res,
                                                        lmax=lmax,
                                                        downsample_f=downsample_f,
+                                                       dB_thresh=dB_thresh,
                                                        **kwargs)
 
         for key in df_keys:
@@ -1077,11 +1148,12 @@ def get_parser():
                         default=None,
                         type=str,
                         help='Location of the maps')
-    parser.add_argument('--rescale',
-                        action='store_true',
-                        dest='rescale',
-                        default=False,
-                        help='If True, rescale the maps with a scale defined as \
+    parser.add_argument(
+        '--rescale',
+        action='store_true',
+        dest='rescale',
+        default=False,
+        help='If True, rescale the maps with a scale defined as \
                         scale in kwargs')
     parser.add_argument('--smooth',
                         action='store_true',
@@ -1089,11 +1161,26 @@ def get_parser():
                         default=False,
                         help='If True, smooth the maps by some factor defined \
                         as sigma in kwargs')
-    parser.add_argument('--pk_normalise',
+    parser.add_argument('--pk_normalize',
                         action='store_true',
-                        dest='pk_normalise',
+                        dest='pk_normalize',
                         default=True,
-                        help='If True, peak-normalise the maps')
+                        help='If True, peak-normalize the maps')
+    parser.add_argument('--threshold',
+                        type=float,
+                        action='store',
+                        dest='threshold',
+                        default=100,
+                        help='Number of times the sigma of the map\
+                              than which the max amplitude must be larger\
+                              to assume a source is included.')
+    parser.add_argument(
+        '--coadd',
+        action='store_true',
+        dest='coadd',
+        default=False,
+        help='Co-add all maps of input direrctory. No MPI needed in\
+                              in this case.')
     parser.add_argument('--pol',
                         action='store_true',
                         dest='pol',
@@ -1110,16 +1197,16 @@ def get_parser():
                         default=False,
                         help='Test fitting result dependency on initial \
                         parameters')
-    parser.add_argument('--init_dependence',
-                        action='store',
-                        type=float,
-                        dest='init_dependence',
-                        default=.01,
-                        help='Allowed maximum dependence on initial conditions')
+    parser.add_argument(
+        '--init_dependence',
+        action='store',
+        type=float,
+        dest='init_dependence',
+        default=.01,
+        help='Allowed maximum dependence on initial conditions')
     parser.add_argument('--theta_max',
                         action='store',
                         dest='theta_max',
-                        default=None,
                         type=float,
                         help='Maximum angle of the map')
     parser.add_argument('--acc',
@@ -1163,20 +1250,20 @@ def get_parser():
     parser.add_argument('--downsample_f',
                         action='store',
                         dest='downsample_f',
-                        default=10,
                         type=int,
                         help='Downsampling factor if the full beam data')
     parser.add_argument('--lmax',
                         action='store',
                         dest='lmax',
-                        default=400,
+                        type=int,
                         help='Maximum multipole number to take into account \
                         for the harmonic transform')
-    parser.add_argument('--make_plots',
-                        action='store_true',
-                        dest='make_plots',
-                        default=False,
-                        help='Plot maps, beam profiles and harmonic transforms')
+    parser.add_argument(
+        '--make_plots',
+        action='store_true',
+        dest='make_plots',
+        default=False,
+        help='Plot maps, beam profiles and harmonic transforms')
     parser.add_argument('--save_stats',
                         action='store_true',
                         dest='save_stats',
@@ -1198,6 +1285,13 @@ def get_parser():
                         dest='outdir',
                         default=None,
                         help='Output directory')
+    parser.add_argument('--dB_thresh',
+                        action='store',
+                        dest='dB_thresh',
+                        required=False,
+                        type=float,
+                        help='Do not include profile data under dB_thresh\
+                              for estimating the harmonic transform')
     # kwargs
     parser.add_argument('--beamfile',
                         action='store',
@@ -1208,9 +1302,9 @@ def get_parser():
     parser.add_argument('--initial_parameters_file',
                         action='store',
                         dest='initial_parameters_file',
-                        default='/mnt/so1/users/konstad/'\
-                                'pwg-scripts_sp/pwg-bcp/'\
-                                'sotodlib_staging/data/'\
+                        default='/mnt/so1/users/konstad/'
+                                'pwg-scripts_sp/pwg-bcp/'
+                                'sotodlib_staging/data/'
                                 'initial_parameters.yaml',
                         type=str,
                         help='Location of the initial parameters file')
@@ -1218,7 +1312,6 @@ def get_parser():
                         action='store',
                         dest='r_noise',
                         type=float,
-                        default=None,
                         help='Radius after which beam is negligible--used for \
                         SNR estimation')
     parser.add_argument('--sigma',
@@ -1226,11 +1319,12 @@ def get_parser():
                         dest='sigma',
                         default=None,
                         help='Smoothing scale')
-    parser.add_argument('--scale',
-                        action='store',
-                        dest='scale',
-                        default=None,
-                        help='Scaing factor if rescaling of the maps is called \
+    parser.add_argument(
+        '--scale',
+        action='store',
+        dest='scale',
+        default=None,
+        help='Scaing factor if rescaling of the maps is called \
                         for')
     parser.add_argument('--nsamps',
                         action='store',
@@ -1244,6 +1338,13 @@ def get_parser():
                         default=0.7,
                         help='Acceptable fraction of negative to full data \
                         for a map to be fitted')
+    parser.add_argument('--skybox',
+                        action='store',
+                        dest='skybox',
+                        type=float,
+                        nargs='+',
+                        default=None,
+                        help='Ra/dec grid for resizing the map')
 
     args = parser.parse_args()
 
@@ -1253,6 +1354,22 @@ def get_parser():
 def main():
 
     args = get_parser()
+
+    if not args.theta_max or not args.lmax or not args.downsample_f:
+        tele, band = args.tele, args.band
+        config_file = get_config_file(args.initial_parameters_file)
+        band_idx = config_file['telescopes'][tele]['bands'].index(band)
+        beamsize = config_file['telescopes'][tele]['beamsize'][band_idx]
+
+        if not args.theta_max:
+            args.theta_max = 8 * np.radians(beamsize / 60)
+        if not args.lmax:
+            args.lmax = int(180 / (beamsize / 60))
+        if not args.downsample_f:
+            args.downsample_f = config_file['telescopes'][tele]['downsample_f']
+
+    if not args.r_noise:
+        args.r_noise = 0.9 * args.theta_max
 
     all_kwargs = {'initial_parameters_file': args.initial_parameters_file,
                   'beamfile': args.beamfile,
@@ -1267,7 +1384,10 @@ def main():
             map_path=args.map_path,
             rescale=args.rescale,
             smooth=args.smooth,
-            pk_normalise=args.pk_normalise,
+            pk_normalize=args.pk_normalize,
+            coadd=args.coadd,
+            skybox=args.skybox,
+            threshold=args.threshold,
             pol=args.pol,
             init_params=args.init_params,
             test_init_cond=args.test_init_cond,
@@ -1285,6 +1405,7 @@ def main():
             write_beam=args.write_beam,
             outdir=args.outdir,
             prefix=args.prefix,
+            dB_thresh=args.dB_thresh,
             **all_kwargs)
 
 
