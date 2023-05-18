@@ -14,7 +14,7 @@ import datetime as dt
 from sotodlib.hwp.g3thwp import G3tHWP
 
 from sotodlib.site_pipeline import util
-logger = util.init_logger(__name__, 'update-hwp-angle: ')
+logger = util.init_logger(__name__, 'make-hwp-solutinos: ')
 
 def get_parser():
 
