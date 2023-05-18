@@ -82,6 +82,13 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=3600,
                 aman, filt, detrend=prefilt_detrend, signal_name='signal'))
         else:
             signal = aman.signal
+    else:
+        if apply_prefilt:
+            raise ValueError('tod_ops.filters module does not support'+
+                    ' passing an axis other than aman.signal, you must'+
+                    ' run with apply_prefilt=False, signal=<your signal>'+
+                    ' apply_prefilt=True, signal=None, or apply_prefilt'+
+                    '=False, signal=None.')
 
     if hwp_angle is None:
         hwp_angle = aman.hwp_angle
