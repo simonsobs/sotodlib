@@ -345,6 +345,25 @@ def guess_hwpss_params(x, ys, modes):
     params_init = 2 * np.matmul(ys, vects.T) / x.shape[0]
     return params_init
 
+def wrapper_harms_func(x, modes, *args):
+    """
+    A wrapper function for the harmonics function to be used for fitting data using Scipy's curve-fitting algorithm.
+    Parameters
+    ----------
+    x : array-like
+        The x-values of the data points to be fitted.
+    modes : array-like
+        An array of integers representing the modes of the harmonics function.
+    *args : tuple
+        A tuple of arguments. The first argument should be an array of coefficients used to calculate the harmonics function.
+    Returns
+    -------
+    y : array-like
+        An array of the same length as x representing the values of the harmonics function evaluated at x using the given 
+        modes and coefficients.
+    """
+    coeffs = np.array(args[0])
+    return harms_func(x, modes, coeffs)
 
 def hwpss_curvefit(x, ys, yerrs, modes, params_init=None):
     """
@@ -400,8 +419,8 @@ def hwpss_curvefit(x, ys, yerrs, modes, params_init=None):
 
     for det_idx in range(N_dets):
         p0 = params_init[det_idx]
-        coeff, covar = curve_fit(lambda x, *params_init: harms_func(x, modes, np.array(p0)),
-                                 x, ys[det_idx], p0=p0, sigma=yerrs[det_idx] *
+        coeff, covar = curve_fit(lambda x, *params_init: wrapper_harms_func(x, modes, params_init),
+                                 x, ys[det_idx], p0=params_init, sigma=yerrs[det_idx] *
                                  np.ones_like(ys[det_idx]),
                                  absolute_sigma=True)
 
@@ -411,7 +430,7 @@ def hwpss_curvefit(x, ys, yerrs, modes, params_init=None):
         yfit = harms_func(x, modes, coeff)
         fitsig[det_idx, :] = harms_func(xn, modes, coeff)
         redchi2s[det_idx] = np.sum(
-            ((ys[det_idx] - yfit[~m]) / yerrs[det_idx])**2) / (x.shape[0] - 2*len(modes))
+            ((ys[det_idx] - yfit) / yerrs[det_idx])**2) / (x.shape[0] - 2*len(modes))
 
     return fitsig, coeffs, covars, redchi2s
 
