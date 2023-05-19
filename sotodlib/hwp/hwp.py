@@ -426,8 +426,8 @@ def hwpss_curvefit(x, ys, yerrs, modes, params_init=None):
 
     for det_idx in range(N_dets):
         p0 = params_init[det_idx]
-        coeff, covar = curve_fit(lambda x, *params_init: wrapper_harms_func(x, modes, params_init),
-                                 x, ys[det_idx], p0=params_init, sigma=yerrs[det_idx] *
+        coeff, covar = curve_fit(lambda x, *p0: wrapper_harms_func(x, modes, p0),
+                                 x, ys[det_idx], p0=p0, sigma=yerrs[det_idx] *
                                  np.ones_like(ys[det_idx]),
                                  absolute_sigma=True)
 
