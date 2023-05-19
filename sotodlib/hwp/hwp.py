@@ -6,9 +6,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=3600,
+def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
               lin_reg=True, modes=[1, 2, 3, 4, 6, 8], apply_prefilt=True,
-              prefilt_cutoff=1.0, prefilt_detrend='linear', flags=None,
+              prefilt_cfg=None, prefilt_detrend='linear', flags=None,
               merge_stats=True, hwpss_stats_name='hwpss_stats',
               merge_model=True, hwpss_model_name='hwpss_model'):
     """
@@ -37,8 +37,9 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=3600,
         The HWPSS harmonic modes to extract. Default is [1, 2, 3, 4, 6, 8].
     apply_prefilt : bool, optional
         Whether to apply a high-pass filter to signal before extracting HWPSS. Default is `True`.
-    prefilt_cutoff : float, optional
-        The cutoff frequency of the high-pass filter, in Hz. Only used if `apply_prefilt` is `True`. Default is 1.0.
+    prefilt_cfg : dict, optional
+        The configuration of the high-pass filter, in Hz. Only used if `apply_prefilt` is `True`.
+        Default is sine2 filter of with cutoff frequency of 1.0 Hz and trans_width of 1.0 Hz.
     prefilt_detrend: str or None
         Method of detrending when you apply prefilter. Default is `linear`. If data is already detrended or you do not want to detrend,
         set it to `None`.
@@ -77,9 +78,11 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=3600,
 
     if signal is None:
         if apply_prefilt:
-            filt = tod_ops.filters.high_pass_sine2(cutoff=prefilt_cutoff)
+            if prefilt_cfg is None:
+                prefilt_cfg = {'type': 'sine2', 'cutoff': 1.0, 'trans_width': 1.0}
+            prefilt = tod_ops.filters.get_hpf(prefilt_cfg)
             signal = np.array(tod_ops.fourier_filter(
-                aman, filt, detrend=prefilt_detrend, signal_name='signal'))
+                aman, prefilt, detrend=prefilt_detrend, signal_name='signal'))
         else:
             signal = aman.signal
     else:
@@ -104,6 +107,15 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=3600,
     if bin_signal:
         hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = get_binned_signal(
             aman, signal, hwp_angle=None, bins=bins, flags=flags)
+        
+        # check bin count
+        num_invalid_bins = np.count_nonzero(np.isnan(binned_hwpss[0][:]))
+        if num_invalid_bins > 0:
+            logger.warning(f'There are {num_invalid_bins} bins with zero samples. ' + 
+                             'You maybe using simulation data whose hwp speed is perfectly constant, ' + 
+                             'or your specification of number of bins is too large.')
+        
+        # wrap
         hwpss_stats.wrap('binned_angle', hwp_angle_bin_centers, [
                        (0, core.IndexAxis('bin_samps', count=bins))])
         hwpss_stats.wrap('binned_signal', binned_hwpss, [
@@ -406,7 +418,7 @@ def hwpss_curvefit(x, ys, yerrs, modes, params_init=None):
         yfit = harms_func(x, modes, coeff)
         fitsig[det_idx, :] = harms_func(xn, modes, coeff)
         redchi2s[det_idx] = np.sum(
-            ((ys[det_idx] - yfit) / yerrs[det_idx])**2) / (x.shape[0] - 2*len(modes))
+            ((ys[det_idx] - yfit[~m]) / yerrs[det_idx])**2) / (x.shape[0] - 2*len(modes))
 
     return fitsig, coeffs, covars, redchi2s
 
