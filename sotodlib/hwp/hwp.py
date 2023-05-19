@@ -58,22 +58,26 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
     -------
     hwpss_stats : AxisManager object
         The extracted HWPSS and its statistics. The statistics include:
-            - coeffs (n_dets x n_modes) coefficients of the model
-                Sum_n coeffs[2*n]*sin(modes[n]*hwp_angle) + coeffs[2*n+1]*cos(modes[n]*hwp_angle)
-                where the sum on n range(len(modes))
-                Note: n_modes is 2*len(modes)
-            - covars (n_dets x n_modes x n_modes) variance covariance matrix
-                of the fitted coefficients for each detector.
-            - redchi2 (n_dets) reduced chi^2 of the fit for each detector.
-        In the binned case the following are returned:
-            - binned_angle (n_bins) binned version of hwp_angle in range (0, 2pi]
-                with number of bins set by bins argument.
-            - binned_signal (n_dets x n_bins) binned signal for each detector.
-            - sigma_bin (n_dets) average over all bins of the standard 
-                deviation of the signal within each bin.
-        In the non-binned case the following are returned:
-            - sigma_tod (n_dets) estimate of the standard deviation of the
-                signal using function ``estimate_sigma_tod``
+
+            - **coeffs** (n_dets x n_modes) : coefficients of the model
+
+            .. math::
+                \sum_n \mathrm{coeffs}[2n]\sin{(\mathrm{modes}[n] \chi_{\mathrm{hwp}})} + \mathrm{coeffs}[2n+1]\cos{(\mathrm{modes}[n] \chi_{\mathrm{hwp}})}
+
+            where the sum on n range(len(modes)). **Note**: n_modes is 2*len(modes)
+
+            - **covars** (n_dets x n_modes x n_modes) : variance covariance matrix of the fitted coefficients for each detector.
+            - **redchi2** (n_dets) : reduced chi^2 of the fit for each detector.
+        
+            **In the binned case the following are returned:**
+            
+            - **binned_angle** (n_bins) : binned version of hwp_angle in range (0, 2pi] with number of bins set by bins argument.
+            - **binned_signal** (n_dets x n_bins) : binned signal for each detector.
+            - **sigma_bin** (n_dets) : average over all bins of the standard deviation of the signal within each bin.
+        
+            **In the non-binned case the following are returned:**
+
+            - **sigma_tod** (n_dets) : estimate of the standard deviation of the signal using function ``estimate_sigma_tod``
     """
 
     if signal is None:
