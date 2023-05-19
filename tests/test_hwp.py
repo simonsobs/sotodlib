@@ -92,6 +92,11 @@ class HwpssTest(unittest.TestCase):
         _ = hwp.get_hwpss(tod, lin_reg=lr, bin_signal=bn, bins=200)
         ommax = get_coeff_metric(tod)
         self.assertTrue(ommax < 0.1)
+        # Checks that returned covariance matrix from fit is finite.
+        # When not using wrapper function in lambda function we get
+        # infinite covariance matrix returned. So this is a warning
+        # to not change that even though it looks wrong.
+        self.assertFalse(False in np.isfinite(tod.hwpss_stats.covars))
 
     def test_fitnobin(self):
         lr, bn = False, False
