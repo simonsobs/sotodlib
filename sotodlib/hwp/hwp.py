@@ -507,7 +507,7 @@ def subtract_hwpss(aman, signal=None, hwpss_template=None,
     if signal is None:
         signal = aman.signal
     if hwpss_template is None:
-        hwpss_template = aman['hwpss_extract']
+        hwpss_template = aman['hwpss_model']
 
     aman.wrap(subtract_name, np.subtract(
         signal, hwpss_template), [(0, 'dets'), (1, 'samps')])
