@@ -18,13 +18,17 @@ def spl_int(t1, t0, y):
     """
     Wrapper for scipy.interpolate spline interpolation to take the same
     arguments as np.interp
-    Args:
+    
+    Args
     -----
-    t1 (ndarray): Timestamps to interpolate onto.
-    t0 (ndarray): Timestamps of the data to interpolate.
-    y (ndarray): Data to interpolate
+    t1 : ndarray
+        Timestamps to interpolate onto.
+    t0 : ndarray
+        Timestamps of the data to interpolate.
+    y : ndarray
+        Data to interpolate
 
-    Returns:
+    Returns
     --------
     Interpolated values.
     """
@@ -40,18 +44,24 @@ def interp_aman(aman, t0, t1, axis='samps', interp_type='linear'):
     and RangesMatrices but currently does not interpolate csr matrices
     (it just drops these).
 
-    Args:
+    Args
     -----
-    aman (AxisManager): Axis manager to interpolate
-    t0 (ndarray): Timestamps of axis manager.
-    t2 (ndarray): Timestamps to interpolate onto.
-    axis (str): Name of axis to interpolate along (defaults to samps).
-                I have not tested setting thing to something else!!!
-    interp_type (str): Either 'linear' or 'spline' type interpolation.
+    aman : AxisManager
+        Axis manager to interpolate
+    t0 : ndarray
+        Timestamps of axis manager.
+    t2 : ndarray
+        Timestamps to interpolate onto.
+    axis : str
+        Name of axis to interpolate along (defaults to samps).
+        **Only tested on samps axis!!!**
+    interp_type : str
+        Either 'linear' or 'spline' type interpolation.
 
-    Returns:
+    Returns
     --------
-    dest (AxisManager): New axis manager interpolated to t1 timestamps.
+    dest : AxisManager
+        New axis manager interpolated to t1 timestamps.
     """
     new_axes = []
     for k, v in aman._axes.items():
@@ -111,14 +121,17 @@ def decimate_aman(aman, fs_new):
     """
     Decimate axis manager to new sample rate.
     
-    Args:
+    Args
     -----
-    aman (AxisManager): Axis manager to decimate.
-    fs_new (int): New sampling rate.
+    aman : AxisManager
+        Axis manager to decimate.
+    fs_new : int
+        New sampling rate.
 
-    Returns:
+    Returns
     --------
-    aman_new (AxisManager): Decimated axis manager.
+    aman_new : AxisManager
+        Decimated axis manager.
     """
     ts_new = np.arange(aman.timestamps[0], aman.timestamps[-1], 1/fs_new)
     aman_new = interp_aman(aman, aman.timestamps, ts_new)
