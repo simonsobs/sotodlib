@@ -97,7 +97,7 @@ def get_coeff_metric(tod):
 class SssTest(unittest.TestCase):
     "Test the SSS fitting functions"
     def test_fit(self):
-        tod = make_fake_sss_tod()
+        tod = make_fake_sss_tod(noise_amp=0)
         _ = sss.get_sss(tod)
         ommax = get_coeff_metric(tod)
         print(ommax)
