@@ -12,19 +12,18 @@ def get_sss(aman, signal=None, azpoint=None, nmodes=20,
             merge_model=True, sss_model_name='sss_model'):
     """
     Extracts scan synchronous signal (SSS) assuming it is represented by 
-    a sum of legendre polynomials in Az-signal space using linear regression 
-    or curve-fitting.
+    a sum of legendre polynomials in Az-signal space using numpy polynomial fitter.
 
     Parameters
     ----------
     aman : AxisManager object
-        The TOD to extract HWPSS from.
+        The TOD to extract SSS from.
     signal : array-like, optional
         The TOD signal to use. If not provided, `aman.signal` will be used.
     nmodes : int, optional
         The max order of legendre polynomials to extract. Default is 20.
     flags : RangesMatrix, optional
-        Flags to be masked out before extracting HWPSS. If Default is None, and no mask will be applied.
+        Flags to be masked out before extracting SSS. If Default is None, and no mask will be applied.
     merge_stats : bool, optional
         Whether to add the extracted SSS statistics to `aman` as new axes. Default is `True`.
     sss_stats_name : str, optional
@@ -91,18 +90,18 @@ def subtract_sss(aman, signal=None, sss_template=None,
     Parameters
     ----------
     aman : AxisManager
-        The axis manager containing the signal to which the HWPSS template will
+        The axis manager containing the signal to which the SSS template will
         be applied.
     signal : ndarray, optional
-        The signal to which the SSS template will be applied. If `signal` is
+        The signal from which the SSS template will be subtracted. If `signal` is
         None (default), the signal contained in the axis manager will be used.
-    dss_template : ndarray, optional
+    sss_template : ndarray, optional
         The SSS template to be subtracted from the signal. If `sss_template`
         is None (default), the SSS template stored in the axis manager under
         the key 'sss_extract' will be used.
     subtract_name : str, optional
-        The name of the output axis manager that will contain the HWPSS-
-        subtracted signal. Defaults to 'sss_remove'.
+        The name of the output axis manager field that will contain the SSS-subtracted 
+        signal. Defaults to 'sss_remove'.
 
     Returns
     -------
