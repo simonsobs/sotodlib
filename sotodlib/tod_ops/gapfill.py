@@ -385,7 +385,8 @@ def get_contaminated_ranges(good_flags, bad_flags):
 
 
 def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
-                  glitch_flags=None, in_place=True):
+                  glitch_flags=None, merge_filled=True,
+                  filled_name='gap_filled'):
     """
     Top level function for filling glitches assuming glitch flags exist.
     Wraps the other functions in the ``tod_ops.gapfill`` module.
@@ -406,8 +407,10 @@ def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
     glitch_flags : RangesMatrix or None
         RangesMatrix containing flags to use for gap filling. If None then
         uses ``aman.flags.glitches``.
-    in_place : bool
-        Modify signal in axis manager or return a copy of the modified signal.
+    merge_filled : bool
+        Merge gap filled data into input axis manager.
+    filled_name : str
+        Axis name to merge gap filled data if merge_filled is True.
 
     Returns
     -------
@@ -415,13 +418,10 @@ def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
         Returns ndarray with gaps filled from input signal.
     """
     if signal is None:
-        if in_place:
-            sig = aman.signal
-        else:
-            sig = np.copy(aman.signal)
+        sig = np.copy(aman.signal)
     else:
-        if ~in_place:
-            sig = np.copy(signal)
+        sig = np.copy(signal)
+    
     if glitch_flags is None:
         glitch_flags = aman.flags.glitches
     if use_pca is True:
@@ -430,6 +430,11 @@ def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
                            f'{aman.dets.count}, setting modes = number of ' +
                            'detectors')
             modes = aman.dets.count
+        # fill with poly fill before PCA
+        gaps = get_gap_fill(aman, nbuf=nbuf, flags=glitch_flags,
+                            signal=np.float32(sig))
+        sig = gaps.swap(aman, signal=sig)
+        # PCA fill
         mod = pca.get_pca_model(tod=aman, n_modes=modes,
                                 signal=sig)
         gfill = get_gap_model(tod=aman, model=mod, flags=glitch_flags)
@@ -438,7 +443,9 @@ def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
         gaps = get_gap_fill(aman, nbuf=nbuf, flags=glitch_flags,
                             signal=np.float32(sig))
         sig = gaps.swap(aman, signal=sig)
-    if in_place:
-        signal = sig
+    if merge_filled:
+        if filled_name in aman._assignments:
+            aman.move(filled_name, None)
+        aman.wrap(filled_name, sig, [(0, 'dets'), (1, 'samps')])
     else:
         return sig
