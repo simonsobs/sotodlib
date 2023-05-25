@@ -1,25 +1,5 @@
 #update_obsdb
-"""
-I give you a bunch of books, look through to build me an obsdb and an obsfilesb so I can then choose what I want
 
-Use the metadata functions to manipulate the obsdb
-
-We want to do it after the librarian has the data. If they can save the data somewhere permanent 
-
-bkbind->imprinter make books
-librarian updates its knowledge. We want to work off the librarian
-/mnt/so1/shared/site-pipeline/data_pkg/books
-UCSD books are the better ones for now but they are not fully complete
-
-I suspect we're going to have a lot of cases where we want to pre-configure the columns of the ObsDb.
-Like perhaps we just want a couple of the things from the M_index file in there. 
-Is there a way to make this more configurable by default?
-Another is that I can image cases where we what "all the oper books" 
-or "all the obs books" or "all of both types of books." Could take also have an option here?
-I think the last one, in a lot of the pipeline scripts the way of starting a database 
-is "have the file path in the config file, if the file doesn't exist then make it, 
-if the file does exists then update it." Could we also use that behavior here?
-"""
 from sotodlib.core.metadata import ObsDb, ObsFileDb
 from sotodlib.core import Context
 import os
