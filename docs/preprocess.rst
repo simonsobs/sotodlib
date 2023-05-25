@@ -132,8 +132,6 @@ Flagging and Products
 
 HWP Related
 :::::::::::
-
-.. autoclass:: sotodlib.preprocess.processes.HWPSSGuess
 .. autoclass:: sotodlib.preprocess.processes.EstimateHWPSS
 .. autoclass:: sotodlib.preprocess.processes.SubtractHWPSS
 .. autoclass:: sotodlib.preprocess.processes.Demodulate
