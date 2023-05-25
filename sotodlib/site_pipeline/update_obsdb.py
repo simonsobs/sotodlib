@@ -10,6 +10,15 @@ bkbind->imprinter make books
 librarian updates its knowledge. We want to work off the librarian
 /mnt/so1/shared/site-pipeline/data_pkg/books
 UCSD books are the better ones for now but they are not fully complete
+
+I suspect we're going to have a lot of cases where we want to pre-configure the columns of the ObsDb.
+Like perhaps we just want a couple of the things from the M_index file in there. 
+Is there a way to make this more configurable by default?
+Another is that I can image cases where we what "all the oper books" 
+or "all the obs books" or "all of both types of books." Could take also have an option here?
+I think the last one, in a lot of the pipeline scripts the way of starting a database 
+is "have the file path in the config file, if the file doesn't exist then make it, 
+if the file does exists then update it." Could we also use that behavior here?
 """
 from sotodlib.core.metadata import ObsDb, ObsFileDb
 from sotodlib.core import Context
@@ -31,12 +40,45 @@ def check_meta_type(bookpath):
     else:
         return meta["type"]
 
-def update_obsdb(base_dir, recency=2., verbosity=2, preexist_obsdb=None):
+def update_obsdb(base_dir, 
+                 config="config.yaml", 
+                 recency=2., 
+                 verbosity=2, 
+                 booktype="both"):
+    """
+        Create or update an obsdb for observation or operations data.
+    Argument
+    ----------
+    base_dir : str
+        The base directory in which to look for books
+    Parameters
+    ----------
+    config : str
+        Path to config file
+    recency : float
+        How far back in time to look for databases, in days. (default: 2.)
+    booktype : str
+        Look for observations or operations data or both (default: both)
+    """
     bookcart = []
     bookcartobsdb = ObsDb()
     bookcartobsfiledb = ObsFileDb()
-    if preexist_obsdb is not None:
-        bookcartobsfiledb = ObsDb.from_file(os.path.join(base_dir, preexist_obsdb))
+
+    if booktype=="both":
+        accept_type = ["obs", "oper"]
+    else:
+        accept_type = [booktype]
+
+    configs = yaml.safe_load(open(config, "r"))
+    if "filepath" in configs:
+        if os.path.isfile(configs["filepath"]):
+            bookcartobsdb = ObsDb.from_file(os.path.join(base_dir, preexist_obsdb))
+    if "cols" in configs:
+        col_list = []
+        for col, typ in configs["cols"].items():
+            col_list.append(col+" "+typ)
+        bookcartobsdb.add_obs_columns(col_list)
+
     #How far back we should look
     tnow = time.time()
     tback = tnow - recency*86400
@@ -48,39 +90,48 @@ def update_obsdb(base_dir, recency=2., verbosity=2, preexist_obsdb=None):
         if os.path.exists(os.path.join(dirpath, "M_index.yaml")):
             #Looks like a context file
             bookcart.append(dirpath)
-    #Check the books for obsdb
+    #Check the books for the observations we want
+
     for bookpath in bookcart:
-        if check_meta_type(bookpath)=="obs":
+        if check_meta_type(bookpath) in accept_type:
             index = yaml.safe_load(open(os.path.join(bookpath, "M_index.yaml"), "rb"))
             obs_id = index.pop("book_id")
             tags = index.pop("tags")
             detsets = index.pop("detsets")
-            col_list = []
-            clean = {key:val for key, val in index.items() if val is not None}
-            very_clean = {key:val for key, val in clean.items() if type(val) is not list}
-            for key, val in very_clean.items():
-                col_list.append(key+" "+type(val).__name__)
-            bookcartobsdb.add_obs_columns(col_list)
-            if tags[0] != '':
+
+            if "cols" in configs:
+                very_clean = {col:index[col] for col in iter(configs["cols"]) if col in index}
+            else:
+                col_list = []
+                clean = {key:val for key, val in index.items() if val is not None}
+                very_clean = {key:val for key, val in clean.items() if type(val) is not list}
+                for key, val in very_clean.items():
+                    col_list.append(key+" "+type(val).__name__)
+                bookcartobsdb.add_obs_columns(col_list)
+
+            if tags != ([] or [""]):
                 bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
             else:
                 bookcartobsdb.update_obs(obs_id, very_clean)
             #bookcartobsfiledb.add_obsfile(bookpath, obs_id, detsets)
+           
         else:
             bookcart.remove(bookpath)
-
 
 
 def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
-    parser.add_argument('--base_dir', help="base directory from which to look for books", type=str)
-    parser.add_argument('--recency', help="Days to subtract from now to set as minimum ctime",
-                        default=2, type=float)
-    parser.add_argument('--preexist_obsdb', help="Builds or updates database from scratch",
-                        action="store", default=None)
-    parser.add_argument("--verbosity", help="increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug",
-                       default=2, type=int)
+    parser.add_argument('--base_dir', type=str, 
+        help="base directory from which to look for books")
+    parser.add_argument("--config", help="ObsDb configuration file",
+        default="config.yaml", type=str)
+    parser.add_argument('--recency', default=2, type=float,
+        help="Days to subtract from now to set as minimum ctime")
+    parser.add_argument("--verbosity", default=2, type=int,
+        help="Increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug")
+    parser.add_argument("--booktype", default="both", type=str,
+        help="Select book type to look for: obs, oper, both(default)")
     return parser
 def main():
     parser = get_parser(parser=None)
