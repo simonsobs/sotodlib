@@ -23,6 +23,12 @@ import argparse as ap
 import pandas as pd
 from mpi4py import MPI
 import re
+import logging
+
+from sotodlib.site_pipeline import util
+
+# Default logger, note it will be replaced if you run main()
+logger = logging.getLogger(__name__)
 
 opj = os.path.join
 INITIAL_PARA_FILE = "/mnt/so1/shared/site-pipeline/bcp/initial_parameters.h5"
@@ -279,14 +285,23 @@ def tod_sim_all(space_time, a, xi0, eta0, fwhm_xi, fwhm_eta, phi, tau):
 
 
 def fit_params(
-    ctx, obs_id, ctime, az, el, band, sso_name, rd_id, highpass, cutoff, init_params
+        readout_id, data,
+        ctime, az, el, band, sso_name, rd_id, highpass, cutoff, init_params
 ):
     """Function that fits individual time-streams and returns the parameters
 
     Args
     ----
-    ctx: context
-        context object 
+    readout_id: str
+        Detector id string.
+    data: array of float
+        Vector of time-ordered data for this detector.
+    ctime: array of float
+        timestamps
+    az: array of float
+        azimuth of boresight
+    el: array of float
+        elevation of boresight
     obs_id: obs_id
         obs_id for loading the tod
     band: string
@@ -298,14 +313,11 @@ def fit_params(
     highpass: bool
         If True use a butterworth filter on the data
     """
-    tod = ctx.get_obs(obs_id, dets=[rd_id])
-    
     initial_guess, bounds, radius_main = init_params
     radius_cut = 2 * radius_main
 
-    data = tod.signal.squeeze()
     data -= np.mean(data)
-    sample_rate = 1.0 / np.mean(np.diff(tod.timestamps))
+    sample_rate = 1.0 / np.mean(np.diff(ctime))
 
     if highpass and (cutoff is not None):
         data = highpass_filter(data, cutoff, sample_rate)
@@ -313,7 +325,7 @@ def fit_params(
     coord_transforms = get_xieta_src_centered(ctime, az, el, data, sso_name)
 
     if coord_transforms is None:
-        return np.array([tod.dets.vals.squeeze(), *np.full(8, np.nan)])
+        return np.array([readout_id, *np.full(8, np.nan)])
 
     total_coords, peak_coords, q_det, q_bore, q_obj = coord_transforms
 
@@ -342,6 +354,9 @@ def fit_params(
     eta_main = eta_disk[idx_main_in_disk]
     data_main = data_disk[idx_main_in_disk]
 
+    # Thing to return on error ...
+    failed_params = np.array([readout_id, *np.full(8, np.nan)])
+
     p0 = initial_guess
     xieta = np.vstack((xi_band, eta_band))
     space_time_pointing = {
@@ -365,7 +380,7 @@ def fit_params(
             bounds=bounds_pointing,
         )
     except:
-        return np.array([tod.dets.vals.squeeze(), *np.full(8, np.nan)])
+        return failed_params
 
     p0[0] = popt_pointing[0]
 
@@ -425,7 +440,7 @@ def fit_params(
             bounds=bounds_beam,
         )
     except:
-        return np.array([tod.dets.vals.squeeze(), *np.full(8, np.nan)])
+        return failed_params
 
     p0[3] = popt_beam[0]  # fwhm_xi
     p0[4] = popt_beam[1]  # fwhm_eta
@@ -445,7 +460,7 @@ def fit_params(
         )
 
     except:
-        return np.array([tod.dets.vals.squeeze(), *np.full(8, np.nan)])
+        return failed_params
 
     q_t = quat.rotation_xieta(xi_t, eta_t)
     q_delta = quat.rotation_xieta(popt[1], popt[2])  # xi0 and eta0
@@ -453,7 +468,7 @@ def fit_params(
     noise = np.nanstd(data[np.where(radius > radius_cut)[0]])
     snr = popt[0] / noise
 
-    all_params = np.array([tod.dets.vals.squeeze(), *popt, snr])
+    all_params = np.array([readout_id, *popt, snr])
 
     return all_params
 
@@ -489,15 +504,14 @@ def run(
     ctx_file,
     ctx_idx,
     outdir,
-    tube,
     band,
-    wafer,
     sso_name,
     tele,
     highpass,
     cutoff,
     map_make,
     n_modes,
+        test=False,
 ):
     """
     Initiate an MPI environment and fit a simulation in the time domain
@@ -510,14 +524,11 @@ def run(
     ntask = comm.Get_size()
 
     ctx = core.Context(ctx_file)
-#     obs = ctx.obsdb.query('telescope=="%s" and '%tele+\
-#                           'tel_tube=="%s" and '%tube+\
-#                           'target="%s"'%sso_name.lower())
     obs = ctx.obsdb.query()
 
     obs_id = obs[ctx_idx]['obs_id']
-    tod = ctx.get_obs(obs_id, 
-                      no_signal=True)
+    logger.warning(f'Loading {obs_id} in task {rank}')
+    tod = ctx.get_obs(obs_id, no_signal=True)
     rd_ids = tod.dets.vals
 
     ## Get the initial parameters
@@ -542,12 +553,22 @@ def run(
             "snr",
         ], index=rd_idx_rng,)
 
-    for rd_idx in rd_idx_rng:
+    # Load signal for only my dets.
+    tod = ctx.get_obs(obs_id, dets=np.array(rd_ids)[rd_idx_rng])
+
+    count = 0
+    for _i, rd_idx in enumerate(rd_idx_rng):
         rd_id = rd_ids[rd_idx]
-        params = fit_params(ctx, obs_id, ctime, az, el, 
+        params = fit_params(rd_id, tod.signal[_i],
+                            ctime, az, el, 
                             band, sso_name, rd_id, 
                             highpass, cutoff, init_params)
+        snr = float(params[-1])
+        logger.info(f'Solved {rd_idx:<5d} "{rd_id}" with S/N={snr:.2f}')
         df.loc[rd_idx, :] = np.array(params)
+        count += 1
+        if test and count >= 2:
+            break
     all_dfs = comm.gather(df, root=0)
 
     if rank == 0:
@@ -603,6 +624,9 @@ def run(
 
 
 def main():
+    global logger
+    logger = util.init_logger(__name__)
+
     parser = ap.ArgumentParser(formatter_class=ap.ArgumentDefaultsHelpFormatter)
     
     parser.add_argument(
@@ -658,6 +682,12 @@ def main():
     )
     
     parser.add_argument(
+        "--test-mode",
+        action="store_true",
+        help="Run analysis on a subset of detectors, to quickly check for problems."
+    )
+
+    parser.add_argument(
         "--highpass",
         action="store_true",
         dest="highpass",
@@ -695,15 +725,14 @@ def main():
         args.ctx_file,
         args.ctx_idx,
         args.outdir,
-        args.tube,
         args.band,
-        args.wafer,
         args.sso_name,
         args.tele,
         args.highpass,
         args.cutoff,
         args.map_make,
         args.n_modes,
+        test=args.test_mode,
     )
 
 
