@@ -313,9 +313,7 @@ def fit_params(
     coord_transforms = get_xieta_src_centered(ctime, az, el, data, sso_name)
 
     if coord_transforms is None:
-        all_params = np.empty(9)
-        all_params[:] = np.nan
-        return all_params
+        return np.array([tod.dets.vals.squeeze(), *np.full(8, np.nan)])
 
     total_coords, peak_coords, q_det, q_bore, q_obj = coord_transforms
 
@@ -367,10 +365,7 @@ def fit_params(
             bounds=bounds_pointing,
         )
     except:
-        all_params = np.empty(9)
-        all_params[0] = tod.dets.vals.squeeze()
-        all_params[1:] = np.nan
-        return all_params
+        return np.array([tod.dets.vals.squeeze(), *np.full(8, np.nan)])
 
     p0[0] = popt_pointing[0]
 
@@ -430,10 +425,7 @@ def fit_params(
             bounds=bounds_beam,
         )
     except:
-        all_params = np.empty(9)
-        all_params[0] = tod.dets.vals.squeeze()
-        all_params[1:] = np.nan
-        return all_params
+        return np.array([tod.dets.vals.squeeze(), *np.full(8, np.nan)])
 
     p0[3] = popt_beam[0]  # fwhm_xi
     p0[4] = popt_beam[1]  # fwhm_eta
@@ -453,10 +445,7 @@ def fit_params(
         )
 
     except:
-        all_params = np.empty(9)
-        all_params[0] = tod.dets.vals.squeeze()
-        all_params[1:] = np.nan
-        return all_params
+        return np.array([tod.dets.vals.squeeze(), *np.full(8, np.nan)])
 
     q_t = quat.rotation_xieta(xi_t, eta_t)
     q_delta = quat.rotation_xieta(popt[1], popt[2])  # xi0 and eta0
