@@ -172,3 +172,15 @@ an unit step, so it is acting as a matched filter.
 
 .. automodule:: sotodlib.tod_ops.jumps
    :members:
+
+
+
+tod_ops.sss
+=============
+
+Function for fitting legendre polynomials in az-vs-signal space. This has been used in ABS and other experiments to get a scan synchronous signal (SSS) template largely due to polarized ground signal to remove from the data.
+
+.. autofunction:: sotodlib.tod_ops.sss.get_sss
+
+.. autofunction:: sotodlib.tod_ops.sss.subtract_sss
+	  

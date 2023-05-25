@@ -9,7 +9,8 @@ import unittest
 import numpy as np
 from numpy.polynomial import legendre as L
 
-from sotodlib import core, sss
+from sotodlib import core
+from sotodlib.tod_ops import sss
 
 
 def get_scan(n_scans=33, scan_accel=0.025, scanrate=0.025,
