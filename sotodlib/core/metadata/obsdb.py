@@ -317,3 +317,34 @@ class ObsDb(object):
         if add_prefix is not None:
             results.keys = [add_prefix + k for k in results.keys]
         return results
+
+    def info(self):
+        """Return a dict summarizing the structure and contents of the obsdb;
+        this is used by the CLI.
+
+        """
+        def _short_list(items, max_len=40):
+            i, acc, keepers = 0, 0, []
+            while (len(keepers) < 1 or acc < max_len) and i < len(items):
+                keepers.append(str(items[i]))
+                i += 1
+                acc += len(keepers[-1]) + 2
+            return  ('[' + ', '.join(map(str, keepers))
+                     + (' ...' * (i < len(items))) + ']')
+
+        # Summarize the fields ...
+        rs = self.query()
+        fields = {}
+        for k in rs.keys:
+            items = list(set(rs[k]))
+            fields[k] = (len(items), _short_list(items))
+
+        # Count occurances of each tag ...
+        c = self.conn.execute('select tag, count(obs_id) from tags group by tag order by tag')
+        tags = {r[0]: r[1] for r in c}
+
+        return {
+            'count': len(rs),
+            'fields': fields,
+            'tags': tags,
+        }
