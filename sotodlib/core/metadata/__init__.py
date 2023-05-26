@@ -9,6 +9,7 @@ from .obsdb import ObsDb
 from .obsfiledb import ObsFileDb
 from .manifest import ManifestDb, ManifestScheme
 from .loader import SuperLoader, LoaderInterface, Unpacker, merge_det_info
+from . import cli
 
 def get_example(db_type, *args, **kwargs):
     if db_type == 'DetDb':

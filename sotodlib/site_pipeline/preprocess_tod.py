@@ -106,6 +106,7 @@ def preprocess_tod(obs_id, configs, overwrite=False, logger=None):
     pipe = _build_pipe_from_configs(configs)
 
     for group in groups:
+        logger.info(f"Beginning run for {obs_id}:{group}")
 
         aman = context.get_obs(obs_id, dets={group_by:group})
         aman, proc_aman = run_preprocess(aman, pipe, logger=logger)
@@ -155,6 +156,8 @@ def run_preprocess(aman, pipe=None, configs=None, logger=None):
 
         process.process(aman, proc_aman) ## make changes to aman
         process.calc_and_save(aman, proc_aman) ## calculate data products
+    logger.info("Finished Processing")
+
     return aman, proc_aman
 
 def load_preprocess_det_select(obs_id, configs, context=None):
@@ -278,6 +281,7 @@ def main(
 
     logger.info(f"Beginning to run preprocessing on {len(run_list)} observations")
     for obs in run_list:
+        logger.info(f"Processing obs_id: {obs_id}")
         preprocess_tod(obs["obs_id"], configs, overwrite=overwrite,logger=logger)
             
 
