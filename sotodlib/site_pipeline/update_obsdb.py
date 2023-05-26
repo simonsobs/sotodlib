@@ -1,7 +1,20 @@
-#update_obsdb
+"""update_obsdb
+The config file could be of the form:
+.. code-block:: yaml
 
-from sotodlib.core.metadata import ObsDb, ObsFileDb
+    obsdb: dummydb.yaml
+    cols:
+        start_time: float
+        end_time: float
+        n_samples: int
+        telescope: str
+        tube_slot: str
+        type: str
+
+"""
+from sotodlib.core.metadata import ObsDb
 from sotodlib.core import Context
+from check_book import main as checkbook
 import os
 import glob
 import yaml
@@ -42,7 +55,6 @@ def update_obsdb(base_dir,
     """
     bookcart = []
     bookcartobsdb = ObsDb()
-    bookcartobsfiledb = ObsFileDb()
 
     if booktype=="both":
         accept_type = ["obs", "oper"]
@@ -50,9 +62,9 @@ def update_obsdb(base_dir,
         accept_type = [booktype]
 
     configs = yaml.safe_load(open(config, "r"))
-    if "filepath" in configs:
-        if os.path.isfile(configs["filepath"]):
-            bookcartobsdb = ObsDb.from_file(os.path.join(base_dir, preexist_obsdb))
+    if "obsdb" in configs:
+        if os.path.isfile(configs["obsdb"]):
+            bookcartobsdb = ObsDb.from_file(configs["obsdb"])
     if "cols" in configs:
         col_list = []
         for col, typ in configs["cols"].items():
@@ -78,7 +90,7 @@ def update_obsdb(base_dir,
             obs_id = index.pop("book_id")
             tags = index.pop("tags")
             detsets = index.pop("detsets")
-
+            checkbook(bookpath, configs)
             if "cols" in configs:
                 very_clean = {col:index[col] for col in iter(configs["cols"]) if col in index}
             else:
@@ -93,10 +105,13 @@ def update_obsdb(base_dir,
                 bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
             else:
                 bookcartobsdb.update_obs(obs_id, very_clean)
-            #bookcartobsfiledb.add_obsfile(bookpath, obs_id, detsets)
            
         else:
             bookcart.remove(bookpath)
+    if "obsdb" in configs:
+        bookcartobsdb.to_file(configs["obsdb"])
+    else:
+        bookcartobsdb.to_file("obsdb_from{}_to{}".format(tback, tnow))
 
 
 def get_parser(parser=None):
