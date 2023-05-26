@@ -23,12 +23,9 @@ import argparse as ap
 import pandas as pd
 from mpi4py import MPI
 import re
-import logging
 
 from sotodlib.site_pipeline import util
 
-# Default logger, note it will be replaced if you run main()
-logger = logging.getLogger(__name__)
 
 opj = os.path.join
 INITIAL_PARA_FILE = "/mnt/so1/shared/site-pipeline/bcp/initial_parameters.h5"
@@ -500,7 +497,7 @@ def make_maps(path, outdir, ofilename, sso_name, beamsize, n_modes):
     )
 
 
-def run(
+def main(
     ctx_file,
     ctx_idx,
     outdir,
@@ -511,12 +508,14 @@ def run(
     cutoff,
     map_make,
     n_modes,
-        test=False,
+    test_mode=False,
+    logger=None,
 ):
     """
     Initiate an MPI environment and fit a simulation in the time domain
     """
-
+    if logger is None:
+        logger = util.init_logger(__name__)
     t1 = time.time()
 
     comm = MPI.COMM_WORLD
@@ -538,7 +537,7 @@ def run(
     nrd = len(rd_ids)
     nsample_task = nrd // ntask + 1
     rd_idx_rng = np.arange(rank * nsample_task,
-                            min((rank + 1) * nsample_task, nrd))
+                           min((rank + 1) * nsample_task, nrd))
     
     df = pd.DataFrame(
         columns=[
@@ -567,7 +566,7 @@ def run(
         logger.info(f'Solved {rd_idx:<5d} "{rd_id}" with S/N={snr:.2f}')
         df.loc[rd_idx, :] = np.array(params)
         count += 1
-        if test and count >= 2:
+        if test_mode and count >= 2:
             break
     all_dfs = comm.gather(df, root=0)
 
@@ -623,12 +622,10 @@ def run(
             make_maps(path, outdir, obs_id, sso_name, beamsize, n_modes)
 
 
-def main():
-    global logger
-    logger = util.init_logger(__name__)
+def get_parser(parser=None):
+    if parser is None:
+        parser = ap.ArgumentParser(formatter_class=ap.ArgumentDefaultsHelpFormatter)
 
-    parser = ap.ArgumentParser(formatter_class=ap.ArgumentDefaultsHelpFormatter)
-    
     parser.add_argument(
         "--ctx_file",
         action="store",
@@ -655,23 +652,10 @@ def main():
         "--tele", action="store", dest="tele", help="The telescope name [LAT, SAT]."
     )
     parser.add_argument(
-        "--tube",
-        action="store",
-        dest="tube",
-        help="The tube name [c1, i6, o6, ...] for LAT, [SAT1, SAT2, ...] for SAT.",
-    )
-    parser.add_argument(
         "--band",
         action="store",
         dest="band",
         help="Frequency band [30,40,90,150,230,290].",
-    )
-    parser.add_argument(
-        "--wafer",
-        action="store",
-        dest="wafer",
-        help="The wafer name [wafers number increases from the center and \
-    anti-clockwise] across the focalplane.",
     )
     
     parser.add_argument(
@@ -719,22 +703,8 @@ def main():
         type=int,
     )
 
-    args = parser.parse_args()
-
-    run(
-        args.ctx_file,
-        args.ctx_idx,
-        args.outdir,
-        args.band,
-        args.sso_name,
-        args.tele,
-        args.highpass,
-        args.cutoff,
-        args.map_make,
-        args.n_modes,
-        test=args.test_mode,
-    )
+    return parser
 
 
 if __name__ == "__main__":
-    main()
+    util.main_launcher(main, get_parser)
