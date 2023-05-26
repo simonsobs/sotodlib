@@ -274,7 +274,7 @@ def tod_sim_all(space_time, a, xi0, eta0, fwhm_xi, fwhm_eta, phi, tau):
 
 def fit_params(
         readout_id, data,
-        ctime, az, el, band, sso_name, rd_id, highpass, cutoff, init_params
+        ctime, az, el, band, sso_name, highpass, cutoff, init_params
 ):
     """Function that fits individual time-streams and returns the parameters
 
@@ -296,8 +296,6 @@ def fit_params(
         The frequency-band
     sso_name: string
         Name of the celestial source
-    rd_id: str
-        The string of the detector
     highpass: bool
         If True use a butterworth filter on the data
     """
@@ -555,7 +553,7 @@ def main(
         rd_id = rd_ids[rd_idx]
         params = fit_params(rd_id, tod.signal[_i],
                             ctime, az, el, 
-                            band, sso_name, rd_id, 
+                            band, sso_name, 
                             highpass, cutoff, init_params)
         snr = float(params[-1])
         logger.info(f'Solved {rd_idx:<5d} "{rd_id}" with S/N={snr:.2f}')
