@@ -14,8 +14,6 @@ import time, ephem, os
 from scipy.optimize import curve_fit
 from datetime import datetime
 import argparse as ap
-import pandas as pd
-from mpi4py import MPI
 
 from sotodlib.site_pipeline import util
 
@@ -507,6 +505,10 @@ def main(
     """
     Initiate an MPI environment and fit a simulation in the time domain
     """
+    # Two local imports, to avoid docs depenency.
+    from mpi4py import MPI
+    import pandas as pd
+
     if logger is None:
         logger = util.init_logger(__name__)
     t1 = time.time()
