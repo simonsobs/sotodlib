@@ -55,6 +55,7 @@ def get_glitch_flags(
     hp_fc=0.5,
     n_sig=10,
     buffer=200,
+    detrend=None,
     signal=None,
     merge=True,
     overwrite=False,
@@ -70,6 +71,7 @@ def get_glitch_flags(
         hp_fc: high pass filter cutoff
         n_sig (int or float): significance of detection
         buffer (int): amount to buffer flags around found location
+        detrend (str): detrend method to pass to fourier_filter
         signal (str): if None, defaults to 'signal'
         merge (bool): if true, add to aman.flags
         name (string): name of flag to add to aman.flags
@@ -86,10 +88,10 @@ def get_glitch_flags(
         signal = "signal"
     # f-space filtering
     filt = filters.high_pass_sine2(cutoff=hp_fc) * filters.gaussian_filter(
-        t_sigma=0.002
+        t_sigma=t_glitch
     )
     fvec = fourier_filter(
-        aman, filt, detrend="linear", signal_name=signal, resize="zero_pad"
+        aman, filt, detrend=detrend, signal_name=signal, resize="zero_pad"
     )
     # get the threshods based on n_sig x nlev = n_sig x iqu x 0.741
     fvec = np.abs(fvec)
