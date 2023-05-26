@@ -3,26 +3,19 @@ import so3g
 from so3g.proj import coords, quat
 import sotodlib.coords.planets as planets
 from sotodlib import core
-from sotodlib.io.load import load_file
-import toast
 from sotodlib.toast.ops import sim_sso
 from sotodlib.core import metadata
 from sotodlib.io.metadata import write_dataset, read_dataset
 from astropy import units as u
 
-import h5py
 import numpy as np
-import scipy
-import scipy.stats
 import scipy.signal
 import time, ephem, os
 from scipy.optimize import curve_fit
-from glob import glob
 from datetime import datetime
 import argparse as ap
 import pandas as pd
 from mpi4py import MPI
-import re
 
 from sotodlib.site_pipeline import util
 
