@@ -114,7 +114,7 @@ def get_glitch_flags(aman, t_glitch=0.002, hp_fc=0.5, n_sig=10, buffer=200,
 
     return flag
 
-def get_trending_flags(aman, max_trend=5*np.pi, n_pieces=1, signal=None,
+def get_trending_flags(aman, max_trend=.01, n_pieces=1, max_samples=500, signal=None, timestamps=None,
                      merge=True, overwrite=True, name='trends',
                      full_output=False):
     """ Flag Detectors with trends larger than max_trend. Note, this is really
@@ -122,18 +122,19 @@ def get_trending_flags(aman, max_trend=5*np.pi, n_pieces=1, signal=None,
 
     Args:
         aman (AxisManager): the tod
-        max_trend: maxmimum amount to always the detectors to change by.
-            The default is for use with phase units.
-        n_pieces: number of pieces to cut the timestream in to to look for
-                    trends
+        max_trend: Slope at which detectors are unlocked. 
+                   The default is for use with phase units.
+        n_pieces: number of pieces to cut the timestream in to to look for trends.
+        max_samples: Maximum samples to compute the slope with.
         signal: Signal to use to generate flags, default is aman.signal.
+        timestamps: Timestamps to use to generate flags, default is aman.timestamps.
         merge (bool): if true, merges the generated flag into aman
         overwrite (bool): if true, write over flag. if false, don't
         name (string): name of flag to add to aman.flags if merge is True
         full_output(bool): if true, returns calculated slope sizes
         
     Returns:
-        flag: RangesMatrix object of glitches
+        cut: RangesMatrix of trending regions
         trends: if full_output is true, calculated slopes and the
         sample edges where they were calculated. 
     """
@@ -142,28 +143,28 @@ def get_trending_flags(aman, max_trend=5*np.pi, n_pieces=1, signal=None,
 
     if signal is None:
         signal = aman.signal
+    signal = np.atleast_2d(signal)
+    if timestamps is None:
+        timestamps = aman.timestamps
+    assert(len(timestamps) == signal.shape[1])
 
-    signal = np.atleast_2d( signal )
-    signal = signal[:,:aman.samps.count//n_pieces*n_pieces].reshape((signal.shape[0], n_pieces,-1))
+    slopes = np.zeros((len(signal), 0))
+    cut = np.zeros((len(signal), 0), dtype=bool)
+    samp_edges = [0]
+    for t,s in zip(np.array_split(timestamps, n_pieces), np.array_split(signal, n_pieces, 1)):
+        samps = len(t)
+        # Cheap downsampling
+        if len(t) < max_samples:
+            n = len(t)//max_samples
+            t = t[::n]
+            s = s[:, ::n]
+        _slopes = ((t*s).mean(axis=1) - t.mean()*s.mean(axis=1)) / ((t**2).mean() - (t.mean())**2)
+        cut = np.hstack((cut, np.tile((np.abs(_slopes)>max_trend)[..., np.newaxis], samps)))
+        if full_output:
+            slopes = np.hstack((slopes, _slopes[..., np.newaxis]))
+            samp_edges.append(samp_edges[-1]+len(t))
+    cut = RangesMatrix.from_mask(cut)
 
-    piece_size = signal.shape[2]
-    slopes = signal[:,:,-1]-signal[:,:,0]
-
-    bad_slopes = np.abs(slopes)>max_trend
-
-
-    if n_pieces == 1:
-        cut = bad_slopes[:,0]
-    else:
-        cut = aman.flags.get_zeros()
-        dets = np.unique(np.where(bad_slopes)[0])
-        for d in dets:
-            clear = np.where(bad_slopes[d])[0]
-            for c in clear:
-                if c == n_pieces-1:
-                    cut[d].add_interval(int(c*piece_size), cut.ranges[d].count)
-                else:
-                    cut[d].add_interval(int(c*piece_size), int((c+1)*piece_size))
     if merge:
         if name in aman.flags and not overwrite:
             raise ValueError('Flag name {} already exists in aman.flags'.format(name))
@@ -173,10 +174,10 @@ def get_trending_flags(aman, max_trend=5*np.pi, n_pieces=1, signal=None,
             aman.flags.wrap(name, cut)
     
     if full_output:
-        samp_edges = np.linspace(0, piece_size*n_pieces, n_pieces+1)
+        samp_edges = np.array(samp_edges)
         trends = core.AxisManager( 
             aman.dets, 
-            aman.samps,
+            core.OffsetAxis("samps", len(timestamps)),
             core.OffsetAxis("trend_bins", len(samp_edges)-1),
         )
         trends.wrap("samp_start", samp_edges[:-1], [(0,"trend_bins")])
