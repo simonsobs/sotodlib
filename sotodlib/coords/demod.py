@@ -19,7 +19,7 @@ def make_map(tod,
     tod : dict
         An AxisManager object
     P : sotodlib.coords.pmat
-        Projection Matrix to be used for mapmaking. If None, it is generated from `wcs_kernel` and `res`.
+        Projection Matrix to be used for mapmaking. If None, it is generated from `wcs_kernel`.
     wcs_kernel : enlib.wcs.WCS or None, optional
         The WCS object used to generate the output map.
         If None, a new WCS object with a Cartesian projection and a resolution of `res` will be created.
