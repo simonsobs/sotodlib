@@ -16,15 +16,21 @@ def make_map(tod,
 
     Parameters
     ----------
-    tod : dict
+    tod : sotodlib.core.AxisManager
         An AxisManager object
     P : sotodlib.coords.pmat
-        Projection Matrix to be used for mapmaking. If None, it is generated from `wcs_kernel`.
+        Projection Matrix to be used for mapmaking. If None, it is generated from `wcs_kernel` or `centor_on`.
     wcs_kernel : enlib.wcs.WCS or None, optional
         The WCS object used to generate the output map.
         If None, a new WCS object with a Cartesian projection and a resolution of `res` will be created.
+    center_on: None or str
+        Name of point source. If specified, Source-centered map with a tangent projection will be made.
+        If None, wcs_kernel will be used to generate a projection matrix.
+    size: float or None
+        If specified, trim source-centored map to a local square with `size`, in radian.
+        If None, not trimming will be applied. Only valid when `centor_on` is specified.
     res : float, optional
-        The resolution of the output map, in radian.
+        The resolution of the output map, in radian.        
     dsT : array-like or None, optional
         The input dsT timestream data. If None, the 'dsT' field of `tod` will be used.
     demodQ : array-like or None, optional
@@ -60,10 +66,14 @@ def make_map(tod,
         demodU = tod['demodU']
 
     if P is None:
-        if wcs_kernel is None:
-            wcs_kernel = coords.get_wcs_kernel('car', 0, 0, res)
-        P = coords.P.for_tod(
-            tod=tod, wcs_kernel=wcs_kernel, cuts=cuts, comps='QU')
+        if center_on is None:
+            if wcs_kernel is None:
+                wcs_kernel = coords.get_wcs_kernel('car', 0, 0, res)
+            P = coords.P.for_tod(
+                tod=tod, wcs_kernel=wcs_kernel, cuts=cuts, comps='QU')
+        else:
+            P, X = coords.planets.get_scan_P(tod, planet=center_on, res=res)
+            
 
     if det_weights is None:
         if det_weights_demod is None:
