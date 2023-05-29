@@ -6,4 +6,4 @@ from .helpers import (
 from . import planets
 from . import local
 from .plotting import *
-from . import sat_mapmake
+from . import demod
