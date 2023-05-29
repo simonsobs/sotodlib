@@ -10,7 +10,8 @@ def make_map(tod,
              res=0.1 * coords.DEG,
              dsT=None, demodQ=None, demodU=None,
              cuts=None,
-             det_weights=None, det_weights_demod=None):
+             det_weights=None, det_weights_demod=None,
+             wrong_definition=False):
     """
     Generates maps of temperature and polarization from a TOD.
 
@@ -89,22 +90,24 @@ def make_map(tod,
     wT = P.to_weights(tod, signal=dsT, comps='T', det_weights=det_weights)
 
     # Q/U maps and weights
-    mQ_weighted = P.to_map(tod=tod, signal=demodQ,
+    mQ_weighted = P.to_map(tod=tod, signal=demodQ, comps='QU'
                              det_weights=det_weights_demod)
-    mU_weighted = P.to_map(tod=tod, signal=demodU,
+    mU_weighted = P.to_map(tod=tod, signal=demodU, comps='QU'
                              det_weights=det_weights_demod)
     mQU_weighted = P.zeros()
-
-    # CAUTION: Here the definition of mQU_weighted uses a wrong way of definition, as toast simulation defines that in the wrong way.
-    # (= Q_{flipped detector coord}*cos(2 theta_pa) - U_{flipped detector coord}*sin(2 theta_pa) )
-    mQU_weighted[0][:] = mQ_weighted[0] - mU_weighted[1]
-    # (= Q_{flipped detector coord}*sin(2 theta_pa) + U_{flipped detector coord}*cos(2 theta_pa) )
-    mQU_weighted[1][:] = mQ_weighted[1] + mU_weighted[0]
-    #### In field, you should use instead ####
-    # mQU_weighted[0][:] = mQ_weighted[0] + mU_weighted[1] # (= Q_{flipped detector coord}*cos(2 theta_pa) + U_{flipped detector coord}*sin(2 theta_pa) )
-    # mQU_weighted[1][:] = -mQ_weighted[1] + mU_weighted[0] # (= -Q_{flipped
-    # detector coord}*sin(2 theta_pa) + U_{flipped detector coord}*cos(2
-    # theta_pa) )
+    
+    if wrong_definition == True:
+        # CAUTION: Here the definition of mQU_weighted uses a wrong way of definition, as toast simulation defines that in the wrong way.
+        mQU_weighted[0][:] = mQ_weighted[0] - mU_weighted[1]
+        # (= Q_{flipped detector coord}*cos(2 theta_pa) - U_{flipped detector coord}*sin(2 theta_pa) )
+        mQU_weighted[1][:] = mQ_weighted[1] + mU_weighted[0]
+        # (= Q_{flipped detector coord}*sin(2 theta_pa) + U_{flipped detector coord}*cos(2 theta_pa) )
+    else:
+        #### In field, you should use instead ####
+        mQU_weighted[0][:] = mQ_weighted[0] + mU_weighted[1]
+        # (= Q_{flipped detector coord}*cos(2 theta_pa) + U_{flipped detector coord}*sin(2 theta_pa) )
+        mQU_weighted[1][:] = -mQ_weighted[1] + mU_weighted[0] 
+        # (= -Q_{flipped detector coord}*sin(2 theta_pa) + U_{flipped detector coord}*cos(2 theta_pa) )
     wQU = P.to_weights(tod, signal=demodQ, comps='T',
                          det_weights=det_weights_demod)
 
