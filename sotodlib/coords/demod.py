@@ -90,9 +90,9 @@ def make_map(tod,
     wT = P.to_weights(tod, signal=dsT, comps='T', det_weights=det_weights)
 
     # Q/U maps and weights
-    mQ_weighted = P.to_map(tod=tod, signal=demodQ, comps='QU'
+    mQ_weighted = P.to_map(tod=tod, signal=demodQ, comps='QU',
                              det_weights=det_weights_demod)
-    mU_weighted = P.to_map(tod=tod, signal=demodU, comps='QU'
+    mU_weighted = P.to_map(tod=tod, signal=demodU, comps='QU',
                              det_weights=det_weights_demod)
     mQU_weighted = P.zeros()
     
