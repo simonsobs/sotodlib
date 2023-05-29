@@ -41,11 +41,12 @@ def make_map(tod,
 
     Returns
     -------
-    mTQU : enmap.ndmap
+    A dictionary which contains:
+    'map' : enmap.ndmap
         map of temperature and polarization
-    mTQU_weighted : enmap.ndmap
+    'weighted_map' : enmap.ndmap
         The inverse variance weighted map of temperature and polarization
-    wTQU : enmap.ndmap
+    'weight' : enmap.ndmap
         The map of inverse variance weights used in the map-making process.
     """
     if wcs_kernel is None:
@@ -108,5 +109,8 @@ def make_map(tod,
     # remove weights
     mTQU = PQU.remove_weights(signal_map=mTQU_weighted,
                               weights_map=wTQU, comps='TQU')
-
-    return mTQU, mTQU_weighted, wTQU
+    
+    output = {'map': mTQU,
+             'weighted_map': mTQU_weighted,
+             'weight': wTQU}
+    return output
