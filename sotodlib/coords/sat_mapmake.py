@@ -9,8 +9,7 @@ def make_map(tod,
             res = 0.1*coords.DEG,
             dsT = None, demodQ = None, demodU = None,
             cuts = None,
-            det_weights_predemod = None,
-            det_weights_dsT = None, det_weights_demod = None):
+            det_weights = None, det_weights_demod = None):
     """
     Generates maps of temperature and polarization from a TOD.
 
@@ -32,12 +31,12 @@ def make_map(tod,
     cuts : RangesMatrix or None, optional
         A RangesMatrix that identifies samples that should be excluded from projection operations.
         If None, no cuts will be applied.
-    det_weights_dsT : array-like or None, optional
+    det_weights : array-like or None, optional
         The detector weights to use in the map-making for the dsT timestream.
     det_weights_demod : array-like or None, optional
         The detector weights to use in the map-making for the demodulated Q and U timestreams.
-        If both of `det_weights_dsT` and `det_weights_demod` are None, uniform detector weights will be used.
-        If only one of two are provided, the other weight is provided by `det_weights_dsT` = 2 * `det_weights_demod`.
+        If both of `det_weights` and `det_weights_demod` are None, uniform detector weights will be used.
+        If only one of two are provided, the other weight is provided by `det_weights` = 2 * `det_weights_demod`.
 
     Returns
     -------
@@ -59,17 +58,17 @@ def make_map(tod,
     
     PQU = coords.P.for_tod(tod=tod, wcs_kernel=wcs_kernel, cuts=cuts, comps='QU')
 
-    if det_weights_dsT is None:
+    if det_weights is None:
         if det_weights_demod is None:
             det_weights_demod = np.ones(tod.dets.count, dtype='float32')
-        det_weights_dsT = det_weights_demod * 2.
+        det_weights = det_weights_demod * 2.
     else:
         if det_weights_demod is None:
-            det_weights_demod = det_weights_dsT / 2.
+            det_weights_demod = det_weights / 2.
     
     # T map and weight
-    mT_weighted = PQU.to_map(tod=tod, signal=dsT, comps='T', det_weights=det_weights_dsT)
-    wT = PQU.to_weights(tod, signal=dsT, comps='T', det_weights=det_weights_dsT)
+    mT_weighted = PQU.to_map(tod=tod, signal=dsT, comps='T', det_weights=det_weights)
+    wT = PQU.to_weights(tod, signal=dsT, comps='T', det_weights=det_weights)
     
     # Q/U maps and weights
     mQ_weighted = PQU.to_map(tod=tod, signal=demodQ, det_weights=det_weights_demod)
