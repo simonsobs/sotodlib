@@ -6,7 +6,7 @@ from .. import core, tod_ops, coords
 
 
 def make_map(tod,
-             wcs_kernel=None,
+             P=None, wcs_kernel=None,
              res=0.1 * coords.DEG,
              dsT=None, demodQ=None, demodU=None,
              cuts=None,
@@ -18,6 +18,8 @@ def make_map(tod,
     ----------
     tod : dict
         An AxisManager object
+    P : sotodlib.coords.pmat
+        Projection Matrix to be used for mapmaking. If None, it is generated from `wcs_kernel` and `res`.
     wcs_kernel : enlib.wcs.WCS or None, optional
         The WCS object used to generate the output map.
         If None, a new WCS object with a Cartesian projection and a resolution of `res` will be created.
@@ -49,8 +51,7 @@ def make_map(tod,
     'weight' : enmap.ndmap
         The map of inverse variance weights used in the map-making process.
     """
-    if wcs_kernel is None:
-        wcs_kernel = coords.get_wcs_kernel('car', 0, 0, res)
+
     if dsT is None:
         dsT = tod['dsT']
     if demodQ is None:
@@ -58,8 +59,11 @@ def make_map(tod,
     if demodU is None:
         demodU = tod['demodU']
 
-    PQU = coords.P.for_tod(
-        tod=tod, wcs_kernel=wcs_kernel, cuts=cuts, comps='QU')
+    if P is None:
+        if wcs_kernel is None:
+            wcs_kernel = coords.get_wcs_kernel('car', 0, 0, res)
+        P = coords.P.for_tod(
+            tod=tod, wcs_kernel=wcs_kernel, cuts=cuts, comps='QU')
 
     if det_weights is None:
         if det_weights_demod is None:
@@ -70,16 +74,16 @@ def make_map(tod,
             det_weights_demod = det_weights / 2.
 
     # T map and weight
-    mT_weighted = PQU.to_map(
+    mT_weighted = P.to_map(
         tod=tod, signal=dsT, comps='T', det_weights=det_weights)
-    wT = PQU.to_weights(tod, signal=dsT, comps='T', det_weights=det_weights)
+    wT = P.to_weights(tod, signal=dsT, comps='T', det_weights=det_weights)
 
     # Q/U maps and weights
-    mQ_weighted = PQU.to_map(tod=tod, signal=demodQ,
+    mQ_weighted = P.to_map(tod=tod, signal=demodQ,
                              det_weights=det_weights_demod)
-    mU_weighted = PQU.to_map(tod=tod, signal=demodU,
+    mU_weighted = P.to_map(tod=tod, signal=demodU,
                              det_weights=det_weights_demod)
-    mQU_weighted = PQU.zeros()
+    mQU_weighted = P.zeros()
 
     # CAUTION: Here the definition of mQU_weighted uses a wrong way of definition, as toast simulation defines that in the wrong way.
     # (= Q_{flipped detector coord}*cos(2 theta_pa) - U_{flipped detector coord}*sin(2 theta_pa) )
@@ -91,23 +95,23 @@ def make_map(tod,
     # mQU_weighted[1][:] = -mQ_weighted[1] + mU_weighted[0] # (= -Q_{flipped
     # detector coord}*sin(2 theta_pa) + U_{flipped detector coord}*cos(2
     # theta_pa) )
-    wQU = PQU.to_weights(tod, signal=demodQ, comps='T',
+    wQU = P.to_weights(tod, signal=demodQ, comps='T',
                          det_weights=det_weights_demod)
 
     # combine mT_weighted and mQU_weighted into mTQU_weighted
-    mTQU_weighted = PQU.zeros(super_shape=3)
+    mTQU_weighted = P.zeros(super_shape=3)
     mTQU_weighted[0] = mT_weighted
     mTQU_weighted[1] = mQU_weighted[0]
     mTQU_weighted[2] = mQU_weighted[1]
 
     # combine wT and wQU into wTQU
-    wTQU = enmap.zeros((3, 3) + PQU.geom.shape, wcs=PQU.geom.wcs)
+    wTQU = enmap.zeros((3, 3) + P.geom.shape, wcs=P.geom.wcs)
     wTQU[0][0] = wT
     wTQU[1][1] = wQU
     wTQU[2][2] = wQU
 
     # remove weights
-    mTQU = PQU.remove_weights(signal_map=mTQU_weighted,
+    mTQU = P.remove_weights(signal_map=mTQU_weighted,
                               weights_map=wTQU, comps='TQU')
     
     output = {'map': mTQU,
