@@ -74,7 +74,7 @@ class TestDetDb(unittest.TestCase):
         # Check indexing
         # ... with int
         self.assertIsInstance(dets[1], dict)
-        self.assertIsInstance(dets[np.int(1)], dict)
+        self.assertIsInstance(dets[int(1)], dict)
         self.assertIsInstance(dets[np.arange(3)[1]], dict)
 
         # ... with slice

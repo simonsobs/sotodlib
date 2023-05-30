@@ -3,15 +3,17 @@
 
 import os
 import sys
+from datetime import datetime, timezone
+import re
 
 import numpy as np
 
 import astropy.units as u
 from astropy.table import QTable
-from toast.instrument import Focalplane
+from toast.instrument import Focalplane, GroundSite, Telescope
 from toast.utils import Logger
 
-from ..core import Hardware
+from ..core.hardware import Hardware, build_readout_id, parse_readout_id
 from ..sim_hardware import sim_nominal
 from .sim_focalplane import sim_telescope_detectors
 
@@ -56,11 +58,59 @@ def get_telescope(telescope, wafer_slots, tube_slots):
     return telescope
 
 
+def get_tele_wafer_band_name(tele, tube, wafer, band):
+    """Return a simplified name for one band of a wafer.
+
+    There are multiple places where we need to construct a unique string
+    composed of the telescope name, optics tube, wafer and band within a
+    wafer.  The formal band name includes the telescope, which results
+    in annoying duplication.
+
+    Args:
+        tele (str):  Name of the telescope
+        tube (str):  The optics tube slot
+        wafer (str):  The wafer slot name
+        band (str):  The name of the band in the hardware dictionary
+
+    Returns:
+        (str):  The name.
+
+    """
+    bf_pat = re.compile(r"(.*_)")
+    band_freq = bf_pat.sub("", band)
+    return f"{tele}_{tube}_{wafer}_{band_freq}"
+
+
+class SOSite(GroundSite):
+    def __init__(
+        self,
+        name="ATACAMA",
+        lat=-22.958064 * u.degree,
+        lon=-67.786222 * u.degree,
+        alt=5200 * u.meter,
+        **kwargs,
+    ):
+        super().__init__(
+            name,
+            lat,
+            lon,
+            alt,
+            **kwargs,
+        )
+
+
 class SOFocalplane(Focalplane):
-    """SO Focalplane class"""
+    """SO Focalplane class.
+
+    This can be constructed in several ways:
+        - From a file while applying selection criteria.
+        - From an existing (pre-selected) Hardware instance.
+
+    """
 
     def __init__(
         self,
+        hw=None,
         hwfile=None,
         telescope=None,
         sample_rate=u.Quantity(10.0, u.Hz),
@@ -68,60 +118,72 @@ class SOFocalplane(Focalplane):
         wafer_slots=None,
         tube_slots=None,
         thinfp=None,
+        creation_time=None,
         comm=None,
     ):
         log = Logger.get()
-        self.telescope = get_telescope(telescope, wafer_slots, tube_slots)
-        field_of_view = 2 * FOCALPLANE_RADII[self.telescope]
+        meta = dict()
+        meta["telescope"] = get_telescope(telescope, wafer_slots, tube_slots)
+        field_of_view = 2 * FOCALPLANE_RADII[meta["telescope"]]
 
-        hw = None
-        if comm is None or comm.rank == 0:
-            if hwfile is not None:
-                log.info(f"Loading hardware configuration from {hwfile}...")
-                hw = Hardware(hwfile)
-            elif self.telescope in ["LAT", "SAT1", "SAT2", "SAT3", "SAT4"]:
-                log.info("Simulating default hardware configuration")
-                hw = sim_nominal()
-                sim_telescope_detectors(
-                    hw,
-                    self.telescope,
-                )
-            else:
-                raise RuntimeError(
-                    "Must provide a path to file or a valid telescope name"
-                )
+        if creation_time is None:
+            # Use the current time
+            creation_time = datetime.now(tz=timezone.utc).timestamp()
 
-            if bands is not None or wafer_slots is not None or tube_slots is not None:
-                match = {"band": bands.replace(",", "|")}
-                if wafer_slots is not None:
-                    match["wafer_slot"] = wafer_slots.split(",")
-                if tube_slots is not None:
-                    tube_slots = tube_slots.split(",")
-                hw = hw.select(tube_slots=tube_slots, match=match)
+        if hw is None:
+            if comm is None or comm.rank == 0:
+                if hwfile is not None:
+                    log.debug(f"Loading hardware configuration from {hwfile}...")
+                    hw = Hardware(hwfile)
+                elif meta["telescope"] in ["LAT", "SAT1", "SAT2", "SAT3", "SAT4"]:
+                    log.debug("Simulating default hardware configuration")
+                    hw = sim_nominal()
+                    sim_telescope_detectors(
+                        hw,
+                        meta["telescope"],
+                    )
+                else:
+                    raise RuntimeError(
+                        "Must provide a path to file or a valid telescope name"
+                    )
 
-            if thinfp is not None:
-                dets = list(hw.data["detectors"].keys())
-                for det in dets:
-                    pixel = hw.data["detectors"][det]["pixel"]
-                    if int(pixel) % thinfp != 0:
-                        del hw.data["detectors"][det]
+                if (
+                    bands is not None
+                    or wafer_slots is not None
+                    or tube_slots is not None
+                ):
+                    match = dict()
+                    if bands is not None:
+                        match["band"] = bands.replace(",", "|")
+                    if wafer_slots is not None:
+                        match["wafer_slot"] = wafer_slots.split(",")
+                    if tube_slots is not None:
+                        tube_slots = tube_slots.split(",")
+                    hw = hw.select(tube_slots=tube_slots, match=match)
 
-            ndet = len(hw.data["detectors"])
-            if ndet == 0:
-                raise RuntimeError(
-                    f"No detectors match query: telescope={self.telescope}, "
-                    f"tube_slots={tube_slots}, wafer_slots={wafer_slots}, "
-                    f"bands={bands}, thinfp={thinfp}"
-                )
-            else:
-                log.info(
-                    f"{ndet} detectors match query: telescope={self.telescope}, "
-                    f"tube_slots={tube_slots}, wafer_slots={wafer_slots}, "
-                    f"bands={bands}, thinfp={thinfp}"
-                )
+                if thinfp is not None:
+                    dets = list(hw.data["detectors"].keys())
+                    for det in dets:
+                        pixel = hw.data["detectors"][det]["pixel"]
+                        if int(pixel) % thinfp != 0:
+                            del hw.data["detectors"][det]
 
-        if comm is not None:
-            hw = comm.bcast(hw)
+                ndet = len(hw.data["detectors"])
+                if ndet == 0:
+                    raise RuntimeError(
+                        f"No detectors match query: telescope={meta['telescope']}, "
+                        f"tube_slots={tube_slots}, wafer_slots={wafer_slots}, "
+                        f"bands={bands}, thinfp={thinfp}"
+                    )
+                else:
+                    log.debug(
+                        f"{ndet} detectors match query: telescope={meta['telescope']}, "
+                        f"tube_slots={tube_slots}, wafer_slots={wafer_slots}, "
+                        f"bands={bands}, thinfp={thinfp}"
+                    )
+
+            if comm is not None:
+                hw = comm.bcast(hw)
 
         def get_par_float(ddata, key, default):
             if key in ddata:
@@ -130,6 +192,7 @@ class SOFocalplane(Focalplane):
                 return float(default)
 
         (
+            readout_id,
             names,
             quats,
             bands,
@@ -148,6 +211,9 @@ class SOFocalplane(Focalplane):
             pixels,
             fwhms,
             pols,
+            pol_angs,
+            pol_angs_wafer,
+            pol_orientations_wafer,
             card_slots,
             channels,
             AMCs,
@@ -155,7 +221,13 @@ class SOFocalplane(Focalplane):
             readout_freqs,
             bondpads,
             mux_positions,
+            tele_wf_band,
         ) = (
+            [],
+            [],
+            [],
+            [],
+            [],
             [],
             [],
             [],
@@ -184,16 +256,24 @@ class SOFocalplane(Focalplane):
         )
 
         for det_name, det_data in hw.data["detectors"].items():
+            readout_id.append(
+                build_readout_id(
+                    creation_time, det_data["wafer_slot"], det_data["channel"]
+                )
+            )
             names.append(det_name)
             quats.append(np.array([float(x) for x in det_data["quat"]]))
             ids.append(int(det_data["ID"]))
             # Replace pixel index on the wafer with a unique identifier that
             # combines telescope, wafer and pixel index
             pixels.append(
-                f"{self.telescope}_{det_data['wafer_slot']}_p{det_data['pixel']}"
+                f"{meta['telescope']}_{det_data['wafer_slot']}_p{det_data['pixel']}"
             )
             fwhms.append(float(det_data["fwhm"]) * u.arcmin)
             pols.append(det_data["pol"])
+            pol_angs.append(det_data["pol_ang"])
+            pol_angs_wafer.append(det_data["pol_ang_wafer"])
+            pol_orientations_wafer.append(det_data["pol_orientation_wafer"])
             card_slots.append(det_data["card_slot"])
             channels.append(det_data["channel"])
             AMCs.append(det_data["AMC"])
@@ -215,10 +295,16 @@ class SOFocalplane(Focalplane):
             else:
                 raise RuntimeError(f"{wafer_slot} is not in any tube_slot")
             tube_slots.append(tube_slot)
+            tele_wf_band.append(
+                get_tele_wafer_band_name(meta["telescope"], tube_slot, wafer_slot, band)
+            )
             # Get noise parameters.  If detector-specific entries are
             # absent, use band averages
             nets.append(
-                get_par_float(det_data, "NET", band_data["NET"]) * 1.0e-6 * u.K * u.s ** 0.5
+                get_par_float(det_data, "NET", band_data["NET"])
+                * 1.0e-6
+                * u.K
+                * u.s**0.5
             )
             net_corrs.append(get_par_float(det_data, "NET_corr", band_data["NET_corr"]))
             fknees.append(get_par_float(det_data, "fknee", band_data["fknee"]) * u.mHz)
@@ -236,6 +322,7 @@ class SOFocalplane(Focalplane):
 
         detdata = QTable(
             [
+                readout_id,
                 names,
                 ids,
                 quats,
@@ -255,14 +342,19 @@ class SOFocalplane(Focalplane):
                 bandwidths,
                 pixels,
                 pols,
+                pol_angs,
+                pol_angs_wafer,
+                pol_orientations_wafer,
                 channels,
                 AMCs,
                 biases,
                 readout_freqs,
                 bondpads,
                 mux_positions,
+                tele_wf_band,
             ],
             names=[
+                "readout_id",
                 "name",
                 "uid",
                 "quat",
@@ -282,13 +374,18 @@ class SOFocalplane(Focalplane):
                 "bandwidth",
                 "pixel",
                 "pol",
+                "pol_ang",
+                "pol_ang_wafer",
+                "pol_orientation_wafer",
                 "channel",
                 "AMC",
                 "bias",
                 "readout_freq",
                 "bondpad",
                 "mux_position",
+                "tele_wf_band",
             ],
+            meta=meta,
         )
 
         super().__init__(
@@ -296,3 +393,57 @@ class SOFocalplane(Focalplane):
             field_of_view=field_of_view,
             sample_rate=sample_rate,
         )
+
+
+def update_creation_time(det_data, creation_time):
+    """Update the readout_id column of a focalplane with a new creation time.
+
+    Args:
+        det_data (QTable):  The detector properties table.
+        creation_time (float):  The updated time for use in the readout_id
+
+    Returns:
+        None
+
+    """
+    for row in range(len(det_data)):
+        wf, ct, chan = parse_readout_id(det_data["readout_id"][row])
+        det_data["readout_id"][row] = build_readout_id(creation_time, wf, chan)
+
+
+def simulated_telescope(
+    hw=None,
+    hwfile=None,
+    telescope_name=None,
+    sample_rate=10 * u.Hz,
+    bands=None,
+    wafer_slots=None,
+    tube_slots=None,
+    thinfp=None,
+    comm=None,
+):
+    if hw is not None and telescope_name is None:
+        # get it from the hw
+        if len(hw.data["telescopes"]) != 1:
+            raise RuntimeError("Input Hardware has multiple telescopes")
+        telescope_name = list(hw.data["telescopes"].keys())[0]
+    focalplane = SOFocalplane(
+        hw=hw,
+        hwfile=hwfile,
+        telescope=telescope_name,
+        sample_rate=sample_rate,
+        bands=bands,
+        wafer_slots=wafer_slots,
+        tube_slots=tube_slots,
+        thinfp=thinfp,
+        comm=comm,
+    )
+    site = SOSite()
+    # The focalplane construction above will lookup the telescope name if needed
+    # from the wafer / tube information
+    telescope = Telescope(
+        focalplane.detector_data.meta["telescope"],
+        focalplane=focalplane,
+        site=site,
+    )
+    return telescope

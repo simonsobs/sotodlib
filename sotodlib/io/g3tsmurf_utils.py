@@ -6,6 +6,9 @@ import numpy as np
 import logging
 import yaml
 
+from sqlalchemy import desc, asc
+
+
 from so3g.hk import load_range
 
 import sotodlib.core as core
@@ -67,6 +70,170 @@ def get_obs_plots(obs_id, archive):
                      f"how does {obs.obs_id} exist?")
     return [os.path.join(path, f) for f in os.listdir(path)]
 
+
+def _get_last_oper(timestamp, stream_id, tag, session):
+    """Search for observations based on tag, meant to be used to find 
+    smurf operations as defined by the data packaging setup.
+    """
+    obs = session.query(Observations).filter(
+        Observations.tag.like(tag),
+        Observations.timestamp <= timestamp,
+        Observations.stream_id == stream_id,
+    ).order_by(desc(Observations.timestamp)).first()
+    return obs
+    
+def get_last_bg_map( my_obs_id, SMURF):
+    """Find the last bias group map relative to a specific observation ID. 
+    
+    Note: Uses a tag search that was built into sodetlib ~Oct 2022.
+    """
+    session = SMURF.Session()
+    obs = session.query(Observations).filter(Observations.obs_id == my_obs_id).one()
+    oper = _get_last_oper(
+        obs.timestamp, 
+        obs.stream_id,
+        "oper,bgmap%",
+        session
+    )
+    if oper is None:
+        logger.error(f"Unable to find Bias Step associated with {my_obs_id}")
+    
+    files = get_obs_outputs(oper.obs_id, SMURF) 
+    file = [f for f in files if "bg_map.npy" in f]
+    if len(file) != 1:
+        logger.error(f"Unable to find analysis file in {get_obs_folder(oper.obs_id, SMURF)}")
+    session.close()
+    return file[0]
+
+
+def get_last_bias_step( my_obs_id, SMURF):
+    """Find the last bias step analysis relative to a specific observation ID. 
+    
+    Note: Uses a tag search that was built into sodetlib ~Oct 2022.
+    """
+    session = SMURF.Session()
+    obs = session.query(Observations).filter(Observations.obs_id == my_obs_id).one()
+    oper = _get_last_oper(
+        obs.timestamp, 
+        obs.stream_id,
+        "oper,bias_steps%",
+        session
+    )
+    if oper is None:
+        logger.error(f"Unable to find Bias Step associated with {my_obs_id}")
+    
+    files = get_obs_outputs(oper.obs_id, SMURF) 
+    file = [f for f in files if "bias_step_analysis.npy" in f]
+    if len(file) != 1:
+        logger.error(f"Unable to find analysis file in {get_obs_folder(oper.obs_id, SMURF)}")
+    session.close()
+    return file[0]
+
+
+def get_last_iv( my_obs_id, SMURF):
+    """Find the last IV analysis relative to a specific observation ID. 
+    
+    Note: Uses a tag search that was built into sodetlib ~Oct 2022.
+    """
+    session = SMURF.Session()
+    obs = session.query(Observations).filter(Observations.obs_id == my_obs_id).one()
+    oper = _get_last_oper(
+        obs.timestamp, 
+        obs.stream_id,
+        "oper,iv%",
+        session
+    )
+    if oper is None:
+        logger.error(f"Unable to find IV associated with {my_obs_id}")
+    
+    files = get_obs_outputs(oper.obs_id, SMURF) 
+    file = [f for f in files if "iv_analysis.npy" in f]
+    if len(file) != 1:
+        logger.error(f"Unable to find analysis file in {get_obs_folder(oper.obs_id, SMURF)}")
+    session.close()
+    return file[0]
+
+def _get_next_oper(timestamp, stream_id, tag, session):
+    """Search for observations based on tag, meant to be used to find 
+    smurf operations as defined by the data packaging setup.
+    """
+    obs = session.query(Observations).filter(
+        Observations.tag.like(tag),
+        Observations.timestamp >= timestamp,
+        Observations.stream_id == stream_id,
+    ).order_by(asc(Observations.timestamp)).first()
+    return obs
+
+def get_next_bg_map( my_obs_id, SMURF):
+    """Find the next bias group map relative to a specific observation ID. 
+    
+    Note: Uses a tag search that was built into sodetlib ~Oct 2022.
+    """
+    session = SMURF.Session()
+    obs = session.query(Observations).filter(Observations.obs_id == my_obs_id).one()
+    oper = _get_next_oper(
+        obs.timestamp, 
+        obs.stream_id,
+        "oper,bgmap%",
+        session
+    )
+    if oper is None:
+        logger.error(f"Unable to find Bias Step associated with {my_obs_id}")
+    
+    files = get_obs_outputs(oper.obs_id, SMURF) 
+    file = [f for f in files if "bg_map.npy" in f]
+    if len(file) != 1:
+        logger.error(f"Unable to find analysis file in {get_obs_folder(oper.obs_id, SMURF)}")
+    session.close()
+    return file[0]
+
+
+def get_next_bias_step( my_obs_id, SMURF):
+    """Find the next bias step analysis relative to a specific observation ID. 
+    
+    Note: Uses a tag search that was built into sodetlib ~Oct 2022.
+    """
+    session = SMURF.Session()
+    obs = session.query(Observations).filter(Observations.obs_id == my_obs_id).one()
+    oper = _get_next_oper(
+        obs.timestamp, 
+        obs.stream_id,
+        "oper,bias_steps%",
+        session
+    )
+    if oper is None:
+        logger.error(f"Unable to find Bias Step associated with {my_obs_id}")
+    
+    files = get_obs_outputs(oper.obs_id, SMURF) 
+    file = [f for f in files if "bias_step_analysis.npy" in f]
+    if len(file) != 1:
+        logger.error(f"Unable to find analysis file in {get_obs_folder(oper.obs_id, SMURF)}")
+    session.close()
+    return file[0]
+
+
+def get_next_iv( my_obs_id, SMURF):
+    """Find the next IV analysis relative to a specific observation ID. 
+    
+    Note: Uses a tag search that was built into sodetlib ~Oct 2022.
+    """
+    session = SMURF.Session()
+    obs = session.query(Observations).filter(Observations.obs_id == my_obs_id).one()
+    oper = _get_next_oper(
+        obs.timestamp, 
+        obs.stream_id,
+        "oper,iv%",
+        session
+    )
+    if oper is None:
+        logger.error(f"Unable to find IV associated with {my_obs_id}")
+    
+    files = get_obs_outputs(oper.obs_id, SMURF) 
+    file = [f for f in files if "iv_analysis.npy" in f]
+    if len(file) != 1:
+        logger.error(f"Unable to find analysis file in {get_obs_folder(oper.obs_id, SMURF)}")
+    session.close()
+    return file[0]
 
 def get_batch(
     obs_id,

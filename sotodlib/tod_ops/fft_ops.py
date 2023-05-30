@@ -3,10 +3,12 @@
 from scipy.signal import welch
 import numpy as np
 import pyfftw
+from sotodlib import core
 
 import so3g
 
-from . import detrend_data
+from sotodlib import core
+from . import detrend_tod
 
 def _get_num_threads():
     # Guess how many threads we should be using in FFT ops...
@@ -22,7 +24,8 @@ def rfft(aman, detrend='linear', resize='zero_pad', window=np.hanning,
         aman: axis manager
         
         detrend: Method of detrending to be done before ffting. Can
-            be 'linear', 'mean', or None.
+            be 'linear', 'mean', or None. Note that detrending here can be slow
+            for large arrays.
             
         resize: How to resize the axis to increase fft speed. 'zero_pad' 
             will increase to the next 2**N. 'trim' will cut out so the 
@@ -66,8 +69,8 @@ def rfft(aman, detrend='linear', resize='zero_pad', window=np.hanning,
     if detrend is None:
         signal = np.atleast_2d(getattr(aman, signal_name))
     else:
-        signal = detrend_data(aman, detrend, axis_name=axis_name, 
-                             signal_name=signal_name)
+        signal = detrend_tod(aman, detrend, axis_name=axis_name, 
+                             signal_name=signal_name, in_place=True)
     
     if other_idx is not None and other_idx != 0:
         signal = signal.transpose()
@@ -186,57 +189,101 @@ def find_superior_integer(target, primes=[2,3,5,7,11,13]):
             best = best_friend * base
     return int(best)
 
-def calc_psd(aman, signal=None, timestamps=None, **kwargs):
+def calc_psd(
+    aman, 
+    signal=None, 
+    timestamps=None, 
+    max_samples=2**18,
+    prefer='center',
+    merge=False, 
+    overwrite=True, 
+    **kwargs
+):
     """Calculates the power spectrum density of an input signal using signal.welch()
     Data defaults to aman.signal and times defaults to aman.timestamps
-        Arguments:
-            aman: AxisManager with (dets, samps) OR (channels, samps)axes.
+        
+    Arguments:
+        aman (AxisManager): with (dets, samps) OR (channels, samps)axes.
+        signal (float ndarray): data signal to pass to scipy.signal.welch()
+        timestamps (float ndarray): timestamps associated with the data signal         
+        max_samples (int): maximum samples along sample axis to send to welch
+        prefer (str): One of ['left', 'right', 'center'], indicating what
+            part of the array we would like to send to welch if cuts are
+            required
+        merge (bool): if true merge results into axismanager
+        overwrite (bool): if true will overwrite f, pxx axes.
+        **kwargs: keyword args to be passed to signal.welch()
 
-            signal: data signal to pass to scipy.signal.welch()
-            
-            timestamps: timestamps associated with the data signal
-            
-            **kwargs: keyword args to be passed to signal.welch()
-
-        Returns two numpy arrays:
-            freqs:
-                array of frequencies corresponding to PSD calculated from welch
-            Pxx:
-                array of PSD values 
+    Returns:
+        freqs: array of frequencies corresponding to PSD calculated from welch
+        Pxx: array of PSD values 
     """
     if signal is None:
         signal = aman.signal
     if timestamps is None:
         timestamps = aman.timestamps
-        
-    freqs, Pxx = welch( signal, 1/np.median(np.diff(timestamps)), **kwargs)
+    
+    n_samps = signal.shape[-1]
+    if n_samps <= max_samples:
+        start = 0 
+        stop = n_samps
+    else:
+        offset = n_samps-max_samples
+        if prefer == 'left':
+            offset=0
+        elif prefer == 'center':
+            offset //= 2
+        elif prefer == 'right':
+            pass
+        else:
+            raise ValueError(f"Invalid choise prefer='{prefer}'")
+        start = offset
+        stop = offset + max_samples
+    
+            
+    freqs, Pxx = welch( 
+        signal[:,start:stop], 
+        1/np.nanmedian(np.diff(timestamps[start:stop])), 
+        **kwargs
+    )
+    if merge:
+        aman.merge( core.AxisManager(core.OffsetAxis("fsamps", len(freqs))))
+        aman.wrap("freqs", freqs, [(0,"fsamps")])
+        aman.wrap("Pxx", Pxx, [(0,"dets"),(1,"fsamps")])
     return freqs, Pxx
 
 def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
     """
-    Function that calculates the white noise level as a median PSD value between two frequencies.
-    Defaults to calculation of white noise between 5 and 10Hz.
+    Function that calculates the white noise level as a median PSD value between
+    two frequencies. Defaults to calculation of white noise between 5 and 10Hz.
     Defaults frequency information to a wrapped "freqs" field in aman.
-    Args:
-    - aman: Axis manager 
-        Uses aman.freq as frequency information associated with the PSD, pxx.
-    - pxx: Float array
-        Psd information to calculate white noise. Defaults to aman.pxx
-    - freqs: 1d Float array
-        frequency information related to the psd. Defaults to aman.freqs
-    - low_f: Floating point number
-        low frequency cutoff to calculate median psd value. Defaults to 5Hz
-    - high_f: Floating point number
-        high frequency cutoff to calculate median psd value. Defaults to 10Hz
-    Returns:
-    wn: Float array 
-        array of white noise levels for each psd passed into argument.
+    
+    Arguments
+    ---------
+        aman (AxisManager): 
+            Uses aman.freq as frequency information associated with the PSD, pxx.
+        
+        pxx (Float array): 
+            Psd information to calculate white noise. Defaults to aman.pxx
+        
+        freqs (1d Float array): 
+            frequency information related to the psd. Defaults to aman.freqs
+        
+        low_f (Float): 
+            low frequency cutoff to calculate median psd value. Defaults to 5Hz
+        
+        high_f (float): 
+            high frequency cutoff to calculate median psd value. Defaults to 10Hz
+    
+    Returns
+    -------
+        wn: Float array of white noise levels for each psd passed into argument.
     """
     if freqs is None:
         freqs = aman.freqs
 
     if pxx is None:
-        pxx = aman.pxx
+        pxx = aman.Pxx
     
     fmsk = np.all([freqs >= low_f, freqs <= high_f], axis=0 )
     if pxx.ndim == 1:

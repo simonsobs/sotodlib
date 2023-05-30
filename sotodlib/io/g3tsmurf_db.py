@@ -32,11 +32,13 @@ class Observations(Base):
     
     Dec. 2021 -- The definitions of obs_id and timestamp changed to better 
     match the operation of the smurf-streamer / sodetlib / pysmurf.
+    Oct. 2022 -- The definition of obs_id changed again to include obs or oper
+    tags based on if the observation is an sodetlib operation or not.
     
     Attributes 
     -----------
     obs_id : string
-        <stream_id>_<session_id>. 
+        <obs|oper>_<stream_id>_<session_id>. 
     timestamp : integer
         The .g3 session_id, which is also the ctime the .g3 streaming started
         and the first part .g3 file name.
@@ -49,6 +51,9 @@ class Observations(Base):
         The stream_id of this observation. Generally corresponds to UFM or Smurf
         slot. Column is implemented since level 2 data is not perfectly co-sampled 
         across stream_ids.
+    timing : bool
+        If true, the files of the entry observation were made with times
+        referenced to the timing system.
     duration : float
         The total observation time in seconds
     n_samples : integer
@@ -79,7 +84,8 @@ class Observations(Base):
     action_name = db.Column(db.String)
     
     stream_id = db.Column(db.String)
-    
+    timing = db.Column(db.Boolean)
+
     # in seconds
     duration = db.Column(db.Float)
     n_samples = db.Column(db.Integer)
@@ -148,6 +154,8 @@ class Files(Base):
     observation : SQLAlchemy Observation Instance
     stream_id : The stream_id for the file. Generally of the form crateXslotY.
         These are expected to map one per UXM.
+    timing : bool
+        If true, every frame in the file has times that are referenced to the timing system
     n_frames : Integer
         Number of frames in the .g3 file
     frames : list of SQLALchemy Frame Instances
@@ -182,7 +190,8 @@ class Files(Base):
     observation = relationship("Observations", back_populates='files')
     
     stream_id = db.Column(db.String)
-    
+    timing = db.Column(db.Boolean)
+
     n_frames = db.Column(db.Integer)
     frames = relationship("Frames", back_populates='file')
     
@@ -240,7 +249,13 @@ class Tunes(Base):
     ## one to many
     tuneset_id = db.Column(db.Integer, db.ForeignKey('tunesets.id'))
     tuneset = relationship("TuneSets", back_populates='tunes')
-    
+   
+    @staticmethod
+    def get_name_from_status(status):
+        """Return the name format expected from SmurfStatus instance
+        """
+        return status.stream_id+"_"+status.tune.strip(".npy")
+ 
 class TuneSets(Base):
     """Indexing of 'tunes sets' available during observations. Should
     correspond to the tune files where new_master_assignment=True. TuneSets

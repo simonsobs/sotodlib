@@ -1,5 +1,5 @@
 import os
-import pickle
+import h5py
 import copy
 
 import traitlets
@@ -180,7 +180,7 @@ class SimSource(Operator):
     beam_file = Unicode(
         None,
         allow_none=True,
-        help="Pickle file that stores the simulated beam",
+        help="HDF5 file that stores the simulated beam",
     )
 
     wind_gusts_amp = Quantity(
@@ -229,7 +229,7 @@ class SimSource(Operator):
     @traitlets.validate("beam_file")
     def _check_beam_file(self, proposal):
         beam_file = proposal["value"]
-        if not os.path.isfile(beam_file):
+        if beam_file is not None and not os.path.isfile(beam_file):
             raise traitlets.TraitError(f"{beam_file} is not a valid beam file")
         return beam_file
 
@@ -571,8 +571,10 @@ class SimSource(Operator):
             # We have already read the single beam file.
             beam_dic = self.beam_props["ALL"]
         else:
-            with open(self.beam_file, "rb") as f_t:
-                beam_dic = pickle.load(f_t)
+            with h5py(self.beam_file, 'r') as f_t:
+                beam_dic = {}
+                beam_dic["data"] = f_t["beam"][:]
+                beam_dic["size"] = [[f_t["beam"].attrs["size"], f_t["beam"].attrs["res"]], [f_t["beam"].attrs["npix"], 1]]
                 self.beam_props["ALL"] = beam_dic
         description = beam_dic["size"]  # 2d array [[size, res], [n, 1]]
         model = beam_dic["data"]
@@ -686,7 +688,7 @@ class SimSource(Operator):
             )
 
             sig *= weights_I + pfrac * (
-                np.cos(angle) * weights_Q + np.sin(angle) * weights_U
+                np.cos(2 * angle) * weights_Q + np.sin(2 * angle) * weights_U
             )
 
             signal[good] += sig
