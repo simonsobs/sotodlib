@@ -3,6 +3,7 @@ import yaml
 import os
 import importlib
 import logging
+import numpy as np
 
 from . import metadata
 from .axisman import AxisManager, OffsetAxis, AxisInterface
@@ -188,8 +189,8 @@ class Context(odict):
 
         Args:
           obs_id (multiple): The observation to load (see Notes).
-          dets (list, dict or ResultSet): The detectors to read.  If
-            None, all dets will be read.
+          dets (list, array, dict or ResultSet): The detectors to
+            read.  If None, all dets will be read.
           samples (tuple of ints): The start and stop sample indices.
             If None, read all samples.  (Note that some loader
             functions might not support this argument.)
@@ -198,8 +199,8 @@ class Context(odict):
             obsfiledb, but this shortcut will automatically determine
             the obs_id and the detector and sample range selections
             that correspond to this single file.
-          detsets (list): The detsets to read (with None equivalent to
-            requesting all detsets).
+          detsets (list, array): The detsets to read (with None
+            equivalent to requesting all detsets).
           meta (AxisManager): An AxisManager returned by get_meta
             (though possibly with additional axis restrictions
             applied) to use as a starting point for detector selection
@@ -293,12 +294,34 @@ class Context(odict):
         if loader_type is None:
             loader_type = self.get('obs_loader_type', 'default')
         loader_func = OBSLOADER_REGISTRY[loader_type]  # Register your loader?
-        aman = loader_func(self.obsfiledb, obs_id, dets,
+        aman = loader_func(self.obsfiledb, obs_id, dets=dets,
                            samples=samples, no_signal=no_signal)
-
+ 
         if aman is None:
             return meta
         if meta is not None:
+            if 'det_info' in aman and 'det_info' in meta:
+                # If the loader added det_info, then perform a special
+                # merge.  Duplicate keys should be avoided, because
+                # checking the values are the same is annoying.
+                _det_info = aman['det_info']
+                del aman['det_info']
+                _det_info.restrict_axes([meta.dets])
+                for k in meta.det_info._fields:
+                    if k in _det_info._fields:
+                        try:
+                            check = np.all([meta['det_info'][k] ==_det_info[k]])
+                            if check:
+                                _det_info.move(k, None)
+                                continue
+                        except Exception as e:
+                            pass
+                        logger.error(f'Key "{k}" is present in det_info returned by '
+                                     f'observation loader as well as in metadata '
+                                     f'databases; The two versions are not '
+                                     f'comparable. dropping the loader version.')
+                        _det_info.move(k, None)
+                meta.det_info.merge(_det_info)
             aman.merge(meta)
         return aman
 
@@ -428,17 +451,23 @@ class Context(odict):
         request = {'obs:obs_id': obs_id}
         if detsets is not None:
             request['dets:detset'] = detsets
-        if isinstance(dets, list):
-            request['dets:readout_id'] = dets
-        elif isinstance(dets, metadata.ResultSet):
-            request['dets:readout_id'] = dets['readout_id']
-        elif dets is not None:
+
+        # Convert dets argument to request entry(s)
+        if isinstance(dets, dict):
             for k, v in dets.items():
                 if not k.startswith('dets:'):
                     k = 'dets:' + k
                 if k in request:
                     raise ValueError(f'Duplicate specification of dets field "{k}"')
                 request[k] = v
+        elif isinstance(dets, metadata.ResultSet):
+            request['dets:readout_id'] = dets['readout_id']
+        elif hasattr(dets, '__getitem__'):
+            # lists, tuples, arrays ...
+            request['dets:readout_id'] = dets
+        elif dets is not None:
+            # Try a cast ...
+            request['dets:readout_id'] = list(dets)
 
         metadata_list = self._get_warn_missing('metadata', [])
         meta = self.loader.load(metadata_list, request, det_info=det_info, check=check,

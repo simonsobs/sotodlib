@@ -117,6 +117,22 @@ def parse_config(operators, templates, comm):
     )
 
     parser.add_argument(
+        "--save_books",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Save simulated data to L3 book format.",
+    )
+
+    parser.add_argument(
+        "--save_hdf5",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Save simulated data to TOAST native HDF5 format.",
+    )
+
+    parser.add_argument(
         "--obsmaps",
         required=False,
         default=False,
@@ -157,9 +173,9 @@ def load_instrument_and_schedule(args, comm):
     timer = toast.timing.Timer()
     timer.start()
 
-    focalplane = sotoast.SOFocalplane(
+    telescope = sotoast.simulated_telescope(
         hwfile=args.hardware,
-        telescope=args.telescope,
+        telescope_name=args.telescope,
         sample_rate=args.sample_rate * u.Hz,
         bands=args.bands,
         wafer_slots=args.wafer_slots,
@@ -178,17 +194,6 @@ def load_instrument_and_schedule(args, comm):
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"After loading schedule:  {mem}", comm)
 
-    # FIXME : hardcode site parameters?
-    site = toast.instrument.GroundSite(
-        schedule.site_name,
-        schedule.site_lat,
-        schedule.site_lon,
-        schedule.site_alt,
-        weather=None,
-    )
-    telescope = toast.instrument.Telescope(
-        schedule.telescope_name, focalplane=focalplane, site=site
-    )
     return telescope, schedule
 
 
@@ -329,6 +334,10 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     ops.corotate_lat.apply(data)
     log.info_rank("Apply LAT co-rotation in", comm=world_comm, timer=timer)
 
+    # Perturb HWP spin
+    ops.perturb_hwp.apply(data)
+    log.info_rank("Perturbed HWP rotation in", comm=world_comm, timer=timer)
+
     # Construct a "perfect" noise model just from the focalplane parameters
 
     ops.default_model.apply(data)
@@ -343,13 +352,19 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
 
     # Create the Elevation modulated noise model
 
-    ops.elevation_model.noise_model = ops.default_model.noise_model
-    ops.elevation_model.out_model = ops.elevation_model.noise_model
     ops.elevation_model.detector_pointing = ops.det_pointing_azel
     ops.elevation_model.apply(data)
     log.info_rank("Created elevation noise model in", comm=world_comm, timer=timer)
 
     ops.mem_count.prefix = "After elevation noise model"
+    ops.mem_count.apply(data)
+
+    # Add common noise modes
+
+    ops.common_mode_noise.apply(data)
+    log.info_rank("Added common mode noise model in", comm=world_comm, timer=timer)
+
+    ops.mem_count.prefix = "After common mode noise model"
     ops.mem_count.apply(data)
 
     # Set up pointing matrices for binning operators
@@ -402,6 +417,21 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     ops.mem_count.prefix = "After simulating sky signal"
     ops.mem_count.apply(data)
 
+    # Use the Conviqt operator to generate beam-convolved TOD
+
+    if ops.sim_ground.hwp_angle is None:
+        ops.conviqt.comm = world_comm
+        ops.conviqt.detector_pointing = ops.det_pointing_radec
+        ops.conviqt.apply(data)
+    else:
+        ops.conviqt_teb.comm = world_comm
+        ops.conviqt_teb.detector_pointing = ops.det_pointing_radec
+        ops.conviqt_teb.hwp_angle = ops.sim_ground.hwp_angle
+        ops.conviqt_teb.apply(data)
+
+    ops.mem_count.prefix = "After 4-pi beam convolution"
+    ops.mem_count.apply(data)
+
     # Simulate scan-synchronous signal
 
     ops.sim_sss.detector_pointing = ops.det_pointing_azel
@@ -429,9 +459,20 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     # Simulate Solar System Objects
 
     ops.sim_sso.detector_pointing = ops.det_pointing_azel
+    ops.sim_sso.detector_weights = ops.weights_radec
     ops.sim_sso.apply(data)
     log.info_rank(
         "Simulated and observed solar system objects",
+        comm=world_comm,
+        timer=timer,
+    )
+
+    # Simulate Solar System Objects
+
+    ops.sim_catalog.detector_pointing = ops.det_pointing_radec
+    ops.sim_catalog.apply(data)
+    log.info_rank(
+        "Simulated and observed catalog",
         comm=world_comm,
         timer=timer,
     )
@@ -460,7 +501,6 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
 
     # Simulate detector noise
 
-    ops.sim_noise.noise_model = ops.elevation_model.out_model
     if args.realization is not None:
         ops.sim_noise.realization = args.realization
     log.info_rank("Simulating detector noise", comm=world_comm)
@@ -497,9 +537,11 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
             if not os.path.isdir(hdf5_path):
                 os.makedirs(hdf5_path)
         ops.save_hdf5.volume = hdf5_path
-
+        ops.save_books.book_dir = os.path.join(args.out_dir, "books")
     ops.save_hdf5.apply(data)
     log.info_rank("Saved HDF5 data in", comm=world_comm, timer=timer)
+    ops.save_books.apply(data)
+    log.info_rank("Saved book data in", comm=world_comm, timer=timer)
 
     return data
 
@@ -526,7 +568,6 @@ def reduce_data(job, args, data):
         # new TOAST data object
         ops.demodulate.stokes_weights = ops.weights_radec
         ops.demodulate.hwp_angle = ops.sim_ground.hwp_angle
-        ops.demodulate.noise_model = ops.default_model.noise_model
         data = ops.demodulate.apply(data)
         log.info_rank("Demodulated in", comm=world_comm, timer=timer)
         demod_weights = toast.ops.StokesWeightsDemod()
@@ -624,9 +665,6 @@ def reduce_data(job, args, data):
     # The map maker requires the the binning operators used for the solve and final,
     # the templates, and the noise model.
 
-    ops.binner.noise_model = ops.elevation_model.out_model
-    ops.binner_final.noise_model = ops.elevation_model.out_model
-
     ops.mapmaker.binning = ops.binner
     ops.mapmaker.template_matrix = toast.ops.TemplateMatrix(templates=[tmpls.baselines])
     ops.mapmaker.map_binning = ops.binner_final
@@ -685,9 +723,6 @@ def reduce_data(job, args, data):
     ops.mem_count.prefix = "After mapmaker"
     ops.mem_count.apply(data)
 
-    ops.mlmapmaker.apply(data)
-    log.info_rank("Finished ML map-making in", comm=world_comm, timer=timer)
-
     # Optionally run Madam
 
     if toast.ops.madam.available() and ops.madam.enabled:
@@ -743,10 +778,17 @@ def main():
     # operator is disabled by default.
 
     operators = [
-        toast.ops.SimGround(name="sim_ground", weather="atacama", detset_key="pixel"),
+        toast.ops.SimGround(
+            name="sim_ground",
+            weather="atacama",
+            detset_key="pixel",
+            session_split_key="tube_slot",
+        ),
         so_ops.CoRotator(name="corotate_lat"),
+        toast.ops.PerturbHWP(name="perturb_hwp", enabled=False),
         toast.ops.DefaultNoiseModel(name="default_model", noise_model="noise_model"),
         toast.ops.ElevationNoise(name="elevation_model", out_model="noise_model"),
+        toast.ops.CommonModeNoise(name="common_mode_noise", enabled=False),
         toast.ops.PointingDetectorSimple(name="det_pointing_azel", quats="quats_azel"),
         toast.ops.StokesWeights(
             name="weights_azel", weights="weights_azel", mode="IQU"
@@ -755,6 +797,8 @@ def main():
             name="det_pointing_radec", quats="quats_radec"
         ),
         toast.ops.ScanHealpixMap(name="scan_map", enabled=False),
+        toast.ops.SimConviqt(name="conviqt", enabled=False),
+        toast.ops.SimTEBConviqt(name="conviqt_teb", enabled=False),
         toast.ops.SimAtmosphere(
             name="sim_atmosphere_coarse",
             add_loading=False,
@@ -789,6 +833,7 @@ def main():
         ),
         toast.ops.SimScanSynchronousSignal(name="sim_sss", enabled=False),
         so_ops.SimSSO(name="sim_sso", enabled=False),
+        so_ops.SimCatalog(name="sim_catalog", enabled=False),
         so_ops.SimSource(name="sim_source", enabled=False),
         so_ops.SimHWPSS(name="sim_hwpss", enabled=False),
         so_ops.SimWireGrid(name="sim_wiregrid", enabled=False),
@@ -797,6 +842,7 @@ def main():
             name="convolve_time_constant", deconvolve=False, enabled=False
         ),
         toast.ops.SaveHDF5(name="save_hdf5", enabled=False),
+        so_ops.SaveBooks(name="save_books", enabled=False),
         toast.ops.GainScrambler(name="gainscrambler", enabled=False),
         toast.ops.SimNoise(name="sim_noise"),
         toast.ops.PixelsHealpix(name="pixels_healpix_radec"),

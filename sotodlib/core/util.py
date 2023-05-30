@@ -1,6 +1,6 @@
 import numpy as np
 
-def get_coindices(v0, v1):
+def get_coindices(v0, v1, check_unique=False):
     """Given vectors v0 and v1, each of which contains no duplicate
     values, determine the elements that are found in both vectors.
     Returns (vals, i0, i1), i.e. the vector of common elements and
@@ -12,7 +12,14 @@ def get_coindices(v0, v1):
     but rather the elements will appear in the same order that they
     were found in v0 (so that i0 is strictly increasing).
 
+    The behavior is undefined if either v0 or v1 contain duplicates.
+    Pass check_unique=True to assert that condition.
+
     """
+    if check_unique:
+        assert(len(set(v0)) == len(v0))
+        assert(len(set(v1)) == len(v1))
+
     try:
         vals, i0, i1 = np.intersect1d(v0, v1, return_indices=True)
         order = np.argsort(i0)

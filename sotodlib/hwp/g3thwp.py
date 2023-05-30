@@ -2,15 +2,13 @@
 # -*- coding: utf-8 -*-
 
 import os
-import sys
 import numpy as np
 import scipy.interpolate
 import so3g
 from spt3g import core
-import argparse
-from tqdm import tqdm
 import logging
 import yaml
+import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -101,16 +99,16 @@ class G3tHWP():
         self._output = self.configs.get('output', None)
 
     def load_data(self, start=None, end=None,
-                  data_dir=None, instance='HBA'):
+                  data_dir=None, instance=None):
         """
         Loads house keeping data for a given time range and
         returns HWP parameters in L2 HK .g3 file
 
         Args
         -----
-            start : timestamp or DateTime
+            start : timestamp or datetime
                 start time for data, assumed to be in UTC unless specified
-            end :  timestamp or DateTime
+            end :  timestamp or datetime
                 end time for data, assumed to be in UTC unless specified
             data_dir : str or None
                 path to HK g3 file, overwrite config file
@@ -130,10 +128,16 @@ class G3tHWP():
             logger.error("Can not find time range")
             return {}
 
-        if isinstance(start, np.datetime64):
-            start = start.timestamp()
-        if isinstance(end, np.datetime64):
-            end = end.timestamp()
+        if isinstance(start, datetime.datetime):
+            if start.tzinfo is None:
+                logger.warning('No tzinfo info in start argument, set to utc timezone')
+                start = start.replace(tzinfo=datetime.timezone.utc)
+            self._start = start.timestamp()
+        if isinstance(end, datetime.datetime):
+            if end.tzinfo is None:
+                logger.warning('No tzinfo info in end argument, set to utc timezone')
+                end = start.replace(tzinfo=datetime.timezone.utc)
+            self._end = end.timestamp()
 
         if data_dir is not None:
             self._data_dir = data_dir
@@ -145,43 +149,19 @@ class G3tHWP():
                 self._field_instance = instance
             else:
                 self._field_instance = 'observatory.' + instance + '.feeds.HWPEncoder'
-        else:
-            logger.error("Can not find field instance")
-            return {}
 
         # load housekeeping data with hwp keys
         logger.info('Loading HK data files ')
         logger.info("input time range: " +
                     str(self._start) + " - " + str(self._end))
 
-        hwp_keys = []
-        for i in range(len(self._field_list)):
-            if 'counter' in self._field_list[i]:
-                hwp_keys.append(self._field_instance +
-                                '_full.' + self._field_list[i])
-            else:
-                hwp_keys.append(self._field_instance +
-                                '.' + self._field_list[i])
-        alias = self._field_list
-
-        # 2nd encoder readout
-        hwp_keys_2 = []
-        alias_2 = []
-        if self._field_instance_sub is not None:
-            for i in range(len(self._field_list)):
-                if 'counter' in self._field_list[i]:
-                    hwp_keys_2.append(self._field_instance_sub +
-                                      '_full.' + self._field_list[i])
-                else:
-                    hwp_keys_2.append(self._field_instance_sub +
-                                      '.' + self._field_list[i])
-            alias_2 = [a + '_2' for a in self._field_list]
+        fields, alias = self._key_formatting()
 
         data = so3g.hk.load_range(
             self._start,
             self._end,
-            fields=hwp_keys + hwp_keys_2,
-            alias=alias + alias_2,
+            fields,
+            alias,
             data_dir=self._data_dir)
         if not any(data):
             logger.info('HWP is not spinning in time range {' + str(
@@ -219,29 +199,6 @@ class G3tHWP():
             else:
                 self._field_instance = 'observatory.' + instance + '.feeds.HWPEncoder'
 
-        hwp_keys = []
-        for i in range(len(self._field_list)):
-            if 'counter' in self._field_list[i]:
-                hwp_keys.append(self._field_instance +
-                                '_full.' + self._field_list[i])
-            else:
-                hwp_keys.append(self._field_instance +
-                                '.' + self._field_list[i])
-        alias = self._field_list
-
-        # 2nd encoder readout
-        hwp_keys_2 = []
-        alias_2 = []
-        if self._field_instance_sub is not None:
-            for i in range(len(self._field_list)):
-                if 'counter' in self._field_list[i]:
-                    hwp_keys_2.append(self._field_instance_sub +
-                                      '_full.' + self._field_list[i])
-                else:
-                    hwp_keys_2.append(self._field_instance_sub +
-                                      '.' + self._field_list[i])
-            alias_2 = [a + '_2' for a in self._field_list]
-
         # load housekeeping files with hwp keys
         scanner = so3g.hk.HKArchiveScanner()
         if not (isinstance(self._file_list, list)
@@ -261,27 +218,171 @@ class G3tHWP():
             self._end = 0
             return {}
 
-        for i in range(len(hwp_keys)):
-            if not hwp_keys[i] in arc.get_fields()[0].keys():
-                logger.info(
-                    "HWP is not spinning in input g3 files or can not find field")
-                return {}
-            elif self._start == 0 and self._end == 0:
-                self._start = arc.simple(hwp_keys[0])[0][0]
-                self._end = arc.simple(hwp_keys[0])[0][-1]
+        fields, alias = self._key_formatting()
 
-        data = {}
-        for i in range(len(alias)):
-            data = dict(**data, **{alias[i]: arc.simple(hwp_keys[i])})
+        if not np.any([f in arc.get_fields()[0].keys() for f in fields]):
+            logger.info(
+                "HWP is not spinning in input g3 files or can not find field")
+            return {}
+        if self._start == 0 and self._end == 0:
+            self._start = np.min([arc.simple(f)[0][0]
+                                 for f in fields if f in arc.get_fields()[0].keys()])
+            self._end = np.max([arc.simple(f)[0][-1]
+                               for f in fields if f in arc.get_fields()[0].keys()])
 
-        for i in range(len(alias_2)):
-            if not hwp_keys_2[i] in arc.get_fields()[0].keys():
-                continue
-            data = dict(**data, **{alias_2[i]: arc.simple(hwp_keys_2[i])})
+        data = {a: arc.simple(f) for a, f in zip(
+            alias, fields) if f in arc.get_fields()[0].keys()}
 
         return data
 
-    def analyze(self, data, ratio=0.25, fast=True):
+    def _key_formatting(self):
+        """
+        Formatting hwp housekeeping field names and aliases
+
+        Return
+        -----
+        fields, alias
+        """
+        # 1st encoder readout
+        fields = [self._field_instance + '_full.' + f if 'counter' in f
+                  else self._field_instance + '.' + f for f in self._field_list]
+        alias = self._field_list
+
+        # 2nd encoder readout
+        if self._field_instance_sub is not None:
+            fields += [self._field_instance_sub + '_full.' + f if 'counter' in f
+                       else self._field_instance_sub + '.' + f for f in self._field_list]
+            alias += [a + '_2' for a in self._field_list]
+
+        return fields, alias
+
+    def _data_formatting(self, data, suffix=''):
+        """
+        Formatting encoder data
+
+        Args
+        -----
+        data : dict
+            HWP HK data from load_data
+        suffix: Specify whether to use 1st or 2nd encoder, '' or '_2'
+            '' for 1st encoder, '_2' for 2nd encoder
+
+        Returns
+        --------
+        dict
+            {'rising_edge_count', 'irig_time', 'counter', 'counter_index', 'quad', 'quad_time'}
+        """
+        enc_key = {'': '1st', '_2': '2nd'}
+
+        keys = ['rising_edge_count', 'irig_time',
+                'counter', 'counter_index', 'quad', 'quad_time']
+        out = {k: data[k+suffix][1] if k+suffix in data.keys() else []
+               for k in keys}
+
+        # irig part
+        if 'irig_time'+suffix not in data.keys():
+            logger.warning(
+                f'All IRIG time is not correct for {enc_key[suffix]} encoder')
+            return out
+
+        if self._irig_type == 1:
+            out['irig_time'] = data['irig_synch_pulse_clock_time'+suffix][1]
+            out['rising_edge_count'] = data['irig_synch_pulse_clock_counts'+suffix][1]
+
+        logger.info('IRIG timing quality check.')
+        out['irig_time'], out['rising_edge_count'] = self._irig_quality_check(
+            out['irig_time'], out['rising_edge_count'])
+
+        # encoder part
+        if 'counter'+suffix not in data.keys():
+            logger.warning(
+                f'No encoder data is available for {enc_key[suffix]} encoder')
+            return out
+
+        out['quad'] = self._quad_form(data['quad'+suffix][1])
+        out['quad_time'] = data['quad'+suffix][0]
+
+        return out
+
+    def _slowdata_process(self, fast_time, irig_time):
+        """ Diagnose hwp status and output status flags
+
+        Returns
+        --------
+        dict
+            {stable, locked, hwp_rate, slow_time}
+
+        Notes
+        ------
+        - Time definition -
+        if fast_time exists: slow_time = fast_time
+        elif: irig_time exists but no fast_time, slow_time = irig_time
+        else: slow_time is per 10 sec array
+        """
+        slow_time = np.arange(self._start, self._end, 10)
+
+        if len(irig_time) == 0:
+            out = {
+                'locked': np.zeros_like(slow_time, dtype=bool),
+                'stable': np.zeros_like(slow_time, dtype=bool),
+                'hwp_rate': np.zeros_like(slow_time, dtype=float),
+                'slow_time': slow_time,
+            }
+            return out
+
+        if len(fast_time) == 0:
+            fast_irig_time = irig_time
+            locked = np.zeros_like(irig_time, dtype=bool)
+            stable = np.zeros_like(irig_time, dtype=bool)
+            hwp_rate = np.zeros_like(irig_time, dtype=float)
+
+        else:
+            # hwp speed calc. (approximate using ref)
+            hwp_rate_ref = 1 / np.diff(fast_time[self._ref_indexes])
+            hwp_rate = [hwp_rate_ref[0] for i in range(self._ref_indexes[0])]
+            for n in range(len(np.diff(self._ref_indexes))):
+                hwp_rate += [hwp_rate_ref[n]
+                             for r in range(np.diff(self._ref_indexes)[n])]
+            hwp_rate += [hwp_rate_ref[-1] for i in range(len(fast_time) -
+                                                         self._ref_indexes[-1])]
+
+            fast_irig_time = fast_time
+            locked = np.ones_like(fast_time, dtype=bool)
+            locked[np.where(hwp_rate == 0)] = False
+            stable = np.ones_like(fast_time, dtype=bool)
+
+            # irig only status
+            irig_only_time = irig_time[np.where(
+                (irig_time < fast_time[0]) | (irig_time > fast_time[-1]))]
+            irig_only_locked = np.zeros_like(irig_only_time, dtype=bool)
+            irig_only_hwp_rate = np.zeros_like(irig_only_time, dtype=float)
+
+            fast_irig_time = np.append(irig_only_time, fast_time)
+            fast_irig_idx = np.argsort(fast_irig_time)
+            fast_irig_time = fast_irig_time[fast_irig_idx]
+            locked = np.append(irig_only_locked, locked)[fast_irig_idx]
+            hwp_rate = np.append(irig_only_hwp_rate, hwp_rate)[fast_irig_idx]
+            stable = np.ones_like(fast_irig_time, dtype=bool)
+
+        # slow status
+        slow_time = slow_time[np.where(
+            (slow_time < fast_irig_time[0]) | (slow_time > fast_irig_time[-1]))]
+        slow_locked = np.zeros_like(slow_time, dtype=bool)
+        slow_stable = np.zeros_like(slow_time, dtype=bool)
+        slow_hwp_rate = np.zeros_like(slow_time, dtype=float)
+
+        slow_time = np.append(slow_time, fast_irig_time)
+        slow_idx = np.argsort(slow_time)
+        slow_time = slow_time[slow_idx]
+        locked = np.append(slow_locked, locked)[slow_idx]
+        stable = np.append(slow_stable, stable)[slow_idx]
+        hwp_rate = np.append(slow_hwp_rate, hwp_rate)[slow_idx]
+
+        locked[np.where(hwp_rate == 0)] = False
+
+        return {'locked': locked, 'stable': stable, 'hwp_rate': hwp_rate, 'slow_time': slow_time}
+
+    def analyze(self, data, ratio=None, mod2pi=True, fast=True):
         """
         Analyze HWP angle solution
         to be checked by hardware that 0 is CW and 1 is CCW from (sky side) consistently for all SAT
@@ -293,6 +394,8 @@ class G3tHWP():
             ratio : float, optional
                 parameter for referelce slit
                 threshold = 2 slit distances +/- ratio
+            mod2pi : bool, optional
+                If True, return hwp angle % 2pi
             fast : bool, optional
                 If True, run fast fill_ref algorithm
 
@@ -323,145 +426,100 @@ class G3tHWP():
 
         if not any(data):
             logger.info("no HWP field data")
-        ## Analysis parameters ##
-        # Fast block
-        counter = np.array([])
-        counter_idx = np.array([])
-        quad_time = np.array([])
-        quad = np.array([])
-        if 'counter' in data.keys():
-            counter = data['counter'][1]
-            counter_idx = data['counter_index'][1]
-            quad_time = data['quad'][0]
-            quad = self._quad_form(data['quad'][1])
 
-        irig_time = np.array([])
-        rising_edge = np.array([])
-        if 'irig_time' in data.keys():
-            irig_time = data['irig_time'][1]
-            rising_edge = data['rising_edge_count'][1]
-            if self._irig_type == 1:
-                irig_time = data['irig_synch_pulse_clock_time'][1]
-                rising_edge = data['irig_synch_pulse_clock_counts'][1]
-            logger.info('IRIG timing quality check.')
-            irig_time, rising_edge = self._irig_quality_check(
-                irig_time, rising_edge)
-            if len(irig_time) == 0:
-                logger.warning('All IRIG time is not correct in 1st encoder')
-
-        irig_time_2 = np.array([])
-        rising_edge_2 = np.array([])
+        d = self._data_formatting(data)
         if 'irig_time_2' in data.keys() and 'counter_2' in data.keys():
-            logger.info('checking 2nd encoder.')
-            irig_time_2 = data['irig_time_2'][1]
-            rising_edge_2 = data['rising_edge_count_2'][1]
-            if self._irig_type == 1:
-                irig_time_2 = data['irig_synch_pulse_clock_time_2'][1]
-                rising_edge_2 = data['irig_synch_pulse_clock_counts_2'][1]
-            irig_time_2, rising_edge_2 = self._irig_quality_check(
-                irig_time_2, rising_edge_2)
-            if len(irig_time_2) == 0:
-                logger.info('All IRIG time is not correct in 2nd encoder')
-
-        if len(irig_time) == 0 and len(irig_time_2) == 0:
+            d2 = self._data_formatting(data, suffix='_2')
+            if len(d['counter']) < len(d2['counter']):
+                logger.info('Use 2nd encoder.')
+                d = d2
+        if len(d['irig_time']) == 0:
             logger.warning('There is no correct IRIG timing. Stop analyze.')
             return {}
-        if len(irig_time) < len(irig_time_2):
-            logger.info('Use 2nd encoder IRIG timing.')
-            irig_time = irig_time_2
-            rising_edge = rising_edge_2
-            counter = data['counter_2']
-            counter_index = data['counter_index_2']
-            quad_time = data['quad_2'][0]
-            quad = self._quad_form(data['quad_2'][1])
 
-        fast_time = np.array([])
-        angle = np.array([])
-        hwp_rate = np.array([])
-        if len(counter) > 0 and len(irig_time) > 0:
-            fast_time, angle = self._hwp_angle_calculator(
-                counter, counter_idx, irig_time, rising_edge, quad_time, quad, ratio, fast)
-            if len(fast_time) == 0:
-                return {}
+        # hwp angle calc.
+        if ratio is not None:
+            logger.info(f"Overwriting reference slit threshold by {ratio}.")
+            self._ref_range = ratio
+        fast_time, angle = self._hwp_angle_calculator(
+            d['counter'], d['counter_index'], d['irig_time'],
+            d['rising_edge_count'], d['quad_time'], d['quad'],
+            mod2pi, fast)
+        if len(fast_time) == 0:
+            logger.warning('analyzed encoder data is None')
 
-            # hwp speed calc. (approximate using ref)
-            hwp_rate_ref = 1 / np.diff(fast_time[self._ref_indexes])
-            hwp_rate = [hwp_rate_ref[0] for i in range(self._ref_indexes[0])]
-            for n in range(len(np.diff(self._ref_indexes))):
-                hwp_rate += [hwp_rate_ref[n]
-                             for r in range(np.diff(self._ref_indexes)[n])]
-            hwp_rate += [hwp_rate_ref[-1] for i in range(len(fast_time) -
-                                                         self._ref_indexes[-1])]
+        # hwp status calc.
+        out = self._slowdata_process(fast_time, d['irig_time'])
+        out['fast_time'] = fast_time
+        out['angle'] = angle
 
-        # Slow block
-        # - Time definition -
-        # if fast_time exists: slow_time = fast_time
-        # elif: irig_time exists but no fast_time, slow_time = irig_time
-        # else: slow_time is per 10 sec array
-        if len(fast_time) != 0 and len(irig_time) != 0:
-            fast_irig_time = fast_time
-            locked = np.ones(len(fast_time), dtype=bool)
-            locked[np.where(hwp_rate == 0)] = False
-            stable = np.ones(len(fast_time), dtype=bool)
+        return out
 
-            irig_only_time = irig_time[np.where(
-                (irig_time < fast_time[0]) | (irig_time > fast_time[-1]))]
-            irig_only_locked = np.zeros(len(irig_only_time), dtype=bool)
-            irig_only_hwp_rate = np.zeros(len(irig_only_time), dtype=float)
-            fast_irig_time = np.append(irig_only_time, fast_time).flatten()
-            fast_irig_idx = np.argsort(fast_irig_time)
-            fast_irig_time = fast_irig_time[fast_irig_idx]
-            locked = (np.append(irig_only_locked, locked).flatten())[
-                fast_irig_idx]
-            hwp_rate = (np.append(irig_only_hwp_rate, hwp_rate).flatten())[
-                fast_irig_idx]
-            stable = np.ones(len(fast_irig_time), dtype=bool)
-        elif len(fast_time) == 0 and len(irig_time) != 0:
-            fast_irig_time = irig_time
-            locked = np.zeros(len(fast_irig_time), dtype=bool)
-            stable = np.ones(len(fast_irig_time), dtype=bool)
-            hwp_rate = np.zeros(len(fast_irig_time), dtype=float)
-        else:
-            fast_irig_time = []
-            locked = []
-            stable = []
-            hwp_rate = []
+    def eval_angle(self, solved, poly_order=3):
+        """
+        Evaluate the non-uniformity of hwp angle timestamp and subtract
+        The raw hwp angle timestamp is kept.
 
-        slow_only_time = np.arange(self._start, self._end, 10)
-        if len(fast_irig_time) != 0:
-            irig_only_locked = np.zeros(len(irig_only_time), dtype=bool)
-            irig_only_hwp_rate = np.zeros(len(irig_only_time), dtype=float)
-            fast_irig_time = np.append(irig_only_time, fast_time).flatten()
-            fast_irig_idx = np.argsort(fast_irig_time)
-            fast_irig_time = fast_irig_time[fast_irig_idx]
-            locked = (np.append(irig_only_locked, locked).flatten())[
-                fast_irig_idx]
-            hwp_rate = (np.append(irig_only_hwp_rate, hwp_rate).flatten())[
-                fast_irig_idx]
-            stable = np.ones(len(fast_irig_time), dtype=bool)
+        Args
+        -----
+        solved: dict
+          dict data from analyze
 
-            slow_only_time = slow_only_time[np.where(
-                (slow_only_time < fast_irig_time[0]) | (slow_only_time > fast_irig_time[-1]))]
-            slow_only_locked = np.zeros(len(slow_only_time), dtype=bool)
-            slow_only_stable = np.zeros(len(slow_only_time), dtype=bool)
-            slow_only_hwp_rate = np.zeros(len(slow_only_time), dtype=float)
+        Returns
+        --------
+        output: dict
+            {fast_time, fast_time_raw, angle, slow_time, stable, locked, hwp_rate, fast_time_moving_ave, angle_moving_ave}
 
-            slow_time = np.append(slow_only_time, fast_irig_time).flatten()
-            slow_idx = np.argsort(slow_time)
-            slow_time = slow_time[slow_idx]
-            locked = (np.append(slow_only_locked, locked).flatten())[slow_idx]
-            stable = (np.append(slow_only_stable, stable).flatten())[slow_idx]
-            hwp_rate = (np.append(slow_only_hwp_rate,
-                        hwp_rate).flatten())[slow_idx]
-            locked[np.where(hwp_rate == 0)] = False
-        else:
-            slow_time = slow_only_time
-            locked = np.zeros(len(slow_time), dtype=bool)
-            stable = np.zeros(len(slow_time), dtype=bool)
-            hwp_rate = np.zeros(len(slow_time), dtype=float)
+        Notes
+        ------
+        non-uniformity of hwp angle comes from following reasons,
+            - non-uniformity of encoder slits
+            - sag of rotor
+            - bad tuning of the comparator threshold of DriverBoard
+            - degradation of LED
+        and the non-uniformity can be time-dependent.
 
-        return {'fast_time': fast_time, 'angle': angle, 'slow_time': slow_time,
-                'stable': stable, 'locked': locked, 'hwp_rate': hwp_rate}
+        Need to evaluate and subtract it before interpolating hwp angle into Smurf timestamps.
+        The non-uniformity of encoder slots creates additional hwp angle jitter.
+        The maximum possible additional jitter is comparable to the requirement of angle jitter.
+
+        The simple method to subrtact the non-uniformity
+        is to take the moving average of hwp angle per one revolution.
+        The advantages of moving averaging method is is it's simplicity and robustness.
+        The disadvantage is that this method is assuming no real angle fluctuation within one revolution.
+
+        The more carful and accurate method is to make an template of encoder slits,
+        and subtract it from the timestamp.
+        """
+        def moving_average(array, n):
+            return np.convolve(array, np.ones(n), 'valid')/n
+
+        logger.info('Remove non-uniformity from hwp angle and overwrite')
+        solved['fast_time_moving_ave'] = moving_average(
+            solved['fast_time'], self._num_edges)
+        solved['angle_moving_ave'] = moving_average(
+            solved['angle'], self._num_edges)
+
+        def detrend(array, deg=poly_order):
+            x = np.linspace(-1, 1, len(array))
+            p = np.polyfit(x, array, deg=deg)
+            pv = np.polyval(p, x)
+            return array - pv
+
+        # template subtraction
+        ft = solved['fast_time'][self._ref_indexes[0]:self._ref_indexes[-2]+1]
+        # remove rotation frequency drift for making a template of encoder slits
+        ft = detrend(ft, deg=3)
+        # make template
+        template_slit = np.diff(ft).reshape(
+            len(self._ref_indexes)-2, self._num_edges)
+        template_slit = np.average(template_slit, axis=0)
+        average_slit = np.average(template_slit)
+        # subtract template, keep raw timestamp
+        subtract = np.cumsum(np.roll(np.tile(template_slit-average_slit, len(
+            self._ref_indexes) + 1), self._ref_indexes[0] + 1)[:len(solved['fast_time'])])
+        solved['fast_time_raw'] = solved['fast_time']
+        solved['fast_time'] = solved['fast_time'] - subtract
 
     def write_solution(self, solved, output=None):
         """
@@ -572,7 +630,7 @@ class G3tHWP():
             rising_edge,
             quad_time,
             quad,
-            ratio,
+            mod2pi,
             fast):
 
         #   counter: BBB counter values for encoder signal edges
@@ -627,7 +685,7 @@ class G3tHWP():
             fill_value='extrapolate')(self._encd_clk)
 
         # calculate hwp angle with IRIG timing
-        self._calc_angle_linear()
+        self._calc_angle_linear(mod2pi)
 
         logger.debug('qualitycheck')
         logger.debug('_time:        ' + str(len(self._time)))
@@ -655,7 +713,7 @@ class G3tHWP():
             n += (self._num_edges - 2)
             if n >= len(diff):
                 break
-        offset = 0
+        offset = 1
         # Conditions for idenfitying the ref slit
         # Slit distance somewhere between 2 slits:
         # 2 slit distances (defined above) +/- 10%
@@ -671,6 +729,7 @@ class G3tHWP():
             if len(__diff) == 0:
                 continue
             slit_dist = np.mean(__diff)
+
             # Conditions for idenfitying the ref slit
             # Slit distance somewhere between 2 slits:
             # 2 slit distances (defined above) +/- ref_range
@@ -775,7 +834,7 @@ class G3tHWP():
             self._encd_cnt[(ind + 1):] += -(cnt_diff[ind] - 1)
         return
 
-    def _calc_angle_linear(self):
+    def _calc_angle_linear(self, mod2pi=True):
 
         quad = self._quad_form(
             scipy.interpolate.interp1d(
@@ -790,22 +849,22 @@ class G3tHWP():
             direction = self._force_quad
 
         self._encd_cnt_split = np.split(self._encd_cnt, self._ref_indexes)
-        self._angle = (self._encd_cnt_split[0] - self._ref_cnt[0]) * \
+        angle_first_revolution = (self._encd_cnt_split[0] - self._ref_cnt[0]) * \
             (2 * np.pi / self._num_edges) % (2 * np.pi)
-        self._angle = np.append(self._angle,
-                                np.concatenate(
-                                    np.array(
-                                        [((self._encd_cnt_split[i] - self._ref_cnt[i]) *
-                                          (2 * np.pi /
-                                            np.diff(self._ref_indexes)[i - 1])
-                                            % (2 * np.pi)).flatten()
-                                            for i in range(1, len(self._encd_cnt_split) - 1)], dtype=object)))
-        self._angle = np.append(self._angle,
-                                (self._encd_cnt_split[-1] - self._ref_cnt[-1]) *
-                                (2 * np.pi / self._num_edges) % (2 * np.pi))
+        angle_last_revolution = (self._encd_cnt_split[-1] - self._ref_cnt[-1]) * \
+            (2 * np.pi / self._num_edges) % (2 * np.pi) + \
+            len(self._ref_cnt) * 2 * np.pi
+        self._angle = np.concatenate([(self._encd_cnt_split[i] - self._ref_cnt[i]) *
+                                      (2 * np.pi /
+                                       np.diff(self._ref_indexes)[i - 1])
+                                      % (2 * np.pi) + i * 2 * np.pi
+                                      for i in range(1, len(self._encd_cnt_split) - 1)])
+        self._angle = np.concatenate(
+            [angle_first_revolution, self._angle.flatten(), angle_last_revolution])
         self._angle = direction * self._angle
+        if mod2pi:
+            self._angle = self._angle % (2 * np.pi)
 
-        ii = np.where(np.diff(self._ref_indexes) != 1140)[0]
         return
 
     def _find_dropped_packets(self):
@@ -853,11 +912,11 @@ class G3tHWP():
         quad[(quad < 0.5)] = 0
         offset = 0
         logger_bit = True
-        for quad_split in np.array_split(quad, len(quad) / 100):
+        for quad_split in np.array_split(quad, 1 + np.floor(len(quad) / 100)):
             if quad_split.mean() > 0.1 and quad_split.mean() < 0.9:
                 if logger_bit:
                     logger.warning(
-                        "flipping quad is corrected by mean value, please consider to ues force_quad")
+                        "flipping quad is corrected by mean value, please consider to use force_quad")
                     logger_bit = False
                 for j in range(len(quad_split)):
                     quad[j + offset] = int(quad_split.mean() + 0.5)
@@ -885,6 +944,8 @@ class G3tHWP():
 
     def _irig_quality_check(self, irig_time, rising_edge):
         idx = np.where(np.diff(irig_time) == 1)[0]
+        if self._irig_type == 1:
+            idx = np.where(np.isclose(np.diff(irig_time), np.full(len(irig_time)-1, 0.1)))[0]
         if len(irig_time) - 1 == len(idx):
             return irig_time, rising_edge
         elif len(irig_time) > len(idx) and len(idx) > 0:
