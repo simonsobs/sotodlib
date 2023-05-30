@@ -63,20 +63,7 @@ fiducial_models = {
                     }
 
 
-def distance_correction_factor():
-    return
 
-def disk_oblateness_correction_factor(planet, Dw):
-    R_eq = fiducial_models[planet]['R_eq']
-    R_pole = fiducial_models[planet]['R_pole']
-    A_ref = np.pi * R_pole * R_eq
-    
-    Dw = 0 # this should be provided as argument later
-    R_proj_pole = R_pole * np.sqrt(1 - np.sin(Dw)**2 * (1 - (R_eq/R_pole)**2) )
-    A_proj_disk = np.pi * R_proj_pole * R_eq
-    
-    f_A = A_proj_disk / A_ref
-    return f_A
 
 def calc_model_temperature(bandpass_name, bandpass_suffix,
                           planet_name, model_name):
@@ -109,13 +96,39 @@ def calc_model_temperature(bandpass_name, bandpass_suffix,
     return band_averaged_Trj
 
 
+def get_expected_T_Omega(planet, bandpass_name, timestamp):
+    T_planet = fiducial_models[planet]['Trj'][bandpass_name]
+    Omega_planet_ref = fiducial_models[planet]['Omega_ref']
+    f_A = get_distance_correction_factor(planet, timestamp)
+    De = get_sub_earth_latitude(planet, timestamp)
+    f_d = get_disk_oblatenes_correction_factor(planet, De)
+    expected_T_Omega = T_planet * Omega_planet_ref * f_A / f_d
+    return expected_T_Omega
+    
 
-def calc_Dw_from_IAU_report(planet, timestamp):
+def get_distance_correction_factor(planet, timestamp):
+    ra, dec, distance = coords.planets.get_source_pos(planet, timestamp)
+    distance *= au
+    disatnce_fiducial = fiducial_models[planet]['d_ref']
+    f_d = (distance / disatnce_fiducial)**2
+    return f_d
+
+def get_disk_oblatenes_correction_factor(planet, De):
+    R_eq = fiducial_models[planet]['R_eq']
+    R_pole = fiducial_models[planet]['R_pole']
+    A_ref = np.pi * R_pole * R_eq
+    
+    R_proj_pole = R_pole * np.sqrt(1 - np.sin(De)**2 * (1 - (R_eq/R_pole)**2) )
+    A_proj_disk = np.pi * R_proj_pole * R_eq
+    f_A = A_proj_disk / A_ref
+    return f_A
+
+def get_sub_earth_latitude(planet, timestamp):
     """
-    Calculate Dw from "Report of the IAU Working Group on Cartographic Coordinates and Rotational Elements: 2015"
-    α0, δ0:
+    Calculate sub-earth latitude, De, from "Report of the IAU Working Group on Cartographic Coordinates and Rotational Elements: 2015"
+    alpha0, delta0:
         Are ICRF equatorial coordinates at epoch J2000.0
-        Approximate coordinates of the north pole of the invariable plane are α0 = 273◦.85, δ0 = 66◦.99
+        Approximate coordinates of the north pole of the invariable plane are alpha0 = 273◦.85, delta0 = 66◦.99
     T:
         Interval in Julian centuries (36,525 days) from the standard epoch
     d:
@@ -123,13 +136,13 @@ def calc_Dw_from_IAU_report(planet, timestamp):
     where the standard epoch is JD 2451545.0
     
     Sun:
-        α0 = 286◦.13
-        δ0 = 63◦.87
+        alpha0 = 286◦.13
+        delta0 = 63◦.87
         W = 84◦.176 + 14◦.1844000d(a)
         
     Mercury:
-        α0 = 281.0103 − 0.0328 T
-        δ0 = 61.4155 − 0.0049 T
+        alpha0 = 281.0103 − 0.0328 T
+        delta0 = 61.4155 − 0.0049 T
         W = 329.5988 ± 0.0037 + 6.1385108d
             + 0◦.01067257 sin M1
             − 0◦.00112309 sin M2
@@ -144,18 +157,18 @@ def calc_Dw_from_IAU_report(planet, timestamp):
             M5 = 153◦.9554286 + 20◦.461675d
             
     Venus:
-        α0 = 272.76
-        δ0 = 67.16
+        alpha0 = 272.76
+        delta0 = 67.16
         W = 160.20 − 1.4813688d
         
     Mars:
-        α0 = 317.269202 − 0.10927547T
+        alpha0 = 317.269202 − 0.10927547T
             + 0.000068 sin(198.991226 + 19139.4819985T )
             + 0.000238 sin(226.292679 + 38280.8511281T )
             + 0.000052 sin(249.663391 + 57420.7251593T )
             + 0.000009 sin(266.183510 + 76560.6367950T )
             + 0.419057 sin(79.398797 + 0.5042615T )
-        δ0 = 54.432516 − 0.05827105T
+        delta0 = 54.432516 − 0.05827105T
             + 0.000051 cos(122.433576 + 19139.9407476T )
             + 0.000141 cos(43.058401 + 38280.8753272T )
             + 0.000031 cos(57.663379 + 57420.7517205T )
@@ -170,9 +183,9 @@ def calc_Dw_from_IAU_report(planet, timestamp):
             + 0.584542 sin(95.391654 + 0.5042615T )
     
     Jupiter:
-        α0 = 268.056595 − 0.006499T + 0◦.000117 sin Ja + 0◦.000938 sin Jb
+        alpha0 = 268.056595 − 0.006499T + 0◦.000117 sin Ja + 0◦.000938 sin Jb
             + 0.001432 sin Jc + 0.000030 sin Jd + 0.002150 sin Je
-        δ0 = 64.495303 + 0.002413T + 0.000050 cos Ja + 0.000404 cos Jb
+        delta0 = 64.495303 + 0.002413T + 0.000050 cos Ja + 0.000404 cos Jb
             + 0.000617 cos Jc − 0.000013 cos Jd + 0.000926 cos Je
         W = 284.95 + 870.5360000d
         where
@@ -181,18 +194,18 @@ def calc_Dw_from_IAU_report(planet, timestamp):
         Je = 49◦.511251 + 64◦.3000T
 
     Saturn::
-        α0 = 40.589 − 0.036T
-        δ0 = 83.537 − 0.004T
+        alpha0 = 40.589 − 0.036T
+        delta0 = 83.537 − 0.004T
         W = 38.90 + 810.7939024d
 
     Uranus:
-        α0 = 257.311
-        δ0 = −15.175
+        alpha0 = 257.311
+        delta0 = −15.175
         W = 203.81 − 501.1600928d
     
     Neptune:
-        α0 = 299.36 + 0.70 sin N
-        δ0 = 43.46 − 0.51 cos N
+        alpha0 = 299.36 + 0.70 sin N
+        delta0 = 43.46 − 0.51 cos N
         W = 249.978 + 541.1397757d − 0.48 sin N
         N = 357.85 + 52.316T
     
@@ -200,7 +213,7 @@ def calc_Dw_from_IAU_report(planet, timestamp):
         planet: name of the planet
         timestamp: timestamp of the observation in UTC
     Returns:
-        De: the latitude of the planet coordinate system relative to the Earth.
+        De: sub-earth latitude = tilt angle of polar axis of planet towards the Earth
     """
     # convert UTC to JD
     time = Time(timestamp, format='unix')
@@ -236,6 +249,7 @@ def calc_Dw_from_IAU_report(planet, timestamp):
         alpha = 268.056595 - 0.006499*T + 0.000117*sin(d2r(Ja)) + 0.000938*sin(d2r(Jb)) + 0.001432*sin(d2r(Jc)) + 0.000030*sin(d2r(Jd)) + 0.002150*sin(d2r(Je))
         delta = 64.495303 + 0.002413*T + 0.000050*cos(d2r(Ja)) + 0.000404*cos(d2r(Jb)) + 0.000617*cos(d2r(Jc)) - 0.000013*cos(d2r(Jd)) + 0.000926*cos(d2r(Je))
         W = 284.95 + 870.5360000*d
+        
     if planet == 'saturn':
         alpha = 40.589 - 0.036*T
         delta = 83.537 - 0.004*T
@@ -268,7 +282,6 @@ def calc_Dw_from_IAU_report(planet, timestamp):
     # calculate the latitude of the planet coordinate system relative to the Earth
     n_sight = np.array([sin(theta1)*cos(phi1), sin(theta1)*sin(phi1), cos(theta1)])
     n_pole = np.array([sin(theta2)*cos(phi2), sin(theta2)*sin(phi2), cos(theta2)])
-    
     theta3 = np.arccos(np.dot(n_sight, n_pole))
     De = pi / 2 - theta3
     return De
