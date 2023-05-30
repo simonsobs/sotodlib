@@ -1,12 +1,61 @@
 import os
 import numpy as np
 import sotodlib
+from astropy import units
+au = units.au.si.to(units.m)
 
 
-fiducial_models_rj = {
-                 'uranus' : {'f090':130.76, 'f150':104.10}, #from ESA4
-                 'neptune': {'f090':121.77, 'f150':108.10}  #from ESA4
+# fiducial models of planets
+# R_eq, R_pole, Omega_ref, and d_ref are comes from Table2 of Weiland et al. (2010)
+# SEVEN-YEAR WMAP OBSERVATIONS: PLANETS AND CELESTIAL CALIBRATION SOURCES
+mars_fiducial = {
+                'R_eq': 3396e3,
+                'R_pole': 3376e3,
+                'Omega_ref': 7.153e-10,
+                'd_ref': 1.5 * au,
+                'Trj': {'f090': None,
+                        'f150': None}
                 }
+jupiter_fiducial = {
+                'R_eq': 71492e3,
+                'R_pole': 66854e3,
+                'd_ref': 5.2 * au,
+                'Omega_ref': 2.481e-8,
+                'Trj': {'f090': 166.73, # from ESA1
+                        'f150': 166.81}
+                }
+saturn_fiducial =  {
+                'R_eq': 60268e3,
+                'R_pole': 54364e3,
+                'd_ref': 9.5 * au,
+                'Omega_ref': 5.096e-9,
+                'Trj': {'f090': None,
+                        'f150': None}
+                }
+uranus_fiducial =  {
+                'R_eq': 25559e3,
+                'R_pole': 24973e3,
+                'Omega_ref': 2.482e-10,
+                'd_ref': 19. * au,
+                'Trj': {'f090': 130.76, # from ESA4
+                        'f150': 104.10}
+                }
+neptune_fiducial = {
+                'R_eq': 24764e3,
+                'R_pole': 24341e3,
+                'Omega_ref': 1.006e-10,
+                'd_ref': 29. * au,
+                'Trj': {'f090': 121.77, # from ESA4
+                        'f150': 108.10}
+                }
+
+fiducial_models = {
+    'mars': mars_fiducial,
+    'jupiter': jupiter_fiducial,
+    'saturn': saturn_fiducial,
+    'uranus': uranus_fiducial,
+    'neptune': neptune_fiducial
+                    }
 
 def calc_model_temperature(bandpass_name, bandpass_suffix,
                           planet_name, model_name):
