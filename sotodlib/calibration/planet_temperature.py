@@ -21,7 +21,7 @@ jupiter_fiducial = {
                 'R_pole': 66854e3,
                 'd_ref': 5.2 * au,
                 'Omega_ref': 2.481e-8,
-                'Trj': {'f090': 166.73, # from ESA1
+                'Trj': {'f090': 166.73, # from ESA1 * SO bandpass
                         'f150': 166.81}
                 }
 saturn_fiducial =  {
@@ -37,7 +37,7 @@ uranus_fiducial =  {
                 'R_pole': 24973e3,
                 'Omega_ref': 2.482e-10,
                 'd_ref': 19. * au,
-                'Trj': {'f090': 130.76, # from ESA4
+                'Trj': {'f090': 130.76, # from ESA4 * SO bandpass
                         'f150': 104.10}
                 }
 neptune_fiducial = {
@@ -45,7 +45,7 @@ neptune_fiducial = {
                 'R_pole': 24341e3,
                 'Omega_ref': 1.006e-10,
                 'd_ref': 29. * au,
-                'Trj': {'f090': 121.77, # from ESA4
+                'Trj': {'f090': 121.77, # from ESA4 * SO bandpass
                         'f150': 108.10}
                 }
 
@@ -56,6 +56,21 @@ fiducial_models = {
     'uranus': uranus_fiducial,
     'neptune': neptune_fiducial
                     }
+
+def distance_correction_factor(planet):
+    R_eq = fiducial_models[planet]['R_eq']
+    R_pole = fiducial_models[planet]['R_pole']
+    A_ref = np.pi * R_pole * R_eq
+    
+    Dw = 0 # this should be provided as argument later
+    R_proj_pole = R_pole * np.sqrt(1 - np.sin(Dw)**2 * (1 - (R_pole/R_eq)**2) )
+    A_proj_disk = np.pi * R_proj_pole * R_eq
+    
+    f_A = A_proj_disk / A_ref
+    return f_A
+
+def disk_oblateness_correction_factor():
+    return
 
 def calc_model_temperature(bandpass_name, bandpass_suffix,
                           planet_name, model_name):
