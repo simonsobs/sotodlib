@@ -579,25 +579,17 @@ Here's an annotated example:
 .. code-block:: yaml
 
   # Data sources
-  pointing_data:
-    - "pointing_res_1.h5"
-    - "pointing_res_2.h5"
-  # Note here that the number of pointing results match the number of polang results
-  # It is currently assumed that this is true, and that the i'th file for each are associated
-  # If the numbers do not match files can be repeated or "" can be given to skip polangs for that pointing
-  # Polangs can also be fully omitted in which case do not include the "polangs" key in the file
-  polangs:
-    - "polang_res_1.h5"
-    - "polang_res_2.h5"
   detmap: "detmap_results.csv"
   bias_map: "bias_map_results.npz"
   
-  g3tsmurf:
-    obs_id: "obs_ufm_uv8_1677778438"
-    paths:
-        archive_path: "/path/to/timestreams/"
-        meta_path: "/path/to/smurf/"
-        db_path: "/path/to/g3tsmurf.db"
+  context:
+    path: "context.yaml"
+    # What the metadata is called in the context file
+    pointing: "beammap"
+    polarization: null # Set to null to not use
+    # List of observation ids to run on
+    obs_ids:
+        - "obs_ufm_uv31_1677980982"
   
   # Configuration options
   ufm: "Uv8"
