@@ -102,7 +102,7 @@ def Tth2Tkcmb(Tth, freq):
     Tkcmb = brightness2Tkcmb(brightness, freq)
     return Tkcmb
 
-def Trj2Tth(Tth, freq):
+def Trj2Tth(Trj, freq):
     """
     Args:
         Trj (float): Rayleigh-JTeperature in K_RJ unit
