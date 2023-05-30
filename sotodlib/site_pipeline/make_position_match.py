@@ -8,7 +8,7 @@ import yaml
 import sotodlib.io.g3tsmurf_utils as g3u
 import sotodlib.io.load_smurf as ls
 from functools import partial
-from sotodlib.core import AxisManager, metadata
+from sotodlib.core import AxisManager, metadata, Context
 from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
 from scipy.spatial.transform import Rotation as R
@@ -154,7 +154,7 @@ def gen_priors(aman, template_det_ids, prior, method="flat", width=1, basis=None
     return priors.T
 
 
-def transform_from_detmap(aman):
+def transform_from_detmap(aman, pointing_name):
     """
     Do an approximate transformation of the pointing back to
     the focal plane using the mapping from the loaded detmap.
@@ -162,30 +162,32 @@ def transform_from_detmap(aman):
     Arguments:
 
         aman: AxisManager containing both pointing and datmap results.
+
+        pointing_name: Name of sub-AxisManager containing pointing info
     """
-    xi_0 = np.nanmedian(aman.xi)
-    eta_0 = np.nanmedian(aman.eta)
-    msk_1 = (aman.xi > xi_0) & (aman.eta > eta_0)
+    xi_0 = np.nanmedian(aman[pointing_name].xi0)
+    eta_0 = np.nanmedian(aman[pointing_name].eta0)
+    msk_1 = (aman[pointing_name].xi0 > xi_0) & (aman[pointing_name].eta0 > eta_0)
     p1_fp = np.array(
         (
-            np.nanmedian(aman.xi[msk_1]),
-            np.nanmedian(aman.eta[msk_1]),
+            np.nanmedian(aman[pointing_name].xi0[msk_1]),
+            np.nanmedian(aman[pointing_name].eta0[msk_1]),
             1,
         )
     )
-    msk_2 = (aman.xi < xi_0) & (aman.eta > eta_0)
+    msk_2 = (aman[pointing_name].xi0 < xi_0) & (aman[pointing_name].eta0 > eta_0)
     p2_fp = np.array(
         (
-            np.nanmedian(aman.xi[msk_2]),
-            np.nanmedian(aman.eta[msk_2]),
+            np.nanmedian(aman[pointing_name].xi0[msk_2]),
+            np.nanmedian(aman[pointing_name].eta0[msk_2]),
             1,
         )
     )
-    msk_3 = aman.eta < eta_0
+    msk_3 = aman[pointing_name].eta0 < eta_0
     p3_fp = np.array(
         (
-            np.nanmedian(aman.xi[msk_3]),
-            np.nanmedian(aman.eta[msk_3]),
+            np.nanmedian(aman[pointing_name].xi0[msk_3]),
+            np.nanmedian(aman[pointing_name].eta0[msk_3]),
             1,
         )
     )
@@ -193,22 +195,22 @@ def transform_from_detmap(aman):
 
     p1_dm = np.array(
         (
-            np.nanmedian(aman.det_info.wafer.det_x[msk_1]),
-            np.nanmedian(aman.det_info.wafer.det_y[msk_1]),
+            np.nanmedian(aman[pointing_name].det_info.wafer.det_x[msk_1]),
+            np.nanmedian(aman[pointing_name].det_info.wafer.det_y[msk_1]),
             1,
         )
     )
     p2_dm = np.array(
         (
-            np.nanmedian(aman.det_info.wafer.det_x[msk_2]),
-            np.nanmedian(aman.det_info.wafer.det_y[msk_2]),
+            np.nanmedian(aman[pointing_name].det_info.wafer.det_x[msk_2]),
+            np.nanmedian(aman[pointing_name].det_info.wafer.det_y[msk_2]),
             1,
         )
     )
     p3_dm = np.array(
         (
-            np.nanmedian(aman.det_info.wafer.det_x[msk_3]),
-            np.nanmedian(aman.det_info.wafer.det_y[msk_3]),
+            np.nanmedian(aman[pointing_name].det_info.wafer.det_x[msk_3]),
+            np.nanmedian(aman[pointing_name].det_info.wafer.det_y[msk_3]),
             1,
         )
     )
@@ -216,14 +218,14 @@ def transform_from_detmap(aman):
 
     A2 = Y * X.I
 
-    coords = np.vstack((aman.xi, aman.eta)).T
+    coords = np.vstack((aman[pointing_name].xi0, aman[pointing_name].eta0)).T
     transformed = [
         (A2 * np.vstack((np.matrix(pt).reshape(2, 1), 1)))[0:2, :] for pt in coords
     ]
     transformed = np.reshape(transformed, coords.shape)
 
-    aman.xi = transformed[:, 0]
-    aman.eta = transformed[:, 1]
+    aman[pointing_name].xi0 = transformed[:, 0]
+    aman[pointing_name].eta0 = transformed[:, 1]
 
 
 def visualize(frame, frames, ax, bias_lines):
@@ -425,62 +427,51 @@ def main():
     # NOTE: Eventually all of this should just be metadata I can load from a single context?
 
     # Making some assumtions about pointing data that aren't currently true:
-    # 1. I am assuming that the HDF5 file is a ResultSet
-    # 2. I am assuming it contains aman.det_info
+    # 1. I am assuming it contains smurf band and channel
     parser.add_argument("config_path", help="Location of the config file")
     args = parser.parse_args()
 
     # Open config file
     with open(args.config_path, "r") as file:
         config = yaml.safe_load(file)
-    pointing_paths = np.atleast_1d(config["pointing_data"])
-    if "polangs" in config:
-        polangs_paths = np.atleast_1d(config["polangs"])
-        polangs = []
-    else:
-        polangs_paths = np.zeros(len(pointing_paths), dtype=bool)
 
-    # Figure out the tuneset
-    SMURF = ls.G3tSmurf(**config["g3tsmurf"]["paths"])
+    # Load context
+    ctx = Context(config["context"]["path"])
+    pointing_name = config["context"]["pointing"]
+    pol_name = config["context"]["polarization"]
+    if pol_name is None:
+        logger.warning("Polarization data is disabled")
+        pol = False
+    obs_ids = config["context"]["obs_ids"]
+    if len(obs_ids) == 0:
+        raise ValueError("No observations provided in configuration")
+
+    # Figure out the tuneset and check the list of obs
+    SMURF = ls.G3tSmurf(db_path=ctx["obsdb"], archive_path=None)
     ses = SMURF.Session()
-    obs = (
-        ses.query(ls.Observations)
-        .filter(ls.Observations.obs_id == config["g3tsmurf"]["obs_id"])
-        .one()
-    )
-    tunefile = obs.tunesets[0].path
-
-    # Load data
-    pointings = []
-    polangs = []
-    for point_path, pol_path in zip(pointing_paths, polangs_paths):
-        logger.info("Loading pointing from: " + point_path)
-        aman = AxisManager.load(point_path)
-        g3u.add_detmap_info(aman, config["detmap"], columns="all")
-        pointings.append(aman)
-
-        if not pol_path:
-            logger.warning("No polang associated with this pointing")
-            polangs.append(False)
-            continue
-        # NOTE: Assuming some standin structure for the pol data
-        # This may change in the future
-        logger.info("Loading polangs from: " + pol_path)
-        rset = read_dataset(pol_path, "polarization_angle")
-        pol_rid = rset["dets:readout_id"]
-        pols = rset["polarization_angle"]
-        rid_map = np.argsort(np.argsort(aman.det_info.readout_id))
-        rid_sort = np.argsort(pol_rid)
-        pols = pols[rid_sort][rid_map]
-        polangs.append(pols)
-    bg_map = np.load(config["bias_map"], allow_pickle=True).item()
+    tunefile = []
+    for obs_id in obs_ids:
+        try:
+            obs = (
+                ses.query(ls.Observations)
+                .filter(ls.Observations.obs_id == obs_id)
+                .one()
+            )
+        except:
+            raise ValueError(
+                obs_id + " not found. Please check obs_id list and context file."
+            )
+        tunefile.append(obs.tunesets[0].path)
+    if not np.all(np.array(tunefile) == tunefile[0]):
+        raise ValueError("Not all observations have the same tunefile")
+    tunefile = tunefile[0]
 
     # Build output path
     ufm = config["ufm"]
     append = ""
     if "append" in config:
         append = "_" + config["append"]
-    if len(pointings) == 1:
+    if len(obs_ids) == 1:
         create_db(config["manifest_db"])
         db = metadata.ManifestDb(config["manifest_db"])
         outpath = os.path.join(config["outdir"], f"{ufm}_{obs.obs_id}{append}.h5")
@@ -493,14 +484,17 @@ def main():
     outpath = os.path.abspath(outpath)
 
     # Make ResultSet of input paths for later reference
-    types = ["config", "tunefile", "bgmap", "results"]
-    paths = [args.config_path, tunefile, config["bias_map"], outpath]
-    types += ["pointing"] * len(pointing_paths)
-    paths += list(pointing_paths)
-    if "polangs" in config:
-        types += ["polang"] * len(polangs)
-        paths += list(pointing_paths)
+    types = ["config", "tunefile", "bgmap", "results", "context"]
+    paths = [
+        args.config_path,
+        tunefile,
+        config["bias_map"],
+        outpath,
+        config["context"]["path"],
+    ]
     paths = [os.path.abspath(p) for p in paths]
+    types += ["obs_id"] * len(obs_ids)
+    paths += list(obs_ids)
     rset_paths = metadata.ResultSet(
         keys=["type", "path"],
         src=np.vstack((types, paths)).T,
@@ -549,11 +543,34 @@ def main():
     avg_fp = {}
     master_template = []
     results = [[], [], []]
-    for i, (aman, pol) in enumerate(zip(pointings, polangs)):
-        logger.info("Starting match number " + str(i))
+    num = 0
+    for obs_id in obs_ids:
+        logger.info("Starting match on observation " + obs_id)
+
+        # Load data
+        aman = ctx.get_meta(obs_id)
+        if pointing_name not in aman:
+            logger.warning("No pointing associated with this observation. Skipping.")
+            continue
+        num += 1
+        if pol_name is not None:
+            pol = True
+            if pol_name not in aman:
+                pol = False
+                logger.warning("No polang associated with this pointing")
+        # Put SMuRF band channel in the correct place
+        smurf = AxisManager(aman.dets)
+        smurf.wrap("band", aman[pointing_name].band, [(0, smurf.dets)])
+        smurf.wrap("channel", aman[pointing_name].channel, [(0, smurf.dets)])
+        aman.det_info.wrap("smurf", smurf)
+
+        g3u.add_detmap_info(aman, config["detmap"], columns="all")
+        bg_map = np.load(config["bias_map"], allow_pickle=True).item()
+
         # Do a radial cut
         r = np.sqrt(
-            (aman.xi - np.median(aman.xi)) ** 2 + (aman.eta - np.median(aman.eta)) ** 2
+            (aman[pointing_name].xi0 - np.median(aman[pointing_name].xi0)) ** 2
+            + (aman[pointing_name].eta0 - np.median(aman[pointing_name].eta0)) ** 2
         )
         r_msk = r < config["radial_thresh"] * np.median(r)
         aman = aman.restrict("dets", aman.dets.vals[r_msk])
@@ -562,7 +579,7 @@ def main():
         if config["dm_transform"]:
             logger.info("\tApplying transformation from detmap")
             original = aman.copy()
-            transform_from_detmap(aman)
+            transform_from_detmap(aman, pointing_name)
 
         bias_group = np.zeros(aman.dets.count) - 1
         for i in range(aman.dets.count):
@@ -637,18 +654,38 @@ def main():
             priors_s = priors[np.ix_(template_s, msk_s)]
 
         if pol:
-            focal_plane = np.column_stack((bias_group, aman.xi, aman.eta, pol[r_msk]))
+            focal_plane = np.column_stack(
+                (
+                    bias_group,
+                    aman[pointing_name].xi0,
+                    aman[pointing_name].eta0,
+                    aman[pol_name].polang,
+                )
+            )
             original_focal_plane = np.column_stack(
-                (original.xi, original.eta, pol[r_msk])
+                (
+                    original[pointing_name].xi0,
+                    original[pointing_name].eta0,
+                    paman[pol_name].polan,
+                )
             )
             _focal_plane = focal_plane
             ndim = 3
         else:
             focal_plane = np.column_stack(
-                (bias_group, aman.xi, aman.eta, np.zeros_like(aman.eta) + np.nan)
+                (
+                    bias_group,
+                    aman[pointing_name].xi0,
+                    aman[pointing_name].eta0,
+                    np.zeros_like(aman[pointing_name].eta0) + np.nan,
+                )
             )
             original_focal_plane = np.column_stack(
-                (original.xi, original.eta, np.zeros_like(original.eta) + np.nan)
+                (
+                    original[pointing_name].xi0,
+                    original[pointing_name].eta0,
+                    np.zeros_like(original[pointing_name].eta0) + np.nan,
+                )
             )
             _focal_plane = focal_plane[:, :-1]
             template = template[:, :-1]
@@ -721,8 +758,10 @@ def main():
         ]
     )
 
-    # It we only have a single dataset
-    if len(pointing_paths) == 1:
+    if num == 0:
+        logger.error("No valid observations provided")
+        sys.exit()
+    elif num == 1:
         det_id = np.zeros(aman.dets.count, dtype=det_ids.dtype)
         det_id[msk_n] = det_ids[template_n][map_n]
         det_id[msk_s] = det_ids[template_s][map_s]
