@@ -195,22 +195,22 @@ def transform_from_detmap(aman, pointing_name):
 
     p1_dm = np.array(
         (
-            np.nanmedian(aman[pointing_name].det_info.wafer.det_x[msk_1]),
-            np.nanmedian(aman[pointing_name].det_info.wafer.det_y[msk_1]),
+            np.nanmedian(aman.det_info.wafer.det_x[msk_1]),
+            np.nanmedian(aman.det_info.wafer.det_y[msk_1]),
             1,
         )
     )
     p2_dm = np.array(
         (
-            np.nanmedian(aman[pointing_name].det_info.wafer.det_x[msk_2]),
-            np.nanmedian(aman[pointing_name].det_info.wafer.det_y[msk_2]),
+            np.nanmedian(aman.det_info.wafer.det_x[msk_2]),
+            np.nanmedian(aman.det_info.wafer.det_y[msk_2]),
             1,
         )
     )
     p3_dm = np.array(
         (
-            np.nanmedian(aman[pointing_name].det_info.wafer.det_x[msk_3]),
-            np.nanmedian(aman[pointing_name].det_info.wafer.det_y[msk_3]),
+            np.nanmedian(aman.det_info.wafer.det_x[msk_3]),
+            np.nanmedian(aman.det_info.wafer.det_y[msk_3]),
             1,
         )
     )
