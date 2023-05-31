@@ -558,6 +558,7 @@ def main():
         aman = aman.restrict("dets", aman.dets.vals[r_msk])
         logger.info("\tCut " + str(np.sum(~r_msk)) + " detectors with bad pointing")
 
+        original = aman
         if config["dm_transform"]:
             logger.info("\tApplying transformation from detmap")
             original = aman.copy()
@@ -648,7 +649,7 @@ def main():
                 (
                     original[pointing_name].xi0,
                     original[pointing_name].eta0,
-                    paman[pol_name].polan,
+                    original[pol_name].polang,
                 )
             )
             _focal_plane = focal_plane
