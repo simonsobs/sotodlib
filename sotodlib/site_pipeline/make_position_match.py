@@ -143,12 +143,12 @@ def gen_priors(aman, template_det_ids, prior, method="flat", width=1, basis=None
         x_axis = aman.det_info.wafer[basis]
 
     priors = np.ones((aman.dets.count, len(template_det_ids)))
+    _, msk, template_msk = np.intersect1d(
+        aman.det_info.det_id, template_det_ids, return_indices=True
+    )
     # TODO: Could probably vectorize this
     for i in range(aman.dets.count):
         _prior = prior_method(x_axis, i)
-        _, msk, template_msk = np.intersect1d(
-            aman.det_info.det_id, template_det_ids, return_indices=True
-        )
         priors[i, template_msk] = _prior[msk]
 
     return priors.T
