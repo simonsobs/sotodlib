@@ -57,7 +57,8 @@ def make_fake_sss_tod(nmodes=20, noise_amp=1, n_scans=10,
     in it, populated via legendre polynomials plus gaussian noise.
     """
     ts, azpoint = get_scan(n_scans=n_scans)
-    x = (azpoint-(np.mean(azpoint)))/(np.ptp(azpoint)/2)
+    az_min, az_max = np.min(azpoint), np.max(azpoint)
+    x = ( 2*azpoint - (az_min+az_max) ) / (az_max - az_min)
 
     fake_signal = np.zeros((ndets, len(ts)))
     if input_coeffs is None:
@@ -90,6 +91,8 @@ def get_coeff_metric(tod):
     """
     Evaluates fit is working by comparing coefficients in to out.
     """
+    print(tod.input_coeffs[0])
+    print(tod.sss_stats.coeffs[0])
     outmetric_num = (tod.sss_stats.coeffs - tod.input_coeffs)**2
     outmetric_denom = (tod.input_coeffs)**2
     return np.max(100*(outmetric_num/outmetric_denom))
@@ -99,7 +102,7 @@ class SssTest(unittest.TestCase):
     "Test the SSS fitting functions"
     def test_fit(self):
         tod = make_fake_sss_tod(noise_amp=0)
-        _ = sss.get_sss(tod)
+        sss_stats, model_sig_tod = sss.get_sss(tod, method='fit', nmodes=20, bin_range=None)
         ommax = get_coeff_metric(tod)
         print(ommax)
         self.assertTrue(ommax < 0.1)

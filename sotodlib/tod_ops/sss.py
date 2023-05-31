@@ -8,7 +8,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def bin_by_az(aman, signal=None, az=None, bin_range=[-np.pi, np.pi], bins=360, flags=None):
+def bin_by_az(aman, signal=None, az=None, bin_range=[-np.pi, np.pi], bins=3600, flags=None):
     """
     Bins a signal by azimuth angle.
 
@@ -45,7 +45,7 @@ def bin_by_az(aman, signal=None, az=None, bin_range=[-np.pi, np.pi], bins=360, f
     return binning_dict
     
     
-def get_sss(aman, signal=None, az=None, bin_range=[-np.pi, np.pi], bins=360, flags=None, 
+def get_sss(aman, signal=None, az=None, bin_range=[-np.pi, np.pi], bins=3600, flags=None, 
             method='interpolate', nmodes=None,
             merge_stats=True, sss_stats_name='sss_stats',
             merge_model=True, sss_model_name='sss_model'):
