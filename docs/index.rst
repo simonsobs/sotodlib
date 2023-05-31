@@ -16,7 +16,6 @@ Welcome to SOTODLib's documentation!
    flagman.rst
    context.rst
    g3tsmurf.rst
-   sss.rst
    hwp.rst
    tod_ops.rst
    coords.rst
