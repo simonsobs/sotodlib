@@ -217,7 +217,7 @@ def transform_from_detmap(aman, pointing_name):
     aman[pointing_name].eta0 = transformed[:, 1]
 
 
-def visualize(frame, frames, ax, bias_lines):
+def visualize(frame, frames, ax=None, bias_lines=True):
     """
     Visualize CPD matching process.
     Modified from the pycpd example scripts.
@@ -228,10 +228,12 @@ def visualize(frame, frames, ax, bias_lines):
 
         frames: List of frames, each frame should be [iteration, error, X, Y]
 
-        ax: Axis to use for plots.
+        ax: Axes to use for plots.
 
         bias_lines: True if bias lines are included in points.
     """
+    if ax is None:
+        ax = plt.gca()
     iteration, error, X, Y = frames[frame]
     cmap = "Set3"
     if bias_lines:
@@ -246,7 +248,7 @@ def visualize(frame, frames, ax, bias_lines):
         c_t = np.zeros(len(X))
         c_s = np.ones(len(Y))
         srt = np.lexsort(X.T[0:2])
-    plt.cla()
+    ax.cla()
     ax.scatter(
         X[:, x][srt[0::4]],
         X[:, y][srt[0::4]],
@@ -290,7 +292,7 @@ def visualize(frame, frames, ax, bias_lines):
     ax.scatter(
         Y[:, x], Y[:, y], c=c_s, cmap=cmap, alpha=0.5, marker="X", vmin=0, vmax=1
     )
-    plt.text(
+    ax.text(
         0.87,
         0.92,
         "Iteration: {:d}\nQ: {:06.4f}".format(iteration, error),
