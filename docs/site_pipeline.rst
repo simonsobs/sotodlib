@@ -563,8 +563,10 @@ API
 make-position-match
 -------------------
 
-This element builds a `readout_id` to `detector_id` mapping by matching measured pointing and polarization angles against a template.
-It is capable of taking multiple measurements from the same tuning epoch and combining them to produce a single mapping and an average focal plane.
+This element builds a ``readout_id`` to ``detector_id`` mapping by matching
+measured pointing and polarization angles against a template.
+It is capable of taking multiple measurements from the same tuning epoch and
+combining them to produce a single mapping and an average focal plane.
 
 .. automodule:: sotodlib.site_pipeline.make_position_match
    :members:
@@ -604,7 +606,7 @@ Here's an annotated example:
     method: "gaussian"
     width: 1
     basis: "fit_fr_mhz"
-  # Value that liklihoods are normalized to when making priors from them.
+  # Value that likelihoods are normalized to when making priors from them.
   prior_normalization: .2
 
   # Settings for the matching processes
@@ -624,35 +626,41 @@ Here's an annotated example:
 Ouput file format
 `````````````````
 
-The results of `make_position_match` are stored in an HDF5 file containing two datasets.
-The datasets are made using the `ResultSet` class and can be loaded back as such.
+The results of ``make_position_match`` are stored in an HDF5 file containing
+two datasets. The datasets are made using the ``ResultSet`` class and can be
+loaded back as such.
 
-The first dataset is called `input_data_paths` and has two columns: `type` and `path`.
-It contains the list of input files used to produce the output, with `type` being the type of input
-and `path` being the actual path.
+The first dataset is called ``input_data_paths`` and has two columns:
+``type`` and ``path``. It contains the list of input files used to produce
+the output, with ``type`` being the type of input and ``path`` being the
+actual path.
 
 The current types of paths are:
 
 - config
 - tunefile
 - bgmap
-- pointing
-- polang
+- context
+- obs_id (not actually a path, but useful to track)
 
-The second dataset is called `focal_plane` and has columns:
+The second dataset is called ``focal_plane`` and has columns:
 
-- `dets:readout_id`, the readout id.
-- `matched_det_id`, the detector id as matched by this element.
-- `band`, the SMuRF band.
-- `channel`, the SMuRF channel.
-- `xi`, average xi for each detector.
-- `eta`, average eta for each detector.
-- `polang`, average polarization angle for each detector.
-- `meas_x`, the measured x position of each detector on the array.
-- `meas_y`, the measured y position of each detector on the array.
-- `meas_pol`, the measured polarization angle of each detector on the array.
-- `likelihood`, the liklihood of the match for each detector.
-- `outliers`, flag that shows which detectors look like outliers.
+- ``dets:readout_id``, the readout id.
+- ``matched_det_id``, the detector id as matched by this element.
+- ``band``, the SMuRF band.
+- ``channel``, the SMuRF channel.
+- ``xi``, average xi for each detector. Nominally in radians.
+- ``eta``, average eta for each detector. Nominally in radians.
+- ``polang``, average polarization angle for each detector.
+  Nominally in radians.
+- ``meas_x``, the measured x position of each detector on the array.
+  Nominally in mm.
+- ``meas_y``, the measured y position of each detector on the array.
+  Nominally in mm.
+- ``meas_pol``, the measured polarization angle of each detector on the array.
+  Nominally in deg.
+- ``likelihood``, the likelihood of the match for each detector.
+- ``outliers``, boolean flag that shows which detectors look like outliers.
 
 If the input contained only a single observation the results can be found
 using the ManifestDb specified in the config file, this ManifestDb is indexed by `obs_id`.
