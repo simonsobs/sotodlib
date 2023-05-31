@@ -9,14 +9,15 @@ import sotodlib.io.g3tsmurf_utils as g3u
 import sotodlib.io.load_smurf as ls
 from functools import partial
 from sotodlib.core import AxisManager, metadata, Context
-from sotodlib.io.metadata import read_dataset, write_dataset
+from sotodlib.io.metadata import write_dataset
 from sotodlib.site_pipeline import util
-from scipy.spatial.transform import Rotation as R
 from scipy.optimize import linear_sum_assignment
 from pycpd import AffineRegistration
 from detmap.makemap import MapMaker
 
 logger = util.init_logger(__name__, "make_position_match: ")
+
+valid_bg = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
 
 
 def create_db(filename):
@@ -411,6 +412,140 @@ def match_template(
     return mapping, outliers, P, TY
 
 
+def _gen_template(ufm):
+    logger.info("Generating template for " + ufm)
+    wafer = MapMaker(north_is_highband=False, array_name=ufm)
+    det_x = []
+    det_y = []
+    polang = []
+    det_ids = []
+    template_bg = []
+    is_north = []
+    for det in wafer.grab_metadata():
+        if not det.is_optical:
+            continue
+        det_x.append(det.det_x)
+        det_y.append(det.det_y)
+        polang.append(det.angle_actual_deg)
+        det_ids.append(det.detector_id)
+        template_bg.append(det.bias_line)
+        is_north.append(det.is_north)
+    det_ids = np.array(det_ids)
+    template_bg = np.array(template_bg)
+    template_msk = np.isin(template_bg, valid_bg)
+    template_n = np.array(is_north) & template_msk
+    template_s = ~np.array(is_north) & template_msk
+    template_bg[template_bg % 2 == 1] *= -1
+    template = np.column_stack(
+        (template_bg, np.array(det_x), np.array(det_y), np.array(polang))
+    )
+
+    return template, template_n, template_s, det_ids
+
+
+def _mk_template(aman):
+    dm_msk = (
+        np.isfinite(aman.det_info.wafer.det_x)
+        | np.isfinite(aman.det_info.wafer.det_y)
+        | np.isfinite(aman.det_info.wafer.angle)
+    )
+    dm_aman = aman.restrict("dets", aman.dets.vals[dm_msk], False)
+
+    template_msk = np.isin(dm_aman.det_info.wafer.bias_line, valid_bg)
+    bias_line = dm_aman.det_info.wafer.bias_line
+    bias_line[bias_line % 2 == 1] *= -1
+
+    template = np.column_stack(
+        (
+            bias_line,
+            dm_aman.det_info.wafer.det_x,
+            dm_aman.det_info.wafer.det_y,
+            dm_aman.det_info.wafer.angle,
+        )
+    )
+    det_ids = dm_aman.det_info.det_id
+    is_north = dm_aman.det_info.wafer.is_north == "True"
+    template_n = is_north & template_msk
+    template_s = ~(is_north) & template_msk
+
+    return template, template_n, template_s, det_ids
+
+
+def _load_bg(aman, bg_map):
+    bias_group = np.zeros(aman.dets.count) - 1
+    for i in range(aman.dets.count):
+        msk = np.all(
+            [
+                aman.det_info.smurf.band[i] == bg_map["bands"],
+                aman.det_info.smurf.channel[i] == bg_map["channels"],
+            ],
+            axis=0,
+        )
+        bias_group[i] = bg_map["bgmap"][msk][0]
+    msk_bp = np.isin(bias_group, valid_bg)
+
+    return bias_group, msk_bp
+
+
+def _mk_output(
+    out_dt,
+    readout_id,
+    det_ids,
+    dm_det_id,
+    focal_plane,
+    msk_n,
+    msk_s,
+    template_n,
+    template_s,
+    map_n,
+    out_n,
+    P_n,
+    TY_n,
+    map_s,
+    out_s,
+    P_s,
+    TY_s,
+):
+    det_id = np.zeros(len(readout_id), dtype=det_ids.dtype)
+    det_id[msk_n] = det_ids[template_n][map_n]
+    det_id[msk_s] = det_ids[template_s][map_s]
+
+    logger.info(str(np.sum(msk_n | msk_s)) + " detectors matched")
+    logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
+    if dm_det_id is not None:
+        logger.info(str(np.sum(det_id == dm_det_id)) + " match with detmap")
+
+    P_mapped = np.zeros(len(readout_id))
+    P_mapped[msk_n] = P_n[map_n, range(P_n.shape[1])]
+    P_mapped[msk_s] = P_s[map_s, range(P_s.shape[1])]
+
+    transformed = np.nan + np.zeros((len(readout_id), 3))
+    ndim = TY_n.shape[1] - 1
+    transformed[msk_n, :ndim] = TY_n[:, 1:]
+    transformed[msk_s, :ndim] = TY_s[:, 1:]
+
+    out_msk = np.zeros(len(readout_id), dtype=bool)
+    out_msk[np.flatnonzero(msk_n)[out_n]] = True
+    out_msk[np.flatnonzero(msk_s)[out_s]] = True
+    out_msk[~(msk_n | msk_s)] = True
+
+    data_out = np.fromiter(
+        zip(
+            readout_id,
+            det_id,
+            *focal_plane.T,
+            *transformed.T,
+            P_mapped,
+            out_msk,
+        ),
+        out_dt,
+        count=len(det_id),
+    )
+    rset_data = metadata.ResultSet.from_friend(data_out)
+
+    return rset_data
+
+
 def main():
     # Read in input pars
     parser = ap.ArgumentParser()
@@ -491,37 +626,12 @@ def main():
         src=np.vstack((types, paths)).T,
     )
 
-    valid_bg = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
-
     # If requested generate a template for the UFM with the instrument model
     gen_template = config["gen_template"]
     if gen_template:
-        logger.info("Generating template for " + ufm)
-        wafer = MapMaker(north_is_highband=False, array_name=ufm)
-        det_x = []
-        det_y = []
-        polang = []
-        det_ids = []
-        template_bg = []
-        is_north = []
-        for det in wafer.grab_metadata():
-            if not det.is_optical:
-                continue
-            det_x.append(det.det_x)
-            det_y.append(det.det_y)
-            polang.append(det.angle_actual_deg)
-            det_ids.append(det.detector_id)
-            template_bg.append(det.bias_line)
-            is_north.append(det.is_north)
-        det_ids = np.array(det_ids)
-        template_bg = np.array(template_bg)
-        template_msk = np.isin(template_bg, valid_bg)
-        template_n = np.array(is_north) & template_msk
-        template_s = ~np.array(is_north) & template_msk
-        template_bg[template_bg % 2 == 1] *= -1
-        template = np.column_stack(
-            (template_bg, np.array(det_x), np.array(det_y), np.array(polang))
-        )
+        template, template_n, template_s, det_ids = _gen_template(ufm)
+
+    bg_map = np.load(config["bias_map"], allow_pickle=True).item()
 
     reverse = config["matching"].get("reverse", False)
     if reverse:
@@ -556,7 +666,6 @@ def main():
         aman.det_info.wrap("smurf", smurf)
 
         g3u.add_detmap_info(aman, config["detmap"], columns="all")
-        bg_map = np.load(config["bias_map"], allow_pickle=True).item()
 
         # Do a radial cut
         r = np.sqrt(
@@ -573,19 +682,8 @@ def main():
             original = aman.copy()
             transform_from_detmap(aman, pointing_name)
 
-        bias_group = np.zeros(aman.dets.count) - 1
-        for i in range(aman.dets.count):
-            msk = np.all(
-                [
-                    aman.det_info.smurf.band[i] == bg_map["bands"],
-                    aman.det_info.smurf.channel[i] == bg_map["channels"],
-                ],
-                axis=0,
-            )
-            bias_group[i] = bg_map["bgmap"][msk][0]
-
-        msk_bp = np.isin(bias_group, valid_bg)
-
+        # Load bias group info
+        bias_group, msk_bp = _load_bg(aman, bg_map)
         bl_diff = np.sum(~(bias_group == aman.det_info.wafer.bias_line)) - np.sum(
             ~(msk_bp)
         )
@@ -601,33 +699,9 @@ def main():
         bias_group[bias_group % 2 == 1] *= -1
 
         # Prep inputs
-        dm_msk = slice(None)
         if not gen_template:
-            dm_msk = (
-                np.isfinite(aman.det_info.wafer.det_x)
-                | np.isfinite(aman.det_info.wafer.det_y)
-                | np.isfinite(aman.det_info.wafer.angle)
-            )
-            dm_aman = aman.restrict("dets", aman.dets.vals[dm_msk], False)
-
-            template_msk = np.isin(dm_aman.det_info.wafer.bias_line, valid_bg)
-            bias_line = dm_aman.det_info.wafer.bias_line
-            bias_line[bias_line % 2 == 1] *= -1
-
-            template = np.column_stack(
-                (
-                    bias_line,
-                    dm_aman.det_info.wafer.det_x,
-                    dm_aman.det_info.wafer.det_y,
-                    dm_aman.det_info.wafer.angle,
-                )
-            )
-            master_template.append(np.column_stack((template, dm_aman.det_info.det_id)))
-            det_ids = dm_aman.det_info.det_id
-            is_north = dm_aman.det_info.wafer.is_north == "True"
-            template_n = is_north & template_msk
-            template_s = ~(is_north) & template_msk
-
+            template, template_n, template_s, det_ids = _mk_template(ufm)
+            master_template.append(np.column_stack((template, det_ids)))
             if np.sum(template_n | template_n) < np.sum(msk_n | msk_s):
                 logger.warning(
                     "\tTemplate is smaller than input pointing, uniqueness of mapping is no longer gauranteed"
@@ -662,7 +736,6 @@ def main():
                 )
             )
             _focal_plane = focal_plane
-            ndim = 3
         else:
             focal_plane = np.column_stack(
                 (
@@ -681,7 +754,6 @@ def main():
             )
             _focal_plane = focal_plane[:, :-1]
             template = template[:, :-1]
-            ndim = 2
 
         # Do actual matching
         map_n, out_n, P_n, TY_n = match_template(
@@ -754,35 +826,25 @@ def main():
         logger.error("No valid observations provided")
         sys.exit()
     elif num == 1:
-        det_id = np.zeros(aman.dets.count, dtype=det_ids.dtype)
-        det_id[msk_n] = det_ids[template_n][map_n]
-        det_id[msk_s] = det_ids[template_s][map_s]
-
-        logger.info(str(np.sum(msk_n | msk_s)) + " detectors matched")
-        logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
-        logger.info(str(np.sum(det_id == aman.det_info.det_id)) + " match with detmap")
-
-        transformed = np.nan + np.zeros((aman.dets.count, 3))
-        transformed[msk_n, :ndim] = TY_n[:, 1:]
-        transformed[msk_s, :ndim] = TY_s[:, 1:]
-
-        P_mapped = np.zeros(aman.dets.count)
-        P_mapped[msk_n] = P_n[map_n, range(P_n.shape[1])]
-        P_mapped[msk_s] = P_s[map_s, range(P_s.shape[1])]
-
-        data_out = np.fromiter(
-            zip(
-                aman.det_info.readout_id,
-                det_id,
-                *focal_plane.T[:5],
-                *transformed.T,
-                P_mapped,
-                out_msk,
-            ),
+        rset_data = _mk_output(
             out_dt,
-            count=len(det_id),
+            aman.det_info.readout_id,
+            det_ids,
+            aman.det_info.det_id,
+            focal_plane[:, :5],
+            msk_n,
+            msk_s,
+            template_n,
+            template_s,
+            map_n,
+            out_n,
+            P_n,
+            TY_n,
+            map_s,
+            out_s,
+            P_s,
+            TY_s,
         )
-        rset_data = metadata.ResultSet.from_friend(data_out)
         write_dataset(rset_data, outpath, dataset, overwrite=True)
         write_dataset(rset_paths, outpath, input_paths, overwrite=True)
         db.add_entry(
@@ -806,13 +868,11 @@ def main():
     focal_plane = np.column_stack(focal_plane)
     msk_n = focal_plane[-1].astype(bool)
     msk_s = ~msk_n
-    bc_avg_pointing = focal_plane[:5]
+    bc_avg_pointing = focal_plane[:5].T
     focal_plane = focal_plane[5:9].T
-    ndim = 3
     if np.isnan(focal_plane[:, -1]).all():
         focal_plane = focal_plane[:, :-1]
         template = template[:, :-1]
-        ndim = 2
 
     # Build priors from previous results
     priors = 1
@@ -827,13 +887,13 @@ def main():
         )
 
     # Do final matching
-    map_n, out_n, P_n, TY_n = match_template(
+    north_results = match_template(
         focal_plane[msk_n],
         template[template_n],
         priors=priors[np.ix_(template_n, msk_n)],
         **config["matching"],
     )
-    map_s, out_s, P_n, TY_s = match_template(
+    south_results = match_template(
         focal_plane[msk_s],
         template[template_s],
         priors=priors[np.ix_(template_s, msk_s)],
@@ -841,32 +901,19 @@ def main():
     )
 
     # Make final outputs and save
-    transformed = np.nan + np.zeros((len(readout_ids), 3))
-    transformed[msk_n, :ndim] = TY_n[:, 1:]
-    transformed[msk_s, :ndim] = TY_s[:, 1:]
-
-    det_id = np.zeros(len(readout_ids), dtype=np.dtype(("U", len(det_ids[0]))))
-    det_id[msk_n] = det_ids[template_n][map_n]
-    det_id[msk_s] = det_ids[template_s][map_s]
-
-    out_msk = np.zeros(len(readout_ids), dtype=bool)
-    out_msk[np.flatnonzero(msk_n)[out_n]] = True
-    out_msk[np.flatnonzero(msk_s)[out_s]] = True
-    out_msk[~(msk_n | msk_s)] = True
-
-    P_mapped = np.zeros(len(readout_ids))
-    P_mapped[msk_n] = P_n[map_n, range(P_n.shape[1])]
-    P_mapped[msk_s] = P_s[map_s, range(P_s.shape[1])]
-
-    logger.info(str(np.sum(msk_n | msk_s)) + " detectors matched")
-    logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
-
-    data_out = np.fromiter(
-        zip(readout_ids, det_id, *bc_avg_pointing, *transformed.T, P_mapped, out_msk),
+    rset_data = _mk_output(
         out_dt,
-        count=len(det_id),
+        readout_ids,
+        det_ids,
+        None,
+        bc_avg_pointing,
+        msk_n,
+        msk_s,
+        template_n,
+        template_s,
+        *north_results,
+        *south_results,
     )
-    rset_data = metadata.ResultSet.from_friend(data_out)
     write_dataset(rset_data, outpath, dataset, overwrite=True)
     write_dataset(rset_paths, outpath, input_paths, overwrite=True)
 
