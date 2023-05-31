@@ -159,6 +159,13 @@ def transform_from_detmap(aman, pointing_name):
     Do an approximate transformation of the pointing back to
     the focal plane using the mapping from the loaded detmap.
 
+    This function works by making three roughly equal bins based on
+    the pointing information in aman. These bins are then used to make
+    three representative points each for both the pointing information
+    and the xy positions of the detectors. These points then form two
+    3x3 matrices that can be used to compute the transformation between
+    the two spaces.
+
     Arguments:
 
         aman: AxisManager containing both pointing and datmap results.
@@ -310,12 +317,12 @@ def match_template(
     Arguments:
 
         focal_plane: Measured pointing and optionally polarization angle.
-                     Should be a (2, n) or (3, n) array with columns: xi, eta, pol.
-                     Optionally an optics model can be preapplied to this to map the pointing
-                     onto the physical focal plane in which case the columns are: x, y, pol.
+                     Should be a (4, n) or (3, n) array with columns: bias_line, xi, eta, pol.
+                     Nominal units for the columns are: none, radians, radians, radians.
 
         template: Designed x, y, and polarization angle of each detector.
-                  Should be a (2, n) or (3, n) array with columns: x, y, pol.
+                  Should be a (4, n) or (3, n) array with columns: bias_line, x, y, pol.
+                  Nominal units for the columns are: none, mm, mm, degrees.
 
         priors: Priors to apply when matching.
                 Should be be a n by n array where n is the number of points.
