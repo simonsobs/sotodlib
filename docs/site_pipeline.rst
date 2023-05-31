@@ -166,6 +166,18 @@ entries mater.
           multi: true
 
 
+analyze-bright-ptsrc
+--------------------
+
+This script analyzes an observation of a bright point source (such as
+a planet) and performs per-detector fitting of beam parameters
+including amplitude and FWHM.
+
+.. argparse::
+   :module: sotodlib.site_pipeline.analyze_bright_ptsrc
+   :func: get_parser
+
+
 preprocess-tod
 --------------
 This script is set up to run a preprocessing pipeline using the preprocess
