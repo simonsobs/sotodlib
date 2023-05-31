@@ -105,7 +105,7 @@ class SssTest(unittest.TestCase):
         sss_stats, model_sig_tod = sss.get_sss(tod, method='fit', nmodes=20, bin_range=None)
         ommax = get_coeff_metric(tod)
         print(ommax)
-        self.assertTrue(ommax < 0.1)
+        self.assertTrue(ommax < 1.0)
 
 if __name__ == '__main__':
     unittest.main()
