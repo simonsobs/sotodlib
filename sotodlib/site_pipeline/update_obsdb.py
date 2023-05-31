@@ -13,8 +13,8 @@ The config file could be of the form:
 
 """
 from sotodlib.core.metadata import ObsDb
-from sotodlib.core import Context
-from check_book import main as checkbook
+from sotodlib.core import Context 
+from sotodlib.site_pipeline.check_book import main as checkbook
 import os
 import glob
 import yaml
@@ -86,11 +86,33 @@ def update_obsdb(base_dir,
 
     for bookpath in bookcart:
         if check_meta_type(bookpath) in accept_type:
+            """ obsfiledb creation
+            The extra files give us a bit of trouble. We'll assume that index,
+            book, and bookbinder_log are always here, and edit our config file
+            to cover the rest as extra files.
+            """
+            book_file_list = os.listdir(bookpath)
+            book_file_list.remove("M_index.yaml")
+            book_file_list.remove("M_book.yaml")
+            book_file_list.remove("Z_bookbinder_log.txt")
+            book_file_list = [file_name for file_name in book_file_list if not file_name.endswith(".g3")]
+            if len(book_file_list)>0:
+                configs["extra_extra_files"] += book_file_list
+                with open(config, "w") as config_file:
+                    yaml.dump(configs, config_file)
+                checkbook(bookpath, config, add=True)
+                configs["extra_extra_files"] = ["Z_bookbinder_log.txt"]
+                with open(config, "w") as config_file:
+                    yaml.dump(configs, config_file)
+
+            else:
+                checkbook(bookpath, config, add=True)
+
             index = yaml.safe_load(open(os.path.join(bookpath, "M_index.yaml"), "rb"))
             obs_id = index.pop("book_id")
             tags = index.pop("tags")
             detsets = index.pop("detsets")
-            checkbook(bookpath, configs)
+
             if "cols" in configs:
                 very_clean = {col:index[col] for col in iter(configs["cols"]) if col in index}
             else:
