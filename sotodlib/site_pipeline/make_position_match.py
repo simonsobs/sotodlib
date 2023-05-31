@@ -165,59 +165,41 @@ def transform_from_detmap(aman, pointing_name):
 
         pointing_name: Name of sub-AxisManager containing pointing info
     """
-    xi_0 = np.nanmedian(aman[pointing_name].xi0)
-    eta_0 = np.nanmedian(aman[pointing_name].eta0)
-    msk_1 = (aman[pointing_name].xi0 > xi_0) & (aman[pointing_name].eta0 > eta_0)
-    p1_fp = np.array(
-        (
-            np.nanmedian(aman[pointing_name].xi0[msk_1]),
-            np.nanmedian(aman[pointing_name].eta0[msk_1]),
-            1,
+    phi = np.arctan2(
+        aman[pointing_name].eta0 - np.nanmedian(aman[pointing_name].eta0),
+        aman[pointing_name].xi0 - np.nanmedian(aman[pointing_name].eta0),
+    ) % (2 * np.pi)
+    bins = np.nanpercentile(phi, [0.5, 33.5, 66.5, 99.5])
+    x = []
+    msks = []
+    for i in range(3):
+        msk = (phi > bins[i]) & (phi < bins[i + 1])
+        msks.append(msk)
+        x.append(
+            np.array(
+                (
+                    np.nanmedian(aman[pointing_name].xi0[msk]),
+                    np.nanmedian(aman[pointing_name].eta0[msk]),
+                    1,
+                )
+            )
         )
-    )
-    msk_2 = (aman[pointing_name].xi0 < xi_0) & (aman[pointing_name].eta0 > eta_0)
-    p2_fp = np.array(
-        (
-            np.nanmedian(aman[pointing_name].xi0[msk_2]),
-            np.nanmedian(aman[pointing_name].eta0[msk_2]),
-            1,
-        )
-    )
-    msk_3 = aman[pointing_name].eta0 < eta_0
-    p3_fp = np.array(
-        (
-            np.nanmedian(aman[pointing_name].xi0[msk_3]),
-            np.nanmedian(aman[pointing_name].eta0[msk_3]),
-            1,
-        )
-    )
-    X = np.transpose(np.matrix([p1_fp, p2_fp, p3_fp]))
+    X = np.transpose(np.matrix(x))
 
-    p1_dm = np.array(
-        (
-            np.nanmedian(aman.det_info.wafer.det_x[msk_1]),
-            np.nanmedian(aman.det_info.wafer.det_y[msk_1]),
-            1,
+    y = []
+    for msk in msks:
+        y.append(
+            np.array(
+                (
+                    np.nanmedian(aman.det_info.wafer.det_x[msk]),
+                    np.nanmedian(aman.det_info.wafer.det_y[msk]),
+                    1,
+                )
+            )
         )
-    )
-    p2_dm = np.array(
-        (
-            np.nanmedian(aman.det_info.wafer.det_x[msk_2]),
-            np.nanmedian(aman.det_info.wafer.det_y[msk_2]),
-            1,
-        )
-    )
-    p3_dm = np.array(
-        (
-            np.nanmedian(aman.det_info.wafer.det_x[msk_3]),
-            np.nanmedian(aman.det_info.wafer.det_y[msk_3]),
-            1,
-        )
-    )
-    Y = np.transpose(np.matrix([p1_dm, p2_dm, p3_dm]))
+    Y = np.transpose(np.matrix(y))
 
     A2 = Y * X.I
-
     coords = np.vstack((aman[pointing_name].xi0, aman[pointing_name].eta0)).T
     transformed = [
         (A2 * np.vstack((np.matrix(pt).reshape(2, 1), 1)))[0:2, :] for pt in coords
