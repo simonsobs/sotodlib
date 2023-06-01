@@ -698,7 +698,7 @@ class G3tHWP():
         return
 """    
     
-    def write_solution_h5(self, solved, smurf_timestamp, tod, output=None, h5_address=None):
+    def write_solution_h5(self, solved, tod, output=None, h5_address=None):
         """
         Output HWP angle + flags as AxisManager format
 
@@ -748,12 +748,12 @@ class G3tHWP():
         aman.wrap_new('hwp_angle', shape=('samps', ))
         aman.wrap_new('hwp_angle_eval', shape=('samps', ))
         if 'fast_time_raw' in solved.keys():
-            aman.hwp_angle = scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
-            aman.hwp_angle_eval = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
+            aman.hwp_angle = scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',fill_value='extrapolate')(tod.timestamps)
+            aman.hwp_angle_eval = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',fill_value='extrapolate')(tod.timestamps)
             
         else:
             logger.info('no hwp_angle_eval data')
-            aman.hwp_angle = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
+            aman.hwp_angle = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',fill_value='extrapolate')(tod.timestamps)
         aman.save(output, h5_address, overwrite=True)
 
         return
