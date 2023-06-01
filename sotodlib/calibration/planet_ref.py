@@ -111,14 +111,14 @@ def calc_model_temperature(bandpass_name, bandpass_suffix,
     return band_averaged_Trj
 
 
-def get_expected_T_Omega(planet, bandpass_name, timestamp):
+def get_expected_Trj_Omega(planet, bandpass_name, timestamp):
     T_planet = fiducial_models[planet]['Trj'][bandpass_name]
     Omega_planet_ref = fiducial_models[planet]['Omega_ref']
     f_A = get_distance_correction_factor(planet, timestamp)
     De = get_sub_earth_latitude(planet, timestamp)
     f_d = get_disk_oblatenes_correction_factor(planet, De)
-    expected_T_Omega = T_planet * Omega_planet_ref * f_A / f_d
-    return expected_T_Omega
+    expected_Trj_Omega = T_planet * Omega_planet_ref * f_A / f_d
+    return expected_Trj_Omega
 
 
 def get_distance_correction_factor(planet, timestamp):
