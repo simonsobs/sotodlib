@@ -641,8 +641,10 @@ class G3tHWP():
 
         - timestamp:
             SMuRF synched timestamp
-        - hwp_angle: float
-            SMuRF synched HWP angle in radian
+        - hwp_angle_v1: float
+            SMuRF synched HWP angle (calculated from raw encoder signals) in radian
+        - hwp_angle_v2: float
+            SMuRF synched HWP angle (the systematics from the non-uniform encoder slot pattern is subtracted ) in radian
         - slow_time: timestamp
             time list of slow block (stable, locked. hwp_rate)
         - stable: bool
@@ -668,15 +670,30 @@ class G3tHWP():
             logger.info('write no rotation data, skip writing')
             return     
         
-        angle_synch = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
-        rate_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['hwp_rate'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
-        locked_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['locked'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
-        stable_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['stable'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
-        with h5py.File(output, 'w') as fout:
-            write_dataset(angle_synch, fout, 'hwp_angle')
-            write_dataset(stable_synch, fout, 'stable')
-            write_dataset(locked_synch, fout, 'locked')
-            write_dataset(rate_synch, fout, 'hwp_rate')
+        if 'fast_time_raw' in solved.keys():
+            angle_synch_v1 = scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
+            angle_synch_v2 = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
+            rate_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['hwp_rate'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
+            locked_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['locked'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
+            stable_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['stable'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
+
+            with h5py.File(output, 'w') as fout:
+                write_dataset(angle_synch_v1, fout, 'hwp_angle_v1')
+                write_dataset(angle_synch_v2, fout, 'hwp_angle_v2')
+                write_dataset(stable_synch, fout, 'stable')
+                write_dataset(locked_synch, fout, 'locked')
+                write_dataset(rate_synch, fout, 'hwp_rate')
+        else:
+            logger.info('write no angle_v2 data')
+            angle_synch_v1 = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
+            rate_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['hwp_rate'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
+            locked_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['locked'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
+            stable_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['stable'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
+            with h5py.File(output, 'w') as fout:
+                write_dataset(angle_synch_v1, fout, 'hwp_angle_v1')
+                write_dataset(stable_synch, fout, 'stable')
+                write_dataset(locked_synch, fout, 'locked')
+                write_dataset(rate_synch, fout, 'hwp_rate')
 
         return
     
