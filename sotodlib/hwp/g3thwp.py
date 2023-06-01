@@ -623,7 +623,7 @@ class G3tHWP():
             start_time += frame_length
 
         return
-"""    
+    """    
     def write_solution_h5(self, solved, smurf_timestamp, output=None):
         ""
         Output HWP angle + flags as HDF5 format
@@ -696,7 +696,7 @@ class G3tHWP():
                 write_dataset(rate_synch, fout, 'hwp_rate')
 
         return
-"""    
+    """    
     
     def write_solution_h5(self, solved, tod, output=None, h5_address=None):
         """
