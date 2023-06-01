@@ -523,6 +523,31 @@ def _mk_output(
     return rset_data
 
 
+def _do_match(
+    det_ids, focal_plane, template, priors, msks, template_msks, match_config
+):
+    ndim = focal_plane.shape[1] - 1
+    mapped_det_ids = np.zeros(len(focal_plane), dtype=det_ids.dtype)
+    out_msk = np.zeros(len(focal_plane), dtype=bool)
+    P = np.zeros(len(focal_plane))
+    transformed = np.nan + np.zeros((len(focal_plane), 3))
+    for msk, t_msk, prior in zip(msks, template_msks, priors):
+        _map, _out, _P, _TY = match_template(
+            focal_plane[msk],
+            template[t_msk],
+            priors=prior,
+            **match_config,
+        )
+        mapped_det_ids[msk] = det_ids[t_msk][_map]
+        P[msk] = _P[_map, range(_P.shape[1])]
+        out_msk[np.flatnonzero(msk)[_out]] = True
+        transformed[msk, :ndim] = _TY[:, 1:]
+    out_msk[~np.any(msks, axis=0)] = True
+    logger.info("\tAverage matched likelihood = " + str(np.median(P)))
+
+    return mapped_det_ids, out_msk, P, transformed
+
+
 def main():
     # Read in input pars
     parser = ap.ArgumentParser()
@@ -809,28 +834,13 @@ def main():
         )
         _focal_plane = focal_plane[:, pol_slice]
         _template = template[:, pol_slice]
-        ndim = _focal_plane.shape[1] - 1
 
         # Do actual matching
         match_config = config["matching"]
         match_config["bias_lines"] &= have_bgmap and have_band and have_ch
-        mapped_det_ids = np.zeros(len(focal_plane), dtype=det_ids.dtype)
-        out_msk = np.zeros(len(focal_plane), dtype=bool)
-        P = np.zeros(len(focal_plane))
-        transformed = np.nan + np.zeros((len(focal_plane), 3))
-        for msk, t_msk, prior in zip(msks, _template_msks, priors):
-            _map, _out, _P, _TY = match_template(
-                _focal_plane[msk],
-                _template[t_msk],
-                priors=prior,
-                **match_config,
-            )
-            mapped_det_ids[msk] = det_ids[t_msk][_map]
-            P[msk] = _P[_map, range(_P.shape[1])]
-            out_msk[np.flatnonzero(msk)[_out]] = True
-            transformed[msk, :ndim] = _TY[:, 1:]
-        out_msk[~np.any(msks, axis=0)] = True
-        logger.info("\tAverage matched likelihood = " + str(np.median(P)))
+        mapped_det_ids, out_msk, P, transformed = _do_match(
+            det_ids, _focal_plane, _template, priors, msks, _template_msks, match_config
+        )
 
         # Store outputs for now
         results[0].append(aman.det_info.readout_id)
@@ -958,24 +968,10 @@ def main():
 
     # Do final matching
     match_config = config["matching"]
-    match_config["bias_lines"] &= have_bgmap and np.isfinite(_focal_plane[:, 0]).all()
-    mapped_det_ids = np.zeros(len(focal_plane), dtype=det_ids.dtype)
-    out_msk = np.zeros(len(focal_plane), dtype=bool)
-    P = np.zeros(len(focal_plane))
-    transformed = np.nan + np.zeros((len(focal_plane), 3))
-    for msk, t_msk, prior in zip(msks, _template_msks, priors):
-        _map, _out, _P, _TY = match_template(
-            focal_plane[msk],
-            template[t_msk],
-            priors=prior,
-            **match_config,
-        )
-        mapped_det_ids[msk] = det_ids[t_msk][_map]
-        P[msk] = _P[_map, range(_P.shape[1])]
-        out_msk[np.flatnonzero(msk)[_out]] = True
-        transformed[msk, :ndim] = _TY[:, 1:]
-    out_msk[~np.any(msks, axis=0)] = True
-    logger.info("\tAverage matched likelihood = " + str(np.median(P)))
+    match_config["bias_lines"] &= have_bgmap and np.isfinite(focal_plane[:, 0]).all()
+    mapped_det_ids, out_msk, P, transformed = _do_match(
+        det_ids, focal_plane, template, priors, msks, template_msks, match_config
+    )
 
     # Make final outputs and save
     rset_data = _mk_output(
