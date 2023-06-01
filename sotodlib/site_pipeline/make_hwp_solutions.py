@@ -80,7 +80,9 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
     man_db_filename = os.path.join(output_dir, 'hwp_angle.sqlite')
     output_filename = os.path.join(output_dir, 'hwp_angle.h5')
     
-    obs = ctx.obsdb.get()[:1]
+    # temporary for debugging
+    obs_range = 1
+    obs = ctx.obsdb.get()[:obs_range]
     for obs_id in obs['obs_id']:
         print(obs_id)
         tod = ctx.get_obs(obs_id, no_signal=True)
@@ -101,9 +103,11 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
 
         logger.debug("analyze")
         solved = g3thwp.analyze(data)
-        print(solved['angle'])
-        aman.hwp_angle = g3thwp.interp_smurf(solved,tod.timestamps)
-        print(aman.hwp_angle)
+        aman.hwp_angle = scipy.interpolate.interp1d(
+            solved['fast_time'],
+            solved['angle'],
+            kind='linear',
+            fill_value='extrapolate')(tod.timestamps)
         
         # template subtracted angle --- need to fix bug inside
         #g3thwp.eval_angle(solved)
