@@ -669,13 +669,14 @@ class G3tHWP():
             return     
         
         angle_synch = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
+        rate_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['hwp_rate'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
+        locked_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['locked'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
+        stable_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['stable'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
         with h5py.File(output, 'w') as fout:
-            write_dataset(smurf_timestamp, fout, 'timestamp')
             write_dataset(angle_synch, fout, 'hwp_angle')
-            write_dataset(solved['slow_time'], fout, 'slow_time')
-            write_dataset(solved['stable'], fout, 'stable')
-            write_dataset(solved['locked'], fout, 'locked')
-            write_dataset(solved['hwp_rate'], fout, 'hwp_rate')
+            write_dataset(stable_synch, fout, 'stable')
+            write_dataset(locked_synch, fout, 'locked')
+            write_dataset(rate_synch, fout, 'hwp_rate')
 
         return
     
