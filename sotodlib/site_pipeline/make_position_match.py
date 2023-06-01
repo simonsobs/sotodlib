@@ -784,40 +784,31 @@ def main():
             priors = [None] * len(msks)
 
         if pol:
-            focal_plane = np.column_stack(
-                (
-                    bias_group,
-                    aman[pointing_name].xi0,
-                    aman[pointing_name].eta0,
-                    aman[pol_name].polang,
-                )
-            )
-            original_focal_plane = np.column_stack(
-                (
-                    original[pointing_name].xi0,
-                    original[pointing_name].eta0,
-                    original[pol_name].polang,
-                )
-            )
-            _focal_plane = focal_plane
+            pol_slice = slice(None)
+            pol_val = aman[pol_name].polang
+            pol_orig = original[pol_name].polang
         else:
-            focal_plane = np.column_stack(
-                (
-                    bias_group,
-                    aman[pointing_name].xi0,
-                    aman[pointing_name].eta0,
-                    np.zeros_like(aman[pointing_name].eta0) + np.nan,
-                )
+            pol_slice = slice(0, -1)
+            pol_val = np.zeros_like(aman[pointing_name].eta0) + np.nan
+            pol_orig = pol_val
+
+        focal_plane = np.column_stack(
+            (
+                bias_group,
+                aman[pointing_name].xi0,
+                aman[pointing_name].eta0,
+                pol_val,
             )
-            original_focal_plane = np.column_stack(
-                (
-                    original[pointing_name].xi0,
-                    original[pointing_name].eta0,
-                    np.zeros_like(original[pointing_name].eta0) + np.nan,
-                )
+        )
+        original_focal_plane = np.column_stack(
+            (
+                original[pointing_name].xi0,
+                original[pointing_name].eta0,
+                pol_orig,
             )
-            _focal_plane = focal_plane[:, :-1]
-            template = template[:, :-1]
+        )
+        _focal_plane = focal_plane[:, pol_slice]
+        _template = template[:, pol_slice]
         ndim = _focal_plane.shape[1] - 1
 
         # Do actual matching
@@ -830,7 +821,7 @@ def main():
         for msk, t_msk, prior in zip(msks, _template_msks, priors):
             _map, _out, _P, _TY = match_template(
                 _focal_plane[msk],
-                template[t_msk],
+                _template[t_msk],
                 priors=prior,
                 **match_config,
             )
@@ -974,7 +965,7 @@ def main():
     transformed = np.nan + np.zeros((len(focal_plane), 3))
     for msk, t_msk, prior in zip(msks, _template_msks, priors):
         _map, _out, _P, _TY = match_template(
-            _focal_plane[msk],
+            focal_plane[msk],
             template[t_msk],
             priors=prior,
             **match_config,
