@@ -490,49 +490,26 @@ def _load_bg(aman, bg_map):
 def _mk_output(
     out_dt,
     readout_id,
-    det_ids,
+    det_id,
     dm_det_id,
+    band_channel,
     focal_plane,
-    msk_n,
-    msk_s,
-    template_n,
-    template_s,
-    map_n,
-    out_n,
-    P_n,
-    TY_n,
-    map_s,
-    out_s,
-    P_s,
-    TY_s,
+    transformed,
+    P_mapped,
+    out_msk,
+    msks,
 ):
-    det_id = np.zeros(len(readout_id), dtype=det_ids.dtype)
-    det_id[msk_n] = det_ids[template_n][map_n]
-    det_id[msk_s] = det_ids[template_s][map_s]
-
-    logger.info(str(np.sum(msk_n | msk_s)) + " detectors matched")
+    logger.info(str(np.sum(np.any(msks, axis=0))) + " detectors matched")
     logger.info(str(np.unique(det_id).shape[0]) + " unique matches")
     if dm_det_id is not None:
         logger.info(str(np.sum(det_id == dm_det_id)) + " match with detmap")
 
-    P_mapped = np.zeros(len(readout_id))
-    P_mapped[msk_n] = P_n[map_n, range(P_n.shape[1])]
-    P_mapped[msk_s] = P_s[map_s, range(P_s.shape[1])]
-
-    transformed = np.nan + np.zeros((len(readout_id), 3))
-    ndim = TY_n.shape[1] - 1
-    transformed[msk_n, :ndim] = TY_n[:, 1:]
-    transformed[msk_s, :ndim] = TY_s[:, 1:]
-
-    out_msk = np.zeros(len(readout_id), dtype=bool)
-    out_msk[np.flatnonzero(msk_n)[out_n]] = True
-    out_msk[np.flatnonzero(msk_s)[out_s]] = True
-    out_msk[~(msk_n | msk_s)] = True
-
+    band_channel = np.nan_to_num(band_channel, nan=-1)
     data_out = np.fromiter(
         zip(
             readout_id,
             det_id,
+            *band_channel.T,
             *focal_plane.T,
             *transformed.T,
             P_mapped,
@@ -609,15 +586,73 @@ def main():
     input_paths = "input_data_paths"
     outpath = os.path.abspath(outpath)
 
-    # Make ResultSet of input paths for later reference
-    types = ["config", "tunefile", "bgmap", "results", "context"]
+    # Make list of input paths for later reference
+    types = ["config", "tunefile", "results", "context"]
     paths = [
         args.config_path,
         tunefile,
-        config["bias_map"],
         outpath,
         config["context"]["path"],
     ]
+
+    # If requested generate a template for the UFM with the instrument model
+    gen_template = config["gen_template"]
+    # If given a path instead of a bool load template from file
+    if isinstance(gen_template, str):
+        logger.info("Loading template from " + gen_template)
+        if os.path.isfile(gen_template):
+            # Assuming its a tsv with columns: det_id, bias_line, x, y, is_north
+            template = np.genfromtxt(gen_template, dtype=str)
+            det_ids = template[:, 0]
+            template_n = template[:, -1].astype(bool)
+            template_s = ~template_n
+            template_msks = [template_n, template_s]
+            template = template[:, 1:-1].astype(float)
+            gen_template = True
+            types.append("template")
+            paths.append("gen_template")
+        else:
+            logger.error(
+                "Requested template file doesn't exist. Generating template instead."
+            )
+            gen_template = True
+            template, template_n, template_s, det_ids = _gen_template(ufm)
+    elif gen_template:
+        template, template_n, template_s, det_ids = _gen_template(ufm)
+        template_msks = [template_n, template_s]
+
+    # Check if we can load a bgmap and load it if we can
+    have_bgmap = "bias_map" in config
+    if have_bgmap:
+        logger.info("loading bg_map from " + config["bias_map"])
+        if os.path.isfile(config["bias_map"]):
+            bg_map = np.load(config["bias_map"], allow_pickle=True).item()
+            types.append("bgmap")
+            paths.append(config["bias_map"])
+        else:
+            logger.error(
+                "Requested bgmap doesn't exist. Running without bias line info."
+            )
+            have_bgmap = False
+    else:
+        logger.warning("Running without bias line info. This can effect performance.")
+        config["matching"]["bias_lines"] = False
+
+    # Check if we can load a detmap
+    have_detmap = "detmap" in config
+    if have_detmap:
+        logger.info("Using detmap from " + config["detmap"])
+        if os.path.isfile(config["detmap"]):
+            types.append("detmap")
+            paths.append(config["detmap"])
+        else:
+            logger.error("Requested detmap doesn't exist. Running without one.")
+            have_detmap = False
+    else:
+        logger.warning("Running without detmap info. This can effect performance.")
+        config["dm_transform"] = False
+
+    # Make ResultSet of inputs
     paths = [os.path.abspath(p) for p in paths]
     types += ["obs_id"] * len(obs_ids)
     paths += list(obs_ids)
@@ -626,21 +661,12 @@ def main():
         src=np.vstack((types, paths)).T,
     )
 
-    # If requested generate a template for the UFM with the instrument model
-    gen_template = config["gen_template"]
-    if gen_template:
-        template, template_n, template_s, det_ids = _gen_template(ufm)
-
-    bg_map = np.load(config["bias_map"], allow_pickle=True).item()
-
     reverse = config["matching"].get("reverse", False)
     if reverse:
         logger.warning(
             "Matching running in reverse mode. meas_x and meas_y will actually be fit pointing."
         )
-    make_priors = "priors" in config
-    priors_n = None
-    priors_s = None
+    make_priors = ("priors" in config) and have_detmap
     avg_fp = {}
     master_template = []
     results = [[], [], []]
@@ -653,7 +679,7 @@ def main():
         if pointing_name not in aman:
             logger.warning("No pointing associated with this observation. Skipping.")
             continue
-        num += 1
+
         if pol_name is not None:
             pol = True
             if pol_name not in aman:
@@ -661,11 +687,21 @@ def main():
                 logger.warning("No polang associated with this pointing")
         # Put SMuRF band channel in the correct place
         smurf = AxisManager(aman.dets)
-        smurf.wrap("band", aman[pointing_name].band, [(0, smurf.dets)])
-        smurf.wrap("channel", aman[pointing_name].channel, [(0, smurf.dets)])
+        have_band = "band" in aman[pointing_name]
+        if have_band:
+            smurf.wrap("band", aman[pointing_name].band, [(0, smurf.dets)])
+        else:
+            logger.error(
+                "Input is missing band information. Won't be able to load detmap or bgmap and north/south split cannot be performed."
+            )
+        have_ch = "channel" in aman[pointing_name]
+        if have_ch:
+            smurf.wrap("channel", aman[pointing_name].channel, [(0, smurf.dets)])
+        else:
+            logger.error(
+                "Input is missing channel information. Won't be able to load detmap or bgmap."
+            )
         aman.det_info.wrap("smurf", smurf)
-
-        g3u.add_detmap_info(aman, config["detmap"], columns="all")
 
         # Do a radial cut
         r = np.sqrt(
@@ -677,38 +713,63 @@ def main():
         logger.info("\tCut " + str(np.sum(~r_msk)) + " detectors with bad pointing")
 
         original = aman
-        if config["dm_transform"]:
-            logger.info("\tApplying transformation from detmap")
-            original = aman.copy()
-            transform_from_detmap(aman, pointing_name)
+        if have_detmap and have_band and have_ch:
+            g3u.add_detmap_info(aman, config["detmap"], columns="all")
+            if config["dm_transform"]:
+                logger.info("\tApplying transformation from detmap")
+                original = aman.copy()
+                transform_from_detmap(aman, pointing_name)
 
         # Load bias group info
-        bias_group, msk_bp = _load_bg(aman, bg_map)
-        bl_diff = np.sum(~(bias_group == aman.det_info.wafer.bias_line)) - np.sum(
-            ~(msk_bp)
-        )
-        logger.info(
-            "\t"
-            + str(bl_diff)
-            + " detectors have bias lines that don't match the detmap"
-        )
+        if have_bgmap and have_band and have_ch:
+            bias_group, msk_bp = _load_bg(aman, bg_map)
+            bl_diff = np.sum(~(bias_group == aman.det_info.wafer.bias_line)) - np.sum(
+                ~(msk_bp)
+            )
+            logger.info(
+                "\t"
+                + str(bl_diff)
+                + " detectors have bias lines that don't match the detmap"
+            )
+            bias_group[bias_group % 2 == 1] *= -1
+        else:
+            bias_group = np.nan + np.zeros(aman.dets.count)
+            msk_bp = np.ones(aman.dets.count, dtype=bool)
 
-        north = np.isin(aman.det_info.smurf.band.astype(int), (0, 1, 2, 3))
-        msk_n = north & msk_bp
-        msk_s = (~north) & msk_bp
-        bias_group[bias_group % 2 == 1] *= -1
+        msks = []
+        if have_band:
+            north = np.isin(aman.det_info.smurf.band.astype(int), (0, 1, 2, 3))
+            msks += [north & msk_bp, (~north) & msk_bp]
+        else:
+            msks += [np.ones(aman.dets.count, dtype=bool)]
 
         # Prep inputs
         if not gen_template:
+            if not (have_detmap and have_band and have_ch):
+                logger.warning(
+                    "Unable to make template from detmap for this observation, skipping."
+                )
+                logger.warning(
+                    "You may want to change settings and either provide a template or turn in gen_template."
+                )
+                continue
             template, template_n, template_s, det_ids = _mk_template(ufm)
-            master_template.append(np.column_stack((template, det_ids)))
-            if np.sum(template_n | template_n) < np.sum(msk_n | msk_s):
+            template_msks = [template_n, template_s]
+            c_msk = np.zeros(aman.dets.count)
+            for i, msk in enumerate(template_msks):
+                c_msk += i * msk
+            master_template.append(np.column_stack((template, det_ids, c_msk)))
+            if np.sum(template_n | template_s) < np.sum(np.any(msks, axis=0)):
                 logger.warning(
                     "\tTemplate is smaller than input pointing, uniqueness of mapping is no longer gauranteed"
                 )
+        if have_band:
+            _template_msks = template_msks
+        else:
+            _template_msks = [np.ones(len(det_ids), dtype=bool)]
 
-        if make_priors:
-            priors = gen_priors(
+        if make_priors and have_detmap and have_band and have_ch:
+            _priors = gen_priors(
                 aman,
                 det_ids,
                 config["priors"]["val"],
@@ -716,8 +777,11 @@ def main():
                 config["priors"]["width"],
                 config["priors"]["basis"],
             )
-            priors_n = priors[np.ix_(template_n, msk_n)]
-            priors_s = priors[np.ix_(template_s, msk_s)]
+            priors = []
+            for t_msk, msk in zip(template_msks, msks):
+                priors.append(_priors[np.ix_(t_msk, msk)])
+        else:
+            priors = [None] * len(msks)
 
         if pol:
             focal_plane = np.column_stack(
@@ -754,48 +818,54 @@ def main():
             )
             _focal_plane = focal_plane[:, :-1]
             template = template[:, :-1]
+        ndim = _focal_plane.shape[1] - 1
 
         # Do actual matching
-        map_n, out_n, P_n, TY_n = match_template(
-            _focal_plane[msk_n],
-            template[template_n],
-            priors=priors_n,
-            **config["matching"],
-        )
-        map_s, out_s, P_s, TY_s = match_template(
-            _focal_plane[msk_s],
-            template[template_s],
-            priors=priors_s,
-            **config["matching"],
-        )
-        P_avg = (
-            np.median(P_n[map_n, range(P_n.shape[1])])
-            + np.median(P_s[map_s, range(P_s.shape[1])])
-        ) / 2
-        logger.info("\tAverage matched likelihood = " + str(P_avg))
+        match_config = config["matching"]
+        match_config["bias_lines"] &= have_bgmap and have_band and have_ch
+        mapped_det_ids = np.zeros(len(focal_plane), dtype=det_ids.dtype)
+        out_msk = np.zeros(len(focal_plane), dtype=bool)
+        P = np.zeros(len(focal_plane))
+        transformed = np.nan + np.zeros((len(focal_plane), 3))
+        for msk, t_msk, prior in zip(msks, _template_msks, priors):
+            _map, _out, _P, _TY = match_template(
+                _focal_plane[msk],
+                template[t_msk],
+                priors=prior,
+                **match_config,
+            )
+            mapped_det_ids[msk] = det_ids[t_msk][_map]
+            P[msk] = _P[_map, range(_P.shape[1])]
+            out_msk[np.flatnonzero(msk)[_out]] = True
+            transformed[msk, :ndim] = _TY[:, 1:]
+        out_msk[~np.any(msks, axis=0)] = True
+        logger.info("\tAverage matched likelihood = " + str(np.median(P)))
 
         # Store outputs for now
         results[0].append(aman.det_info.readout_id)
         results[1].append(det_ids)
-        P = np.zeros((len(template), len(focal_plane)), dtype=bool)
-        P[np.ix_(template_n, msk_n)] = P_n
-        P[np.ix_(template_s, msk_s)] = P_s
         results[2].append(P)
 
-        out_msk = np.zeros(aman.dets.count, dtype=bool)
-        out_msk[np.flatnonzero(msk_n)[out_n]] = True
-        out_msk[np.flatnonzero(msk_s)[out_s]] = True
-        out_msk[~(msk_n | msk_s)] = True
-
-        ns_msk = np.zeros(aman.dets.count)
-        ns_msk[msk_n] = 1
+        # Collapse mask and save focal plane
+        c_msk = np.zeros(aman.dets.count)
+        if have_band:
+            band = aman.det_info.smurf.band
+            for i, msk in enumerate(msks):
+                c_msk += i * msk
+        else:
+            band = np.nan + np.zeros(aman.dets.count)
+            c_msk += np.nan
+        if have_ch:
+            ch = aman.det_info.smurf.channel
+        else:
+            ch = np.nan + np.zeros(aman.dets.count)
         focal_plane = np.column_stack(
             (
-                aman.det_info.smurf.band,
-                aman.det_info.smurf.channel,
+                band,
+                ch,
                 original_focal_plane,
                 focal_plane,
-                ns_msk,
+                c_msk,
             )
         )
         focal_plane[out_msk, 2:] = np.nan
@@ -804,6 +874,7 @@ def main():
                 avg_fp[ri].append(fp)
             except KeyError:
                 avg_fp[ri] = [fp]
+        num += 1
 
     out_dt = np.dtype(
         [
@@ -826,24 +897,20 @@ def main():
         logger.error("No valid observations provided")
         sys.exit()
     elif num == 1:
+        dm_det_id = None
+        if have_detmap and have_band and have_ch:
+            dm_det_id = aman.det_info.det_id
         rset_data = _mk_output(
             out_dt,
             aman.det_info.readout_id,
-            det_ids,
-            aman.det_info.det_id,
-            focal_plane[:, :5],
-            msk_n,
-            msk_s,
-            template_n,
-            template_s,
-            map_n,
-            out_n,
-            P_n,
-            TY_n,
-            map_s,
-            out_s,
-            P_s,
-            TY_s,
+            mapped_det_ids,
+            dm_det_id,
+            focal_plane[:, :2],
+            focal_plane[:, 2:5],
+            transformed,
+            P,
+            out_msk,
+            msks,
         )
         write_dataset(rset_data, outpath, dataset, overwrite=True)
         write_dataset(rset_paths, outpath, input_paths, overwrite=True)
@@ -856,8 +923,12 @@ def main():
 
     if not gen_template:
         template = np.unique(np.vstack(master_template), axis=0)
-        det_ids = template[:, -1]
-        template = template[:, :-1].astype(float)
+        c_msk = template[:, -1].astype(int)
+        template_msks = []
+        for i in range(np.max(c_msk)):
+            template_msks.append(c_msk == i)
+        det_ids = template[:, -2]
+        template = template[:, :-2].astype(float)
 
     # Compute the average focal plane while ignoring outliers
     focal_plane = []
@@ -866,8 +937,13 @@ def main():
         avg_pointing = np.nanmedian(np.vstack(avg_fp[rid]), axis=0)
         focal_plane.append(avg_pointing)
     focal_plane = np.column_stack(focal_plane)
-    msk_n = focal_plane[-1].astype(bool)
-    msk_s = ~msk_n
+    c_msk = focal_plane[-1].astype(int)
+    if np.isnan(c_msk).all():
+        msks = [np.ones_like(c_msk, dtype=bool)]
+    else:
+        msks = []
+        for i in range(np.nanmax(c_msk)):
+            msks.append(c_msk == i)
     bc_avg_pointing = focal_plane[:5].T
     focal_plane = focal_plane[5:9].T
     if np.isnan(focal_plane[:, -1]).all():
@@ -885,34 +961,43 @@ def main():
             P,
             config["prior_normalization"],
         )
+    priors = []
+    for t_msk, msk in zip(template_msks, msks):
+        priors.append(_priors[np.ix_(t_msk, msk)])
 
     # Do final matching
-    north_results = match_template(
-        focal_plane[msk_n],
-        template[template_n],
-        priors=priors[np.ix_(template_n, msk_n)],
-        **config["matching"],
-    )
-    south_results = match_template(
-        focal_plane[msk_s],
-        template[template_s],
-        priors=priors[np.ix_(template_s, msk_s)],
-        **config["matching"],
-    )
+    match_config = config["matching"]
+    match_config["bias_lines"] &= have_bgmap and np.isfinite(_focal_plane[:, 0]).all()
+    mapped_det_ids = np.zeros(len(focal_plane), dtype=det_ids.dtype)
+    out_msk = np.zeros(len(focal_plane), dtype=bool)
+    P = np.zeros(len(focal_plane))
+    transformed = np.nan + np.zeros((len(focal_plane), 3))
+    for msk, t_msk, prior in zip(msks, _template_msks, priors):
+        _map, _out, _P, _TY = match_template(
+            _focal_plane[msk],
+            template[t_msk],
+            priors=prior,
+            **match_config,
+        )
+        mapped_det_ids[msk] = det_ids[t_msk][_map]
+        P[msk] = _P[_map, range(_P.shape[1])]
+        out_msk[np.flatnonzero(msk)[_out]] = True
+        transformed[msk, :ndim] = _TY[:, 1:]
+    out_msk[~np.any(msks, axis=0)] = True
+    logger.info("\tAverage matched likelihood = " + str(np.median(P)))
 
     # Make final outputs and save
     rset_data = _mk_output(
         out_dt,
         readout_ids,
-        det_ids,
+        mapped_det_ids,
         None,
-        bc_avg_pointing,
-        msk_n,
-        msk_s,
-        template_n,
-        template_s,
-        *north_results,
-        *south_results,
+        bc_avg_pointing[:, :2],
+        bc_avg_pointing[:, 2:5],
+        transformed,
+        P,
+        out_msk,
+        msks,
     )
     write_dataset(rset_data, outpath, dataset, overwrite=True)
     write_dataset(rset_paths, outpath, input_paths, overwrite=True)
