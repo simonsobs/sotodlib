@@ -406,7 +406,8 @@ def load_wafer_data(filename, array_name, sub_array_name=None):
 
     filename(str): path to det_info hdf5 file
     array_name(str): array name to load from the file
-    sub_array_name(str): work-around to change the array name while we only have some arrays
+    sub_array_name(str): work-around to change the array name while we
+        only have some arrays
     """
 
     rs = read_dataset(filename, array_name)
@@ -618,8 +619,8 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
         tubeprops = hw.data["tube_slots"][tube_slots[0]]
         waferspace = tubeprops["waferspace"] * platescale
 
-        # Wafers are arranged in a rotated hexagon shape, however these locations
-        # are rotated from a normal layout.
+        # Wafers are arranged in a rotated hexagon shape, however these
+        # locations are rotated from a normal layout.
         wcenters = hex_layout(
             7,
             (3.0 * np.sqrt(3.0) / 2) * waferspace * u.degree,
@@ -645,7 +646,7 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
 
         windx = 0
         for wafer_slot in tubeprops["wafer_slots"]:
-            if det_info is not None:
+            if det_info is not None and det_info[0] is not None:
                 dets = load_wafer_detectors(
                     hw, wafer_slot, platescale, fwhm,
                     det_info[0], det_info[1], center=centers[windx],
@@ -659,8 +660,9 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
             alldets.update(dets)
             windx += 1
     else:
-        # This is the LAT.  We layout detectors for the case of 30 degree elevation
-        # and no boresight rotation.  Compute the tube centers.
+        # This is the LAT.  We layout detectors for the case of 30
+        # degree elevation and no boresight rotation.  Compute the
+        # tube centers.
 
         # Inter-tube spacing
         tubespace = teleprops["tubespace"]
@@ -706,7 +708,7 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
 
             windx = 0
             for wafer_slot in tubeprops["wafer_slots"]:
-                if det_info is not None:
+                if det_info is not None and det_info[0] is not None:
                     dets = load_wafer_detectors(
                         hw, wafer_slot, platescale, fwhm,
                         det_info[0], det_info[1], center=centers[windx],
