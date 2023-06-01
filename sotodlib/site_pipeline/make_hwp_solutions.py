@@ -134,7 +134,7 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
 
         h5_address = obs_id
         aman.save(output_filename, h5_address, overwrite=True)
-"""     
+        """     
         # Add an entry to the database
         man_db.add_entry({'obs:obs_id': obs_id, 'dataset': h5_address}, filename=output_filename)
 
@@ -145,4 +145,6 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
     
     
 if __name__ == '__main__':
+    parser = get_parser()
+    args = parser.parse_args()
     util.main_launcher(main, get_parser)
