@@ -103,6 +103,17 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
 
         logger.debug("analyze")
         solved = g3thwp.analyze(data)
+        
+        # template subtracted angle
+        try:
+            g3thwp.eval_angle(solved)
+        except Exception as e:
+            logger.error(f"Exception '{e}' thrown while the template subtraction")
+            continue    
+        g3thwp.write_solution_h5(solved, tod, output=output_filename, h5_address=obs_id)
+        
+        del g3thwp
+        """
         aman.hwp_angle = scipy.interpolate.interp1d(
             solved['fast_time'],
             solved['angle'],
@@ -110,21 +121,26 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
             fill_value='extrapolate')(tod.timestamps)
         
         # template subtracted angle --- need to fix bug inside
-        #g3thwp.eval_angle(solved)
-        #aman.hwp_angle_eval = g3thwp.interp_smurf(solved,tod.timestamps)
-        
+        g3thwp.eval_angle(solved)
+        aman.hwp_angle_eval = scipy.interpolate.interp1d(
+            solved['fast_time'],
+            solved['angle'],
+            kind='linear',
+            fill_value='extrapolate')(tod.timestamps)
+
+       
         del g3thwp
         #### End of angle calculation ####
 
         h5_address = obs_id
         aman.save(output_filename, h5_address, overwrite=True)
-    
+"""     
         # Add an entry to the database
         man_db.add_entry({'obs:obs_id': obs_id, 'dataset': h5_address}, filename=output_filename)
 
         # Commit the ManifestDb to file.
         man_db.to_file(man_db_filename)
-    
+   
     return
     
     
