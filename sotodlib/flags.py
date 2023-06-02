@@ -164,6 +164,9 @@ def get_trending_flags(
         trends: if full_output is true, calculated slopes and the
         sample edges where they were calculated.
     """
+    if 'flags' not in aman:
+        overwrite = False
+        merge = False
     if overwrite and name in aman.flags:
         aman.flags.move(name, None)
 
