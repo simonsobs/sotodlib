@@ -570,7 +570,11 @@ def main():
     if pol_name is None:
         logger.warning("Polarization data is disabled")
         pol = False
-    obs_ids = config["context"]["obs_ids"]
+    obs_ids = np.append(
+        config["context"].get("obs_ids", []),
+        ctx.obsdb.query(config["context"]["query"])["obs_id"],
+    )
+    obs_ids = np.unique(obs_ids)
     if len(obs_ids) == 0:
         raise ValueError("No observations provided in configuration")
 
