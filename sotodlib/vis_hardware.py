@@ -101,6 +101,19 @@ def plot_detectors(
         [dets[detnames[x]]["quat"] for x in range(n_det)], dtype=np.float64
     )
 
+    # Skip bolometers that do not have a proper quaternion
+    good = np.isfinite(quats[:, 0])
+    bad = np.logical_not(good)
+    nbad = np.sum(bad)
+    if nbad != 0:
+        print(f"Skipping {nbad} detectors without quaternions")
+        for detname, is_bad in zip(detnames, bad):
+            if is_bad:
+                del dets[detname]
+        detnames = list(dets.keys())
+        quats = quats[good]
+        n_det = len(dets)
+
     lat_rot = None
     lat_elstr = ""
 

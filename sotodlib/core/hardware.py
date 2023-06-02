@@ -73,6 +73,28 @@ def parse_readout_id(readout_id):
     channel = smband * 8 + smchan
     return (wf, ct, channel)
 
+def sim_wafer_names( hw ):
+    """Adds SO generic UFM names to the hardware model based on the type of the wafer
+       Ex: Uv1, Mv4, Lv3, etc
+    """
+    c = [1,1,1]
+    for wafer in hw.data["wafer_slots"]:
+        wprops = hw.data["wafer_slots"][wafer]
+        if "UHF" in wprops["type"]:
+            pre = "Uv"
+            i = 0
+        elif "MF" in wprops["type"]:
+            pre = "Mv"
+            i = 1
+        elif "LF" in wprops["type"]:
+            pre = "Lv"
+            i = 2
+        else:
+            raise ValueError(f"Unknown band type {wprops['type']} for wafer {wafer}")
+
+        wprops["wafer_name"] = f"{pre}{c[i]}"
+        c[i] += 1
+
 
 class Hardware(object):
     """Class representing a specific hardware configuration.
