@@ -177,6 +177,10 @@ the standard operators in toast.
    :members:
    :noindex:
 
+.. autoclass:: sotodlib.toast.ops.SimReadout
+   :members:
+   :noindex:
+
 
 Data I/O
 ^^^^^^^^^^^^^^
