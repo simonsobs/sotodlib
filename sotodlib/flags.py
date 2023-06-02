@@ -182,7 +182,7 @@ def get_trending_flags(
     ):
         samps = len(t)
         # Cheap downsampling
-        if len(t) < max_samples:
+        if len(t) > max_samples:
             n = len(t) // max_samples
             t = t[::n]
             s = s[:, ::n]
@@ -194,13 +194,13 @@ def get_trending_flags(
         )
         if full_output:
             slopes = np.hstack((slopes, _slopes[..., np.newaxis]))
-            samp_edges.append(samp_edges[-1] + len(t))
+            samp_edges.append(samp_edges[-1] + samps)
     cut = RangesMatrix.from_mask(cut)
 
     if merge:
         if name in aman.flags and not overwrite:
             raise ValueError("Flag name {} already exists in aman.flags".format(name))
-        elif name in aman.flags:
+        if name in aman.flags:
             aman.flags[name] = cut
         else:
             aman.flags.wrap(name, cut)
