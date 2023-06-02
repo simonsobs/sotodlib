@@ -5,9 +5,9 @@ Currently only works for the LAT.
 LAT code adapted from code provided by Simon Dicker.
 """
 import logging
-from functools import cache
+from functools import cache, partial
 import numpy as np
-from scipy.interpolate import interp2d, interp1d
+from scipy.interpolate import interp1d, bisplrep, bisplev
 from scipy.spatial.transform import Rotation as R
 from sotodlib import core
 from so3g.proj import quat
@@ -42,6 +42,21 @@ LAT_TUBES = {
 # TODO: Maybe we want these to be provided in a config file?
 SAT_X = (0.00000, 29.7580, 59.4574, 89.5745, 120.550, 152.821, 163.986, 181.218)
 SAT_THETA = (0.00000, 2.99999, 5.99999, 8.99999, 12.0000, 14.9999, 15.9999, 17.4999)
+
+
+def _interp_func(x, y, spline):
+    xr = np.atleast_1d(x).ravel()
+    xa = np.argsort(xr)
+    xs = np.argsort(xr)
+    yr = np.atleast_1d(y).ravel()
+    ya = np.argsort(yr)
+    ys = np.argsort(ya)
+    z = bisplev(xr[xa], yr[ya], spline)
+    z = z[(xs, ys)]
+
+    if np.isscalar(x):
+        return z[0]
+    return z.reshape(x.shape)
 
 
 # TODO: Should probably have a lookup table that maps tube/wafer to the correct parameters
@@ -115,16 +130,16 @@ def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo
     xz = x * np.cos(d2r * opt2cryo) - y * np.sin(d2r * opt2cryo)
     yz = y * np.cos(d2r * opt2cryo) + x * np.sin(d2r * opt2cryo)
     # Where is it on (zemax secondary focal plane wrt LATR)
-    xs = np.diag(array2secx(xz, yz)).ravel()
-    ys = np.diag(array2secy(xz, yz)).ravel()
+    xs = array2secx(xz, yz)
+    ys = array2secy(xz, yz)
     # get into LAT zemax coord
     # We may need to add a rotation offset here to account for physical vs ZEMAX
     xrot = xs * np.cos(d2r * rot) - ys * np.sin(d2r * rot)
     yrot = ys * np.cos(d2r * rot) + xs * np.sin(d2r * rot)
-    elev = np.diag(
-        sec2elev(xrot, yrot)
-    ).ravel()  # note these are around the telescope boresight
-    xel = np.diag(sec2xel(xrot, yrot)).ravel()
+    # note these are around the telescope boresight
+    elev = sec2elev(xrot, yrot)
+    xel = sec2xel(xrot, yrot)
+
     return elev, xel
 
 
@@ -172,8 +187,15 @@ def LAT_optics(zemax_path):
         raise e
 
     gi = np.where(LAT["mask"] != 0.0)
-    sec2elev = interp2d(LAT["x"][gi], LAT["y"][gi], LAT["elev"][gi], bounds_error=True)
-    sec2xel = interp2d(LAT["x"][gi], LAT["y"][gi], LAT["xel"][gi], bounds_error=True)
+    x = LAT["x"][gi].ravel()
+    y = LAT["y"][gi].ravel()
+    elev = LAT["elev"][gi].ravel()
+    xel = LAT["xel"][gi].ravel()
+
+    s2e = bisplrep(x, y, elev, kx=3, ky=3)
+    sec2elev = partial(_interp_func, spline=s2e)
+    s2x = bisplrep(x, y, xel, kx=3, ky=3)
+    sec2xel = partial(_interp_func, spline=s2x)
 
     return sec2elev, sec2xel
 
@@ -219,18 +241,16 @@ def LATR_optics(zemax_path, tube):
 
     logger.info("Working on LAT tube " + tube_name)
     gi = np.where(LATR[tube_num]["mask"] != 0)
-    array2secx = interp2d(
-        LATR[tube_num]["array_x"][gi],
-        LATR[tube_num]["array_y"][gi],
-        LATR[tube_num]["sec_x"][gi],
-        bounds_error=True,
-    )
-    array2secy = interp2d(
-        LATR[tube_num]["array_x"][gi],
-        LATR[tube_num]["array_y"][gi],
-        LATR[tube_num]["sec_y"][gi],
-        bounds_error=True,
-    )
+
+    array_x = LATR[tube_num]["array_x"][gi].ravel()
+    array_y = LATR[tube_num]["array_y"][gi].ravel()
+    sec_x = LATR[tube_num]["sec_x"][gi].ravel()
+    sec_y = LATR[tube_num]["sec_y"][gi].ravel()
+
+    a2x = bisplrep(array_x, array_y, sec_x, kx=3, ky=3)
+    array2secx = partial(_interp_func, spline=a2x)
+    a2y = bisplrep(array_x, array_y, sec_y, kx=3, ky=3)
+    array2secy = partial(_interp_func, spline=a2y)
 
     return array2secx, array2secy
 
