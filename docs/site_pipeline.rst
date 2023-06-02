@@ -593,6 +593,7 @@ Here's an annotated example:
 .. code-block:: yaml
 
   # Data sources
+  # Both of these are technically optional but are strongly reccomended
   detmap: "detmap_results.csv"
   bias_map: "bias_map_results.npz"
   
@@ -602,8 +603,10 @@ Here's an annotated example:
     pointing: "beammap"
     polarization: null # Set to null to not use
     # List of observation ids to run on
+    # You need at least one of these, but can also provide both
     obs_ids:
         - "obs_ufm_uv31_1677980982"
+    query: "sqlite query string"
   
   # Configuration options
   ufm: "Uv8"
@@ -651,8 +654,9 @@ The current types of paths are:
 
 - config
 - tunefile
-- bgmap
 - context
+- bgmap
+- detmap
 - obs_id (not actually a path, but useful to track)
 
 The second dataset is called ``focal_plane`` and has columns:
