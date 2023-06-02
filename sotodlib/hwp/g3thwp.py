@@ -10,7 +10,8 @@ import logging
 import yaml
 import datetime
 import h5py
-from sotodlib.io.metadata import write_dataset
+import sotodlib
+
 
 logger = logging.getLogger(__name__)
 
@@ -744,7 +745,7 @@ class G3tHWP():
             logger.info('write no rotation data, skip writing')
             return
         
-        aman = core.AxisManager(tod.dets, tod.samps)
+        aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         aman.wrap_new('hwp_angle', shape=('samps', ))
         aman.wrap_new('hwp_angle_eval', shape=('samps', ))
         if 'fast_time_raw' in solved.keys():
