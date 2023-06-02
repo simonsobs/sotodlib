@@ -11,20 +11,16 @@ import logging
 import yaml
 import datetime as dt
 import scipy 
-
-## Temporary
-sys.path.insert(0, "/mnt/so1/users/ysakurai/sotodlib_dev/make-hwp-solutions/sotodlib/")
-
 import sotodlib
 from sotodlib import core
 from sotodlib.hwp.g3thwp import G3tHWP
-
 from sotodlib.site_pipeline import util
 logger = util.init_logger(__name__, 'make-hwp-solutinos: ')
 
 
 def get_parser(parser=None):
     if parser is None:
+        
         parser = argparse.ArgumentParser()
     parser.add_argument('--context',required=True, help=
                         "Path to context yaml file to define observation for which to generate hwp angle.")
@@ -43,6 +39,7 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
     
     print(context, config_file)
     configs = yaml.safe_load(open(config_file, "r"))
+    args = parser.parse_args()
     if args.output_dir is None:
         args.output_dir = configs["output_dir"]
     
@@ -135,6 +132,7 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
         h5_address = obs_id
         aman.save(output_filename, h5_address, overwrite=True)
         """     
+        h5_address = obs_id
         # Add an entry to the database
         man_db.add_entry({'obs:obs_id': obs_id, 'dataset': h5_address}, filename=output_filename)
 
@@ -146,5 +144,4 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
     
 if __name__ == '__main__':
     parser = get_parser()
-    args = parser.parse_args()
     util.main_launcher(main, get_parser)
