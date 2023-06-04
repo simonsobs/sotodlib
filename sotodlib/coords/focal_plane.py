@@ -47,7 +47,7 @@ SAT_THETA = (0.00000, 2.99999, 5.99999, 8.99999, 12.0000, 14.9999, 15.9999, 17.4
 def _interp_func(x, y, spline):
     xr = np.atleast_1d(x).ravel()
     xa = np.argsort(xr)
-    xs = np.argsort(xr)
+    xs = np.argsort(xa)
     yr = np.atleast_1d(y).ravel()
     ya = np.argsort(yr)
     ys = np.argsort(ya)
