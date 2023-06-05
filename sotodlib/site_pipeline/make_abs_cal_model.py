@@ -6,7 +6,7 @@ import yaml
 from pprint import pprint
 
 from pixell import enmap
-from sotodlib import core
+from sotodlib import core, coords
 import sotodlib.io.metadata as io_meta
 from sotodlib.calibration import planet_ref
 from sotodlib.site_pipeline import util
@@ -82,11 +82,16 @@ def main(config_file=None, obs_id=None, groups=None, verbose=0,
         print('The archive of uncal-beammap contains:')
         pprint([inspect_dict['obs:obs_id'] for inspect_dict in uncalmap_db.inspect()])
         return
-    
-
         
     # get obs
     obs = obsdb.query(f'obs_id == "{obs_id}"')[0]
+    # load tod without signal
+    tod = ctx.get_obs(obs_id=obs_id, no_signal=True)
+    P, q = coords.planets.get_scan_P(tod, planet=obs['target'])
+    az, el = q['az'], q['el']
+    pwv_mean = 1.0 # = np.mean(aman.pwv)
+    pwv_std = 0.1 # = np.std(aman.pwv)
+    
     # load infomation of uncal-beammap
     uncalmap_info_all_groups = uncalmap_db.match({'obs:obs_id': obs_id}, multi=True)
     all_groups = [uncalmap_info['group'] for uncalmap_info in uncalmap_info_all_groups]
@@ -116,7 +121,8 @@ def main(config_file=None, obs_id=None, groups=None, verbose=0,
         
     logger.info(f'Gain factors for groups ({groups}) will be calculated')
     
-    gain_factor_rs = core.metadata.ResultSet(keys=['groups', 'gain_factor', 'gain_factor_error'])
+    gain_factor_rs = core.metadata.ResultSet(keys=['groups', 'gain_factor', 'gain_factor_error',
+                                                  'az', 'el', 'pwv_mean', 'pwv_std'])
     for uncalmap_info in uncalmap_info_all_groups:
         group = uncalmap_info['group']
         if group in groups:
@@ -133,14 +139,16 @@ def main(config_file=None, obs_id=None, groups=None, verbose=0,
             expected_Trj = expected_Trj_Omega / Omega_fit
             gain_factor = expected_Trj / peak_fit
             gain_factor_error = 0. # for now
-            gain_factor_rs.rows.append((group, gain_factor, gain_factor_error))
+            gain_factor_rs.rows.append((group, gain_factor, gain_factor_error, az, el, pwv_mean, pwv_std))
             
             # registor gain factors in data-base
             db_data = {'obs:obs_id': obs_id,
                        'group': group,
-                       'split': uncalmap_info['split']}
+                       'split': uncalmap_info['split'],
+                      }
             db.add_entry(db_data, output_h5, replace=True)
     
+    # write gain_factors into h5 file
     io_meta.write_dataset(gain_factor_rs, output_h5, f'{obs_id}')
         
     return
