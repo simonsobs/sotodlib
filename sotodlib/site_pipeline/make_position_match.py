@@ -704,7 +704,7 @@ def main():
         logger.info("Starting match on observation " + obs_id)
 
         # Load data
-        aman = ctx.get_meta(obs_id)
+        aman = ctx.get_meta(obs_id, dets=config["context"].get("dets", {}))
         if pointing_name not in aman:
             logger.warning("No pointing associated with this observation. Skipping.")
             continue
