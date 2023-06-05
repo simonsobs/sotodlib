@@ -471,7 +471,8 @@ def _mk_template(aman):
         template_s = ~(is_north) & template_msk
     else:
         logger.warning(
-            "\tis_north is missing from the wafer info. If this is a sim this is probably fine. If not please check the inputs."
+            "\tis_north is missing from the wafer info.\n"
+            + "\t\tIf this is a sim this is probably fine. If not please check the inputs."
         )
         template_n = template_msk
         template_s = np.zeros_like(template_msk, dtype=bool)
@@ -560,10 +561,6 @@ def main():
     # Read in input pars
     parser = ap.ArgumentParser()
 
-    # NOTE: Eventually all of this should just be metadata I can load from a single context?
-
-    # Making some assumtions about pointing data that aren't currently true:
-    # 1. I am assuming it contains smurf band and channel
     parser.add_argument("config_path", help="Location of the config file")
     args = parser.parse_args()
 
@@ -737,14 +734,16 @@ def main():
             smurf.wrap("band", aman[pointing_name].band, [(0, smurf.dets)])
         else:
             logger.error(
-                "\tInput is missing band information. Won't be able to load detmap or bgmap and north/south split cannot be performed."
+                "\tInput is missing band information.\n"
+                + "\t\tWon't be able to load detmap or bgmap and north/south split cannot be performed."
             )
         have_ch = "channel" in aman[pointing_name]
         if have_ch:
             smurf.wrap("channel", aman[pointing_name].channel, [(0, smurf.dets)])
         else:
             logger.error(
-                "\tInput is missing channel information. Won't be able to load detmap or bgmap."
+                "\tInput is missing channel information.\n"
+                + "\t\tWon't be able to load detmap or bgmap."
             )
         aman.det_info.wrap("smurf", smurf)
 
