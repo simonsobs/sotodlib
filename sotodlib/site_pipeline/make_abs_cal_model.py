@@ -7,6 +7,7 @@ from pprint import pprint
 
 from pixell import enmap
 from sotodlib import core
+import sotodlib.io.metadata as io_meta
 from sotodlib.calibration import planet_ref
 from sotodlib.site_pipeline import util
 
@@ -81,8 +82,9 @@ def main(config_file=None, obs_id=None, groups=None, verbose=0,
         print('The archive of uncal-beammap contains:')
         pprint([inspect_dict['obs:obs_id'] for inspect_dict in uncalmap_db.inspect()])
         return
-
     
+
+        
     # get obs
     obs = obsdb.query(f'obs_id == "{obs_id}"')[0]
     # load infomation of uncal-beammap
@@ -97,7 +99,24 @@ def main(config_file=None, obs_id=None, groups=None, verbose=0,
     if groups[0] == 'all':
         groups = all_groups
     
+    # output h5
+    output_h5 = config['archive']['policy']['filename']
+        
+    # make database for make_abscal
+    if os.path.exists(config['archive']['index']):
+        logger.info(f'Mapping {config["archive"]["index"]} for the archive index.')
+        db = core.metadata.ManifestDb(config['archive']['index'])
+    else:
+        logger.info(f'Creating {config["archive"]["index"]} for the archive index.')
+        scheme = core.metadata.ManifestScheme()
+        scheme.add_exact_match('obs:obs_id')
+        scheme.add_data_field('group')
+        scheme.add_data_field('split')
+        db = core.metadata.ManifestDb(config['archive']['index'], scheme=scheme)
+        
     logger.info(f'Gain factors for groups ({groups}) will be calculated')
+    
+    gain_factor_rs = core.metadata.ResultSet(keys=['groups', 'gain_factor', 'gain_factor_error'])
     for uncalmap_info in uncalmap_info_all_groups:
         group = uncalmap_info['group']
         if group in groups:
@@ -113,8 +132,17 @@ def main(config_file=None, obs_id=None, groups=None, verbose=0,
                                                    timestamp=obs['timestamp'] + obs['duration']/2.)
             expected_Trj = expected_Trj_Omega / Omega_fit
             gain_factor = expected_Trj / peak_fit
-            print(gain_factor)
+            gain_factor_error = 0. # for now
+            gain_factor_rs.rows.append((group, gain_factor, gain_factor_error))
+            
+            # registor gain factors in data-base
+            db_data = {'obs:obs_id': obs_id,
+                       'group': group,
+                       'split': uncalmap_info['split']}
+            db.add_entry(db_data, output_h5, replace=True)
     
+    io_meta.write_dataset(gain_factor_rs, output_h5, f'{obs_id}')
+        
     return
             
 if __name__ == '__main__':
