@@ -12,6 +12,7 @@ from sotodlib.core import AxisManager, metadata, Context
 from sotodlib.io.metadata import write_dataset
 from sotodlib.site_pipeline import util
 from scipy.optimize import linear_sum_assignment
+from sqlalchemy.exc import OperationalError
 from pycpd import AffineRegistration
 from detmap.makemap import MapMaker
 
@@ -464,9 +465,16 @@ def _mk_template(aman):
         )
     )
     det_ids = dm_aman.det_info.det_id
-    is_north = dm_aman.det_info.wafer.is_north == "True"
-    template_n = is_north & template_msk
-    template_s = ~(is_north) & template_msk
+    if "is_north" in dm_aman.det_info:
+        is_north = dm_aman.det_info.wafer.is_north == "True"
+        template_n = is_north & template_msk
+        template_s = ~(is_north) & template_msk
+    else:
+        logger.warning(
+            "\tis_north is missing from the wafer info. If this is a sim this is probably fine. If not please check the inputs."
+        )
+        template_n = template_msk
+        template_s = np.zeros_like(template_msk, dtype=bool)
 
     return template, template_n, template_s, det_ids
 
@@ -570,33 +578,44 @@ def main():
     if pol_name is None:
         logger.warning("Polarization data is disabled")
         pol = False
-    obs_ids = np.append(
-        config["context"].get("obs_ids", []),
-        ctx.obsdb.query(config["context"]["query"])["obs_id"],
-    )
+    query = []
+    if "query" in config["context"]:
+        query = (ctx.obsdb.query(config["context"]["query"])["obs_id"],)
+    obs_ids = np.append(config["context"].get("obs_ids", []), query)
     obs_ids = np.unique(obs_ids)
     if len(obs_ids) == 0:
         raise ValueError("No observations provided in configuration")
 
     # Figure out the tuneset and check the list of obs
-    SMURF = ls.G3tSmurf(db_path=ctx["obsdb"], archive_path=None)
-    ses = SMURF.Session()
-    tunefile = []
-    for obs_id in obs_ids:
-        try:
-            obs = (
-                ses.query(ls.Observations)
-                .filter(ls.Observations.obs_id == obs_id)
-                .one()
-            )
-        except:
-            raise ValueError(
-                obs_id + " not found. Please check obs_id list and context file."
-            )
-        tunefile.append(obs.tunesets[0].path)
-    if not np.all(np.array(tunefile) == tunefile[0]):
-        raise ValueError("Not all observations have the same tunefile")
+    try:
+        SMURF = ls.G3tSmurf(db_path=ctx["obsdb"], archive_path=None)
+        ses = SMURF.Session()
+        tunefile = []
+        tune_id = []
+        for obs_id in obs_ids:
+            try:
+                obs = (
+                    ses.query(ls.Observations)
+                    .filter(ls.Observations.obs_id == obs_id)
+                    .one()
+                )
+            except:
+                raise ValueError(
+                    obs_id + " not found. Please check obs_id list and context file."
+                )
+            tunefile.append(obs.tunesets[0].path)
+            tune_id.append(obs.tunesets[0].id)
+    except OperationalError:
+        logger.info("Input seems to be from a sim")
+        tunefile = ["sim"] * len(obs_ids)
+        tune_id = ["sim"] * len(obs_ids)
+    if not (
+        np.all(np.array(tunefile) == tunefile[0])
+        and np.all(np.array(tune_id) == tune_id[0])
+    ):
+        raise ValueError("Not all observations have the same tuneset")
     tunefile = tunefile[0]
+    tune_id = tune_id[0]
 
     # Build output path
     ufm = config["ufm"]
@@ -606,11 +625,9 @@ def main():
     if len(obs_ids) == 1:
         create_db(config["manifest_db"])
         db = metadata.ManifestDb(config["manifest_db"])
-        outpath = os.path.join(config["outdir"], f"{ufm}_{obs.obs_id}{append}.h5")
+        outpath = os.path.join(config["outdir"], f"{ufm}_{obs_ids[0]}{append}.h5")
     else:
-        outpath = os.path.join(
-            config["outdir"], f"{ufm}_{obs.tunesets[0].id}{append}.h5"
-        )
+        outpath = os.path.join(config["outdir"], f"{ufm}_{tune_id}{append}.h5")
     dataset = "focal_plane"
     input_paths = "input_data_paths"
     outpath = os.path.abspath(outpath)
@@ -679,7 +696,6 @@ def main():
             have_detmap = False
     else:
         logger.warning("Running without detmap info. This can effect performance.")
-        config["dm_transform"] = False
 
     # Make ResultSet of inputs
     paths = [os.path.abspath(p) for p in paths]
@@ -706,14 +722,14 @@ def main():
         # Load data
         aman = ctx.get_meta(obs_id, dets=config["context"].get("dets", {}))
         if pointing_name not in aman:
-            logger.warning("No pointing associated with this observation. Skipping.")
+            logger.warning("\tNo pointing associated with this observation. Skipping.")
             continue
 
         if pol_name is not None:
             pol = True
             if pol_name not in aman:
                 pol = False
-                logger.warning("No polang associated with this pointing")
+                logger.warning("\tNo polang associated with this pointing")
         # Put SMuRF band channel in the correct place
         smurf = AxisManager(aman.dets)
         have_band = "band" in aman[pointing_name]
@@ -721,14 +737,14 @@ def main():
             smurf.wrap("band", aman[pointing_name].band, [(0, smurf.dets)])
         else:
             logger.error(
-                "Input is missing band information. Won't be able to load detmap or bgmap and north/south split cannot be performed."
+                "\tInput is missing band information. Won't be able to load detmap or bgmap and north/south split cannot be performed."
             )
         have_ch = "channel" in aman[pointing_name]
         if have_ch:
             smurf.wrap("channel", aman[pointing_name].channel, [(0, smurf.dets)])
         else:
             logger.error(
-                "Input is missing channel information. Won't be able to load detmap or bgmap."
+                "\tInput is missing channel information. Won't be able to load detmap or bgmap."
             )
         aman.det_info.wrap("smurf", smurf)
 
@@ -741,13 +757,14 @@ def main():
         aman = aman.restrict("dets", aman.dets.vals[r_msk])
         logger.info("\tCut " + str(np.sum(~r_msk)) + " detectors with bad pointing")
 
-        original = aman
         if have_detmap and have_band and have_ch:
             g3u.add_detmap_info(aman, config["detmap"], columns="all")
-            if config["dm_transform"]:
-                logger.info("\tApplying transformation from detmap")
-                original = aman.copy()
-                transform_from_detmap(aman, pointing_name)
+        have_wafer = "wafer" in aman.det_info
+        original = aman
+        if have_wafer and config["dm_transform"]:
+            logger.info("\tApplying transformation from detmap")
+            original = aman.copy()
+            transform_from_detmap(aman, pointing_name)
 
         # Load bias group info
         if have_bgmap and have_band and have_ch:
@@ -774,15 +791,15 @@ def main():
 
         # Prep inputs
         if not gen_template:
-            if not (have_detmap and have_band and have_ch):
+            if not have_wafer:
                 logger.warning(
-                    "Unable to make template from detmap for this observation, skipping."
+                    "\tUnable to make template from wafer info for this observation, skipping."
                 )
                 logger.warning(
-                    "You may want to change settings and either provide a template or turn in gen_template."
+                    "\tYou may want to change settings and either provide a template or turn on gen_template."
                 )
                 continue
-            template, template_n, template_s, det_ids = _mk_template(ufm)
+            template, template_n, template_s, det_ids = _mk_template(aman)
             template_msks = [template_n, template_s]
             c_msk = np.zeros(aman.dets.count)
             for i, msk in enumerate(template_msks):
@@ -797,7 +814,7 @@ def main():
         else:
             _template_msks = [np.ones(len(det_ids), dtype=bool)]
 
-        if make_priors and have_detmap and have_band and have_ch:
+        if make_priors and have_wafer:
             _priors = gen_priors(
                 aman,
                 det_ids,
@@ -840,7 +857,7 @@ def main():
         _template = template[:, pol_slice]
 
         # Do actual matching
-        match_config = config["matching"]
+        match_config = config["matching"].copy()
         match_config["bias_lines"] &= have_bgmap and have_band and have_ch
         mapped_det_ids, out_msk, P, transformed = _do_match(
             det_ids, _focal_plane, _template, priors, msks, _template_msks, match_config
@@ -903,7 +920,7 @@ def main():
         sys.exit()
     elif num == 1:
         dm_det_id = None
-        if have_detmap and have_band and have_ch:
+        if have_wafer:
             dm_det_id = aman.det_info.det_id
         rset_data = _mk_output(
             out_dt,
@@ -920,7 +937,7 @@ def main():
         write_dataset(rset_data, outpath, dataset, overwrite=True)
         write_dataset(rset_paths, outpath, input_paths, overwrite=True)
         db.add_entry(
-            {"obs:obs_id": obs.obs_id, "dataset": dataset, "input_paths": input_paths},
+            {"obs:obs_id": obs_id, "dataset": dataset, "input_paths": input_paths},
             outpath,
             replace=True,
         )
