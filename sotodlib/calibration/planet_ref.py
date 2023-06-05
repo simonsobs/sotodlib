@@ -6,8 +6,7 @@ from numpy import sin, cos, pi
 from numpy import deg2rad as d2r
 from numpy import rad2deg as r2d
 
-from astropy import units
-au = units.au.si.to(units.m)
+from astropy.constants import au
 
 
 # fiducial models of planets
@@ -17,14 +16,14 @@ mars_fiducial = {
     'R_eq': 3396e3,
     'R_pole': 3376e3,
     'Omega_ref': 7.153e-10,
-    'd_ref': 1.5 * au,
+    'd_ref': 1.5 * au.si.value,
     'Trj': {'f090': None,
             'f150': None}
 }
 jupiter_fiducial = {
     'R_eq': 71492e3,
     'R_pole': 66854e3,
-    'd_ref': 5.2 * au,
+    'd_ref': 5.2 * au.si.value,
     'Omega_ref': 2.481e-8,
     'Trj': {'f090': 166.73,  # from ESA1 * SO bandpass
             'f150': 166.81}
@@ -32,7 +31,7 @@ jupiter_fiducial = {
 saturn_fiducial = {
     'R_eq': 60268e3,
     'R_pole': 54364e3,
-    'd_ref': 9.5 * au,
+    'd_ref': 9.5 * au.si.value,
     'Omega_ref': 5.096e-9,
     'Trj': {'f090': None,
             'f150': None}
@@ -41,7 +40,7 @@ uranus_fiducial = {
     'R_eq': 25559e3,
     'R_pole': 24973e3,
     'Omega_ref': 2.482e-10,
-    'd_ref': 19. * au,
+    'd_ref': 19. * au.si.value,
     'Trj': {'f090': 130.76,  # from ESA4 * SO bandpass
             'f150': 104.10}
 }
@@ -49,7 +48,7 @@ neptune_fiducial = {
     'R_eq': 24764e3,
     'R_pole': 24341e3,
     'Omega_ref': 1.006e-10,
-    'd_ref': 29. * au,
+    'd_ref': 29. * au.si.value,
     'Trj': {'f090': 121.77,  # from ESA4 * SO bandpass
             'f150': 108.10}
 }
@@ -114,16 +113,18 @@ def calc_model_temperature(bandpass_name, bandpass_suffix,
 def get_expected_Trj_Omega(planet, bandpass_name, timestamp):
     T_planet = fiducial_models[planet]['Trj'][bandpass_name]
     Omega_planet_ref = fiducial_models[planet]['Omega_ref']
-    f_A = get_distance_correction_factor(planet, timestamp)
+    f_d = get_distance_correction_factor(planet, timestamp)
+    
     De = get_sub_earth_latitude(planet, timestamp)
-    f_d = get_disk_oblatenes_correction_factor(planet, De)
+    f_A = get_disk_oblatenes_correction_factor(planet, De)
+    
     expected_Trj_Omega = T_planet * Omega_planet_ref * f_A / f_d
     return expected_Trj_Omega
 
 
 def get_distance_correction_factor(planet, timestamp):
     ra, dec, distance = coords.planets.get_source_pos(planet, timestamp)
-    distance *= au
+    distance *= au.si.value
     disatnce_fiducial = fiducial_models[planet]['d_ref']
     f_d = (distance / disatnce_fiducial)**2
     return f_d
