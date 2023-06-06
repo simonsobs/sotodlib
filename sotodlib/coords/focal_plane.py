@@ -143,7 +143,10 @@ def ufm_to_fp(aman, x=None, y=None, theta=0, dx=0, dy=0):
         focal_plane = core.AxisManager(aman.dets)
         focal_plane.wrap("x_fp", x_fp, [(0, focal_plane.dets)])
         focal_plane.wrap("y_fp", x_fp, [(0, focal_plane.dets)])
-        aman.wrap("focal_plane", focal_plane)
+        if "focal_plane" in aman:
+            aman.focal_plane.merge(focal_plane)
+        else:
+            aman.wrap("focal_plane", focal_plane)
 
     return x_fp, y_fp
 
@@ -403,7 +406,7 @@ def SAT_focal_plane(aman, x=None, y=None, mapping_data=None):
     if mapping_data is None:
         fp_to_sky = sat_to_sky(SAT_X, SAT_THETA)
     else:
-        mapping_data = (tuple(val) for val in fp_to_sky)
+        mapping_data = (tuple(val) for val in mapping_data)
         fp_to_sky = sat_to_sky(*mapping_data)
     # NOTE: The -1 does the flip about the origin
     theta = -1 * np.sign(x) * fp_to_sky(np.abs(x))
@@ -414,6 +417,9 @@ def SAT_focal_plane(aman, x=None, y=None, mapping_data=None):
         focal_plane = core.AxisManager(aman.dets)
         focal_plane.wrap("xi", xi, [(0, focal_plane.dets)])
         focal_plane.wrap("eta", eta, [(0, focal_plane.dets)])
-        aman.wrap("focal_plane", focal_plane)
+        if "focal_plane" in aman:
+            aman.focal_plane.merge(focal_plane)
+        else:
+            aman.wrap("focal_plane", focal_plane)
 
     return xi, eta
