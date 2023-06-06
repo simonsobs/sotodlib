@@ -14,6 +14,30 @@ quick-turnaround data processing at the observatory.
   syntax.
 
 
+Command line interface
+======================
+
+
+Usage
+-----
+
+To execute a pipeline element from the command line, use the
+``so-site-pipeline`` command.  For example, ``make-source-flags`` can
+be invoked as::
+
+  so-site-pipeline make-source-flags [options]
+
+To configure tab-completion of element names, in bash, run::
+
+  eval `so-site-pipeline --bash-completion`
+
+
+Wrapping a pipeline script
+--------------------------
+
+.. automodule:: sotodlib.site_pipeline.cli
+
+
 Pipeline Elements
 =================
 
@@ -30,6 +54,28 @@ This script is designed to help with the bookbinding. It will search a given
 Level 2 G3tSmurf database for observations that overlap in time. The different
 optional arguments will let us pass information from something like the sorunlib
 database to further filter the observations. 
+
+check-book
+----------
+
+For a description and documentation of the config file format, see
+:mod:`sotodlib.site_pipeline.check_book` module autodocumentation below.
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.check_book
+   :func: get_parser
+   :prog: check-book
+
+Module documentation
+````````````````````
+
+.. automodule:: sotodlib.site_pipeline.check_book
+   :members:
+   :undoc-members:
+
 
 Detector and Readout ID Mapping
 -------------------------------
@@ -120,10 +166,31 @@ entries mater.
           multi: true
 
 
+analyze-bright-ptsrc
+--------------------
+
+This script analyzes an observation of a bright point source (such as
+a planet) and performs per-detector fitting of beam parameters
+including amplitude and FWHM.
+
+.. argparse::
+   :module: sotodlib.site_pipeline.analyze_bright_ptsrc
+   :func: get_parser
+
+
 preprocess-tod
 --------------
 This script is set up to run a preprocessing pipeline using the preprocess
-module. :ref:`See details here<preprocess-module>`.
+module. See details in :ref:`See details here<preprocess-module>` for how to
+build a preprocessing pipeline. 
+
+This module includes the functions designed to be run as part of a batch script
+for automated analysis as well as options for loading AxisManagers that have all
+the preprocessing steps applied to them.
+
+.. argparse::
+   :module: sotodlib.site_pipeline.preprocess_tod
+   :func: get_parser
 
 make-source-flags
 -----------------
@@ -134,6 +201,8 @@ Command line arguments
 .. argparse::
    :module: sotodlib.site_pipeline.make_source_flags
    :func: get_parser
+   :prog: make-source-flags
+
 
 Config file format
 ``````````````````
@@ -176,7 +245,7 @@ Command line arguments
 
 .. argparse::
    :module: sotodlib.site_pipeline.make_uncal_beam_map
-   :func: _get_parser
+   :func: get_parser
    :prog: make-uncal-beam-map
 
 Config file format

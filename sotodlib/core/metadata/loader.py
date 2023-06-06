@@ -208,15 +208,18 @@ class SuperLoader:
                 skip_this = (mask.sum() == 0)
             to_skip.append(skip_this)
 
-        # Load at least one item, or we won't have the structure of
-        # the output.
-        if np.all(to_skip):
-            if len(to_skip) == 0:
-                raise LoaderError(
-                    'No detectors in common.',
-                    f'Metadata item had zero overlap with the detectors in det_info.\n\n'
-                    f'   det_info: {det_info}\n\n')
+        if len(index_lines) == 0:
+            # If we come out the other side with no data to load,
+            # invent one so that we at least get the structure of the
+            # metadata (even though we'll throw out all the actual
+            # results).  You can get here if someone passes dets=[].
+            candidate_index_lines = man.inspect(request, False)
+            index_lines.append(candidate_index_lines[0])
+            to_skip = [False]
 
+        elif all(to_skip):
+            # Load at least one item, or we won't have the structure of
+            # the output.
             to_skip[0] = False
 
         # Load each index_line.
@@ -392,7 +395,7 @@ class SuperLoader:
                              f'{len(det_info)} -> {mask.sum()})')
                 det_info = det_info.subset(rows=mask)
 
-            if len(det_info) == 0:
+            if len(mask) > 0 and len(det_info) == 0:
                 logger.warning(f'All detectors have been eliminated from processing.')
                 logger.warning(f'  dets:*: {det_reqs}')
                 logger.warning(f'  free_tags: {free_tags}')
