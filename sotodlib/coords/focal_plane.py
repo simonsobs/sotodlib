@@ -5,7 +5,7 @@ Currently only works for the LAT.
 LAT code adapted from code provided by Simon Dicker.
 """
 import logging
-from functools import cache, partial
+from functools import lru_cache, partial
 import numpy as np
 from scipy.interpolate import interp1d, bisplrep, bisplev
 from scipy.spatial.transform import Rotation as R
@@ -143,7 +143,7 @@ def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo
     return elev, xel
 
 
-@cache
+@lru_cache(maxsize=None)
 def load_zemax(path):
     """
     Load zemax_dat from path
@@ -164,7 +164,7 @@ def load_zemax(path):
     return dict(zemax_dat)
 
 
-@cache
+@lru_cache(maxsize=None)
 def LAT_optics(zemax_path):
     """
     Compute mapping from LAT secondary to sky.
@@ -200,7 +200,7 @@ def LAT_optics(zemax_path):
     return sec2elev, sec2xel
 
 
-@cache
+@lru_cache(maxsize=None)
 def LATR_optics(zemax_path, tube):
     """
     Compute mapping from LAT secondary to sky.
@@ -309,7 +309,7 @@ def LAT_focal_plane(
     return xi, eta
 
 
-@cache
+@lru_cache(maxsize=None)
 def sat_to_sky(x, theta):
     """
     Interpolate x and theta values to create mapping from SAT focal plane to sky.
