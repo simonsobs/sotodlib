@@ -11,6 +11,7 @@ from scipy.interpolate import interp1d, bisplrep, bisplev
 from scipy.spatial.transform import Rotation as R
 from sotodlib import core
 from so3g.proj import quat
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -59,41 +60,92 @@ def _interp_func(x, y, spline):
     return z.reshape(x.shape)
 
 
-# TODO: Should probably have a lookup table that maps tube/wafer to the correct parameters
-def LAT_coord_transform(x, y, rot_fp, rot_ufm, r=72.645):
+@lru_cache(maxsize=None)
+def load_ufm_to_fp_config(config_path):
     """
-    Transform from coords internal to wafer to LAT Zemax coords.
+    Load and cache config file with the parameters to transform from UFM to focal_plane coordinates.
 
     Arguments:
 
-        x: X position in wafer's internal coordinate system
+        config_path: Path to the yaml config file.
 
-        y: Y position in wafer's internal coordinate system.
-
-        rot_fp: Angle of array location on focal plane in deg.
-
-        rot_ufm: Rotatation of UFM about its center.
-
-        r: Distance from center of focal plane to center of wafer.
     Returns:
 
-        x: X position on focal plane in zemax coords.
-
-        y: Y position on focal plane in zemax coords.
+        config: Dictionairy containing the config information.
     """
-    xy = np.vstack((x, y))
-    xy_trans = np.zeros((xy.shape[1], 3))
-    xy_trans[:, :2] = xy.T
+    with open(config_path, "r") as file:
+        config = yaml.safe_load(file)
+    return config
 
-    r1 = R.from_euler("z", rot_fp, degrees=True)
-    shift = r1.apply(np.array([r, 0, 0]))
 
-    r2 = R.from_euler("z", rot_ufm, degrees=True)
-    xy_trans = r2.apply(xy_trans) + shift
+@lru_cache(maxsize=None)
+def get_ufm_to_fp_pars(telescope, slot, config_path):
+    """
+    Get (and cache) the parameters to transform from UFM to focal plane coordinates
+    for a specific slot of a given telescope's focal plane.
 
-    xy_trans = xy_trans.T[:2]
+    Arguments:
 
-    return xy_trans[0], xy_trans[1]
+        telescope: The telescope, should be LAT or SAT.
+
+        slot: The UFM slot to get parameters for.
+
+        config_path: Path to the yaml with the parameters.
+
+    Returns:
+
+        transform_pars: Dictionairy of transformation parameters that can be passed to ufm_to_fp.
+    """
+    config = load_ufm_to_fp_config(config_path)
+    return config[telescope][slot]
+
+
+def ufm_to_fp(aman, x=None, y=None, theta=0, dx=0, dy=0):
+    """
+    Transform from coords internal to wafer to focal plane coordinates.
+
+    Arguments:
+
+        aman: AxisManager assumed to contain aman.det_info.wafer.
+              If provided outputs will be wrapped into aman.focal_plane.
+
+        x: X position in wafer's internal coordinate system in mm.
+           If provided overrides the value from aman.
+
+        y: Y position in wafer's internal coordinate system in mm.
+           If provided overrides the value from aman.
+
+        theta: Internal rotation of the UFM in degrees.
+
+        dx: X offset in mm.
+
+        dy: Y offset in mm.
+
+    Returns:
+
+        x_fp: X position on focal plane.
+
+        y_fp: Y position on focal plane.
+    """
+    if x is None:
+        x = aman.det_info.wafer.det_x
+    if y is None:
+        y = aman.det_info.wafer.det_y
+    xy = np.column_stack((x, y, np.zeros_like(x)))
+
+    rot = R.from_euler("z", theta, degrees=True)
+    xy = rot.apply(xy)
+
+    x_fp = xy[:, 0] + dx
+    y_fp = xy[:, 1] + dy
+
+    if aman is not None:
+        focal_plane = core.AxisManager(aman.dets)
+        focal_plane.wrap("x_fp", x_fp, [(0, focal_plane.dets)])
+        focal_plane.wrap("y_fp", x_fp, [(0, focal_plane.dets)])
+        aman.wrap("focal_plane", focal_plane)
+
+    return x_fp, y_fp
 
 
 def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo=0.0):
@@ -255,15 +307,13 @@ def LATR_optics(zemax_path, tube):
     return array2secx, array2secy
 
 
-def LAT_focal_plane(
-    aman, zemax_path, x=None, y=None, rot=0, tube="c", transform_pars=None
-):
+def LAT_focal_plane(aman, zemax_path, x=None, y=None, rot=0, tube="c"):
     """
     Compute focal plane for a wafer in the LAT.
 
     Arguments:
 
-        aman: AxisManager nominally containing aman.det_info.wafer.
+        aman: AxisManager nominally containing aman.focal_plane.x_fp and aman.focal_plane.y_fp.
               If provided focal plane will be stored in aman.focal_plane.
 
         zemax_path: Path to LATR optics data from zemax.
@@ -276,9 +326,6 @@ def LAT_focal_plane(
 
         tube: Either the tube name as a string or the tube number as an int.
 
-        transform_pars: Parameters to pass to LAT_coord_transform to transform from internal
-                        wafer coordinates to the focal plane's Zemax coordinate system.
-                        If None then no transformation will be applied.
     Returns:
 
         xi: Detector elev on sky from physical optics.
@@ -288,12 +335,9 @@ def LAT_focal_plane(
              If aman is provided then will be wrapped as aman.focal_plane.eta.
     """
     if x is None:
-        x = aman.det_info.wafer.det_x
+        x = aman.focal_plane.x_fp
     if y is None:
-        y = aman.det_info.wafer.det_y
-
-    if transform_pars is not None:
-        x, y = LAT_coord_transform(x, y, *transform_pars)
+        y = aman.focal_plane.y_fp
 
     sec2elev, sec2xel = LAT_optics(zemax_path)
     array2secx, array2secy = LATR_optics(zemax_path, tube)
@@ -333,7 +377,7 @@ def SAT_focal_plane(aman, x=None, y=None, mapping_data=None):
 
     Arguments:
 
-        aman: AxisManager nominally containing aman.det_info.wafer.
+        aman: AxisManager nominally containing aman.focal_plane.x_fp and aman.focal_plane.y_fp.
               If provided focal plane will be stored in aman.focal_plane.
 
         x: Detector x positions, if provided will override positions loaded from aman.
@@ -352,11 +396,9 @@ def SAT_focal_plane(aman, x=None, y=None, mapping_data=None):
              If aman is provided then will be wrapped as aman.focal_plane.eta.
     """
     if x is None:
-        x = aman.det_info.wafer.det_x
+        x = aman.focal_plane.x_fp
     if y is None:
-        y = aman.det_info.wafer.det_y
-
-    # TODO: Need a convenient way to automatically transform from wafer to focal plane coords
+        y = aman.focal_plane.y_fp
 
     if mapping_data is None:
         fp_to_sky = sat_to_sky(SAT_X, SAT_THETA)
