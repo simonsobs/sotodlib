@@ -321,11 +321,11 @@ def match_template(
     Arguments:
 
         focal_plane: Measured pointing and optionally polarization angle.
-                     Should be a (4, n) or (3, n) array with columns: bias_line, xi, eta, pol.
+                     Should be a (n, 4) or (n, 3) array with columns: bias_line, xi, eta, pol.
                      Nominal units for the columns are: none, radians, radians, radians.
 
         template: Designed x, y, and polarization angle of each detector.
-                  Should be a (4, n) or (3, n) array with columns: bias_line, x, y, pol.
+                  Should be a (n, 4) or (n, 3) array with columns: bias_line, x, y, pol.
                   Nominal units for the columns are: none, mm, mm, degrees.
 
         priors: Priors to apply when matching.
@@ -413,6 +413,17 @@ def match_template(
     return mapping, outliers, P, TY
 
 
+def _scramble_bgs(bg):
+    """
+    Transform bias group information so that CPD is more strongly punished
+    for swapping nearby bias lines.
+
+    Currently this is just a simple sign flip on every other bias line.
+    """
+    bg[bg % 2 == 1] *= -1
+    return bg
+
+
 def _gen_template(ufm):
     logger.info("Generating template for " + ufm)
     wafer = MapMaker(north_is_highband=False, array_name=ufm)
@@ -436,7 +447,7 @@ def _gen_template(ufm):
     template_msk = np.isin(template_bg, valid_bg)
     template_n = np.array(is_north) & template_msk
     template_s = ~np.array(is_north) & template_msk
-    template_bg[template_bg % 2 == 1] *= -1
+    template_bg = _scramble_bgs(template_bg)
     template = np.column_stack(
         (template_bg, np.array(det_x), np.array(det_y), np.array(polang))
     )
@@ -454,7 +465,7 @@ def _mk_template(aman):
 
     template_msk = np.isin(dm_aman.det_info.wafer.bias_line, valid_bg)
     bias_line = dm_aman.det_info.wafer.bias_line
-    bias_line[bias_line % 2 == 1] *= -1
+    bias_line = _scramble_bgs(bias_line)
 
     template = np.column_stack(
         (
@@ -496,6 +507,31 @@ def _load_bg(aman, bg_map):
     return bias_group, msk_bp
 
 
+def _do_match(
+    det_ids, focal_plane, template, priors, msks, template_msks, match_config
+):
+    ndim = focal_plane.shape[1] - 1
+    mapped_det_ids = np.zeros(len(focal_plane), dtype=det_ids.dtype)
+    out_msk = np.zeros(len(focal_plane), dtype=bool)
+    P = np.zeros(len(focal_plane))
+    transformed = np.nan + np.zeros((len(focal_plane), 3))
+    for msk, t_msk, prior in zip(msks, template_msks, priors):
+        _map, _out, _P, _TY = match_template(
+            focal_plane[msk],
+            template[t_msk],
+            priors=prior,
+            **match_config,
+        )
+        mapped_det_ids[msk] = det_ids[t_msk][_map]
+        P[msk] = _P[_map, range(_P.shape[1])]
+        out_msk[np.flatnonzero(msk)[_out]] = True
+        transformed[msk, :ndim] = _TY[:, 1:]
+    out_msk[~np.any(msks, axis=0)] = True
+    logger.info("\tAverage matched likelihood = " + str(np.median(P)))
+
+    return mapped_det_ids, out_msk, P, transformed
+
+
 def _mk_output(
     out_dt,
     readout_id,
@@ -530,31 +566,6 @@ def _mk_output(
     rset_data = metadata.ResultSet.from_friend(data_out)
 
     return rset_data
-
-
-def _do_match(
-    det_ids, focal_plane, template, priors, msks, template_msks, match_config
-):
-    ndim = focal_plane.shape[1] - 1
-    mapped_det_ids = np.zeros(len(focal_plane), dtype=det_ids.dtype)
-    out_msk = np.zeros(len(focal_plane), dtype=bool)
-    P = np.zeros(len(focal_plane))
-    transformed = np.nan + np.zeros((len(focal_plane), 3))
-    for msk, t_msk, prior in zip(msks, template_msks, priors):
-        _map, _out, _P, _TY = match_template(
-            focal_plane[msk],
-            template[t_msk],
-            priors=prior,
-            **match_config,
-        )
-        mapped_det_ids[msk] = det_ids[t_msk][_map]
-        P[msk] = _P[_map, range(_P.shape[1])]
-        out_msk[np.flatnonzero(msk)[_out]] = True
-        transformed[msk, :ndim] = _TY[:, 1:]
-    out_msk[~np.any(msks, axis=0)] = True
-    logger.info("\tAverage matched likelihood = " + str(np.median(P)))
-
-    return mapped_det_ids, out_msk, P, transformed
 
 
 def main():
@@ -776,7 +787,7 @@ def main():
                 + str(bl_diff)
                 + " detectors have bias lines that don't match the detmap"
             )
-            bias_group[bias_group % 2 == 1] *= -1
+            bias_group = _scramble_bgs(bias_group)
         else:
             bias_group = np.nan + np.zeros(aman.dets.count)
             msk_bp = np.ones(aman.dets.count, dtype=bool)
