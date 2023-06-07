@@ -125,8 +125,8 @@ def get_expected_Trj_Omega(planet, bandpass_name, timestamp):
 def get_distance_correction_factor(planet, timestamp):
     ra, dec, distance = coords.planets.get_source_pos(planet, timestamp)
     distance *= au.si.value
-    disatnce_fiducial = fiducial_models[planet]['d_ref']
-    f_d = (distance / disatnce_fiducial)**2
+    distance_fiducial = fiducial_models[planet]['d_ref']
+    f_d = (distance / distance_fiducial)**2
     return f_d
 
 
