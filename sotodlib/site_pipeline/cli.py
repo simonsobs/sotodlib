@@ -44,7 +44,7 @@ from . import (
     make_source_flags,
     make_uncal_beam_map,
     update_g3tsmurf_database,
-    preprocess_tod
+    preprocess_tod,
     update_obsdb
 )
 
