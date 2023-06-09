@@ -45,6 +45,7 @@ from . import (
     make_uncal_beam_map,
     update_g3tsmurf_database,
     preprocess_tod
+    update_obsdb
 )
 
 # Dictionary matching element name to a submodule (which must have
@@ -58,6 +59,7 @@ ELEMENTS = {
     'make-uncal-beam-map': make_uncal_beam_map,
     'update-g3tsmurf-database': update_g3tsmurf_database,
     'preprocess-tod': preprocess_tod,
+    'update-obsdb': update_obsdb,
 }
 
 CLI_NAME = 'so-site-pipeline'

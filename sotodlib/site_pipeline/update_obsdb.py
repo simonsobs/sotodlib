@@ -104,27 +104,8 @@ def update_obsdb(config,
 
     for bookpath in bookcart:
         if check_meta_type(bookpath) in accept_type:
-            """ obsfiledb creation
-            The extra files give us a bit of trouble. We'll assume that index,
-            book, and bookbinder_log are always here, and edit our config file
-            to cover the rest as extra files.
-            """
-            book_file_list = os.listdir(bookpath)
-            book_file_list.remove("M_index.yaml")
-            book_file_list.remove("M_book.yaml")
-            book_file_list.remove("Z_bookbinder_log.txt")
-            book_file_list = [file_name for file_name in book_file_list if not file_name.endswith(".g3")]
-            if len(book_file_list)>0:
-                config_dict["extra_extra_files"] += book_file_list
-                with open(config, "w") as config_file:
-                    yaml.dump(config_dict, config_file)
-                checkbook(bookpath, config, add=True)
-                config_dict["extra_extra_files"] = ["Z_bookbinder_log.txt"]
-                with open(config, "w") as config_file:
-                    yaml.dump(config_dict, config_file)
-
-            else:
-                checkbook(bookpath, config, add=True)
+            #obsfiledb creation
+            checkbook(bookpath, config, add=True, tolerate_stray=True)
 
             index = yaml.safe_load(open(os.path.join(bookpath, "M_index.yaml"), "rb"))
             obs_id = index.pop("book_id")
@@ -141,6 +122,13 @@ def update_obsdb(config,
                     col_list.append(key+" "+type(val).__name__)
                 bookcartobsdb.add_obs_columns(col_list)
 
+            start = index.get("start_time")
+            end = index.get("end_time") 
+            if None not in [start, end]:
+                bookcartobsdb.add_obs_columns(["timestamp float", "duration float"])
+                very_clean["timestamp"] = start
+                very_clean["duration"] = end - start
+            
             if tags != ([] or [""]):
                 bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
             else:
