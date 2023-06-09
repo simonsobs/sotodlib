@@ -193,7 +193,6 @@ def main():
     outpath = os.path.abspath(outpath)
 
     fp_dict = {}
-    all_skipped = True
     use_matched = "use_matched" in config and config["use_matched"]
     for obs_id, detmap in zip(obs_ids, config["detmaps"]):
         logger.info("Loading information from observation " + obs_id)
@@ -238,9 +237,8 @@ def main():
                 fp_dict[di].append(fp)
             except KeyError:
                 fp_dict[di] = [fp]
-        all_skipped = False
 
-    if all_skipped:
+    if len(fp_dict):
         logger.error("No valid observations provided")
         sys.exit()
 
