@@ -156,6 +156,7 @@ def main():
 
     fp_dict = {}
     all_skipped = True
+    use_matched = "use_matched" in config and config["use_matched"]
     for obs_id, detmap in zip(obs_ids, config["detmaps"]):
         logger.info("Loading information from observation " + obs_id)
 
@@ -190,7 +191,12 @@ def main():
         )
         out_msk = aman[name].outliers
         focal_plane[out_msk, :2] = np.nan
-        for di, fp in zip(aman.det_info.detector_id, focal_plane):
+
+        if use_matched:
+            det_ids = aman[name].matched_detector_id
+        else:
+            det_ids = aman.det_info.detector_id
+        for di, fp in zip(det_ids, focal_plane):
             try:
                 fp_dict[di].append(fp)
             except KeyError:
