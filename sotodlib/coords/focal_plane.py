@@ -41,8 +41,17 @@ LAT_TUBES = {
 
 # SAT Optics
 # TODO: Maybe we want these to be provided in a config file?
-SAT_X = (0.00000, 29.7580, 59.4574, 89.5745, 120.550, 152.821, 163.986, 181.218)
-SAT_THETA = (0.00000, 2.99999, 5.99999, 8.99999, 12.0000, 14.9999, 15.9999, 17.4999)
+SAT_X = (0.0, 29.7580, 59.4574, 89.5745, 120.550, 152.821, 163.986, 181.218)
+SAT_THETA = (
+    0.0,
+    0.0523597,
+    0.10471958,
+    0.15707946,
+    0.20943951,
+    0.26179764,
+    0.27925093,
+    0.30543087,
+)
 
 
 def _interp_func(x, y, spline):
@@ -175,9 +184,9 @@ def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo
 
     Returns:
 
-        elev: The on sky elevation.
+        elev: The on sky elevation in radians.
 
-        xel: The on sky xel.
+        xel: The on sky xel in radians.
     """
     d2r = np.pi / 180.0
     # TBD - put in check for MASK - values outside circle should not be allowed
@@ -195,7 +204,7 @@ def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo
     elev = sec2elev(xrot, yrot)
     xel = sec2xel(xrot, yrot)
 
-    return elev, xel
+    return np.deg2rad(elev), np.deg2rad(xel)
 
 
 @lru_cache(maxsize=None)
@@ -331,10 +340,10 @@ def LAT_focal_plane(aman, zemax_path, x=None, y=None, rot=0, tube="c"):
 
     Returns:
 
-        xi: Detector elev on sky from physical optics.
+        xi: Detector elev on sky from physical optics in radians.
             If aman is provided then will be wrapped as aman.focal_plane.xi.
 
-        eta: Detector xel on sky from physical optics.
+        eta: Detector xel on sky from physical optics in radians.
              If aman is provided then will be wrapped as aman.focal_plane.eta.
     """
     if x is None:
@@ -365,7 +374,7 @@ def sat_to_sky(x, theta):
     Arguments:
         x: X values in mm, should be all positive.
 
-        theta: Theta values in deg, should be all positive.
+        theta: Theta values in radians, should be all positive.
                Theta is defined by ISO coordinates.
 
     Return:
@@ -392,10 +401,10 @@ def SAT_focal_plane(aman, x=None, y=None, mapping_data=None):
 
     Returns:
 
-        xi: Detector elev on sky from physical optics.
+        xi: Detector elev on sky from physical optics in radians.
             If aman is provided then will be wrapped as aman.focal_plane.xi.
 
-        eta: Detector xel on sky from physical optics.
+        eta: Detector xel on sky from physical optics in radians.
              If aman is provided then will be wrapped as aman.focal_plane.eta.
     """
     if x is None:
