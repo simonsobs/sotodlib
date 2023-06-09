@@ -20,7 +20,39 @@ def _avg_focalplane(fp_dict):
         avg_pointing = np.nanmedian(np.vstack(fp_dict[did]), axis=0)
         focal_plane.append(avg_pointing)
     focal_plane = np.column_stack(focal_plane)
+
+    if np.isnan(focal_plane[:2]).all():
+        raise ValueError("All detectors are outliers. Check your inputs")
+
     return detector_ids, focal_plane
+
+
+def _mk_fpout(detector_id, focal_plane):
+    outdt = [
+        ("dets:detector_id", detector_id.dtype),
+        ("xi", np.float32),
+        ("eta", np.float32),
+    ]
+    fpout = np.fromiter(
+        zip(detector_id, *focal_plane[:2]), dtype=outdt, count=len(detector_id)
+    )
+
+    return metadata.ResultSet.from_friend(fpout)
+
+
+def _mk_tpout(shift, affine_pars):
+    outdt = [
+        ("d_xi", np.float32),
+        ("d_eta", np.float32),
+        ("scale_xi", np.float32),
+        ("scale_eta", np.float32),
+        ("shear", np.float32),
+        ("rot", np.float32),
+    ]
+    tpout = np.zeros(1, dtype=outdt)
+    tpout[0] = tuple(shift) + tuple(affine_pars)
+
+    return metadata.ResultSet.from_friend(tpout)
 
 
 def get_nominal(focal_plane, config):
@@ -73,8 +105,15 @@ def get_affine(src, dst):
 
         shift: Shift to apply after transformation.
     """
+    msk = np.isfinite(src).all(axis=0) and np.isfinite(src).all(axis=0)
+    if np.sum(msk) < 7:
+        raise ValueError("Not enough finite points to compute transformation")
+
     M = np.vstack(
-        (src - np.median(src, axis=1)[:, None], dst - np.median(dst, axis=1)[:, None])
+        (
+            src[msk] - np.median(src[msk], axis=1)[:, None],
+            dst[msk] - np.median(dst[msk], axis=1)[:, None],
+        )
     ).T
     u, s, vh = la.svd(M)
     vh_splits = [
@@ -82,8 +121,8 @@ def get_affine(src, dst):
     ]
     affine = np.dot(vh_splits[2], la.pinv(vh_splits[0]))
 
-    transformed = affine @ src
-    shift = np.median(dst - transformed, axis=1)
+    transformed = affine @ src[msk]
+    shift = np.median(dst[msk] - transformed, axis=1)
 
     return affine, shift
 
@@ -151,7 +190,6 @@ def main():
     if "append" in config:
         append = "_" + config["append"]
     outpath = os.path.join(config["outdir"], f"{ufm}{append}.h5")
-    dataset = "focal_plane"
     outpath = os.path.abspath(outpath)
 
     fp_dict = {}
@@ -208,7 +246,7 @@ def main():
         sys.exit()
 
     # Compute the average focal plane while ignoring outliers
-    focal_plane = _avg_focalplane(fp_dict)
+    detector_id, focal_plane = _avg_focalplane(fp_dict)
     xi = focal_plane[0]
     eta = focal_plane[1]
 
@@ -219,9 +257,13 @@ def main():
     affine, shift = get_affine(
         np.vstack((xi, eta)), np.vstack((xi_nominal, eta_nominal))
     )
-    s_xi, s_eta, shear, rot = decompose_affine(affine)
+    affine_pars = decompose_affine(affine)
 
-    # TODO: Make final outputs and save
+    # Make final outputs and save
+    fpout = _mk_fpout(detector_id, focal_plane)
+    tpout = _mk_tpout(shift, affine_pars)
+    write_dataset(fpout, outpath, "focal_plane")
+    write_dataset(tpout, outpath, "pointing_transform")
 
 
 if __name__ == "__main__":
