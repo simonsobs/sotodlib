@@ -1,3 +1,6 @@
+# Copyright (c) 2018-2023 Simons Observatory.
+# Full license can be found in the top level "LICENSE" file.
+
 import os
 import h5py
 import copy
@@ -652,6 +655,7 @@ class SimSource(Operator):
 
             # Interpolate the beam map at appropriate locations
             x = (az - source_az.to_value(u.rad)) * np.cos(el)
+            x = x % (2 * np.pi) - np.pi
             y = el - source_el.to_value(u.rad)
             r = np.sqrt(x**2 + y**2)
             good = r < radius
