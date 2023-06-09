@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2021 Simons Observatory.
+# Copyright (c) 2018-2023 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import h5py
@@ -438,6 +438,7 @@ class SimSSO(Operator):
             # Interpolate the beam map at appropriate locations
 
             x = (az - sso_az.to_value(u.rad)) * np.cos(el)
+            x = x % (2 * np.pi) - np.pi
             y = el - sso_el.to_value(u.rad)
             r = np.sqrt(x**2 + y**2)
 
