@@ -12,6 +12,7 @@ The config file could be of the form:
         subtype: str
     obsdb: dummyobsdb.sqlite
     obsfiledb: dummyobsfiledb.sqlite
+    tolerate_stray_files: True 
     extra_extra_files:
     - Z_bookbinder_log.txt
     extra_files:
@@ -105,7 +106,7 @@ def update_obsdb(config,
     for bookpath in bookcart:
         if check_meta_type(bookpath) in accept_type:
             #obsfiledb creation
-            checkbook(bookpath, config, add=True, tolerate_stray=True)
+            checkbook(bookpath, config, add=True, overwrite=True)
 
             index = yaml.safe_load(open(os.path.join(bookpath, "M_index.yaml"), "rb"))
             obs_id = index.pop("book_id")
