@@ -219,21 +219,20 @@ def main():
             logger.error("\tThis observation has no detmap results, skipping")
             continue
 
-        focal_plane = np.column_stack(
-            (
-                aman[name].xi,
-                aman[name].eta,
-                aman.det_info.wafer.det_x,
-                aman.det_info.wafer.det_y,
-            )
-        )
+        det_ids = aman.det_info.detector_id
+        x = aman.det_info.wafer.det_x
+        y = aman.det_info.wafer.det_y
+        if use_matched:
+            det_ids = aman[name].matched_detector_id
+            dm_sort = np.argsort(aman.det_info.detector_id)
+            mapping = np.argsort(np.argsort(det_ids))
+            x = x[dm_sort][mapping]
+            y = y[dm_sort][mapping]
+
+        focal_plane = np.column_stack((aman[name].xi, aman[name].eta, x, y))
         out_msk = aman[name].outliers
         focal_plane[out_msk, :2] = np.nan
 
-        if use_matched:
-            det_ids = aman[name].matched_detector_id
-        else:
-            det_ids = aman.det_info.detector_id
         for di, fp in zip(det_ids, focal_plane):
             try:
                 fp_dict[di].append(fp)
