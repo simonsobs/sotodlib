@@ -174,13 +174,23 @@ class G3thk:
 
         starts = []
         ends = []
+        medians = []
+        means = []
+        min_vals = []
+        max_vals = []
+        stds = []
         for i in range(len(hkfs)):
             data = arc.simple(hkfs[i])
             time = data[0]
             starts.append(time[0])
             ends.append(time[-1])
+            medians.append(np.median(data[1]))
+            means.append(np.mean(data[1]))
+            min_vals.append(np.min(data[1]))
+            max_vals.append(np.max(data[1]))
+            stds.append(np.std(data[1]))
 
-        return hkfs, starts, ends
+        return hkfs, starts, ends, medians, means, min_vals, max_vals, stds
 
     def get_agg(self, hkfile):  # only use hkarchive_path as the FULL path
         """
@@ -249,7 +259,7 @@ class G3thk:
         file_list = self.session.query(HKFiles).all()
 
         for file in file_list:
-            fields, starts, ends = self.load_fields(file.path, file.filename)
+            fields, starts, ends, medians, means, min_vals, max_vals, stds = self.load_fields(file.path, file.filename)
             agents = []
             for field in fields:
                 agent = field.split('.')[1]
@@ -271,12 +281,12 @@ class G3thk:
                         starts_agent.append(starts[i])
                         ends_agent.append(ends[i])
 
-                    #  from the starts_agent and ends_agent, extract start
-                    #  and stop time for the agent
+                #  from the starts_agent and ends_agent, extract start
+                #  and stop time for the agent
                 agent_start = np.min(starts_agent)
                 agent_stop = np.max(ends_agent)
 
-                    #  populate the HKAgents table
+                #  populate the HKAgents table
                 db_file = HKAgents(instance_id=agent,
                                     start=agent_start,
                                     stop=agent_stop,
@@ -309,7 +319,7 @@ class G3thk:
         file_list = self.session.query(HKFiles).all()
 
         for file in file_list:
-            fields, starts, ends = self.load_fields(file.path, file.filename)
+            fields, starts, ends, medians, means, min_vals, max_vals, stds = self.load_fields(file.path, file.filename)
 
             for i in range(len(fields)):
                 agentname = fields[i].split('.')[1]
@@ -320,6 +330,11 @@ class G3thk:
                 db_file = HKFields(field=fields[i],
                                    start=starts[i],
                                    end=ends[i],
+                                   median=medians[i],
+                                   mean=means[i],
+                                   min_val=min_vals[i],
+                                   max_val=max_vals[i],
+                                   stand_dev=stds[i],
                                    hkfile=file,
                                    hkagent=agent[0])
                 self.session.add(db_file)
