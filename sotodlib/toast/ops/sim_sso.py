@@ -437,8 +437,8 @@ class SimSSO(Operator):
 
             # Interpolate the beam map at appropriate locations
 
-            x = (az - sso_az.to_value(u.rad)) * np.cos(el)
-            x = x % (2 * np.pi) - np.pi
+            az_diff = (az - sso_az.to_value(u.rad) + np.pi) % (2 * np.pi) - np.pi
+            x = az_diff * np.cos(el)
             y = el - sso_el.to_value(u.rad)
             r = np.sqrt(x**2 + y**2)
 
