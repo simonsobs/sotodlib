@@ -1,8 +1,10 @@
 import os
 import sys
+from itertools import zip_longest
 import argparse as ap
 import numpy as np
 import scipy.linalg as la
+from scipy.spatial.transform import Rotation as R
 import yaml
 import sotodlib.io.g3tsmurf_utils as g3u
 from sotodlib.core import AxisManager, metadata, Context
@@ -40,17 +42,18 @@ def _mk_fpout(detector_id, focal_plane):
     return metadata.ResultSet.from_friend(fpout)
 
 
-def _mk_tpout(shift, affine_pars):
+def _mk_tpout(shift, scale, shear, rot):
     outdt = [
-        ("d_xi", np.float32),
-        ("d_eta", np.float32),
-        ("scale_xi", np.float32),
-        ("scale_eta", np.float32),
+        ("shift", np.float32),
+        ("scale", np.float32),
         ("shear", np.float32),
         ("rot", np.float32),
     ]
-    tpout = np.zeros(1, dtype=outdt)
-    tpout[0] = tuple(shift) + tuple(affine_pars)
+    # rot will always have 3 values
+    # so we can use to pad the others when we have no pol
+    tpout = np.fromiter(
+        zip_longest(shift, scale, shear, rot, fillvalue=np.nan), count=3, dtype=outdt
+    )
 
     return metadata.ResultSet.from_friend(tpout)
 
@@ -71,21 +74,25 @@ def get_nominal(focal_plane, config):
         xi_nominal: The nominal xi values.
 
         eta_nominal: The nominal eta values.
+
+        gamma_nominal: The nominal gamma values.
     """
     transform_pars = fpc.get_ufm_to_fp_pars(
         config["telescope"], config["slot"], config["config_path"]
     )
-    x, y = fpc.ufm_to_fp(None, x=focal_plane[2], y=focal_plane[3], **transform_pars)
+    x, y, pol = fpc.ufm_to_fp(
+        None, x=focal_plane[3], y=focal_plane[4], pol=focal_plane[5], **transform_pars
+    )
     if config["telescope"] == "LAT":
-        xi_nominal, eta_nominal = fpc.LAT_focal_plane(
-            None, config["zemax_path"], x, y, config["rot"], config["tube"]
+        xi_nominal, eta_nominal, gamma_nominal = fpc.LAT_focal_plane(
+            None, config["zemax_path"], x, y, pol, config["rot"], config["tube"]
         )
     elif config["coord_transform"]["telescope"] == "SAT":
-        xi_nominal, eta_nominal = fpc.SAT_focal_plane(None, x, y)
+        xi_nominal, eta_nominal, gamma_nominal = fpc.SAT_focal_plane(None, x, y, pol)
     else:
         raise ValueError("Invalid telescope provided")
 
-    return xi_nominal, eta_nominal
+    return xi_nominal, eta_nominal, gamma_nominal
 
 
 def get_affine(src, dst):
@@ -130,34 +137,61 @@ def get_affine(src, dst):
 def decompose_affine(affine):
     """
     Decompose an affine transformation into its components.
-    Note that this currently only works on a 2x2 matrix.
 
     Arguments:
 
-        affine: The 2x2 affine transformation matrix.
+        affine: The affine transformation matrix.
 
     Returns:
 
-        scale_0: The scale in the first dimension.
+        scale: Array of ndim scale parameters.
 
-        scale_1: The scale in the second dimension.
+        shear: Array of shear parameters.
 
-        shear: The shear parameter.
-
-        rot: The rotation angle in radians.
+        rot: Rotation matrix.
+             Not currently decomposed in this function because the easiest
+             way to do that is not n-dimensional but this rest of this function is.
     """
-    scale_0 = np.sqrt(affine[0, 0] ** 2 + affine[1, 0] ** 2)
-    rot = np.arctan2(affine[1, 0], affine[0, 0])
+    # Use the fact that rotation matrix times its transpose is the identity
+    no_rot = affine.T @ affine
+    # Decompose to get a matrix with just scale and shear
+    no_rot = la.cholesky(no_rot).T
 
-    ms = affine[0, 1] * np.cos(rot) + affine[1, 1] * np.sin(rot)
-    if np.isclose(0, np.sin(rot)):
-        scale_1 = (affine[1, 1] - ms * np.sin(rot)) / np.cos(rot)
-    else:
-        scale_1 = (ms * np.cos(rot) - affine[0, 1]) / np.sin(rot)
+    scale = np.diag(no_rot)
+    shear = (no_rot / scale[:, None])[np.triu_indices(len(no_rot), k=1)]
+    rot = affine @ la.inv(no_rot)
 
-    shear = ms / scale_1
+    return scale, shear, rot
 
-    return shear, scale_0, scale_1, rot
+
+def decompose_rotation(rotation):
+    """
+    Decompose a rotation matrix into its angles.
+    This currently won't work on anything higher than 3 dimensions.
+
+    Arguments:
+
+        rotation: (ndim, ndim) rotation matrix.
+
+    Returns:
+
+        angles: Array of rotation angles in radians.
+                If the input is 2d then the first 2 angles will be nan.
+    """
+    ndim = len(rotation)
+    if ndim > 3:
+        raise ValueError("No support for rotations in more than 3 dimensions")
+    elif ndim < 2:
+        raise ValueError("Rotations with less than 2 dimensions don't make sense")
+    if rotation.shape != (ndim, ndim):
+        raise ValueError("Rotation matrix should be ndim by ndim")
+    _rotation = np.eye(3)
+    _rotation[:ndim, :ndim] = rotation
+    angles = R.from_matrix(_rotation).to_euler("xyz")
+
+    if ndim == 2:
+        angles[:2] = np.nan
+    return angles
 
 
 def main():
@@ -213,7 +247,7 @@ def main():
 
         if detmap is not None:
             g3u.add_detmap_info(aman, detmap)
-        have_wafer = "wafer" in aman.det_inFO
+        have_wafer = "wafer" in aman.det_info
         if not have_wafer:
             logger.error("\tThis observation has no detmap results, skipping")
             continue
@@ -221,16 +255,20 @@ def main():
         det_ids = aman.det_info.detector_id
         x = aman.det_info.wafer.det_x
         y = aman.det_info.wafer.det_y
+        pol = aman.det_info.wafer.angle_actual_deg
         if use_matched:
             det_ids = aman[name].matched_detector_id
             dm_sort = np.argsort(aman.det_info.detector_id)
             mapping = np.argsort(np.argsort(det_ids))
             x = x[dm_sort][mapping]
             y = y[dm_sort][mapping]
+            pol = pol[dm_sort][mapping]
 
-        focal_plane = np.column_stack((aman[name].xi, aman[name].eta, x, y))
+        focal_plane = np.column_stack(
+            (aman[name].xi, aman[name].eta, aman[name].polang, x, y, pol)
+        )
         out_msk = aman[name].outliers
-        focal_plane[out_msk, :2] = np.nan
+        focal_plane[out_msk, :3] = np.nan
 
         for di, fp in zip(det_ids, focal_plane):
             try:
@@ -244,21 +282,23 @@ def main():
 
     # Compute the average focal plane while ignoring outliers
     detector_id, focal_plane = _avg_focalplane(fp_dict)
-    xi = focal_plane[0]
-    eta = focal_plane[1]
+    measured = focal_plane[:3]
 
-    # Get nominal xi and eta
-    xi_nominal, eta_nominal = get_nominal(focal_plane, config["coord_transform"])
+    # Get nominal xi, eta, gamma
+    nominal = get_nominal(focal_plane, config["coord_transform"])
 
     # Compute transformation between the two nominal and measured pointing
-    affine, shift = get_affine(
-        np.vstack((xi, eta)), np.vstack((xi_nominal, eta_nominal))
-    )
-    affine_pars = decompose_affine(affine)
+    if np.isnan(measured[2]).all():
+        logger.warning("No polarization data availible, gammas will be nan")
+        nominal = nominal[:2]
+        measured = measured[:2]
+    affine, shift = get_affine(np.vstack(nominal), np.vstack(measured))
+    scale, shear, rot = decompose_affine(affine)
+    rot = decompose_rotation(rot)
 
     # Make final outputs and save
     fpout = _mk_fpout(detector_id, focal_plane)
-    tpout = _mk_tpout(shift, affine_pars)
+    tpout = _mk_tpout(shift, scale, shear, rot)
     write_dataset(fpout, outpath, "focal_plane")
     write_dataset(tpout, outpath, "pointing_transform")
 
