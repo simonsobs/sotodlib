@@ -434,7 +434,8 @@ class SimCatalog(Operator):
                 # Interpolate the beam map at appropriate locations
                 source_theta = np.radians(90 - source_dict["dec_deg"])
                 source_phi = np.radians(source_dict["ra_deg"])
-                x = (det_phi[hit] - source_phi) * np.cos(np.pi / 2 - det_theta[hit])
+                phi_diff = (det_phi[hit] - source_phi + np.pi) % (2 * np.pi) - np.pi
+                x = phi_diff * np.cos(np.pi / 2 - det_theta[hit])
                 y = det_theta[hit] - source_theta
                 # Rotate into the beam frame
                 psi = det_psi[hit] - det_psi_pol.to_value(u.rad)
