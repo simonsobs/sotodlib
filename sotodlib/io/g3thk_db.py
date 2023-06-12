@@ -110,7 +110,7 @@ class HKFields(Base):
     alias = db.Column(db.String)
     start = db.Column(db.Integer)
     end = db.Column(db.Integer)
-    median = db.Columne(db.Integer)
+    median = db.Column(db.Integer)
     mean = db.Column(db.Integer)
     min_val = db.Column(db.Integer)
     max_val = db.Column(db.Integer)
