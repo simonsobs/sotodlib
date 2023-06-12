@@ -69,6 +69,64 @@ def _interp_func(x, y, spline):
     return z.reshape(x.shape)
 
 
+def gen_pol_endpoints(x, y, pol):
+    """
+    Get end points of unit vectors that will be centered on the provided xy positions
+    and have the angles specified by pol.
+
+    Arguments:
+
+        x: X positions nominally in mm.
+
+        y: Y positions nominally in mm.
+
+        pol: Angles in degrees.
+
+    Returns:
+
+        x_pol: X postions of endpoints where the even indices are starts
+        and the odds are ends.
+
+        y_pol: Y postions of endpoints where the even indices are starts
+        and the odds are ends.
+    """
+    _x = np.cos(np.deg2rad(pol)) / 2
+    _y = np.sin(np.deg2rad(pol)) / 2
+
+    x_pol = np.column_stack((x - _x, x + _x)).ravel()
+    y_pol = np.column_stack((y - _y, y + _y)).ravel()
+
+    return x_pol, y_pol
+
+
+def get_gamma(pol_xi, pol_eta):
+    """
+    Convert xi, eta endpoints to angles that correspond to gamma.
+
+    Arguments:
+
+        pol_xi: 2n xi values where the ones with even indices are
+                starting points and odd are ending points where each pair
+                forms a vector whose angle is gamma.
+
+        pol_eta: 2n eta values where the ones with even indices are
+                 starting points and odd are ending points where each pair
+                 forms a vector whose angle is gamma.
+
+    Returns:
+
+        gamma: Array of n gamma values in radians.
+    """
+    xi = pol_xi.reshape((len(pol_xi) // 2, 2))
+    eta = pol_eta.reshape((len(pol_eta) // 2, 2))
+
+    d_xi = np.diff(xi, axis=1).ravel()
+    d_eta = np.diff(eta, axis=1).ravel()
+
+    gamma = np.arctan2(d_eta, d_xi) % (2 * np.pi)
+    return gamma
+
+
 @lru_cache(maxsize=None)
 def load_ufm_to_fp_config(config_path):
     """
@@ -109,7 +167,7 @@ def get_ufm_to_fp_pars(telescope, slot, config_path):
     return config[telescope][slot]
 
 
-def ufm_to_fp(aman, x=None, y=None, theta=0, dx=0, dy=0):
+def ufm_to_fp(aman, x=None, y=None, pol=None, theta=0, dx=0, dy=0):
     """
     Transform from coords internal to wafer to focal plane coordinates.
 
@@ -124,6 +182,9 @@ def ufm_to_fp(aman, x=None, y=None, theta=0, dx=0, dy=0):
         y: Y position in wafer's internal coordinate system in mm.
            If provided overrides the value from aman.
 
+        pol: Polarization angle in wafer's internal coordinate system in deg.
+           If provided overrides the value from aman.
+
         theta: Internal rotation of the UFM in degrees.
 
         dx: X offset in mm.
@@ -135,11 +196,15 @@ def ufm_to_fp(aman, x=None, y=None, theta=0, dx=0, dy=0):
         x_fp: X position on focal plane.
 
         y_fp: Y position on focal plane.
+
+        pol_fp: Y position on focal plane.
     """
     if x is None:
         x = aman.det_info.wafer.det_x
     if y is None:
         y = aman.det_info.wafer.det_y
+    if pol is None:
+        pol = aman.det_info.wafer.actual_angle_deg
     xy = np.column_stack((x, y, np.zeros_like(x)))
 
     rot = R.from_euler("z", theta, degrees=True)
@@ -147,17 +212,19 @@ def ufm_to_fp(aman, x=None, y=None, theta=0, dx=0, dy=0):
 
     x_fp = xy[:, 0] + dx
     y_fp = xy[:, 1] + dy
+    pol_fp = pol + theta
 
     if aman is not None:
         focal_plane = core.AxisManager(aman.dets)
         focal_plane.wrap("x_fp", x_fp, [(0, focal_plane.dets)])
-        focal_plane.wrap("y_fp", x_fp, [(0, focal_plane.dets)])
+        focal_plane.wrap("y_fp", y_fp, [(0, focal_plane.dets)])
+        focal_plane.wrap("pol_fp", pol_fp, [(0, focal_plane.dets)])
         if "focal_plane" in aman:
             aman.focal_plane.merge(focal_plane)
         else:
             aman.wrap("focal_plane", focal_plane)
 
-    return x_fp, y_fp
+    return x_fp, y_fp, pol_fp
 
 
 def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo=0.0):
@@ -319,7 +386,7 @@ def LATR_optics(zemax_path, tube):
     return array2secx, array2secy
 
 
-def LAT_focal_plane(aman, zemax_path, x=None, y=None, rot=0, tube="c"):
+def LAT_focal_plane(aman, zemax_path, x=None, y=None, pol=None, rot=0, tube="c"):
     """
     Compute focal plane for a wafer in the LAT.
 
@@ -334,6 +401,8 @@ def LAT_focal_plane(aman, zemax_path, x=None, y=None, rot=0, tube="c"):
 
         y: Detector y positions, if provided will override positions loaded from aman.
 
+        pol: Detector polarization angle, if provided will override positions loaded from aman.
+
         rot: Rotation about the line of site = elev - 60 - corotator.
 
         tube: Either the tube name as a string or the tube number as an int.
@@ -345,24 +414,39 @@ def LAT_focal_plane(aman, zemax_path, x=None, y=None, rot=0, tube="c"):
 
         eta: Detector xel on sky from physical optics in radians.
              If aman is provided then will be wrapped as aman.focal_plane.eta.
+
+        gamma: Detector gamma on sky from physical optics in radians.
+               If aman is provided then will be wrapped as aman.focal_plane.eta.
     """
     if x is None:
         x = aman.focal_plane.x_fp
     if y is None:
         y = aman.focal_plane.y_fp
+    if pol is None:
+        pol = aman.focal_plane.pol_fp
 
     sec2elev, sec2xel = LAT_optics(zemax_path)
     array2secx, array2secy = LATR_optics(zemax_path, tube)
 
     xi, eta = LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot)
 
+    pol_x, pol_y = gen_pol_endpoints(x, y, pol)
+    pol_xi, pol_eta = LAT_pix2sky(
+        pol_x, pol_y, sec2elev, sec2xel, array2secx, array2secy, rot
+    )
+    gamma = get_gamma(pol_xi, pol_eta)
+
     if aman is not None:
         focal_plane = core.AxisManager(aman.dets)
         focal_plane.wrap("xi", xi, [(0, focal_plane.dets)])
         focal_plane.wrap("eta", eta, [(0, focal_plane.dets)])
-        aman.wrap("focal_plane", focal_plane)
+        focal_plane.wrap("gamma", gamma, [(0, focal_plane.dets)])
+        if "focal_plane" in aman:
+            aman.focal_plane.merge(focal_plane)
+        else:
+            aman.wrap("focal_plane", focal_plane)
 
-    return xi, eta
+    return xi, eta, gamma
 
 
 @lru_cache(maxsize=None)
@@ -383,7 +467,7 @@ def sat_to_sky(x, theta):
     return interp1d(x, theta, fill_value="extrapolate")
 
 
-def SAT_focal_plane(aman, x=None, y=None, mapping_data=None):
+def SAT_focal_plane(aman, x=None, y=None, pol=None, mapping_data=None):
     """
     Compute focal plane for a wafer in the SAT.
 
@@ -396,6 +480,8 @@ def SAT_focal_plane(aman, x=None, y=None, mapping_data=None):
 
         y: Detector y positions, if provided will override positions loaded from aman.
 
+        pol: Detector polarization angle, if provided will override positions loaded from aman.
+
         mapping_data: Tuple of (x, theta) that can be interpolated to map the focal plane to the sky.
                       Leave as None to use the default mapping.
 
@@ -406,11 +492,16 @@ def SAT_focal_plane(aman, x=None, y=None, mapping_data=None):
 
         eta: Detector xel on sky from physical optics in radians.
              If aman is provided then will be wrapped as aman.focal_plane.eta.
+
+        gamma: Detector gamma on sky from physical optics in radians.
+               If aman is provided then will be wrapped as aman.focal_plane.eta.
     """
     if x is None:
         x = aman.focal_plane.x_fp
     if y is None:
         y = aman.focal_plane.y_fp
+    if pol is None:
+        pol = aman.focal_plane.pol_fp
 
     if mapping_data is None:
         fp_to_sky = sat_to_sky(SAT_X, SAT_THETA)
@@ -420,15 +511,22 @@ def SAT_focal_plane(aman, x=None, y=None, mapping_data=None):
     # NOTE: The -1 does the flip about the origin
     theta = -1 * np.sign(x) * fp_to_sky(np.abs(x))
     phi = -1 * np.sign(y) * fp_to_sky(np.abs(y))
-    xi, eta, gamma = quat.decompose_xieta(quat.rotation_iso(theta, phi))
+    xi, eta, _ = quat.decompose_xieta(quat.rotation_iso(theta, phi))
+
+    pol_x, pol_y = gen_pol_endpoints(x, y, pol)
+    pol_theta = -1 * np.sign(pol_x) * fp_to_sky(np.abs(pol_x))
+    pol_phi = -1 * np.sign(pol_y) * fp_to_sky(np.abs(pol_y))
+    pol_xi, pol_eta, _ = quat.decompose_xieta(quat.rotation_iso(pol_theta, pol_phi))
+    gamma = get_gamma(pol_xi, pol_eta)
 
     if aman is not None:
         focal_plane = core.AxisManager(aman.dets)
         focal_plane.wrap("xi", xi, [(0, focal_plane.dets)])
         focal_plane.wrap("eta", eta, [(0, focal_plane.dets)])
+        focal_plane.wrap("gamma", gamma, [(0, focal_plane.dets)])
         if "focal_plane" in aman:
             aman.focal_plane.merge(focal_plane)
         else:
             aman.wrap("focal_plane", focal_plane)
 
-    return xi, eta
+    return xi, eta, gamma
