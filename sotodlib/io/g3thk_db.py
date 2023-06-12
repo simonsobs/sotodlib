@@ -57,8 +57,6 @@ class HKAgents(Base):
         HK file in the hkfeeds table
     instance_id : string
         TODO
-    alias : string
-        TODO
     start : integer
         TODO
     stop : integer
@@ -73,7 +71,6 @@ class HKAgents(Base):
     hkfile = relationship("HKFiles", back_populates='agents')
 
     instance_id = db.Column(db.String)
-    alias = db.Column(db.String)
 
     start = db.Column(db.Integer)
     stop = db.Column(db.Integer)
@@ -90,8 +87,12 @@ class HKFields(Base):
     file_id : integer
         id that points a field back to its corresponding
         HK file in the hkfeeds table
+    agent_id : integer
+        TODO
     field : string
         name of HK field in corresponding HK file
+    alias : string
+        TODO
     start : integer
         start time for each HK field in ctime
     end : integer
@@ -106,8 +107,15 @@ class HKFields(Base):
     hkagent = relationship("HKAgents", back_populates='fields')
 
     field = db.Column(db.String)
+    alias = db.Column(db.String)
     start = db.Column(db.Integer)
     end = db.Column(db.Integer)
+    median = db.Columne(db.Integer)
+    mean = db.Column(db.Integer)
+    min_val = db.Column(db.Integer)
+    max_val = db.Column(db.Integer)
+    stand_dev = db.Column(db.Integer)
+    special_math = db.Column(db.Integer)
 
 
 class G3thk:
