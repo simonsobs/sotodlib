@@ -1,15 +1,20 @@
-"""update_obsdb
+"""update_obsdb.py
+
+Create and/or update an obsdb and obsfiledb based on some books.
 The config file could be of the form:
+
 .. code-block:: yaml
+
     base_dir: path_to_base_directory
     obsdb_cols:
-        start_time: float
-        stop_time: float
-        n_samples: int
-        telescope: str
-        tube_slot: str
-        type: str
-        subtype: str
+      start_time: float
+      stop_time: float
+      n_samples: int
+      telescope: str
+      tube_slot: str
+      type: str
+      subtype: str
+
     obsdb: dummyobsdb.sqlite
     obsfiledb: dummyobsfiledb.sqlite
     tolerate_stray_files: True 
@@ -18,6 +23,7 @@ The config file could be of the form:
     extra_files:
     - M_index.yaml
     - M_book.yaml
+
 """
 
 from sotodlib.core.metadata import ObsDb
@@ -46,14 +52,12 @@ def update_obsdb(config,
                  booktype="both",
                  verbosity=2):
     """
-        Create or update an obsdb for observation or operations data.
-    Required Arguments
+    Create or update an obsdb for observation or operations data.
+
+    Arguments
     ----------
     config : str
         Path to config file
-
-    Optional Arguments
-    ----------
     recency : float
         How far back in time to look for databases, in days. If None, 
         goes back to the UNIX start date (default: None)
