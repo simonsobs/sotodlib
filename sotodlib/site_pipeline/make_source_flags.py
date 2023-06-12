@@ -61,6 +61,10 @@ def main(config_file=None, verbose=0, obs_id=None):
     index_map = {}
 
     detsets = ctx.obsfiledb.get_detsets(obs_id)
+    if len(detsets) == 0:
+        logger.error(f'No detsets listed for {obs_id}!')
+        return
+
     for detset in detsets:
         logger.info(f'Loading {obs_id}:detset={detset}')
         # Load pointing and dets axis; we don't need signal though.
@@ -122,8 +126,6 @@ def main(config_file=None, verbose=0, obs_id=None):
                    f'dets:{group_by}': this_index}
         db.add_entry(db_data, dest_file, replace=True)
 
-    # Return something?
-    return tod, aman
 
 if __name__ == '__main__':
     util.main_launcher(main, get_parser)
