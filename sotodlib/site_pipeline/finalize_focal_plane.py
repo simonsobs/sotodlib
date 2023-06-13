@@ -213,7 +213,6 @@ def main():
     obs_ids = np.append(config["context"].get("obs_ids", []), query)
     # Add in manually loaded paths
     obs_ids = np.append(obs_ids, config.get("multi_obs", []))
-    obs_ids = np.unique(obs_ids)
     if len(obs_ids) == 0:
         raise ValueError("No observations provided in configuration")
 
