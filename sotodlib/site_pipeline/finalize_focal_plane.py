@@ -5,6 +5,7 @@ import argparse as ap
 import numpy as np
 import scipy.linalg as la
 from scipy.spatial.transform import Rotation as R
+import matplotlib.pyplot as plt
 import yaml
 import sotodlib.io.g3tsmurf_utils as g3u
 from sotodlib.core import AxisManager, metadata, Context
@@ -308,6 +309,15 @@ def main():
                 " Someone may have used the wrong units somewhere."
             )
         )
+
+    if "plot" in config and config["plot"]:
+        plt.style.use("tableau-colorblind10")
+        plt.scatter(measured[0], measured[1], label="measured")
+        plt.scatter(nominal[0], nominal[1], label="nominal")
+        transformed = affine @ nominal + shift[:, None]
+        plt.scatter(transformed[0], transformed[1], label="transformed")
+        plt.legend()
+        plt.show()
 
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)

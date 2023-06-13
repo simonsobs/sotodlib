@@ -216,6 +216,7 @@ Here's an annotated example:
   
   # Configuration options
   use_matched: False # Set to True to use the mapping from make_position_match
+  plot: True # Show a plot of the nominal, measured and transformed coords
   coord_transform:
       telescope: "LAT"
       tube: "c"
