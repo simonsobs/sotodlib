@@ -1,0 +1,11 @@
+Name,Description
+``obs_id``,"(str) Observation ID, unique within SO."
+``timestamp``,"(float) Unix timestamp associated with the observation, corresponding approximately to its start time."
+``duration``,"(float, seconds) Approximate length of observation, in seconds."
+``start_time``,"(float, seconds) Unix timestamp of observation start."
+``stop_time``,"(float, seconds) Unix timestamp of observation end."
+``n_samples``,"(int) Number of samples in the detector timestreams."
+``telescope``,"(str) Telescope name (e.g. LAT, SATP1, SATP2 ...)."
+``tube_slot``,"(str) Tube slot name (e.g. c1/i1-6/o1-6; ST1/2/...)."
+``type``,"(str) Observation type; 'obs' or 'oper'."
+``subtype``,"(str) Observation sub-type."

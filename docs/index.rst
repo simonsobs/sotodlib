@@ -22,6 +22,7 @@ Welcome to SOTODLib's documentation!
    toast.rst
    preprocess.rst
    site_pipeline.rst
+   standard_info.rst
    reference.rst
    dev.rst
 
