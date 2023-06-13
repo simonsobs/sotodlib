@@ -34,9 +34,10 @@ def _mk_fpout(detector_id, focal_plane):
         ("dets:detector_id", detector_id.dtype),
         ("xi", np.float32),
         ("eta", np.float32),
+        ("gamma", np.float32),
     ]
     fpout = np.fromiter(
-        zip(detector_id, *focal_plane[:2]), dtype=outdt, count=len(detector_id)
+        zip(detector_id, *focal_plane[:3]), dtype=outdt, count=len(detector_id)
     )
 
     return metadata.ResultSet.from_friend(fpout)
