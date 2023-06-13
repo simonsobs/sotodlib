@@ -302,7 +302,16 @@ def main():
     scale, shear, rot = decompose_affine(affine)
     rot = decompose_rotation(rot)
 
+    if np.isclose(scale, np.pi / 180.0).any() or np.isclose(scale, 180.0 / np.pi).any():
+        logger.warning(
+            (
+                "Scale factor looks like a deg/rad conversion."
+                " Someone may have used the wrong units somewhere."
+            )
+        )
+
     # Make final outputs and save
+    logger.info("Saving data to %s", outpath)
     fpout = _mk_fpout(det_id, focal_plane)
     tpout = _mk_tpout(shift, scale, shear, rot)
     write_dataset(fpout, outpath, "focal_plane", overwrite=True)
