@@ -177,6 +177,103 @@ including amplitude and FWHM.
    :module: sotodlib.site_pipeline.analyze_bright_ptsrc
    :func: get_parser
 
+finalize-focal-plane
+--------------------
+
+This element produces a finalized focal plane for a given array.
+It consumes the output of ``make_position_match`` and is designed to
+conbine results across multiple tuning epochs.
+
+.. automodule:: sotodlib.site_pipeline.finalize_focal_plane
+   :members:
+   :undoc-members:
+
+
+Config file format
+``````````````````
+
+Here's an annotated example:
+
+.. code-block:: yaml
+
+  # Data sources
+  context:
+      path: "context.yaml"
+      position_match: "position_match"
+      obs_ids:
+          - "obs_ufm_uv8_1678148785"
+      query: "query_string"
+
+  # For multi observation results just specify the path
+  multi_obs:
+    - "path_to_h5"
+  # These should be one per provided result
+  # If a given has context setup to load this information set the value to null
+  # Order is the ones from obs_id first, then query, then multi_obs
+  detmaps:
+      - null
+      - "path_to_detmap"
+  
+  # Configuration options
+  use_matched: False # Set to True to use the mapping from make_position_match
+  coord_transform:
+      telescope: "LAT"
+      tube: "c"
+      slot: 0
+      rot: 0
+      config_path: "/home/saianeesh/code/site-pipeline-configs/ufm_to_fp.yaml"
+      zemax_path: "/home/saianeesh/data/ID9_checked_trace_data.npz"
+  
+  # Output info
+  ufm: "Uv8"
+  outdir: "."
+  append: "test" # Will have a "_" before it.
+  
+
+Output file format
+``````````````````
+
+The results of ``finalize_focal_plane`` are stored in an HDF5 file containing
+two datasets. The datasets are made using the ``ResultSet`` class and can be
+loaded back as such.
+
+The first dataset is called ``focal_plane`` and contains three columns:
+
+- ``dets:det_id``: The detector id
+- ``xi``: xi in radians
+- ``eta``: eta in radians
+- ``gamma``: gamma in radians
+
+If a given detctor has no good pointing information provided then the three
+pointing columns will be ``nan`` for it.
+If no polarization angles are provided then ``gamma`` will be all ``nan``
+
+The second dataset is called ``pointing_transform`` and contain the information
+to transform from the nominal pointing to the measured pointing.
+
+This transformation is an affine transformation defined as :math:`m = An + t`,
+where:
+
+- ``m`` is the measured pointing
+- ``n`` is the nominal pointing
+- ``A`` is the affine matrix
+- ``t`` is the final translation
+
+The ``ResultSet`` contains information from decomposing ``A`` as well as ``t``.
+It has collums:
+
+- ``shift``: The shift along each axis.
+  This is ``t`` from above, note that this is in the measured basis not nominal.
+- ``scale``: The scale along each axis.
+- ``shear``: The shear params.
+- ``rot``: The rotation about each axis in radians.
+
+The ``ResultSet`` has three rows.
+In general the first row corresponds to ``xi``, the second ``eta``, the third ``gamma``.
+So for ``shift`` the row tells you what axis you are translating across.
+For ``scale`` the row tells you what axis you are scaling.
+For ``rot`` the row tells you what axis you are rotating about.
+For ``shear`` the row is just which order the shear params appear in the transformation matrix.
 
 preprocess-tod
 --------------
