@@ -8,7 +8,7 @@ from scipy.spatial.transform import Rotation as R
 import yaml
 import sotodlib.io.g3tsmurf_utils as g3u
 from sotodlib.core import AxisManager, metadata, Context
-from sotodlib.io.metadata import write_dataset
+from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
 from sotodlib.coords import focal_plane as fpc
 
@@ -206,14 +206,14 @@ def main():
         config = yaml.safe_load(file)
 
     # Load context
-    # TODO: Currently this is just setup to load the single obs results
-    # Need a way to load multi obs results
     ctx = Context(config["context"]["path"])
     name = config["context"]["position_match"]
     query = []
     if "query" in config["context"]:
         query = (ctx.obsdb.query(config["context"]["query"])["obs_id"],)
     obs_ids = np.append(config["context"].get("obs_ids", []), query)
+    # Add in manually loaded paths
+    obs_ids = np.append(obs_ids, config.get("multi_obs", []))
     obs_ids = np.unique(obs_ids)
     if len(obs_ids) == 0:
         raise ValueError("No observations provided in configuration")
@@ -229,10 +229,16 @@ def main():
     fp_dict = {}
     use_matched = "use_matched" in config and config["use_matched"]
     for obs_id, detmap in zip(obs_ids, config["detmaps"]):
-        logger.info("Loading information from observation " + obs_id)
-
         # Load data
-        aman = ctx.get_meta(obs_id, dets=config["context"].get("dets", {}))
+        if os.path.isfile(obs_id):
+            logger.info("Loading information from file at " + obs_id)
+            rset = read_dataset(obs_id, "focal_plane")
+            _aman = rset.to_axismanager(axis_key="dets:readout_id")
+            aman = AxisManager(_aman.dets)
+            aman.wrap(name, _aman)
+        else:
+            logger.info("Loading information from observation " + obs_id)
+            aman = ctx.get_meta(obs_id, dets=config["context"].get("dets", {}))
         if name not in aman:
             logger.warning(
                 "\tNo position_match associated with this observation. Skipping."
