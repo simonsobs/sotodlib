@@ -17,8 +17,8 @@ logger = util.init_logger(__name__, "finalize_focal_plane: ")
 
 def _avg_focalplane(fp_dict):
     focal_plane = []
-    detector_ids = np.array(list(fp_dict.keys()))
-    for did in detector_ids:
+    det_ids = np.array(list(fp_dict.keys()))
+    for did in det_ids:
         avg_pointing = np.nanmedian(np.vstack(fp_dict[did]), axis=0)
         focal_plane.append(avg_pointing)
     focal_plane = np.column_stack(focal_plane)
@@ -26,19 +26,17 @@ def _avg_focalplane(fp_dict):
     if np.isnan(focal_plane[:2]).all():
         raise ValueError("All detectors are outliers. Check your inputs")
 
-    return detector_ids, focal_plane
+    return det_ids, focal_plane
 
 
-def _mk_fpout(detector_id, focal_plane):
+def _mk_fpout(det_id, focal_plane):
     outdt = [
-        ("dets:detector_id", detector_id.dtype),
+        ("dets:det_id", det_id.dtype),
         ("xi", np.float32),
         ("eta", np.float32),
         ("gamma", np.float32),
     ]
-    fpout = np.fromiter(
-        zip(detector_id, *focal_plane[:3]), dtype=outdt, count=len(detector_id)
-    )
+    fpout = np.fromiter(zip(det_id, *focal_plane[:3]), dtype=outdt, count=len(det_id))
 
     return metadata.ResultSet.from_friend(fpout)
 
@@ -113,24 +111,24 @@ def get_affine(src, dst):
 
         shift: Shift to apply after transformation.
     """
-    msk = np.isfinite(src).all(axis=0) and np.isfinite(src).all(axis=0)
+    msk = np.isfinite(src).all(axis=0) * np.isfinite(dst).all(axis=0)
     if np.sum(msk) < 7:
         raise ValueError("Not enough finite points to compute transformation")
 
     M = np.vstack(
         (
-            src[msk] - np.median(src[msk], axis=1)[:, None],
-            dst[msk] - np.median(dst[msk], axis=1)[:, None],
+            src[:, msk] - np.median(src[:, msk], axis=1)[:, None],
+            dst[:, msk] - np.median(dst[:, msk], axis=1)[:, None],
         )
     ).T
-    u, s, vh = la.svd(M)
+    *_, vh = la.svd(M)
     vh_splits = [
         quad for half in np.split(vh.T, 2, axis=0) for quad in np.split(half, 2, axis=1)
     ]
     affine = np.dot(vh_splits[2], la.pinv(vh_splits[0]))
 
-    transformed = affine @ src[msk]
-    shift = np.median(dst[msk] - transformed, axis=1)
+    transformed = affine @ src[:, msk]
+    shift = np.median(dst[:, msk] - transformed, axis=1)
 
     return affine, shift
 
@@ -182,13 +180,13 @@ def decompose_rotation(rotation):
     ndim = len(rotation)
     if ndim > 3:
         raise ValueError("No support for rotations in more than 3 dimensions")
-    elif ndim < 2:
+    if ndim < 2:
         raise ValueError("Rotations with less than 2 dimensions don't make sense")
     if rotation.shape != (ndim, ndim):
         raise ValueError("Rotation matrix should be ndim by ndim")
     _rotation = np.eye(3)
     _rotation[:ndim, :ndim] = rotation
-    angles = R.from_matrix(_rotation).to_euler("xyz")
+    angles = R.from_matrix(_rotation).as_euler("xyz")
 
     if ndim == 2:
         angles[:2] = np.nan
@@ -203,7 +201,7 @@ def main():
     args = parser.parse_args()
 
     # Open config file
-    with open(args.config_path, "r") as file:
+    with open(args.config_path, "r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
 
     # Load context
@@ -224,6 +222,7 @@ def main():
     append = ""
     if "append" in config:
         append = "_" + config["append"]
+    os.makedirs(config["outdir"], exist_ok=True)
     outpath = os.path.join(config["outdir"], f"{ufm}{append}.h5")
     outpath = os.path.abspath(outpath)
 
@@ -232,13 +231,13 @@ def main():
     for obs_id, detmap in zip(obs_ids, config["detmaps"]):
         # Load data
         if os.path.isfile(obs_id):
-            logger.info("Loading information from file at " + obs_id)
+            logger.info("Loading information from file at %s", obs_id)
             rset = read_dataset(obs_id, "focal_plane")
             _aman = rset.to_axismanager(axis_key="dets:readout_id")
             aman = AxisManager(_aman.dets)
             aman.wrap(name, _aman)
         else:
-            logger.info("Loading information from observation " + obs_id)
+            logger.info("Loading information from observation %s", obs_id)
             aman = ctx.get_meta(obs_id, dets=config["context"].get("dets", {}))
         if name not in aman:
             logger.warning(
@@ -259,13 +258,13 @@ def main():
             logger.error("\tThis observation has no detmap results, skipping")
             continue
 
-        det_ids = aman.det_info.detector_id
+        det_ids = aman.det_info.det_id
         x = aman.det_info.wafer.det_x
         y = aman.det_info.wafer.det_y
-        pol = aman.det_info.wafer.angle_actual_deg
+        pol = aman.det_info.wafer.angle
         if use_matched:
-            det_ids = aman[name].matched_detector_id
-            dm_sort = np.argsort(aman.det_info.detector_id)
+            det_ids = aman[name].matched_det_id
+            dm_sort = np.argsort(aman.det_info.det_id)
             mapping = np.argsort(np.argsort(det_ids))
             x = x[dm_sort][mapping]
             y = y[dm_sort][mapping]
@@ -273,7 +272,7 @@ def main():
 
         focal_plane = np.column_stack(
             (aman[name].xi, aman[name].eta, aman[name].polang, x, y, pol)
-        )
+        ).astype(float)
         out_msk = aman[name].outliers
         focal_plane[out_msk, :3] = np.nan
 
@@ -283,12 +282,12 @@ def main():
             except KeyError:
                 fp_dict[di] = [fp]
 
-    if len(fp_dict):
+    if not fp_dict:
         logger.error("No valid observations provided")
         sys.exit()
 
     # Compute the average focal plane while ignoring outliers
-    detector_id, focal_plane = _avg_focalplane(fp_dict)
+    det_id, focal_plane = _avg_focalplane(fp_dict)
     measured = focal_plane[:3]
 
     # Get nominal xi, eta, gamma
@@ -304,10 +303,10 @@ def main():
     rot = decompose_rotation(rot)
 
     # Make final outputs and save
-    fpout = _mk_fpout(detector_id, focal_plane)
+    fpout = _mk_fpout(det_id, focal_plane)
     tpout = _mk_tpout(shift, scale, shear, rot)
-    write_dataset(fpout, outpath, "focal_plane")
-    write_dataset(tpout, outpath, "pointing_transform")
+    write_dataset(fpout, outpath, "focal_plane", overwrite=True)
+    write_dataset(tpout, outpath, "pointing_transform", overwrite=True)
 
 
 if __name__ == "__main__":
