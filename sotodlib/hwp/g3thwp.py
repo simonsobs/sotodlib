@@ -754,20 +754,17 @@ class G3tHWP():
         aman.wrap_new('hwp_rate', shape=('samps', ))
         
         # write solution
-        start_time = solved['fast_time'].min()
-        end_time = solved['fast_time'].max()
-        s = (start_time <= tod.timestamps) * (tod.timestamps < end_time)
-        aman.timestamps = tod.timestamps[s]
-        aman.stable = scipy.interpolate.interp1d(solved['slow_time'], solved['stable'], kind='linear', fill_value='extrapolate')(tod.timestamps[s])
-        aman.locked = scipy.interpolate.interp1d(solved['slow_time'], solved['locked'], kind='linear', fill_value='extrapolate')(tod.timestamps[s])
-        aman.hwp_rate = scipy.interpolate.interp1d(solved['slow_time'], solved['hwp_rate'], kind='linear', fill_value='extrapolate')(tod.timestamps[s])
+        aman.timestamps = tod.timestamps
+        aman.stable = scipy.interpolate.interp1d(solved['slow_time'], solved['stable'], kind='linear', bounds_error=False)(tod.timestamps)
+        aman.locked = scipy.interpolate.interp1d(solved['slow_time'], solved['locked'], kind='linear', bounds_error=False)(tod.timestamps)
+        aman.hwp_rate = scipy.interpolate.interp1d(solved['slow_time'], solved['hwp_rate'], kind='linear', bounds_error=False)(tod.timestamps)
         if 'fast_time_raw' in solved.keys():
-            aman.hwp_angle = scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',fill_value='extrapolate')(tod.timestamps[s])
-            aman.hwp_angle_eval = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',fill_value='extrapolate')(tod.timestamps[s])
+            aman.hwp_angle = scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps)
+            aman.hwp_angle_eval = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps)
             
         else:
             logger.info('no hwp_angle_eval data')
-            aman.hwp_angle = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',fill_value='extrapolate')(tod.timestamps[s])
+            aman.hwp_angle = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps)
         aman.save(output, h5_address, overwrite=True)
 
         return
