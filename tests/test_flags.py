@@ -19,7 +19,7 @@ class TestFlags(unittest.TestCase):
         aman.wrap("signal", signal, [(0, "dets"), (1, "samps")])
 
         for max_size in (nsamps // 2, nsamps, nsamps * 2):
-            cut = flags.get_trending_flags(aman)
+            cut = flags.get_trending_flags(aman, max_trend=.5)
             self.assertTupleEqual(cut.shape, (2, 1000))
             self.assertTrue(np.array_equal(cut.ranges[1].ranges(), [[0, 1000]]))
             self.assertEqual(len(cut.ranges[0].ranges()), 0)
