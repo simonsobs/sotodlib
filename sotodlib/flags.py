@@ -133,7 +133,7 @@ def get_glitch_flags(
 
 def get_trending_flags(
     aman,
-    max_trend=0.01,
+    max_trend=1.2,
     n_pieces=1,
     max_samples=500,
     signal=None,
@@ -143,8 +143,10 @@ def get_trending_flags(
     name="trends",
     full_output=False,
 ):
-    """Flag Detectors with trends larger than max_trend. Note, this is really
-    a max-min calculator.
+    """
+    Flag Detectors with trends larger than max_trend.
+    This function can be used to find unlocked detectors.
+    Note that this is a rough cut and unflagged detectors can still have poor tracking.
 
     Args:
         aman (AxisManager): the tod
