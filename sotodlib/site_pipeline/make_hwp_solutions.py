@@ -83,14 +83,11 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
     for obs_id in obs['obs_id']:
         print(obs_id)
         tod = ctx.get_obs(obs_id, no_signal=True)
-        # Wrap result into AxisManager for HDF5 off-load.
-        aman = core.AxisManager(tod.dets, tod.samps)
-        aman.wrap_new('hwp_angle', shape=('samps', ))
-        aman.wrap_new('hwp_angle_eval', shape=('samps', ))
         
         #### Angle calculation ####
-        start = int(tod.timestamps[0])
-        end = int(tod.timestamps[-1])
+        margin = 10 #sec
+        start = int(tod.timestamps[0])-margin
+        end = int(tod.timestamps[-1])+margin
         g3thwp = G3tHWP(config_file)
         data = g3thwp.load_data(start, end)
 
@@ -110,28 +107,7 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
         g3thwp.write_solution_h5(solved, tod, output=output_filename, h5_address=obs_id)
         
         del g3thwp
-        """
-        aman.hwp_angle = scipy.interpolate.interp1d(
-            solved['fast_time'],
-            solved['angle'],
-            kind='linear',
-            fill_value='extrapolate')(tod.timestamps)
         
-        # template subtracted angle --- need to fix bug inside
-        g3thwp.eval_angle(solved)
-        aman.hwp_angle_eval = scipy.interpolate.interp1d(
-            solved['fast_time'],
-            solved['angle'],
-            kind='linear',
-            fill_value='extrapolate')(tod.timestamps)
-
-       
-        del g3thwp
-        #### End of angle calculation ####
-
-        h5_address = obs_id
-        aman.save(output_filename, h5_address, overwrite=True)
-        """     
         h5_address = obs_id
         # Add an entry to the database
         man_db.add_entry({'obs:obs_id': obs_id, 'dataset': h5_address}, filename=output_filename)
