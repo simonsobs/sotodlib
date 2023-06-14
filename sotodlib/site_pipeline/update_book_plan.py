@@ -15,7 +15,6 @@ def main(
     from_scratch: bool = False
     ):
     """
-
     Update the book plan database with new data from the g3tsmurf database.
 
     Parameters
@@ -48,9 +47,12 @@ def main(
         min_ctime = min_ctime.timestamp()
     if isinstance(max_ctime, dt.datetime):
         max_ctime = max_ctime.timestamp()
+    # obs and oper books
     imprinter.update_bookdb_from_g3tsmurf(min_ctime=min_ctime, max_ctime=max_ctime,
                                           ignore_singles=False,
                                           stream_ids=stream_ids,
                                           force_single_stream=force_single_stream)
+    # hk books
+    imprinter.register_hk_books()
 if __name__ == "__main__":
     typer.run(main)
