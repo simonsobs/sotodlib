@@ -58,6 +58,23 @@ def _mk_tpout(shift, scale, shear, rot):
     return metadata.ResultSet.from_friend(tpout)
 
 
+def _mk_plot(nominal, measured, affine, shift):
+    plt.style.use("tableau-colorblind10")
+    _, ax = plt.subplots()
+    ax.set_xlabel("Xi Nominal (rad)")
+    ax.set_ylabel("Eta Nominal (rad)")
+    p1 = ax.scatter(nominal[0], nominal[1], label="nominal", color="grey")
+    ax1 = ax.twinx()
+    ax1.set_ylabel("Eta Measured (rad)")
+    ax2 = ax1.twiny()
+    ax2.set_xlabel("Xi Measured (rad)")
+    p2 = ax2.scatter(measured[0], measured[1], label="measured")
+    transformed = affine @ nominal + shift[:, None]
+    p3 = ax2.scatter(transformed[0], transformed[1], label="transformed")
+    ax2.legend(handles=[p1, p2, p3])
+    plt.show()
+
+
 def get_nominal(focal_plane, config):
     """
     Get nominal pointing from detector xy positions.
@@ -311,13 +328,7 @@ def main():
         )
 
     if "plot" in config and config["plot"]:
-        plt.style.use("tableau-colorblind10")
-        plt.scatter(measured[0], measured[1], label="measured")
-        plt.scatter(nominal[0], nominal[1], label="nominal")
-        transformed = affine @ nominal + shift[:, None]
-        plt.scatter(transformed[0], transformed[1], label="transformed")
-        plt.legend()
-        plt.show()
+        _mk_plot(nominal, measured, affine, shift)
 
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)
