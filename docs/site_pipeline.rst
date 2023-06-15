@@ -228,7 +228,10 @@ Here's an annotated example:
   
   # Configuration options
   use_matched: False # Set to True to use the mapping from make_position_match
-  plot: True # Show a plot of the nominal, measured and transformed coords
+  # Show a plot of the nominal, measured and transformed coords
+  # If set to True the plot will be shown
+  # If set to a path the plot will be saved there
+  plot: True
   coord_transform:
       telescope: "LAT"
       tube: "c"

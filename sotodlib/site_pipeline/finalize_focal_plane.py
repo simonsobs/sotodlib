@@ -337,8 +337,9 @@ def main():
             )
         )
 
-    if "plot" in config and config["plot"]:
-        _mk_plot(nominal, measured, affine, shift)
+    plot = config.get("plot", False)
+    if plot:
+        _mk_plot(nominal, measured, affine, shift, plot)
 
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)
