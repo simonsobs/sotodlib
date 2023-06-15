@@ -117,13 +117,13 @@ def get_gamma(pol_xi, pol_eta):
 
         gamma: Array of n gamma values in radians.
     """
-    xi = pol_xi.reshape((len(pol_xi) // 2, 2))
-    eta = pol_eta.reshape((len(pol_eta) // 2, 2))
+    xi = pol_xi.reshape((-1, 2))
+    eta = pol_eta.reshape((-1, 2))
 
     d_xi = np.diff(xi, axis=1).ravel()
     d_eta = np.diff(eta, axis=1).ravel()
 
-    gamma = np.arctan2(d_eta, d_xi) % (2 * np.pi)
+    gamma = np.arctan2(d_xi, d_eta) % (2 * np.pi)
     return gamma
 
 
@@ -161,7 +161,7 @@ def get_ufm_to_fp_pars(telescope, slot, config_path):
 
     Returns:
 
-        transform_pars: Dictionairy of transformation parameters that can be passed to ufm_to_fp.
+        transform_pars: Dict of transformation parameters that can be passed to ufm_to_fp.
     """
     config = load_ufm_to_fp_config(config_path)
     return config[telescope][slot]
