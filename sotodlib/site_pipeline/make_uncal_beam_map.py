@@ -21,22 +21,32 @@ from sotodlib import core, coords, site_pipeline, tod_ops, hwp
 
 from . import util
 
-logger = None
-
 
 def get_parser(parser=None):
     if parser is None:
         parser = ArgumentParser()
-    parser.add_argument('-c', '--config-file', help=
+    parser.add_argument('config_file', help=
                         "Configuration file.")
-    parser.add_argument('-v', '--verbose', action='count',
-                        default=0, help="Pass multiple times to increase.")
-    parser.add_argument('obs_id', nargs='?', help=
-                        "Observation for which to make source map.")
-    parser.add_argument('--test', action='store_true', help=
-                        "Reduce detector count for quick tests.")
-    parser.add_argument('--force-source', help=
-                        "Specify which source to target (when ambiguous).")
+
+    g = parser.add_argument_group('Specifying observations')
+    g.add_argument('obs_id', nargs='*', help=
+                   "Observation(s) for which to make source map.")
+    g.add_argument('--query', help=
+                   "Query to pass to obsdb to select observations.")
+    g.add_argument('--obs-file', help=
+                   "Name of file containing list of obs_id to analyze in (first column)")
+
+    g = parser.add_argument_group('Configuration file overrides')
+    g.add_argument('--context', help=
+                   "Specify context file to use.")
+    g.add_argument('--force-source', help=
+                   "Specify which source to target (when ambiguous).")
+
+    g = parser.add_argument_group('Logging / testing')
+    g.add_argument('-v', '--verbose', action='count',
+                   default=0, help="Pass multiple times to increase.")
+    g.add_argument('--test', action='store_true', help=
+                   "Reduce detector count for quick tests.")
 
     return parser
 
@@ -203,12 +213,29 @@ def _adjust_focal_plane(tod, focal_plane=None, boresight_offset=None):
     fp.eta[:] = eta
     fp.gamma[:] = gamma
 
-def main(config_file=None, obs_id=None, verbose=0, test=False,
-         force_source=None):
+def main(
+        config_file=None,
+        obs_id=None,
+        query=None,
+        obs_file=None,
+        context=None,
+        force_source=None,
+        verbose=0,
+        test=False,
+        logger=None
+):
     """Entry point."""
     config = _get_config(config_file)
 
-    logger = util.init_logger(__name__, 'make_uncal_beam_map: ')
+    # Process overrides / defaults
+    if context is None:
+        context = config['context_file']
+    if force_source is None:
+        force_source = config['mapmaking'].get('force_source')
+
+    if logger is None:
+        logger = util.init_logger(__name__, 'make_uncal_beam_map: ')
+
     if verbose >= 1:
         logger.setLevel('INFO')
     if verbose >= 2:
@@ -216,7 +243,23 @@ def main(config_file=None, obs_id=None, verbose=0, test=False,
     if verbose >= 3:
         sotodlib.logger.setLevel('DEBUG')
 
-    ctx = core.Context(config['context_file'])
+    ctx = core.Context(context)
+
+    # Find the obs.
+    if sum([len(obs_id) > 0, query is not None, obs_file is not None]) != 1:
+        logger.error('Pass exactly one of obs_id list, --query, or --obs_file.')
+        sys.exit(1)
+
+    if query is not None:
+        obs_id = ctx.obsdb.query(query)['obs_id']
+    elif obs_file is not None:
+        obs_id = [line.split()[0] for line in open(obs_file)
+                  if line.strip()[:1] not in ['', '#']]
+
+    if len(obs_id) > 1:
+        logger.warning(f'User requested multipled obs: {obs_id}')
+        logger.warning(f'Running on the first one only.')
+    obs_id = obs_id[0]
 
     group_by = config['subobs'].get('use', 'detset')
     if group_by.startswith('dets:'):
@@ -277,9 +320,7 @@ def main(config_file=None, obs_id=None, verbose=0, test=False,
 
         # Determine what source to map.
         ## To-do: have a mode where it maps all sources it finds.
-        source_name = config['mapmaking'].get('force_source')
-        if force_source is not None:
-            source_name = force_source
+        source_name = force_source
         if source_name is None:
             sources = coords.planets.get_nearby_sources(tod)
             logger.info(f"Mappable sources in this region: {sources}")
