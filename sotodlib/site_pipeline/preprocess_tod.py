@@ -9,7 +9,7 @@ from sotodlib.preprocess import _Preprocess, PIPELINE, processes
 
 logger = sp_util.init_logger("preprocess")
 
-def _build_pipe_from_configs(configs):
+def _build_pipe_from_configs(configs, logger):
     pipe = []
     for process in configs["process_pipe"]:
         name = process.get("name")
@@ -104,7 +104,7 @@ def preprocess_tod(obs_id, configs, overwrite=False, logger=None):
             scheme=scheme
         )
 
-    pipe = _build_pipe_from_configs(configs)
+    pipe = _build_pipe_from_configs(configs, logger)
 
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
