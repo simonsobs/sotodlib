@@ -53,6 +53,15 @@ def get_parser(parser=None):
 def _get_config(config_file):
     return yaml.safe_load(open(config_file, 'r'))
 
+def _lookup_dot_key(tod, key):
+    tokens = key.split('.')
+    while len(tokens):
+        try:
+            tod = tod[tokens.pop(0)]
+        except KeyError:
+            return None
+    return tod
+
 def _clip_map(m, mask=None, edges=[0.05, 0.95]):
     if mask is None:
         mask = ~np.isnan(m)
@@ -384,6 +393,17 @@ def main(
                 cal *= tod[k]
         if cal is not None:
             tod.signal *= cal[:,None]
+
+        # Promote glitch flags.
+        for k in config['preprocessing']['glitch_flags']:
+            _glitches = _lookup_dot_key(tod, k)
+            if _glitches is None:
+                continue
+            logger.info(f'Merging {k} into tod.glitches')
+            if 'glitches' not in tod:
+                tod.wrap('glitches', _glitches, [(0, 'dets'), (1, 'samps')])
+            else:
+                tod.glitches = tod.glitches + _glitches
 
         # Figure out the resolution
         reses = [
