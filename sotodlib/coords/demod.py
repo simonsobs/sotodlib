@@ -75,6 +75,8 @@ def make_map(tod,
         else:
             P, X = coords.planets.get_scan_P(tod, planet=center_on, res=res)
             
+    # Note that P might be passed in with an unexpected comps setting,
+    # so specify comps explicitly in every operation on P, below.
 
     if det_weights is None:
         if det_weights_demod is None:
@@ -94,7 +96,7 @@ def make_map(tod,
                              det_weights=det_weights_demod)
     mU_weighted = P.to_map(tod=tod, signal=demodU, comps='QU',
                              det_weights=det_weights_demod)
-    mQU_weighted = P.zeros()
+    mQU_weighted = P.zeros(comps='QU')
     
     if wrong_definition == True:
         # CAUTION: Here the definition of mQU_weighted uses a wrong way of definition, as toast simulation defines that in the wrong way.
@@ -112,7 +114,7 @@ def make_map(tod,
                          det_weights=det_weights_demod)
 
     # combine mT_weighted and mQU_weighted into mTQU_weighted
-    mTQU_weighted = P.zeros(super_shape=3)
+    mTQU_weighted = P.zeros(super_shape=3, comps='TQU')
     mTQU_weighted[0] = mT_weighted
     mTQU_weighted[1] = mQU_weighted[0]
     mTQU_weighted[2] = mQU_weighted[1]
