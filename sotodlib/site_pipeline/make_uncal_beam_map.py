@@ -27,10 +27,10 @@ def get_parser(parser=None):
         parser = ArgumentParser()
     parser.add_argument('config_file', help=
                         "Configuration file.")
+    parser.add_argument('obs_id', nargs='*', help=
+                        "Observation(s) for which to make source map.")
 
     g = parser.add_argument_group('Specifying observations')
-    g.add_argument('obs_id', nargs='*', help=
-                   "Observation(s) for which to make source map.")
     g.add_argument('--query', help=
                    "Query to pass to obsdb to select observations.")
     g.add_argument('--obs-file', help=
@@ -361,6 +361,16 @@ def main(
 
         tod.signal[:] = tod_ops.fourier_filter(tod, filt, resize=None, detrend=None)
 
+        # Subtract HWPSS
+        hwpss_key = config['preprocessing'].get('hwpss')
+        if hwpss_key:
+            logger.info(f'Removing HWPSS model at {hwpss_key}')
+            hwpss_model = _lookup_dot_key(tod, hwpss_key)
+            mode_ints = [int(x[1:]) for x in hwpss_model.modes.vals[::2]]
+            fitsig_tod = hwp.hwp.harms_func(tod.hwp_angle, mode_ints, hwpss_model.coeffs)
+            tod.signal -= fitsig_tod
+            del fitsig_tod
+
         # Demodulation & downsampling.
         demodQU = None
         unmirror_det_angles = None
@@ -395,7 +405,7 @@ def main(
             tod.signal *= cal[:,None]
 
         # Promote glitch flags.
-        for k in config['preprocessing']['glitch_flags']:
+        for k in config['preprocessing'].get('glitch_flags', []):
             _glitches = _lookup_dot_key(tod, k)
             if _glitches is None:
                 continue
