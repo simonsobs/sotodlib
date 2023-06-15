@@ -58,7 +58,7 @@ def _mk_tpout(shift, scale, shear, rot):
     return metadata.ResultSet.from_friend(tpout)
 
 
-def _mk_plot(nominal, measured, affine, shift):
+def _mk_plot(nominal, measured, affine, shift, show_or_save):
     plt.style.use("tableau-colorblind10")
     _, ax = plt.subplots()
     ax.set_xlabel("Xi Nominal (rad)")
@@ -72,7 +72,11 @@ def _mk_plot(nominal, measured, affine, shift):
     transformed = affine @ nominal + shift[:, None]
     p3 = ax2.scatter(transformed[0], transformed[1], label="transformed")
     ax2.legend(handles=[p1, p2, p3])
-    plt.show()
+    if isinstance(show_or_save, str):
+        plt.savefig(show_or_save)
+        plt.cla()
+    else:
+        plt.show()
 
 
 def get_nominal(focal_plane, config):
@@ -154,6 +158,7 @@ def get_affine(src, dst):
 def decompose_affine(affine):
     """
     Decompose an affine transformation into its components.
+    This decomposetion treats the affine matrix as: rotation * shear * scale.
 
     Arguments:
 
@@ -167,7 +172,7 @@ def decompose_affine(affine):
 
         rot: Rotation matrix.
              Not currently decomposed in this function because the easiest
-             way to do that is not n-dimensional but this rest of this function is.
+             way to do that is not n-dimensional but the rest of this function is.
     """
     # Use the fact that rotation matrix times its transpose is the identity
     no_rot = affine.T @ affine
@@ -183,7 +188,7 @@ def decompose_affine(affine):
 
 def decompose_rotation(rotation):
     """
-    Decompose a rotation matrix into its angles.
+    Decompose a rotation matrix into its xyz rotation angles.
     This currently won't work on anything higher than 3 dimensions.
 
     Arguments:
@@ -232,7 +237,12 @@ def main():
     # Add in manually loaded paths
     obs_ids = np.append(obs_ids, config.get("multi_obs", []))
     if len(obs_ids) == 0:
-        raise ValueError("No observations provided in configuration")
+        raise ValueError("No position match results provided in configuration")
+    detmaps = config["detmaps"]
+    if len(obs_ids) != len(detmaps):
+        raise ValueError(
+            "Number of DetMaps doesn't match number of position match results"
+        )
 
     # Build output path
     ufm = config["ufm"]
@@ -244,8 +254,8 @@ def main():
     outpath = os.path.abspath(outpath)
 
     fp_dict = {}
-    use_matched = "use_matched" in config and config["use_matched"]
-    for obs_id, detmap in zip(obs_ids, config["detmaps"]):
+    use_matched = config.get("use_matched", False)
+    for obs_id, detmap in zip(obs_ids, detmaps):
         # Load data
         if os.path.isfile(obs_id):
             logger.info("Loading information from file at %s", obs_id)
