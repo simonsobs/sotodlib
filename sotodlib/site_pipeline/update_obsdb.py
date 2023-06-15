@@ -134,7 +134,7 @@ def update_obsdb(config,
                 very_clean["timestamp"] = start
                 very_clean["duration"] = end - start
             
-            if tags != ([] or [""]):
+            if tags != [] and tags != [""]:
                 bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
             else:
                 bookcartobsdb.update_obs(obs_id, very_clean)
