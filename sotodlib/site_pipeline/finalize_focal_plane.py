@@ -6,6 +6,7 @@ import h5py
 import numpy as np
 import scipy.linalg as la
 from scipy.spatial.transform import Rotation as R
+from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 import yaml
 import sotodlib.io.g3tsmurf_utils as g3u
@@ -129,6 +130,37 @@ def get_nominal(focal_plane, config):
     return xi_nominal, eta_nominal, gamma_nominal
 
 
+def gamma_fit(src, dst):
+    """
+    Fit the transformation for gamma.
+    Note that the periodicity here assumes things are in radians.
+
+    Arguments:
+
+        src: Source gamma in radians
+
+        dst: Destination gamma in radians
+
+    Returns:
+
+       scale: Scale applied to src
+
+       shift: Shift applied to scale*src
+    """
+
+    def _gamma_min(scale, shift, gamma):
+        twopi = 2.0 * np.pi
+        src = gamma[0] % twopi
+        dst = gamma[1] % twopi
+
+        transformed = (src * scale + shift) % twopi
+
+        return np.std(dst - transformed)
+
+    res = minimize(_gamma_min, (1.0, 0.0), (src, dst))
+    return res.x
+
+
 def main():
     # Read in input pars
     parser = ap.ArgumentParser()
@@ -236,17 +268,14 @@ def main():
     # Compute transformation between the two nominal and measured pointing
     measured_gamma = np.isfinite(measured[2]).all()
     if measured_gamma:
-        gamma_scale, gamma_shift = op.get_affine(
-            np.vstack(nominal[2]), np.vstack(measured[2])
-        )
-        gamma_shift = gamma_shift.item()
+        gamma_scale, gamma_shift = gamma_fit(nominal[2], measured[2])
     else:
         logger.warning(
             "No polarization data availible, gammas will be filled with the nominal values."
         )
         focal_plane[2] = nominal[2]
         gamma_scale = 1.0
-        gamma_shift = 1.0
+        gamma_shift = 0.0
 
     affine, shift = op.get_affine(np.vstack(nominal[:2]), np.vstack(measured[:2]))
     scale, shear, rot = op.decompose_affine(affine)
