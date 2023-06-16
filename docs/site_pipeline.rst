@@ -250,10 +250,10 @@ Output file format
 ``````````````````
 
 The results of ``finalize_focal_plane`` are stored in an HDF5 file containing
-two datasets. The datasets are made using the ``ResultSet`` class and can be
-loaded back as such.
+a dataset with additional attributes. The dataset is made using the ``ResultSet``
+class and can be loaded back as such but the attributes require ``h5py``.
 
-The first dataset is called ``focal_plane`` and contains three columns:
+The dataset is called ``focal_plane`` and contains three columns:
 
 - ``dets:det_id``: The detector id
 - ``xi``: xi in radians
@@ -263,33 +263,33 @@ The first dataset is called ``focal_plane`` and contains three columns:
 If a given detector has no good pointing information provided then the three
 pointing columns will be ``nan`` for it. If no polarization angles are provided
 them ``gamma`` will be populated with the nominal values from physical optics.
+There is an attribute called ``measured_gamma`` that will be ``False`` in this case.
 
-The second dataset is called ``pointing_transform`` and contain the information
-to transform from the nominal pointing to the measured pointing.
+The other attributes contain the information to transform from the nominal
+pointing to the measured pointing.
 
-This transformation is an affine transformation defined as :math:`m = An + t`,
-where:
+This transformation for ``xi`` and ``eta`` is an affine transformation defined as
+:math:`m = An + t`, where:
 
-- ``m`` is the measured pointing
-- ``n`` is the nominal pointing
-- ``A`` is the affine matrix
+- ``m`` is the measured ``xi-eta`` pointing
+- ``n`` is the nominal ``xi-eta`` pointing
+- ``A`` is the 2x2 affine matrix
 - ``t`` is the final translation
 
-The ``ResultSet`` contains information from decomposing ``A`` as well as ``t``.
-It has collums:
+``A`` is then decomposed into a rotation of the ``xi-eta`` plane, a shear parameter,
+and a scale along each axis.
 
-- ``shift``: The shift along each axis.
-  This is ``t`` from above, note that this is in the measured basis not nominal.
-- ``scale``: The scale along each axis.
-- ``shear``: The shear params.
-- ``rot``: The rotation about each axis in radians.
+For gamma the transformation is also technically affine, but since it is in just
+one dimension it can be described by a single shift and scale.
 
-The ``ResultSet`` has three rows.
-In general the first row corresponds to ``xi``, the second ``eta``, the third ``gamma``.
-So for ``shift`` the row tells you what axis you are translating across.
-For ``scale`` the row tells you what axis you are scaling.
-For ``rot`` the row tells you what axis you are rotating about.
-For ``shear`` the row is just which order the shear params appear in the transformation matrix.
+All of these parameters are stored in the following attributes:
+
+- ``shift``: a 3 element tuple with the shift along ``(xi, eta, gamma)``.
+  Note that this is in the basis of the measured points.
+- ``scale``: a 3 element tuple with the scaling along ``(xi, eta, gamma)``.
+- ``shear``: the shear parameter in the ``xi-eta`` plane.
+- ``rot``: the rotation of the ``xi-eta`` plane.
+
 
 preprocess-tod
 --------------
