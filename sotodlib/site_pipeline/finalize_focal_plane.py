@@ -11,7 +11,7 @@ import sotodlib.io.g3tsmurf_utils as g3u
 from sotodlib.core import AxisManager, metadata, Context
 from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
-from sotodlib.coords import focal_plane as fpc
+from sotodlib.coords import optics as op
 
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
 
@@ -98,122 +98,22 @@ def get_nominal(focal_plane, config):
 
         gamma_nominal: The nominal gamma values.
     """
-    transform_pars = fpc.get_ufm_to_fp_pars(
+    transform_pars = op.get_ufm_to_fp_pars(
         config["telescope"], config["slot"], config["config_path"]
     )
-    x, y, pol = fpc.ufm_to_fp(
+    x, y, pol = op.ufm_to_fp(
         None, x=focal_plane[3], y=focal_plane[4], pol=focal_plane[5], **transform_pars
     )
     if config["telescope"] == "LAT":
-        xi_nominal, eta_nominal, gamma_nominal = fpc.LAT_focal_plane(
+        xi_nominal, eta_nominal, gamma_nominal = op.LAT_focal_plane(
             None, config["zemax_path"], x, y, pol, config["rot"], config["tube"]
         )
     elif config["coord_transform"]["telescope"] == "SAT":
-        xi_nominal, eta_nominal, gamma_nominal = fpc.SAT_focal_plane(None, x, y, pol)
+        xi_nominal, eta_nominal, gamma_nominal = op.SAT_focal_plane(None, x, y, pol)
     else:
         raise ValueError("Invalid telescope provided")
 
     return xi_nominal, eta_nominal, gamma_nominal
-
-
-def get_affine(src, dst):
-    """
-    Get affine transformation between two point clouds.
-    Transformation is dst = affine@src + shift
-
-    Arguments:
-
-        src: (ndim, npoints) array of source points.
-
-        dst: (ndim, npoints) array of destination points.
-
-    Returns:
-
-        affine: The transformation matrix.
-
-        shift: Shift to apply after transformation.
-    """
-    msk = np.isfinite(src).all(axis=0) * np.isfinite(dst).all(axis=0)
-    if np.sum(msk) < 7:
-        raise ValueError("Not enough finite points to compute transformation")
-
-    M = np.vstack(
-        (
-            src[:, msk] - np.median(src[:, msk], axis=1)[:, None],
-            dst[:, msk] - np.median(dst[:, msk], axis=1)[:, None],
-        )
-    ).T
-    *_, vh = la.svd(M)
-    vh_splits = [
-        quad for half in np.split(vh.T, 2, axis=0) for quad in np.split(half, 2, axis=1)
-    ]
-    affine = np.dot(vh_splits[2], la.pinv(vh_splits[0]))
-
-    transformed = affine @ src[:, msk]
-    shift = np.median(dst[:, msk] - transformed, axis=1)
-
-    return affine, shift
-
-
-def decompose_affine(affine):
-    """
-    Decompose an affine transformation into its components.
-    This decomposetion treats the affine matrix as: rotation * shear * scale.
-
-    Arguments:
-
-        affine: The affine transformation matrix.
-
-    Returns:
-
-        scale: Array of ndim scale parameters.
-
-        shear: Array of shear parameters.
-
-        rot: Rotation matrix.
-             Not currently decomposed in this function because the easiest
-             way to do that is not n-dimensional but the rest of this function is.
-    """
-    # Use the fact that rotation matrix times its transpose is the identity
-    no_rot = affine.T @ affine
-    # Decompose to get a matrix with just scale and shear
-    no_rot = la.cholesky(no_rot).T
-
-    scale = np.diag(no_rot)
-    shear = (no_rot / scale[:, None])[np.triu_indices(len(no_rot), k=1)]
-    rot = affine @ la.inv(no_rot)
-
-    return scale, shear, rot
-
-
-def decompose_rotation(rotation):
-    """
-    Decompose a rotation matrix into its xyz rotation angles.
-    This currently won't work on anything higher than 3 dimensions.
-
-    Arguments:
-
-        rotation: (ndim, ndim) rotation matrix.
-
-    Returns:
-
-        angles: Array of rotation angles in radians.
-                If the input is 2d then the first 2 angles will be nan.
-    """
-    ndim = len(rotation)
-    if ndim > 3:
-        raise ValueError("No support for rotations in more than 3 dimensions")
-    if ndim < 2:
-        raise ValueError("Rotations with less than 2 dimensions don't make sense")
-    if rotation.shape != (ndim, ndim):
-        raise ValueError("Rotation matrix should be ndim by ndim")
-    _rotation = np.eye(3)
-    _rotation[:ndim, :ndim] = rotation
-    angles = R.from_matrix(_rotation).as_euler("xyz")
-
-    if ndim == 2:
-        angles[:2] = np.nan
-    return angles
 
 
 def main():
@@ -325,9 +225,9 @@ def main():
         logger.warning("No polarization data availible, gammas will be nan")
         nominal = nominal[:2]
         measured = measured[:2]
-    affine, shift = get_affine(np.vstack(nominal), np.vstack(measured))
-    scale, shear, rot = decompose_affine(affine)
-    rot = decompose_rotation(rot)
+    affine, shift = op.get_affine(np.vstack(nominal), np.vstack(measured))
+    scale, shear, rot = op.decompose_affine(affine)
+    rot = op.decompose_rotation(rot)
 
     if np.isclose(scale, np.pi / 180.0).any() or np.isclose(scale, 180.0 / np.pi).any():
         logger.warning(
