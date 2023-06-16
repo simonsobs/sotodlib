@@ -2,6 +2,7 @@ import os
 import sys
 from itertools import zip_longest
 import argparse as ap
+import h5py
 import numpy as np
 import scipy.linalg as la
 from scipy.spatial.transform import Rotation as R
@@ -30,6 +31,26 @@ def _avg_focalplane(fp_dict):
     return det_ids, focal_plane
 
 
+def _log_vals(shift, scale, shear, rot):
+    axis = ["xi", "eta", "gamma"]
+    deg2rad = np.pi / 180.0
+    rad2deg = 180.0 / np.pi
+    for ax, s in zip(axis, shift):
+        logger.info("Shift along %s axis is %f", ax, s)
+    for ax, s in zip(axis, scale):
+        logger.info("Scale along %s axis is %f", ax, s)
+        if np.isclose(s, deg2rad):
+            logger.warning(
+                "Scale factor for %s looks like a degrees to radians conversion", ax
+            )
+        elif np.isclose(s, rad2deg):
+            logger.warning(
+                "Scale factor for %s looks like a radians to degrees conversion", ax
+            )
+    logger.info("Shear param is %f", shear)
+    logger.info("Rotation of the xi-eta plane is %f radians", rot)
+
+
 def _mk_fpout(det_id, focal_plane):
     outdt = [
         ("dets:det_id", det_id.dtype),
@@ -42,20 +63,12 @@ def _mk_fpout(det_id, focal_plane):
     return metadata.ResultSet.from_friend(fpout)
 
 
-def _mk_tpout(shift, scale, shear, rot):
-    outdt = [
-        ("shift", np.float32),
-        ("scale", np.float32),
-        ("shear", np.float32),
-        ("rot", np.float32),
-    ]
-    # rot will always have 3 values
-    # so we can use to pad the others when we have no pol
-    tpout = np.fromiter(
-        zip_longest(shift, scale, shear, rot, fillvalue=np.nan), count=3, dtype=outdt
-    )
-
-    return metadata.ResultSet.from_friend(tpout)
+def _add_attrs(dset, shift, scale, shear, rot, measured_gamma):
+    dset["shift"] = shift
+    dset["scale"] = scale
+    dset["shear"] = shear
+    dset["rot"] = rot
+    dset["measured_gamma"] = measured_gamma
 
 
 def _mk_plot(nominal, measured, affine, shift, show_or_save):
@@ -221,32 +234,40 @@ def main():
     nominal = get_nominal(focal_plane, config["coord_transform"])
 
     # Compute transformation between the two nominal and measured pointing
-    if np.isnan(measured[2]).all():
-        logger.warning("No polarization data availible, gammas will be nan")
-        nominal = nominal[:2]
-        measured = measured[:2]
-    affine, shift = op.get_affine(np.vstack(nominal), np.vstack(measured))
-    scale, shear, rot = op.decompose_affine(affine)
-    rot = op.decompose_rotation(rot)
-
-    if np.isclose(scale, np.pi / 180.0).any() or np.isclose(scale, 180.0 / np.pi).any():
-        logger.warning(
-            (
-                "Scale factor looks like a deg/rad conversion."
-                " Someone may have used the wrong units somewhere."
-            )
+    measured_gamma = np.isfinite(measured[2]).all()
+    if measured_gamma:
+        gamma_scale, gamma_shift = op.get_affine(
+            np.vstack(nominal[2]), np.vstack(measured[2])
         )
+        gamma_shift = gamma_shift.item()
+    else:
+        logger.warning(
+            "No polarization data availible, gammas will be filled with the nominal values."
+        )
+        focal_plane[2] = nominal[2]
+        gamma_scale = 1.0
+        gamma_shift = 1.0
+
+    affine, shift = op.get_affine(np.vstack(nominal[:2]), np.vstack(measured[:2]))
+    scale, shear, rot = op.decompose_affine(affine)
+    shear = shear.item()
+    rot = op.decompose_rotation(rot)[-1]
 
     plot = config.get("plot", False)
     if plot:
         _mk_plot(nominal, measured, affine, shift, plot)
 
+    shift = (shift, gamma_shift)
+    scale = (*scale, gamma_scale)
+
+    _log_vals(shift, scale, shear, rot)
+
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)
-    fpout = _mk_fpout(det_id, focal_plane)
-    tpout = _mk_tpout(shift, scale, shear, rot)
-    write_dataset(fpout, outpath, "focal_plane", overwrite=True)
-    write_dataset(tpout, outpath, "pointing_transform", overwrite=True)
+    with h5py.File(outpath, "w") as f:
+        fpout = _mk_fpout(det_id, focal_plane)
+        write_dataset(fpout, f, "focal_plane", overwrite=True)
+        _add_attrs(f["focal_plane"], shift, scale, shear, rot, measured_gamma)
 
 
 if __name__ == "__main__":
