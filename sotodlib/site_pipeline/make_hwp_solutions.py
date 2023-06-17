@@ -94,8 +94,8 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
             logger.info(f"Found no HWP data in {obs_id}")
             aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
             aman.wrap_new('timestamps', shape=('samps', ))
-            aman.wrap_new('hwp_angle', shape=('samps', ))
-            aman.wrap_new('hwp_angle_eval', shape=('samps', ))
+            aman.wrap_new('hwp_angle_ver1', shape=('samps', ))
+            aman.wrap_new('hwp_angle_ver2', shape=('samps', ))
             aman.wrap_new('stable', shape=('samps', ))
             aman.wrap_new('locked', shape=('samps', ))
             aman.wrap_new('hwp_rate', shape=('samps', ))
@@ -104,8 +104,8 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
             aman.stable = np.zeros(len(tod.timestamps))
             aman.locked = np.zeros(len(tod.timestamps))
             aman.hwp_rate = np.zeros(len(tod.timestamps))
-            aman.hwp_angle = np.zeros(len(tod.timestamps))
-            aman.hwp_angle_eval = np.zeros(len(tod.timestamps))
+            aman.hwp_angle_ver1 = np.zeros(len(tod.timestamps))
+            aman.hwp_angle_ver2 = np.zeros(len(tod.timestamps))
 
         else:
             logger.debug("analyze")
