@@ -85,26 +85,39 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
         tod = ctx.get_obs(obs_id, no_signal=True)
         
         #### Angle calculation ####
-        margin = 10 #sec
-        start = int(tod.timestamps[0])-margin
-        end = int(tod.timestamps[-1])+margin
         g3thwp = G3tHWP(config_file)
+        start = int(tod.timestamps[0])-g3thwp._margin
+        end = int(tod.timestamps[-1])+g3thwp._margin
         data = g3thwp.load_data(start, end)
 
         if len(data)==0:
             logger.info(f"Found no HWP data in {obs_id}")
-            continue
-
-        logger.debug("analyze")
-        solved = g3thwp.analyze(data)
+            aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
+            aman.wrap_new('timestamps', shape=('samps', ))
+            aman.wrap_new('hwp_angle', shape=('samps', ))
+            aman.wrap_new('hwp_angle_eval', shape=('samps', ))
+            aman.wrap_new('stable', shape=('samps', ))
+            aman.wrap_new('locked', shape=('samps', ))
+            aman.wrap_new('hwp_rate', shape=('samps', ))
         
-        # template subtracted angle
-        try:
-            g3thwp.eval_angle(solved)
-        except Exception as e:
-            logger.error(f"Exception '{e}' thrown while the template subtraction")
-            continue    
-        g3thwp.write_solution_h5(solved, tod, output=output_filename, h5_address=obs_id)
+            aman.timestamps = tod.timestamps
+            aman.stable = np.zeros(len(tod.timestamps))
+            aman.locked = np.zeros(len(tod.timestamps))
+            aman.hwp_rate = np.zeros(len(tod.timestamps))
+            aman.hwp_angle = np.zeros(len(tod.timestamps))
+            aman.hwp_angle_eval = np.zeros(len(tod.timestamps))
+
+        else:
+            logger.debug("analyze")
+            solved = g3thwp.analyze(data)
+            
+            # template subtracted angle
+            try:
+                g3thwp.eval_angle(solved)
+            except Exception as e:
+                logger.error(f"Exception '{e}' thrown while the template subtraction")
+                continue    
+            g3thwp.write_solution_h5(solved, tod, output=output_filename, h5_address=obs_id)
         
         del g3thwp
         
