@@ -49,6 +49,7 @@ class G3tHWP():
 
         self._file_list = self.configs.get('file_list', None)
         self._data_dir = self.configs.get('data_dir', None)
+        self._margin = self.configs.get('margin', 10)
 
         # 1st/2nd encoder readout
         self._field_instance = self.configs.get('field_instance',
@@ -624,80 +625,7 @@ class G3tHWP():
             start_time += frame_length
 
         return
-    """    
-    def write_solution_h5(self, solved, smurf_timestamp, output=None):
-        ""
-        Output HWP angle + flags as HDF5 format
 
-        Args
-        -----
-        solved: dict
-          dict data from analyze
-        output: str or None
-          output path + file name, overwrite config file
-
-        Notes
-        -----------
-        Output file format \n
-
-        - timestamp:
-            SMuRF synched timestamp
-        - hwp_angle_v1: float
-            SMuRF synched HWP angle (calculated from raw encoder signals) in radian
-        - hwp_angle_v2: float
-            SMuRF synched HWP angle (the systematics from the non-uniform encoder slot pattern is subtracted ) in radian
-        - slow_time: timestamp
-            time list of slow block (stable, locked. hwp_rate)
-        - stable: bool
-            if non-zero, indicates the HWP spin state is known. \n
-            i.e. it is either spinning at a measurable rate, or stationary. \n
-            When this flag is non-zero, the hwp_rate field can be taken at face value. \n
-        - locked: bool
-            if non-zero, indicates the HWP is spinning and the position solution is working. \n
-            In this case one should find the hwp_angle populated in the fast data block. \n
-        - hwp_rate: float
-            the "approximate" HWP spin rate, with sign, in revs / second. \n
-            Use placeholder value of 0 for cases when not "locked".
-        ""
-        if self._output is None and output is None:
-            logger.warning('Not specified output file')
-            return
-        if output is not None:
-            self._output = output
-        if len(solved) == 0:
-            logger.warning('input data is empty, skip writing')
-            return
-        if len(solved['fast_time']) == 0:
-            logger.info('write no rotation data, skip writing')
-            return     
-        
-        if 'fast_time_raw' in solved.keys():
-            angle_synch_v1 = scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
-            angle_synch_v2 = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
-            rate_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['hwp_rate'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
-            locked_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['locked'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
-            stable_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['stable'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
-
-            with h5py.File(output, 'w') as fout:
-                write_dataset(angle_synch_v1, fout, 'hwp_angle_v1')
-                write_dataset(angle_synch_v2, fout, 'hwp_angle_v2')
-                write_dataset(stable_synch, fout, 'stable')
-                write_dataset(locked_synch, fout, 'locked')
-                write_dataset(rate_synch, fout, 'hwp_rate')
-        else:
-            logger.info('no angle_v2 data')
-            angle_synch_v1 = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
-            rate_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['hwp_rate'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
-            locked_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['locked'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
-            stable_synch = scipy.interpolate.interp1d(solved['slow_time'], solved['stable'], kind='linear',fill_value='extrapolate')(smurf_timestamp)
-            with h5py.File(output, 'w') as fout:
-                write_dataset(angle_synch_v1, fout, 'hwp_angle_v1')
-                write_dataset(stable_synch, fout, 'stable')
-                write_dataset(locked_synch, fout, 'locked')
-                write_dataset(rate_synch, fout, 'hwp_rate')
-
-        return
-    """    
     
     def write_solution_h5(self, solved, tod, output=None, h5_address=None):
         """
