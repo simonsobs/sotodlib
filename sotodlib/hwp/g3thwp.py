@@ -675,8 +675,8 @@ class G3tHWP():
         
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         aman.wrap_new('timestamps', shape=('samps', ))
-        aman.wrap_new('hwp_angle', shape=('samps', ))
-        aman.wrap_new('hwp_angle_eval', shape=('samps', ))
+        aman.wrap_new('hwp_angle_ver1', shape=('samps', ))
+        aman.wrap_new('hwp_angle_ver2', shape=('samps', ))
         aman.wrap_new('stable', shape=('samps', ))
         aman.wrap_new('locked', shape=('samps', ))
         aman.wrap_new('hwp_rate', shape=('samps', ))
@@ -687,12 +687,13 @@ class G3tHWP():
         aman.locked = scipy.interpolate.interp1d(solved['slow_time'], solved['locked'], kind='linear', bounds_error=False)(tod.timestamps)
         aman.hwp_rate = scipy.interpolate.interp1d(solved['slow_time'], solved['hwp_rate'], kind='linear', bounds_error=False)(tod.timestamps)
         if 'fast_time_raw' in solved.keys():
-            aman.hwp_angle = scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps)
-            aman.hwp_angle_eval = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps)
+            aman.hwp_angle_ver1 = scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps)
+            aman.hwp_angle_ver2 = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps)
             
         else:
-            logger.info('no hwp_angle_eval data')
-            aman.hwp_angle = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps)
+            logger.info('Template subtraction failed')
+            aman.hwp_angle_ver1 = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps)
+            aman.hwp_angle_ver2 = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps)
         aman.save(output, h5_address, overwrite=True)
 
         return
