@@ -149,13 +149,11 @@ def gamma_fit(src, dst):
     """
 
     def _gamma_min(scale, shift, gamma):
-        twopi = 2.0 * np.pi
-        src = gamma[0] % twopi
-        dst = gamma[1] % twopi
+        src, dst = gamma
+        transformed = np.sin(src * scale + shift)
+        diff = np.sin(dst) - transformed
 
-        transformed = (src * scale + shift) % twopi
-
-        return np.std(dst - transformed)
+        return np.sqrt(np.mean(diff**2))
 
     res = minimize(_gamma_min, (1.0, 0.0), (src, dst))
     return res.x
