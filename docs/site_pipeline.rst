@@ -165,6 +165,76 @@ entries mater.
           det_info: true
           multi: true
 
+make-timeconst-model
+--------------------
+
+This module combines multiple measurements of detector time constants
+from analyze-bright-ptsrc to produce a time constant model. For first 
+light, the model is simply the average measured value. This script works 
+with dets:det_id and assumes that channel map has been applied. The 
+final result is a time constant indexed by wafer, with associated obs_id 
+stored in the dataset attributes. There's an option to 
+make this number per wafer, per biasline or per detector.
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.make_timeconst_model
+   :func: get_parser
+
+Config file format
+``````````````````
+
+Here's an annotated example:
+
+.. code-block:: yaml
+
+  # Context file for the observation
+  context_file: ./context.yaml
+
+  # A .txt file with one obs_id per line
+  obs_id_file: './obs_ids.txt'
+
+  # Wafer to calculate timeconst for. Optional.
+  wafer: 'w03'
+
+  # How to report averaged time constant.
+  group_by: dets, biasline or wafer
+  
+  archive:
+    index: 'archive.sqlite'
+    policy:
+      type: 'directory'
+      root_dir: './'
+      out_dir: 'output/config/'
+
+Inputs
+``````
+
+The Context should load the timeconst from analyze-bright-ptsrc into AxisManager. 
+The det_info should include both detector properties like det_id and readout 
+properties like bias line for each detector. More specifically, here are the
+fields to be used. 
+
+- obs_ids:
+
+  - ``'target'``
+  - ``'timestamp'``
+  - ``'pwv'``
+
+- ptsrc_params:
+
+  - ``'tau'``
+
+- det_info:
+
+  - ``'wafer_slot'``
+  - ``'det_id'``
+  - ``'bias_line'``
+  - ``'band'``
+
+
 
 preprocess-tod
 --------------
