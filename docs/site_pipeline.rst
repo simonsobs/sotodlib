@@ -214,10 +214,10 @@ Here's an annotated example:
   obs_id_file: './obs_ids.txt'
 
   # Optional parameters for data cutting
-  min_cut: 0
-  max_cut: np.inf
-  max_obs_residue: np.inf # This is the maximum offset between observations.
-  max_error_ratio: np.inf # Allowed std/mean for each detector between observations
+  min_cut: null
+  max_cut: null
+  max_obs_residue: null # This is the maximum offset between observations.
+  max_error_ratio: null # Allowed std/mean for each detector between observations
   min_obs_per_det: 1
   
   archive:
