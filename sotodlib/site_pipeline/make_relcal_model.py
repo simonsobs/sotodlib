@@ -58,7 +58,7 @@ def read_store_data(ctx, obs_ids, value, wafers, min_cut = None, max_cut = None)
     logger.info(f'Start data loading.')
 
     if not wafers:
-        logger.info(f'Load all wafers.')
+        logger.info(f'No wafer specified. Load all wafers.')
         find_wafer = True
     else: 
         logger.info(f'Load wafer {wafers}.')
@@ -161,7 +161,7 @@ def calibrate_data(amp_dict, noise_dict, method,
                     mean_residue = np.mean(y - x*a)
 
                     # There should not be any intercepts
-                    if mean_residue > max_obs_residue:
+                    if (max_obs_residue) and (mean_residue > max_obs_residue):
                         logger.warning(f'{obs_id}: {wafer} {band} fails normalization')
                         item[obs_id] = [np.nan]*len(item)
                     else:
@@ -193,7 +193,12 @@ def calibrate_data(amp_dict, noise_dict, method,
                 sys.exit(1)
 
             logger.info(f'{wafer} {band}: average response of {average.mean():.2e} and error {error.mean():.2e}.')
-            mask = (error/average <= max_error_ratio) & (cal_val.count(axis = 1)>= min_obs_per_det)
+            
+            mask = np.ones_like(average)
+            if max_error_ratio:
+                mask = mask & (error/average <= max_error_ratio)
+            if min_obs_per_det:
+                mask = mask &(cal_val.count(axis = 1)>= min_obs_per_det)
 
             factor_dict.setdefault(wafer,{})[band] = np.array(list(zip(item['det_id'][mask].values,
                                                                        (average.median()/average)[mask].values,
@@ -308,6 +313,7 @@ def main(args=None):
         if isinstance(obs_ids, str): obs_ids = [obs_ids]
 
     elif args.obs_query: 
+        logger.info(f'Query Obsdb {args.obs_query}.')
         obs_ids = ctx.obsdb.query(args.obs_query)['obs_id'].tolist()
 
     elif obs_id_file:
@@ -321,6 +327,7 @@ def main(args=None):
     if len(obs_ids)== 0: 
         logger.error('No obs_ids found.')
         sys.exit(1)
+    logger.info(f"Found a total of {len(obs_ids)} observations.")
 
 
     # Find all wafers if wafer is not specified
@@ -360,7 +367,7 @@ def main(args=None):
 
             db.add_entry({'dets:wafer_slot':wafer, 'dets:band': band,'dataset': dataset, 'config': args.config_file}, 
                 fname, replace = overwrite)
-
+    logger.info(f'Finished writing to {config["archive"]["index"]}.')
 
 if __name__ == '__main__':
     main()
