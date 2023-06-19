@@ -178,6 +178,48 @@ including amplitude and FWHM.
    :func: get_parser
 
 
+make-relcal-model
+--------------------
+
+This script receives the fitted detector optical response 
+from the analyze-bright-ptsrc after the detmap has been applied, 
+and determines a 'flat field' for the detectors. The output is a 
+set of per-detector calibration factors of order 1 associated 
+with det_id to be multiplied to the detector response. 
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.make_relcal_model
+   :func: get_parser
+
+Config file format
+``````````````````
+
+Here's an annotated example:
+
+.. code-block:: yaml
+
+  # Context file for the observation
+  context_file: ./context_local.yaml
+
+  # Value used for calibration, Peak (amp) or Flux (amp*fwhm_eta*fwhm_xi)
+  value: 'Flux'
+
+  # Methods for averaging, Median, Mean or Weighted_average
+  method: 'Weighted_average'
+
+  # A .txt file with one obs_id per line
+  obs_id_file: './obs_ids.txt'
+  
+  archive:
+    index: 'archive.sqlite'
+    policy:
+      type: 'directory'
+      root_dir: './'
+      out_dir: './output/'
+
 preprocess-tod
 --------------
 This script is set up to run a preprocessing pipeline using the preprocess
