@@ -196,11 +196,20 @@ Here's an annotated example:
   # A .txt file with one obs_id per line
   obs_id_file: './obs_ids.txt'
 
-  # Wafer to calculate timeconst for. Optional.
+  # Wafer to calculate timeconst for. Can be list or null
   wafer: 'w03'
 
   # How to report averaged time constant.
   group_by: dets, biasline or wafer
+
+  # Mean or Median
+  method: Median
+
+  # Optional parameters for data cutting.
+  min_cut: 0.001
+  max_cut: 0.01 
+  max_z_score: 3
+  min_yield: 30 #This should depend on group_by
   
   archive:
     index: 'archive.sqlite'
