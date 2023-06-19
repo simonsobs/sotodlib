@@ -54,7 +54,6 @@ def get_parser():
     parser.add_argument('--overwrite', action = 'store_true',
         help = 'Overwrites existing entries.')
 
-
     return parser
 
 
@@ -127,7 +126,6 @@ def make_plots(plot_dict, min_cut, max_cut, save_plot = False, output_dir = None
 
 def main(args=None):
 
-    # Will change this when in site_pipeline
     args =  get_parser().parse_args(args)
 
     # Get cofig
@@ -307,4 +305,4 @@ def main(args=None):
     logger.info(f'Finished writing to {config["archive"]["index"]}.')
 
 if __name__ == '__main__':
-    main()
+    util.main_launcher(main, get_parser)
