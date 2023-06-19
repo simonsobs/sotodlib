@@ -19,7 +19,7 @@ from sotodlib.site_pipeline import util
 
 logger = util.init_logger(__name__)
 
-def parse_args():
+def get_parser():
 
     parser = ArgumentParser()
 
@@ -253,7 +253,7 @@ def make_plots(amp_dict, plot_dict, value, save_plot = False, output_dir = None)
 
 def main(args=None):
 
-    args = parse_args().parse_args(args)
+    args = get_parser().parse_args(args)
 
     # Get cofig
     config = yaml.safe_load(open(args.config_file, 'r'))
