@@ -220,6 +220,33 @@ Here's an annotated example:
       root_dir: './'
       out_dir: './output/'
 
+Inputs
+``````
+
+The Context should include both the detector response 
+as output from analyze-bright-ptsrc and the detector mapping. 
+Here are the AxisManager fields required for this script. 
+
+- obs_info:
+
+  - ``'target'``
+  - ``'timestamp'``
+
+- ptsrc_params:
+
+  - Output of analyze-bright-ptsrc
+  - ``'amp'``
+  - ``'snr'``
+  - ``'fwhm_xi'``
+  - ``'fwhm_eta'``
+
+- det_info:
+
+  - ``'band'``
+  - ``'det_id'``
+  - ``'wafer_slot'``
+
+
 preprocess-tod
 --------------
 This script is set up to run a preprocessing pipeline using the preprocess
