@@ -99,6 +99,7 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
             aman.wrap_new('stable', shape=('samps', ))
             aman.wrap_new('locked', shape=('samps', ))
             aman.wrap_new('hwp_rate', shape=('samps', ))
+            aman.wrap_new('eval', shape=('samps', ))
         
             aman.timestamps = tod.timestamps
             aman.stable = np.zeros(len(tod.timestamps))
@@ -106,6 +107,7 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
             aman.hwp_rate = np.zeros(len(tod.timestamps))
             aman.hwp_angle_ver1 = np.zeros(len(tod.timestamps))
             aman.hwp_angle_ver2 = np.zeros(len(tod.timestamps))
+            aman.eval = np.zeros(len(tod.timestamps))
 
         else:
             logger.debug("analyze")
