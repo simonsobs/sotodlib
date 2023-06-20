@@ -644,10 +644,11 @@ class G3tHWP():
 
         - timestamp:
             SMuRF synched timestamp
-        - hwp_angle: float
+        - hwp_angle_ver1: float
             SMuRF synched HWP angle (calculated from raw encoder signals) in radian
-        - hwp_angle_eval: float
-            SMuRF synched HWP angle (the systematics from the non-uniform encoder slot pattern is subtracted ) in radian
+        - hwp_angle_ver2: float
+            SMuRF synched HWP angle after the template subtraction (the systematics from the non-uniform encoder slot pattern is subtracted ) in radian. \n
+            if 'eval' is zero, template subtraction is not completed and its value is same as 'hwp_angle_ver1'.
         - slow_time: timestamp
             time list of slow block (stable, locked. hwp_rate)
         - stable: bool
@@ -660,6 +661,8 @@ class G3tHWP():
         - hwp_rate: float
             the "approximate" HWP spin rate, with sign, in revs / second. \n
             Use placeholder value of 0 for cases when not "locked".
+        - eval: bool
+            if non-zero, the template subtraction is completed.
         """
         if self._output is None and output is None:
             logger.warning('Not specified output file')
@@ -680,6 +683,7 @@ class G3tHWP():
         aman.wrap_new('stable', shape=('samps', ))
         aman.wrap_new('locked', shape=('samps', ))
         aman.wrap_new('hwp_rate', shape=('samps', ))
+        aman.wrap_new('eval', shape=('samps', ))
         
         # write solution
         aman.timestamps = tod.timestamps
@@ -689,11 +693,13 @@ class G3tHWP():
         if 'fast_time_raw' in solved.keys():
             aman.hwp_angle_ver1 = scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps)
             aman.hwp_angle_ver2 = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps)
+            aman.eval = np.ones(len(tod.timestamps))
             
         else:
             logger.info('Template subtraction failed')
             aman.hwp_angle_ver1 = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps)
             aman.hwp_angle_ver2 = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps)
+            aman.eval = np.zeros(len(tod.timestamps))
         aman.save(output, h5_address, overwrite=True)
 
         return
