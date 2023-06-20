@@ -7,7 +7,6 @@ with det_id, to be multiplied to the detector response.
 '''
 import sys
 import numpy as np
-import pandas as pd
 import os
 import yaml
 import h5py
@@ -16,8 +15,6 @@ import matplotlib.pyplot as plt
 from sotodlib.core import Context, metadata
 import sotodlib.io.metadata as io_meta
 from sotodlib.site_pipeline import util
-
-logger = util.init_logger(__name__)
 
 def get_parser():
 
@@ -32,7 +29,7 @@ def get_parser():
     parser.add_argument('--obs_id_file', help=
         'Path to a txt that stores obs_ids.')
 
-    parser.add_argument('-w', '--wafer', help=
+    parser.add_argument('-w', '--wafers', help=
          'The wafer or wafers to run model on.')
 
     parser.add_argument('-q', '--obs_query', help = 
@@ -256,18 +253,22 @@ def make_plots(amp_dict, plot_dict, value, save_plot = False, output_dir = None)
             plt.show()
 
 
-def main(args=None):
+def main(config_file=None, obs_id = None, obs_id_file = None, wafers = None,
+    obs_query = None, verbose = 0, make_plot= True, save_plot = False, 
+    overwrite = False, logger = None):
 
-    args = get_parser().parse_args(args)
+    import pandas as pd
+
+    if logger is None:
+        logger = util.init_logger(__name__)
+
 
     # Get cofig
-    config = yaml.safe_load(open(args.config_file, 'r'))
+    config = yaml.safe_load(open(config_file, 'r'))
     ctx = Context(config['context_file'])
-    overwrite = args.overwrite
     value = config['value']
     method = config['method']
     output_dir = config['archive']['policy']['out_dir']
-    verbose = args.verbose
     fname = os.path.join(output_dir, 'relcal_model.h5')
 
     if verbose >= 1:
@@ -303,18 +304,17 @@ def main(args=None):
 
     # Get list of observations
 
-    if args.obs_id_file: obs_id_file = args.obs_id_file
-    elif 'obs_id_file' in config: obs_id_file = config['obs_id_file']
-    else: obs_id_file = None
+    if not obs_id_file:
+        if 'obs_id_file' in config: obs_id_file = config['obs_id_file']
+        else: obs_id_file = None
 
-    if args.obs_id:
+    if obs_id:
         logger.info(f'Loading obs_ids from inputs.')
-        obs_ids = args.obs_id
         if isinstance(obs_ids, str): obs_ids = [obs_ids]
 
-    elif args.obs_query: 
-        logger.info(f'Query Obsdb {args.obs_query}.')
-        obs_ids = ctx.obsdb.query(args.obs_query)['obs_id'].tolist()
+    elif obs_query: 
+        logger.info(f'Query Obsdb {obs_query}.')
+        obs_ids = ctx.obsdb.query(obs_query)['obs_id'].tolist()
 
     elif obs_id_file:
         logger.info(f'Loading obs_ids from file {obs_id_file}.')
@@ -331,20 +331,19 @@ def main(args=None):
 
 
     # Find all wafers if wafer is not specified
-    if args.wafer:
-        wafers = args.wafer
-    elif 'wafer' in config: 
-        wafers = config['wafer']
-        if isinstance(wafers, str): wafers = [wafers]
-    else:
-        wafers = []
+    if not wafers:
+        if 'wafer' in config: 
+            wafers = config['wafer']
+            if isinstance(wafers, str): wafers = [wafers]
+        else:
+            wafers = []
 
     # Load all the data and store relevant parts
-    amp_dict, noise_dict, plot_dict = read_store_data(ctx, obs_ids, value, wafers,min_cut,max_cut)
+    amp_dict, noise_dict, plot_dict = read_store_data(ctx, obs_ids, value, wafers, min_cut, max_cut)
 
 
-    if args.make_plot: 
-        make_plots(amp_dict, plot_dict, value, args.save_plot, output_dir)
+    if make_plot: 
+        make_plots(amp_dict, plot_dict, value, save_plot, output_dir)
 
     # Calculate relcal factor
     factor_dict = calibrate_data(amp_dict, noise_dict, method,
@@ -365,9 +364,9 @@ def main(args=None):
             with h5py.File(fname, 'r+') as h:
                 h[dataset].attrs['obs_id'] = obs_ids
 
-            db.add_entry({'dets:wafer_slot':wafer, 'dets:band': band,'dataset': dataset, 'config': args.config_file}, 
+            db.add_entry({'dets:wafer_slot':wafer, 'dets:band': band,'dataset': dataset, 'config': config_file}, 
                 fname, replace = overwrite)
     logger.info(f'Finished writing to {config["archive"]["index"]}.')
 
 if __name__ == '__main__':
-    main()
+    util.main_launcher(main, get_parser)
