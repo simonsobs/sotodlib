@@ -60,6 +60,7 @@ setup_opts["install_requires"] = [
     'toml',
     'skyfield',
     'so3g',
+    'socs',
     'pixell',
     'scikit-image',
     'pyfftw',
