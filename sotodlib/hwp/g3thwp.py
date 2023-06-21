@@ -495,6 +495,10 @@ class G3tHWP():
         The more carful and accurate method is to make an template of encoder slits,
         and subtract it from the timestamp.
         """
+        if 'fast_time_raw' in solved.keys():
+            logger.info('Non-uniformity is already subtracted. Calculation is skipped.')
+            return
+                    
         def moving_average(array, n):
             return np.convolve(array, np.ones(n), 'valid')/n
 
