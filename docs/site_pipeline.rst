@@ -250,8 +250,8 @@ Output file format
 ``````````````````
 
 The results of ``finalize_focal_plane`` are stored in an HDF5 file containing
-a dataset with additional attributes. The dataset is made using the ``ResultSet``
-class and can be loaded back as such but the attributes require ``h5py``.
+two datasets. The datasets are made using the ``ResultSet`` class and can be
+loaded back as such but metadata stored as attributes require ``h5py``.
 
 The dataset is called ``focal_plane`` and contains three columns:
 
@@ -265,8 +265,8 @@ pointing columns will be ``nan`` for it. If no polarization angles are provided
 them ``gamma`` will be populated with the nominal values from physical optics.
 There is an attribute called ``measured_gamma`` that will be ``False`` in this case.
 
-The other attributes contain the information to transform from the nominal
-pointing to the measured pointing.
+The other dataset is called ``offsets`` and contains the information to transform from
+the nominal pointing to the measured pointing.
 
 This transformation for ``xi`` and ``eta`` is an affine transformation defined as
 :math:`m = An + t`, where:
@@ -282,13 +282,17 @@ and a scale along each axis.
 For gamma the transformation is also technically affine, but since it is in just
 one dimension it can be described by a single shift and scale.
 
-All of these parameters are stored in the following attributes:
+All of these parameters are stored in a ``ResultSet`` with a single row,
+its collums are:
 
-- ``shift``: a 3 element tuple with the shift along ``(xi, eta, gamma)``.
-  Note that this is in the basis of the measured points.
-- ``scale``: a 3 element tuple with the scaling along ``(xi, eta, gamma)``.
-- ``shear``: the shear parameter in the ``xi-eta`` plane.
-- ``rot``: the rotation of the ``xi-eta`` plane.
+- ``d_xi``: The shift along the measured ``xi`` axis.
+- ``d_eta``: The shift along the measured ``eta`` axis.
+- ``d_gamma``: The shift along the measured ``gamma`` axis.
+- ``s_xi``: The scale along the measured ``xi`` axis.
+- ``s_eta``: The scale along the measured ``eta`` axis.
+- ``s_gamma``: The scale along the measured ``gamma`` axis.
+- ``shear``: The shear parameter of the ``xi-eta`` plane.
+- ``rot``: The rotation of the ``xi-eta`` plane in radians.
 
 
 preprocess-tod
