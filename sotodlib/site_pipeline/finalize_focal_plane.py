@@ -310,8 +310,9 @@ def main():
         fpout = _mk_fpout(det_id, focal_plane)
         tpout = _mk_tpout(shift, scale, shear, rot)
         write_dataset(fpout, f, "focal_plane", overwrite=True)
-        write_dataset(tpout, f, "offsets", overwrite=True)
         _add_attrs(f["focal_plane"], {"measured_gamma": measured_gamma})
+        write_dataset(tpout, f, "offsets", overwrite=True)
+        _add_attrs(f["offsets"], {"affine_matrix": affine})
 
 
 if __name__ == "__main__":

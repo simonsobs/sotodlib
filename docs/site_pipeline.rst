@@ -283,7 +283,7 @@ For gamma the transformation is also technically affine, but since it is in just
 one dimension it can be described by a single shift and scale.
 
 All of these parameters are stored in a ``ResultSet`` with a single row,
-its collums are:
+its colums are:
 
 - ``d_xi``: The shift along the measured ``xi`` axis.
 - ``d_eta``: The shift along the measured ``eta`` axis.
@@ -294,6 +294,9 @@ its collums are:
 - ``shear``: The shear parameter of the ``xi-eta`` plane.
 - ``rot``: The rotation of the ``xi-eta`` plane in radians.
 
+This dataset also has the attribute ``affine_matrix`` which contains the affine
+transformation matrix that is decomposed to produce some of values in the ``ResultSet``.
+This matrix is ``A`` in the equation :math: `m = An + t` that is described above.
 
 preprocess-tod
 --------------
