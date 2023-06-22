@@ -1,10 +1,12 @@
 import sqlalchemy as db
+from sqlalchemy.exc import IntegrityError
 
 from sqlalchemy import and_
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 
 import os
+import yaml
 import numpy as np
 from so3g import hk
 
@@ -118,7 +120,7 @@ class HKFields(Base):
     special_math = db.Column(db.Integer)
 
 
-class G3thk:
+class G3tHk:
     def __init__(self, hkarchive_path, db_path=None, echo=False):
         """
         Class to manage a housekeeping data archive
@@ -137,7 +139,9 @@ class G3thk:
 
         self.hkarchive_path = hkarchive_path
         self.db_path = db_path
-        self.engine = db.create_engine(f"sqlite:///{db_path}")
+        self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo)
+        print('self.engine: ', self.engine)
+        print('db_path: ', db_path)
         Session.configure(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine)
         self.session = Session()
@@ -357,3 +361,17 @@ class G3thk:
             last_field_file_id = hkfields_list[-1].file_id
             if last_file_id > last_field_file_id:
                 self.populate_hkfields()
+
+    @classmethod
+    def from_configs(cls, configs):
+        """
+        Create a G3tHK instance from a configs dictionary
+
+        Args
+        ----
+        configs - dictionary containing `data_prefix` and `g3thk_db` keys
+        """
+        if type(configs)==str:
+            configs = yaml.safe_load(open(configs, "r"))
+        
+        return cls(configs["data_prefix"], configs['g3thk_db'])
