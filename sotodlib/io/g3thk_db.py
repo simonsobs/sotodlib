@@ -140,8 +140,6 @@ class G3tHk:
         self.hkarchive_path = hkarchive_path
         self.db_path = db_path
         self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo)
-        print('self.engine: ', self.engine)
-        print('db_path: ', db_path)
         Session.configure(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine)
         self.session = Session()
@@ -375,3 +373,4 @@ class G3tHk:
             configs = yaml.safe_load(open(configs, "r"))
         
         return cls(configs["data_prefix"], configs['g3thk_db'])
+
