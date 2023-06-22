@@ -1,6 +1,5 @@
 import os
 import sys
-from itertools import zip_longest
 import argparse as ap
 import h5py
 import numpy as np
@@ -64,12 +63,26 @@ def _mk_fpout(det_id, focal_plane):
     return metadata.ResultSet.from_friend(fpout)
 
 
-def _add_attrs(dset, shift, scale, shear, rot, measured_gamma):
-    dset["shift"] = shift
-    dset["scale"] = scale
-    dset["shear"] = shear
-    dset["rot"] = rot
-    dset["measured_gamma"] = measured_gamma
+def _mk_tpout(shift, scale, shear, rot):
+    outdt = [
+        ("d_xi", np.float32),
+        ("d_eta", np.float32),
+        ("d_gamma", np.float32),
+        ("s_xi", np.float32),
+        ("s_eta", np.float32),
+        ("s_gamma", np.float32),
+        ("shear", np.float32),
+        ("rot", np.float32),
+    ]
+    row = shift + scale + (shear, rot)
+    tpout = np.array(row, outdt)
+
+    return tpout
+
+
+def _add_attrs(dset, attrs):
+    for k, v in attrs.items():
+        dset.attrs[k] = v
 
 
 def _mk_plot(nominal, measured, affine, shift, show_or_save):
@@ -275,7 +288,9 @@ def main():
         gamma_scale = 1.0
         gamma_shift = 0.0
 
-    affine, shift = op.get_affine(np.vstack(nominal[:2]), np.vstack(measured[:2]))
+    nominal = np.vstack(nominal[:2])
+    measured = np.vstack(measured[:2])
+    affine, shift = op.get_affine(nominal, measured)
     scale, shear, rot = op.decompose_affine(affine)
     shear = shear.item()
     rot = op.decompose_rotation(rot)[-1]
@@ -284,7 +299,7 @@ def main():
     if plot:
         _mk_plot(nominal, measured, affine, shift, plot)
 
-    shift = (shift, gamma_shift)
+    shift = (*shift, gamma_shift)
     scale = (*scale, gamma_scale)
 
     _log_vals(shift, scale, shear, rot)
@@ -293,8 +308,10 @@ def main():
     logger.info("Saving data to %s", outpath)
     with h5py.File(outpath, "w") as f:
         fpout = _mk_fpout(det_id, focal_plane)
+        tpout = _mk_tpout(shift, scale, shear, rot)
         write_dataset(fpout, f, "focal_plane", overwrite=True)
-        _add_attrs(f["focal_plane"], shift, scale, shear, rot, measured_gamma)
+        write_dataset(tpout, f, "offsets", overwrite=True)
+        _add_attrs(f["focal_plane"], {"measured_gamma": measured_gamma})
 
 
 if __name__ == "__main__":
