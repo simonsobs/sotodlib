@@ -106,6 +106,8 @@ Processing Functions
 
 .. autofunction:: sotodlib.site_pipeline.preprocess_tod.preprocess_tod
 
+.. autofunction:: sotodlib.site_pipeline.preprocess_tod.run_preprocess
+
 .. autofunction:: sotodlib.site_pipeline.preprocess_tod.load_preprocess_det_select
 
 .. autofunction:: sotodlib.site_pipeline.preprocess_tod.load_preprocess_tod
@@ -130,8 +132,6 @@ Flagging and Products
 
 HWP Related
 :::::::::::
-
-.. autoclass:: sotodlib.preprocess.processes.HWPSSGuess
 .. autoclass:: sotodlib.preprocess.processes.EstimateHWPSS
 .. autoclass:: sotodlib.preprocess.processes.SubtractHWPSS
 .. autoclass:: sotodlib.preprocess.processes.Demodulate

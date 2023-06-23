@@ -3,37 +3,7 @@ import argparse as ap
 import numpy as np
 import sotodlib.io.g3tsmurf_utils as g3u
 from sotodlib.core import AxisManager
-from scipy.spatial.transform import Rotation as R
 from pycpd import AffineRegistration
-
-
-def LAT_coord_transform(xy, rot_fp, rot_ufm, r=72.645):
-    """
-    Transform from instrument model coords to LAT Zemax coords
-
-    Arguments:
-
-        xy: XY coords from instrument model.
-            Should be a (2, n) array.
-
-        rot_fp: Angle of array location on focal plane in deg.
-
-        rot_ufm: Rotatation of UFM about its center.
-
-    Returns:
-
-        xy_trans: Transformed coords.
-    """
-    xy_trans = np.zeros((xy.shape[1], 3))
-    xy_trans[:, :2] = xy.T
-
-    r1 = R.from_euler("z", rot_fp, degrees=True)
-    shift = r1.apply(np.array([r, 0, 0]))
-
-    r2 = R.from_euler("z", rot_ufm, degrees=True)
-    xy_trans = r2.apply(xy_trans) + shift
-
-    return xy_trans.T[:2]
 
 
 def rescale(xy):

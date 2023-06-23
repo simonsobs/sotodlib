@@ -46,11 +46,19 @@ def get_turnaround_flags(tod, qlim=1, az=None, merge=True,
             tod.flags.wrap(name, flag)
     return flag
 
-
-def get_glitch_flags(aman, t_glitch=0.002, hp_fc=0.5, n_sig=10, buffer=200,
-                     signal=None, merge=True,
-                     overwrite=False, name='glitches',
-                     full_output=False):
+def get_glitch_flags(
+    aman, 
+    t_glitch=0.002, 
+    hp_fc=0.5, 
+    n_sig=10, 
+    buffer=200,
+    detrend=None,
+    signal=None, 
+    merge=True,
+    overwrite=False, 
+    name='glitches',
+    full_output=False
+):
     """ Find glitches with fourier filtering
     Translation from moby2 as starting point
 
@@ -60,6 +68,7 @@ def get_glitch_flags(aman, t_glitch=0.002, hp_fc=0.5, n_sig=10, buffer=200,
         hp_fc: high pass filter cutoff
         n_sig (int or float): significance of detection
         buffer (int): amount to buffer flags around found location
+        detrend (str): detrend method to pass to fourier_filter
         signal (str): if None, defaults to 'signal'
         merge (bool): if true, add to aman.flags
         name (string): name of flag to add to aman.flags
@@ -75,8 +84,8 @@ def get_glitch_flags(aman, t_glitch=0.002, hp_fc=0.5, n_sig=10, buffer=200,
     if signal is None:
         signal = 'signal'
     # f-space filtering
-    filt = filters.high_pass_sine2(cutoff=hp_fc) * filters.gaussian_filter(t_sigma=0.002)
-    fvec = fourier_filter(aman, filt, detrend='linear',
+    filt = filters.high_pass_sine2(cutoff=hp_fc) * filters.gaussian_filter(t_sigma=t_glitch)
+    fvec = fourier_filter(aman, filt, detrend=detrend,
                           signal_name=signal, resize='zero_pad')
     # get the threshods based on n_sig x nlev = n_sig x iqu x 0.741
     fvec = np.abs(fvec)

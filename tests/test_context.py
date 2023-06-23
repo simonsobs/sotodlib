@@ -68,8 +68,31 @@ class ContextTest(unittest.TestCase):
             name, _ = self._open_new('db.sqlite', 'create')
             db.to_file(name)
             cd[key] = name
-            ctx = Context(self._write_context(cd))
+            ctx_file = self._write_context(cd)
+            ctx = Context(ctx_file)
             self.assertIsInstance(getattr(ctx, key), cls)
+            metadata.cli.main(args=['context', ctx_file])
+
+    def test_010_cli(self):
+        def save_db(src, k, suffix=''):
+            if src.get(k) is None:
+                return
+            if isinstance(src[k], str):
+                return
+            db_file, _ = self._open_new(k + suffix, 'create')
+            src[k].to_file(db_file)
+            src[k] = db_file
+
+        dataset_sim = DatasetSim()
+        ctx = dataset_sim.get_context()
+        for _db in ['obsfiledb', 'obsdb', 'detdb']:
+            print(ctx)
+            save_db(ctx, _db)
+        for i, entry in enumerate(ctx.get('metadata', [])):
+            save_db(entry, 'db', str(i))
+
+        ctx_file = self._write_context(dict(ctx))
+        metadata.cli.main(args=['context', ctx_file])
 
     def test_100_loads(self):
         dataset_sim = DatasetSim()
@@ -79,6 +102,9 @@ class ContextTest(unittest.TestCase):
         n = len(dataset_sim.dets)
         obs_id = dataset_sim.obss['obs_id'][1]
         for selection, count in [
+                (['read05'], 1),
+                (np.array(['read05']), 1),
+                (metadata.ResultSet(['readout_id'], [['read05']]), 1),
                 ({'dets:readout_id': ['read05']}, 1),
                 ({'dets:readout_id': np.array(['read05'])}, 1),
                 ({'dets:detset': 'neard'}, 4),
@@ -90,6 +116,17 @@ class ContextTest(unittest.TestCase):
                 ({'dets:det_id': ['NO_MATCH']}, 2),
         ]:
             meta = ctx.get_meta(obs_id, dets=selection)
+            self.assertEqual(meta.dets.count, count, msg=f"{selection}")
+            self.assertTrue('cal' in meta)
+            self.assertTrue('flags' in meta)
+
+        # And tolerance of the detsets argument ...
+        for selection, count in [
+                ('neard', 4),
+                (['neard'], 4),
+                (np.array(['neard', 'fard']), 8),
+        ]:
+            meta = ctx.get_meta(obs_id, detsets=selection)
             self.assertEqual(meta.dets.count, count, msg=f"{selection}")
             self.assertTrue('cal' in meta)
             self.assertTrue('flags' in meta)
