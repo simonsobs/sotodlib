@@ -194,7 +194,7 @@ class G3tHk:
 
         return hkfs, starts, ends, medians, means, min_vals, max_vals, stds
 
-    def get_agg(self, hkfile):  # only use hkarchive_path as the FULL path
+    def _get_agg(self, path_to_file):  # only use hkarchive_path as the FULL path
         """
         Load aggregator information from .g3 file by splitting the field
         names
@@ -202,16 +202,15 @@ class G3tHk:
         Args
         ____
 
-        hkarchivepath: str
-        hkfile: str
+        path_to_file: the full path to a .g3 file which is used in 
+                      populate_hkfiels() to get the aggregator name
 
-        returns: aggregator
+        returns: aggregator name
+        
         """
-        file = os.path.join(self.hkarchive_path, hkfile)
-
         # enact HKArchiveScanner
         hkas = hk.HKArchiveScanner()
-        hkas.process_file(file)
+        hkas.process_file(path_to_file)
 
         arc = hkas.finalize()
 
