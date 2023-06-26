@@ -1,6 +1,7 @@
 """ This module includes all the database definitions used with G3tSmurf, broken out 
 here to reduce the overall number of lines in each module. 
 """
+from enum import Enum
 import sqlalchemy as db
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship, backref
@@ -21,6 +22,45 @@ association_table_dets = db.Table('detsets', Base.metadata,
     db.Column('name', db.Integer, db.ForeignKey('tunesets.name')),
     db.Column('det', db.Integer, db.ForeignKey('channels.name'))
 )
+
+class Finalized(Base):
+    """Table for tracking if files and metadata are ready for bookbinding. Built
+    to work off of the suprsync finalization files.
+
+    Attributes
+    ----------
+    """
+    __tablename__ = 'finalize'
+
+    stream_id = db.Column(db.String, primary_key=True)
+    files_until = db.Column(db.Float)
+    meta_until = db.Column(db.Float)
+
+class SupRsyncType(Enum):
+    FILES = 0
+    META = 1
+
+class StreamIDs(Base):
+    """Table for tracking stream_ids in the databases and what Suprsync agents
+    are in charge of transferring data for each stream_id as a function of time.
+    We are assuming a stream_id can be moved from one computer to another at
+    some point in time
+
+    Attributes
+    ----------
+    """
+    __table_name__ = "stream_ids"
+    
+    id = db.Column(db.Integer, primary_key=True)
+    stream_id = db.Column(db.String)
+
+    agent = db.Column(db.String)
+    # a SupRsyncType
+    agent_type = db.Column(db.Integer)
+
+    # timestamps
+    start = db.Column(db.Float)
+    stop = db.Column(db.Float)
 
 class Observations(Base):
     """Times of continuous detector readout. This table is named obs and serves
