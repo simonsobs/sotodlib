@@ -227,22 +227,31 @@ class G3tHk:
         return agg_name
 
     def populate_hkfiles(self):
-        """
-        """
-        for root, _, files in os.walk(self.hkarchive_path):
-            for f in files:
-                path = os.path.join(root, f)
-                filename = path.split("/")[-1]
-                global_start_time = int(filename.split(".")[0])
-                aggregator = self.get_agg(f)
+        """Gather and add column information for hkfiles tables
 
-                db_file = HKFiles(filename=filename,
-                                  path=self.hkarchive_path,
-                                  global_start_time=global_start_time,
-                                  aggregator=aggregator)
+        """
+        dirs = []
+        dir_list = os.listdir(self.hkarchive_path)
+        for i in range(len(dir_list)):
+            base = self.hkarchive_path + dir_list[i]
+            dirs.append(base)
+        dirs = sorted(dirs)
 
-                self.session.add(db_file)
-                self.session.commit()
+        for i in range(len(dirs)):
+            for root, _, files in sorted(os.walk(dirs[i])):
+                for f in sorted(files):
+                    path = os.path.join(root, f)
+                    filename = path.split("/")[-1]
+                    global_start_time = int(filename.split(".")[0])
+                    aggregator = self._get_agg(path)
+
+                    db_file = HKFiles(filename=filename,
+                                      path=root,
+                                      global_start_time=global_start_time,
+                                      aggregator=aggregator)
+
+                    self.session.add(db_file)
+                    self.session.commit()
 
     def add_hkfiles(self):
         """
