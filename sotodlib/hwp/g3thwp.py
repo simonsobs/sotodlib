@@ -629,16 +629,38 @@ class G3tHWP():
             start_time += frame_length
 
         return
+    
+    def _write_empty_solution_h5(self, tod, output=None, h5_address=None):
+        logger.info('Writing empty solutions')
+        aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
+        aman.wrap_new('timestamps', shape=('samps', ))
+        aman.wrap_new('hwp_angle_ver1', shape=('samps', ))
+        aman.wrap_new('hwp_angle_ver2', shape=('samps', ))
+        aman.wrap_new('stable', shape=('samps', ))
+        aman.wrap_new('locked', shape=('samps', ))
+        aman.wrap_new('hwp_rate', shape=('samps', ))
+        aman.wrap_new('eval', shape=('samps', ))
+
+        aman.timestamps = tod.timestamps
+        aman.stable = np.zeros(len(tod.timestamps))
+        aman.locked = np.zeros(len(tod.timestamps))
+        aman.hwp_rate = np.zeros(len(tod.timestamps))
+        aman.hwp_angle_ver1 = np.zeros(len(tod.timestamps))
+        aman.hwp_angle_ver2 = np.zeros(len(tod.timestamps))
+        aman.eval = np.zeros(len(tod.timestamps))
+        aman.save(output, h5_address, overwrite=True)
+        
+        return
 
     
-    def write_solution_h5(self, solved, tod, output=None, h5_address=None):
+    def write_solution_h5(self, tod, output=None, h5_address=None):
         """
         Output HWP angle + flags as AxisManager format
 
         Args
         -----
-        solved: dict
-          dict data from analyze
+        data: g3 file
+          data = G3tHWP.load_data(start, end)
         output: str or None
           output path + file name, overwrite config file
 
@@ -669,17 +691,52 @@ class G3tHWP():
             if non-zero, the template subtraction is completed.
         """
         if self._output is None and output is None:
-            logger.warning('Not specified output file')
+            logger.warning('Output file not specified')
             return
         if output is not None:
             self._output = output
-        if len(solved) == 0:
-            logger.warning('input data is empty, skip writing')
+            
+        if len(tod.timestamps) == 0:
+            logger.warning('Input data is empty.')
+            return 
+        
+        start = int(tod.timestamps[0])-self._margin
+        end = int(tod.timestamps[-1])+self._margin
+        try:
+            data = self.load_data(start, end)
+        except Exception as e:
+            logger.error(f"Exception '{e}' thrown while loading HWP data. The specified encoder field is missing.")
+            self._write_empty_solution_h5(tod, output, h5_address)
             return
-        if len(solved['fast_time']) == 0:
-            logger.info('write no rotation data, skip writing')
+            
+        if len(data) == 0:
+            logger.warning('No HWP data in the specified timestamps.')
+            self._write_empty_solution_h5(tod, output, h5_address)
             return
         
+        # calculate HWP angle 
+        logger.debug("analyze")
+        
+        try:
+            solved = self.analyze(data)
+        except Exception as e:
+            logger.error(f"Exception '{e}' thrown while calculating HWP angle. Encoder signal might have too much noise.")
+            self._write_empty_solution_h5(tod, output, h5_address)
+            return 
+            
+        if len(solved['fast_time']) == 0:
+            logger.info('No rotation data in the specified timestamps.')
+            self._write_empty_solution_h5(tod, output, h5_address)
+            return
+            
+        # calculate template subtracted angle
+        try:
+            self.eval_angle(solved)
+        except Exception as e:
+            logger.error(f"Exception '{e}' thrown while the template subtraction")
+            pass
+        
+        # write solution
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         aman.wrap_new('timestamps', shape=('samps', ))
         aman.wrap_new('hwp_angle_ver1', shape=('samps', ))
@@ -689,7 +746,6 @@ class G3tHWP():
         aman.wrap_new('hwp_rate', shape=('samps', ))
         aman.wrap_new('eval', shape=('samps', ))
         
-        # write solution
         aman.timestamps = tod.timestamps
         aman.stable = scipy.interpolate.interp1d(solved['slow_time'], solved['stable'], kind='linear', bounds_error=False)(tod.timestamps)
         aman.locked = scipy.interpolate.interp1d(solved['slow_time'], solved['locked'], kind='linear', bounds_error=False)(tod.timestamps)
@@ -698,7 +754,6 @@ class G3tHWP():
             aman.hwp_angle_ver1 = scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps)
             aman.hwp_angle_ver2 = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps)
             aman.eval = np.ones(len(tod.timestamps))
-            
         else:
             logger.info('Template subtraction failed')
             aman.hwp_angle_ver1 = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps)
