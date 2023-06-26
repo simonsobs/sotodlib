@@ -60,7 +60,6 @@ setup_opts["install_requires"] = [
     'toml',
     'skyfield',
     'so3g',
-    'socs',
     'pixell',
     'scikit-image',
     'pyfftw',
@@ -69,6 +68,9 @@ setup_opts["install_requires"] = [
 setup_opts["extras_require"] = {
     "site_pipeline": [
         "influxdb",
+    ],
+    "tests": [
+        "socs",
     ],
 }
 

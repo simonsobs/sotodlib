@@ -53,11 +53,10 @@ jobs:
           python3 -m pip install so3g
           python3 -m pip install pshmem
           python3 -m pip install --pre toast
-          python3 -m pip install socs
 
       - name: Install sotodlib
         run: |
-          python3 -m pip install -vvv .
+          python3 -m pip install -vvv .[tests]
 
       - name: Run Serial Tests
         run: |
