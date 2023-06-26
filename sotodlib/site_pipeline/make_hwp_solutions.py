@@ -15,8 +15,7 @@ import sotodlib
 from sotodlib import core
 from sotodlib.hwp.g3thwp import G3tHWP
 from sotodlib.site_pipeline import util
-logger = util.init_logger(__name__, 'make-hwp-solutinos: ')
-
+logger = util.init_logger(__name__, 'make-hwp-solutions: ')
 
 def get_parser(parser=None):
     if parser is None:
@@ -77,49 +76,15 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
     man_db_filename = os.path.join(output_dir, 'hwp_angle.sqlite')
     output_filename = os.path.join(output_dir, 'hwp_angle.h5')
     
-    # temporary for debugging
-    obs_range = 1
-    obs = ctx.obsdb.get()[:obs_range]
+    # load observation data
+    obs = ctx.obsdb.get()
     for obs_id in obs['obs_id']:
         print(obs_id)
         tod = ctx.get_obs(obs_id, no_signal=True)
         
-        #### Angle calculation ####
+        # make angle solutions
         g3thwp = G3tHWP(config_file)
-        start = int(tod.timestamps[0])-g3thwp._margin
-        end = int(tod.timestamps[-1])+g3thwp._margin
-        data = g3thwp.load_data(start, end)
-
-        if len(data)==0:
-            logger.info(f"Found no HWP data in {obs_id}")
-            aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
-            aman.wrap_new('timestamps', shape=('samps', ))
-            aman.wrap_new('hwp_angle_ver1', shape=('samps', ))
-            aman.wrap_new('hwp_angle_ver2', shape=('samps', ))
-            aman.wrap_new('stable', shape=('samps', ))
-            aman.wrap_new('locked', shape=('samps', ))
-            aman.wrap_new('hwp_rate', shape=('samps', ))
-            aman.wrap_new('eval', shape=('samps', ))
-        
-            aman.timestamps = tod.timestamps
-            aman.stable = np.zeros(len(tod.timestamps))
-            aman.locked = np.zeros(len(tod.timestamps))
-            aman.hwp_rate = np.zeros(len(tod.timestamps))
-            aman.hwp_angle_ver1 = np.zeros(len(tod.timestamps))
-            aman.hwp_angle_ver2 = np.zeros(len(tod.timestamps))
-            aman.eval = np.zeros(len(tod.timestamps))
-
-        else:
-            logger.debug("analyze")
-            solved = g3thwp.analyze(data)
-            
-            # template subtracted angle
-            try:
-                g3thwp.eval_angle(solved)
-            except Exception as e:
-                logger.error(f"Exception '{e}' thrown while the template subtraction")
-                continue    
-            g3thwp.write_solution_h5(solved, tod, output=output_filename, h5_address=obs_id)
+        g3thwp.write_solution_h5(tod, output=output_filename, h5_address=obs_id)
         
         del g3thwp
         
