@@ -69,6 +69,9 @@ setup_opts["extras_require"] = {
     "site_pipeline": [
         "influxdb",
     ],
+    "tests": [
+        "socs",
+    ],
 }
 
 # Command Class dictionary.

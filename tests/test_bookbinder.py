@@ -1,4 +1,7 @@
-import socs.agents.smurf_file_emulator.agent as sfe
+try:
+    import socs.agents.smurf_file_emulator.agent as sfe
+except ModuleNotFoundError:
+    sfe = None
 import sotodlib.io.bookbinder as bb
 import numpy as np
 import so3g
@@ -65,6 +68,12 @@ class BookbinderTest(unittest.TestCase):
         return session.data['g3_files']
     
     def test_smurf_stream_processor(self):
+        if sfe is None:
+            print(
+                "No socs module. "
+                "Skipping BookbinderTest.test_smurf_stream_processor"
+            )
+            return
         l2_files = self.write_data('test', 60, 200, 5, drop_chance=0.1)
 
         in_ts, in_data = load_data(l2_files, data_name='data')
