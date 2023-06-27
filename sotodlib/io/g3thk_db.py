@@ -8,7 +8,12 @@ from sqlalchemy.orm import sessionmaker, relationship
 import os
 import yaml
 import numpy as np
+from tqdm import tqdm
 from so3g import hk
+
+
+import logging
+logger = logging.getLogger(__name__)
 
 Base = declarative_base()
 Session = sessionmaker()
@@ -226,42 +231,80 @@ class G3tHk:
 
         return agg_name
 
-    def populate_hkfiles(self):
-        """Gather and add column information for hkfiles tables
 
-        """
+    def _files_to_add(self, min_ctime=None, max_ctime=None):
+
+        db_files = self.session.query(HKFiles).all()
+        db_files = [f.path for f in db_files]
+
         dirs = []
         dir_list = os.listdir(self.hkarchive_path)
         for i in range(len(dir_list)):
-            base = self.hkarchive_path + dir_list[i]
+            base = os.path.join(self.hkarchive_path, dir_list[i])
             dirs.append(base)
         dirs = sorted(dirs)
+
+        path_list = []
 
         for i in range(len(dirs)):
             for root, _, files in sorted(os.walk(dirs[i])):
                 for f in sorted(files):
                     path = os.path.join(root, f)
-                    filename = path.split("/")[-1]
-                    global_start_time = int(filename.split(".")[0])
-                    aggregator = self._get_agg(path)
+                    if f[-3:] != ".g3":
+                        continue
+                    if path in db_files:
+                        continue
+                    ftime = int(f.split(".")[0])
+                    if min_ctime is not None and ftime < min_ctime:
+                        continue
+                    if max_ctime is not None and ftime > max_ctime:
+                        continue 
+                    path_list.append(path)
 
-                    db_file = HKFiles(filename=filename,
-                                      path=root,
-                                      global_start_time=global_start_time,
-                                      aggregator=aggregator)
+        logger.debug(f"{len(path_list)} files to add to database.")
+        return path_list
 
-                    self.session.add(db_file)
-                    self.session.commit()
-
-    def add_hkfiles(self):
+    def add_hkfiles(self, min_ctime=None, max_ctime=None, show_pb=True):
+        """Gather and add column information for hkfiles tables
         """
-        """
-        file_list = self.session.query(HKFiles).all()
-        if len(file_list) == 0:
-            self.populate_hkfiles()
-        else:
-            last_file_id = file_list[-1].id
-            # TODO: if statement for populating files when .g3 file written
+
+        file_list = self._files_to_add(
+            min_ctime = min_ctime, 
+            max_ctime = max_ctime,
+        )        
+
+
+        for path in tqdm( sorted(file_list), disable=(not show_pb)):
+            root, filename = os.path.split(path)
+
+            global_start_time = int(filename.split(".")[0])
+
+            try: 
+                aggregator = self._get_agg(path)
+
+                db_file = HKFiles(filename=filename,
+                                  path=path,
+                                  global_start_time=global_start_time,
+                                  aggregator=aggregator)
+
+                self.session.add(db_file)
+                self.session.commit()
+            except IntegrityError as e:
+                # Database Integrity Errors, such as duplicate entries
+                self.session.rollback()
+                logger.warning(f"Integrity error with error {e}")
+            except RuntimeError as e:
+                # End of stream errors, for G3Files that were not fully flushed
+                self.session.rollback()
+                logger.warning(f"Failed on file {filename} due to end of stream error!")
+            except Exception as e:
+                # This will catch generic errors such as attempting to load
+                # out-of-date files that do not have the required frame
+                # structure specified in the TOD2MAPS docs.
+                self.session.rollback()
+                if stop_at_error:
+                    raise e
+                logger.warning(f"Failed on file {filename}:\n{e}")
 
     def populate_hkagents(self):
         """
