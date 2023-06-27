@@ -23,6 +23,7 @@ association_table_dets = db.Table('detsets', Base.metadata,
     db.Column('det', db.Integer, db.ForeignKey('channels.name'))
 )
 
+
 class Finalized(Base):
     """Table for tracking if files and metadata are ready for bookbinding. Built
     to work off of the suprsync finalization files.
@@ -49,7 +50,7 @@ class StreamIDs(Base):
     Attributes
     ----------
     """
-    __table_name__ = "stream_ids"
+    __tablename__ = "stream_ids"
     
     id = db.Column(db.Integer, primary_key=True)
     stream_id = db.Column(db.String)
