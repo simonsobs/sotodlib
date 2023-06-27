@@ -70,6 +70,8 @@ class HKAgents(Base):
         TODO
     hkfile:
     fields
+
+    TODO: add uniqueness constraint
     """
     __tablename__ = 'hkagents'
     # unique constraint for instance-id? needs more thought?
@@ -104,6 +106,8 @@ class HKFields(Base):
         start time for each HK field in ctime
     end : integer
         end time for each HK field in ctime
+    
+    TODO: add uniqueness constraint
     """
     __tablename__ = 'hkfields'
     id = db.Column(db.Integer, primary_key=True)
@@ -150,26 +154,23 @@ class G3tHk:
         self.session = Session()
         Base.metadata.create_all(self.engine)
 
-    def load_fields(self, hkarchive_path, hkfile):
+    def load_fields(self, hk_path):
         """
         Load fields from .g3 file and start and end time for each field.
 
         Args
         ____
 
-        hkarchive_path : string
-            Path to data directory
-        hkfile: string
-            Name of .g3 HK file
+        hk_path : string
+            file path    
 
         returns: list of field names and corresponding start and
                  end times from HK .g3 files
         """
-        f = os.path.join(hkarchive_path, hkfile)
 
         # enact HKArchiveScanner
         hkas = hk.HKArchiveScanner()
-        hkas.process_file(f)
+        hkas.process_file(hk_path)
 
         arc = hkas.finalize()
 
@@ -186,16 +187,25 @@ class G3tHk:
         min_vals = []
         max_vals = []
         stds = []
+
         for i in range(len(hkfs)):
             data = arc.simple(hkfs[i])
             time = data[0]
             starts.append(time[0])
             ends.append(time[-1])
-            medians.append(np.median(data[1]))
-            means.append(np.mean(data[1]))
-            min_vals.append(np.min(data[1]))
-            max_vals.append(np.max(data[1]))
-            stds.append(np.std(data[1]))
+            try:
+                medians.append(np.median(data[1]))
+                means.append(np.mean(data[1]))
+                min_vals.append(np.min(data[1]))
+                max_vals.append(np.max(data[1]))
+                stds.append(np.std(data[1]))
+            except:
+                medians.append(np.nan)
+                means.append(np.nan)
+                min_vals.append(np.nan)
+                max_vals.append(np.nan)
+                stds.append(np.nan)
+            
 
         return hkfs, starts, ends, medians, means, min_vals, max_vals, stds
 
@@ -306,13 +316,87 @@ class G3tHk:
                     raise e
                 logger.warning(f"Failed on file {filename}:\n{e}")
 
+    
+    def add_agents_and_fields(self, db_file):
+        fields, starts, ends, medians, means, min_vals, max_vals, stds = self.load_fields(db_file.path)
+        agents = []
+        for field in fields:
+            agent = field.split('.')[1]
+            agents.append(agent)
+
+        #  remove duplicate agent names to avoid multiple agent_ids for
+        #  same instance_id
+        agents = [*set(agents)]
+
+
+        # get the start and stop for each agent
+        for agent in agents:
+            starts_agent = []
+            ends_agent = []
+            for i in range(len(fields)):
+                #  extract agent instance id from each field name
+                if fields[i].split('.')[1] == agent:
+                    #  gather all the starts and stops for each field
+                    #  in the agent
+                    starts_agent.append(starts[i])
+                    ends_agent.append(ends[i])
+ 
+            #  from the starts_agent and ends_agent, extract start
+            #  and stop time for the agent
+            agent_start = np.min(starts_agent)
+            agent_stop = np.max(ends_agent)
+
+            db_agent = self.session.query(HKAgents).filter(
+                HKAgents.instance_id == agent,
+                HKAgents.file_id == db_file.id,
+            ).one_or_none()
+            if db_agent is None:
+                #  populate the HKAgents table
+                db_agent = HKAgents(instance_id=agent,
+                                    start=agent_start,
+                                    stop=agent_stop,
+                                    hkfile=db_file)
+                self.session.add(db_agent)
+            else:
+                # stop may have changed for an incomplete file?
+                db_agent.stop=agent_stop
+            self.session.commit()
+        
+        for i in range(len(fields)):
+            agentname = fields[i].split('.')[1]
+            db_agent = self.session.query(HKAgents).filter(
+                    and_(HKAgents.instance_id == agentname,
+                         HKAgents.file_id == db_file.id)).one()
+            db_field = self.session.query(HKFields).filter(
+                HKFields.agent_id == db_agent.id,
+                HKFields.file_id == db_file.id,
+                HKFields.field == fields[i],
+            ).one_or_none()
+
+            if db_field is None:
+                db_field = HKFields(field=fields[i],
+                                   start=starts[i],
+                                   hkfile=db_file,
+                                   hkagent=db_agent)
+                self.session.add(db_field)
+            
+            # update the math incase previous incomplete file?    
+            db_field.end = ends[i]
+            db_field.median = medians[i]
+            db_field.mean = means[i]
+            db_field.min_val = min_vals[i]
+            db_field.max_val = max_vals[i]
+            db_field.stand_dev = stds[i]
+
+            self.session.commit()
+        
     def populate_hkagents(self):
         """
         """
         file_list = self.session.query(HKFiles).all()
 
         for file in file_list:
-            fields, starts, ends, medians, means, min_vals, max_vals, stds = self.load_fields(file.path, file.filename)
+            fields, starts, ends, medians, means, min_vals, max_vals, stds = self.load_fields(file.path)
             agents = []
             for field in fields:
                 agent = field.split('.')[1]
@@ -372,7 +456,7 @@ class G3tHk:
         file_list = self.session.query(HKFiles).all()
 
         for file in file_list:
-            fields, starts, ends, medians, means, min_vals, max_vals, stds = self.load_fields(file.path, file.filename)
+            fields, starts, ends, medians, means, min_vals, max_vals, stds = self.load_fields(file.path)
 
             for i in range(len(fields)):
                 agentname = fields[i].split('.')[1]
