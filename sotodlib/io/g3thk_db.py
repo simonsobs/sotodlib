@@ -66,7 +66,7 @@ class HKAgents(Base):
         TODO
     start : integer
         TODO
-    stop : integer
+    end : integer
         TODO
     hkfile:
     fields
@@ -82,7 +82,7 @@ class HKAgents(Base):
     instance_id = db.Column(db.String)
 
     start = db.Column(db.Integer)
-    stop = db.Column(db.Integer)
+    end = db.Column(db.Integer)
 
     fields = relationship("HKFields", back_populates='hkagent')
 
