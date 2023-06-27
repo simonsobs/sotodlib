@@ -351,7 +351,7 @@ class G3tHk:
                 #  populate the HKAgents table
                 db_agent = HKAgents(instance_id=agent,
                                     start=agent_start,
-                                    stop=agent_stop,
+                                    end=agent_stop,
                                     hkfile=db_file)
                 self.session.add(db_agent)
             else:
