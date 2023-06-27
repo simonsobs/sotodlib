@@ -504,5 +504,5 @@ class G3tHk:
         if type(configs)==str:
             configs = yaml.safe_load(open(configs, "r"))
         
-        return cls(configs["data_prefix"], configs['g3thk_db'])
+        return cls(os.join(configs["data_prefix"], "hk"), configs['g3thk_db'])
 
