@@ -356,7 +356,7 @@ class G3tHk:
                 self.session.add(db_agent)
             else:
                 # stop may have changed for an incomplete file?
-                db_agent.stop=agent_stop
+                db_agent.end=agent_stop
             self.session.commit()
         
         for i in range(len(fields)):
@@ -423,7 +423,7 @@ class G3tHk:
                 #  populate the HKAgents table
                 db_file = HKAgents(instance_id=agent,
                                     start=agent_start,
-                                    stop=agent_stop,
+                                    end=agent_stop,
                                     hkfile=file)
                 self.session.add(db_file)
 
