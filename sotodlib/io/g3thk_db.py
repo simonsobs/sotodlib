@@ -100,8 +100,6 @@ class HKFields(Base):
         TODO
     field : string
         name of HK field in corresponding HK file
-    alias : string
-        TODO
     start : integer
         start time for each HK field in ctime
     end : integer
@@ -118,7 +116,6 @@ class HKFields(Base):
     hkagent = relationship("HKAgents", back_populates='fields')
 
     field = db.Column(db.String)
-    alias = db.Column(db.String)
     start = db.Column(db.Integer)
     end = db.Column(db.Integer)
     median = db.Column(db.Integer)
