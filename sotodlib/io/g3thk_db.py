@@ -118,12 +118,12 @@ class HKFields(Base):
     field = db.Column(db.String)
     start = db.Column(db.Integer)
     stop = db.Column(db.Integer)
-    median = db.Column(db.Integer)
-    mean = db.Column(db.Integer)
-    min_val = db.Column(db.Integer)
-    max_val = db.Column(db.Integer)
-    stand_dev = db.Column(db.Integer)
-    special_math = db.Column(db.Integer)
+    median = db.Column(db.Float)
+    mean = db.Column(db.Float)
+    min_val = db.Column(db.Float)
+    max_val = db.Column(db.Float)
+    stand_dev = db.Column(db.Float)
+    special_math = db.Column(db.Float)
 
 
 class G3tHk:
