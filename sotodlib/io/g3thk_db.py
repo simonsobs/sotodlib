@@ -448,6 +448,33 @@ class G3tHk:
             raise ValueError("db_instance must be HKFields, HKFiles, "
                              "HKAgents instances or a list of these")
 
+    def get_db_agents(self, instance_id, start, stop):
+        """Return list of HKAgents with given instance_id that are active 
+        for any subset of time between start and stop
+
+        Arguments
+        ---------
+        instance_id : instance_id of agent
+        start : ctime to begin search
+        stop : ctime to end search
+    
+        Returns
+        -------
+        list of HKAgent instances
+        """
+        agents = self.session.query(HKAgents).filter(
+            db.or_( 
+                db.and_(HKAgents.start <= start, HKAgents.stop >= stop),
+                db.and_(HKAgents.start >= start, HKAgents.start <= stop),
+                db.and_(HKAgents.stop >= start, HKAgents.stop <= stop)
+            )
+        )
+        if agents.count() == 0:
+            logger.warning(f"no agents found between {start} and {stop}"
+                            " database may be incomplete")
+        agents = agents.filter(HKAgents.instance_id == instance_id).all()
+        return agents
+
     @classmethod
     def from_configs(cls, configs):
         """
