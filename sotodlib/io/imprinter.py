@@ -353,8 +353,8 @@ class Imprinter:
                     return {
                         'book_id': book.bid,
                         # dummy start and stop times
-                        'start_time': float(first5+"00000"),
-                        'stop_time': float(first5+"99999"),
+                        'start_time': float(first5)*1e5,
+                        'stop_time': (float(first5)+1)*1e5,
                         'telescope': book.tel_tube[:3].lower(),
                         'tube_slot': book.tel_tube.lower().replace("sat","satst")[3:],
                         'type': 'hk',
