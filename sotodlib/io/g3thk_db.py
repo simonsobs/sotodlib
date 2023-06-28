@@ -318,6 +318,9 @@ class G3tHk:
 
     
     def add_agents_and_fields(self, db_file):
+        db_agents = db_file.agents
+        db_fields = db_file.fields
+
         fields, starts, ends, medians, means, min_vals, max_vals, stds = self.load_fields(db_file.path)
         agents = []
         for field in fields:
@@ -345,13 +348,11 @@ class G3tHk:
             #  and stop time for the agent
             agent_start = np.min(starts_agent)
             agent_stop = np.max(ends_agent)
-
-            db_agent = self.session.query(HKAgents).filter(
-                HKAgents.instance_id == agent,
-                HKAgents.file_id == db_file.id,
-            ).one_or_none()
-            if db_agent is None:
-                #  populate the HKAgents table
+            
+            
+            x = np.where( [agent == a.instance_id for a in db_agents])[0] 
+            if len(x) == 0:
+                # if we don't have an agent
                 db_agent = HKAgents(instance_id=agent,
                                     start=agent_start,
                                     stop=agent_stop,
@@ -359,26 +360,27 @@ class G3tHk:
                 self.session.add(db_agent)
             else:
                 # stop may have changed for an incomplete file?
-                db_agent.stop=agent_stop
-            self.session.commit()
+                db_agent = db_agents[x[0]]
+                db_agent.stop = agent_stop
+        self.session.commit()
+        db_agents = db_file.agents
         
         for i in range(len(fields)):
             agentname = fields[i].split('.')[1]
-            db_agent = self.session.query(HKAgents).filter(
-                    and_(HKAgents.instance_id == agentname,
-                         HKAgents.file_id == db_file.id)).one()
-            db_field = self.session.query(HKFields).filter(
-                HKFields.agent_id == db_agent.id,
-                HKFields.file_id == db_file.id,
-                HKFields.field == fields[i],
-            ).one_or_none()
-
-            if db_field is None:
+            x = np.where( [agentname == a.instance_id for a in db_agents])[0]
+            if len(x) == 0:
+                logger.error(f"Somehow did not add agent {agentname} for {db_file.path}")
+                continue
+            db_agent = db_agents[x[0]]
+            x = np.where( [fields[i] == f.field for f in db_fields])[0]
+            if len(x) == 0:
                 db_field = HKFields(field=fields[i],
                                    start=starts[i],
                                    hkfile=db_file,
                                    hkagent=db_agent)
                 self.session.add(db_field)
+            else:
+                db_field = db_fields[x[0]]
             
             # update the math incase previous incomplete file?    
             db_field.end = ends[i]
