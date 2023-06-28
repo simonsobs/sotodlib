@@ -355,8 +355,7 @@ class Imprinter:
                         # dummy start and stop times
                         'start_time': float(first5)*1e5,
                         'stop_time': (float(first5)+1)*1e5,
-                        'telescope': book.tel_tube[:3].lower(),
-                        'tube_slot': book.tel_tube.lower().replace("sat","satst")[3:],
+                        'telescope': book.tel_tube.lower(),
                         'type': 'hk',
                     }
                 def bind(self, pbar=False):
