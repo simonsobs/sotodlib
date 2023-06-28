@@ -392,6 +392,62 @@ class G3tHk:
 
         self.session.commit()
 
+    def load_data(self, db_instance ):
+        """Load data from database objects
+        
+        Arguments
+        ---------
+        db_instance: HKFiles, HKAgents, HKFields, or list of one of these objects
+
+        Returns
+        -------
+        load_range style dictionary. If a list of instances are passed then it
+        concatenates matching keys.
+
+        """
+        if isinstance(db_instance, HKFields ):
+            x = hk.load_range( 
+                db_instance.start, 
+                db_instance.stop, 
+                fields = [db_instance.field],
+                data_dir=self.hkarchive_path
+            )
+            return x
+        elif isinstance(db_instance, HKAgents):
+            fields = [f.field for f in db_instance.fields]
+            x = hk.load_range( 
+                db_instance.start, 
+                db_instance.stop, 
+                fields = fields,
+                data_dir=self.hkarchive_path
+            )
+            return x
+        elif isinstance(db_instance, HKFiles):
+            fields = [f.field for f in db_instance.fields]
+            x = hk.load_range( 
+                min( [f.start for f in db_instance.fields]), 
+                max( [f.stop for f in db_instance.fields]), 
+                fields = fields,
+                data_dir=self.hkarchive_path
+            )
+            return x  
+        elif isinstance(db_instance, list):
+            temp = [self.load_data(x) for x in db_instance]
+            data = {}
+            for x in temp:
+                for k,item in x.items():
+                    if k not in data:
+                        data[k] = item
+                    else:
+                        data[k] = (
+                            np.concatenate( (data[k][0], item[0])),
+                            np.concatenate( (data[k][1], item[1]))
+                        )
+            return data    
+        else:
+            raise ValueError("db_instance must be HKFields, HKFiles, "
+                             "HKAgents instances or a list of these")
+
     @classmethod
     def from_configs(cls, configs):
         """
