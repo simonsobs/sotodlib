@@ -66,7 +66,7 @@ class HKAgents(Base):
         TODO
     start : integer
         TODO
-    stop : integer
+    end : integer
         TODO
     hkfile:
     fields
@@ -82,7 +82,7 @@ class HKAgents(Base):
     instance_id = db.Column(db.String)
 
     start = db.Column(db.Integer)
-    stop = db.Column(db.Integer)
+    end = db.Column(db.Integer)
 
     fields = relationship("HKFields", back_populates='hkagent')
 
@@ -100,8 +100,6 @@ class HKFields(Base):
         TODO
     field : string
         name of HK field in corresponding HK file
-    alias : string
-        TODO
     start : integer
         start time for each HK field in ctime
     end : integer
@@ -118,7 +116,6 @@ class HKFields(Base):
     hkagent = relationship("HKAgents", back_populates='fields')
 
     field = db.Column(db.String)
-    alias = db.Column(db.String)
     start = db.Column(db.Integer)
     end = db.Column(db.Integer)
     median = db.Column(db.Integer)
@@ -355,13 +352,14 @@ class G3tHk:
                 # if we don't have an agent
                 db_agent = HKAgents(instance_id=agent,
                                     start=agent_start,
-                                    stop=agent_stop,
+                                    end=agent_stop,
                                     hkfile=db_file)
                 self.session.add(db_agent)
             else:
                 # stop may have changed for an incomplete file?
                 db_agent = db_agents[x[0]]
                 db_agent.stop = agent_stop
+        
         self.session.commit()
         db_agents = db_file.agents
         
@@ -428,7 +426,7 @@ class G3tHk:
                 #  populate the HKAgents table
                 db_file = HKAgents(instance_id=agent,
                                     start=agent_start,
-                                    stop=agent_stop,
+                                    end=agent_stop,
                                     hkfile=file)
                 self.session.add(db_file)
 
@@ -509,5 +507,5 @@ class G3tHk:
         if type(configs)==str:
             configs = yaml.safe_load(open(configs, "r"))
         
-        return cls(configs["data_prefix"], configs['g3thk_db'])
+        return cls(os.path.join(configs["data_prefix"], "hk"), configs['g3thk_db'])
 
