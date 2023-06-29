@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2021 Simons Observatory.
+# Copyright (c) 2019-2023 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import os
@@ -11,7 +11,7 @@ import numpy as np
 import astropy.units as u
 from astropy.table import QTable
 from toast.instrument import Focalplane, GroundSite, Telescope
-from toast.utils import Logger
+from toast.utils import Logger, name_UID
 
 from ..core.hardware import Hardware, build_readout_id, parse_readout_id
 from ..sim_hardware import sim_nominal
@@ -112,6 +112,8 @@ class SOFocalplane(Focalplane):
         self,
         hw=None,
         hwfile=None,
+        det_info_file=None,
+        det_info_version=None,
         telescope=None,
         sample_rate=u.Quantity(10.0, u.Hz),
         bands=None,
@@ -141,6 +143,8 @@ class SOFocalplane(Focalplane):
                     sim_telescope_detectors(
                         hw,
                         meta["telescope"],
+                        det_info=(det_info_file, det_info_version),
+                        no_darks=det_info_file is not None,
                     )
                 else:
                     raise RuntimeError(
@@ -165,7 +169,11 @@ class SOFocalplane(Focalplane):
                     dets = list(hw.data["detectors"].keys())
                     for det in dets:
                         pixel = hw.data["detectors"][det]["pixel"]
-                        if int(pixel) % thinfp != 0:
+                        try:
+                            pixel_id = int(pixel)
+                        except ValueError:
+                            pixel_id = name_UID(pixel)
+                        if pixel_id % thinfp != 0:
                             del hw.data["detectors"][det]
 
                 ndet = len(hw.data["detectors"])
@@ -320,6 +328,9 @@ class SOFocalplane(Focalplane):
             bandcenters.append(0.5 * (lower + upper))
             bandwidths.append(upper - lower)
 
+        meta["platescale"] = hw.data["telescopes"][meta["telescope"]]["platescale"] \
+                             * u.deg / u.mm
+
         detdata = QTable(
             [
                 readout_id,
@@ -414,6 +425,8 @@ def update_creation_time(det_data, creation_time):
 def simulated_telescope(
     hw=None,
     hwfile=None,
+    det_info_file=None,
+    det_info_version=None,
     telescope_name=None,
     sample_rate=10 * u.Hz,
     bands=None,
@@ -430,6 +443,8 @@ def simulated_telescope(
     focalplane = SOFocalplane(
         hw=hw,
         hwfile=hwfile,
+        det_info_file=det_info_file,
+        det_info_version=det_info_version,
         telescope=telescope_name,
         sample_rate=sample_rate,
         bands=bands,

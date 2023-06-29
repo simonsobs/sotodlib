@@ -84,7 +84,7 @@ def get_glitch_flags(
     if signal is None:
         signal = 'signal'
     # f-space filtering
-    filt = filters.high_pass_sine2(cutoff=hp_fc) * filters.gaussian_filter(t_sigma=0.002)
+    filt = filters.high_pass_sine2(cutoff=hp_fc) * filters.gaussian_filter(t_sigma=t_glitch)
     fvec = fourier_filter(aman, filt, detrend=detrend,
                           signal_name=signal, resize='zero_pad')
     # get the threshods based on n_sig x nlev = n_sig x iqu x 0.741
