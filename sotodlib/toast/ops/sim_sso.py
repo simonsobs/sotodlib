@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2021 Simons Observatory.
+# Copyright (c) 2018-2023 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import h5py
@@ -311,8 +311,8 @@ class SimSSO(Operator):
         size = description[0][0] * u.degree
         sso_radius_avg = np.average(sso_diameter) / 2
         sso_solid_angle = np.pi * sso_radius_avg**2
-        amp = ttemp_det * (
-            sso_solid_angle.to_value(u.rad**2) / beam_solid_angle.to_value(u.rad**2)
+        amp = ttemp_det.to_value(u.K) * (
+                    sso_solid_angle.to_value(u.rad**2) / beam_solid_angle.to_value(u.rad**2)
         )
         w = size.to_value(u.rad) / 2
         if self.finite_sso_radius:
@@ -431,14 +431,14 @@ class SimSSO(Operator):
 
             # Convolve the planet SED with the detector bandpass
             sso_freq, sso_temp = self._get_sso_temperature(sso_name)
-            det_temp = bandpass.convolve(det, sso_freq, sso_temp)
-
+            det_temp = bandpass.convolve(det, sso_freq, sso_temp) * u.K
             if beam is None or not "ALL" in self.beam_props:
                 beam, radius = self._get_beam_map(det, sso_diameter, det_temp)
 
             # Interpolate the beam map at appropriate locations
 
-            x = (az - sso_az.to_value(u.rad)) * np.cos(el)
+            az_diff = (az - sso_az.to_value(u.rad) + np.pi) % (2 * np.pi) - np.pi
+            x = az_diff * np.cos(el)
             y = el - sso_el.to_value(u.rad)
             r = np.sqrt(x**2 + y**2)
 
