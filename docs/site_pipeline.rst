@@ -76,6 +76,26 @@ Module documentation
    :members:
    :undoc-members:
 
+update-obsdb
+------------
+
+For a description and documentation of the config file format, see
+:mod:`sotodlib.site_pipeline.update_obsdb` module autodocumentation below.
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.update_obsdb
+   :func: get_parser
+   :prog: update-obsdb
+
+Module documentation
+````````````````````
+
+.. automodule:: sotodlib.site_pipeline.update_obsdb
+   :members:
+   :undoc-members:
 
 Detector and Readout ID Mapping
 -------------------------------
