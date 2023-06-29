@@ -775,11 +775,6 @@ class BookBinder:
         # Copy smurf ancillary files if they exist
         self.copy_smurf_files_to_book()
 
-        # Write M_file
-        mfile = os.path.join(self.outdir, 'M_index.yaml')
-        with open(mfile, 'w') as f:
-            yaml.dump(self.get_metadata(), f)
-
         # Bind Ancil Data
         self.ancil.bind(self.outdir, self.times, self.frame_idxs, self.file_idxs)
         

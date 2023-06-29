@@ -4,7 +4,8 @@ from collections import OrderedDict
 from typing import List
 import yaml, traceback
 import shutil
-import sotodlib
+import logging
+from glob import glob
 
 import sqlalchemy as db
 from sqlalchemy import or_, and_, not_
@@ -13,11 +14,9 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 import so3g
 from spt3g import core
-import itertools
-import logging
 
-
-from sotodlib.io.bookbinder import BookBinder
+import sotodlib
+from .bookbinder import BookBinder
 from .load_smurf import G3tSmurf, Observations as G3tObservations, SmurfStatus, get_channel_info
 from ..site_pipeline.util import init_logger
 
@@ -277,6 +276,95 @@ class Imprinter:
             self.register_book(session, bid, obs_list, commit=False)
         if commit: session.commit()
 
+    def register_hk_books(self, commit=True, session=None):
+        """Register housekeeping books to database
+
+        """
+        session = session or self.get_session()
+
+        # fixme: tel_tube and daq_node may not be the same
+        for daq_node in self.config['sources']: 
+            with open(self.config['sources'][daq_node]['g3tsmurf'], "r") as f:
+                g3tsmurf_cfg = yaml.safe_load(f)
+            data_root = g3tsmurf_cfg['data_prefix']
+            
+            # all ctime dir except the last ctime dir will be considered complete
+            ctime_dirs = sorted(glob(op.join(data_root, "hk", "*")))
+            for ctime_dir in ctime_dirs[:-1]:
+                ctime = op.basename(ctime_dir)
+                book_id = f"hk_{ctime}_{daq_node}"
+                # check whether the book exists
+                if self.get_book(book_id) is not None:
+                    continue
+                book = Books(
+                    bid=book_id,
+                    type="hk",
+                    status=UNBOUND,
+                    tel_tube=daq_node,  # fixme: tel_tube and daq_node may not be the same
+                )
+                session.add(book)
+            if commit: session.commit()
+
+    def _get_binder_for_book(self, book, output_root="out", pbar=False):
+        """get the appropriate bookbinder for the book based on its type"""
+        g3tsmurf_cfg_file = self.sources[book.tel_tube]['g3tsmurf']
+        with open(g3tsmurf_cfg_file, 'r') as f:
+            g3tsmurf_cfg = yaml.safe_load(f)
+        data_root = g3tsmurf_cfg['data_prefix']
+
+        if book.type in ['obs', 'oper']:
+            session_id = book.bid.split('_')[1]
+            first5 = session_id[:5]
+            odir = op.join(output_root, book.type, first5)
+            if not op.exists(odir):
+                os.makedirs(odir)
+            book_path = os.path.join(odir, book.bid)
+
+            # after sanity checks, now we proceed to bind the book.
+            # get files associated with this book, in the form of
+            # a dictionary of {stream_id: [file_paths]}
+            filedb = self.get_files_for_book(book)
+            obsdb = self.get_g3tsmurf_obs_for_book(book)
+            readout_ids = self.get_readout_ids_for_book(book)
+
+            # bind book using bookbinder library
+            bookbinder = BookBinder(book, obsdb, filedb, data_root, readout_ids,
+                                    book_path)
+            return bookbinder
+        
+        elif book.type in ['hk']:
+            # get source directory for hk book
+            hk_root = op.join(data_root, "hk")
+            first5 = book.bid.split('_')[1]
+            assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
+            book_path_src = op.join(hk_root, first5)
+
+            # get target directory for hk book
+            odir = op.join(output_root, book.type)
+            if not op.exists(odir):
+                os.makedirs(odir)
+            book_path_tgt = os.path.join(odir, book.bid)
+
+            class _HKBinder:  # dummy class to mimic baseline bookbinder
+                def __init__(self, indir, outdir):
+                    self.indir = indir
+                    self.outdir = outdir
+                def get_metadata(self):
+                    return {
+                        'book_id': book.bid,
+                        # dummy start and stop times
+                        'start_time': float(first5)*1e5,
+                        'stop_time': (float(first5)+1)*1e5,
+                        'telescope': book.tel_tube.lower(),
+                        'type': 'hk',
+                    }
+                def bind(self, pbar=False):
+                    shutil.copytree(self.indir, self.outdir)
+            return _HKBinder(book_path_src, book_path_tgt)
+
+        else:
+            raise NotImplementedError(f"binder for book type {book.type} not implemented")
+
     def bind_book(self, book, session=None, output_root="out", message="",
                   test_mode=False, pbar=False):
         """Bind book using bookbinder
@@ -310,36 +398,15 @@ class Imprinter:
         # check whether book is already bound
         if (book.status == BOUND) and (not test_mode):
             raise BookBoundError(f"Book {bid} is already bound")
-
         assert book.type in VALID_OBSTYPES
 
-        # after sanity checks, now we proceed to bind the book.
-        # get files associated with this book, in the form of
-        # a dictionary of {stream_id: [file_paths]}
-        filedb = self.get_files_for_book(book)
-        obsdb = self.get_g3tsmurf_obs_for_book(book)
-        readout_ids = self.get_readout_ids_for_book(book)
-
-        g3tsmurf_cfg_file = self.sources[book.tel_tube]['g3tsmurf']
-        with open(g3tsmurf_cfg_file, 'r') as f:
-            g3tsmurf_cfg = yaml.safe_load(f)
-        data_root = g3tsmurf_cfg['data_prefix']
-
-        session_id = book.bid.split('_')[1]
-        first5 = session_id[:5]
-        odir = op.join(output_root, book.type, first5)
-        if not op.exists(odir):
-            os.makedirs(odir)
-        book_path = os.path.join(odir, book.bid)
-
-        # bind book using bookbinder library
-        bookbinder = BookBinder(book, obsdb, filedb, data_root, readout_ids,
-                                book_path)
+        # find appropriate binder for the book type
+        binder = self._get_binder_for_book(book, output_root=output_root)
         try:
-            bookbinder.bind(pbar=pbar)
+            binder.bind(pbar=pbar)
 
             # write M_book file
-            m_book_file = os.path.join(book_path, 'M_book.yaml')
+            m_book_file = os.path.join(binder.outdir, 'M_book.yaml')
             book_meta = {}
             book_meta['book'] = {
                 "type": book.type,
@@ -352,13 +419,17 @@ class Imprinter:
                 "version": sotodlib.__version__,
                 "context": self.config.get('context', 'unknown')
             }
-
             with open(m_book_file, 'w') as f:
                 yaml.dump(book_meta, f)
 
+            # write M_index file
+            mfile = os.path.join(binder.outdir, 'M_index.yaml')
+            with open(mfile, 'w') as f:
+                yaml.dump(binder.get_metadata(), f)
+
             # not sure if this is the best place to update
             book.status = BOUND
-            book.path = op.abspath(op.join(odir, book.bid))
+            book.path = op.abspath(binder.outdir)
             self.logger.info("Book {} bound".format(book.bid))
             book.message = message
             if not test_mode:
@@ -380,7 +451,7 @@ class Imprinter:
                 session.rollback()
 
             raise e
-
+        
     def get_book(self, bid, session=None):
         """Get book from database.
 
