@@ -410,11 +410,17 @@ class G3tHk:
         load_range style dictionary. If a list of instances are passed then it
         concatenates matching keys.
 
+        Note: the extra half second on these load_range calls is because
+        load_range uses [start,stop) intervals but db_instance.stop is the last
+        timestamp in the file for that field (which Katie thinks is correct for
+        this specific implementation). Really, we should replace load_range with
+        something that doesn't require going through time when we are really
+        just asking for "all data from X in file"
         """
         if isinstance(db_instance, HKFields ):
             x = hk.load_range( 
                 db_instance.start, 
-                db_instance.stop, 
+                db_instance.stop+0.5, 
                 fields = [db_instance.field],
                 data_dir=self.hkarchive_path
             )
@@ -423,7 +429,7 @@ class G3tHk:
             fields = [f.field for f in db_instance.fields]
             x = hk.load_range( 
                 db_instance.start, 
-                db_instance.stop, 
+                db_instance.stop+0.5, 
                 fields = fields,
                 data_dir=self.hkarchive_path
             )
@@ -432,7 +438,7 @@ class G3tHk:
             fields = [f.field for f in db_instance.fields]
             x = hk.load_range( 
                 min( [f.start for f in db_instance.fields]), 
-                max( [f.stop for f in db_instance.fields]), 
+                max( [f.stop for f in db_instance.fields])+0.5, 
                 fields = fields,
                 data_dir=self.hkarchive_path
             )
