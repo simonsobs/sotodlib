@@ -271,7 +271,13 @@ class G3tHk:
         logger.debug(f"{len(path_list)} files to add to database.")
         return path_list
 
-    def add_hkfiles(self, min_ctime=None, max_ctime=None, show_pb=True):
+    def add_hkfiles(
+        self, 
+        min_ctime=None, 
+        max_ctime=None,
+        show_pb=True,
+        stop_at_error=False
+        ):
         """Gather and add column information for hkfiles tables
         """
 
