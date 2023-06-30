@@ -1,3 +1,4 @@
+import pdb
 import numpy as np
 import yaml
 import itertools
@@ -18,8 +19,85 @@ def _get_swap_dict(d):
     """
     return {v: k for k, v in d.items()}
 
+def _group_feeds(fields, aliases=False):
+    """ group the feeds given the type of data that's output from load_range()
+    """
+    if aliases:
+        sorted_fields = sorted(_get_swap_dict(fields))
+    else:
+        sorted_fields = sorted(fields)
 
-def get_grouped_hkdata(start, stop, config):
+    grouped_feeds = []
+    key_func = lambda field: field.split('.')[0:4]
+    for key, group in itertools.groupby(sorted_fields, key_func):
+        grouped_feeds.append(list(group))
+
+    return grouped_feeds
+
+def _group_data(hkdata, field_dict=None, fields=False, alias=False, config=False):
+    """ Sort hkdata that comes out of load_range depending
+    on the parameters used for load_range()
+
+    Default assumes a list of fields were made to make load_range()
+
+    Returns:
+        get_grouped_data(list): grouped list of data per HK feed/device;
+        useful for turning into a grouped set of axismanagers
+    
+    """
+    hknames = list(hkdata.keys())
+    if fields:
+        grouped_feeds = _group_feeds(hknames)
+    if config:
+        # need the field_dictionary from the config file
+        assert field_dict is not None
+    if alias or config:
+        online_fields = {}
+        for alias in hknames:
+            if config:
+                field_info = {alias: field_dict[alias]}
+                online_fields.update(field_info)
+            elif alias:
+                field_info = {alias: hkdata[alias]}
+                online_fields.update(field_info)
+
+        #if config:
+        fields_data = {}
+        for alias in online_fields:
+            time = hkdata[alias][0]
+            data = hkdata[alias][1]
+            field = online_fields[alias]
+                
+            info = {field: [alias, time, data]}
+            fields_data.update(info)
+        
+        #if alias:
+        #    fields_data = {}
+        #    for field in fields:
+        #        time = hkdata[field][0]
+        #        data = hkdata[field][1]
+                
+        #        info = {field: [alias, time, data]}
+        #        fields_data.update(info)
+                
+        grouped_feeds = _group_feeds(online_fields, aliases=True)
+    
+    grouped_data = [] # requires hkdata from load_range as an input here
+    for group in grouped_feeds:
+        device_data = {}
+        for field in group:
+            if fields:
+                field_dict = {field: hkdata[field]}
+                device_data.update(field_dict)
+            if alias or config:
+                field_dict = {field: fields_data[field]}
+                device_data.update(field_dict)
+
+        grouped_data.append(device_data)
+
+    return grouped_data
+
+def sort_hkdata_fromconfig(start, stop, config):
     """
     Takes output from load_range(), reconfigures load_range() dictionary
     slightly. Groups HK field data by corresponding device/feed. Outputs
@@ -49,6 +127,7 @@ def get_grouped_hkdata(start, stop, config):
             'bf_4k' : 'observatory.LSA22HG.feeds.temperatures.Channel_06_T'
             'xy_stage_x': 'observatory.XYWing.feeds.positions.x'
             'xy_stage_y': 'observatory.XYWing.feeds.positions.y'
+    
     """
     # call load_range()
     logger.debug("running load_range()")
@@ -60,47 +139,49 @@ def get_grouped_hkdata(start, stop, config):
 
     field_dict = hkconfig['field_list']
 
-    # output a dict of field name, alias, timestamps, and data
-    # for fields that are online given start, stop and keys from load_range()
-    hk_aliases = list(hkdata.keys())
-
-    online_fields = {}
-    for alias in hk_aliases:
-        field_info = {alias: field_dict[alias]}
-        online_fields.update(field_info)
-
-    fields_data = {}
-    for alias in online_fields:
-        time = hkdata[alias][0]
-        data = hkdata[alias][1]
-        field = online_fields[alias]
-
-        info = {field: [alias, time, data]}
-        fields_data.update(info)
-
-    # now group field names by feed/device
-    sorted_fields = sorted(_get_swap_dict(online_fields))
-
-    grouped_feeds = []
-    key_func = lambda field: field.split('.')[0:4]
-    for key, group in itertools.groupby(sorted_fields, key_func):
-        grouped_feeds.append(list(group))
-
-    # use grouped_feeds and fields_data to output a grouped list of data per
-    # feed/device, ready to input to an axismanager
-    grouped_data = []
-    for group in grouped_feeds:
-        device_data = {}
-        for field in group:
-            field_dict = {field: fields_data[field]}
-            device_data.update(field_dict)
-
-        grouped_data.append(device_data)
+    grouped_data = _group_data(hkdata, field_dict=field_dict, config=True)
 
     return grouped_data
 
 
-def make_hkaman(grouped_data, det_cosampled=False, det_aman=None):
+def sort_hkdata(start, stop, fields, data_dir, alias=None):
+    """
+    Takes output from load_range(), reconfigures load_range() dictionary
+    slightly. Groups HK field data by corresponding device/feed. Outputs
+    that list of data.
+
+    Parameters:
+        start: Earliest time to search for data. Can be datetime objects,
+            unix timestamps, int, floats.
+        stop: Latest time to search for data. See start parameter above for
+            note on time formats.
+        fields: (list) List of strings of Field names to query.
+        alias (optional): (str) List of string of aliases of the field names
+
+    Returns:
+        get_grouped_data (list): grouped list of data per HK feed/device;
+            useful for turning into a grouped set of axismanagers, or for
+            other grouped data analysis purposes.
+
+            'xy_stage_y': 'observatory.XYWing.feeds.positions.y'
+    
+    """
+    if alias is None:
+        hkdata = load_range(start, stop, fields, data_dir=data_dir)
+        
+        grouped_data = _group_data(hkdata, fields=True)
+
+        return grouped_data
+    
+    else:
+        hkdata = load_range(start, stop, fields, alias, data_dir)
+            
+        grouped_data = _group_data(hkdata, alias=True)
+
+        return grouped_data
+        
+
+def make_hkaman(grouped_data, alias_exists=False, det_cosampled=False, det_aman=None):
     """
     Takes data from get_grouped_hkdata(), tests whether feed/device is
     cosampled, outputs axismanager(s) for either case.
@@ -132,20 +213,36 @@ def make_hkaman(grouped_data, det_cosampled=False, det_aman=None):
         times_hk = []
         times_det = {}
         for field in group:
-            # arrange data per device to input into aman
-            alias = group[field][0]
-            aliases.append(alias)
+            if alias_exists is True:
+                # arrange data per device to input into aman
+                alias = group[field][0]
+                aliases.append(alias)
 
-            time = group[field][1]
-            times_hk.append(time)
+                time = group[field][1]
+                times_hk.append(time)
 
-            time_info = {alias: time}
-            times_det.update(time_info)
+                time_info = {alias: time}
+                times_det.update(time_info)
 
-            device_data = group[field][2]
+                device_data = group[field][2]
 
-            info = {alias: device_data}
-            data.update(info)
+                info = {alias: device_data}
+                data.update(info)
+            else:
+                alias = field
+                aliases.append(alias)
+                
+                time = group[field][0]
+                times_hk.append(time)
+
+                time_info = {alias: time}
+                times_det.update(time_info)
+
+                device_data = group[field][1]
+
+                info = {alias: device_data}
+                data.update(info)
+
 
         # only want HK data, checking for cases where HK data is cosampled
         if det_cosampled is False:
@@ -219,7 +316,7 @@ def make_hkaman(grouped_data, det_cosampled=False, det_aman=None):
     return merged_amans
 
 
-def get_hkaman(start, stop, config):
+def get_hkaman(start, stop, config=None, alias=None, fields=None, data_dir=None): # add args for conditions
     """
     Wrapper to combine get_grouped_hkdata() and make_hkaman() to output one
     axismanager of HK axismanagers to streamline data analysis.
@@ -244,12 +341,25 @@ def get_hkaman(start, stop, config):
             'xy_stage_x': 'observatory.XYWing.feeds.positions.x'
             'xy_stage_y': 'observatory.XYWing.feeds.positions.y'
     """
-    data = get_grouped_hkdata(start, stop, config)
-    hk_amans = make_hkaman(data)
-    return hk_amans
+    if config is not None:
+        data = sort_hkdata_fromconfig(start, stop,config)
+        hkamans = make_hkaman(data, alias_exists=True)
+        
+        return hkamans
+    elif fields is not None:
+        # make sure you're working with the right components,
+        # that you didn't provide any aliases 
+        if alias is None:
+            data = sort_hkdata(start, stop, fields, data_dir)
+            hkamans = make_hkaman(data)
 
+            return hkamans
+        else:
+            data = sort_hkdata(start, stop, fields, alias, data_dir)
+            hkamans = make_hkaman(data, alias_exists=True)
+            return hkamans
 
-def get_detcosamp_hkaman(config, det_aman):
+def get_detcosamp_hkaman(config, det_aman): #add args for conditions
     """
     Wrapper to combine get_grouped_hkdata() and make_hkaman() to output one
     axismanager of HK axismanagers that are cosampled to detector timestreams.
@@ -273,6 +383,8 @@ def get_detcosamp_hkaman(config, det_aman):
     """
     start = float(det_aman.timestamps[0])
     stop = float(det_aman.timestamps[-1])
+
+    # TODO: conditionals and fix to sort_hkdata
     data = get_grouped_hkdata(start, stop, config)
 
     hkamans_detcosamp = make_hkaman(data, det_cosampled=True, det_aman=det_aman)
