@@ -1,4 +1,3 @@
-import pdb
 import numpy as np
 import yaml
 import itertools
@@ -359,7 +358,7 @@ def get_hkaman(start, stop, config=None, alias=None, fields=None, data_dir=None)
             hkamans = make_hkaman(data, alias_exists=True)
             return hkamans
 
-def get_detcosamp_hkaman(config, det_aman): #add args for conditions
+def get_detcosamp_hkaman(start, stop, det_aman, config=None, alias=None, fields=None, data_dir=None): #add args for conditions
     """
     Wrapper to combine get_grouped_hkdata() and make_hkaman() to output one
     axismanager of HK axismanagers that are cosampled to detector timestreams.
@@ -384,9 +383,18 @@ def get_detcosamp_hkaman(config, det_aman): #add args for conditions
     start = float(det_aman.timestamps[0])
     stop = float(det_aman.timestamps[-1])
 
-    # TODO: conditionals and fix to sort_hkdata
-    data = get_grouped_hkdata(start, stop, config)
+    if config is not None:
+        data = sort_hkdata_fromconfig(start, stop,config)
+        amans = make_hkaman(data, alias_exists=True, det_cosampled=True, det_aman=det_aman)
+        
+        return amans
+    elif fields is not None:
+        if alias is None:
+            data = sort_hkdata(start, stop, fields, data_dir)
+            amans = make_hkaman(data)
 
-    hkamans_detcosamp = make_hkaman(data, det_cosampled=True, det_aman=det_aman)
-    return hkamans_detcosamp
-# TODO: insert a progress bar for get_grouped_hkdata
+            return amans
+        else:
+            data = sort_hkdata(start, stop, fields, alias, data_dir)
+            amans = make_hkaman(data, alias_exists=True, det_cosampled=True, det_aman=det_aman)
+            return amans
