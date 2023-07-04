@@ -137,14 +137,26 @@ def wg_demod_tod(aman) :
     if ("demodQ" in aman.keys()) or ("demodU" in aman.keys()) : return
 
     ### Demod
-    #detrend.detrend_tod(aman,method='median')
-    #apodize.apodize_cosine(aman)
+    ind=3
+    fig = plt.figure()
+    plt.plot(np.arange(len(aman["signal"][ind])), aman["signal"][ind], alpha=0.5)
+    detrend.detrend_tod(aman,method='median')
+    plt.plot(np.arange(len(aman["signal"][ind])), aman["signal"][ind], alpha=0.5)
+    apodize.apodize_cosine(aman)
+    plt.plot(np.arange(len(aman["signal"][ind])), aman["signal"][ind], alpha=0.5)
     hwp.demod_tod(aman,signal='signal')
+    plt.plot(np.arange(len(aman.demodQ[ind])), aman.demodQ[ind], alpha=0.5)
+    plt.grid(ls=":")
+    plt.show()
 
     return
 
+def get_moving_part() : 
+    pass
 
-def get_wg_angle(aman, threshold=0.00015, plateau_len=5000, debug=False) :
+### Note : Length of plateau and in/ouf time of wg (remove_len) are determined in hard coding.
+###        You may have to check if the length is ok to analyze recent wg calibration.
+def get_wg_angle(aman, threshold=0.00015, plateau_len=3*5000, remove_len= 30*5000, debug=False) :
     
     wg_angle =  aman["hkwg"]["wg_angle"]
     wg_timestamp = aman["hkwg"]["wg_timestamp"]
@@ -155,25 +167,47 @@ def get_wg_angle(aman, threshold=0.00015, plateau_len=5000, debug=False) :
     switch_indices = np.where(np.diff(moving) != 0)[0] + 1
     run_lengths = np.diff(switch_indices)
     
+    #static_indices_start = switch_indices[:-1][(run_lengths>plateau_len) & (run_lengths<remove_len)]
     static_indices_start = switch_indices[:-1][run_lengths>plateau_len]
     static_indices_end = []
-    for _id,run_length in enumerate(run_lengths[run_lengths>plateau_len]) : 
-        static_indices_end.append(static_indices_start[_id]+run_length-1)
+    #for _id,run_length in enumerate(run_lengths[(run_lengths>plateau_len) & (run_lengths<remove_len)]) : 
+    #for _id,run_length in enumerate(run_lengths[(run_lengths>plateau_len)]) : 
+    #    static_indices_end.append(static_indices_start[_id]+run_length-1)
+    for _id,run_length in enumerate(run_lengths[(run_lengths>plateau_len)]) : 
+        if run_length < remove_len : 
+            static_indices_end.append(static_indices_start[_id]+run_length-1)
+        else : 
+            static_indices_end.append(static_indices_start[_id]+prev-1)
+        prev = run_length
      
-    if debug : 
-        fig_check = plt.figure(figsize=[20,4])
-        plt.plot(wg_timestamp[:-1][diff_wgangle>0]-1.676598e9,diff_wgangle[diff_wgangle>0])
-        for _id in range(len(static_indices_start)) : 
-            plt.vlines(wg_timestamp[static_indices_start[_id]]-1.676598e9,0.,0.00035,color="blue")
-            plt.vlines(wg_timestamp[static_indices_end[_id]]-1.676598e9,0.,0.00035,color="red")
-        plt.show()
-    
     ### Generate a list that contents timestamps of wg static start/end and angle of wg
     wg_info = []
     for _id in range(len(static_indices_start)) : 
         angle = np.mean(wg_angle[static_indices_start[_id]:static_indices_end[_id]])
         wg_info.append([wg_timestamp[static_indices_start[_id]],wg_timestamp[static_indices_end[_id]],angle])
+
+    ### Temporary to add the last part
+    length = len(static_indices_start)
+    start_ts = static_indices_end[length-1] + 1 + static_indices_start[-1] - static_indices_end[-2]
+    last_ts = static_indices_end[length-1] - static_indices_end[length-2] + start_ts 
+    angle = np.mean(wg_angle[start_ts:last_ts])
+    wg_info.append([wg_timestamp[start_ts], wg_timestamp[last_ts],angle])
+    static_indices_start = np.append(static_indices_start,start_ts)
+    static_indices_end.append(last_ts)
+
+
+    if debug : 
+        fig_check = plt.figure(figsize=[20,4])
+        plt.plot(wg_timestamp[:-1][diff_wgangle>0]-1.676598e9,diff_wgangle[diff_wgangle>0])
+        plt.plot(aman.timestamps-1.676598e9, aman.demodQ[0], alpha=0.5)
+        for _id in range(len(static_indices_start)) : 
+            #plt.vlines(wg_timestamp[static_indices_start[_id]]-1.676598e9,0.,0.00035,color="blue")
+            #plt.vlines(wg_timestamp[static_indices_end[_id]]-1.676598e9,0.,0.00035,color="red")
+            plt.vlines(wg_timestamp[static_indices_start[_id]]-1.676598e9,-0.06,0.,color="blue")
+            plt.vlines(wg_timestamp[static_indices_end[_id]]-1.676598e9,-0.06,0.,color="red")
+        plt.show()
     
+
     return len(static_indices_start),wg_info
 
 
@@ -196,7 +230,24 @@ def fit_angle(aman,fitting_results,wg_info,rotate_tau=False,debug=False):
     hwp_speed = num_rot/dt
     dspeed = np.abs(hwp_speed - 2.)
     print(f"HWP rotation speed is {hwp_speed}")
-    
+
+    ### If you want to consider the effect of time constant, you need to make tau vector
+    ### NOTE :::  Must be updated    
+    t_const = []
+    if rotate_tau : 
+        import pickle
+        with open('/data/atakeuchi/my_soenv/repos/230313/sotodlib/sotodlib/wiregrid/my_tau.pickle', 'rb') as fin :
+            
+            data = pickle.load(fin)
+
+            for det in aman["det_info"]["readout_id"] :
+                if det.encode() in data.keys() : 
+                    t_const.append(data[det.encode()])
+                else : 
+                    t_const.append(0.)
+
+        t_const = np.array(t_const)
+
     ### Get compoents of wg_info then calculate polarized angle
     each_result = []
     ang_mean,Q_mean,U_mean,Q_error,U_error=[],[],[],[],[]
@@ -216,7 +267,7 @@ def fit_angle(aman,fitting_results,wg_info,rotate_tau=False,debug=False):
             plt.show()
          
         if rotate_tau : 
-            exp = np.exp(t_const*hwp_speed*2.*np.pi*4.).reshape((len(t_const), 1)) #  Need to update this later
+            exp = np.exp(1j*t_const*hwp_speed*2.*np.pi*4.).reshape((len(t_const), 1)) #  Need to update this later
         else : 
             exp = 1.
                 
@@ -338,8 +389,8 @@ def main(config_file='./test_config.yaml', query=None, obs_id="", overwrite=Fals
         stream_id = array['stream_id']
         aman = wg_init_setting(config_file=config_file,stream_id=stream_id,tag=tag,hk_dir=hk_dir)
         wg_demod_tod(aman)
-        num_angle, wg_info = get_wg_angle(aman,debug=False)
-        fitting_results = fit_angle(aman,fitting_results,wg_info,debug=False)
+        num_angle, wg_info = get_wg_angle(aman,debug=True)
+        fitting_results = fit_angle(aman,fitting_results,wg_info,debug=False,rotate_tau=True)
         del aman
 
     # Save outputs
