@@ -34,10 +34,10 @@ class G3tHWP():
                 logger.info("Loading config from " + self.config_file)
             else:
                 logger.warning(
-                    "Can not find config file, use all default values")
+                    "Cannot find config file, use all default values")
                 self.configs = {}
         else:
-            logger.warning("Can not find config file, use all default values")
+            logger.warning("Cannot find config file, use all default values")
             self.configs = {}
 
         self._start = 0
@@ -129,7 +129,7 @@ class G3tHWP():
             self._start = start
             self._end = end
         if self._start is None:
-            logger.error("Can not find time range")
+            logger.error("Cannot find time range")
             return {}
 
         if isinstance(start, datetime.datetime):
@@ -146,7 +146,7 @@ class G3tHWP():
         if data_dir is not None:
             self._data_dir = data_dir
         if self._data_dir is None:
-            logger.error("Can not find data directory")
+            logger.error("Cannot find data directory")
             return {}
         if instance is not None:
             if 'observatory' in instance:
@@ -192,7 +192,7 @@ class G3tHWP():
         """
 
         if file_list is None and self._file_list is None:
-            logger.error('Can not find input g3 file')
+            logger.error('Cannot find input g3 file')
             return {}
         if file_list is not None:
             self._file_list = file_list
@@ -210,7 +210,7 @@ class G3tHWP():
             self._file_list = [self._file_list]
         for f in self._file_list:
             if not os.path.exists(f):
-                logger.error('Can not find input g3 file')
+                logger.error('Cannot find input g3 file')
                 return {}
             scanner.process_file(f)
         logger.info("Loading HK data files: {}".format(
@@ -226,7 +226,7 @@ class G3tHWP():
 
         if not np.any([f in arc.get_fields()[0].keys() for f in fields]):
             logger.info(
-                "HWP is not spinning in input g3 files or can not find field")
+                "HWP is not spinning in input g3 files or cannot find field")
             return {}
         if self._start == 0 and self._end == 0:
             self._start = np.min([arc.simple(f)[0][0]
@@ -641,13 +641,7 @@ class G3tHWP():
         aman.wrap_new('hwp_rate', shape=('samps', ))
         aman.wrap_new('eval', shape=('samps', ))
 
-        aman.timestamps = tod.timestamps
-        aman.stable = np.zeros(len(tod.timestamps))
-        aman.locked = np.zeros(len(tod.timestamps))
-        aman.hwp_rate = np.zeros(len(tod.timestamps))
-        aman.hwp_angle_ver1 = np.zeros(len(tod.timestamps))
-        aman.hwp_angle_ver2 = np.zeros(len(tod.timestamps))
-        aman.eval = np.zeros(len(tod.timestamps))
+        aman.timestamps[:] = tod.timestamps
         aman.save(output, h5_address, overwrite=True)
         
         return
@@ -746,19 +740,19 @@ class G3tHWP():
         aman.wrap_new('hwp_rate', shape=('samps', ))
         aman.wrap_new('eval', shape=('samps', ))
         
-        aman.timestamps = tod.timestamps
-        aman.stable = scipy.interpolate.interp1d(solved['slow_time'], solved['stable'], kind='linear', bounds_error=False)(tod.timestamps)
-        aman.locked = scipy.interpolate.interp1d(solved['slow_time'], solved['locked'], kind='linear', bounds_error=False)(tod.timestamps)
-        aman.hwp_rate = scipy.interpolate.interp1d(solved['slow_time'], solved['hwp_rate'], kind='linear', bounds_error=False)(tod.timestamps)
+        aman.timestamps[:] = tod.timestamps
+        aman.stable[:] = scipy.interpolate.interp1d(solved['slow_time'], solved['stable'], kind='linear', bounds_error=False)(tod.timestamps)
+        aman.locked[:] = scipy.interpolate.interp1d(solved['slow_time'], solved['locked'], kind='linear', bounds_error=False)(tod.timestamps)
+        aman.hwp_rate[:] = scipy.interpolate.interp1d(solved['slow_time'], solved['hwp_rate'], kind='linear', bounds_error=False)(tod.timestamps)
         if 'fast_time_raw' in solved.keys():
-            aman.hwp_angle_ver1 = scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps)
-            aman.hwp_angle_ver2 = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps)
-            aman.eval = np.ones(len(tod.timestamps))
+            aman.hwp_angle_ver1[:] = scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps)
+            aman.hwp_angle_ver2[:] = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps)
+            aman.eval[:] = np.ones(len(tod.timestamps))
         else:
             logger.info('Template subtraction failed')
-            aman.hwp_angle_ver1 = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps)
-            aman.hwp_angle_ver2 = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps)
-            aman.eval = np.zeros(len(tod.timestamps))
+            aman.hwp_angle_ver1[:] = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps)
+            aman.hwp_angle_ver2[:] = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps)
+    
         aman.save(output, h5_address, overwrite=True)
 
         return
@@ -892,10 +886,10 @@ class G3tHWP():
         if len(self._ref_indexes) == 0:
             if len(diff) < self._num_edges:
                 logger.warning(
-                    'can not find reference points, # of data is less than # of slit')
+                    'cannot find reference points, # of data is less than # of slit')
             else:
                 logger.warning(
-                    'can not find reference points, please adjust parameters!')
+                    'cannot find reference points, please adjust parameters!')
             return -1
 
         ## delete unexpected ref slit indexes ##
