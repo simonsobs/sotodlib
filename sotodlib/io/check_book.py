@@ -10,6 +10,7 @@ import so3g
 from spt3g import core
 
 import os
+import fnmatch
 import glob
 import yaml
 
@@ -26,6 +27,7 @@ _DEFAULT_CONFIG = {
     # Schema ...
     'extra_files': ['M_index.yaml', 'M_book.yaml'],
     'extra_extra_files': [],
+    'banned_files': [],
 
     # Work-arounds ...
     'sample_range_inclusive_hack': False,
@@ -33,6 +35,8 @@ _DEFAULT_CONFIG = {
     'tolerate_missing_ancil': False,
     'tolerate_missing_ancil_timestamps': False,
     'tolerate_timestamps_value_discrepancy': False,
+    'tolerate_stray_files': False,
+    'tolerate_missing_extra_files': False,
 }
     
 
@@ -184,7 +188,8 @@ class BookScanner:
             try:
                 strays.remove(fn)
             except ValueError:
-                self._err(basename, 'Expected "extra file" and did not find it.')
+                self._err(basename, 'Expected "extra file" and did not find it.',
+                          warn=self.config['tolerate_missing_extra_files'])
 
         meta = self.results['metadata']
         file_counts = []
@@ -214,7 +219,12 @@ class BookScanner:
                       'sample_ranges entry {_file_count}')
         meta['file_count'] = file_count
         if len(strays):
-            self._err(None, f'Extra files found in book dir: {strays}')
+            self._err(None, f'Extra files found in book dir: {strays}',
+                      warn=self.config['tolerate_stray_files'])
+            for bf in self.config['banned_files']:
+                # interpret as a pattern
+                for banned in fnmatch.filter(strays, self._get_filename(bf)):
+                    self._err(banned, f'File is banned from book by pattern: {bf}')
 
     def check_frames(self):
         """Read the "Scan" frames from all files and check structure /

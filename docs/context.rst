@@ -286,8 +286,8 @@ Unpacker
 Metadata
 --------
 
-Overview
-========
+Overview and Examples
+=====================
 
 The "metadata" we are talking about here consists of things like
 detector pointing offsets, calibration factors, detector time
@@ -319,8 +319,8 @@ resolving the metadata request, loading the results, and broadcasting
 them to their intended targets.
 
 
-Example
-=======
+Example 1
+---------
 
 Let's say we want to build an HDF5 database with a number ``thing``
 per detector per observation::
@@ -369,6 +369,83 @@ Using that context file::
 
 will return an AxisManager that includes ``aman.thing`` for that
 specific observation.
+
+Example 2
+---------
+
+In this example, we loop over observations found in an ObsDb and
+create an AxisManager for each one that contains new, interesting
+supporting data.  The AxisManager is written to HDF5, and the
+ManifestDb is updated with indexing information so the metadata system
+can find the right dataset automatically.
+
+Here is the script to generate the HDF5 and ManifestDb on disk::
+
+  from sotodlib import core
+
+  # We will create an entry for every obs found in this context.
+  ctx = core.Context('context/context-basic.yaml')
+
+  # Set up our scheme -- one result per obs_id, to be looked up in an
+  # archive of HDF5 files at address stored in dataset.
+  scheme = core.metadata.ManifestScheme()
+  scheme.add_exact_match('obs:obs_id')
+  scheme.add_data_field('dataset')
+  man_db = core.metadata.ManifestDb(scheme=scheme)
+
+  # Path for the ManifestDb
+  man_db_filename = 'my_new_info.sqlite'
+
+  # Use a single HDF5 file for now.
+  output_filename = 'my_new_info.h5'
+
+  # Loop over obs.
+  obs = ctx.obsdb.get()
+  for obs_id in obs['obs_id']:
+      print(obs_id)
+
+      # Load the observation, without signal, so we can see the samps
+      # and dets axes, timestamps, etc.
+      tod = ctx.get_obs(obs_id, no_signal=True)
+
+      # Create an AxisManager using tod's axes.  (Note that the dets
+      # axis is required for compatibility with the metadata system,
+      # even if you're not going to use it.)
+      new_info = core.AxisManager(tod.dets, tod.samps)
+
+      # Add some stuff to it
+      new_info.wrap_new('my_special_vector', shape=('samps', ))
+
+      # Save the info to HDF5
+      h5_address = obs_id
+      new_info.save(output_filename, h5_address, overwrite=True)
+
+      # Add an entry to the database
+      man_db.add_entry({'obs:obs_id': obs_id, 'dataset': h5_address},
+                        filename=output_filename)
+
+  # Commit the ManifestDb to file.
+  man_db.to_file(man_db_filename)
+
+
+The new context.yaml file, that includes this new metadata, would have
+a metadata list that includes::
+
+    metadata:
+      - db: 'my_new_info.sqlite'
+        name: 'new_info'
+
+If you want to load the single vector ``my_special_vector`` into the
+top level of the AxisManager, under name ``special``, use this
+syntax::
+
+    metadata:
+      - db: 'my_new_info.sqlite'
+        name: 'special&my_special_vector'
+
+
+Tips
+----
 
 If this is example is almost, but not quite, what you need, consider the
 following:
