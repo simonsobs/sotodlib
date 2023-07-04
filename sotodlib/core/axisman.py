@@ -474,10 +474,14 @@ class AxisManager:
             elif isinstance(keepers[0], np.ndarray):
                 new_data[name] = np.concatenate(keepers, axis=ax_dim)
             elif isinstance(keepers[0], csr_array):
+                # Note in scipy 1.11 the default format for vstack
+                # and/or hstack seems to have change, as we started
+                # seeing induced cso format here.  Force preservation
+                # of incoming format.
                 if ax_dim == 0:
-                    new_data[name] = sparse.vstack(keepers)
+                    new_data[name] = sparse.vstack(keepers, format=keepers[0].format)
                 elif ax_dim == 1:
-                    new_data[name] = sparse.hstack(keepers)
+                    new_data[name] = sparse.hstack(keepers, format=keepers[0].format)
                 else:
                     raise ValueError('sparse arrays cannot concatenate along '
                                      f'axes greater than 1, received {ax_dim}')
