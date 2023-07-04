@@ -19,25 +19,59 @@ logger = util.init_logger(__name__, 'make-hwp-solutions: ')
 
 def get_parser(parser=None):
     if parser is None:
-        
         parser = argparse.ArgumentParser()
-    parser.add_argument('--context',required=True, help=
-                        "Path to context yaml file to define observation for which to generate hwp angle.")
-    parser.add_argument('--config-file', required=True, help=
-                        "Path to HWP configuration yaml file.")
+    parser.add_argument(
+        'context', 
+        help="Path to context yaml file to define observation\
+        for which to generate hwp angle.")
+    parser.add_argument(
+        'HWPconfig', 
+        help="Path to HWP configuration yaml file.")
     parser.add_argument(
         '-o', '--output-dir', action='store', default=None, type=str,
         help='output data directory, overwrite config output_dir')
-    parser.add_argument("--verbose", default=2, type=int,
-                        help="increase output verbosity. \
-                        0: Error, 1: Warning, 2: Info(default), 3: Debug")
-
+    parser.add_argument(
+        '--verbose', default=2, type=int,
+        help="increase output verbosity. \
+        0: Error, 1: Warning, 2: Info(default), 3: Debug")
+    parser.add_argument(
+        '--overwrite',
+        help="If true, overwrites existing entries in the database",
+        action='store_true',
+    )
+    parser.add_argument(
+        '--query', 
+        help="Query to pass to the observation list",  
+        type=str
+    )
+    parser.add_argument(
+        '--min-ctime',
+        help="Minimum timestamp for the beginning of an observation list",
+    )
+    parser.add_argument(
+        '--max-ctime',
+        help="Maximum timestamp for the beginning of an observation list",
+    )
+    parser.add_argument(
+        '--obs-id',
+        help="obs-id of particular observation if we want to run on just one",
+    )
     return parser
 
-def main(context=None, config_file=None, output_dir=None, verbose=None):
+def main(
+    context=None, 
+    HWPconfig=None, 
+    output_dir=None, 
+    verbose=None,
+    overwrite=False,
+    query=None,
+    min_ctime=None,
+    max_ctime=None,
+    obs_id=None,    
+ ):
     
-    print(context, config_file)
-    configs = yaml.safe_load(open(config_file, "r"))
+    print(context, HWPconfig)
+    configs = yaml.safe_load(open(HWPconfig, "r"))
     args = parser.parse_args()
     if args.output_dir is None:
         args.output_dir = configs["output_dir"]
@@ -77,20 +111,49 @@ def main(context=None, config_file=None, output_dir=None, verbose=None):
     output_filename = os.path.join(output_dir, 'hwp_angle.h5')
     
     # load observation data
-    obs = ctx.obsdb.get()
-    for obs_id in obs['obs_id']:
-        print(obs_id)
-        tod = ctx.get_obs(obs_id, no_signal=True)
+    if obs_id is not None:
+        tot_query = f"obs_id=='{obs_id}'"
+    else:
+        tot_query = "and "
+        if min_ctime is not None:
+            tot_query += f"timestamp>={min_ctime} and "
+        if max_ctime is not None:
+            tot_query += f"timestamp<={max_ctime} and "
+        if query is not None:
+            tot_query += query + " and "
+        tot_query = tot_query[4:-4]
+        if tot_query=="":
+            tot_query="1"
+    obs_list = ctx.obsdb.query(tot_query)
+        
+    if len(obs_list)==0:
+        logger.warning(f"No observations returned from query: {query}")
+    run_list = []
+
+    if not os.path.exists(man_db_filename):
+        #run on all if database doesn't exist
+        run_list = obs_list
+    else:
+        db = core.metadata.ManifestDb(man_db_filename)
+        for obs in obs_list:
+            x = db.match({'obs:obs_id': obs["obs_id"]}, multi=True)
+            if overwrite or not x:
+                run_list.append(obs)
+
+    #write solutions
+    for obs in run_list:
+        print(obs["obs_id"])
+        tod = ctx.get_obs(obs, no_signal=True)
         
         # make angle solutions
-        g3thwp = G3tHWP(config_file)
+        g3thwp = G3tHWP(HWPconfig)
         g3thwp.write_solution_h5(tod, output=output_filename, h5_address=obs_id)
         
         del g3thwp
         
         h5_address = obs_id
         # Add an entry to the database
-        man_db.add_entry({'obs:obs_id': obs_id, 'dataset': h5_address}, filename=output_filename)
+        man_db.add_entry({'obs:obs_id': obs["obs_id"], 'dataset': h5_address}, filename=output_filename)
 
         # Commit the ManifestDb to file.
         man_db.to_file(man_db_filename)
