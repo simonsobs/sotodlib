@@ -1,11 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt 
-import pandas as pd
-import csv 
 import yaml
 import os 
 import sqlite3
 import argparse
+import sys
 
 from iminuit import Minuit, cost
 
@@ -17,10 +16,8 @@ import sotodlib.io.g3tsmurf_utils as utils
 import sotodlib.site_pipeline.util as sp_util
 import sotodlib.io.metadata as io_meta
 import sotodlib.hwp.hwp as hwp
-from sotodlib.hwp import demod
-from sotodlib.hwp.g3thwp import G3tHWP
 from so3g.hk import load_range, HKArchiveScanner
-import sodetlib 
+
 
 
 def _get_config(config_file):
@@ -49,7 +46,7 @@ def search_wg_obs(config_file='./test_config.yaml', keyword="wg_step") :
 
         if keyword in tag[0] :
             wg_obs_dict[obs_ids[i][0]] = tag[0]
-            print(obs_ids[i][0], tag[0])
+            #print(obs_ids[i][0], tag[0])
 
     return wg_obs_dict
 
@@ -137,17 +134,9 @@ def wg_demod_tod(aman) :
     if ("demodQ" in aman.keys()) or ("demodU" in aman.keys()) : return
 
     ### Demod
-    ind=3
-    fig = plt.figure()
-    plt.plot(np.arange(len(aman["signal"][ind])), aman["signal"][ind], alpha=0.5)
     detrend.detrend_tod(aman,method='median')
-    plt.plot(np.arange(len(aman["signal"][ind])), aman["signal"][ind], alpha=0.5)
     apodize.apodize_cosine(aman)
-    plt.plot(np.arange(len(aman["signal"][ind])), aman["signal"][ind], alpha=0.5)
-    hwp.demod_tod(aman,signal='signal')
-    plt.plot(np.arange(len(aman.demodQ[ind])), aman.demodQ[ind], alpha=0.5)
-    plt.grid(ls=":")
-    plt.show()
+    hwp.demod_tod(aman,signal_name='signal')
 
     return
 
@@ -198,13 +187,14 @@ def get_wg_angle(aman, threshold=0.00015, plateau_len=3*5000, remove_len= 30*500
 
     if debug : 
         fig_check = plt.figure(figsize=[20,4])
-        plt.plot(wg_timestamp[:-1][diff_wgangle>0]-1.676598e9,diff_wgangle[diff_wgangle>0])
+        #plt.plot(wg_timestamp[:-1][diff_wgangle>0]-1.676598e9,diff_wgangle[diff_wgangle>0])
         plt.plot(aman.timestamps-1.676598e9, aman.demodQ[0], alpha=0.5)
+        plt.plot(aman.timestamps-1.676598e9, aman.demodU[0], alpha=0.5)
         for _id in range(len(static_indices_start)) : 
             #plt.vlines(wg_timestamp[static_indices_start[_id]]-1.676598e9,0.,0.00035,color="blue")
             #plt.vlines(wg_timestamp[static_indices_end[_id]]-1.676598e9,0.,0.00035,color="red")
-            plt.vlines(wg_timestamp[static_indices_start[_id]]-1.676598e9,-0.06,0.,color="blue")
-            plt.vlines(wg_timestamp[static_indices_end[_id]]-1.676598e9,-0.06,0.,color="red")
+            plt.vlines(wg_timestamp[static_indices_start[_id]]-1.676598e9,-0.15,0.15,color="blue")
+            plt.vlines(wg_timestamp[static_indices_end[_id]]-1.676598e9,-0.15,0.15,color="red")
         plt.show()
     
 
@@ -232,26 +222,29 @@ def fit_angle(aman,fitting_results,wg_info,rotate_tau=False,debug=False):
     print(f"HWP rotation speed is {hwp_speed}")
 
     ### If you want to consider the effect of time constant, you need to make tau vector
-    ### NOTE :::  Must be updated    
+    ### NOTE :::  Must be updated. Should we make a db for timeconstant?   
     t_const = []
-    if rotate_tau : 
-        import pickle
-        with open('/data/atakeuchi/my_soenv/repos/230313/sotodlib/sotodlib/wiregrid/my_tau.pickle', 'rb') as fin :
+    if rotate_tau :
+        try : 
+            import pickle
+            with open('/data/atakeuchi/my_soenv/repos/230313/sotodlib/sotodlib/wiregrid/my_tau.pickle', 'rb') as fin :
             
-            data = pickle.load(fin)
+                data = pickle.load(fin)
 
-            for det in aman["det_info"]["readout_id"] :
-                if det.encode() in data.keys() : 
-                    t_const.append(data[det.encode()])
-                else : 
-                    t_const.append(0.)
+                for det in aman["det_info"]["readout_id"] :
+                    if det.encode() in data.keys() : 
+                        t_const.append(data[det.encode()])
+                    else : 
+                        t_const.append(0.)
 
-        t_const = np.array(t_const)
+            t_const = np.array(t_const)
+        except : 
+            print("No pickle file was found.")
+            sys.exit()
 
     ### Get compoents of wg_info then calculate polarized angle
     each_result = []
     ang_mean,Q_mean,U_mean,Q_error,U_error=[],[],[],[],[]
-    fig1 = plt.figure()
     for _id in range(len(wg_info)) : 
         wg_angle = wg_info[_id][2]
         t_selection = (aman.timestamps > wg_info[_id][0]) & (aman.timestamps < wg_info[_id][1])
@@ -260,12 +253,6 @@ def fit_angle(aman,fitting_results,wg_info,rotate_tau=False,debug=False):
         Q = aman.demodQ[:,t_selection]
         U = aman.demodU[:,t_selection]
         
-        if debug :
-            fig = plt.figure()
-            plt.plot(timestamp[t_selection],Q[0])
-            plt.plot(timestamp[t_selection],U[0])
-            plt.show()
-         
         if rotate_tau : 
             exp = np.exp(1j*t_const*hwp_speed*2.*np.pi*4.).reshape((len(t_const), 1)) #  Need to update this later
         else : 
@@ -291,9 +278,8 @@ def fit_angle(aman,fitting_results,wg_info,rotate_tau=False,debug=False):
     
     for i in range(len(Q_mean[0])) : 
 
-        if np.sum(np.isnan(Q_mean[:,i]).astype(np.int32)) > 0 : 
+        if (np.sum(np.isnan(Q_mean[:,i]).astype(np.int32)) > 0) or (np.sum(Q_error[:,i])==0) or (np.sum(U_error[:,i])==0): 
             print(aman["det_info"]["readout_id"][i])
-            print(aman.dets.vals)
             continue 
 
         Qi,Ui = Q_mean[:,i],U_mean[:,i]
@@ -389,7 +375,7 @@ def main(config_file='./test_config.yaml', query=None, obs_id="", overwrite=Fals
         stream_id = array['stream_id']
         aman = wg_init_setting(config_file=config_file,stream_id=stream_id,tag=tag,hk_dir=hk_dir)
         wg_demod_tod(aman)
-        num_angle, wg_info = get_wg_angle(aman,debug=True)
+        num_angle, wg_info = get_wg_angle(aman,debug=False)
         fitting_results = fit_angle(aman,fitting_results,wg_info,debug=False,rotate_tau=True)
         del aman
 
