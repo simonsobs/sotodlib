@@ -208,25 +208,33 @@ if __name__ == '__main__':
     min_ctime = (dt.datetime.now() - dt.timedelta(days=args.min_days)).timestamp()
     max_ctime = (dt.datetime.now() - dt.timedelta(days=args.max_days)).timestamp()
 
-    for root, dirs, files in os.walk(os.path.join(book_dir,'oper')):
-        for f in files:
-            if 'M_index' in f:
-                book_index = yaml.safe_load(open(os.path.join(root,f),"r"))
-                book_id = book_index['book_id']
-                if (book_index['start_time'] < min_ctime) or (book_index['start_time'] > max_ctime):
-                    continue
-                try:
-                    meta_types = list(book_index['meta_files'].keys())
-                except KeyError:
-                    logger.debug(f'No metadata files in {book_id}')
-                    continue
-                if 'bias_steps' in meta_types:
-                    bs_list.append(os.path.join(root,book_index['meta_files']['bias_steps']))
-                if 'bgmap' in meta_types:
-                    bgmap_list.append(os.path.join(root,book_index['meta_files']['bgmap']))
-                if 'iv' in meta_types:
-                    iv_list.append(os.path.join(root,book_index['meta_files']['iv']))
+    # for root, dirs, files in os.walk(os.path.join(book_dir,'oper')):
+    #     for f in files:
+    #         if 'M_index' in f:
+    #             book_index = yaml.safe_load(open(os.path.join(root,f),"r"))
+    #             book_id = book_index['book_id']
+    #             if (book_index['start_time'] < min_ctime) or (book_index['start_time'] > max_ctime):
+    #                 continue
+    #             try:
+    #                 meta_types = list(book_index['meta_files'].keys())
+    #             except KeyError:
+    #                 logger.debug(f'No metadata files in {book_id}')
+    #                 continue
+    #             if 'bias_steps' in meta_types:
+    #                 bs_list.append(os.path.join(root,book_index['meta_files']['bias_steps']))
+    #             if 'bgmap' in meta_types:
+    #                 bgmap_list.append(os.path.join(root,book_index['meta_files']['bgmap']))
+    #             if 'iv' in meta_types:
+    #                 iv_list.append(os.path.join(root,book_index['meta_files']['iv']))
 
+    for fname,stream_id,ctime,path in SMURF.search_metadata_files(min_ctime=min_ctime, max_ctime=max_ctime):
+        if 'bg_map' in fname:
+            bgmap_list.append(path)
+        if 'bias_step' in fname:
+            bs_list.append(path)
+        if 'iv' in fname:
+            iv_list.append(path)
+    
     bgmap_list = sorted(bgmap_list)
     bs_list = sorted(bs_list)
     iv_list = sorted(iv_list)
