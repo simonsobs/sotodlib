@@ -328,7 +328,7 @@ def ufm_to_fp(aman, x=None, y=None, pol=None, theta=0, dx=0, dy=0):
     return x_fp, y_fp, pol_fp
 
 
-def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo=0.0):
+def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo=30.0):
     """
     Routine to map pixels from arrays to sky.
 
