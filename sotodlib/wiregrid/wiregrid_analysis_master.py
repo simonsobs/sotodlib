@@ -46,7 +46,6 @@ def search_wg_obs(config_file='./test_config.yaml', keyword="wg_step") :
 
         if keyword in tag[0] :
             wg_obs_dict[obs_ids[i][0]] = tag[0]
-            #print(obs_ids[i][0], tag[0])
 
     return wg_obs_dict
 
@@ -72,6 +71,31 @@ def wg_obsid2tag(obsid, config_file='./test_config.yaml', keyword="wg_step") :
     return None
 
 
+def get_tau_eff(aman, bias_step_obj) :
+
+    _tau = bias_step_obj["tau_eff"]
+    _band = bias_step_obj["bands"]
+    _channel = bias_step_obj["channels"]
+    sid = bias_step_obj["sid"]
+    stream_id = bias_step_obj["meta"]["stream_id"]
+   
+    det_list = aman["det_info"]["readout_id"]
+    array = [0.] * len(det_list)
+
+    for i,tau in enumerate(_tau) :
+        
+        band, channel = _band[i], _channel[i]
+        this_det = "sch_" + str(stream_id) + "_" + str(sid) + "_" + str(band) + '_' + str(_channel[i])
+        try : 
+            index = det_list.tolist().index(this_det.encode())
+        except : 
+            continue 
+        array[index] = tau
+
+    return np.array(array)
+        
+
+
 def wg_init_setting(config_file, stream_id, tag, hk_dir) : 
    
     wg_max_enc = 52000.
@@ -82,13 +106,14 @@ def wg_init_setting(config_file, stream_id, tag, hk_dir) :
     obs_ids = [obs.obs_id for obs in obs_list]
     obs_start = [obs.start for obs in obs_list]
     obs_end = [obs.stop for obs in obs_list]
-    # I guess the number of obs_XXX component is just one. But adopt the last component as the end time just in case.
     aman = SMURF.load_data(obs_start[0], obs_end[-1], stream_id = stream_id) 
 
     ### Load data
     utils.load_hwp_data(aman, config_file)
     bias_step_file = utils.get_last_bias_step(obs_ids[0], SMURF)
     bias_step_obj = np.load(bias_step_file, allow_pickle=True).item()
+    tau_eff = get_tau_eff(aman, bias_step_obj)
+    aman.wrap("tau_eff", tau_eff)
     
     ### Load and wrap wiregrid house keeping data
     wg_fields = ['observatory.wgencoder.feeds.wgencoder_full.reference_count']
@@ -103,31 +128,6 @@ def wg_init_setting(config_file, stream_id, tag, hk_dir) :
     return aman
 
 
-def wg_init_setting_ctime(start, end, config_file, hk_dir) :
-
-    ### Declare axis manager
-    SMURF = load_smurf.G3tSmurf.from_configs(config_file)
-    aman = SMURF.load_data(start, end)
-
-    ### Load data
-    utils.load_hwp_data(aman, config_file)
-    bias_step_file = utils.get_last_bias_step(start, SMURF)
-    bias_step_obj = np.load(bias_step_file, allow_pickle=True).item()
-
-    ### Load and wrap wiregrid house keeping data
-    wg_fields = ['observatory.wgencoder.feeds.wgencoder_full.reference_count']
-    hk_in = load_range(start, end, wg_fields, data_dir=hk_dir)
-    wg_time, wg_enc = hk_in['observatory.wgencoder.feeds.wgencoder_full.reference_count']
-    wg_ang = wg_enc/wg_max_enc*2.*np.pi
-    wg_man = core.AxisManager()
-    wg_man.wrap("wg_timestamp", wg_time, [(0, core.OffsetAxis('wg_samps', count=len(wg_time)))])
-    wg_man.wrap("wg_angle", wg_ang, [(0, 'wg_samps')])
-    aman.wrap("hkwg", wg_man)
-
-    return aman
-
-
-
 def wg_demod_tod(aman) :
 
     ### If axis manager already has demomded components, skip the process
@@ -140,12 +140,11 @@ def wg_demod_tod(aman) :
 
     return
 
-def get_moving_part() : 
-    pass
 
+def get_wg_angle(aman, threshold=0.00015, plateau_len=3*5000, remove_len= 30*5000, debug=False) :
 ### Note : Length of plateau and in/ouf time of wg (remove_len) are determined in hard coding.
 ###        You may have to check if the length is ok to analyze recent wg calibration.
-def get_wg_angle(aman, threshold=0.00015, plateau_len=3*5000, remove_len= 30*5000, debug=False) :
+###        Need to update.
     
     wg_angle =  aman["hkwg"]["wg_angle"]
     wg_timestamp = aman["hkwg"]["wg_timestamp"]
@@ -156,12 +155,8 @@ def get_wg_angle(aman, threshold=0.00015, plateau_len=3*5000, remove_len= 30*500
     switch_indices = np.where(np.diff(moving) != 0)[0] + 1
     run_lengths = np.diff(switch_indices)
     
-    #static_indices_start = switch_indices[:-1][(run_lengths>plateau_len) & (run_lengths<remove_len)]
     static_indices_start = switch_indices[:-1][run_lengths>plateau_len]
     static_indices_end = []
-    #for _id,run_length in enumerate(run_lengths[(run_lengths>plateau_len) & (run_lengths<remove_len)]) : 
-    #for _id,run_length in enumerate(run_lengths[(run_lengths>plateau_len)]) : 
-    #    static_indices_end.append(static_indices_start[_id]+run_length-1)
     for _id,run_length in enumerate(run_lengths[(run_lengths>plateau_len)]) : 
         if run_length < remove_len : 
             static_indices_end.append(static_indices_start[_id]+run_length-1)
@@ -187,12 +182,9 @@ def get_wg_angle(aman, threshold=0.00015, plateau_len=3*5000, remove_len= 30*500
 
     if debug : 
         fig_check = plt.figure(figsize=[20,4])
-        #plt.plot(wg_timestamp[:-1][diff_wgangle>0]-1.676598e9,diff_wgangle[diff_wgangle>0])
         plt.plot(aman.timestamps-1.676598e9, aman.demodQ[0], alpha=0.5)
         plt.plot(aman.timestamps-1.676598e9, aman.demodU[0], alpha=0.5)
         for _id in range(len(static_indices_start)) : 
-            #plt.vlines(wg_timestamp[static_indices_start[_id]]-1.676598e9,0.,0.00035,color="blue")
-            #plt.vlines(wg_timestamp[static_indices_end[_id]]-1.676598e9,0.,0.00035,color="red")
             plt.vlines(wg_timestamp[static_indices_start[_id]]-1.676598e9,-0.15,0.15,color="blue")
             plt.vlines(wg_timestamp[static_indices_end[_id]]-1.676598e9,-0.15,0.15,color="red")
         plt.show()
@@ -209,7 +201,7 @@ def funcU(x, amp, freq, phase, offsetU):
     return amp * np.cos ( freq * x + 2.*phase + np.pi*0.5) + offsetU
 
 
-def fit_angle(aman,fitting_results,wg_info,rotate_tau=False,debug=False):
+def fit_angle(aman,fitting_results,wg_info,rotate_tau_wg=False,rotate_tau_tune=False,debug=False):
     
     ### Calculate HWP rotation speed 
     timestamp = aman["timestamps"]
@@ -222,9 +214,9 @@ def fit_angle(aman,fitting_results,wg_info,rotate_tau=False,debug=False):
     print(f"HWP rotation speed is {hwp_speed}")
 
     ### If you want to consider the effect of time constant, you need to make tau vector
-    ### NOTE :::  Must be updated. Should we make a db for timeconstant?   
+    ### NOTE :::  Must be updated. Should we make a db for timeconstant or use tuning file?   
     t_const = []
-    if rotate_tau :
+    if rotate_tau_wg :
         try : 
             import pickle
             with open('/data/atakeuchi/my_soenv/repos/230313/sotodlib/sotodlib/wiregrid/my_tau.pickle', 'rb') as fin :
@@ -242,6 +234,15 @@ def fit_angle(aman,fitting_results,wg_info,rotate_tau=False,debug=False):
             print("No pickle file was found.")
             sys.exit()
 
+    if rotate_tau_tune :
+        if rotate_tau_wg : 
+            print("Time constant info from wiregrid is not used.")
+        try : 
+            t_const = aman["tau_eff"]
+        except : 
+            print("loading tau_eff failed")
+            sys.exit()
+
     ### Get compoents of wg_info then calculate polarized angle
     each_result = []
     ang_mean,Q_mean,U_mean,Q_error,U_error=[],[],[],[],[]
@@ -253,7 +254,7 @@ def fit_angle(aman,fitting_results,wg_info,rotate_tau=False,debug=False):
         Q = aman.demodQ[:,t_selection]
         U = aman.demodU[:,t_selection]
         
-        if rotate_tau : 
+        if rotate_tau_tune or rotate_tau_wg : 
             exp = np.exp(1j*t_const*hwp_speed*2.*np.pi*4.).reshape((len(t_const), 1)) #  Need to update this later
         else : 
             exp = 1.
@@ -292,10 +293,10 @@ def fit_angle(aman,fitting_results,wg_info,rotate_tau=False,debug=False):
             chi_squared2 =  ((model2-Ui)/Ui_e)*((model2-Ui)/Ui_e)
             return np.sum(chi_squared1)+np.sum(chi_squared2)
             
-        m = Minuit(fcn, amp=(np.max(Q_mean[:,i])-np.min(Q_mean[:,i]))*0.5, freq=hwp_speed, phase=0.5*np.pi, offsetQ=np.mean(Q_mean[:,i]), offsetU=np.mean(U_mean[:,i]))
+        m = Minuit(fcn, amp=(np.max(Q_mean[:,i])-np.min(Q_mean[:,i]))*0.5, freq=2., phase=0.5*np.pi, offsetQ=np.mean(Q_mean[:,i]), offsetU=np.mean(U_mean[:,i]))
         m.limits['amp'] = (0, None)
         m.limits['phase'] = (-np.pi,2.*np.pi)
-        m.limits['freq'] = (2.,2.)
+        m.fixed['freq'] = True
         m.migrad().migrad().hesse()
 
         _id = aman["det_info"]["readout_id"][i]
@@ -376,7 +377,7 @@ def main(config_file='./test_config.yaml', query=None, obs_id="", overwrite=Fals
         aman = wg_init_setting(config_file=config_file,stream_id=stream_id,tag=tag,hk_dir=hk_dir)
         wg_demod_tod(aman)
         num_angle, wg_info = get_wg_angle(aman,debug=False)
-        fitting_results = fit_angle(aman,fitting_results,wg_info,debug=False,rotate_tau=True)
+        fitting_results = fit_angle(aman,fitting_results,wg_info,debug=False,rotate_tau_wg=False, rotate_tau_tune=False)
         del aman
 
     # Save outputs
