@@ -250,10 +250,10 @@ Output file format
 ``````````````````
 
 The results of ``finalize_focal_plane`` are stored in an HDF5 file containing
-two datasets. The datasets are made using the ``ResultSet`` class and can be
+three datasets. The datasets are made using the ``ResultSet`` class and can be
 loaded back as such but metadata stored as attributes require ``h5py``.
 
-The dataset is called ``focal_plane`` and contains three columns:
+The first dataset is called ``focal_plane`` and contains three columns:
 
 - ``dets:det_id``: The detector id
 - ``xi``: xi in radians
@@ -265,7 +265,7 @@ pointing columns will be ``nan`` for it. If no polarization angles are provided
 them ``gamma`` will be populated with the nominal values from physical optics.
 There is an attribute called ``measured_gamma`` that will be ``False`` in this case.
 
-The other dataset is called ``offsets`` and contains the information to transform from
+The second dataset is called ``offsets`` and contains the information to transform from
 the nominal pointing to the measured pointing.
 
 This transformation for ``xi`` and ``eta`` is an affine transformation defined as
@@ -283,7 +283,7 @@ For gamma the transformation is also technically affine, but since it is in just
 one dimension it can be described by a single shift and scale.
 
 All of these parameters are stored in a ``ResultSet`` with a single row,
-its colums are:
+its columns are:
 
 - ``d_xi``: The shift along the measured ``xi`` axis.
 - ``d_eta``: The shift along the measured ``eta`` axis.
@@ -297,6 +297,17 @@ its colums are:
 This dataset also has the attribute ``affine_matrix`` which contains the affine
 transformation matrix that is decomposed to produce some of values in the ``ResultSet``.
 This matrix is ``A`` in the equation :math: `m = An + t` that is described above.
+
+The third dataset is called ``lever_arm`` and contains the lever arm of the array on sky.
+This lever arm is the nominal ``xi-eta-gamma`` coordinates of the center of the array mapped onto the sky,
+the origin of this coordinate system is the telescope boresite.
+
+This dataset is stored as a ``ResultSet`` with a single row,
+its columns are:
+
+- ``xi``: The nominal ``xi`` of the center of the array.
+- ``eta``: The nominal ``eta`` of the center of the array.
+- ``gamma``: The nominal ``gamma`` of the center of the array. Computed with a polarization angle of 0.
 
 preprocess-tod
 --------------
