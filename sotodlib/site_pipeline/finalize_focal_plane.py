@@ -80,6 +80,18 @@ def _mk_tpout(shift, scale, shear, rot):
     return tpout
 
 
+def _mk_laout(lever_arm):
+    outdt = [
+        ("xi", np.float32),
+        ("eta", np.float32),
+        ("gamma", np.float32),
+    ]
+    row = lever_arm.ravel
+    laout = np.array(row, outdt)
+
+    return laout
+
+
 def _add_attrs(dset, attrs):
     for k, v in attrs.items():
         dset.attrs[k] = v
@@ -304,15 +316,20 @@ def main():
 
     _log_vals(shift, scale, shear, rot)
 
+    # Compute the lever arm
+    lever_arm = get_nominal(np.zeros(6), config["coord_transform"])
+
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)
+    fpout = _mk_fpout(det_id, focal_plane)
+    tpout = _mk_tpout(shift, scale, shear, rot)
+    laout = _mk_laout(lever_arm)
     with h5py.File(outpath, "w") as f:
-        fpout = _mk_fpout(det_id, focal_plane)
-        tpout = _mk_tpout(shift, scale, shear, rot)
         write_dataset(fpout, f, "focal_plane", overwrite=True)
         _add_attrs(f["focal_plane"], {"measured_gamma": measured_gamma})
         write_dataset(tpout, f, "offsets", overwrite=True)
         _add_attrs(f["offsets"], {"affine_matrix": affine})
+        write_dataset(laout, f, "lever_arm", overwrite=True)
 
 
 if __name__ == "__main__":
