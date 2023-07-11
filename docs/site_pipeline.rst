@@ -390,13 +390,14 @@ Here's an annotated example:
   # Optional string to be appended to output filename.
   # Will have a "_" before it.
   append: "test" 
-  manifest_db: "path.sqlite"
+  # ManifestDb to store things in 
+  manifest_db: "file.sqlite"
 
 Ouput file format
 `````````````````
 
 The results of ``make_position_match`` are stored in an HDF5 file containing
-two datasets. The datasets are made using the ``ResultSet`` class and can be
+three datasets. The datasets are made using the ``ResultSet`` class and can be
 loaded back as such.
 
 The first dataset is called ``input_data_paths`` and has two columns:
@@ -432,8 +433,18 @@ The second dataset is called ``focal_plane`` and has columns:
 - ``likelihood``, the likelihood of the match for each detector.
 - ``outliers``, boolean flag that shows which detectors look like outliers.
 
+The third dataset is called ``encoders`` and stores the nominal encoder values for
+each input observation. It cah columns:
+
+- ``obs_id``, the observation id thathe encoder values are associated with.
+- ``az``, the nominal azimuth for this observation.
+- ``el``, the nominal elevation for this observation.
+- ``bs``, the nominal boresite angle for this observation.
+
+All of the angles are reported in radians.
+
 If the input contained only a single observation the results can be found
-using the ManifestDb specified in the config file, this ManifestDb is indexed by `obs_id`.
+using the ManifestDb specified in the config file, the ManifestDb is indexed by `obs_id`.
 
 make-source-flags
 -----------------
