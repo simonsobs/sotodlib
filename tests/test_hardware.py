@@ -82,6 +82,8 @@ class HardwareTest(TestCase):
             print("TOAST cannot be imported- skipping unit test", flush=True)
             return
         fullhw = sim_nominal()
+
+        # SAT test
         toastsf.sim_telescope_detectors(fullhw, "SAT1")
         hw = fullhw.select(match={"wafer_slot": ["w25",],})
         outpath = os.path.join(self.outdir, "telescope_SAT1_w25.toml.gz")
@@ -89,6 +91,18 @@ class HardwareTest(TestCase):
         if not self.skip_plots:
             outpath = os.path.join(self.outdir, "telescope_SAT1_w25.pdf")
             plot_detectors(hw.data["detectors"], outpath, labels=False)
+
+        fullhw.data["detectors"] = OrderedDict()
+
+        # LAT test
+        toastsf.sim_telescope_detectors(fullhw, "LAT")
+        hw = fullhw.select(match={"tube_slots": ["c1",],})
+        outpath = os.path.join(self.outdir, "telescope_LAT_c1.toml.gz")
+        hw.dump(outpath, overwrite=True, compress=True)
+        if not self.skip_plots:
+            outpath = os.path.join(self.outdir, "telescope_LAT_c1.pdf")
+            plot_detectors(hw.data["detectors"], outpath, labels=False)
+
         return
 
     def test_sim_full(self):

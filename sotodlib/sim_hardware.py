@@ -91,7 +91,7 @@ def sim_nominal():
     bnd["NET"] = 435.1
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     # Noise elevation scaling fits from Carlos Sierra
     # These numbers are for V3 LAT baseline
     bnd["A"] = 0.06
@@ -107,7 +107,7 @@ def sim_nominal():
     bnd["NET"] = 281.5
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.16
     bnd["C"] = 0.79
     bnd["NET_corr"] = 1.02
@@ -121,7 +121,7 @@ def sim_nominal():
     bnd["NET"] = 361.0
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.16
     bnd["C"] = 0.80
     bnd["NET_corr"] = 1.09
@@ -135,7 +135,7 @@ def sim_nominal():
     bnd["NET"] = 352.4
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.17
     bnd["C"] = 0.78
     bnd["NET_corr"] = 1.01
@@ -149,7 +149,7 @@ def sim_nominal():
     bnd["NET"] = 724.4
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.29
     bnd["C"] = 0.62
     bnd["NET_corr"] = 1.02
@@ -163,7 +163,7 @@ def sim_nominal():
     bnd["NET"] = 1803.9
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.36
     bnd["C"] = 0.53
     bnd["NET_corr"] = 1.00
@@ -177,7 +177,7 @@ def sim_nominal():
     bnd["NET"] = 314.1
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     # Noise elevation scaling fits from Carlos Sierra
     # These numbers are for V3 SAT baseline
     bnd["A"] = 0.06
@@ -193,7 +193,7 @@ def sim_nominal():
     bnd["NET"] = 225.8
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.19
     bnd["C"] = 0.76
     bnd["NET_corr"] = 1.01
@@ -207,7 +207,7 @@ def sim_nominal():
     bnd["NET"] = 245.1
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.19
     bnd["C"] = 0.76
     bnd["NET_corr"] = 1.04
@@ -221,7 +221,7 @@ def sim_nominal():
     bnd["NET"] = 250.2
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.23
     bnd["C"] = 0.70
     bnd["NET_corr"] = 1.02
@@ -235,7 +235,7 @@ def sim_nominal():
     bnd["NET"] = 540.3
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.35
     bnd["C"] = 0.54
     bnd["NET_corr"] = 1.00
@@ -249,7 +249,7 @@ def sim_nominal():
     bnd["NET"] = 1397.5
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.42
     bnd["C"] = 0.45
     bnd["NET_corr"] = 1.00

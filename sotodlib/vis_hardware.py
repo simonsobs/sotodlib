@@ -56,6 +56,7 @@ def plot_detectors(
     xieta=False,
     lat_corotate=True,
     lat_elevation=None,
+    show_centers=False,
 ):
     """Visualize a dictionary of detectors.
 
@@ -73,6 +74,7 @@ def plot_detectors(
         bandcolor (dict, optional): Dictionary of color values for each band.
         xieta (bool):  If True, plot in Xi / Eta / Gamma coordinates rather
             than focalplane X / Y / Z.
+        show_centers (bool):  If True, label pixel centers.
 
     Returns:
         None
@@ -183,7 +185,7 @@ def plot_detectors(
         dir = qa.rotate(quats, zaxis)
         orient = qa.rotate(quats, xaxis)
 
-        small = np.fabs(1.0 - dir[:, 2]) < 1.0e-6
+        small = np.fabs(1.0 - dir[:, 2]) < 1.0e-12
         not_small = np.logical_not(small)
         xp = np.zeros(n_det, dtype=np.float64)
         yp = np.zeros(n_det, dtype=np.float64)
@@ -337,11 +339,27 @@ def plot_detectors(
             length_includes_head=True,
         )
 
+        # Compute the font size to use for detector labels
+        fontpix = 0.1 * detradius * hpixperdeg
+        if fontpix < 1.0:
+            fontpix = 1.0
+
+        if show_centers:
+            ysgn = -1.0
+            if dx < 0.0:
+                ysgn = 1.0
+            ax.text(
+                (xpos + 0.1 * dx),
+                (ypos + 0.1 * ysgn * dy),
+                f"({xpos:0.4f}, {ypos:0.4f})",
+                color="green",
+                fontsize=fontpix,
+                horizontalalignment="center",
+                verticalalignment="center",
+                bbox=dict(fc="w", ec="none", pad=1, alpha=0.0),
+            )
+
         if labels:
-            # Compute the font size to use for detector labels
-            fontpix = 0.1 * detradius * hpixperdeg
-            if fontpix < 1.0:
-                fontpix = 1.0
             ax.text(
                 xpos,
                 ypos,
