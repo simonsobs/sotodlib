@@ -183,7 +183,8 @@ class G3tHWP():
             file_list : str or list or None
                 path and file name of input level 2 HK g3 file
             instance : str or None
-                instance of field list, overwrite config file \n
+                instance of field list, overwrite config file 
+
                 ex.) 'HBA' or 'observatory.HBA.feeds.HWPEncoder'
         Returns
         ----
@@ -327,18 +328,18 @@ class G3tHWP():
 
         if len(irig_time) == 0:
             out = {
-                'locked': np.zeros_like(slow_time, dtype=bool),
-                'stable': np.zeros_like(slow_time, dtype=bool),
-                'hwp_rate': np.zeros_like(slow_time, dtype=float),
+                'locked': np.zeros_like(slow_time, dtype=np.bool),
+                'stable': np.zeros_like(slow_time, dtype=np.bool),
+                'hwp_rate': np.zeros_like(slow_time, dtype=np.float32),
                 'slow_time': slow_time,
             }
             return out
 
         if len(fast_time) == 0:
             fast_irig_time = irig_time
-            locked = np.zeros_like(irig_time, dtype=bool)
-            stable = np.zeros_like(irig_time, dtype=bool)
-            hwp_rate = np.zeros_like(irig_time, dtype=float)
+            locked = np.zeros_like(irig_time, dtype=np.bool)
+            stable = np.zeros_like(irig_time, dtype=np.bool)
+            hwp_rate = np.zeros_like(irig_time, dtype=np.float32)
 
         else:
             # hwp speed calc. (approximate using ref)
@@ -351,29 +352,29 @@ class G3tHWP():
                                                          self._ref_indexes[-1])]
 
             fast_irig_time = fast_time
-            locked = np.ones_like(fast_time, dtype=bool)
+            locked = np.ones_like(fast_time, dtype=np.bool)
             locked[np.where(hwp_rate == 0)] = False
-            stable = np.ones_like(fast_time, dtype=bool)
+            stable = np.ones_like(fast_time, dtype=np.bool)
 
             # irig only status
             irig_only_time = irig_time[np.where(
                 (irig_time < fast_time[0]) | (irig_time > fast_time[-1]))]
-            irig_only_locked = np.zeros_like(irig_only_time, dtype=bool)
-            irig_only_hwp_rate = np.zeros_like(irig_only_time, dtype=float)
+            irig_only_locked = np.zeros_like(irig_only_time, dtype=np.bool)
+            irig_only_hwp_rate = np.zeros_like(irig_only_time, dtype=np.float32)
 
             fast_irig_time = np.append(irig_only_time, fast_time)
             fast_irig_idx = np.argsort(fast_irig_time)
             fast_irig_time = fast_irig_time[fast_irig_idx]
             locked = np.append(irig_only_locked, locked)[fast_irig_idx]
             hwp_rate = np.append(irig_only_hwp_rate, hwp_rate)[fast_irig_idx]
-            stable = np.ones_like(fast_irig_time, dtype=bool)
+            stable = np.ones_like(fast_irig_time, dtype=np.bool)
 
         # slow status
         slow_time = slow_time[np.where(
             (slow_time < fast_irig_time[0]) | (slow_time > fast_irig_time[-1]))]
-        slow_locked = np.zeros_like(slow_time, dtype=bool)
-        slow_stable = np.zeros_like(slow_time, dtype=bool)
-        slow_hwp_rate = np.zeros_like(slow_time, dtype=float)
+        slow_locked = np.zeros_like(slow_time, dtype=np.bool)
+        slow_stable = np.zeros_like(slow_time, dtype=np.bool)
+        slow_hwp_rate = np.zeros_like(slow_time, dtype=np.float32)
 
         slow_time = np.append(slow_time, fast_irig_time)
         slow_idx = np.argsort(slow_time)
@@ -542,7 +543,8 @@ class G3tHWP():
 
         Notes
         -----------
-        Output file format \n
+        Output file format 
+
         * Provider: 'hwp'
             * Fast block
                 * 'hwp.hwp_angle'
@@ -558,14 +560,20 @@ class G3tHWP():
         - slow_time: timestamp
             time list of slow block
         - stable: bool
-            if non-zero, indicates the HWP spin state is known. \n
-            i.e. it is either spinning at a measurable rate, or stationary. \n
-            When this flag is non-zero, the hwp_rate field can be taken at face value. \n
+            if non-zero, indicates the HWP spin state is known. 
+
+            i.e. it is either spinning at a measurable rate, or stationary. 
+
+            When this flag is non-zero, the hwp_rate field can be taken at face value. 
+
         - locked: bool
-            if non-zero, indicates the HWP is spinning and the position solution is working. \n
-            In this case one should find the hwp_angle populated in the fast data block. \n
+            if non-zero, indicates the HWP is spinning and the position solution is working. 
+
+            In this case one should find the hwp_angle populated in the fast data block. 
+
         - hwp_rate: float
-            the "approximate" HWP spin rate, with sign, in revs / second. \n
+            the "approximate" HWP spin rate, with sign, in revs / second. 
+
             Use placeholder value of 0 for cases when not "locked".
         """
         if self._output is None and output is None:
@@ -633,13 +641,13 @@ class G3tHWP():
     def _write_empty_solution_h5(self, tod, output=None, h5_address=None):
         logger.info('Writing empty solutions')
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
-        aman.wrap_new('timestamps', shape=('samps', ))
-        aman.wrap_new('hwp_angle_ver1', shape=('samps', ))
-        aman.wrap_new('hwp_angle_ver2', shape=('samps', ))
-        aman.wrap_new('stable', shape=('samps', ))
-        aman.wrap_new('locked', shape=('samps', ))
-        aman.wrap_new('hwp_rate', shape=('samps', ))
-        aman.wrap_new('eval', shape=('samps', ))
+        aman.wrap_new('timestamps', shape=('samps', ), dtype=np.int64)
+        aman.wrap_new('hwp_angle_ver1', shape=('samps', ), dtype=np.float32)
+        aman.wrap_new('hwp_angle_ver2', shape=('samps', ), dtype=np.float32)
+        aman.wrap_new('stable', shape=('samps', ), dtype=np.bool)
+        aman.wrap_new('locked', shape=('samps', ), dtype=np.bool)
+        aman.wrap_new('hwp_rate', shape=('samps', ), dtype=np.float32)
+        aman.wrap_new('eval', shape=('samps', ), dtype=np.bool)
 
         aman.timestamps[:] = tod.timestamps
         aman.save(output, h5_address, overwrite=True)
@@ -660,26 +668,34 @@ class G3tHWP():
 
         Notes
         -----------
-        Output file format \n
+
+       Output file format 
 
         - timestamp:
             SMuRF synched timestamp
         - hwp_angle_ver1: float
             SMuRF synched HWP angle (calculated from raw encoder signals) in radian
         - hwp_angle_ver2: float
-            SMuRF synched HWP angle after the template subtraction (the systematics from the non-uniform encoder slot pattern is subtracted ) in radian. \n
+            SMuRF synched HWP angle after the template subtraction (the systematics from the non-uniform encoder slot pattern is subtracted ) in radian. 
+
             if 'eval' is zero, template subtraction is not completed and its value is same as 'hwp_angle_ver1'.
         - slow_time: timestamp
             time list of slow block (stable, locked. hwp_rate)
         - stable: bool
-            if non-zero, indicates the HWP spin state is known. \n
-            i.e. it is either spinning at a measurable rate, or stationary. \n
-            When this flag is non-zero, the hwp_rate field can be taken at face value. \n
+            if non-zero, indicates the HWP spin state is known. 
+
+            i.e. it is either spinning at a measurable rate, or stationary. 
+
+            When this flag is non-zero, the hwp_rate field can be taken at face value. 
+
         - locked: bool
-            if non-zero, indicates the HWP is spinning and the position solution is working. \n
-            In this case one should find the hwp_angle populated in the fast data block. \n
+            if non-zero, indicates the HWP is spinning and the position solution is working. 
+
+            In this case one should find the hwp_angle populated in the fast data block. 
+
         - hwp_rate: float
-            the "approximate" HWP spin rate, with sign, in revs / second. \n
+            the "approximate" HWP spin rate, with sign, in revs / second. 
+
             Use placeholder value of 0 for cases when not "locked".
         - eval: bool
             if non-zero, the template subtraction is completed.
@@ -949,7 +965,7 @@ class G3tHWP():
             np.array(
                 [[sub_clk, np.linspace(self._encd_clk[ref_index - 1], self._encd_clk[ref_index], self._ref_edges + 2)[1:-1]]
                  for ref_index, sub_clk
-                 in zip(self._ref_indexes, np.split(self._encd_clk, self._ref_indexes))], dtype=object
+                 in zip(self._ref_indexes, np.split(self._encd_clk, self._ref_indexes))], dtype=np.object
             ).flatten()
         )
         self._encd_clk = np.append(self._encd_clk, lastsub)
