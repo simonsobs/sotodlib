@@ -679,8 +679,6 @@ class G3tHWP():
             SMuRF synched HWP angle after the template subtraction (the systematics from the non-uniform encoder slot pattern is subtracted ) in radian. 
 
             if 'eval' is zero, template subtraction is not completed and its value is same as 'hwp_angle_ver1'.
-        - slow_time: timestamp
-            time list of slow block (stable, locked. hwp_rate)
         - stable: bool
             if non-zero, indicates the HWP spin state is known. 
 
