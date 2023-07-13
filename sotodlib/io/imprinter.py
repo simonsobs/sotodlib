@@ -34,10 +34,12 @@ from ..site_pipeline.util import init_logger
 ####################
 
 # book status
-UNBOUND = "Unbound"
-BOUND = "Bound"
-FAILED = "Failed"
-REBIND = "Rebind"
+FAILED = -1
+UNBOUND = 0
+REBIND = 1
+BOUND = 2
+UPLOADED = 3
+DONE = 4
 
 # tel tube, stream_id, slot mapping
 VALID_OBSTYPES = ["obs", "oper", "smurf", "hk", "stray", "misc"]
@@ -111,7 +113,7 @@ class Books(Base):
     max_channels = db.Column(db.Integer)
     obs = relationship("Observations", back_populates="book")  # one to many
     type = db.Column(db.String)
-    status = db.Column(db.String, default=UNBOUND)
+    status = db.Column(db.Integer, default=UNBOUND)
     message = db.Column(db.String, default="")
     tel_tube = db.Column(db.String)
     slots = db.Column(db.String)
@@ -636,6 +638,23 @@ class Imprinter:
             session = self.get_session()
         return session.query(Books).all()
 
+    def get_books_by_status(self, status, session=None):
+        """Get all books with a given status from database.
+
+        Parameters
+        ----------
+        session: BookDB session
+        status: int
+
+        Returns
+        -------
+        books: list of book objects
+
+        """
+        if session is None: session = self.get_session()
+        return session.query(Books).filter(Books.status == status).all()
+
+    # some aliases for readability
     def get_unbound_books(self, session=None):
         """Get all unbound books from database.
 
@@ -652,6 +671,20 @@ class Imprinter:
             session = self.get_session()
         return session.query(Books).filter(Books.status == UNBOUND).all()
 
+    def get_bound_books(self, session=None):
+        """Get all bound books from database.
+
+        Parameters
+        ----------
+        session: BookDB session
+
+        Returns
+        -------
+        books: list of book objects
+
+        """
+        return self.get_books_by_status(BOUND, session)
+    
     def get_failed_books(self, session=None):
         """Get all failed books from database
 
@@ -664,9 +697,13 @@ class Imprinter:
         books: list of books
 
         """
+<<<<<<< HEAD
         if session is None:
             session = self.get_session()
         return session.query(Books).filter(Books.status == FAILED).all()
+=======
+        return self.get_books_by_status(FAILED, session)
+>>>>>>> update imprinter db schema
 
     def get_rebind_books(self, session=None):
         """Get all books to be rebinded from database
@@ -680,9 +717,27 @@ class Imprinter:
         books: list of books
 
         """
+<<<<<<< HEAD
         if session is None:
             session = self.get_session()
         return session.query(Books).filter(Books.status == REBIND).all()
+=======
+        return self.get_books_by_status(REBIND, session)
+
+    def get_uploaded_books(self, session=None):
+        """Get all books uploaded to librarian from database
+
+        Parameters
+        ----------
+        session: BookDB session
+
+        Returns
+        -------
+        books: list of books
+
+        """
+        return self.get_books_by_status(UPLOADED, session)
+>>>>>>> update imprinter db schema
 
     def book_exists(self, bid, session=None):
         """Check if a book exists in the database.
@@ -1098,6 +1153,28 @@ class Imprinter:
             .all()
         )
         return {o.obs_id: o for o in obs}
+
+    def all_bound_until(self):
+        """report a datetime object to indicate that all books are bound
+        by this datetime.
+        """
+        session = self.get_session()
+        # sort by start time and find the start time by which
+        # all books are bound
+        books = session.query(Books).order_by(Books.start).all()
+        for book in books:
+            if book.status < BOUND:
+                return book.start
+        return book.start  # last book
+
+    def all_bound_until_hk(self):
+        session = self.get_session()
+        books = session.query(Books).filter(Books.type == "hk").order_by(Books.start).all()
+        for book in books:
+            if book.status < BOUND:
+                return book.start
+        return book.start  # last book
+        
 
     def delete_book_files(self, book):
         """Delete all files associated with a book
