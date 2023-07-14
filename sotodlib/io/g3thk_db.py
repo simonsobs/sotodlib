@@ -239,9 +239,16 @@ class G3tHk:
         return agg_name
 
 
-    def _files_to_add(self, min_ctime=None, max_ctime=None):
+    def _files_to_add(self, min_ctime=None, max_ctime=None,
+                      update_last_file=True):
 
-        db_files = self.session.query(HKFiles).all()
+        db_files = self.session.query(HKFiles)
+        if update_last_file:
+            last = db_files.order_by(db.desc(HKFiles.global_start_time)).first()
+            db_files = db_files.filter(
+                HKFiles.global_start_time != last.global_start_time
+            )
+        db_files = db_files.all()
         db_files = [f.path for f in db_files]
 
         dirs = []
@@ -276,7 +283,8 @@ class G3tHk:
         min_ctime=None, 
         max_ctime=None,
         show_pb=True,
-        stop_at_error=False
+        stop_at_error=False,
+        update_last_file=True
         ):
         """Gather and add column information for hkfiles tables
         """
@@ -284,26 +292,17 @@ class G3tHk:
         file_list = self._files_to_add(
             min_ctime = min_ctime, 
             max_ctime = max_ctime,
+            update_last_file=update_last_file,
         )        
 
 
         for path in tqdm( sorted(file_list), disable=(not show_pb)):
-            root, filename = os.path.split(path)
-
-            global_start_time = int(filename.split(".")[0])
 
             try: 
-                aggregator = self._get_agg(path)
+                root, filename = os.path.split(path)    
+                self.add_file(path, overwrite=True)
+                self.add_agents_and_fields(path, overwrite=True)
 
-                db_file = HKFiles(filename=filename,
-                                  path=path,
-                                  global_start_time=global_start_time,
-                                  aggregator=aggregator)
-
-                self.session.add(db_file)
-                self.session.commit()
-
-                self.add_agents_and_fields(db_file)
             except IntegrityError as e:
                 # Database Integrity Errors, such as duplicate entries
                 self.session.rollback()
@@ -321,13 +320,37 @@ class G3tHk:
                     raise e
                 logger.warning(f"Failed on file {filename}:\n{e}")
 
-    
-    def add_agents_and_fields(self, db_file):
+    def add_file(self, path, overwrite=False):
+        db_file = self.session.query(HKFiles).filter(
+            HKFiles.path == path,
+        ).one_or_none()
+
+        if db_file is not None and not overwrite:
+            return
+        if db_file is None:
+            db_file = HKFiles(path=path)
+            self.session.add(db_file)
+
+        root, filename = os.path.split(path)    
+        db_file.filename = filename
+        db_file.global_start_time = int(filename.split(".")[0])
+        db_file.aggregator = self._get_agg(path)
+        
+        self.session.commit()
+
+    def add_agents_and_fields(self, path, overwrite=False):
+        db_file = self.session.query(HKFiles).filter(
+            HKFiles.path == path,
+        ).one()
+
         db_agents = db_file.agents
         db_fields = db_file.fields
-
-        fields, starts, stops, medians, means, min_vals, max_vals, stds = self.load_fields(db_file.path)
+        
         agents = []
+
+        out = self.load_fields(db_file.path)
+        fields, starts, stops, medians, means, min_vals, max_vals, stds = out        
+
         for field in fields:
             agent = field.split('.')[1]
             agents.append(agent)
@@ -335,7 +358,6 @@ class G3tHk:
         #  remove duplicate agent names to avoid multiple agent_ids for
         #  same instance_id
         agents = [*set(agents)]
-
 
         # get the start and stop for each agent
         for agent in agents:
@@ -353,8 +375,7 @@ class G3tHk:
             #  and stop time for the agent
             agent_start = np.min(starts_agent)
             agent_stop = np.max(stops_agent)
-            
-            
+                      
             x = np.where( [agent == a.instance_id for a in db_agents])[0] 
             if len(x) == 0:
                 # if we don't have an agent
@@ -363,9 +384,10 @@ class G3tHk:
                                     stop=agent_stop,
                                     hkfile=db_file)
                 self.session.add(db_agent)
-            else:
+            elif overwrite:
                 # stop may have changed for an incomplete file?
                 db_agent = db_agents[x[0]]
+                db_agent.start = agent_start
                 db_agent.stop = agent_stop
         
         self.session.commit()
@@ -379,22 +401,24 @@ class G3tHk:
                 continue
             db_agent = db_agents[x[0]]
             x = np.where( [fields[i] == f.field for f in db_fields])[0]
-            if len(x) == 0:
+            if len(x) > 0 and not overwrite:
+                continue
+            elif len(x) == 0:
                 db_field = HKFields(field=fields[i],
-                                   start=starts[i],
                                    hkfile=db_file,
                                    hkagent=db_agent)
                 self.session.add(db_field)
             else:
                 db_field = db_fields[x[0]]
-            
-            # update the math incase previous incomplete file?    
+
+            db_field.start=starts[i]
             db_field.stop = stops[i]
             db_field.median = medians[i]
             db_field.mean = means[i]
             db_field.min_val = min_vals[i]
             db_field.max_val = max_vals[i]
             db_field.stand_dev = stds[i]
+            # update the math incase previous incomplete file?    
 
         self.session.commit()
 
@@ -474,6 +498,11 @@ class G3tHk:
         -------
         list of HKAgent instances
         """
+        last = self.get_last_update()
+        if stop > last:
+            raise ValueError(f"stop time {stop} is beyond the last database "
+                             f"update of {last}")
+
         agents = self.session.query(HKAgents).filter(
             db.or_( 
                 db.and_(HKAgents.start <= start, HKAgents.stop >= stop),
@@ -482,10 +511,19 @@ class G3tHk:
             )
         )
         if agents.count() == 0:
-            logger.warning(f"no agents found between {start} and {stop}"
-                            " database may be incomplete")
+            logger.warning(f"no agents found between {start} and {stop}")
+
         agents = agents.filter(HKAgents.instance_id == instance_id).all()
         return agents
+    
+    def get_last_update(self):
+        """Return the last timestamp present in the database
+        """
+        last_file = self.session.query(HKFiles).order_by(
+            db.desc(HKFiles.global_start_time)
+        ).first()
+        return max([a.stop for a in last_file.agents])
+
 
     @classmethod
     def from_configs(cls, configs):
