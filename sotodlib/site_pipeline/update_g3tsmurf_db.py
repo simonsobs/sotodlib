@@ -16,12 +16,8 @@ from sotodlib.site_pipeline.monitor import Monitor
 from sotodlib.io.load_smurf import G3tSmurf, Observations, logger as default_logger
 
 
-def update_g3tsmurf_db(
-    config: Optional[str] = None, 
-    update_delay: int = 2, 
-    from_scratch: bool = False,
-    verbosity: int = 2, 
-    logger=None):
+def main(config: Optional[str] = None, update_delay: int = 2, 
+         from_scratch: bool = False, verbosity: int = 2, logger=None):
 
     show_pb = True if verbosity > 1 else False
 
@@ -137,4 +133,4 @@ def get_parser(parser=None):
 if __name__ == '__main__':
     parser = get_parser(parser=None)
     args = parser.parse_args()
-    update_g3tsmurf_db(**vars(args))
+    main(**vars(args))
