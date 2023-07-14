@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 from .. import core
 from . import load as io_load
 from .g3thk_db import G3tHk, HKFiles, HKAgents, HKFields
+from .g3thk_utils import pysmurf_monitor_control_list
 
 from sotodlib.io.g3tsmurf_db import (
     Base,
@@ -1256,7 +1257,65 @@ class G3tSmurf:
         
         session.commit()
 
+    def get_final_time(
+        self, 
+        stream_ids, 
+        start=None, 
+        stop=None, 
+        check_control=True, 
+        session=None
+    ):
+        """Return the ctime to which database is finalized for a set of stream_ids 
+        between ctimes start and stop. If check_control is True it will use the 
+        pysmurf-monitor entries in the HK database to determine which 
+        pysmurf-monitors were in control of which stream_ids between start and stop.
+        """
+        if check_control and self.hk_db_path is None:
+            raise ValueError("HK database path required to update finalization"
+                             " time")
+        if check_control and (start is None) or (stop is None):
+            raise ValueError("start and stop ctimes are required to check which"
+                             " pysmurf-monitors control which stream_ids")
+        if session is None:
+            session = self.Session()
+        HK = G3tHk(
+            os.path.join(os.path.split(self.archive_path)[0],'hk'),
+            self.hk_db_path,
+        )
 
+        agent_list = []
+        if "servers" not in self.finalize:
+            raise ValueError("server list not found in finalization "
+                             "information, required to check completeness")
+        for server in self.finalize.get("servers"):
+            if "smurf-suprsync" not in server:
+                logger.error(f"Incomplete finalization information, missing "
+                               f"'smurf-suprync' in {server}")
+            if "timestream-suprsync" not in server:
+                logger.error(f"Incomplete finalization information, missing "
+                               f"'timestream-suprync' in {server}")
+            pm = server.get("pysmurf-monitor")
+            if not check_control or pm is None:
+                if check_control:
+                    logger.warning(f"Incomplete finalization information, "
+                                   f"missing 'pysmurf-monitor'. Not checking "
+                                   "for stream_id control")
+                agent_list.append(server["smurf-suprsync"])
+                agent_list.append(server["timestream-suprsync"])
+                continue
+            sids = pysmurf_monitor_control_list(pm, start, stop, HK)
+            if np.any( [s in stream_ids for s in sids]):
+                agent_list.append(server["smurf-suprsync"])
+                agent_list.append(server["timestream-suprsync"])
+        
+        min_time = self.last_update
+        for agent in agent_list:
+            time, = session.query(Finalize.time).filter(
+                        Finalize.agent == agent
+                    ).one()
+            min_time = min(min_time, time)
+        return min_time
+        
 
     def _process_index_error(self, session, e, stream_id, ctime, path, stop_at_error):
         if type(e) == ValueError:
