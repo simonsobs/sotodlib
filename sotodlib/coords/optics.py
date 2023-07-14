@@ -63,10 +63,16 @@ def _interp_func(x, y, spline):
     ya = np.argsort(yr)
     ys = np.argsort(ya)
     z = bisplev(xr[xa], yr[ya], spline)
-    z = z[(xs, ys)]
 
+    if np.isscalar(z):
+        if np.isscalar(x):
+            return z
+        else:
+            z = np.atleast_2d(z)
+    z = z[(xs, ys)]
     if np.isscalar(x):
         return z[0]
+
     return z.reshape(x.shape)
 
 
