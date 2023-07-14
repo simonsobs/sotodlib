@@ -13,6 +13,7 @@ from sotodlib.core import AxisManager, metadata, Context
 from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
 from sotodlib.coords import optics as op
+from so3g import proj
 
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
 
@@ -54,8 +55,7 @@ def _avg_focalplane(fp_dict):
     return det_ids, focal_plane
 
 
-def _log_vals(shift, scale, shear, rot):
-    axis = ["xi", "eta", "gamma"]
+def _log_vals(shift, scale, shear, rot, axis):
     deg2rad = np.pi / 180.0
     rad2deg = 180.0 / np.pi
     for ax, s in zip(axis, shift):
@@ -71,7 +71,7 @@ def _log_vals(shift, scale, shear, rot):
                 "Scale factor for %s looks like a radians to degrees conversion", ax
             )
     logger.info("Shear param is %f", shear)
-    logger.info("Rotation of the xi-eta plane is %f radians", rot)
+    logger.info("Rotation of the %s-%s plane is %f radians", axis[0], axis[1], rot)
 
 
 def _mk_fpout(det_id, focal_plane):
@@ -86,19 +86,20 @@ def _mk_fpout(det_id, focal_plane):
     return metadata.ResultSet.from_friend(fpout)
 
 
-def _mk_tpout(shift, scale, shear, rot):
+def _mk_tpout(xieta, horiz):
     outdt = [
-        ("d_xi", np.float32),
-        ("d_eta", np.float32),
-        ("d_gamma", np.float32),
-        ("s_xi", np.float32),
-        ("s_eta", np.float32),
-        ("s_gamma", np.float32),
+        ("d_x", np.float32),
+        ("d_y", np.float32),
+        ("d_z", np.float32),
+        ("s_x", np.float32),
+        ("s_y", np.float32),
+        ("s_z", np.float32),
         ("shear", np.float32),
         ("rot", np.float32),
     ]
-    row = shift + scale + (shear, rot)
-    tpout = np.array(row, outdt)
+    xieta = (*xieta[0], *xieta[1], *xieta[2:])
+    horiz = (*horiz[0], *horiz[1], *horiz[2:])
+    tpout = np.array([xieta, horiz], outdt)
 
     return tpout
 
@@ -210,6 +211,47 @@ def gamma_fit(src, dst):
 
     res = minimize(_gamma_min, (1.0, 0.0), (src, dst))
     return res.x
+
+
+def to_horiz(points, encoders):
+    """
+    Go from xieta coordinates to horizon coordinates.
+
+    Arguments:
+
+        points: (3, ndet) array of points.
+                Rows should be (xi, eta, gamma).
+
+        encoders: The encoder positions for the LOS.
+                  Should be (az, el, bs).
+
+    Returns:
+
+        horiz : (3, ndet) array if points.
+                Rows are (az, el, bs).
+    """
+    msk = np.isfinite(points).all(axis=0)
+    good_points = points[:, msk]
+    dets = np.arange(good_points.shape[1])
+    fp = proj.FocalPlane.from_xieta(dets, *good_points)
+    sight = proj.CelestialSightLine.for_horizon([0], *np.atleast_2d(encoders).T)
+    asm = proj.Assembly.attach(sight, fp)
+    output = np.zeros((len(dets), 1, 4))
+    projectionist = proj.Projectionist()
+    projectionist.get_coords(asm, output=output)
+
+    # Get rid of the time axis and transpose
+    output = np.squeeze(output, axis=1).T
+    # Fix sign on az
+    output[0] *= -1
+    # Compute BS (need to check sign and 0 point)
+    bs = np.arctan2(output[3], output[2]) % (2 * np.pi)
+
+    _horiz = np.vstack((output[:2], bs))
+    horiz = np.zeros((3, len(msk))) + np.nan
+    horiz[:, msk] = _horiz
+
+    return horiz
 
 
 def main():
@@ -359,38 +401,61 @@ def main():
             "No polarization data availible, gammas will be filled with the nominal values."
         )
         focal_plane[2] = nominal[2]
+        measured[2] = nominal[2]
         gamma_scale = 1.0
         gamma_shift = 0.0
 
-    nominal = np.vstack(nominal[:2])
-    measured = np.vstack(measured[:2])
-    affine, shift = op.get_affine(nominal, measured)
+    nominal = np.vstack(nominal[:3])
+    measured = np.vstack(measured[:3])
+    affine, shift = op.get_affine(nominal[:2], measured[:2])
     scale, shear, rot = op.decompose_affine(affine)
     shear = shear.item()
     rot = op.decompose_rotation(rot)[-1]
 
     plot = config.get("plot", False)
     if plot:
-        _mk_plot(nominal, measured, affine, shift, plot)
+        _mk_plot(nominal[:2], measured[:2], affine, shift, plot)
 
     shift = (*shift, gamma_shift)
     scale = (*scale, gamma_scale)
-
-    _log_vals(shift, scale, shear, rot)
+    xieta = (shift, scale, shear, rot)
+    _log_vals(shift, scale, shear, rot, ("xi", "eta", "gamma"))
 
     # Compute the lever arm
     lever_arm = get_nominal(np.zeros(6), config["coord_transform"], encoders)
 
+    # Put nominal and measured into horiz basis and compute transformation.
+    if np.isnan(encoders).any():
+        horiz = ((np.nan,) * 3,) * 2 + (np.nan,) * 2
+    else:
+        nominal_horiz = to_horiz(nominal, encoders)
+        measured_horiz = to_horiz(measured, encoders)
+
+        if measured_gamma:
+            bs_scale, bs_shift = gamma_fit(nominal_horiz[2], measured_horiz[2])
+        else:
+            bs_scale = 1.0
+            bs_shift = 0.0
+        horiz_affine, horiz_shift = op.get_affine(nominal_horiz[:2], measured_horiz[:2])
+        horiz_scale, horiz_shear, horiz_rot = op.decompose_affine(horiz_affine)
+        horiz_shear = horiz_shear.item()
+        horiz_rot = op.decompose_rotation(horiz_rot)[-1]
+
+        horiz_shift = (*horiz_shift, bs_shift)
+        horiz_scale = (*horiz_scale, bs_scale)
+        horiz = (horiz_shift, horiz_scale, horiz_shear, horiz_rot)
+        _log_vals(horiz_shift, horiz_scale, horiz_shear, horiz_rot, ("az", "el", "bs"))
+
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)
     fpout = _mk_fpout(det_id, focal_plane)
-    tpout = _mk_tpout(shift, scale, shear, rot)
+    tpout = _mk_tpout(xieta, horiz)
     refout = _mk_refout(lever_arm, encoders)
     with h5py.File(outpath, "w") as f:
         write_dataset(fpout, f, "focal_plane", overwrite=True)
         _add_attrs(f["focal_plane"], {"measured_gamma": measured_gamma})
         write_dataset(tpout, f, "offsets", overwrite=True)
-        _add_attrs(f["offsets"], {"affine_matrix": affine})
+        _add_attrs(f["offsets"], {"affine_xieta": affine, "affine_horiz": horiz_affine})
         write_dataset(refout, f, "reference", overwrite=True)
 
 
