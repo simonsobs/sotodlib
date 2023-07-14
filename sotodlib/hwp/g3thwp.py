@@ -638,17 +638,23 @@ class G3tHWP():
 
         return
     
-    def _write_empty_solution_h5(self, tod, output=None, h5_address=None):
-        logger.info('Writing empty solutions')
-        aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
-        aman.wrap_new('timestamps', shape=('samps', ), dtype=np.int64)
+    def _set_empty_axes(self, aman):
+        
+        aman.wrap_new('timestamps', shape=('samps', ), dtype=np.int32)
         aman.wrap_new('hwp_angle_ver1', shape=('samps', ), dtype=np.float32)
         aman.wrap_new('hwp_angle_ver2', shape=('samps', ), dtype=np.float32)
         aman.wrap_new('stable', shape=('samps', ), dtype=np.bool)
         aman.wrap_new('locked', shape=('samps', ), dtype=np.bool)
         aman.wrap_new('hwp_rate', shape=('samps', ), dtype=np.float32)
         aman.wrap_new('eval', shape=('samps', ), dtype=np.bool)
+        
+        return 
+        
+    def _write_empty_solution_h5(self, tod, output=None, h5_address=None):
 
+        logger.info('Writing empty solutions')
+        aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
+        self._set_empty_axes(aman)
         aman.timestamps[:] = tod.timestamps
         aman.save(output, h5_address, overwrite=True)
         
@@ -746,13 +752,7 @@ class G3tHWP():
         
         # write solution
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
-        aman.wrap_new('timestamps', shape=('samps', ))
-        aman.wrap_new('hwp_angle_ver1', shape=('samps', ))
-        aman.wrap_new('hwp_angle_ver2', shape=('samps', ))
-        aman.wrap_new('stable', shape=('samps', ))
-        aman.wrap_new('locked', shape=('samps', ))
-        aman.wrap_new('hwp_rate', shape=('samps', ))
-        aman.wrap_new('eval', shape=('samps', ))
+        self._set_empty_axes(aman)
         
         aman.timestamps[:] = tod.timestamps
         aman.stable[:] = scipy.interpolate.interp1d(solved['slow_time'], solved['stable'], kind='linear', bounds_error=False)(tod.timestamps)
@@ -1055,7 +1055,9 @@ class G3tHWP():
             logger.debug('no need to fix encoder index')
 
     def _quad_form(self, quad):
-
+        
+        if self._force_quad==1: 
+            return np.ones_like(quad)
         # bit process
         quad[(quad >= 0.5)] = 1
         quad[(quad < 0.5)] = 0
