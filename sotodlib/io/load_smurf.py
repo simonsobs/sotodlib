@@ -20,9 +20,13 @@ logger = logging.getLogger(__name__)
 
 from .. import core
 from . import load as io_load
+from .g3thk_db import G3tHk, HKFiles, HKAgents, HKFields
 
 from sotodlib.io.g3tsmurf_db import (
     Base,
+    TimeCodes,
+    SupRsyncType,
+    Finalize,
     Observations,
     Tags,
     Files,
@@ -150,7 +154,16 @@ def _file_has_end_frames(filename):
 
 
 class G3tSmurf:
-    def __init__(self, archive_path, db_path=None, meta_path=None, echo=False, db_args={}):
+    def __init__(
+        self, 
+        archive_path, 
+        db_path=None, 
+        meta_path=None, 
+        echo=False, 
+        db_args={},
+        finalize={},
+        hk_db_path=None,
+    ):
         """
         Class to manage a smurf data archive.
 
@@ -168,12 +181,16 @@ class G3tSmurf:
                 If true, all sql statements will print to stdout.
             db_args: dict, optional
                 Additional arguments to pass to sqlalchemy.create_engine
+            finalize: dict, optional
+                Arguments required for fast tracking of data file transfers
         """
         if db_path is None:
             db_path = os.path.join(archive_path, "frames.db")
         self.archive_path = archive_path
         self.meta_path = meta_path
         self.db_path = db_path
+        self.hk_db_path = hk_db_path
+        self.finalize = finalize
         self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo, **db_args)
         Session.configure(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine)
@@ -181,6 +198,7 @@ class G3tSmurf:
 
         # Defines frame_types
         self._create_frame_types()
+        self._start_finalization()
 
     def _create_frame_types(self):
         session = self.Session()
@@ -190,6 +208,33 @@ class G3tSmurf:
                 ft = FrameType(type_name=k)
                 session.add(ft)
             session.commit()
+
+    def _start_finalization(self):
+        """Initialize finalization rows if they are not in the database yet
+        """
+        session = self.Session()
+        row = session.query(Finalize).filter(
+            Finalize.agent == "G3tSMURF"
+        ).one_or_none()
+        if row is None:
+            session.add(
+                Finalize(agent="G3tSMURF", time=1.6e9)
+            )
+            session.commit()
+        for server in self.finalize.get("servers"):
+            for x in ['smurf-suprsync', 'timestream-suprsync']:
+                agent = server.get(x)
+                if agent is None:
+                    continue
+                row = session.query(Finalize).filter(
+                    Finalize.agent == agent
+                ).one_or_none()
+                if row is not None:
+                    continue
+                session.add(
+                    Finalize(agent=agent, time=1.6e9)
+                )
+                session.commit()
 
     @classmethod
     def from_configs(cls, configs):
@@ -205,7 +250,10 @@ class G3tSmurf:
         return cls(os.path.join(configs["data_prefix"], "timestreams"),
                    configs["g3tsmurf_db"],
                    meta_path=os.path.join(configs["data_prefix"],"smurf"),
-                   db_args=configs.get("db_args", {}))
+                   db_args=configs.get("db_args", {}),
+                   finalize=configs.get("finalization",{}),
+                   hk_db_path=configs.get("g3thk_db"),
+                   )
 
     @staticmethod
     def _make_datetime(x):
@@ -232,6 +280,19 @@ class G3tSmurf:
             return x
         raise (Exception("Input not a datetime or timestamp"))
 
+    @property
+    def last_db_update(self):
+        with self.Session() as session:
+            t = session.query(Finalize).filter(Finalize.agent == 'G3tSMURF').one().time
+        return t
+
+    @last_db_update.setter
+    def last_update(self, time):
+        with self.Session() as session:
+            agent =  session.query(Finalize).filter(Finalize.agent == 'G3tSMURF').one()
+            agent.time = time
+            session.commit()
+            
     def add_file(self, path, session, overwrite=False):
         """
         Indexes a single file and adds it to the sqlite database. Creates a
@@ -278,12 +339,14 @@ class G3tSmurf:
             ## tune has been found in streamed data. 
             self.add_tuneset_to_file(my_tune, db_file, session)
 
-        try:
-            splits = path.split("/")
-            db_file.stream_id = splits[-2]
-        except:
-            # should this fail silently?
-            pass
+        db_file.stream_id = status.stream_id
+        if db_file.stream_id is None:
+            try:
+                splits = path.split("/")
+                db_file.stream_id = splits[-2]
+            except:
+                logger.warning(f"Failed to find stream_id for {path}")
+                pass
 
         reader = so3g.G3IndexedReader(path)
 
@@ -1068,6 +1131,132 @@ class G3tSmurf:
                             yield (fname, stream_id, ctime, os.path.join(root, name))
                         except GeneratorExit:
                             return
+
+    def search_suprsync_files(
+        self, min_ctime=16000 * 1e5, max_ctime=None, reverse=False
+    ):
+        """Generator used to page through smurf folder returning each suprsync
+        finalization file formatted for easy use
+
+        Args
+        -----
+        min_ctime : lowest timestamped action to return
+        max_ctime : highest timestamped action to return
+        reverse : if true, goes backward
+
+        Yields
+        -------
+        tuple (action, stream_id, ctime, path)
+        action : Smurf Action string with ctime removed for easy comparison
+        stream_id : stream_id of Action
+        ctime : ctime of Action folder
+        path : absolute path to action folder
+        """
+        if max_ctime is None:
+            max_ctime = dt.datetime.now().timestamp()
+
+        logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
+        
+        for base_dir in [self.archive_path, self.meta_path]:
+            for ct_dir in sorted(os.listdir(base_dir), reverse=reverse):
+                if int(ct_dir) < int(min_ctime // 1e5):
+                    continue
+                elif int(ct_dir) > int(max_ctime // 1e5):
+                    continue
+            
+                if "suprsync" not in os.listdir(
+                        os.path.join(base_dir, ct_dir)
+                ):
+                    continue
+                base = os.path.join(base_dir, ct_dir, 'suprsync')
+            
+                for agent in os.listdir(base):
+                    for f in os.listdir(os.path.join(base,agent)):
+                        try:
+                            yield os.path.join(base,agent,f)
+                        except GeneratorExit:
+                            return
+
+    def index_timecodes(self, session=None, min_ctime=16000e5, max_ctime=None):
+        """Index the timecode finalizeation files coming out of suprsync
+        """
+        if session is None:
+            session = self.Session()
+
+        if max_ctime is None:
+            max_ctime = dt.datetime.now().timestamp()
+
+        for fname in self.search_suprsync_files( 
+            min_ctime=min_ctime,
+            max_ctime=max_ctime
+        ):
+            info = yaml.safe_load(open(fname, "r"))
+
+            for subdir in info["subdirs"]:
+                if subdir == "suprsync":
+                    continue
+
+                tcf = session.query(TimeCodes).filter(
+                    TimeCodes.stream_id == subdir,
+                    TimeCodes.suprsync_type ==  SupRsyncType.from_string(
+                        info["archive_name"]
+                    ).value,
+                    TimeCodes.timecode == info["timecode"]
+                ).one_or_none()
+                if tcf is not None:
+                    continue
+                tcf = TimeCodes(
+                    stream_id = subdir,
+                    suprsync_type =  SupRsyncType.from_string(info["archive_name"]).value,
+                    timecode = info["timecode"],
+                    agent = info["instance_id"]
+                )
+                session.add(tcf)
+                session.commit()
+
+    def update_finalization(self, update_time, session=None):
+        """Update the finalization time rows in the database
+        """
+        if self.hk_db_path is None:
+            raise ValueError("HK database path required to update finalization"
+                             " time")
+        
+        if session is None:
+            session = self.Session()
+        HK = G3tHk(
+            os.path.join(os.path.split(self.archive_path)[0],'hk'),
+            self.hk_db_path,
+        )
+
+        agent_list = session.query(Finalize).all()
+        for agent in agent_list:
+            if agent.agent == "G3tSMURF":
+                continue
+            db_agent = HK.session.query(HKAgents).filter(
+                HKAgents.instance_id == agent.agent,
+                HKAgents.start <= update_time,
+            ).order_by(db.desc(HKAgents.start)).first()
+            if db_agent is None:
+                logger.info(f"Agent {agent} not found in HK database before"
+                            f" update time {update_time}")
+                continue
+            f = [f for f in db_agent.fields if "finalized_until" in f.field]
+            if len(f) == 0:
+                logger.warning(f"Did not find finalized_until in Agent {agent}"
+                               f"from file {db_agent.hkfile.filename}")
+                continue
+            f = f[0]
+            data = HK.load_data(f)
+            x = np.where(data[f.field][0] <= update_time)[0]
+            if len(x) < 1:
+                logger.error(f"No data points before update time for agent "
+                             f"{agent} in file {db_agent.hkfile.filename}?")
+            x = x[0]
+            agent.time = data[f.field][1][x]
+        
+        session.commit()
+
+
 
     def _process_index_error(self, session, e, stream_id, ctime, path, stop_at_error):
         if type(e) == ValueError:
