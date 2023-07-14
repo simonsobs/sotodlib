@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 #           12
 # Below config assumes a 30 degree rotation
 LAT_TUBES = {
-    "c": 0,
+    "c1": 0,
     "i1": 3,
     "i2": 1,
     "i3": 7,
