@@ -606,34 +606,62 @@ class Imprinter:
         ignore_singles: boolean
             if True, ignore single observations
         stream_ids: list
-            a list of stream ids (str) to consider
+            a list of stream ids (str) to consider. Defaults to list in
+            imprinter configuration file. 
         force_single_stream: boolean
             if True, treat observations from different streams separately
         """
-        session = self.get_g3tsmurf_session(source)
+        session, SMURF = self.get_g3tsmurf_session(source, return_archive=True)
         # set sensible ctime range is none is given
         if min_ctime is None:
             min_ctime = session.query(G3tObservations.timestamp).order_by(G3tObservations.timestamp).first()[0]
         if max_ctime is None:
             max_ctime = dt.datetime.now().timestamp()
-        # find all complete observations that start within the time range
-        obs_q = session.query(G3tObservations).filter(G3tObservations.timestamp >= min_ctime,
-                                                      G3tObservations.timestamp <= max_ctime,
-                                                      not_(G3tObservations.stop==None))
+        
         # get wafers
         if stream_ids is None:
-            # find all unique stream ids during the time range
-            streams = session.query(G3tObservations.stream_id).filter(
-                G3tObservations.timestamp >= min_ctime,
-                G3tObservations.timestamp <= max_ctime
-            ).distinct().all()
-            streams = [s[0] for s in streams]
+            streams = self.sources[source].get("slots")
+            if streams is None:
+                raise ValueError(f"Imprinter missing slot / stream_id"
+                                  " information for {source}")
         else:
             # if user input is present, format it like the query response
             streams = stream_ids
-
+        self.logger.debug(f"Looking for observations from stream_ids {streams}")
+        
         # restrict to given stream ids (wafers)
         stream_filt = or_(*[G3tObservations.stream_id == s for s in streams])
+        
+        # check data transfer finalization
+        final_time = SMURF.get_final_time(
+            streams, min_ctime, max_ctime, check_control=True
+        )
+        if final_time < max_ctime:
+            max_ctime = final_time
+
+        # check for incomplete observations in time range
+        q_incomplete = session.query(G3tObservations).filter(
+            G3tObservations.timestamp >= min_ctime,
+            G3tObservations.timestamp <= max_ctime,
+            stream_filt,
+            G3tObservations.stop == None,
+        )
+        # if we have incomplete observations in our stream_id list we cannot
+        # bookbind any observations overlapping the incomplete ones.
+        if q_incomplete.count () > 0:
+            max_ctime = min([obs.timestamp for obs in q_incomplete.all()])
+        max_stop = dt.datetime.utcfromtimestamp(max_ctime)
+       
+        print(max_stop, max_ctime, min_ctime)
+
+        # find all complete observations that start within the time range
+        obs_q = session.query(G3tObservations).filter(
+            G3tObservations.timestamp >= min_ctime,
+            G3tObservations.timestamp < max_ctime,
+            stream_filt,
+            G3tObservations.stop < max_stop,
+            not_(G3tObservations.stop==None)
+        )
 
         output = []
         for stream in streams:
@@ -660,10 +688,18 @@ class Imprinter:
                                 and_(G3tObservations.stop >= str_obs.start, G3tObservations.stop <= str_obs.stop),
                                 and_(G3tObservations.start >= str_obs.start, G3tObservations.start <= str_obs.stop),
                             ))
+
                         # if we failed to find any overlapping observations
                         if q.count()==0 and not ignore_singles:
                             # append only this one when there's no overlapping segments
-                            output.append(ObsSet([str_obs], mode="obs", slots=self.sources[source]['slots'], tel_tube=source))
+                            output.append(
+                                ObsSet(
+                                    [str_obs], 
+                                    mode="obs", 
+                                    slots=self.sources[source]['slots'], 
+                                    tel_tube=source
+                                )
+                            )
 
                         elif q.count() > 0:
                             # obtain overlapping observations (returned as a tuple of stream_id)
@@ -673,10 +709,19 @@ class Imprinter:
                             # check to make sure ALL observations overlap all others
                             # and the overlap passes the minimum requirement
                             overlap_time = np.min([o.stop for o in obs_list]) - np.max([o.start for o in obs_list])
-                            if overlap_time.total_seconds() < 0: continue
-                            if overlap_time.total_seconds() < min_overlap: continue
+                            if overlap_time.total_seconds() < 0: 
+                                continue
+                            if overlap_time.total_seconds() < min_overlap: 
+                                continue
                             # add all of the possible overlaps
-                            output.append(ObsSet(obs_list, mode="obs", slots=self.sources[source]['slots'], tel_tube=source))
+                            output.append( 
+                                ObsSet(
+                                    obs_list, 
+                                    mode="obs", 
+                                    slots=self.sources[source]['slots'], 
+                                    tel_tube=source
+                                )
+                            )
 
         # remove exact duplicates in output
         output = drop_duplicates(output)
@@ -690,7 +735,7 @@ class Imprinter:
             try:
                 self.register_book(oset, commit=False)
             except BookExistsError:
-                self.logger.warning(f"Book already registered: {oset}, skipping")
+                self.logger.debug(f"Book already registered: {oset}, skipping")
                 continue
             except NoFilesError:
                 self.logger.warning(f"No files found for {oset}, skipping")

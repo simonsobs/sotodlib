@@ -2,7 +2,7 @@ import datetime as dt
 from typing import Optional
 import typer
 
-from ..io.imprinter import Imprinter
+from sotodlib.io.imprinter import Imprinter
 
 
 def main(

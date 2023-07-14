@@ -6,14 +6,16 @@ import numpy as np
 import logging
 import yaml
 
-from sqlalchemy import desc, asc
+from sqlalchemy import desc, asc, or_, and_, not_
 
 
 from so3g.hk import load_range
 
 import sotodlib.core as core
-from sotodlib.io.load_smurf import load_file, SmurfStatus
-from sotodlib.io.g3tsmurf_db import Observations, Files
+from sotodlib.io.load_smurf import load_file, SmurfStatus, G3tSmurf
+from sotodlib.io.g3tsmurf_db import Observations, Files, TimeCodes, SupRsyncType
+from sotodlib.io.g3thk_db import G3tHk
+
 from scipy.interpolate import interp1d
 
 logger = logging.getLogger(__name__)
@@ -234,6 +236,62 @@ def get_next_iv( my_obs_id, SMURF):
         logger.error(f"Unable to find analysis file in {get_obs_folder(oper.obs_id, SMURF)}")
     session.close()
     return file[0]
+
+def check_timecodes(stream_id, start, stop, SMURF):
+    """Check if we have timecode entries for a stream_id between
+    start and stop timestamps"""
+    session = SMURF.Session()
+    ## check the timecode dirs first
+    t_codes = range( int(start//1e5), int(stop//1e5+1))
+    q = session.query(TimeCodes).filter(
+        TimeCodes.stream_id == stream_id, 
+        or_(*[TimeCodes.timecode == tc for tc in t_codes]),
+    )
+    files = q.filter(TimeCodes.suprsync_type == SupRsyncType.FILES.value)
+    meta = q.filter(TimeCodes.suprsync_type == SupRsyncType.META.value)
+    if files.count() == len(t_codes) and meta.count() == len(t_codes):
+        return True
+
+    return False
+
+def check_stream_ids(stream_ids, start, stop, cfgs, SMURF=None, HK=None):
+    """Validate that a list of stream_ids are able to be bookbound for a
+    specific time range.
+
+    Arguments
+    ---------
+    stream_id: string
+        stream_id to check
+    start: float
+        start ctime
+    stop: float
+        stop ctime 
+    cfgs: string
+
+    Returns
+    -------
+    True if we can say for sure the list of stream_ids is complete
+    """
+    assert start < stop
+    if SMURF is None:
+        SMURF = G3tSmurf.from_configs(cfgs)
+    if HK is None:
+        HK = G3tHk.from_configs(cfgs)
+
+    have_tcodes = np.all([
+        check_timecodes(stream_id, start, stop, SMURF) for stream_id in stream_ids
+    ])
+    if have_tcodes:
+        return True
+    
+        
+    
+    ## check if g3tsmurf thinks it's updated here?    
+    ## check if pysmurf-monitor thinks it's streaming
+    ## check if suprsync agents think they're good
+
+    pass
+
 
 def get_batch(
     obs_id,
