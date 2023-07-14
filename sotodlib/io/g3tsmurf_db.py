@@ -24,44 +24,52 @@ association_table_dets = db.Table('detsets', Base.metadata,
 )
 
 
-class Finalized(Base):
+class TimeCodes(Base):
     """Table for tracking if files and metadata are ready for bookbinding. Built
     to work off of the suprsync finalization files.
 
     Attributes
     ----------
     """
-    __tablename__ = 'finalize'
-
-    stream_id = db.Column(db.String, primary_key=True)
-    files_until = db.Column(db.Float)
-    meta_until = db.Column(db.Float)
+    __tablename__ = 'time_codes'
+    __table_args__ = (
+        db.UniqueConstraint('stream_id', 'suprsync_type','timecode'),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    stream_id = db.Column(db.String)
+    suprsync_type = db.Column(db.Integer)
+    timecode = db.Column(db.Integer)
+    agent = db.Column(db.String)
 
 class SupRsyncType(Enum):
     FILES = 0
     META = 1
 
-class StreamIDs(Base):
-    """Table for tracking stream_ids in the databases and what Suprsync agents
-    are in charge of transferring data for each stream_id as a function of time.
-    We are assuming a stream_id can be moved from one computer to another at
-    some point in time
+    @classmethod
+    def from_string(cls, string):
+        if string == "smurf":
+            return cls.META
+        elif string == "timestreams":
+            return cls.FILES
+        else:
+            raise ValueError("SupRsync strings are 'smurf' or 'timestreams'")
 
-    Attributes
-    ----------
-    """
-    __tablename__ = "stream_ids"
+class Finalize(Base):
+    """Table for tracking what the finalization times for different agents were
+    at the last g3tsmurf update. Will have a special row for the archive update
+    time that will have the name G3tSMURF.
     
+    Attributes
+    -----------
+    agent: string
+        instance id of the suprsync agents
+    time: float
+        the finalization timestamp of the agent at the last update
+    """
+    __tablename__ = 'finalize'
     id = db.Column(db.Integer, primary_key=True)
-    stream_id = db.Column(db.String)
-
-    agent = db.Column(db.String)
-    # a SupRsyncType
-    agent_type = db.Column(db.Integer)
-
-    # timestamps
-    start = db.Column(db.Float)
-    stop = db.Column(db.Float)
+    agent = db.Column(db.String, unique=True)
+    time = db.Column(db.Float) 
 
 class Observations(Base):
     """Times of continuous detector readout. This table is named obs and serves
