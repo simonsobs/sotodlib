@@ -574,7 +574,7 @@ def sat_to_sky(x, theta):
     return interp1d(x, theta, fill_value="extrapolate")
 
 
-def SAT_focal_plane(aman, x=None, y=None, pol=None, mapping_data=None):
+def SAT_focal_plane(aman, x=None, y=None, pol=None, rot=0, mapping_data=None):
     """
     Compute focal plane for a wafer in the SAT.
 
@@ -588,6 +588,8 @@ def SAT_focal_plane(aman, x=None, y=None, pol=None, mapping_data=None):
         y: Detector y positions, if provided will override positions loaded from aman.
 
         pol: Detector polarization angle, if provided will override positions loaded from aman.
+
+        rot: Rotation about the line of site =  -boresight.
 
         mapping_data: Tuple of (x, theta) that can be interpolated to map the focal plane to the sky.
                       Leave as None to use the default mapping.
@@ -618,12 +620,16 @@ def SAT_focal_plane(aman, x=None, y=None, pol=None, mapping_data=None):
     # NOTE: The -1 does the flip about the origin
     theta = -1 * np.sign(x) * fp_to_sky(np.abs(x))
     phi = -1 * np.sign(y) * fp_to_sky(np.abs(y))
-    xi, eta, _ = quat.decompose_xieta(quat.rotation_iso(theta, phi))
+    _xi, _eta, _ = quat.decompose_xieta(quat.rotation_iso(theta, phi))
+    xi = _xi * np.cos(np.deg2rad(rot)) - _eta * np.sin(np.deg2rad(rot))
+    eta = _eta * np.cos(np.deg2rad(rot)) + _xi * np.sin(np.deg2rad(rot))
 
     pol_x, pol_y = gen_pol_endpoints(x, y, pol)
     pol_theta = -1 * np.sign(pol_x) * fp_to_sky(np.abs(pol_x))
     pol_phi = -1 * np.sign(pol_y) * fp_to_sky(np.abs(pol_y))
-    pol_xi, pol_eta, _ = quat.decompose_xieta(quat.rotation_iso(pol_theta, pol_phi))
+    _xi, _eta, _ = quat.decompose_xieta(quat.rotation_iso(pol_theta, pol_phi))
+    pol_xi = _xi * np.cos(np.deg2rad(rot)) - _eta * np.sin(np.deg2rad(rot))
+    pol_eta = _eta * np.cos(np.deg2rad(rot)) + _xi * np.sin(np.deg2rad(rot))
     gamma = get_gamma(pol_xi, pol_eta)
 
     if aman is not None:
