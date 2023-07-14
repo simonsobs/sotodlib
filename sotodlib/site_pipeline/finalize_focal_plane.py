@@ -140,7 +140,7 @@ def _mk_plot(nominal, measured, affine, shift, show_or_save):
         plt.show()
 
 
-def get_nominal(focal_plane, config):
+def get_nominal(focal_plane, config, encoders):
     """
     Get nominal pointing from detector xy positions.
 
@@ -150,6 +150,8 @@ def get_nominal(focal_plane, config):
 
         config: Transformation configuration.
                 Nominally config["coord_transform"].
+
+        encoders: Encoder values to compute LOS rotation from.
 
     Returns:
 
@@ -166,11 +168,15 @@ def get_nominal(focal_plane, config):
         None, x=focal_plane[3], y=focal_plane[4], pol=focal_plane[5], **transform_pars
     )
     if config["telescope"] == "LAT":
+        rot = np.nan_to_num(np.rad2deg(encoders[1]) - 60 - np.rad2deg(encoders[2]))
         xi_nominal, eta_nominal, gamma_nominal = op.LAT_focal_plane(
-            None, config["zemax_path"], x, y, pol, config["rot"], config["tube"]
+            None, config["zemax_path"], x, y, pol, rot, config["tube"]
         )
     elif config["coord_transform"]["telescope"] == "SAT":
-        xi_nominal, eta_nominal, gamma_nominal = op.SAT_focal_plane(None, x, y, pol)
+        rot = np.nan_to_num(-1.0 * np.rad2deg(encoders[2]))
+        xi_nominal, eta_nominal, gamma_nominal = op.SAT_focal_plane(
+            None, x, y, pol, rot
+        )
     else:
         raise ValueError("Invalid telescope provided")
 
@@ -323,12 +329,26 @@ def main():
         logger.error("No valid observations provided")
         sys.exit()
 
+    # Compute nominal encoder vals
+    encoders = np.column_stack(encoders)
+    if _encs_notclose(*encoders):
+        encoders = (np.nan,) * 3
+        logger.error(
+            "Not all of the inputs were taken at similar measurements. Outputs will have nans for encoder related fields."
+        )
+        logger.warning("FOV rotation will be 0")
+    else:
+        encoders = np.nanmedian(encoders, axis=1)
+        if np.isnan(encoders).any():
+            logger.error("Some or all of the encoders are nan")
+            logger.warning("FOV rotation may be 0")
+
     # Compute the average focal plane while ignoring outliers
     det_id, focal_plane = _avg_focalplane(fp_dict)
     measured = focal_plane[:3]
 
     # Get nominal xi, eta, gamma
-    nominal = get_nominal(focal_plane, config["coord_transform"])
+    nominal = get_nominal(focal_plane, config["coord_transform"], encoders)
 
     # Compute transformation between the two nominal and measured pointing
     measured_gamma = np.isfinite(measured[2]).all()
@@ -359,19 +379,7 @@ def main():
     _log_vals(shift, scale, shear, rot)
 
     # Compute the lever arm
-    lever_arm = get_nominal(np.zeros(6), config["coord_transform"])
-
-    # Compute nominal encoder vals
-    encoders = np.column_stack(encoders)
-    if _encs_notclose(*encoders):
-        encoders = (np.nan,) * 3
-        logger.error(
-            "Not all of the inputs were taken at similar measurements. Outputs will have nans for encoder related fields."
-        )
-    else:
-        encoders = np.nanmedian(encoders, axis=1)
-        if np.isnan(encoders).any():
-            logger.error("Some or all of the encoders are nan")
+    lever_arm = get_nominal(np.zeros(6), config["coord_transform"], encoders)
 
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)
