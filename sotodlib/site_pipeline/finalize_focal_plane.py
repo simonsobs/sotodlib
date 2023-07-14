@@ -17,6 +17,29 @@ from sotodlib.coords import optics as op
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
 
 
+def _get_db(ctx, name):
+    db = None
+    for meta in ctx["metadata"]:
+        if "name" not in meta:
+            continue
+        if meta["name"] == "position_match":
+            db = meta["db"]
+            break
+    if db is None:
+        raise ValueError(f"Context does not contain {name}")
+    if db.startswith("./"):
+        db = os.path.join(os.path.dirname(ctx.filename), db[2:])
+    return metadata.ManifestDb(db)
+
+
+def _encs_notclose(az, el, bs):
+    return not (
+        np.isclose(az, az[0], equal_nan=True).all()
+        and np.isclose(el, el[0], equal_nan=True).all()
+        and np.isclose(bs, bs[0], equal_nan=True).all()
+    )
+
+
 def _avg_focalplane(fp_dict):
     focal_plane = []
     det_ids = np.array(list(fp_dict.keys()))
@@ -80,16 +103,15 @@ def _mk_tpout(shift, scale, shear, rot):
     return tpout
 
 
-def _mk_laout(lever_arm):
+def _mk_refout(lever_arm, encoders):
     outdt = [
-        ("xi", np.float32),
-        ("eta", np.float32),
-        ("gamma", np.float32),
+        ("x", np.float32),
+        ("y", np.float32),
+        ("z", np.float32),
     ]
-    row = lever_arm.ravel
-    laout = np.array(row, outdt)
+    refout = np.array([lever_arm, tuple(encoders)], outdt)
 
-    return laout
+    return refout
 
 
 def _add_attrs(dset, attrs):
@@ -198,6 +220,7 @@ def main():
     # Load context
     ctx = Context(config["context"]["path"])
     name = config["context"]["position_match"]
+    db = _get_db(ctx, name)
     query = []
     if "query" in config["context"]:
         query = (ctx.obsdb.query(config["context"]["query"])["obs_id"],)
@@ -222,6 +245,7 @@ def main():
     outpath = os.path.abspath(outpath)
 
     fp_dict = {}
+    encoders = []
     use_matched = config.get("use_matched", False)
     for obs_id, detmap in zip(obs_ids, detmaps):
         # Load data
@@ -231,15 +255,33 @@ def main():
             _aman = rset.to_axismanager(axis_key="dets:readout_id")
             aman = AxisManager(_aman.dets)
             aman.wrap(name, _aman)
+            encs = read_dataset(obs_id, "encoders")
         else:
             logger.info("Loading information from observation %s", obs_id)
             aman = ctx.get_meta(obs_id, dets=config["context"].get("dets", {}))
+            db_match = db.match({"obs:obs_id": obs_id})
+            if db_match:
+                encs = read_dataset(db_match["filename"], "encoders")
+            else:
+                logger.warning("\tMissing encoder information, nans will be used")
+                encs = None
         if name not in aman:
             logger.warning(
                 "\tNo position_match associated with this observation. Skipping."
             )
             continue
 
+        # Figure out encoders
+        if encs is None:
+            encoders.append((np.nan,) * 3)
+        else:
+            az = encs["az"]
+            el = encs["el"]
+            bs = encs["bs"]
+            if _encs_notclose(az, el, bs):
+                logger.warning("\tNot all encoder values are close. Skipping.")
+                continue
+            encoders.append((np.nanmedian(az), np.nanmedian(el), np.nanmedian(bs)))
         # Put SMuRF band channel in the correct place
         smurf = AxisManager(aman.dets)
         smurf.wrap("band", aman[name].band, [(0, smurf.dets)])
@@ -319,17 +361,29 @@ def main():
     # Compute the lever arm
     lever_arm = get_nominal(np.zeros(6), config["coord_transform"])
 
+    # Compute nominal encoder vals
+    encoders = np.column_stack(encoders)
+    if _encs_notclose(*encoders):
+        encoders = (np.nan,) * 3
+        logger.error(
+            "Not all of the inputs were taken at similar measurements. Outputs will have nans for encoder related fields."
+        )
+    else:
+        encoders = np.nanmedian(encoders, axis=1)
+        if np.isnan(encoders).any():
+            logger.error("Some or all of the encoders are nan")
+
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)
     fpout = _mk_fpout(det_id, focal_plane)
     tpout = _mk_tpout(shift, scale, shear, rot)
-    laout = _mk_laout(lever_arm)
+    refout = _mk_refout(lever_arm, encoders)
     with h5py.File(outpath, "w") as f:
         write_dataset(fpout, f, "focal_plane", overwrite=True)
         _add_attrs(f["focal_plane"], {"measured_gamma": measured_gamma})
         write_dataset(tpout, f, "offsets", overwrite=True)
         _add_attrs(f["offsets"], {"affine_matrix": affine})
-        write_dataset(laout, f, "lever_arm", overwrite=True)
+        write_dataset(refout, f, "reference", overwrite=True)
 
 
 if __name__ == "__main__":
