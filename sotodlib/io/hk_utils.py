@@ -18,10 +18,10 @@ def _get_swap_dict(d):
     """
     return {v: k for k, v in d.items()}
 
-def _group_feeds(fields, aliases=False):
+def _group_feeds(fields, alias_exists=False):
     """ group the feeds given the type of data that's output from load_range()
     """
-    if aliases:
+    if alias_exists:
         sorted_fields = sorted(_get_swap_dict(fields))
     else:
         sorted_fields = sorted(fields)
@@ -33,7 +33,7 @@ def _group_feeds(fields, aliases=False):
 
     return grouped_feeds
 
-def _group_data(hkdata, field_dict=None, fields=False, alias=False, config=False):
+def _group_data(hkdata, field_dict=None, field_exists=False, alias_exists=False, config_exists=False):
     """ Sort hkdata that comes out of load_range depending
     on the parameters used for load_range()
 
@@ -45,50 +45,42 @@ def _group_data(hkdata, field_dict=None, fields=False, alias=False, config=False
     
     """
     hknames = list(hkdata.keys())
-    if fields:
+    if field_exists: #meaning only field names provided, no aliases given for them
         grouped_feeds = _group_feeds(hknames)
-    if config:
+    if alias_exists or config_exists:
         # need the field_dictionary from the config file
         assert field_dict is not None
-    if alias or config:
+    if config_exists:
         online_fields = {}
-        for alias in hknames:
-            if config:
-                field_info = {alias: field_dict[alias]}
-                online_fields.update(field_info)
-            elif alias:
-                field_info = {alias: hkdata[alias]}
-                online_fields.update(field_info)
+        for i in range(len(hknames)):
+            alias = hknames[i]
+            field_name = field_dict[alias]
+            field_info = {alias: field_name}
+            online_fields.update(field_info)
+    elif alias_exists:
+        online_fields = _get_swap_dict(field_dict)
 
-        #if config:
+    if config_exists or alias_exists:
         fields_data = {}
         for alias in online_fields:
             time = hkdata[alias][0]
             data = hkdata[alias][1]
             field = online_fields[alias]
-                
+
             info = {field: [alias, time, data]}
             fields_data.update(info)
-        
-        #if alias:
-        #    fields_data = {}
-        #    for field in fields:
-        #        time = hkdata[field][0]
-        #        data = hkdata[field][1]
-                
-        #        info = {field: [alias, time, data]}
-        #        fields_data.update(info)
-                
-        grouped_feeds = _group_feeds(online_fields, aliases=True)
+        # this swaps the order bc i want it swapped after the config file scenario
+        # but with aliases provided in the arg, i don't need it swapped
+        grouped_feeds = _group_feeds(online_fields, alias_exists=True)
     
     grouped_data = [] # requires hkdata from load_range as an input here
     for group in grouped_feeds:
         device_data = {}
         for field in group:
-            if fields:
+            if field_exists:
                 field_dict = {field: hkdata[field]}
                 device_data.update(field_dict)
-            if alias or config:
+            if alias_exists or config_exists:
                 field_dict = {field: fields_data[field]}
                 device_data.update(field_dict)
 
@@ -138,7 +130,7 @@ def sort_hkdata_fromconfig(start, stop, config):
 
     field_dict = hkconfig['field_list']
 
-    grouped_data = _group_data(hkdata, field_dict=field_dict, config=True)
+    grouped_data = _group_data(hkdata, field_dict=field_dict, config_exists=True)
 
     return grouped_data
 
@@ -168,14 +160,28 @@ def sort_hkdata(start, stop, fields, data_dir, alias=None):
     if alias is None:
         hkdata = load_range(start, stop, fields, data_dir=data_dir)
         
-        grouped_data = _group_data(hkdata, fields=True)
+        grouped_data = _group_data(hkdata, field_exists=True)
 
         return grouped_data
     
-    else:
+    elif alias is not None:
+        # TODO: i think here, we need to have it output that field_dict
+        # for grouping purposes, 
         hkdata = load_range(start, stop, fields, alias, data_dir)
-            
-        grouped_data = _group_data(hkdata, alias=True)
+        
+        # grouped data should also have a field_dict = field_dict argument 
+        # which probably means i could combine this function with the sort hkdata from config function
+        # to make it cleaner and easier to work with
+
+        field_dict = {}
+        for i in range(len(fields)):
+            assert len(fields) == len(alias)
+            info = {fields[i]: alias[i]}
+            field_dict.update(info)
+
+        # TODO: i think we might wanna change field_exists = bool to be only fields exist or change it to only be concerned with aliase_exists
+        # and just asser that you are supplying a list of fieldnames
+        grouped_data = _group_data(hkdata, field_dict=field_dict, alias_exists=True)
 
         return grouped_data
         
@@ -351,14 +357,13 @@ def get_hkaman(start, stop, config=None, alias=None, fields=None, data_dir=None)
         if alias is None:
             data = sort_hkdata(start, stop, fields, data_dir)
             hkamans = make_hkaman(data)
-
             return hkamans
         else:
-            data = sort_hkdata(start, stop, fields, alias, data_dir)
+            data = sort_hkdata(start, stop, fields, data_dir, alias=alias)
             hkamans = make_hkaman(data, alias_exists=True)
             return hkamans
 
-def get_detcosamp_hkaman(start, stop, det_aman, config=None, alias=None, fields=None, data_dir=None): #add args for conditions
+def get_detcosamp_hkaman(det_aman, config=None, alias=None, fields=None, data_dir=None): #add args for conditions
     """
     Wrapper to combine get_grouped_hkdata() and make_hkaman() to output one
     axismanager of HK axismanagers that are cosampled to detector timestreams.
@@ -385,16 +390,14 @@ def get_detcosamp_hkaman(start, stop, det_aman, config=None, alias=None, fields=
 
     if config is not None:
         data = sort_hkdata_fromconfig(start, stop,config)
-        amans = make_hkaman(data, alias_exists=True, det_cosampled=True, det_aman=det_aman)
-        
+        amans = make_hkaman(data, det_aman=det_aman, alias_exists=True, det_cosampled=True)
         return amans
     elif fields is not None:
         if alias is None:
             data = sort_hkdata(start, stop, fields, data_dir)
-            amans = make_hkaman(data)
-
+            amans = make_hkaman(data, det_cosampled=True, det_aman=det_aman)
             return amans
         else:
-            data = sort_hkdata(start, stop, fields, alias, data_dir)
+            data = sort_hkdata(start, stop, fields, data_dir, alias=alias)
             amans = make_hkaman(data, alias_exists=True, det_cosampled=True, det_aman=det_aman)
             return amans
