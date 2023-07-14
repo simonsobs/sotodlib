@@ -5,7 +5,7 @@ from typing import Optional
 from ..io.imprinter import Imprinter
 
 
-def update_book_plan(
+def main(
     config: str,
     min_ctime: Optional[float] = None,
     max_ctime: Optional[float] = None,
@@ -74,4 +74,4 @@ def get_parser(parser=None):
 if __name__ == "__main__":
     parser = get_parser(parser=None)
     args = parser.parse_args()
-    update_book_plan(**vars(args))
+    main(**vars(args))

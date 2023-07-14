@@ -4,7 +4,7 @@ import traceback
 from ..io.imprinter import Imprinter
 
 
-def make_book(config: str, output_root: str, source: Optional[str], logger=None):
+def main(config: str, output_root: str, source: Optional[str], logger=None):
     """Make books based on imprinter db
     
     Parameters
@@ -56,4 +56,4 @@ def get_parser(parser=None):
 if __name__ == "__main__":
     parser = get_parser(parser=None)
     args = parser.parse_args()
-    make_book(**vars(args))
+    main(**vars(args))
