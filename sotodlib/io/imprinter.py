@@ -17,7 +17,8 @@ from spt3g import core
 
 import sotodlib
 from .bookbinder import BookBinder
-from .load_smurf import G3tSmurf, Observations as G3tObservations, SmurfStatus, get_channel_info
+from .load_smurf import (G3tSmurf, Observations as G3tObservations, SmurfStatus, 
+                        get_channel_info, TimeCodes, SupRsyncType, Files)
 from ..site_pipeline.util import init_logger
 
 
@@ -303,7 +304,66 @@ class Imprinter:
                     tel_tube=daq_node,  # fixme: tel_tube and daq_node may not be the same
                 )
                 session.add(book)
-            if commit: session.commit()
+            if commit: 
+                session.commit()
+    
+    @loop_over_sources
+    def register_timecode_books(self, source, commit=True, session=None):
+        """Register smurf and stray books with database. We do not expect many
+        stray books as nearly all .g3 files will be associated with some
+        obs or oper book. 
+        """
+        session = session or self.get_session()
+
+        g3session = self.get_g3tsmurf_session(source)
+        streams = self.sources[source].get("slots")
+        
+        tcs = g3session.query(TimeCodes.timecode).distinct().all()
+        stream_filt = or_(*[TimeCodes.stream_id == s for s in streams])
+        stream_filt_files = or_(*[Files.stream_id == s for s in streams])
+
+        for tc, in tcs:
+            q = g3session.query(TimeCodes).filter(
+                TimeCodes.timecode == tc,
+                stream_filt
+            )
+            files = q.filter(TimeCodes.suprsync_type == SupRsyncType.FILES.value)
+            meta = q.filter(TimeCodes.suprsync_type == SupRsyncType.META.value)
+            
+            if files.count() == len(streams) and meta.count() == len(streams):
+                ## register books
+                book_id = f"smurf_{tc}_{source}"
+                if self.get_book(book_id) is not None:
+                    continue
+                self.logger.debug(f"registering {book_id}")
+                book1 = Books(
+                    bid = book_id,
+                    type="smurf",
+                    status = UNBOUND,
+                    tel_tube = source,
+                )
+                session.add(book1)
+                q = g3session.query(Files).filter(
+                    Files.start >= dt.datetime.utcfromtimestamp(tc*1e5),
+                    Files.start < dt.datetime.utcfromtimestamp((tc+1)*1e5),
+                    stream_filt_files,
+                    Files.obs_id == None,
+                )
+                if q.count() == 0: # no stray g3 files
+                    self.logger.debug(f"No stray book for {tc}, {source}")
+                    continue
+                book_id = f"stray_{tc}_{source}"
+                if self.get_book(book_id) is not None:
+                    continue
+                book2 = Books(
+                    bid = book_id,
+                    type="stray", 
+                    status = UNBOUND,
+                    tel_tube = source
+                )
+
+        if commit:
+            session.commit()
 
     def _get_binder_for_book(self, book, output_root="out", pbar=False):
         """get the appropriate bookbinder for the book based on its type"""
@@ -361,7 +421,7 @@ class Imprinter:
                 def bind(self, pbar=False):
                     shutil.copytree(self.indir, self.outdir)
             return _HKBinder(book_path_src, book_path_tgt)
-
+        
         else:
             raise NotImplementedError(f"binder for book type {book.type} not implemented")
 
