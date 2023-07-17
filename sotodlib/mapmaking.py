@@ -504,7 +504,7 @@ class Nmat:
     def __init__(self):
         """Initialize the noise model. In subclasses this will typically set up parameters, but not
         build the details that depend on the actual time-ordered data"""
-        self.ivar  = 1.0
+        self.ivar  = np.ones(1, dtype=np.float32)
         self.ready = True
     def build(self, tod, **kwargs):
         """Measure the noise properties of the given time-ordered data tod[ndet,nsamp], and
