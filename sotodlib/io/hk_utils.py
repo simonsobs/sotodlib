@@ -19,7 +19,21 @@ def _get_swap_dict(d):
     return {v: k for k, v in d.items()}
 
 def _group_feeds(fields, alias_exists=False):
-    """ group the feeds given the type of data that's output from load_range()
+    """ Sort and group the HK feeds that are output from load_range() 
+    by device.
+
+    Parameters:
+        fields (dict) : dict of names of fields and/or aliases
+        alias_exists (bool) : determines whether the field dict provided
+            has aliases for the field names. If True, need to invert the
+            dictionary to properly group by device. Grouping can only be done
+            by knowing the exact field name. If False, no aliases were provided
+            in the fields dictionary. Default is False.
+    Returns:
+        grouped_feeds (list): a sorted, grouped list of fields by device name;
+            critical for eventually outputting an axismanager that's broken down
+            per HK device
+    
     """
     if alias_exists:
         sorted_fields = sorted(_get_swap_dict(fields))
@@ -33,24 +47,54 @@ def _group_feeds(fields, alias_exists=False):
 
     return grouped_feeds
 
-def _group_data(hkdata, field_dict=None, field_exists=False, alias_exists=False, config_exists=False):
-    """ Sort hkdata that comes out of load_range depending
-    on the parameters used for load_range()
+def _group_data(hkdata, field_dict=None, alias_exists=False, config_exists=False): # field_exists=False
+    """ Sort hkdata that comes out of load_range() depending on the parameters
+    used for load_range() -- config file, field names only, or aliases provided
+    with field names.
 
-    Default assumes a list of fields were made to make load_range()
+    Parameters:
+        hkdata (dict) : data output from load_range()
+        field_dict (dict or None) : If None, this information already exists with 
+            the way hkdata was created; i.e., we already have a list of field names
+            that we can immediately start grouping. If None, the argument for
+            load_range() was only a list of field names (no aliases provided). If
+            field_dict provided, aliases do exist for each field name, but
+            are either coming from a config file input for load_range() or as a
+            list of aliases input into load_range().
+        alias_exists (bool) : If True, aliases were given for each field name. 
+            If True, field_dict can't be None and manipulation is required to 
+            field_dict to ensure data is grouped by parsing through the field name.
+            If False, only field names were provided in field_dict. Default is False.
+        config_exists (bool) : If True, load_range() was used using a config file;
+            typically, config files have aliases so must follow a similar manipulation
+            path as alias_exists. Default is False.
 
     Returns:
-        get_grouped_data(list): grouped list of data per HK feed/device;
+        get_grouped_data (list) : grouped list of data per HK feed/device;
         useful for turning into a grouped set of axismanagers
+
+    Notes
+    -----
+        Note that only one bool must be True at a time. If there are field names only
+        and no config file, alias_exists=False and config_exists=False, but
+        field_dict is not None. If aliases were provided for load_range() without
+        a config file, alias_exists=True and config_exists=False, field_dict
+        is not None. If a config file was used in load_range(), alias_exists=False,
+        config_exists=True, and field_dict is not None.
     
     """
     hknames = list(hkdata.keys())
-    if field_exists: #meaning only field names provided, no aliases given for them
+
+    if alias_exists is False: 
+        # only field names provided; easy grouping of feeds, skip all steps below 
         grouped_feeds = _group_feeds(hknames)
+    
     if alias_exists or config_exists:
-        # need the field_dictionary from the config file
+        # check for a field dict
         assert field_dict is not None
+    
     if config_exists:
+        # here, field_dict looks like --> observatory.lsa22yg.channel1: X-001 
         online_fields = {}
         for i in range(len(hknames)):
             alias = hknames[i]
@@ -58,6 +102,8 @@ def _group_data(hkdata, field_dict=None, field_exists=False, alias_exists=False,
             field_info = {alias: field_name}
             online_fields.update(field_info)
     elif alias_exists:
+        # here, field dict looks like --> X-001: observatory.lsa22yg.channel1
+        # swap dict to ensure grouping happens by field name, not alias
         online_fields = _get_swap_dict(field_dict)
 
     if config_exists or alias_exists:
@@ -69,11 +115,10 @@ def _group_data(hkdata, field_dict=None, field_exists=False, alias_exists=False,
 
             info = {field: [alias, time, data]}
             fields_data.update(info)
-        # this swaps the order bc i want it swapped after the config file scenario
-        # but with aliases provided in the arg, i don't need it swapped
+        
         grouped_feeds = _group_feeds(online_fields, alias_exists=True)
     
-    grouped_data = [] # requires hkdata from load_range as an input here
+    grouped_data = []
     for group in grouped_feeds:
         device_data = {}
         for field in group:
@@ -160,7 +205,7 @@ def sort_hkdata(start, stop, fields, data_dir, alias=None):
     if alias is None:
         hkdata = load_range(start, stop, fields, data_dir=data_dir)
         
-        grouped_data = _group_data(hkdata, field_exists=True)
+        grouped_data = _group_data(hkdata, alias_exists=False)
 
         return grouped_data
     
