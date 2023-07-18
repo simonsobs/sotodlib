@@ -21,6 +21,7 @@ from toast.utils import Logger, Environment, rate_from_times
 from toast.timing import function_timer, Timer
 from toast.observation import default_values as defaults
 from toast.fft import FFTPlanReal1DStore
+from toast.instrument_coords import xieta_to_quat, quat_to_xieta
 
 import so3g
 
@@ -350,12 +351,20 @@ class MLMapmaker(Operator):
             # Convert the focalplane offsets into the expected form
             det_to_row = {y["name"]: x for x, y in enumerate(fp.detector_data)}
             det_quat = np.array([fp.detector_data["quat"][det_to_row[x]] for x in dets])
+            """
             det_theta, det_phi, det_pa = toast.qarray.to_iso_angles(det_quat)
 
             radius = np.sin(det_theta)
             xi  = radius * np.sin(det_phi)
             eta = radius * np.cos(det_phi)
             gamma = np.pi/2 - det_pa
+            """
+            xi, eta, gamma = quat_to_xieta(det_quat)
+            # gamma = gamma #             good Q, little bit of U
+            # gamma = np.pi / 2 - gamma # good Q, lots of U
+            # gamma = gamma - np.pi / 2 # inverted Q, little bit of U
+            # gamma = -gamma #            inverted Q, lots of U
+            gamma = 1.5 * np.pi - gamma
             # for d in range(len(det_quat)):
             #     print(f"{d:03d}: {det_quat[d]}")
             #     print(f"  theta = {det_theta[d]}")
