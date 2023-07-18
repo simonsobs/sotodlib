@@ -2,11 +2,12 @@ import so3g
 import numpy as np
 from sotodlib.tod_ops import detrend_tod
 from sotodlib.core import AxisManager
+import os
 
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 
-import filter_stats_functions as func
+from sotodlib.tod_ops import filter_stats_functions as func
 
 
 cols = ['Number of Detectors', 'Y and X Extent Ratio', 'Mean abs(Correlation)',
