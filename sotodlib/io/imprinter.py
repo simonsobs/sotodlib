@@ -333,35 +333,31 @@ class Imprinter:
             if files.count() == len(streams) and meta.count() == len(streams):
                 ## register books
                 book_id = f"smurf_{tc}_{source}"
-                if self.get_book(book_id) is not None:
-                    continue
-                self.logger.debug(f"registering {book_id}")
-                book1 = Books(
-                    bid = book_id,
-                    type="smurf",
-                    status = UNBOUND,
-                    tel_tube = source,
-                )
-                session.add(book1)
+                if self.get_book(book_id) is None:
+                    self.logger.debug(f"registering {book_id}")
+                    book1 = Books(
+                        bid = book_id,
+                        type="smurf",
+                        status = UNBOUND,
+                        tel_tube = source,
+                    )
+                    session.add(book1)
                 q = g3session.query(Files).filter(
                     Files.start >= dt.datetime.utcfromtimestamp(tc*1e5),
                     Files.start < dt.datetime.utcfromtimestamp((tc+1)*1e5),
                     stream_filt_files,
                     Files.obs_id == None,
                 )
-                if q.count() == 0: # no stray g3 files
-                    self.logger.debug(f"No stray book for {tc}, {source}")
-                    continue
                 book_id = f"stray_{tc}_{source}"
-                if self.get_book(book_id) is not None:
-                    continue
-                book2 = Books(
-                    bid = book_id,
-                    type="stray", 
-                    status = UNBOUND,
-                    tel_tube = source
-                )
-
+                
+                if q.count() > 0 and self.get_book(book_id) is None: 
+                    book2 = Books(
+                        bid = book_id,
+                        type="stray", 
+                        status = UNBOUND,
+                        tel_tube = source
+                    )
+                    session.add(book2)
         if commit:
             session.commit()
 
@@ -424,6 +420,8 @@ class Imprinter:
                         ignore=shutil.ignore_patterns('*.dat', '*_mask.txt','*_freq.txt')
                     )
             return _FakeBinder(book_path_src, book_path_tgt)
+        elif book.type in ['stray']:
+            pass    
         
         else:
             raise NotImplementedError(f"binder for book type {book.type} not implemented")
@@ -819,13 +817,19 @@ class Imprinter:
 
         """
         session = self.get_g3tsmurf_session(book.tel_tube)
-        obs_ids = [o.obs_id for o in book.obs]
-        obs = session.query(G3tObservations).filter(G3tObservations.obs_id.in_(obs_ids)).all()
+        if book.type in ['obs', 'oper']:
+            obs_ids = [o.obs_id for o in book.obs]
+            obs = session.query(G3tObservations).filter(G3tObservations.obs_id.in_(obs_ids)).all()
 
-        res = OrderedDict()
-        for o in obs:
-            res[o.obs_id] = sorted([f.name for f in o.files])
-        return res
+            res = OrderedDict()
+            for o in obs:
+                res[o.obs_id] = sorted([f.name for f in o.files])
+            return res
+        elif book.type in ['stray']:
+            pass
+        else:
+            raise NotImplementedError(f"book type {book.type} not understood for"
+                                       " file search")
 
     def get_readout_ids_for_book(self, book):
         """
