@@ -332,6 +332,9 @@ class Imprinter:
             
             if files.count() == len(streams) and meta.count() == len(streams):
                 ## register books
+                book_start = dt.datetime.utcfromtimestamp(tc*1e5)
+                book_stop = dt.datetime.utcfromtimestamp((tc+1)*1e5)
+
                 book_id = f"smurf_{tc}_{source}"
                 if self.get_book(book_id) is None:
                     self.logger.debug(f"registering {book_id}")
@@ -340,11 +343,13 @@ class Imprinter:
                         type="smurf",
                         status = UNBOUND,
                         tel_tube = source,
+                        start = book_start,
+                        stop = book_stop
                     )
                     session.add(book1)
                 q = g3session.query(Files).filter(
-                    Files.start >= dt.datetime.utcfromtimestamp(tc*1e5),
-                    Files.start < dt.datetime.utcfromtimestamp((tc+1)*1e5),
+                    Files.start >= book_start,
+                    Files.start < book_stop),
                     stream_filt_files,
                     Files.obs_id == None,
                 )
@@ -355,7 +360,9 @@ class Imprinter:
                         bid = book_id,
                         type="stray", 
                         status = UNBOUND,
-                        tel_tube = source
+                        tel_tube = source,
+                        start = book_start,
+                        stop = book_stop,
                     )
                     session.add(book2)
         if commit:
