@@ -640,7 +640,7 @@ class G3tHWP():
     
     def _set_empty_axes(self, aman):
         
-        aman.wrap_new('timestamps', shape=('samps', ), dtype=np.int32)
+        aman.wrap_new('timestamps', shape=('samps', ), dtype=np.float32)
         aman.wrap_new('hwp_angle_ver1', shape=('samps', ), dtype=np.float32)
         aman.wrap_new('hwp_angle_ver2', shape=('samps', ), dtype=np.float32)
         aman.wrap_new('stable', shape=('samps', ), dtype=np.bool)
@@ -651,7 +651,7 @@ class G3tHWP():
         return 
         
     def _write_empty_solution_h5(self, tod, output=None, h5_address=None):
-
+        
         logger.info('Writing empty solutions')
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         self._set_empty_axes(aman)
@@ -659,6 +659,16 @@ class G3tHWP():
         aman.save(output, h5_address, overwrite=True)
         
         return
+
+    def _bool_interpolation(self, timestamp1, data, timestamp2):
+        interp = scipy.interpolate.interp1d(timestamp1, data, kind='linear', bounds_error=False)(timestamp2)
+        result = []
+        for i in interp:
+            if i > .999:
+                result.append(True)
+            else:
+                result.append(False)
+        return result
 
     
     def write_solution_h5(self, tod, output=None, h5_address=None):
@@ -732,7 +742,7 @@ class G3tHWP():
         logger.debug("analyze")
         
         try:
-            solved = self.analyze(data)
+            solved = self.analyze(data, mod2pi=False)
         except Exception as e:
             logger.error(f"Exception '{e}' thrown while calculating HWP angle. Encoder signal might have too much noise.")
             self._write_empty_solution_h5(tod, output, h5_address)
@@ -753,10 +763,11 @@ class G3tHWP():
         # write solution
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         self._set_empty_axes(aman)
-        
+        if solved['fast_time'][0] > tod.timestamps[0] or solved['fast_time'][-1] < tod.timestamps[-1]:
+            logger.error("The angle solution contains empty data at the beginning or end of the timestamps.")
         aman.timestamps[:] = tod.timestamps
-        aman.stable[:] = scipy.interpolate.interp1d(solved['slow_time'], solved['stable'], kind='linear', bounds_error=False)(tod.timestamps)
-        aman.locked[:] = scipy.interpolate.interp1d(solved['slow_time'], solved['locked'], kind='linear', bounds_error=False)(tod.timestamps)
+        aman.stable[:] = self._bool_interpolation(solved['slow_time'], solved['stable'], tod.timestamps)
+        aman.locked[:] = self._bool_interpolation(solved['slow_time'], solved['locked'], tod.timestamps)
         aman.hwp_rate[:] = scipy.interpolate.interp1d(solved['slow_time'], solved['hwp_rate'], kind='linear', bounds_error=False)(tod.timestamps)
         if 'fast_time_raw' in solved.keys():
             aman.hwp_angle_ver1[:] = scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps)
