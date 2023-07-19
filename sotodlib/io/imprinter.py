@@ -392,12 +392,12 @@ class Imprinter:
                                     book_path)
             return bookbinder
         
-        elif book.type in ['hk']:
+        elif book.type in ['hk', 'smurf']:
             # get source directory for hk book
-            hk_root = op.join(data_root, "hk")
+            root = op.join(data_root, book.type)
             first5 = book.bid.split('_')[1]
             assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
-            book_path_src = op.join(hk_root, first5)
+            book_path_src = op.join(root, first5)
 
             # get target directory for hk book
             odir = op.join(output_root, book.type)
@@ -405,7 +405,7 @@ class Imprinter:
                 os.makedirs(odir)
             book_path_tgt = os.path.join(odir, book.bid)
 
-            class _HKBinder:  # dummy class to mimic baseline bookbinder
+            class _FakeBinder:  # dummy class to mimic baseline bookbinder
                 def __init__(self, indir, outdir):
                     self.indir = indir
                     self.outdir = outdir
@@ -416,11 +416,14 @@ class Imprinter:
                         'start_time': float(first5)*1e5,
                         'stop_time': (float(first5)+1)*1e5,
                         'telescope': book.tel_tube.lower(),
-                        'type': 'hk',
+                        'type': book.type,
                     }
                 def bind(self, pbar=False):
-                    shutil.copytree(self.indir, self.outdir)
-            return _HKBinder(book_path_src, book_path_tgt)
+                    shutil.copytree(
+                        self.indir, self.outdir,
+                        ignore=shutil.ignore_patterns('*.dat', '*_mask.txt','*_freq.txt')
+                    )
+            return _FakeBinder(book_path_src, book_path_tgt)
         
         else:
             raise NotImplementedError(f"binder for book type {book.type} not implemented")
