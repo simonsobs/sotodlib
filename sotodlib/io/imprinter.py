@@ -759,8 +759,6 @@ class Imprinter:
             max_ctime = min([obs.timestamp for obs in q_incomplete.all()])
         max_stop = dt.datetime.utcfromtimestamp(max_ctime)
        
-        print(max_stop, max_ctime, min_ctime)
-
         # find all complete observations that start within the time range
         obs_q = session.query(G3tObservations).filter(
             G3tObservations.timestamp >= min_ctime,
