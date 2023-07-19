@@ -349,7 +349,7 @@ class Imprinter:
                     session.add(book1)
                 q = g3session.query(Files).filter(
                     Files.start >= book_start,
-                    Files.start < book_stop),
+                    Files.start < book_stop,
                     stream_filt_files,
                     Files.obs_id == None,
                 )
@@ -395,7 +395,7 @@ class Imprinter:
                                     book_path)
             return bookbinder
         
-        elif book.type in ['hk', 'smurf']:
+        elif book.type in ['hk', 'smurf' ]:
             # get source directory for hk book
             root = op.join(data_root, book.type)
             first5 = book.bid.split('_')[1]
@@ -427,9 +427,48 @@ class Imprinter:
                         ignore=shutil.ignore_patterns('*.dat', '*_mask.txt','*_freq.txt')
                     )
             return _FakeBinder(book_path_src, book_path_tgt)
-        elif book.type in ['stray']:
-            pass    
         
+        elif book.type in ['stray']:
+            flist = self.get_files_for_book(book)
+
+            # get source directory for stray book
+            root = op.join(data_root, "timestreams")
+            first5 = book.bid.split('_')[1]
+            assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
+            book_path_src = op.join(root, first5)
+
+            # get target directory for hk book
+            odir = op.join(output_root, book.type)
+            if not op.exists(odir):
+                os.makedirs(odir)
+            book_path_tgt = os.path.join(odir, book.bid)
+
+            class _FakeBinder:  # dummy class to mimic baseline bookbinder
+                def __init__(self, indir, outdir, file_list):
+                    self.indir = indir
+                    self.outdir = outdir
+                    self.file_list = file_list
+                def get_metadata(self):
+                    return {
+                        'book_id': book.bid,
+                        # dummy start and stop times
+                        'start_time': float(first5)*1e5,
+                        'stop_time': (float(first5)+1)*1e5,
+                        'telescope': book.tel_tube.lower(),
+                        'type': book.type,
+                    }
+                def bind(self, pbar=False):
+                    if not os.path.exists(self.outdir):
+                        os.makedirs(self.outdir)
+                    for f in self.file_list:
+                        relpath = os.path.relpath(f, self.indir)
+                        path = os.path.join(self.outdir, relpath)
+                        base,_ = os.path.split(path)
+                        if not os.path.exists(base):
+                            os.makedirs(base)
+                        shutil.copy( f, os.path.join(self.outdir, relpath))
+
+            return _FakeBinder(book_path_src, book_path_tgt, flist)
         else:
             raise NotImplementedError(f"binder for book type {book.type} not implemented")
 
@@ -819,7 +858,7 @@ class Imprinter:
 
         Returns
         -------
-        files: dict
+        files: dict if book.type is 'obs' or 'oper', otherwise list
             {obs_id: [file_paths...]}
 
         """
@@ -833,7 +872,16 @@ class Imprinter:
                 res[o.obs_id] = sorted([f.name for f in o.files])
             return res
         elif book.type in ['stray']:
-            pass
+            streams = self.sources[book.tel_tube].get("slots")
+            stream_filt_files = or_(*[Files.stream_id == s for s in streams])
+            flist = session.query(Files).filter(
+                Files.start >= book.start,
+                Files.start < book.stop,
+                stream_filt_files,
+                Files.obs_id == None,
+            ).all()
+            return [f.name for f in flist]
+
         else:
             raise NotImplementedError(f"book type {book.type} not understood for"
                                        " file search")
