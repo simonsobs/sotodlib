@@ -54,5 +54,7 @@ def main(
                                           force_single_stream=force_single_stream)
     # hk books
     imprinter.register_hk_books()
+    # smurf and stray books
+    imprinter.register_timecode_books()
 if __name__ == "__main__":
     typer.run(main)
