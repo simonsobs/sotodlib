@@ -2621,7 +2621,7 @@ def load_g3tsmurf_obs(
         samples=samples,
         obsfiledb=db,
         no_signal=no_signal,
-        merge_det_info=False
+        merge_det_info=True
     )
 
 
