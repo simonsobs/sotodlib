@@ -54,8 +54,16 @@ def check_was_streaming(stream_id, start, stop, cfgs=None, HK=None, servers=None
     stream_id: string
     start: timestamp
     stop: timestamp
-    cfgs: configuration dictionary with finalization information
+    cfgs: optional, dictionary
+        configuration dictionary with finalization informtion. Format matches
+        what is described in G3tSmurf.from_configs. If not given, HK and servers
+        arguments are required.
+    servers: optional, list
+        list of dictionaries containing the server to instance id mapping as
+        described in G3tSmurf.from_configs. In not given the cfgs dictionary is
+        used instead.
     HK: optional, G3tHK instance
+        if not given, loaded using configs dictionary
 
     Returns
     -------
