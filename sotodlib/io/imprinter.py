@@ -26,6 +26,7 @@ from .load_smurf import (
     SupRsyncType,
     Files,
 )
+from .g3thk_db import G3tHk, HKFiles
 from ..site_pipeline.util import init_logger
 
 
@@ -101,7 +102,7 @@ class Books(Base):
     updated_at: time when book was updated
     timing: bool, whether timing system is on
     path: str, location of book directory
-
+    lvl2_deleted: bool, if level 2 data has been purged yet
     """
 
     __tablename__ = "books"
@@ -121,6 +122,7 @@ class Books(Base):
     )
     timing = db.Column(db.Boolean)
     path = db.Column(db.String)
+    lvl2_deleted = db.Column(db.Boolean, default=False)
 
     def __repr__(self):
         return f"<Book: {self.bid}>"
@@ -172,6 +174,7 @@ class Imprinter:
         self.session = None
         self.g3tsmurf_sessions = {}
         self.archives = {}
+        self.hk_archives = {}
 
         self.logger = logger
         if logger is None:
@@ -216,6 +219,14 @@ class Imprinter:
         if not return_archive:
             return self.g3tsmurf_sessions[source]
         return self.g3tsmurf_sessions[source], self.archives[source]
+
+    def get_g3thk(self, source):
+        """Get a G3tHk database using the g3tsmurf config file."""
+        if source not in self.hk_archives:
+            self.hk_archives[source] = G3tHk.from_configs(
+                self.config["sources"][source]["g3tsmurf"]
+            )
+        return self.hk_archives[source]
 
     def register_book(self, obsset, bid=None, commit=True, session=None):
         """Register book to database
@@ -328,6 +339,8 @@ class Imprinter:
                     bid=book_id,
                     type="hk",
                     status=UNBOUND,
+                    start=dt.datetime.utcfromtimestamp(int(ctime) * 1e5),
+                    stop=dt.datetime.utcfromtimestamp((int(ctime) + 1) * 1e5),
                     tel_tube=daq_node,  # fixme: tel_tube and daq_node may not be the same
                 )
                 session.add(book)
@@ -635,6 +648,38 @@ class Imprinter:
         if session is None:
             session = self.get_session()
         return session.query(Books).all()
+
+    def get_level2_deleteable_books(self, session=None, max_time=None):
+        """Get all bound books from database where we need to delete the level2
+        data
+
+        Parameters
+        ----------
+        session: BookDB session
+        max_time: maxmimum time of book start to search
+
+        Returns
+        -------
+        books: list of book objects
+
+        """
+        if session is None:
+            session = self.get_session()
+
+        q = session.query(Books).filter(
+            Books.status == BOUND,
+            Books.lvl2_deleted == False,
+            or_(  ## not implementing smurf deletion just yet
+                Books.type == "obs",
+                Books.type == "oper",
+                Books.type == "stray",
+                Books.type == "hk",
+            ),
+        )
+        if max_time is not None:
+            q = q.filter(Books.stop <= max_time)
+
+        return q.all()
 
     def get_unbound_books(self, session=None):
         """Get all unbound books from database.
@@ -975,6 +1020,17 @@ class Imprinter:
                 .all()
             )
             return [f.name for f in flist]
+        elif book.type == "hk":
+            HK = self.get_g3thk(book.tel_tube)
+            flist = (
+                HK.session.query(HKFiles)
+                .filter(
+                    HKFiles.global_start_time >= book.start.timestamp(),
+                    HKFiles.global_start_time < book.stop.timestamp(),
+                )
+                .all()
+            )
+            return [f.path for f in flist]
 
         else:
             raise NotImplementedError(
@@ -1098,6 +1154,50 @@ class Imprinter:
             .all()
         )
         return {o.obs_id: o for o in obs}
+
+    def delete_lvl2_files(self, book, dry_run=True):
+        """Delete level 2 data from already bound books
+
+        Parameters
+        ----------
+        book: book object
+        dry_run: bool
+            if true, just prints plans to self.logger.info
+        """
+        if book.status != BOUND:
+            raise ValueError(f"Book must be bound to delete level 2 files")
+
+        if book.type == "obs" or book.type == "obs":
+            session, SMURF = self.get_g3tsmurf_session(
+                book.tel_tube, return_archive=True
+            )
+            odic = self.get_g3tsmurf_obs_for_book(book)
+
+            for oid, obs in odic.items():
+                SMURF.delete_observation_files(
+                    obs, session, dry_run=dry_run, my_logger=self.logger
+                )
+        elif book.type == "stray":
+            session, SMURF = self.get_g3tsmurf_session(
+                book.tel_tube, return_archive=True
+            )
+            flist = self.get_files_for_book(book)
+            for f in flist:
+                db_file = session.query(Files).filter(Files.name == f).one()
+                SMURF.delete_file(
+                    db_file, session, dry_run=dry_run, my_logger=self.logger
+                )
+        elif book.type == "hk":
+            HK = self.get_g3thk(book.tel_tube)
+            flist = self.get_files_for_book(book)
+            for f in flist:
+                hkfile = HK.session.query(HKFiles).filter(HKFiles.path == f).one()
+                HK.delete_file(hkfile, dry_run=dry_run, my_logger=self.logger)
+        else:
+            raise NotImplementedError(
+                f"Do not know how to delete level 2 files"
+                f" for book of type {book.type}"
+            )
 
     def delete_book_files(self, book):
         """Delete all files associated with a book

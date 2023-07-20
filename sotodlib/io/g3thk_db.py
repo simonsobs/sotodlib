@@ -548,3 +548,45 @@ class G3tHk:
             configs = yaml.safe_load(open(configs, "r"))
 
         return cls(os.path.join(configs["data_prefix"], "hk"), configs["g3thk_db"])
+
+    def delete_file(self, hkfile, dry_run=False, my_logger=None):
+        """WARNING: Removes actual files from file system.
+
+        Delete an hkfile instance, its on-disk file, and all associated agents
+        and field entries in the database
+
+        Arguments
+        ---------
+        hkfile: HKFile instance. Assumes file was queried uses self.session
+        """
+
+        if my_logger is None:
+            my_logger = logger
+
+        ## remove field info
+        my_logger.info(f"removing field entries for {hkfile.path} from database")
+        if not dry_run:
+            for f in hkfile.fields:
+                self.session.delete(f)
+
+        ## remove agent info
+        my_logger.info(f"removing agent entries for {hkfile.path} from database")
+        if not dry_run:
+            for a in hkfile.agents:
+                self.session.delete(a)
+
+        if not os.path.exists(hkfile.path):
+            my_logger.warning(f"{hkfile.path} appears already deleted")
+        else:
+            my_logger.info(f"deleting {hkfile.path}")
+            if not dry_run:
+                os.remove(hkfile.path)
+
+                base, _ = os.path.split(hkfile.path)
+                if len(os.listdir(base)) == 0:
+                    os.rmdir(base)
+
+        my_logger.info(f"remove {hkfile.path} from database")
+        if not dry_run:
+            self.session.delete(hkfile)
+            self.commit()
