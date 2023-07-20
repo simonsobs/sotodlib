@@ -538,7 +538,7 @@ class G3tSmurf:
                 logger.warning(f"Failed on file {f}:\n{e}")
         session.close()
 
-    def delete_file(self, db_file, session=None):
+    def delete_file(self, db_file, session=None, dry_run=False, my_logger=None):
         """WARNING: Deletes data from the file system
 
         Delete both a database file entry, it's associated frames, AND the
@@ -551,27 +551,40 @@ class G3tSmurf:
         session: optional, SQLAlchemy session
             should be passed if file is called as part of a larger cleanup
             function
+        dry_run: boolean
+            if true, just prints deletion to my_logger.info
+        my_logger: logger, optional
+            option to pass different logger to this function
         """
 
         if session is None:
             session = self.Session()
+        if my_logger is None:
+            my_logger = logger
 
         db_frames = db_file.frames
-        [session.delete(frame) for frame in db_frames]
+        my_logger.info(f"Deleting frame entries for {db_file.name}")
+        if not dry_run:
+            [session.delete(frame) for frame in db_frames]
 
         if not os.path.exists(db_file.name):
-            self.logger.warning(
+            my_logger.warning(
                 f"Database file {db_file.name} appears already" " deleted on disk"
             )
         else:
-            os.remove(db_file.name)
+            my_logger.info(f"Deleting file {db_file.name}")
 
-            ## clean up directory if it is empty
-            base, _ = os.path.split(db_file.name)
-            if len(os.listdir(base)) == 0:
-                os.rmdir(base)
-        session.delete(db_file)
-        session.commit()
+            if not dry_run:
+                os.remove(db_file.name)
+
+                ## clean up directory if it is empty
+                base, _ = os.path.split(db_file.name)
+                if len(os.listdir(base)) == 0:
+                    os.rmdir(base)
+        my_logger.info(f"Deleting database entry for {db_file.name}")
+        if not dry_run:
+            session.delete(db_file)
+            session.commit()
 
     def add_new_channel_assignment(self, stream_id, ctime, cha, cha_path, session):
         """Add new entry to the Channel Assignments table. Called by the
@@ -1064,14 +1077,18 @@ class G3tSmurf:
             logger.debug(f"Setting {obs.obs_id} stop time to {obs.stop}")
         session.commit()
 
-    def delete_observation_files(self, obs, session):
+    def delete_observation_files(self, obs, session, dry_run=False, my_logger=None):
         """WARNING: Deletes files from the file system
 
         Args
         ----
         obs: observation instance
         session: SQLAlchemy session used to query obs
+        dry_run: boolean
+            if true, only prints deletion to my_logger.info
         """
+        if my_logger is None:
+            my_logger = logger
 
         ## first remove the tags
         tags = (
@@ -1081,15 +1098,20 @@ class G3tSmurf:
             )
             .all()
         )
-        [session.delete(t) for t in tags]
+        for t in tags:
+            my_logger.info(f"Deleting Tag ({t.tag, t.obs_id}) from database")
+            if not dry_run:
+                session.delete(t)
 
         ## then remove the files
         for f in obs.files:
-            self.delete_file(f, session)
+            self.delete_file(f, session, dry_run=dry_run, my_logger=my_logger)
 
         ## then remove the observation
-        self.delete(obs)
-        self.commit()
+        my_logger.info(f"Deleting Observation {obs.obs_id} from database")
+        if not dry_run:
+            self.delete(obs)
+            self.commit()
 
     def search_metadata_actions(
         self, min_ctime=16000 * 1e5, max_ctime=None, reverse=False
