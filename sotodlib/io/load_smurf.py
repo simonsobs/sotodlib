@@ -231,7 +231,27 @@ class G3tSmurf:
     @classmethod
     def from_configs(cls, configs):
         """
-        Create a G3tSmurf instance from a configs dictionary
+        Create a G3tSmurf instance from a configs dictionary or yaml file
+        example configuration file will all relevant entries::
+
+
+            data_prefix : "/path/to/daq-node/"
+            g3tsmurf_db: "/path/to/g3tsmurf.db"
+            g3thk_db: "/path/to/g3hk.db"
+
+
+            finalization:
+                servers:
+                    - smurf-suprsync: "smurf-sync-so1" ## instance-id
+                      timestream-suprsync: "timestream-sync-so1" ## instance-id
+                      pysmurf-monitor: "monitor-so1" ## instance-id
+                    - smurf-suprsync: "smurf-sync-so2" ## instance-id
+                      timestream-suprsync: "timestream-sync-so2" ## instance-id
+                      pysmurf-monitor: "monitor-so2" ## instance-id
+
+        The HK and finalization entries in the configuration are required for
+        maintaining the g3tsmurf database but not for simply accessing or
+        querying information.
 
         Args
         -----
