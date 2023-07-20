@@ -2539,6 +2539,7 @@ def load_file(
         smurf.wrap("channel", ch_info.channel, [(0,det_axis)])
         smurf.wrap("res_frequency", ch_info.frequency, [(0,det_axis)])
         det_info.wrap("smurf", smurf)
+        det_info.wrap("stream_id", status.stream_id)
         aman.wrap("det_info", det_info)
 
 
