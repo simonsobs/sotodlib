@@ -17,8 +17,15 @@ from spt3g import core
 
 import sotodlib
 from .bookbinder import BookBinder
-from .load_smurf import (G3tSmurf, Observations as G3tObservations, SmurfStatus, 
-                        get_channel_info, TimeCodes, SupRsyncType, Files)
+from .load_smurf import (
+    G3tSmurf,
+    Observations as G3tObservations,
+    SmurfStatus,
+    get_channel_info,
+    TimeCodes,
+    SupRsyncType,
+    Files,
+)
 from ..site_pipeline.util import init_logger
 
 
@@ -33,19 +40,24 @@ FAILED = "Failed"
 REBIND = "Rebind"
 
 # tel tube, stream_id, slot mapping
-VALID_OBSTYPES = ['obs', 'oper', 'smurf', 'hk', 'stray', 'misc']
+VALID_OBSTYPES = ["obs", "oper", "smurf", "hk", "stray", "misc"]
 
 
 class BookExistsError(Exception):
     """Exception raised when a book already exists in the database"""
+
     pass
+
 
 class BookBoundError(Exception):
     """Exception raised when a book is already bound"""
+
     pass
+
 
 class NoFilesError(Exception):
     """Exception raised when no files are found in the book"""
+
     pass
 
 
@@ -64,10 +76,11 @@ class Observations(Base):
     bid: book id
 
     """
-    __tablename__ = 'observations'
+
+    __tablename__ = "observations"
     obs_id = db.Column(db.String, primary_key=True)
     bid = db.Column(db.String, db.ForeignKey("books.bid"))
-    book = relationship("Books", back_populates='obs')
+    book = relationship("Books", back_populates="obs")
 
 
 class Books(Base):
@@ -90,19 +103,22 @@ class Books(Base):
     path: str, location of book directory
 
     """
-    __tablename__ = 'books'
+
+    __tablename__ = "books"
     bid = db.Column(db.String, primary_key=True)
     start = db.Column(db.DateTime)
     stop = db.Column(db.DateTime)
     max_channels = db.Column(db.Integer)
-    obs = relationship("Observations", back_populates='book')  # one to many
+    obs = relationship("Observations", back_populates="book")  # one to many
     type = db.Column(db.String)
     status = db.Column(db.String, default=UNBOUND)
     message = db.Column(db.String, default="")
     tel_tube = db.Column(db.String)
     slots = db.Column(db.String)
     created_at = db.Column(db.DateTime, default=dt.datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow
+    )
     timing = db.Column(db.Boolean)
     path = db.Column(db.String)
 
@@ -114,11 +130,13 @@ class Books(Base):
 # main logic #
 ##############
 
+
 # convenient decorator to repeat a method over all data sources
 def loop_over_sources(method):
     def wrapper(self, *args, **kwargs):
         for source in self.sources:
             method(self, source, *args, **kwargs)
+
     return wrapper
 
 
@@ -139,8 +157,8 @@ class Imprinter:
         with open(im_config, "r") as f:
             self.config = yaml.safe_load(f)
 
-        self.db_path = self.config['db_path']
-        self.sources = self.config['sources']
+        self.db_path = self.config["db_path"]
+        self.sources = self.config["sources"]
 
         # check whether db_path directory exists
         if not op.exists(op.dirname(self.db_path)):
@@ -191,7 +209,10 @@ class Imprinter:
 
         """
         if source not in self.g3tsmurf_sessions:
-            self.g3tsmurf_sessions[source], self.archives[source] = create_g3tsmurf_session(self.sources[source]['g3tsmurf'])
+            (
+                self.g3tsmurf_sessions[source],
+                self.archives[source],
+            ) = create_g3tsmurf_session(self.sources[source]["g3tsmurf"])
         if not return_archive:
             return self.g3tsmurf_sessions[source]
         return self.g3tsmurf_sessions[source], self.archives[source]
@@ -215,9 +236,11 @@ class Imprinter:
         book: book object
 
         """
-        if session is None: session = self.get_session()
+        if session is None:
+            session = self.get_session()
         # create book id if not provided
-        if bid is None: bid = obsset.get_id()
+        if bid is None:
+            bid = obsset.get_id()
         assert obsset.mode is not None
         # check whether book exists in the database
         if self.book_exists(bid, session=session):
@@ -232,7 +255,9 @@ class Imprinter:
         # get start and end times (initial guess)
         start_t = np.max([np.min([f.start for f in o.files]) for o in obsset])
         stop_t = np.min([np.max([f.stop for f in o.files]) for o in obsset])
-        max_channels = int(np.max([np.max([f.n_channels for f in o.files]) for o in obsset]))
+        max_channels = int(
+            np.max([np.max([f.n_channels for f in o.files]) for o in obsset])
+        )
         timing_on = np.all([o.timing for o in obsset])
 
         # create observation and book objects
@@ -246,7 +271,9 @@ class Imprinter:
             stop=stop_t,
             max_channels=max_channels,
             tel_tube=obsset.tel_tube,
-            slots=','.join([s for s in obsset.slots if obsset.contains_stream(s)]),  # not worth having a extra table
+            slots=",".join(
+                [s for s in obsset.slots if obsset.contains_stream(s)]
+            ),  # not worth having a extra table
             timing=timing_on,
         )
 
@@ -272,23 +299,23 @@ class Imprinter:
         session: BookDB session
 
         """
-        if session is None: session = self.get_session()
+        if session is None:
+            session = self.get_session()
         for bid, obs_list in zip(bids, obs_lists):
             self.register_book(session, bid, obs_list, commit=False)
-        if commit: session.commit()
+        if commit:
+            session.commit()
 
     def register_hk_books(self, commit=True, session=None):
-        """Register housekeeping books to database
-
-        """
+        """Register housekeeping books to database"""
         session = session or self.get_session()
 
         # fixme: tel_tube and daq_node may not be the same
-        for daq_node in self.config['sources']: 
-            with open(self.config['sources'][daq_node]['g3tsmurf'], "r") as f:
+        for daq_node in self.config["sources"]:
+            with open(self.config["sources"][daq_node]["g3tsmurf"], "r") as f:
                 g3tsmurf_cfg = yaml.safe_load(f)
-            data_root = g3tsmurf_cfg['data_prefix']
-            
+            data_root = g3tsmurf_cfg["data_prefix"]
+
             # all ctime dir except the last ctime dir will be considered complete
             ctime_dirs = sorted(glob(op.join(data_root, "hk", "*")))
             for ctime_dir in ctime_dirs[:-1]:
@@ -304,47 +331,44 @@ class Imprinter:
                     tel_tube=daq_node,  # fixme: tel_tube and daq_node may not be the same
                 )
                 session.add(book)
-            if commit: 
+            if commit:
                 session.commit()
-    
+
     @loop_over_sources
     def register_timecode_books(self, source, commit=True, session=None):
         """Register smurf and stray books with database. We do not expect many
         stray books as nearly all .g3 files will be associated with some
-        obs or oper book. 
+        obs or oper book.
         """
         session = session or self.get_session()
 
         g3session = self.get_g3tsmurf_session(source)
         streams = self.sources[source].get("slots")
-        
+
         tcs = g3session.query(TimeCodes.timecode).distinct().all()
         stream_filt = or_(*[TimeCodes.stream_id == s for s in streams])
         stream_filt_files = or_(*[Files.stream_id == s for s in streams])
 
-        for tc, in tcs:
-            q = g3session.query(TimeCodes).filter(
-                TimeCodes.timecode == tc,
-                stream_filt
-            )
+        for (tc,) in tcs:
+            q = g3session.query(TimeCodes).filter(TimeCodes.timecode == tc, stream_filt)
             files = q.filter(TimeCodes.suprsync_type == SupRsyncType.FILES.value)
             meta = q.filter(TimeCodes.suprsync_type == SupRsyncType.META.value)
-            
+
             if files.count() == len(streams) and meta.count() == len(streams):
                 ## register books
-                book_start = dt.datetime.utcfromtimestamp(tc*1e5)
-                book_stop = dt.datetime.utcfromtimestamp((tc+1)*1e5)
+                book_start = dt.datetime.utcfromtimestamp(tc * 1e5)
+                book_stop = dt.datetime.utcfromtimestamp((tc + 1) * 1e5)
 
                 book_id = f"smurf_{tc}_{source}"
                 if self.get_book(book_id) is None:
                     self.logger.debug(f"registering {book_id}")
                     book1 = Books(
-                        bid = book_id,
+                        bid=book_id,
                         type="smurf",
-                        status = UNBOUND,
-                        tel_tube = source,
-                        start = book_start,
-                        stop = book_stop
+                        status=UNBOUND,
+                        tel_tube=source,
+                        start=book_start,
+                        stop=book_stop,
                     )
                     session.add(book1)
                 q = g3session.query(Files).filter(
@@ -354,15 +378,15 @@ class Imprinter:
                     Files.obs_id == None,
                 )
                 book_id = f"stray_{tc}_{source}"
-                
-                if q.count() > 0 and self.get_book(book_id) is None: 
+
+                if q.count() > 0 and self.get_book(book_id) is None:
                     book2 = Books(
-                        bid = book_id,
-                        type="stray", 
-                        status = UNBOUND,
-                        tel_tube = source,
-                        start = book_start,
-                        stop = book_stop,
+                        bid=book_id,
+                        type="stray",
+                        status=UNBOUND,
+                        tel_tube=source,
+                        start=book_start,
+                        stop=book_stop,
                     )
                     session.add(book2)
         if commit:
@@ -370,13 +394,13 @@ class Imprinter:
 
     def _get_binder_for_book(self, book, output_root="out", pbar=False):
         """get the appropriate bookbinder for the book based on its type"""
-        g3tsmurf_cfg_file = self.sources[book.tel_tube]['g3tsmurf']
-        with open(g3tsmurf_cfg_file, 'r') as f:
+        g3tsmurf_cfg_file = self.sources[book.tel_tube]["g3tsmurf"]
+        with open(g3tsmurf_cfg_file, "r") as f:
             g3tsmurf_cfg = yaml.safe_load(f)
-        data_root = g3tsmurf_cfg['data_prefix']
+        data_root = g3tsmurf_cfg["data_prefix"]
 
-        if book.type in ['obs', 'oper']:
-            session_id = book.bid.split('_')[1]
+        if book.type in ["obs", "oper"]:
+            session_id = book.bid.split("_")[1]
             first5 = session_id[:5]
             odir = op.join(output_root, book.type, first5)
             if not op.exists(odir):
@@ -391,14 +415,15 @@ class Imprinter:
             readout_ids = self.get_readout_ids_for_book(book)
 
             # bind book using bookbinder library
-            bookbinder = BookBinder(book, obsdb, filedb, data_root, readout_ids,
-                                    book_path)
+            bookbinder = BookBinder(
+                book, obsdb, filedb, data_root, readout_ids, book_path
+            )
             return bookbinder
-        
-        elif book.type in ['hk', 'smurf' ]:
+
+        elif book.type in ["hk", "smurf"]:
             # get source directory for hk book
             root = op.join(data_root, book.type)
-            first5 = book.bid.split('_')[1]
+            first5 = book.bid.split("_")[1]
             assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
             book_path_src = op.join(root, first5)
 
@@ -412,28 +437,34 @@ class Imprinter:
                 def __init__(self, indir, outdir):
                     self.indir = indir
                     self.outdir = outdir
+
                 def get_metadata(self):
                     return {
-                        'book_id': book.bid,
+                        "book_id": book.bid,
                         # dummy start and stop times
-                        'start_time': float(first5)*1e5,
-                        'stop_time': (float(first5)+1)*1e5,
-                        'telescope': book.tel_tube.lower(),
-                        'type': book.type,
+                        "start_time": float(first5) * 1e5,
+                        "stop_time": (float(first5) + 1) * 1e5,
+                        "telescope": book.tel_tube.lower(),
+                        "type": book.type,
                     }
+
                 def bind(self, pbar=False):
                     shutil.copytree(
-                        self.indir, self.outdir,
-                        ignore=shutil.ignore_patterns('*.dat', '*_mask.txt','*_freq.txt')
+                        self.indir,
+                        self.outdir,
+                        ignore=shutil.ignore_patterns(
+                            "*.dat", "*_mask.txt", "*_freq.txt"
+                        ),
                     )
+
             return _FakeBinder(book_path_src, book_path_tgt)
-        
-        elif book.type in ['stray']:
+
+        elif book.type in ["stray"]:
             flist = self.get_files_for_book(book)
 
             # get source directory for stray book
             root = op.join(data_root, "timestreams")
-            first5 = book.bid.split('_')[1]
+            first5 = book.bid.split("_")[1]
             assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
             book_path_src = op.join(root, first5)
 
@@ -448,32 +479,43 @@ class Imprinter:
                     self.indir = indir
                     self.outdir = outdir
                     self.file_list = file_list
+
                 def get_metadata(self):
                     return {
-                        'book_id': book.bid,
+                        "book_id": book.bid,
                         # dummy start and stop times
-                        'start_time': float(first5)*1e5,
-                        'stop_time': (float(first5)+1)*1e5,
-                        'telescope': book.tel_tube.lower(),
-                        'type': book.type,
+                        "start_time": float(first5) * 1e5,
+                        "stop_time": (float(first5) + 1) * 1e5,
+                        "telescope": book.tel_tube.lower(),
+                        "type": book.type,
                     }
+
                 def bind(self, pbar=False):
                     if not os.path.exists(self.outdir):
                         os.makedirs(self.outdir)
                     for f in self.file_list:
                         relpath = os.path.relpath(f, self.indir)
                         path = os.path.join(self.outdir, relpath)
-                        base,_ = os.path.split(path)
+                        base, _ = os.path.split(path)
                         if not os.path.exists(base):
                             os.makedirs(base)
-                        shutil.copy( f, os.path.join(self.outdir, relpath))
+                        shutil.copy(f, os.path.join(self.outdir, relpath))
 
             return _FakeBinder(book_path_src, book_path_tgt, flist)
         else:
-            raise NotImplementedError(f"binder for book type {book.type} not implemented")
+            raise NotImplementedError(
+                f"binder for book type {book.type} not implemented"
+            )
 
-    def bind_book(self, book, session=None, output_root="out", message="",
-                  test_mode=False, pbar=False):
+    def bind_book(
+        self,
+        book,
+        session=None,
+        output_root="out",
+        message="",
+        test_mode=False,
+        pbar=False,
+    ):
         """Bind book using bookbinder
 
         Parameters
@@ -490,7 +532,8 @@ class Imprinter:
             books, and will not update any db fields in the db. This is useful
             for testing purposes.
         """
-        if session is None: session = self.get_session()
+        if session is None:
+            session = self.get_session()
         # get book id and book object, depending on whether book id is given or not
         if isinstance(book, Books):
             bid = book.bid
@@ -513,25 +556,25 @@ class Imprinter:
             binder.bind(pbar=pbar)
 
             # write M_book file
-            m_book_file = os.path.join(binder.outdir, 'M_book.yaml')
+            m_book_file = os.path.join(binder.outdir, "M_book.yaml")
             book_meta = {}
-            book_meta['book'] = {
+            book_meta["book"] = {
                 "type": book.type,
                 "schema_version": 0,
                 "book_id": book.bid,
                 "finalized_at": dt.datetime.utcnow().isoformat(),
             }
-            book_meta['bookbinder'] = {
+            book_meta["bookbinder"] = {
                 "codebase": sotodlib.__file__,
                 "version": sotodlib.__version__,
-                "context": self.config.get('context', 'unknown')
+                "context": self.config.get("context", "unknown"),
             }
-            with open(m_book_file, 'w') as f:
+            with open(m_book_file, "w") as f:
                 yaml.dump(book_meta, f)
 
             # write M_index file
-            mfile = os.path.join(binder.outdir, 'M_index.yaml')
-            with open(mfile, 'w') as f:
+            mfile = os.path.join(binder.outdir, "M_index.yaml")
+            with open(mfile, "w") as f:
                 yaml.dump(binder.get_metadata(), f)
 
             # not sure if this is the best place to update
@@ -558,7 +601,7 @@ class Imprinter:
                 session.rollback()
 
             raise e
-        
+
     def get_book(self, bid, session=None):
         """Get book from database.
 
@@ -573,7 +616,8 @@ class Imprinter:
         book: book object or None if not found
 
         """
-        if session is None: session = self.get_session()
+        if session is None:
+            session = self.get_session()
         return session.query(Books).filter(Books.bid == bid).one_or_none()
 
     def get_books(self, session=None):
@@ -588,7 +632,8 @@ class Imprinter:
         books: list of book objects
 
         """
-        if session is None: session = self.get_session()
+        if session is None:
+            session = self.get_session()
         return session.query(Books).all()
 
     def get_unbound_books(self, session=None):
@@ -603,7 +648,8 @@ class Imprinter:
         books: list of book objects
 
         """
-        if session is None: session = self.get_session()
+        if session is None:
+            session = self.get_session()
         return session.query(Books).filter(Books.status == UNBOUND).all()
 
     def get_failed_books(self, session=None):
@@ -618,7 +664,8 @@ class Imprinter:
         books: list of books
 
         """
-        if session is None: session = self.get_session()
+        if session is None:
+            session = self.get_session()
         return session.query(Books).filter(Books.status == FAILED).all()
 
     def get_rebind_books(self, session=None):
@@ -633,7 +680,8 @@ class Imprinter:
         books: list of books
 
         """
-        if session is None: session = self.get_session()
+        if session is None:
+            session = self.get_session()
         return session.query(Books).filter(Books.status == REBIND).all()
 
     def book_exists(self, bid, session=None):
@@ -650,7 +698,8 @@ class Imprinter:
         boolean: True if book exists, False otherwise
 
         """
-        if session is None: session = self.get_session()
+        if session is None:
+            session = self.get_session()
         return self.get_book(bid, session=session) is not None
 
     def book_bound(self, bid, session=None):
@@ -667,9 +716,11 @@ class Imprinter:
         boolean: True if book is bound, False otherwise
 
         """
-        if session is None: session = self.get_session()
+        if session is None:
+            session = self.get_session()
         book = self.get_book(bid, session=session)
-        if book is None: return False
+        if book is None:
+            return False
         return book.status == BOUND
 
     def commit(self, session=None):
@@ -680,7 +731,8 @@ class Imprinter:
         session: BookDB session
 
         """
-        if session is None: session = self.get_session()
+        if session is None:
+            session = self.get_session()
         session.commit()
 
     def rollback(self, session=None):
@@ -691,13 +743,21 @@ class Imprinter:
         session: BookDB session
 
         """
-        if session is None: session = self.get_session()
+        if session is None:
+            session = self.get_session()
         session.rollback()
 
     @loop_over_sources
-    def update_bookdb_from_g3tsmurf(self, source, min_ctime=None, max_ctime=None,
-                                    min_overlap=30, ignore_singles=False,
-                                    stream_ids=None, force_single_stream=False):
+    def update_bookdb_from_g3tsmurf(
+        self,
+        source,
+        min_ctime=None,
+        max_ctime=None,
+        min_overlap=30,
+        ignore_singles=False,
+        stream_ids=None,
+        force_single_stream=False,
+    ):
         """Update bdb with new observations from g3tsmurf db.
 
         Parameters
@@ -714,31 +774,36 @@ class Imprinter:
             if True, ignore single observations
         stream_ids: list
             a list of stream ids (str) to consider. Defaults to list in
-            imprinter configuration file. 
+            imprinter configuration file.
         force_single_stream: boolean
             if True, treat observations from different streams separately
         """
         session, SMURF = self.get_g3tsmurf_session(source, return_archive=True)
         # set sensible ctime range is none is given
         if min_ctime is None:
-            min_ctime = session.query(G3tObservations.timestamp).order_by(G3tObservations.timestamp).first()[0]
+            min_ctime = (
+                session.query(G3tObservations.timestamp)
+                .order_by(G3tObservations.timestamp)
+                .first()[0]
+            )
         if max_ctime is None:
             max_ctime = dt.datetime.now().timestamp()
-        
+
         # get wafers
         if stream_ids is None:
             streams = self.sources[source].get("slots")
             if streams is None:
-                raise ValueError(f"Imprinter missing slot / stream_id"
-                                  " information for {source}")
+                raise ValueError(
+                    f"Imprinter missing slot / stream_id" " information for {source}"
+                )
         else:
             # if user input is present, format it like the query response
             streams = stream_ids
         self.logger.debug(f"Looking for observations from stream_ids {streams}")
-        
+
         # restrict to given stream ids (wafers)
         stream_filt = or_(*[G3tObservations.stream_id == s for s in streams])
-        
+
         # check data transfer finalization
         final_time = SMURF.get_final_time(
             streams, min_ctime, max_ctime, check_control=True
@@ -755,17 +820,17 @@ class Imprinter:
         )
         # if we have incomplete observations in our stream_id list we cannot
         # bookbind any observations overlapping the incomplete ones.
-        if q_incomplete.count () > 0:
+        if q_incomplete.count() > 0:
             max_ctime = min([obs.timestamp for obs in q_incomplete.all()])
         max_stop = dt.datetime.utcfromtimestamp(max_ctime)
-       
+
         # find all complete observations that start within the time range
         obs_q = session.query(G3tObservations).filter(
             G3tObservations.timestamp >= min_ctime,
             G3tObservations.timestamp < max_ctime,
             stream_filt,
             G3tObservations.stop < max_stop,
-            not_(G3tObservations.stop==None)
+            not_(G3tObservations.stop == None),
         )
 
         output = []
@@ -774,35 +839,56 @@ class Imprinter:
             for str_obs in obs_q.filter(G3tObservations.stream_id == stream).all():
                 # distinguish different types of books
                 # operation book
-                if get_obs_type(str_obs) == 'oper':
-                    output.append(ObsSet([str_obs],
-                        mode="oper",
-                        slots=self.sources[source]['slots'],
-                        tel_tube=source))
-                elif get_obs_type(str_obs) == 'obs':
+                if get_obs_type(str_obs) == "oper":
+                    output.append(
+                        ObsSet(
+                            [str_obs],
+                            mode="oper",
+                            slots=self.sources[source]["slots"],
+                            tel_tube=source,
+                        )
+                    )
+                elif get_obs_type(str_obs) == "obs":
                     # force each observation to be its own book
                     if force_single_stream:
-                        output.append(ObsSet([str_obs], mode="obs", slots=self.slots, tel_tube=self.tel_tube))
+                        output.append(
+                            ObsSet(
+                                [str_obs],
+                                mode="obs",
+                                slots=self.slots,
+                                tel_tube=self.tel_tube,
+                            )
+                        )
                     else:
                         # query for all possible types of overlapping observations from other streams
                         q = obs_q.filter(
                             G3tObservations.stream_id != str_obs.stream_id,
                             stream_filt,
                             or_(
-                                and_(G3tObservations.start <= str_obs.start, G3tObservations.stop >= str_obs.stop),
-                                and_(G3tObservations.stop >= str_obs.start, G3tObservations.stop <= str_obs.stop),
-                                and_(G3tObservations.start >= str_obs.start, G3tObservations.start <= str_obs.stop),
-                            ))
+                                and_(
+                                    G3tObservations.start <= str_obs.start,
+                                    G3tObservations.stop >= str_obs.stop,
+                                ),
+                                and_(
+                                    G3tObservations.stop >= str_obs.start,
+                                    G3tObservations.stop <= str_obs.stop,
+                                ),
+                                and_(
+                                    G3tObservations.start >= str_obs.start,
+                                    G3tObservations.start <= str_obs.stop,
+                                ),
+                            ),
+                        )
 
                         # if we failed to find any overlapping observations
-                        if q.count()==0 and not ignore_singles:
+                        if q.count() == 0 and not ignore_singles:
                             # append only this one when there's no overlapping segments
                             output.append(
                                 ObsSet(
-                                    [str_obs], 
-                                    mode="obs", 
-                                    slots=self.sources[source]['slots'], 
-                                    tel_tube=source
+                                    [str_obs],
+                                    mode="obs",
+                                    slots=self.sources[source]["slots"],
+                                    tel_tube=source,
                                 )
                             )
 
@@ -813,18 +899,20 @@ class Imprinter:
                             obs_list.append(str_obs)
                             # check to make sure ALL observations overlap all others
                             # and the overlap passes the minimum requirement
-                            overlap_time = np.min([o.stop for o in obs_list]) - np.max([o.start for o in obs_list])
-                            if overlap_time.total_seconds() < 0: 
+                            overlap_time = np.min([o.stop for o in obs_list]) - np.max(
+                                [o.start for o in obs_list]
+                            )
+                            if overlap_time.total_seconds() < 0:
                                 continue
-                            if overlap_time.total_seconds() < min_overlap: 
+                            if overlap_time.total_seconds() < min_overlap:
                                 continue
                             # add all of the possible overlaps
-                            output.append( 
+                            output.append(
                                 ObsSet(
-                                    obs_list, 
-                                    mode="obs", 
-                                    slots=self.sources[source]['slots'], 
-                                    tel_tube=source
+                                    obs_list,
+                                    mode="obs",
+                                    slots=self.sources[source]["slots"],
+                                    tel_tube=source,
                                 )
                             )
 
@@ -861,28 +949,37 @@ class Imprinter:
 
         """
         session = self.get_g3tsmurf_session(book.tel_tube)
-        if book.type in ['obs', 'oper']:
+        if book.type in ["obs", "oper"]:
             obs_ids = [o.obs_id for o in book.obs]
-            obs = session.query(G3tObservations).filter(G3tObservations.obs_id.in_(obs_ids)).all()
+            obs = (
+                session.query(G3tObservations)
+                .filter(G3tObservations.obs_id.in_(obs_ids))
+                .all()
+            )
 
             res = OrderedDict()
             for o in obs:
                 res[o.obs_id] = sorted([f.name for f in o.files])
             return res
-        elif book.type in ['stray']:
+        elif book.type in ["stray"]:
             streams = self.sources[book.tel_tube].get("slots")
             stream_filt_files = or_(*[Files.stream_id == s for s in streams])
-            flist = session.query(Files).filter(
-                Files.start >= book.start,
-                Files.start < book.stop,
-                stream_filt_files,
-                Files.obs_id == None,
-            ).all()
+            flist = (
+                session.query(Files)
+                .filter(
+                    Files.start >= book.start,
+                    Files.start < book.stop,
+                    stream_filt_files,
+                    Files.obs_id == None,
+                )
+                .all()
+            )
             return [f.name for f in flist]
 
         else:
-            raise NotImplementedError(f"book type {book.type} not understood for"
-                                       " file search")
+            raise NotImplementedError(
+                f"book type {book.type} not understood for" " file search"
+            )
 
     def get_readout_ids_for_book(self, book):
         """
@@ -906,12 +1003,18 @@ class Imprinter:
             status = SmurfStatus.from_file(files[0])
             ch_info = get_channel_info(status, archive=SMURF)
             if "readout_id" not in ch_info:
-                raise ValueError(f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing")
+                raise ValueError(
+                    f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing"
+                )
             checks = ["NONE" in rid for rid in ch_info.readout_id]
             if np.all(checks):
-                raise ValueError(f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing")
+                raise ValueError(
+                    f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing"
+                )
             if np.any(checks):
-                self.logger.warning(f"Found {sum(checks)} channels without readout_id. Were fixed tones running?")
+                self.logger.warning(
+                    f"Found {sum(checks)} channels without readout_id. Were fixed tones running?"
+                )
             # make sure all rchannel ids are sorted
             assert list(ch_info.rchannel) == sorted(ch_info.rchannel)
             out[obs_id] = ch_info.readout_id
@@ -936,20 +1039,23 @@ class Imprinter:
             Dictionary of destination paths of important metadata such as
             tunes, bgmaps, or IVs.
         """
-        if book.type != 'oper':
+        if book.type != "oper":
             raise TypeError("Book must have type 'oper'")
 
         session, arc = self.get_g3tsmurf_session(book.tel_tube, return_archive=True)
 
         obs_ids = [o.obs_id for o in book.obs]
-        obs = session.query(G3tObservations) \
-                     .filter(G3tObservations.obs_id.in_(obs_ids)).all()
+        obs = (
+            session.query(G3tObservations)
+            .filter(G3tObservations.obs_id.in_(obs_ids))
+            .all()
+        )
 
         files = []
         for ob in obs:
             files.extend(get_smurf_files(ob, arc.meta_path))
 
-        dirname = os.path.join(book_path, 'smurf')
+        dirname = os.path.join(book_path, "smurf")
         if not os.path.exists(dirname):
             os.makedirs(dirname)
 
@@ -959,14 +1065,14 @@ class Imprinter:
             dest = os.path.join(book_path, basename)
             shutil.copyfile(f, dest)
 
-            if f.endswith('iv_analysis.npy'):
-                meta_files['iv'] = basename
-            elif f.endswith('bg_map.npy'):
-                meta_files['bgmap'] = basename
-            elif f.endswith('bias_step_analysis.npy'):
-                meta_files['bias_steps'] = basename
-            elif f.endswith('take_noise.npy'):
-                meta_files['noise'] = basename
+            if f.endswith("iv_analysis.npy"):
+                meta_files["iv"] = basename
+            elif f.endswith("bg_map.npy"):
+                meta_files["bgmap"] = basename
+            elif f.endswith("bias_step_analysis.npy"):
+                meta_files["bias_steps"] = basename
+            elif f.endswith("take_noise.npy"):
+                meta_files["noise"] = basename
 
         return files, meta_files
 
@@ -986,7 +1092,11 @@ class Imprinter:
         """
         session = self.get_g3tsmurf_session(book.tel_tube)
         obs_ids = [o.obs_id for o in book.obs]
-        obs = session.query(G3tObservations).filter(G3tObservations.obs_id.in_(obs_ids)).all()
+        obs = (
+            session.query(G3tObservations)
+            .filter(G3tObservations.obs_id.in_(obs_ids))
+            .all()
+        )
         return {o.obs_id: o for o in obs}
 
     def delete_book_files(self, book):
@@ -1011,6 +1121,8 @@ class Imprinter:
 
 
 _primary_idx_map = {}
+
+
 def get_frame_times(frame):
     """
     Returns timestamps for a G3Frame of detector data.
@@ -1031,16 +1143,17 @@ def get_frame_times(frame):
 
     """
     if len(_primary_idx_map) == 0:
-        for i, name in enumerate(frame['primary'].names):
+        for i, name in enumerate(frame["primary"].names):
             _primary_idx_map[name] = i
 
-    c0 = frame['primary'].data[_primary_idx_map['Counter0']]
-    c2 = frame['primary'].data[_primary_idx_map['Counter2']]
+    c0 = frame["primary"].data[_primary_idx_map["Counter0"]]
+    c2 = frame["primary"].data[_primary_idx_map["Counter2"]]
 
     if np.any(c0):
         return True, counters_to_timestamps(c0, c2) * core.G3Units.s
     else:
-        return False, np.array(frame['data'].times)
+        return False, np.array(frame["data"].times)
+
 
 def get_start_and_end(files):
     """
@@ -1066,7 +1179,7 @@ def get_start_and_end(files):
         for frame in core.G3File(file):
             if frame.type == core.G3FrameType.Scan:
                 t0 = get_frame_times(frame)[1][0]
-                found_scan=True
+                found_scan = True
                 break
         if found_scan:
             break
@@ -1080,12 +1193,13 @@ def get_start_and_end(files):
                 frame = _frame
                 found_scan = True
 
-        if found_scan: 
+        if found_scan:
             break
 
     t1 = get_frame_times(frame)[1][-1]
 
     return t0, t1
+
 
 def create_g3tsmurf_session(config):
     """create a connection session to g3tsmurf database
@@ -1105,10 +1219,11 @@ def create_g3tsmurf_session(config):
     # create database connection
     with open(config, "r") as f:
         config = yaml.safe_load(f)
-    config['db_args'] = {'connect_args': {'check_same_thread': False}}
+    config["db_args"] = {"connect_args": {"check_same_thread": False}}
     SMURF = G3tSmurf.from_configs(config)
     session = SMURF.Session()
     return session, SMURF
+
 
 def stream_timestamp(obs_id):
     """parse observation id to obtain a (stream, timestamp) pair
@@ -1128,6 +1243,7 @@ def stream_timestamp(obs_id):
     """
     return "_".join(obs_id.split("_")[1:-1]), obs_id.split("_")[-1]
 
+
 def get_obs_type(obs: G3tObservations):
     """Get the type of observation based on the observation id
 
@@ -1140,7 +1256,8 @@ def get_obs_type(obs: G3tObservations):
     obs_type: str
 
     """
-    if obs.tag is None: return None
+    if obs.tag is None:
+        return None
     tags = obs.tag.split(",")
     # assert tags[0] in VALID_OBSTYPES, f"Unknown tag {tags[0]}"  # this is too strict for now
     return tags[0]
@@ -1149,6 +1266,7 @@ def get_obs_type(obs: G3tObservations):
 class ObsSet(list):
     """A thin wrapper around a list of observations that are all
     part of the same book"""
+
     def __init__(self, *args, mode="obs", slots=None, tel_tube=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.mode = mode
@@ -1173,7 +1291,8 @@ class ObsSet(list):
 
         """
         for obs_id in self.obs_ids:
-            if stream_id in stream_timestamp(obs_id)[0]: return True
+            if stream_id in stream_timestamp(obs_id)[0]:
+                return True
         return False
 
     def __eq__(self, other):
@@ -1196,7 +1315,8 @@ class ObsSet(list):
 
         """
         # if no mode is specified, use the one provided for the set
-        if mode is None: mode = self.mode
+        if mode is None:
+            mode = self.mode
 
         assert mode in VALID_OBSTYPES, f"Invalid mode {mode}"
 
@@ -1205,11 +1325,11 @@ class ObsSet(list):
         _, timestamp = stream_timestamp(self.obs_ids[0])
 
         # the rest of the id depends on the mode
-        if mode in ['obs', 'oper']:
+        if mode in ["obs", "oper"]:
             # get slot flags
-            slot_flags = ''
+            slot_flags = ""
             for slot in self.slots:
-                slot_flags += '1' if self.contains_stream(slot) else '0'
+                slot_flags += "1" if self.contains_stream(slot) else "0"
             bid = f"{mode}_{timestamp}_{self.tel_tube}_{slot_flags}"
         else:
             raise NotImplementedError
@@ -1233,10 +1353,13 @@ def drop_duplicates(obsset_list: List[ObsSet]):
         with duplicates removed
     """
     ids_list = [oset.obs_ids for oset in obsset_list]
-    new_obsset_list = list(OrderedDict(
-        (tuple(ids), oset) for (ids, oset) in zip(ids_list, obsset_list)).values()
+    new_obsset_list = list(
+        OrderedDict(
+            (tuple(ids), oset) for (ids, oset) in zip(ids_list, obsset_list)
+        ).values()
     )
     return new_obsset_list
+
 
 def require(dct, keys):
     """
@@ -1249,7 +1372,8 @@ def require(dct, keys):
     keys: list
         list of required keys
     """
-    if dict is None: raise ValueError("Missing required dictionary")
+    if dict is None:
+        raise ValueError("Missing required dictionary")
     for k in keys:
         if k not in dct:
             raise ValueError(f"Missing required key {k}")
