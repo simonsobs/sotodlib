@@ -538,6 +538,41 @@ class G3tSmurf:
                 logger.warning(f"Failed on file {f}:\n{e}")
         session.close()
 
+    def delete_file(self, db_file, session=None):
+        """WARNING: Deletes data from the file system
+
+        Delete both a database file entry, it's associated frames, AND the
+        file itself. Only to be run by automated data management systems
+
+        Args
+        ----
+        db_file: File instance
+            database Fine instance to be deleted
+        session: optional, SQLAlchemy session
+            should be passed if file is called as part of a larger cleanup
+            function
+        """
+
+        if session is None:
+            session = self.Session()
+
+        db_frames = db_file.frames
+        [session.delete(frame) for frame in db_frames]
+
+        if not os.path.exists(db_file.name):
+            self.logger.warning(
+                f"Database file {db_file.name} appears already" " deleted on disk"
+            )
+        else:
+            os.remove(db_file.name)
+
+            ## clean up directory if it is empty
+            base, _ = os.path.split(db_file.name)
+            if len(os.listdir(base)) == 0:
+                os.rmdir(base)
+        session.delete(db_file)
+        session.commit()
+
     def add_new_channel_assignment(self, stream_id, ctime, cha, cha_path, session):
         """Add new entry to the Channel Assignments table. Called by the
         index_metadata function.
@@ -948,6 +983,13 @@ class G3tSmurf:
         # Add any tags from the status
         if len(status.tags) > 0:
             for tag in status.tags:
+                t = (
+                    session.query(Tags)
+                    .filter(Tags.tag == tag, Tags.obs_id == obs.obs_id)
+                    .one_or_none()
+                )
+                if t is not None:
+                    continue
                 new_tag = Tags(obs_id=obs.obs_id, tag=tag)
                 session.add(new_tag)
             obs.tag = ",".join(status.tags)
@@ -1021,6 +1063,33 @@ class G3tSmurf:
             obs.timing = np.all([f.timing for f in flist])
             logger.debug(f"Setting {obs.obs_id} stop time to {obs.stop}")
         session.commit()
+
+    def delete_observation_files(self, obs, session):
+        """WARNING: Deletes files from the file system
+
+        Args
+        ----
+        obs: observation instance
+        session: SQLAlchemy session used to query obs
+        """
+
+        ## first remove the tags
+        tags = (
+            session.query(Tags)
+            .filter(
+                Tags.obs_id == obs.obs_id,
+            )
+            .all()
+        )
+        [session.delete(t) for t in tags]
+
+        ## then remove the files
+        for f in obs.files:
+            self.delete_file(f, session)
+
+        ## then remove the observation
+        self.delete(obs)
+        self.commit()
 
     def search_metadata_actions(
         self, min_ctime=16000 * 1e5, max_ctime=None, reverse=False
