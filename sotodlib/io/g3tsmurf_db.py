@@ -36,6 +36,16 @@ class TimeCodes(Base):
 
     Attributes
     ----------
+    stream_id: string
+        stream_id found in the timecode files
+    suprsync_type: integer
+        entry in SupRsyncType class. For tracking if suprsync is managing the
+        timestreams (files) or smurf (meta) files
+    timecode: integer
+        the 5 digit ctime folder number that has been finalized
+    agent: string
+        instance id of the suprsync agent we got the finalization information
+        from.
     """
 
     __tablename__ = "time_codes"
@@ -48,6 +58,10 @@ class TimeCodes(Base):
 
 
 class SupRsyncType(Enum):
+    """Files match with the timestream folders and meta match with the smurf
+    folders.
+    """
+
     FILES = 0
     META = 1
 
