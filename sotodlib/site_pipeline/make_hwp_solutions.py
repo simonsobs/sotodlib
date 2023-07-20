@@ -142,16 +142,16 @@ def main(
 
     #write solutions
     for obs in run_list:
-        print(obs["obs_id"])
+        h5_address = obs["obs_id"]
+        print(h5_address)
         tod = ctx.get_obs(obs, no_signal=True)
         
         # make angle solutions
         g3thwp = G3tHWP(HWPconfig)
-        g3thwp.write_solution_h5(tod, output=output_filename, h5_address=obs_id)
+        g3thwp.write_solution_h5(tod, output=output_filename, h5_address=h5_address)
         
         del g3thwp
         
-        h5_address = obs_id
         # Add an entry to the database
         man_db.add_entry({'obs:obs_id': obs["obs_id"], 'dataset': h5_address}, filename=output_filename)
 
