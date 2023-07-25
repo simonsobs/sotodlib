@@ -30,7 +30,7 @@ import numpy as np
 from collections import OrderedDict
 
 from .. import core
-from .load_toast_h5 import load_toast_h5_obs
+from .load_toast_h5 import load_toast_h5_obs, load_toast_h5_dichroic_hack
 
 
 # Interim, Oct. 2021.  Wait a year, remove this caution.
@@ -595,6 +595,7 @@ core.OBSLOADER_REGISTRY.update(
     {
         'pipe-s0001': load_observation,
         'toast3-hdf': load_toast_h5_obs,
+        'toast3-hdf-dichroic-hack': load_toast_h5_dichroic_hack,
         'default': load_observation,
     }
 )
