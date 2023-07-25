@@ -1155,7 +1155,7 @@ class Imprinter:
         )
         return {o.obs_id: o for o in obs}
 
-    def delete_lvl2_files(self, book, dry_run=True):
+    def delete_level2_files(self, book, dry_run=True):
         """Delete level 2 data from already bound books
 
         Parameters
@@ -1167,7 +1167,8 @@ class Imprinter:
         if book.status != BOUND:
             raise ValueError(f"Book must be bound to delete level 2 files")
 
-        if book.type == "obs" or book.type == "obs":
+        self.logger.info(f"Removing level 2 files for {book.bid}")
+        if book.type == "obs" or book.type == "oper":
             session, SMURF = self.get_g3tsmurf_session(
                 book.tel_tube, return_archive=True
             )
@@ -1198,6 +1199,9 @@ class Imprinter:
                 f"Do not know how to delete level 2 files"
                 f" for book of type {book.type}"
             )
+        
+        book.lvl2_deleted = True
+        self.session.commit()
 
     def delete_book_files(self, book):
         """Delete all files associated with a book
