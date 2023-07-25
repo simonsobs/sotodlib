@@ -667,9 +667,7 @@ class Imprinter:
         books: list of book objects
 
         """
-        if session is None:
-            session = self.get_session()
-        return session.query(Books).filter(Books.status == UNBOUND).all()
+        return self.get_books_by_status(UNBOUND, session)
 
     def get_bound_books(self, session=None):
         """Get all bound books from database.
@@ -697,13 +695,7 @@ class Imprinter:
         books: list of books
 
         """
-<<<<<<< HEAD
-        if session is None:
-            session = self.get_session()
-        return session.query(Books).filter(Books.status == FAILED).all()
-=======
         return self.get_books_by_status(FAILED, session)
->>>>>>> update imprinter db schema
 
     def get_rebind_books(self, session=None):
         """Get all books to be rebinded from database
@@ -717,11 +709,6 @@ class Imprinter:
         books: list of books
 
         """
-<<<<<<< HEAD
-        if session is None:
-            session = self.get_session()
-        return session.query(Books).filter(Books.status == REBIND).all()
-=======
         return self.get_books_by_status(REBIND, session)
 
     def get_uploaded_books(self, session=None):
@@ -737,7 +724,6 @@ class Imprinter:
 
         """
         return self.get_books_by_status(UPLOADED, session)
->>>>>>> update imprinter db schema
 
     def book_exists(self, bid, session=None):
         """Check if a book exists in the database.
