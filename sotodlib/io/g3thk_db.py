@@ -13,6 +13,7 @@ from so3g import hk
 
 
 import logging
+
 logger = logging.getLogger(__name__)
 
 Base = declarative_base()
@@ -36,10 +37,11 @@ class HKFiles(Base):
     fields:
     agents
     """
-    __tablename__ = 'hkfiles'
+
+    __tablename__ = "hkfiles"
     __table_args__ = (
-            db.UniqueConstraint('filename'),
-            db.UniqueConstraint('global_start_time'),
+        db.UniqueConstraint("filename"),
+        db.UniqueConstraint("global_start_time"),
     )
 
     id = db.Column(db.Integer, primary_key=True)
@@ -49,8 +51,8 @@ class HKFiles(Base):
     path = db.Column(db.String)
     aggregator = db.Column(db.String)
 
-    fields = relationship("HKFields", back_populates='hkfile')
-    agents = relationship("HKAgents", back_populates='hkfile')
+    fields = relationship("HKFields", back_populates="hkfile")
+    agents = relationship("HKAgents", back_populates="hkfile")
 
 
 class HKAgents(Base):
@@ -73,18 +75,19 @@ class HKAgents(Base):
 
     TODO: add uniqueness constraint
     """
-    __tablename__ = 'hkagents'
+
+    __tablename__ = "hkagents"
     # unique constraint for instance-id? needs more thought?
     id = db.Column(db.Integer, primary_key=True)
-    file_id = db.Column(db.Integer, db.ForeignKey('hkfiles.id'))
-    hkfile = relationship("HKFiles", back_populates='agents')
+    file_id = db.Column(db.Integer, db.ForeignKey("hkfiles.id"))
+    hkfile = relationship("HKFiles", back_populates="agents")
 
     instance_id = db.Column(db.String)
 
     start = db.Column(db.Integer)
     stop = db.Column(db.Integer)
 
-    fields = relationship("HKFields", back_populates='hkagent')
+    fields = relationship("HKFields", back_populates="hkagent")
 
 
 class HKFields(Base):
@@ -104,16 +107,17 @@ class HKFields(Base):
         start time for each HK field in ctime
     end : integer
         end time for each HK field in ctime
-    
+
     TODO: add uniqueness constraint
     """
-    __tablename__ = 'hkfields'
-    id = db.Column(db.Integer, primary_key=True)
-    file_id = db.Column(db.Integer, db.ForeignKey('hkfiles.id'))
-    hkfile = relationship("HKFiles", back_populates='fields')
 
-    agent_id = db.Column(db.Integer, db.ForeignKey('hkagents.id'))
-    hkagent = relationship("HKAgents", back_populates='fields')
+    __tablename__ = "hkfields"
+    id = db.Column(db.Integer, primary_key=True)
+    file_id = db.Column(db.Integer, db.ForeignKey("hkfiles.id"))
+    hkfile = relationship("HKFiles", back_populates="fields")
+
+    agent_id = db.Column(db.Integer, db.ForeignKey("hkagents.id"))
+    hkagent = relationship("HKAgents", back_populates="fields")
 
     field = db.Column(db.String)
     start = db.Column(db.Integer)
@@ -141,7 +145,7 @@ class G3tHk:
             If true, all sql statements will print to stdout
         """
         if db_path is None:
-            db_path = os.path.join(hkarchive_path, '_HK.db')
+            db_path = os.path.join(hkarchive_path, "_HK.db")
 
         self.hkarchive_path = hkarchive_path
         self.db_path = db_path
@@ -159,7 +163,7 @@ class G3tHk:
         ____
 
         hk_path : string
-            file path    
+            file path
 
         returns: list of field names and corresponding start and
                  end times from HK .g3 files
@@ -202,7 +206,6 @@ class G3tHk:
                 min_vals.append(np.nan)
                 max_vals.append(np.nan)
                 stds.append(np.nan)
-            
 
         return hkfs, starts, stops, medians, means, min_vals, max_vals, stds
 
@@ -214,11 +217,11 @@ class G3tHk:
         Args
         ____
 
-        path_to_file: the full path to a .g3 file which is used in 
+        path_to_file: the full path to a .g3 file which is used in
                       populate_hkfiels() to get the aggregator name
 
         returns: aggregator name
-        
+
         """
         # enact HKArchiveScanner
         hkas = hk.HKArchiveScanner()
@@ -232,16 +235,20 @@ class G3tHk:
         for key in fields.keys():
             hkfs.append(key)
 
-        agg_name = hkfs[0].split('.')[0]
+        agg_name = hkfs[0].split(".")[0]
         for agg in hkfs:
-            assert agg.split('.')[0] == agg_name, 'Aggregator name is not consistent'
+            assert agg.split(".")[0] == agg_name, "Aggregator name is not consistent"
 
         return agg_name
 
-
-    def _files_to_add(self, min_ctime=None, max_ctime=None):
-
-        db_files = self.session.query(HKFiles).all()
+    def _files_to_add(self, min_ctime=None, max_ctime=None, update_last_file=True):
+        db_files = self.session.query(HKFiles)
+        if update_last_file:
+            last = db_files.order_by(db.desc(HKFiles.global_start_time)).first()
+            db_files = db_files.filter(
+                HKFiles.global_start_time != last.global_start_time
+            )
+        db_files = db_files.all()
         db_files = [f.path for f in db_files]
 
         dirs = []
@@ -265,45 +272,34 @@ class G3tHk:
                     if min_ctime is not None and ftime < min_ctime:
                         continue
                     if max_ctime is not None and ftime > max_ctime:
-                        continue 
+                        continue
                     path_list.append(path)
 
         logger.debug(f"{len(path_list)} files to add to database.")
         return path_list
 
     def add_hkfiles(
-        self, 
-        min_ctime=None, 
+        self,
+        min_ctime=None,
         max_ctime=None,
         show_pb=True,
-        stop_at_error=False
-        ):
-        """Gather and add column information for hkfiles tables
-        """
+        stop_at_error=False,
+        update_last_file=True,
+    ):
+        """Gather and add column information for hkfiles tables"""
 
         file_list = self._files_to_add(
-            min_ctime = min_ctime, 
-            max_ctime = max_ctime,
-        )        
+            min_ctime=min_ctime,
+            max_ctime=max_ctime,
+            update_last_file=update_last_file,
+        )
 
+        for path in tqdm(sorted(file_list), disable=(not show_pb)):
+            try:
+                root, filename = os.path.split(path)
+                self.add_file(path, overwrite=True)
+                self.add_agents_and_fields(path, overwrite=True)
 
-        for path in tqdm( sorted(file_list), disable=(not show_pb)):
-            root, filename = os.path.split(path)
-
-            global_start_time = int(filename.split(".")[0])
-
-            try: 
-                aggregator = self._get_agg(path)
-
-                db_file = HKFiles(filename=filename,
-                                  path=path,
-                                  global_start_time=global_start_time,
-                                  aggregator=aggregator)
-
-                self.session.add(db_file)
-                self.session.commit()
-
-                self.add_agents_and_fields(db_file)
             except IntegrityError as e:
                 # Database Integrity Errors, such as duplicate entries
                 self.session.rollback()
@@ -321,21 +317,52 @@ class G3tHk:
                     raise e
                 logger.warning(f"Failed on file {filename}:\n{e}")
 
-    
-    def add_agents_and_fields(self, db_file):
+    def add_file(self, path, overwrite=False):
+        db_file = (
+            self.session.query(HKFiles)
+            .filter(
+                HKFiles.path == path,
+            )
+            .one_or_none()
+        )
+
+        if db_file is not None and not overwrite:
+            return
+        if db_file is None:
+            db_file = HKFiles(path=path)
+            self.session.add(db_file)
+
+        root, filename = os.path.split(path)
+        db_file.filename = filename
+        db_file.global_start_time = int(filename.split(".")[0])
+        db_file.aggregator = self._get_agg(path)
+
+        self.session.commit()
+
+    def add_agents_and_fields(self, path, overwrite=False):
+        db_file = (
+            self.session.query(HKFiles)
+            .filter(
+                HKFiles.path == path,
+            )
+            .one()
+        )
+
         db_agents = db_file.agents
         db_fields = db_file.fields
 
-        fields, starts, stops, medians, means, min_vals, max_vals, stds = self.load_fields(db_file.path)
         agents = []
+
+        out = self.load_fields(db_file.path)
+        fields, starts, stops, medians, means, min_vals, max_vals, stds = out
+
         for field in fields:
-            agent = field.split('.')[1]
+            agent = field.split(".")[1]
             agents.append(agent)
 
         #  remove duplicate agent names to avoid multiple agent_ids for
         #  same instance_id
         agents = [*set(agents)]
-
 
         # get the start and stop for each agent
         for agent in agents:
@@ -343,64 +370,68 @@ class G3tHk:
             stops_agent = []
             for i in range(len(fields)):
                 #  extract agent instance id from each field name
-                if fields[i].split('.')[1] == agent:
+                if fields[i].split(".")[1] == agent:
                     #  gather all the starts and stops for each field
                     #  in the agent
                     starts_agent.append(starts[i])
                     stops_agent.append(stops[i])
- 
+
             #  from the starts_agent and ends_agent, extract start
             #  and stop time for the agent
             agent_start = np.min(starts_agent)
             agent_stop = np.max(stops_agent)
-            
-            
-            x = np.where( [agent == a.instance_id for a in db_agents])[0] 
+
+            x = np.where([agent == a.instance_id for a in db_agents])[0]
             if len(x) == 0:
                 # if we don't have an agent
-                db_agent = HKAgents(instance_id=agent,
-                                    start=agent_start,
-                                    stop=agent_stop,
-                                    hkfile=db_file)
+                db_agent = HKAgents(
+                    instance_id=agent,
+                    start=agent_start,
+                    stop=agent_stop,
+                    hkfile=db_file,
+                )
                 self.session.add(db_agent)
-            else:
+            elif overwrite:
                 # stop may have changed for an incomplete file?
                 db_agent = db_agents[x[0]]
+                db_agent.start = agent_start
                 db_agent.stop = agent_stop
-        
+
         self.session.commit()
         db_agents = db_file.agents
-        
+
         for i in range(len(fields)):
-            agentname = fields[i].split('.')[1]
-            x = np.where( [agentname == a.instance_id for a in db_agents])[0]
+            agentname = fields[i].split(".")[1]
+            x = np.where([agentname == a.instance_id for a in db_agents])[0]
             if len(x) == 0:
-                logger.error(f"Somehow did not add agent {agentname} for {db_file.path}")
+                logger.error(
+                    f"Somehow did not add agent {agentname} for {db_file.path}"
+                )
                 continue
             db_agent = db_agents[x[0]]
-            x = np.where( [fields[i] == f.field for f in db_fields])[0]
-            if len(x) == 0:
-                db_field = HKFields(field=fields[i],
-                                   start=starts[i],
-                                   hkfile=db_file,
-                                   hkagent=db_agent)
+            x = np.where([fields[i] == f.field for f in db_fields])[0]
+            if len(x) > 0 and not overwrite:
+                continue
+            elif len(x) == 0:
+                db_field = HKFields(field=fields[i], hkfile=db_file, hkagent=db_agent)
                 self.session.add(db_field)
             else:
                 db_field = db_fields[x[0]]
-            
-            # update the math incase previous incomplete file?    
+
+            db_field.start = starts[i]
             db_field.stop = stops[i]
             db_field.median = medians[i]
             db_field.mean = means[i]
             db_field.min_val = min_vals[i]
             db_field.max_val = max_vals[i]
             db_field.stand_dev = stds[i]
+            # update the math incase previous incomplete file?
 
         self.session.commit()
 
-    def load_data(self, db_instance ):
+    def load_data(self, db_instance):
         """Load data from database objects
-        
+
         Arguments
         ---------
         db_instance: HKFiles, HKAgents, HKFields, or list of one of these objects
@@ -417,51 +448,53 @@ class G3tHk:
         something that doesn't require going through time when we are really
         just asking for "all data from X in file"
         """
-        if isinstance(db_instance, HKFields ):
-            x = hk.load_range( 
-                db_instance.start, 
-                db_instance.stop+0.5, 
-                fields = [db_instance.field],
-                data_dir=self.hkarchive_path
+        if isinstance(db_instance, HKFields):
+            x = hk.load_range(
+                db_instance.start,
+                db_instance.stop + 0.5,
+                fields=[db_instance.field],
+                data_dir=self.hkarchive_path,
             )
             return x
         elif isinstance(db_instance, HKAgents):
             fields = [f.field for f in db_instance.fields]
-            x = hk.load_range( 
-                db_instance.start, 
-                db_instance.stop+0.5, 
-                fields = fields,
-                data_dir=self.hkarchive_path
+            x = hk.load_range(
+                db_instance.start,
+                db_instance.stop + 0.5,
+                fields=fields,
+                data_dir=self.hkarchive_path,
             )
             return x
         elif isinstance(db_instance, HKFiles):
             fields = [f.field for f in db_instance.fields]
-            x = hk.load_range( 
-                min( [f.start for f in db_instance.fields]), 
-                max( [f.stop for f in db_instance.fields])+0.5, 
-                fields = fields,
-                data_dir=self.hkarchive_path
+            x = hk.load_range(
+                min([f.start for f in db_instance.fields]),
+                max([f.stop for f in db_instance.fields]) + 0.5,
+                fields=fields,
+                data_dir=self.hkarchive_path,
             )
-            return x  
+            return x
         elif isinstance(db_instance, list):
             temp = [self.load_data(x) for x in db_instance]
             data = {}
             for x in temp:
-                for k,item in x.items():
+                for k, item in x.items():
                     if k not in data:
                         data[k] = item
                     else:
                         data[k] = (
-                            np.concatenate( (data[k][0], item[0])),
-                            np.concatenate( (data[k][1], item[1]))
+                            np.concatenate((data[k][0], item[0])),
+                            np.concatenate((data[k][1], item[1])),
                         )
-            return data    
+            return data
         else:
-            raise ValueError("db_instance must be HKFields, HKFiles, "
-                             "HKAgents instances or a list of these")
+            raise ValueError(
+                "db_instance must be HKFields, HKFiles, "
+                "HKAgents instances or a list of these"
+            )
 
     def get_db_agents(self, instance_id, start, stop):
-        """Return list of HKAgents with given instance_id that are active 
+        """Return list of HKAgents with given instance_id that are active
         for any subset of time between start and stop
 
         Arguments
@@ -469,23 +502,38 @@ class G3tHk:
         instance_id : instance_id of agent
         start : ctime to begin search
         stop : ctime to end search
-    
+
         Returns
         -------
         list of HKAgent instances
         """
+        last = self.get_last_update()
+        if stop > last:
+            raise ValueError(
+                f"stop time {stop} is beyond the last database " f"update of {last}"
+            )
+
         agents = self.session.query(HKAgents).filter(
-            db.or_( 
+            db.or_(
                 db.and_(HKAgents.start <= start, HKAgents.stop >= stop),
                 db.and_(HKAgents.start >= start, HKAgents.start <= stop),
-                db.and_(HKAgents.stop >= start, HKAgents.stop <= stop)
+                db.and_(HKAgents.stop >= start, HKAgents.stop <= stop),
             )
         )
         if agents.count() == 0:
-            logger.warning(f"no agents found between {start} and {stop}"
-                            " database may be incomplete")
+            logger.warning(f"no agents found between {start} and {stop}")
+
         agents = agents.filter(HKAgents.instance_id == instance_id).all()
         return agents
+
+    def get_last_update(self):
+        """Return the last timestamp present in the database"""
+        last_file = (
+            self.session.query(HKFiles)
+            .order_by(db.desc(HKFiles.global_start_time))
+            .first()
+        )
+        return max([a.stop for a in last_file.agents])
 
     @classmethod
     def from_configs(cls, configs):
@@ -496,8 +544,7 @@ class G3tHk:
         ----
         configs - dictionary containing `data_prefix` and `g3thk_db` keys
         """
-        if type(configs)==str:
+        if type(configs) == str:
             configs = yaml.safe_load(open(configs, "r"))
-        
-        return cls(os.path.join(configs["data_prefix"], "hk"), configs['g3thk_db'])
 
+        return cls(os.path.join(configs["data_prefix"], "hk"), configs["g3thk_db"])

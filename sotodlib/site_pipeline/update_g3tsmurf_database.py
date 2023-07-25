@@ -48,10 +48,14 @@ def update_g3tsmurf_db(config=None, update_delay=2, from_scratch=False,
         except Exception as e:
             logger.error(f"Monitor connectioned failed {e}")
             monitor = None
-        
+    updates_start = dt.datetime.now().timestamp()
+
     SMURF.index_metadata(min_ctime=min_time.timestamp())
     SMURF.index_archive(min_ctime=min_time.timestamp(), show_pb=show_pb)
     SMURF.index_action_observations(min_ctime=min_time.timestamp())    
+    SMURF.index_timecodes(min_ctime=min_time.timestamp())
+    SMURF.update_finalization(update_time=updates_start)
+    SMURF.last_update = updates_start
 
     session = SMURF.Session()
 
