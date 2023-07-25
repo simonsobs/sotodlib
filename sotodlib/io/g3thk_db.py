@@ -243,13 +243,16 @@ class G3tHk:
 
     def _files_to_add(self, min_ctime=None, max_ctime=None, update_last_file=True):
         db_files = self.session.query(HKFiles)
-        if update_last_file:
-            last = db_files.order_by(db.desc(HKFiles.global_start_time)).first()
-            db_files = db_files.filter(
-                HKFiles.global_start_time != last.global_start_time
-            )
-        db_files = db_files.all()
-        db_files = [f.path for f in db_files]
+        if db_files.count() == 0:
+            db_files = []
+        else:
+            if update_last_file:
+                last = db_files.order_by(db.desc(HKFiles.global_start_time)).first()
+                db_files = db_files.filter(
+                    HKFiles.global_start_time != last.global_start_time
+                )
+            db_files = db_files.all()
+            db_files = [f.path for f in db_files]
 
         dirs = []
         dir_list = os.listdir(self.hkarchive_path)
@@ -589,4 +592,4 @@ class G3tHk:
         my_logger.info(f"remove {hkfile.path} from database")
         if not dry_run:
             self.session.delete(hkfile)
-            self.commit()
+            self.session.commit()
