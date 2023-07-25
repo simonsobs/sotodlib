@@ -2,7 +2,7 @@ import datetime as dt
 from typing import Optional
 import typer
 
-from ..io.imprinter import Imprinter
+from sotodlib.io.imprinter import Imprinter
 
 
 def main(
@@ -54,5 +54,7 @@ def main(
                                           force_single_stream=force_single_stream)
     # hk books
     imprinter.register_hk_books()
+    # smurf and stray books
+    imprinter.register_timecode_books()
 if __name__ == "__main__":
     typer.run(main)
