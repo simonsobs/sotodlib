@@ -1007,13 +1007,13 @@ class Imprinter:
                 res[o.obs_id] = sorted([f.name for f in o.files])
             return res
         elif book.type in ["stray"]:
+            tcode = int(book.bid.split("_")[1])
             streams = self.sources[book.tel_tube].get("slots")
             stream_filt_files = or_(*[Files.stream_id == s for s in streams])
             flist = (
                 session.query(Files)
                 .filter(
-                    Files.start >= book.start,
-                    Files.start < book.stop,
+                    Files.name.like(f"%/{tcode}/%"),
                     stream_filt_files,
                     Files.obs_id == None,
                 )
