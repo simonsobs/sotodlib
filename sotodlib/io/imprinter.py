@@ -1153,15 +1153,6 @@ class Imprinter:
                 return book.start
         return book.start  # last book
 
-    def all_bound_until_hk(self):
-        session = self.get_session()
-        books = session.query(Books).filter(Books.type == "hk").order_by(Books.start).all()
-        for book in books:
-            if book.status < BOUND:
-                return book.start
-        return book.start  # last book
-        
-
     def delete_book_files(self, book):
         """Delete all files associated with a book
 
