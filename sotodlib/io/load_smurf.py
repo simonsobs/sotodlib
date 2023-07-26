@@ -874,20 +874,20 @@ class G3tSmurf:
         """
 
         if session_id is None:
-            x = session.query(Files.name)
-            x = x.filter(
+            db_file = session.query(Files)
+            db_file = db_file.filter(
                 Files.stream_id == stream_id,
                 Files.start >= dt.datetime.utcfromtimestamp(action_ctime - max_early),
             )
-            x = x.order_by(Files.start).first()
-            if x is None:
+            db_file = db_file.order_by(Files.start).first()
+            if db_file is None:
                 logger.debug(
                     f"No .g3 files from Action {action_name} in {stream_id}"
                     f" at {action_ctime}. Not Making Observation"
                 )
                 return
 
-            session_id = int((x.name[:-3].split("/")[-1]).split("_")[0])
+            session_id = int((db_file.name[:-3].split("/")[-1]).split("_")[0])
 
         if calibration:
             obs_id = f"oper_{stream_id}_{session_id}"
@@ -905,22 +905,30 @@ class G3tSmurf:
             )
             .one_or_none()
         )
+        logger.debug(f"Observations {obs_id} already exists")
 
         if obs is None:
-            x = session.query(Files.name)
-            x = x.filter(
+            db_file = session.query(Files)
+            db_file = db_file.filter(
                 Files.stream_id == stream_id, Files.name.like(f"%{session_id}%")
             )
-            x = x.order_by(Files.start).first()
-
+            db_file = db_file.order_by(Files.start).first()
+            logger.debug(f"Found file {db_file.name} to be the start of observation {obs_id}")
+            if db_file.obs_id is not None:
+                if db_file.obs_id != obs_id:
+                    logger.warning(f"Trying to make {obs_id} using file {db_file.name} "
+                                   f"but file is already part if {db_file.obs_id}. Will "
+                                   f"not create observation")
+                    return
+            
             # Verify the files we found match with Observation
-            status = SmurfStatus.from_file(x.name)
+            status = SmurfStatus.from_file(db_file.name)
             if status.action is not None:
                 assert status.action == action_name
                 assert status.action_timestamp == action_ctime
 
             # Verify inside of file matches the outside
-            reader = so3g.G3IndexedReader(x.name)
+            reader = so3g.G3IndexedReader(db_file.name)
             while True:
                 frames = reader.Process(None)
                 if not frames:
