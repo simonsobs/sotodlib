@@ -364,7 +364,7 @@ class MLMapmaker(Operator):
             # gamma = np.pi / 2 - gamma # good Q, lots of U
             # gamma = gamma - np.pi / 2 # inverted Q, little bit of U
             # gamma = -gamma #            inverted Q, lots of U
-            gamma = 1.5 * np.pi - gamma
+            # gamma = 1.5 * np.pi - gamma
             # for d in range(len(det_quat)):
             #     print(f"{d:03d}: {det_quat[d]}")
             #     print(f"  theta = {det_theta[d]}")
