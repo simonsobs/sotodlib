@@ -24,9 +24,7 @@ def main(
     """
 
     imprinter = Imprinter(config, db_args={'connect_args': {'check_same_thread': False}})
-    max_time = dt.datetime.now() - dt.timedelta(days=cleanup_delay)
-
-    book_list = imprinter.get_level2_deleteable_books(max_time=max_time)
+    book_list = imprinter.get_level2_deleteable_books(max_time=max_time, cleanup_delay=cleanup_delay)
 
     for book in book_list:
         imprinter.delete_level2_files(book, dry_run=False)

@@ -649,14 +649,17 @@ class Imprinter:
             session = self.get_session()
         return session.query(Books).all()
 
-    def get_level2_deleteable_books(self, session=None, max_time=None):
+    def get_level2_deleteable_books(self, session=None, cleanup_delay=None, max_time=None):
         """Get all bound books from database where we need to delete the level2
         data
 
         Parameters
         ----------
         session: BookDB session
-        max_time: maxmimum time of book start to search
+        cleanup_delay: float
+            amount of time to delay book deletation relative to g3tsmurf finalization
+            time in units of days. 
+        max_time: maxmimum time of book start to search. Overrides cleanup_delay
 
         Returns
         -------
@@ -665,8 +668,10 @@ class Imprinter:
         """
         if session is None:
             session = self.get_session()
+        if cleanup_delay is None:
+            cleanup_delay = 0
 
-        q = session.query(Books).filter(
+        base_filt = and_(
             Books.status == BOUND,
             Books.lvl2_deleted == False,
             or_(  ## not implementing smurf deletion just yet
@@ -676,6 +681,21 @@ class Imprinter:
                 Books.type == "hk",
             ),
         )
+        sources = session.query(Books.tel_tube).filter(base_filt).distinct().all()
+        source_filt = []
+        for source, in sources:
+            streams = self.sources[source].get("slots")
+            _, SMURF = self.get_g3tsmurf_session(source, return_archive=True)
+            limit = SMURF.get_final_time(streams, check_control=False)
+            max_stop = dt.datetime.utcfromtimestamp(limit) - dt.timedelta(days=cleanup_delay)
+            
+            source_filt.append( and_(Books.tel_tube == source, Books.stop <= max_stop) )
+
+        q = session.query(Books).filter(
+            base_filt,
+            or_(*source_filt),
+        )
+        
         if max_time is not None:
             q = q.filter(Books.stop <= max_time)
 

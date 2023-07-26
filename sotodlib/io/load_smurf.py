@@ -1384,7 +1384,7 @@ class G3tSmurf:
         """
         if check_control and self.hk_db_path is None:
             raise ValueError("HK database path required to update finalization" " time")
-        if check_control and (start is None) or (stop is None):
+        if check_control and ((start is None) or (stop is None)):
             raise ValueError(
                 "start and stop ctimes are required to check which"
                 " pysmurf-monitors control which stream_ids"
