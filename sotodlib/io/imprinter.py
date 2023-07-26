@@ -1266,20 +1266,6 @@ class Imprinter:
         if not dry_run:
             book.lvl2_deleted = True
             self.session.commit()
-=======
-    def all_bound_until(self):
-        """report a datetime object to indicate that all books are bound
-        by this datetime.
-        """
-        session = self.get_session()
-        # sort by start time and find the start time by which
-        # all books are bound
-        books = session.query(Books).order_by(Books.start).all()
-        for book in books:
-            if book.status < BOUND:
-                return book.start
-        return book.start  # last book
->>>>>>> master
 
     def delete_book_files(self, book):
         """Delete all files associated with a book
@@ -1296,6 +1282,19 @@ class Imprinter:
             self.logger.warning(f"Failed to remove {book.path}: {e}")
             self.logger.error(traceback.format_exc())
 
+
+    def all_bound_until(self):
+        """report a datetime object to indicate that all books are bound
+        by this datetime.
+        """
+        session = self.get_session()
+        # sort by start time and find the start time by which
+        # all books are bound
+        books = session.query(Books).order_by(Books.start).all()
+        for book in books:
+            if book.status < BOUND:
+                return book.start
+        return book.start  # last book
 
 #####################
 # Utility functions #
