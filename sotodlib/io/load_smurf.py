@@ -1110,8 +1110,8 @@ class G3tSmurf:
         ## then remove the observation
         my_logger.info(f"Deleting Observation {obs.obs_id} from database")
         if not dry_run:
-            self.delete(obs)
-            self.commit()
+            session.delete(obs)
+            session.commit()
 
     def search_metadata_actions(
         self, min_ctime=16000 * 1e5, max_ctime=None, reverse=False
@@ -1537,7 +1537,9 @@ class G3tSmurf:
         max_time : int, float, or None
             maximum time for indexing
         """
-
+        logger.warning("Indexing via actions is deprecated and SHOULD NOT be "
+                       "run on systems where level 2 files are being automatically "
+                       "deleted")
         for action, stream_id, ctime, path in self.search_metadata_actions(
             min_ctime=min_ctime, max_ctime=max_ctime
         ):
