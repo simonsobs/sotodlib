@@ -213,7 +213,7 @@ class G3tSmurf:
         if row is None:
             session.add(Finalize(agent="G3tSMURF", time=1.6e9))
             session.commit()
-        for server in self.finalize.get("servers"):
+        for server in self.finalize.get("servers", []):
             for x in ["smurf-suprsync", "timestream-suprsync"]:
                 agent = server.get(x)
                 if agent is None:
