@@ -205,7 +205,7 @@ Database Creation and Update Script
 
 Keeping the databases updated requires a little care when we are building
 databases while data is actively being taken. To assist with this there is
-an **update_g3tsmurf_database.py** script saved within the 
+an **update_g3tsmurf_db.py** script saved within the 
 **sotodlib.site_pipeline** folder. This script requires config file that is the
 same as an expanded version of the one used for connecting to the G3tSmurf database::
 
@@ -232,7 +232,7 @@ the database file in order to perform updates.
 Here is the information for this script:
 
 .. argparse::
-    :module: sotodlib.site_pipeline.update_g3tsmurf_database
+    :module: sotodlib.site_pipeline.update_g3tsmurf_db
     :func: get_parser
 
 
