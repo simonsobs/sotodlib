@@ -1219,9 +1219,9 @@ class Imprinter:
                 f"Do not know how to delete level 2 files"
                 f" for book of type {book.type}"
             )
-        
-        book.lvl2_deleted = True
-        self.session.commit()
+        if not dry_run:
+            book.lvl2_deleted = True
+            self.session.commit()
 
     def delete_book_files(self, book):
         """Delete all files associated with a book
