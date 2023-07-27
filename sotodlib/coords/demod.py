@@ -73,10 +73,17 @@ def make_map(tod,
             P = coords.P.for_tod(
                 tod=tod, wcs_kernel=wcs_kernel, cuts=cuts, comps='QU')
         else:
-            P, X = coords.planets.get_scan_P(tod, planet=center_on, res=res)
+            P, X = coords.planets.get_scan_P(tod, planet=center_on, res=res,
+                                             cuts=cuts)
+    elif cuts is not None:
+        if P.cuts is not None:
+            raise RuntimeError("P was passed in, and has non-trivial .cuts; "
+                               "but non-trivial cuts was also passed in as a kwarg.")
             
     # Note that P might be passed in with an unexpected comps setting,
-    # so specify comps explicitly in every operation on P, below.
+    # so specify comps explicitly in every operation on P,
+    # below. Similarly, pass cuts to every call if it's not already
+    # cached in P.
 
     if det_weights is None:
         if det_weights_demod is None:
@@ -88,14 +95,16 @@ def make_map(tod,
 
     # T map and weight
     mT_weighted = P.to_map(
-        tod=tod, signal=dsT, comps='T', det_weights=det_weights)
-    wT = P.to_weights(tod, signal=dsT, comps='T', det_weights=det_weights)
+        tod=tod, signal=dsT, comps='T', det_weights=det_weights,
+        cuts=cuts)
+    wT = P.to_weights(tod, signal=dsT, comps='T', det_weights=det_weights,
+                      cuts=cuts)
 
     # Q/U maps and weights
     mQ_weighted = P.to_map(tod=tod, signal=demodQ, comps='QU',
-                             det_weights=det_weights_demod)
+                             det_weights=det_weights_demod, cuts=cuts)
     mU_weighted = P.to_map(tod=tod, signal=demodU, comps='QU',
-                             det_weights=det_weights_demod)
+                             det_weights=det_weights_demod, cuts=cuts)
     mQU_weighted = P.zeros(comps='QU')
     
     if wrong_definition == True:
@@ -111,7 +120,7 @@ def make_map(tod,
         mQU_weighted[1][:] = -mQ_weighted[1] + mU_weighted[0] 
         # (= -Q_{flipped detector coord}*sin(2 theta_pa) + U_{flipped detector coord}*cos(2 theta_pa) )
     wQU = P.to_weights(tod, signal=demodQ, comps='T',
-                         det_weights=det_weights_demod)
+                         det_weights=det_weights_demod, cuts=cuts)
 
     # combine mT_weighted and mQU_weighted into mTQU_weighted
     mTQU_weighted = P.zeros(super_shape=3, comps='TQU')
