@@ -213,7 +213,7 @@ class G3tSmurf:
         if row is None:
             session.add(Finalize(agent="G3tSMURF", time=1.6e9))
             session.commit()
-        for server in self.finalize.get("servers"):
+        for server in self.finalize.get("servers", []):
             for x in ["smurf-suprsync", "timestream-suprsync"]:
                 agent = server.get(x)
                 if agent is None:
@@ -538,6 +538,54 @@ class G3tSmurf:
                 logger.warning(f"Failed on file {f}:\n{e}")
         session.close()
 
+    def delete_file(self, db_file, session=None, dry_run=False, my_logger=None):
+        """WARNING: Deletes data from the file system
+
+        Delete both a database file entry, it's associated frames, AND the
+        file itself. Only to be run by automated data management systems
+
+        Args
+        ----
+        db_file: File instance
+            database Fine instance to be deleted
+        session: optional, SQLAlchemy session
+            should be passed if file is called as part of a larger cleanup
+            function
+        dry_run: boolean
+            if true, just prints deletion to my_logger.info
+        my_logger: logger, optional
+            option to pass different logger to this function
+        """
+
+        if session is None:
+            session = self.Session()
+        if my_logger is None:
+            my_logger = logger
+
+        db_frames = db_file.frames
+        my_logger.info(f"Deleting frame entries for {db_file.name}")
+        if not dry_run:
+            [session.delete(frame) for frame in db_frames]
+
+        if not os.path.exists(db_file.name):
+            my_logger.warning(
+                f"Database file {db_file.name} appears already" " deleted on disk"
+            )
+        else:
+            my_logger.info(f"Deleting file {db_file.name}")
+
+            if not dry_run:
+                os.remove(db_file.name)
+
+                ## clean up directory if it is empty
+                base, _ = os.path.split(db_file.name)
+                if len(os.listdir(base)) == 0:
+                    os.rmdir(base)
+        my_logger.info(f"Deleting database entry for {db_file.name}")
+        if not dry_run:
+            session.delete(db_file)
+            session.commit()
+
     def add_new_channel_assignment(self, stream_id, ctime, cha, cha_path, session):
         """Add new entry to the Channel Assignments table. Called by the
         index_metadata function.
@@ -826,20 +874,20 @@ class G3tSmurf:
         """
 
         if session_id is None:
-            x = session.query(Files.name)
-            x = x.filter(
+            db_file = session.query(Files)
+            db_file = db_file.filter(
                 Files.stream_id == stream_id,
                 Files.start >= dt.datetime.utcfromtimestamp(action_ctime - max_early),
             )
-            x = x.order_by(Files.start).first()
-            if x is None:
+            db_file = db_file.order_by(Files.start).first()
+            if db_file is None:
                 logger.debug(
                     f"No .g3 files from Action {action_name} in {stream_id}"
                     f" at {action_ctime}. Not Making Observation"
                 )
                 return
 
-            session_id = int((x.name[:-3].split("/")[-1]).split("_")[0])
+            session_id = int((db_file.name[:-3].split("/")[-1]).split("_")[0])
 
         if calibration:
             obs_id = f"oper_{stream_id}_{session_id}"
@@ -857,22 +905,30 @@ class G3tSmurf:
             )
             .one_or_none()
         )
+        logger.debug(f"Observations {obs_id} already exists")
 
         if obs is None:
-            x = session.query(Files.name)
-            x = x.filter(
+            db_file = session.query(Files)
+            db_file = db_file.filter(
                 Files.stream_id == stream_id, Files.name.like(f"%{session_id}%")
             )
-            x = x.order_by(Files.start).first()
-
+            db_file = db_file.order_by(Files.start).first()
+            logger.debug(f"Found file {db_file.name} to be the start of observation {obs_id}")
+            if db_file.obs_id is not None:
+                if db_file.obs_id != obs_id:
+                    logger.warning(f"Trying to make {obs_id} using file {db_file.name} "
+                                   f"but file is already part if {db_file.obs_id}. Will "
+                                   f"not create observation")
+                    return
+            
             # Verify the files we found match with Observation
-            status = SmurfStatus.from_file(x.name)
+            status = SmurfStatus.from_file(db_file.name)
             if status.action is not None:
                 assert status.action == action_name
                 assert status.action_timestamp == action_ctime
 
             # Verify inside of file matches the outside
-            reader = so3g.G3IndexedReader(x.name)
+            reader = so3g.G3IndexedReader(db_file.name)
             while True:
                 frames = reader.Process(None)
                 if not frames:
@@ -948,6 +1004,13 @@ class G3tSmurf:
         # Add any tags from the status
         if len(status.tags) > 0:
             for tag in status.tags:
+                t = (
+                    session.query(Tags)
+                    .filter(Tags.tag == tag, Tags.obs_id == obs.obs_id)
+                    .one_or_none()
+                )
+                if t is not None:
+                    continue
                 new_tag = Tags(obs_id=obs.obs_id, tag=tag)
                 session.add(new_tag)
             obs.tag = ",".join(status.tags)
@@ -1021,6 +1084,42 @@ class G3tSmurf:
             obs.timing = np.all([f.timing for f in flist])
             logger.debug(f"Setting {obs.obs_id} stop time to {obs.stop}")
         session.commit()
+
+    def delete_observation_files(self, obs, session, dry_run=False, my_logger=None):
+        """WARNING: Deletes files from the file system
+
+        Args
+        ----
+        obs: observation instance
+        session: SQLAlchemy session used to query obs
+        dry_run: boolean
+            if true, only prints deletion to my_logger.info
+        """
+        if my_logger is None:
+            my_logger = logger
+
+        ## first remove the tags
+        tags = (
+            session.query(Tags)
+            .filter(
+                Tags.obs_id == obs.obs_id,
+            )
+            .all()
+        )
+        for t in tags:
+            my_logger.info(f"Deleting Tag ({t.tag, t.obs_id}) from database")
+            if not dry_run:
+                session.delete(t)
+
+        ## then remove the files
+        for f in obs.files:
+            self.delete_file(f, session, dry_run=dry_run, my_logger=my_logger)
+
+        ## then remove the observation
+        my_logger.info(f"Deleting Observation {obs.obs_id} from database")
+        if not dry_run:
+            session.delete(obs)
+            session.commit()
 
     def search_metadata_actions(
         self, min_ctime=16000 * 1e5, max_ctime=None, reverse=False
@@ -1285,7 +1384,7 @@ class G3tSmurf:
         """
         if check_control and self.hk_db_path is None:
             raise ValueError("HK database path required to update finalization" " time")
-        if check_control and (start is None) or (stop is None):
+        if check_control and ((start is None) or (stop is None)):
             raise ValueError(
                 "start and stop ctimes are required to check which"
                 " pysmurf-monitors control which stream_ids"
@@ -1446,7 +1545,9 @@ class G3tSmurf:
         max_time : int, float, or None
             maximum time for indexing
         """
-
+        logger.warning("Indexing via actions is deprecated and SHOULD NOT be "
+                       "run on systems where level 2 files are being automatically "
+                       "deleted")
         for action, stream_id, ctime, path in self.search_metadata_actions(
             min_ctime=min_ctime, max_ctime=max_ctime
         ):

@@ -10,13 +10,35 @@ import numpy as np
 import argparse
 import logging
 from sqlalchemy import not_, or_, and_
+from typing import Optional
 
 from sotodlib.site_pipeline.monitor import Monitor
 from sotodlib.io.load_smurf import G3tSmurf, Observations, logger as default_logger
 
 
-def update_g3tsmurf_db(config=None, update_delay=2, from_scratch=False,
-                       verbosity=2, logger=None):
+def main(config: Optional[str] = None, update_delay: float = 2, 
+         from_scratch: bool = False, verbosity: int = 2, logger=None,
+         index_via_actions: bool =False):
+    """
+    Arguments
+    ---------
+    config: string
+        configuration file for G3tSmurf
+    update_delay: float
+        number of days to 'look back' to update observation information
+    from_scratch: bool
+        if True, run database update with minimum ctime of 1.6e9 (all SO time).
+        overrides update_delay
+    verbosity: int
+        0-3, higher numbers = more printouts
+    logger: logging.logger
+        allows passing another longer to execution functions
+    index_via_actions: bool
+        if True, will look through action folders to create observations, this
+        will be necessary for data older than Oct 2022 but creates concurancy 
+        issues on systems (like the site) running automatic deletion of level 2 
+        data.
+    """
 
     show_pb = True if verbosity > 1 else False
 
@@ -52,7 +74,8 @@ def update_g3tsmurf_db(config=None, update_delay=2, from_scratch=False,
 
     SMURF.index_metadata(min_ctime=min_time.timestamp())
     SMURF.index_archive(min_ctime=min_time.timestamp(), show_pb=show_pb)
-    SMURF.index_action_observations(min_ctime=min_time.timestamp())    
+    if index_via_actions:
+        SMURF.index_action_observations(min_ctime=min_time.timestamp())    
     SMURF.index_timecodes(min_ctime=min_time.timestamp())
     SMURF.update_finalization(update_time=updates_start)
     SMURF.last_update = updates_start
@@ -133,10 +156,7 @@ def get_parser(parser=None):
                        default=2, type=int)
     return parser
 
-main = update_g3tsmurf_db
-
-
 if __name__ == '__main__':
     parser = get_parser(parser=None)
     args = parser.parse_args()
-    update_g3tsmurf_db(**vars(args))
+    main(**vars(args))
