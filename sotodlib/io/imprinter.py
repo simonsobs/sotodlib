@@ -1218,7 +1218,6 @@ class Imprinter:
         )
         return {o.obs_id: o for o in obs}
 
-<<<<<<< HEAD
     def delete_level2_files(self, book, dry_run=True):
         """Delete level 2 data from already bound books
 
