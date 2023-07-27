@@ -53,12 +53,13 @@ class MLMapmaker:
         self.dof          = MultiZipper()
         self.ready        = False
 
-    def add_obs(self, id, obs, noise_model=None):
+    def add_obs(self, id, obs, deslope=True, noise_model=None):
         # Prepare our tod
         ctime  = obs.timestamps
         srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
         tod    = obs.signal.astype(self.dtype, copy=False)
-        utils.deslope(tod, w=1, inplace=True)
+        if deslope:
+            utils.deslope(tod, w=deslope_order, inplace=True)
         # Allow the user to override the noise model on a per-obs level
         if noise_model is None: noise_model = self.noise_model
         # Build the noise model from the obs unless a fully

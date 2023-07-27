@@ -144,6 +144,11 @@ class MLMapmaker(Operator):
         "maps it has some overhead due to extra communication."
     )
 
+    deslope = Bool(
+        True,
+        help="If True, each observation will have the mean and slope removed.",
+    )
+
     verbose = Int(
         1,
         allow_none=True,
@@ -432,7 +437,9 @@ class MLMapmaker(Operator):
             else:
                 nmat = None
 
-            self._mapmaker.add_obs(ob.name, axobs, noise_model=nmat)
+            self._mapmaker.add_obs(
+                ob.name, axobs, deslope=self.deslope, noise_model=nmat
+            )
             del axobs
 
             # Maybe save the noise model we built (only if we actually built one rather than
@@ -526,7 +533,8 @@ class MLMapmaker(Operator):
 
         for signal, val in zip(self._mapmaker.signals, step.x):
             if signal.output:
-                signal.write(prefix, "map", val)
+                fname = signal.write(prefix, "map", val)
+                log.info_rank(f"Wrote {fname}", comm=comm)
 
         if comm is not None:
             comm.barrier()
