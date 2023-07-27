@@ -370,6 +370,7 @@ def sim_nominal():
         tb["type"] = ttyp
         tb["waferspace"] = 128.4
         tb["wafer_slots"] = list()
+        tb["wafer_slot_angle"] = [0.0 for tw in range(3)] # Degrees
         for tw in range(3):
             off = 0
             for w, props in cnf["wafer_slots"].items():
@@ -393,6 +394,7 @@ def sim_nominal():
         tb["type"] = ttyp
         tb["waferspace"] = 128.4
         tb["wafer_slots"] = list()
+        tb["wafer_slot_angle"] = [0.0 for tw in range(7)] # Degrees
         for tw in range(7):
             off = 0
             for w, props in cnf["wafer_slots"].items():

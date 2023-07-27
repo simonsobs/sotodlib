@@ -567,6 +567,7 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
         # This is a SAT.  We have one tube at the center.
         tubeprops = hw.data["tube_slots"][tube_slots[0]]
         waferspace = tubeprops["waferspace"] * platescale
+        wafer_slot_ang_deg = tubeprops["wafer_slot_angle"]
 
         # Wafers are arranged in a rotated hexagon shape, however these
         # locations are rotated from a normal layout.
@@ -575,7 +576,7 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
             2 * waferspace * u.degree,
             "",
             "",
-            np.zeros(7) * u.degree,
+            u.Quantity(wafer_slot_ang_deg, u.degree),
         )
         centers = np.zeros((7, 4), dtype=np.float64)
         if det_info_file is None:
@@ -634,19 +635,33 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
             tubeprops = hw.data["tube_slots"][tube_slot]
             waferspace = tubeprops["waferspace"]
             location = tubeprops["toast_hex_pos"]
+            wafer_slot_ang_deg = tubeprops["wafer_slot_angle"]
+            wafer_slot_ang_rad = np.radians(wafer_slot_ang_deg)
 
             wradius = 0.5 * (waferspace * platescale * np.pi / 180.0)
             if det_info_file is None:
                 qwcenters = [
-                    xieta_to_quat(-wradius, wradius / np.sqrt(3.0), thirty * 4),
-                    xieta_to_quat(0.0, -2.0 * wradius / np.sqrt(3.0), 0.0),
-                    xieta_to_quat(wradius, wradius / np.sqrt(3.0), -thirty * 4),
+                    xieta_to_quat(
+                        -wradius, wradius / np.sqrt(3.0), thirty * 4 + wafer_slot_ang_rad[0]
+                    ),
+                    xieta_to_quat(
+                        0.0, -2.0 * wradius / np.sqrt(3.0), wafer_slot_ang_rad[1]
+                    ),
+                    xieta_to_quat(
+                        wradius, wradius / np.sqrt(3.0), -thirty * 4 + wafer_slot_ang_rad[2]
+                    ),
                 ]
             else:
                 qwcenters = [
-                    xieta_to_quat(-wradius, wradius / np.sqrt(3.0), 7*thirty),
-                    xieta_to_quat(0.0, -2.0 * wradius / np.sqrt(3.0), 3*thirty),
-                    xieta_to_quat(wradius, wradius / np.sqrt(3.0), -thirty ),
+                    xieta_to_quat(
+                        -wradius, wradius / np.sqrt(3.0), 7*thirty + wafer_slot_ang_rad[0]
+                    ),
+                    xieta_to_quat(
+                        0.0, -2.0 * wradius / np.sqrt(3.0), 3*thirty + wafer_slot_ang_rad[1]
+                    ),
+                    xieta_to_quat(
+                        wradius, wradius / np.sqrt(3.0), -thirty + wafer_slot_ang_rad[2]
+                    ),
                 ]
 
             centers = list()
