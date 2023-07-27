@@ -19,7 +19,7 @@ import sotodlib
 import so3g
 from sotodlib import core, coords, site_pipeline, tod_ops, hwp
 
-from . import util
+from . import util, make_source_flags
 
 
 def get_parser(parser=None):
@@ -321,6 +321,18 @@ def main(
             logger.warning(f'Decimating focal plane (--test).')
             dets = tod.dets.vals[::10]
             tod.restrict('dets', dets)
+
+        # Generate source flags?
+        if 'source_flags' not in tod:
+            logger.info(f'Generating source flags ...')
+            _flags = make_source_flags.make_source_flags(
+                tod, config['masking'], logger=logger)
+            tod.wrap('source_flags', _flags, [(0, 'dets'), (1, 'samps')])
+
+        # Fake cuts?
+        if 'flags' not in tod:
+            tod.wrap_new('flags', shape=('dets', 'samps'),
+                         cls=so3g.proj.RangesMatrix.zeros)
 
         # Modify samps axis for FFTs.
         logger.info(f' -- Before trimming, TOD shape is: {tod.shape}.')

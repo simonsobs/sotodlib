@@ -9,15 +9,14 @@ import sotodlib
 from sotodlib import core, coords, site_pipeline
 from . import util
 
-logger = logging.getLogger(__name__)
 
 def get_parser(parser=None):
     if parser is None:
         parser = ArgumentParser()
+    parser.add_argument('config_file', help=
+                        "Configuration file.")
     parser.add_argument('obs_id',help=
                         "Observation for which to generate flags.")
-    parser.add_argument('-c', '--config-file', help=
-                        "Configuration file.")
     parser.add_argument('-v', '--verbose', action='count',
                         default=0, help="Pass multiple times to increase.")
     return parser
@@ -25,7 +24,45 @@ def get_parser(parser=None):
 def get_config(config_file):
     return yaml.safe_load(open(config_file, 'r'))
 
-def main(config_file=None, verbose=0, obs_id=None):
+def make_source_flags(tod, mask_config, logger=None):
+    if logger is None:
+        logger = logging.getLogger(__name__)
+
+    # Load / compute mask parameters.
+    mask_params = mask_config['default']
+    mask_res = util.parse_quantity(
+        util.lookup_conditional(
+            mask_config, 'res', default=[1, 'arcmin']),
+        'deg').value
+
+    sources = coords.planets.get_nearby_sources(tod)
+    flags = None
+    for source_name, eph_object in sources:
+        logger.info(f'Flagging for {source_name} ...')
+        _flags = coords.planets.compute_source_flags(
+            tod, center_on=source_name, res=mask_res*coords.DEG,
+            mask=mask_params)
+        weight = np.mean(_flags.get_stats()['samples']) / _flags.shape[1]
+        logger.info(f' ... weight for {source_name} was {weight*100:.2}%.')
+        if flags is None:
+            flags = _flags
+        else:
+            flags += _flags
+
+    if flags is None:
+        import so3g  # This is here to dodge sphinxarg mocking failure.
+        flags = so3g.proj.RangesMatrix.zeros(
+            shape=(tod.dets.count, tod.samps.count))
+
+    # Compute fraction of samples
+    weight = np.mean(flags.get_stats()['samples']) / flags.shape[1]
+    logger.info(f'Total mask weight is {weight*100:.2}%.')
+
+
+def main(config_file=None, verbose=0, obs_id=None, logger=None):
+    if logger is None:
+        logger = logging.getLogger(__name__)
+
     config = get_config(config_file)
 
     if verbose >= 1:
@@ -81,35 +118,7 @@ def main(config_file=None, verbose=0, obs_id=None):
         index_map[this_index] = detset
         logger.info(f'detset "{detset}" corresponds to {group_by}="{this_index}"')
 
-        # Load / compute mask parameters.
-        mask_params = config['mask_params']['default']
-        mask_res = util.parse_quantity(
-            util.lookup_conditional(
-                config['mask_params'], 'res', default=[1, 'arcmin']),
-            'deg').value
-
-        sources = coords.planets.get_nearby_sources(tod)
-        flags = None
-        for source_name, eph_object in sources:
-            logger.info(f'Flagging for {source_name} ...')
-            _flags = coords.planets.compute_source_flags(
-                tod, center_on=source_name, res=mask_res*coords.DEG,
-                mask=mask_params)
-            weight = np.mean(_flags.get_stats()['samples']) / _flags.shape[1]
-            logger.info(f' ... weight for {source_name} was {weight*100:.2}%.')
-            if flags is None:
-                flags = _flags
-            else:
-                flags += _flags
-
-        if flags is None:
-            import so3g  # This is here to dodge sphinxarg mocking failure.
-            flags = so3g.proj.RangesMatrix.zeros(
-                shape=(tod.dets.count, tod.samps.count))
-
-        # Compute fraction of samples
-        weight = np.mean(flags.get_stats()['samples']) / flags.shape[1]
-        logger.info(f'Total mask weight is {weight*100:.2}%.')
+        flags = make_source_flags(tod, config['mask_params'], logger=logger)
 
         # Wrap result into AxisManager for HDF5 off-load.
         aman = core.AxisManager(tod.dets, tod.samps)
