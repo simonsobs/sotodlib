@@ -44,8 +44,9 @@ from . import (
     check_book,
     make_source_flags,
     make_uncal_beam_map,
-    update_g3tsmurf_database,
-    preprocess_tod
+    update_g3tsmurf_db,
+    preprocess_tod,
+    update_obsdb
 )
 
 # Dictionary matching element name to a submodule (which must have
@@ -58,8 +59,9 @@ ELEMENTS = {
     'check-book': check_book,
     'make-source-flags': make_source_flags,
     'make-uncal-beam-map': make_uncal_beam_map,
-    'update-g3tsmurf-database': update_g3tsmurf_database,
+    'update-g3tsmurf-db': update_g3tsmurf_db,
     'preprocess-tod': preprocess_tod,
+    'update-obsdb': update_obsdb,
 }
 
 CLI_NAME = 'so-site-pipeline'

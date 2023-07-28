@@ -205,12 +205,26 @@ Database Creation and Update Script
 
 Keeping the databases updated requires a little care when we are building
 databases while data is actively being taken. To assist with this there is
-an **update_g3tsmurf_database.py** script saved within the 
+an **update_g3tsmurf_db.py** script saved within the 
 **sotodlib.site_pipeline** folder. This script requires config file that is the
-same as for connecting to the G3tSmurf database::
+same as an expanded version of the one used for connecting to the G3tSmurf database::
 
-    data_prefix: "/path/to/data"
-    g3tsmurf_db: "/path/to/database.db"
+    data_prefix : "/path/to/daq-node/"
+    g3tsmurf_db: "/path/to/g3tsmurf.db"
+    g3thk_db: "/path/to/g3hk.db"
+
+
+    finalization:
+        servers:
+            - smurf-suprsync: "smurf-sync-so1" ## instance-id
+              timestream-suprsync: "timestream-sync-so1" ## instance-id
+              pysmurf-monitor: "monitor-so1" ## instance-id
+            - smurf-suprsync: "smurf-sync-so2" ## instance-id
+              timestream-suprsync: "timestream-sync-so2" ## instance-id
+              pysmurf-monitor: "monitor-so2" ## instance-id
+
+The finalization information and the HK database are required for tracking the
+data transfer status between the level 1 servers and the level 2 DAQ node.
 
 The user running this script must have read, write, and execute permissions to
 the database file in order to perform updates.
@@ -218,7 +232,7 @@ the database file in order to perform updates.
 Here is the information for this script:
 
 .. argparse::
-    :module: sotodlib.site_pipeline.update_g3tsmurf_database
+    :module: sotodlib.site_pipeline.update_g3tsmurf_db
     :func: get_parser
 
 

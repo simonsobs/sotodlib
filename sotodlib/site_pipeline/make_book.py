@@ -1,15 +1,11 @@
 from typing import Optional
-import typer
 import traceback
+import argparse
 
 from ..io.imprinter import Imprinter
 
 
-def main(
-    im_config: str,
-    output_root: str,
-    source: Optional[str],
-    ):
+def main(config: str, output_root: str, source: Optional[str], logger=None):
     """Make books based on imprinter db
     
     Parameters
@@ -21,7 +17,7 @@ def main(
     source: str, optional
         data source to use, e.g., sat1, latrt, tsat. If None, use all sources
     """
-    imprinter = Imprinter(im_config, db_args={'connect_args': {'check_same_thread': False}})
+    imprinter = Imprinter(config, db_args={'connect_args': {'check_same_thread': False}})
     # get unbound books
     unbound_books = imprinter.get_unbound_books()
     failed_books = imprinter.get_failed_books()
@@ -48,5 +44,17 @@ def main(
             # it has failed twice, ideally we want people to look at it now
             # do something here
 
-if __name__ == '__main__':
-    typer.run(main)
+
+def get_parser(parser=None):
+    if parser is None:
+        parser = argparse.ArgumentParser()
+    parser.add_argument('config', type=str, help="Path to imprinter configuration file")
+    parser.add_argument('output_root', type=str, help="Root path of the books")
+    parser.add_argument('--source', type=str, help="Data source to use, e.g., sat1, latrt, tsat. If None, use all sources")
+    return parser
+
+
+if __name__ == "__main__":
+    parser = get_parser(parser=None)
+    args = parser.parse_args()
+    main(**vars(args))
