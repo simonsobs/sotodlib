@@ -538,6 +538,11 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
             timer=timer,
         )
 
+    # Add random flags
+
+    ops.yield_cut.apply(data)
+    log.info_rank("  Applied yield flags in", comm=world_comm, timer=timer)
+
     # Add calibration error
 
     if args.realization is not None:
@@ -882,6 +887,7 @@ def main():
             enabled=False,
         ),
         toast.ops.StokesWeights(name="weights_radec", mode="IQU"),
+        toast.ops.YieldCut(name="yield_cut", enabled=False),
         toast.ops.Demodulate(name="demodulate", enabled=False),
         toast.ops.NoiseEstim(name="noise_estim", enabled=False),
         toast.ops.FlagSSO(name="flag_sso", enabled=False),
