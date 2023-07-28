@@ -33,7 +33,7 @@ def _group_feeds(fields, alias_exists=False):
 
     return grouped_feeds
 
-def _group_data(hkdata, field_dict=None, field_exists=False, alias_exists=False, config_exists=False):
+def _group_data(hkdata, field_dict=None, fields_only=False, alias_exists=False, config_exists=False):
     """ Sort hkdata that comes out of load_range depending
     on the parameters used for load_range()
 
@@ -45,7 +45,7 @@ def _group_data(hkdata, field_dict=None, field_exists=False, alias_exists=False,
     
     """
     hknames = list(hkdata.keys())
-    if field_exists: #meaning only field names provided, no aliases given for them
+    if fields_only: #meaning only field names provided, no aliases given for them
         grouped_feeds = _group_feeds(hknames)
     if alias_exists or config_exists:
         # need the field_dictionary from the config file
@@ -87,6 +87,29 @@ def _group_data(hkdata, field_dict=None, field_exists=False, alias_exists=False,
         grouped_data.append(device_data)
 
     return grouped_data
+
+def _check_hkdata(data):
+    """
+    A new bug was found in load_range() where if the same field name
+    is given n times, load_range() returns an empty array of data n 
+    times. This is written to catch that code and remove it from the
+    hkdata dictonary until this bug is fixed.
+    
+    Parameters:
+        data (dict) : dictionary of alias/fieldname, time, data from
+            load_range()
+
+    Returns:
+        hkdata (dict) : updated dictionary without the empty arrays
+
+    """
+    empty_keys = []
+    for alias in list(data):
+        if len(data[alias][0]) == 0:
+            empty_keys.append(alias)
+    
+    for key in empty_keys:
+        del data[key]
 
 def sort_hkdata_fromconfig(start, stop, config):
     """
