@@ -456,6 +456,46 @@ be processed:
   - ``'source_flags'``
   - ``'glitch_flags'`` - optional
 
+analyze-beam-map
+----------------
+
+This script performs map pre-processing operations, estimates the beam 
+parameters, fits the beam profiles and transfer functions of the input planet 
+maps and stores the result. 
+
+Inputs
+``````
+
+- Pixell maps
+- Configuration file with initial fit parameters
+
+Config file format
+``````````````````
+
+.. code-block:: yaml
+
+  telescopes:
+      
+      SAT:
+
+            aperture: 0.42
+            bands: ['f030', 'f040', 'f090', 'f150', 'f230', 'f290']
+            band_c: [27, 39, 93, 145, 225, 280]
+            beamsize: [91, 63, 27.4, 17.3, 13.5, 12.1]
+          
+      LAT:
+
+            aperture: 6.0
+            bands: ['f030', 'f040', 'f090', 'f150', 'f230', 'f290']
+            band_c: [27, 39, 93, 145, 225, 280]
+            beamsize: [4, 3, 2.1, 1.3, 0.95, 0.84] 
+
+Outputs
+```````
+
+- Astropy table containing the fitted beam parameters stored as .HDF5
+- Text file containing average beam profile and 1σ error
+- Text file containing average beam trasnfer function and 1σ error
 
 update-hwp-angle
 ----------------
