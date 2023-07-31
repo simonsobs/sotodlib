@@ -81,7 +81,6 @@ def _group_data(hkdata, field_dict=None, fields_only=False, alias_exists=False, 
         assert field_dict is not None
     
     if config_exists:
-        # here, field_dict looks like --> observatory.lsa22yg.channel1: X-001 
         online_fields = {}
         for i in range(len(hknames)):
             alias = hknames[i]
@@ -89,8 +88,6 @@ def _group_data(hkdata, field_dict=None, fields_only=False, alias_exists=False, 
             field_info = {alias: field_name}
             online_fields.update(field_info)
     elif alias_exists:
-        # here, field dict looks like --> X-001: observatory.lsa22yg.channel1
-        # swap dict to ensure grouping happens by field name, not alias
         online_fields = _get_swap_dict(field_dict)
 
     if config_exists or alias_exists:
@@ -109,7 +106,7 @@ def _group_data(hkdata, field_dict=None, fields_only=False, alias_exists=False, 
     for group in grouped_feeds:
         device_data = {}
         for field in group:
-            if field_exists:
+            if fields_only:
                 field_dict = {field: hkdata[field]}
                 device_data.update(field_dict)
             if alias_exists or config_exists:
@@ -217,7 +214,7 @@ def sort_hkdata(start, stop, fields, data_dir, alias=None):
         hkdata = load_range(start, stop, fields, data_dir=data_dir)
         _check_hkdata(hkdata)
 
-        grouped_data = _group_data(hkdata, alias_exists=False)
+        grouped_data = _group_data(hkdata, fields_only=True)
 
         return grouped_data
     
