@@ -73,7 +73,7 @@ def _group_data(hkdata, field_dict=None, fields_only=False, alias_exists=False, 
 
     """
     hknames = list(hkdata.keys())
-    if fields_only: #meaning only field names provided, no aliases given for them
+    if fields_only: # only field names provided, no aliases given for them
         grouped_feeds = _group_feeds(hknames)
     
     if alias_exists or config_exists:
@@ -121,7 +121,7 @@ def _check_hkdata(data):
     """
     A new bug was found in load_range() where if the same field name
     is given n times, load_range() returns an empty array of data n 
-    times. This is written to catch that code and remove it from the
+    times. This is written to catch that bug and remove it from the
     hkdata dictonary until this bug is fixed.
     
     Parameters:
@@ -129,7 +129,7 @@ def _check_hkdata(data):
             load_range()
 
     Returns:
-        hkdata (dict) : updated dictionary without the empty arrays
+        data (dict) : updated dictionary without the empty arrays
 
     """
     empty_keys = []
@@ -200,14 +200,12 @@ def sort_hkdata(start, stop, fields, data_dir, alias=None):
         stop: Latest time to search for data. See start parameter above for
             note on time formats.
         fields: (list) List of strings of Field names to query.
-        alias (optional): (str) List of string of aliases of the field names
+        alias (optional): (list) List of string of aliases of the field names
 
     Returns:
         get_grouped_data (list): grouped list of data per HK feed/device;
             useful for turning into a grouped set of axismanagers, or for
             other grouped data analysis purposes.
-
-            'xy_stage_y': 'observatory.XYWing.feeds.positions.y'
     
     """
     if alias is None:
