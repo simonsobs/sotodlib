@@ -9,7 +9,7 @@ New users should either use `toast_so_map`
 or `python -m sotodlib.workflows.toast_so_map`.
 """
 
-from sotodlib.workflows.toast_so_map import cli
+from sotodlib.toast.workflows.toast_so_map import cli
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ New users should either use `make_hardware_maps`
 or `python -m sotodlib.workflows.make_hardware_maps`.
 """
 
-from sotodlib.workflows.make_hardware_maps import main
+from sotodlib.toast.workflows.make_hardware_maps import main
 
 
 if __name__ == "__main__":

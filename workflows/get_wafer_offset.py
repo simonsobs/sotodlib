@@ -9,7 +9,7 @@ New users should either use `get_wafer_offset`
 or `python -m sotodlib.workflows.get_wafer_offset`.
 """
 
-from sotodlib.workflows.get_wafer_offset import main
+from sotodlib.toast.workflows.get_wafer_offset import main
 
 
 if __name__ == "__main__":

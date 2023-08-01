@@ -9,7 +9,7 @@ New users should either use `toast_so_convert`
 or `python -m sotodlib.workflows.toast_so_convert`.
 """
 
-from sotodlib.workflows.toast_so_convert import cli
+from sotodlib.toast.workflows.toast_so_convert import cli
 
 
 if __name__ == "__main__":
