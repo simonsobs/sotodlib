@@ -9,7 +9,7 @@ New users should either use `mapmaker_test`
 or `python -m sotodlib.workflows.mapmaker_test`.
 """
 
-from sotodlib.workflows.mapmaker_test import cli
+from sotodlib.toast.workflows.mapmaker_test import cli
 
 
 if __name__ == "__main__":
