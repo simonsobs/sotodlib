@@ -357,11 +357,25 @@ def sim_nominal():
     # TOAST hexagon layout positions in Xi/Eta coordinates
     ltube_toasthex_pos = [0, 1, 2, 3, 5, 6, 10]
 
-    # "Optics" locations as given in several SO slide decks
+    # "Optics" locations as given in several SO slide decks.  Note this is flipped in
+    # some figures.  See:
+    # https://simonsobs.atlassian.net/wiki/spaces/PRO/pages/101974017/Focal+Plane+Coordinates
     ltube_optics_pos = [1, 3, 5, 4, 8, 9, 12]
 
     # Cryo team names for these positions
     ltube_cryonames=["c1", "i5", "i6", "i1", "i3", "i4", "o6"]
+
+    lat_ufm_slot = [
+        2,
+        1,
+        0,
+    ]
+
+    lat_ufm_thetarot = [
+        120.0,
+        0.0,
+        240.0,
+    ]
 
     for tindx in range(7):
         nm = ltube_cryonames[tindx]
@@ -370,13 +384,18 @@ def sim_nominal():
         tb["type"] = ttyp
         tb["waferspace"] = 128.4
         tb["wafer_slots"] = list()
-        tb["wafer_slot_angle"] = [0.0 for tw in range(3)] # Degrees
+        tb["wafer_slot_angle"] = [
+            lat_ufm_thetarot[tw] for tw in range(3)
+        ] # Degrees
+        # The "slot" here is the relative slot (ws0 - ws2) within the tube.
+        tb["wafer_ufm_slot"] = list()
         for tw in range(3):
             off = 0
             for w, props in cnf["wafer_slots"].items():
                 if props["type"] == ttyp:
                     if off == woff[ttyp]:
                         tb["wafer_slots"].append(w)
+                        tb["wafer_ufm_slot"].append(lat_ufm_slot[tw])
                         woff[ttyp] += 1
                         break
                     off += 1
@@ -386,7 +405,35 @@ def sim_nominal():
         tb["receiver_name"] = ""
         tube_slots[nm] = tb
 
-    stubes = ["SAT_MF", "SAT_MF", "SAT_UHF","SAT_LF"]
+    hex_to_ufm_slot = [
+        0,
+        2,
+        1,
+        6,
+        5,
+        4,
+        3,
+    ]
+    hex_to_ufm_loc = [
+        "AX",
+        "NE",
+        "NO",
+        "NW",
+        "SW",
+        "SO",
+        "SE",
+    ]
+    hex_to_ufm_thetarot = [
+        240.0,
+        0.0,
+        300.0,
+        180.0,
+        120.0,
+        60.0,
+        60.0,
+    ]
+
+    stubes = ["SAT_MF", "SAT_MF", "SAT_UHF", "SAT_LF"]
     for tindx in range(4):
         nm = "ST{:d}".format(tindx+1)
         ttyp = stubes[tindx]
@@ -394,13 +441,23 @@ def sim_nominal():
         tb["type"] = ttyp
         tb["waferspace"] = 128.4
         tb["wafer_slots"] = list()
-        tb["wafer_slot_angle"] = [0.0 for tw in range(7)] # Degrees
+        tb["wafer_slot_angle"] = [
+            hex_to_ufm_thetarot[tw] for tw in range(7)
+        ] # Degrees
+        # These are taken from:
+        # https://simonsobs.atlassian.net/wiki/spaces/PRO/pages/101974017/Focal+Plane+Coordinates#UFM-Layout.1
+        # The "slot" here is the relative slot (ws0 - ws6) within the tube.
+        tb["wafer_ufm_slot"] = list()
+        # The "loc" here is the compass direction name (e.g. NO, NE, SW, etc.)
+        tb["wafer_ufm_loc"] = list()
         for tw in range(7):
             off = 0
             for w, props in cnf["wafer_slots"].items():
                 if props["type"] == ttyp:
                     if off == woff[ttyp]:
                         tb["wafer_slots"].append(w)
+                        tb["wafer_ufm_slot"].append(hex_to_ufm_slot[tw])
+                        tb["wafer_ufm_loc"].append(hex_to_ufm_loc[tw])
                         woff[ttyp] += 1
                         break
                     off += 1

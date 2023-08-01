@@ -317,7 +317,7 @@ def sim_wafer_detectors(
                 dprops["mux_position"] = doff // chan_per_mux
 
                 dprops["detector_name"] = ""
-                dname = "{}_p{}_{}_{}".format(wafer_slot, pstr, b, pl)
+                dname = "{}_p{}_{}_{}".format(wafer_slot, pxstr, b, pl)
                 dets[dname] = dprops
                 doff += 1
         p += 1
@@ -562,37 +562,70 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
                 msg = f"Invalid tube_slot '{t}' for telescope '{tele}'"
                 raise RuntimeError(msg)
 
+    # All tubes on both SAT and LAT are flipped along both coordinate axes
+    # (i.e. rotated 180 degrees) by the reimaging optics.
+    reimaging_optics_rot = qa.from_axisangle(zaxis, np.pi)
+
     alldets = OrderedDict()
     if ntube == 1:
         # This is a SAT.  We have one tube at the center.
         tubeprops = hw.data["tube_slots"][tube_slots[0]]
         waferspace = tubeprops["waferspace"] * platescale
-        wafer_slot_ang_deg = tubeprops["wafer_slot_angle"]
 
-        # Wafers are arranged in a rotated hexagon shape, however these
-        # locations are rotated from a normal layout.
+        # This is the per-wafer rotation at it tube location.
+        wafer_slot_ang_deg = tubeprops["wafer_slot_angle"]
+        wafer_slot_ang_rad = np.radians(wafer_slot_ang_deg)
+
+        # Wafers are arranged in a rotated hexagon shape, and each wafer
+        # is individually rotated as well.
+        if det_info_file is None:
+            tube_center = qa.mult(
+                reimaging_optics_rot,
+                qa.from_axisangle(zaxis, -thirty),
+            )
+            extra_wafer_rots = None
+        else:
+            # FIXME: verify this.
+            tube_center = qa.mult(
+                reimaging_optics_rot,
+                qa.from_axisangle(zaxis, thirty),
+            )
+            # Additional rotation for each wafer
+            # FIXME:  do we understand where this comes from?
+            extra_wafer_rots = [
+                qa.from_axisangle(zaxis, ang) for ang in [
+                    thirty,
+                    thirty,
+                    -thirty,
+                    -3*thirty,
+                    5*thirty,
+                    3*thirty,
+                    thirty,
+                ]
+            ]
+
+        # Wafer layout, including the overall rotation of the
+        # tube center.
         wcenters = hex_layout(
             7,
             2 * waferspace * u.degree,
             "",
             "",
-            u.Quantity(wafer_slot_ang_deg, u.degree),
+            np.zeros(7, dtype=np.float64) * u.degree,
+            center=tube_center,
         )
+
+        # Now rotate each wafer
         centers = np.zeros((7, 4), dtype=np.float64)
-        if det_info_file is None:
-            qrot = qa.from_axisangle(zaxis, -thirty)
-        else:
-            qrot = qa.from_axisangle(zaxis, thirty)
-            rots = [thirty, thirty, -thirty, -3*thirty, 5*thirty, 3*thirty, thirty]
-        
         for p, q in wcenters.items():
-            quat = q["quat"]
+            windx = int(p)
+            wquat = q["quat"]
+            wrot = qa.from_axisangle(zaxis, wafer_slot_ang_rad[windx])
             if det_info_file is not None:
-                # Add an additional rotation of the wafer before
-                # repositioning the wafer center
-                quat2 = qa.from_axisangle(zaxis, rots[int(p)])
-                quat = qa.mult(quat, quat2)
-            centers[int(p), :] = qa.mult(qrot, quat)
+                # Add an additional rotation of the wafer
+                quat2 = qa.from_axisangle(zaxis, extra_wafer_rots[windx])
+                wquat = qa.mult(wquat, quat2)
+            centers[windx, :] = qa.mult(wquat, wrot)
 
         for windx, wafer_slot in enumerate(tubeprops["wafer_slots"]):
             if det_info_file is not None:
@@ -626,9 +659,10 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
             "",
             "",
             np.zeros(19, dtype=np.float64) * u.degree,
+            center=None,
         )
         tcenters = np.array(
-            [q["quat"] for p, q in tube_quats.items()]
+            [qa.mult(q["quat"], reimaging_optics_rot) for p, q in tube_quats.items()]
         )
 
         for tindx, tube_slot in enumerate(tube_slots):
@@ -642,16 +676,17 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
             if det_info_file is None:
                 qwcenters = [
                     xieta_to_quat(
-                        -wradius, wradius / np.sqrt(3.0), thirty * 4 + wafer_slot_ang_rad[0]
+                        -wradius, wradius / np.sqrt(3.0), wafer_slot_ang_rad[0]
                     ),
                     xieta_to_quat(
                         0.0, -2.0 * wradius / np.sqrt(3.0), wafer_slot_ang_rad[1]
                     ),
                     xieta_to_quat(
-                        wradius, wradius / np.sqrt(3.0), -thirty * 4 + wafer_slot_ang_rad[2]
+                        wradius, wradius / np.sqrt(3.0), wafer_slot_ang_rad[2]
                     ),
                 ]
             else:
+                # FIXME: again, det_info case needs re-testing.
                 qwcenters = [
                     xieta_to_quat(
                         -wradius, wradius / np.sqrt(3.0), 7*thirty + wafer_slot_ang_rad[0]
