@@ -30,7 +30,7 @@ from toast.mpi import MPI
 
 from toast.schedule_sim_ground import run_scheduler
 
-import sotodlib.toast.ops as so_ops
+from .. import ops as so_ops
 
 # Make sure pixell uses a reliable FFT engine
 import pixell.fft

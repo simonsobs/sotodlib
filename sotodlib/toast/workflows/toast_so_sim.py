@@ -43,8 +43,7 @@ import toast.ops
 
 from toast.mpi import MPI, Comm
 
-import sotodlib.toast.ops as so_ops
-import sotodlib.mapmaking
+from .. import ops as so_ops
 
 # Make sure pixell uses a reliable FFT engine
 import pixell.fft
