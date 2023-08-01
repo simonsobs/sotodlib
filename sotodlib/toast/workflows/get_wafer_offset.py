@@ -13,8 +13,8 @@ import numpy as np
 import toast.qarray as qa
 from astropy import units as u
 
-import sotodlib.sim_hardware as hardware
-from sotodlib.core.hardware import LAT_COROTATOR_OFFSET
+from ... import sim_hardware as hardware
+from ...core.hardware import LAT_COROTATOR_OFFSET
 
 
 XAXIS, YAXIS, ZAXIS = np.eye(3)

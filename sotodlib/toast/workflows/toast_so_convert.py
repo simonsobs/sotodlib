@@ -48,7 +48,7 @@ import toast.ops
 from toast.mpi import MPI, Comm
 from toast.observation import default_values as defaults
 
-import sotodlib.toast.ops as so_ops
+from .. import ops as so_ops
 
 
 def parse_config(operators, templates, comm):
