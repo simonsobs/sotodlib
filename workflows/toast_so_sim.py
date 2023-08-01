@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2019-2021 Simons Observatory.
+# Copyright (c) 2019-2023 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 """
@@ -64,6 +64,18 @@ def parse_config(operators, templates, comm):
 
     parser.add_argument(
         "--hardware", required=False, default=None, help="Input hardware file"
+    )
+    parser.add_argument(
+        "--det_info_file",
+        required=False,
+        default=None,
+        help="Input detector info file for real hardware maps",
+    )
+    parser.add_argument(
+        "--det_info_version",
+        required=False,
+        default=None,
+        help="Detector info file version such as 'Cv4'",
     )
     parser.add_argument(
         "--thinfp",
@@ -175,6 +187,8 @@ def load_instrument_and_schedule(args, comm):
 
     telescope = sotoast.simulated_telescope(
         hwfile=args.hardware,
+        det_info_file=args.det_info_file,
+        det_info_version=args.det_info_version,
         telescope_name=args.telescope,
         sample_rate=args.sample_rate * u.Hz,
         bands=args.bands,
@@ -183,7 +197,8 @@ def load_instrument_and_schedule(args, comm):
         thinfp=args.thinfp,
         comm=comm,
     )
-    log.info_rank("Loaded focalplane in", comm=comm, timer=timer)
+    ndet = len(telescope.focalplane.detectors)
+    log.info_rank(f"Loaded focalplane with {ndet} detectors in", comm=comm, timer=timer)
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"After loading focalplane:  {mem}", comm)
 
@@ -530,6 +545,11 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     ops.gainscrambler.apply(data)
     log.info_rank("Simulated gain errors in", comm=world_comm, timer=timer)
 
+    # Add readout systematics
+
+    ops.sim_readout.apply(data)
+    log.info_rank("Simulated readout systematics in", comm=world_comm, timer=timer)
+
     # Optionally write out the data
     if args.out_dir is not None:
         hdf5_path = os.path.join(args.out_dir, "data")
@@ -845,6 +865,7 @@ def main():
         so_ops.SaveBooks(name="save_books", enabled=False),
         toast.ops.GainScrambler(name="gainscrambler", enabled=False),
         toast.ops.SimNoise(name="sim_noise"),
+        so_ops.SimReadout(name="sim_readout", enabled=False),
         toast.ops.PixelsHealpix(name="pixels_healpix_radec"),
         toast.ops.PixelsWCS(
             name="pixels_wcs_radec",

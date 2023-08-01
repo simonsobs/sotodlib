@@ -40,6 +40,7 @@ command line wrapper, edit ``cli.py`` and see comments inline.
 import argparse
 
 from . import (
+    analyze_bright_ptsrc,
     check_book,
     make_source_flags,
     make_uncal_beam_map,
@@ -53,6 +54,7 @@ from . import (
 # the module comments above.
 
 ELEMENTS = {
+    'analyze-bright-ptsrc': analyze_bright_ptsrc,
     'check-book': check_book,
     'make-source-flags': make_source_flags,
     'make-uncal-beam-map': make_uncal_beam_map,

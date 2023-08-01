@@ -311,8 +311,8 @@ class SimSSO(Operator):
         size = description[0][0] * u.degree
         sso_radius_avg = np.average(sso_diameter) / 2
         sso_solid_angle = np.pi * sso_radius_avg**2
-        amp = ttemp_det * (
-            sso_solid_angle.to_value(u.rad**2) / beam_solid_angle.to_value(u.rad**2)
+        amp = ttemp_det.to_value(u.K) * (
+                    sso_solid_angle.to_value(u.rad**2) / beam_solid_angle.to_value(u.rad**2)
         )
         w = size.to_value(u.rad) / 2
         if self.finite_sso_radius:
@@ -431,8 +431,7 @@ class SimSSO(Operator):
 
             # Convolve the planet SED with the detector bandpass
             sso_freq, sso_temp = self._get_sso_temperature(sso_name)
-            det_temp = bandpass.convolve(det, sso_freq, sso_temp)
-
+            det_temp = bandpass.convolve(det, sso_freq, sso_temp) * u.K
             if beam is None or not "ALL" in self.beam_props:
                 beam, radius = self._get_beam_map(det, sso_diameter, det_temp)
 

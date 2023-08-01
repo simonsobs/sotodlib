@@ -255,6 +255,22 @@ def sim_nominal():
     bnd["NET_corr"] = 1.00
     bands["SAT_f290"] = bnd
 
+    # Special "band" for dark bolometers
+
+    bnd = OrderedDict()
+    bnd["center"] = np.nan
+    bnd["low"] = np.nan
+    bnd["high"] = np.nan
+    bnd["bandpass"] = ""
+    bnd["NET"] = 1000.0
+    bnd["fknee"] = 50.0
+    bnd["fmin"] = 0.01
+    bnd["alpha"] = 1.0
+    bnd["A"] = np.nan
+    bnd["C"] = np.nan
+    bnd["NET_corr"] = 1.00
+    bands["NC"] = bnd
+
     cnf["bands"] = bands
 
     wafer_slots = OrderedDict()

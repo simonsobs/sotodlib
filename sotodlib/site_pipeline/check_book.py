@@ -45,6 +45,10 @@ enabled:
     tolerate_missing_ancil_timestamps: True
     tolerate_timestamps_value_discrepancy: False
 
+    # Tolerate arbitrary extra files, except explicitly named ones
+    tolerate_stray_files: True
+    banned_files: ['frame_splits.txt']
+
     # If stream_ids are not provided in metadata, list them here.
     stream_ids:
       ufm_mv14

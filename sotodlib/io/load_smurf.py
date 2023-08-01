@@ -2021,7 +2021,7 @@ def _get_tuneset_channel_names(status, ch_map, archive):
     if status.tune is not None and len(status.tune) > 0:
         tune_file = Tunes.get_name_from_status(status)
         tune = session.query(Tunes).filter(
-            Tunes.name == tune_file,
+            db.or_(Tunes.name == tune_file, Tunes.name == status.tune),
             Tunes.stream_id == status.stream_id,
         ).one_or_none()
         if tune is None:
@@ -2074,7 +2074,18 @@ def _get_detset_channel_names(status, ch_map, obsfiledb):
         c = obsfiledb.conn.execute(
             "select tuneset_id from tunes " "where name=?",(Tunes.get_name_from_status(status),)
         )
-        tuneset_id = [r[0] for r in c][0]
+        temp = [r[0] for r in c]
+        
+        if len(temp) == 0:
+            ## check for backward compatibility with old naming scheme. May 2023
+            c = obsfiledb.conn.execute(
+                "select tuneset_id from tunes " "where name=?",(status.tune,)
+            )
+            temp = [r[0] for r in c]
+            if len(temp) == 0:
+                logger.error(f"Tuneset id for {status.tune} not found")
+
+        tuneset_id = temp[0]
 
     else:
         logger.info("Tune information not in SmurfStatus, using most recent Tune")
