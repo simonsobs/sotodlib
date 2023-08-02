@@ -640,12 +640,12 @@ class G3tHWP():
     
     def _set_empty_axes(self, aman):
         
-        aman.wrap_new('timestamps', shape=('samps', ), dtype=np.float32)
-        aman.wrap_new('hwp_angle_ver1', shape=('samps', ), dtype=np.float32)
-        aman.wrap_new('hwp_angle_ver2', shape=('samps', ), dtype=np.float32)
+        aman.wrap_new('timestamps', shape=('samps', ), dtype=np.float64)
+        aman.wrap_new('hwp_angle_ver1', shape=('samps', ), dtype=np.float64)
+        aman.wrap_new('hwp_angle_ver2', shape=('samps', ), dtype=np.float64)
         aman.wrap_new('stable', shape=('samps', ), dtype=np.bool)
         aman.wrap_new('locked', shape=('samps', ), dtype=np.bool)
-        aman.wrap_new('hwp_rate', shape=('samps', ), dtype=np.float32)
+        aman.wrap_new('hwp_rate', shape=('samps', ), dtype=np.float16)
         aman.wrap_new('eval', shape=('samps', ), dtype=np.bool)
         
         return 
@@ -770,13 +770,13 @@ class G3tHWP():
         aman.locked[:] = self._bool_interpolation(solved['slow_time'], solved['locked'], tod.timestamps)
         aman.hwp_rate[:] = scipy.interpolate.interp1d(solved['slow_time'], solved['hwp_rate'], kind='linear', bounds_error=False)(tod.timestamps)
         if 'fast_time_raw' in solved.keys():
-            aman.hwp_angle_ver1[:] = scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps)
-            aman.hwp_angle_ver2[:] = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps)
+            aman.hwp_angle_ver1[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
+            aman.hwp_angle_ver2[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
             aman.eval[:] = np.ones(len(tod.timestamps))
         else:
             logger.info('Template subtraction failed')
-            aman.hwp_angle_ver1[:] = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps)
-            aman.hwp_angle_ver2[:] = scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps)
+            aman.hwp_angle_ver1[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
+            aman.hwp_angle_ver2[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
     
         aman.save(output, h5_address, overwrite=True)
 
