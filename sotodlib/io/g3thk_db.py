@@ -71,8 +71,8 @@ class HKAgents(Base):
         start timestamp corresponding to the agent for corresponding file
     end : integer
         start timestamp corresponding to the agent for corresponding file
+    
     """
-
     __tablename__ = "hkagents"
     # unique constraint for instance-id? needs more thought?
     id = db.Column(db.Integer, primary_key=True)
@@ -89,25 +89,24 @@ class HKAgents(Base):
 
 class HKFields(Base):
     """This table is named hkfields and serves as a db for all
-    fields inside each HK'ing file in the hkfeeds table.
+    fields inside each HK file in the hkfeeds table.
 
     Attributes
     ----------
     file_id : integer
         id that points a field back to its corresponding
-        HK file in the hkfeeds table
+        HK file in the hkfiles table
     agent_id : integer
-        TODO
+        id that points a field back to its corresponding HK
+        agent in the hkagents table
     field : string
         name of HK field in corresponding HK file
     start : integer
-        start time for each HK field in ctime
+        start time for each HK field in ctime for .g3 file
     end : integer
-        end time for each HK field in ctime
-
-    TODO: add uniqueness constraint
+        end time for each HK field in ctime for .g3 file
+    
     """
-
     __tablename__ = "hkfields"
     id = db.Column(db.Integer, primary_key=True)
     file_id = db.Column(db.Integer, db.ForeignKey("hkfiles.id"))
