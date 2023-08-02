@@ -1,7 +1,6 @@
 import sqlalchemy as db
 from sqlalchemy.exc import IntegrityError
 
-from sqlalchemy import and_
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 
@@ -64,14 +63,14 @@ class HKAgents(Base):
         id that points an agent back to its corresponding
         HK file in the hkfiles table
     instance_id : string
-        the identifier for the instrument/agent; ex: LSA22YG 
+        the identifier for the instrument/agent; ex: LSA22YG
         for a Lakeshore 372 with the serial number identified as
         an ocs instance-id
     start : integer
         start timestamp corresponding to the agent for corresponding file
     end : integer
         start timestamp corresponding to the agent for corresponding file
-    
+
     """
     __tablename__ = "hkagents"
     # unique constraint for instance-id? needs more thought?
@@ -105,7 +104,7 @@ class HKFields(Base):
         start time for each HK field in ctime for .g3 file
     end : integer
         end time for each HK field in ctime for .g3 file
-    
+
     """
     __tablename__ = "hkfields"
     id = db.Column(db.Integer, primary_key=True)
@@ -562,13 +561,13 @@ class G3tHk:
         if my_logger is None:
             my_logger = logger
 
-        ## remove field info
+        # remove field info
         my_logger.info(f"removing field entries for {hkfile.path} from database")
         if not dry_run:
             for f in hkfile.fields:
                 self.session.delete(f)
 
-        ## remove agent info
+        # remove agent info
         my_logger.info(f"removing agent entries for {hkfile.path} from database")
         if not dry_run:
             for a in hkfile.agents:
