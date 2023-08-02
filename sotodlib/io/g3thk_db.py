@@ -33,11 +33,10 @@ class HKFiles(Base):
         timestamp that begins a new HK file
     path : string
         path to the HK file
-    aggregator:
-    fields:
-    agents
-    """
+    aggregator : string
+        the aggregator corresponding to the data; ex: satp1, satp2, site
 
+    """
     __tablename__ = "hkfiles"
     __table_args__ = (
         db.UniqueConstraint("filename"),
