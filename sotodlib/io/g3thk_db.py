@@ -55,24 +55,22 @@ class HKFiles(Base):
 
 
 class HKAgents(Base):
-    """This table is named HKAgents; serves as a db for holding
-    critical information about each Agent in an HK file.
+    """This table is named hkagents; serves as a db for holding
+    critical information about each agent in an HK file.
 
     Attributes
     ----------
     file_id : integer
-        id that points a field back to its corresponding
-        HK file in the hkfeeds table
+        id that points an agent back to its corresponding
+        HK file in the hkfiles table
     instance_id : string
-        TODO
+        the identifier for the instrument/agent; ex: LSA22YG 
+        for a Lakeshore 372 with the serial number identified as
+        an ocs instance-id
     start : integer
-        TODO
+        start timestamp corresponding to the agent for corresponding file
     end : integer
-        TODO
-    hkfile:
-    fields
-
-    TODO: add uniqueness constraint
+        start timestamp corresponding to the agent for corresponding file
     """
 
     __tablename__ = "hkagents"
