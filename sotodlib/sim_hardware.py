@@ -255,6 +255,22 @@ def sim_nominal():
     bnd["NET_corr"] = 1.00
     bands["SAT_f290"] = bnd
 
+    # Special "band" for dark bolometers
+
+    bnd = OrderedDict()
+    bnd["center"] = np.nan
+    bnd["low"] = np.nan
+    bnd["high"] = np.nan
+    bnd["bandpass"] = ""
+    bnd["NET"] = 1000.0
+    bnd["fknee"] = 50.0
+    bnd["fmin"] = 0.01
+    bnd["alpha"] = 1.0
+    bnd["A"] = np.nan
+    bnd["C"] = np.nan
+    bnd["NET_corr"] = 1.00
+    bands["NC"] = bnd
+
     cnf["bands"] = bands
 
     wafer_slots = OrderedDict()
@@ -504,3 +520,24 @@ def sim_nominal():
     hw.data = cnf
 
     return hw
+
+
+def telescope_tube_wafer():
+    """Global mapping of telescopes, tubes, and wafers used in simulations.
+
+    This mapping is here rather than core.hardware, so that we could put
+    alternate definitions there for actual fielded configurations.
+
+    Returns:
+        (dict):  The mapping
+
+    """
+    hw = sim_nominal()
+    result = dict()
+    for tele_name, tele_props in hw.data["telescopes"].items():
+        tb = dict()
+        for tube_name in tele_props["tube_slots"]:
+            tube_props = hw.data["tube_slots"][tube_name]
+            tb[tube_name] = list(tube_props["wafer_slots"])
+        result[tele_name] = tb
+    return result

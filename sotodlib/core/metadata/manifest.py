@@ -489,12 +489,15 @@ class ManifestDb:
             raise ValueError('Matched multiple rows with index data: %s' % rows)
         return rows[0]
 
-    def inspect(self, params={}):
+    def inspect(self, params={}, strict=True):
         """Given (partial) Index Data and Endpoint Data, find and return the
         complete matching records.
 
         Arguments:
           params (dict): any mix of Index Data and Endpoint Data.
+          strict (bool): if True, a ValueError will be raised if
+            params contains any keys that aren't recognized as Index
+            or Endpoint data.
 
         Returns:
           A list of results matching the query.  Each result in the
@@ -506,7 +509,7 @@ class ManifestDb:
         params = dict(params)
         filename = params.pop('filename', None)
 
-        q, p, rp = self.scheme.get_match_query(params, partial=True, strict=True)
+        q, p, rp = self.scheme.get_match_query(params, partial=True, strict=strict)
         cols = ['map`.`id', 'files`.`name'] + list(rp)
         rp = ['_id', 'filename'] + rp
         c = self.conn.cursor()
@@ -649,10 +652,11 @@ class ManifestDb:
         return False
 
 
-def get_parser():
-    parser = argparse.ArgumentParser(
-        epilog="""For details of individual modes, pass a dummy database argument
-        followed by the mode and -h, e.g.: "%(prog)s x files -h" """)
+def get_parser(parser=None):
+    if parser is None:
+        parser = argparse.ArgumentParser(
+            epilog="""For details of individual modes, pass a dummy database argument
+            followed by the mode and -h, e.g.: "%(prog)s x files -h" """)
 
     parser.add_argument('filename', help="Path to a ManifestDb.",
                         metavar='my_db.sqlite')
@@ -671,6 +675,17 @@ def get_parser():
         This will print a summary of the index fields and
         endpoint fields.  (This mode is chosen by default.)
         """)
+
+    # "table"
+    p = cmdsubp.add_parser(
+        'table', usage="""Syntax:
+
+    %(prog)s
+
+        This will print every row of the metadata map table,
+        including the filename.
+        """)
+
 
     # "files"
     p = cmdsubp.add_parser(
@@ -763,8 +778,9 @@ def main(args=None):
     """Entry point for the so-metadata tool."""
     if args is None:
         args = sys.argv[1:]
-    parser = get_parser()
-    args = parser.parse_args(args)
+    if not isinstance(args, argparse.Namespace):
+        parser = get_parser()
+        args = parser.parse_args(args)
 
     if args.mode is None:
         args.mode = 'summary'
@@ -807,27 +823,47 @@ def main(args=None):
 
         print()
 
+    elif args.mode == 'table':
+        # Print the table of entries.
+        schema = db.scheme.as_resultset()
+        keys = []
+        for purp in ['in', 'out']:
+            for s in schema:
+                if s['purpose'] != purp:
+                    continue
+                if s['col_type'] == 'range':
+                    keys.extend([s['field'] + '__lo',
+                                 s['field'] + '__hi'])
+                else:
+                    keys.append(s['field'])
+        keys.append('filename')
+        print(keys)
+        print(['-'] * len(keys))
+        for row in db.conn.execute('select map.*, files.name as filename from '
+                                   'map join files where map.file_id=files.id'):
+            print([row[k] for k in keys])
+
     elif args.mode == 'files':
         # Get all files.
         rows = db.conn.execute(
-            'select files.name as filename, count(map.id) '
+            'select files.id, files.name as filename, count(map.id) '
             'from map join files on '
             'map.file_id==files.id group by filename').fetchall()
 
         if args.clean:
-            for filename, count in rows:
+            for _id, filename, count in rows:
                 print(filename)
         else:
-            fmt = '  {count:>7} {filename}'
-            hdr = fmt.format(count="Count", filename="Filename")
+            fmt = '  {_id:>7} {count:>7} {filename}'
+            hdr = fmt.format(_id="file_id", count="Count", filename="Filename")
             print(hdr)
             print('-' * (len(hdr) + 20))
             n = len(rows)
-            super_count = sum([r[1] for r in rows])
+            super_count = sum([r[2] for r in rows])
             if n > 20 and not args.all:
                 rows = rows[:10]
-            for filename, count in rows:
-                print(fmt.format(filename=filename, count=count))
+            for _id, filename, count in rows:
+                print(fmt.format(_id=_id, filename=filename, count=count))
             if len(rows) < n:
                 other_count = super_count - sum([r[1] for r in rows])
                 print(fmt.format(count=other_count, filename='...'))

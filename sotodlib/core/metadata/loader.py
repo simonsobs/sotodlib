@@ -13,6 +13,12 @@ REGISTRY = {
 }
 
 
+class LoaderError(RuntimeError):
+    """
+    Use with two args: (pithy_summary, formatted_detail)
+    """
+
+
 class SuperLoader:
     def __init__(self, context=None, detdb=None, obsdb=None, working_dir=None):
         """Metadata batch loader.
@@ -162,8 +168,8 @@ class SuperLoader:
                 subreqs = det_info.subset(keys=short_keys).distinct()
             except:
                 raise RuntimeError(
-                    f'Decoding spec={spec} with request={request} requires '
-                    f'keys={missing_dets_keys} but det_info={det_info}.')
+                    f'Metadata request requires keys={missing_dets_keys} '
+                    f'but det_info={det_info}.')
             subreqs.keys = missing_dets_keys # back with dets: prefix ...
         else:
             subreqs = ResultSet([], [()])  # length 1!
@@ -179,12 +185,9 @@ class SuperLoader:
                 _lines = man.match(subreq, multi=True, prefix=dbpath)
             except Exception as e:
                 text = str(e)
-                raise RuntimeError(
-                    'An exception was raised while decoding the following spec:\n'
-                    + '  ' + str(spec) + '\n'
-                    + 'with the following request:\n'
-                    + '  ' + str(subreq) + '\n'
-                    + 'The exception is:\n  %s' % text)
+                raise LoaderError('Exception when matching subrequest.',
+                                  f"An exception occurred while processing sub-request:\n\n"
+                                  f"  subreq={subreq}\n\n")
             for _line in _lines:
                 # Now reject any _line if they contradict subreq.
                 if any([subreq.get(k, v) != v for k, v in _line.items()]):
@@ -205,14 +208,18 @@ class SuperLoader:
                 skip_this = (mask.sum() == 0)
             to_skip.append(skip_this)
 
-        # Load at least one item, or we won't have the structure of
-        # the output.
-        if np.all(to_skip):
-            if len(to_skip) == 0:
-                raise RuntimeError(
-                    f'The metadata item spec={spec} with request={request} '
-                    f'and det_info={det_info} matched no items in the ManifestDb; '
-                    f'in this case we cannot even return an empty structure.')
+        if len(index_lines) == 0:
+            # If we come out the other side with no data to load,
+            # invent one so that we at least get the structure of the
+            # metadata (even though we'll throw out all the actual
+            # results).  You can get here if someone passes dets=[].
+            candidate_index_lines = man.inspect(request, False)
+            index_lines.append(candidate_index_lines[0])
+            to_skip = [False]
+
+        elif all(to_skip):
+            # Load at least one item, or we won't have the structure of
+            # the output.
             to_skip[0] = False
 
         # Load each index_line.
@@ -229,7 +236,9 @@ class SuperLoader:
             try:
                 loader_class = REGISTRY[loader]
             except KeyError:
-                raise RuntimeError('No metadata loader registered under name "%s"' % loader)
+                raise LoaderError(
+                    'Loader function not found.',
+                    f'No metadata loader registered under name "{loader}"')
 
             loader_object = loader_class()  # pass obs info?
             mi1 = loader_object.from_loadspec(index_line)
@@ -273,7 +282,8 @@ class SuperLoader:
                     mi2 = mi1.restrict('dets', new_dets[mask])
 
             else:
-                raise RuntimeError(
+                raise LoaderError(
+                    'Invalid metadata carrier.',
                     'Returned object is non-specialized type {}: {}'
                     .format(mi1.__class__, mi1))
 
@@ -340,12 +350,15 @@ class SuperLoader:
             dest.wrap('obs_info', obs_man)
             
         def reraise(spec, e):
-            e.args = e.args + (
-                "\n\nThe above exception arose while processing "
-                "the following metadata spec:\n"
-                f"  spec:    {spec}\n"
-                f"  request: {request}\n\n"
-                "Does your database expose this product for this observation?",)
+            logger.error(
+                f"An error occurred while processing a meta entry:\n\n"
+                f"  spec:    {spec}\n\n"
+                f"  request: {request}\n\n")
+            if isinstance(e, LoaderError):
+                # Present all args to logger instead...
+                for a in e.args[1:]:
+                    logger.error(a)
+                e = LoaderError(e.args[0])
             raise e
 
         def check_tags(det_info, aug_request, final=False):
@@ -381,6 +394,12 @@ class SuperLoader:
                 logger.debug(f' ... free tags / request reduce det_info (row count '
                              f'{len(det_info)} -> {mask.sum()})')
                 det_info = det_info.subset(rows=mask)
+
+            if len(mask) > 0 and len(det_info) == 0:
+                logger.warning(f'All detectors have been eliminated from processing.')
+                logger.warning(f'  dets:*: {det_reqs}')
+                logger.warning(f'  free_tags: {free_tags}')
+
             return det_info, aug_request
 
         det_info, aug_request = check_tags(det_info, aug_request)
@@ -401,14 +420,14 @@ class SuperLoader:
                 if check:
                     error = e
                 elif ignore_missing:
-                    logger.warning(f'Failed to load metadata for spec={spec}, '
-                                   f'request={aug_request}; ignoring.')
+                    logger.warning(f'Failed to load metadata for spec={spec}; ignoring.')
                     continue
                 else:
                     reraise(spec, e)
 
-            if spec.get('det_info'):
-                det_info = merge_det_info(det_info, item)
+            if spec.get('det_info') and error is None:
+                det_info = merge_det_info(
+                    det_info, item, multi=spec.get('multi', False))
                 item = None
 
                 det_info, aug_request = check_tags(det_info, aug_request)
@@ -459,7 +478,7 @@ def _filter_items(prefix, d, remove=True):
     return [k[len(prefix)*remove:] for k in d if k.startswith(prefix)]
 
 
-def merge_det_info(det_info, new_info,
+def merge_det_info(det_info, new_info, multi=False,
                    index_columns=['readout_id', 'det_id']):
     """Args:
 
@@ -467,6 +486,10 @@ def merge_det_info(det_info, new_info,
         with columns *without* the 'dets:' prefix.
       new_info (ResultSet): New data to merge/check against
         det_info; only columns with dets: prefix are processed.
+      multi (bool): whether to permit some rows to match multiple
+        rows.
+      index_columns: columns that will be recognized as indexing
+        columns.
 
     Returns:
       A (possibly) new det_info table, containing updates and
@@ -499,7 +522,16 @@ def merge_det_info(det_info, new_info,
     if det_info is None:
         return new_info
 
-    both, i0, i1 = core.util.get_coindices(new_info[match_key], det_info[match_key])
+    if multi:
+        # Permit duplicate keys.
+        i0 = core.util.get_multi_index(
+            new_info[match_key], det_info[match_key])
+        i1 = np.arange(len(det_info[match_key]))
+        i0, i1 = i0[i0>=0], i1[i0>=0]
+    else:
+        both, i0, i1 = core.util.get_coindices(
+            new_info[match_key], det_info[match_key],
+            check_unique=True)
 
     # Common fields need to be in accordance, then drop them.
     common_keys = set(new_info.keys) & set(det_info.keys)

@@ -1,6 +1,8 @@
 # Copyright (c) 2020-2021 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
+import re
+
 import numpy as np
 
 import traitlets
@@ -95,7 +97,9 @@ class CoRotator(Operator):
         timer.start()
 
         for obs in data.obs:
-            if obs.telescope.name != "LAT":
+            if re.match(r"LAT.*", obs.telescope.name) is None:
+                msg = f"Skipping corotation for telescope '{obs.telescope.name}'"
+                log.debug(msg)
                 continue
 
             el_rad = obs.shared[self.elevation].data

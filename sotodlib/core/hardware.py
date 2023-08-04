@@ -28,6 +28,74 @@ import toml
 LAT_COROTATOR_OFFSET = u.Quantity(60.0, u.degree)
 
 
+def build_readout_id(creation_time, wafer_slot, channel):
+    """Construct a simulated readout_id.
+
+    We build this string from the stream_id (wafer slot), the overall
+    creation time (treating this as the last tuning time), and the
+    readout channel.  We convert the readout channel into a smurf band
+    and smurf channel assuming 8 bands and 512 channels per band.
+
+    Args:
+        creation_time (float):  The POSIX ctime of the simulation start.
+        wafer_slot (str):  The stream_id / wafer_slot
+        channel (int):  The readout channel (0-4095).
+
+    Returns:
+        (str):  The fake readout_id.
+
+    """
+    creation_time = int(creation_time)
+    smurf_band = channel // 8
+    smurf_channel = channel % 8
+    return f"{wafer_slot}_{creation_time:10d}_{smurf_band}_{smurf_channel}"
+
+def parse_readout_id(readout_id):
+    """Split a readout_id into its parts.
+
+    Args:
+        creation_time (float):  The POSIX ctime of the simulation start.
+        wafer_slot (str):  The stream_id / wafer_slot
+        channel (int):  The readout channel (0-4095).
+
+    Returns:
+        (tuple):  The wafer_slot, creation time, readout channel
+
+    """
+    pat = re.compile(r"(.*)_(.*)_(.*)_(.*)")
+    mat = pat.match(readout_id)
+    if mat is None:
+        raise ValueError(f"Readout ID {readout_id} is invalid")
+    wf = mat.group(1)
+    ct = float(mat.group(2))
+    smband = int(mat.group(3))
+    smchan = int(mat.group(4))
+    channel = smband * 8 + smchan
+    return (wf, ct, channel)
+
+def sim_wafer_names( hw ):
+    """Adds SO generic UFM names to the hardware model based on the type of the wafer
+       Ex: Uv1, Mv4, Lv3, etc
+    """
+    c = [1,1,1]
+    for wafer in hw.data["wafer_slots"]:
+        wprops = hw.data["wafer_slots"][wafer]
+        if "UHF" in wprops["type"]:
+            pre = "Uv"
+            i = 0
+        elif "MF" in wprops["type"]:
+            pre = "Mv"
+            i = 1
+        elif "LF" in wprops["type"]:
+            pre = "Lv"
+            i = 2
+        else:
+            raise ValueError(f"Unknown band type {wprops['type']} for wafer {wafer}")
+
+        wprops["wafer_name"] = f"{pre}{c[i]}"
+        c[i] += 1
+
+
 class Hardware(object):
     """Class representing a specific hardware configuration.
 

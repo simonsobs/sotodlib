@@ -21,11 +21,12 @@ from sotodlib import core, coords, site_pipeline, tod_ops
 
 from . import util
 
-logger = util.init_logger(__name__, 'make_uncal_beam_map: ')
+logger = None
 
 
-def _get_parser():
-    parser = ArgumentParser()
+def get_parser(parser=None):
+    if parser is None:
+        parser = ArgumentParser()
     parser.add_argument('-c', '--config-file', help=
                         "Configuration file.")
     parser.add_argument('-v', '--verbose', action='count',
@@ -37,12 +38,8 @@ def _get_parser():
 
     return parser
 
-def _get_config(args):
-    cfg = yaml.safe_load(open(args.config_file, 'r'))
-    for k in ['obs_id', 'verbose']:
-        cfg[k] = getattr(args, k)
-    cfg['_args'] = args
-    return cfg
+def _get_config(config_file):
+    return yaml.safe_load(open(config_file, 'r'))
 
 def _clip_map(m, mask=None, edges=[0.05, 0.95]):
     if mask is None:
@@ -204,18 +201,16 @@ def _adjust_focal_plane(tod, focal_plane=None, boresight_offset=None):
     fp.eta[:] = eta
     fp.gamma[:] = gamma
 
-def main(args=None):
+def main(config_file=None, obs_id=None, verbose=0, test=False):
     """Entry point."""
-    if args is None:
-        args = sys.argv[1:]
-    parser = _get_parser()
-    config = _get_config(parser.parse_args(args))
+    config = _get_config(config_file)
 
-    if config['verbose'] >= 1:
+    logger = util.init_logger(__name__, 'make_uncal_beam_map: ')
+    if verbose >= 1:
         logger.setLevel('INFO')
-    if config['verbose'] >= 2:
+    if verbose >= 2:
         sotodlib.logger.setLevel('INFO')
-    if config['verbose'] >= 3:
+    if verbose >= 3:
         sotodlib.logger.setLevel('DEBUG')
 
     ctx = core.Context(config['context_file'])
@@ -225,16 +220,16 @@ def main(args=None):
         group_by = group_by.split(':',1)[1]
 
     if group_by == 'detset':
-        groups = ctx.obsfiledb.get_detsets(config['obs_id'])
+        groups = ctx.obsfiledb.get_detsets(obs_id)
     else:
-        det_info = ctx.get_det_info(config['obs_id'])
+        det_info = ctx.get_det_info(obs_id)
         groups = det_info.subset(keys=[group_by]).distinct()[group_by]
 
     # Ignore some values?
     groups = [g for g in groups if g not in config['subobs'].get('ignore_vals', [])]
 
     if len(groups) == 0:
-        logger.warning(f'No map groups found for obs_id={config["obs_id"]}')
+        logger.warning(f'No map groups found for obs_id={obs_id}')
 
     if os.path.exists(config['archive']['index']):
         logger.info(f'Mapping {config["archive"]["index"]} for the archive index.')
@@ -248,22 +243,22 @@ def main(args=None):
         db = core.metadata.ManifestDb(config['archive']['index'], scheme=scheme)
 
     for group in groups:
-        logger.info(f'Loading {config["obs_id"]}:{group_by}={group}')
-        map_info = {'obs_id': config['obs_id'],
+        logger.info(f'Loading {obs_id}:{group_by}={group}')
+        map_info = {'obs_id': obs_id,
                     'group': group,
                     group_by: group,
         }
         map_info['product_id'] = '{obs_id}-{group}'.format(**map_info)
 
         # Read data.
-        tod = ctx.get_obs(config['obs_id'], dets={group_by: group})
+        tod = ctx.get_obs(obs_id, dets={group_by: group})
         if len(tod.signal) == 0:
-            logger.warning(f'No detectors loaded for obs_id={config["obs_id"]}, '
+            logger.warning(f'No detectors loaded for obs_id={obs_id}, '
                            f'group {group_by}={group}; skipping.')
             continue
 
         # Modify dets axis for testing
-        if config['_args'].test:
+        if test:
             logger.warning(f'Decimating focal plane (--test).')
             dets = tod.dets.vals[::10]
             tod.restrict('dets', dets)
@@ -374,7 +369,7 @@ def main(args=None):
                 used_names.append(filename)
                 if code == db_code:
                     # Index
-                    db_data = {'obs:obs_id': config['obs_id'],
+                    db_data = {'obs:obs_id': obs_id,
                                'group': group,
                                'split': key}
                     db.add_entry(db_data, filename, replace=True)
@@ -395,3 +390,7 @@ def main(args=None):
 
     # Return something?
     return True
+
+
+if __name__ == '__main__':
+    util.main_launcher(main, get_parser)

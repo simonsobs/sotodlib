@@ -286,8 +286,8 @@ Unpacker
 Metadata
 --------
 
-Overview
-========
+Overview and Examples
+=====================
 
 The "metadata" we are talking about here consists of things like
 detector pointing offsets, calibration factors, detector time
@@ -319,8 +319,8 @@ resolving the metadata request, loading the results, and broadcasting
 them to their intended targets.
 
 
-Example
-=======
+Example 1
+---------
 
 Let's say we want to build an HDF5 database with a number ``thing``
 per detector per observation::
@@ -369,6 +369,83 @@ Using that context file::
 
 will return an AxisManager that includes ``aman.thing`` for that
 specific observation.
+
+Example 2
+---------
+
+In this example, we loop over observations found in an ObsDb and
+create an AxisManager for each one that contains new, interesting
+supporting data.  The AxisManager is written to HDF5, and the
+ManifestDb is updated with indexing information so the metadata system
+can find the right dataset automatically.
+
+Here is the script to generate the HDF5 and ManifestDb on disk::
+
+  from sotodlib import core
+
+  # We will create an entry for every obs found in this context.
+  ctx = core.Context('context/context-basic.yaml')
+
+  # Set up our scheme -- one result per obs_id, to be looked up in an
+  # archive of HDF5 files at address stored in dataset.
+  scheme = core.metadata.ManifestScheme()
+  scheme.add_exact_match('obs:obs_id')
+  scheme.add_data_field('dataset')
+  man_db = core.metadata.ManifestDb(scheme=scheme)
+
+  # Path for the ManifestDb
+  man_db_filename = 'my_new_info.sqlite'
+
+  # Use a single HDF5 file for now.
+  output_filename = 'my_new_info.h5'
+
+  # Loop over obs.
+  obs = ctx.obsdb.get()
+  for obs_id in obs['obs_id']:
+      print(obs_id)
+
+      # Load the observation, without signal, so we can see the samps
+      # and dets axes, timestamps, etc.
+      tod = ctx.get_obs(obs_id, no_signal=True)
+
+      # Create an AxisManager using tod's axes.  (Note that the dets
+      # axis is required for compatibility with the metadata system,
+      # even if you're not going to use it.)
+      new_info = core.AxisManager(tod.dets, tod.samps)
+
+      # Add some stuff to it
+      new_info.wrap_new('my_special_vector', shape=('samps', ))
+
+      # Save the info to HDF5
+      h5_address = obs_id
+      new_info.save(output_filename, h5_address, overwrite=True)
+
+      # Add an entry to the database
+      man_db.add_entry({'obs:obs_id': obs_id, 'dataset': h5_address},
+                        filename=output_filename)
+
+  # Commit the ManifestDb to file.
+  man_db.to_file(man_db_filename)
+
+
+The new context.yaml file, that includes this new metadata, would have
+a metadata list that includes::
+
+    metadata:
+      - db: 'my_new_info.sqlite'
+        name: 'new_info'
+
+If you want to load the single vector ``my_special_vector`` into the
+top level of the AxisManager, under name ``special``, use this
+syntax::
+
+    metadata:
+      - db: 'my_new_info.sqlite'
+        name: 'special&my_special_vector'
+
+
+Tips
+----
 
 If this is example is almost, but not quite, what you need, consider the
 following:
@@ -746,23 +823,6 @@ The context.yaml metadata entry would probably look like this::
 
 
 
-so-metadata tool
-----------------
-
-The ``so-metadata`` script is a tool for inspecting and manipulating
-ManifestDbs stored on disk.  For example, it can show you what files
-are referred to by the ManifestDb, and what kind of information is
-used to index the database.
-
-If you need to change the filenames in a ManifestDb, the "reroot" mode
-might be helpful.
-
-
-.. argparse::
-   :module: sotodlib.core.metadata.manifest
-   :func: get_parser
-
-
 ManifestDb reference
 --------------------
 
@@ -849,32 +909,24 @@ contain only the ``obs_id``.  For each item in the context.yaml
 Changing det_info
 -----------------
 
-Metadata entries can be used to change the active ``det_info`` table
-that is used to screen and match metadata results.  This is
-accomplished through special metadata entries with the following
-syntax::
+Metadata entries can be used to augment the  ``det_info`` table
+that is used to screen and match metadata results.  For example::
 
   metadata:
   - ...
   - db: 'more_det_info.sqlite'
     det_info: true
-    det_key: 'dets:name'
   - ...
 
-The boolean ``'det_info': true`` marks this as a special metadata
-entry to update ``det_info``.  The ``det_key`` entry specifies what
-column of the loaded metadata should be used as the index to add the
-information to the existing tracked ``det_info``; that key should
-exist in both the active ``det_info`` and in the result that is loaded
-here.
+The boolean ``'det_info': true`` marks the above as a special metadata
+entry to update ``det_info``.  It is expected that the database
+(``more_det_info.sqlite``) is a standard ManifestDb, which will be
+queried in the usual way except that when we get to the "Wrap
+Metadata" step, instead the following is performed:
 
-It is expected that ``more_det_info.sqlite`` is a standard ManifestDb,
-which will be queried in the usual way except that when we get to the
-"Wrap Metadata" step, instead the following is performed:
-
-  - The index field identified by ``det_key`` is looked up in the
-    current active ``det_info`` (after removing the dets: prefix) and
-    in the new metadata object (with prefix intact).
+  - An index field will be identified in the current active
+    ``det_info`` -- it can be either ``dets:readout_id`` or
+    ``dets:det_id`` -- to match against the new metadata.
   - The columns from the new metadata are merged into the active
     ``det_info``, ensuring that the index field values correspond.
   - Only the rows for which the index field has the same value in the
@@ -882,7 +934,23 @@ which will be queried in the usual way except that when we get to the
 
 As subsequent metadata are processed, they can match against any
 fields that have been added to ``det_info`` by preceding entries in
-the metadata list.
+the metadata list.  However, currently it is only possible to augment
+``det_info`` using ``readout_id`` or ``det_id``.
+
+By default, ``readout_id`` / ``det_id`` are expected to be unique
+indices.  It is often useful to permit multiple matches, especially
+for the special value "NOT_FOUND" in ``det_id``.  To permit this, add
+'multi: true' to the metadata block.  For example::
+
+  metadata:
+  ...
+  - db: 'wafer_det_map.sqlite'   # the 'readout_id' -> 'det_id' mapping
+    det_info: true
+  - db: 'wafer_info.sqlite'      # the 'det_id' -> misc properties table
+    det_info: true
+    multi: true                  # Set multi=true if det_id=NOT_FOUND might
+                                 # need to be broadcast to multiple readout_id
+  ...
 
 
 ------------------------------------
@@ -1551,3 +1619,38 @@ Here's the class documentation for ResultSetHdfLoader:
 .. autoclass:: sotodlib.io.metadata.ResultSetHdfLoader
    :inherited-members: __init__
    :members:
+
+-----------------
+Command Line Tool
+-----------------
+
+
+The `so-metadata` script is a tool that can be used to inspect and
+alter the contents of ObsFileDb, ObsDb, and ManifestDb ("metadata")
+sqlite3 databases.  In the case of ObsFileDb and ManifestDb, it can
+also be used to perform batch filename updates.
+
+To summarize a database, pass the db type and then the path to the db
+file.  It might be convenient to start by printing a summary of the
+context.yaml file, as this will give full paths to the various
+databases, that can be copied and pasted::
+
+  so-metadata context /path/to/context.yaml
+
+
+Analyzing individual databases::
+
+  so-metadata obsdb /path/to/context/obsdb.
+  so-metadata obsfiledb /path/to/context/obsfiledb.sqlite
+  so-metadata metadata /path/to/context/some_metadata.sqlite
+
+
+Usage
+=====
+
+.. argparse::
+   :module: sotodlib.core.metadata.cli
+   :func: get_parser
+   :prog: so-metadata
+
+

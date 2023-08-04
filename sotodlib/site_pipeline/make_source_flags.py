@@ -11,8 +11,9 @@ from . import util
 
 logger = logging.getLogger(__name__)
 
-def get_parser():
-    parser = ArgumentParser()
+def get_parser(parser=None):
+    if parser is None:
+        parser = ArgumentParser()
     parser.add_argument('obs_id',help=
                         "Observation for which to generate flags.")
     parser.add_argument('-c', '--config-file', help=
@@ -21,23 +22,20 @@ def get_parser():
                         default=0, help="Pass multiple times to increase.")
     return parser
 
-def get_config(args):
-    cfg = yaml.safe_load(open(args.config_file, 'r'))
+def get_config(config_file, obs_id=None, verbose=None):
+    cfg = yaml.safe_load(open(config_file, 'r'))
     for k in ['obs_id', 'verbose']:
         cfg[k] = getattr(args, k)
     return cfg
 
-def main(args=None):
-    if args is None:
-        args = sys.argv[1:]
-    parser = get_parser()
-    config = get_config(parser.parse_args(args))
+def main(config_file=None, verbose=0, obs_id=None):
+    config = get_config(config_file)
 
-    if config['verbose'] >= 1:
+    if verbose >= 1:
         logger.setLevel('INFO')
-    if config['verbose'] >= 2:
+    if verbose >= 2:
         sotodlib.logger.setLevel('INFO')
-    if config['verbose'] >= 3:
+    if verbose >= 3:
         sotodlib.logger.setLevel('DEBUG')
 
     ctx = core.Context(config['context_file'])
@@ -65,11 +63,11 @@ def main(args=None):
     # correspondence to the output index values.
     index_map = {}
 
-    detsets = ctx.obsfiledb.get_detsets(config['obs_id'])
+    detsets = ctx.obsfiledb.get_detsets(obs_id)
     for detset in detsets:
         logger.info(f'Loading {config["obs_id"]}:detset={detset}')
         # Load pointing and dets axis; we don't need signal though.
-        tod = ctx.get_obs(config['obs_id'], detsets=[detset],
+        tod = ctx.get_obs(obs_id, detsets=[detset],
                           no_signal=True)
 
         # Figure out the indexing info for this.
@@ -118,14 +116,17 @@ def main(args=None):
 
         # Get file + dataset from policy.
         policy = util.ArchivePolicy.from_params(config['archive']['policy'])
-        dest_file, dest_dataset = policy.get_dest(config['obs_id'])
+        dest_file, dest_dataset = policy.get_dest(obs_id)
         aman.save(dest_file, dest_dataset, overwrite=True)
 
         # Update the index.
-        db_data = {'obs:obs_id': config['obs_id'],
+        db_data = {'obs:obs_id': obs_id,
                    'dataset': dest_dataset,
                    f'dets:{group_by}': this_index}
         db.add_entry(db_data, dest_file, replace=True)
 
     # Return something?
     return tod, aman
+
+if __name__ == '__main__':
+    util.main_launcher(main, get_parser)

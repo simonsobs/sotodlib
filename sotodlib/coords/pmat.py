@@ -69,7 +69,9 @@ class P:
       in celestial coordinates. [samps]
     - fp: G3VectorQuat representing the focal plane offsets of each
       detector. [dets]
-    - geom: The target map geometry (shape, wcs).
+    - geom: The target map geometry. This is a pixell.enmap.Geometry
+      object, with attributes .shape and .wcs; or possibly (if tiled)
+      a pixell.tilemap.TileGeometry.
     - comps: String indicating the spin-components to include in maps.
       E.g., 'T', 'QU', 'TQU'.
     - rot: quat giving an additional fixed rotation to apply to get

@@ -148,7 +148,7 @@ def get_scan_P(tod, planet, refq=None, res=None, size=None, **kw):
     if size is not None:
         # Trim to a local square
         mz = P.zeros(comps='T').submap([[-size/2, size/2], [size/2, -size/2]])
-        P.geom = mz.shape, mz.wcs
+        P.geom = enmap.Geometry(shape=mz.shape, wcs=mz.wcs)
     return P, X
 
 def filter_for_sources(tod=None, signal=None, source_flags=None,
@@ -408,8 +408,9 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
     if P is None:
         logger.info('Getting Projection Matrix ...')
         P, X = get_scan_P(tod, center_on, res=res, comps='T')
-        if P.geom[0][0] * P.geom[0][1] > max_pix:
-            raise ValueError(f'Mask map too large: {P.geom}')
+        shape, wcs = tuple(P.geom)
+        if shape[0] * shape[1] > max_pix:
+            raise ValueError(f'Mask map too large: {shape}')
 
     if isinstance(mask, str):
         # Assume it's a filename, and file is simple columns of (x, y,
