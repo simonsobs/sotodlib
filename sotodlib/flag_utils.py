@@ -5,7 +5,7 @@ import time
 from scipy import stats
 
 def plot_glitch_stats(tod, glitches=None, N_bins=30, save_path='./',
-                      save_name='glitch_flag_stats.png', save_plot=True):
+                      save_name='glitch_flag_stats.png', save_plot=False):
     """
     Function for plotting the glitch flags/cut statistics using the built in stats functions
     in the RangesMatrices class.
@@ -45,9 +45,6 @@ def plot_glitch_stats(tod, glitches=None, N_bins=30, save_path='./',
     ax[0].axvline(medsamps,color = 'C1', ls = ':', lw = 2, label=f'Median: {medsamps:.2f}%')
     meansamps = np.mean(frac_samp_glitches)
     ax[0].axvline(meansamps,color = 'C2', ls = ':', lw = 2, label=f'Mean: {meansamps:.2f}%')
-    modesamps = stats.mode(frac_samp_glitches)
-    ax[0].axvline(modesamps[0][0],color = 'C3', ls = ':', lw = 2, 
-                  label=f'Mode: {modesamps[0][0]:.2f}%, Counts: {modesamps[1][0]}')
     stdsamps = np.std(frac_samp_glitches)
     ax[0].axvspan(meansamps-stdsamps, meansamps+stdsamps, color = 'wheat', alpha = 0.2, 
                   label=f'$\sigma$: {stdsamps:.2f}%')
@@ -68,9 +65,6 @@ def plot_glitch_stats(tod, glitches=None, N_bins=30, save_path='./',
     meanints = np.mean(interval_glitches)
     ax[1].axvline(meanints,color = 'C2', ls = ':', lw = 2, 
                   label=f'Mean: {meanints:.2f} intervals')
-    modeints = stats.mode(interval_glitches)
-    ax[1].axvline(modeints[0][0],color = 'C3', ls = ':', lw = 2,
-                  label=f'Mode: {modeints[0][0]:.2f} intervals, Counts: {modeints[1][0]}')
     stdints = np.std(interval_glitches)
     ax[1].axvspan(meanints-stdints, meanints+stdints, color = 'wheat', alpha = 0.2,
                   label=f'$\sigma$: {stdints:.2f} intervals')
