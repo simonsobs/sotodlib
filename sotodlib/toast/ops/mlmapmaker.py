@@ -356,28 +356,7 @@ class MLMapmaker(Operator):
             # Convert the focalplane offsets into the expected form
             det_to_row = {y["name"]: x for x, y in enumerate(fp.detector_data)}
             det_quat = np.array([fp.detector_data["quat"][det_to_row[x]] for x in dets])
-            """
-            det_theta, det_phi, det_pa = toast.qarray.to_iso_angles(det_quat)
-
-            radius = np.sin(det_theta)
-            xi  = radius * np.sin(det_phi)
-            eta = radius * np.cos(det_phi)
-            gamma = np.pi/2 - det_pa
-            """
             xi, eta, gamma = quat_to_xieta(det_quat)
-            # gamma = gamma #             good Q, little bit of U
-            # gamma = np.pi / 2 - gamma # good Q, lots of U
-            # gamma = gamma - np.pi / 2 # inverted Q, little bit of U
-            # gamma = -gamma #            inverted Q, lots of U
-            # gamma = 1.5 * np.pi - gamma
-            # for d in range(len(det_quat)):
-            #     print(f"{d:03d}: {det_quat[d]}")
-            #     print(f"  theta = {det_theta[d]}")
-            #     print(f"  phi   = {det_phi[d]}")
-            #     print(f"  pa    = {det_pa[d]}")
-            #     print(f"  xi    = {xi[d]}")
-            #     print(f"  eta   = {eta[d]}")
-            #     print(f"  gamma = {gamma[d]}")
 
             axfp = AxisManager()
             axfp.wrap("xi", xi, axis_map=[(0, axdets)])
@@ -391,7 +370,7 @@ class MLMapmaker(Operator):
             # Azimuth is measured in the opposite direction from longitude
             az = 2 * np.pi - phi
             el = np.pi / 2 - theta
-            roll = pa  # FIXME: double check this...
+            roll = pa
 
             axbore = AxisManager()
             axbore.wrap("az", az, axis_map=[(0, axsamps)])

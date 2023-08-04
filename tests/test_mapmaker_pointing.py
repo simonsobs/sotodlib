@@ -41,7 +41,7 @@ class MapmakerPointingTest(unittest.TestCase):
         nside = 1024
         wpix = hp.nside2pixarea(nside, degrees=True)**.5 * 60
         npix = 12 * nside**2
-        # testdir = tempfile.TemporaryDirectory()
+        testdir = tempfile.TemporaryDirectory()
         class TestDir:
             name = "testdata"
         testdir = TestDir()
@@ -138,7 +138,7 @@ class MapmakerPointingTest(unittest.TestCase):
             comps="TQU",
             nmat_type="Nmat",
             maxiter=3,
-            truncate_tod=True,
+            truncate_tod=False,
             write_hits=True,
             write_rhs=False,
             write_div=False,
@@ -148,35 +148,88 @@ class MapmakerPointingTest(unittest.TestCase):
         mapmaker.apply(data)
 
         if rank == 0:
+            # Direct comparison of pointing
+            obs = data.obs[0]
+            pmap = mapmaker._signal_map.data[obs.name].pmap
+            det_quats = pmap._get_asm().dets
+            coords = np.array(pmap.sight.coords(det_quats))
+            dets = mapmaker._mapmaker.data[0].dets
+            ndet = len(dets)
+
+            pointing.apply(data)
+            dlats_mean = np.zeros(ndet)
+            dlats_rms = np.zeros(ndet)
+            dlons_mean = np.zeros(ndet)
+            dlons_rms = np.zeros(ndet)
+            dgammas_mean = np.zeros(ndet)
+            dgammas_rms = np.zeros(ndet)
+            for idet in range(ndet):
+                lon, lat, cosgamma, singamma = coords[idet].T
+                gamma = np.arctan2(singamma, cosgamma)
+                theta, toast_lon, toast_gamma = toast.qarray.to_iso_angles(
+                    obs.detdata["quats_radec"][idet]
+                )
+                toast_lat = np.pi / 2 - theta
+                toast_dets = obs.local_detectors
+                dlon = np.degrees(lon - toast_lon) * 3600
+                dlat = np.degrees(lat - toast_lat) * 3600
+                dgamma = np.degrees(np.unwrap(gamma - toast_gamma)) * 3600
+                mean_dlon = np.mean(dlon)
+                rms_dlon = np.std(dlon)
+                mean_dlat = np.mean(dlat)
+                rms_dlat = np.std(dlat)
+                mean_dgamma = np.mean(dgamma)
+                rms_dgamma = np.std(dgamma)
+                #log.info(f"dlat = {mean_dlat:.3f} +- {rms_dlat:.3f} arcsec")
+                #log.info(f"dlon = {mean_dlon:.3f} +- {rms_dlon:.3f} arcsec")
+                #log.info(f"dgamma = {mean_dgamma:.3f} +- {rms_dgamma:.3f} arcsec")
+                dlats_mean[idet] = mean_dlat
+                dlats_rms[idet] = rms_dlat
+                dlons_mean[idet] = mean_dlon
+                dlons_rms[idet] = rms_dlon
+                dgammas_mean[idet] = mean_dgamma
+                dgammas_rms[idet] = rms_dgamma
+            log.info(f"dlat = {np.mean(dlats_mean):.3f} +- {np.std(dlats_mean):.3f} arcsec")
+            log.info(f"dlon = {np.mean(dlons_mean):.3f} +- {np.std(dlons_mean):.3f} arcsec")
+            log.info(f"dgamma = {np.mean(dgammas_mean):.3f} +- {np.std(dgammas_mean):.3f} arcsec")
+            tol = 1.0
+            if rms_dlon > tol:
+                raise RuntimeError(f"RA differs systematically over {tol} arc seconds")
+            if rms_dlat > tol:
+                raise RuntimeError(f"Dec differs systematically over {tol} arc seconds")
+            if rms_dgamma > tol:
+                raise RuntimeError(f"PA differs systematically over {tol} arc seconds")
+
+            # Compare binned maps
+
             file_hits = os.path.join(testdir.name, "mlmapmaker_sky_hits.fits")
             file_map = os.path.join(testdir.name, "mlmapmaker_sky_map.fits")
             hits = enmap.read_map(file_hits).astype(int)
             sky = enmap.read_map(file_map)
             good = hits != 0
-            limit = np.percentile(hits[good], 0.85)
-            ind = hits > limit
+            ind = sky[1] != 0
 
             toast_hits = hp.read_map(file_hits_toast)
             toast_sky = hp.read_map(file_map_toast, None)
             toast_good = toast_hits != 0
-            toast_limit = np.percentile(toast_hits[toast_good], 0.85)
-            toast_ind = toast_hits > toast_limit
+            toast_ind = toast_sky[1] != 0
 
             rms = []
             means = []
             toast_rms = []
             toast_means = []
             log.info(f"            {'MLMapmaker':16}            {'TOAST':16}")
-            log.info(f"Hits        {np.sum(hits):8}       {np.sum(toast_hits):8}")
-            log.info(f"Hit pixels  {np.sum(good):8}       {np.sum(toast_good):8}")
-            log.info(f"After cut   {np.sum(ind):8}       {np.sum(toast_ind):8}")
+            log.info(f"Hits        {np.sum(hits):8}       {np.sum(toast_hits):16}")
+            log.info(f"Hit pixels  {np.sum(good):8}       {np.sum(toast_good):16}")
+            log.info(f"After cut   {np.sum(ind):8}       {np.sum(toast_ind):16}")
             for i in range(3):
                 rms.append(np.std(sky[i][ind].ravel()))
                 means.append(np.mean(sky[i][ind].ravel()))
                 toast_rms.append(np.std(toast_sky[i][toast_ind].ravel()))
                 toast_means.append(np.mean(toast_sky[i][toast_ind].ravel()))
+                stokes = "IQU"[i]
                 log.info(
-                    f"{i:3} {means[i]:12.6f} +- {rms[i]:12.6f}, "
+                    f"{stokes:3} {means[i]:12.6f} +- {rms[i]:12.6f}, "
                     f"{toast_means[i]:12.6f} +- {toast_rms[i]:12.6f}"
                 )
 
