@@ -4,6 +4,7 @@ import os
 import shutil
 
 import numpy as np
+import astropy.units as u
 from sotodlib import core
 import sotodlib.core.axisman_util as amutil
 import so3g
@@ -376,6 +377,9 @@ class TestAxisManager(unittest.TestCase):
 
         aman.wrap('sparse', csr_array( ((8,3), ([0,1], [1,54])), 
                                       shape=(aman.dets.count, aman.samps.count)))
+
+        aman.wrap('quantity', np.ones(5) << u.m)
+        aman.wrap('quantity2', (np.ones(1) << u.m)[0])
 
         # Make sure the saving / clobbering / readback logic works
         # equally for simple group name, root group, None->root group.

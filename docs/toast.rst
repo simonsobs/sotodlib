@@ -143,21 +143,43 @@ the standard operators in toast.
 
 .. autoclass:: sotodlib.toast.ops.CoRotator
    :members:
+   :noindex:
 
 .. autoclass:: sotodlib.toast.ops.SimSSO
    :members:
+   :noindex:
+
+.. autoclass:: sotodlib.toast.ops.SimCatalog
+   :members:
+   :noindex:
 
 .. autoclass:: sotodlib.toast.ops.SimHWPSS
    :members:
+   :noindex:
 
 .. autoclass:: sotodlib.toast.ops.SimSource
    :members:
+   :noindex:
 
 .. autoclass:: sotodlib.toast.ops.Hn
    :members:
+   :noindex:
 
 .. autoclass:: sotodlib.toast.ops.MLMapmaker
    :members:
+   :noindex:
+
+.. autoclass:: sotodlib.toast.ops.SimWireGrid
+   :members:
+   :noindex:
+
+.. autoclass:: sotodlib.toast.ops.SimStimulator
+   :members:
+   :noindex:
+
+.. autoclass:: sotodlib.toast.ops.SimReadout
+   :members:
+   :noindex:
 
 
 Data I/O

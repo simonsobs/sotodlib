@@ -474,10 +474,14 @@ class AxisManager:
             elif isinstance(keepers[0], np.ndarray):
                 new_data[name] = np.concatenate(keepers, axis=ax_dim)
             elif isinstance(keepers[0], csr_array):
+                # Note in scipy 1.11 the default format for vstack
+                # and/or hstack seems to have change, as we started
+                # seeing induced cso format here.  Force preservation
+                # of incoming format.
                 if ax_dim == 0:
-                    new_data[name] = sparse.vstack(keepers)
+                    new_data[name] = sparse.vstack(keepers, format=keepers[0].format)
                 elif ax_dim == 1:
-                    new_data[name] = sparse.hstack(keepers)
+                    new_data[name] = sparse.hstack(keepers, format=keepers[0].format)
                 else:
                     raise ValueError('sparse arrays cannot concatenate along '
                                      f'axes greater than 1, received {ax_dim}')
@@ -791,6 +795,16 @@ class AxisManager:
         same name will be intersected.
 
         """
+        # Before messing with anything, check for key interference.
+        fields = set(self._fields.keys())
+        for aman in amans:
+            newf = set(aman._fields.keys())
+            both = fields.intersection(newf)
+            if len(both):
+                raise ValueError(f'Key conflict: more than one merge target '
+                                 f'shares keys: {both}')
+            fields.update(newf)
+
         # Get the intersected axis descriptions.
         axes_out = self.intersection_info(self, *amans)
         # Reduce the data in self, update our axes.
@@ -802,9 +816,7 @@ class AxisManager:
                 if k not in self._axes:
                     self._axes[k] = v
             for k, v in aman._fields.items():
-                if k in self._fields:
-                    raise ValueError(f'Key: {k} found in {self} and {aman}')
-                assert(k not in self._fields)
+                assert(k not in self._fields)  # Should have been caught in pre-check
                 self._fields[k] = v
             self._assignments.update(aman._assignments)
         return self

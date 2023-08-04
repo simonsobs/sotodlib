@@ -8,6 +8,7 @@ try:
     from scipy.sparse import csr_array
 except ImportError:
     from scipy.sparse import csr_matrix as csr_array
+import astropy.units as u
 
 from .axisman import *
 from .flagman import FlagManager
@@ -136,6 +137,11 @@ def _save_axisman(axisman, dest, group=None, overwrite=False):
         v = axisman[k]
         if v is None or np.isscalar(v):
             item['encoding'] = 'scalar'
+        elif isinstance(v, u.quantity.Quantity):
+            if v.shape == ():
+                item['encoding'] = 'scalar_quantity'
+            else:
+                item['encoding'] = 'quantity'
         elif isinstance(v, np.ndarray):
             item['encoding'] = 'ndarray'
         elif isinstance(v, AxisInterface):
@@ -207,6 +213,7 @@ def _save_axisman(axisman, dest, group=None, overwrite=False):
         'schema': schema,
         })
     scalars = {}
+    units = {}
 
     for item in schema:
         data = axisman[item['name']]
@@ -214,6 +221,12 @@ def _save_axisman(axisman, dest, group=None, overwrite=False):
             scalars[item['name']] = data
         elif item['encoding'] == 'ndarray':
             dest.create_dataset(item['name'], data=_retype_for_write(data))
+        elif item['encoding'] == 'quantity':
+            dest.create_dataset(item['name'], data=_retype_for_write(data))
+            units[item['name']] = data.unit.to_string()
+        elif item['encoding'] == 'scalar_quantity':
+            scalars[item['name']] = data.value
+            units[item['name']] = data.unit.to_string()
         elif item['encoding'] == 'rangesmatrix':
             g = dest.create_group(item['name'])
             for k, v in flatten_RangesMatrix(data).items():
@@ -232,6 +245,9 @@ def _save_axisman(axisman, dest, group=None, overwrite=False):
 
     if len(scalars):
         dest.attrs['_scalars'] = json.dumps(scalars)
+
+    if len(units):
+        dest.attrs['_units'] = json.dumps(units)
 
     if file_to_close:
         file_to_close.close()
@@ -260,6 +276,10 @@ def _load_axisman(src, group=None, cls=None):
     if '_scalars' in src.attrs:
         scalars = json.loads(src.attrs['_scalars'])
 
+    units = {}
+    if '_units' in src.attrs:
+        units = json.loads(src.attrs['_units'])
+
     # Reconstruct axes.
     axes = []
     for item in schema:
@@ -279,6 +299,10 @@ def _load_axisman(src, group=None, cls=None):
             axisman.wrap(item['name'], scalars[item['name']])
         elif item['encoding'] == 'ndarray':
             axisman.wrap(item['name'], _retype_for_read(src[item['name']][:]), assign)
+        elif item['encoding'] == 'quantity':
+            axisman.wrap(item['name'], _retype_for_read(src[item['name']][:]) << u.Unit(units[item['name']]), assign)
+        elif item['encoding'] == 'scalar_quantity':
+            axisman.wrap(item['name'], scalars[item['name']] << u.Unit(units[item['name']]), assign)
         elif item['encoding'] == 'axisman':
             x = _load_axisman(src[item['name']])
             if item['subclass'] == 'FlagManager':
@@ -296,4 +320,3 @@ def _load_axisman(src, group=None, cls=None):
             print('No decoder for:', item)
 
     return axisman
-

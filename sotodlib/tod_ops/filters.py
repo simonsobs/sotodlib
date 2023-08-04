@@ -5,7 +5,7 @@ import scipy.signal as signal
 
 import logging
 
-from . import detrend_data
+from . import detrend_tod
 from . import fft_ops
 from sotodlib import core
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def fourier_filter(tod, filt_function,
-                   detrend='linear', resize='zero_pad',
+                   detrend=None, resize='zero_pad',
                    axis_name='samps', signal_name='signal', 
                    time_name='timestamps',
                    **kwargs):
@@ -29,7 +29,8 @@ def fourier_filter(tod, filt_function,
             fourier space
         
         detrend: Method of detrending to be done before ffting. Can
-            be 'linear', 'mean', or None.
+            be 'linear', 'mean', or None. Note that detrending here can be slow
+            for large arrays
             
         resize: How to resize the axis to increase fft
             speed. 'zero_pad' will increase to the next nice number (a
@@ -83,8 +84,9 @@ def fourier_filter(tod, filt_function,
         raise ValueError('resize must be "zero_pad", "trim", or None')
 
     if detrend is not None:
-        signal = detrend_data(tod, detrend, axis_name=axis_name,
-                             signal_name=signal_name)
+        logger.info('fourier_filter: detrending.')
+        signal = detrend_tod(tod, detrend, axis_name=axis_name,
+                             signal_name=signal_name, in_place=False)
     else:
         signal = tod[signal_name]
     signal = np.atleast_2d(signal)
@@ -94,6 +96,7 @@ def fourier_filter(tod, filt_function,
         signal = signal.copy()
 
     else:
+        logger.info('fourier_filter: initializing rfft object.')
         a, b, t_1, t_2 = fft_ops.build_rfft_object(n_det, n, 'BOTH')
 
         if other_idx is not None and other_idx != 0:
@@ -101,17 +104,21 @@ def fourier_filter(tod, filt_function,
             signal = signal.transpose()
 
         # This copy is valid for all modes of "resize"
+        logger.info('fourier_filter: copying in data.')
         a[:,:min(n, axis.count)] = signal[:,:min(n, axis.count)]
         a[:,min(n, axis.count):] = 0
 
         ## FFT Signal
+        logger.info('fourier_filter: FFT.')
         t_1()
 
         ## Get Filter
+        logger.info('fourier_filter: applying filter.')
         freqs = np.fft.rfftfreq(n, delta_t)
         filt_function.apply(freqs, tod, b, **kwargs)
 
         ## FFT Back
+        logger.info('fourier_filter: IFFT.')
         t_2()
 
         # Un-pad?
@@ -482,3 +489,91 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None,
     if invert:
         return A / B
     return B / A
+
+
+# Functions to derive low/high/band pass filter from configuration
+##################################################################
+def get_lpf(cfg):
+    """
+    Returns a low-pass filter based on the configuration.
+
+    Args:
+        cfg (dict): A dictionary containing the low-pass filter configuration.
+            It must have the following keys:
+            - "type": A string specifying the type of low-pass filter. Supported values are "identity", "butter4" and "sine2".
+            - "cutoff": A float specifying the cutoff frequency of the low-pass filter.
+            - "trans_width": A float specifying the transition width of the low-pass filter (only for "sine2" type).
+
+    Returns:
+        filters.fourier_filter: the low-pass filter.
+    """
+    if cfg['type'] == 'identity':
+        return identity_filter()
+    elif cfg['type'] == 'butter4':
+        cutoff = cfg['cutoff']
+        return low_pass_butter4(fc=cutoff)
+    elif cfg['type'] == 'sine2':
+        cutoff = cfg['cutoff']
+        trans_width = cfg['trans_width']
+        return low_pass_sine2(cutoff=cutoff, width=trans_width)
+    else:
+        raise ValueError('Unsupported filter type. Supported filters are `identity`, `butter4` and `sine2`')
+
+
+def get_hpf(cfg):
+    """
+    Returns a high-pass filter based on the configuration.
+
+    Args:
+        cfg (dict): A dictionary containing the high-pass filter configuration.
+            It must have the following keys:
+            - "type": A string specifying the type of high-pass filter. Supported values are "identity", "butter4" and "sine2".
+            - "cutoff": A float specifying the cutoff frequency of the high-pass filter.
+            - "trans_width": A float specifying the transition width of the high-pass filter (only for "sine2" type).
+
+    Returns:
+        filters.fourier_filter: the high-pass filter.
+    """
+    if cfg['type'] == 'identity':
+        return identity_filter()
+    elif cfg['type'] == 'butter4':
+        cutoff = cfg['cutoff']
+        return high_pass_butter4(fc=cutoff)
+    elif cfg['type'] == 'sine2':
+        cutoff = cfg['cutoff']
+        trans_width = cfg['trans_width']
+        return high_pass_sine2(cutoff=cutoff, width=trans_width)
+    else:
+        raise ValueError('Unsupported filter type. Supported filters are `identity`, `butter4` and `sine2`')
+        
+
+def get_bpf(cfg):
+    """
+    Returns a band-pass filter based on the configuration.
+
+    Args:
+        cfg (dict): A dictionary containing the band-pass filter configuration.
+            It must have the following keys:
+            - "type": A string specifying the type of band-pass filter. Supported values are "identity", "butter4" and "sine2".
+            - "center": A float specifying the center frequency of the band-pass filter.
+            - "width": A float specifying the width of the band-pass filter.
+            - "trans_width": A float specifying the transition width of the band-pass filter (only for "sine2" type).
+
+    Returns:
+        filters.fourier_filter: the band-pass filter.
+    """
+    if cfg['type'] == 'identity':
+        return identity_filter()
+    elif cfg['type'] == 'butter4':
+        center = cfg['center']
+        width = cfg['width']
+        return low_pass_butter4(fc=center + width/2.) *\
+                high_pass_butter4(fc=center - width/2.)
+    elif cfg['type'] == 'sine2':
+        center = cfg['center']
+        width = cfg['width']
+        trans_width = cfg['trans_width']
+        return low_pass_sine2(cutoff=center + width/2., width=trans_width)*\
+                high_pass_sine2(cutoff=center - width/2., width=trans_width)
+    else:
+        raise ValueError('Unsupported filter type. Supported filters are `identity`, `butter4` and `sine2`')

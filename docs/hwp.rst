@@ -179,7 +179,7 @@ Class and function references should be auto-generated here.
 
 HWPSS
 =====
-.. autofunction:: sotodlib.hwp.hwp.extract_hwpss
+.. autofunction:: sotodlib.hwp.hwp.get_hwpss
 	  
 .. py:module:: sotodlib.hwp.sim_hwp
 
@@ -192,4 +192,4 @@ HWPSS
 Demodulation
 ============
 
-.. autofunction:: sotodlib.hwp.hwp.demod
+.. autofunction:: sotodlib.hwp.hwp.demod_tod

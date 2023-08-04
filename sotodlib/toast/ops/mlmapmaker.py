@@ -350,7 +350,7 @@ class MLMapmaker(Operator):
             # Convert the focalplane offsets into the expected form
             det_to_row = {y["name"]: x for x, y in enumerate(fp.detector_data)}
             det_quat = np.array([fp.detector_data["quat"][det_to_row[x]] for x in dets])
-            det_theta, det_phi, det_pa = toast.qarray.to_angles(det_quat)
+            det_theta, det_phi, det_pa = toast.qarray.to_iso_angles(det_quat)
 
             radius = np.sin(det_theta)
             xi  = radius * np.sin(det_phi)
@@ -372,7 +372,7 @@ class MLMapmaker(Operator):
 
             # Convert Az/El quaternion of the detector back into
             # angles from the simulation.
-            theta, phi, pa = toast.qarray.to_angles(ob.shared[self.boresight][ind])
+            theta, phi, pa = toast.qarray.to_iso_angles(ob.shared[self.boresight][ind])
 
             # Azimuth is measured in the opposite direction from longitude
             az = 2 * np.pi - phi

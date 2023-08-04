@@ -40,10 +40,10 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      - name: Install MPICH
+      - name: Install OpenMPI for Tests
         run: |
           sudo apt update
-          sudo apt install -y libmpich-dev
+          sudo apt install -y libopenmpi-dev
 
       - name: Install Dependencies
         run: |
@@ -56,7 +56,7 @@ jobs:
 
       - name: Install sotodlib
         run: |
-          python3 -m pip install -vvv .
+          python3 -m pip install -vvv .[tests]
 
       - name: Run Serial Tests
         run: |

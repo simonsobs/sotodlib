@@ -59,6 +59,10 @@ class TestObsFileDB(unittest.TestCase):
                     sorted(db2.get_detsets(obs_id)))
             assert (db.get_detsets('not an obs') == [])
 
+            # CLI
+            if fmt == 'sqlite':
+                metadata.obsfiledb.main([self.test_filename, 'files'])
+
     def test_010_remove(self):
         db = self.get_simple_db(4, 3)
         n0 = len(db.get_obs())

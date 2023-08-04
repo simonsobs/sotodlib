@@ -4,6 +4,8 @@ import inspect
 import logging
 import time
 import sys
+import argparse
+
 from astropy import units as u
 
 from .. import core
@@ -265,3 +267,23 @@ def init_logger(name, announce=''):
     logger.info(f'{announce}Log timestamps are relative to {text}')
 
     return logger
+
+def main_launcher(main_func, parser_func, args=None):
+    """Launch an element's main entry point function, after generating
+    a parser and executing it on the command line arguments (or args
+    if it is passed in).
+
+    Args:
+      main_func: the main entry point for a pipeline element.
+      parser_func: the argument parser generation function for a pipeline
+        element.
+      args (list of str): arguments to parse (default is None, which
+        will lead to sys.argv[1:]).
+
+    Returns:
+      Whatever main_func returns.
+
+    """
+    if args is None:
+        args = sys.argv[1:]
+    return main_func(**vars(parser_func().parse_args(args=args)))
