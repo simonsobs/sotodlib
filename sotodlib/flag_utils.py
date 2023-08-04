@@ -4,7 +4,7 @@ import os
 import time
 from scipy import stats
 
-def plot_glitch_stats(tod, flags='flags', glitches='glitches', N_bins=30, save_path='./',
+def plot_glitch_stats(tod, glitches=None, N_bins=30, save_path='./',
                       save_name='glitch_flag_stats.png', save_plot=True):
     """
     Function for plotting the glitch flags/cut statistics using the built in stats functions
@@ -30,9 +30,11 @@ def plot_glitch_stats(tod, flags='flags', glitches='glitches', N_bins=30, save_p
     interval_glitches (ndarray, int): Array size 1 x N_dets with number flagged intervals per
                                       detectors.
     """
+    if glitches == None:
+        glitches = tod.flags.glitches
     fig, axes = plt.subplots(1,2,figsize = (15,5))
     ax = axes.flatten()
-    frac_samp_glitches = 100*np.asarray(tod[flags][glitches].get_stats()['samples'])/\
+    frac_samp_glitches = 100*np.asarray(glitches.get_stats()['samples'])/\
                          tod.samps.count
     glitchlog = np.log10(frac_samp_glitches[frac_samp_glitches > 0])
     binmin = int(np.floor(np.min(glitchlog)))
@@ -57,7 +59,7 @@ def plot_glitch_stats(tod, flags='flags', glitches='glitches', N_bins=30, save_p
     ax[0].set_title('Samples Flagged Stats\n$N_{\mathrm{dets}}$ = '+f'{tod.dets.count}'+
                     ' and $N_{\mathrm{samps}}$ = '+f'{tod.samps.count}', fontsize = 18)
 
-    interval_glitches = np.asarray(tod[flags][glitches].get_stats()['intervals'])
+    interval_glitches = np.asarray(glitches.get_stats()['intervals'])
     binlinmax = np.nanmax(interval_glitches)
     _ = ax[1].hist(interval_glitches, bins = np.linspace(0, binlinmax, N_bins))
     medints = np.median(interval_glitches)
