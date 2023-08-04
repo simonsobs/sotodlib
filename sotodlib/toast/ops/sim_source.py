@@ -806,9 +806,13 @@ class SimSource(Operator):
         FoV = self.focalplane.field_of_view
 
         if self.source_azimuth_range == 0:
-            az_range = FoV/2
+            az_range = FoV
+        else:
+            az_range = self.source_azimuth_range
         if self.source_elevation_range == 0:
-            el_range = FoV/2
+            el_range = FoV
+        else:
+            el_range = self.source_elevation_range
 
         if scan_type == 'azimuth_only' or scan_type == 'azimuth_only_single':
 
@@ -850,12 +854,12 @@ class SimSource(Operator):
 
         source_scan_params = {
             'azimuth_starting': az_start,
-            'azimuth_range': FoV,
+            'azimuth_range': az_range,
             'azimuth_velocity': self.source_azimuth_velocity,
             'azimuth_acceleration': self.source_azimuth_acceleration,
             'azimuth_direction': self.source_azimuth_direction,
             'elevation_starting': el_start,
-            'elevation_range': FoV,
+            'elevation_range': el_range,
             'elevation_velocity': self.source_elevation_velocity,
             'elevation_acceleration': self.source_elevation_acceleration,
             'elevation_direction': self.source_elevation_direction,
