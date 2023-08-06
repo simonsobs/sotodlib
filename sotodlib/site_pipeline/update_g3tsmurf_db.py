@@ -17,8 +17,8 @@ from sotodlib.io.load_smurf import G3tSmurf, Observations, logger as default_log
 
 
 def main(config: Optional[str] = None, update_delay: float = 2, 
-         from_scratch: bool = False, verbosity: int = 2, logger=None,
-         index_via_actions: bool =False):
+         from_scratch: bool = False, verbosity: int = 2,
+         index_via_actions: bool=False, logger=None):
     """
     Arguments
     ---------
