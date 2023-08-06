@@ -366,15 +366,15 @@ def sim_nominal():
     ltube_cryonames=["c1", "i5", "i6", "i1", "i3", "i4", "o6"]
 
     lat_ufm_slot = [
-        2,
-        1,
         0,
+        1,
+        2,
     ]
 
     lat_ufm_thetarot = [
-        120.0,
-        0.0,
         240.0,
+        0.0,
+        120.0,
     ]
 
     for tindx in range(7):
@@ -405,6 +405,8 @@ def sim_nominal():
         tb["receiver_name"] = ""
         tube_slots[nm] = tb
 
+    # These are taken from:
+    # https://simonsobs.atlassian.net/wiki/spaces/PRO/pages/101974017/Focal+Plane+Coordinates#UFM-Layout.1
     hex_to_ufm_slot = [
         0,
         2,
@@ -444,8 +446,6 @@ def sim_nominal():
         tb["wafer_slot_angle"] = [
             hex_to_ufm_thetarot[tw] for tw in range(7)
         ] # Degrees
-        # These are taken from:
-        # https://simonsobs.atlassian.net/wiki/spaces/PRO/pages/101974017/Focal+Plane+Coordinates#UFM-Layout.1
         # The "slot" here is the relative slot (ws0 - ws6) within the tube.
         tb["wafer_ufm_slot"] = list()
         # The "loc" here is the compass direction name (e.g. NO, NE, SW, etc.)

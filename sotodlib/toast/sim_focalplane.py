@@ -546,6 +546,11 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
         det_info_file = det_info[0]
         det_info_version = det_info[1]
 
+    # Disable this code path for now, until systematic study or roundtrip
+    # unit test is implemented.
+    if det_info_file is not None:
+        raise NotImplementedError("det_info loading disabled pending unit test")
+
     # The properties of this telescope
     teleprops = hw.data["telescopes"][tele]
     platescale = teleprops["platescale"]
@@ -662,7 +667,7 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
             center=None,
         )
         tcenters = np.array(
-            [qa.mult(q["quat"], reimaging_optics_rot) for p, q in tube_quats.items()]
+            [q["quat"] for p, q in tube_quats.items()]
         )
 
         for tindx, tube_slot in enumerate(tube_slots):
@@ -673,35 +678,47 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
             wafer_slot_ang_rad = np.radians(wafer_slot_ang_deg)
 
             wradius = 0.5 * (waferspace * platescale * np.pi / 180.0)
+
+            # The wafers within the tube are laid out with the c1-o6 line
+            # along the vertical.  Then it is rotated 90 degrees.
+
             if det_info_file is None:
                 qwcenters = [
                     xieta_to_quat(
-                        -wradius, wradius / np.sqrt(3.0), wafer_slot_ang_rad[0]
+                        -wradius, wradius / np.sqrt(3.0), 0.0
                     ),
                     xieta_to_quat(
-                        0.0, -2.0 * wradius / np.sqrt(3.0), wafer_slot_ang_rad[1]
+                        wradius, wradius / np.sqrt(3.0), 0.0
                     ),
                     xieta_to_quat(
-                        wradius, wradius / np.sqrt(3.0), wafer_slot_ang_rad[2]
+                        0.0, -2.0 * wradius / np.sqrt(3.0), 0.0
                     ),
                 ]
             else:
                 # FIXME: again, det_info case needs re-testing.
                 qwcenters = [
                     xieta_to_quat(
-                        -wradius, wradius / np.sqrt(3.0), 7*thirty + wafer_slot_ang_rad[0]
+                        -wradius / np.sqrt(3.0), wradius, 0.0
                     ),
                     xieta_to_quat(
-                        0.0, -2.0 * wradius / np.sqrt(3.0), 3*thirty + wafer_slot_ang_rad[1]
+                        2.0 * wradius / np.sqrt(3.0), 0.0, 0.0
                     ),
                     xieta_to_quat(
-                        wradius, wradius / np.sqrt(3.0), -thirty + wafer_slot_ang_rad[2]
+                        -wradius / np.sqrt(3.0), -wradius, 0.0
                     ),
                 ]
 
             centers = list()
-            for qwc in qwcenters:
-                centers.append(qa.mult(tcenters[location], qwc))
+            for windx, qwc in enumerate(qwcenters):
+                centers.append(
+                    qa.mult(
+                        qa.mult(
+                            tcenters[location],
+                            qa.mult(reimaging_optics_rot, qwc),
+                        ),
+                        qa.from_axisangle(zaxis, wafer_slot_ang_rad[windx] - sixty),
+                    )
+                )
 
             for windx, wafer_slot in enumerate(tubeprops["wafer_slots"]):
                 if det_info_file is not None:
