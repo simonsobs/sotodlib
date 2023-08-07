@@ -213,7 +213,7 @@ def sort_hkdata(start, stop, fields, data_dir, alias=None):
 
     """
     if alias is None:
-        hkdata = load_range(start, stop, fields, data_dir=data_dir)
+        hkdata = load_range(start=start, stop=stop, fields=fields, data_dir=data_dir)
         _check_hkdata(hkdata)
 
         grouped_data = _group_data(hkdata, fields_only=True)
@@ -221,7 +221,7 @@ def sort_hkdata(start, stop, fields, data_dir, alias=None):
         return grouped_data
 
     elif alias is not None:
-        hkdata = load_range(start, stop, fields, alias, data_dir)
+        hkdata = load_range(start=start, stop=stop, fields=fields, alias=alias, data_dir)
 
         field_dict = {}
         for i in range(len(fields)):
@@ -396,7 +396,8 @@ def get_hkaman(start, stop, config=None, alias=None, fields=None, data_dir=None)
     """
     if config is not None:
         data = sort_hkdata_fromconfig(start, stop, config)
-        hkamans = make_hkaman(data, alias_exists=True)
+        hkamans = make_hkaman(grouped_data=data, alias_exists=True, 
+                              det_cosampled=False)
         return hkamans
 
     elif fields is not None:
@@ -404,11 +405,13 @@ def get_hkaman(start, stop, config=None, alias=None, fields=None, data_dir=None)
         # that you didn't provide any aliases
         if alias is None:
             data = sort_hkdata(start, stop, fields, data_dir)
-            hkamans = make_hkaman(data)
+            hkamans = make_hkaman(grouped_data=data, alias_exists=False,
+                                  det_cosampled=False)
             return hkamans
         else:
             data = sort_hkdata(start, stop, fields, data_dir, alias=alias)
-            hkamans = make_hkaman(data, alias_exists=True)
+            hkamans = make_hkaman(grouped_data=data, alias_exists=True, 
+                                  det_cosampled=False)
             return hkamans
 
 
@@ -439,14 +442,17 @@ def get_detcosamp_hkaman(det_aman, config=None, alias=None, fields=None, data_di
 
     if config is not None:
         data = sort_hkdata_fromconfig(start, stop, config)
-        amans = make_hkaman(data, det_aman=det_aman, alias_exists=True, det_cosampled=True)
+        amans = make_hkaman(grouped_data=data, det_aman=det_aman, 
+                            alias_exists=True, det_cosampled=True)
         return amans
     elif fields is not None:
         if alias is None:
             data = sort_hkdata(start, stop, fields, data_dir)
-            amans = make_hkaman(data, det_cosampled=True, det_aman=det_aman)
+            amans = make_hkaman(grouped_data=data, alias_exists=False,
+                                det_cosampled=True, det_aman=det_aman)
             return amans
         else:
             data = sort_hkdata(start, stop, fields, data_dir, alias=alias)
-            amans = make_hkaman(data, alias_exists=True, det_cosampled=True, det_aman=det_aman)
+            amans = make_hkaman(grouped_data=data, alias_exists=True,
+                                det_cosampled=True, det_aman=det_aman)
             return amans
