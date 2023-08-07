@@ -35,7 +35,7 @@ def pysmurf_monitor_control_list(agent, start=None, stop=None, HK=None):
             raise ValueError("need database to search if agent is instance id")
         agent_list = HK.get_db_agents(agent, start, stop)
         return np.unique(
-                np.concatenate[pysmurf_monitor_control_list(agent) for agent in agent_list])
+                np.concatenate([pysmurf_monitor_control_list(agent) for agent in agent_list])
         )
     stream_ids = []
     for field in agent.fields:
