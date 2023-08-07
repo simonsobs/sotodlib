@@ -76,7 +76,7 @@ def _group_data(hkdata, field_dict=None, fields_only=False, alias_exists=False, 
     """
     hknames = list(hkdata.keys())
     if fields_only:  # only field names provided, no aliases given for them
-        grouped_feeds = _group_feeds(hknames)
+        grouped_feeds = _group_feeds(fields=hknames, alias_exists=False)
 
     if alias_exists or config_exists:
         # check for a field dict
@@ -102,7 +102,7 @@ def _group_data(hkdata, field_dict=None, fields_only=False, alias_exists=False, 
             info = {field: [alias, time, data]}
             fields_data.update(info)
 
-        grouped_feeds = _group_feeds(online_fields, alias_exists=True)
+        grouped_feeds = _group_feeds(fields=online_fields, alias_exists=True)
 
     grouped_data = []
     for group in grouped_feeds:
@@ -178,7 +178,7 @@ def sort_hkdata_fromconfig(start, stop, config):
     """
     # call load_range()
     logger.debug("running load_range()")
-    hkdata = load_range(start, stop, config=config)
+    hkdata = load_range(start=start, stop=stop, config=config)
     _check_hkdata(hkdata)
 
     # load all fields from config file
@@ -187,7 +187,9 @@ def sort_hkdata_fromconfig(start, stop, config):
 
     field_dict = hkconfig['field_list']
 
-    grouped_data = _group_data(hkdata, field_dict=field_dict, config_exists=True)
+    grouped_data = _group_data(hkdata=hkdata, field_dict=field_dict,
+                              fields_only=False, alias_exists=False,
+                              config_exists=True)
 
     return grouped_data
 
@@ -216,7 +218,8 @@ def sort_hkdata(start, stop, fields, data_dir, alias=None):
         hkdata = load_range(start=start, stop=stop, fields=fields, data_dir=data_dir)
         _check_hkdata(hkdata)
 
-        grouped_data = _group_data(hkdata, fields_only=True)
+        grouped_data = _group_data(hkdata=hkdata, fields_only=True,
+                                   alias_exists=False, config_exists=False)
 
         return grouped_data
 
@@ -229,7 +232,9 @@ def sort_hkdata(start, stop, fields, data_dir, alias=None):
             info = {fields[i]: alias[i]}
             field_dict.update(info)
 
-        grouped_data = _group_data(hkdata, field_dict=field_dict, alias_exists=True)
+        grouped_data = _group_data(hkdata=hkdata, field_dict=field_dict,
+                                   fields_only=False, alias_exists=True,
+                                   config_exists=False)
 
         return grouped_data
 
