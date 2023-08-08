@@ -277,7 +277,7 @@ def sim_wafer_detectors(
                 dprops = OrderedDict()
                 dprops["wafer_slot"] = wafer_slot
                 dprops["ID"] = idoff + doff
-                dprops["pixel"] = pstr
+                dprops["pixel"] = pxstr
                 dprops["band"] = b
                 dprops["fwhm"] = fwhm[b]
                 dprops["pol"] = pl

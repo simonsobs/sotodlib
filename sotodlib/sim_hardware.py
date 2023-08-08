@@ -394,6 +394,7 @@ def sim_nominal():
             for w, props in cnf["wafer_slots"].items():
                 if props["type"] == ttyp:
                     if off == woff[ttyp]:
+                        props["tube_index"] = tw
                         tb["wafer_slots"].append(w)
                         tb["wafer_ufm_slot"].append(lat_ufm_slot[tw])
                         woff[ttyp] += 1
@@ -455,6 +456,7 @@ def sim_nominal():
             for w, props in cnf["wafer_slots"].items():
                 if props["type"] == ttyp:
                     if off == woff[ttyp]:
+                        props["tube_index"] = tw
                         tb["wafer_slots"].append(w)
                         tb["wafer_ufm_slot"].append(hex_to_ufm_slot[tw])
                         tb["wafer_ufm_loc"].append(hex_to_ufm_loc[tw])

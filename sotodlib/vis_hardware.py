@@ -235,18 +235,30 @@ def plot_detectors(
 
     wafer_centers = dict()
     if labels:
-        # We are plotting labels and will want to plot a wafer_slot label for each
+        # We are plotting labels and will want to plot a label for each
         # wafer.  To decide where to place the label, we find the average location
         # of all detectors from each wafer and put the label there.
+        temp_centers = dict()
         for d, props in dets.items():
             dwslot = props["wafer_slot"]
-            if dwslot not in wafer_centers:
-                wafer_centers[dwslot] = []
-            wafer_centers[dwslot].append((detx[d], dety[d]))
-        for k in wafer_centers.keys():
-            center = np.mean(wafer_centers[k], axis=0)
-            size = (np.array(wafer_centers[k]) - center).std()
-            wafer_centers[k] = (center, size)
+            if dwslot not in temp_centers:
+                temp_centers[dwslot] = {"x": list(), "y": list()}
+            temp_centers[dwslot]["x"].append(detx[d])
+            temp_centers[dwslot]["y"].append(dety[d])
+        for k in list(temp_centers.keys()):
+            xcenter = np.mean(temp_centers[k]["x"])
+            ycenter = np.mean(temp_centers[k]["y"])
+            ysize = 0.25 * np.std(np.array(temp_centers[k]["y"]) - ycenter)
+            tube_slot = wfmap["tube_slots"][k]
+            tube_props = hw.data["tube_slots"][tube_slot]
+            tube_wafer_indx = hw.data["wafer_slots"][k]["tube_index"]
+            ufm_slot = tube_props["wafer_ufm_slot"][tube_wafer_indx]
+            if "wafer_ufm_loc" in tube_props:
+                ufm_loc = tube_props["wafer_ufm_loc"][tube_wafer_indx]
+                ltext = f"{k}:ws{ufm_slot}:{ufm_loc}"
+            else:
+                ltext = f"{k}:ws{ufm_slot}"
+            wafer_centers[k] = ((xcenter, ycenter), ysize, ltext)
 
     if bandcolor is None:
         bandcolor = default_band_colors
@@ -272,14 +284,14 @@ def plot_detectors(
     if labels:
         # The font size depends on the wafer size ... but keep it
         # between (0.01 and 0.1) times the size of the figure.
-        for k, (center, size) in wafer_centers.items():
+        for k, (center, size, ltext) in wafer_centers.items():
             fontpix = np.clip(0.7 * size * hpixperdeg, 0.01 * hfigpix, 0.10 * hfigpix)
             if fontpix < 1.0:
                 fontpix = 1.0
             ax.text(
                 center[0],
                 center[1] + fontpix / hpixperdeg,
-                k,
+                ltext,
                 color="k",
                 fontsize=fontpix,
                 horizontalalignment="center",
