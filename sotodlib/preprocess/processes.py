@@ -138,7 +138,7 @@ class PSDCalc(_Preprocess):
             if "psd" not in proc_aman:
                 proc_aman.wrap("psd", fft_aman)
             else:
-                proc_aman.wrap("psd_after", fft_aman)
+                proc_aman.wrap(f"psd_{self.process_cfgs['signal']}", fft_aman)
 
 class Noise(_Preprocess):
     """Estimate the white noise levels in the data. Assumes the PSD has been
