@@ -125,14 +125,20 @@ class PSDCalc(_Preprocess):
         )
         fft_aman.wrap("freqs", freqs, [(0,"fsamps")])
         fft_aman.wrap("Pxx", Pxx, [(0,"dets"),(1,"fsamps")])
-        aman.wrap("psd", fft_aman)
+        if "psd" not in aman:
+            aman.wrap("psd", fft_aman)
+        else:
+            aman.wrap(f"psd_{self.process_cfgs['signal']}", fft_aman)
 
     def calc_and_save(self, aman, proc_aman):
         self.save(proc_aman, aman.psd)
     
     def save(self, proc_aman, fft_aman):
         if self.save_cfgs:
-            proc_aman.wrap("psd", fft_aman)
+            if "psd" not in proc_aman:
+                proc_aman.wrap("psd", fft_aman)
+            else:
+                proc_aman.wrap("psd_after", fft_aman)
 
 class Noise(_Preprocess):
     """Estimate the white noise levels in the data. Assumes the PSD has been
