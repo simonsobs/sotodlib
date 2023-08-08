@@ -5,6 +5,24 @@ from sotodlib import core, tod_ops
 
 def plot_hwpss_fit_status(tod, hwpss_stats, plot_dets=None, plot_num_dets=3,
                          save_plot=False, save_path='./', save_name='hwpss_stats.png'):
+    """
+    Generate and display a plot illustrating HWPSS (Half-Wave Plate Synchronous Signal).
+    Generate a 2-subplot figure showing binned signal and model for selected detectors, and a
+    histogram of reduced chi-squared values from HWPSS fit.
+
+    Args:
+        tod (TOD): Time-ordered data object.
+        hwpss_stats (HWPSSStats): HWPSS statistics object containing relevant data.
+        plot_dets (array-like or None, optional): List of detector names to plot. If None, automatically select
+            detectors for plotting. Default is None.
+        plot_num_dets (int, optional): Number of detectors to plot when `plot_dets` is None. Default is 3.
+        save_plot (bool, optional): Whether to save the plot as an image file. Default is False.
+        save_path (str, optional): Directory path for saving the plot. Default is './'.
+        save_name (str, optional): File name for the saved plot image. Default is 'hwpss_stats.png'.
+
+    Returns:
+        matplotlib.figure.Figure, numpy.ndarray: The generated figure object and an array of Axes objects.
+    """
     fig, ax = plt.subplots(1, 2, figsize=(15, 5))
     
     if plot_dets is None:
@@ -42,14 +60,36 @@ def plot_hwpss_fit_status(tod, hwpss_stats, plot_dets=None, plot_num_dets=3,
         plt.savefig(os.path.join(save_path, save_ts+'_'+save_name))
     return fig, ax
 
-def plot_preprocess_PSDs(aman, det=None, psd_before=None, psd_after=None, psd_dsT=None, psd_demodQ=None, psd_demodU=None,
+def plot_preprocess_PSDs(tod, det=None, psd_before=None, psd_after=None, psd_dsT=None, psd_demodQ=None, psd_demodU=None,
                         take_square_root=True, amplitude_unit='pA',
                         save_plot=False, save_path='./', save_name='preprocess_PSDs.png'):
-    if psd_before is None: psd_before = aman.psd
-    if psd_after is None: psd_after = aman.psd_hwpss_remove
-    if psd_dsT is None: psd_dsT = aman.psd_dsT
-    if psd_demodQ is None: psd_demodQ = aman.psd_demodQ
-    if psd_demodU is None: psd_demodU = aman.psd_demodU
+    """
+    Generate and display a plot illustrating various preprocessed Power Spectral Densities (PSDs).
+    The PSDs are output from sotodlib.preprocess.processes.PSDCalc.
+
+    Args:
+        tod: An object containing preprocessed data and PSD information.
+        det (int or None, optional): Detector index for which to plot the PSDs. If None, the first detector is used.
+            Default is None.
+        psd_before (PSD or None, optional): PSD before preprocessing. If None, uses tod.psd. Default is None.
+        psd_after (PSD or None, optional): PSD after HWPSS removal. If None, uses tod.psd_hwpss_remove. Default is None.
+        psd_dsT (PSD or None, optional): Downsampled and averaged PSD. If None, uses tod.psd_dsT. Default is None.
+        psd_demodQ (PSD or None, optional): Demodulated Q component of the PSD. If None, uses tod.psd_demodQ. Default is None.
+        psd_demodU (PSD or None, optional): Demodulated U component of the PSD. If None, uses tod.psd_demodU. Default is None.
+        take_square_root (bool, optional): Whether to take the square root of the PSD values. Default is True.
+        amplitude_unit (str, optional): Unit for the y-axis label of the PSD plot. Default is 'pA'.
+        save_plot (bool, optional): Whether to save the plot as an image file. Default is False.
+        save_path (str, optional): Directory path for saving the plot. Default is './'.
+        save_name (str, optional): File name for the saved plot image. Default is 'preprocess_PSDs.png'.
+
+    Returns:
+        matplotlib.figure.Figure, matplotlib.axes._subplots.AxesSubplot: The generated figure object and the Axes object.
+    """
+    if psd_before is None: psd_before = tod.psd
+    if psd_after is None: psd_after = tod.psd_hwpss_remove
+    if psd_dsT is None: psd_dsT = tod.psd_dsT
+    if psd_demodQ is None: psd_demodQ = tod.psd_demodQ
+    if psd_demodU is None: psd_demodU = tod.psd_demodU
     
     psd_dict = {
     'before': psd_before,
@@ -67,9 +107,9 @@ def plot_preprocess_PSDs(aman, det=None, psd_before=None, psd_after=None, psd_ds
         ylabel = f'PSD [{amplitude_unit}^2/Hz]'
 
     if det is None:
-        det = aman.dets.vals[0]
+        det = tod.dets.vals[0]
         
-    det_idx = np.where(aman.dets.vals == det)[0][0]
+    det_idx = np.where(tod.dets.vals == det)[0][0]
     fig, ax = plt.subplots(1, 1, figsize=(7, 5))
     for i, (psd_name, psd) in enumerate(psd_dict.items()):
         ax.loglog(psd.freqs, psd.Pxx[det_idx]**power, label=psd_name, alpha=0.3)
@@ -79,7 +119,7 @@ def plot_preprocess_PSDs(aman, det=None, psd_before=None, psd_after=None, psd_ds
     ax.legend()
     ax.set_xlabel('freq [Hz]')
     ax.set_ylabel(ylabel)
-    ax.set_title(f'Obs_timestamp:{aman.timestamps[0]:.0f}\ndet:{det}')
+    ax.set_title(f'Obs_timestamp:{tod.timestamps[0]:.0f}\ndet:{det}')
     fig.tight_layout()
     
     save_ts = str(int(time.time()))
