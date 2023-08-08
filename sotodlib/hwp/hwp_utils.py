@@ -40,7 +40,9 @@ def plot_hwpss_fit_status(tod, hwpss_stats, plot_dets=None, plot_num_dets=3,
     plt.subplots_adjust(top=0.85, bottom=0.2)
     if save_plot:
         plt.savefig(os.path.join(save_path, save_ts+'_'+save_name))
-    return fig, ax, frac_samp_glitches, interval_glitches
+    return fig, ax
+
+
     
     
     
