@@ -1,0 +1,28 @@
+obs_id: obs_1735694334_latc1_111
+observatory: Simons Observatory
+stream_ids:
+- w00
+- w01
+- w02
+telescope: LAT
+timestamp_end: 2025-01-01T01:31:41+0000
+timestamp_start: 2025-01-01T01:18:54+0000
+toast:
+  observing_session: small_patch-0-3
+  observing_session_end: 1735695101.5
+  observing_session_start: 1735694334.0
+  observing_session_uid: 523449236
+  site_alt_m: 5200.000000000464
+  site_class: sotodlib.toast.instrument.SOSite
+  site_lat_deg: -22.958063999999993
+  site_lon_deg: -67.78622199999995
+  site_name: ATACAMA
+  site_uid: 38700041
+  site_weather_max_pwv: NONE
+  site_weather_name: atacama
+  site_weather_realization: 0
+  site_weather_time: 1735694718.0
+  site_weather_uid: 38700041
+  site_weather_use_median: true
+  telescope_name: LAT
+  telescope_uid: 2729420996

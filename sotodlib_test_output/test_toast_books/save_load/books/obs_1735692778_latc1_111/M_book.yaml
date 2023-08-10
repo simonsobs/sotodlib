@@ -1,0 +1,9 @@
+book:
+  book_id: obs_1735692778_latc1_111
+  finalized_at: 2023-06-05T13:20:52+0000
+  schema_version: 0
+  type: obs
+bookbinder:
+  codebase: sotodlib.toast
+  context: testing
+  version: sotodlib=0.4.0+1281.g55e82a8,toast=3.0.0a15
