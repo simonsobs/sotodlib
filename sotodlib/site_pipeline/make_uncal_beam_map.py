@@ -79,7 +79,7 @@ def _renorm(im):
         alpha = 0
     else:
         alpha = int(np.floor(np.log10(mag)))
-    rescale = 10**-alpha
+    rescale = 10.**-alpha
     label = '$10^{%d}$' % alpha
     imr = im.copy()
     imr[s] *= rescale
@@ -234,7 +234,10 @@ def main(
         logger=None
 ):
     """Entry point."""
-    config = _get_config(config_file)
+    if isinstance(config_file, dict):
+        config = util.ConditionalConfigDict.wrap(config_file)
+    else:
+        config = util.ConditionalConfigDict.wrap(_get_config(config_file))
 
     # Process overrides / defaults
     if context is None:
@@ -429,7 +432,8 @@ def main(
 
         # Figure out the resolution
         reses = [
-            util.lookup_conditional(config['mapmaking'], 'res', tags=[b])
+            #util.lookup_conditional(config['mapmaking'], 'res', tags=[b])
+            config['mapmaking'].get_cond('res', tags=[b])
             for b in band_splits.keys()]
         assert(all([r == reses[0] for r in reses]))  # Resolution conflict
         res_deg = util.parse_quantity(reses[0], 'deg').value
@@ -437,7 +441,8 @@ def main(
         # Map size can be specified
         if 'map_size' in config['mapmaking']: # not quite right ...
             sizes = [
-                util.lookup_conditional(config['mapmaking'], 'map_size', tags=[b])
+                #util.lookup_conditional(config['mapmaking'], 'map_size', tags=[b])
+                config['mapmaking'].get_cond('map_size', tags=[b])
                 for b in band_splits.keys()]
             size_rad = util.parse_quantity(sizes[0], 'rad').value
         else:
@@ -503,7 +508,8 @@ def main(
 
             band_mask = (tod.det_info['band'] == key)
             zoom_size = util.parse_quantity(
-                util.lookup_conditional(pcfg, 'zoom', tags=[key]),
+                #util.lookup_conditional(pcfg, 'zoom', tags=[key]),
+                pcfg.get_cond('zoom', tags=[key]),
                 'deg').value
 
             plot_map(bundle, plot_filename, zoom_size=zoom_size,

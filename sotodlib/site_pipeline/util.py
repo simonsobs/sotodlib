@@ -244,6 +244,25 @@ class _ReltimeFormatter(logging.Formatter):
             datefmt = '%8.3f'
         return datefmt % (record.created - self.start_time)
 
+
+class ConditionalConfigDict(dict):
+    @staticmethod
+    def wrap(src):
+        _wrap = ConditionalConfigDict.wrap
+        if isinstance(src, dict):
+            out = ConditionalConfigDict()
+            for k, v in src.items():
+                out[k] = _wrap(v)
+            return out
+        if isinstance(src, list):
+            return [_wrap(x) for x in src]
+        return src
+    def get_cond(self, key, default=None, tags=None):
+        if tags is None:
+            return self.get(key, default)
+        return lookup_conditional(self, key, tags)
+
+
 def init_logger(name, announce=''):
     """Configure and return a logger for site_pipeline elements.  It is
     disconnected from general sotodlib (propagate=False) and displays
