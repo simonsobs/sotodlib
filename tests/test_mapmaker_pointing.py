@@ -42,9 +42,6 @@ class MapmakerPointingTest(unittest.TestCase):
         wpix = hp.nside2pixarea(nside, degrees=True)**.5 * 60
         npix = 12 * nside**2
         testdir = tempfile.TemporaryDirectory()
-        class TestDir:
-            name = "testdata"
-        testdir = TestDir()
 
         comm, procs, rank = toast.get_world()
         data = simulation_test_data(
