@@ -2,9 +2,11 @@ import so3g
 from spt3g import core as spt3g_core
 import yaml
 import os
+import itertools
 
 import sotodlib
 from sotodlib import core
+from .check_book import _compact_list
 
 import numpy as np
 
@@ -12,80 +14,8 @@ import numpy as np
 _TES_BIAS_COUNT = 12  # per detset / primary file group
 
 
-def _extract_1d(src, src_offset, dest, dest_offset):
-    """Assist with unloading frames into a destination array.  Copies as
-    much data as possible from src[src_offset:] into
-    dest[dest_offset:].  "As possible" accounts for the possibility
-    that src_offset is beyond the end of src.  The return value is
-    used to update src_offset (and, with a bit of additional care,
-    dest_offset) for next frame.
-
-    Args:
-      src (sliceable): source vector.
-      src_offset (int): starting index into source.
-      dest (ndarray): destination buffer.
-      dest_offset (int): offset into dest samples axis.
-
-    Returns:
-      Number of samples consumed from src; this includes any samples
-      discarded in order to "seek" to src_offset.
-
-    """
-    count = min(len(src) - src_offset, len(dest) - dest_offset)
-    if count < 0:
-        return len(src)
-    samp_slice = slice(src_offset, src_offset+count)
-    dest[dest_offset:dest_offset+count] = src[samp_slice]
-    return src_offset + count
-
-
-def _extract_2d(src, src_offset, dest, dest_offset, dets=None):
-    """Unpack certain elements of a G3SuperTimestream into a 2d array.
-    Equivalent to running _extract_1d, row by row, on src and dest.
-
-    Args:
-      src (G3SuperTimestream): source frame object.
-      src_offset (int): starting index into source.
-      dest (ndarray): destination buffer.
-      dest_offset (int): offset into dest samples axis.
-      dets (list of str): detector names for each index of first axis
-        of dest.  If None, simple one-to-one match-up is assumed.
-
-    Returns:
-      Number of samples consumed from src; this includes any samples
-      discarded in order to "seek" to src_offset.
-
-    """
-    # What dets do we have here and where do they belong?
-    count = min(len(src.times) - src_offset, dest.shape[-1] - dest_offset)
-    if count < 0:
-        return len(src.times)
-    samp_slice = slice(src_offset, src_offset+count)
-    if dets is None:
-        # Straight copy should work.
-        dest[:,dest_offset:dest_offset+count] = src.data[:,samp_slice]
-    else:
-        # Copy index-to-index.
-        _, src_idx, dest_idx = core.util.get_coindices(src.names, dets)
-        for i0, i1 in zip(src_idx, dest_idx):
-            dest[i1,dest_offset:dest_offset+count] = src.data[i0,samp_slice]
-    return src_offset + count
-
-
-def _check_bias_names(frame):
-    """Verify the frame has TES biases with expected names; return the
-    modified names that include stream_id.
-
-    """
-    for i, name in enumerate(frame['tes_biases'].names):
-        if name != 'bias%02i' % i:
-            raise RuntimeError(f'Bias at index {i} has unexpected name "{name}"!')
-    stream_id = frame['stream_id']
-    return [f'{stream_id}_b{_i:02d}' for _i in range(i+1)]
-
-
 def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
-                  no_signal=None,
+                  no_signal=None, dumb_mode=False,
                   **kwargs):
     """Obsloader function for SO "Level 3" obs/oper Books.
 
@@ -127,8 +57,6 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
 
     file_map = db.get_files(obs_id)
     one_group = list(file_map.values())[0]  # [('file0', 0, 1000), ('file1', 1000, 2000), ...]
-    num_files = len(one_group)
-    book_root = os.path.split(one_group[0][0])[0]
     
     # Figure out how many samples we're loading.
     sample_range = one_group[0][1], one_group[-1][2]
@@ -144,171 +72,438 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
     samples[0] = min(max(0, samples[0]), sample_range[1])
     samples[1] = min(max(samples), sample_range[1])
 
-    file_map = db.get_files(obs_id)
+    if dumb_mode:
+        samples[1] = None
 
-    # Prepare the output structure.
+    file_map = db.get_files(obs_id)
+    dets_to_keep = [p[1] for p in pairs_req]
+
+    # Consider pre-allocating the signal buffer.
+    signal_buffer = None
+    if samples[1] is not None and not no_signal:
+        signal_buffer = np.empty((len(dets_to_keep), samples[1] - samples[0]),
+                                 dtype='float32')
+
+    timestamps = None
+    results = {}
+
+    for detset in detsets_req:
+
+        files = file_map[detset]
+        results[detset] = _load_book_detset(
+            files, prefix=prefix, load_ancil=(timestamps is None),
+            samples=samples, dets=dets_to_keep, no_signal=no_signal,
+            signal_buffer=signal_buffer)
+        if timestamps is None:
+            timestamps = results[detset]['timestamps']
+
+    if len(results) == 0:
+        # Load the ancil files, to get ancil stuff.
+        _one_fileset = next(iter(file_map.values()))
+        ancil_files = _get_ancil_files(_one_fileset)
+        ancil = _load_book_detset(ancil_files, prefix=prefix, load_ancil=True,
+                                  samples=samples, dets=[])
+        timestamps = ancil['timestamps']
+
+    aman = _concat_filesets(results, timestamps,
+                            signal_buffer=signal_buffer)
+
+    return aman
+
+
+def _load_book_detset(files, prefix='', load_ancil=True,
+                      dets=None, samples=None, no_signal=False,
+                      signal_buffer=None):
+    """Read data from a single detset."""
+    stream_id = None
+    times_acc = None
+    if load_ancil:
+        times_acc = Accumulator1d(('samps'), samples=samples)
+    primary_acc = AccumulatorNamed(('samps'), samples=samples)
+    bias_names = []
+    bias_acc = Accumulator2d(('samps'), samples=samples)
+    signal_acc = None
+    these_dets = None
+
+    if no_signal:
+        signal_acc = None
+    elif signal_buffer is not None:
+        signal_acc = Accumulator2d(
+            ('samps'), samples=samples,
+            insert_at=signal_buffer,
+            keys_to_keep=dets)
+    else:
+        signal_acc = Accumulator2d(
+            ('samps'), samples=samples,
+            keys_to_keep=dets)
+
+    for frame, frame_offset in _frames_iterator(files, prefix, samples):
+        more_data = True
+
+        # Anything in ancil should be identical across
+        # filesets, so only process it once.
+        if load_ancil:
+            more_data &= times_acc.append(frame['ancil'].times, frame_offset)
+
+        if 'primary' in frame:
+            if stream_id is None:
+                stream_id = frame['stream_id']
+
+            more_data &= primary_acc.append(frame['primary'], frame_offset)
+
+            bias_names = _check_bias_names(frame)[:_TES_BIAS_COUNT]
+            more_data &= bias_acc.append(frame['tes_biases'], frame_offset)
+
+            # Extract the main signal
+            if no_signal:
+                if these_dets is None:
+                    these_dets = list(frame['signal'].names)
+            else:
+                more_data &= signal_acc.append(frame['signal'], frame_offset)
+
+        if not more_data:
+            break
+
+    if times_acc is not None:
+        times_acc = times_acc.finalize() / spt3g_core.G3Units.sec
+
+    if these_dets is None:
+        if stream_id is not None:
+            these_dets = signal_acc.keys
+    elif dets is not None:
+        these_dets = [d for d in these_dets if d in dets]
+
+    return {
+        'stream_id': stream_id,
+        'signal': signal_acc,
+        'dets': (None if these_dets is None
+                 else _compact_list(these_dets)),
+        'primary': primary_acc,
+        'biases': bias_acc,
+        'bias_names': bias_names,
+        'timestamps': times_acc,
+    }
+
+
+def _concat_filesets(results, timestamps,
+                     sample0=0, obs_id=None, dets=None,
+                     no_signal=False, signal_buffer=None):
+    """Assemble multiple detset results (as returned by _load_book_detset)
+    into a full AxisManager.
+
+    """
+    if dets is None:
+        dets = list(itertools.chain(*[r['dets'] for r in results.values()]))
+
     aman = core.AxisManager(
-        core.LabelAxis('dets', [p[1] for p in pairs_req]),
-        core.OffsetAxis('samps', samples[1] - samples[0], samples[0], obs_id))
-    aman.wrap('primary', core.AxisManager(aman.samps))
+        core.LabelAxis('dets', dets),
+        core.OffsetAxis('samps', len(timestamps), sample0, obs_id))
+
+    aman.wrap('timestamps', timestamps, axis_map=[(0, 'samps')])
+
+    if len(results) == 0:
+        return aman
+
+    one_result = next(iter(results.values()))
+    no_signal = one_result['signal'] is None
     if no_signal:
         aman.wrap('signal', None)
     else:
-        aman.wrap_new('signal', ('dets', 'samps'), dtype='float32')
+        if signal_buffer is not None:
+            aman.wrap('signal', signal_buffer,
+                      [(0, 'dets'), (1, 'samps')])
+        else:
+            aman.wrap_new('signal', shape=('dets', 'samps'), dtype='float32')
+            dets_ofs = 0
+            for v in results.values():
+                d = v['signal'].finalize()
+                aman['signal'][dets_ofs:dets_ofs + len(d)] = d
+                dets_ofs += len(d)
 
-    # det_info begins
-    det_info = {p[1]: [p[0], p[1]] for p in pairs_req}
-
-    primary_fields = None
-    bias_dest = np.zeros((len(detsets_req), _TES_BIAS_COUNT,
-                          samples[1] - samples[0]), dtype='int32')
+    # Biases
     all_bias_names = []
-
-    # Temporary storage of G3 timestamp vector
-    g3_times = np.zeros(aman.samps.count, 'int64')
-
-    # Read the signal data, by detset.
-    detset_index = -1
-
-    # When there are no dets being loaded, get "ancil" information from the ancil files.
-    if len(detsets_req) == 0:
-        def _rewrite_entry(row):
-            f, etc = row[0], row[1:]
-            p, b = os.path.split(f)
-            tokens = b.split('_')
-            a = os.path.join(p, 'A_ancil_' + tokens[-1])
-            return tuple([a] + list(etc))
-        _one_fileset = next(iter(file_map.values()))
-        file_map = {'(ancil)': [_rewrite_entry(x) for x in _one_fileset]}
-
-    # On the first pass through the loop we will load ancillary info.
-    first_pass = True
-
-    for detset, files in file_map.items():
-        if detset not in detsets_req and detset != '(ancil)':
-            continue
-        detset_index += 1
-
-        # Target AxisManagers for special primary fields, to be
-        # populated once we can inspect the frames.
-        primary_dest = None
-        
-        # dest_offset is the index, along samples axis, where next
-        # data will be written.
-        dest_offset = 0
-
-        stream_id = None
-        bias_names = []
-
-        for frame, start in _frames_iterator(files, prefix, samples):
-
-            # This should get set in at least one block below...
-            delta = None
-
-            # Anything in ancil should be identical across
-            # filesets, so only process it once.
-            if first_pass:
-                delta = _extract_1d(frame['ancil'].times, start,
-                                    g3_times, dest_offset)
-
-            if 'primary' in frame:
-                if stream_id is None:
-                    stream_id = frame['stream_id']
-                    for p in pairs_req:
-                        if p[0] == detset:
-                            det_info[p[1]].append(stream_id)
-
-                # Extract "primary" fields, organize by detset.
-                if primary_fields is None:
-                    primary_fields = list(frame['primary'].names)
-                else:
-                    assert(primary_fields == list(frame['primary'].names))
-
-                if primary_dest is None:
-                    primary_dest = core.AxisManager(aman.samps)
-                    for f in primary_fields:
-                        primary_dest.wrap_new(f, ('samps', ), dtype='uint64')
-                    aman['primary'].wrap(stream_id, primary_dest)
-
-                primary_block = frame['primary'].data
-                for i, f in enumerate(primary_fields):
-                    delta = _extract_1d(primary_block[i], start,
-                                        primary_dest[f], dest_offset)
-
-                # Extract "bias", organize by detset (note input bias
-                # arrays might have 20 instead of 12 entries...)
-                if len(bias_dest):
-                    bias_names = _check_bias_names(frame)[:_TES_BIAS_COUNT]
-                    delta = _extract_2d(frame['tes_biases'], start,
-                                        bias_dest[detset_index], dest_offset,
-                                        bias_names)
-
-                # Extract the main signal
-                if not no_signal:
-                    delta = _extract_2d(
-                        frame['signal'],
-                        start,
-                        aman['signal'],
-                        dest_offset,
-                        aman.dets.vals,
-                    )
-                
-            # How many samples were added to dest?
-            if delta > start:
-                dest_offset += (delta - start)
-                start = 0
-            else:
-                start -= delta
-
-            if dest_offset >= samples[1] - samples[0]:
-                break
-
-        # Wrap up for detset ...
-        all_bias_names.extend(bias_names)
-
-        first_pass = False
-
-    # Convert timestamps
-    aman.wrap('timestamps', g3_times / spt3g_core.G3Units.sec,
-              [(0, 'samps')])
-
-    # Merge the bias lines.
+    for v in results.values():
+        all_bias_names.extend(v['bias_names'][:_TES_BIAS_COUNT])
     aman.merge(core.AxisManager(core.LabelAxis('bias_lines', all_bias_names)))
-    aman.wrap('biases', bias_dest.reshape((-1, samples[1] - samples[0])),
-              [(0, 'bias_lines'), (1, 'samps')])
+    aman.wrap_new('biases', shape=('bias_lines', 'samps'), dtype='int32')
+    for i, v in enumerate(results.values()):
+        aman['biases'][i * _TES_BIAS_COUNT:(i + 1) * _TES_BIAS_COUNT, :] = \
+            v['biases'].finalize()[:_TES_BIAS_COUNT, :]
 
+    # Primary
+    aman.wrap('primary', core.AxisManager(aman.samps))
+    for r in results.values():
+        _prim = core.AxisManager(aman.samps)
+        for k, v in r['primary'].finalize().items():
+            _prim.wrap(k, v, [(0, 'samps')])
+        aman['primary'].wrap(r['stream_id'], _prim)
+
+    # det_info
     det_info = core.metadata.ResultSet(
-        ['detset', '_readout_id', 'stream_id'],
-        src=list(det_info.values()))
+        ['detset', '_readout_id', 'stream_id'])
+    for detset, r in results.items():
+        det_info.rows.extend(
+            [(detset, _d, r['stream_id']) for _d in r['dets']])
     aman.wrap('det_info', det_info.to_axismanager(axis_key='_readout_id'))
+
+    # flags place
     aman.wrap("flags", core.FlagManager.for_tod(aman, "dets", "samps"))
 
     return aman
 
 
-def _frames_iterator(files, prefix, samples):
-    """Iterates over all the frames in files.
+def _check_bias_names(frame):
+    """Verify the frame has TES biases with expected names; return the
+    modified names that include stream_id.
 
-    Yields each (frame, start), start is the offset into the frame
-    from which data should be taken.  Note this offset could be beyond
-    the end of the frame, indicating the frame should be ignored.
+    """
+    for i, name in enumerate(frame['tes_biases'].names):
+        if name != 'bias%02i' % i:
+            raise RuntimeError(f'Bias at index {i} has unexpected name "{name}"!')
+    stream_id = frame['stream_id']
+    return [f'{stream_id}_b{_i:02d}' for _i in range(i+1)]
+
+
+def _get_ancil_files(non_ancil_files):
+    def _rewrite_entry(row):
+        f, etc = row[0], row[1:]
+        p, b = os.path.split(f)
+        tokens = b.split('_')
+        a = os.path.join(p, 'A_ancil_' + tokens[-1])
+        return tuple([a] + list(etc))
+    return [_rewrite_entry(x) for x in non_ancil_files]
+
+
+class Accumulator:
+    def __init__(self, axes, shape=None, samples=None, preconsumed=None):
+        self.axes = axes
+        self.ndim = len(axes)
+        if samples is None:
+            samples = None, None
+        samples = list(samples)
+        if samples[0] == None:
+            samples[0] = 0
+        self.samples = samples
+
+        self.shape = None
+        self.data = None
+        self.consumed = preconsumed
+
+    def append(self, data, preconsumed=None):
+        if self.consumed is None:
+            if preconsumed is None:
+                preconsumed = 0
+            self.consumed = preconsumed
+        if preconsumed is not None:
+            assert(self.consumed == preconsumed)
+
+        data_count = self._sample_count(data)
+
+        # global sample indices of our destination buffer are
+        # self.samples; global sample indices of this block are:
+        block_samples = [self.consumed, self.consumed + data_count]
+
+        # Does this block precede our area of interest?
+        if block_samples[1] <= self.samples[0]:
+            self.consumed += data_count
+            return True
+
+        # Overlap?
+        over_samples = [max(block_samples[0], self.samples[0]),
+                        block_samples[1]]
+        if self.samples[1] is not None:
+            over_samples[1] = min(over_samples[1], self.samples[1])
+
+        # Size of overlap
+        if over_samples[1] - over_samples[0] <= 0:
+            return False
+
+        # Extraction slice
+        src_slice = slice(over_samples[0] - self.consumed,
+                          over_samples[1] - self.consumed)
+
+        # Insertion slice
+        dest_slice = slice(over_samples[0] - self.samples[0],
+                           over_samples[1] - self.samples[0])
+
+        # Specialization ...
+        self._extract(data, src_slice, dest_slice)
+
+        if over_samples[1] != block_samples[1]:
+            return False
+
+        self.consumed += data_count
+        return True
+
+
+class Accumulator1d(Accumulator):
+    def _sample_count(self, _data):
+        return len(_data)
+
+    def _extract(self, data, src_slice, dest_slice):
+        _data = np.asarray(data[src_slice])
+
+        # On first frame, check if we know the final data shape.
+        if self.data is None:
+            if self.samples[1] is not None:
+                self.shape = (self.samples[1] - self.samples[0], )
+
+        if self.shape is not None:
+            # Determinate.
+            if self.data is None:
+                self.data = np.empty(self.shape, dtype=_data.dtype)
+            self.data[dest_slice] = _data
+        else:
+            # Indeterminate
+            if self.data is None:
+                self.data = []
+            self.data.append(_data)
+
+    def finalize(self):
+        if self.shape is None:
+            return np.hstack(self.data)
+        else:
+            return self.data
+
+
+class AccumulatorNamed(Accumulator):
+    """Accumulator for unpacking 2-d data (G3SuperTimestream) into
+    individual (named) 1-d vectors.
+
+    """
+    def __init__(self, *args, wrap=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.wrap = wrap
+
+    def _get_empty(self, k, n, dtype):
+        if self.wrap is None:
+            return np.empty(n, dtype)
+        else:
+            return self.wrap.wrap_new(k, ('samps', ), dtype=dtype)
+            
+    def _sample_count(self, _data):
+        return len(_data.times)
+
+    def _extract(self, data, src_slice, dest_slice):
+        # On first frame, check if we know the final data shape.
+        if self.data is None:
+            if self.samples[1] is not None:
+                self.shape = (self.samples[1] - self.samples[0], )
+            self.keys = [k for k in data.names]
+
+        if self.shape is not None:
+            # Determinate.
+            if self.data is None:
+                self.data = {k: self._get_empty(k, self.shape[-1], data.data.dtype)
+                             for k in self.keys}
+            for i, k in enumerate(self.keys):
+                self.data[k][dest_slice] = data.data[i][src_slice]
+        else:
+            # Indeterminate
+            if self.data is None:
+                self.data = {k: [] for k in self.keys}
+            for i, k in enumerate(self.keys):
+                self.data[k].append(data.data[i][src_slice])
+
+    def finalize(self):
+        if self.shape is None:
+            self.data = {k: np.hstack(self.data[k]) for k in self.keys}
+            if self.wrap is not None:
+                for k in self.keys:
+
+                    self.wrap(k, self.data[k], axis_map=[(0, 'samps')])
+        return self.data
+
+
+class Accumulator2d(Accumulator):
+    """Accumulator for unpacking 2-d data (G3SuperTimestream) into
+    2-d array (preserving first axis labels).
+
+    """
+    def __init__(self, *args, insert_at=None, keys_to_keep=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        # An optional destination buffer for the data.
+        self.insert_at = insert_at
+        self.keys_to_keep = keys_to_keep
+        self.insert_at_idx = None
+        self.extract_at_idx = None
+        if self.insert_at is not None and self.samples[1] is None:
+            self.samples[1] = self.insert_at.shape[-1] + self.samples[0]
+
+    def _sample_count(self, _data):
+        return len(_data.times)
+
+    def _extract(self, data, src_slice, dest_slice):
+        # First frame stuff ...
+        if self.data is None:
+            if self.insert_at is not None:
+                # We have a destination buffer
+                self.keys, self.extract_at_idx, self.insert_at_idx = \
+                    core.util.get_coindices(
+                        data.names, self.keys_to_keep)
+                self.data = self.insert_at  # place-holder
+            else:
+                if self.keys_to_keep is not None:
+                    self.keys, _, self.extract_at_idx = \
+                        core.util.get_coindices(self.keys_to_keep, data.names)
+                else:
+                    self.keys = list(data.names)
+                # Set shape, if we know it.
+                if self.samples[1] is not None:
+                    self.shape = (len(self.keys), self.samples[1] - self.samples[0])
+                    self.data = np.empty(self.shape, data.data.dtype)
+                else:
+                    self.data = []
+
+        # Store data from this frame.
+        if self.insert_at is not None:
+            # Indexed by name
+            for i0, i1 in zip(self.insert_at_idx, self.extract_at_idx):
+                self.insert_at[i0, dest_slice] = data.data[i1, src_slice]
+
+        elif self.shape is not None:
+            # Full array to hold data.
+            if self.extract_at_idx is not None:
+                for i, j in enumerate(self.extract_at_idx):
+                    self.data[i, dest_slice] = data.data[j, src_slice]
+            else:
+                self.data[:, dest_slice] = data.data[:, src_slice]
+
+        else:
+            # List of arrays, to be hstacked later.
+            if self.extract_at_idx is not None:
+                self.data.append(data.data[self.extract_at_idx, src_slice])
+            else:
+                self.data.append(data.data[:, src_slice])
+
+    def finalize(self):
+        if self.insert_at is not None:
+            pass
+        elif self.shape is None:
+            self.data = np.hstack(self.data)
+        return self.data
+
+
+def _frames_iterator(files, prefix, samples):
+    """Iterates over frames in files.  yields only frames that might be of
+    interest for timestream unpacking.
+
+    Yields each (frame, offset).  The offset is the global offset
+    associated with the start of the frame.
 
     """
     for f, i0, i1 in files:
-        if i1 <= samples[0]:
+        if i1 is not None and i1 <= samples[0]:
             continue
-        if i0 >= samples[1]:
+        if samples[1] is not None and i0 >= samples[1]:
             break
 
-        # "start" is the offset from which we should start copying
-        # data.  It is updated after each frame is processed.
-        # Initially, it could be larger than the number of samples
-        # in the frame we're looking at.  Eventually, it could be
-        # zero.
-        start = max(0, samples[0] - i0)
-
         filename = os.path.join(prefix, f)
+        offset = i0
+
         for frame in spt3g_core.G3File(filename):
             if frame.type is not spt3g_core.G3FrameType.Scan:
                 continue
-            yield frame, start
+            yield frame, offset
+            offset += len(frame['ancil'].times)
+            # Alternately, use frame['sample_range']
