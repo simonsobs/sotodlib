@@ -47,10 +47,10 @@ def check_meta_type(bookpath):
     else:
         return meta["type"]
 
-def update_obsdb(config, 
-                 recency=None, 
-                 booktype="both",
-                 verbosity=2):
+def main(config, 
+         recency=None, 
+         booktype="both",
+         verbosity=2):
     """
     Create or update an obsdb for observation or operations data.
 
@@ -160,11 +160,9 @@ def get_parser(parser=None):
         help="Select book type to look for: obs, oper, both(default)")
     return parser
 
-def main():
-    parser = get_parser(parser=None)
-    args = parser.parse_args()
-    update_obsdb(**vars(args))
 
 
 if __name__ == '__main__':
-    main()
+    parser = get_parser(parser=None)
+    args = parser.parse_args()
+    main(**vars(args))
