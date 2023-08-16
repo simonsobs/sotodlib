@@ -328,8 +328,8 @@ class G3tHWP():
 
         if len(irig_time) == 0:
             out = {
-                'locked': np.zeros_like(slow_time, dtype=np.bool),
-                'stable': np.zeros_like(slow_time, dtype=np.bool),
+                'locked': np.zeros_like(slow_time, dtype=bool),
+                'stable': np.zeros_like(slow_time, dtype=bool),
                 'hwp_rate': np.zeros_like(slow_time, dtype=np.float32),
                 'slow_time': slow_time,
             }
@@ -337,8 +337,8 @@ class G3tHWP():
 
         if len(fast_time) == 0:
             fast_irig_time = irig_time
-            locked = np.zeros_like(irig_time, dtype=np.bool)
-            stable = np.zeros_like(irig_time, dtype=np.bool)
+            locked = np.zeros_like(irig_time, dtype=bool)
+            stable = np.zeros_like(irig_time, dtype=bool)
             hwp_rate = np.zeros_like(irig_time, dtype=np.float32)
 
         else:
@@ -352,14 +352,14 @@ class G3tHWP():
                                                          self._ref_indexes[-1])]
 
             fast_irig_time = fast_time
-            locked = np.ones_like(fast_time, dtype=np.bool)
+            locked = np.ones_like(fast_time, dtype=bool)
             locked[np.where(hwp_rate == 0)] = False
-            stable = np.ones_like(fast_time, dtype=np.bool)
+            stable = np.ones_like(fast_time, dtype=bool)
 
             # irig only status
             irig_only_time = irig_time[np.where(
                 (irig_time < fast_time[0]) | (irig_time > fast_time[-1]))]
-            irig_only_locked = np.zeros_like(irig_only_time, dtype=np.bool)
+            irig_only_locked = np.zeros_like(irig_only_time, dtype=bool)
             irig_only_hwp_rate = np.zeros_like(irig_only_time, dtype=np.float32)
 
             fast_irig_time = np.append(irig_only_time, fast_time)
@@ -367,13 +367,13 @@ class G3tHWP():
             fast_irig_time = fast_irig_time[fast_irig_idx]
             locked = np.append(irig_only_locked, locked)[fast_irig_idx]
             hwp_rate = np.append(irig_only_hwp_rate, hwp_rate)[fast_irig_idx]
-            stable = np.ones_like(fast_irig_time, dtype=np.bool)
+            stable = np.ones_like(fast_irig_time, dtype=bool)
 
         # slow status
         slow_time = slow_time[np.where(
             (slow_time < fast_irig_time[0]) | (slow_time > fast_irig_time[-1]))]
-        slow_locked = np.zeros_like(slow_time, dtype=np.bool)
-        slow_stable = np.zeros_like(slow_time, dtype=np.bool)
+        slow_locked = np.zeros_like(slow_time, dtype=bool)
+        slow_stable = np.zeros_like(slow_time, dtype=bool)
         slow_hwp_rate = np.zeros_like(slow_time, dtype=np.float32)
 
         slow_time = np.append(slow_time, fast_irig_time)
@@ -643,10 +643,10 @@ class G3tHWP():
         aman.wrap_new('timestamps', shape=('samps', ), dtype=np.float64)
         aman.wrap_new('hwp_angle_ver1', shape=('samps', ), dtype=np.float64)
         aman.wrap_new('hwp_angle_ver2', shape=('samps', ), dtype=np.float64)
-        aman.wrap_new('stable', shape=('samps', ), dtype=np.bool)
-        aman.wrap_new('locked', shape=('samps', ), dtype=np.bool)
+        aman.wrap_new('stable', shape=('samps', ), dtype=bool)
+        aman.wrap_new('locked', shape=('samps', ), dtype=bool)
         aman.wrap_new('hwp_rate', shape=('samps', ), dtype=np.float16)
-        aman.wrap_new('eval', shape=('samps', ), dtype=np.bool)
+        aman.wrap_new('eval', shape=('samps', ), dtype=bool)
         
         return 
         
