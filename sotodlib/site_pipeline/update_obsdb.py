@@ -35,7 +35,7 @@ import yaml
 import numpy as np
 import time
 import argparse
-
+from typing import Optional
 
 def check_meta_type(bookpath):
     metapath = os.path.join(bookpath, "M_index.yaml")
@@ -47,10 +47,11 @@ def check_meta_type(bookpath):
     else:
         return meta["type"]
 
-def main(config, 
-         recency=None, 
-         booktype="both",
-         verbosity=2):
+def main(config:str, 
+        recency:float=None, 
+        booktype:Optional[str]="both",
+        verbosity:Optional[int]=2,
+        overwrite:Optional[bool]=False):
     """
     Create or update an obsdb for observation or operations data.
 
@@ -65,7 +66,8 @@ def main(config,
         Look for observations or operations data or both (default: both)
     verbosity : int
         Output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug
-
+    overwrite : bool
+        if False, do not re-check existing entries
     """
     bookcart = []
     bookcartobsdb = ObsDb()
@@ -97,13 +99,18 @@ def main(config,
     else:
         tback = 0 #Back to the UNIX Big Bang 
 
+    existing = bookcartobsdb.query()["obs_id"]
+
     #Find folders that are book-like and recent
     for dirpath,_, _ in os.walk(base_dir):
         last_mod = max(os.path.getmtime(root) for root,_,_ in os.walk(dirpath))
         if last_mod<tback:#Ignore older directories
             continue
         if os.path.exists(os.path.join(dirpath, "M_index.yaml")):
-            #Looks like a context file
+            _, book_id = os.path.split(dirpath)
+            if book_id in existing and not overwrite:
+                continue
+            #Looks like a book folder
             bookcart.append(dirpath)
     #Check the books for the observations we want
 
@@ -158,6 +165,8 @@ def get_parser(parser=None):
         help="Increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug")
     parser.add_argument("--booktype", default="both", type=str,
         help="Select book type to look for: obs, oper, both(default)")
+    parser.add_argument("--overwrite", action="store_true",
+        help="If true, writes over existing entries")
     return parser
 
 
