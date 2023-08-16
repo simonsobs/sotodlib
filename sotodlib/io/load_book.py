@@ -1,21 +1,41 @@
+"""load_obs_book
+
+This module supports loading SO "obs/oper" books (i.e. bookbound
+detector data with encoder and timestamp information) into AxisManager
+data structure.
+
+The two access points in this submodule are:
+
+  load_obs_book
+
+    This is a Context-compatible loader function, to be used when a
+    full obsfiledb is available.
+
+  load_book_file
+
+    This can be used to load single G3 files (or a set of
+    sample-contiguous G3 files) from a book, by filename.
+
+"""
+
 import so3g
 from spt3g import core as spt3g_core
-import yaml
-import os
+import numpy as np
+
 import itertools
+import os
+import yaml
 
 import sotodlib
 from sotodlib import core
 from .check_book import _compact_list
-
-import numpy as np
 
 
 _TES_BIAS_COUNT = 12  # per detset / primary file group
 
 
 def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
-                  no_signal=None, dumb_mode=False,
+                  no_signal=None,
                   **kwargs):
     """Obsloader function for SO "Level 3" obs/oper Books.
 
@@ -72,9 +92,6 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
     samples[0] = min(max(0, samples[0]), sample_range[1])
     samples[1] = min(max(samples), sample_range[1])
 
-    if dumb_mode:
-        samples[1] = None
-
     file_map = db.get_files(obs_id)
     dets_to_keep = [p[1] for p in pairs_req]
 
@@ -88,7 +105,6 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
     results = {}
 
     for detset in detsets_req:
-
         files = file_map[detset]
         results[detset] = _load_book_detset(
             files, prefix=prefix, load_ancil=(timestamps is None),
@@ -105,10 +121,48 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
                                   samples=samples, dets=[])
         timestamps = ancil['timestamps']
 
-    aman = _concat_filesets(results, timestamps,
+    return _concat_filesets(results, timestamps,
                             signal_buffer=signal_buffer)
 
-    return aman
+
+def load_book_file(filename, dets=None, samples=None, no_signal=False):
+    """Load one or more g3 files (from an obs/oper book) and return the
+    contents as an AxisManager.
+
+    No obsfiledb is required here, so  metadata are only as good as
+    the contents of the files.
+
+    If multiple filenames are passed (i.e. filename is a list), then
+    the files will be loaded sequentially and assumed to constitut
+    represent a sample-contiguous dataset from a single set of
+    detectors (detset).
+
+    The "samples" argument should be a tuple (start, stop), and will
+    be interpreted as sample counts within the stream of samples
+    presented in the requested files, starting from 0.  The "dets"
+    argument, if passed, must be a list of strings; elements in that
+    list that aren't found in the data will simply be ignored (so the
+    returned signal may have fewer dets than were requested).
+
+    """
+    if samples is None:
+        samples = [0, None]
+    else:
+        samples = list(samples)
+        if samples[0] is None:
+            samples[0] = 0
+
+    if isinstance(filename, str):
+        filename = [filename]
+
+    files = [(f, None, None) for f in filename]
+    this_detset = _load_book_detset(
+        files, load_ancil=True,
+        samples=samples, dets=dets, no_signal=no_signal)
+
+    return _concat_filesets({'?': this_detset},
+                            this_detset['timestamps'],
+                            no_signal=no_signal)
 
 
 def _load_book_detset(files, prefix='', load_ancil=True,
@@ -148,6 +202,7 @@ def _load_book_detset(files, prefix='', load_ancil=True,
         if 'primary' in frame:
             if stream_id is None:
                 stream_id = frame['stream_id']
+            assert (stream_id == frame['stream_id'])  # check your data files
 
             more_data &= primary_acc.append(frame['primary'], frame_offset)
 
@@ -492,9 +547,12 @@ def _frames_iterator(files, prefix, samples):
     associated with the start of the frame.
 
     """
+    offset = 0
     for f, i0, i1 in files:
         if i1 is not None and i1 <= samples[0]:
             continue
+        if i0 is None:
+            i0 = offset
         if samples[1] is not None and i0 >= samples[1]:
             break
 
