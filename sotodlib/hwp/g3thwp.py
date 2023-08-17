@@ -974,7 +974,7 @@ class G3tHWP():
             np.array(
                 [[sub_clk, np.linspace(self._encd_clk[ref_index - 1], self._encd_clk[ref_index], self._ref_edges + 2)[1:-1]]
                  for ref_index, sub_clk
-                 in zip(self._ref_indexes, np.split(self._encd_clk, self._ref_indexes))], dtype=np.object
+                 in zip(self._ref_indexes, np.split(self._encd_clk, self._ref_indexes))], dtype=object
             ).flatten()
         )
         self._encd_clk = np.append(self._encd_clk, lastsub)
