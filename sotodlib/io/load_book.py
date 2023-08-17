@@ -121,10 +121,10 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         # Load the ancil files, to get ancil stuff.
         _one_fileset = next(iter(file_map.values()))
         ancil_files = _get_ancil_files(_one_fileset)
-        ancil = _load_book_detset(ancil_files, prefix=prefix, load_ancil=True,
-                                  samples=samples, dets=[])
-        ancil = ancil['ancil']
-        timestamps = ancil['timestamps']
+        _res = _load_book_detset(ancil_files, prefix=prefix, load_ancil=True,
+                                 samples=samples, dets=[])
+        ancil = _res['ancil']
+        timestamps = _res['timestamps']
 
     return _concat_filesets(results, ancil, timestamps,
                             signal_buffer=signal_buffer)
@@ -179,11 +179,11 @@ def _load_book_detset(files, prefix='', load_ancil=True,
     ancil_acc = None
     times_acc = None
     if load_ancil:
-        times_acc = Accumulator1d(('samps'), samples=samples)
-        ancil_acc = AccumulatorTimesampleMap(('samps'), samples=samples)
-    primary_acc = AccumulatorNamed(('samps'), samples=samples)
+        times_acc = Accumulator1d(samples=samples)
+        ancil_acc = AccumulatorTimesampleMap(samples=samples)
+    primary_acc = AccumulatorNamed(samples=samples)
     bias_names = []
-    bias_acc = Accumulator2d(('samps'), samples=samples)
+    bias_acc = Accumulator2d(samples=samples)
     signal_acc = None
     these_dets = None
 
@@ -191,12 +191,12 @@ def _load_book_detset(files, prefix='', load_ancil=True,
         signal_acc = None
     elif signal_buffer is not None:
         signal_acc = Accumulator2d(
-            ('samps'), samples=samples,
+            samples=samples,
             insert_at=signal_buffer,
             keys_to_keep=dets)
     else:
         signal_acc = Accumulator2d(
-            ('samps'), samples=samples,
+            samples=samples,
             keys_to_keep=dets)
 
     for frame, frame_offset in _frames_iterator(files, prefix, samples):
@@ -372,9 +372,7 @@ def _get_ancil_files(non_ancil_files):
 
 
 class Accumulator:
-    def __init__(self, axes, shape=None, samples=None, preconsumed=None):
-        self.axes = axes
-        self.ndim = len(axes)
+    def __init__(self, shape=None, samples=None, preconsumed=None):
         if samples is None:
             samples = None, None
         samples = list(samples)
