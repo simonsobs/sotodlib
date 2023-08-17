@@ -376,6 +376,7 @@ def _concat_filesets(results, ancil=None, timestamps=None,
     # Primary (and other stuff to group per-stream)
     aman.wrap('primary', core.AxisManager(aman.samps))
     aman.wrap('iir_params', core.AxisManager())
+    aman['iir_params'].wrap('per_stream', True)
     for r in results.values():
         # Primary.
         _prim = core.AxisManager(aman.samps)
@@ -387,7 +388,6 @@ def _concat_filesets(results, ancil=None, timestamps=None,
         for k, v in r['iir_params'].items():
             _iir.wrap(k, v)
         aman['iir_params'].wrap(r['stream_id'], _iir)
-        aman['iir_params'].wrap('per_stream', True)
 
     # det_info
     det_info = core.metadata.ResultSet(
