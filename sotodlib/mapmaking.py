@@ -249,9 +249,10 @@ class SignalMap(Signal):
             self.hits = tilemap.redistribute(self.hits,self.comm)
             self.dof  = TileMapZipper(self.rhs.geometry, dtype=self.dtype, comm=self.comm)
         else:
-            self.rhs  = utils.allreduce(self.rhs, self.comm)
-            self.div  = utils.allreduce(self.div, self.comm)
-            self.hits = utils.allreduce(self.hits,self.comm)
+            if self.comm is not None:
+                self.rhs  = utils.allreduce(self.rhs, self.comm)
+                self.div  = utils.allreduce(self.div, self.comm)
+                self.hits = utils.allreduce(self.hits,self.comm)
             self.dof  = MapZipper(*self.rhs.geometry, dtype=self.dtype)
         self.idiv  = safe_invert_div(self.div)
         self.ready = True
@@ -284,8 +285,11 @@ class SignalMap(Signal):
         else: return map.copy()
 
     def from_work(self, map):
-        if self.tiled: return tilemap.redistribute(map, self.comm, self.rhs.geometry.active)
-        else: return utils.allreduce(map, self.comm)
+        if self.tiled:
+            return tilemap.redistribute(map, self.comm, self.rhs.geometry.active)
+        else:
+            if self.comm is None: return map
+            else: return utils.allreduce(map, self.comm)
 
     def write(self, prefix, tag, m):
         if not self.output: return
