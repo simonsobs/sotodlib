@@ -693,3 +693,6 @@ def _frames_iterator(files, prefix, samples, smurf_proc=None):
             yield frame, offset
             offset += len(frame['ancil'].times)
             # Alternately, use frame['sample_range']
+
+
+core.OBSLOADER_REGISTRY['obs-book'] = load_obs_book
