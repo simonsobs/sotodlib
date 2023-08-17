@@ -28,7 +28,8 @@ import yaml
 
 import sotodlib
 from sotodlib import core
-from .check_book import _compact_list
+from .check_book import _compact_list  # just a list with a limited repr
+from . import load_smurf
 
 
 _TES_BIAS_COUNT = 12  # per detset / primary file group
@@ -174,7 +175,15 @@ def load_book_file(filename, dets=None, samples=None, no_signal=False):
 def _load_book_detset(files, prefix='', load_ancil=True,
                       dets=None, samples=None, no_signal=False,
                       signal_buffer=None):
-    """Read data from a single detset."""
+    """Read data from a single detset.
+
+    If a list of dets is specified, it may include dets that aren't
+    found in this set of files.  It is thus used only to screen
+    detectors and to set the order they appear in the output.  The
+    actual detectors found and loaded are returned as 'dets' in the
+    output.
+
+    """
     stream_id = None
     ancil_acc = None
     times_acc = None
@@ -185,7 +194,7 @@ def _load_book_detset(files, prefix='', load_ancil=True,
     bias_names = []
     bias_acc = Accumulator2d(samples=samples)
     signal_acc = None
-    these_dets = None
+    this_stream_dets = None
 
     if no_signal:
         signal_acc = None
@@ -199,7 +208,11 @@ def _load_book_detset(files, prefix='', load_ancil=True,
             samples=samples,
             keys_to_keep=dets)
 
-    for frame, frame_offset in _frames_iterator(files, prefix, samples):
+    # Sniff out a smurf status frame.
+    smurf_proc = load_smurf.SmurfStatus._get_frame_processor()
+
+    for frame, frame_offset in _frames_iterator(files, prefix, samples,
+                                                smurf_proc=smurf_proc):
         more_data = True
 
         # Anything in ancil should be identical across
@@ -218,11 +231,12 @@ def _load_book_detset(files, prefix='', load_ancil=True,
             bias_names = _check_bias_names(frame)[:_TES_BIAS_COUNT]
             more_data &= bias_acc.append(frame['tes_biases'], frame_offset)
 
+            # Even if no_signal, we need the det list.
+            if this_stream_dets is None:
+                this_stream_dets = _compact_list(frame['signal'].names)
+
             # Extract the main signal
-            if no_signal:
-                if these_dets is None:
-                    these_dets = list(frame['signal'].names)
-            else:
+            if not no_signal:
                 more_data &= signal_acc.append(frame['signal'], frame_offset)
 
         if not more_data:
@@ -231,20 +245,52 @@ def _load_book_detset(files, prefix='', load_ancil=True,
     if times_acc is not None:
         times_acc = times_acc.finalize() / spt3g_core.G3Units.sec
 
-    if these_dets is None:
-        if stream_id is not None:
-            these_dets = signal_acc.keys
-    elif dets is not None:
-        these_dets = [d for d in these_dets if d in dets]
+    req_dets_in_stream = None
+    det_idx_in_stream = None
+    if this_stream_dets:
+        # Of the requested detectors, what ones were actually found in
+        # this stream?  Keep ordering same as the request, which
+        # should be the same as the populated data.
+        if dets is None:
+            req_dets_in_stream = this_stream_dets
+        else:
+            req_dets_in_stream = _compact_list(
+                [d for d in dets if d in this_stream_dets])
+
+        # For each loaded detector, what was its index within the stream's
+        # dets?
+        det_idx_in_stream = _compact_list([this_stream_dets.index(d)
+                                           for d in req_dets_in_stream])
+
+    stat = smurf_proc.get_status()
+    ch_info = None
+    iir_params = None
+    if stat.num_chans is None:
+        # No wiring frames probably means it's an A_* (ancil) file.
+        stat = None
+    else:
+        # This stuff will need to be regrouped, for all detectors.  So
+        # just extract individual items, restricting to dets actually
+        # used here.
+        ch_info_full = load_smurf.get_channel_info(stat)
+        ch_info = {}
+        for k, v in ch_info_full._fields.items():
+            ch_info[k] = v[det_idx_in_stream]
+        # And this stuff is per stream, so keep it separate.
+        iir_params = {'enabled': stat.filter_enabled,
+                      'b': stat.filter_b,
+                      'a': stat.filter_a,
+                      'fscale': 1. / stat.flux_ramp_rate_hz}
 
     return {
         'stream_id': stream_id,
         'signal': signal_acc,
-        'dets': (None if these_dets is None
-                 else _compact_list(these_dets)),
+        'dets': req_dets_in_stream,
         'primary': primary_acc,
         'biases': bias_acc,
         'bias_names': bias_names,
+        'smurf_ch_info': ch_info,
+        'iir_params': iir_params,
         'ancil': ancil_acc,
         'timestamps': times_acc,
     }
@@ -327,21 +373,40 @@ def _concat_filesets(results, ancil=None, timestamps=None,
         aman['biases'][i * _TES_BIAS_COUNT:(i + 1) * _TES_BIAS_COUNT, :] = \
             v['biases'].finalize()[:_TES_BIAS_COUNT, :]
 
-    # Primary
+    # Primary (and other stuff to group per-stream)
     aman.wrap('primary', core.AxisManager(aman.samps))
+    aman.wrap('iir_params', core.AxisManager())
     for r in results.values():
+        # Primary.
         _prim = core.AxisManager(aman.samps)
         for k, v in r['primary'].finalize().items():
             _prim.wrap(k, v, [(0, 'samps')])
         aman['primary'].wrap(r['stream_id'], _prim)
+        # Filter parameters
+        _iir = core.AxisManager()
+        for k, v in r['iir_params'].items():
+            _iir.wrap(k, v)
+        aman['iir_params'].wrap(r['stream_id'], _iir)
+        aman['iir_params'].wrap('per_stream', True)
 
     # det_info
     det_info = core.metadata.ResultSet(
         ['detset', '_readout_id', 'stream_id'])
+    ch_info = {}
     for detset, r in results.items():
         det_info.rows.extend(
             [(detset, _d, r['stream_id']) for _d in r['dets']])
+        for k, v in r['smurf_ch_info'].items():
+            if k not in ch_info:
+                ch_info[k] = []
+            ch_info[k].extend(v)
+
     aman.wrap('det_info', det_info.to_axismanager(axis_key='_readout_id'))
+
+    smurf = core.AxisManager(aman.dets)
+    for k, v in ch_info.items():
+        smurf.wrap(k, np.array(v), [(0, 'dets')])
+    aman['det_info'].wrap('smurf', smurf)
 
     # flags place
     aman.wrap("flags", core.FlagManager.for_tod(aman, "dets", "samps"))
@@ -597,7 +662,7 @@ class Accumulator2d(Accumulator):
         return self.data
 
 
-def _frames_iterator(files, prefix, samples):
+def _frames_iterator(files, prefix, samples, smurf_proc=None):
     """Iterates over frames in files.  yields only frames that might be of
     interest for timestream unpacking.
 
@@ -607,17 +672,22 @@ def _frames_iterator(files, prefix, samples):
     """
     offset = 0
     for f, i0, i1 in files:
-        if i1 is not None and i1 <= samples[0]:
-            continue
         if i0 is None:
             i0 = offset
-        if samples[1] is not None and i0 >= samples[1]:
-            break
+
+        if smurf_proc is not None:
+            if (i1 is not None) and (i1 <= samples[0]):
+                continue
+            if samples[1] is not None and i0 >= samples[1]:
+                break
 
         filename = os.path.join(prefix, f)
         offset = i0
 
         for frame in spt3g_core.G3File(filename):
+            if smurf_proc is not None and smurf_proc.process(frame):
+                # We found a dump frame, so stop looking.
+                smurf_proc = None
             if frame.type is not spt3g_core.G3FrameType.Scan:
                 continue
             yield frame, offset
