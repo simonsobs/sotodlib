@@ -298,7 +298,7 @@ class SignalMap(Signal):
         if self.tiled:
             tilemap.write_map(oname, m, self.comm)
         else:
-            if self.comm.rank == 0:
+            if self.comm is None or self.comm.rank == 0:
                 enmap.write_map(oname, m)
         return oname
 
@@ -359,7 +359,11 @@ class SignalCut(Signal):
 
     def write(self, prefix, tag, m):
         if not self.output: return
-        oname = self.ofmt.format(name=self.name, rank=self.comm.rank)
+        if self.comm is None:
+            rank = 0
+        else:
+            rank = self.comm.rank
+        oname = self.ofmt.format(name=self.name, rank=rank)
         oname = "%s%s_%s.%s" % (prefix, oname, tag, self.ext)
         with h5py.File(oname, "w") as hfile:
             hfile["data"] = m
@@ -407,7 +411,7 @@ class TileMapZipper:
         return tilemap.TileMap(x.reshape(self.geo.pre+(-1,)).astype(self.dtype, copy=False), self.geo)
 
     def dot(self, a, b):
-        return self.comm.allreduce(np.sum(a*b))
+        return np.sum(a*b) if self.comm is None else utils.allreduce(np.sum(a*b),self.comm)
 
 class MultiZipper:
     def __init__(self):
