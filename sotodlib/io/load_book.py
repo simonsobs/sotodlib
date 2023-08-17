@@ -33,6 +33,8 @@ from .check_book import _compact_list
 
 _TES_BIAS_COUNT = 12  # per detset / primary file group
 
+DEG = np.pi / 180
+
 
 def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
                   no_signal=None,
@@ -101,16 +103,18 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         signal_buffer = np.empty((len(dets_to_keep), samples[1] - samples[0]),
                                  dtype='float32')
 
+    ancil = None
     timestamps = None
     results = {}
 
     for detset in detsets_req:
         files = file_map[detset]
         results[detset] = _load_book_detset(
-            files, prefix=prefix, load_ancil=(timestamps is None),
+            files, prefix=prefix, load_ancil=(ancil is None),
             samples=samples, dets=dets_to_keep, no_signal=no_signal,
             signal_buffer=signal_buffer)
-        if timestamps is None:
+        if ancil is None:
+            ancil = results[detset]['ancil']
             timestamps = results[detset]['timestamps']
 
     if len(results) == 0:
@@ -119,9 +123,10 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         ancil_files = _get_ancil_files(_one_fileset)
         ancil = _load_book_detset(ancil_files, prefix=prefix, load_ancil=True,
                                   samples=samples, dets=[])
+        ancil = ancil['ancil']
         timestamps = ancil['timestamps']
 
-    return _concat_filesets(results, timestamps,
+    return _concat_filesets(results, ancil, timestamps,
                             signal_buffer=signal_buffer)
 
 
@@ -161,6 +166,7 @@ def load_book_file(filename, dets=None, samples=None, no_signal=False):
         samples=samples, dets=dets, no_signal=no_signal)
 
     return _concat_filesets({'?': this_detset},
+                            this_detset['ancil'],
                             this_detset['timestamps'],
                             no_signal=no_signal)
 
@@ -170,9 +176,11 @@ def _load_book_detset(files, prefix='', load_ancil=True,
                       signal_buffer=None):
     """Read data from a single detset."""
     stream_id = None
+    ancil_acc = None
     times_acc = None
     if load_ancil:
         times_acc = Accumulator1d(('samps'), samples=samples)
+        ancil_acc = AccumulatorTimesampleMap(('samps'), samples=samples)
     primary_acc = AccumulatorNamed(('samps'), samples=samples)
     bias_names = []
     bias_acc = Accumulator2d(('samps'), samples=samples)
@@ -198,6 +206,7 @@ def _load_book_detset(files, prefix='', load_ancil=True,
         # filesets, so only process it once.
         if load_ancil:
             more_data &= times_acc.append(frame['ancil'].times, frame_offset)
+            more_data &= ancil_acc.append(frame['ancil'], frame_offset)
 
         if 'primary' in frame:
             if stream_id is None:
@@ -236,17 +245,23 @@ def _load_book_detset(files, prefix='', load_ancil=True,
         'primary': primary_acc,
         'biases': bias_acc,
         'bias_names': bias_names,
+        'ancil': ancil_acc,
         'timestamps': times_acc,
     }
 
 
-def _concat_filesets(results, timestamps,
+def _concat_filesets(results, ancil=None, timestamps=None,
                      sample0=0, obs_id=None, dets=None,
                      no_signal=False, signal_buffer=None):
     """Assemble multiple detset results (as returned by _load_book_detset)
     into a full AxisManager.
 
     """
+    if ancil is None:
+        ancil = next(iter(results))['ancil']
+    if timestamps is None:
+        timestamps = next(iter(results))['timestamps']
+
     if dets is None:
         dets = list(itertools.chain(*[r['dets'] for r in results.values()]))
 
@@ -255,6 +270,33 @@ def _concat_filesets(results, timestamps,
         core.OffsetAxis('samps', len(timestamps), sample0, obs_id))
 
     aman.wrap('timestamps', timestamps, axis_map=[(0, 'samps')])
+
+    if ancil is not None:
+        # Handle ancillary fields, a.k.a. boresight pointing /
+        # rotation / corotation.
+        aman.wrap('ancil', core.AxisManager(aman.samps))
+        aman.wrap('boresight', core.AxisManager(aman.samps))
+
+        # Put all fields into 'ancil'.
+        _a = aman['ancil']
+        for k, v in ancil.finalize().items():
+            _a.wrap(k, v, [(0, 'samps')])
+
+        # Transform some fields into 'boresight'.
+        _b = aman['boresight']
+        if 'az_enc' in _a:
+            _b.wrap('az', _a['az_enc'] * DEG, [(0, 'samps')])
+        if 'el_enc' in _a:
+            _b.wrap('el', _a['el_enc'] * DEG, [(0, 'samps')])
+        roll = None
+        if 'boresight_enc' in _a:
+            roll = _a['boresight_enc']
+        elif 'corotation_enc' in _a:
+            roll = _a['el_enc'] - 60 - _a['corotation_enc']
+        if roll is None:
+            _b.wrap('roll', None)
+        else:
+            _b.wrap('roll', roll * DEG, [(0, 'samps')])
 
     if len(results) == 0:
         return aman
@@ -426,16 +468,6 @@ class AccumulatorNamed(Accumulator):
     individual (named) 1-d vectors.
 
     """
-    def __init__(self, *args, wrap=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.wrap = wrap
-
-    def _get_empty(self, k, n, dtype):
-        if self.wrap is None:
-            return np.empty(n, dtype)
-        else:
-            return self.wrap.wrap_new(k, ('samps', ), dtype=dtype)
-            
     def _sample_count(self, _data):
         return len(_data.times)
 
@@ -444,12 +476,17 @@ class AccumulatorNamed(Accumulator):
         if self.data is None:
             if self.samples[1] is not None:
                 self.shape = (self.samples[1] - self.samples[0], )
-            self.keys = [k for k in data.names]
+            if hasattr(data, 'names'):
+                # G3SuperTimestream ...
+                self.keys = [k for k in data.names]
+            else:
+                # G3TimesampleMap ...
+                self.keys = [k for k in data.keys()]
 
         if self.shape is not None:
             # Determinate.
             if self.data is None:
-                self.data = {k: self._get_empty(k, self.shape[-1], data.data.dtype)
+                self.data = {k: np.empty(self.shape[-1], dtype=data.data.dtype)
                              for k in self.keys}
             for i, k in enumerate(self.keys):
                 self.data[k][dest_slice] = data.data[i][src_slice]
@@ -463,11 +500,34 @@ class AccumulatorNamed(Accumulator):
     def finalize(self):
         if self.shape is None:
             self.data = {k: np.hstack(self.data[k]) for k in self.keys}
-            if self.wrap is not None:
-                for k in self.keys:
-
-                    self.wrap(k, self.data[k], axis_map=[(0, 'samps')])
         return self.data
+
+
+class AccumulatorTimesampleMap(AccumulatorNamed):
+    """Accumulator for unpacking 2-d data (G3TimestampleMap) into
+    individual (named) 1-d vectors.
+
+    """
+    def _extract(self, data, src_slice, dest_slice):
+        # On first frame, check if we know the final data shape.
+        if self.data is None:
+            if self.samples[1] is not None:
+                self.shape = (self.samples[1] - self.samples[0], )
+            self.keys = [k for k in data.keys()]
+
+        if self.shape is not None:
+            # Determinate.
+            if self.data is None:
+                self.data = {k: np.empty(self.shape[-1], dtype=data[k].dtype)
+                             for k in self.keys}
+            for i, k in enumerate(self.keys):
+                self.data[k][dest_slice] = data[k][src_slice]
+        else:
+            # Indeterminate
+            if self.data is None:
+                self.data = {k: [] for k in self.keys}
+            for i, k in enumerate(self.keys):
+                self.data[k].append(data[k][src_slice])
 
 
 class Accumulator2d(Accumulator):
