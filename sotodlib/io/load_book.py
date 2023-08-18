@@ -22,6 +22,7 @@ import so3g
 from spt3g import core as spt3g_core
 import numpy as np
 
+from glob import glob
 import itertools
 import logging
 import os
@@ -139,20 +140,31 @@ def load_book_file(filename, dets=None, samples=None, no_signal=False):
     """Load one or more g3 files (from an obs/oper book) and return the
     contents as an AxisManager.
 
-    No obsfiledb is required here, so  metadata are only as good as
-    the contents of the files.
+    Args:
 
-    If multiple filenames are passed (i.e. filename is a list), then
-    the files will be loaded sequentially and assumed to constitut
-    represent a sample-contiguous dataset from a single set of
-    detectors (detset).
+      filename (str or list of str): The g3 file(s) to load.  See
+        Notes.
+      dets (None, or list of str): The detectors (readout_id) to load.
+      samples (tuple or None): Sample range to load.
+      no_signal (bool): If True, the signal data are not read and
+        .signal is set to None.
 
-    The "samples" argument should be a tuple (start, stop), and will
-    be interpreted as sample counts within the stream of samples
-    presented in the requested files, starting from 0.  The "dets"
-    argument, if passed, must be a list of strings; elements in that
-    list that aren't found in the data will simply be ignored (so the
-    returned signal may have fewer dets than were requested).
+    Notes:
+
+      The filename argument can be a string or a list of strings.  If
+      it's a single string, and contains a wildcard (*), then the
+      pattern will be globbed and sorted and all those files will be
+      loaded.
+
+      When loading multiple files, they must be from the **same
+      fileset / stream_id** (i.e. contain the same detectors).
+
+      The "samples" argument should be a tuple (start, stop), and will
+      be interpreted as sample counts within the stream of samples
+      presented in the requested files, starting from 0.  The "dets"
+      argument, if passed, must be a list of strings; elements in that
+      list that aren't found in the data will simply be ignored (so
+      the returned signal may have fewer dets than were requested).
 
     """
     if samples is None:
@@ -163,7 +175,10 @@ def load_book_file(filename, dets=None, samples=None, no_signal=False):
             samples[0] = 0
 
     if isinstance(filename, str):
-        filename = [filename]
+        if '*' in filename:
+            filename = sorted(glob(filename))
+        else:
+            filename = [filename]
 
     files = [(f, None, None) for f in filename]
     this_detset = _load_book_detset(
