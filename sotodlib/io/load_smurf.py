@@ -2598,8 +2598,8 @@ def get_channel_info(
     Args
     -----
     status : SmurfStatus instance
-    mask : bool array
-        mask of which channels to use
+    mask : bool or int array
+        mask to select which channels to use (and possibly re-order them)
     archive : G3tSmurf instance (optionl)
         G3tSmurf instance for looking for tunes/tunesets
     obsfiledb : ObsfileDb instance (optional)

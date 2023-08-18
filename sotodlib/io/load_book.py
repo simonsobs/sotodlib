@@ -269,13 +269,9 @@ def _load_book_detset(files, prefix='', load_ancil=True,
         # No wiring frames probably means it's an A_* (ancil) file.
         stat = None
     else:
-        # This stuff will need to be regrouped, for all detectors.  So
-        # just extract individual items, restricting to dets actually
-        # used here.
-        ch_info_full = load_smurf.get_channel_info(stat)
-        ch_info = {}
-        for k, v in ch_info_full._fields.items():
-            ch_info[k] = v[det_idx_in_stream]
+        # This is an AxisManager, with dets axis for just this stream
+        # ... extract and stack data later.
+        ch_info = load_smurf.get_channel_info(stat, mask=det_idx_in_stream)
         # And this stuff is per stream, so keep it separate.
         iir_params = {'enabled': stat.filter_enabled,
                       'b': stat.filter_b,
@@ -321,7 +317,6 @@ def _concat_filesets(results, ancil=None, timestamps=None,
         # Handle ancillary fields, a.k.a. boresight pointing /
         # rotation / corotation.
         aman.wrap('ancil', core.AxisManager(aman.samps))
-        aman.wrap('boresight', core.AxisManager(aman.samps))
 
         # Put all fields into 'ancil'.
         _a = aman['ancil']
@@ -329,20 +324,21 @@ def _concat_filesets(results, ancil=None, timestamps=None,
             _a.wrap(k, v, [(0, 'samps')])
 
         # Transform some fields into 'boresight'.
-        _b = aman['boresight']
-        if 'az_enc' in _a:
+        if 'az_enc' in _a and 'el_enc' in _a:
+            aman.wrap('boresight', core.AxisManager(aman.samps))
+            _b = aman['boresight']
             _b.wrap('az', _a['az_enc'] * DEG, [(0, 'samps')])
-        if 'el_enc' in _a:
             _b.wrap('el', _a['el_enc'] * DEG, [(0, 'samps')])
-        roll = None
-        if 'boresight_enc' in _a:
-            roll = _a['boresight_enc']
-        elif 'corotation_enc' in _a:
-            roll = _a['el_enc'] - 60 - _a['corotation_enc']
-        if roll is None:
-            _b.wrap('roll', None)
-        else:
-            _b.wrap('roll', roll * DEG, [(0, 'samps')])
+
+            roll = None
+            if 'boresight_enc' in _a:
+                roll = _a['boresight_enc']
+            elif 'corotation_enc' in _a:
+                roll = _a['el_enc'] - 60 - _a['corotation_enc']
+            if roll is None:
+                _b.wrap('roll', None)
+            else:
+                _b.wrap('roll', roll * DEG, [(0, 'samps')])
 
     if len(results) == 0:
         return aman
@@ -396,7 +392,7 @@ def _concat_filesets(results, ancil=None, timestamps=None,
     for detset, r in results.items():
         det_info.rows.extend(
             [(detset, _d, r['stream_id']) for _d in r['dets']])
-        for k, v in r['smurf_ch_info'].items():
+        for k, v in r['smurf_ch_info']._fields.items():
             if k not in ch_info:
                 ch_info[k] = []
             ch_info[k].extend(v)
