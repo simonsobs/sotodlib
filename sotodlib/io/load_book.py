@@ -23,6 +23,7 @@ from spt3g import core as spt3g_core
 import numpy as np
 
 import itertools
+import logging
 import os
 import yaml
 
@@ -31,6 +32,8 @@ from sotodlib import core
 from .check_book import _compact_list  # just a list with a limited repr
 from . import load_smurf
 
+
+logger = logging.getLogger(__name__)
 
 _TES_BIAS_COUNT = 12  # per detset / primary file group
 
@@ -380,29 +383,53 @@ def _concat_filesets(results, ancil=None, timestamps=None,
             _prim.wrap(k, v, [(0, 'samps')])
         aman['primary'].wrap(r['stream_id'], _prim)
         # Filter parameters
-        _iir = core.AxisManager()
-        for k, v in r['iir_params'].items():
-            _iir.wrap(k, v)
+        _iir = None
+        if r.get('iir_params') is not None:
+            _iir = core.AxisManager()
+            for k, v in r['iir_params'].items():
+                _iir.wrap(k, v)
         aman['iir_params'].wrap(r['stream_id'], _iir)
 
     # det_info
     det_info = core.metadata.ResultSet(
         ['detset', '_readout_id', 'stream_id'])
-    ch_info = {}
+    ch_info = None  # or False, or dict.
     for detset, r in results.items():
         det_info.rows.extend(
             [(detset, _d, r['stream_id']) for _d in r['dets']])
-        for k, v in r['smurf_ch_info']._fields.items():
-            if k not in ch_info:
-                ch_info[k] = []
-            ch_info[k].extend(v)
+
+        if r['smurf_ch_info'] is None:
+            ch_info = False
+            break
+
+        _ch_info_keys = list(r['smurf_ch_info']._fields.keys())
+
+        if ch_info is None:
+            ch_info = {k: [] for k in _ch_info_keys}
+        elif set(ch_info.keys()) != set(_ch_info_keys):
+            ch_info = False
+            break
+
+    if ch_info is False:
+        logger.warning('Missing or inconsistent smurf status fields; '
+                       'dropping det_info.smurf.')
+
+    if ch_info:
+        for detset, r in results.items():
+            if r['smurf_ch_info'] is None:
+                break
+            for k, v in r['smurf_ch_info']._fields.items():
+                if k not in ch_info:
+                    ch_info[k] = []
+                ch_info[k].extend(v)
 
     aman.wrap('det_info', det_info.to_axismanager(axis_key='_readout_id'))
 
-    smurf = core.AxisManager(aman.dets)
-    for k, v in ch_info.items():
-        smurf.wrap(k, np.array(v), [(0, 'dets')])
-    aman['det_info'].wrap('smurf', smurf)
+    if ch_info:
+        smurf = core.AxisManager(aman.dets)
+        for k, v in ch_info.items():
+            smurf.wrap(k, np.array(v), [(0, 'dets')])
+        aman['det_info'].wrap('smurf', smurf)
 
     # flags place
     aman.wrap("flags", core.FlagManager.for_tod(aman, "dets", "samps"))
