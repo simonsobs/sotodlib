@@ -8,8 +8,9 @@ import warnings
 
 import numpy as np
 import so3g
-from pixell import enmap, utils, fft, bunch, tilemap
+from pixell import enmap, utils, fft, bunch, tilemap, resample
 
+from . import core
 from . import coords
 from . import tod_ops
 
@@ -59,7 +60,7 @@ class MLMapmaker:
         srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
         tod    = obs.signal.astype(self.dtype, copy=False)
         if deslope:
-            utils.deslope(tod, w=deslope_order, inplace=True)
+            utils.deslope(tod, w=5, inplace=True)
         # Allow the user to override the noise model on a per-obs level
         if noise_model is None: noise_model = self.noise_model
         # Build the noise model from the obs unless a fully
@@ -1057,3 +1058,61 @@ def fix_boresight_glitches(obs, ang_tol=0.1*utils.degree, t_tol=1):
     tod_ops.get_gap_fill_single(obs.boresight.el, bcut, swap=True)
 
 def unarr(a): return np.array(a).reshape(-1)[0]
+
+def downsample_ranges(ranges, down):
+    """Downsample either an array of ranges [:,{from,to}]
+    or an so3gRangesInt32 object, by the integer factor down.
+    The downsampling is inclusive: The output ranges will be
+    as small as possible while fully encompassing the input ranges."""
+    if isinstance(ranges, so3g.RangesInt32):
+        return so3g.RangesInt32.from_array(downsample_ranges(ranges.ranges(), down), (ranges.count+down-1)//down)
+    oranges = ranges.copy()
+    # Lower range is simple
+    oranges[:,0] //= down
+    # End should be one above highest impacted index.
+    oranges[:,1] = (oranges[:,1]-1)//down+1
+    return oranges
+
+def downsample_cut(cut, down):
+    """Given an integer RangesMatrix respresenting samples to cut,
+    return a new such RangesMatrix that describes which samples to
+    cut if the timestream were to be downsampled by the integer
+    factor down."""
+    return so3g.proj.ranges.RangesMatrix([downsample_ranges(r,down) for r in cut.ranges])
+
+def downsample_obs(obs, down):
+    """Downsample AxisManager obs by the integer factor down.
+
+    This implementation is quite specific and probably needs
+    generalization in the future, but it should work correctly
+    and efficiently for ACT-like data at least. In particular
+    it uses fourier-resampling when downsampling the detector
+    timestreams to avoid both aliasing noise and introducing
+    a transfer function."""
+    assert down == utils.nint(down), "Only integer downsampling supported, but got '%.8g'" % down
+    # Compute how many samples we will end up with
+    onsamp = (obs.samps.count+down-1)//down
+    # Set up our output axis manager
+    res    = core.AxisManager(obs.dets, core.IndexAxis("samps", onsamp))
+    # Stuff without sample axes
+    for key, axes in obs._assignments.items():
+        if "samps" not in axes:
+            val = getattr(obs, key)
+            if isinstance(val, core.AxisManager):
+                res.wrap(key, val)
+            else:
+                axdesc = [(k,v) for k,v in enumerate(axes) if v is not None]
+                res.wrap(key, val, axdesc)
+    # The normal sample stuff
+    res.wrap("timestamps", obs.timestamps[::down], [(0, "samps")])
+    bore = core.AxisManager(core.IndexAxis("samps", onsamp))
+    for key in ["az", "el", "roll"]:
+        bore.wrap(key, getattr(obs.boresight, key)[::down], [(0, "samps")])
+    res.wrap("boresight", bore)
+    res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp), [(0,"dets"),(1,"samps")])
+    # The cuts
+    for key in ["glitch_flags", "source_flags"]:
+        res.wrap(key, downsample_cut(getattr(obs, key), down), [(0,"dets"),(1,"samps")])
+    # Not sure how to deal with flags. Some sort of or-binning operation? But it
+    # doesn't matter anyway
+    return res
