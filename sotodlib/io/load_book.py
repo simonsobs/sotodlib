@@ -25,6 +25,7 @@ import numpy as np
 import itertools
 import logging
 import os
+import re
 import yaml
 
 import sotodlib
@@ -269,9 +270,16 @@ def _load_book_detset(files, prefix='', load_ancil=True,
     ch_info = None
     iir_params = None
     if stat.num_chans is None:
-        # No wiring frames probably means it's an A_* (ancil) file.
-        stat = None
-    else:
+        # Try to grab it from file 000?
+        try_file = re.sub(r'_\d\d\d\.g3', '_000.g3', files[0][0])
+        if try_file != files[0][0] and os.path.exists(try_file):
+            logger.warning(f'Trying to get SmurfStatus from {try_file} ...')
+            stat = load_smurf.SmurfStatus.from_file(try_file)
+            if stat.num_chans is None:
+                logger.warning('... it did not work.')
+                # No wiring frames probably means it's an A_* (ancil) file.
+
+    if stat.num_chans is not None:
         # This is an AxisManager, with dets axis for just this stream
         # ... extract and stack data later.
         ch_info = load_smurf.get_channel_info(stat, mask=det_idx_in_stream)
