@@ -2130,14 +2130,31 @@ class SmurfStatus:
             filenames = [filename]
         else:
             filenames = filename
-        status = {}
+        processor = cls._get_frame_processor()
         for file in filenames:
             reader = so3g.G3IndexedReader(file)
             while True:
                 frames = reader.Process(None)
                 if len(frames) == 0:
                     break
-                frame = frames[0]
+                if processor.process(frames[0]):
+                    break
+        return processor.get_status()
+
+    @classmethod
+    def _get_frame_processor(cls):
+        """Returns a processor that can receive frames and ultimately return a
+        SmurfStatus object.
+
+        User should pass each frame into the return object's "process"
+        method, then call get_status to return a SmurfStatus.  The
+        "process" function returns True if the frame is a
+        "dump_frame".
+
+        """
+        class _WiringFrameHandler(dict):
+            def process(self, frame):
+                status = self
                 if str(frame.type) == "Wiring":
                     status["stream_id"] = frame.get("sostream_id")
                     status["session_id"] = frame.get("session_id")
@@ -2149,9 +2166,12 @@ class SmurfStatus:
                     status.update(yaml.safe_load(frame["status"]))
                     if frame["dump"]:
                         status["dump_frame"] = True
-                        break
+                        return True
                     status["dump_frame"] = False
-        return cls(status)
+                return False
+            def get_status(self):
+                return cls(self)
+        return _WiringFrameHandler()
 
     @classmethod
     def from_time(cls, time, archive, stream_id=None, show_pb=False):
@@ -2578,8 +2598,8 @@ def get_channel_info(
     Args
     -----
     status : SmurfStatus instance
-    mask : bool array
-        mask of which channels to use
+    mask : bool or int array
+        mask to select which channels to use (and possibly re-order them)
     archive : G3tSmurf instance (optionl)
         G3tSmurf instance for looking for tunes/tunesets
     obsfiledb : ObsfileDb instance (optional)
