@@ -473,6 +473,24 @@ Command line arguments
    :func: get_parser
    :prog: update_hwp_angle
 
+
+make-hwp-solutions
+------------------
+
+This element generates HWP angle-related metadata, 
+which contains the calibrated HWP angle and flags.
+The HWP angle is synchronized with the input SMuRF timestamp.
+:ref:`See details here<g3thwp-section>`.
+
+Command line arguments
+``````````````````````
+.. argparse::
+    :module: sotodlib.site_pipeline.make_hwp_solutions
+    :func: get_parser
+    :prog: make_hwp_solutions
+
+
+
 QDS Monitor
 ===========
 The QDS Monitor is meant to be a simple to use class that allows users to
