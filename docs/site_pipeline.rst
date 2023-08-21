@@ -76,6 +76,26 @@ Module documentation
    :members:
    :undoc-members:
 
+update-obsdb
+------------
+
+For a description and documentation of the config file format, see
+:mod:`sotodlib.site_pipeline.update_obsdb` module autodocumentation below.
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.update_obsdb
+   :func: get_parser
+   :prog: update-obsdb
+
+Module documentation
+````````````````````
+
+.. automodule:: sotodlib.site_pipeline.update_obsdb
+   :members:
+   :undoc-members:
 
 Detector and Readout ID Mapping
 -------------------------------
@@ -452,6 +472,24 @@ Command line arguments
    :module: sotodlib.site_pipeline.update_hwp_angle
    :func: get_parser
    :prog: update_hwp_angle
+
+
+make-hwp-solutions
+------------------
+
+This element generates HWP angle-related metadata, 
+which contains the calibrated HWP angle and flags.
+The HWP angle is synchronized with the input SMuRF timestamp.
+:ref:`See details here<g3thwp-section>`.
+
+Command line arguments
+``````````````````````
+.. argparse::
+    :module: sotodlib.site_pipeline.make_hwp_solutions
+    :func: get_parser
+    :prog: make_hwp_solutions
+
+
 
 QDS Monitor
 ===========
