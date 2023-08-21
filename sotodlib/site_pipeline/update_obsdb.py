@@ -127,12 +127,28 @@ def update_obsdb(config,
                     col_list.append(key+" "+type(val).__name__)
                 bookcartobsdb.add_obs_columns(col_list)
 
+            #Adding info that should be there for all observations
+            #Descriptive string columns
+            frequent_cols = ["telescope", "telescope_flavor", "tube_slot", "tube_flavor", "detector_flavor"]
+            for fc in frequent_cols:
+                fcvalue = index.get(fc)
+                if fcvalue is not None:
+                    bookcartobsdb.add_obs_columns([fc+" str"])
+                    very_clean[fc] = fcvalue
+            stream_ids = index.pop("stream_ids")
+            if stream_ids is not None:
+                bookcartobsdb.add_obs_columns(["wafer_count int"])
+                very_clean["wafer_count"] = len(stream_ids)
+
+            #Time
             start = index.get("start_time")
             end = index.get("end_time") 
             if None not in [start, end]:
                 bookcartobsdb.add_obs_columns(["timestamp float", "duration float"])
                 very_clean["timestamp"] = start
                 very_clean["duration"] = end - start
+
+            #Scanning motion
             
             if tags != [] and tags != [""]:
                 bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
