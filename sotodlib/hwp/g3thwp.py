@@ -661,31 +661,27 @@ class G3tHWP():
         return
 
     def _bool_interpolation(self, timestamp1, data, timestamp2):
-        interp = scipy.interpolate.interp1d(timestamp1, data, kind='linear', bounds_error=False)(timestamp2)
-        result = []
-        for i in interp:
-            if i > .999:
-                result.append(True)
-            else:
-                result.append(False)
-        return result
 
+        interp = scipy.interpolate.interp1d(timestamp1, data, kind='linear', bounds_error=False)(timestamp2)
+        result = (interp > 0.999)
+
+        return result
     
     def write_solution_h5(self, tod, output=None, h5_address=None):
         """
         Output HWP angle + flags as AxisManager format
 
         Args
-        -----
+        ----
         data: g3 file
           data = G3tHWP.load_data(start, end)
         output: str or None
           output path + file name, overwrite config file
 
         Notes
-        -----------
+        -----
 
-       Output file format 
+        Output file format 
 
         - timestamp:
             SMuRF synched timestamp
