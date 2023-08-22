@@ -148,6 +148,35 @@ class Imprinter:
     def __init__(self, im_config=None, db_args={}, logger=None):
         """Imprinter manages the book database.
 
+        Example configuration file::
+        
+          db_path: imprinter.db
+          
+          sources:
+            tel-tube1:
+              g3tsmurf: g3tsmurf config file
+              slots:
+                - stream_id1
+                - stream_id2
+                - stream_id3
+            tel-tube2:
+              g3tsmurf: g3tsmurf config file
+              slots:
+                - stream_id4
+                - stream_id5
+          
+          hk_sources:
+            daq-node:
+              g3tsmurf: g3tsmurf config file
+
+        The different tel-tubes will be bound into separate books containing 
+        only the stream_ids listed under slots. While the hk_sources take a 
+        g3tsmurf config key, that is just for symmetry, those files only need
+        to include a data_prefix and g3thk_db entry if only hk books are being 
+        created from that configuration. The g3tsmurf configurations are assumed
+        to be one per daq node, meaning this example could have the same config
+        file repeated several times.
+
         Parameters
         ----------
         im_config: str
@@ -226,10 +255,10 @@ class Imprinter:
     def get_g3thk(self, source):
         """Get a G3tHk database using the g3tsmurf config file."""
         if source not in self.hk_archives:
-            if source in self.config["sources"]:
-                s_type = "sources"
-            elif source in self.config["hk_sources"]:
+            if source in self.config["hk_sources"]:
                 s_type = "hk_sources"
+            elif source in self.config["sources"]:
+                s_type = "sources"
             else:
                 raise ValueError(f"Cannot find {source} in configs")
             self.hk_archives[source] = G3tHk.from_configs(
