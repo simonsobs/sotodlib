@@ -554,6 +554,9 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     ops.sim_readout.apply(data)
     log.info_rank("Simulated readout systematics in", comm=world_comm, timer=timer)
 
+    mem = toast.utils.memreport(msg="(whole node)", comm=world_comm, silent=True)
+    log.info_rank(f"After simulating data:  {mem}", world_comm)
+
     # Optionally write out the data
     if args.out_dir is not None:
         hdf5_path = os.path.join(args.out_dir, "data")
@@ -566,6 +569,9 @@ def simulate_data(job, args, toast_comm, telescope, schedule):
     log.info_rank("Saved HDF5 data in", comm=world_comm, timer=timer)
     ops.save_books.apply(data)
     log.info_rank("Saved book data in", comm=world_comm, timer=timer)
+
+    mem = toast.utils.memreport(msg="(whole node)", comm=world_comm, silent=True)
+    log.info_rank(f"After saving data:  {mem}", world_comm)
 
     return data
 
@@ -598,6 +604,9 @@ def reduce_data(job, args, data):
         ops.weights_radec = demod_weights
         ops.binner.stokes_weights = demod_weights
         ops.binner_final.stokes_weights = demod_weights
+
+        mem = toast.utils.memreport(msg="(whole node)", comm=world_comm, silent=True)
+        log.info_rank(f"After demodulating data:  {mem}", world_comm)
 
     # Apply noise estimation
 
@@ -768,6 +777,9 @@ def reduce_data(job, args, data):
     ops.mem_count.prefix = "After filtered statistics"
     ops.mem_count.apply(data)
 
+    mem = toast.utils.memreport(msg="(whole node)", comm=world_comm, silent=True)
+    log.info_rank(f"After reducing data:  {mem}", world_comm)
+
 
 def main():
     env = toast.utils.Environment.get()
@@ -921,8 +933,12 @@ def main():
     # Templates we want to configure from the command line or a parameter file.
     templates = [toast.templates.Offset(name="baselines")]
 
+    log.info_rank(f"Parsing config at {datetime.datetime.now()}", comm)
+
     # Parse options
     config, args, jobargs = parse_config(operators, templates, comm)
+
+    log.info_rank(f"Loading schedule at {datetime.datetime.now()}", comm)
 
     # Load our instrument model and observing schedule
     telescope, schedule = load_instrument_and_schedule(args, comm)
@@ -934,6 +950,8 @@ def main():
 
     # Create the toast communicator
     toast_comm = toast.Comm(world=comm, groupsize=group_size)
+
+    log.info_rank(f"Simulating data at {datetime.datetime.now()}", comm)
 
     # Create simulated data
     data = simulate_data(job, args, toast_comm, telescope, schedule)
