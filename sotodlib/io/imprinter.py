@@ -163,6 +163,7 @@ class Imprinter:
 
         self.db_path = self.config["db_path"]
         self.sources = self.config["sources"]
+        self.hk_sources = self.config.get("hk_sources", {})
 
         # check whether db_path directory exists
         if not op.exists(op.dirname(self.db_path)):
@@ -225,8 +226,14 @@ class Imprinter:
     def get_g3thk(self, source):
         """Get a G3tHk database using the g3tsmurf config file."""
         if source not in self.hk_archives:
+            if source in self.config["sources"]:
+                s_type = "sources"
+            elif source in self.config["hk_sources"]:
+                s_type = "hk_sources"
+            else:
+                raise ValueError(f"Cannot find {source} in configs")
             self.hk_archives[source] = G3tHk.from_configs(
-                self.config["sources"][source]["g3tsmurf"]
+                self.config[s_type][source]["g3tsmurf"]
             )
         return self.hk_archives[source]
 
@@ -324,8 +331,8 @@ class Imprinter:
         session = session or self.get_session()
 
         # fixme: tel_tube and daq_node may not be the same
-        for daq_node in self.config["sources"]:
-            with open(self.config["sources"][daq_node]["g3tsmurf"], "r") as f:
+        for daq_node in self.hk_sources:
+            with open(self.hk_sources[daq_node]["g3tsmurf"], "r") as f:
                 g3tsmurf_cfg = yaml.safe_load(f)
             data_root = g3tsmurf_cfg["data_prefix"]
 
@@ -409,7 +416,10 @@ class Imprinter:
 
     def _get_binder_for_book(self, book, output_root="out", pbar=False):
         """get the appropriate bookbinder for the book based on its type"""
-        g3tsmurf_cfg_file = self.sources[book.tel_tube]["g3tsmurf"]
+        if book.type == 'hk':
+            g3tsmurf_cfg_file = self.hk_sources[book.tel_tube]["g3tsmurf"]
+        else:
+            g3tsmurf_cfg_file = self.sources[book.tel_tube]["g3tsmurf"]
         with open(g3tsmurf_cfg_file, "r") as f:
             g3tsmurf_cfg = yaml.safe_load(f)
         data_root = g3tsmurf_cfg["data_prefix"]
