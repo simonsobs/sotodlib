@@ -293,8 +293,14 @@ def simulation_test_data(
         elnod_start=el_nod,
         elnods=el_nods,
         scan_accel_az=3 * u.degree / u.second ** 2,
+        use_ephem=False,
+        use_qpoint=True,
     )
     sim_ground.apply(data)
+
+    # corotator = so_ops.CoRotator(name="corotate_lat")
+    # corotator.apply(data)
+
     return data
 
 

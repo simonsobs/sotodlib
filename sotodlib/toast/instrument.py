@@ -16,6 +16,7 @@ from toast.utils import Logger, name_UID
 from ..core.hardware import Hardware, build_readout_id, parse_readout_id
 from ..sim_hardware import sim_nominal
 from .sim_focalplane import sim_telescope_detectors
+from so3g.proj.coords import SITES
 
 
 FOCALPLANE_RADII = {
@@ -85,9 +86,9 @@ class SOSite(GroundSite):
     def __init__(
         self,
         name="ATACAMA",
-        lat=-22.958064 * u.degree,
-        lon=-67.786222 * u.degree,
-        alt=5200 * u.meter,
+        lat=SITES["so"].lat * u.degree,
+        lon=SITES["so"].lon * u.degree,
+        alt=SITES["so"].elev * u.meter,
         **kwargs,
     ):
         super().__init__(
