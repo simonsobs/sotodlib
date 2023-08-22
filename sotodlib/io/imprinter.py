@@ -1095,7 +1095,8 @@ class Imprinter:
             {obs_id: [file_paths...]}
 
         """
-        session = self.get_g3tsmurf_session(book.tel_tube)
+        if book.type in ["obs", "oper", "stray"]:
+            session = self.get_g3tsmurf_session(book.tel_tube)
         if book.type in ["obs", "oper"]:
             obs_ids = [o.obs_id for o in book.obs]
             obs = (
