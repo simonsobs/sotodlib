@@ -402,7 +402,7 @@ def get_hkaman(start, stop, config=None, alias=None, fields=None, data_dir=None)
     """
     if config is not None:
         data = sort_hkdata_fromconfig(start=start, stop=stop, config=config)
-        hkamans = make_hkaman(grouped_data=data, alias_exists=True, 
+        hkamans = make_hkaman(grouped_data=data, alias_exists=True,
                               det_cosampled=False)
         return hkamans
 
@@ -418,7 +418,7 @@ def get_hkaman(start, stop, config=None, alias=None, fields=None, data_dir=None)
         else:
             data = sort_hkdata(start=start, stop=stop, fields=fields,
                                data_dir=data_dir, alias=alias)
-            hkamans = make_hkaman(grouped_data=data, alias_exists=True, 
+            hkamans = make_hkaman(grouped_data=data, alias_exists=True,
                                   det_cosampled=False)
             return hkamans
 
@@ -450,7 +450,7 @@ def get_detcosamp_hkaman(det_aman, config=None, alias=None, fields=None, data_di
 
     if config is not None:
         data = sort_hkdata_fromconfig(start=start, stop=stop, config=config)
-        amans = make_hkaman(grouped_data=data, det_aman=det_aman, 
+        amans = make_hkaman(grouped_data=data, det_aman=det_aman,
                             alias_exists=True, det_cosampled=True)
         return amans
     elif fields is not None:
