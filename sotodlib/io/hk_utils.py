@@ -224,7 +224,8 @@ def sort_hkdata(start, stop, fields, data_dir, alias=None):
         return grouped_data
 
     elif alias is not None:
-        hkdata = load_range(start=start, stop=stop, fields=fields, alias=alias, data_dir)
+        hkdata = load_range(start=start, stop=stop, fields=fields,
+                            alias=alias, data_dir=data_dir)
 
         field_dict = {}
         for i in range(len(fields)):
