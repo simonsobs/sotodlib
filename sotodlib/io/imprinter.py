@@ -604,9 +604,9 @@ class Imprinter:
             raise BookBoundError(f"Book {bid} is already bound")
         assert book.type in VALID_OBSTYPES
 
-        # find appropriate binder for the book type
-        binder = self._get_binder_for_book(book, output_root=output_root)
         try:
+            # find appropriate binder for the book type
+            binder = self._get_binder_for_book(book, output_root=output_root)
             binder.bind(pbar=pbar)
 
             # write M_book file
