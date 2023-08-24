@@ -147,6 +147,47 @@ def loop_over_sources(method):
 class Imprinter:
     def __init__(self, im_config=None, db_args={}, logger=None):
         """Imprinter manages the book database.
+        
+        Imprinter at the site is set up to be one per level 2 daq node. Some pieces
+        of this code have worked with one imprinter for multiple daq nodes but this 
+        has not be end-to-end tested.
+
+        Example configuration file::
+        
+          db_path: imprinter.db
+          
+          sources:
+            tel-tube1:
+              g3tsmurf: g3tsmurf config file
+              slots:
+                - stream_id1
+                - stream_id2
+                - stream_id3
+            tel-tube2:
+              g3tsmurf: g3tsmurf config file
+              slots:
+                - stream_id4
+                - stream_id5
+          
+          hk_sources:
+            daq-node:
+              g3tsmurf: g3tsmurf config file
+
+        The sources entry lists the different tel-tubes that will be bound into 
+        separate books containing only the stream_ids listed under slots. TODO: 
+        There is currently no option to have an empty slot. The tel-tube entries 
+        define the folder books are written to ex: output_root/tel-tube/obs/
+
+        The hk_sources entry determines if housekeeping books should be made, and 
+        where. While it take a g3tsmurf config key, that is just for symmetry with
+        sources. Those config files only need to include a data_prefix and g3thk_db 
+        entry if only hk books are being created from that configuration. The 
+        daq-node entry defines where the books are written to ex: output_root/daq-node/hk
+
+        The g3tsmurf configurations are assumed to be one per daq node, meaning 
+        this example could have the same config file repeated several times. The 
+        repetition is based on the idea that one imprinter could manage multiple 
+        daq-nodes, although that is not the current setup.
 
         Parameters
         ----------
@@ -163,6 +204,7 @@ class Imprinter:
 
         self.db_path = self.config["db_path"]
         self.sources = self.config["sources"]
+        self.hk_sources = self.config.get("hk_sources", {})
 
         # check whether db_path directory exists
         if not op.exists(op.dirname(self.db_path)):
@@ -225,8 +267,14 @@ class Imprinter:
     def get_g3thk(self, source):
         """Get a G3tHk database using the g3tsmurf config file."""
         if source not in self.hk_archives:
+            if source in self.config["hk_sources"]:
+                s_type = "hk_sources"
+            elif source in self.config["sources"]:
+                s_type = "sources"
+            else:
+                raise ValueError(f"Cannot find {source} in configs")
             self.hk_archives[source] = G3tHk.from_configs(
-                self.config["sources"][source]["g3tsmurf"]
+                self.config[s_type][source]["g3tsmurf"]
             )
         return self.hk_archives[source]
 
@@ -324,8 +372,8 @@ class Imprinter:
         session = session or self.get_session()
 
         # fixme: tel_tube and daq_node may not be the same
-        for daq_node in self.config["sources"]:
-            with open(self.config["sources"][daq_node]["g3tsmurf"], "r") as f:
+        for daq_node in self.hk_sources:
+            with open(self.hk_sources[daq_node]["g3tsmurf"], "r") as f:
                 g3tsmurf_cfg = yaml.safe_load(f)
             data_root = g3tsmurf_cfg["data_prefix"]
 
@@ -409,7 +457,10 @@ class Imprinter:
 
     def _get_binder_for_book(self, book, output_root="out", pbar=False):
         """get the appropriate bookbinder for the book based on its type"""
-        g3tsmurf_cfg_file = self.sources[book.tel_tube]["g3tsmurf"]
+        if book.type == 'hk':
+            g3tsmurf_cfg_file = self.hk_sources[book.tel_tube]["g3tsmurf"]
+        else:
+            g3tsmurf_cfg_file = self.sources[book.tel_tube]["g3tsmurf"]
         with open(g3tsmurf_cfg_file, "r") as f:
             g3tsmurf_cfg = yaml.safe_load(f)
         data_root = g3tsmurf_cfg["data_prefix"]
@@ -417,7 +468,7 @@ class Imprinter:
         if book.type in ["obs", "oper"]:
             session_id = book.bid.split("_")[1]
             first5 = session_id[:5]
-            odir = op.join(output_root, book.type, first5)
+            odir = op.join(output_root, book.tel_tube, book.type, first5)
             if not op.exists(odir):
                 os.makedirs(odir)
             book_path = os.path.join(odir, book.bid)
@@ -443,7 +494,7 @@ class Imprinter:
             book_path_src = op.join(root, first5)
 
             # get target directory for hk book
-            odir = op.join(output_root, book.type)
+            odir = op.join(output_root, book.tel_tube, book.type)
             if not op.exists(odir):
                 os.makedirs(odir)
             book_path_tgt = os.path.join(odir, book.bid)
@@ -484,7 +535,7 @@ class Imprinter:
             book_path_src = op.join(root, first5)
 
             # get target directory for hk book
-            odir = op.join(output_root, book.type)
+            odir = op.join(output_root, book.tel_tube, book.type)
             if not op.exists(odir):
                 os.makedirs(odir)
             book_path_tgt = os.path.join(odir, book.bid)
@@ -565,9 +616,9 @@ class Imprinter:
             raise BookBoundError(f"Book {bid} is already bound")
         assert book.type in VALID_OBSTYPES
 
-        # find appropriate binder for the book type
-        binder = self._get_binder_for_book(book, output_root=output_root)
         try:
+            # find appropriate binder for the book type
+            binder = self._get_binder_for_book(book, output_root=output_root)
             binder.bind(pbar=pbar)
 
             # write M_book file
@@ -1056,7 +1107,8 @@ class Imprinter:
             {obs_id: [file_paths...]}
 
         """
-        session = self.get_g3tsmurf_session(book.tel_tube)
+        if book.type in ["obs", "oper", "stray"]:
+            session = self.get_g3tsmurf_session(book.tel_tube)
         if book.type in ["obs", "oper"]:
             obs_ids = [o.obs_id for o in book.obs]
             obs = (
