@@ -85,6 +85,8 @@ class P:
     - det_weights (optional): weights (one per detector) to apply to
       time-ordered data when binning a map (and also when binning a
       weights matrix).  [dets]
+    - interpol (optional): How to interpolate the values for samples
+      between pixel centers. Forwarded to Projectionist.
 
     These things can be updated freely, with the following caveats:
 
@@ -111,7 +113,7 @@ class P:
 
     """
     def __init__(self, sight=None, fp=None, geom=None, comps='T',
-                 cuts=None, threads=None, det_weights=None, interpol="nearest"):
+                 cuts=None, threads=None, det_weights=None, interpol=None):
         self.sight = sight
         self.fp = fp
         self.geom = wrap_geom(geom)
@@ -127,7 +129,7 @@ class P:
                 rot=None, cuts=None, threads=None, det_weights=None,
                 timestamps=None, focal_plane=None, boresight=None,
                 boresight_equ=None, wcs_kernel=None, weather='typical',
-                site='so', interpol="nearest"):
+                site='so', interpol=None):
         """Set up a Projection Matrix for a TOD.  This will ultimately call
         the main P constructor, but some missing arguments will be
         extracted from tod and computed along the way.
