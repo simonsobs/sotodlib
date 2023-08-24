@@ -468,7 +468,7 @@ class Imprinter:
         if book.type in ["obs", "oper"]:
             session_id = book.bid.split("_")[1]
             first5 = session_id[:5]
-            odir = op.join(output_root, book.type, first5)
+            odir = op.join(output_root, book.tel_tube, book.type, first5)
             if not op.exists(odir):
                 os.makedirs(odir)
             book_path = os.path.join(odir, book.bid)
@@ -494,7 +494,7 @@ class Imprinter:
             book_path_src = op.join(root, first5)
 
             # get target directory for hk book
-            odir = op.join(output_root, book.type)
+            odir = op.join(output_root, book.tel_tube, book.type)
             if not op.exists(odir):
                 os.makedirs(odir)
             book_path_tgt = os.path.join(odir, book.bid)
@@ -535,7 +535,7 @@ class Imprinter:
             book_path_src = op.join(root, first5)
 
             # get target directory for hk book
-            odir = op.join(output_root, book.type)
+            odir = op.join(output_root, book.tel_tube, book.type)
             if not op.exists(odir):
                 os.makedirs(odir)
             book_path_tgt = os.path.join(odir, book.bid)
