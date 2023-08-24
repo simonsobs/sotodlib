@@ -147,6 +147,10 @@ def loop_over_sources(method):
 class Imprinter:
     def __init__(self, im_config=None, db_args={}, logger=None):
         """Imprinter manages the book database.
+        
+        Imprinter at the site is set up to be one per level 2 daq node. Some pieces
+        of this code have worked with one imprinter for multiple daq nodes but this 
+        has not be end-to-end tested.
 
         Example configuration file::
         
@@ -169,13 +173,21 @@ class Imprinter:
             daq-node:
               g3tsmurf: g3tsmurf config file
 
-        The different tel-tubes will be bound into separate books containing 
-        only the stream_ids listed under slots. While the hk_sources take a 
-        g3tsmurf config key, that is just for symmetry, those files only need
-        to include a data_prefix and g3thk_db entry if only hk books are being 
-        created from that configuration. The g3tsmurf configurations are assumed
-        to be one per daq node, meaning this example could have the same config
-        file repeated several times.
+        The sources entry lists the different tel-tubes that will be bound into 
+        separate books containing only the stream_ids listed under slots. TODO: 
+        There is currently no option to have an empty slot. The tel-tube entries 
+        define the folder books are written to ex: output_root/tel-tube/obs/
+
+        The hk_sources entry determines if housekeeping books should be made, and 
+        where. While it take a g3tsmurf config key, that is just for symmetry with
+        sources. Those config files only need to include a data_prefix and g3thk_db 
+        entry if only hk books are being created from that configuration. The 
+        daq-node entry defines where the books are written to ex: output_root/daq-node/hk
+
+        The g3tsmurf configurations are assumed to be one per daq node, meaning 
+        this example could have the same config file repeated several times. The 
+        repetition is based on the idea that one imprinter could manage multiple 
+        daq-nodes, although that is not the current setup.
 
         Parameters
         ----------
