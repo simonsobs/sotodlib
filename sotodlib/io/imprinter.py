@@ -203,7 +203,7 @@ class Imprinter:
             self.config = yaml.safe_load(f)
 
         self.db_path = self.config["db_path"]
-        self.sources = self.config["sources"]
+        self.sources = self.config.get("sources", {})
         self.hk_sources = self.config.get("hk_sources", {})
 
         # check whether db_path directory exists
