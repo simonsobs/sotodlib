@@ -111,7 +111,7 @@ class P:
 
     """
     def __init__(self, sight=None, fp=None, geom=None, comps='T',
-                 cuts=None, threads=None, det_weights=None):
+                 cuts=None, threads=None, det_weights=None, interpol="nearest"):
         self.sight = sight
         self.fp = fp
         self.geom = wrap_geom(geom)
@@ -120,12 +120,14 @@ class P:
         self.threads = threads
         self.active_tiles = None
         self.det_weights = det_weights
+        self.interpol = interpol
 
     @classmethod
     def for_tod(cls, tod, sight=None, fp=None, geom=None, comps='T',
                 rot=None, cuts=None, threads=None, det_weights=None,
                 timestamps=None, focal_plane=None, boresight=None,
-                boresight_equ=None, wcs_kernel=None, weather='typical', site='so'):
+                boresight_equ=None, wcs_kernel=None, weather='typical',
+                site='so', interpol="nearest"):
         """Set up a Projection Matrix for a TOD.  This will ultimately call
         the main P constructor, but some missing arguments will be
         extracted from tod and computed along the way.
@@ -175,7 +177,8 @@ class P:
             geom = helpers.get_footprint(tod, wcs_kernel, sight=sight)
 
         return cls(sight=sight, fp=fp, geom=geom, comps=comps,
-                   cuts=cuts, threads=threads, det_weights=det_weights)
+                   cuts=cuts, threads=threads, det_weights=det_weights,
+                   interpol=interpol)
 
     @classmethod
     def for_geom(cls, tod, geom, comps='TQU', timestamps=None,
@@ -401,9 +404,10 @@ class P:
         if self.tiled:
             return so3g.proj.Projectionist.for_tiled(
                 self.geom.shape, self.geom.wcs, self.geom.tile_shape,
-                active_tiles=self.active_tiles)
+                active_tiles=self.active_tiles, interpol=self.interpol)
         else:
-            return so3g.proj.Projectionist.for_geom(self.geom.shape, self.geom.wcs)
+            return so3g.proj.Projectionist.for_geom(self.geom.shape,
+                self.geom.wcs, interpol=self.interpol)
 
     def _get_proj_threads(self, cuts=None):
         """Return the Projectionist and sample-thread assignment for the
