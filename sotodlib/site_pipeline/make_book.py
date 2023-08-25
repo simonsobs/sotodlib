@@ -2,10 +2,10 @@ from typing import Optional
 import traceback
 import argparse
 
-from ..io.imprinter import Imprinter
+from ..io.imprinter import Imprinter, BOUND
 
 
-def main(config: str, output_root: str, source: Optional[str], logger=None):
+def main(config: str, output_root: str, source: Optional[str], book_id: Optional[str] = None, logger=None):
     """Make books based on imprinter db
     
     Parameters
@@ -16,34 +16,32 @@ def main(config: str, output_root: str, source: Optional[str], logger=None):
         root path of the books 
     source: str, optional
         data source to use, e.g., sat1, latrt, tsat. If None, use all sources
+    book_id: str, optional
+        optionally specify a particular book_id to bind
     """
     imprinter = Imprinter(config, db_args={'connect_args': {'check_same_thread': False}})
-    # get unbound books
-    unbound_books = imprinter.get_unbound_books()
-    failed_books = imprinter.get_failed_books()
+    # get list of books to bind: default to all unbound books
+    if books_to_bind is None:
+        books_to_bind = imprinter.get_unbound_books()
+    else:  # optionally focus on a particular book
+        book_ = imprinter.get_book(book_id)
+        if book_ is None:
+            raise ValueError(f"Book {book_id} not found in imprinter db")
+        if book_.status == BOUND:
+            raise ValueError(f"Book {book_id} is already bound")
+        books_to_bind = [book_]
+        
     if source is not None:
-        unbound_books = [book for book in unbound_books if book.tel_tube == source]
-        failed_books = [book for book in failed_books if book.tel_tube == source]
-    print(f"Found {len(unbound_books)} unbound books and {len(failed_books)} failed books")
-    for book in unbound_books:
-        print(f"Binding book {book.bid}")
+        books_to_bind = [book for book in books_to_bind if book.tel_tube == source]
+
+    logger.info(f"Found {len(books_to_bind)} books to bind")
+    for book in books_to_bind:
+        logger.info(f"Binding book {book.bid}")
         try:
             imprinter.bind_book(book, output_root=output_root)
         except Exception as e:
-            print(f"Error binding book {book.bid}: {e}")
-            print(traceback.format_exc())
-
-    print("Retrying previously failed books") 
-    for book in failed_books:
-        print(f"Binding book {book.bid}")
-        try:
-            imprinter.bind_book(book, output_root=output_root)
-        except Exception as e:
-            print(f"Error binding book {book.bid}: {e}")
-            print(traceback.format_exc())
-            # it has failed twice, ideally we want people to look at it now
-            # do something here
-
+            logger.error(f"Error binding book {book.bid}: {e}")
+            logger.error(traceback.format_exc())
 
 def get_parser(parser=None):
     if parser is None:
