@@ -29,6 +29,7 @@ The config file could be of the form:
 from sotodlib.core.metadata import ObsDb
 from sotodlib.core import Context 
 from sotodlib.site_pipeline.check_book import main as checkbook
+from sotodlib.io import load_book
 import os
 import glob
 import yaml
@@ -129,7 +130,11 @@ def update_obsdb(config,
 
             #Adding info that should be there for all observations
             #Descriptive string columns
-            frequent_cols = ["telescope", "telescope_flavor", "tube_slot", "tube_flavor", "detector_flavor"]
+            frequent_cols = ["telescope", 
+                             "telescope_flavor", 
+                             "tube_slot", 
+                             "tube_flavor", 
+                             "detector_flavor"]
             for fc in frequent_cols:
                 fcvalue = index.get(fc)
                 if fcvalue is not None:
@@ -149,7 +154,24 @@ def update_obsdb(config,
                 very_clean["duration"] = end - start
 
             #Scanning motion
-            
+            stream_file = os.path.join(bookpath,"*{}*.g3".format(stream_ids[0]))
+            stream = load_book.load_book_file(stream_file)
+
+            try:
+                for coor in ["az", "el", "roll"]:
+                    coor_enc = stream.ancil[coor+"_enc"]
+                    bookcartobsdb.add_obs_columns([f"{coor}_center float", 
+                                                   f"{coor}_throw float"])
+                    very_clean[f"{coor}_center"]=.5*(coor_enc.max()+coor_enc.min())
+                    very_clean[f"{coor}_throw"]=.5*(coor_enc.max()-coor_enc.min())
+                
+            except KeyError:
+                if verbosity==0:
+                    print(f"No pointing in some streams for obs_id {obs_id}")
+                pass
+
+
+
             if tags != [] and tags != [""]:
                 bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
             else:
