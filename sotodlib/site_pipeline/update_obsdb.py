@@ -157,20 +157,17 @@ def update_obsdb(config,
             stream_file = os.path.join(bookpath,"*{}*.g3".format(stream_ids[0]))
             stream = load_book.load_book_file(stream_file)
 
-            try:
-                for coor in ["az", "el", "roll"]:
+            for coor in ["az", "el", "roll"]:
+                try:
                     coor_enc = stream.ancil[coor+"_enc"]
                     bookcartobsdb.add_obs_columns([f"{coor}_center float", 
                                                    f"{coor}_throw float"])
                     very_clean[f"{coor}_center"]=.5*(coor_enc.max()+coor_enc.min())
                     very_clean[f"{coor}_throw"]=.5*(coor_enc.max()-coor_enc.min())
-                
-            except KeyError:
-                if verbosity==0:
-                    print(f"No pointing in some streams for obs_id {obs_id}")
-                pass
-
-
+                except KeyError:
+                    if verbosity==0:
+                        print(f"No pointing in some streams for obs_id {obs_id}")
+                    pass
 
             if tags != [] and tags != [""]:
                 bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
