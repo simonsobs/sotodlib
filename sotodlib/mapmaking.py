@@ -1191,15 +1191,16 @@ class DemodMapmaker:
         self.ready        = False
         self.ncomp        = len(comps)
 
-    def add_obs(self, id, obs, noise_model=None):
+    def add_obs(self, id, obs, noise_model=None, deslope=False):
         # Prepare our tod
         ctime  = obs.timestamps
         srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
         # now we have 3 signals, dsT / demodQ / demodU. We pack them into an array with shape (3,...)
         tod    = np.array([obs.dsT.astype(self.dtype, copy=False), obs.demodQ.astype(self.dtype, copy=False), obs.demodU.astype(self.dtype, copy=False)])
         #print('The shape of the tod is ',tod.shape)
-        #for i in range(self.ncomp):
-        #    utils.deslope(tod[i], w=1, inplace=True)
+        if deslope:
+            for i in range(self.ncomp):
+                utils.deslope(tod[i], w=5, inplace=True)
         # Allow the user to override the noise model on a per-obs level
         if noise_model is None: noise_model = self.noise_model
         # Build the noise model from the obs unless a fully
@@ -1359,9 +1360,10 @@ class DemodSignalMap(DemodSignal):
             self.hits = tilemap.redistribute(self.hits,self.comm)
             self.dof  = TileMapZipper(self.rhs.geometry, dtype=self.dtype, comm=self.comm)
         else:
-            self.rhs  = utils.allreduce(self.rhs, self.comm)
-            self.div  = utils.allreduce(self.div, self.comm)
-            self.hits = utils.allreduce(self.hits,self.comm)
+            if self.comm is not None:
+                self.rhs  = utils.allreduce(self.rhs, self.comm)
+                self.div  = utils.allreduce(self.div, self.comm)
+                self.hits = utils.allreduce(self.hits,self.comm)
             self.dof  = MapZipper(*self.rhs.geometry, dtype=self.dtype)
         self.idiv  = safe_invert_div(self.div)
         self.ready = True
@@ -1400,7 +1402,7 @@ class DemodSignalMap(DemodSignal):
         if self.tiled:
             tilemap.write_map(oname, m, self.comm)
         else:
-            if self.comm.rank == 0:
+            if self.comm is None or self.comm.rank == 0:
                 enmap.write_map(oname, m)
         return oname
 
@@ -1463,7 +1465,11 @@ class DemodSignalCut(DemodSignal):
 
     def write(self, prefix, tag, m):
         if not self.output: return
-        oname = self.ofmt.format(name=self.name, rank=self.comm.rank)
+        if self.comm is None:
+            rank = 0
+        else:
+            rank = self.comm.rank
+        oname = self.ofmt.format(name=self.name, rank=rank)
         oname = "%s%s_%s.%s" % (prefix, oname, tag, self.ext)
         with h5py.File(oname, "w") as hfile:
             hfile["data"] = m
