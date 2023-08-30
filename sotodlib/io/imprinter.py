@@ -35,7 +35,8 @@ from ..site_pipeline.util import init_logger
 ####################
 
 # book status
-FAILED = -1
+WONT_BIND = -2 # books we have tagged by hand that we will not bind
+FAILED = -1 # books where automated binding failed
 UNBOUND = 0
 REBIND = 1
 BOUND = 2
@@ -455,7 +456,12 @@ class Imprinter:
         if commit:
             session.commit()
 
-    def _get_binder_for_book(self, book, output_root="out", pbar=False):
+    def _get_binder_for_book(self, 
+        book, 
+        output_root="out", 
+        pbar=False, 
+        ignore_tags=False
+    ):
         """get the appropriate bookbinder for the book based on its type"""
         if book.type == 'hk':
             g3tsmurf_cfg_file = self.hk_sources[book.tel_tube]["g3tsmurf"]
@@ -482,7 +488,8 @@ class Imprinter:
 
             # bind book using bookbinder library
             bookbinder = BookBinder(
-                book, obsdb, filedb, data_root, readout_ids, book_path
+                book, obsdb, filedb, data_root, readout_ids, book_path,
+                ignore_tags=ignore_tags,
             )
             return bookbinder
 
@@ -581,6 +588,7 @@ class Imprinter:
         message="",
         test_mode=False,
         pbar=False,
+        ignore_tags=False
     ):
         """Bind book using bookbinder
 
@@ -597,6 +605,9 @@ class Imprinter:
             If in test_mode, this function will still run on already copied
             books, and will not update any db fields in the db. This is useful
             for testing purposes.
+        ignore_tags : bool
+            If true, book will be bound even if the tags between different level 2
+            operations don't match. Only ever expected to be turned on by hand.
         """
         if session is None:
             session = self.get_session()
@@ -618,7 +629,11 @@ class Imprinter:
 
         try:
             # find appropriate binder for the book type
-            binder = self._get_binder_for_book(book, output_root=output_root)
+            binder = self._get_binder_for_book(
+                book, 
+                output_root=output_root,
+                ignore_tags=ignore_tags,
+            )
             binder.bind(pbar=pbar)
 
             # write M_book file
@@ -882,6 +897,38 @@ class Imprinter:
             return False
         return book.status == BOUND
 
+    def set_book_wont_bind(self, book, message=None, session=None):
+        """Change book status to WONT_BIND, meaning the files indicated into 
+        this book will not be bound. .g3 files here will go into stray books.
+
+        This function should not be integrated into automated data packaging.
+
+        This book status is necessary because without it the automated data 
+        packaging could continue to try and register and fail on the same book. 
+
+        Parameters
+        -----------
+        book: str or Book 
+        message: str or None
+            if not none, update book message to explain why the setting is changing
+        session: BookDB session.
+        
+        """
+        if session is None:
+            session = self.get_session()
+
+        if isinstance(book, str):
+            book = self.get_book(book)
+
+        if book.status != FAILED:
+            self.logger.warning(
+                f"Book {book} has not failed before being set not to WONT_BIND"
+            )
+        book.status = WONT_BIND 
+        if message is not None:
+            book.message = message
+        session.commit()
+
     def commit(self, session=None):
         """Commit the book db.
 
@@ -1122,6 +1169,9 @@ class Imprinter:
                 res[o.obs_id] = sorted([f.name for f in o.files])
             return res
         elif book.type in ["stray"]:
+            ## TODO: errant stream ids
+            ## TODO: wont_bind book files
+            ## TODO: Files that have not been added to any book
             tcode = int(book.bid.split("_")[1])
             streams = self.sources[book.tel_tube].get("slots")
             stream_filt_files = or_(*[Files.stream_id == s for s in streams])
