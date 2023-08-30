@@ -367,7 +367,11 @@ class P:
         """
         assert cuts is None  # whoops, not implemented.
 
-        proj = self._get_proj()
+        # _get_proj doesn't set up the tiling info, so
+        # must call get_proj_threads. This is ugly, since from_map
+        # doesn't need the threading structures. Can we find a better design?
+        if self.tiled: proj, _ = self._get_proj_threads()
+        else:          proj    = self._get_proj()
         if comps is None:
             comps = self.comps
         tod_shape = (len(self.fp), len(self.sight.Q))

@@ -8,6 +8,7 @@ import warnings
 
 import numpy as np
 import so3g
+import h5py
 from pixell import enmap, utils, fft, bunch, tilemap, resample
 
 from . import core
@@ -54,11 +55,14 @@ class MLMapmaker:
         self.dof          = MultiZipper()
         self.ready        = False
 
-    def add_obs(self, id, obs, deslope=True, noise_model=None):
+    def add_obs(self, id, obs, deslope=True, noise_model=None, signal_estimate=None):
         # Prepare our tod
         ctime  = obs.timestamps
         srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
         tod    = obs.signal.astype(self.dtype, copy=False)
+        # Subtract an existing estimate of the signal before estimating
+        # the noise model, if available
+        if signal_estimate is not None: tod -= signal_estimate
         if deslope:
             utils.deslope(tod, w=5, inplace=True)
         # Allow the user to override the noise model on a per-obs level
@@ -73,6 +77,13 @@ class MLMapmaker:
             except Exception as e:
                 msg = f"FAILED to build a noise model for observation='{id}' : '{e}'"
                 raise RuntimeError(msg)
+        # Add back signal estimate
+        if signal_estimate is not None:
+            tod += signal_estimate
+            # The signal estimate might not be desloped, so
+            # adding it back can reintroduce a slope. Fix that here.
+            if deslope:
+                utils.deslope(tod, w=5, inplace=True)
         # And apply it to the tod
         tod    = nmat.apply(tod)
         # Add the observation to each of our signals
@@ -132,13 +143,33 @@ class MLMapmaker:
         #t1 = time(); print(f" M      zip : {t1-t2:8.3f}s", flush=True)
         return result
 
-    def solve(self, maxiter=500, maxerr=1e-6):
+    def solve(self, maxiter=500, maxerr=1e-6, x0=None):
         self.prepare()
         rhs    = self.dof.zip(*[signal.rhs for signal in self.signals])
-        solver = utils.CG(self.A, rhs, M=self.M, dot=self.dof.dot)
+        if x0 is not None: x0 = self.dof.zip(*x0)
+        solver = utils.CG(self.A, rhs, M=self.M, dot=self.dof.dot, x0=x0)
         while solver.i < maxiter and solver.err > maxerr:
             solver.step()
             yield bunch.Bunch(i=solver.i, err=solver.err, x=self.dof.unzip(solver.x))
+
+    def translate(self, other, x):
+        """Translate degrees of freedom x from some other mapamaker to the current one.
+        The other mapmaker must have the same list of signals, except that they can have
+        different sample rate etc. than this one. See the individual Signal-classes
+        translate methods for details. This is used in multipass mapmaking."""
+        xnew = []
+        for ssig, osig, oval in zip(self.signals, other.signals, x):
+            xnew.append(ssig.translate(osig, oval))
+        return xnew
+
+    def transeval(self, id, obs, other, x, tod=None):
+        """Evaluate degrees of freedom x for the given tod after translating
+        it from those used by another, similar mapmaker. This will have the same
+        signals, but possibly with different sample rates etc."""
+        if tod is None: tod = np.zeros([obs.dets.count, obs.samps.count], self.dtype)
+        for si, (ssig, osig, oval), in reversed(list(enumerate(zip(self.signals,other.signals,x)))):
+            ssig.transeval(id, obs, osig, oval, tod=tod)
+        return tod
 
 class Signal:
     """This class represents a thing we want to solve for, e.g. the sky, ground, cut samples, etc."""
@@ -165,6 +196,8 @@ class Signal:
     def to_work  (self, x): return x.copy()
     def from_work(self, x): return x
     def write   (self, prefix, tag, x): pass
+    def translate(self, other, x): return x
+    def transeval(self, id, obs, other, x, tod): pass
 
 class SignalMap(Signal):
     """Signal describing a non-distributed sky map."""
@@ -307,6 +340,52 @@ class SignalMap(Signal):
                 enmap.write_map(oname, m)
         return oname
 
+    def _checkcompat(self, other):
+        # Check if other is compatible with us. For SignalMap, we currently
+        # only support direct equivalence
+        if other.sys != self.sys or other.recenter != self.recenter:
+            raise ValueError("Coordinate system mismatch")
+        if other.tiled != self.tiled:
+            raise ValueError("Tiling mismatch")
+        if self.tiled:
+            if other.rhs.geometry.shape != self.rhs.geometry.shape:
+                raise ValueError("Geometry mismatch")
+            # Tiling is not set up yet by the time transeval is called.
+            # Transeval doesn't need the tiling to match, though
+            #if other.rhs.ntile != self.rhs.ntile or other.rhs.nactive != self.rhs.nactive:
+            #    raise ValueError("Tiling mismatch")
+        else:
+            if other.rhs.shape != self.rhs.shape:
+                raise ValueError("Geometry mismatch")
+
+    def translate(self, other, map):
+        """Translate map from another SignalMap representation to the current,
+        returning a new map. The new map may be a reference to the original."""
+        # Currently we don't support any actual translation, but could handle
+        # resolution changes in the future (probably not useful though)
+        self._checkcompat(other)
+        return map
+
+    def transeval(self, id, obs, other, map, tod):
+        """Translate map from SignalMap other to the current SignalMap,
+        and then evaluate it for the given observation, returning a tod.
+        This is used when building a signal-free tod for the noise model
+        in multipass mapmaking."""
+        # Currently we don't support any actual translation, but could handle
+        # resolution changes in the future (probably not useful though)
+        self._checkcompat(other)
+        # Build the local geometry and pointing matrix for this observation
+        if self.recenter:
+            rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter,
+                ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
+        else: rot = None
+        pmap = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry,
+            rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site),
+            interpol=self.interpol)
+        # Build the RHS for this observation
+        pmap.from_map(dest=tod, signal_map=map, comps=self.comps)
+        return tod
+
 class SignalCut(Signal):
     def __init__(self, comm, name="cut", ofmt="{name}_{rank:02}", dtype=np.float32,
             output=False, cut_type=None):
@@ -373,6 +452,41 @@ class SignalCut(Signal):
         with h5py.File(oname, "w") as hfile:
             hfile["data"] = m
         return oname
+
+    def _checkcompat(self, other):
+        if other.cut_type != self.cut_type:
+            raise ValueError("Cut type mismatch")
+
+    def translate(self, other, junk):
+        """Translate junk degrees of freedom from one SignalCut representation
+        to another, e.g. changing sample rate. Returns the result"""
+        self._checkcompat(other)
+        res = np.full(self.off, -1e10, self.dtype)
+        for id in self.data:
+            sdata = self .data[id]
+            odata = other.data[id]
+            so3g.translate_cuts(odata.pcut.cuts, sdata.pcut.cuts, sdata.pcut.model, sdata.pcut.params, junk[odata.i1:odata.i2], res[sdata.i1:sdata.i2])
+        return res
+
+    def transeval(self, id, obs, other, junk, tod):
+        """Translate data junk from SignalCut other to the current SignalCut,
+        and then evaluate it for the given observation, returning a tod.
+        This is used when building a signal-free tod for the noise model
+        in multipass mapmaking."""
+        self._checkcompat(other)
+        # We have to make a pointing matrix from scratch because add_obs
+        # won't have been called yet at this point
+        spcut = PmatCut(obs.glitch_flags, model=self.cut_type)
+        # We do have one for other though, since that will be the output
+        # from the previous round of multiplass mapmaking.
+        odata = other.data[id]
+        sjunk = np.zeros(spcut.njunk, junk.dtype)
+        # Translate the cut degrees of freedom. The sample rate could have
+        # changed, for example.
+        so3g.translate_cuts(odata.pcut.cuts, spcut.cuts, spcut.model, spcut.params, junk[odata.i1:odata.i2], sjunk)
+        # And project onto the tod
+        spcut.forward(tod, sjunk)
+        return tod
 
 class ArrayZipper:
     def __init__(self, shape, dtype, comm=None):
