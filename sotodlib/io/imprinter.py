@@ -398,11 +398,13 @@ class Imprinter:
             if commit:
                 session.commit()
 
-    @loop_over_sources
-    def register_timecode_books(self, source, commit=True, session=None):
+    def register_timecode_books(self, commit=True, session=None):
         """Register smurf and stray books with database. We do not expect many
         stray books as nearly all .g3 files will be associated with some
         obs or oper book.
+
+        stray and smurf books are made per DAQ node, mean there will be one
+        per imprinter instance on the site setup.
         """
         session = session or self.get_session()
 
@@ -1016,6 +1018,7 @@ class Imprinter:
         )
         if final_time < max_ctime:
             max_ctime = final_time
+        self.logger.debug(f"Searching between {min_ctime} and {max_ctime}")
 
         # check for incomplete observations in time range
         q_incomplete = session.query(G3tObservations).filter(
@@ -1028,6 +1031,10 @@ class Imprinter:
         # bookbind any observations overlapping the incomplete ones.
         if q_incomplete.count() > 0:
             max_ctime = min([obs.timestamp for obs in q_incomplete.all()])
+            self.logger.debug(
+                f"Found {q_incomplete.count()} incomplete observations. "
+                f"updating max ctime to {max_ctime}"
+            )
         max_stop = dt.datetime.utcfromtimestamp(max_ctime)
 
         # find all complete observations that start within the time range
@@ -1038,6 +1045,7 @@ class Imprinter:
             G3tObservations.stop < max_stop,
             not_(G3tObservations.stop == None),
         )
+        self.logger.debug(f"Found {obs_q.count()} level 2 observations to consider")
 
         output = []
         for stream in streams:
@@ -1124,7 +1132,7 @@ class Imprinter:
 
         # remove exact duplicates in output
         output = drop_duplicates(output)
-
+        self.logger.debug(f"Found {len(output)} possible books to register")
         # now our output is a list of ObsSet, where each ObsSet contains
         # all observations that overlap each other which should go
         # into the same book.
