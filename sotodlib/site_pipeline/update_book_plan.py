@@ -41,7 +41,7 @@ def main(
     imprinter = Imprinter(config, db_args={'connect_args': {'check_same_thread': False}})
     # leaving min_ctime and max_ctime as None will go through all available data,
     # so preferreably set them to a reasonable range based on update_delay
-    if not from_scratch:
+    if not from_scratch and min_ctime is None:
         min_ctime = dt.datetime.now() - dt.timedelta(days=update_delay)
     if isinstance(min_ctime, dt.datetime):
         min_ctime = min_ctime.timestamp()
