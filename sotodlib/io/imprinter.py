@@ -137,10 +137,10 @@ class Books(Base):
 
 
 # convenient decorator to repeat a method over all data sources
-def loop_over_sources(method):
+def loop_over_tubes(method):
     def wrapper(self, *args, **kwargs):
-        for source in self.sources:
-            method(self, source, *args, **kwargs)
+        for tube in self.tubes:
+            method(self, tube, *args, **kwargs)
 
     return wrapper
 
@@ -149,46 +149,50 @@ class Imprinter:
     def __init__(self, im_config=None, db_args={}, logger=None):
         """Imprinter manages the book database.
         
-        Imprinter at the site is set up to be one per level 2 daq node. Some pieces
-        of this code have worked with one imprinter for multiple daq nodes but this 
-        has not be end-to-end tested.
+        Imprinter at the site is set up to be one per level 2 daq node with a
+        one-to-one matching between imprinter instance and g3tsmurf instance. 
 
         Example configuration file::
         
           db_path: imprinter.db
-          
-          sources:
-            tel-tube1:
-              g3tsmurf: g3tsmurf config file
+          daq_node: daq-node
+          g3tsmurf: /path/to/config.yaml
+          output_root: /abs/path/to/output
+          build_hk: True 
+          build_det: True
+
+          tel_tubes:
+            tel_tube1:
               slots:
                 - stream_id1
                 - stream_id2
                 - stream_id3
-            tel-tube2:
-              g3tsmurf: g3tsmurf config file
+            tel_tube2:
               slots:
                 - stream_id4
                 - stream_id5
           
-          hk_sources:
-            daq-node:
-              g3tsmurf: g3tsmurf config file
-
-        The sources entry lists the different tel-tubes that will be bound into 
-        separate books containing only the stream_ids listed under slots. TODO: 
-        There is currently no option to have an empty slot. The tel-tube entries 
-        define the folder books are written to ex: output_root/tel-tube/obs/
-
-        The hk_sources entry determines if housekeeping books should be made, and 
-        where. While it take a g3tsmurf config key, that is just for symmetry with
-        sources. Those config files only need to include a data_prefix and g3thk_db 
-        entry if only hk books are being created from that configuration. The 
-        daq-node entry defines where the books are written to ex: output_root/daq-node/hk
-
-        The g3tsmurf configurations are assumed to be one per daq node, meaning 
-        this example could have the same config file repeated several times. The 
-        repetition is based on the idea that one imprinter could manage multiple 
-        daq-nodes, although that is not the current setup.
+        Standard Book directory structure based off config file example:
+        output_root/
+            tel_tube1/
+                obs/
+                oper/
+            tel_tube2/
+                obs/
+                oper/
+            daq-node/
+                smurf/
+                stray/
+                hk/
+        
+        The tel_tubes entry lists the different tel-tubes that will be bound
+        into separate books containing only the stream_ids listed under slots.
+        For the SATs we expect one entry under tel_tubes but the LAT will have
+        many. TODO: There is currently no option to have an empty slot. 
+        
+        The build_det_data and build_hk entries determines if detector books
+        (obs,oper,smurf,stray) and housekeeping (hk) books should be made,
+        respectively. 
 
         Parameters
         ----------
@@ -199,13 +203,20 @@ class Imprinter:
         logger: logger
             logger object
         """
+
         # load config file and parameters
         with open(im_config, "r") as f:
             self.config = yaml.safe_load(f)
 
-        self.db_path = self.config["db_path"]
-        self.sources = self.config.get("sources", {})
-        self.hk_sources = self.config.get("hk_sources", {})
+        self.db_path = self.config.get("db_path")
+        self.daq_node = self.config.get("daq_node")
+        self.output_root = self.config.get("output_root")
+        self.g3tsmurf_config = self.config.get("g3tsmurf")
+
+        self.build_hk = self.config.get("build_hk")
+        self.build_det = self.config.get("build_det")
+
+        self.tubes = self.config.get("tel_tubes", {})
 
         # check whether db_path directory exists
         if not op.exists(op.dirname(self.db_path)):
@@ -217,9 +228,9 @@ class Imprinter:
         Base.metadata.create_all(self.engine)
 
         self.session = None
-        self.g3tsmurf_sessions = {}
-        self.archives = {}
-        self.hk_archives = {}
+        self.g3tsmurf_session = None
+        self.archive = None
+        self.hk_archive = None
 
         self.logger = logger
         if logger is None:
@@ -240,7 +251,7 @@ class Imprinter:
             self.session = Session()
         return self.session
 
-    def get_g3tsmurf_session(self, source, return_archive=False):
+    def get_g3tsmurf_session(self, return_archive=False):
         """Get a new g3tsmurf session or return an existing one.
 
         Parameter
@@ -256,28 +267,22 @@ class Imprinter:
         archive: if return_archive is true
 
         """
-        if source not in self.g3tsmurf_sessions:
+        if self.g3tsmurf_session is None:
             (
-                self.g3tsmurf_sessions[source],
-                self.archives[source],
-            ) = create_g3tsmurf_session(self.sources[source]["g3tsmurf"])
+                self.g3tsmurf_session,
+                self.archive,
+            ) = create_g3tsmurf_session(self.g3tsmurf_config)
         if not return_archive:
-            return self.g3tsmurf_sessions[source]
-        return self.g3tsmurf_sessions[source], self.archives[source]
+            return self.g3tsmurf_session
+        return self.g3tsmurf_session, self.archive
 
-    def get_g3thk(self, source):
+    def get_g3thk(self):
         """Get a G3tHk database using the g3tsmurf config file."""
-        if source not in self.hk_archives:
-            if source in self.config["hk_sources"]:
-                s_type = "hk_sources"
-            elif source in self.config["sources"]:
-                s_type = "sources"
-            else:
-                raise ValueError(f"Cannot find {source} in configs")
-            self.hk_archives[source] = G3tHk.from_configs(
-                self.config[s_type][source]["g3tsmurf"]
+        if self.hk_archive is None:
+            self.hk_archive = G3tHk.from_configs(
+                self.g3tsmurf_config
             )
-        return self.hk_archives[source]
+        return self.hk_archive
 
     def register_book(self, obsset, bid=None, commit=True, session=None):
         """Register book to database
@@ -323,7 +328,9 @@ class Imprinter:
         timing_on = np.all([o.timing for o in obsset])
 
         # create observation and book objects
-        observations = [Observations(obs_id=obs_id) for obs_id in obsset.obs_ids]
+        observations = [
+            Observations(obs_id=obs_id) for obs_id in obsset.obs_ids
+        ]
         book = Books(
             bid=bid,
             obs=observations,
@@ -371,45 +378,60 @@ class Imprinter:
     def register_hk_books(self, commit=True, session=None):
         """Register housekeeping books to database"""
         session = session or self.get_session()
+        if not self.build_hk:
+            return
+        
+        with open(self.g3tsmurf_config, "r") as f:
+            g3tsmurf_cfg = yaml.safe_load(f)
+        lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
-        # fixme: tel_tube and daq_node may not be the same
-        for daq_node in self.hk_sources:
-            with open(self.hk_sources[daq_node]["g3tsmurf"], "r") as f:
-                g3tsmurf_cfg = yaml.safe_load(f)
-            data_root = g3tsmurf_cfg["data_prefix"]
-
-            # all ctime dir except the last ctime dir will be considered complete
-            ctime_dirs = sorted(glob(op.join(data_root, "hk", "*")))
-            for ctime_dir in ctime_dirs[:-1]:
-                ctime = op.basename(ctime_dir)
-                book_id = f"hk_{ctime}_{daq_node}"
-                # check whether the book exists
-                if self.get_book(book_id) is not None:
-                    continue
-                book = Books(
-                    bid=book_id,
-                    type="hk",
-                    status=UNBOUND,
-                    start=dt.datetime.utcfromtimestamp(int(ctime) * 1e5),
-                    stop=dt.datetime.utcfromtimestamp((int(ctime) + 1) * 1e5),
-                    tel_tube=daq_node,  # fixme: tel_tube and daq_node may not be the same
-                )
-                session.add(book)
-            if commit:
-                session.commit()
+        # all ctime dir except the last ctime dir will be considered complete
+        ctime_dirs = sorted(glob(op.join(lvl2_data_root, "hk", "*")))
+        for ctime_dir in ctime_dirs[:-1]:
+            ctime = op.basename(ctime_dir)
+            book_id = f"hk_{ctime}_{self.daq_node}"
+            # check whether the book exists
+            if self.get_book(book_id) is not None:
+                continue
+            book = Books(
+                bid=book_id,
+                type="hk",
+                status=UNBOUND,
+                start=dt.datetime.utcfromtimestamp(int(ctime) * 1e5),
+                stop=dt.datetime.utcfromtimestamp((int(ctime) + 1) * 1e5),
+                tel_tube=self.daq_node,  
+            )
+            session.add(book)
+        if commit:
+            session.commit()
 
     def register_timecode_books(self, commit=True, session=None):
         """Register smurf and stray books with database. We do not expect many
-        stray books as nearly all .g3 files will be associated with some
-        obs or oper book.
+        stray books as nearly all .g3 files will be associated with some obs or
+        oper book.
 
-        stray and smurf books are made per DAQ node, mean there will be one
-        per imprinter instance on the site setup.
+        stray and smurf books are made per DAQ node, meaning there will be one
+        per imprinter instance on the site setup. the making of these books
+        depends on the imprinter configuration having the correct stream_ids
+        indexed per source / tel-tube. All stream_ids not part of those lists
+        will be moved to stray books but only the finalization information from
+        the specified stream ids will be used to determine when to output these
+        books.
+
+        smurf books can be made whenever all the relevant metadata timecode
+        entries have been found. stray books can be made with metadata and file
+        timecode entries exist ASSUMING all obs/oper books in that time range
+        have been bound successfully.
         """
+        raise NotImplementedError("This function hasn't been finished yet")
+        if not self.build_det:
+            return
         session = session or self.get_session()
+        g3session = self.get_g3tsmurf_session()
 
-        g3session = self.get_g3tsmurf_session(source)
-        streams = self.sources[source].get("slots")
+        streams = []
+        for tube in self.tubes:
+            streams.append( self.tubes[tube].get("slots") )
 
         tcs = g3session.query(TimeCodes.timecode).distinct().all()
         stream_filt = or_(*[TimeCodes.stream_id == s for s in streams])
@@ -419,64 +441,76 @@ class Imprinter:
             q = g3session.query(TimeCodes).filter(TimeCodes.timecode == tc, stream_filt)
             files = q.filter(TimeCodes.suprsync_type == SupRsyncType.FILES.value)
             meta = q.filter(TimeCodes.suprsync_type == SupRsyncType.META.value)
+            
+            if not meta.count() == len(streams):
+                # not ready to make any books
+                continue
+            
+            ## register smurf  books
+            book_start = dt.datetime.utcfromtimestamp(tc * 1e5)
+            book_stop = dt.datetime.utcfromtimestamp((tc + 1) * 1e5)
 
-            if files.count() == len(streams) and meta.count() == len(streams):
-                ## register books
-                book_start = dt.datetime.utcfromtimestamp(tc * 1e5)
-                book_stop = dt.datetime.utcfromtimestamp((tc + 1) * 1e5)
-
-                book_id = f"smurf_{tc}_{source}"
-                if self.get_book(book_id) is None:
-                    self.logger.debug(f"registering {book_id}")
-                    book1 = Books(
-                        bid=book_id,
-                        type="smurf",
-                        status=UNBOUND,
-                        tel_tube=source,
-                        start=book_start,
-                        stop=book_stop,
-                    )
-                    session.add(book1)
-                q = g3session.query(Files).filter(
-                    Files.start >= book_start,
-                    Files.start < book_stop,
-                    stream_filt_files,
-                    Files.obs_id == None,
+            book_id = f"smurf_{tc}_{self.daq_node}"
+            if self.get_book(book_id) is None:
+                self.logger.debug(f"registering {book_id}")
+                smurf_book = Books(
+                    bid=book_id,
+                    type="smurf",
+                    status=UNBOUND,
+                    tel_tube=self.daq_node,
+                    start=book_start,
+                    stop=book_stop,
                 )
-                book_id = f"stray_{tc}_{source}"
+                session.add(smurf_book)
 
-                if q.count() > 0 and self.get_book(book_id) is None:
-                    book2 = Books(
-                        bid=book_id,
-                        type="stray",
-                        status=UNBOUND,
-                        tel_tube=source,
-                        start=book_start,
-                        stop=book_stop,
-                    )
-                    session.add(book2)
+            if not files.count() == len(streams):
+                #not ready to make stray books
+                continue
+
+            book_id = f"stray_{tc}_{self.daq_node}"
+            if self.get_book(book_id) is not None:
+                # book already registered
+                continue
+
+            # look for failed or unbound books
+            q = session.query(Books).filter(
+                Books.start >= book_start,
+                Books.stop < book_stop,
+                or_(Books.type == 'obs', Books.type == 'oper'),
+                or_(Books.status == UNBOUND, Books.status == FAILED), 
+            )
+            if q.count() > 0:
+                self.logger.info(f"Not ready to bind {book_id} due to unbound or "
+                                  "failed obs/oper books.")
+                continue
+            stray_book = Books(
+                bid=book_id,
+                type="stray",
+                status=UNBOUND,
+                tel_tube=self.daq_node,
+                start=book_start,
+                stop=book_stop,
+            )
+            flist = self.get_files_for_book(stray_book)
+            if len(flist) > 0:
+                session.add(stray_book)
         if commit:
             session.commit()
 
     def _get_binder_for_book(self, 
         book, 
-        output_root="out", 
         pbar=False, 
         ignore_tags=False
     ):
         """get the appropriate bookbinder for the book based on its type"""
-        if book.type == 'hk':
-            g3tsmurf_cfg_file = self.hk_sources[book.tel_tube]["g3tsmurf"]
-        else:
-            g3tsmurf_cfg_file = self.sources[book.tel_tube]["g3tsmurf"]
-        with open(g3tsmurf_cfg_file, "r") as f:
+        with open(self.g3tsmurf_config, "r") as f:
             g3tsmurf_cfg = yaml.safe_load(f)
-        data_root = g3tsmurf_cfg["data_prefix"]
+        lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if book.type in ["obs", "oper"]:
             session_id = book.bid.split("_")[1]
             first5 = session_id[:5]
-            odir = op.join(output_root, book.tel_tube, book.type, first5)
+            odir = op.join(self.output_root, book.tel_tube, book.type, first5)
             if not op.exists(odir):
                 os.makedirs(odir)
             book_path = os.path.join(odir, book.bid)
@@ -490,20 +524,20 @@ class Imprinter:
 
             # bind book using bookbinder library
             bookbinder = BookBinder(
-                book, obsdb, filedb, data_root, readout_ids, book_path,
+                book, obsdb, filedb, lvl2_data_root, readout_ids, book_path,
                 ignore_tags=ignore_tags,
             )
             return bookbinder
 
         elif book.type in ["hk", "smurf"]:
             # get source directory for hk book
-            root = op.join(data_root, book.type)
+            root = op.join(lvl2_data_root, book.type)
             first5 = book.bid.split("_")[1]
             assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
             book_path_src = op.join(root, first5)
 
             # get target directory for hk book
-            odir = op.join(output_root, book.tel_tube, book.type)
+            odir = op.join(self.output_root, book.tel_tube, book.type)
             if not op.exists(odir):
                 os.makedirs(odir)
             book_path_tgt = os.path.join(odir, book.bid)
@@ -538,13 +572,13 @@ class Imprinter:
             flist = self.get_files_for_book(book)
 
             # get source directory for stray book
-            root = op.join(data_root, "timestreams")
+            root = op.join(lvl2_data_root, "timestreams")
             first5 = book.bid.split("_")[1]
             assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
             book_path_src = op.join(root, first5)
 
             # get target directory for hk book
-            odir = op.join(output_root, book.tel_tube, book.type)
+            odir = op.join(self.output_root, book.tel_tube, book.type)
             if not op.exists(odir):
                 os.makedirs(odir)
             book_path_tgt = os.path.join(odir, book.bid)
@@ -586,7 +620,6 @@ class Imprinter:
         self,
         book,
         session=None,
-        output_root="out",
         message="",
         test_mode=False,
         pbar=False,
@@ -599,8 +632,6 @@ class Imprinter:
         bid: str
             book id
         session: BookDB session
-        output_root: str
-            output root directory
         message: string
             message to be added to the book
         test_mode : bool
@@ -633,7 +664,6 @@ class Imprinter:
             # find appropriate binder for the book type
             binder = self._get_binder_for_book(
                 book, 
-                output_root=output_root,
                 ignore_tags=ignore_tags,
             )
             binder.bind(pbar=pbar)
@@ -735,7 +765,9 @@ class Imprinter:
         if session is None: session = self.get_session()
         return session.query(Books).filter(Books.status == status).all()
     
-    def get_level2_deleteable_books(self, session=None, cleanup_delay=None, max_time=None):
+    def get_level2_deleteable_books(
+            self, session=None, cleanup_delay=None, max_time=None
+        ):
         """Get all bound books from database where we need to delete the level2
         data
 
@@ -753,7 +785,7 @@ class Imprinter:
         -------
         books: list of book objects
         """
-
+        raise NotImplementedError("This function hasn't been fixed yet")
         if session is None:
             session = self.get_session()
         if cleanup_delay is None:
@@ -769,10 +801,13 @@ class Imprinter:
                 Books.type == "hk",
             ),
         )
-        sources = session.query(Books.tel_tube).filter(base_filt).distinct().all()
+        sources = session.query(
+            Books.tel_tube
+        ).filter(base_filt).distinct().all()
+
         source_filt = []
         for source, in sources:
-            streams = self.sources[source].get("slots")
+            streams = self.tubes[source].get("slots")
             _, SMURF = self.get_g3tsmurf_session(source, return_archive=True)
             limit = SMURF.get_final_time(streams, check_control=False)
             max_stop = dt.datetime.utcfromtimestamp(limit) - dt.timedelta(days=cleanup_delay)
@@ -955,10 +990,10 @@ class Imprinter:
             session = self.get_session()
         session.rollback()
 
-    @loop_over_sources
+    @loop_over_tubes
     def update_bookdb_from_g3tsmurf(
         self,
-        source,
+        tube,
         min_ctime=None,
         max_ctime=None,
         min_overlap=30,
@@ -970,8 +1005,8 @@ class Imprinter:
 
         Parameters
         ----------
-        source: str
-            g3tsmurf db source. e.g., 'sat1', 'latrt', 'tsat'
+        tube: str
+            which tube to look at. e.g., 'lati6', 'lati1', 'satp1'
         min_ctime: float
             minimum ctime to consider (in seconds since unix epoch)
         max_ctime: float
@@ -986,7 +1021,9 @@ class Imprinter:
         force_single_stream: boolean
             if True, treat observations from different streams separately
         """
-        session, SMURF = self.get_g3tsmurf_session(source, return_archive=True)
+        if not self.build_det:
+            return
+        session, SMURF = self.get_g3tsmurf_session(return_archive=True)
         # set sensible ctime range is none is given
         if min_ctime is None:
             min_ctime = (
@@ -999,7 +1036,7 @@ class Imprinter:
 
         # get wafers
         if stream_ids is None:
-            streams = self.sources[source].get("slots")
+            streams = self.tubes[tube].get("slots")
             if streams is None:
                 raise ValueError(
                     f"Imprinter missing slot / stream_id" " information for {source}"
@@ -1045,7 +1082,9 @@ class Imprinter:
             G3tObservations.stop < max_stop,
             not_(G3tObservations.stop == None),
         )
-        self.logger.debug(f"Found {obs_q.count()} level 2 observations to consider")
+        self.logger.debug(
+            f"Found {obs_q.count()} level 2 observations to consider"
+        )
 
         output = []
         for stream in streams:
@@ -1058,8 +1097,8 @@ class Imprinter:
                         ObsSet(
                             [str_obs],
                             mode="oper",
-                            slots=self.sources[source]["slots"],
-                            tel_tube=source,
+                            slots=self.tubes[tube]["slots"],
+                            tel_tube=tube,
                         )
                     )
                 elif get_obs_type(str_obs) == "obs":
@@ -1069,12 +1108,13 @@ class Imprinter:
                             ObsSet(
                                 [str_obs],
                                 mode="obs",
-                                slots=self.slots,
-                                tel_tube=self.tel_tube,
+                                slots=self.tubes[tube]["slots"],
+                                tel_tube=tube,
                             )
                         )
                     else:
-                        # query for all possible types of overlapping observations from other streams
+                        # query for all possible types of overlapping 
+                        # observations from other streams
                         q = obs_q.filter(
                             G3tObservations.stream_id != str_obs.stream_id,
                             stream_filt,
@@ -1096,13 +1136,14 @@ class Imprinter:
 
                         # if we failed to find any overlapping observations
                         if q.count() == 0 and not ignore_singles:
-                            # append only this one when there's no overlapping segments
+                            # append only this one when there's no overlapping 
+                            # segments
                             output.append(
                                 ObsSet(
                                     [str_obs],
                                     mode="obs",
-                                    slots=self.sources[source]["slots"],
-                                    tel_tube=source,
+                                    slots=self.tubes[tube]["slots"],
+                                    tel_tube=tube,
                                 )
                             )
 
@@ -1111,11 +1152,14 @@ class Imprinter:
                             obs_list = q.all()
                             # add the current obs too
                             obs_list.append(str_obs)
-                            # check to make sure ALL observations overlap all others
-                            # and the overlap passes the minimum requirement
-                            overlap_time = np.min([o.stop for o in obs_list]) - np.max(
-                                [o.start for o in obs_list]
+                            # check to make sure ALL observations overlap all 
+                            # others and the overlap passes the minimum 
+                            # requirement
+                            overlap_time = (
+                                np.min([o.stop for o in obs_list]) - 
+                                np.max([o.start for o in obs_list])
                             )
+
                             if overlap_time.total_seconds() < 0:
                                 continue
                             if overlap_time.total_seconds() < min_overlap:
@@ -1125,8 +1169,8 @@ class Imprinter:
                                 ObsSet(
                                     obs_list,
                                     mode="obs",
-                                    slots=self.sources[source]["slots"],
-                                    tel_tube=source,
+                                    slots=self.tubes[tube]["slots"],
+                                    tel_tube=tube,
                                 )
                             )
 
@@ -1162,9 +1206,8 @@ class Imprinter:
             {obs_id: [file_paths...]}
 
         """
-        if book.type in ["obs", "oper", "stray"]:
-            session = self.get_g3tsmurf_session(book.tel_tube)
         if book.type in ["obs", "oper"]:
+            session = self.get_g3tsmurf_session()
             obs_ids = [o.obs_id for o in book.obs]
             obs = (
                 session.query(G3tObservations)
@@ -1180,8 +1223,27 @@ class Imprinter:
             ## TODO: errant stream ids
             ## TODO: wont_bind book files
             ## TODO: Files that have not been added to any book
+            session = self.get_session()
+            
+            ## build list of files already in bound books
+            ## Note: stray books should not be registered if there are failed or
+            ## unbound books during their time range
+            book_list = session.query(Books).filter(
+                Books.start >= book.start,
+                Books.start < book.stop,
+                or_(Books.type == 'obs', Books.type == 'oper'),
+                Books.status != WONT_BIND,
+            ).all()
+            files_in_books = []
+            for b in book_list:
+                flist = self.get_files_for_book(b)
+                for k in flist:
+                    files_in_books.extend(flist[k])
+            ## TODO: have list, now compare to whats in files table
+
             tcode = int(book.bid.split("_")[1])
-            streams = self.sources[book.tel_tube].get("slots")
+            
+            streams = self.tubes[book.tel_tube].get("slots")
             stream_filt_files = or_(*[Files.stream_id == s for s in streams])
             flist = (
                 session.query(Files)
@@ -1224,7 +1286,7 @@ class Imprinter:
             {obs_id: [readout_ids...]}}
 
         """
-        _, SMURF = self.get_g3tsmurf_session(book.tel_tube, return_archive=True)
+        _, SMURF = self.get_g3tsmurf_session(return_archive=True)
         out = {}
         # load all obs and associated files
         for obs_id, files in self.get_files_for_book(book).items():
@@ -1319,7 +1381,7 @@ class Imprinter:
             {obs_id: G3tObservations}
 
         """
-        session = self.get_g3tsmurf_session(book.tel_tube)
+        session = self.get_g3tsmurf_session()
         obs_ids = [o.obs_id for o in book.obs]
         obs = (
             session.query(G3tObservations)
