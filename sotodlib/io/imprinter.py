@@ -375,7 +375,7 @@ class Imprinter:
         if commit:
             session.commit()
 
-    def register_hk_books(self, commit=True, session=None):
+    def register_hk_books(self, min_ctime=None, max_ctime=None, session=None):
         """Register housekeeping books to database"""
         session = session or self.get_session()
         if not self.build_hk:
@@ -385,10 +385,19 @@ class Imprinter:
             g3tsmurf_cfg = yaml.safe_load(f)
         lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
+        if min_ctime is None:
+            min_ctime = 16000e5
+        if max_ctime is None:
+            max_ctime = 5e10
+
         # all ctime dir except the last ctime dir will be considered complete
         ctime_dirs = sorted(glob(op.join(lvl2_data_root, "hk", "*")))
         for ctime_dir in ctime_dirs[:-1]:
             ctime = op.basename(ctime_dir)
+            if int(ctime) < int(min_ctime//1e5):
+                continue
+            if int(ctime) > int(max_ctime//1e5):
+                continue
             book_id = f"hk_{ctime}_{self.daq_node}"
             # check whether the book exists
             if self.get_book(book_id) is not None:
@@ -402,28 +411,33 @@ class Imprinter:
                 tel_tube=self.daq_node,  
             )
             session.add(book)
-        if commit:
             session.commit()
 
-    def register_timecode_books(self, commit=True, session=None):
+    def register_timecode_books(
+        self, 
+        min_ctime=None, 
+        max_ctime=None,
+        session=None
+    ):
         """Register smurf and stray books with database. We do not expect many
         stray books as nearly all .g3 files will be associated with some obs or
         oper book.
 
         stray and smurf books are made per DAQ node, meaning there will be one
-        per imprinter instance on the site setup. the making of these books
+        per imprinter instance on the site setup. The making of these books
         depends on the imprinter configuration having the correct stream_ids
-        indexed per source / tel-tube. All stream_ids not part of those lists
+        indexed per tel-tube. All stream_ids not part of those lists
         will be moved to stray books but only the finalization information from
         the specified stream ids will be used to determine when to output these
         books.
 
-        smurf books can be made whenever all the relevant metadata timecode
-        entries have been found. stray books can be made with metadata and file
-        timecode entries exist ASSUMING all obs/oper books in that time range
-        have been bound successfully.
+        smurf books are registered whenever all the relevant metadata timecode
+        entries have been found. stray books are registered when metadata and
+        file timecode entries exist ASSUMING all obs/oper books in that time
+        range have been bound successfully.
+
         """
-        raise NotImplementedError("This function hasn't been finished yet")
+
         if not self.build_det:
             return
         session = session or self.get_session()
@@ -431,19 +445,28 @@ class Imprinter:
 
         streams = []
         for tube in self.tubes:
-            streams.append( self.tubes[tube].get("slots") )
+            streams.extend( self.tubes[tube].get("slots") )
 
-        tcs = g3session.query(TimeCodes.timecode).distinct().all()
+        tcs = g3session.query(TimeCodes.timecode)
+        if min_ctime is not None:
+            tcs = tcs.filter(TimeCodes.timecode >= int(min_ctime//1e5))
+        if max_ctime is not None:
+            tcs = tcs.filter(TimeCodes.timecode <= int(max_ctime//1e5)+1)
+        tcs = tcs.distinct().all()
         stream_filt = or_(*[TimeCodes.stream_id == s for s in streams])
-        stream_filt_files = or_(*[Files.stream_id == s for s in streams])
 
         for (tc,) in tcs:
-            q = g3session.query(TimeCodes).filter(TimeCodes.timecode == tc, stream_filt)
-            files = q.filter(TimeCodes.suprsync_type == SupRsyncType.FILES.value)
+            q = g3session.query(TimeCodes).filter(
+                TimeCodes.timecode == tc, stream_filt
+            )
+            files = q.filter(
+                TimeCodes.suprsync_type == SupRsyncType.FILES.value
+            )
             meta = q.filter(TimeCodes.suprsync_type == SupRsyncType.META.value)
             
             if not meta.count() == len(streams):
                 # not ready to make any books
+                self.logger.debug(f"Not ready to make timecode books for {tc}")
                 continue
             
             ## register smurf  books
@@ -462,6 +485,7 @@ class Imprinter:
                     stop=book_stop,
                 )
                 session.add(smurf_book)
+                session.commit()
 
             if not files.count() == len(streams):
                 #not ready to make stray books
@@ -475,13 +499,15 @@ class Imprinter:
             # look for failed or unbound books
             q = session.query(Books).filter(
                 Books.start >= book_start,
-                Books.stop < book_stop,
+                Books.start < book_stop,
                 or_(Books.type == 'obs', Books.type == 'oper'),
                 or_(Books.status == UNBOUND, Books.status == FAILED), 
             )
             if q.count() > 0:
-                self.logger.info(f"Not ready to bind {book_id} due to unbound or "
-                                  "failed obs/oper books.")
+                self.logger.info(
+                    f"Not ready to bind {book_id} due to unbound or "
+                    "failed obs/oper books."
+                )
                 continue
             stray_book = Books(
                 bid=book_id,
@@ -494,8 +520,7 @@ class Imprinter:
             flist = self.get_files_for_book(stray_book)
             if len(flist) > 0:
                 session.add(stray_book)
-        if commit:
-            session.commit()
+                session.commit()
 
     def _get_binder_for_book(self, 
         book, 
@@ -934,38 +959,6 @@ class Imprinter:
             return False
         return book.status == BOUND
 
-    def set_book_wont_bind(self, book, message=None, session=None):
-        """Change book status to WONT_BIND, meaning the files indicated into 
-        this book will not be bound. .g3 files here will go into stray books.
-
-        This function should not be integrated into automated data packaging.
-
-        This book status is necessary because without it the automated data 
-        packaging could continue to try and register and fail on the same book. 
-
-        Parameters
-        -----------
-        book: str or Book 
-        message: str or None
-            if not none, update book message to explain why the setting is changing
-        session: BookDB session.
-        
-        """
-        if session is None:
-            session = self.get_session()
-
-        if isinstance(book, str):
-            book = self.get_book(book)
-
-        if book.status != FAILED:
-            self.logger.warning(
-                f"Book {book} has not failed before being set not to WONT_BIND"
-            )
-        book.status = WONT_BIND 
-        if message is not None:
-            book.message = message
-        session.commit()
-
     def commit(self, session=None):
         """Commit the book db.
 
@@ -1220,14 +1213,9 @@ class Imprinter:
                 res[o.obs_id] = sorted([f.name for f in o.files])
             return res
         elif book.type in ["stray"]:
-            ## TODO: errant stream ids
-            ## TODO: wont_bind book files
-            ## TODO: Files that have not been added to any book
             session = self.get_session()
             
             ## build list of files already in bound books
-            ## Note: stray books should not be registered if there are failed or
-            ## unbound books during their time range
             book_list = session.query(Books).filter(
                 Books.start >= book.start,
                 Books.start < book.stop,
@@ -1239,22 +1227,22 @@ class Imprinter:
                 flist = self.get_files_for_book(b)
                 for k in flist:
                     files_in_books.extend(flist[k])
-            ## TODO: have list, now compare to whats in files table
-
-            tcode = int(book.bid.split("_")[1])
             
-            streams = self.tubes[book.tel_tube].get("slots")
-            stream_filt_files = or_(*[Files.stream_id == s for s in streams])
-            flist = (
-                session.query(Files)
-                .filter(
-                    Files.name.like(f"%/{tcode}/%"),
-                    stream_filt_files,
-                    Files.obs_id == None,
-                )
-                .all()
-            )
-            return [f.name for f in flist]
+            g3session = self.get_g3tsmurf_session()
+            tcode = int(book.bid.split("_")[1])
+
+            files_in_tc = g3session.query(Files).filter(
+                Files.name.like(f"%/{tcode}/%"),
+            ).all()
+            files_in_tc = [f.name for f in files_in_tc]
+            
+            files_into_stray = []
+            for f in files_in_tc:
+                if f in files_in_books:
+                    continue
+                files_into_stray.append(f)
+            return files_into_stray
+        
         elif book.type == "hk":
             HK = self.get_g3thk(book.tel_tube)
             flist = (
