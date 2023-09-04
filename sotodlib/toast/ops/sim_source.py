@@ -574,7 +574,7 @@ class SimSource(Operator):
             # We have already read the single beam file.
             beam_dic = self.beam_props["ALL"]
         else:
-            with h5py(self.beam_file, 'r') as f_t:
+            with h5py.File(self.beam_file, 'r') as f_t:
                 beam_dic = {}
                 beam_dic["data"] = f_t["beam"][:]
                 beam_dic["size"] = [[f_t["beam"].attrs["size"], f_t["beam"].attrs["res"]], [f_t["beam"].attrs["npix"], 1]]
