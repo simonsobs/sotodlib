@@ -5,15 +5,13 @@ import argparse
 from sotodlib.io.imprinter import Imprinter
 
 
-def main(config: str, output_root: str, logger=None):
+def main(config: str, logger=None):
     """Make books based on imprinter db
     
     Parameters
     ----------
     im_config : str
         path to imprinter configuration file
-    output_root : str
-        root path of the books 
     """
     imprinter = Imprinter(config, db_args={'connect_args': {'check_same_thread': False}})
     # get unbound books
@@ -25,7 +23,7 @@ def main(config: str, output_root: str, logger=None):
     for book in unbound_books:
         print(f"Binding book {book.bid}")
         try:
-            imprinter.bind_book(book, output_root=output_root)
+            imprinter.bind_book(book)
         except Exception as e:
             print(f"Error binding book {book.bid}: {e}")
             print(traceback.format_exc())
@@ -38,7 +36,7 @@ def main(config: str, output_root: str, logger=None):
             continue
         print(f"Binding book {book.bid}")
         try:
-            imprinter.bind_book(book, output_root=output_root)
+            imprinter.bind_book(book)
         except Exception as e:
             print(f"Error binding book {book.bid}: {e}")
             print(traceback.format_exc())

@@ -1306,8 +1306,9 @@ class G3tSmurf:
                     session.query(TimeCodes)
                     .filter(
                         TimeCodes.stream_id == subdir,
-                        TimeCodes.suprsync_type
-                        == SupRsyncType.from_string(info["archive_name"]).value,
+                        TimeCodes.suprsync_type == SupRsyncType.from_string(
+                            info["archive_name"]
+                        ).value,
                         TimeCodes.timecode == info["timecode"],
                     )
                     .one_or_none()

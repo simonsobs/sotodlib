@@ -38,24 +38,29 @@ def main(
     """
     if stream_ids is not None:
         stream_ids = stream_ids.split(",")
-    imprinter = Imprinter(config, db_args={'connect_args': {'check_same_thread': False}})
-    # leaving min_ctime and max_ctime as None will go through all available data,
-    # so preferreably set them to a reasonable range based on update_delay
-    if not from_scratch:
+    imprinter = Imprinter(
+        config, db_args={'connect_args': {'check_same_thread': False}}
+    )
+    
+    # leaving min_ctime and max_ctime as None will go through all available 
+    # data, so preferreably set them to a reasonable range based on update_delay
+    if not from_scratch and min_ctime is None:
         min_ctime = dt.datetime.now() - dt.timedelta(days=update_delay)
     if isinstance(min_ctime, dt.datetime):
         min_ctime = min_ctime.timestamp()
     if isinstance(max_ctime, dt.datetime):
         max_ctime = max_ctime.timestamp()
     # obs and oper books
-    imprinter.update_bookdb_from_g3tsmurf(min_ctime=min_ctime, max_ctime=max_ctime,
-                                          ignore_singles=False,
-                                          stream_ids=stream_ids,
-                                          force_single_stream=force_single_stream)
+    imprinter.update_bookdb_from_g3tsmurf(
+        min_ctime=min_ctime, max_ctime=max_ctime,
+        ignore_singles=False,
+        stream_ids=stream_ids,
+        force_single_stream=force_single_stream
+    )
     # hk books
-    imprinter.register_hk_books()
+    imprinter.register_hk_books(min_ctime=min_ctime, max_ctime=max_ctime)
     # smurf and stray books
-    imprinter.register_timecode_books()
+    imprinter.register_timecode_books(min_ctime=min_ctime, max_ctime=max_ctime)
 
 def get_parser(parser=None):
     if parser is None:
