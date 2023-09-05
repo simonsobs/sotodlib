@@ -584,7 +584,7 @@ class SimSource(Operator):
 
     source_noise_out = Quantity(
         u.Quantity(0, u.W / u.Hz),
-        help = 'White noise level in the emission band'
+        help = 'White noise level outside the emission band'
     )
 
     source_pol_angle = Float(
@@ -1047,7 +1047,7 @@ class SimSource(Operator):
             # We have already read the single beam file.
             beam_dic = self.beam_props["ALL"]
         else:
-            with h5py(self.beam_file, 'r') as f_t:
+            with h5py.File(self.beam_file, 'r') as f_t:
                 beam_dic = {}
                 beam_dic["data"] = f_t["beam"][:]
                 beam_dic["size"] = [[f_t["beam"].attrs["size"], f_t["beam"].attrs["res"]], [f_t["beam"].attrs["npix"], 1]]
@@ -1163,12 +1163,17 @@ class SimSource(Operator):
                 self.source_pol_angle
                 + np.random.normal(0, self.source_pol_angle_error, size=(len(sig)))
             )
+            
+            I = sig.copy()
+            Q = pfrac * sig * np.cos(2 * angle)
+            U = pfrac * sig * np.sin(2 * angle)
 
-            sig *= weights_I + pfrac * (
-                np.cos(2 * angle) * weights_Q + np.sin(2 * angle) * weights_U
-            )
+            drone_sig = (I * weights_I
+                    + Q * weights_Q
+                    + U * weights_U
+                   )
 
-            signal[good] += sig
+            signal[good] += drone_sig
 
             timer.stop()
             if data.comm.world_rank == 0:
