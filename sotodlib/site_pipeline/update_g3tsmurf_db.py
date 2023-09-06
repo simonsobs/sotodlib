@@ -85,7 +85,9 @@ def main(config: Optional[str] = None, update_delay: float = 2,
 
     session = SMURF.Session()
 
-    new_obs = session.query(Observations).filter(Observations.start >= min_time).all()
+    new_obs = session.query(Observations).filter(
+        Observations.start >= min_time
+    ).all()
 
     for obs in new_obs:
         if obs.stop is None or len(obs.tunesets)==0:
@@ -103,7 +105,9 @@ def main(config: Optional[str] = None, update_delay: float = 2,
                     if "has_tuneset" in to_record:
                         record_tuning(monitor, obs, cfgs)
                 except Exception as e:
-                    logger.error(f"Monitor Update failed for {obs.obs_id} with {e}")
+                    logger.error(
+                        f"Monitor Update failed for {obs.obs_id} with {e}"
+                    )
 
 def _obs_tags(obs, cfgs):
     
