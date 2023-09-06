@@ -158,6 +158,7 @@ class Imprinter:
           daq_node: daq-node
           g3tsmurf: /path/to/config.yaml
           output_root: /abs/path/to/output
+          librarian_conn: string (optional)
           build_hk: True 
           build_det: True
 
@@ -212,7 +213,7 @@ class Imprinter:
         self.daq_node = self.config.get("daq_node")
         self.output_root = self.config.get("output_root")
         self.g3tsmurf_config = self.config.get("g3tsmurf")
-
+        
         self.build_hk = self.config.get("build_hk")
         self.build_det = self.config.get("build_det")
 
@@ -231,6 +232,7 @@ class Imprinter:
         self.g3tsmurf_session = None
         self.archive = None
         self.hk_archive = None
+        self.librarian = None
 
         self.logger = logger
         if logger is None:
@@ -1377,6 +1379,34 @@ class Imprinter:
             .all()
         )
         return {o.obs_id: o for o in obs}
+
+    def upload_book_to_librarian(self, book, session=None):
+        """Upload bound book to the librarian
+
+        Parameters
+        ----------
+        book: Book object
+        session: imprinter sqlalchemy session
+            session that made book
+        """
+
+        if session is None:
+            session = self.get_session()
+        if self.librarian is None:
+            from hera_librarian import LibrarianClient
+            conn = self.config.get("librarian_conn")
+            if conn is None:
+                raise ValueError(f"'librarian_conn' not in imprinter config")
+            self.librarian = LibrarianClient(conn)
+        
+        assert book.status == BOUND, "cannot upload unboard books"
+        dest_path = op.relpath(book.path, self.output_root)
+        result = lc.upload_file(book.path, dest_path, meta_mode="infer")
+        if not result.get('success'):
+            raise ValueError(f"Failed to upload book {book.bid}. Received result"
+                             f" {result}")
+        book.status = UPLOADED
+        session.commit()
 
     def delete_level2_files(self, book, dry_run=True):
         """Delete level 2 data from already bound books
