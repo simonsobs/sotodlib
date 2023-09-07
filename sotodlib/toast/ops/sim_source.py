@@ -594,12 +594,12 @@ class SimSource(Operator):
     )
 
     source_pol_angle = Float(
-        90,
+        u.Quantity(90, u.degree),
         help="Angle of the polarization vector emitted by the source in degrees (0 means parallel to the gorund and 90 vertical)",
     )
 
     source_pol_angle_error = Float(
-        0,
+        u.Quantity(0, u.degree),
         help="Error in the angle of the polarization vector",
     )
 
@@ -1218,7 +1218,7 @@ class SimSource(Operator):
                     weights_U = 0
 
             pfrac = self.polarization_fraction
-            angle = np.radians(
+            angle = (
                 self.source_pol_angle
                 + np.random.normal(0, self.source_pol_angle_error, size=(len(sig)))
             )
