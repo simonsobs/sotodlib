@@ -1401,6 +1401,7 @@ class Imprinter:
         
         assert book.status == BOUND, "cannot upload unboard books"
         dest_path = op.relpath(book.path, self.output_root)
+        self.logger.info(f"Uploading book {book.bid} to librarian")
         result = self.librarian.upload_file(
             book.path, 
             dest_path, 
