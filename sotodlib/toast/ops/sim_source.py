@@ -1171,6 +1171,13 @@ class SimSource(Operator):
             sig = np.zeros(len(times))
             sig[good] = beam(x[good], y[good], grid=False)
 
+            if self.source_freq_chopping.value > 0:
+                sampling = 1/np.mean(np.diff(times))
+                chop = square(2*np.pi*sampling*self.source_freq_chopping)
+                chop[chop<1] = 0
+
+                sig *= chop
+
             if self.drone_temp > 250*u.K and self.drone_emiss > 0:
                 
                 drone_diameter = local._check_quantity(self.drone_size, u.m)
@@ -1179,19 +1186,12 @@ class SimSource(Operator):
                 drone_freq, drone_temp = self._get_drone_temp()
                 det_drone_temp = bandpass.convolve(det, drone_freq, drone_temp)
 
-                beam_drone = self._get_beam_map(det, drone_diameter, det_drone_temp)
+                beam_drone, _ = self._get_beam_map(det, drone_diameter, det_drone_temp)
 
                 sig_drone = np.zeros(len(times))
                 sig_drone[good] = beam_drone(x[good], y[good], grid=False)
 
                 sig += sig_drone
-
-            if self.source_freq_chopping.value > 0:
-                sampling = 1/np.mean(np.diff(times))
-                chop = square(2*np.pi*sampling*self.source_freq_chopping)
-                chop[chop<1] = 0
-
-                sig *= chop
 
             # Stokes weights for observing polarized source
             if self.detector_weights is None:
