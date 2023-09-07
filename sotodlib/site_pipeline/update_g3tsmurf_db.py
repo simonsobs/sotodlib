@@ -143,9 +143,12 @@ def record_timing(monitor, obs, cfgs):
     tags, log_tags = _obs_tags(obs, cfgs)
 
     if not monitor.check("timing_on", obs.obs_id, tags=tags[0]):
+        timing = obs.timing
+        if timing is None:
+            timing = False
         monitor.record(
             "timing_on", 
-            [obs.timing], 
+            [timing], 
             [obs.timestamp], 
             tags, 
             cfgs["monitor"]["measurement"], 
