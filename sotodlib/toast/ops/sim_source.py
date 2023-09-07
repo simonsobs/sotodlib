@@ -14,6 +14,7 @@ from astropy import units as u
 import ephem
 
 from scipy.interpolate import RectBivariateSpline
+from scipy import signal as sig
 
 from toast.timing import function_timer
 
@@ -587,6 +588,11 @@ class SimSource(Operator):
         help = 'White noise level outside the emission band'
     )
 
+    source_freq_chopping = Quantity(
+        u.Quantity(0, u.Hz),
+        help = 'Frequency of the source chopping system'
+    )
+
     source_pol_angle = Float(
         90,
         help="Angle of the polarization vector emitted by the source in degrees (0 means parallel to the gorund and 90 vertical)",
@@ -766,6 +772,7 @@ class SimSource(Operator):
                 prefix,
                 dets,
                 scale,
+                times
             )
 
         if data.comm.group_rank == 0:
@@ -1086,6 +1093,7 @@ class SimSource(Operator):
         prefix,
         dets,
         scale,
+        times
     ):
         """
         Observe the Source with each detector in tod
@@ -1132,7 +1140,16 @@ class SimSource(Operator):
             y = el - source_el.to_value(u.rad)
             r = np.sqrt(x**2 + y**2)
             good = r < radius
-            sig = beam(x[good], y[good], grid=False)
+
+            sig = np.zeros(len(times))
+            sig[good] = beam(x[good], y[good], grid=False)
+
+            if self.source_freq_chopping.value > 0:
+                sampling = 1/np.mean(np.diff(times))
+                chop = sig.square(2*np.pi*sampling*self.source_freq_chopping)
+                chop[chop<1] = 0
+
+                sig *= chop
 
             # Stokes weights for observing polarized source
             if self.detector_weights is None:
@@ -1144,17 +1161,17 @@ class SimSource(Operator):
                 weight_mode = self.detector_weights.mode
                 if "I" in weight_mode:
                     ind = weight_mode.index("I")
-                    weights_I = weights[good, ind].copy()
+                    weights_I = weights[:, ind].copy()
                 else:
                     weights_I = 0
                 if "Q" in weight_mode:
                     ind = weight_mode.index("Q")
-                    weights_Q = weights[good, ind].copy()
+                    weights_Q = weights[:, ind].copy()
                 else:
                     weights_Q = 0
                 if "U" in weight_mode:
                     ind = weight_mode.index("U")
-                    weights_U = weights[good, ind].copy()
+                    weights_U = weights[:, ind].copy()
                 else:
                     weights_U = 0
 
@@ -1169,11 +1186,11 @@ class SimSource(Operator):
             U = pfrac * sig * np.sin(2 * angle)
 
             drone_sig = (I * weights_I
-                    + Q * weights_Q
-                    + U * weights_U
-                   )
+                         + Q * weights_Q
+                         + U * weights_U
+                         )
 
-            signal[good] += drone_sig
+            signal += drone_sig
 
             timer.stop()
             if data.comm.world_rank == 0:
