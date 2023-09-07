@@ -14,7 +14,7 @@ from astropy import units as u
 import ephem
 
 from scipy.interpolate import RectBivariateSpline
-from scipy import signal as sig
+from scipy.signal import square
 
 from toast.timing import function_timer
 
@@ -614,6 +614,23 @@ class SimSource(Operator):
         help="HDF5 file that stores the simulated beam",
     )
 
+    #Drone parameters
+
+    drone_temp = Quantity(
+        u.Quantity(0, u.K),
+        help = 'BlackBody temperature of the Drone'
+    )
+
+    drone_emiss = Float(
+        0,
+        help = 'Emissivity of the drone'
+    )
+
+    drone_size = Quantity(
+        u.Quantity(0, u.meter),
+        help = 'Drone size in meters',
+    )
+
     #Wind Parameters
 
     wind_gusts_amp = Quantity(
@@ -750,7 +767,7 @@ class SimSource(Operator):
                 source_az,
                 source_el,
                 source_dist,
-                source_diameter,
+                source_diameter
             ) = self._get_source_position(obs, observer, times)
 
             # Make sure detector data output exists
@@ -1043,6 +1060,16 @@ class SimSource(Operator):
 
         return freq, temp
 
+    def _get_drone_temp(self):
+        """
+        Compute the drone CMB temperature as a grey body
+        """
+
+        freqs = np.linspace(20., 350., 1001, endpoint=True)*1e9 * u.Hz
+        temp = utils.tb2tcmb(self.drone_temp, freqs)*self.drone_emiss
+
+        return freqs, temp
+
     def _get_beam_map(self, det, source_diameter, ttemp_det):
         """
         Construct a 2-dimensional interpolator for the beam
@@ -1144,9 +1171,24 @@ class SimSource(Operator):
             sig = np.zeros(len(times))
             sig[good] = beam(x[good], y[good], grid=False)
 
+            if self.drone_temp > 250*u.K and self.drone_emiss > 0:
+                
+                drone_diameter = local._check_quantity(self.drone_size, u.m)
+                drone_diameter = (drone_diameter/source_dist)*u.rad
+
+                drone_freq, drone_temp = self._get_drone_temp()
+                det_drone_temp = bandpass.convolve(det, drone_freq, drone_temp)
+
+                beam_drone = self._get_beam_map(det, drone_diameter, det_drone_temp)
+
+                sig_drone = np.zeros(len(times))
+                sig_drone[good] = beam_drone(x[good], y[good], grid=False)
+
+                sig += sig_drone
+
             if self.source_freq_chopping.value > 0:
                 sampling = 1/np.mean(np.diff(times))
-                chop = sig.square(2*np.pi*sampling*self.source_freq_chopping)
+                chop = square(2*np.pi*sampling*self.source_freq_chopping)
                 chop[chop<1] = 0
 
                 sig *= chop
