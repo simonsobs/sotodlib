@@ -1401,7 +1401,11 @@ class Imprinter:
         
         assert book.status == BOUND, "cannot upload unboard books"
         dest_path = op.relpath(book.path, self.output_root)
-        result = lc.upload_file(book.path, dest_path, meta_mode="infer")
+        result = self.librarian.upload_file(
+            book.path, 
+            dest_path, 
+            meta_mode="infer"
+        )
         if not result.get('success'):
             raise ValueError(f"Failed to upload book {book.bid}. Received result"
                              f" {result}")
