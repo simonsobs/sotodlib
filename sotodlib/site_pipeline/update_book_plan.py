@@ -1,9 +1,10 @@
 import argparse
 import datetime as dt
+import time
 from typing import Optional
 
 from sotodlib.io.imprinter import Imprinter
-
+from sotodlib.site_pipeline.monitor import Monitor
 
 def main(
     config: str,
@@ -50,6 +51,7 @@ def main(
         min_ctime = min_ctime.timestamp()
     if isinstance(max_ctime, dt.datetime):
         max_ctime = max_ctime.timestamp()
+
     # obs and oper books
     imprinter.update_bookdb_from_g3tsmurf(
         min_ctime=min_ctime, max_ctime=max_ctime,
@@ -62,6 +64,67 @@ def main(
     # smurf and stray books
     imprinter.register_timecode_books(min_ctime=min_ctime, max_ctime=max_ctime)
 
+    monitor = None
+    if "monitor" in imprinter.config:
+        imprinter.logger.info("Will send monitor information to Influx")
+        try:
+            monitor = Monitor.from_configs(
+                imprinter.config["monitor"]["connect_configs"]
+            )
+        except Exception as e:
+            imprinter.logger.error(f"Monitor connectioned failed {e}")
+            monitor = None
+
+    if monitor is not None:
+        record_book_counts(monitor, imprinter)
+    
+
+def record_book_counts(monitor, imprinter):
+    """Send a record of the current book count status to the InfluxDb
+    site-pipeline montir
+    """
+    tags = [{"telescope" : imprinter.config["monitor"]["telescope"]}]
+    log_tags = {}
+    script_run = time.time()
+
+    monitor.record(
+        "unbound", 
+        [ len(imprinter.get_unbound_books()) ], 
+        [script_run], 
+        tags, 
+        imprinter.config["monitor"]["measurement"], 
+        log_tags=log_tags
+    )
+
+    monitor.record(
+        "bound", 
+        [ len(imprinter.get_bound_books()) ], 
+        [script_run], 
+        tags, 
+        imprinter.config["monitor"]["measurement"], 
+        log_tags=log_tags
+    )
+
+    monitor.record(
+        "uploaded", 
+        [ len(imprinter.get_uploaded_books()) ], 
+        [script_run], 
+        tags, 
+        imprinter.config["monitor"]["measurement"], 
+        log_tags=log_tags
+    )
+
+    monitor.record(
+        "failed", 
+        [ len(imprinter.get_failed_books()) ], 
+        [script_run], 
+        tags, 
+        imprinter.config["monitor"]["measurement"], 
+        log_tags=log_tags
+    )
+
+    monitor.write()
+
 def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
@@ -69,13 +132,18 @@ def get_parser(parser=None):
     parser.add_argument('--min-ctime', type=float, help="Minimum creation time")
     parser.add_argument('--max-ctime', type=float, help="Maximum creation time")
     parser.add_argument('--stream-ids', type=str, help="Stream IDs")
-    parser.add_argument('--force-single-stream', help="Force single stream", action="store_true")
-    parser.add_argument('--update-delay', type=float, help="Days to subtract from now to set as minimum ctime",
-                        default=1)
-    parser.add_argument('--from-scratch', help="Builds or updates database from scratch",
-                        action="store_true")
-    parser.add_argument('--verbosity', type=int, help="Increase output verbosity. 0: Error, 1: Warning, 2: Info(default), 3: Debug",
-                       default=2)
+    parser.add_argument(
+        '--force-single-stream', help="Force single stream", action="store_true"
+    )
+    parser.add_argument(
+        '--update-delay', type=float, 
+        help="Days to subtract from now to set as minimum ctime",
+        default=1
+    )
+    parser.add_argument(
+        '--from-scratch', help="Builds or updates database from scratch",
+        action="store_true"
+    )
     return parser
 
 
