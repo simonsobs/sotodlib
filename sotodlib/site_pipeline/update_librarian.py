@@ -23,10 +23,8 @@ def main( config: str):
     to_upload = imprinter.get_bound_books(session=session)
 
     for book in to_upload:
-        try:
-            imprinter.upload_book_to_librarian(book, session=session)
-        except:
-            pass
+        imprinter.upload_book_to_librarian(book, session=session)
+
 
 
 def get_parser(parser=None):
