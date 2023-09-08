@@ -2,8 +2,11 @@
 functions expected to be needed for humans making one-off changes to the
 imprinter setup. Functions run as part of the automated pipeline are defined in imprinter.py
 """
+from sqlalchemy import or_
+import datetime as dt
 
 from sotodlib.io.imprinter import ( 
+    Books,
     WONT_BIND,
     FAILED,
     UNBOUND,
@@ -50,6 +53,78 @@ def set_book_wont_bind(imprint, book, message=None, session=None):
         book.message = message
     session.commit()
 
+def get_timecode_final(imprint, time_code, type='all'):
+    """Check if all required entries in the g3tsmurf database are present for
+    smurf or stray book regisitration.
+    
+    Parameters
+    -----------
+    imprint: Imprinter instance
+    time_code: int
+        5-digit ctime code to check for finalization
+    type: str
+        book type to check for
+    
+    Returns
+    --------
+    is_final, bool
+    reason, int
+        0 if the books are ready to be registered
+        1 if we are missing metadata entries
+        2 if we are missing file entries
+        3 if unbound or failed books are preventing registration
+    """
+    assert type in ['all','stray','smurf']
+    
+    g3session, SMURF = imprint.get_g3tsmurf_session(return_archive=True)
+    session = imprint.get_session()
+
+    servers = SMURF.finalize["servers"]
+    meta_agents = [s["smurf-suprsync"] for s in servers]
+    files_agents = [s["timestream-suprsync"] for s in servers]
+
+    meta_query = or_(*[TimeCodes.agent == a for a in meta_agents])
+    files_query = or_(*[TimeCodes.agent == a for a in files_agents])
+
+    tcm = g3session.query(TimeCodes.agent).filter(
+        TimeCodes.timecode==time_code,
+        meta_query,
+        TimeCodes.suprsync_type == SupRsyncType.META.value,
+    ).distinct().all()
+
+    if type == 'smurf':
+        if len(tcm) == len(meta_agents):
+            return True, 0
+        else:
+            return False, 1
+    
+    if len(tcm) != len(meta_agents):
+        return False, 1
+
+    tcf = g3session.query(TimeCodes.agent).filter(
+        TimeCodes.timecode==time_code,
+        files_query,
+        TimeCodes.suprsync_type == SupRsyncType.FILES.value,
+    ).distinct().all()
+    
+    if len(tcf) != len(files_agents):
+        return False, 2
+    
+    book_start = dt.datetime.utcfromtimestamp(time_code * 1e5)
+    book_stop = dt.datetime.utcfromtimestamp((time_code + 1) * 1e5)
+
+    q = session.query(Books).filter(
+        Books.start >= book_start,
+        Books.start < book_stop,
+        or_(Books.type == 'obs', Books.type == 'oper'),
+        or_(Books.status == UNBOUND, Books.status == FAILED), 
+    )
+    if q.count() > 0:
+        return False, 3
+
+    return True, 0
+
+    
 def set_timecode_final(imprint, time_code):
     """Add required entires to the g3tsmurf database in order to force the smurf
     and/or stray books to be created. Will be used if there are errors in
@@ -61,38 +136,36 @@ def set_timecode_final(imprint, time_code):
     time_code: 5-digit ctime code to finalize
     """
 
-    g3session = imprint.get_g3tsmurf_session()
+    g3session, SMURF = imprint.get_g3tsmurf_session(return_archive=True)
 
-    streams = []
-    for tube in imprint.tubes:
-        streams.extend( imprint.tubes[tube].get("slots") )
+    servers = SMURF.finalize["servers"]
     
-    for stream in streams:
+    for server in servers:
         tcf = g3session.query(TimeCodes).filter(
-            TimeCodes.timecode==time_code,
-            TimeCodes.stream_id == stream,
+            TimeCodes.timecode == time_code,
+            TimeCodes.agent == server["timestream-suprsync"],
             TimeCodes.suprsync_type == SupRsyncType.FILES.value,
-        ).one_or_none()
+        ).first()
         if tcf is None:
             tcf = TimeCodes(
-                stream_id=stream,
+                stream_id="fake",
                 suprsync_type=SupRsyncType.FILES.value,
                 timecode=time_code,
-                agent="fake",
+                agent=server["timestream-suprsync"],
             )
         g3session.add(tcf)
 
         tcm = g3session.query(TimeCodes).filter(
             TimeCodes.timecode==time_code,
-            TimeCodes.stream_id == stream,
+            TimeCodes.agent == server["smurf-suprsync"],
             TimeCodes.suprsync_type == SupRsyncType.META.value,
-        ).one_or_none()
+        ).first()
         if tcm is None:
             tcm = TimeCodes(
-                stream_id=stream,
+                stream_id="fake",
                 suprsync_type=SupRsyncType.META.value,
                 timecode=time_code,
-                agent="fake",
+                agent=server["smurf-suprsync"],
             )
         g3session.add(tcm)    
     g3session.commit()
