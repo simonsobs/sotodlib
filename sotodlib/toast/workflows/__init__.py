@@ -40,6 +40,8 @@ from .proc_flagging import (
     flag_sso,
     setup_flag_noise_outliers,
     flag_noise_outliers,
+    setup_processing_mask,
+    processing_mask,
 )
 from .proc_mapmaker_filterbin import setup_mapmaker_filterbin, mapmaker_filterbin
 from .proc_mapmaker_madam import setup_mapmaker_madam, mapmaker_madam
