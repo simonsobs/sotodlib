@@ -593,12 +593,12 @@ class SimSource(Operator):
         help = 'Frequency of the source chopping system'
     )
 
-    source_pol_angle = Float(
+    source_pol_angle = Quantity(
         u.Quantity(90, u.degree),
         help="Angle of the polarization vector emitted by the source in degrees (0 means parallel to the gorund and 90 vertical)",
     )
 
-    source_pol_angle_error = Float(
+    source_pol_angle_error = Quantity(
         u.Quantity(0, u.degree),
         help="Error in the angle of the polarization vector",
     )
@@ -1220,7 +1220,11 @@ class SimSource(Operator):
             pfrac = self.polarization_fraction
             angle = (
                 self.source_pol_angle
-                + np.random.normal(0, self.source_pol_angle_error, size=(len(sig)))
+                + np.random.normal(
+                    0, 
+                    self.source_pol_angle_error.to_value(u.radian), 
+                    size=(len(sig))
+                )
             )
             
             I = sig.copy()
