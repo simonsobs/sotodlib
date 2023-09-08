@@ -347,7 +347,7 @@ class Imprinter:
             ),  # not worth having a extra table
             timing=timing_on,
         )
-
+        self.logger.info(f"registering {bid}")
         # add book to database
         session.add(book)
         if commit:
@@ -404,6 +404,7 @@ class Imprinter:
             # check whether the book exists
             if self.get_book(book_id) is not None:
                 continue
+            self.logger.info(f"registering {book_id}")
             book = Books(
                 bid=book_id,
                 type="hk",
@@ -443,11 +444,14 @@ class Imprinter:
         if not self.build_det:
             return
         session = session or self.get_session()
-        g3session = self.get_g3tsmurf_session()
+        g3session, SMURF = self.get_g3tsmurf_session(return_archive=True)
 
-        streams = []
-        for tube in self.tubes:
-            streams.extend( self.tubes[tube].get("slots") )
+        servers = SMURF.finalize["servers"]
+        meta_agents = [s["smurf-suprsync"] for s in servers]
+        files_agents = [s["timestream-suprsync"] for s in servers]
+
+        meta_query = or_(*[TimeCodes.agent == a for a in meta_agents])
+        files_query = or_(*[TimeCodes.agent == a for a in files_agents])
 
         tcs = g3session.query(TimeCodes.timecode)
         if min_ctime is not None:
@@ -455,18 +459,23 @@ class Imprinter:
         if max_ctime is not None:
             tcs = tcs.filter(TimeCodes.timecode <= int(max_ctime//1e5)+1)
         tcs = tcs.distinct().all()
-        stream_filt = or_(*[TimeCodes.stream_id == s for s in streams])
 
         for (tc,) in tcs:
             q = g3session.query(TimeCodes).filter(
-                TimeCodes.timecode == tc, stream_filt
+                TimeCodes.timecode == tc,
             )
-            files = q.filter(
-                TimeCodes.suprsync_type == SupRsyncType.FILES.value
-            )
-            meta = q.filter(TimeCodes.suprsync_type == SupRsyncType.META.value)
-            
-            if not meta.count() == len(streams):
+            files = g3session.query(TimeCodes.agent).filter(
+                TimeCodes.timecode==tc,
+                files_query,
+                TimeCodes.suprsync_type == SupRsyncType.FILES.value,
+            ).distinct().all()
+            meta = g3session.query(TimeCodes.agent).filter(
+                TimeCodes.timecode==tc,
+                meta_query,
+                TimeCodes.suprsync_type == SupRsyncType.META.value,
+            ).distinct().all()
+
+            if not len(meta) == len(meta_agents):
                 # not ready to make any books
                 self.logger.debug(f"Not ready to make timecode books for {tc}")
                 continue
@@ -477,7 +486,7 @@ class Imprinter:
 
             book_id = f"smurf_{tc}_{self.daq_node}"
             if self.get_book(book_id) is None:
-                self.logger.debug(f"registering {book_id}")
+                self.logger.info(f"registering {book_id}")
                 smurf_book = Books(
                     bid=book_id,
                     type="smurf",
@@ -489,8 +498,9 @@ class Imprinter:
                 session.add(smurf_book)
                 session.commit()
 
-            if not files.count() == len(streams):
+            if not len(files) == len(files_agents):
                 #not ready to make stray books
+                self.logger.debug(f"Not ready to make stray books for {tc}")
                 continue
 
             book_id = f"stray_{tc}_{self.daq_node}"
@@ -521,6 +531,7 @@ class Imprinter:
             )
             flist = self.get_files_for_book(stray_book)
             if len(flist) > 0:
+                self.logger.info(f"registering {book_id}")
                 session.add(stray_book)
                 session.commit()
 
