@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.optimize import least_squares
-import h5py, json
+import h5py, yaml
 
 # TODO: load in delta_az from Saianeesh's output
 # az_enc = np.radians(az_enc_data)
@@ -18,6 +18,7 @@ ARCMIN = DEG / 60
 ARCSEC = ARCMIN / 60
 
 def az_fn(params, az_enc, el_enc):
+    # TODO: what happens as el -> 90 deg?
     ia, an, aw, npae, ca = params
     az = np.radians(az_enc)
     el = np.radians(el_enc)
@@ -35,12 +36,24 @@ def el_fn(params, az_enc, el_enc):
     new_el += - an * np.cos(az_enc) + aw * np.sin(az_enc)
     return new_el # in radians
 
-def br_fn(params, br_enc):
-    # TODO: add more params for br
-    ib = params
+def br_fn(params, br_enc, el_enc):
+    # terms borrowed from CLASS; is this useful/effective?
+    c11, c12, c13, c21, c22, c23, c31, c32, c33 = params
     br = np.radians(br_enc)
-    # the independent params
-    new_br = br + ib
+    el = np.radians(el_enc)
+    delta_br = 0
+    # the parameters
+    delta_br += c11
+    delta_br += c12 * br
+    delta_br += c13 * br ** 2
+    delta_br += c21 * (el - np.pi/2)
+    delta_br += c22 * (el - np.pi/2) * br
+    delta_br += c23 * (el - np.pi/2) * br ** 2
+    delta_br += c31 * (el - np.pi/2) ** 2
+    delta_br += c32 * (el - np.pi/2) ** 2 * br
+    delta_br += c33 * (el - np.pi/2) ** 2 + br ** 2
+
+    new_br = br + delta_br
     return new_br # in radians
 
 def objective_fn_az(params, az_enc, el_enc, delta_az):
@@ -53,8 +66,8 @@ def objective_fn_el(params, az_enc, el_enc, delta_el):
     el_data = el_enc - delta_el
     return (el_data - el_pred) ** 2
 
-def objective_fn_br(params, br_enc, delta_br):
-    br_pred = br_fn(params, br_enc)
+def objective_fn_br(params, br_enc, el_enc, delta_br):
+    br_pred = br_fn(params, br_enc, el_enc)
     br_data = br_enc - delta_br
     return (br_data - br_pred) ** 2
 
@@ -74,7 +87,7 @@ def find_params_br(initial_guess_br):
 #    initial_guess_br = [ib_guess]
     br_result = least_squares(objective_fn_br, initial_guess_br)
     ib_opt = br_result.x
-    return ib_opt
+    return c11, c12, c13, c21, c22, c23, c31, c32, c33
 
 if __name__ == "__main__":
     # TODO: get the data from Saianeesh's file
@@ -126,4 +139,4 @@ if __name__ == "__main__":
     # TODO: clean up this save; should it be different file type?
     new_filename = 'pointing_version_%s.json' % version
     with open(new_filename, 'w') as f:
-        json.dump(opt_results, f)
+        yaml.dump(opt_results, f)
