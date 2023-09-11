@@ -14,6 +14,7 @@ from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
 from sotodlib.coords import optics as op
 from so3g import proj
+from make_position_match import _gen_template
 
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
 
@@ -295,6 +296,10 @@ def main():
     fp_dict = {}
     encoders = []
     use_matched = config.get("use_matched", False)
+    if use_matched:
+        template, _, __, template_det_ids = _gen_template(ufm)
+        template = {det_id: det[1:4] for det_id, det in zip(template_det_ids, template)}
+
     for obs_id, detmap in zip(obs_ids, detmaps):
         # Load data
         if os.path.isfile(obs_id):
@@ -303,13 +308,21 @@ def main():
             _aman = rset.to_axismanager(axis_key="dets:readout_id")
             aman = AxisManager(_aman.dets)
             aman.wrap(name, _aman)
-            encs = read_dataset(obs_id, "encoders")
+            try:
+                encs = read_dataset(obs_id, "encoders")
+            except KeyError:
+                logger.warning("\tMissing encoder information, nans will be used")
+                encs = None
         else:
             logger.info("Loading information from observation %s", obs_id)
             aman = ctx.get_meta(obs_id, dets=config["context"].get("dets", {}))
             db_match = db.match({"obs:obs_id": obs_id})
             if db_match:
-                encs = read_dataset(db_match["filename"], "encoders")
+                try:
+                    encs = read_dataset(db_match["filename"], "encoders")
+                except KeyError:
+                    logger.warning("\tMissing encoder information, nans will be used")
+                    encs = None
             else:
                 logger.warning("\tMissing encoder information, nans will be used")
                 encs = None
@@ -343,17 +356,14 @@ def main():
             logger.error("\tThis observation has no detmap results, skipping")
             continue
 
-        det_ids = aman.det_info.det_id
-        x = aman.det_info.wafer.det_x
-        y = aman.det_info.wafer.det_y
-        pol = aman.det_info.wafer.angle
         if use_matched:
             det_ids = aman[name].matched_det_id
-            dm_sort = np.argsort(aman.det_info.det_id)
-            mapping = np.argsort(np.argsort(det_ids))
-            x = x[dm_sort][mapping]
-            y = y[dm_sort][mapping]
-            pol = pol[dm_sort][mapping]
+            x, y, pol = np.array([template[det] for det in det_ids]).T
+        else:
+            det_ids = aman.det_info.det_id
+            x = aman.det_info.wafer.det_x
+            y = aman.det_info.wafer.det_y
+            pol = aman.det_info.wafer.angle
 
         focal_plane = np.column_stack(
             (aman[name].xi, aman[name].eta, aman[name].polang, x, y, pol)
@@ -427,6 +437,7 @@ def main():
     # Put nominal and measured into horiz basis and compute transformation.
     if np.isnan(encoders).any():
         horiz = ((np.nan,) * 3,) * 2 + (np.nan,) * 2
+        horiz_affine = np.nan * np.empty_like(affine)
     else:
         nominal_horiz = to_horiz(nominal, encoders)
         measured_horiz = to_horiz(measured, encoders)
