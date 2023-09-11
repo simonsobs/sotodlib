@@ -12,9 +12,9 @@ import sotodlib.io.g3tsmurf_utils as g3u
 from sotodlib.core import AxisManager, metadata, Context
 from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
+from sotodlib.site_pipeline.make_position_match import _gen_template
 from sotodlib.coords import optics as op
 
-from make_position_match import _gen_template
 
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
 
