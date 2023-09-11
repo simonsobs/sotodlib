@@ -3,17 +3,17 @@ import sys
 import argparse as ap
 import h5py
 import numpy as np
-import scipy.linalg as la
-from scipy.spatial.transform import Rotation as R
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 import yaml
+
+from so3g import proj
 import sotodlib.io.g3tsmurf_utils as g3u
 from sotodlib.core import AxisManager, metadata, Context
 from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
 from sotodlib.coords import optics as op
-from so3g import proj
+
 from make_position_match import _gen_template
 
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
