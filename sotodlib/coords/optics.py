@@ -371,7 +371,8 @@ def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo
     xs = array2secx(xz, yz)
     ys = array2secy(xz, yz)
     # get into LAT zemax coord
-    # We may need to add a rotation offset here to account for physical vs ZEMAX
+    # There is a 90 degree offset between how zemax coords and SO coords are defined
+    rot -= 90
     xrot = xs * np.cos(d2r * rot) - ys * np.sin(d2r * rot)
     yrot = ys * np.cos(d2r * rot) + xs * np.sin(d2r * rot)
     # note these are around the telescope boresight
@@ -620,14 +621,18 @@ def SAT_focal_plane(aman, x=None, y=None, pol=None, rot=0, mapping_data=None):
     # NOTE: The -1 does the flip about the origin
     theta = -1 * np.sign(x) * fp_to_sky(np.abs(x))
     phi = -1 * np.sign(y) * fp_to_sky(np.abs(y))
-    _xi, _eta, _ = quat.decompose_xieta(quat.rotation_iso(theta, phi))
+    _xi, _eta, _ = quat.decompose_xieta(
+        quat.euler(1, np.deg2rad(90)) * quat.rotation_lonlat(theta, phi)
+    )
     xi = _xi * np.cos(np.deg2rad(rot)) - _eta * np.sin(np.deg2rad(rot))
     eta = _eta * np.cos(np.deg2rad(rot)) + _xi * np.sin(np.deg2rad(rot))
 
     pol_x, pol_y = gen_pol_endpoints(x, y, pol)
     pol_theta = -1 * np.sign(pol_x) * fp_to_sky(np.abs(pol_x))
     pol_phi = -1 * np.sign(pol_y) * fp_to_sky(np.abs(pol_y))
-    _xi, _eta, _ = quat.decompose_xieta(quat.rotation_iso(pol_theta, pol_phi))
+    _xi, _eta, _ = quat.decompose_xieta(
+        quat.euler(1, np.deg2rad(90)) * quat.rotation_iso(pol_theta, pol_phi)
+    )
     pol_xi = _xi * np.cos(np.deg2rad(rot)) - _eta * np.sin(np.deg2rad(rot))
     pol_eta = _eta * np.cos(np.deg2rad(rot)) + _xi * np.sin(np.deg2rad(rot))
     gamma = get_gamma(pol_xi, pol_eta)
