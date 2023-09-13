@@ -165,7 +165,9 @@ def get_parser(parser=None):
     parser.add_argument('--from-scratch', help="Builds or updates database from scratch",
                         action="store_true")
     parser.add_argument("--verbosity", help="increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug",
-                       default=2, type=int)
+                        default=2, type=int)
+    parser.add_argument('--index-via-actions', help="Look through action folders to create observations",
+                        action="store_true")
     return parser
 
 if __name__ == '__main__':
