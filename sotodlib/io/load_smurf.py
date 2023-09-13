@@ -1351,7 +1351,7 @@ class G3tSmurf:
             )
             if db_agent is None:
                 logger.info(
-                    f"Agent {agent} not found in HK database before"
+                    f"Agent {agent.agent} not found in HK database before"
                     f" update time {update_time}"
                 )
                 continue
