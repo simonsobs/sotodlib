@@ -190,7 +190,7 @@ def get_parser(parser=None):
         '--update-delay-timecodes', type=float, 
         help= "Days to subtract from now to set as minimum ctime "
               "for timecode books",
-        default=1
+        default=7
     )
 
     return parser
