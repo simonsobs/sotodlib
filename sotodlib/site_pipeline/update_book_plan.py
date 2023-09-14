@@ -13,6 +13,9 @@ def main(
     stream_ids: Optional[str] = None,
     force_single_stream: bool = False,
     update_delay: float = 1,
+    update_delay_timecodes: Optional[float] = 7,
+    min_ctime_timecodes: Optional[float] = None,
+    max_ctime_timecodes: Optional[float] = None,
     from_scratch: bool = False,
     logger = None
     ):
@@ -33,7 +36,16 @@ def main(
     force_single_stream : bool, optional
         If True, tream multi-wafer data as if it were single wafer data, by default False
     update_delay : float, optional
-        The range of time to search through g3tsmurf db for new data in units of days, by default 1
+        The range of time to search through g3tsmurf db for new data in units of
+        days, by default 1
+    update_delay_timecodes : float, optional
+        The range of time to search through g3tsmurf db for new data in units of
+        days for timecode books, by default 7
+    min_ctime_timecodes : Optional[float], optional
+        The minimum ctime to include in the book plan for timecode (hk, smurf, stray) books, by default None
+    max_ctime_timecodes : Optional[float], optional
+        The maximum ctime to include in the book planor timecode (hk, smurf, stray) books, by default None
+
     from_scratch : bool, optional
         If True, start to search from beginning of time, by default False
     """
@@ -59,10 +71,32 @@ def main(
         stream_ids=stream_ids,
         force_single_stream=force_single_stream
     )
+
+    ## over-ride timecode book making if specific values given
+    if update_delay_timecodes is None and min_ctime_timecodes is None:
+        min_ctime_timecodes = min_ctime
+    elif min_ctime_timecodes is None:
+        min_ctime_timecodes = (
+            dt.datetime.now() - dt.timedelta(days=update_delay_timecodes)
+        )
+    if max_ctime_timecodes is None:
+        max_ctime_timecodes = max_ctime
+
+    if isinstance(min_ctime_timecodes, dt.datetime):
+        min_ctime_timecodes = min_ctime_timecodes.timestamp()
+    if isinstance(max_ctime, dt.datetime):
+        max_ctime_timecodes = max_ctime_timecodes.timestamp()
+
     # hk books
-    imprinter.register_hk_books(min_ctime=min_ctime, max_ctime=max_ctime)
+    imprinter.register_hk_books(
+        min_ctime=min_ctime_timecodes, 
+        max_ctime=max_ctime_timecodes,
+    )
     # smurf and stray books
-    imprinter.register_timecode_books(min_ctime=min_ctime, max_ctime=max_ctime)
+    imprinter.register_timecode_books(
+        min_ctime=min_ctime_timecodes, 
+        max_ctime=max_ctime_timecodes,
+    )
 
     monitor = None
     if "monitor" in imprinter.config:
@@ -144,6 +178,21 @@ def get_parser(parser=None):
         '--from-scratch', help="Builds or updates database from scratch",
         action="store_true"
     )
+    parser.add_argument(
+        '--min-ctime-timecodes', type=float, 
+        help="Minimum creation time for timecode books"
+    )
+    parser.add_argument(
+        '--max-ctime-timecodes', type=float, 
+        help="Maximum creation time for timecode books"
+    )
+    parser.add_argument(
+        '--update-delay-timecodes', type=float, 
+        help= "Days to subtract from now to set as minimum ctime "
+              "for timecode books",
+        default=7
+    )
+
     return parser
 
 
