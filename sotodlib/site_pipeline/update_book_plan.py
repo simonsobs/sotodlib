@@ -52,7 +52,9 @@ def main(
     if stream_ids is not None:
         stream_ids = stream_ids.split(",")
     imprinter = Imprinter(
-        config, db_args={'connect_args': {'check_same_thread': False}}
+        config, 
+        db_args={'connect_args': {'check_same_thread': False}},
+        logger=logger,
     )
     
     # leaving min_ctime and max_ctime as None will go through all available 
