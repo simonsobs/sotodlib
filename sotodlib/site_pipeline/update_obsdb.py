@@ -36,6 +36,9 @@ import yaml
 import numpy as np
 import time
 import argparse
+import logging
+from sotodlib.site_pipeline import util
+logger = util.init_logger(__name__, 'update-obsdb: ')
 
 
 def check_meta_type(bookpath):
@@ -48,10 +51,11 @@ def check_meta_type(bookpath):
     else:
         return meta["type"]
 
-def update_obsdb(config, 
-                 recency=None, 
-                 booktype="both",
-                 verbosity=2):
+def update_obsdb(config: str, 
+                 recency: float=None, 
+                 booktype: str="both",
+                 verbosity: int=2,
+                 logger=None):
     """
     Create or update an obsdb for observation or operations data.
 
@@ -66,11 +70,27 @@ def update_obsdb(config,
         Look for observations or operations data or both (default: both)
     verbosity : int
         Output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug
+    logger : logging
+        When to output the print statements
 
     """
+
+    if args.verbosity == 0:
+        logger.setLevel(logging.ERROR)
+    elif args.verbosity == 1:
+        logger.setLevel(logging.WARNING)
+    elif args.verbosity == 2:
+        logger.setLevel(logging.INFO)
+    elif args.verbosity == 3:
+        logger.setLevel(logging.DEBUG)
+
+    logger.info("Updating obsdb")
     bookcart = []
     bookcartobsdb = ObsDb()
 
+    if booktype not in ["obs", "oper", "both"]:
+        logger.warning("Specified booktype inadapted to update_obsdb")
+    
     if booktype=="both":
         accept_type = ["obs", "oper"]
     else:
@@ -80,8 +100,7 @@ def update_obsdb(config,
     try:
         base_dir = config_dict["base_dir"]
     except KeyError:
-        if verbosity==0:
-            print("No base directory base_dir specified in config file!")
+        logger.error("No base directory base_dir specified in config file!")
     if "obsdb" in config_dict:
         if os.path.isfile(config_dict["obsdb"]):
             bookcartobsdb = ObsDb.from_file(config_dict["obsdb"])
@@ -97,16 +116,19 @@ def update_obsdb(config,
         tback = tnow - recency*86400
     else:
         tback = 0 #Back to the UNIX Big Bang 
-
+    #Check if there are one or multiple base_dir specified
+    if isinstance(base_dir,str):
+        base_dir = [base_dir]
     #Find folders that are book-like and recent
-    for dirpath,_, _ in os.walk(base_dir):
-        last_mod = max(os.path.getmtime(root) for root,_,_ in os.walk(dirpath))
-        if last_mod<tback:#Ignore older directories
-            continue
-        if os.path.exists(os.path.join(dirpath, "M_index.yaml")):
-            #Looks like a context file
-            bookcart.append(dirpath)
-    #Check the books for the observations we want
+    for bd in base_dir:
+        for dirpath,_, _ in os.walk(bd):
+            last_mod = max(os.path.getmtime(root) for root,_,_ in os.walk(dirpath))
+            if last_mod<tback:#Ignore older directories
+                continue
+            if os.path.exists(os.path.join(dirpath, "M_index.yaml")):
+                #Looks like a context file
+                bookcart.append(dirpath)
+        #Check the books for the observations we want
 
     for bookpath in bookcart:
         if check_meta_type(bookpath) in accept_type:
@@ -165,8 +187,7 @@ def update_obsdb(config,
                     very_clean[f"{coor}_center"]=.5*(coor_enc.max()+coor_enc.min())
                     very_clean[f"{coor}_throw"]=.5*(coor_enc.max()-coor_enc.min())
                 except KeyError:
-                    if verbosity==0:
-                        print(f"No pointing in some streams for obs_id {obs_id}")
+                    logger.error(f"No pointing in some streams for obs_id {obs_id}")
                     pass
 
             if tags != [] and tags != [""]:
