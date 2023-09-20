@@ -570,7 +570,8 @@ class BookBinder:
         Array of output file indices for all output frames in the book
     """
     def __init__(self, book, obsdb, filedb, data_root, readout_ids, outdir,
-                 max_samps_per_frame=50_000, max_file_size=1e9):
+                 max_samps_per_frame=50_000, max_file_size=1e9, 
+                ignore_tags=False):
         self.filedb = filedb
         self.book = book
         self.data_root = data_root
@@ -584,6 +585,7 @@ class BookBinder:
 
         self.max_samps_per_frame = max_samps_per_frame
         self.max_file_size = max_file_size
+        self.ignore_tags = ignore_tags
 
         if not os.path.exists(outdir):
             os.makedirs(outdir)
@@ -746,7 +748,10 @@ class BookBinder:
 
         # make sure all tags are the same for obs in the same book
         tags = list(set(tags))
-        assert len(tags) == 1
+        if not self.ignore_tags:
+            assert len(tags) == 1
+        else:
+            tags = [','.join(tags)]
         tags = tags[0].split(',')
         # book should have at least one tag
         assert len(tags) > 0
@@ -774,11 +779,6 @@ class BookBinder:
 
         # Copy smurf ancillary files if they exist
         self.copy_smurf_files_to_book()
-
-        # Write M_file
-        mfile = os.path.join(self.outdir, 'M_index.yaml')
-        with open(mfile, 'w') as f:
-            yaml.dump(self.get_metadata(), f)
 
         # Bind Ancil Data
         self.ancil.bind(self.outdir, self.times, self.frame_idxs, self.file_idxs)
