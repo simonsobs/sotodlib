@@ -39,7 +39,7 @@ import argparse
 import logging
 from sotodlib.site_pipeline import util
 logger = util.init_logger(__name__, 'update-obsdb: ')
-
+from typing import Optional
 
 def check_meta_type(bookpath):
     metapath = os.path.join(bookpath, "M_index.yaml")
@@ -51,11 +51,13 @@ def check_meta_type(bookpath):
     else:
         return meta["type"]
 
-def update_obsdb(config: str, 
-                 recency: float=None, 
-                 booktype: str="both",
-                 verbosity: int=2,
-                 logger=None):
+def main(config:str, 
+        recency:float=None, 
+        booktype:Optional[str]="both",
+        verbosity:Optional[int]=2,
+        overwrite:Optional[bool]=False,
+        logger=None):
+
     """
     Create or update an obsdb for observation or operations data.
 
@@ -70,8 +72,11 @@ def update_obsdb(config: str,
         Look for observations or operations data or both (default: both)
     verbosity : int
         Output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug
+    overwrite : bool
+        if False, do not re-check existing entries
     logger : logging
         When to output the print statements
+
 
     """
 
@@ -116,19 +121,25 @@ def update_obsdb(config: str,
         tback = tnow - recency*86400
     else:
         tback = 0 #Back to the UNIX Big Bang 
+
+    existing = bookcartobsdb.query()["obs_id"]
     #Check if there are one or multiple base_dir specified
     if isinstance(base_dir,str):
         base_dir = [base_dir]
-    #Find folders that are book-like and recent
     for bd in base_dir:
+        #Find folders that are book-like and recent
         for dirpath,_, _ in os.walk(bd):
             last_mod = max(os.path.getmtime(root) for root,_,_ in os.walk(dirpath))
             if last_mod<tback:#Ignore older directories
                 continue
             if os.path.exists(os.path.join(dirpath, "M_index.yaml")):
-                #Looks like a context file
+                _, book_id = os.path.split(dirpath)
+                if book_id in existing and not overwrite:
+                    continue
+                #Looks like a book folder
                 bookcart.append(dirpath)
-        #Check the books for the observations we want
+    #Check the books for the observations we want
+
 
     for bookpath in bookcart:
         if check_meta_type(bookpath) in accept_type:
@@ -214,13 +225,13 @@ def get_parser(parser=None):
         help="Increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug")
     parser.add_argument("--booktype", default="both", type=str,
         help="Select book type to look for: obs, oper, both(default)")
+    parser.add_argument("--overwrite", action="store_true",
+        help="If true, writes over existing entries")
     return parser
 
-def main():
-    parser = get_parser(parser=None)
-    args = parser.parse_args()
-    update_obsdb(**vars(args))
 
 
 if __name__ == '__main__':
-    main()
+    parser = get_parser(parser=None)
+    args = parser.parse_args()
+    main(**vars(args))

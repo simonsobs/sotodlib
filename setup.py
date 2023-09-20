@@ -24,9 +24,15 @@ setup_opts["entry_points"] = {
         "so_hardware_info = sotodlib.scripts.hardware_info:main",
         "so-metadata = sotodlib.core.metadata.cli:main",
         "so-site-pipeline = sotodlib.site_pipeline.cli:main",
+        "toast_so_sim = sotodlib.toast.workflows.toast_so_sim:cli",
+        "toast_so_map = sotodlib.toast.workflows.toast_so_map:cli",
+        "toast_so_convert = sotodlib.toast.workflows.toast_so_convert:cli",
+        "get_wafer_offset = sotodlib.toast.workflows.get_wafer_offset:main",
     ]
 }
 
+# left here for backward compatibility
+# new scripts should be put to console_scripts above instead
 scripts = [
     "workflows/toast_so_sim.py",
     "workflows/toast_so_map.py",
@@ -63,11 +69,13 @@ setup_opts["install_requires"] = [
     'pixell',
     'scikit-image',
     'pyfftw',
-    'typer',
 ]
 setup_opts["extras_require"] = {
     "site_pipeline": [
         "influxdb",
+    ],
+    "tests": [
+        "socs",
     ],
 }
 
