@@ -224,14 +224,16 @@ def get_wcs_kernel(proj, ra=None, dec=None, res=None):
                   must adhere to the following format:
 
                       proj-res
-                  
+
                   where proj is a projection type (e.g. 'car', 'tan'
                   'gnom') and res is the resolution, in appropriate
-                  units (deg, arcmin or arcsec).
-                  Examples of acceptable args:
+                  units (deg, arcmin or arcsec).Examples of acceptable
+                  args:
+
                       'car-0.5deg'
                       'tan-3arcmin'
                       'gnom-25arcsec'
+
       ra: Right Ascension (longitude) of the reference position, in
         radians.
       dec: Declination (latitude) of the reference position, in
