@@ -248,7 +248,7 @@ def get_wcs_kernel(proj, ra=None, dec=None, res=None):
         # Convert to radians
         res = res * np.pi/180.
         if unit == 'arcmin':
-            res / =60.
+            res /= 60.
         if unit == 'arcsec':
             res /= 3600.
 
