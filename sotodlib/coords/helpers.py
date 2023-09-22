@@ -210,10 +210,11 @@ def get_horiz(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
         tod.wrap(wrap, output, [(0, 'dets'), (1, 'samps')])
     return output
 
+
 def get_wcs_kernel(proj, ra=None, dec=None, res=None):
     """Construct a WCS.  This fixes the projection type (e.g. CAR, TAN),
-    centered with respect to a reference point (at ra,dec = (0,0)), and 
-    resolution of a pixelization, without specifying a particular grid 
+    centered with respect to a reference point (at ra,dec = (0,0)), and
+    resolution of a pixelization, without specifying a particular grid
     of pixels.
 
     This interface is subject to change.
@@ -224,11 +225,11 @@ def get_wcs_kernel(proj, ra=None, dec=None, res=None):
                       proj-res
                   where proj is a projection type (e.g. 'car', 'tan'
                   'gnom') and res is the resolution, in appropriate
-                  units (deg, arcmin or arcsec). 
+                  units (deg, arcmin or arcsec).
                   Examples of acceptable args:
                       'car-0.5deg'
                       'tan-3arcmin'
-                      'gnom-25arcsec'                
+                      'gnom-25arcsec'
       ra: Right Ascension (longitude) of the reference position, in
         radians.
       dec: Declination (latitude) of the reference position, in
@@ -238,31 +239,32 @@ def get_wcs_kernel(proj, ra=None, dec=None, res=None):
     Returns a WCS object that captures the requested pixelization.
 
     """
-    if len(proj)>3:
+    if len(proj) > 3:
         m = re.match('(?P<proj>car|tan)-(?P<res>[0-9]*.?[0-9]*)(?P<unit>arcsec|arcmin|deg)', proj)
         proj = m['proj']
         res = float(m['res'])
         unit = m['unit']
-        
+
         # Convert to radians
         res = res * np.pi/180.
         if unit == 'arcmin':
-            res/=60.
+            res / =60.
         if unit == 'arcsec':
-            res/=3600.
-        
+            res /= 3600.
+
         if unit == 'deg' and res > 10:
             raise ValueError("Beam is too big")
-        
-        _, wcs = enmap.geometry(np.array((0,0)), shape=(1,1), proj=proj,
+
+        _, wcs = enmap.geometry(np.array((0, 0)), shape=(1, 1), proj=proj,
                                 res=(res, -res))
-        
+
     else:
         assert np.isscalar(res)  # This ain't enlib.
-        _, wcs = enmap.geometry(np.array((dec,ra)), shape=(1,1), proj=proj,
+        _, wcs = enmap.geometry(np.array((dec, ra)), shape=(1, 1), proj=proj,
                                 res=(res, -res))
 
     return wcs
+
 
 def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
                   focal_plane=None, sight=None, rot=None):
