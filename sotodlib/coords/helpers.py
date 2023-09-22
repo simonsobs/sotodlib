@@ -210,7 +210,7 @@ def get_horiz(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
         tod.wrap(wrap, output, [(0, 'dets'), (1, 'samps')])
     return output
 
-def test_wcs_kernel(proj, ra=None, dec=None, res=None):
+def get_wcs_kernel(proj, ra=None, dec=None, res=None):
     """Construct a WCS.  This fixes the projection type (e.g. CAR, TAN),
     centered with respect to a reference point (at ra,dec = (0,0)), and 
     resolution of a pixelization, without specifying a particular grid 
