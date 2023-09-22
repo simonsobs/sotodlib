@@ -222,7 +222,9 @@ def get_wcs_kernel(proj, ra=None, dec=None, res=None):
     Args:
       proj (str): Name and resolution of projection to be used. It
                   must adhere to the following format:
+
                       proj-res
+                  
                   where proj is a projection type (e.g. 'car', 'tan'
                   'gnom') and res is the resolution, in appropriate
                   units (deg, arcmin or arcsec).
