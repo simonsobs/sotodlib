@@ -3,6 +3,7 @@ import numpy as np
 from pixell import enmap, wcsutils, utils
 
 import time
+import re
 
 DEG = np.pi/180
 
@@ -209,7 +210,7 @@ def get_horiz(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
         tod.wrap(wrap, output, [(0, 'dets'), (1, 'samps')])
     return output
 
-def get_wcs_kernel(proj):
+def test_wcs_kernel(proj, ra=None, dec=None, res=None):
     """Construct a WCS.  This fixes the projection type (e.g. CAR, TAN),
     centered with respect to a reference point (at ra,dec = (0,0)), and 
     resolution of a pixelization, without specifying a particular grid 
@@ -220,47 +221,47 @@ def get_wcs_kernel(proj):
     Args:
       proj (str): Name and resolution of projection to be used. It
                   must adhere to the following format:
-                      'proj-res'
+                      proj-res
                   where proj is a projection type (e.g. 'car', 'tan'
                   'gnom') and res is the resolution, in appropriate
                   units (deg, arcmin or arcsec). 
                   Examples of acceptable args:
                       'car-0.5deg'
                       'tan-3arcmin'
-                      'gnom-25arcsec'
+                      'gnom-25arcsec'                
+      ra: Right Ascension (longitude) of the reference position, in
+        radians.
+      dec: Declination (latitude) of the reference position, in
+        radians.
+      res: Resolution, in radians.
 
-    Returns a WCS object that captures the requested pixelization.    
+    Returns a WCS object that captures the requested pixelization.
 
     """
-    proj, res  = proj.split('-')
-    
-    if 'deg' in res:
-        res = res.split('deg')[0]
-        unit = 'deg'
-
-    elif 'arcmin' in res:
-        res = res.split('arcmin')[0]
-        unit = 'arcmin'
-
-    elif 'arcsec' in res:
-        res = res.split('arcsec')[0]
-        unit = 'arcsec'
-    
-    else:
-        raise ValueError("Please use a real unit [deg, arcmin, arcsec]")
-   
-    res = float(res)
-    
-    if res not in [0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30,
-                   40, 45]:
-        raise ValueError("Beam size is awkward")
-
-    if unit == 'deg' and res > 10:
-        raise ValueError("Beam is too big")
-
-    assert np.isscalar(res)  # This ain't enlib.
-    _, wcs = enmap.geometry(np.array((0,0)), shape=(1,1), proj=proj,
+    if len(proj)>3:
+        m = re.match('(?P<proj>car|tan)-(?P<res>[0-9]*.?[0-9]*)(?P<unit>arcsec|arcmin|deg)', proj)
+        proj = m['proj']
+        res = float(m['res'])
+        unit = m['unit']
+        
+        # Convert to radians
+        res = res * np.pi/180.
+        if unit == 'arcmin':
+            res/=60.
+        if unit == 'arcsec':
+            res/=3600.
+        
+        if unit == 'deg' and res > 10:
+            raise ValueError("Beam is too big")
+        
+        _, wcs = enmap.geometry(np.array((0,0)), shape=(1,1), proj=proj,
                                 res=(res, -res))
+        
+    else:
+        assert np.isscalar(res)  # This ain't enlib.
+        _, wcs = enmap.geometry(np.array((dec,ra)), shape=(1,1), proj=proj,
+                                res=(res, -res))
+
     return wcs
 
 def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
