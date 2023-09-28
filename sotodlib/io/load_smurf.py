@@ -1306,8 +1306,9 @@ class G3tSmurf:
                     session.query(TimeCodes)
                     .filter(
                         TimeCodes.stream_id == subdir,
-                        TimeCodes.suprsync_type
-                        == SupRsyncType.from_string(info["archive_name"]).value,
+                        TimeCodes.suprsync_type == SupRsyncType.from_string(
+                            info["archive_name"]
+                        ).value,
                         TimeCodes.timecode == info["timecode"],
                     )
                     .one_or_none()
@@ -1350,7 +1351,7 @@ class G3tSmurf:
             )
             if db_agent is None:
                 logger.info(
-                    f"Agent {agent} not found in HK database before"
+                    f"Agent {agent.agent} not found in HK database before"
                     f" update time {update_time}"
                 )
                 continue
