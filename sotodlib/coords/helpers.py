@@ -280,6 +280,9 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     big enough to contain all data from tod.  Returns (shape, wcs).
 
     """
+    if type(wcs_kernel) == str:
+        wcs_kernel = get_wcs_kernel(wcs_kernel)
+
     dets = _valid_arg(dets, tod.dets.vals, src=tod)
     fp0 = _valid_arg(focal_plane, 'focal_plane', src=tod)
     if sight is None and 'sight' in tod:
