@@ -220,8 +220,10 @@ def get_wcs_kernel(proj, ra=None, dec=None, res=None):
     This interface is subject to change.
 
     Args:
-      proj (str): Name and resolution of projection to be used. It
-                  must adhere to the following format:
+      proj (str): Either the name of a FITS projection to use (e.g. 'car',
+                  'cea', 'tan'), in which case "res" must also be specified,
+                  or a string containing both the projection and the
+                  resolution, in this format:
 
                       proj-res
 
@@ -243,8 +245,11 @@ def get_wcs_kernel(proj, ra=None, dec=None, res=None):
     Returns a WCS object that captures the requested pixelization.
 
     """
-    if len(proj) > 3:
-        m = re.match('(?P<proj>car|tan)-(?P<res>[0-9]*.?[0-9]*)(?P<unit>arcsec|arcmin|deg)', proj)
+    if len(proj) > 4:
+        m = re.match('(?P<proj>car|tan|cea|gnom)-(?P<res>[0-9]*.?[0-9]*)(?P<unit>arcsec|arcmin|deg)',
+                     proj)
+        if m is None:
+            raise ValueError("Input projection string is incorrectly formatted.")
         proj = m['proj']
         res = float(m['res'])
         unit = m['unit']
@@ -256,9 +261,6 @@ def get_wcs_kernel(proj, ra=None, dec=None, res=None):
         if unit == 'arcsec':
             res /= 3600.
 
-        if unit == 'deg' and res > 10:
-            raise ValueError("Beam is too big")
-
         _, wcs = enmap.geometry(np.array((0, 0)), shape=(1, 1), proj=proj,
                                 res=(res, -res))
 
@@ -266,6 +268,9 @@ def get_wcs_kernel(proj, ra=None, dec=None, res=None):
         assert np.isscalar(res)  # This ain't enlib.
         _, wcs = enmap.geometry(np.array((dec, ra)), shape=(1, 1), proj=proj,
                                 res=(res, -res))
+
+    if proj == 'car':
+        wcs.wcs.crpix = [1.0, 0.5]
 
     return wcs
 
