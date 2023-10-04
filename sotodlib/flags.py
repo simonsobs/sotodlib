@@ -95,7 +95,10 @@ def get_glitch_flags(
     )
     # get the threshods based on n_sig x nlev = n_sig x iqu x 0.741
     fvec = np.abs(fvec)
-    iqr_range = 0.741 * stats.iqr(fvec, axis=1)
+        if fvec.shape[1] > 50000:
+        ds = int(fvec.shape[1]/20000)
+    else: ds = 1
+    iqr_range = 0.741 * stats.iqr(fvec[:,::ds], axis=1)
     # get flags
     msk = fvec > iqr_range[:, None] * n_sig
     flag = RangesMatrix([Ranges.from_bitmask(m) for m in msk])
