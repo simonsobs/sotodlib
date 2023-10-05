@@ -6,7 +6,8 @@ import argparse
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
 from sotodlib.preprocess import _Preprocess, PIPELINE, processes
-
+import logging
+logger = logging.getLogger(__name__)
 
 def _build_pipe_from_configs(configs):
     pipe = []
