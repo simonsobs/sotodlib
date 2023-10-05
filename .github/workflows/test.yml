@@ -33,7 +33,7 @@ jobs:
           access_token: ${{ github.token }}
 
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - uses: actions/setup-python@v4
         name: Install Python
@@ -96,7 +96,7 @@ jobs:
   #         access_token: ${{ github.token }}
 
   #     - name: Checkout
-  #       uses: actions/checkout@v3
+  #       uses: actions/checkout@v4
 
   #     - uses: actions/setup-python@v4
   #       name: Install Python
