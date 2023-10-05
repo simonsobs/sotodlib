@@ -1197,7 +1197,6 @@ class DemodMapmaker:
         srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
         # now we have 3 signals, dsT / demodQ / demodU. We pack them into an array with shape (3,...)
         tod    = np.array([obs.dsT.astype(self.dtype, copy=False), obs.demodQ.astype(self.dtype, copy=False), obs.demodU.astype(self.dtype, copy=False)])
-        #print('The shape of the tod is ',tod.shape)
         if deslope:
             for i in range(self.ncomp):
                 utils.deslope(tod[i], w=5, inplace=True)
@@ -1217,7 +1216,6 @@ class DemodMapmaker:
         # And apply it to the tod
         for i in range(self.ncomp):
             tod[i]    = nmat.apply(tod[i])
-        #print('Inside add_obs, the mean of the timestream demodQ is %.5E'%np.mean(tod[1][300]))
         # Add the observation to each of our signals
         for signal in self.signals:
             signal.add_obs(id, obs, nmat, tod)
@@ -1277,7 +1275,7 @@ class DemodSignalMap(DemodSignal):
             self.div = enmap.zeros((ncomp,ncomp)+shape, wcs, dtype=dtype)
             self.hits= enmap.zeros(              shape, wcs, dtype=dtype)
 
-    def add_obs(self, id, obs, nmat, Nd, pmap=None, wrong_definition=True):
+    def add_obs(self, id, obs, nmat, Nd, pmap=None, wrong_definition=False):
         # Nd will have 3 components, corresponding to ds_T, demodQ, demodU with the noise model applied
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
@@ -1303,6 +1301,7 @@ class DemodSignalMap(DemodSignal):
         for i in range(self.ncomp):
             pcut.clear(Nd[i])  # I don't know what this does
         pmap.to_map(dest=obs_rhs_T, signal=Nd[0], comps='T') # this is only the RHS for T
+        
         # RHS for QU. We save it to dummy maps
         obs_rhs_demodQ = pmap.to_map(signal=Nd[1], comps='QU') # Do I need to pass tod=obs ?
         obs_rhs_demodU = pmap.to_map(signal=Nd[2], comps='QU') # Do I need to pass tod=obs ?
@@ -1323,9 +1322,16 @@ class DemodSignalMap(DemodSignal):
         obs_rhs[0] = obs_rhs_T[0]
         obs_rhs[1] = obs_rhs_demodQU[0]
         obs_rhs[2] = obs_rhs_demodQU[1]
-        
-        # Build the per-pixel inverse covmat for this observation
         obs_div    = pmap.zeros(super_shape=(self.ncomp,self.ncomp))
+        # Build the per-pixel inverse covmat for this observation
+        #obs_div = enmap.zeros((3, 3) + pmap.geom.shape, wcs=pmap.geom.wcs)
+        #det_weights = 1/np.std(obs.demodQ, axis=1)**2
+        wT = pmap.to_weights(obs, signal=obs.dsT, comps='T', det_weights=nmat.ivar)
+        wQU = pmap.to_weights(obs, signal=obs.demodQ, comps='T', det_weights=nmat.ivar)
+        obs_div[0,0] = wT
+        obs_div[1,1] = wQU
+        obs_div[2,2] = wQU
+        """
         for i in range(self.ncomp):
             obs_div[i]   = 0
             obs_div[i,i] = 1
@@ -1335,12 +1341,14 @@ class DemodSignalMap(DemodSignal):
             Nd[i] = nmat.white(Nd[i])
             obs_div[i]   = 0
             pmap.to_map(signal=Nd[i], dest=obs_div[i])
+#        if self.ncomp==3:
+#            obs_div[2,2] = obs_div[1,1]
+        """
         # Build hitcount
         Nd[0,:] = 1
         pcut.clear(Nd[0])
         obs_hits = pmap.to_map(signal=Nd[0])
         del Nd
-
         # Update our full rhs and div. This works for both plain and distributed maps
         self.rhs = self.rhs.insert(obs_rhs, op=np.ndarray.__iadd__)
         self.div = self.div.insert(obs_div, op=np.ndarray.__iadd__)
