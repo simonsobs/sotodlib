@@ -97,7 +97,8 @@ def get_glitch_flags(
     fvec = np.abs(fvec)
     if fvec.shape[1] > 50000:
         ds = int(fvec.shape[1]/20000)
-    else: ds = 1
+    else: 
+        ds = 1
     iqr_range = 0.741 * stats.iqr(fvec[:,::ds], axis=1)
     # get flags
     msk = fvec > iqr_range[:, None] * n_sig
