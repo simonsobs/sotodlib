@@ -172,15 +172,3 @@ an unit step, so it is acting as a matched filter.
 
 .. automodule:: sotodlib.tod_ops.jumps
    :members:
-
-tod_ops.resample
-================
-
-Support for resampling an axis manager to a new set of timestamps. Useful for downsampling
-or upsampling data. This does not include any filtering required to reduce aliasing in
-this step. Data must first be filtered with appropriate nyquist filter using the
-``sotodlib.tod_ops.fourier_filter`` module.
-
-.. automodule:: sotodlib.tod_ops.resample
-   :members:
-
