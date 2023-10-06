@@ -274,7 +274,7 @@ def get_wcs_kernel(proj, ra=None, dec=None, res=None):
         # Check if the resolution is sensible, for SHTs
         res = res * 180./np.pi # Easier to do this check in degs
         div = 90./res - np.round(90./res)
-        if len(str(div).split('.')[1]) > 3:
+        if abs(div) > 1e-8:
             raise ValueError("Please use a standard resolution")
     
     return wcs
