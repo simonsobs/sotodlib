@@ -189,8 +189,12 @@ class AncilProcessor:
         if 'Corrected_Azimuth' in block.data:
             az = np.interp(times, block.times, block.data['Corrected_Azimuth'])
             el = np.interp(times, block.times, block.data['Corrected_Elevation'])
-        if 'Corrected_Corotation' in block.data:
-            boresight = np.interp(times, block.times, block.data['Corrected_Boresight'])
+        if 'Corrected_Boresight' in block.data:
+            boresight = np.interp(
+                times, 
+                block.times, 
+                block.data['Corrected_Boresight']
+            )
         if 'Corrected_Corotation' in block.data:
             corotation = np.interp(times, block.times, block.data['Corrected_Corotation'])
 
