@@ -449,7 +449,7 @@ def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
         sig = gfill.swap(aman, signal=sig)
     
     # Wrap and Return
-    if type(wrap) is str:
+    if isinstance(wrap, str):
         if wrap in aman._assignments:
             aman.move(wrap, None)
         aman.wrap(wrap, sig, [(0, 'dets'), (1, 'samps')])
