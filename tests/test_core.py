@@ -9,6 +9,8 @@ from sotodlib import core
 import sotodlib.core.axisman_util as amutil
 import so3g
 
+from so3g.proj import Ranges, RangesMatrix
+
 ## "temporary" fix to deal with scipy>1.8 changing the sparse setup
 try:
     from scipy.sparse import csr_array
@@ -427,6 +429,113 @@ class TestFlagManager(unittest.TestCase):
         flags = core.FlagManager.for_tod(tod, 'dets', 'samps')
         tod.wrap('flags', flags)
         self.assertTrue( type(tod.flags) == core.FlagManager )
+
+
+    def test_900_resampe(self):
+
+        def check_resample(t0,t1):
+
+            ## empty flag
+            flag = Ranges( len(t0) )
+            new_flag = core.flagman.resample_cuts( flag, t0, t1) 
+            self.assertTrue( len(new_flag.ranges()) == 0 )
+
+            ## flag before the start of t1
+            flag.add_interval( 2340, 3452 )
+            new_flag = core.flagman.resample_cuts( flag, t0, t1) 
+            self.assertTrue( len(new_flag.ranges()) == 0 )
+
+            ## flag on edge of the start of t1
+            flag = Ranges( len(t0) )
+            flag.add_interval( 3900, 4452 )
+            new_flag = core.flagman.resample_cuts(flag, t0, t1) 
+
+            self.assertTrue(len(new_flag.ranges()) == 1 )
+            self.assertTrue(t0[ flag.ranges()[0][0]] < t1[new_flag.ranges()[0][0]])
+            self.assertTrue(t0[ flag.ranges()[0][1]] <= t1[new_flag.ranges()[0][1]])
+            self.assertTrue(
+                t0[ flag.ranges()[0][1]] > t1[new_flag.ranges()[0][1]-1]
+            )
+
+            ## flag inside full t1 range
+            flag = Ranges( len(t0) )
+            flag.add_interval( 6254, 7896 )
+            new_flag = core.flagman.resample_cuts( flag, t0, t1) 
+            self.assertTrue(t0[ flag.ranges()[0][0]] >= t1[new_flag.ranges()[0][0]])
+            self.assertTrue(
+                t0[ flag.ranges()[0][0]] < t1[new_flag.ranges()[0][0]+1]
+            )
+            self.assertTrue(t0[ flag.ranges()[0][1]] <= t1[new_flag.ranges()[0][1]])
+            self.assertTrue(
+                t0[ flag.ranges()[0][1]] > t1[new_flag.ranges()[0][1]-1]
+            )
+
+            ## flag on edge of the end of t1
+            flag = Ranges( len(t0) )
+            flag.add_interval( 173001, 177001 )
+            new_flag = core.flagman.resample_cuts( flag, t0, t1) 
+            self.assertTrue(
+                t0[ flag.ranges()[0][0]] >= t1[new_flag.ranges()[0][0]]
+            )
+            self.assertTrue(
+                t0[ flag.ranges()[0][0]] < t1[new_flag.ranges()[0][0]+1]
+            )
+            self.assertTrue(new_flag.ranges()[0][1] == len(t1) )
+
+            ## with ranges matix
+            flag = RangesMatrix.full( (5,len(t0)), False )
+            flag[0].add_interval( 2340, 3452 )
+            flag[1].add_interval( 3900, 4452 )
+            flag[2].add_interval( 6254, 7896 )
+            flag[3].add_interval( 173001, 177001 )
+
+            new_flag = core.flagman.resample_cuts( flag, t0, t1) 
+            self.assertTrue( len(new_flag[0].ranges()) == 0 )
+            self.assertTrue( len(new_flag[4].ranges()) == 0 )
+
+            self.assertTrue( 
+                t0[ flag[1].ranges()[0][0]] < t1[new_flag[1].ranges()[0][0]]
+            )
+            self.assertTrue( 
+                t0[ flag[1].ranges()[0][1]] <= t1[new_flag[1].ranges()[0][1]]
+            )
+            self.assertTrue( 
+                t0[ flag[1].ranges()[0][1]] > t1[new_flag[1].ranges()[0][1]-1]
+            )
+    
+            self.assertTrue( 
+                t0[ flag[2].ranges()[0][0]] >= t1[new_flag[2].ranges()[0][0]]
+            )
+            self.assertTrue( 
+                t0[ flag[2].ranges()[0][0]] < t1[new_flag[2].ranges()[0][0]+1]
+            )
+            self.assertTrue( 
+                t0[ flag[2].ranges()[0][1]] <= t1[new_flag[2].ranges()[0][1]]
+            )
+            self.assertTrue( 
+                t0[ flag[2].ranges()[0][1]] > t1[new_flag[2].ranges()[0][1]-1]
+            )
+
+            self.assertTrue( 
+                t0[ flag[3].ranges()[0][0]] >= t1[new_flag[3].ranges()[0][0]]
+            )
+            self.assertTrue( 
+                t0[ flag[3].ranges()[0][0]] < t1[new_flag[3].ranges()[0][0]+1]
+            )
+            self.assertTrue( new_flag[3].ranges()[0][1] == len(t1))
+
+        t0 = np.linspace( 0, 100, 1000*200+1)
+        t1 = np.linspace( 2, 87, 5800)
+        check_resample(t0, t1)
+        
+        t1 = np.linspace( -1, 87, 5800)
+        self.assertRaises(AssertionError, check_resample, t0,t1)
+        
+        t1 = np.linspace( 2, 87, 3*1000*200+1)
+        check_resample(t0, t1)
+
+    
+    
 
 
 class TestUtil(unittest.TestCase):

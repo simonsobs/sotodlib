@@ -7,3 +7,4 @@ from .gapfill import \
 from . import jumps
 from . import pca
 from .apodize import apodize_cosine
+from . import resample

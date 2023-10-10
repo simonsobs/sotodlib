@@ -270,6 +270,7 @@ def _get_shape(data):
 
 def has_any_cuts(flag):
     return np.array([len(x.ranges())>0 for x in flag], dtype='bool')
+
 def has_all_cut(flag):
     return np.array(
         [len(x.complement().ranges())==0 for x in flag],
@@ -277,6 +278,74 @@ def has_all_cut(flag):
     )
 def count_cuts(flag):
     return np.array([len(x.ranges()) for x in flag], dtype='int')
+
+
+def resample_cuts(flag, t0, t1):
+    """ Resample flags from one time range to another. Follows the 'any'
+    convention. Flags are by convention [s,e) intervals. The flagged time range
+    is defined as [t0[s], t0[e]) and flags are transfered to t1 if any samples
+    on an interval are flagged. 
+
+    Will raise an Assertion error if any part of t1 is outside the range of t0.
+
+    Args
+    ----
+    flag: Ranges or 2D RangesMatrix
+        flag to resample, resamples along the last axis
+    t0: 1D ndarray
+        array of timestamps that align with the last axis of the flag
+    t1: 1D ndarray
+        array of timestamps that align with the new flag
+
+    Returns
+    -------
+    new_flag: type(flag)
+        resampled flag
+    """
+
+    assert flag.__class__ in [Ranges, RangesMatrix]
+    assert len(flag.shape) <= 2
+    
+    ## resampling will not extrapolate
+    assert t0[0] <= t1[0]
+    assert t0[-1] >= t1[-1]
+    
+    def transfer( rng, new_rng):
+        for (s,e) in rng.ranges():
+            ns = np.where( t1 <= t0[s] )[0]
+            if len(ns) > 0 :
+                ns = ns[-1]
+            else:
+                ns = 0
+
+            if e == rng.shape[0]:
+                ne = new_rng.shape[0]
+            else:
+                ne = np.where( t1 >= t0[e] )[0]
+                if len(ne) > 0:
+                    ne = ne[0]
+                else:
+                    ne = new_rng.shape[0]
+                    
+            if ns == 0 and ne == 0:
+                continue
+            if ns == new_rng.shape[0] and ne == new_rng.shape[0]:
+                continue
+
+            new_rng.add_interval( ns,ne )
+    
+
+    if isinstance(flag, Ranges):
+        new_flag = flag.__class__( len(t1) )
+        transfer( flag, new_flag)
+
+    elif isinstance(flag, RangesMatrix):
+        new_flag = flag.__class__.full( (flag.shape[0], len(t1)), False)
+
+        for r, rng in enumerate(flag):
+            transfer(rng, new_flag[r])
+    return new_flag
+
 
 def sparse_to_ranges_matrix(arr, buffer=0, close_gaps=0, val=True):
     """Convert a csr sparse array into a ranges matrix
