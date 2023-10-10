@@ -409,13 +409,8 @@ def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
         RangesMatrix containing flags to use for gap filling. If None then
         uses ``aman.flags.glitches``.
     wrap : bool or str
-        If True wraps new axis called ``gap_filled``, if False returns the 
+        If True wraps new axis called ``gap_filled``, if False returns the
         gap filled array, if a string wraps new axis with provided this name.
-
-    merge_filled : bool
-        Merge gap filled data into input axis manager.
-    filled_name : str
-        Axis name to merge gap filled data if merge_filled is True.
 
     Returns
     -------
