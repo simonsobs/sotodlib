@@ -33,7 +33,7 @@ jobs:
           access_token: ${{ github.token }}
 
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - uses: actions/setup-python@v4
         name: Install Python
@@ -53,11 +53,10 @@ jobs:
           python3 -m pip install so3g
           python3 -m pip install pshmem
           python3 -m pip install --pre toast
-          python3 -m pip install socs
 
       - name: Install sotodlib
         run: |
-          python3 -m pip install -vvv .
+          python3 -m pip install -vvv .[tests]
 
       - name: Run Serial Tests
         run: |
@@ -97,7 +96,7 @@ jobs:
   #         access_token: ${{ github.token }}
 
   #     - name: Checkout
-  #       uses: actions/checkout@v3
+  #       uses: actions/checkout@v4
 
   #     - uses: actions/setup-python@v4
   #       name: Install Python

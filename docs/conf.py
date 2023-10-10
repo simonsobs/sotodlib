@@ -71,7 +71,7 @@ master_doc = 'index'
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = 'en'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -98,11 +98,11 @@ autodoc_default_options = {
 # some external dependencies are not met at build time and break the
 # building process.
 autodoc_mock_imports = []
-for missing in ('numpy', 'matplotlib', 'healpy', 'astropy','sqlalchemy',
+for missing in ('matplotlib', 'healpy', 'sqlalchemy',
                 'quaternionarray', 'yaml', 'toml', 'sqlite3','tqdm',
                 'skyfield', 'h5py', 'pyfftw', 'scipy',
-                'toast', 'spt3g', 'so3g', 'pixell', 'scikit', 'skimage',
-                'traitlets', 'ephem', 'influxdb'):
+                'toast', 'pixell', 'scikit', 'skimage',
+                'traitlets', 'ephem', 'influxdb', 'pycpd', 'detmap'):
     try:
         foo = import_module(missing)
     except ImportError:

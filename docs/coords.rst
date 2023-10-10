@@ -279,3 +279,9 @@ Local coordinate systems
 
 .. automodule:: sotodlib.coords.local
    :members:
+
+Focal Plane from Physical Optics
+--------------------------------
+
+.. automodule:: sotodlib.coords.focal_plane
+   :members:

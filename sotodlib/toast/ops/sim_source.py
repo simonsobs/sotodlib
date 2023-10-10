@@ -1,3 +1,6 @@
+# Copyright (c) 2018-2023 Simons Observatory.
+# Full license can be found in the top level "LICENSE" file.
+
 import os
 import h5py
 import copy
@@ -571,7 +574,7 @@ class SimSource(Operator):
             # We have already read the single beam file.
             beam_dic = self.beam_props["ALL"]
         else:
-            with h5py(self.beam_file, 'r') as f_t:
+            with h5py.File(self.beam_file, 'r') as f_t:
                 beam_dic = {}
                 beam_dic["data"] = f_t["beam"][:]
                 beam_dic["size"] = [[f_t["beam"].attrs["size"], f_t["beam"].attrs["res"]], [f_t["beam"].attrs["npix"], 1]]
@@ -651,7 +654,8 @@ class SimSource(Operator):
             beam, radius = self._get_beam_map(det, source_diameter, det_temp)
 
             # Interpolate the beam map at appropriate locations
-            x = (az - source_az.to_value(u.rad)) * np.cos(el)
+            az_diff = (az - source_az.to_value(u.rad) + np.pi) % (2 * np.pi) - np.pi
+            x = az_diff * np.cos(el)
             y = el - source_el.to_value(u.rad)
             r = np.sqrt(x**2 + y**2)
             good = r < radius
