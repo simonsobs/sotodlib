@@ -385,8 +385,7 @@ def get_contaminated_ranges(good_flags, bad_flags):
 
 
 def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
-                  glitch_flags=None, merge_filled=True,
-                  filled_name='gap_filled'):
+                  glitch_flags=None, wrap=True):
     """
     This function fills pre-computed glitches provided by the caller in
     time-ordered data using either a polynomial (default) or PCA-based
