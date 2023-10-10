@@ -8,8 +8,9 @@ import warnings
 
 import numpy as np
 import so3g
-from pixell import enmap, utils, fft, bunch, tilemap
+from pixell import enmap, utils, fft, bunch, tilemap, resample
 
+from . import core
 from . import coords
 from . import tod_ops
 
@@ -53,12 +54,13 @@ class MLMapmaker:
         self.dof          = MultiZipper()
         self.ready        = False
 
-    def add_obs(self, id, obs, noise_model=None):
+    def add_obs(self, id, obs, deslope=True, noise_model=None):
         # Prepare our tod
         ctime  = obs.timestamps
         srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
         tod    = obs.signal.astype(self.dtype, copy=False)
-        utils.deslope(tod, w=1, inplace=True)
+        if deslope:
+            utils.deslope(tod, w=5, inplace=True)
         # Allow the user to override the noise model on a per-obs level
         if noise_model is None: noise_model = self.noise_model
         # Build the noise model from the obs unless a fully
@@ -248,9 +250,10 @@ class SignalMap(Signal):
             self.hits = tilemap.redistribute(self.hits,self.comm)
             self.dof  = TileMapZipper(self.rhs.geometry, dtype=self.dtype, comm=self.comm)
         else:
-            self.rhs  = utils.allreduce(self.rhs, self.comm)
-            self.div  = utils.allreduce(self.div, self.comm)
-            self.hits = utils.allreduce(self.hits,self.comm)
+            if self.comm is not None:
+                self.rhs  = utils.allreduce(self.rhs, self.comm)
+                self.div  = utils.allreduce(self.div, self.comm)
+                self.hits = utils.allreduce(self.hits,self.comm)
             self.dof  = MapZipper(*self.rhs.geometry, dtype=self.dtype)
         self.idiv  = safe_invert_div(self.div)
         self.ready = True
@@ -283,8 +286,11 @@ class SignalMap(Signal):
         else: return map.copy()
 
     def from_work(self, map):
-        if self.tiled: return tilemap.redistribute(map, self.comm, self.rhs.geometry.active)
-        else: return utils.allreduce(map, self.comm)
+        if self.tiled:
+            return tilemap.redistribute(map, self.comm, self.rhs.geometry.active)
+        else:
+            if self.comm is None: return map
+            else: return utils.allreduce(map, self.comm)
 
     def write(self, prefix, tag, m):
         if not self.output: return
@@ -293,7 +299,7 @@ class SignalMap(Signal):
         if self.tiled:
             tilemap.write_map(oname, m, self.comm)
         else:
-            if self.comm.rank == 0:
+            if self.comm is None or self.comm.rank == 0:
                 enmap.write_map(oname, m)
         return oname
 
@@ -354,7 +360,11 @@ class SignalCut(Signal):
 
     def write(self, prefix, tag, m):
         if not self.output: return
-        oname = self.ofmt.format(name=self.name, rank=self.comm.rank)
+        if self.comm is None:
+            rank = 0
+        else:
+            rank = self.comm.rank
+        oname = self.ofmt.format(name=self.name, rank=rank)
         oname = "%s%s_%s.%s" % (prefix, oname, tag, self.ext)
         with h5py.File(oname, "w") as hfile:
             hfile["data"] = m
@@ -402,7 +412,7 @@ class TileMapZipper:
         return tilemap.TileMap(x.reshape(self.geo.pre+(-1,)).astype(self.dtype, copy=False), self.geo)
 
     def dot(self, a, b):
-        return self.comm.allreduce(np.sum(a*b))
+        return np.sum(a*b) if self.comm is None else utils.allreduce(np.sum(a*b),self.comm)
 
 class MultiZipper:
     def __init__(self):
@@ -504,7 +514,7 @@ class Nmat:
     def __init__(self):
         """Initialize the noise model. In subclasses this will typically set up parameters, but not
         build the details that depend on the actual time-ordered data"""
-        self.ivar  = 1.0
+        self.ivar  = np.ones(1, dtype=np.float32)
         self.ready = True
     def build(self, tod, **kwargs):
         """Measure the noise properties of the given time-ordered data tod[ndet,nsamp], and
@@ -1048,3 +1058,61 @@ def fix_boresight_glitches(obs, ang_tol=0.1*utils.degree, t_tol=1):
     tod_ops.get_gap_fill_single(obs.boresight.el, bcut, swap=True)
 
 def unarr(a): return np.array(a).reshape(-1)[0]
+
+def downsample_ranges(ranges, down):
+    """Downsample either an array of ranges [:,{from,to}]
+    or an so3gRangesInt32 object, by the integer factor down.
+    The downsampling is inclusive: The output ranges will be
+    as small as possible while fully encompassing the input ranges."""
+    if isinstance(ranges, so3g.RangesInt32):
+        return so3g.RangesInt32.from_array(downsample_ranges(ranges.ranges(), down), (ranges.count+down-1)//down)
+    oranges = ranges.copy()
+    # Lower range is simple
+    oranges[:,0] //= down
+    # End should be one above highest impacted index.
+    oranges[:,1] = (oranges[:,1]-1)//down+1
+    return oranges
+
+def downsample_cut(cut, down):
+    """Given an integer RangesMatrix respresenting samples to cut,
+    return a new such RangesMatrix that describes which samples to
+    cut if the timestream were to be downsampled by the integer
+    factor down."""
+    return so3g.proj.ranges.RangesMatrix([downsample_ranges(r,down) for r in cut.ranges])
+
+def downsample_obs(obs, down):
+    """Downsample AxisManager obs by the integer factor down.
+
+    This implementation is quite specific and probably needs
+    generalization in the future, but it should work correctly
+    and efficiently for ACT-like data at least. In particular
+    it uses fourier-resampling when downsampling the detector
+    timestreams to avoid both aliasing noise and introducing
+    a transfer function."""
+    assert down == utils.nint(down), "Only integer downsampling supported, but got '%.8g'" % down
+    # Compute how many samples we will end up with
+    onsamp = (obs.samps.count+down-1)//down
+    # Set up our output axis manager
+    res    = core.AxisManager(obs.dets, core.IndexAxis("samps", onsamp))
+    # Stuff without sample axes
+    for key, axes in obs._assignments.items():
+        if "samps" not in axes:
+            val = getattr(obs, key)
+            if isinstance(val, core.AxisManager):
+                res.wrap(key, val)
+            else:
+                axdesc = [(k,v) for k,v in enumerate(axes) if v is not None]
+                res.wrap(key, val, axdesc)
+    # The normal sample stuff
+    res.wrap("timestamps", obs.timestamps[::down], [(0, "samps")])
+    bore = core.AxisManager(core.IndexAxis("samps", onsamp))
+    for key in ["az", "el", "roll"]:
+        bore.wrap(key, getattr(obs.boresight, key)[::down], [(0, "samps")])
+    res.wrap("boresight", bore)
+    res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp), [(0,"dets"),(1,"samps")])
+    # The cuts
+    for key in ["glitch_flags", "source_flags"]:
+        res.wrap(key, downsample_cut(getattr(obs, key), down), [(0,"dets"),(1,"samps")])
+    # Not sure how to deal with flags. Some sort of or-binning operation? But it
+    # doesn't matter anyway
+    return res
