@@ -7,7 +7,7 @@ from .. import core, tod_ops, coords
 
 def make_map(tod,
              P=None, wcs_kernel=None,
-             res=0.1 * coords.DEG,
+             res=0.1 * coords.DEG, center_on=None,
              dsT=None, demodQ=None, demodU=None,
              cuts=None,
              det_weights=None, det_weights_demod=None,

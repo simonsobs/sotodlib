@@ -204,7 +204,8 @@ def calc_psd(
         
     Arguments:
         aman (AxisManager): with (dets, samps) OR (channels, samps)axes.
-        signal (float ndarray): data signal to pass to scipy.signal.welch()
+        signal (float ndarray or str): data signal to pass to scipy.signal.welch(). If
+            given by string, uses aman[signal] as signal.
         timestamps (float ndarray): timestamps associated with the data signal         
         max_samples (int): maximum samples along sample axis to send to welch
         prefer (str): One of ['left', 'right', 'center'], indicating what
@@ -220,6 +221,9 @@ def calc_psd(
     """
     if signal is None:
         signal = aman.signal
+    elif isinstance(signal, str):
+        signal = aman[signal]
+    
     if timestamps is None:
         timestamps = aman.timestamps
     
