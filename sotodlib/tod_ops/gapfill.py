@@ -452,9 +452,11 @@ def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
         if wrap in aman._assignments:
             aman.move(wrap, None)
         aman.wrap(wrap, sig, [(0, 'dets'), (1, 'samps')])
+        return sig
     elif wrap:
         if 'gap_filled' in aman._assignments:
             aman.move('gap_filled', None)
         aman.wrap('gap_filled', sig, [(0, 'dets'), (1, 'samps')])
+        return sig
     else:
         return sig
