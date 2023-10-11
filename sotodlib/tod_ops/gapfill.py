@@ -408,8 +408,8 @@ def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
         RangesMatrix containing flags to use for gap filling. If None then
         uses ``aman.flags.glitches``.
     wrap : bool or str
-        If True wraps new axis called ``gap_filled``, if False returns the
-        gap filled array, if a string wraps new axis with provided this name.
+        If True wraps new field called ``gap_filled``, if False returns the
+        gap filled array, if a string wraps new field with provided name.
 
     Returns
     -------
