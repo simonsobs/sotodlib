@@ -245,7 +245,7 @@ class Demodulate(_Preprocess):
         hwp.demod_tod(aman, **self.process_cfgs)
 
 
-class Glitchfill(_Preprocess):
+class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
 
     .. autofunction:: sotodlib.tod_ops.gapfill.fill_glitches
@@ -284,4 +284,4 @@ _Preprocess.register(EstimateHWPSS.name, EstimateHWPSS)
 _Preprocess.register(SubtractHWPSS.name, SubtractHWPSS)
 _Preprocess.register(Apodize.name, Apodize)
 _Preprocess.register(Demodulate.name, Demodulate)
-_Preprocess.register(Glitchfill.name, Glitchfill)
+_Preprocess.register(GlitchFill.name, GlitchFill)
