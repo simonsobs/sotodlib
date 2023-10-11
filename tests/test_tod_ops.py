@@ -170,11 +170,11 @@ class GapFillTest(unittest.TestCase):
                                                       wrap=mg)
         print(np.max(np.abs(glitch_filled-aman.inputsignal)))
 
-        # test in_place
+        # test wrap new field
         up, mg = False, True
         glitch_filled = tod_ops.gapfill.fill_glitches(aman, use_pca=up,
                                                       wrap=mg)
-        self.assertTrue(glitch_filled is None)
+        self.assertTrue('gap_filled' in aman._assignments)
 
 class FilterTest(unittest.TestCase):
     def test_basic(self):
