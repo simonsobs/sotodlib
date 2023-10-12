@@ -5,7 +5,7 @@ The config file could be of the form:
 
 .. code-block:: yaml
 
-    base_dir: path_to_base_directory
+    base_dir: path_to_base_directories. Can be a list or a single string.
     obsdb_cols:
       start_time: float
       stop_time: float
@@ -80,6 +80,10 @@ def main(config:str,
 
     """
 
+    if logger is None:
+        logger = globals()['logger']
+    else:
+        globals()['logger'] = logger
     if args.verbosity == 0:
         logger.setLevel(logging.ERROR)
     elif args.verbosity == 1:
