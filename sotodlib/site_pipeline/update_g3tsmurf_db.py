@@ -9,11 +9,10 @@ import datetime as dt
 import numpy as np
 import argparse
 import logging
-from sqlalchemy import not_, or_, and_
 from typing import Optional
 
 from sotodlib.site_pipeline.monitor import Monitor
-from sotodlib.io.load_smurf import G3tSmurf, Observations, logger as default_logger
+from sotodlib.io.load_smurf import G3tSmurf, Observations, _logger as default_logger
 
 
 def main(config: Optional[str] = None, update_delay: float = 2, 
@@ -31,13 +30,13 @@ def main(config: Optional[str] = None, update_delay: float = 2,
         overrides update_delay
     verbosity: int
         0-3, higher numbers = more printouts
-    logger: logging.logger
-        allows passing another longer to execution functions
     index_via_actions: bool
         if True, will look through action folders to create observations, this
         will be necessary for data older than Oct 2022 but creates concurancy 
         issues on systems (like the site) running automatic deletion of level 2 
         data.
+    logger: logging.logger
+        allows passing another longer to execution functions
     """
 
     show_pb = True if verbosity > 1 else False
@@ -53,8 +52,8 @@ def main(config: Optional[str] = None, update_delay: float = 2,
     elif verbosity == 3:
         logger.setLevel(logging.DEBUG)
 
-    cfgs = yaml.safe_load( open(config, "r"))
-    SMURF = G3tSmurf.from_configs(cfgs)
+    cfgs = yaml.safe_load(open(config, "r"))
+    SMURF = G3tSmurf.from_configs(cfgs, logger=logger)
 
     if from_scratch:
         logger.info("Building Database from Scratch, May take awhile")

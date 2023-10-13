@@ -126,7 +126,7 @@ class HKFields(Base):
 
 
 class G3tHk:
-    def __init__(self, hkarchive_path, db_path=None, echo=False):
+    def __init__(self, hkarchive_path, db_path=None, echo=False, logger=logger):
         """
         Class to manage a housekeeping data archive
 
@@ -149,6 +149,8 @@ class G3tHk:
         self.Session = sessionmaker(bind=self.engine)
         self.session = Session()
         Base.metadata.create_all(self.engine)
+
+        self.logger = logger
 
     def load_fields(self, hk_path):
         """
@@ -273,7 +275,7 @@ class G3tHk:
                         continue
                     path_list.append(path)
 
-        logger.debug(f"{len(path_list)} files to add to database.")
+        self.logger.debug(f"{len(path_list)} files to add to database.")
         return path_list
 
     def add_hkfiles(
@@ -291,6 +293,7 @@ class G3tHk:
             max_ctime=max_ctime,
             update_last_file=update_last_file,
         )
+        self.logger.info(f"Found {len(file_list)} files to add.")
 
         for path in tqdm(sorted(file_list), disable=(not show_pb)):
             try:
@@ -301,11 +304,11 @@ class G3tHk:
             except IntegrityError as e:
                 # Database Integrity Errors, such as duplicate entries
                 self.session.rollback()
-                logger.warning(f"Integrity error with error {e}")
+                self.logger.warning(f"Integrity error with error {e}")
             except RuntimeError as e:
                 # End of stream errors, for G3Files that were not fully flushed
                 self.session.rollback()
-                logger.warning(f"Failed on file {filename} due to end of stream error!")
+                self.logger.warning(f"Failed on file {filename} due to end of stream error!")
             except Exception as e:
                 # This will catch generic errors such as attempting to load
                 # out-of-date files that do not have the required frame
@@ -313,7 +316,7 @@ class G3tHk:
                 self.session.rollback()
                 if stop_at_error:
                     raise e
-                logger.warning(f"Failed on file {filename}:\n{e}")
+                self.logger.warning(f"Failed on file {filename}:\n{e}")
 
     def add_file(self, path, overwrite=False):
         db_file = (
@@ -402,7 +405,7 @@ class G3tHk:
             agentname = fields[i].split(".")[1]
             x = np.where([agentname == a.instance_id for a in db_agents])[0]
             if len(x) == 0:
-                logger.error(
+                self.logger.error(
                     f"Somehow did not add agent {agentname} for {db_file.path}"
                 )
                 continue
@@ -519,7 +522,7 @@ class G3tHk:
             )
         )
         if agents.count() == 0:
-            logger.warning(f"no agents found between {start} and {stop}")
+            self.logger.warning(f"no agents found between {start} and {stop}")
 
         agents = agents.filter(HKAgents.instance_id == instance_id).all()
         return agents
@@ -534,7 +537,7 @@ class G3tHk:
         return max([a.stop for a in last_file.agents])
 
     @classmethod
-    def from_configs(cls, configs):
+    def from_configs(cls, configs, logger=logger):
         """
         Create a G3tHK instance from a configs dictionary
 
@@ -545,9 +548,9 @@ class G3tHk:
         if type(configs) == str:
             configs = yaml.safe_load(open(configs, "r"))
 
-        return cls(os.path.join(configs["data_prefix"], "hk"), configs["g3thk_db"])
+        return cls(os.path.join(configs["data_prefix"], "hk"), configs["g3thk_db"], logger=logger)
 
-    def delete_file(self, hkfile, dry_run=False, my_logger=None):
+    def delete_file(self, hkfile, dry_run=False):
         """WARNING: Removes actual files from file system.
 
         Delete an hkfile instance, its on-disk file, and all associated agents
@@ -558,25 +561,22 @@ class G3tHk:
         hkfile: HKFile instance. Assumes file was queried uses self.session
         """
 
-        if my_logger is None:
-            my_logger = logger
-
         # remove field info
-        my_logger.info(f"removing field entries for {hkfile.path} from database")
+        self.logger.info(f"removing field entries for {hkfile.path} from database")
         if not dry_run:
             for f in hkfile.fields:
                 self.session.delete(f)
 
         # remove agent info
-        my_logger.info(f"removing agent entries for {hkfile.path} from database")
+        self.logger.info(f"removing agent entries for {hkfile.path} from database")
         if not dry_run:
             for a in hkfile.agents:
                 self.session.delete(a)
 
         if not os.path.exists(hkfile.path):
-            my_logger.warning(f"{hkfile.path} appears already deleted")
+            self.logger.warning(f"{hkfile.path} appears already deleted")
         else:
-            my_logger.info(f"deleting {hkfile.path}")
+            self.logger.info(f"deleting {hkfile.path}")
             if not dry_run:
                 os.remove(hkfile.path)
 
@@ -584,7 +584,7 @@ class G3tHk:
                 if len(os.listdir(base)) == 0:
                     os.rmdir(base)
 
-        my_logger.info(f"remove {hkfile.path} from database")
+        self.logger.info(f"remove {hkfile.path} from database")
         if not dry_run:
             self.session.delete(hkfile)
             self.session.commit()

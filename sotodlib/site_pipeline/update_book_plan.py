@@ -102,13 +102,13 @@ def main(
 
     monitor = None
     if "monitor" in imprinter.config:
-        imprinter.logger.info("Will send monitor information to Influx")
+        logger.info("Will send monitor information to Influx")
         try:
             monitor = Monitor.from_configs(
                 imprinter.config["monitor"]["connect_configs"]
             )
         except Exception as e:
-            imprinter.logger.error(f"Monitor connectioned failed {e}")
+            logger.error(f"Monitor connectioned failed {e}")
             monitor = None
 
     if monitor is not None:

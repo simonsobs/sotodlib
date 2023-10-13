@@ -477,7 +477,7 @@ class Imprinter:
 
             if not len(meta) == len(meta_agents):
                 # not ready to make any books
-                self.logger.debug(f"Not ready to make timecode books for {tc}")
+                self.logger.info(f"Not ready to make timecode books for {tc}")
                 continue
             
             ## register smurf  books
@@ -500,7 +500,7 @@ class Imprinter:
 
             if not len(files) == len(files_agents):
                 #not ready to make stray books
-                self.logger.debug(f"Not ready to make stray books for {tc}")
+                self.logger.info(f"Not ready to make stray books for {tc}")
                 continue
 
             book_id = f"stray_{tc}_{self.daq_node}"
@@ -1050,7 +1050,7 @@ class Imprinter:
         else:
             # if user input is present, format it like the query response
             streams = stream_ids
-        self.logger.debug(f"Looking for observations from stream_ids {streams}")
+        self.logger.info(f"Looking for observations from stream_ids {streams}")
 
         # restrict to given stream ids (wafers)
         stream_filt = or_(*[G3tObservations.stream_id == s for s in streams])
@@ -1059,9 +1059,10 @@ class Imprinter:
         final_time = SMURF.get_final_time(
             streams, min_ctime, max_ctime, check_control=True
         )
+        self.logger.info(f"Finalization time: {final_time}")
         if final_time < max_ctime:
             max_ctime = final_time
-        self.logger.debug(f"Searching between {min_ctime} and {max_ctime}")
+        self.logger.info(f"Searching between {min_ctime} and {max_ctime}")
 
         # check for incomplete observations in time range
         q_incomplete = session.query(G3tObservations).filter(
@@ -1074,7 +1075,7 @@ class Imprinter:
         # bookbind any observations overlapping the incomplete ones.
         if q_incomplete.count() > 0:
             max_ctime = min([obs.timestamp for obs in q_incomplete.all()])
-            self.logger.debug(
+            self.logger.info(
                 f"Found {q_incomplete.count()} incomplete observations. "
                 f"updating max ctime to {max_ctime}"
             )
@@ -1088,7 +1089,7 @@ class Imprinter:
             G3tObservations.stop < max_stop,
             not_(G3tObservations.stop == None),
         )
-        self.logger.debug(
+        self.logger.info(
             f"Found {obs_q.count()} level 2 observations to consider"
         )
 
@@ -1182,7 +1183,7 @@ class Imprinter:
 
         # remove exact duplicates in output
         output = drop_duplicates(output)
-        self.logger.debug(f"Found {len(output)} possible books to register")
+        self.logger.info(f"Found {len(output)} possible books to register")
         # now our output is a list of ObsSet, where each ObsSet contains
         # all observations that overlap each other which should go
         # into the same book.
@@ -1192,7 +1193,7 @@ class Imprinter:
             try:
                 self.register_book(oset, commit=False)
             except BookExistsError:
-                self.logger.debug(f"Book already registered: {oset}, skipping")
+                self.logger.info(f"Book already registered: {oset}, skipping")
                 continue
             except NoFilesError:
                 self.logger.warning(f"No files found for {oset}, skipping")
@@ -1587,7 +1588,7 @@ def get_start_and_end(files):
     return t0, t1
 
 
-def create_g3tsmurf_session(config):
+def create_g3tsmurf_session(config, logger=None):
     """create a connection session to g3tsmurf database
 
     Parameters
@@ -1606,7 +1607,7 @@ def create_g3tsmurf_session(config):
     with open(config, "r") as f:
         config = yaml.safe_load(f)
     config["db_args"] = {"connect_args": {"check_same_thread": False}}
-    SMURF = G3tSmurf.from_configs(config)
+    SMURF = G3tSmurf.from_configs(config, logger=logger)
     session = SMURF.Session()
     return session, SMURF
 

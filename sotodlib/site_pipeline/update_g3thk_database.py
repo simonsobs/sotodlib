@@ -3,13 +3,10 @@ Script for running updates on (or creating) a g3tsmurf database. This setup
 is specifically designed to work when the data is dynamically coming in. Meaning is 
 is designed to work from something like a cronjob. 
 """
-import os
 import yaml
-import datetime as dt
-import numpy as np
 import argparse
 import logging
-from sqlalchemy import not_, or_, and_, desc
+from sqlalchemy import desc
 
 from sotodlib.io.g3thk_db import G3tHk, HKFiles, logger as default_logger
 
@@ -29,8 +26,8 @@ def main(config=None, from_scratch=False, verbosity=2, logger=None):
     elif verbosity == 3:
         logger.setLevel(logging.DEBUG)
 
-    cfgs = yaml.safe_load( open(config, "r"))
-    HK = G3tHk.from_configs(cfgs)
+    cfgs = yaml.safe_load(open(config, "r"))
+    HK = G3tHk.from_configs(cfgs, logger=logger)
 
     if from_scratch or HK.session.query(HKFiles).count()==0:
         logger.info("Building Database from Scratch, May take awhile")

@@ -193,7 +193,7 @@ def load_book_file(filename, dets=None, samples=None, no_signal=False):
 
 def _load_book_detset(files, prefix='', load_ancil=True,
                       dets=None, samples=None, no_signal=False,
-                      signal_buffer=None):
+                      signal_buffer=None, logger=logger):
     """Read data from a single detset.
 
     If a list of dets is specified, it may include dets that aren't
@@ -297,7 +297,7 @@ def _load_book_detset(files, prefix='', load_ancil=True,
     if stat.num_chans is not None:
         # This is an AxisManager, with dets axis for just this stream
         # ... extract and stack data later.
-        ch_info = load_smurf.get_channel_info(stat, mask=det_idx_in_stream)
+        ch_info = load_smurf.get_channel_info(stat, mask=det_idx_in_stream, logger=logger)
         # And this stuff is per stream, so keep it separate.
         iir_params = {'enabled': stat.filter_enabled,
                       'b': stat.filter_b,

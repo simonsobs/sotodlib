@@ -1,6 +1,6 @@
 import sqlalchemy as db
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import sessionmaker, relationship, backref
+from sqlalchemy.orm import sessionmaker
 
 import so3g
 from spt3g import core as spt3g_core
@@ -11,16 +11,15 @@ from tqdm import tqdm
 import numpy as np
 import yaml
 import ast
-from collections import namedtuple
 from enum import Enum
 
 import logging
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 from .. import core
 from . import load as io_load
-from .g3thk_db import G3tHk, HKFiles, HKAgents, HKFields
+from .g3thk_db import G3tHk, HKAgents
 from .g3thk_utils import pysmurf_monitor_control_list
 
 from sotodlib.io.g3tsmurf_db import (
@@ -72,7 +71,7 @@ class TimingParadigm(Enum):
     Mixed = 4
 
 
-def get_sample_timestamps(frame):
+def get_sample_timestamps(frame, logger=None):
     """
     Gets timestamps of samples in a G3Frame. This will try to get highest
     precision first and move to lower precision methods if that fails.
@@ -89,6 +88,8 @@ def get_sample_timestamps(frame):
         paradigm (TimingParadigm):
             Paradigm used to calculate timestamps.
     """
+    logger = _logger if logger is None else logger
+
     logger.warning("get_sample_timestamps is deprecated, how did you get here?")
     if "primary" in frame.keys():
         if False:
@@ -116,7 +117,8 @@ def get_sample_timestamps(frame):
         return times, TimingParadigm.G3Timestream
 
 
-def _file_has_end_frames(filename):
+def _file_has_end_frames(filename, logger=None):
+    logger = _logger if logger is None else logger
     ended = False
 
     ## Search through file looking for stream closeout
@@ -160,6 +162,7 @@ class G3tSmurf:
         db_args={},
         finalize={},
         hk_db_path=None,
+        logger=None
     ):
         """
         Class to manage a smurf data archive.
@@ -193,6 +196,8 @@ class G3tSmurf:
         self.Session = sessionmaker(bind=self.engine)
         Base.metadata.create_all(self.engine)
 
+        self.logger = logger if logger is not None else _logger
+
         # Defines frame_types
         self._create_frame_types()
         self._start_finalization()
@@ -200,7 +205,7 @@ class G3tSmurf:
     def _create_frame_types(self):
         session = self.Session()
         if not session.query(FrameType).all():
-            logger.info("Creating FrameType table...")
+            self.logger.debug("Creating FrameType table...")
             for k in type_key:
                 ft = FrameType(type_name=k)
                 session.add(ft)
@@ -229,7 +234,7 @@ class G3tSmurf:
                 session.commit()
 
     @classmethod
-    def from_configs(cls, configs):
+    def from_configs(cls, configs, logger=None):
         """
         Create a G3tSmurf instance from a configs dictionary or yaml file
         example configuration file will all relevant entries::
@@ -266,6 +271,7 @@ class G3tSmurf:
             db_args=configs.get("db_args", {}),
             finalize=configs.get("finalization", {}),
             hk_db_path=configs.get("g3thk_db"),
+            logger=logger
         )
 
     @staticmethod
@@ -330,10 +336,10 @@ class G3tSmurf:
             db_file = Files(name=path)
             session.add(db_file)
         elif not overwrite:
-            logger.info(f"File {path} found in database, use overwrite=True to update")
+            self.logger.info(f"File {path} found in database, use overwrite=True to update")
             return
         else:
-            logger.debug(
+            self.logger.info(
                 f"File {path} found in database, updating entry and re-making frames"
             )
             db_frames = db_file.frames
@@ -360,7 +366,7 @@ class G3tSmurf:
                 splits = path.split("/")
                 db_file.stream_id = splits[-2]
             except:
-                logger.warning(f"Failed to find stream_id for {path}")
+                self.logger.warning(f"Failed to find stream_id for {path}")
                 pass
 
         reader = so3g.G3IndexedReader(path)
@@ -377,7 +383,7 @@ class G3tSmurf:
                 if not frames:
                     break
             except RuntimeError as e:
-                logger.warning(f"Failed to add {path}: file likely corrupted")
+                self.logger.warning(f"Failed to add {path}: file likely corrupted")
                 session.rollback()
                 return
 
@@ -458,7 +464,7 @@ class G3tSmurf:
         if len(status.tags) > 0:
             if status.tags[0] == "obs" or status.tags[0] == "oper":
                 ## this is where I tell it to make an observation
-                logger.debug(f"file {db_file.name} is an observation")
+                self.logger.debug(f"file {db_file.name} is an observation")
                 self.add_new_observation_from_status(status, session)
 
     def index_archive(
@@ -512,7 +518,7 @@ class G3tSmurf:
                             continue
                     files.append(path)
 
-        logger.info(f"Indexing {len(files)} files...")
+        self.logger.info(f"Indexing {len(files)} files...")
 
         ## files must be updated in sequencial order. otherwise we may end up
         ## with more TuneSets than are necessary
@@ -523,11 +529,11 @@ class G3tSmurf:
             except IntegrityError as e:
                 # Database Integrity Errors, such as duplicate entries
                 session.rollback()
-                logger.warning(f"Integrity error with error {e}")
+                self.logger.warning(f"Integrity error with error {e}")
             except RuntimeError as e:
                 # End of stream errors, for G3Files that were not fully flushed
                 session.rollback()
-                logger.warning(f"Failed on file {f} due to end of stream error!")
+                self.logger.warning(f"Failed on file {f} due to end of stream error!")
             except Exception as e:
                 # This will catch generic errors such as attempting to load
                 # out-of-date files that do not have the required frame
@@ -535,10 +541,10 @@ class G3tSmurf:
                 session.rollback()
                 if stop_at_error:
                     raise e
-                logger.warning(f"Failed on file {f}:\n{e}")
+                self.logger.warning(f"Failed on file {f}:\n{e}")
         session.close()
 
-    def delete_file(self, db_file, session=None, dry_run=False, my_logger=None):
+    def delete_file(self, db_file, session=None, dry_run=False):
         """WARNING: Deletes data from the file system
 
         Delete both a database file entry, it's associated frames, AND the
@@ -559,20 +565,18 @@ class G3tSmurf:
 
         if session is None:
             session = self.Session()
-        if my_logger is None:
-            my_logger = logger
 
         db_frames = db_file.frames
-        my_logger.info(f"Deleting frame entries for {db_file.name}")
+        self.logger.info(f"Deleting frame entries for {db_file.name}")
         if not dry_run:
             [session.delete(frame) for frame in db_frames]
 
         if not os.path.exists(db_file.name):
-            my_logger.warning(
+            self.logger.warning(
                 f"Database file {db_file.name} appears already" " deleted on disk"
             )
         else:
-            my_logger.info(f"Deleting file {db_file.name}")
+            self.logger.info(f"Deleting file {db_file.name}")
 
             if not dry_run:
                 os.remove(db_file.name)
@@ -581,7 +585,7 @@ class G3tSmurf:
                 base, _ = os.path.split(db_file.name)
                 if len(os.listdir(base)) == 0:
                     os.rmdir(base)
-        my_logger.info(f"Deleting database entry for {db_file.name}")
+        self.logger.info(f"Deleting database entry for {db_file.name}")
         if not dry_run:
             session.delete(db_file)
             session.commit()
@@ -653,7 +657,7 @@ class G3tSmurf:
                 )
 
                 if ch.channel == -1:
-                    logger.warning(
+                    self.logger.warning(
                         f"Un-assigned channel made in Channel Assignment {ch_assign.name}"
                     )
                     continue
@@ -722,7 +726,7 @@ class G3tSmurf:
 
                 cha = cha.order_by(db.desc(ChanAssignments.ctime)).first()
             if cha is None:
-                logger.error(f"Missing Channel Assignment for tune file {tune_path}")
+                self.logger.error(f"Missing Channel Assignment for tune file {tune_path}")
                 continue
             assign_set.append(cha)
         return assign_set
@@ -792,7 +796,7 @@ class G3tSmurf:
                         tuneset = ts
 
             if tuneset is None:
-                logger.debug(
+                self.logger.debug(
                     f"New Tuneset Detected {db_tune.name},"
                     f" {[[a.name for a in assign_set]]}"
                 )
@@ -881,7 +885,7 @@ class G3tSmurf:
             )
             db_file = db_file.order_by(Files.start).first()
             if db_file is None:
-                logger.debug(
+                self.logger.debug(
                     f"No .g3 files from Action {action_name} in {stream_id}"
                     f" at {action_ctime}. Not Making Observation"
                 )
@@ -905,7 +909,7 @@ class G3tSmurf:
             )
             .one_or_none()
         )
-        logger.debug(f"Observations {obs_id} already exists")
+        self.logger.debug(f"Observations {obs_id} already exists")
 
         if obs is None:
             db_file = session.query(Files)
@@ -913,10 +917,10 @@ class G3tSmurf:
                 Files.stream_id == stream_id, Files.name.like(f"%{session_id}%")
             )
             db_file = db_file.order_by(Files.start).first()
-            logger.debug(f"Found file {db_file.name} to be the start of observation {obs_id}")
+            self.logger.debug(f"Found file {db_file.name} to be the start of observation {obs_id}")
             if db_file.obs_id is not None:
                 if db_file.obs_id != obs_id:
-                    logger.warning(f"Trying to make {obs_id} using file {db_file.name} "
+                    self.logger.warning(f"Trying to make {obs_id} using file {db_file.name} "
                                    f"but file is already part if {db_file.obs_id}. Will "
                                    f"not create observation")
                     return
@@ -976,7 +980,7 @@ class G3tSmurf:
         """
 
         if not force and obs.stop is not None:
-            logger.debug(f"Returning from {obs.obs_id} without updates")
+            self.logger.debug(f"Returning from {obs.obs_id} without updates")
             return
 
         # Prefix is deterministic based on observation details
@@ -989,10 +993,10 @@ class G3tSmurf:
             .all()
         )
 
-        logger.debug(f"Found {len(flist)} files in {obs.obs_id}")
+        self.logger.info(f"Found {len(flist)} files in {obs.obs_id}")
         if len(flist) == 0:
             ## we don't have .g3 files for some reason, shouldn't be possible?
-            logger.debug(f"Found no files associated with {obs.obs_id}")
+            self.logger.info(f"Found no files associated with {obs.obs_id}")
             return
 
         ## set start to be the first scan frame in file/observation
@@ -1026,7 +1030,7 @@ class G3tSmurf:
                 .one_or_none()
             )
             if tune is None:
-                logger.warning(
+                self.logger.warning(
                     f"Tune {status.tune} not found in database, update error?"
                 )
                 tuneset = None
@@ -1077,15 +1081,15 @@ class G3tSmurf:
                     obs_ended = _file_has_end_frames(f.name)
 
         if obs_ended:
-            logger.debug(f"Found that {obs.obs_id} has ended.")
+            self.logger.info(f"Found that {obs.obs_id} has ended.")
             obs.n_samples = obs_samps
             obs.duration = flist[-1].stop.timestamp() - flist[0].start.timestamp()
             obs.stop = flist[-1].stop
             obs.timing = np.all([f.timing for f in flist])
-            logger.debug(f"Setting {obs.obs_id} stop time to {obs.stop}")
+            self.logger.info(f"Setting {obs.obs_id} stop time to {obs.stop}")
         session.commit()
 
-    def delete_observation_files(self, obs, session, dry_run=False, my_logger=None):
+    def delete_observation_files(self, obs, session, dry_run=False):
         """WARNING: Deletes files from the file system
 
         Args
@@ -1095,9 +1099,6 @@ class G3tSmurf:
         dry_run: boolean
             if true, only prints deletion to my_logger.info
         """
-        if my_logger is None:
-            my_logger = logger
-
         ## first remove the tags
         tags = (
             session.query(Tags)
@@ -1107,16 +1108,16 @@ class G3tSmurf:
             .all()
         )
         for t in tags:
-            my_logger.info(f"Deleting Tag ({t.tag, t.obs_id}) from database")
+            self.logger.info(f"Deleting Tag ({t.tag, t.obs_id}) from database")
             if not dry_run:
                 session.delete(t)
 
         ## then remove the files
         for f in obs.files:
-            self.delete_file(f, session, dry_run=dry_run, my_logger=my_logger)
+            self.delete_file(f, session, dry_run=dry_run)
 
         ## then remove the observation
-        my_logger.info(f"Deleting Observation {obs.obs_id} from database")
+        self.logger.info(f"Deleting Observation {obs.obs_id} from database")
         if not dry_run:
             session.delete(obs)
             session.commit()
@@ -1149,7 +1150,7 @@ class G3tSmurf:
                 "Archiver needs meta_path attribute to index channel assignments"
             )
 
-        logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
+        self.logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
 
         for ct_dir in sorted(os.listdir(self.meta_path), reverse=reverse):
             if int(ct_dir) < int(min_ctime // 1e5):
@@ -1265,7 +1266,7 @@ class G3tSmurf:
         if max_ctime is None:
             max_ctime = dt.datetime.now().timestamp()
 
-        logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
+        self.logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
 
         for base_dir in [self.archive_path, self.meta_path]:
             for ct_dir in sorted(os.listdir(base_dir), reverse=reverse):
@@ -1331,9 +1332,11 @@ class G3tSmurf:
 
         if session is None:
             session = self.Session()
+
         HK = G3tHk(
             os.path.join(os.path.split(self.archive_path)[0], "hk"),
             self.hk_db_path,
+            logger=self.logger
         )
 
         agent_list = session.query(Finalize).all()
@@ -1350,14 +1353,14 @@ class G3tSmurf:
                 .first()
             )
             if db_agent is None:
-                logger.info(
+                self.logger.info(
                     f"Agent {agent.agent} not found in HK database before"
                     f" update time {update_time}"
                 )
                 continue
             f = [f for f in db_agent.fields if "finalized_until" in f.field]
             if len(f) == 0:
-                logger.warning(
+                self.logger.warning(
                     f"Did not find finalized_until in Agent {agent}"
                     f"from file {db_agent.hkfile.filename}"
                 )
@@ -1366,7 +1369,7 @@ class G3tSmurf:
             data = HK.load_data(f)
             x = np.where(data[f.field][0] <= update_time)[0]
             if len(x) < 1:
-                logger.error(
+                self.logger.error(
                     f"No data points before update time for agent "
                     f"{agent} in file {db_agent.hkfile.filename}?"
                 )
@@ -1384,7 +1387,7 @@ class G3tSmurf:
         pysmurf-monitors were in control of which stream_ids between start and stop.
         """
         if check_control and self.hk_db_path is None:
-            raise ValueError("HK database path required to update finalization" " time")
+            raise ValueError("HK database path required to update finalization time")
         if check_control and ((start is None) or (stop is None)):
             raise ValueError(
                 "start and stop ctimes are required to check which"
@@ -1395,6 +1398,7 @@ class G3tSmurf:
         HK = G3tHk(
             os.path.join(os.path.split(self.archive_path)[0], "hk"),
             self.hk_db_path,
+            logger=self.logger
         )
 
         agent_list = []
@@ -1405,19 +1409,19 @@ class G3tSmurf:
             )
         for server in self.finalize.get("servers"):
             if "smurf-suprsync" not in server:
-                logger.error(
+                self.logger.error(
                     f"Incomplete finalization information, missing "
                     f"'smurf-suprync' in {server}"
                 )
             if "timestream-suprsync" not in server:
-                logger.error(
+                self.logger.error(
                     f"Incomplete finalization information, missing "
                     f"'timestream-suprync' in {server}"
                 )
             pm = server.get("pysmurf-monitor")
             if not check_control or pm is None:
                 if check_control:
-                    logger.warning(
+                    self.logger.warning(
                         f"Incomplete finalization information, "
                         f"missing 'pysmurf-monitor'. Not checking "
                         "for stream_id control"
@@ -1427,7 +1431,7 @@ class G3tSmurf:
                 continue
             if stop > HK.get_last_update():
                 if stop > HK.get_last_update()+3600:
-                    logger.error(f"HK database not updated recently enough to"
+                    self.logger.error(f"HK database not updated recently enough to"
                                   " check finalization time. Last update "
                                  f"{HK.get_last_update}. Trying to check until"
                                  f"{stop}")
@@ -1446,13 +1450,13 @@ class G3tSmurf:
 
     def _process_index_error(self, session, e, stream_id, ctime, path, stop_at_error):
         if type(e) == ValueError:
-            logger.info(f"Value Error at {stream_id}, {ctime}, {path}")
+            self.logger.info(f"Value Error at {stream_id}, {ctime}, {path}")
         elif type(e) == IntegrityError:
             # Database Integrity Errors, such as duplicate entries
             session.rollback()
-            logger.info(f"Integrity Error at {stream_id}, {ctime}, {path}")
+            self.logger.info(f"Integrity Error at {stream_id}, {ctime}, {path}")
         else:
-            logger.info(
+            self.logger.info(
                 f"Error of type {type(e).__name__} at {stream_id}, {ctime}, {path}"
             )
         if stop_at_error:
@@ -1497,7 +1501,7 @@ class G3tSmurf:
                     ]
                     if ctime != np.max(cha_times):
                         continue
-                    logger.debug(
+                    self.logger.debug(
                         f"Add new channel assignment: {stream_id},{ctime}, {path}"
                     )
                     self.add_new_channel_assignment(
@@ -1533,7 +1537,7 @@ class G3tSmurf:
         ):
             if pattern in fname:
                 try:
-                    logger.debug(f"Add new Tune: {stream_id}, {ctime}, {path}")
+                    self.logger.debug(f"Add new Tune: {stream_id}, {ctime}, {path}")
                     self.add_new_tuning(stream_id, ctime, path, session)
                 except Exception as e:
                     self._process_index_error(
@@ -1554,7 +1558,7 @@ class G3tSmurf:
         max_time : int, float, or None
             maximum time for indexing
         """
-        logger.warning("Indexing via actions is deprecated and SHOULD NOT be "
+        self.logger.warning("Indexing via actions is deprecated and SHOULD NOT be "
                        "run on systems where level 2 files are being automatically "
                        "deleted")
         for action, stream_id, ctime, path in self.search_metadata_actions(
@@ -1566,7 +1570,7 @@ class G3tSmurf:
             ):
                 try:
                     obs_path = os.listdir(os.path.join(path, "outputs"))
-                    logger.debug(
+                    self.logger.info(
                         f"Add new Observation: {stream_id}, {ctime}, {obs_path}"
                     )
                     self.add_new_observation(
@@ -1603,16 +1607,16 @@ class G3tSmurf:
             )
 
         session = self.Session()
-        logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
+        self.logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
 
-        logger.debug("Indexing Channel Assignments")
+        self.logger.debug("Indexing Channel Assignments")
         self.index_channel_assignments(
             session,
             min_ctime=min_ctime,
             max_ctime=max_ctime,
             stop_at_error=stop_at_error,
         )
-        logger.debug("Indexing Tune Files")
+        self.logger.debug("Indexing Tune Files")
         self.index_tunes(
             session,
             min_ctime=min_ctime,
@@ -1640,9 +1644,9 @@ class G3tSmurf:
         """
 
         session = self.Session()
-        logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
+        self.logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
 
-        logger.debug("Indexing Observations")
+        self.logger.info("Indexing Observations")
         self.index_observations(
             session,
             min_ctime=min_ctime,
@@ -1659,7 +1663,7 @@ class G3tSmurf:
         file = session.query(Files).filter(Files.name == filename).one_or_none()
 
         if file is None and fail_ok:
-            logger.debug(f"Did not find file {filename} in database")
+            self.logger.info(f"Did not find file {filename} in database")
             return None
 
         return {
@@ -1796,7 +1800,7 @@ class G3tSmurf:
             try:
                 status = self.load_status(scan_start[0], stream_id=stream_id)
             except:
-                logger.info("Status load from database failed, using file load")
+                self.logger.info("Status load from database failed, using file load")
                 status = None
 
         aman = load_file(
@@ -1813,7 +1817,7 @@ class G3tSmurf:
         )
         idx = np.where(msk)[0]
         if len(idx) == 0:
-            logger.warning("No samples returned in time range")
+            self.logger.warning("No samples returned in time range")
             aman.restrict("samps", (0, 0))
         else:
             aman.restrict("samps", (idx[0], idx[-1]))
@@ -2175,7 +2179,7 @@ class SmurfStatus:
         return _WiringFrameHandler()
 
     @classmethod
-    def from_time(cls, time, archive, stream_id=None, show_pb=False):
+    def from_time(cls, time, archive, stream_id=None, show_pb=False, logger=None):
         """Generates a Smurf Status at specified unix timestamp.
         Loads all status frames between session start frame and specified time.
 
@@ -2196,6 +2200,7 @@ class SmurfStatus:
             status : (SmurfStatus instance)
                 object indexing of rogue variables at specified time.
         """
+        logger = _logger if logger is None else logger
         time = archive._make_datetime(time)
         session = archive.Session()
         q = (
@@ -2423,7 +2428,7 @@ def get_channel_mask(
     return msk
 
 
-def _get_tuneset_channel_names(status, ch_map, archive):
+def _get_tuneset_channel_names(status, ch_map, archive, logger=None):
     """Update channel maps with name from Tuneset
 
     Returns
@@ -2432,6 +2437,7 @@ def _get_tuneset_channel_names(status, ch_map, archive):
         readout_ids cannot be found.
     """
     session = archive.Session()
+    logger = _logger if logger is None else logger
 
     # tune file in status
     if status.tune is not None and len(status.tune) > 0:
@@ -2487,8 +2493,9 @@ def _get_tuneset_channel_names(status, ch_map, archive):
     return ruids
 
 
-def _get_detset_channel_names(status, ch_map, obsfiledb):
+def _get_detset_channel_names(status, ch_map, obsfiledb, logger=None):
     """Update channel maps with name from obsfiledb"""
+    logger = _logger if logger is None else logger
     # tune file in status
     if status.tune is not None and len(status.tune) > 0:
         c = obsfiledb.conn.execute(
@@ -2581,6 +2588,7 @@ def get_channel_info(
     archive=None,
     obsfiledb=None,
     det_axis="dets",
+    logger=None
 ):
     """Create the Channel Info Section of a G3tSmurf AxisManager
 
@@ -2611,6 +2619,7 @@ def get_channel_info(
     ch_info : AxisManager
 
     """
+    logger = _logger if logger is None else logger
     ch_list = np.arange(status.num_chans)
     if mask is not None:
         ch_list = ch_list[mask]
@@ -2630,9 +2639,9 @@ def get_channel_info(
     ch_map = _get_channel_mapping(status, ch_map)
 
     if archive is not None:
-        ruids = _get_tuneset_channel_names(status, ch_map, archive)
+        ruids = _get_tuneset_channel_names(status, ch_map, archive, logger=logger)
     elif obsfiledb is not None:
-        ruids = _get_detset_channel_names(status, ch_map, obsfiledb)
+        ruids = _get_detset_channel_names(status, ch_map, obsfiledb, logger=logger)
     else:
         ruids = None
 
@@ -2708,7 +2717,7 @@ def split_ts_bits(c):
     return a, b
 
 
-def _get_timestamps(streams, load_type=None, linearize_timestamps=True):
+def _get_timestamps(streams, load_type=None, linearize_timestamps=True, logger=None):
     """Calculate the timestamp field for loaded data
 
     Args
@@ -2722,6 +2731,7 @@ def _get_timestamps(streams, load_type=None, linearize_timestamps=True):
           if true and using unix timing, linearize the timing based on the
           frame counter
     """
+    logger = _logger if logger is None else logger
     if load_type is None:
         # determine the desired loading type. Expand as logic as
         # data fields develop
@@ -2775,6 +2785,7 @@ def load_file(
     det_axis="dets",
     linearize_timestamps=True,
     merge_det_info=True,
+    logger=None,
 ):
     """Load data from file where there may or may not be a connected archive.
 
@@ -2816,6 +2827,7 @@ def load_file(
         always have fields `timestamps`, `signal`, `flags`(FlagManager),
         `ch_info` (AxisManager with `bands`, `channels`, `frequency`, etc).
     """
+    logger = _logger if logger is None else logger
     logger.debug(f"Axis Manager will have {det_axis} and samps axes")
 
     if isinstance(filename, str):
@@ -2832,7 +2844,7 @@ def load_file(
 
     if status is None:
         try:
-            logger.debug(f"Loading status from {filenames[0]}")
+            logger.info(f"Loading status from {filenames[0]}")
             status = SmurfStatus.from_file(filenames[0])
         except:
             logger.warning(f"Failed to load status from {filenames[0]}.")
@@ -2879,6 +2891,7 @@ def load_file(
         archive=archive,
         obsfiledb=obsfiledb,
         det_axis=det_axis,
+        logger=logger
     )
 
     # flist will take the form [(file, sample_start, sample_stop)...] and will be

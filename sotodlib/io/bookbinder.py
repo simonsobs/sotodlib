@@ -18,7 +18,7 @@ if not log.hasHandlers():
     init_logger('bookbinder')
 
 
-def setup_logger(logfile=None):
+def setup_logger(logfile=None, log=None):
     """
     This setups up a logger for bookbinder. If a logfile is passed, it will
     write to that file as well as stdout. It is useful to create a one-off
@@ -26,7 +26,8 @@ def setup_logger(logfile=None):
     a separate log-file for each bookbinder instance.
     """
     fmt = '%(asctime)s: %(message)s (%(levelname)s)'
-    log = logging.Logger('bookbinder', level=logging.DEBUG)
+    if log is None:
+        log = logging.Logger('bookbinder', level=logging.DEBUG)
 
     ch = logging.StreamHandler(sys.stdout)
     formatter = logging.Formatter(fmt)
@@ -558,6 +559,7 @@ class BookBinder:
         Dict of readout_ids to use for each stream_id. If provided, these
         will be used to set the `names` in the signal frames. If not provided,
         names will be taken from the input frames.
+    logger: logging.Logger, optional
 
     
     Attributes
@@ -575,7 +577,7 @@ class BookBinder:
     """
     def __init__(self, book, obsdb, filedb, data_root, readout_ids, outdir,
                  max_samps_per_frame=50_000, max_file_size=1e9, 
-                ignore_tags=False):
+                 ignore_tags=False, logger=None):
         self.filedb = filedb
         self.book = book
         self.data_root = data_root
@@ -595,7 +597,7 @@ class BookBinder:
             os.makedirs(outdir)
 
         logfile = os.path.join(outdir, 'Z_bookbinder_log.txt')
-        self.log = setup_logger(logfile)
+        self.log = setup_logger(logfile, log=logger)
 
         self.ancil = AncilProcessor(self.hkfiles, book.bid, log=self.log)
         self.streams = {}
