@@ -1395,11 +1395,13 @@ class G3tSmurf:
             )
         if session is None:
             session = self.Session()
+        self.logger.info("Initializing G3tHk db...")
         HK = G3tHk(
             os.path.join(os.path.split(self.archive_path)[0], "hk"),
             self.hk_db_path,
             logger=self.logger
         )
+        self.logger.info("Initializing G3tHk db...")
 
         agent_list = []
         if "servers" not in self.finalize:
@@ -1408,6 +1410,7 @@ class G3tSmurf:
                 "information, required to check completeness"
             )
         for server in self.finalize.get("servers"):
+            self.logger.info(f"Inspecting server {server}")
             if "smurf-suprsync" not in server:
                 self.logger.error(
                     f"Incomplete finalization information, missing "
@@ -1429,15 +1432,21 @@ class G3tSmurf:
                 agent_list.append(server["smurf-suprsync"])
                 agent_list.append(server["timestream-suprsync"])
                 continue
-            if stop > HK.get_last_update():
-                if stop > HK.get_last_update()+3600:
+
+            last_update = HK.get_last_update()
+            self.logger.info(f"HK last update time: {last_update}")
+
+            if stop > last_update:
+                if stop > last_update+3600:
                     self.logger.error(f"HK database not updated recently enough to"
                                   " check finalization time. Last update "
                                  f"{HK.get_last_update}. Trying to check until"
                                  f"{stop}")
                 else:
-                    stop = HK.get_last_update()
-            sids = pysmurf_monitor_control_list(pm, start, stop, HK)
+                    stop = last_update
+            self.logger.info("Getting pysmurf monitor control list:")
+            sids = pysmurf_monitor_control_list(pm, start, stop, HK, logger=self.logger)
+            self.logger.info(f"\t{sids}")
             if np.any([s in stream_ids for s in sids]):
                 agent_list.append(server["smurf-suprsync"])
                 agent_list.append(server["timestream-suprsync"])

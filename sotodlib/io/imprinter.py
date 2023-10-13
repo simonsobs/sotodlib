@@ -273,7 +273,7 @@ class Imprinter:
             (
                 self.g3tsmurf_session,
                 self.archive,
-            ) = create_g3tsmurf_session(self.g3tsmurf_config)
+            ) = create_g3tsmurf_session(self.g3tsmurf_config, logger=self.logger)
         if not return_archive:
             return self.g3tsmurf_session
         return self.g3tsmurf_session, self.archive
@@ -282,7 +282,8 @@ class Imprinter:
         """Get a G3tHk database using the g3tsmurf config file."""
         if self.hk_archive is None:
             self.hk_archive = G3tHk.from_configs(
-                self.g3tsmurf_config
+                self.g3tsmurf_config,
+                logger=self.logger
             )
         return self.hk_archive
 
@@ -1056,6 +1057,7 @@ class Imprinter:
         stream_filt = or_(*[G3tObservations.stream_id == s for s in streams])
 
         # check data transfer finalization
+        self.logger.info("Getting finalization time from G3tHK db...")
         final_time = SMURF.get_final_time(
             streams, min_ctime, max_ctime, check_control=True
         )

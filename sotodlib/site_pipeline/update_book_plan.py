@@ -67,6 +67,7 @@ def main(
         max_ctime = max_ctime.timestamp()
 
     # obs and oper books
+    logger.info("Updating imprinter db based on g3tsmurf db...")
     imprinter.update_bookdb_from_g3tsmurf(
         min_ctime=min_ctime, max_ctime=max_ctime,
         ignore_singles=False,
@@ -90,11 +91,13 @@ def main(
         max_ctime_timecodes = max_ctime_timecodes.timestamp()
 
     # hk books
+    logger.info(f"Registering hk books between {min_ctime_timecodes} and {max_ctime_timecodes}")
     imprinter.register_hk_books(
         min_ctime=min_ctime_timecodes, 
         max_ctime=max_ctime_timecodes,
     )
     # smurf and stray books
+    logger.info(f"Registering timecode books between {min_ctime_timecodes} and {max_ctime_timecodes}")
     imprinter.register_timecode_books(
         min_ctime=min_ctime_timecodes, 
         max_ctime=max_ctime_timecodes,

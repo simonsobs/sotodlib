@@ -9,7 +9,7 @@ from sotodlib.io.g3thk_db import G3tHk, HKFiles, HKAgents, HKFields
 logger = logging.getLogger(__name__)
 
 
-def pysmurf_monitor_control_list(agent, start=None, stop=None, HK=None):
+def pysmurf_monitor_control_list(agent, start=None, stop=None, HK=None, logger=logger):
     """Return list of stream_ids controlled by a pysmurf-monitor agent
 
     Arguments
@@ -26,6 +26,7 @@ def pysmurf_monitor_control_list(agent, start=None, stop=None, HK=None):
     -------
     stream_ids: list of stream_ids monitored by agent
     """
+    logger.info(f"Finding monitor control list for agent: {agent}")
     if isinstance(agent, str):
         if start is None or stop is None:
             raise ValueError(
@@ -37,8 +38,9 @@ def pysmurf_monitor_control_list(agent, start=None, stop=None, HK=None):
         if len(agent_list) == 0: 
             logger.warning(f"Agent {agent} not running between {start} and {stop}")
             return np.array([], dtype='<U8') 
+        logger.info(f"Agents to go through ({len(agent_list)}):: {agent_list}")
         return np.unique(
-                np.concatenate([pysmurf_monitor_control_list(agent) for agent in agent_list])
+                np.concatenate([pysmurf_monitor_control_list(agent, logger=logger) for agent in agent_list])
         )
     stream_ids = []
     for field in agent.fields:
