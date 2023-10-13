@@ -6,10 +6,10 @@ import logging
 
 from sotodlib.io.g3thk_db import G3tHk, HKFiles, HKAgents, HKFields
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 
-def pysmurf_monitor_control_list(agent, start=None, stop=None, HK=None, logger=logger):
+def pysmurf_monitor_control_list(agent, start=None, stop=None, HK=None, logger=None):
     """Return list of stream_ids controlled by a pysmurf-monitor agent
 
     Arguments
@@ -26,6 +26,7 @@ def pysmurf_monitor_control_list(agent, start=None, stop=None, HK=None, logger=l
     -------
     stream_ids: list of stream_ids monitored by agent
     """
+    logger = _logger if logger is None else logger
     if isinstance(agent, str):
         if start is None or stop is None:
             raise ValueError(
@@ -51,7 +52,7 @@ def pysmurf_monitor_control_list(agent, start=None, stop=None, HK=None, logger=l
     return np.unique(stream_ids)
 
 
-def check_was_streaming(stream_id, start, stop, cfgs=None, HK=None, servers=None):
+def check_was_streaming(stream_id, start, stop, cfgs=None, HK=None, servers=None, logger=None):
     """Query the HK database to see if a specific stream_id was
     streaming during a time range.
 
@@ -81,9 +82,9 @@ def check_was_streaming(stream_id, start, stop, cfgs=None, HK=None, servers=None
     ------
     ValueError if stream_id is found in multiple pysmurf-monitors
     """
-
+    logger = _logger if logger is None else logger
     if HK is None:
-        HK = G3tHk.from_configs(cfgs)
+        HK = G3tHk.from_configs(cfgs, logger=logger)
     if servers is None:
         servers = cfgs["finalization"]["servers"]
     assert HK.get_last_update() >= stop
