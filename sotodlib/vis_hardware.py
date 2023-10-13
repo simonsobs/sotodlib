@@ -56,6 +56,7 @@ def plot_detectors(
     xieta=False,
     lat_corotate=True,
     lat_elevation=None,
+    show_centers=False,
 ):
     """Visualize a dictionary of detectors.
 
@@ -73,6 +74,7 @@ def plot_detectors(
         bandcolor (dict, optional): Dictionary of color values for each band.
         xieta (bool):  If True, plot in Xi / Eta / Gamma coordinates rather
             than focalplane X / Y / Z.
+        show_centers (bool):  If True, label pixel centers.
 
     Returns:
         None
@@ -100,6 +102,19 @@ def plot_detectors(
     quats = np.array(
         [dets[detnames[x]]["quat"] for x in range(n_det)], dtype=np.float64
     )
+
+    # Skip bolometers that do not have a proper quaternion
+    good = np.isfinite(quats[:, 0])
+    bad = np.logical_not(good)
+    nbad = np.sum(bad)
+    if nbad != 0:
+        print(f"Skipping {nbad} detectors without quaternions")
+        for detname, is_bad in zip(detnames, bad):
+            if is_bad:
+                del dets[detname]
+        detnames = list(dets.keys())
+        quats = quats[good]
+        n_det = len(dets)
 
     lat_rot = None
     lat_elstr = ""
@@ -170,7 +185,7 @@ def plot_detectors(
         dir = qa.rotate(quats, zaxis)
         orient = qa.rotate(quats, xaxis)
 
-        small = np.fabs(1.0 - dir[:, 2]) < 1.0e-6
+        small = np.fabs(1.0 - dir[:, 2]) < 1.0e-12
         not_small = np.logical_not(small)
         xp = np.zeros(n_det, dtype=np.float64)
         yp = np.zeros(n_det, dtype=np.float64)
@@ -220,18 +235,30 @@ def plot_detectors(
 
     wafer_centers = dict()
     if labels:
-        # We are plotting labels and will want to plot a wafer_slot label for each
+        # We are plotting labels and will want to plot a label for each
         # wafer.  To decide where to place the label, we find the average location
         # of all detectors from each wafer and put the label there.
+        temp_centers = dict()
         for d, props in dets.items():
             dwslot = props["wafer_slot"]
-            if dwslot not in wafer_centers:
-                wafer_centers[dwslot] = []
-            wafer_centers[dwslot].append((detx[d], dety[d]))
-        for k in wafer_centers.keys():
-            center = np.mean(wafer_centers[k], axis=0)
-            size = (np.array(wafer_centers[k]) - center).std()
-            wafer_centers[k] = (center, size)
+            if dwslot not in temp_centers:
+                temp_centers[dwslot] = {"x": list(), "y": list()}
+            temp_centers[dwslot]["x"].append(detx[d])
+            temp_centers[dwslot]["y"].append(dety[d])
+        for k in list(temp_centers.keys()):
+            xcenter = np.mean(temp_centers[k]["x"])
+            ycenter = np.mean(temp_centers[k]["y"])
+            ysize = 0.25 * np.std(np.array(temp_centers[k]["y"]) - ycenter)
+            tube_slot = wfmap["tube_slots"][k]
+            tube_props = hw.data["tube_slots"][tube_slot]
+            tube_wafer_indx = hw.data["wafer_slots"][k]["tube_index"]
+            ufm_slot = tube_props["wafer_ufm_slot"][tube_wafer_indx]
+            if "wafer_ufm_loc" in tube_props:
+                ufm_loc = tube_props["wafer_ufm_loc"][tube_wafer_indx]
+                ltext = f"{k}:ws{ufm_slot}:{ufm_loc}"
+            else:
+                ltext = f"{k}:ws{ufm_slot}"
+            wafer_centers[k] = ((xcenter, ycenter), ysize, ltext)
 
     if bandcolor is None:
         bandcolor = default_band_colors
@@ -257,14 +284,14 @@ def plot_detectors(
     if labels:
         # The font size depends on the wafer size ... but keep it
         # between (0.01 and 0.1) times the size of the figure.
-        for k, (center, size) in wafer_centers.items():
+        for k, (center, size, ltext) in wafer_centers.items():
             fontpix = np.clip(0.7 * size * hpixperdeg, 0.01 * hfigpix, 0.10 * hfigpix)
             if fontpix < 1.0:
                 fontpix = 1.0
             ax.text(
                 center[0],
                 center[1] + fontpix / hpixperdeg,
-                k,
+                ltext,
                 color="k",
                 fontsize=fontpix,
                 horizontalalignment="center",
@@ -324,11 +351,27 @@ def plot_detectors(
             length_includes_head=True,
         )
 
+        # Compute the font size to use for detector labels
+        fontpix = 0.1 * detradius * hpixperdeg
+        if fontpix < 1.0:
+            fontpix = 1.0
+
+        if show_centers:
+            ysgn = -1.0
+            if dx < 0.0:
+                ysgn = 1.0
+            ax.text(
+                (xpos + 0.1 * dx),
+                (ypos + 0.1 * ysgn * dy),
+                f"({xpos:0.4f}, {ypos:0.4f})",
+                color="green",
+                fontsize=fontpix,
+                horizontalalignment="center",
+                verticalalignment="center",
+                bbox=dict(fc="w", ec="none", pad=1, alpha=0.0),
+            )
+
         if labels:
-            # Compute the font size to use for detector labels
-            fontpix = 0.1 * detradius * hpixperdeg
-            if fontpix < 1.0:
-                fontpix = 1.0
             ax.text(
                 xpos,
                 ypos,

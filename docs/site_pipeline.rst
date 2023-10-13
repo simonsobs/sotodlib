@@ -76,6 +76,26 @@ Module documentation
    :members:
    :undoc-members:
 
+update-obsdb
+------------
+
+For a description and documentation of the config file format, see
+:mod:`sotodlib.site_pipeline.update_obsdb` module autodocumentation below.
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.update_obsdb
+   :func: get_parser
+   :prog: update-obsdb
+
+Module documentation
+````````````````````
+
+.. automodule:: sotodlib.site_pipeline.update_obsdb
+   :members:
+   :undoc-members:
 
 Detector and Readout ID Mapping
 -------------------------------
@@ -166,6 +186,18 @@ entries mater.
           multi: true
 
 
+analyze-bright-ptsrc
+--------------------
+
+This script analyzes an observation of a bright point source (such as
+a planet) and performs per-detector fitting of beam parameters
+including amplitude and FWHM.
+
+.. argparse::
+   :module: sotodlib.site_pipeline.analyze_bright_ptsrc
+   :func: get_parser
+
+
 preprocess-tod
 --------------
 This script is set up to run a preprocessing pipeline using the preprocess
@@ -179,6 +211,118 @@ the preprocessing steps applied to them.
 .. argparse::
    :module: sotodlib.site_pipeline.preprocess_tod
    :func: get_parser
+
+make-position-match
+-------------------
+
+This element builds a ``readout_id`` to ``detector_id`` mapping by matching
+measured pointing and polarization angles against a template.
+It is capable of taking multiple measurements from the same tuning epoch and
+combining them to produce a single mapping and an average focal plane.
+
+.. automodule:: sotodlib.site_pipeline.make_position_match
+   :members:
+   :undoc-members:
+
+
+Config file format
+``````````````````
+
+Here's an annotated example:
+
+.. code-block:: yaml
+
+  # Data sources
+  # Both of these are technically optional but are strongly reccomended
+  detmap: "detmap_results.csv"
+  bias_map: "bias_map_results.npz"
+  
+  context:
+    path: "context.yaml"
+    # What the metadata is called in the context file
+    pointing: "beammap"
+    polarization: null # Set to null to not use
+    # List of observation ids to run on
+    # You need at least one of these, but can also provide both
+    obs_ids:
+        - "obs_ufm_uv31_1677980982"
+    query: "sqlite query string"
+    # Optional det selection dict to be passed to context loader
+    dets:
+        wafer: "w03"
+  
+  # Configuration options
+  ufm: "Uv31"
+  gen_template: False # Generate template using InstModel
+  radial_thresh: 2.0 # Threshold at which to cut detectors based on their pointing
+  dm_transform: True # Apply an initial transformation based on the detmap
+
+  # Settings to generate priors from detmap
+  # Do not include if you dont want priors
+  priors:
+    val: 1.5
+    method: "gaussian"
+    width: 1
+    basis: "fit_fr_mhz"
+  # Value that likelihoods are normalized to when making priors from them.
+  prior_normalization: .2
+
+  # Settings for the matching processes
+  matching:
+    out_thresh: .4 # Liklihood below which things will be considered outliers
+    reverse: False # Reverse the match direction
+    vis: False # Play an animation of match iterations
+    cpd_args: # Args to pass pycpd
+      max_iterations: 1000
+
+  outdir: "."
+  # Optional string to be appended to output filename.
+  # Will have a "_" before it.
+  append: "test" 
+  manifest_db: "path.sqlite"
+
+Ouput file format
+`````````````````
+
+The results of ``make_position_match`` are stored in an HDF5 file containing
+two datasets. The datasets are made using the ``ResultSet`` class and can be
+loaded back as such.
+
+The first dataset is called ``input_data_paths`` and has two columns:
+``type`` and ``path``. It contains the list of input files used to produce
+the output, with ``type`` being the type of input and ``path`` being the
+actual path.
+
+The current types of paths are:
+
+- config
+- tunefile
+- context
+- bgmap
+- detmap
+- obs_id (not actually a path, but useful to track)
+
+The second dataset is called ``focal_plane`` and has columns:
+
+- ``dets:readout_id``, the readout id.
+- ``matched_det_id``, the detector id as matched by this element.
+- ``band``, the SMuRF band.
+- ``channel``, the SMuRF channel.
+- ``xi``, average xi for each detector. Nominally in radians.
+- ``eta``, average eta for each detector. Nominally in radians.
+- ``polang``, average polarization angle for each detector.
+  Nominally in radians.
+- ``meas_x``, the measured x position of each detector on the array.
+  Nominally in mm.
+- ``meas_y``, the measured y position of each detector on the array.
+  Nominally in mm.
+- ``meas_pol``, the measured polarization angle of each detector on the array.
+  Nominally in deg.
+- ``likelihood``, the likelihood of the match for each detector.
+- ``outliers``, boolean flag that shows which detectors look like outliers.
+
+If the input contained only a single observation the results can be found
+using the ManifestDb specified in the config file, this ManifestDb is indexed by `obs_id`.
 
 make-source-flags
 -----------------
@@ -328,6 +472,24 @@ Command line arguments
    :module: sotodlib.site_pipeline.update_hwp_angle
    :func: get_parser
    :prog: update_hwp_angle
+
+
+make-hwp-solutions
+------------------
+
+This element generates HWP angle-related metadata, 
+which contains the calibrated HWP angle and flags.
+The HWP angle is synchronized with the input SMuRF timestamp.
+:ref:`See details here<g3thwp-section>`.
+
+Command line arguments
+``````````````````````
+.. argparse::
+    :module: sotodlib.site_pipeline.make_hwp_solutions
+    :func: get_parser
+    :prog: make_hwp_solutions
+
+
 
 QDS Monitor
 ===========
@@ -559,6 +721,7 @@ API
 ---
 .. autoclass:: sotodlib.site_pipeline.monitor.Monitor
     :members:
+
 
 Support
 =======

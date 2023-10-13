@@ -12,7 +12,7 @@ import scipy.signal
 
 from numpy.testing import assert_array_equal, assert_allclose
 
-from sotodlib import core, tod_ops
+from sotodlib import core, tod_ops, sim_flags
 import so3g
 
 from ._helpers import mpi_multi
@@ -39,6 +39,38 @@ def get_tod(sig_type='trendy'):
     else:
         raise RuntimeError(f'sig_type={sig_type}?')
     return tod
+
+
+def get_glitchy_tod(ts, noise_amp=0, ndets=2, npoly=3, poly_coeffs=None):
+    """Returns axis manager to test fill_glitches"""
+    fake_signal = np.zeros((ndets, len(ts)))
+    input_sig = np.zeros((ndets, len(ts)))
+    if poly_coeffs is None:
+        poly_coeffs = np.random.uniform(0.5, 1.6, npoly)*1e-1
+    poly_sig = np.polyval(poly_coeffs, ts-np.mean(ts))
+    for nd in range(ndets):
+        input_sig[nd] = poly_sig
+        fake_signal[nd] = poly_sig
+        noise = np.random.normal(0, noise_amp, size=len(ts))
+        fake_signal[nd] += noise
+
+    dets = ['det%i' % i for i in range(ndets)]
+
+    tod_fake = core.AxisManager(core.LabelAxis('dets', vals=dets),
+                                core.OffsetAxis('samps', count=len(ts)))
+    tod_fake.wrap('timestamps', ts, axis_map=[(0, 'samps')])
+    tod_fake.wrap('signal', np.atleast_2d(fake_signal),
+                  axis_map=[(0, 'dets'), (1, 'samps')])
+    tod_fake.wrap('inputsignal', np.atleast_2d(input_sig),
+                  axis_map=[(0, 'dets'), (1, 'samps')])
+    flgs = core.AxisManager()
+    tod_fake.wrap('flags', flgs)
+    params = {'n_glitches': 10, 'sig_n_glitch': 10, 'h_glitc  h': 10,
+              'sig_h_glitch': 2}
+    sim_flags.add_random_glitches(tod_fake, params=params, signal='signal',
+                                  flag='glitches', overwrite=False)
+    return tod_fake
+
 
 class FactorsTest(unittest.TestCase):
     def test_inf(self):
@@ -121,6 +153,28 @@ class GapFillTest(unittest.TestCase):
                 assert_allclose(tod.signal[1][gap_mask], sentinel)
                 # ... check "extraction" has model values.
                 assert_allclose(ex[1].data, sig[gap_mask], atol=atol)
+    
+    def test_fillglitches(self):
+        """Tests fill glitches wrapper function"""
+        ts = np.arange(0, 1*60, 1/200)
+        aman = get_glitchy_tod(ts, ndets=100)
+        # test poly fill
+        up, mg = False, False
+        glitch_filled = tod_ops.gapfill.fill_glitches(aman, use_pca=up,
+                                                      wrap=mg)
+        self.assertTrue(np.max(np.abs(glitch_filled-aman.inputsignal)) < 1e-3)
+
+        # test pca fill
+        up, mg = True, False
+        glitch_filled = tod_ops.gapfill.fill_glitches(aman, use_pca=up,
+                                                      wrap=mg)
+        print(np.max(np.abs(glitch_filled-aman.inputsignal)))
+
+        # test wrap new field
+        up, mg = False, True
+        glitch_filled = tod_ops.gapfill.fill_glitches(aman, use_pca=up,
+                                                      wrap=mg)
+        self.assertTrue('gap_filled' in aman._assignments)
 
 class FilterTest(unittest.TestCase):
     def test_basic(self):

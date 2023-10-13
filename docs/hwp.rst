@@ -153,6 +153,15 @@ We can also specify output file path+name in config file.
 
 If you specify both, config file setting will be overwritten.
 
+Write HWP metadata
+------------------
+
+There is a fucntion to output analyzed data with HDF5 metadata format.
+This is mainly used for make-hwp-solutions site pipeline element.
+::
+
+   hwp_angle_tool.write_solution_h5(aman,h5_filename,h5_address)
+
 .. _g3thwp-ref-section:
 
 Reference
@@ -174,6 +183,10 @@ Class and function references should be auto-generated here.
 
 .. autoclass:: G3tHWP
     :members: write_solution
+    :noindex:
+
+.. autoclass:: G3tHWP
+    :members: write_solution_h5
     :noindex:
 
 
