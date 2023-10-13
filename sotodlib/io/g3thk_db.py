@@ -2,7 +2,7 @@ import sqlalchemy as db
 from sqlalchemy.exc import IntegrityError
 
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import sessionmaker, relationship, joinedload
 
 import os
 import yaml
@@ -524,7 +524,7 @@ class G3tHk:
         if agents.count() == 0:
             self.logger.warning(f"no agents found between {start} and {stop}")
 
-        agents = agents.filter(HKAgents.instance_id == instance_id).all()
+        agents = agents.filter(HKAgents.instance_id == instance_id).options(joinedload(HKAgents.fields)).all()
         return agents
 
     def get_last_update(self):

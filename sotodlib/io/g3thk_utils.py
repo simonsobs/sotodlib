@@ -26,7 +26,6 @@ def pysmurf_monitor_control_list(agent, start=None, stop=None, HK=None, logger=l
     -------
     stream_ids: list of stream_ids monitored by agent
     """
-    logger.info(f"Finding monitor control list for agent: {agent}")
     if isinstance(agent, str):
         if start is None or stop is None:
             raise ValueError(
@@ -38,7 +37,7 @@ def pysmurf_monitor_control_list(agent, start=None, stop=None, HK=None, logger=l
         if len(agent_list) == 0: 
             logger.warning(f"Agent {agent} not running between {start} and {stop}")
             return np.array([], dtype='<U8') 
-        logger.info(f"Agents to go through ({len(agent_list)}):: {agent_list}")
+        logger.info(f"Total agents to go through: {len(agent_list)}")
         return np.unique(
                 np.concatenate([pysmurf_monitor_control_list(agent, logger=logger) for agent in agent_list])
         )
