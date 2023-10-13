@@ -13,33 +13,33 @@ def main(config: str, logger=None):
     im_config : str
         path to imprinter configuration file
     """
-    imprinter = Imprinter(config, db_args={'connect_args': {'check_same_thread': False}})
+    imprinter = Imprinter(config, db_args={'connect_args': {'check_same_thread': False}}, logger=logger)
     # get unbound books
     unbound_books = imprinter.get_unbound_books()
     already_failed_books = imprinter.get_failed_books()
     
-    print(f"Found {len(unbound_books)} unbound books and "
-          f"{len(already_failed_books)} failed books")
+    logger.info(f"Found {len(unbound_books)} unbound books and "
+                f"{len(already_failed_books)} failed books")
     for book in unbound_books:
-        print(f"Binding book {book.bid}")
+        logger.info(f"Binding book {book.bid}")
         try:
             imprinter.bind_book(book)
         except Exception as e:
-            print(f"Error binding book {book.bid}: {e}")
-            print(traceback.format_exc())
+            logger.error(f"Error binding book {book.bid}: {e}")
+            logger.error(traceback.format_exc())
 
-    print("Retrying failed books") 
+    logger.info("Retrying failed books")
     failed_books = imprinter.get_failed_books()
     for book in failed_books:
         if book in already_failed_books:
-            print(f"Book {book.bid} has already failed twice, not re-trying")
+            logger.info(f"Book {book.bid} has already failed twice, not re-trying")
             continue
-        print(f"Binding book {book.bid}")
+        logger.info(f"Binding book {book.bid}")
         try:
             imprinter.bind_book(book)
         except Exception as e:
-            print(f"Error binding book {book.bid}: {e}")
-            print(traceback.format_exc())
+            logger.error(f"Error binding book {book.bid}: {e}")
+            logger.error(traceback.format_exc())
             # it has failed twice, ideally we want people to look at it now
             # do something here
 

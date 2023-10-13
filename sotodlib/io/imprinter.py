@@ -565,6 +565,7 @@ class Imprinter:
             bookbinder = BookBinder(
                 book, obsdb, filedb, lvl2_data_root, readout_ids, book_path,
                 ignore_tags=ignore_tags,
+                logger=self.logger
             )
             return bookbinder
 
