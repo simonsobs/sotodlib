@@ -21,6 +21,7 @@ from toast.utils import Logger, Environment, rate_from_times
 from toast.timing import function_timer, Timer
 from toast.observation import default_values as defaults
 from toast.fft import FFTPlanReal1DStore
+from toast.instrument_coords import xieta_to_quat, quat_to_xieta
 
 import so3g
 
@@ -143,6 +144,11 @@ class MLMapmaker(Operator):
         "maps it has some overhead due to extra communication."
     )
 
+    deslope = Bool(
+        True,
+        help="If True, each observation will have the mean and slope removed.",
+    )
+
     verbose = Int(
         1,
         allow_none=True,
@@ -244,7 +250,7 @@ class MLMapmaker(Operator):
     @traitlets.validate("nmat_type")
     def _check_nmat_type(self, proposal):
         check = proposal["value"]
-        allowed = ["NmatUncorr", "NmatDetvecs"]
+        allowed = ["NmatUncorr", "NmatDetvecs", "Nmat"]
         if check not in allowed:
             msg = f"nmat_type must be one of {allowed}, not {check}"
             raise traitlets.TraitError(msg)
@@ -350,20 +356,7 @@ class MLMapmaker(Operator):
             # Convert the focalplane offsets into the expected form
             det_to_row = {y["name"]: x for x, y in enumerate(fp.detector_data)}
             det_quat = np.array([fp.detector_data["quat"][det_to_row[x]] for x in dets])
-            det_theta, det_phi, det_pa = toast.qarray.to_iso_angles(det_quat)
-
-            radius = np.sin(det_theta)
-            xi  = radius * np.sin(det_phi)
-            eta = radius * np.cos(det_phi)
-            gamma = np.pi/2 - det_pa
-            # for d in range(len(det_quat)):
-            #     print(f"{d:03d}: {det_quat[d]}")
-            #     print(f"  theta = {det_theta[d]}")
-            #     print(f"  phi   = {det_phi[d]}")
-            #     print(f"  pa    = {det_pa[d]}")
-            #     print(f"  xi    = {xi[d]}")
-            #     print(f"  eta   = {eta[d]}")
-            #     print(f"  gamma = {gamma[d]}")
+            xi, eta, gamma = quat_to_xieta(det_quat)
 
             axfp = AxisManager()
             axfp.wrap("xi", xi, axis_map=[(0, axdets)])
@@ -377,7 +370,7 @@ class MLMapmaker(Operator):
             # Azimuth is measured in the opposite direction from longitude
             az = 2 * np.pi - phi
             el = np.pi / 2 - theta
-            roll = pa  # FIXME: double check this...
+            roll = pa
 
             axbore = AxisManager()
             axbore.wrap("az", az, axis_map=[(0, axsamps)])
@@ -423,7 +416,9 @@ class MLMapmaker(Operator):
             else:
                 nmat = None
 
-            self._mapmaker.add_obs(ob.name, axobs, noise_model=nmat)
+            self._mapmaker.add_obs(
+                ob.name, axobs, deslope=self.deslope, noise_model=nmat
+            )
             del axobs
 
             # Maybe save the noise model we built (only if we actually built one rather than
@@ -517,7 +512,8 @@ class MLMapmaker(Operator):
 
         for signal, val in zip(self._mapmaker.signals, step.x):
             if signal.output:
-                signal.write(prefix, "map", val)
+                fname = signal.write(prefix, "map", val)
+                log.info_rank(f"Wrote {fname}", comm=comm)
 
         if comm is not None:
             comm.barrier()

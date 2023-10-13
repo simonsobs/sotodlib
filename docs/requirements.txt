@@ -5,6 +5,7 @@ sphinx-argparse==0.3.1
 
 # Required because it is used at root level in some modules.
 numpy
+so3g
 
 # Required in order to support using Quantities for default function
 # argument values like:

@@ -17,3 +17,4 @@ from .sim_wiregrid import SimWireGrid
 from .sim_stimulator import SimStimulator
 from .save_books import SaveBooks
 from .load_books import LoadBooks
+from .sim_readout import SimReadout
