@@ -43,6 +43,64 @@ def bin_by_az(aman, signal=None, az=None, bin_range=[-np.pi, np.pi], bins=3600, 
     binning_dict = bin_signal(aman, bin_by=az, signal=signal,
                                bin_range=bin_range, bins=bins, flags=flags)
     return binning_dict
+
+def fit_sss(az, sss_stats, nmodes=None, fit_range=[-np.pi, np.pi]):
+    """
+    Function for fitting legendre polynomials to signal binned in azimuth.
+
+    Paramaters
+    ----------
+    az: array-like
+        azimuth array from main axis manager
+    sss_stats: AxisManager
+        Axis manager containing binned signal and azimuth used for fitting.
+        Created by ``get_sss`` function.
+    nmodes: integer, optional
+        Highest order legendre polynomial to include in the fit.
+    fit_range: list
+        Azimuth range used to renormalized to the [-1,1] range spanned
+        by the legendre polynomials for fitting. Default is [-pi, pi].
+
+    Returns
+    -------
+    sss_stats: AxisManager
+        Returns updated sss_stats with added fit information
+    model_sig_tod: array-like
+        Model fit for each detector size ndets x n_az_bins
+    """
+    bin_width = sss_stats.binned_az[1] - sss_stats.binned_az[0]
+    m = ~np.isnan(sss_stats.binned_signal[0]) # masks bins without counts
+    if np.count_nonzero(m) < nmodes:
+        raise ValueError('Number of valid bins is smaller than mode of Legendre function')
+    
+    if fit_range==None:
+        az_min = np.min(sss_stats.binned_az[m]) - bin_width/2
+        az_max = np.max(sss_stats.binned_az[m]) + bin_width/2
+    else:
+        az_min = -np.pi
+        az_max = np.pi
+    
+    x_Legendre = ( 2*az - (az_min+az_max) ) / (az_max - az_min)
+    x_Legendre_bin_centers = ( 2*sss_stats.binned_az - (az_min+az_max) ) / (az_max - az_min)
+    x_Legendre_bin_centers = np.where(~m, np.nan, x_Legendre_bin_centers)
+    
+    mode_names = []
+    for mode in range(nmodes+1):
+        mode_names.append(f'Legendre{mode}')
+    
+    coeffs = L.legfit(x_Legendre_bin_centers[m], sss_stats.binned_signal[:, m].T, nmodes)
+    coeffs = coeffs.T
+    binned_model = L.legval(x_Legendre_bin_centers, coeffs.T)
+    binned_model = np.where(~m, np.nan, binned_model)
+    sum_of_squares = np.sum(((sss_stats.binned_signal[:, m] - binned_model[:,m])**2), axis=-1)
+    redchi2s = sum_of_squares/sss_stats.uniform_binned_signal_sigma**2 / ( len(x_Legendre_bin_centers[m]) - nmodes - 1)
+    
+    sss_stats.wrap('binned_model', binned_model, [(0, 'dets'), (1, 'bin_samps')])
+    sss_stats.wrap('x_Legendre_bin_centers', x_Legendre_bin_centers, [(0, 'bin_samps')])
+    sss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, core.LabelAxis(name='modes', vals=np.array(mode_names, dtype='<U10')))])
+    sss_stats.wrap('redchi2s', redchi2s, [(0, 'dets')])
+    
+    return sss_stats, L.legval(x_Legendre, coeffs.T)
     
     
 def get_sss(aman, signal=None, az=None, bin_range=[-np.pi, np.pi], bins=3600, flags=None, 
@@ -106,41 +164,11 @@ def get_sss(aman, signal=None, az=None, bin_range=[-np.pi, np.pi], bins=3600, fl
     sss_stats.wrap('binned_az', bin_centers, [(0, core.IndexAxis('bin_samps', count=bins))])
     sss_stats.wrap('binned_signal', binned_signal, [(0, 'dets'), (1, 'bin_samps')])
     sss_stats.wrap('binned_signal_sigma', binned_signal_sigma, [(0, 'dets'), (1, 'bin_samps')])
+    sss_stats.wrap('uniform_binned_signal_sigma', uniform_binned_signal_sigma, [(0, 'dets')])
     
     if method == 'fit':
-        bin_width = bin_centers[1] - bin_centers[0]
-        m = ~np.isnan(binned_signal[0]) # masks bins without counts
-        if np.count_nonzero(m) < nmodes:
-            raise ValueError('Number of valid bins is smaller than mode of Legendre function')
+        sss_stats, model_sig_tod = fit_sss(az=az, sss_stats=sss_stats, nmodes=nmodes, fit_range=bin_range)
         
-        if bin_range==None:
-            az_min = np.min(bin_centers[m]) - bin_width/2
-            az_max = np.max(bin_centers[m]) + bin_width/2
-        else:
-            az_min = -np.pi
-            az_max = np.pi
-        
-        x_Legendre = ( 2*az - (az_min+az_max) ) / (az_max - az_min)
-        x_Legendre_bin_centers = ( 2*bin_centers - (az_min+az_max) ) / (az_max - az_min)
-        x_Legendre_bin_centers = np.where(~m, np.nan, x_Legendre_bin_centers)
-        
-        mode_names = []
-        for mode in range(nmodes+1):
-            mode_names.append(f'Legendre{mode}')
-        
-        coeffs = L.legfit(x_Legendre_bin_centers[m], binned_signal[:, m].T, nmodes)
-        coeffs = coeffs.T
-        binned_model = L.legval(x_Legendre_bin_centers, coeffs.T)
-        binned_model = np.where(~m, np.nan, binned_model)
-        sum_of_squares = np.sum(((binned_signal[:, m] - binned_model[:,m])**2), axis=-1)
-        redchi2s = sum_of_squares/uniform_binned_signal_sigma**2 /  ( len(x_Legendre_bin_centers[m]) - nmodes - 1)
-        
-        sss_stats.wrap('binned_model', binned_model, [(0, 'dets'), (1, 'bin_samps')])
-        sss_stats.wrap('x_Legendre_bin_centers', x_Legendre_bin_centers, [(0, 'bin_samps')])
-        sss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, core.LabelAxis(name='modes', vals=np.array(mode_names, dtype='<U10')))])
-        sss_stats.wrap('redchi2s', redchi2s, [(0, 'dets')])
-        
-        model_sig_tod = L.legval(x_Legendre, coeffs.T)
         
     if method == 'interpolate':
         f_template = interp1d(bin_centers, binned_signal, fill_value='extrapolate')
