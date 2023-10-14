@@ -236,15 +236,61 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         tod.wrap(wrap, signal, [(0, 'dets'), (1, 'samps')])
     return signal
 
+def _get_astrometric(source_name, timestamp, site='_default'):
+    """
+    Derive skyfield's Astrometric object of a celestial source at a 
+    specific timestamp and observing site, which is used to derive
+    radec/azel in get_source_pos/get_source_azel.
+    
+    Note that it will download a 16M ephemeris file on first use.
+    
+    Args:
+      source_name: Planet name; in capitalized format, e.g. "Jupiter",
+        or fixed source specification.
+      timestamp: unix timestamp.
+      site (str or so3g.proj.EarthlySite): if this is a string, the
+        site will be looked up in so3g.proj.SITES dict.
 
+    Returns:
+      astrometric: skyfield's astrometric object
+    """
+    # Get the ephemeris -- this will trigger a 16M download on first use.
+    de_url = RESOURCE_URLS['de421.bsp']
+    de_filename = au_data.download_file(de_url, cache=True)
+
+    planets = jpllib.SpiceKernel(de_filename)
+    for k in [
+            source_name,
+            source_name + ' barycenter',
+    ]:
+        try:
+            target = planets[k]
+            break
+        except (ValueError, KeyError):
+            pass
+    else:
+        options = list(planets.names().values())
+        raise ValueError(f'Failed to find a match for "{source_name}" in '
+                         f'ephemeris: {options}')
+
+    if isinstance(site, str):
+        site = so3g.proj.SITES[site]
+
+    observatory = site.skyfield_site(planets)
+
+    timescale = skyfield_api.load.timescale()
+    sf_timestamp = timescale.from_datetime(
+        datetime.datetime.fromtimestamp(timestamp, tz=skyfield_api.utc))
+    astrometric = observatory.at(sf_timestamp).observe(target)
+    return astrometric
+    
+    
 def get_source_pos(source_name, timestamp, site='_default'):
     """Get the equatorial coordinates of a planet (or fixed-position
     source, see note) at some time.  Returns the apparent position,
     accounting for geographical position on earth, but assuming no
     atmospheric refraction.
-
-    Note that this will download a 16M ephemeris file on first use.
-
+    
     Args:
       source_name: Planet name; in capitalized format, e.g. "Jupiter",
         or fixed source specification.
@@ -273,50 +319,24 @@ def get_source_pos(source_name, timestamp, site='_default'):
         ra, dec = float(m['ra_deg']) * \
             coords.DEG, float(m['dec_deg']) * coords.DEG
         return ra, dec, float('inf')
-
-    # Get the ephemeris -- this will trigger a 16M download on first use.
-    de_url = RESOURCE_URLS['de421.bsp']
-    de_filename = au_data.download_file(de_url, cache=True)
-
-    planets = jpllib.SpiceKernel(de_filename)
-    for k in [
-            source_name,
-            source_name + ' barycenter',
-    ]:
-        try:
-            target = planets[k]
-            break
-        except (ValueError, KeyError):
-            pass
-    else:
-        options = list(planets.names().values())
-        raise ValueError(f'Failed to find a match for "{source_name}" in '
-                         f'ephemeris: {options}')
-
-    if isinstance(site, str):
-        site = so3g.proj.SITES[site]
-
-    observatory = site.skyfield_site(planets)
-
-    timescale = skyfield_api.load.timescale()
-    sf_timestamp = timescale.from_datetime(
-        datetime.datetime.fromtimestamp(timestamp, tz=skyfield_api.utc))
-    amet0 = observatory.at(sf_timestamp).observe(target)
+    
+    # Derive from skyfield astrometric object
+    amet0 = _get_astrometric(source_name, timestamp, site)
     ra, dec, distance = amet0.radec()
     return ra.to(units.rad).value, dec.to(units.rad).value, distance.to(units.au).value
 
 
 def get_source_azel(source_name, timestamp, site='_default'):
     """
-    Get the apparent azimuth and elevation of a celestial source at a specific timestamp and observing site.
-
-    This function calculates the apparent azimuth and elevation of a celestial source, accounting for the geographical position
-    on Earth but assuming no atmospheric refraction. Note that it will download a 16M ephemeris file on first use.
+    Get the apparent azimuth and elevation of a celestial source at a 
+    specific timestamp and observing site. Returns the apparent position,
+    accounting for geographical position on earth, but assuming no
+    atmospheric refraction.
 
     Args:
         source_name: Planet name; in capitalized format, e.g. "Jupiter"
         timestamp (float): The Unix timestamp representing the time for 
-        which to calculate azimuth and elevation.
+          which to calculate azimuth and elevation.
         site (str or so3g.proj.EarthlySite): if this is a string, the
         site will be looked up in so3g.proj.SITES dict.
 
@@ -325,34 +345,7 @@ def get_source_azel(source_name, timestamp, site='_default'):
       el (float): in radians.
       distance (float): in AU.
     """
-    # Get the ephemeris -- this will trigger a 16M download on first use.
-    de_url = RESOURCE_URLS['de421.bsp']
-    de_filename = au_data.download_file(de_url, cache=True)
-
-    planets = jpllib.SpiceKernel(de_filename)
-    for k in [
-            source_name,
-            source_name + ' barycenter',
-    ]:
-        try:
-            target = planets[k]
-            break
-        except (ValueError, KeyError):
-            pass
-    else:
-        options = list(planets.names().values())
-        raise ValueError(f'Failed to find a match for "{source_name}" in '
-                         f'ephemeris: {options}')
-
-    if isinstance(site, str):
-        site = so3g.proj.SITES[site]
-
-    observatory = site.skyfield_site(planets)
-
-    timescale = skyfield_api.load.timescale()
-    sf_timestamp = timescale.from_datetime(
-        datetime.datetime.fromtimestamp(timestamp, tz=skyfield_api.utc))
-    amet0 = observatory.at(sf_timestamp).observe(target)
+    amet0 = _get_astrometric(source_name, timestamp, site)
     el, az, distance = amet0.apparent().altaz()
     return az.to(units.rad).value, el.to(units.rad).value, distance.to(units.au).value
 
