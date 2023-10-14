@@ -44,7 +44,7 @@ def bin_by_az(aman, signal=None, az=None, bin_range=[-np.pi, np.pi], bins=3600, 
                                bin_range=bin_range, bins=bins, flags=flags)
     return binning_dict
 
-def fit_sss(az, sss_stats, nmodes=None, fit_range=[-np.pi, np.pi]):
+def fit_sss(az, sss_stats, nmodes, fit_range=None):
     """
     Function for fitting legendre polynomials to signal binned in azimuth.
 
@@ -55,18 +55,19 @@ def fit_sss(az, sss_stats, nmodes=None, fit_range=[-np.pi, np.pi]):
     sss_stats: AxisManager
         Axis manager containing binned signal and azimuth used for fitting.
         Created by ``get_sss`` function.
-    nmodes: integer, optional
+    nmodes: integer, required
         Highest order legendre polynomial to include in the fit.
     fit_range: list
         Azimuth range used to renormalized to the [-1,1] range spanned
-        by the legendre polynomials for fitting. Default is [-pi, pi].
+        by the legendre polynomials for fitting. Default is the max-min
+        span in the ``binned_az`` array passed in via ``sss_stats``.
 
     Returns
     -------
     sss_stats: AxisManager
         Returns updated sss_stats with added fit information
     model_sig_tod: array-like
-        Model fit for each detector size ndets x n_az_bins
+        Model fit for each detector size ndets x n_samps
     """
     bin_width = sss_stats.binned_az[1] - sss_stats.binned_az[0]
     m = ~np.isnan(sss_stats.binned_signal[0]) # masks bins without counts
@@ -77,8 +78,7 @@ def fit_sss(az, sss_stats, nmodes=None, fit_range=[-np.pi, np.pi]):
         az_min = np.min(sss_stats.binned_az[m]) - bin_width/2
         az_max = np.max(sss_stats.binned_az[m]) + bin_width/2
     else:
-        az_min = -np.pi
-        az_max = np.pi
+        az_min, az_max = fit_range[0], fit_range[1]
     
     x_Legendre = ( 2*az - (az_min+az_max) ) / (az_max - az_min)
     x_Legendre_bin_centers = ( 2*sss_stats.binned_az - (az_min+az_max) ) / (az_max - az_min)
