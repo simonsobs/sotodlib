@@ -271,6 +271,9 @@ Here's an annotated example:
   matching:
     out_thresh: .4 # Liklihood below which things will be considered outliers
     reverse: False # Reverse the match direction
+    # To save the animation, set vis to the directory where you want to save it
+    # If the directory doesn't exist it will be made
+    # If you instead want to watch the animation in real time set to True
     vis: False # Play an animation of match iterations
     cpd_args: # Args to pass pycpd
       max_iterations: 1000

@@ -340,8 +340,11 @@ def match_template(
 
         reverse: Reverse direction of match.
 
-        vis: If true generate plots to watch the matching process.
-             Should only be used for debugging with human interaction.
+        vis: If True generate plots to watch the matching process.
+             To save the plot pass in a path to save at instead.
+             Note that with True is passed and the animation is displayed, that is a blocking process.
+             so it should only be used when debugging with human interaction.
+             If this is running headless you should pass in a path instead.
 
         cpd_args: Dictionairy containing kwargs to be passed into AffineRegistration.
                   See the pycpd docs for what these can be.
@@ -384,7 +387,11 @@ def match_template(
             frames=len(frames),
             interval=200,
         )
-        plt.show()
+        if isinstance(vis, str):
+            anim.save(vis)
+            plt.close()
+        else:
+            plt.show()
     else:
         reg.register()
 
@@ -507,20 +514,34 @@ def _load_bg(aman, bg_map):
     return bias_group, msk_bp
 
 
+def _update_vis(match_config, msk_str):
+    vis = match_config.get("vis", False)
+    # If we aren't saving a plot
+    if isinstance(vis, bool):
+        return match_config
+    # Otherwise update the save path
+    vis = os.path.join(vis, msk_str + ".webp")
+    new_config = match_config.copy()
+    new_config["vis"] = vis
+    return new_config
+
+
 def _do_match(
-    det_ids, focal_plane, template, priors, msks, template_msks, match_config
+    det_ids, focal_plane, template, priors, msks, msk_strs, template_msks, match_config
 ):
     ndim = focal_plane.shape[1] - 1
     mapped_det_ids = np.zeros(len(focal_plane), dtype=det_ids.dtype)
     out_msk = np.zeros(len(focal_plane), dtype=bool)
     P = np.zeros(len(focal_plane))
     transformed = np.nan + np.zeros((len(focal_plane), 3))
-    for msk, t_msk, prior in zip(msks, template_msks, priors):
+    for msk, msk_str, t_msk, prior in zip(msks, msk_strs, template_msks, priors):
+        logger.info("\tPerforming match with mask: %s", msk_str)
+        _match_config = _update_vis(match_config, msk_str)
         _map, _out, _P, _TY = match_template(
             focal_plane[msk],
             template[t_msk],
             priors=prior,
-            **match_config,
+            **_match_config,
         )
         mapped_det_ids[msk] = det_ids[t_msk][_map]
         P[msk] = _P[_map, range(_P.shape[1])]
@@ -714,7 +735,11 @@ def main():
         src=np.vstack((types, paths)).T,
     )
 
-    reverse = config["matching"].get("reverse", False)
+    base_match_config = config.get("matching", {})
+    vis = base_match_config.get("vis", False)
+    if isinstance(vis, str):
+        os.makedirs(vis, exist_ok=True)
+    reverse = base_match_config.get("reverse", False)
     if reverse:
         logger.warning(
             "Matching running in reverse mode. meas_x and meas_y will actually be fit pointing."
@@ -793,11 +818,16 @@ def main():
             msk_bp = np.ones(aman.dets.count, dtype=bool)
 
         msks = []
+        msk_strs = []
         if have_band:
             north = np.isin(aman.det_info.smurf.band.astype(int), (0, 1, 2, 3))
             msks += [north & msk_bp, (~north) & msk_bp]
+            msk_strs += ["valid_bg-and-north", "valid_bg-and-south"]
         else:
             msks += [np.ones(aman.dets.count, dtype=bool)]
+            msk_strs += ["no_mask"]
+        # So that the plots will be associated with an obs_id
+        msk_strs = [f"{obs_id}-{msk_str}" for msk_str in msk_strs]
 
         # Prep inputs
         if not gen_template:
@@ -867,10 +897,17 @@ def main():
         _template = template[:, pol_slice]
 
         # Do actual matching
-        match_config = config["matching"].copy()
+        match_config = base_match_config.copy()
         match_config["bias_lines"] &= have_bgmap and have_band and have_ch
         mapped_det_ids, out_msk, P, transformed = _do_match(
-            det_ids, _focal_plane, _template, priors, msks, _template_msks, match_config
+            det_ids,
+            _focal_plane,
+            _template,
+            priors,
+            msks,
+            msk_strs,
+            _template_msks,
+            match_config,
         )
 
         # Store outputs for now
@@ -972,10 +1009,12 @@ def main():
     c_msk = focal_plane[-1].astype(int)
     if np.isnan(c_msk).all():
         msks = [np.ones_like(c_msk, dtype=bool)]
+        msk_strs = ["no_mask"]
     else:
         msks = []
         for i in range(np.nanmax(c_msk)):
             msks.append(c_msk == i)
+            msk_strs.append(f"avg_msk_{i}")
     bc_avg_pointing = focal_plane[:5].T
     focal_plane = focal_plane[5:9].T
     if np.isnan(focal_plane[:, -1]).all():
@@ -1001,7 +1040,14 @@ def main():
     match_config = config["matching"]
     match_config["bias_lines"] &= have_bgmap and np.isfinite(focal_plane[:, 0]).all()
     mapped_det_ids, out_msk, P, transformed = _do_match(
-        det_ids, focal_plane, template, priors, msks, template_msks, match_config
+        det_ids,
+        focal_plane,
+        template,
+        priors,
+        msks,
+        msk_strs,
+        template_msks,
+        match_config,
     )
 
     # Make final outputs and save
