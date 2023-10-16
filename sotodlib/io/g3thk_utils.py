@@ -34,7 +34,12 @@ def pysmurf_monitor_control_list(agent, start=None, stop=None, HK=None):
         if HK is None:
             raise ValueError("need database to search if agent is instance id")
         agent_list = HK.get_db_agents(agent, start, stop)
-        return np.unique([pysmurf_monitor_control_list(agent) for agent in agent_list])
+        if len(agent_list) == 0: 
+            logger.warning(f"Agent {agent} not running between {start} and {stop}")
+            return np.array([], dtype='<U8') 
+        return np.unique(
+                np.concatenate([pysmurf_monitor_control_list(agent) for agent in agent_list])
+        )
     stream_ids = []
     for field in agent.fields:
         if not "_meta" in field.field:

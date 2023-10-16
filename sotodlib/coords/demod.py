@@ -11,7 +11,7 @@ def make_map(tod,
              dsT=None, demodQ=None, demodU=None,
              cuts=None,
              det_weights=None, det_weights_demod=None,
-             wrong_definition=False):
+             wrong_definition=False, center_on=None):
     """
     Generates maps of temperature and polarization from a TOD.
 

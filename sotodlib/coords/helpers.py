@@ -3,6 +3,7 @@ import numpy as np
 from pixell import enmap, wcsutils, utils
 
 import time
+import re
 
 DEG = np.pi/180
 
@@ -209,16 +210,31 @@ def get_horiz(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
         tod.wrap(wrap, output, [(0, 'dets'), (1, 'samps')])
     return output
 
-def get_wcs_kernel(proj, ra, dec, res):
+
+def get_wcs_kernel(proj, ra=None, dec=None, res=None):
     """Construct a WCS.  This fixes the projection type (e.g. CAR, TAN),
-    reference point (the special ra, dec), and resolution of a
-    pixelization, without specifying a particular grid of pixels.
+    centered with respect to a reference point (at ra,dec = (0,0)), and
+    resolution of a pixelization, without specifying a particular grid
+    of pixels.
 
     This interface is subject to change.
 
     Args:
-      proj (str): Name of the projection to use, as processed by
-        pixell.  E.g. 'car', 'cea', 'tan'.
+      proj (str): Either the name of a FITS projection to use (e.g. 'car',
+        'cea', 'tan'), in which case "res" must also be specified, or a
+        string containing both the projection and the resolution, in this
+        format:
+
+                      proj-res
+
+        where proj is a projection type (e.g. 'car', 'tan, 'gnom') and res
+        is the resolution, in appropriate units (deg, arcmin or arcsec).
+        Examples of acceptable args:
+
+                      'car-0.5deg'
+                      'tan-3arcmin'
+                      'gnom-25arcsec'
+
       ra: Right Ascension (longitude) of the reference position, in
         radians.
       dec: Declination (latitude) of the reference position, in
@@ -228,10 +244,41 @@ def get_wcs_kernel(proj, ra, dec, res):
     Returns a WCS object that captures the requested pixelization.
 
     """
-    assert np.isscalar(res)  # This ain't enlib.
-    _, wcs = enmap.geometry(np.array((dec, ra)), shape=(1,1), proj=proj,
-                            res=(res, -res))
+    if len(proj) > 4:
+        m = re.match('(?P<proj>car|tan|cea|gnom)-(?P<res>[0-9]*.?[0-9]*)(?P<unit>arcsec|arcmin|deg)',
+                     proj)
+        if m is None:
+            raise ValueError("Input projection string is incorrectly formatted.")
+        proj = m['proj']
+        res = float(m['res'])
+        unit = m['unit']
+
+        # Convert to radians
+        res = res * np.pi/180.
+        if unit == 'arcmin':
+            res /= 60.
+        if unit == 'arcsec':
+            res /= 3600.
+
+        _, wcs = enmap.geometry(np.array((0, 0)), shape=(1, 1), proj=proj,
+                                res=(res, -res))
+
+    else:
+        assert np.isscalar(res)  # This ain't enlib.
+        _, wcs = enmap.geometry(np.array((dec, ra)), shape=(1, 1), proj=proj,
+                                res=(res, -res))
+
+    if proj == 'car':
+        wcs.wcs.crpix = [1.0, 0.5]
+
+        # Check if the resolution is sensible, for SHTs
+        res = res * 180./np.pi  # Easier to do this check in degs
+        div = 90./res - np.round(90./res)
+        if abs(div) > 1e-8:
+            raise ValueError(f"The requested resolution {res} deg does not divide 90 deg evenly.")
+
     return wcs
+
 
 def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
                   focal_plane=None, sight=None, rot=None):
@@ -239,6 +286,9 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     big enough to contain all data from tod.  Returns (shape, wcs).
 
     """
+    if isinstance(wcs_kernel, str):
+        wcs_kernel = get_wcs_kernel(wcs_kernel)
+
     dets = _valid_arg(dets, tod.dets.vals, src=tod)
     fp0 = _valid_arg(focal_plane, 'focal_plane', src=tod)
     if sight is None and 'sight' in tod:

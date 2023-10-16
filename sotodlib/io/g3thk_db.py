@@ -1,9 +1,8 @@
 import sqlalchemy as db
 from sqlalchemy.exc import IntegrityError
 
-from sqlalchemy import and_
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import sessionmaker, relationship, joinedload
 
 import os
 import yaml
@@ -33,11 +32,10 @@ class HKFiles(Base):
         timestamp that begins a new HK file
     path : string
         path to the HK file
-    aggregator:
-    fields:
-    agents
-    """
+    aggregator : string
+        the aggregator corresponding to the data; ex: satp1, satp2, site
 
+    """
     __tablename__ = "hkfiles"
     __table_args__ = (
         db.UniqueConstraint("filename"),
@@ -56,26 +54,24 @@ class HKFiles(Base):
 
 
 class HKAgents(Base):
-    """This table is named HKAgents; serves as a db for holding
-    critical information about each Agent in an HK file.
+    """This table is named hkagents; serves as a db for holding
+    critical information about each agent in an HK file.
 
     Attributes
     ----------
     file_id : integer
-        id that points a field back to its corresponding
-        HK file in the hkfeeds table
+        id that points an agent back to its corresponding
+        HK file in the hkfiles table
     instance_id : string
-        TODO
+        the identifier for the instrument/agent; ex: LSA22YG
+        for a Lakeshore 372 with the serial number identified as
+        an ocs instance-id
     start : integer
-        TODO
+        start timestamp corresponding to the agent for corresponding file
     end : integer
-        TODO
-    hkfile:
-    fields
+        start timestamp corresponding to the agent for corresponding file
 
-    TODO: add uniqueness constraint
     """
-
     __tablename__ = "hkagents"
     # unique constraint for instance-id? needs more thought?
     id = db.Column(db.Integer, primary_key=True)
@@ -92,25 +88,24 @@ class HKAgents(Base):
 
 class HKFields(Base):
     """This table is named hkfields and serves as a db for all
-    fields inside each HK'ing file in the hkfeeds table.
+    fields inside each HK file in the hkfeeds table.
 
     Attributes
     ----------
     file_id : integer
         id that points a field back to its corresponding
-        HK file in the hkfeeds table
+        HK file in the hkfiles table
     agent_id : integer
-        TODO
+        id that points a field back to its corresponding HK
+        agent in the hkagents table
     field : string
         name of HK field in corresponding HK file
     start : integer
-        start time for each HK field in ctime
+        start time for each HK field in ctime for .g3 file
     end : integer
-        end time for each HK field in ctime
+        end time for each HK field in ctime for .g3 file
 
-    TODO: add uniqueness constraint
     """
-
     __tablename__ = "hkfields"
     id = db.Column(db.Integer, primary_key=True)
     file_id = db.Column(db.Integer, db.ForeignKey("hkfiles.id"))
@@ -526,7 +521,7 @@ class G3tHk:
         if agents.count() == 0:
             logger.warning(f"no agents found between {start} and {stop}")
 
-        agents = agents.filter(HKAgents.instance_id == instance_id).all()
+        agents = agents.filter(HKAgents.instance_id == instance_id).options(joinedload(HKAgents.fields)).all()
         return agents
 
     def get_last_update(self):
@@ -566,13 +561,13 @@ class G3tHk:
         if my_logger is None:
             my_logger = logger
 
-        ## remove field info
+        # remove field info
         my_logger.info(f"removing field entries for {hkfile.path} from database")
         if not dry_run:
             for f in hkfile.fields:
                 self.session.delete(f)
 
-        ## remove agent info
+        # remove agent info
         my_logger.info(f"removing agent entries for {hkfile.path} from database")
         if not dry_run:
             for a in hkfile.agents:

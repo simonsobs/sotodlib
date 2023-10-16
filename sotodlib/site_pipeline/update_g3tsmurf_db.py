@@ -17,8 +17,8 @@ from sotodlib.io.load_smurf import G3tSmurf, Observations, logger as default_log
 
 
 def main(config: Optional[str] = None, update_delay: float = 2, 
-         from_scratch: bool = False, verbosity: int = 2, logger=None,
-         index_via_actions: bool =False):
+         from_scratch: bool = False, verbosity: int = 2,
+         index_via_actions: bool=False, logger=None):
     """
     Arguments
     ---------
@@ -67,9 +67,12 @@ def main(config: Optional[str] = None, update_delay: float = 2,
         logger.info("Will send monitor information to Influx")
         try:
             monitor = Monitor.from_configs(cfgs["monitor"]["connect_configs"])
+            to_record = cfgs["monitor"].get("record", [])
         except Exception as e:
             logger.error(f"Monitor connectioned failed {e}")
             monitor = None
+            to_record = []
+
     updates_start = dt.datetime.now().timestamp()
 
     SMURF.index_metadata(min_ctime=min_time.timestamp())
@@ -82,7 +85,9 @@ def main(config: Optional[str] = None, update_delay: float = 2,
 
     session = SMURF.Session()
 
-    new_obs = session.query(Observations).filter(Observations.start >= min_time).all()
+    new_obs = session.query(Observations).filter(
+        Observations.start >= min_time
+    ).all()
 
     for obs in new_obs:
         if obs.stop is None or len(obs.tunesets)==0:
@@ -95,15 +100,19 @@ def main(config: Optional[str] = None, update_delay: float = 2,
         if monitor is not None:
             if obs.stop is not None:
                 try:
-                    record_timing(monitor, obs, cfgs)
-                    record_tuning(monitor, obs, cfgs)
+                    if "timing_on" in to_record:
+                        record_timing(monitor, obs, cfgs)
+                    if "has_tuneset" in to_record:
+                        record_tuning(monitor, obs, cfgs)
                 except Exception as e:
-                    logger.error(f"Monitor Update failed for {obs.obs_id} with {e}")
+                    logger.error(
+                        f"Monitor Update failed for {obs.obs_id} with {e}"
+                    )
 
 def _obs_tags(obs, cfgs):
     
     tags = [{
-        "tel_tube" : cfgs["monitor"]["tel_tube"], 
+        "telescope" : cfgs["monitor"]["telescope"], 
         "stream_id" : obs.stream_id
     }]
 
@@ -116,13 +125,13 @@ def record_tuning(monitor, obs, cfgs):
     Will be used to alter if the database readout_ids are not working.
     """
     tags, log_tags = _obs_tags(obs, cfgs)
-    if not monitor.check("timing_on", obs.obs_id, tags=tags[0]):
+    if not monitor.check("has_tuneset", obs.obs_id, tags=tags[0]):
         monitor.record(
             "has_tuneset", 
             [ len(obs.tunesets)==1 ], 
             [obs.timestamp], 
             tags, 
-            "data_pkg", 
+            cfgs["monitor"]["measurement"], 
             log_tags=log_tags
         )
         monitor.write()
@@ -134,12 +143,15 @@ def record_timing(monitor, obs, cfgs):
     tags, log_tags = _obs_tags(obs, cfgs)
 
     if not monitor.check("timing_on", obs.obs_id, tags=tags[0]):
+        timing = obs.timing
+        if timing is None:
+            timing = False
         monitor.record(
             "timing_on", 
-            [obs.timing], 
+            [timing], 
             [obs.timestamp], 
             tags, 
-            "data_pkg", 
+            cfgs["monitor"]["measurement"], 
             log_tags=log_tags
         )
         monitor.write()
@@ -153,7 +165,9 @@ def get_parser(parser=None):
     parser.add_argument('--from-scratch', help="Builds or updates database from scratch",
                         action="store_true")
     parser.add_argument("--verbosity", help="increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug",
-                       default=2, type=int)
+                        default=2, type=int)
+    parser.add_argument('--index-via-actions', help="Look through action folders to create observations",
+                        action="store_true")
     return parser
 
 if __name__ == '__main__':
