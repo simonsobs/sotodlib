@@ -1306,8 +1306,9 @@ class G3tSmurf:
                     session.query(TimeCodes)
                     .filter(
                         TimeCodes.stream_id == subdir,
-                        TimeCodes.suprsync_type
-                        == SupRsyncType.from_string(info["archive_name"]).value,
+                        TimeCodes.suprsync_type == SupRsyncType.from_string(
+                            info["archive_name"]
+                        ).value,
                         TimeCodes.timecode == info["timecode"],
                     )
                     .one_or_none()
@@ -1350,7 +1351,7 @@ class G3tSmurf:
             )
             if db_agent is None:
                 logger.info(
-                    f"Agent {agent} not found in HK database before"
+                    f"Agent {agent.agent} not found in HK database before"
                     f" update time {update_time}"
                 )
                 continue
@@ -1424,6 +1425,14 @@ class G3tSmurf:
                 agent_list.append(server["smurf-suprsync"])
                 agent_list.append(server["timestream-suprsync"])
                 continue
+            if stop > HK.get_last_update():
+                if stop > HK.get_last_update()+3600:
+                    logger.error(f"HK database not updated recently enough to"
+                                  " check finalization time. Last update "
+                                 f"{HK.get_last_update}. Trying to check until"
+                                 f"{stop}")
+                else:
+                    stop = HK.get_last_update()
             sids = pysmurf_monitor_control_list(pm, start, stop, HK)
             if np.any([s in stream_ids for s in sids]):
                 agent_list.append(server["smurf-suprsync"])
@@ -2122,14 +2131,31 @@ class SmurfStatus:
             filenames = [filename]
         else:
             filenames = filename
-        status = {}
+        processor = cls._get_frame_processor()
         for file in filenames:
             reader = so3g.G3IndexedReader(file)
             while True:
                 frames = reader.Process(None)
                 if len(frames) == 0:
                     break
-                frame = frames[0]
+                if processor.process(frames[0]):
+                    break
+        return processor.get_status()
+
+    @classmethod
+    def _get_frame_processor(cls):
+        """Returns a processor that can receive frames and ultimately return a
+        SmurfStatus object.
+
+        User should pass each frame into the return object's "process"
+        method, then call get_status to return a SmurfStatus.  The
+        "process" function returns True if the frame is a
+        "dump_frame".
+
+        """
+        class _WiringFrameHandler(dict):
+            def process(self, frame):
+                status = self
                 if str(frame.type) == "Wiring":
                     status["stream_id"] = frame.get("sostream_id")
                     status["session_id"] = frame.get("session_id")
@@ -2141,9 +2167,12 @@ class SmurfStatus:
                     status.update(yaml.safe_load(frame["status"]))
                     if frame["dump"]:
                         status["dump_frame"] = True
-                        break
+                        return True
                     status["dump_frame"] = False
-        return cls(status)
+                return False
+            def get_status(self):
+                return cls(self)
+        return _WiringFrameHandler()
 
     @classmethod
     def from_time(cls, time, archive, stream_id=None, show_pb=False):
@@ -2570,8 +2599,8 @@ def get_channel_info(
     Args
     -----
     status : SmurfStatus instance
-    mask : bool array
-        mask of which channels to use
+    mask : bool or int array
+        mask to select which channels to use (and possibly re-order them)
     archive : G3tSmurf instance (optionl)
         G3tSmurf instance for looking for tunes/tunesets
     obsfiledb : ObsfileDb instance (optional)

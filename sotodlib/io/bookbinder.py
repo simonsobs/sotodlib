@@ -189,8 +189,12 @@ class AncilProcessor:
         if 'Corrected_Azimuth' in block.data:
             az = np.interp(times, block.times, block.data['Corrected_Azimuth'])
             el = np.interp(times, block.times, block.data['Corrected_Elevation'])
-        if 'Corrected_Corotation' in block.data:
-            boresight = np.interp(times, block.times, block.data['Corrected_Boresight'])
+        if 'Corrected_Boresight' in block.data:
+            boresight = np.interp(
+                times, 
+                block.times, 
+                block.data['Corrected_Boresight']
+            )
         if 'Corrected_Corotation' in block.data:
             corotation = np.interp(times, block.times, block.data['Corrected_Corotation'])
 
@@ -570,7 +574,8 @@ class BookBinder:
         Array of output file indices for all output frames in the book
     """
     def __init__(self, book, obsdb, filedb, data_root, readout_ids, outdir,
-                 max_samps_per_frame=50_000, max_file_size=1e9):
+                 max_samps_per_frame=50_000, max_file_size=1e9, 
+                ignore_tags=False):
         self.filedb = filedb
         self.book = book
         self.data_root = data_root
@@ -584,6 +589,7 @@ class BookBinder:
 
         self.max_samps_per_frame = max_samps_per_frame
         self.max_file_size = max_file_size
+        self.ignore_tags = ignore_tags
 
         if not os.path.exists(outdir):
             os.makedirs(outdir)
@@ -746,7 +752,10 @@ class BookBinder:
 
         # make sure all tags are the same for obs in the same book
         tags = list(set(tags))
-        assert len(tags) == 1
+        if not self.ignore_tags:
+            assert len(tags) == 1
+        else:
+            tags = [','.join(tags)]
         tags = tags[0].split(',')
         # book should have at least one tag
         assert len(tags) > 0

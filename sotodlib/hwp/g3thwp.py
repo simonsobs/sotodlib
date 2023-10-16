@@ -9,6 +9,9 @@ from spt3g import core
 import logging
 import yaml
 import datetime
+import h5py
+import sotodlib
+
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +34,10 @@ class G3tHWP():
                 logger.info("Loading config from " + self.config_file)
             else:
                 logger.warning(
-                    "Can not find config file, use all default values")
+                    "Cannot find config file, use all default values")
                 self.configs = {}
         else:
-            logger.warning("Can not find config file, use all default values")
+            logger.warning("Cannot find config file, use all default values")
             self.configs = {}
 
         self._start = 0
@@ -46,6 +49,7 @@ class G3tHWP():
 
         self._file_list = self.configs.get('file_list', None)
         self._data_dir = self.configs.get('data_dir', None)
+        self._margin = self.configs.get('margin', 10)
 
         # 1st/2nd encoder readout
         self._field_instance = self.configs.get('field_instance',
@@ -125,7 +129,7 @@ class G3tHWP():
             self._start = start
             self._end = end
         if self._start is None:
-            logger.error("Can not find time range")
+            logger.error("Cannot find time range")
             return {}
 
         if isinstance(start, datetime.datetime):
@@ -142,7 +146,7 @@ class G3tHWP():
         if data_dir is not None:
             self._data_dir = data_dir
         if self._data_dir is None:
-            logger.error("Can not find data directory")
+            logger.error("Cannot find data directory")
             return {}
         if instance is not None:
             if 'observatory' in instance:
@@ -179,7 +183,8 @@ class G3tHWP():
             file_list : str or list or None
                 path and file name of input level 2 HK g3 file
             instance : str or None
-                instance of field list, overwrite config file \n
+                instance of field list, overwrite config file 
+
                 ex.) 'HBA' or 'observatory.HBA.feeds.HWPEncoder'
         Returns
         ----
@@ -188,7 +193,7 @@ class G3tHWP():
         """
 
         if file_list is None and self._file_list is None:
-            logger.error('Can not find input g3 file')
+            logger.error('Cannot find input g3 file')
             return {}
         if file_list is not None:
             self._file_list = file_list
@@ -206,7 +211,7 @@ class G3tHWP():
             self._file_list = [self._file_list]
         for f in self._file_list:
             if not os.path.exists(f):
-                logger.error('Can not find input g3 file')
+                logger.error('Cannot find input g3 file')
                 return {}
             scanner.process_file(f)
         logger.info("Loading HK data files: {}".format(
@@ -222,7 +227,7 @@ class G3tHWP():
 
         if not np.any([f in arc.get_fields()[0].keys() for f in fields]):
             logger.info(
-                "HWP is not spinning in input g3 files or can not find field")
+                "HWP is not spinning in input g3 files or cannot find field")
             return {}
         if self._start == 0 and self._end == 0:
             self._start = np.min([arc.simple(f)[0][0]
@@ -325,7 +330,7 @@ class G3tHWP():
             out = {
                 'locked': np.zeros_like(slow_time, dtype=bool),
                 'stable': np.zeros_like(slow_time, dtype=bool),
-                'hwp_rate': np.zeros_like(slow_time, dtype=float),
+                'hwp_rate': np.zeros_like(slow_time, dtype=np.float32),
                 'slow_time': slow_time,
             }
             return out
@@ -334,7 +339,7 @@ class G3tHWP():
             fast_irig_time = irig_time
             locked = np.zeros_like(irig_time, dtype=bool)
             stable = np.zeros_like(irig_time, dtype=bool)
-            hwp_rate = np.zeros_like(irig_time, dtype=float)
+            hwp_rate = np.zeros_like(irig_time, dtype=np.float32)
 
         else:
             # hwp speed calc. (approximate using ref)
@@ -355,7 +360,7 @@ class G3tHWP():
             irig_only_time = irig_time[np.where(
                 (irig_time < fast_time[0]) | (irig_time > fast_time[-1]))]
             irig_only_locked = np.zeros_like(irig_only_time, dtype=bool)
-            irig_only_hwp_rate = np.zeros_like(irig_only_time, dtype=float)
+            irig_only_hwp_rate = np.zeros_like(irig_only_time, dtype=np.float32)
 
             fast_irig_time = np.append(irig_only_time, fast_time)
             fast_irig_idx = np.argsort(fast_irig_time)
@@ -369,7 +374,7 @@ class G3tHWP():
             (slow_time < fast_irig_time[0]) | (slow_time > fast_irig_time[-1]))]
         slow_locked = np.zeros_like(slow_time, dtype=bool)
         slow_stable = np.zeros_like(slow_time, dtype=bool)
-        slow_hwp_rate = np.zeros_like(slow_time, dtype=float)
+        slow_hwp_rate = np.zeros_like(slow_time, dtype=np.float32)
 
         slow_time = np.append(slow_time, fast_irig_time)
         slow_idx = np.argsort(slow_time)
@@ -491,6 +496,10 @@ class G3tHWP():
         The more carful and accurate method is to make an template of encoder slits,
         and subtract it from the timestamp.
         """
+        if 'fast_time_raw' in solved.keys():
+            logger.info('Non-uniformity is already subtracted. Calculation is skipped.')
+            return
+                    
         def moving_average(array, n):
             return np.convolve(array, np.ones(n), 'valid')/n
 
@@ -534,7 +543,8 @@ class G3tHWP():
 
         Notes
         -----------
-        Output file format \n
+        Output file format 
+
         * Provider: 'hwp'
             * Fast block
                 * 'hwp.hwp_angle'
@@ -550,14 +560,20 @@ class G3tHWP():
         - slow_time: timestamp
             time list of slow block
         - stable: bool
-            if non-zero, indicates the HWP spin state is known. \n
-            i.e. it is either spinning at a measurable rate, or stationary. \n
-            When this flag is non-zero, the hwp_rate field can be taken at face value. \n
+            if non-zero, indicates the HWP spin state is known. 
+
+            i.e. it is either spinning at a measurable rate, or stationary. 
+
+            When this flag is non-zero, the hwp_rate field can be taken at face value. 
+
         - locked: bool
-            if non-zero, indicates the HWP is spinning and the position solution is working. \n
-            In this case one should find the hwp_angle populated in the fast data block. \n
+            if non-zero, indicates the HWP is spinning and the position solution is working. 
+
+            In this case one should find the hwp_angle populated in the fast data block. 
+
         - hwp_rate: float
-            the "approximate" HWP spin rate, with sign, in revs / second. \n
+            the "approximate" HWP spin rate, with sign, in revs / second. 
+
             Use placeholder value of 0 for cases when not "locked".
         """
         if self._output is None and output is None:
@@ -621,7 +637,147 @@ class G3tHWP():
             start_time += frame_length
 
         return
+    
+    def _set_empty_axes(self, aman):
+        
+        aman.wrap_new('timestamps', shape=('samps', ), dtype=np.float64)
+        aman.wrap_new('hwp_angle_ver1', shape=('samps', ), dtype=np.float64)
+        aman.wrap_new('hwp_angle_ver2', shape=('samps', ), dtype=np.float64)
+        aman.wrap_new('stable', shape=('samps', ), dtype=bool)
+        aman.wrap_new('locked', shape=('samps', ), dtype=bool)
+        aman.wrap_new('hwp_rate', shape=('samps', ), dtype=np.float16)
+        aman.wrap_new('eval', shape=('samps', ), dtype=bool)
+        
+        return 
+        
+    def _write_empty_solution_h5(self, tod, output=None, h5_address=None):
+        
+        logger.info('Writing empty solutions')
+        aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
+        self._set_empty_axes(aman)
+        aman.timestamps[:] = tod.timestamps
+        aman.save(output, h5_address, overwrite=True)
+        
+        return
 
+    def _bool_interpolation(self, timestamp1, data, timestamp2):
+
+        interp = scipy.interpolate.interp1d(timestamp1, data, kind='linear', bounds_error=False)(timestamp2)
+        result = (interp > 0.999)
+
+        return result
+    
+    def write_solution_h5(self, tod, output=None, h5_address=None):
+        """
+        Output HWP angle + flags as AxisManager format
+
+        Args
+        ----
+        data: g3 file
+          data = G3tHWP.load_data(start, end)
+        output: str or None
+          output path + file name, overwrite config file
+
+        Notes
+        -----
+
+        Output file format 
+
+        - timestamp:
+            SMuRF synched timestamp
+        - hwp_angle_ver1: float
+            SMuRF synched HWP angle (calculated from raw encoder signals) in radian
+        - hwp_angle_ver2: float
+            SMuRF synched HWP angle after the template subtraction (the systematics from the non-uniform encoder slot pattern is subtracted ) in radian. 
+
+            if 'eval' is zero, template subtraction is not completed and its value is same as 'hwp_angle_ver1'.
+        - stable: bool
+            if non-zero, indicates the HWP spin state is known. 
+
+            i.e. it is either spinning at a measurable rate, or stationary. 
+
+            When this flag is non-zero, the hwp_rate field can be taken at face value. 
+
+        - locked: bool
+            if non-zero, indicates the HWP is spinning and the position solution is working. 
+
+            In this case one should find the hwp_angle populated in the fast data block. 
+
+        - hwp_rate: float
+            the "approximate" HWP spin rate, with sign, in revs / second. 
+
+            Use placeholder value of 0 for cases when not "locked".
+        - eval: bool
+            if non-zero, the template subtraction is completed.
+        """
+        if self._output is None and output is None:
+            logger.warning('Output file not specified')
+            return
+        if output is not None:
+            self._output = output
+            
+        if len(tod.timestamps) == 0:
+            logger.warning('Input data is empty.')
+            return 
+        
+        start = int(tod.timestamps[0])-self._margin
+        end = int(tod.timestamps[-1])+self._margin
+        try:
+            data = self.load_data(start, end)
+        except Exception as e:
+            logger.error(f"Exception '{e}' thrown while loading HWP data. The specified encoder field is missing.")
+            self._write_empty_solution_h5(tod, output, h5_address)
+            return
+            
+        if len(data) == 0:
+            logger.warning('No HWP data in the specified timestamps.')
+            self._write_empty_solution_h5(tod, output, h5_address)
+            return
+        
+        # calculate HWP angle 
+        logger.debug("analyze")
+        
+        try:
+            solved = self.analyze(data, mod2pi=False)
+        except Exception as e:
+            logger.error(f"Exception '{e}' thrown while calculating HWP angle. Encoder signal might have too much noise.")
+            self._write_empty_solution_h5(tod, output, h5_address)
+            return 
+            
+        if len(solved['fast_time']) == 0:
+            logger.info('No rotation data in the specified timestamps.')
+            self._write_empty_solution_h5(tod, output, h5_address)
+            return
+            
+        # calculate template subtracted angle
+        try:
+            self.eval_angle(solved)
+        except Exception as e:
+            logger.error(f"Exception '{e}' thrown while the template subtraction")
+            pass
+        
+        # write solution
+        aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
+        self._set_empty_axes(aman)
+        if solved['fast_time'][0] > tod.timestamps[0] or solved['fast_time'][-1] < tod.timestamps[-1]:
+            logger.error("The angle solution contains empty data at the beginning or end of the timestamps.")
+        aman.timestamps[:] = tod.timestamps
+        aman.stable[:] = self._bool_interpolation(solved['slow_time'], solved['stable'], tod.timestamps)
+        aman.locked[:] = self._bool_interpolation(solved['slow_time'], solved['locked'], tod.timestamps)
+        aman.hwp_rate[:] = scipy.interpolate.interp1d(solved['slow_time'], solved['hwp_rate'], kind='linear', bounds_error=False)(tod.timestamps)
+        if 'fast_time_raw' in solved.keys():
+            aman.hwp_angle_ver1[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
+            aman.hwp_angle_ver2[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
+            aman.eval[:] = np.ones(len(tod.timestamps))
+        else:
+            logger.info('Template subtraction failed')
+            aman.hwp_angle_ver1[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
+            aman.hwp_angle_ver2[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
+    
+        aman.save(output, h5_address, overwrite=True)
+
+        return
+    
     def _hwp_angle_calculator(
             self,
             counter,
@@ -751,10 +907,10 @@ class G3tHWP():
         if len(self._ref_indexes) == 0:
             if len(diff) < self._num_edges:
                 logger.warning(
-                    'can not find reference points, # of data is less than # of slit')
+                    'cannot find reference points, # of data is less than # of slit')
             else:
                 logger.warning(
-                    'can not find reference points, please adjust parameters!')
+                    'cannot find reference points, please adjust parameters!')
             return -1
 
         ## delete unexpected ref slit indexes ##
@@ -906,7 +1062,9 @@ class G3tHWP():
             logger.debug('no need to fix encoder index')
 
     def _quad_form(self, quad):
-
+        
+        if self._force_quad==1: 
+            return np.ones_like(quad)
         # bit process
         quad[(quad >= 0.5)] = 1
         quad[(quad < 0.5)] = 0
@@ -964,7 +1122,7 @@ class G3tHWP():
     def interp_smurf(self, smurf_timestamp):
         smurf_angle = scipy.interpolate.interp1d(
             self._time,
-            self.angle,
+            self._angle,
             kind='linear',
             fill_value='extrapolate')(smurf_timestamp)
         return smurf_angle
