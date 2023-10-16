@@ -1037,10 +1037,13 @@ def locate_scan_events(az, dy=0.001, min_gap=200, filter_window=100):
             else:
                 c_upper_enter.append(c_upper[i])
 
+    # If any empty lists are passed to concatenate, this will be cast
+    # into an array of floats instead of ints
     starts = np.sort(np.concatenate((c_lower_exit, c_upper_exit)))
     stops = np.sort(np.concatenate((c_lower_enter, c_upper_enter)))
     events = np.sort(np.concatenate((starts, stops)))
 
+    # cast back to ints just in case
     starts = starts.astype(int)
     stops = stops.astype(int)
     events = events.astype(int)
