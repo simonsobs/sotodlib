@@ -1040,6 +1040,10 @@ def locate_scan_events(az, dy=0.001, min_gap=200, filter_window=100):
     starts = np.sort(np.concatenate((c_lower_exit, c_upper_exit)))
     stops = np.sort(np.concatenate((c_lower_enter, c_upper_enter)))
     events = np.sort(np.concatenate((starts, stops)))
+
+    starts = starts.astype(int)
+    stops = stops.astype(int)
+    events = events.astype(int)
     
     # Look for zero-crossings
     zc = []
