@@ -251,46 +251,17 @@ def visualize(frame, frames, ax=None, bias_lines=True):
         c_s = np.ones(len(Y))
         srt = np.lexsort(X.T[0:2])
     ax.cla()
-    ax.scatter(
-        X[:, x][srt[0::4]],
-        X[:, y][srt[0::4]],
-        c=c_t[srt[0::4]],
-        cmap=cmap,
-        alpha=0.5,
-        marker=4,
-        vmin=0,
-        vmax=1,
-    )
-    ax.scatter(
-        X[:, x][srt[1::4]],
-        X[:, y][srt[1::4]],
-        c=c_t[srt[1::4]],
-        cmap=cmap,
-        alpha=0.5,
-        marker=5,
-        vmin=0,
-        vmax=1,
-    )
-    ax.scatter(
-        X[:, x][srt[2::4]],
-        X[:, y][srt[2::4]],
-        c=c_t[srt[2::4]],
-        cmap=cmap,
-        alpha=0.5,
-        marker=6,
-        vmin=0,
-        vmax=1,
-    )
-    ax.scatter(
-        X[:, x][srt[3::4]],
-        X[:, y][srt[3::4]],
-        c=c_t[srt[3::4]],
-        cmap=cmap,
-        alpha=0.5,
-        marker=7,
-        vmin=0,
-        vmax=1,
-    )
+    for i in range(4):
+        ax.scatter(
+            X[:, x][srt[i::4]],
+            X[:, y][srt[i::4]],
+            c=c_t[srt[i::4]],
+            cmap=cmap,
+            alpha=0.5,
+            marker=4 + i,
+            vmin=0,
+            vmax=1,
+        )
     ax.scatter(
         Y[:, x], Y[:, y], c=c_s, cmap=cmap, alpha=0.5, marker="X", vmin=0, vmax=1
     )
