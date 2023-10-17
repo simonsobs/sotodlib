@@ -627,7 +627,7 @@ class AccumulatorTimesampleMap(AccumulatorNamed):
         if self.shape is not None:
             # Determinate.
             if self.data is None:
-                self.data = {k: np.empty(self.shape[-1], dtype=data[k].dtype)
+                self.data = {k: np.empty(self.shape[-1], dtype=np.asarray(data[k]).dtype)
                              for k in self.keys}
             for i, k in enumerate(self.keys):
                 self.data[k][dest_slice] = data[k][src_slice]
