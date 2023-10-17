@@ -722,8 +722,16 @@ class BookBinder:
         meta['type'] = self.book.type
         detsets = []
         tags = []
+
+        # build detset list in same order as slots
+        meta['stream_ids'] = self.book.slots.split(',')
+        for sid in meta['stream_ids']:
+            detsets.append(
+                [obs.tunesets[0].name for _,obs in self.obsdb.items() 
+                    if obs.stream_id == sid ][0]
+            )
+        # just append all tags, order doesn't matter
         for _, g3tobs in self.obsdb.items():
-            detsets.append(g3tobs.tunesets[0].name)
             tags.append(g3tobs.tag)
         meta['detsets'] = detsets
 
@@ -761,7 +769,7 @@ class BookBinder:
         assert len(tags) > 0
         meta['subtype'] = tags[1] if len(tags) > 1 else ""
         meta['tags'] = tags[2:]
-        meta['stream_ids'] = self.book.slots.split(',')
+        
         if (self.book.type == 'oper') and self.meta_files:
             meta['meta_files'] = self.meta_files
         return meta
