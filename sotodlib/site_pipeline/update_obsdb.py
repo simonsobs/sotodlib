@@ -98,7 +98,7 @@ def main(config:str,
         tback = tnow - recency*86400
     else:
         tback = 0 #Back to the UNIX Big Bang 
-
+    print(tback)
     existing = bookcartobsdb.query()["obs_id"]
 
     #Find folders that are book-like and recent
@@ -116,8 +116,16 @@ def main(config:str,
 
     for bookpath in bookcart:
         if check_meta_type(bookpath) in accept_type:
-            #obsfiledb creation
-            checkbook(bookpath, config, add=True, overwrite=True)
+
+            try:
+                #obsfiledb creation
+                checkbook(bookpath, config, add=True, overwrite=True)
+            except Exception as e:
+                if config_dict["skip_bad_books"]:
+                    print(f"failed to add {bookpath}")
+                    continue
+                else:
+                    raise e
 
             index = yaml.safe_load(open(os.path.join(bookpath, "M_index.yaml"), "rb"))
             obs_id = index.pop("book_id")
