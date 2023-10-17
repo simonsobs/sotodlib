@@ -86,11 +86,13 @@ class P:
       time-ordered data when binning a map (and also when binning a
       weights matrix).  [dets]
     - interpol (optional): How to interpolate the values for samples
-      between pixel centers. Forwarded to Projectionist.
-      Valid options are:
+      between pixel centers. Forwarded to Projectionist. Valid
+      options are:
+
       - None, 'nn' or 'nearest': Standard nearest neighbor mapmaking.
-      - 'lin' or 'bilinear': Linearly interpolate between the four closest
-        pixels.
+      - 'lin' or 'bilinear': Linearly interpolate between the four
+        closest pixels.
+
       Default: None
 
     These things can be updated freely, with the following caveats:
