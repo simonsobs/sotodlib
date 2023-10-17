@@ -624,6 +624,9 @@ class SmurfStreamProcessor:
         # Sample idx within each in-frame for every input sample
         in_offset_idxs = np.arange(len(self.times)) - offsets[self.frame_idxs]
 
+        # Mask to use to separate out non-resonator signal from resonator signal
+        res_chans = np.array(['NONE' not in r for r in self.readout_ids], dtype=bool)
+
         # Handle file writers
         writer = None
         cur_file_idx = None
@@ -740,7 +743,8 @@ class SmurfStreamProcessor:
             oframe['flag_smurfgaps'] = core.G3VectorBool(~filled)
 
             ts = core.G3VectorTime(ts * core.G3Units.s)
-            oframe['signal'] = so3g.G3SuperTimestream(self.readout_ids, ts, data)
+            oframe['signal'] = so3g.G3SuperTimestream(self.readout_ids[res_chans], ts, data[res_chans, :])
+            oframe['non_res_signal'] = so3g.G3SuperTimestream(self.readout_ids[~res_chans], ts, data[~res_chans, :])
             oframe['primary'] = so3g.G3SuperTimestream(self.primary_names, ts, primary)
             oframe['tes_biases'] = so3g.G3SuperTimestream(self.bias_names, ts, biases)
             oframe['stream_id'] = self.stream_id
