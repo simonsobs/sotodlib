@@ -26,6 +26,7 @@ from .load_smurf import (
     SupRsyncType,
     Files,
 )
+from .check_book import BookScanner
 from .g3thk_db import G3tHk, HKFiles
 from ..site_pipeline.util import init_logger
 
@@ -661,7 +662,8 @@ class Imprinter:
         message="",
         test_mode=False,
         pbar=False,
-        ignore_tags=False
+        ignore_tags=False,
+        check_configs={}
     ):
         """Bind book using bookbinder
 
@@ -679,6 +681,8 @@ class Imprinter:
         ignore_tags : bool
             If true, book will be bound even if the tags between different level 2
             operations don't match. Only ever expected to be turned on by hand.
+        check_configs: dict
+            additional non-default configurations to send to check book
         """
         if session is None:
             session = self.get_session()
@@ -728,9 +732,15 @@ class Imprinter:
             with open(mfile, "w") as f:
                 yaml.dump(binder.get_metadata(), f)
 
+            book.path = op.abspath(binder.outdir)
+            # check that book was written out correctly
+            self.logger.info("Checking Book {}".format(book.bid))
+            check = BookScanner(book.path, config=check_configs)
+            check.go()
+
             # not sure if this is the best place to update
             book.status = BOUND
-            book.path = op.abspath(binder.outdir)
+            
             self.logger.info("Book {} bound".format(book.bid))
             book.message = message
             if not test_mode:
