@@ -311,7 +311,7 @@ def ufm_to_fp(aman, x=None, y=None, pol=None, theta=0, dx=0, dy=0):
     if y is None:
         y = aman.det_info.wafer.det_y
     if pol is None:
-        pol = aman.det_info.wafer.actual_angle_deg
+        pol = aman.det_info.wafer.angle
     xy = np.column_stack((x, y, np.zeros_like(x)))
 
     rot = R.from_euler("z", theta, degrees=True)
