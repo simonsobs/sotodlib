@@ -417,7 +417,7 @@ def _gen_template(ufm):
             continue
         det_x.append(det.det_x)
         det_y.append(det.det_y)
-        polang.append(det.angle_actual_deg)
+        polang.append(det.angle)
         det_ids.append(det.detector_id)
         template_bg.append(det.bias_line)
         is_north.append(det.is_north)
