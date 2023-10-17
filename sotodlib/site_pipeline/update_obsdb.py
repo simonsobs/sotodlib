@@ -98,7 +98,7 @@ def main(config:str,
         tback = tnow - recency*86400
     else:
         tback = 0 #Back to the UNIX Big Bang 
-    print(tback)
+    
     existing = bookcartobsdb.query()["obs_id"]
 
     #Find folders that are book-like and recent
