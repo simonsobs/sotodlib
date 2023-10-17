@@ -91,7 +91,9 @@ def main(config:str,
         for col, typ in config_dict["obsdb_cols"].items():
             col_list.append(col+" "+typ)
         bookcartobsdb.add_obs_columns(col_list)
-
+    if "skip_bad_books" not in config_dict:
+        config_dict["skip_bad_books"] = False
+        
     #How far back we should look
     tnow = time.time()
     if recency is not None:
