@@ -16,11 +16,11 @@ def bin_signal(aman, bin_by, signal=None,
     signal : str, optional
         The name of the signal to be binned. Defaults to aman.signal if not specified.
     bin_range : list or None
-        A list specifying the bin range ([min, max])
-        Default is None, which means bin range is set to [min(bin_by), max(bin_by)] automaticaly by np.histogram.
+        A list specifying the bin range ([min, max]). Default is None, which means bin range
+        is set to [min(bin_by), max(bin_by)] automaticaly by np.histogram.
     bins : int, optional
         The number of bins to use. Default is 100.
-    flags : RangesMatrix, optinal
+    flags : RangesMatrix, optional
         Flag indicating whether to exclude flagged samples when binning the signal.
         Default is no mask applied.
 
