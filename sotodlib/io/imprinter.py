@@ -733,10 +733,12 @@ class Imprinter:
                 yaml.dump(binder.get_metadata(), f)
 
             book.path = op.abspath(binder.outdir)
-            # check that book was written out correctly
-            self.logger.info("Checking Book {}".format(book.bid))
-            check = BookScanner(book.path, config=check_configs)
-            check.go()
+
+            if book.type in ['obs', 'oper']:
+                # check that detectors books were written out correctly
+                self.logger.info("Checking Book {}".format(book.bid))
+                check = BookScanner(book.path, config=check_configs)
+                check.go()
 
             # not sure if this is the best place to update
             book.status = BOUND
