@@ -8,7 +8,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def bin_by_az(aman, signal=None, az=None, bin_range=[-np.pi, np.pi], bins=3600, flags=None):
+def bin_by_az(aman, signal=None, az=None, range=[-np.pi, np.pi], bins=3600, flags=None):
     """
     Bins a signal by azimuth angle.
 
@@ -20,7 +20,7 @@ def bin_by_az(aman, signal=None, az=None, bin_range=[-np.pi, np.pi], bins=3600, 
         numpy array of signal to be binned. If None, the signal is taken from aman.signal.
     az: array-like, optional
         A 1D numpy array representing the azimuth angles. If not provided, the azimuth angles are taken from aman.boresight.az attribute.
-    bin_range: array-like, optional
+    range: array-like, optional
         A list specifying the range of azimuth angles to consider for binning. Defaults to [-np.pi, np.pi].
         If None, [min(az), max(az)] will be used for binning.
     bins: integer
@@ -41,7 +41,7 @@ def bin_by_az(aman, signal=None, az=None, bin_range=[-np.pi, np.pi], bins=3600, 
     if az is None:
         az = aman.boresight.az
     binning_dict = bin_signal(aman, bin_by=az, signal=signal,
-                               bin_range=bin_range, bins=bins, flags=flags)
+                               range=range, bins=bins, flags=flags)
     return binning_dict
 
 def fit_sss(az, sss_stats, nmodes, fit_range=None):
@@ -103,7 +103,7 @@ def fit_sss(az, sss_stats, nmodes, fit_range=None):
     return sss_stats, L.legval(x_Legendre, coeffs.T)
     
     
-def get_sss(aman, signal=None, az=None, bin_range=[-np.pi, np.pi], bins=3600, flags=None, 
+def get_sss(aman, signal=None, az=None, range=[-np.pi, np.pi], bins=3600, flags=None, 
             method='interpolate', nmodes=None,
             merge_stats=True, sss_stats_name='sss_stats',
             merge_model=True, sss_model_name='sss_model'):
@@ -118,7 +118,7 @@ def get_sss(aman, signal=None, az=None, bin_range=[-np.pi, np.pi], bins=3600, fl
         A numpy array representing the signal to be used for SSS extraction. If not provided, the signal is taken from aman.signal.
     az: array-like, optional
         A 1D numpy array representing the azimuth angles. If not provided, the azimuth angles are taken from aman.boresight.az.
-    bin_range: list, optinal
+    range: list, optinal
         A list specifying the range of azimuth angles to consider for binning. Defaults to [-np.pi, np.pi].
         If None, [min(az), max(az)] will be used for binning.
     bins: integer
@@ -154,7 +154,7 @@ def get_sss(aman, signal=None, az=None, bin_range=[-np.pi, np.pi], bins=3600, fl
         az = aman.boresight.az
         
     # do binning
-    binning_dict = bin_by_az(aman, signal=signal, az=az, bin_range=bin_range, bins=bins, flags=flags)
+    binning_dict = bin_by_az(aman, signal=signal, az=az, range=range, bins=bins, flags=flags)
     bin_centers = binning_dict['bin_centers']
     binned_signal = binning_dict['binned_signal']
     binned_signal_sigma = binning_dict['binned_signal_sigma']
@@ -167,7 +167,7 @@ def get_sss(aman, signal=None, az=None, bin_range=[-np.pi, np.pi], bins=3600, fl
     sss_stats.wrap('uniform_binned_signal_sigma', uniform_binned_signal_sigma, [(0, 'dets')])
     
     if method == 'fit':
-        sss_stats, model_sig_tod = fit_sss(az=az, sss_stats=sss_stats, nmodes=nmodes, fit_range=bin_range)
+        sss_stats, model_sig_tod = fit_sss(az=az, sss_stats=sss_stats, nmodes=nmodes, fit_range=range)
         
         
     if method == 'interpolate':
