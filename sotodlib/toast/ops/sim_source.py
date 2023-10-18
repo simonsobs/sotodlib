@@ -158,16 +158,26 @@ class SimulateDroneMovement:
         
         """
         
-        fact = delta_axis-np.abs(vel**2/acc)
-        
-        if fact > 0 :
-            t_acc = np.abs(vel/acc)
-            t_vel = (delta_axis-np.abs(vel**2/acc))/np.abs(vel)
-            v_max = vel
+        if self.params['scan_type'] == 'elevation_only_single' or \
+           self.params['scan_type'] == 'azimuth_only_single':
+                v_max = (acc * self.params['scan_time']
+                         - np.sqrt((acc * self.params['scan_time'])**2
+                                   - 4 * acc * delta_axis)
+                         )/2
+                t_acc = np.abs(v_max/acc)
+                t_vel = self.params['scan_time'] - 2 * t_acc
         else:
-            v_max = np.sqrt(np.abs(delta_axis*acc))*direction
-            t_acc = np.abs(v_max/acc)
-            t_vel = 0
+        
+            fact = delta_axis-np.abs(vel**2/acc)
+
+            if fact > 0 :
+                t_acc = np.abs(vel/acc)
+                t_vel = (delta_axis-np.abs(vel**2/acc))/np.abs(vel)
+                v_max = vel
+            else:
+                v_max = np.sqrt(np.abs(delta_axis*acc))*direction
+                t_acc = np.abs(v_max/acc)
+                t_vel = 0
             
         return t_acc, t_vel, v_max
 
@@ -1220,11 +1230,7 @@ class SimSource(Operator):
             pfrac = self.polarization_fraction
             angle = (
                 self.source_pol_angle
-                + np.random.normal(
-                    0, 
-                    self.source_pol_angle_error.to_value(u.radian), 
-                    size=(len(sig))
-                )
+                + np.random.normal(0, self.source_pol_angle_error.to(u.deg).value, size=(len(sig))) * u.deg
             )
             
             I = sig.copy()
@@ -1234,7 +1240,7 @@ class SimSource(Operator):
             drone_sig = (I * weights_I
                          + Q * weights_Q
                          + U * weights_U
-                         )
+                         ).value
 
             signal += drone_sig
 
