@@ -53,7 +53,7 @@ def bin_signal(aman, bin_by, signal=None,
         m = ~flags.mask()
 
     # binning tod
-    for i in range(aman.dets.count):
+    for i, dets in enumerate(aman.dets.vals):
         binned_signal[i][mcnts] = np.histogram(bin_by[m[i]], bins=bins, range=range,
                                           weights=signal[i][m[i]])[0][mcnts] / bin_counts[mcnts]
 
