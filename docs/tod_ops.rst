@@ -183,7 +183,10 @@ of boresight.
 tod_ops.sss
 =============
 
-Function for fitting legendre polynomials in az-vs-signal space. This has been used in ABS and other experiments to get a scan synchronous signal (SSS) template largely due to polarized ground signal to remove from the data.
+Function for binning signal by azimuth and fitting it with legendre polynomials in 
+az-vs-signal space. This has been used in ABS and other experiments to get 
+a scan synchronous signal (SSS) template largely due to polarized ground signal 
+to remove from the data.
 
 .. autofunction:: sotodlib.tod_ops.sss.get_sss
 
