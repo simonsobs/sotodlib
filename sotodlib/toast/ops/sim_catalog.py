@@ -247,7 +247,7 @@ class SimCatalog(Operator):
             # We have already read the single beam file.
             beam_dic = self.beam_props["ALL"]
         else:
-            with h5py(self.beam_file, 'r') as f_t:
+            with h5py.File(self.beam_file, 'r') as f_t:
                 beam_dic = {}
                 beam_dic["data"] = f_t["beam"][:]
                 beam_dic["size"] = [[f_t["beam"].attrs["size"], f_t["beam"].attrs["res"]], [f_t["beam"].attrs["npix"], 1]]
@@ -314,7 +314,7 @@ class SimCatalog(Operator):
 
             det_theta, det_phi, det_psi = qa.to_iso_angles(det_quat)
             det_vec = hp.dir2vec(det_theta, det_phi).T.copy()
-            det_psi_pol = focalplane[det]["pol_ang"] * u.deg
+            det_psi_pol = focalplane[det]["pol_ang"]
 
             if beam is None or not "ALL" in self.beam_props:
                 beam, beam_radius, beam_solid_angle = self._get_beam_map(det)
