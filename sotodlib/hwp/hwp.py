@@ -208,7 +208,7 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
     if hwp_angle is None:
         hwp_angle = aman['hwp_angle']
         
-    binning_dict = bin_signal(aman, bin_by=hwp_angle, bin_range=[0, 2*np.pi],
+    binning_dict = bin_signal(aman, bin_by=hwp_angle, range=[0, 2*np.pi],
                               bins=bins, signal=signal, flags=flags)
     
     bin_centers = binning_dict['bin_centers']
