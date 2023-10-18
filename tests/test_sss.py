@@ -71,7 +71,7 @@ def make_fake_sss_tod(nmodes=20, noise_amp=1, n_scans=10,
     dets = ['det%i' % i for i in range(ndets)]
     mode_names = []
     for mode in range(nmodes+1):
-        mode_names.append(f'Legendre{mode}')
+        mode_names.append(f'legendre{mode}')
 
     tod_fake = core.AxisManager(core.LabelAxis('dets', vals=dets),
                                 core.OffsetAxis('samps', count=len(ts)),
