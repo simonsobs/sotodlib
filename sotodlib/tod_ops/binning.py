@@ -18,8 +18,9 @@ def bin_signal(aman, bin_by, signal=None,
     range : list or None
         A list specifying the bin range ([min, max]). Default is None, which means bin range
         is set to [min(bin_by), max(bin_by)] automaticaly by np.histogram.
-    bins : int, optional
-        The number of bins to use. Default is 100.
+    bins : int or sequence of scalars
+        If bins is an int, it defines the number of equal-width bins in the given range (100, by default).
+        If bins is a sequence, it defines the bin edges, including the rightmost edge, allowing for non-uniform bin widths.
     flags : RangesMatrix, optional
         Flag indicating whether to exclude flagged samples when binning the signal.
         Default is no mask applied.
@@ -35,16 +36,17 @@ def bin_signal(aman, bin_by, signal=None,
         signal = aman.signal
 
     # binning hwp_angle tod
-    bin_counts, bin_centers = np.histogram(bin_by, bins=bins, range=range)
-    bin_centers = (bin_centers[1] - bin_centers[0])/2. + bin_centers[:-1] # edge to center
+    bin_counts, bin_edges = np.histogram(bin_by, bins=bins, range=range)
+    bin_centers = (bin_edges[1] - bin_edges[0])/2. + bin_edges[:-1] # edge to center
+    nbins = len(bin_centers)
     
     # find bins with non-zero counts
     mcnts = bin_counts > 0
     
     # bin signal
-    binned_signal = np.full([aman.dets.count, bins], np.nan)
-    binned_signal_squared_mean = np.full([aman.dets.count, bins], np.nan)
-    binned_signal_sigma = np.full([aman.dets.count, bins], np.nan)
+    binned_signal = np.full([aman.dets.count, nbins], np.nan)
+    binned_signal_squared_mean = np.full([aman.dets.count, nbins], np.nan)
+    binned_signal_sigma = np.full([aman.dets.count, nbins], np.nan)
 
     # get mask from flags
     if flags is None:
