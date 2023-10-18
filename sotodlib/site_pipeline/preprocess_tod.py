@@ -7,6 +7,7 @@ from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
 from sotodlib.preprocess import _Preprocess, PIPELINE, processes
 
+logger = sp_util.init_logger("preprocess")
 
 def _build_pipe_from_configs(configs):
     pipe = []
@@ -248,6 +249,7 @@ def main(
     configs, context = _get_preprocess_context(configs)
     if logger is None: 
         logger = sp_util.init_logger("preprocess")
+    globals()['logger'] = logger
 
     if obs_id is not None:
         tot_query = f"obs_id=='{obs_id}'"
