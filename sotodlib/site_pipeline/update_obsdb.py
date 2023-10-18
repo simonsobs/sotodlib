@@ -17,7 +17,8 @@ The config file could be of the form:
 
     obsdb: dummyobsdb.sqlite
     obsfiledb: dummyobsfiledb.sqlite
-    tolerate_stray_files: True 
+    tolerate_stray_files: True
+    skip_bad_books: True
     extra_extra_files:
     - Z_bookbinder_log.txt
     extra_files:
@@ -147,9 +148,15 @@ def main(config:str,
 
     for bookpath in bookcart:
         if check_meta_type(bookpath) in accept_type:
-            #obsfiledb creation
-            checkbook(bookpath, config, add=True, overwrite=True)
-
+            try:
+                #obsfiledb creation
+                checkbook(bookpath, config, add=True, overwrite=True)
+            except Exception as e:#Some books might be rotten, let's skip them
+                if config_dict["skip_bad_books"]:
+                    print(f"failed to add {bookpath}")
+                    continue
+                else:
+                    raise e
             index = yaml.safe_load(open(os.path.join(bookpath, "M_index.yaml"), "rb"))
             obs_id = index.pop("book_id")
             tags = index.pop("tags")
@@ -164,7 +171,8 @@ def main(config:str,
                 for key, val in very_clean.items():
                     col_list.append(key+" "+type(val).__name__)
                 bookcartobsdb.add_obs_columns(col_list)
-
+            if "skip_bad_books" not in config_dict:
+                config_dict["skip_bad_books"] = False
             #Adding info that should be there for all observations
             #Descriptive string columns
             frequent_cols = ["telescope", 
