@@ -48,7 +48,7 @@ def fit_sss(az, sss_stats, nmodes, fit_range=None):
     """
     Function for fitting legendre polynomials to signal binned in azimuth.
 
-    Paramaters
+    Parameters
     ----------
     az: array-like
         azimuth array from main axis manager
