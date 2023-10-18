@@ -3,7 +3,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 def bin_signal(aman, bin_by, signal=None,
-               bin_range=None, bins=100, flags=None):
+               range=None, bins=100, flags=None):
     """
     Bin time-ordered data by the `bin_by` and return the binned signal and its standard deviation.
 
@@ -15,7 +15,7 @@ def bin_signal(aman, bin_by, signal=None,
         The array by which signal is binned. It should has the same samps as aman.
     signal : str, optional
         The name of the signal to be binned. Defaults to aman.signal if not specified.
-    bin_range : list or None
+    range : list or None
         A list specifying the bin range ([min, max]). Default is None, which means bin range
         is set to [min(bin_by), max(bin_by)] automaticaly by np.histogram.
     bins : int, optional
@@ -35,7 +35,7 @@ def bin_signal(aman, bin_by, signal=None,
         signal = aman.signal
 
     # binning hwp_angle tod
-    bin_counts, bin_centers = np.histogram(bin_by, bins=bins, range=bin_range)
+    bin_counts, bin_centers = np.histogram(bin_by, bins=bins, range=range)
     bin_centers = (bin_centers[1] - bin_centers[0])/2. + bin_centers[:-1] # edge to center
     
     # find bins with non-zero counts
@@ -54,10 +54,10 @@ def bin_signal(aman, bin_by, signal=None,
 
     # binning tod
     for i in range(aman.dets.count):
-        binned_signal[i][mcnts] = np.histogram(bin_by[m[i]], bins=bins, range=bin_range,
+        binned_signal[i][mcnts] = np.histogram(bin_by[m[i]], bins=bins, range=range,
                                           weights=signal[i][m[i]])[0][mcnts] / bin_counts[mcnts]
 
-        binned_signal_squared_mean[i][mcnts] = np.histogram(bin_by[m[i]], bins=bins, range=bin_range,
+        binned_signal_squared_mean[i][mcnts] = np.histogram(bin_by[m[i]], bins=bins, range=range,
                                                        weights=signal[i][m[i]]**2)[0][mcnts] / bin_counts[mcnts]
 
     # get sigma of each bin
