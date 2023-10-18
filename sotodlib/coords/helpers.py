@@ -271,6 +271,12 @@ def get_wcs_kernel(proj, ra=None, dec=None, res=None):
     if proj == 'car':
         wcs.wcs.crpix = [1.0, 0.5]
 
+        # Check if the resolution is sensible, for SHTs
+        res = res * 180./np.pi  # Easier to do this check in degs
+        div = 90./res - np.round(90./res)
+        if abs(div) > 1e-8:
+            raise ValueError(f"The requested resolution {res} deg does not divide 90 deg evenly.")
+
     return wcs
 
 
