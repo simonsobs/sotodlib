@@ -46,7 +46,7 @@ def bin_by_az(aman, signal=None, az=None, range=[-np.pi, np.pi], bins=3600, flag
 
 def fit_sss(az, sss_stats, nmodes, fit_range=None):
     """
-    Function for fitting legendre polynomials to signal binned in azimuth.
+    Function for fitting Legendre polynomials to signal binned in azimuth.
 
     Parameters
     ----------
@@ -56,10 +56,10 @@ def fit_sss(az, sss_stats, nmodes, fit_range=None):
         Axis manager containing binned signal and azimuth used for fitting.
         Created by ``get_sss`` function.
     nmodes: integer, required
-        Highest order legendre polynomial to include in the fit.
+        Highest order Legendre polynomial to include in the fit.
     fit_range: list
         Azimuth range used to renormalized to the [-1,1] range spanned
-        by the legendre polynomials for fitting. Default is the max-min
+        by the Legendre polynomials for fitting. Default is the max-min
         span in the ``binned_az`` array passed in via ``sss_stats``.
 
     Returns
@@ -80,27 +80,27 @@ def fit_sss(az, sss_stats, nmodes, fit_range=None):
     else:
         az_min, az_max = fit_range[0], fit_range[1]
     
-    x_Legendre = ( 2*az - (az_min+az_max) ) / (az_max - az_min)
-    x_Legendre_bin_centers = ( 2*sss_stats.binned_az - (az_min+az_max) ) / (az_max - az_min)
-    x_Legendre_bin_centers = np.where(~m, np.nan, x_Legendre_bin_centers)
+    x_legendre = ( 2*az - (az_min+az_max) ) / (az_max - az_min)
+    x_legendre_bin_centers = ( 2*sss_stats.binned_az - (az_min+az_max) ) / (az_max - az_min)
+    x_legendre_bin_centers = np.where(~m, np.nan, x_legendre_bin_centers)
     
     mode_names = []
     for mode in range(nmodes+1):
-        mode_names.append(f'Legendre{mode}')
+        mode_names.append(f'legendre{mode}')
     
-    coeffs = L.legfit(x_Legendre_bin_centers[m], sss_stats.binned_signal[:, m].T, nmodes)
+    coeffs = L.legfit(x_legendre_bin_centers[m], sss_stats.binned_signal[:, m].T, nmodes)
     coeffs = coeffs.T
-    binned_model = L.legval(x_Legendre_bin_centers, coeffs.T)
+    binned_model = L.legval(x_legendre_bin_centers, coeffs.T)
     binned_model = np.where(~m, np.nan, binned_model)
     sum_of_squares = np.sum(((sss_stats.binned_signal[:, m] - binned_model[:,m])**2), axis=-1)
-    redchi2s = sum_of_squares/sss_stats.uniform_binned_signal_sigma**2 / ( len(x_Legendre_bin_centers[m]) - nmodes - 1)
+    redchi2s = sum_of_squares/sss_stats.uniform_binned_signal_sigma**2 / ( len(x_legendre_bin_centers[m]) - nmodes - 1)
     
     sss_stats.wrap('binned_model', binned_model, [(0, 'dets'), (1, 'bin_samps')])
-    sss_stats.wrap('x_Legendre_bin_centers', x_Legendre_bin_centers, [(0, 'bin_samps')])
+    sss_stats.wrap('x_legendre_bin_centers', x_legendre_bin_centers, [(0, 'bin_samps')])
     sss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, core.LabelAxis(name='modes', vals=np.array(mode_names, dtype='<U10')))])
     sss_stats.wrap('redchi2s', redchi2s, [(0, 'dets')])
     
-    return sss_stats, L.legval(x_Legendre, coeffs.T)
+    return sss_stats, L.legval(x_legendre, coeffs.T)
     
     
 def get_sss(aman, signal=None, az=None, range=[-np.pi, np.pi], bins=3600, flags=None, 
