@@ -204,7 +204,7 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
         * estimated sigma of binned signal
     """
     if signal is None:
-        signal = aman.signal    
+        signal = aman.signal
     if hwp_angle is None:
         hwp_angle = aman['hwp_angle']
         
