@@ -722,8 +722,16 @@ class BookBinder:
         meta['type'] = self.book.type
         detsets = []
         tags = []
+
+        # build detset list in same order as slots
+        meta['stream_ids'] = self.book.slots.split(',')
+        for sid in meta['stream_ids']:
+            detsets.append(
+                [obs.tunesets[0].name for _,obs in self.obsdb.items() 
+                    if obs.stream_id == sid ][0]
+            )
+        # just append all tags, order doesn't matter
         for _, g3tobs in self.obsdb.items():
-            detsets.append(g3tobs.tunesets[0].name)
             tags.append(g3tobs.tag)
         meta['detsets'] = detsets
 
@@ -761,7 +769,7 @@ class BookBinder:
         assert len(tags) > 0
         meta['subtype'] = tags[1] if len(tags) > 1 else ""
         meta['tags'] = tags[2:]
-        meta['stream_ids'] = self.book.slots.split(',')
+        
         if (self.book.type == 'oper') and self.meta_files:
             meta['meta_files'] = self.meta_files
         return meta
@@ -1037,9 +1045,16 @@ def locate_scan_events(az, dy=0.001, min_gap=200, filter_window=100):
             else:
                 c_upper_enter.append(c_upper[i])
 
+    # If any empty lists are passed to concatenate, this will be cast
+    # into an array of floats instead of ints
     starts = np.sort(np.concatenate((c_lower_exit, c_upper_exit)))
     stops = np.sort(np.concatenate((c_lower_enter, c_upper_enter)))
     events = np.sort(np.concatenate((starts, stops)))
+
+    # cast back to ints just in case
+    starts = starts.astype(int)
+    stops = stops.astype(int)
+    events = events.astype(int)
     
     # Look for zero-crossings
     zc = []

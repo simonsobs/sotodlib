@@ -119,14 +119,16 @@ def main(config:str,
         for col, typ in config_dict["obsdb_cols"].items():
             col_list.append(col+" "+typ)
         bookcartobsdb.add_obs_columns(col_list)
-
+    if "skip_bad_books" not in config_dict:
+        config_dict["skip_bad_books"] = False
+        
     #How far back we should look
     tnow = time.time()
     if recency is not None:
         tback = tnow - recency*86400
     else:
         tback = 0 #Back to the UNIX Big Bang 
-
+    
     existing = bookcartobsdb.query()["obs_id"]
     #Check if there are one or multiple base_dir specified
     if isinstance(base_dir,str):
@@ -148,15 +150,17 @@ def main(config:str,
 
     for bookpath in bookcart:
         if check_meta_type(bookpath) in accept_type:
+
             try:
                 #obsfiledb creation
                 checkbook(bookpath, config, add=True, overwrite=True)
-            except Exception as e:#Some books might be rotten, let's skip them
+            except Exception as e:
                 if config_dict["skip_bad_books"]:
                     print(f"failed to add {bookpath}")
                     continue
                 else:
                     raise e
+
             index = yaml.safe_load(open(os.path.join(bookpath, "M_index.yaml"), "rb"))
             obs_id = index.pop("book_id")
             tags = index.pop("tags")
