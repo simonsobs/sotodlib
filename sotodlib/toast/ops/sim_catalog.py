@@ -438,7 +438,7 @@ class SimCatalog(Operator):
                 x = phi_diff * np.cos(np.pi / 2 - det_theta[hit])
                 y = det_theta[hit] - source_theta
                 # Rotate into the beam frame
-                psi = det_psi[hit] - det_psi_pol.to_value(u.rad)
+                psi = det_psi[hit] - det_psi_pol.to_value(u.rad**2)
                 x_beam = np.cos(psi) * x - np.sin(psi) * y
                 y_beam = np.sin(psi) * x + np.cos(psi) * y
                 sig = beam(x_beam, y_beam, grid=False) * temperature
