@@ -109,8 +109,11 @@ def get_pca(tod=None, cov=None, signal=None, wrap=None):
     output = core.AxisManager(dets, mode_axis)
     output.wrap('cov', cov, [(0, dets.name), (1, dets.name)])
 
+    # Note eig will sometimes return complex eigenvalues.
     E, R = np.linalg.eig(cov)  # eigh nans sometimes...
     E[np.isnan(E)] = 0.
+    E, R = E.real, R.real
+
     idx = np.argsort(-E)
     output.wrap('E', E[idx], [(0, mode_axis.name)])
     output.wrap('R', R[:, idx], [(0, dets.name), (1, mode_axis.name)])
