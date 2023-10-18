@@ -314,7 +314,7 @@ class SimCatalog(Operator):
 
             det_theta, det_phi, det_psi = qa.to_iso_angles(det_quat)
             det_vec = hp.dir2vec(det_theta, det_phi).T.copy()
-            det_psi_pol = focalplane[det]["pol_ang"] * u.deg
+            det_psi_pol = focalplane[det]["pol_ang"]
 
             if beam is None or not "ALL" in self.beam_props:
                 beam, beam_radius, beam_solid_angle = self._get_beam_map(det)
@@ -438,7 +438,7 @@ class SimCatalog(Operator):
                 x = phi_diff * np.cos(np.pi / 2 - det_theta[hit])
                 y = det_theta[hit] - source_theta
                 # Rotate into the beam frame
-                psi = det_psi[hit] - det_psi_pol.to_value(u.rad**2)
+                psi = det_psi[hit] - det_psi_pol.to_value(u.rad)
                 x_beam = np.cos(psi) * x - np.sin(psi) * y
                 y_beam = np.sin(psi) * x + np.cos(psi) * y
                 sig = beam(x_beam, y_beam, grid=False) * temperature
