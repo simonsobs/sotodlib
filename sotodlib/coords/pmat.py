@@ -85,6 +85,15 @@ class P:
     - det_weights (optional): weights (one per detector) to apply to
       time-ordered data when binning a map (and also when binning a
       weights matrix).  [dets]
+    - interpol (optional): How to interpolate the values for samples
+      between pixel centers. Forwarded to Projectionist. Valid
+      options are:
+
+      - None, 'nn' or 'nearest': Standard nearest neighbor mapmaking.
+      - 'lin' or 'bilinear': Linearly interpolate between the four
+        closest pixels.
+
+      Default: None
 
     These things can be updated freely, with the following caveats:
 
@@ -111,7 +120,7 @@ class P:
 
     """
     def __init__(self, sight=None, fp=None, geom=None, comps='T',
-                 cuts=None, threads=None, det_weights=None):
+                 cuts=None, threads=None, det_weights=None, interpol=None):
         self.sight = sight
         self.fp = fp
         self.geom = wrap_geom(geom)
@@ -120,12 +129,14 @@ class P:
         self.threads = threads
         self.active_tiles = None
         self.det_weights = det_weights
+        self.interpol = interpol
 
     @classmethod
     def for_tod(cls, tod, sight=None, fp=None, geom=None, comps='T',
                 rot=None, cuts=None, threads=None, det_weights=None,
                 timestamps=None, focal_plane=None, boresight=None,
-                boresight_equ=None, wcs_kernel=None, weather='typical', site='so'):
+                boresight_equ=None, wcs_kernel=None, weather='typical',
+                site='so', interpol=None):
         """Set up a Projection Matrix for a TOD.  This will ultimately call
         the main P constructor, but some missing arguments will be
         extracted from tod and computed along the way.
@@ -175,7 +186,8 @@ class P:
             geom = helpers.get_footprint(tod, wcs_kernel, sight=sight)
 
         return cls(sight=sight, fp=fp, geom=geom, comps=comps,
-                   cuts=cuts, threads=threads, det_weights=det_weights)
+                   cuts=cuts, threads=threads, det_weights=det_weights,
+                   interpol=interpol)
 
     @classmethod
     def for_geom(cls, tod, geom, comps='TQU', timestamps=None,
@@ -240,7 +252,7 @@ class P:
 
         proj, threads = self._get_proj_threads(cuts=cuts)
         proj.to_map(signal, self._get_asm(), output=self._prepare_map(dest),
-                det_weights=det_weights, comps=comps, threads=threads)
+                det_weights=det_weights, comps=comps, threads=unwrap_ranges(threads))
         return dest
 
     def to_weights(self, tod=None, dest=None, comps=None, signal=None,
@@ -278,7 +290,7 @@ class P:
 
         proj, threads = self._get_proj_threads(cuts=cuts)
         proj.to_weights(self._get_asm(), output=self._prepare_map(dest),
-                det_weights=det_weights, comps=comps, threads=threads)
+                det_weights=det_weights, comps=comps, threads=unwrap_ranges(threads))
         return dest
 
     def to_inverse_weights(self, weights_map=None, tod=None, dest=None,
@@ -398,12 +410,15 @@ class P:
     def _get_proj(self):
         if self.geom is None:
             raise ValueError("Can't project without a geometry!")
+        # Backwards compatibility for old so3g
+        interpol_kw = _get_interpol_args(self.interpol)
         if self.tiled:
             return so3g.proj.Projectionist.for_tiled(
                 self.geom.shape, self.geom.wcs, self.geom.tile_shape,
-                active_tiles=self.active_tiles)
+                active_tiles=self.active_tiles, **interpol_kw)
         else:
-            return so3g.proj.Projectionist.for_geom(self.geom.shape, self.geom.wcs)
+            return so3g.proj.Projectionist.for_geom(self.geom.shape,
+                self.geom.wcs, **interpol_kw)
 
     def _get_proj_threads(self, cuts=None):
         """Return the Projectionist and sample-thread assignment for the
@@ -430,7 +445,7 @@ class P:
             if isinstance(self.threads, str) and self.threads == 'tiles':
                 logger.info('_get_proj_threads: assigning using "tiles"')
                 tile_info = proj.get_active_tiles(self._get_asm(), assign=True)
-                _tile_threads = tile_info['group_ranges']
+                _tile_threads = wrap_ranges(tile_info['group_ranges'])
             else:
                 tile_info = proj.get_active_tiles(self._get_asm())
             self.active_tiles = tile_info['active_tiles']
@@ -443,8 +458,8 @@ class P:
         if isinstance(self.threads, str):
             if self.threads in ['simple', 'domdir']:
                 logger.info(f'_get_proj_threads: assigning using "{self.threads}"')
-                self.threads = proj.assign_threads(
-                    self._get_asm(), method=self.threads)
+                self.threads = wrap_ranges(proj.assign_threads(
+                    self._get_asm(), method=self.threads))
             elif self.threads == 'tiles':
                 # Computed above unless logic failed us...
                 self.threads = _thile_threads
@@ -492,3 +507,31 @@ def wrap_geom(geom):
         return enmap.Geometry(*geom)
     else:
         return geom
+
+# Helpers for backwards compatibility with old so3g. Consider removing these
+# once transition is done.
+def wrap_ranges(ranges):
+    if _so3g_ivals_format() == 1:
+        return so3g.proj.ranges.RangesMatrix([ranges])
+    else:
+        return ranges
+
+def unwrap_ranges(ranges):
+    if _so3g_ivals_format() == 1:
+        assert len(ranges) == 1, "Old so3g only supports simple (1-bunch) thread ranges, but got thread ranges with shape %s" % (str(ranges.shape))
+        return ranges[0]
+    else:
+        return ranges
+
+def _so3g_ivals_format():
+    projclass = so3g.proj.Projectionist
+    if not hasattr(projclass, '_ivals_format'):
+        return 1
+    else:
+        return projclass._ivals_format
+
+def _get_interpol_args(interpol):
+    if _so3g_ivals_format() >= 2:
+        return {'interpol': interpol}
+    assert interpol in [None, "nn", "nearest"], "Old so3g does not support interpolated mapmaking"
+    return {}

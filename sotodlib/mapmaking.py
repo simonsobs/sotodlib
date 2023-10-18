@@ -169,10 +169,12 @@ class Signal:
 class SignalMap(Signal):
     """Signal describing a non-distributed sky map."""
     def __init__(self, shape, wcs, comm, comps="TQU", name="sky", ofmt="{name}", output=True,
-            ext="fits", dtype=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False):
+            ext="fits", dtype=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False,
+            interpol=None):
         """Signal describing a sky map in the coordinate system given by "sys", which defaults
         to equatorial coordinates. If tiled==True, then this will be a distributed map with
-        the given tile_shape, otherwise it will be a plain enmap."""
+        the given tile_shape, otherwise it will be a plain enmap. interpol controls the
+        pointing matrix interpolation mode. See so3g's Projectionist docstring for details."""
         Signal.__init__(self, name, ofmt, output, ext)
         self.comm  = comm
         self.comps = comps
@@ -180,6 +182,7 @@ class SignalMap(Signal):
         self.recenter = recenter
         self.dtype = dtype
         self.tiled = tiled
+        self.interpol = interpol
         self.data  = {}
         ncomp      = len(comps)
         shape      = tuple(shape[-2:])
@@ -209,7 +212,8 @@ class SignalMap(Signal):
                     ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
             else: rot = None
             pmap = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry,
-                rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site))
+                rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site),
+                interpol=self.interpol)
         # Build the RHS for this observation
         pcut.clear(Nd)
         obs_rhs = pmap.zeros()
@@ -461,7 +465,7 @@ class PmatCut:
         junk = np.empty(self.njunk, tod.dtype)
         so3g.process_cuts(self.cuts.ranges, "clear", self.model, self.params, tod, junk)
 
-def inject_map(obs, map, recenter=None):
+def inject_map(obs, map, recenter=None, interpol=None):
     # Infer the stokes components
     map = map.preflat
     if map.shape[0] not in [1,2,3]:
@@ -473,7 +477,7 @@ def inject_map(obs, map, recenter=None):
         rot    = recentering_to_quat_lonlat(*evaluate_recentering(recenter, ctime=ctime[len(ctime)//2], geom=(map.shape, map.wcs), site=unarr(obs.site)))
     else: rot = None
     # Set up our pointing matrix for the map
-    pmat  = coords.pmat.P.for_tod(obs, comps=comps, geom=(map.shape, map.wcs), rot=rot, threads="domdir")
+    pmat  = coords.pmat.P.for_tod(obs, comps=comps, geom=(map.shape, map.wcs), rot=rot, threads="domdir", interpol=self.interpol)
     # And perform the actual injection
     pmat.from_map(map.extract(shape, wcs), dest=obs.signal)
 
