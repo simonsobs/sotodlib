@@ -66,4 +66,4 @@ def bin_signal(aman, bin_by, signal=None,
     binned_signal_sigma[:, mcnts] = np.sqrt(np.abs(binned_signal_squared_mean[:,mcnts] - binned_signal[:,mcnts]**2)
                                  ) / np.sqrt(bin_counts[mcnts])
 
-    return {'bin_centers': bin_centers, 'binned_signal': binned_signal, 'binned_signal_sigma': binned_signal_sigma}
+    return {'bin_edges': bin_edges, 'bin_centers': bin_centers, 'binned_signal': binned_signal, 'binned_signal_sigma': binned_signal_sigma}
