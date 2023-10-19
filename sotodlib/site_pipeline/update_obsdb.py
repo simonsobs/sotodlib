@@ -204,9 +204,9 @@ def main(config:str,
 
             #Scanning motion
             stream_file = os.path.join(bookpath,"*{}*.g3".format(stream_ids[0]))
-            stream = load_book.load_book_file(stream_file)
+            stream = load_book.load_book_file(stream_file, no_signal=True)
 
-            for coor in ["az", "el", "roll"]:
+            for coor in ["az", "el", "boresight"]:
                 try:
                     coor_enc = stream.ancil[coor+"_enc"]
                     bookcartobsdb.add_obs_columns([f"{coor}_center float", 
@@ -214,7 +214,7 @@ def main(config:str,
                     very_clean[f"{coor}_center"]=.5*(coor_enc.max()+coor_enc.min())
                     very_clean[f"{coor}_throw"]=.5*(coor_enc.max()-coor_enc.min())
                 except KeyError:
-                    logger.error(f"No pointing in some streams for obs_id {obs_id}")
+                    logger.error(f"No {coor} pointing in some streams for obs_id {obs_id}")
                     pass
 
             if tags != [] and tags != [""]:
