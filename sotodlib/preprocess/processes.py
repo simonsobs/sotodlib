@@ -244,6 +244,35 @@ class Demodulate(_Preprocess):
     def process(self, aman, proc_aman):
         hwp.demod_tod(aman, **self.process_cfgs)
 
+
+class GlitchFill(_Preprocess):
+    """Fill glitches. All process configs go to `fill_glitches`.
+
+    .. autofunction:: sotodlib.tod_ops.gapfill.fill_glitches
+    """
+    name = "glitchfill"
+
+    def process(self, aman):
+        pcfgs = np.fromiter(self.process_cfgs.keys(), dtype='U16')
+        if 'glitch_flags' in pcfgs:
+            flags = aman.flags[self.process_cfgs["glitch_flags"]]
+            pcfgs = np.delete(pcfgs, np.where(pcfgs == 'glitch_flags'))
+        else:
+            flags = None
+
+        if 'signal' in pcfgs:
+            signal = aman[self.process_cfgs["signal"]]
+            pcfgs = np.delete(pcfgs, np.where(pcfgs == 'signal'))
+        else:
+            signal = None
+
+        args = {}
+        for pcfg in pcfgs:
+            args[pcfg] = self.process_cfgs[pcfg]
+
+        tod_ops.gapfill.fill_glitches(aman, signal=signal, glitch_flags=flags, **args)
+
+
 _Preprocess.register(Trends.name, Trends)
 _Preprocess.register(FFTTrim.name, FFTTrim)
 _Preprocess.register(Detrend.name, Detrend)
@@ -255,3 +284,4 @@ _Preprocess.register(EstimateHWPSS.name, EstimateHWPSS)
 _Preprocess.register(SubtractHWPSS.name, SubtractHWPSS)
 _Preprocess.register(Apodize.name, Apodize)
 _Preprocess.register(Demodulate.name, Demodulate)
+_Preprocess.register(GlitchFill.name, GlitchFill)
