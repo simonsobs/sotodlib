@@ -618,23 +618,23 @@ def SAT_focal_plane(aman, x=None, y=None, pol=None, rot=0, mapping_data=None):
     else:
         mapping_data = (tuple(val) for val in mapping_data)
         fp_to_sky = sat_to_sky(*mapping_data)
-    # NOTE: The -1 does the flip about the origin
-    theta = -1 * np.sign(x) * fp_to_sky(np.abs(x))
-    phi = -1 * np.sign(y) * fp_to_sky(np.abs(y))
+    theta = np.sign(x) * fp_to_sky(np.abs(x))
+    phi = np.sign(y) * fp_to_sky(np.abs(y))
     _xi, _eta, _ = quat.decompose_xieta(
         quat.euler(1, np.deg2rad(90)) * quat.rotation_lonlat(theta, phi)
     )
-    xi = _xi * np.cos(np.deg2rad(rot)) - _eta * np.sin(np.deg2rad(rot))
-    eta = _eta * np.cos(np.deg2rad(rot)) + _xi * np.sin(np.deg2rad(rot))
+    # NOTE: The -1 does the flip about the origin
+    xi = -1*(_xi * np.cos(np.deg2rad(rot)) - _eta * np.sin(np.deg2rad(rot)))
+    eta = -1*(_eta * np.cos(np.deg2rad(rot)) + _xi * np.sin(np.deg2rad(rot)))
 
     pol_x, pol_y = gen_pol_endpoints(x, y, pol)
-    pol_theta = -1 * np.sign(pol_x) * fp_to_sky(np.abs(pol_x))
-    pol_phi = -1 * np.sign(pol_y) * fp_to_sky(np.abs(pol_y))
+    pol_theta = np.sign(pol_x) * fp_to_sky(np.abs(pol_x))
+    pol_phi = np.sign(pol_y) * fp_to_sky(np.abs(pol_y))
     _xi, _eta, _ = quat.decompose_xieta(
-        quat.euler(1, np.deg2rad(90)) * quat.rotation_iso(pol_theta, pol_phi)
+        quat.euler(1, np.deg2rad(90)) * quat.rotation_lonlat(pol_theta, pol_phi)
     )
-    pol_xi = _xi * np.cos(np.deg2rad(rot)) - _eta * np.sin(np.deg2rad(rot))
-    pol_eta = _eta * np.cos(np.deg2rad(rot)) + _xi * np.sin(np.deg2rad(rot))
+    pol_xi = -1*(_xi * np.cos(np.deg2rad(rot)) - _eta * np.sin(np.deg2rad(rot)))
+    pol_eta = -1*(_eta * np.cos(np.deg2rad(rot)) + _xi * np.sin(np.deg2rad(rot)))
     gamma = get_gamma(pol_xi, pol_eta)
 
     if aman is not None:
