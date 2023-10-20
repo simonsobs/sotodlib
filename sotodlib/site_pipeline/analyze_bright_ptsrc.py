@@ -278,7 +278,7 @@ def fit_params(
     radius = np.sqrt(xi_det_center ** 2 + eta_det_center ** 2)
     idx_main_in = np.where(radius < radius_main)[0]
     idx_main_out = np.where(radius > radius_main)[0]
-    xi_main = xi_det_center[np.array(idx_main_in)]
+    xi_main = xi_det_center[idx_main_in]
     eta_main = eta_det_center[idx_main_in]
     data_main = data[idx_main_in]
 
@@ -315,9 +315,9 @@ def fit_params(
         eta_det_center += popt[2]
         radius = np.sqrt(xi_det_center ** 2 + eta_det_center ** 2)
         idx_main_in = np.where(radius < radius_main)[0]
-        xi_main, eta_main, data_main = xi_det_center[idx_main_in],
-        eta_det_center[idx_main_in],
-        data[idx_main_in]
+        xi_main = xi_det_center[idx_main_in]
+        eta_main = eta_det_center[idx_main_in]
+        data_main = data[idx_main_in]
         data_sim_main = gaussian2d(
             xi_main,
             eta_main,
@@ -611,8 +611,7 @@ def main(
         kwargs['xi_hw'], kwargs['eta_hw'], kwargs['dets_hw'] = xi_hw, eta_hw, dets_hw
 
     count = 0
-    # for _i, rd_idx in enumerate(rd_idx_rng):
-    for rd_idx, _i in zip(range(5255, 5256), range(5255, 5256)):
+    for _i, rd_idx in enumerate(rd_idx_rng):
         rd_id = rd_ids[rd_idx]
         params = fit_params(rd_id, tod.signal[_i, :],
                             ctime, az, el,
