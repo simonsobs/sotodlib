@@ -39,8 +39,9 @@ import time
 import argparse
 import logging
 from sotodlib.site_pipeline import util
-logger = util.init_logger(__name__, 'update-obsdb: ')
 from typing import Optional
+
+logger = util.init_logger(__name__, 'update-obsdb: ')
 
 def check_meta_type(bookpath):
     metapath = os.path.join(bookpath, "M_index.yaml")
@@ -135,9 +136,9 @@ def main(config:str,
         base_dir = [base_dir]
     for bd in base_dir:
         #Find folders that are book-like and recent
-        for dirpath,_, _ in os.walk(bd):
-            last_mod = max(os.path.getmtime(root) for root,_,_ in os.walk(dirpath))
-            if last_mod<tback:#Ignore older directories
+        for dirpath, _, _ in os.walk(bd):
+            last_mod = max(os.path.getmtime(root) for root, _, _ in os.walk(dirpath))
+            if last_mod < tback:#Ignore older directories
                 continue
             if os.path.exists(os.path.join(dirpath, "M_index.yaml")):
                 _, book_id = os.path.split(dirpath)
@@ -211,8 +212,8 @@ def main(config:str,
                     coor_enc = stream.ancil[coor+"_enc"]
                     bookcartobsdb.add_obs_columns([f"{coor}_center float", 
                                                    f"{coor}_throw float"])
-                    very_clean[f"{coor}_center"]=.5*(coor_enc.max()+coor_enc.min())
-                    very_clean[f"{coor}_throw"]=.5*(coor_enc.max()-coor_enc.min())
+                    very_clean[f"{coor}_center"] = .5 * (coor_enc.max() + coor_enc.min())
+                    very_clean[f"{coor}_throw"] = .5 * (coor_enc.max() - coor_enc.min())
                 except KeyError:
                     logger.error(f"No {coor} pointing in some streams for obs_id {obs_id}")
                     pass
