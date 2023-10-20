@@ -484,20 +484,20 @@ def plot_tods(readout_id, xi_main, eta_main, data_main, data_sim_main,
 
     fig, (ax1, ax2, ax3) = plt.subplots(
         1, 3, figsize=(10, 4), width_ratios=[1, 1, 2], dpi=300)
-    ax1.plot(xi_main, data_main, lw=2, label='Raw \n data')
+    ax1.plot(xi_main, data_main, lw=2, label='Raw data')
     ax1.plot(xi_main, data_sim_main, '--', lw=1)
     ax1.set_xlabel(r"$\xi$[deg]")
     ax1.set_ylabel('T(K)')
     ax1.legend(loc='upper left', frameon=False)
     ax2.plot(eta_main, data_main, lw=2)
-    ax2.plot(eta_main, data_sim_main, '--', lw=1, label='Fitted \n data')
+    ax2.plot(eta_main, data_sim_main, '--', lw=1, label='Fitted data')
     ax2.set_xlabel(r"$\eta$[deg]")
     ax2.set_ylabel('T(K)')
     ax2.legend(loc='upper left', frameon=False)
     ax3.scatter(xi_hw, eta_hw, c='gray')
     ax3.scatter(xi_hw[det_idx], eta_hw[det_idx], c='r')
-    ax3.set_xlabel(r"$\xi$[deg]")
-    ax3.set_ylabel(r"$\eta$[deg]")
+    ax3.set_xlabel(r"$\xi$[rad]")
+    ax3.set_ylabel(r"$\eta$[rad]")
     fig.subplots_adjust(wspace=0.31)
     plt.savefig(opj(kwargs['img_dir'], 'tod_det_' +
                     readout_id +
