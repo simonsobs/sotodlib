@@ -50,7 +50,7 @@ def get_scan(n_scans=33, scan_accel=0.025, scanrate=0.025,
     return t_tot, d_tot
 
 
-def make_fake_sss_tod(nmodes=20, noise_amp=1, n_scans=10,
+def make_fake_sss_tod(max_mode=20, noise_amp=1, n_scans=10,
                       ndets=2, input_coeffs=None):
     """
     Makes an axis manager with azimuth synchronous signal
@@ -62,7 +62,7 @@ def make_fake_sss_tod(nmodes=20, noise_amp=1, n_scans=10,
 
     fake_signal = np.zeros((ndets, len(ts)))
     if input_coeffs is None:
-        input_coeffs = np.random.uniform(-10, 11, size=(ndets, nmodes+1))
+        input_coeffs = np.random.uniform(-10, 11, size=(ndets, max_mode+1))
     for nd in range(ndets):
         fake_signal[nd] += L.legval(x, input_coeffs[nd])
         noise = np.random.normal(0, noise_amp, size=len(ts))
@@ -70,7 +70,7 @@ def make_fake_sss_tod(nmodes=20, noise_amp=1, n_scans=10,
 
     dets = ['det%i' % i for i in range(ndets)]
     mode_names = []
-    for mode in range(nmodes+1):
+    for mode in range(max_mode+1):
         mode_names.append(f'legendre{mode}')
 
     tod_fake = core.AxisManager(core.LabelAxis('dets', vals=dets),
@@ -102,7 +102,7 @@ class SssTest(unittest.TestCase):
     "Test the SSS fitting functions"
     def test_fit(self):
         tod = make_fake_sss_tod(noise_amp=0)
-        sss_stats, model_sig_tod = sss.get_sss(tod, method='fit', nmodes=20, range=None, bins=10000)
+        sss_stats, model_sig_tod = sss.get_sss(tod, method='fit', max_mode=20, range=None, bins=10000)
         ommax = get_coeff_metric(tod)
         print(ommax)
         self.assertTrue(ommax < 1.0)

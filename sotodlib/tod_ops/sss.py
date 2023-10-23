@@ -44,7 +44,7 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None):
                                range=range, bins=bins, flags=flags)
     return binning_dict
 
-def fit_sss(az, sss_stats, nmodes, fit_range=None):
+def fit_sss(az, sss_stats, max_mode, fit_range=None):
     """
     Function for fitting Legendre polynomials to signal binned in azimuth.
 
@@ -55,7 +55,7 @@ def fit_sss(az, sss_stats, nmodes, fit_range=None):
     sss_stats: AxisManager
         Axis manager containing binned signal and azimuth used for fitting.
         Created by ``get_sss`` function.
-    nmodes: integer, required
+    max_mode: integer, required
         Highest order Legendre polynomial to include in the fit.
     fit_range: list
         Azimuth range used to renormalized to the [-1,1] range spanned
@@ -71,7 +71,7 @@ def fit_sss(az, sss_stats, nmodes, fit_range=None):
     """
     bin_width = sss_stats.binned_az[1] - sss_stats.binned_az[0]
     m = ~np.isnan(sss_stats.binned_signal[0]) # masks bins without counts
-    if np.count_nonzero(m) < nmodes:
+    if np.count_nonzero(m) < max_mode:
         raise ValueError('Number of valid bins is smaller than mode of Legendre function')
     
     if fit_range==None:
@@ -85,15 +85,15 @@ def fit_sss(az, sss_stats, nmodes, fit_range=None):
     x_legendre_bin_centers = np.where(~m, np.nan, x_legendre_bin_centers)
     
     mode_names = []
-    for mode in range(nmodes+1):
+    for mode in range(max_mode+1):
         mode_names.append(f'legendre{mode}')
     
-    coeffs = L.legfit(x_legendre_bin_centers[m], sss_stats.binned_signal[:, m].T, nmodes)
+    coeffs = L.legfit(x_legendre_bin_centers[m], sss_stats.binned_signal[:, m].T, max_mode)
     coeffs = coeffs.T
     binned_model = L.legval(x_legendre_bin_centers, coeffs.T)
     binned_model = np.where(~m, np.nan, binned_model)
     sum_of_squares = np.sum(((sss_stats.binned_signal[:, m] - binned_model[:,m])**2), axis=-1)
-    redchi2s = sum_of_squares/sss_stats.uniform_binned_signal_sigma**2 / ( len(x_legendre_bin_centers[m]) - nmodes - 1)
+    redchi2s = sum_of_squares/sss_stats.uniform_binned_signal_sigma**2 / ( len(x_legendre_bin_centers[m]) - max_mode - 1)
     
     sss_stats.wrap('binned_model', binned_model, [(0, 'dets'), (1, 'bin_samps')])
     sss_stats.wrap('x_legendre_bin_centers', x_legendre_bin_centers, [(0, 'bin_samps')])
@@ -104,7 +104,7 @@ def fit_sss(az, sss_stats, nmodes, fit_range=None):
     
     
 def get_sss(aman, signal=None, az=None, range=None, bins=100, flags=None,
-            method='interpolate', nmodes=None,
+            method='interpolate', max_mode=None,
             merge_stats=True, sss_stats_name='sss_stats',
             merge_model=True, sss_model_name='sss_model'):
     """
@@ -131,7 +131,7 @@ def get_sss(aman, signal=None, az=None, range=None, bins=100, flags=None,
         In 'interpolate', binned signal is used directly.
         In 'fit', fitting is applied to the binned signal.
         Defaults to 'interpolate'.
-    nmodes: integer, optinal
+    max_mode: integer, optinal
         The number of Legendre modes to use for SSS when method is 'fit'. Required when method is 'fit'.
     merge_stats: boolean, optional
         Boolean flag indicating whether to merge the SSS statistics with aman. Defaults to True.
@@ -167,9 +167,9 @@ def get_sss(aman, signal=None, az=None, range=None, bins=100, flags=None,
     sss_stats.wrap('uniform_binned_signal_sigma', uniform_binned_signal_sigma, [(0, 'dets')])
     
     if method == 'fit':
-        if type(nmodes) is not int:
-            raise ValueError('nmodes is not provided as integer')
-        sss_stats, model_sig_tod = fit_sss(az=az, sss_stats=sss_stats, nmodes=nmodes, fit_range=range)
+        if type(max_mode) is not int:
+            raise ValueError('max_mode is not provided as integer')
+        sss_stats, model_sig_tod = fit_sss(az=az, sss_stats=sss_stats, max_mode=max_mode, fit_range=range)
         
     if method == 'interpolate':
         f_template = interp1d(bin_centers, binned_signal, fill_value='extrapolate')
