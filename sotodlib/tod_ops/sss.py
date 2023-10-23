@@ -8,7 +8,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def bin_by_az(aman, signal=None, az=None, range=[-np.pi, np.pi], bins=3600, flags=None):
+def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None):
     """
     Bins a signal by azimuth angle.
 
@@ -21,7 +21,7 @@ def bin_by_az(aman, signal=None, az=None, range=[-np.pi, np.pi], bins=3600, flag
     az: array-like, optional
         A 1D numpy array representing the azimuth angles. If not provided, the azimuth angles are taken from aman.boresight.az attribute.
     range: array-like, optional
-        A list specifying the range of azimuth angles to consider for binning. Defaults to [-np.pi, np.pi].
+        A list specifying the range of azimuth angles to consider for binning. Defaults to None.
         If None, [min(az), max(az)] will be used for binning.
     bins: integer
         The number of bins to divide the azimuth angle range into. Defaults to 360.
@@ -103,7 +103,7 @@ def fit_sss(az, sss_stats, nmodes, fit_range=None):
     return sss_stats, L.legval(x_legendre, coeffs.T)
     
     
-def get_sss(aman, signal=None, az=None, range=[-np.pi, np.pi], bins=3600, flags=None, 
+def get_sss(aman, signal=None, az=None, range=None, bins=100, flags=None,
             method='interpolate', nmodes=None,
             merge_stats=True, sss_stats_name='sss_stats',
             merge_model=True, sss_model_name='sss_model'):
@@ -129,7 +129,7 @@ def get_sss(aman, signal=None, az=None, range=[-np.pi, np.pi], bins=3600, flags=
     method: str
         The method to use for SSS modeling. Options are 'interpolate' and 'fit'. 
         In 'interpolate', binned signal is used directly.
-        In 'fitting', fitting is applied to the binned signal.
+        In 'fit', fitting is applied to the binned signal.
         Defaults to 'interpolate'.
     nmodes: integer, optinal
         The number of Legendre modes to use for SSS when method is 'fit'. Required when method is 'fit'.
