@@ -55,7 +55,7 @@ def fit_sss(az, sss_stats, max_mode, fit_range=None):
     sss_stats: AxisManager
         Axis manager containing binned signal and azimuth used for fitting.
         Created by ``get_sss`` function.
-    max_mode: integer, required
+    max_mode: integer
         Highest order Legendre polynomial to include in the fit.
     fit_range: list
         Azimuth range used to renormalized to the [-1,1] range spanned
@@ -71,7 +71,7 @@ def fit_sss(az, sss_stats, max_mode, fit_range=None):
     """
     bin_width = sss_stats.binned_az[1] - sss_stats.binned_az[0]
     m = ~np.isnan(sss_stats.binned_signal[0]) # masks bins without counts
-    if np.count_nonzero(m) < max_mode:
+    if np.count_nonzero(m) < max_mode + 1:
         raise ValueError('Number of valid bins is smaller than mode of Legendre function')
     
     if fit_range==None:
