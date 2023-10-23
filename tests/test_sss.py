@@ -102,7 +102,7 @@ class SssTest(unittest.TestCase):
     "Test the SSS fitting functions"
     def test_fit(self):
         tod = make_fake_sss_tod(noise_amp=0)
-        sss_stats, model_sig_tod = sss.get_sss(tod, method='fit', nmodes=20, range=None)
+        sss_stats, model_sig_tod = sss.get_sss(tod, method='fit', nmodes=20, range=None, bins=10000)
         ommax = get_coeff_metric(tod)
         print(ommax)
         self.assertTrue(ommax < 1.0)

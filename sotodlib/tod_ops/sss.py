@@ -104,7 +104,7 @@ def fit_sss(az, sss_stats, nmodes, fit_range=None):
     
     
 def get_sss(aman, signal=None, az=None, range=None, bins=100, flags=None,
-            method='interpolate', nmodes=None, fill_value=None,
+            method='interpolate', nmodes=None,
             merge_stats=True, sss_stats_name='sss_stats',
             merge_model=True, sss_model_name='sss_model'):
     """
