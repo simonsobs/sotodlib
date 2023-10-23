@@ -104,7 +104,7 @@ def fit_sss(az, sss_stats, nmodes, fit_range=None):
     
     
 def get_sss(aman, signal=None, az=None, range=None, bins=100, flags=None,
-            method='interpolate', nmodes=None,
+            method='interpolate', nmodes=None, fill_value=None,
             merge_stats=True, sss_stats_name='sss_stats',
             merge_model=True, sss_model_name='sss_model'):
     """
@@ -167,8 +167,9 @@ def get_sss(aman, signal=None, az=None, range=None, bins=100, flags=None,
     sss_stats.wrap('uniform_binned_signal_sigma', uniform_binned_signal_sigma, [(0, 'dets')])
     
     if method == 'fit':
+        if type(nmodes) is not int:
+            raise ValueError('nmodes is not provided as integer')
         sss_stats, model_sig_tod = fit_sss(az=az, sss_stats=sss_stats, nmodes=nmodes, fit_range=range)
-        
         
     if method == 'interpolate':
         f_template = interp1d(bin_centers, binned_signal, fill_value='extrapolate')
