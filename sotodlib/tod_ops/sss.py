@@ -104,11 +104,12 @@ def fit_sss(az, sss_stats, max_mode, fit_range=None):
     
     
 def get_sss(aman, signal=None, az=None, range=None, bins=100, flags=None,
-            method='interpolate', max_mode=None,
+            method='interpolate', max_mode=None, subtract_in_place=False,
             merge_stats=True, sss_stats_name='sss_stats',
             merge_model=True, sss_model_name='sss_model'):
     """
-    Derive SSS (Scan Synchronous Signal) statistics and model from the given AMAN data.
+    Derive SSS (Scan Synchronous Signal) statistics and model from the given axismanager data.
+    NOTE: This function does not modify the `signal` unless `subtract_in_place` is True.
 
     Parameters
     ----------
@@ -133,6 +134,8 @@ def get_sss(aman, signal=None, az=None, range=None, bins=100, flags=None,
         Defaults to 'interpolate'.
     max_mode: integer, optinal
         The number of Legendre modes to use for SSS when method is 'fit'. Required when method is 'fit'.
+    subtract_in_place: bool
+        If True, it subtract the modeled tod from original signal. The aman.signal will be modified.
     merge_stats: boolean, optional
         Boolean flag indicating whether to merge the SSS statistics with aman. Defaults to True.
     sss_stats_name: string, optional
@@ -179,7 +182,8 @@ def get_sss(aman, signal=None, az=None, range=None, bins=100, flags=None,
         aman.wrap(sss_stats_name, sss_stats)
     if merge_model:
         aman.wrap(sss_model_name, model_sig_tod, [(0, 'dets'), (1, 'samps')])
-    
+    if subtract_in_place:
+        aman.signal = np.subtract(signal, model_sig_tod)
     return sss_stats, model_sig_tod
 
 def subtract_sss(aman, signal=None, sss_template=None,
