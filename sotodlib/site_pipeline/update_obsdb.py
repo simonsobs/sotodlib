@@ -5,7 +5,7 @@ The config file could be of the form:
 
 .. code-block:: yaml
 
-    base_dir: path_to_base_directory
+    base_dir: path_to_base_directories. Can be a list or a single string.
     obsdb_cols:
       start_time: float
       stop_time: float
@@ -17,7 +17,8 @@ The config file could be of the form:
 
     obsdb: dummyobsdb.sqlite
     obsfiledb: dummyobsfiledb.sqlite
-    tolerate_stray_files: True 
+    tolerate_stray_files: True
+    skip_bad_books: True
     extra_extra_files:
     - Z_bookbinder_log.txt
     extra_files:
@@ -29,13 +30,18 @@ The config file could be of the form:
 from sotodlib.core.metadata import ObsDb
 from sotodlib.core import Context 
 from sotodlib.site_pipeline.check_book import main as checkbook
+from sotodlib.io import load_book
 import os
 import glob
 import yaml
 import numpy as np
 import time
 import argparse
+import logging
+from sotodlib.site_pipeline import util
 from typing import Optional
+
+logger = util.init_logger(__name__, 'update-obsdb: ')
 
 def check_meta_type(bookpath):
     metapath = os.path.join(bookpath, "M_index.yaml")
@@ -51,7 +57,9 @@ def main(config:str,
         recency:float=None, 
         booktype:Optional[str]="both",
         verbosity:Optional[int]=2,
-        overwrite:Optional[bool]=False):
+        overwrite:Optional[bool]=False,
+        logger=None):
+
     """
     Create or update an obsdb for observation or operations data.
 
@@ -68,10 +76,32 @@ def main(config:str,
         Output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug
     overwrite : bool
         if False, do not re-check existing entries
+    logger : logging
+        When to output the print statements
+
+
     """
+
+    if logger is None:
+        logger = globals()['logger']
+    else:
+        globals()['logger'] = logger
+    if args.verbosity == 0:
+        logger.setLevel(logging.ERROR)
+    elif args.verbosity == 1:
+        logger.setLevel(logging.WARNING)
+    elif args.verbosity == 2:
+        logger.setLevel(logging.INFO)
+    elif args.verbosity == 3:
+        logger.setLevel(logging.DEBUG)
+
+    logger.info("Updating obsdb")
     bookcart = []
     bookcartobsdb = ObsDb()
 
+    if booktype not in ["obs", "oper", "both"]:
+        logger.warning("Specified booktype inadapted to update_obsdb")
+    
     if booktype=="both":
         accept_type = ["obs", "oper"]
     else:
@@ -81,8 +111,7 @@ def main(config:str,
     try:
         base_dir = config_dict["base_dir"]
     except KeyError:
-        if verbosity==0:
-            print("No base directory base_dir specified in config file!")
+        logger.error("No base directory base_dir specified in config file!")
     if "obsdb" in config_dict:
         if os.path.isfile(config_dict["obsdb"]):
             bookcartobsdb = ObsDb.from_file(config_dict["obsdb"])
@@ -102,19 +131,23 @@ def main(config:str,
         tback = 0 #Back to the UNIX Big Bang 
     
     existing = bookcartobsdb.query()["obs_id"]
-
-    #Find folders that are book-like and recent
-    for dirpath,_, _ in os.walk(base_dir):
-        last_mod = max(os.path.getmtime(root) for root,_,_ in os.walk(dirpath))
-        if last_mod<tback:#Ignore older directories
-            continue
-        if os.path.exists(os.path.join(dirpath, "M_index.yaml")):
-            _, book_id = os.path.split(dirpath)
-            if book_id in existing and not overwrite:
+    #Check if there are one or multiple base_dir specified
+    if isinstance(base_dir,str):
+        base_dir = [base_dir]
+    for bd in base_dir:
+        #Find folders that are book-like and recent
+        for dirpath, _, _ in os.walk(bd):
+            last_mod = max(os.path.getmtime(root) for root, _, _ in os.walk(dirpath))
+            if last_mod < tback:#Ignore older directories
                 continue
-            #Looks like a book folder
-            bookcart.append(dirpath)
+            if os.path.exists(os.path.join(dirpath, "M_index.yaml")):
+                _, book_id = os.path.split(dirpath)
+                if book_id in existing and not overwrite:
+                    continue
+                #Looks like a book folder
+                bookcart.append(dirpath)
     #Check the books for the observations we want
+
 
     for bookpath in bookcart:
         if check_meta_type(bookpath) in accept_type:
@@ -143,14 +176,48 @@ def main(config:str,
                 for key, val in very_clean.items():
                     col_list.append(key+" "+type(val).__name__)
                 bookcartobsdb.add_obs_columns(col_list)
+            if "skip_bad_books" not in config_dict:
+                config_dict["skip_bad_books"] = False
+            #Adding info that should be there for all observations
+            #Descriptive string columns
+            frequent_cols = ["telescope", 
+                             "telescope_flavor", 
+                             "tube_slot", 
+                             "tube_flavor", 
+                             "detector_flavor"]
+            for fc in frequent_cols:
+                fcvalue = index.get(fc)
+                if fcvalue is not None:
+                    bookcartobsdb.add_obs_columns([fc+" str"])
+                    very_clean[fc] = fcvalue
+            stream_ids = index.pop("stream_ids")
+            if stream_ids is not None:
+                bookcartobsdb.add_obs_columns(["wafer_count int"])
+                very_clean["wafer_count"] = len(stream_ids)
 
+            #Time
             start = index.get("start_time")
             end = index.get("end_time") 
             if None not in [start, end]:
                 bookcartobsdb.add_obs_columns(["timestamp float", "duration float"])
                 very_clean["timestamp"] = start
                 very_clean["duration"] = end - start
-            
+
+            #Scanning motion
+            stream_file = os.path.join(bookpath,"*{}*.g3".format(stream_ids[0]))
+            stream = load_book.load_book_file(stream_file, no_signal=True)
+
+            for coor in ["az", "el", "boresight"]:
+                try:
+                    coor_enc = stream.ancil[coor+"_enc"]
+                    bookcartobsdb.add_obs_columns([f"{coor}_center float", 
+                                                   f"{coor}_throw float"])
+                    very_clean[f"{coor}_center"] = .5 * (coor_enc.max() + coor_enc.min())
+                    very_clean[f"{coor}_throw"] = .5 * (coor_enc.max() - coor_enc.min())
+                except KeyError:
+                    logger.error(f"No {coor} pointing in some streams for obs_id {obs_id}")
+                    pass
+
             if tags != [] and tags != [""]:
                 bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
             else:
