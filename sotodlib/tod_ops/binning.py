@@ -29,9 +29,10 @@ def bin_signal(aman, bin_by, signal=None,
     Returns
     -------
     Dictionary:
-        - **bin_centers** (dict key): center of each bin
-        - **binned_signal** (dict key): binned signal
-        - **binned_signal_sigma** (dict key): estimated sigma of binned signal
+        - **bin_edges** (dict key): float array of bin edges length(bin_centers)+1.
+        - **bin_centers** (dict key): center of each bin.
+        - **binned_signal** (dict key): binned signal.
+        - **binned_signal_sigma** (dict key): estimated sigma of binned signal.
     """
     if signal is None:
         signal = aman.signal
