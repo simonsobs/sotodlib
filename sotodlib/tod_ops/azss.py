@@ -108,8 +108,8 @@ def get_azss(aman, signal=None, az=None, range=None, bins=100, flags=None,
             merge_stats=True, azss_stats_name='azss_stats',
             merge_model=True, azss_model_name='azss_model'):
     """
-    Derive azss (Scan Synchronous Signal) statistics and model from the given axismanager data.
-    NOTE: This function does not modify the `signal` unless `subtract_in_place` is True.
+    Derive azss (Azimuth Synchronous Signal) statistics and model from the given axismanager data.
+    *NOTE:* This function does not modify the ``signal`` unless ``subtract_in_place = True``.
 
     Parameters
     ----------
@@ -119,7 +119,7 @@ def get_azss(aman, signal=None, az=None, range=None, bins=100, flags=None,
         A numpy array representing the signal to be used for azss extraction. If not provided, the signal is taken from aman.signal.
     az: array-like, optional
         A 1D numpy array representing the azimuth angles. If not provided, the azimuth angles are taken from aman.boresight.az.
-    range: list, optinal
+    range: list, optional
         A list specifying the range of azimuth angles to consider for binning. Defaults to [-np.pi, np.pi].
         If None, [min(az), max(az)] will be used for binning.
     bins: integer
@@ -147,9 +147,12 @@ def get_azss(aman, signal=None, az=None, range=None, bins=100, flags=None,
 
     Returns
     -------
-        tuple: A tuple containing the azss statistics and the azss model.
-            - azss_stats: An instance of core.AxisManager containing the azss statistics.
-            - model_sig_tod: A numpy array representing the azss model as a function of time.
+    tuple: A tuple containing the following.
+    - azss_stats: core.AxisManager
+    azss statistics including: azumith bin centers, binned signal, std of each detector-az bin, std of each detector.
+    If ``method=fit`` then also includes: binned legendre model, legendre bin centers, fit coefficients, reduced chi2.
+    - model_sig_tod: numpy.array
+    azss model as a function of time either from fits or interpolation depending on ``method`` argument.
     """
     if signal is None:
         signal = aman.signal
@@ -198,15 +201,15 @@ def subtract_azss(aman, signal=None, azss_template=None,
         The axis manager containing the signal to which the azss template will
         be applied.
     signal : ndarray, optional
-        The signal from which the azss template will be subtracted. If `signal` is
+        The signal from which the azss template will be subtracted. If ``signal`` is
         None (default), the signal contained in the axis manager will be used.
     azss_template : ndarray, optional
         The azss template to be subtracted from the signal. If `azss_template`
         is None (default), the azss template stored in the axis manager under
-        the key 'azss_extract' will be used.
+        the key ``azss_extract`` will be used.
     subtract_name : str, optional
         The name of the output axis manager field that will contain the azss-subtracted 
-        signal. Defaults to 'azss_remove'.
+        signal. Defaults to ``azss_remove``.
 
     Returns
     -------
