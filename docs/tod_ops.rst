@@ -173,13 +173,6 @@ an unit step, so it is acting as a matched filter.
 .. automodule:: sotodlib.tod_ops.jumps
    :members:
 
-
-tod_ops.binning
-Function to binning signal by a time-ordered data, such as HWP angle and Azimuth
-of boresight.
-
-.. automodule:: sotodlib.tod_ops.binning.bin_signal
-
 tod_ops.azss
 =============
 
