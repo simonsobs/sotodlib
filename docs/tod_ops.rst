@@ -191,4 +191,10 @@ to remove from the data.
 .. autofunction:: sotodlib.tod_ops.azss.get_azss
 
 .. autofunction:: sotodlib.tod_ops.azss.subtract_azss
-	  
+
+tod_ops.binning
+===============
+
+Function for binning signal along specified axis (i.e. azimuth, time, hwp angle).
+
+.. autofunction:: sotodlib.tod_ops.binning.bin_signal
