@@ -1,7 +1,7 @@
 # Copyright (c) 2021 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
-"""Check sss routines.
+"""Check azss routines.
 
 """
 
@@ -10,7 +10,7 @@ import numpy as np
 from numpy.polynomial import legendre as L
 
 from sotodlib import core
-from sotodlib.tod_ops import sss
+from sotodlib.tod_ops import azss
 
 
 def get_scan(n_scans=33, scan_accel=0.025, scanrate=0.025,
@@ -50,7 +50,7 @@ def get_scan(n_scans=33, scan_accel=0.025, scanrate=0.025,
     return t_tot, d_tot
 
 
-def make_fake_sss_tod(max_mode=20, noise_amp=1, n_scans=10,
+def make_fake_azss_tod(max_mode=20, noise_amp=1, n_scans=10,
                       ndets=2, input_coeffs=None):
     """
     Makes an axis manager with azimuth synchronous signal
@@ -92,17 +92,17 @@ def get_coeff_metric(tod):
     Evaluates fit is working by comparing coefficients in to out.
     """
     print(tod.input_coeffs[0])
-    print(tod.sss_stats.coeffs[0])
-    outmetric_num = (tod.sss_stats.coeffs - tod.input_coeffs)**2
+    print(tod.azss_stats.coeffs[0])
+    outmetric_num = (tod.azss_stats.coeffs - tod.input_coeffs)**2
     outmetric_denom = (tod.input_coeffs)**2
     return np.max(100*(outmetric_num/outmetric_denom))
 
 
-class SssTest(unittest.TestCase):
-    "Test the SSS fitting functions"
+class AzssTest(unittest.TestCase):
+    "Test the Azimuth Synchronous Signal fitting functions"
     def test_fit(self):
-        tod = make_fake_sss_tod(noise_amp=0)
-        sss_stats, model_sig_tod = sss.get_sss(tod, method='fit', max_mode=20, range=None, bins=10000)
+        tod = make_fake_azss_tod(noise_amp=0)
+        azss_stats, model_sig_tod = azss.get_azss(tod, method='fit', max_mode=20, range=None, bins=10000)
         ommax = get_coeff_metric(tod)
         print(ommax)
         self.assertTrue(ommax < 1.0)
