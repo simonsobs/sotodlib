@@ -14,6 +14,52 @@ from .tod_ops import filters
 from .tod_ops import fourier_filter
 
 
+def get_turnaround_flags_by_dazdt(
+    tod, qlim=3.,az=None, merge=False, overwrite=False, name="turnarounds_by_dazdt"
+):
+
+    """
+    Args:
+        tod: AxisManager object
+        qlimp: percentage threshold applied to positive daz/dt
+        qlimn: percentage threshold applied to negative daz/dt
+        az: The azimuth signal to look for turnarounds. If None it defaults to
+            tod.boresight.az
+        merge: If true, merge into tod.flags
+        overwrite: If true and merge is True, write over existing flag
+        name: name of flag when merged into tod.flags
+
+    Returns:
+        flag: Ranges object of turn-arounds
+    """
+
+    daz = np.copy(np.diff(tod.boresight.az))
+    daz = np.append(daz,daz[-1])
+    # rough selection of stationary part
+    lo,hi = np.min(daz)*(100-5)*0.01,np.max(daz)*(100-5)*0.01
+
+    mean_hi = np.mean(daz[daz>hi])
+    mean_lo = np.mean(daz[daz<lo])
+
+    hi = mean_hi*(100.-qlim)*0.01
+    # to avoid oscillation of daz
+    lo = mean_lo+2.*(mean_lo-np.min(daz[daz<lo]))
+
+    m = np.logical_and(daz > lo, daz < hi)
+
+    flag = Ranges.from_bitmask(m)
+
+    if merge:
+        if name in tod.flags and not overwrite:
+            raise ValueError("Flag name {} already exists in tod.flags".format(name))
+        elif name in tod.flags:
+            tod.flags[name] = flag
+        else:
+            tod.flags.wrap(name, flag)
+    return flag
+
+
+
 def get_turnaround_flags(
     tod, qlim=1, az=None, merge=True, overwrite=False, name="turnarounds"
 ):
