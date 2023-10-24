@@ -180,15 +180,15 @@ of boresight.
 
 .. automodule:: sotodlib.tod_ops.binning.bin_signal
 
-tod_ops.sss
+tod_ops.azss
 =============
 
 Function for binning signal by azimuth and fitting it with legendre polynomials in 
 az-vs-signal space. This has been used in ABS and other experiments to get 
-a scan synchronous signal (SSS) template largely due to polarized ground signal 
+an Azimuth synchronous signal (AzSS) template largely due to polarized ground signal 
 to remove from the data.
 
-.. autofunction:: sotodlib.tod_ops.sss.get_sss
+.. autofunction:: sotodlib.tod_ops.azss.get_azss
 
-.. autofunction:: sotodlib.tod_ops.sss.subtract_sss
+.. autofunction:: sotodlib.tod_ops.azss.subtract_azss
 	  
