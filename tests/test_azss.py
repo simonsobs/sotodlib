@@ -102,7 +102,7 @@ class AzssTest(unittest.TestCase):
     "Test the Azimuth Synchronous Signal fitting functions"
     def test_fit(self):
         tod = make_fake_azss_tod(noise_amp=0)
-        azss_stats, model_sig_tod = azss.get_azss(tod, method='fit', max_mode=20, range=None, bins=10000)
+        azss_stats, model_sig_tod = azss.get_azss(tod, method='fit', max_mode=20, range=(2, 2.25), bins=10000)
         ommax = get_coeff_metric(tod)
         print(ommax)
         self.assertTrue(ommax < 1.0)
