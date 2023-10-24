@@ -1,6 +1,7 @@
 """FFTs and related operations
 """
 from scipy.signal import welch
+from scipy.optimize import curve_fit
 import numpy as np
 import pyfftw
 from sotodlib import core
@@ -293,3 +294,85 @@ def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
     
     wn = np.sqrt(wn2)
     return wn
+
+def noise_model(f, fknee, w, alpha, s):
+    """
+    Noise model for power spectrum with white noise, and 1/f noise.
+    """
+    return w*(1 + s*(fknee/f)**alpha)
+
+def fit_noise_model(aman, signal=None, f=None, pxx=None, psdargs=None,
+                    fwhite=(10,100), lowf=1, merge_fit=False,
+                    merge_name='noise_fit_stats', merge_psd=True):
+    """
+    Fits noise model with white and 1/f noise to the PSD of signal.
+    Args
+    ----
+    aman : AxisManager
+        Axis manager which has samps axis aligned with signal.
+    signal : nparray
+        Signal sized ndets x nsamps to fit noise model to.
+        Default is None which corresponds to aman.signal.
+    f : nparray
+        Frequency of PSD of signal.
+        Default is None which calculates f, pxx from signal.
+    pxx : nparray
+        PSD sized ndets x len(f) which is fit to with model.
+        Default is None which calculates f, pxx from signal.
+    psdargs : dict
+        Dictionary of optional argument for ``scipy.signal.welch``
+    fwhite : tuple
+        Low and high frequency used to estimate white noise for initial
+        guess passed to ``scipy.signal.curve_fit``.
+    lowf : tuple
+        Frequency below which estimate of 1/f noise index and knee are estimated
+        for initial guess passed to ``scipy.signal.curve_fit``.
+    merge_fit : bool
+        Merges fit and fit statistics into input axis manager.
+    merge_name : bool
+        If ``merge_fit`` is True then addes into axis manager with merge_name.
+    Returns
+    -------
+    noise_fit_stats : AxisManager
+        If merge_fit is False then axis manager with fit and fit statistics
+        is returned otherwise nothing is returned and axis manager is wrapped
+        into input aman.
+    """
+    if signal is None:
+        signal = aman.signal
+
+    if f is None or pxx is None:
+        if psdargs is None:
+            f, pxx = calc_psd(aman, signal=signal, timestamps=aman.timestamps,
+                              merge=merge_psd)
+        else:
+            f, pxx = calc_psd(aman, signal=signal, timestamps=aman.timestamps,
+                              merge=merge_psd, **psdargs)
+    f = f[1:]
+    pxx = pxx[:,1:]
+
+    fitout = np.zeros((aman.dets.count, 4))
+    covout = np.zeros((aman.dets.count, 4, 4))
+    for i in range(aman.dets.count):
+        p = pxx[i]
+        wnest = np.median(p[((f>fwhite[0]) & (f<fwhite[1]))])
+        pfit = np.polyfit(np.log10(f[f<lowf]), np.log10(p[f<lowf]), 1)
+        fidx = np.argmin(np.abs(10**np.polyval(pfit, np.log10(f)) - wnest))
+        p0 = [f[fidx], wnest, -pfit[0], 0.5]
+        fitout[i], covout[i] = curve_fit(noise_model, f[f < fwhite[1]], p[f < fwhite[1]],
+                                         p0=p0, bounds=([0,0,0,0],
+                                                        [np.inf,np.inf,np.inf,np.inf]),
+                                         maxfev=1600)
+
+
+    noise_model_coeffs = ['fknee', 'w', 'alpha', 's']
+    noise_fit_stats = core.AxisManager(aman.dets, core.LabelAxis(
+        name='noise_model_coeffs', vals=np.array(noise_model_coeffs, dtype='<U8')))
+    noise_fit_stats.wrap('fit', fitout, [(0, 'dets'), (1, 'noise_model_coeffs')])
+    noise_fit_stats.wrap('cov', covout, [(0, 'dets'), (1, 'noise_model_coeffs'),
+                                         (2, 'noise_model_coeffs')])
+
+    if merge_fit:
+        aman.wrap(merge_name, noise_fit_stats)
+    else:
+        return noise_fit_stats
