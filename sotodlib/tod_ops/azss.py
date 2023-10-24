@@ -109,7 +109,7 @@ def get_azss(aman, signal=None, az=None, range=None, bins=100, flags=None,
             merge_model=True, azss_model_name='azss_model'):
     """
     Derive azss (Azimuth Synchronous Signal) statistics and model from the given axismanager data.
-    *NOTE:* This function does not modify the ``signal`` unless ``subtract_in_place = True``.
+    **NOTE:** This function does not modify the ``signal`` unless ``subtract_in_place = True``.
 
     Parameters
     ----------
@@ -147,12 +147,12 @@ def get_azss(aman, signal=None, az=None, range=None, bins=100, flags=None,
 
     Returns
     -------
-    tuple: A tuple containing the following.
-    - azss_stats: core.AxisManager
-    azss statistics including: azumith bin centers, binned signal, std of each detector-az bin, std of each detector.
-    If ``method=fit`` then also includes: binned legendre model, legendre bin centers, fit coefficients, reduced chi2.
-    - model_sig_tod: numpy.array
-    azss model as a function of time either from fits or interpolation depending on ``method`` argument.
+    Tuple:
+        - azss_stats: core.AxisManager
+            - azss statistics including: azumith bin centers, binned signal, std of each detector-az bin, std of each detector.
+            - If ``method=fit`` then also includes: binned legendre model, legendre bin centers, fit coefficients, reduced chi2.
+        - model_sig_tod: numpy.array
+            - azss model as a function of time either from fits or interpolation depending on ``method`` argument.
     """
     if signal is None:
         signal = aman.signal

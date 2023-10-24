@@ -5,7 +5,7 @@ logger = logging.getLogger(__name__)
 def bin_signal(aman, bin_by, signal=None,
                range=None, bins=100, flags=None):
     """
-    Bin time-ordered data by the `bin_by` and return the binned signal and its standard deviation.
+    Bin time-ordered data by the ``bin_by`` and return the binned signal and its standard deviation.
 
     Parameters
     ----------
@@ -28,10 +28,10 @@ def bin_signal(aman, bin_by, signal=None,
 
     Returns
     -------
-    A dictionary which contains
-        * 'bin_centers': center of each bin of hwp_angle
-        * 'binned_signal': binned signal
-        * 'binned_signal_sigma': estimated sigma of binned signal
+    Dictionary:
+        - **bin_centers** (dict key): center of each bin
+        - **binned_signal** (dict key): binned signal
+        - **binned_signal_sigma** (dict key): estimated sigma of binned signal
     """
     if signal is None:
         signal = aman.signal
