@@ -811,7 +811,7 @@ class G3tHWP():
         
         # check packet drop
         self._encoder_packet_sort()
-        self._find_dropped_packets()
+        self._fill_dropped_packets()
 
         # assign IRIG synched timestamp
         self._time = scipy.interpolate.interp1d(
@@ -1033,7 +1033,7 @@ class G3tHWP():
             self._encd_cnt[idx[i]:] = self._encd_cnt[idx[i]:] + abs(np.diff(self._encd_cnt)[idx[i]-1]) + 1
         
     
-    def _find_dropped_packets(self):
+    def _fill_dropped_packets(self):
         """ Estimate the number of dropped packets """
         cnt_diff = np.diff(self._encd_cnt)
         dropped_samples = np.sum(cnt_diff[cnt_diff >= self._pkt_size])
@@ -1051,31 +1051,12 @@ class G3tHWP():
             gap_cnt = np.arange(self._encd_cnt[ii]+1,self._encd_cnt[ii+1])
             self._encd_cnt = np.insert(self._encd_cnt, ii+1, gap_cnt)
             self._encd_clk = np.insert(self._encd_clk, ii+1, gap_clk)
-        
-        """
-        if self._num_dropped_pkts > 0:
-            logger.warning('{} dropped packets are found, performing fill process'.format(
-                self._num_dropped_pkts))
-
-            idx = np.where(np.diff(self._encd_cnt) > 1)[0]
-            offset = 0
-            for i in idx:
-                i += offset
-                _diff = int(np.diff(self._encd_cnt)[i])
-                clk = (self._encd_clk[i + 1] - self._encd_clk[i]) / _diff
-                gap = np.array(
-                    [self._encd_clk[i] + clk * ii for ii in range(1, _diff)])
-                self._encd_clk = np.insert(self._encd_clk, i + 1, gap)
-                offset += _diff - 1
-            self._encd_cnt = self._encd_cnt[0] + np.arange(len(self._encd_clk))
-            
-        """
         return
 
     def _encoder_packet_sort(self):
         cnt_diff = np.diff(self._encd_cnt)
         if np.any(cnt_diff != 1):
-            logger.warning(
+            logger.debug(
                 'a part of the counter is incorrect')
             if np.any(cnt_diff < 0):
                 if 1 - self._pkt_size in cnt_diff:
@@ -1084,9 +1065,10 @@ class G3tHWP():
                 idx = np.argsort(self._encd_cnt)
                 self._encd_clk = self._encd_clk[idx]
             else:
-                logger.warning('maybe packet drop exists')
+                logger.warning('Packet drop exists')
         else:
             logger.debug('no need to fix encoder index')
+        return
 
     def _quad_form(self, quad):
         
@@ -1096,13 +1078,8 @@ class G3tHWP():
         quad[(quad >= 0.5)] = 1
         quad[(quad < 0.5)] = 0
         offset = 0
-        logger_bit = True
         for quad_split in np.array_split(quad, 1 + np.floor(len(quad) / 100)):
             if quad_split.mean() > 0.1 and quad_split.mean() < 0.9:
-                if logger_bit:
-                    logger.warning(
-                        "flipping quad is corrected by mean value, please consider to use force_quad")
-                    logger_bit = False
                 for j in range(len(quad_split)):
                     quad[j + offset] = int(quad_split.mean() + 0.5)
                 offset += len(quad_split)
@@ -1112,6 +1089,9 @@ class G3tHWP():
                 np.abs(
                     quad_split.mean() -
                     quad_split) > 0.5).flatten()
+            if len(outlier) > 5: 
+                logger.warning(
+                    "flipping quad is corrected by mean value, please consider to use force_quad")
             for i in outlier:
                 if i == 0:
                     ii, iii = i + 1, i + 2
@@ -1135,7 +1115,7 @@ class G3tHWP():
             return irig_time, rising_edge
         elif len(irig_time) > len(idx) and len(idx) > 0:
             if np.any(np.diff(irig_time) > 5):
-                logger.warning(
+                logger.debug(
                     'a part of the IRIG time is incorrect, performing the correction process...')
             irig_time = irig_time[idx]
             rising_edge = rising_edge[idx]
