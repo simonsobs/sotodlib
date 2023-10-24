@@ -101,8 +101,9 @@ def get_coeff_metric(tod):
 class AzssTest(unittest.TestCase):
     "Test the Azimuth Synchronous Signal fitting functions"
     def test_fit(self):
-        tod = make_fake_azss_tod(noise_amp=0, n_scans=50)
-        azss_stats, model_sig_tod = azss.get_azss(tod, method='fit', max_mode=20, range=None, bins=100000)
+        max_mode = 10
+        tod = make_fake_azss_tod(noise_amp=0, n_scans=50, max_mode=max_mode)
+        azss_stats, model_sig_tod = azss.get_azss(tod, method='fit', max_mode=max_mode, range=None, bins=100000)
         ommax = get_coeff_metric(tod)
         print(ommax)
         self.assertTrue(ommax < 1.0)
