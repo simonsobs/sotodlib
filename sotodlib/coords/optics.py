@@ -43,7 +43,7 @@ LAT_TUBES = {
 # SAT Optics
 # TODO: Maybe we want these to be provided in a config file?
 SAT_X = (0.0, 29.7580, 59.4574, 89.5745, 120.550, 152.821, 163.986, 181.218)
-SAT_THETA = (
+SAT_LON = (
     0.0,
     0.0523597,
     0.10471958,
@@ -614,27 +614,34 @@ def SAT_focal_plane(aman, x=None, y=None, pol=None, rot=0, mapping_data=None):
         pol = aman.focal_plane.pol_fp
 
     if mapping_data is None:
-        fp_to_sky = sat_to_sky(SAT_X, SAT_THETA)
+        fp_to_sky = sat_to_sky(SAT_X, SAT_LON)
     else:
         mapping_data = (tuple(val) for val in mapping_data)
         fp_to_sky = sat_to_sky(*mapping_data)
-    theta = np.sign(x) * fp_to_sky(np.abs(x))
-    phi = np.sign(y) * fp_to_sky(np.abs(y))
+
+    # NOTE: lonlat coords are naturally centered at (1, 0, 0) and
+    #       xieta at (0, 0, 1). The euler angle below does this recentering
+    #       as well as flipping the sign of eta.
+    #       There is also a sign flip of xi that is supresses the factor of
+    #       -1 that would normally be applied when calculating lon since
+    #       it has the opposite sign as x.
+    #       The sign flips perform the flip about the origin from optics.
+    minus_lon = np.sign(x) * fp_to_sky(np.abs(x))
+    lat = np.sign(y) * fp_to_sky(np.abs(y))
     _xi, _eta, _ = quat.decompose_xieta(
-        quat.euler(1, np.deg2rad(90)) * quat.rotation_lonlat(theta, phi)
+        quat.euler(1, np.deg2rad(90)) * quat.rotation_lonlat(minus_lon, lat)
     )
-    # NOTE: The -1 does the flip about the origin
-    xi = -1*(_xi * np.cos(np.deg2rad(rot)) - _eta * np.sin(np.deg2rad(rot)))
-    eta = -1*(_eta * np.cos(np.deg2rad(rot)) + _xi * np.sin(np.deg2rad(rot)))
+    xi = _xi * np.cos(np.deg2rad(rot)) - _eta * np.sin(np.deg2rad(rot))
+    eta = _eta * np.cos(np.deg2rad(rot)) + _xi * np.sin(np.deg2rad(rot))
 
     pol_x, pol_y = gen_pol_endpoints(x, y, pol)
-    pol_theta = np.sign(pol_x) * fp_to_sky(np.abs(pol_x))
-    pol_phi = np.sign(pol_y) * fp_to_sky(np.abs(pol_y))
+    pol_minus_lon = np.sign(pol_x) * fp_to_sky(np.abs(pol_x))
+    pol_lat = np.sign(pol_y) * fp_to_sky(np.abs(pol_y))
     _xi, _eta, _ = quat.decompose_xieta(
-        quat.euler(1, np.deg2rad(90)) * quat.rotation_lonlat(pol_theta, pol_phi)
+        quat.euler(1, np.deg2rad(90)) * quat.rotation_lonlat(pol_minus_lon, pol_lat)
     )
-    pol_xi = -1*(_xi * np.cos(np.deg2rad(rot)) - _eta * np.sin(np.deg2rad(rot)))
-    pol_eta = -1*(_eta * np.cos(np.deg2rad(rot)) + _xi * np.sin(np.deg2rad(rot)))
+    pol_xi = _xi * np.cos(np.deg2rad(rot)) - _eta * np.sin(np.deg2rad(rot))
+    pol_eta = _eta * np.cos(np.deg2rad(rot)) + _xi * np.sin(np.deg2rad(rot))
     gamma = get_gamma(pol_xi, pol_eta)
 
     if aman is not None:
