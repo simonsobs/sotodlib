@@ -431,7 +431,7 @@ class G3tHWP():
 
         if not any(data):
             logger.info("no HWP field data")
-
+        
         d = self._data_formatting(data)
         if 'irig_time_2' in data.keys() and 'counter_2' in data.keys():
             d2 = self._data_formatting(data, suffix='_2')
@@ -806,6 +806,9 @@ class G3tHWP():
         self._time = []
         self._angle = []
 
+        # treat counter index reset due to agent reboot
+        self._process_counter_index_reset()
+        
         # check packet drop
         self._encoder_packet_sort()
         self._find_dropped_packets()
@@ -1023,6 +1026,13 @@ class G3tHWP():
 
         return
 
+    def _process_counter_index_reset(self):
+        """ Treat counter index reset due to agent reboot """
+        idx = np.where(np.diff(self._encd_cnt<-1e4))[0] + 1
+        for i in range(len(idx)):
+            self._encd_cnt[idx[i]:] = self._encd_cnt[idx[i]:] + abs(np.diff(self._encd_cnt)[idx[i]-1]) + 1
+        
+    
     def _find_dropped_packets(self):
         """ Estimate the number of dropped packets """
         cnt_diff = np.diff(self._encd_cnt)
@@ -1031,18 +1041,35 @@ class G3tHWP():
         if self._num_dropped_pkts > 0:
             logger.warning('{} dropped packets are found, performing fill process'.format(
                 self._num_dropped_pkts))
+        
+        idx = np.where(np.diff(self._encd_cnt) > 1)[0]
+        for i in range(len(idx)):
+            ii = (np.where(np.diff(self._encd_cnt) > 1)[0])[0]
+            _diff = int(np.diff(self._encd_cnt)[ii])
+            clk = (self._encd_clk[ii+1] - self._encd_clk[ii]) / _diff
+            gap_clk = np.array([self._encd_clk[ii] + clk * j for j in range(1, _diff)])
+            gap_cnt = np.arange(self._encd_cnt[ii]+1,self._encd_cnt[ii+1])
+            self._encd_cnt = np.insert(self._encd_cnt, ii+1, gap_cnt)
+            self._encd_clk = np.insert(self._encd_clk, ii+1, gap_clk)
+        
+        """
+        if self._num_dropped_pkts > 0:
+            logger.warning('{} dropped packets are found, performing fill process'.format(
+                self._num_dropped_pkts))
 
             idx = np.where(np.diff(self._encd_cnt) > 1)[0]
             offset = 0
             for i in idx:
                 i += offset
-                _diff = np.diff(self._encd_cnt)[i]
+                _diff = int(np.diff(self._encd_cnt)[i])
                 clk = (self._encd_clk[i + 1] - self._encd_clk[i]) / _diff
                 gap = np.array(
                     [self._encd_clk[i] + clk * ii for ii in range(1, _diff)])
                 self._encd_clk = np.insert(self._encd_clk, i + 1, gap)
                 offset += _diff - 1
             self._encd_cnt = self._encd_cnt[0] + np.arange(len(self._encd_clk))
+            
+        """
         return
 
     def _encoder_packet_sort(self):
