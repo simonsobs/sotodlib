@@ -1,3 +1,4 @@
+"""Module for estimating Aziumth Synchronous Signal (azss)"""
 import numpy as np
 from numpy.polynomial import legendre as L
 from scipy.optimize import curve_fit
