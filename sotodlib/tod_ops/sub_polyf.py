@@ -6,7 +6,7 @@ from sotodlib import flags
 
 
 def get_turnaround_flags_by_dazdt(
-    tod, qlim=3.,az=None
+    tod, qlim=5.,az=None
 ):
 
     """
@@ -39,7 +39,8 @@ def get_turnaround_flags_by_dazdt(
     return m
 
 
-def get_turnaround_flags( # Copy of flags.get_turnaround_flags, editted
+# Copy of flags.get_turnaround_flags, editted to return boolean numpy array
+def get_turnaround_flags( # Copy of flags.get_turnaround_flags, editted to return boolean numpy array
     tod, qlim=1, az=None
 ):
     """Flag the scan turnaround times.
@@ -75,32 +76,114 @@ def get_ta_list(ta_flag):
     indices = [(start, end) for start, end in indices if (end - start + 1 >= num1) and (end - start + 1 <= num2)]
 
     return indices 
+
+
+
+# subscan ranges are obtained based on the sign of az speed 
+def get_leftright_array(
+    tod, az=None
+):
+    if az is None:
+        az = tod.boresight.az
+    
+    daz = np.copy(np.diff(tod.boresight.az))
+    daz = np.append(daz,daz[-1])
+    signs = np.sign(daz)
+    
+    # positive range
+    positive_indices = np.where(signs > 0)[0]
+    ranges = np.split(positive_indices, np.where(np.diff(positive_indices) != 1)[0]+1)
+    index_ranges_p = [(rng[0], rng[-1]) for rng in ranges]
+    
+    # negative range
+    negative_indices = np.where(signs <= 0)[0]
+    ranges = np.split(negative_indices, np.where(np.diff(negative_indices) != 1)[0]+1)
+    index_ranges_n = [(rng[0], rng[-1]) for rng in ranges]
+    
+    index_ranges_p.extend(index_ranges_n)
+    
+    return index_ranges_p
  
     
-def subscan_polyfilter_onlystat(aman, degree, default_flag=False, wrap_flag=True) : 
+def subscan_polyfilter_onlystat(aman, degree, signal='signal', default_flag=False, wrap_flag=True) : 
+
+    """
+    subscan polyfilter for only stationary part.
     
-    ta_flag = get_turnaround_flags_by_dazdt(aman,3.)
+    Args:
+        aman: AxisManager object
+        degree: Degree of polynomial
+        default_flag: If True, turnaround part is looked for using 'get_turnaround_flags()'
+                        Otherwise, turnaround part is looked for by looking at daz/dt (get_turnaround_flags_by_dazdt())
+        wrap_flag: This function can make the jumps in tod at each turnaround part.
+                        If wrap_flag is True, a mask that veto turnaround part will be wrapped in aman. 
+
+    Returns:
+        -
+    """
+   
+    if default_flag : ta_flag = get_turnaround_flags(aman)
+    else : ta_flag = get_turnaround_flags_by_dazdt(aman,3.)
     ta_list = get_ta_list(ta_flag)
     
     time = aman.timestamps
     time = time - time[0]
     new_mask = np.zeros_like(time,dtype=bool)
     
-    for i_det in range(aman.signal.shape[0]) : 
+    for i_det in range(aman[signal]shape[0]) : 
         for ta in ta_list :
             start = ta[0]
             end = ta[1]
             
             t_mean = np.mean(time[start:end+1])
             
-            pars = np.polyfit(time[start:end+1]-t_mean,aman.signal[i_det,start:end+1],deg=degree)
+            pars = np.polyfit(time[start:end+1]-t_mean,aman[signal][i_det,start:end+1],deg=degree)
             f = np.poly1d(pars)
-            aman.signal[i_det,start:end+1] = aman.signal[i_det,start:end+1] - f(time[start:end+1]-t_mean)
+            aman[signal][i_det,start:end+1] = aman[signal][i_det,start:end+1] - f(time[start:end+1]-t_mean)
             new_mask[start:end+1] = True
-        
+        ]
     if wrap_flag : 
         print("non-turn-around part is wrapped.")
         aman.wrap('stationary_part', new_mask, [(0, 'samps')])
 
     
-    
+
+def subscan_polyfilter(aman, degree, signal='signal') :
+
+    """
+    subscan polyfilter
+    In this function, subscan is defined looking at the sign of scan speed.
+
+    Args:
+        aman: AxisManager object
+        degree: Degree of polynomial
+        signal: Which tod is used
+
+    Returns:
+        -
+    """
+
+    ### Get left scan ranges and right scan ranges
+    subscans = get_leftright_array(aman)
+
+    time = aman.timestamps
+    time = time - time[0]
+
+    for i_det in range(aman[signal].shape[0]) :
+        for subscan in subscans :
+            start = subscan[0]
+            end = subscan[1]
+
+            ### if the number of points is small, just subtract the mean
+            if end - start < degree :
+                aman[signal][i_det,start:end+1] = aman[signal][i_det,start:end+1] - np.mean(aman[signal][i_det,start:end+1])
+                continue
+
+            ### mean of time is subtracted to make fit easier,
+            ### then polynomial fit is applied.
+            t_mean = np.mean(time[start:end+1])
+            pars = np.polyfit(time[start:end+1]-t_mean,aman[signal][i_det,start:end+1],deg=degree)
+            f = np.poly1d(pars)
+
+            aman[signal][i_det,start:end+1] = aman[signal][i_det,start:end+1] - f(time[start:end+1]-t_mean)
+
