@@ -122,8 +122,8 @@ def subscan_polyfilter_onlystat(aman, degree, signal='signal', default_flag=Fals
         -
     """
    
-    if default_flag : ta_flag = get_turnaround_flags(aman)
-    else : ta_flag = get_turnaround_flags_by_dazdt(aman,3.)
+    if default_flag : ta_flag = get_turnaround_flags(aman,qlim=5)
+    else : ta_flag = get_turnaround_flags_by_dazdt(aman,qlim=5)
     ta_list = get_ta_list(ta_flag)
     
     time = aman.timestamps
