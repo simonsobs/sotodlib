@@ -92,28 +92,36 @@ OR, if you have a local git checkout of sotodlib::
 Interactive Use
 ---------------------
 
-Example notebooks are in ``pwg-tutorials/toast``.
-
-.. note:: Not quite yet.  In progress and using features from PR 183.
+Example notebooks will be placed in ``pwg-tutorials/toast``. You can mix and
+match high-level "workflow" functions to do broad tasks (load data, simulate
+observing, mapmaking, etc) and other individual operators or your own custom
+code.
 
 
 Batch Use
 -------------------
 
 When running workflows in batch mode, we typically use a slightly different
-structure from a notebook. There are helper functions in toast to parse
-operator options from the commandline and / or a config file, and to
-automatically create named instances of those operators for use in workflow.
+structure from a notebook. There is usually additional boilerplate code to
+ensure that any unhandled python exceptions correctly terminate an MPI job.
+There is often more extensive logging of the job configuration and also
+workflow functions will get their arguments exclusively from config files and
+commandline arguments.
+
 There is a large-scale simulation and reduction workflow in
-``sotodlib/workflows/toast_so_sim.py``. This script has nearly every possible
-operator in its config options, and they can be selectively enabled or disabled
-from the commandline or config file.
+``sotodlib/workflows/so_sim.py``. This script has nearly every possible
+operator and focuses on a typical sequence of simulating different effects and
+multiple different analyses. Different reduction paths and mapmakers can be
+selectively enabled or disabled from the commandline or config files.
 
-For processing data that already exists on disk, you can use
-``sotodlib/workflows/toast_so_map.py`` as an example workflow. This loads data
-in the native toast HDF5 format and / or L3 books.
+For processing data that already exists on disk, you can look at
+``sotodlib/workflows/so_map.py`` as an example workflow. This loads data in any
+of the supported formats and has multiple mapmaking / reduction code paths that
+can be enabled.
 
-.. note:: Loading data from books will be added in PR 183.
+Of course not every script needs to include all of these simulation and
+reduction techniques. You can make small, focused workflows that do only the
+things you want.
 
 
 Reference
@@ -121,25 +129,182 @@ Reference
 
 This is an API reference for the software in ``sotodlib.toast``.
 
+Workflow Tools
+^^^^^^^^^^^^^^^^^^^^^^^
 
-Instrument Model
-^^^^^^^^^^^^^^^^^^^^^^
+For high-level operations (e.g. "load some data", "make a map", etc) it is
+often helpful to leverage the workflow functions that can use a mix of config
+files and user parameters to setup and run a pre-defined set of operations. The
+best examples are in the source files ``sotodlib/toast/workflows/so_*.py``. The
+basic pattern is to select the high level operations you want to use, call the
+"setup" function for each, call the ``setup_job`` function to merge options
+from config files and other sources, and then run the operations in the desired
+sequence.
+
+
+Here is a list of the supported high-level operations:
+
+.. autofunction:: sotodlib.toast.workflows.setup_load_data_context
+.. autofunction:: sotodlib.toast.workflows.load_data_context
+
+.. autofunction:: sotodlib.toast.workflows.setup_load_data_hdf5
+.. autofunction:: sotodlib.toast.workflows.load_data_hdf5
+
+.. autofunction:: sotodlib.toast.workflows.setup_load_data_books
+.. autofunction:: sotodlib.toast.workflows.load_data_books
+
+.. autofunction:: sotodlib.toast.workflows.setup_save_data_hdf5
+.. autofunction:: sotodlib.toast.workflows.save_data_hdf5
+
+.. autofunction:: sotodlib.toast.workflows.setup_save_data_books
+.. autofunction:: sotodlib.toast.workflows.save_data_books
+
+.. autofunction:: sotodlib.toast.workflows.setup_pointing
+.. autofunction:: sotodlib.toast.workflows.select_pointing
+
+.. autofunction:: sotodlib.toast.workflows.setup_demodulate
+.. autofunction:: sotodlib.toast.workflows.demodulate
+
+.. autofunction:: sotodlib.toast.workflows.setup_deconvolve_detector_timeconstant
+.. autofunction:: sotodlib.toast.workflows.deconvolve_detector_timeconstant
+
+.. autofunction:: sotodlib.toast.workflows.setup_filter_hwpss
+.. autofunction:: sotodlib.toast.workflows.filter_hwpss
+
+.. autofunction:: sotodlib.toast.workflows.setup_filter_ground
+.. autofunction:: sotodlib.toast.workflows.filter_ground
+
+.. autofunction:: sotodlib.toast.workflows.setup_filter_poly1d
+.. autofunction:: sotodlib.toast.workflows.filter_poly1d
+
+.. autofunction:: sotodlib.toast.workflows.setup_filter_poly2d
+.. autofunction:: sotodlib.toast.workflows.filter_poly2d
+
+.. autofunction:: sotodlib.toast.workflows.setup_filter_common_mode
+.. autofunction:: sotodlib.toast.workflows.filter_common_mode
+
+.. autofunction:: sotodlib.toast.workflows.setup_flag_sso
+.. autofunction:: sotodlib.toast.workflows.flag_sso
+
+.. autofunction:: sotodlib.toast.workflows.setup_flag_noise_outliers
+.. autofunction:: sotodlib.toast.workflows.flag_noise_outliers
+
+.. autofunction:: sotodlib.toast.workflows.setup_mapmaker_filterbin
+.. autofunction:: sotodlib.toast.workflows.mapmaker_filterbin
+
+.. autofunction:: sotodlib.toast.workflows.setup_mapmaker_madam
+.. autofunction:: sotodlib.toast.workflows.mapmaker_madam
+
+.. autofunction:: sotodlib.toast.workflows.setup_mapmaker_ml
+.. autofunction:: sotodlib.toast.workflows.mapmaker_ml
+
+.. autofunction:: sotodlib.toast.workflows.setup_mapmaker
+.. autofunction:: sotodlib.toast.workflows.mapmaker
+
+.. autofunction:: sotodlib.toast.workflows.setup_noise_estimation
+.. autofunction:: sotodlib.toast.workflows.noise_estimation
+
+.. autofunction:: sotodlib.toast.workflows.setup_raw_statistics
+.. autofunction:: sotodlib.toast.workflows.raw_statistics
+
+.. autofunction:: sotodlib.toast.workflows.setup_filtered_statistics
+.. autofunction:: sotodlib.toast.workflows.filtered_statistics
+
+.. autofunction:: sotodlib.toast.workflows.setup_hn_map
+.. autofunction:: sotodlib.toast.workflows.hn_map
+
+.. autofunction:: sotodlib.toast.workflows.setup_cadence_map
+.. autofunction:: sotodlib.toast.workflows.cadence_map
+
+.. autofunction:: sotodlib.toast.workflows.setup_crosslinking_map
+.. autofunction:: sotodlib.toast.workflows.crosslinking_map
+
+.. autofunction:: sotodlib.toast.workflows.setup_simulate_observing
+.. autofunction:: sotodlib.toast.workflows.simulate_observing
+
+.. autofunction:: sotodlib.toast.workflows.setup_simple_noise_models
+.. autofunction:: sotodlib.toast.workflows.simple_noise_models
+
+.. autofunction:: sotodlib.toast.workflows.setup_simulate_sky_map_signal
+.. autofunction:: sotodlib.toast.workflows.simulate_sky_map_signal
+
+.. autofunction:: sotodlib.toast.workflows.setup_simulate_conviqt_signal
+.. autofunction:: sotodlib.toast.workflows.simulate_conviqt_signal
+
+.. autofunction:: sotodlib.toast.workflows.setup_simulate_source_signal
+.. autofunction:: sotodlib.toast.workflows.simulate_source_signal
+
+.. autofunction:: sotodlib.toast.workflows.setup_simulate_sso_signal
+.. autofunction:: sotodlib.toast.workflows.simulate_sso_signal
+
+.. autofunction:: sotodlib.toast.workflows.setup_simulate_catalog_signal
+.. autofunction:: sotodlib.toast.workflows.simulate_catalog_signal
+
+.. autofunction:: sotodlib.toast.workflows.setup_simulate_atmosphere_signal
+.. autofunction:: sotodlib.toast.workflows.simulate_atmosphere_signal
+
+.. autofunction:: sotodlib.toast.workflows.setup_simulate_wiregrid_signal
+.. autofunction:: sotodlib.toast.workflows.simulate_wiregrid_signal
+
+.. autofunction:: sotodlib.toast.workflows.setup_simulate_stimulator_signal
+.. autofunction:: sotodlib.toast.workflows.simulate_stimulator_signal
+
+.. autofunction:: sotodlib.toast.workflows.setup_simulate_scan_synchronous_signal
+.. autofunction:: sotodlib.toast.workflows.simulate_scan_synchronous_signal
+
+.. autofunction:: sotodlib.toast.workflows.setup_simulate_hwpss_signal
+.. autofunction:: sotodlib.toast.workflows.simulate_hwpss_signal
+
+.. autofunction:: sotodlib.toast.workflows.setup_simulate_detector_timeconstant
+.. autofunction:: sotodlib.toast.workflows.simulate_detector_timeconstant
+
+.. autofunction:: sotodlib.toast.workflows.setup_simulate_detector_noise
+.. autofunction:: sotodlib.toast.workflows.simulate_detector_noise
+
+.. autofunction:: sotodlib.toast.workflows.setup_simulate_readout_effects
+.. autofunction:: sotodlib.toast.workflows.simulate_readout_effects
+
+.. autofunction:: sotodlib.toast.workflows.setup_simulate_detector_yield
+.. autofunction:: sotodlib.toast.workflows.simulate_detector_yield
+
+.. autofunction:: sotodlib.toast.workflows.setup_simulate_calibration_error
+.. autofunction:: sotodlib.toast.workflows.simulate_calibration_error
+
+.. autofunction:: sotodlib.toast.workflows.setup_job
+
+
+Simulated Instrument Model
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The TOAST instrument model consists of a ``Telescope`` instance which is
-associated with a ``Site`` and a ``Focalplane``.  A particular Focalplane
-instance usually contains detectors from one readout card / wafer.
+associated with a ``Site`` and a ``Focalplane``. These are specified for every
+observation- typically a single wafer and frequency for some constant elevation
+scan. When working with a "bootstrapped" instrument model that is simulated
+from nominal parameters, we have use a special Focalplane class which uses the
+synthetic hardware model to build the table of detector properties and
+boresight offsets:
 
 .. autoclass:: sotodlib.toast.SOFocalplane
    :members:
 
-.. note::  There are more extensive updates to the S.O. toast instrument classes coming in PR 183.
+
+Instrument Model for Real Data
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When starting from real data, we already have most properties available
+directly and associated with a readout ID. We use this to build our
+``Focalplane`` detector table directly. If the detector to readout mapping is
+available, the detector name is also added to this table. Similarly for the
+detector focalplane offsets.
 
 
-Operators
-^^^^^^^^^^^^^^^^
+Simulation Operators
+^^^^^^^^^^^^^^^^^^^^^^^
 
-The operators in ``sotodlib.toast.ops`` can be used in a workflow along with
-the standard operators in toast.
+Here we document only the tools that are specific to Simons Observatory. There
+are many other generic things that are supplied in toast. The operators in
+``sotodlib.toast.ops`` can be used in a workflow along with the standard
+operators in toast.
 
 .. autoclass:: sotodlib.toast.ops.CoRotator
    :members:
@@ -161,14 +326,6 @@ the standard operators in toast.
    :members:
    :noindex:
 
-.. autoclass:: sotodlib.toast.ops.Hn
-   :members:
-   :noindex:
-
-.. autoclass:: sotodlib.toast.ops.MLMapmaker
-   :members:
-   :noindex:
-
 .. autoclass:: sotodlib.toast.ops.SimWireGrid
    :members:
    :noindex:
@@ -182,7 +339,37 @@ the standard operators in toast.
    :noindex:
 
 
-Data I/O
-^^^^^^^^^^^^^^
+Data Reduction Operators
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. note:: Expand this during PR 183.
+These are the data reduction operators specific to Simons Observatory. Many
+other operators for different kinds of mapmaking, filtering, demodulation, etc
+are available in toast.
+
+.. autoclass:: sotodlib.toast.ops.Hn
+   :members:
+   :noindex:
+
+.. autoclass:: sotodlib.toast.ops.MLMapmaker
+   :members:
+   :noindex:
+
+
+Data Load / Save Operators
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The toast package has built-in operators for saving / loading data to / from a
+directory of HDF5 files. There are also several operators specific to Simons
+Observatory:
+
+.. autoclass:: sotodlib.toast.ops.SaveBooks
+   :members:
+   :noindex:
+
+.. autoclass:: sotodlib.toast.ops.LoadBooks
+   :members:
+   :noindex:
+
+.. .. autoclass:: sotodlib.toast.ops.LoadContext
+..    :members:
+..    :noindex:
