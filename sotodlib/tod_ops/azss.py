@@ -187,7 +187,7 @@ def get_azss(aman, signal=None, az=None, range=None, bins=100, flags=None,
     if merge_model:
         aman.wrap(azss_model_name, model_sig_tod, [(0, 'dets'), (1, 'samps')])
     if subtract_in_place:
-        aman.signal = np.subtract(signal, model_sig_tod)
+        aman.signal = np.subtract(signal, model_sig_tod, dtype='float32')
     return azss_stats, model_sig_tod
 
 def subtract_azss(aman, signal=None, azss_template=None,
@@ -222,4 +222,4 @@ def subtract_azss(aman, signal=None, azss_template=None,
         azss_template = aman['azss_model']
 
     aman.wrap(subtract_name, np.subtract(
-              signal, azss_template), [(0, 'dets'), (1, 'samps')])
+              signal, azss_template, dtype='float32'), [(0, 'dets'), (1, 'samps')])
