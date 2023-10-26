@@ -15,7 +15,7 @@ from .tod_ops import fourier_filter
 
 
 def get_turnaround_flags_by_dazdt(
-    tod, qlim=3.,az=None, merge=False, overwrite=False, name="turnarounds_by_dazdt"
+    tod, qlim=5.,az=None, merge=False, overwrite=False, name="turnarounds_by_dazdt"
 ):
 
     """
@@ -42,8 +42,9 @@ def get_turnaround_flags_by_dazdt(
     mean_lo = np.mean(daz[daz<lo])
 
     hi = mean_hi*(100.-qlim)*0.01
+    lo = mean_lo*(100.-qlim)*0.01
     # to avoid oscillation of daz
-    lo = mean_lo+2.*(mean_lo-np.min(daz[daz<lo]))
+    #lo = mean_lo+2.*(mean_lo-np.min(daz[daz<lo]))
 
     m = np.logical_and(daz > lo, daz < hi)
 
