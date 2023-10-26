@@ -126,7 +126,7 @@ def get_parser(parser=None):
         '--config', type=str, help="configuration file"
     )
     parser.add_argument(
-        '--overwrite', type=bool, action='store_true',
+        '--overwrite', action='store_true',
         help='Overwrite existing entries'
     )
     return parser
