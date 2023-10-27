@@ -847,8 +847,13 @@ class SimSource(Operator):
             el_range = FoV
         else:
             el_range = self.source_elevation_range
+        
+        if scan_type == 'fixed':
+            
+            el_start = np.median(np.array(obs.shared[self.elevation])) * u.rad
+            az_start = np.median(np.array(obs.shared[self.azimuth])) * u.rad
 
-        if scan_type == 'azimuth_only' or scan_type == 'azimuth_only_single':
+        elif scan_type == 'azimuth_only' or scan_type == 'azimuth_only_single':
 
             if self.source_azimuth_direction == 'increasing':
                 az_start = np.amin(np.array(obs.shared[self.azimuth])) * u.rad
