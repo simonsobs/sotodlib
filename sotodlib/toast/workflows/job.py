@@ -13,6 +13,7 @@ def setup_job(
     opts=None,
     config_files=None,
     argparse_opts=None,
+    verbose=False,
 ):
     """Generate configuration for a workflow and parse options.
 
@@ -43,6 +44,7 @@ def setup_job(
         config_files (list):  A list of configuration files to load.
         argparse_opts (list):  When running in batch mode, an argparse list of
             command line arguments to use instead of parsing sys.argv.
+        verbose (bool):  If True, dump out the final config to stdout.
 
     Returns:
         (tuple):  The (job namespace, config dictionary, other args, runtime args)
@@ -68,9 +70,15 @@ def setup_job(
                 optkey = f"--{k}"
                 if isinstance(v, bool):
                     # This is just a switch
-                    argparse_opts.extend([optkey])
+                    if v:
+                        argparse_opts.extend([optkey])
+                    else:
+                        # Invert
+                        kparts = k.split(".")
+                        kparts[-1] = f"no_{kparts[-1]}"
+                        argparse_opts.extend([f"--{'.'.join(kparts)}"])
                 else:
-                    argparse_opts.extend([optkey, v])
+                    argparse_opts.extend([optkey, str(v)])
         if config_files is not None:
             for conf in config_files:
                 argparse_opts.extend(["--config", conf])
@@ -108,5 +116,24 @@ def setup_job(
 
     # Instantiate operators and templates
     job = toast.config.create_from_config(config)
+
+    if verbose:
+        out = ""
+        for objtype, objlist in zip(
+            ["Operators", "Templates"],
+            [job.operators, job.templates],
+        ):
+            out += f"{objtype}:\n"
+            for objname, obj in vars(objlist).items():
+                out += f"  {objname}:\n"
+                for trait_name, trait in obj.traits().items():
+                    if trait_name == "API":
+                        continue
+                    if trait_name == "kernel_implementation":
+                        continue
+                    if trait_name == "name":
+                        continue
+                    out += f"    {trait_name} = {trait.get(obj)} # {trait.help}\n"
+        print(out)
 
     return job, config, otherargs, runargs

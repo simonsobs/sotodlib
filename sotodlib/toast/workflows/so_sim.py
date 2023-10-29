@@ -161,12 +161,6 @@ def main():
         action="store_true",
         help="Map each observation separately.",
     )
-    parser.add_argument(
-        "--realization",
-        required=False,
-        help="Realization index",
-        type=int,
-    )
 
     # The operators and templates we want to configure from the command line
     # or a parameter file.

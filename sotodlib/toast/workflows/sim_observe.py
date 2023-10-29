@@ -80,6 +80,13 @@ def setup_simulate_observing(parser, operators):
     parser.add_argument(
         "--schedule", required=True, default=None, help="Input observing schedule"
     )
+    parser.add_argument(
+        "--realization",
+        required=False,
+        default=None,
+        help="Realization index",
+        type=int,
+    )
 
     operators.append(
         toast.ops.SimGround(
