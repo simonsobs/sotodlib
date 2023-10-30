@@ -245,7 +245,7 @@ class Demodulate(_Preprocess):
         hwp.demod_tod(aman, **self.process_cfgs)
 
 
-class EstimateAZSS(_Preprocess):
+class EstimateAzSS(_Preprocess):
     """Estimates Azimuth Synchronous Signal (AzSS) by binning signal by azimuth of boresight.
     All process confgis go to `get_azss`. If `method` is 'interpolate', no fitting applied 
     and binned signal is directly used as AzSS model. If `method` is 'fit', Legendre polynominal
@@ -305,6 +305,6 @@ _Preprocess.register(EstimateHWPSS.name, EstimateHWPSS)
 _Preprocess.register(SubtractHWPSS.name, SubtractHWPSS)
 _Preprocess.register(Apodize.name, Apodize)
 _Preprocess.register(Demodulate.name, Demodulate)
-_Preprocess.register(EstimateAZSS.name, EstimateAZSS)
+_Preprocess.register(EstimateAzSS.name, EstimateAzSS)
 _Preprocess.register(GlitchFill.name, GlitchFill)
 
