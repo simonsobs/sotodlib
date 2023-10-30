@@ -85,10 +85,8 @@ def _jumpfinder(x, min_chunk, min_size, win_size, nsigma, max_depth=-1, depth=0)
     if np.all(msk):
         return jumps.reshape(orig_shape)
 
-    # TODO: Use msk to save time when only a few chans may have jumps
-
     # Take cumulative sum, this is equivalent to convolving with a step
-    x_step = np.cumsum(x, axis=-1)
+    x_step = np.cumsum(x[msk], axis=-1)
 
     # Smooth and take the second derivative
     sg_x_step = np.abs(sig.savgol_filter(x_step, win_size, 2, deriv=2, axis=-1))
@@ -138,7 +136,7 @@ def _jumpfinder(x, min_chunk, min_size, win_size, nsigma, max_depth=-1, depth=0)
     jump_rows = jump_rows[size_cut]
     jump_cols = jump_cols[size_cut]
 
-    jumps[jump_rows, jump_cols] = True
+    jumps[np.flatnonzero(msk)[jump_rows], jump_cols] = True
 
     # If no jumps found return
     if not np.any(jumps):
