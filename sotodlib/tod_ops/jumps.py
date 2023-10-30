@@ -5,7 +5,7 @@ from skimage.restoration import denoise_tv_chambolle
 from so3g.proj import RangesMatrix
 
 
-def std_est(x):
+def std_est(x, axis=-1):
     """
     Estimate white noise standard deviation of data.
     More robust to jumps and 1/f then np.std()
@@ -19,7 +19,7 @@ def std_est(x):
         stdev: The estimated white noise standard deviation of x.
     """
     # Find ~1 sigma limits of differenced data
-    lims = np.quantile(np.diff(x), [0.159, 0.841])
+    lims = np.quantile(np.diff(x, axis=axis), [0.159, 0.841], axis=axis)
     # Convert to standard deviation
     return (lims[1] - lims[0]) / 8**0.5
 
@@ -65,67 +65,110 @@ def _jumpfinder(x, min_chunk, min_size, win_size, nsigma, max_depth=-1, depth=0)
     if nsigma is None:
         nsigma = 5
 
-    if len(x) < min_chunk:
-        return np.array([], dtype=int)
+    # Since this is intended for det data lets assume we either 1d or 2d data
+    # and in the case of 2d data we find jumps along rows
+    orig_shape = x.shape
+    x = np.atleast_2d(x)
 
-    if np.max(x) - np.min(x) < min_size:
-        return np.array([], dtype=int)
+    jumps = np.zeros(x.shape, dtype=bool)
+    if x.shape[-1] < min_chunk:
+        return jumps.reshape(orig_shape)
+
+    size_msk = (np.max(x, axis=-1) - np.min(x, axis=-1)) < min_size
+    if np.all(size_msk):
+        return jumps.reshape(orig_shape)
 
     # If std is basically 0 no need to check for jumps
-    if np.isclose(x.std(), 0.0) or (std_est(x) == 0):
-        return np.array([], dtype=int)
+    std_msk = np.isclose(x.std(axis=-1), 0.0) + (std_est(x, axis=-1) == 0)
+    msk = size_msk + std_msk
 
-    # Scale data to have std of order 1
-    _x = x / std_est(x)
+    if np.all(msk):
+        return jumps.reshape(orig_shape)
 
-    # Mean subtract to make the jumps in the steps below more prominant peaks
-    _x -= _x.mean()
+    # TODO: Use msk to save time when only a few chans may have jumps
 
     # Take cumulative sum, this is equivalent to convolving with a step
-    x_step = np.cumsum(_x)
+    x_step = np.cumsum(x, axis=-1)
 
     # Smooth and take the second derivative
-    sg_x_step = np.abs(sig.savgol_filter(x_step, win_size, 2))
+    sg_x_step = np.abs(sig.savgol_filter(x_step, win_size, 2, deriv=2, axis=-1))
 
     # Peaks should be jumps
     # Doing the simple thing and looking for things much larger than the median
-    peaks = np.where(sg_x_step > np.median(sg_x_step) + nsigma * std_est(sg_x_step))[0]
-    # The peak may have multiple points above this criteria
-    gaps = np.diff(peaks) > win_size
-    begins = np.insert(peaks[1:][gaps], 0, peaks[0])
-    ends = np.append(peaks[:-1][gaps], peaks[-1])
-    jumps = ((begins + ends) / 2).astype(int) + 1
+    peaks = (
+        sg_x_step
+        > (np.median(sg_x_step, axis=-1) + nsigma * std_est(sg_x_step, axis=-1))[
+            ..., None
+        ]
+    )
+    if not np.any(peaks):
+        return jumps.reshape(orig_shape)
 
-    # Filter out jumps that are too small
-    # TODO: There must be a way to get jump size from x_step...
-    sizes = get_jump_sizes(x, jumps, win_size)
-    jumps = jumps[abs(sizes) > min_size]
+    # The peak may have multiple points above this criteria
+    peak_idx = np.where(peaks)
+    peak_idx_padded = peak_idx[1] + (x.shape[-1] + win_size) * peak_idx[0]
+    gaps = np.diff(peak_idx_padded) >= win_size
+    begins = np.insert(peak_idx_padded[1:][gaps], 0, peak_idx_padded[0])
+    ends = np.append(peak_idx_padded[:-1][gaps], peak_idx_padded[-1])
+    jump_idx = ((begins + ends) / 2).astype(int) + 1
+    jump_rows = jump_idx // (x.shape[1] + win_size)
+    jump_cols = jump_idx % (x.shape[1] + win_size)
+
+    # Estimate jump heights and get better positions
+    # TODO: Pad things to avoid np.diff annoyance
+    half_win = int(win_size / 2)
+    win_rows = np.repeat(jump_rows, 2 * half_win)
+    win_cols = np.repeat(jump_cols, 2 * half_win) + np.tile(
+        np.arange(-1 * half_win, half_win, dtype=int), len(jump_cols)
+    )
+    np.clip(win_cols, 0, x.shape[-1] - 3)
+    d2x_step = np.abs(np.diff(x_step, n=2, axis=-1))[win_rows, win_cols].reshape(
+        (len(jump_idx), 2 * half_win)
+    )
+    jump_sizes = np.amax(d2x_step, axis=-1)
+    jump_cols = (
+        win_cols.reshape(d2x_step.shape)[
+            np.arange(len(jump_idx)), np.argmax(d2x_step, axis=-1)
+        ]
+        + 2
+    )
+
+    # Make a jump size cut
+    size_cut = jump_sizes > min_size
+    jump_rows = jump_rows[size_cut]
+    jump_cols = jump_cols[size_cut]
+
+    jumps[jump_rows, jump_cols] = True
 
     # If no jumps found return
-    if len(jumps) == 0:
-        return jumps.astype(int)
+    if not np.any(jumps):
+        return jumps.reshape(orig_shape)
 
     # If at max_depth then return
     if depth == max_depth:
-        return jumps.astype(int)
+        return jumps.reshape(orig_shape)
 
     # Recursively check for jumps between jumps
-    _jumps = np.insert(jumps, 0, 0)
-    _jumps = np.append(_jumps, len(x))
-    added = 0
-    for i in range(len(_jumps) - 1):
-        sub_jumps = _jumpfinder(
-            x[(_jumps[i]) : (_jumps[i + 1])],
-            min_chunk,
-            min_size,
-            win_size,
-            nsigma,
-            max_depth,
-            depth + 1,
-        )
-        jumps = np.insert(jumps, i + added, sub_jumps + _jumps[i])
-        added += len(sub_jumps)
-    return jumps.astype(int)
+    # We lose the benefits of vectorization here, so high depths are slow.
+    for row in range(len(x)):
+        row_msk = jump_rows == row
+        if not np.any(row_msk):
+            continue
+        _jumps = jump_cols[row_msk]
+        _jumps = np.insert(jumps, 0, 0)
+        _jumps = np.append(_jumps, len(x))
+        for i in range(len(_jumps) - 1):
+            sub_jumps = _jumpfinder(
+                x[row, (_jumps[i]) : (_jumps[i + 1])],
+                min_chunk,
+                min_size,
+                win_size,
+                nsigma,
+                max_depth,
+                depth + 1,
+            )
+            jumps[row, (_jumps[i]) : (_jumps[i + 1])] += sub_jumps
+    return jumps.reshape(orig_shape)
 
 
 def get_jump_sizes(x, jumps, win_size):
@@ -206,7 +249,10 @@ def jumpfinder_tv(
     if win_size is None:
         win_size = 5
 
-    x_filt = denoise_tv_chambolle(x, weight)
+    channel_axis = 1
+    if len(x.shape) == 1:
+        channel_axis = None
+    x_filt = denoise_tv_chambolle(x, weight, channel_axis=channel_axis)
     return _jumpfinder(
         x_filt,
         min_chunk,
@@ -261,7 +307,7 @@ def jumpfinder_gaussian(
         win_size = 10
 
     # Apply filter
-    x_filt = simg.gaussian_filter(x, sigma, 0)
+    x_filt = simg.gaussian_filter1d(x, sigma, axis=-1)
 
     # Search for jumps in filtered data
     return _jumpfinder(
@@ -332,12 +378,13 @@ def jumpfinder_sliding_window(
                There is some uncertainty on order of 1 sample.
                Jumps within min_chunk of each other may not be distinguished.
     """
-    jumps = np.array([], dtype=int)
-    for i in range(len(x) // (window_size - overlap)):
+    jumps = np.zeros(x.shape, dtype=bool)
+    tot = jumps.shape[-1]
+    for i in range(tot // (window_size - overlap)):
         start = i * (window_size - overlap)
-        end = np.min((start + window_size, len(x)))
+        end = np.min((start + window_size, tot))
         _jumps = jumpfinder_func(
-            x[start:end],
+            x=x[..., start:end],
             min_chunk=min_chunk,
             min_size=min_size,
             win_size=win_size,
@@ -345,8 +392,8 @@ def jumpfinder_sliding_window(
             max_depth=max_depth,
             **kwargs
         )
-        jumps = np.hstack((jumps, _jumps + start))
-    return np.unique(jumps).astype(int)
+        jumps[..., start:end] += _jumps
+    return jumps
 
 
 def find_jumps(
@@ -418,39 +465,19 @@ def find_jumps(
     if signal is None:
         signal = tod.signal
 
-    # TODO: Move the bool mask creation to _jumpfinder so that this can be vectorized.
-    jump_mask = np.zeros(signal.shape, dtype=bool)
-
-    if len(signal.shape) == 1:
-        if min_size is None:
-            min_size = min_sigma * std_est(signal)
-        jumps = jumpfinder(
-            signal,
-            min_chunk=min_chunk,
-            min_size=min_size,
-            win_size=win_size,
-            nsigma=nsigma,
-            max_depth=max_depth,
-            **kwargs
-        )
-        jump_mask[jumps] = True
-    elif len(signal.shape) == 2:
-        for i, _signal in enumerate(signal):
-            if min_size is None:
-                _min_size = min_sigma * std_est(_signal)
-            else:
-                _min_size = min_size
-            jumps = jumpfinder(
-                _signal,
-                min_chunk=min_chunk,
-                min_size=_min_size,
-                win_size=win_size,
-                nsigma=nsigma,
-                max_depth=max_depth,
-                **kwargs
-            )
-            jump_mask[i][jumps] = True
-    else:
+    if len(signal.shape) > 2:
         raise ValueError("Jumpfinder only works on 1D or 2D data")
+
+    if min_size is None:
+        min_size = min_sigma * std_est(signal, axis=-1)
+    jumps = jumpfinder(
+        signal,
+        min_chunk=min_chunk,
+        min_size=min_size,
+        win_size=win_size,
+        nsigma=nsigma,
+        max_depth=max_depth,
+        **kwargs
+    )
     # TODO: include heights in output
-    return RangesMatrix.from_mask(jump_mask).buffer(buff_size)
+    return RangesMatrix.from_mask(jumps).buffer(buff_size)
