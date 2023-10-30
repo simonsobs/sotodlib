@@ -1,8 +1,8 @@
 import numpy as np
-import scipy.signal as sig
 import scipy.ndimage as simg
-from so3g.proj import RangesMatrix
+import scipy.signal as sig
 from skimage.restoration import denoise_tv_chambolle
+from so3g.proj import RangesMatrix
 
 
 def std_est(x):
@@ -21,10 +21,10 @@ def std_est(x):
     # Find ~1 sigma limits of differenced data
     lims = np.quantile(np.diff(x), [0.159, 0.841])
     # Convert to standard deviation
-    return (lims[1] - lims[0]) / 8 ** 0.5
+    return (lims[1] - lims[0]) / 8**0.5
 
 
-def _jumpfinder(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwargs):
+def _jumpfinder(x, min_chunk, min_size, win_size, nsigma, max_depth=-1, depth=0):
     """
     Recursive edge detection based jumpfinder.
 
@@ -41,13 +41,14 @@ def _jumpfinder(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwarg
         min_size: The smallest jump size counted as a jump.
 
         win_size: Number of samples to average over when checking jump size.
+                  Also used to apply the SG filter when peak finding.
+
+        nsigma: Number of sigma above the mean for something to be a peak.
 
         max_depth: The maximum recursion depth.
                    Set negative for infite depth and 0 for no recursion.
 
         depth: The current recursion depth.
-
-        **kwargs: Arguments to pass to scipy.signal.find_peaks.
 
     Returns:
 
@@ -61,8 +62,13 @@ def _jumpfinder(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwarg
         min_size = 0.1
     if win_size is None:
         win_size = 10
+    if nsigma is None:
+        nsigma = 5
 
     if len(x) < min_chunk:
+        return np.array([], dtype=int)
+
+    if np.max(x) - np.min(x) < min_size:
         return np.array([], dtype=int)
 
     # If std is basically 0 no need to check for jumps
@@ -78,13 +84,20 @@ def _jumpfinder(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwarg
     # Take cumulative sum, this is equivalent to convolving with a step
     x_step = np.cumsum(_x)
 
-    # Look for peaks to find jumps
-    u_jumps, _ = sig.find_peaks(x_step, **kwargs)
-    d_jumps, _ = sig.find_peaks(-1 * x_step, **kwargs)
-    jumps = np.concatenate([u_jumps, d_jumps])
-    jumps.sort()
+    # Smooth and take the second derivative
+    sg_x_step = np.abs(sig.savgol_filter(x_step, win_size, 2))
+
+    # Peaks should be jumps
+    # Doing the simple thing and looking for things much larger than the median
+    peaks = np.where(sg_x_step > np.median(sg_x_step) + nsigma * std_est(sg_x_step))[0]
+    # The peak may have multiple points above this criteria
+    gaps = np.diff(peaks) > win_size
+    begins = np.insert(peaks[1:][gaps], 0, peaks[0])
+    ends = np.append(peaks[:-1][gaps], peaks[-1])
+    jumps = ((begins + ends) / 2).astype(int) + 1
 
     # Filter out jumps that are too small
+    # TODO: There must be a way to get jump size from x_step...
     sizes = get_jump_sizes(x, jumps, win_size)
     jumps = jumps[abs(sizes) > min_size]
 
@@ -106,9 +119,9 @@ def _jumpfinder(x, min_chunk, min_size, win_size, max_depth=-1, depth=0, **kwarg
             min_chunk,
             min_size,
             win_size,
+            nsigma,
             max_depth,
             depth + 1,
-            **kwargs
         )
         jumps = np.insert(jumps, i + added, sub_jumps + _jumps[i])
         added += len(sub_jumps)
@@ -154,11 +167,9 @@ def jumpfinder_tv(
     min_chunk=None,
     min_size=None,
     win_size=None,
-    max_depth=-1,
+    nsigma=None,
+    max_depth=1,
     weight=1,
-    height=1,
-    prominence=1,
-    **kwargs
 ):
     """
     Apply total variance filter and then search for jumps.
@@ -172,18 +183,15 @@ def jumpfinder_tv(
         min_size: The smallest jump size counted as a jump.
 
         win_size: Number of samples to average over when checking jump size.
+                  Also used to apply the SG filter when peak finding.
+
+        nsigma: Number of sigma above the mean for something to be a peak.
 
         max_depth: The maximum recursion depth.
                    Set negative for infite depth and 0 for no recursion.
 
         weight: Denoising weight. Higher weights denoise more, lower weights
                 preserve the input signal better.
-
-        height: Height of peaks to pass to scipy.signal.find_peaks.
-
-        prominence: Prominence of peaks to pass to scipy.signal.find_peaks.
-
-        **kwargs: Additional arguments to pass to scipy.signal.find_peaks.
 
     Returns:
 
@@ -204,11 +212,9 @@ def jumpfinder_tv(
         min_chunk,
         min_size,
         win_size,
+        nsigma,
         max_depth,
         0,
-        height=height,
-        prominence=prominence,
-        **kwargs
     )
 
 
@@ -217,11 +223,9 @@ def jumpfinder_gaussian(
     min_chunk=None,
     min_size=None,
     win_size=None,
-    max_depth=-1,
+    nsigma=None,
+    max_depth=1,
     sigma=5,
-    height=1,
-    prominence=1,
-    **kwargs
 ):
     """
     Apply gaussian filter to data and then search for jumps.
@@ -236,17 +240,12 @@ def jumpfinder_gaussian(
                   Note that this is in terms of the filtered data.
 
         win_size: Number of samples to average over when checking jump size.
+                  Also used to apply the SG filter when peak finding.
+
+        nsigma: Number of sigma above the mean for something to be a peak.
 
         max_depth: The maximum recursion depth.
                    Set negative for infite depth and 0 for no recursion.
-
-        sigma: Sigma of gaussian kernal.
-
-        height: Height of peaks to pass to scipy.signal.find_peaks.
-
-        prominence: Prominence of peaks to pass to scipy.signal.find_peaks.
-
-        **kwargs: Additional arguments to pass to scipy.signal.find_peaks.
 
     Returns:
 
@@ -270,11 +269,9 @@ def jumpfinder_gaussian(
         min_chunk,
         min_size,
         win_size,
+        nsigma,
         max_depth,
         0,
-        height=height,
-        prominence=prominence,
-        **kwargs
     )
 
 
@@ -283,7 +280,8 @@ def jumpfinder_sliding_window(
     min_chunk=None,
     min_size=None,
     win_size=None,
-    max_depth=-1,
+    nsigma=None,
+    max_depth=1,
     window_size=10000,
     overlap=1000,
     jumpfinder_func=jumpfinder_tv,
@@ -299,20 +297,23 @@ def jumpfinder_sliding_window(
 
         x: Data to jumpfind on, expects 1D.
 
-        window_size: Size of window to use.
-
-        overlap: Overlap between adjacent windows.
-
-        jumpfinder_func: Jumpfinding function to use.
-
         min_chunk: The smallest chunk of data to look for jumps in.
 
         min_size: The smallest jump size counted as a jump.
 
         win_size: Number of samples to average over when checking jump size.
+                  Also used to apply the SG filter when peak finding.
+
+        nsigma: Number of sigma above the mean for something to be a peak.
 
         max_depth: The maximum recursion depth.
                    Set negative for infite depth and 0 for no recursion.
+
+        window_size: Size of window to use.
+
+        overlap: Overlap between adjacent windows.
+
+        jumpfinder_func: Jumpfinding function to use.
 
         **kwargs: Additional keyword args to pass to jumpfinder.
                   Arguments that will ultimately be passed to scipy.signal.find_peaks
@@ -340,6 +341,7 @@ def jumpfinder_sliding_window(
             min_chunk=min_chunk,
             min_size=min_size,
             win_size=win_size,
+            nsigma=nsigma,
             max_depth=max_depth,
             **kwargs
         )
@@ -356,7 +358,8 @@ def find_jumps(
     min_sigma=5,
     min_size=None,
     win_size=None,
-    max_depth=-1,
+    nsigma=None,
+    max_depth=1,
     **kwargs
 ):
     """
@@ -386,6 +389,9 @@ def find_jumps(
                   if set this will override min_sigma.
 
         win_size: Number of samples to average over when checking jump size.
+                  Also used to apply the SG filter when peak finding.
+
+        nsigma: Number of sigma above the mean for something to be a peak.
 
         max_depth: The maximum recursion depth.
                    Set negative for infite depth and 0 for no recursion.
@@ -412,6 +418,7 @@ def find_jumps(
     if signal is None:
         signal = tod.signal
 
+    # TODO: Move the bool mask creation to _jumpfinder so that this can be vectorized.
     jump_mask = np.zeros(signal.shape, dtype=bool)
 
     if len(signal.shape) == 1:
@@ -422,6 +429,7 @@ def find_jumps(
             min_chunk=min_chunk,
             min_size=min_size,
             win_size=win_size,
+            nsigma=nsigma,
             max_depth=max_depth,
             **kwargs
         )
@@ -437,10 +445,12 @@ def find_jumps(
                 min_chunk=min_chunk,
                 min_size=_min_size,
                 win_size=win_size,
+                nsigma=nsigma,
                 max_depth=max_depth,
                 **kwargs
             )
             jump_mask[i][jumps] = True
     else:
         raise ValueError("Jumpfinder only works on 1D or 2D data")
+    # TODO: include heights in output
     return RangesMatrix.from_mask(jump_mask).buffer(buff_size)
