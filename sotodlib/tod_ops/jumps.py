@@ -34,7 +34,7 @@ def _jumpfinder(x, min_chunk, min_size, win_size, nsigma, max_depth=-1, depth=0)
 
     Arguments:
 
-        x: Data to jumpfind on, expects 1D.
+        x: Data to jumpfind on, expects 1D or 2D.
 
         min_chunk: The smallest chunk of data to look for jumps in.
 
@@ -394,6 +394,49 @@ def jumpfinder_sliding_window(
     return jumps
 
 
+def jumpfix_median_sub(x, jumps, inplace=False):
+    """
+    Naive jump fixing routine where we median subtract between jumps.
+    Note that you should exepect a glitch at the jump locations.
+
+    Arguments:
+
+        x: Data to jumpfix on, expects 1D or 2D.
+
+        jumps: Boolean mask of that is True at jump locations.
+               Should be the same shape at x.
+
+        inplace: Whether of not x should be fixed inplace.
+
+    Returns:
+
+        x_fixed: x with jumps removed.
+                 If inplace is True this is just a reference to x.
+    """
+    x_fixed = x
+    if not inplace:
+        x_fixed = x.copy()
+
+    padded_shape = list(jumps.shape)
+    padded_shape[-1] += 2
+    jumps_padded = np.ones(padded_shape, dtype=bool)
+    jumps_padded[..., 1:-1] = jumps
+
+    rows, cols = np.nonzero(np.diff(~jumps_padded, axis=-1))
+    rows = rows[::2]
+    cols = cols.reshape((-1, 2))
+
+    diff = np.diff(cols, axis=-1).ravel()
+    has_jumps = diff < x.shape[-1]
+    rows = rows[has_jumps]
+    cols = cols[has_jumps]
+
+    for r, (c1, c2) in zip(rows, cols):
+        x_fixed[r, c1:c2] -= np.median(x_fixed[r, c1:c2])
+
+    return x_fixed
+
+
 def find_jumps(
     tod,
     signal=None,
@@ -405,6 +448,8 @@ def find_jumps(
     win_size=None,
     nsigma=None,
     max_depth=1,
+    fix=None,
+    inplace=False,
     **kwargs
 ):
     """
@@ -441,6 +486,11 @@ def find_jumps(
         max_depth: The maximum recursion depth.
                    Set negative for infite depth and 0 for no recursion.
 
+        fix: Method to use for jumpfixing.
+             Set to None to not fix.
+
+        inplace: Whether of not signal should be fixed inplace.
+
         **kwargs: Additional keyword args to pass to jumpfinder.
 
                   * _jumpfinder: None
@@ -459,6 +509,8 @@ def find_jumps(
                if signal is 1D Ranges in returned instead.
                There is some uncertainty on order of a few samples.
                Jumps within a few samples of each other may not be distinguished.
+
+        fixed: signal with jump fixed. Only returned if fix is set.
     """
     if signal is None:
         signal = tod.signal
@@ -478,4 +530,9 @@ def find_jumps(
         **kwargs
     )
     # TODO: include heights in output
+
+    if fix is not None:
+        fixed = fix(signal, jumps, inplace)
+        return RangesMatrix.from_mask(jumps).buffer(buff_size), fixed
+
     return RangesMatrix.from_mask(jumps).buffer(buff_size)
