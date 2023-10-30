@@ -24,7 +24,7 @@ def std_est(x, axis=-1):
     return (lims[1] - lims[0]) / 8**0.5
 
 
-def _jumpfinder(x, min_chunk, min_size, win_size, nsigma, max_depth=-1, depth=0):
+def _jumpfinder(x, min_chunk, min_size, win_size, nsigma, max_depth=1, depth=0):
     """
     Recursive edge detection based jumpfinder.
 
@@ -80,9 +80,9 @@ def _jumpfinder(x, min_chunk, min_size, win_size, nsigma, max_depth=-1, depth=0)
 
     # If std is basically 0 no need to check for jumps
     std_msk = np.isclose(x.std(axis=-1), 0.0) + (std_est(x, axis=-1) == 0)
-    msk = size_msk + std_msk
 
-    if np.all(msk):
+    msk = ~(size_msk + std_msk)
+    if not np.any(msk):
         return jumps.reshape(orig_shape)
 
     # Take cumulative sum, this is equivalent to convolving with a step
@@ -119,7 +119,7 @@ def _jumpfinder(x, min_chunk, min_size, win_size, nsigma, max_depth=-1, depth=0)
     win_cols = np.repeat(jump_cols, 2 * half_win) + np.tile(
         np.arange(-1 * half_win, half_win, dtype=int), len(jump_cols)
     )
-    np.clip(win_cols, 0, x.shape[-1] - 3)
+    win_cols = np.clip(win_cols, 0, x.shape[-1] - 3)
     d2x_step = np.abs(np.diff(x_step, n=2, axis=-1))[win_rows, win_cols].reshape(
         (len(jump_idx), 2 * half_win)
     )
@@ -210,7 +210,7 @@ def jumpfinder_tv(
     win_size=None,
     nsigma=None,
     max_depth=1,
-    weight=1,
+    weight=0.5,
 ):
     """
     Apply total variance filter and then search for jumps.
@@ -269,7 +269,7 @@ def jumpfinder_gaussian(
     win_size=None,
     nsigma=None,
     max_depth=1,
-    sigma=5,
+    sigma=0.5,
 ):
     """
     Apply gaussian filter to data and then search for jumps.
@@ -290,6 +290,8 @@ def jumpfinder_gaussian(
 
         max_depth: The maximum recursion depth.
                    Set negative for infite depth and 0 for no recursion.
+
+        sigma: Kernal size of the gaussian filter.
 
     Returns:
 
@@ -441,7 +443,7 @@ def find_jumps(
     tod,
     signal=None,
     buff_size=0,
-    jumpfinder=jumpfinder_tv,
+    jumpfinder=_jumpfinder,
     min_chunk=None,
     min_sigma=5,
     min_size=None,
@@ -529,6 +531,7 @@ def find_jumps(
         max_depth=max_depth,
         **kwargs
     )
+
     # TODO: include heights in output
 
     if fix is not None:
