@@ -245,6 +245,26 @@ class Demodulate(_Preprocess):
         hwp.demod_tod(aman, **self.process_cfgs)
 
 
+class EstimateAzSS(_Preprocess):
+    """Estimates Azimuth Synchronous Signal (AzSS) by binning signal by azimuth of boresight.
+    All process confgis go to `get_azss`. If `method` is 'interpolate', no fitting applied 
+    and binned signal is directly used as AzSS model. If `method` is 'fit', Legendre polynominal
+    fitting will be applied and used as AzSS model.
+
+    .. autofunction:: sotodlib.tod_ops.azss.get_azss
+    """
+    name = "estimate_azss"
+
+    def calc_and_save(self, aman):
+        azss_stats, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+        self.save(proc_aman, azss_stats)
+    
+    def save(self, proc_aman, azss_stats):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(self.calc_cfgs["azss_stats_name"], azss_stats)
+
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
 
@@ -273,6 +293,7 @@ class GlitchFill(_Preprocess):
         tod_ops.gapfill.fill_glitches(aman, signal=signal, glitch_flags=flags, **args)
 
 
+
 _Preprocess.register(Trends.name, Trends)
 _Preprocess.register(FFTTrim.name, FFTTrim)
 _Preprocess.register(Detrend.name, Detrend)
@@ -284,4 +305,6 @@ _Preprocess.register(EstimateHWPSS.name, EstimateHWPSS)
 _Preprocess.register(SubtractHWPSS.name, SubtractHWPSS)
 _Preprocess.register(Apodize.name, Apodize)
 _Preprocess.register(Demodulate.name, Demodulate)
+_Preprocess.register(EstimateAzSS.name, EstimateAzSS)
 _Preprocess.register(GlitchFill.name, GlitchFill)
+
