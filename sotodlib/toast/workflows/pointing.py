@@ -5,6 +5,7 @@ import numpy as np
 from astropy import units as u
 import toast
 import toast.ops
+from toast.observation import default_values as defaults
 
 from .. import ops as so_ops
 
@@ -120,10 +121,11 @@ def select_pointing(job, otherargs, runargs, data):
     job_ops.pixels_healpix_radec_final.detector_pointing = job_ops.det_pointing_radec
 
     job_ops.weights_azel.detector_pointing = job_ops.det_pointing_azel
-    job_ops.weights_azel.hwp_angle = job_ops.sim_ground.hwp_angle
-
     job_ops.weights_radec.detector_pointing = job_ops.det_pointing_radec
-    job_ops.weights_radec.hwp_angle = job_ops.sim_ground.hwp_angle
+
+    if defaults.hwp_angle in data.obs[0].shared:
+        job_ops.weights_azel.hwp_angle = defaults.hwp_angle
+        job_ops.weights_radec.hwp_angle = defaults.hwp_angle
 
     # Select Pixelization and weights for solve and final binning
 
