@@ -1,6 +1,8 @@
 # This code has been ported over from enlib: 
 # https://github.com/amaurea/enlib
 # Ported over on 10/31/2023
+# The original code is public domain. Modifications and additions 
+# are subject to the main license in this repository.
 
 # -*- coding: utf-8 -*-
 """This module provides a simple class for benchmarking selected parts of the
