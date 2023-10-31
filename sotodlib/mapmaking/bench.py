@@ -1,4 +1,3 @@
-from __future__ import division, print_function
 # -*- coding: utf-8 -*-
 """This module provides a simple class for benchmarking selected parts of the
 code during regular execution of a program. Usage:
