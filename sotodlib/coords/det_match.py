@@ -12,8 +12,6 @@ from sotodlib.coords import optics
 from sotodlib.core import metadata
 from sotodlib.io.metadata import write_dataset
 
-warnings.filterwarnings(action='ignore',
-                        message='overflow encountered in exp*', category=RuntimeWarning)
 
 
 def map_band_chans(b1, c1, b2, c2, chans_per_band=512):
@@ -80,36 +78,37 @@ class Resonator:
     match_idx: int = -1
  
 
-def apply_design_properties(src_res, dst_res, in_place=False):
+def apply_design_properties(smurf_res, design_res, in_place=False):
     """
     Combines two resonators into one, taking smurf-properties such as res-idx,
     smurf-band, and smurf-channel one, and design properties such as det
     position and polarization from the other.
 
     Args:
-        src_res (Resonator):
+        smurf_res (Resonator):
             The resonator to take smurf properties from
-        dst_res (Resonator):
+        design_res (Resonator):
             The resonator to take design properties from
         in_place (bool):
             If True, the src_res will be modified. Otherwise, a new Resonator
             will be created and returned.
     """
     if in_place:
-        r = src_res
+        r = smurf_res
     else:
-        r = deepcopy(src_res)
-    r.det_x = src_res.det_x
-    r.det_y = src_res.det_y
-    r.det_rhomb = src_res.det_rhomb
-    r.det_pol = src_res.det_pol
-    r.det_freq = src_res.det_freq
-    r.det_bandpass = src_res.det_bandpass
-    r.is_optical = src_res.is_optical
+        r = deepcopy(smurf_res)
 
-    r.mux_band = src_res.mux_band
-    r.mux_channel = src_res.mux_channel
-    r.mux_layout_pos = src_res.mux_layout_pos
+    r.det_x = design_res.det_x
+    r.det_y = design_res.det_y
+    r.det_rhomb = design_res.det_rhomb
+    r.det_pol = design_res.det_pol
+    r.det_freq = design_res.det_freq
+    r.det_bandpass = design_res.det_bandpass
+    r.is_optical = design_res.is_optical
+
+    r.mux_band = design_res.mux_band
+    r.mux_channel = design_res.mux_channel
+    r.mux_layout_pos = design_res.mux_layout_pos
 
     r.matched = 1
 
@@ -167,7 +166,7 @@ class ResSet:
                 Name to label this ResSet
             north_is_highband (bool):
                 True if the north-side of the array corresponds to bands
-                4-8
+                4-7
             resfit_file (str):
                 Path to file containing resonance fit data
             bgmap_file (str):
@@ -428,23 +427,23 @@ class Match:
         self.stats = self.get_stats()
 
     def _get_biadjacency_matrix(self):
-        ra1 = self.src.as_array()
-        ra2 = self.dst.as_array()
+        src_arr = self.src.as_array()
+        dst_arr = self.dst.as_array()
 
         mat = np.zeros((len(self.src), len(self.dst)), dtype=float)
 
         # N/S mismatch
-        m = ra1['is_north'][:, None] != ra2['is_north'][None, :]
+        m = src_arr['is_north'][:, None] != dst_arr['is_north'][None, :]
         mat[m] = np.inf
 
         # Frequency offset
-        df = ra1['res_freq'][:, None] - ra2['res_freq'][None, :]
+        df = src_arr['res_freq'][:, None] - dst_arr['res_freq'][None, :]
         df -= self.match_pars.freq_offset_mhz
         mat += np.exp((np.abs(df / self.match_pars.freq_width)) ** 2)
 
         # BG mismatch
-        bgs_mismatch = ra1['bg'][:, None] != ra2['bg'][None, :]
-        bgs_unassigned = (ra1['bg'][:, None] == 1) | (ra2['bg'][None, :] == -1)
+        bgs_mismatch = src_arr['bg'][:, None] != dst_arr['bg'][None, :]
+        bgs_unassigned = (src_arr['bg'][:, None] == 1) | (dst_arr['bg'][None, :] == -1)
 
         m = bgs_mismatch & bgs_unassigned
         mat[m] += self.match_pars.unassigned_bg_mismatch_pen
@@ -453,10 +452,9 @@ class Match:
 
         # If pointing, add cost if assigned too far
         dd = np.sqrt(
-              (ra1['xi'][:, None] - ra2['xi'][None, :])**2 \
-            + (ra1['eta'][:, None] - ra2['eta'][None, :])**2)
+              (src_arr['xi'][:, None] - dst_arr['xi'][None, :])**2 \
+            + (src_arr['eta'][:, None] - dst_arr['eta'][None, :])**2)
         m = ~np.isnan(dd)
-        c = np.exp((np.abs(dd / self.match_pars.dist_width)) ** 2)
         mat[m] += np.exp((np.abs(dd[m] / self.match_pars.dist_width)) ** 2)
 
         return mat
@@ -487,15 +485,22 @@ class Match:
 
         # Keep this square so all resonators are included in final matching
         mat_full = np.zeros((nside, nside), dtype=float)
-        mat_full[:len(self.src), :len(self.dst)] = self._get_biadjacency_matrix()
-        mat_full[:len(self.src), len(self.dst):] = \
-            self._get_unassigned_costs(
-                self.src,
-                force_if_pointing=self.match_pars.force_src_pointing
-            )[:, None]
-        mat_full[len(self.src):, :len(self.dst)] = \
-            self._get_unassigned_costs(self.dst, force_if_pointing=False)[None, :]
-        mat_full[len(self.src):, len(self.dst):] = 0
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                action='ignore',
+                message='overflow encountered in exp*',
+                category=RuntimeWarning
+            )
+
+            mat_full[:len(self.src), :len(self.dst)] = self._get_biadjacency_matrix()
+            mat_full[:len(self.src), len(self.dst):] = \
+                self._get_unassigned_costs(
+                    self.src,
+                    force_if_pointing=self.match_pars.force_src_pointing
+                )[:, None]
+            mat_full[len(self.src):, :len(self.dst)] = \
+                self._get_unassigned_costs(self.dst, force_if_pointing=False)[None, :]
+            mat_full[len(self.src):, len(self.dst):] = 0
 
         self.matching = np.array(linear_sum_assignment(mat_full))
 
