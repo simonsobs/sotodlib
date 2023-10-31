@@ -1,3 +1,7 @@
+# This code has been ported over from enlib: 
+# https://github.com/amaurea/enlib
+# Ported over on 10/31/2023
+
 """This module provids a simple logging/output interface."""
 import time
 from logging import *
