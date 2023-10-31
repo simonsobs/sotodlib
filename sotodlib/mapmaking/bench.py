@@ -1,3 +1,7 @@
+# This code has been ported over from enlib: 
+# https://github.com/amaurea/enlib
+# Ported over on 10/31/2023
+
 # -*- coding: utf-8 -*-
 """This module provides a simple class for benchmarking selected parts of the
 code during regular execution of a program. Usage:
