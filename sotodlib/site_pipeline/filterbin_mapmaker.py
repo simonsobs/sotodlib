@@ -2,13 +2,10 @@ from argparse import ArgumentParser
 import numpy as np, sys, time, warnings, os, so3g, logging
 from sotodlib.core import Context,  metadata as metadata_core
 from sotodlib.io import metadata   # PerDetectorHdf5 work-around
-from sotodlib import tod_ops, coords
-from sotodlib import mapmaking
+from sotodlib import tod_ops, coords, mapmaking
 from sotodlib.tod_ops import filters
 from sotodlib.hwp import hwp
-from pixell import enmap, utils, fft, bunch, wcsutils, tilemap, colors, memory
-from pixell import mpi
-from mpi4py import MPI as mpi
+from pixell import enmap, utils, fft, bunch, wcsutils, tilemap, colors, memory, mpi
 from scipy import ndimage
 
 from . import util
