@@ -46,7 +46,7 @@ from .proc_mapmaker_madam import setup_mapmaker_madam, mapmaker_madam
 from .proc_mapmaker_ml import setup_mapmaker_ml, mapmaker_ml
 from .proc_mapmaker import setup_mapmaker, mapmaker
 from .proc_noise_est import setup_noise_estimation, noise_estimation
-from .proc_quality import (
+from .proc_characterize import (
     setup_raw_statistics,
     raw_statistics,
     setup_filtered_statistics,
