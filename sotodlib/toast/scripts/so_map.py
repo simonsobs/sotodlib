@@ -161,7 +161,6 @@ def main():
 
     wrk.setup_load_data_hdf5(operators)
     wrk.setup_load_data_books(operators)
-    wrk.setup_load_data_context(operators)
 
     wrk.setup_pointing(operators)
     wrk.setup_simple_noise_models(operators)
