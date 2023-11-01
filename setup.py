@@ -41,7 +41,6 @@ setup_opts["url"] = "https://github.com/simonsobs/sotodlib"
 setup_opts["packages"] = find_packages(where=".", exclude="tests")
 setup_opts["license"] = "MIT"
 setup_opts["requires"] = ["Python (>3.7.0)", ]
-setup_opts["scripts"] = scripts
 setup_opts["package_data"] = {
     "sotodlib": [
         "toast/ops/data/*"
