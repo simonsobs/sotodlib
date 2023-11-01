@@ -332,10 +332,7 @@ class SmurfStreamProcessor:
             if self.nchans is None:
                 self.nchans = len(self.readout_ids)
                 self.primary_names = frame['primary'].names
-                for i, n in enumerate(self.primary_names):
-                    if n == "FrameCounter":
-                        fc_idx = i
-                        break
+                fc_idx = list(self.primary_names).index("FrameCounter")
                 self.bias_names = frame['tes_biases'].names
                 self.timing_paradigm = frame['timing_paradigm']
                 self.session_id = frame['session_id']
@@ -362,8 +359,8 @@ class SmurfStreamProcessor:
             self.log.info(
                 "Timestamps are Low Precision, linearizing from frame-counter"
             )
-            fsamp, offset = np.polyfit(self.smurf_frame_counters, self.times, 1)
-            self.times = offset + fsamp * self.smurf_frame_counters
+            dt, offset = np.polyfit(self.smurf_frame_counters, self.times, 1)
+            self.times = offset + dt * self.smurf_frame_counters
 
     def bind(self, outdir, times, frame_idxs, file_idxs, pbar=False, ancil=None,
              atol=1e-4):
