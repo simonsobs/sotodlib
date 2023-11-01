@@ -319,3 +319,4 @@ class DemodSignalCut(DemodSignal):
         with h5py.File(oname, "w") as hfile:
             hfile["data"] = m
         return oname
+    
