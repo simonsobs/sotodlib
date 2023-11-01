@@ -44,6 +44,11 @@ def mapmaker_ml(job, otherargs, runargs, data):
     job_ops = job.operators
 
     if job_ops.mlmapmaker.enabled:
+        if data.comm.group_size != 1:
+            msg = "The ML mapmaker requires the process group"
+            msg += " size to be exactly one, since it uses"
+            msg += " threads for parallelism."
+            raise RuntimeError(msg)
         job_ops.mlmapmaker.out_dir = otherargs.out_dir
         job_ops.mlmapmaker.apply(data)
 
