@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.ndimage as simg
 import scipy.signal as sig
+import scipy.stats as ss
 from skimage.restoration import denoise_tv_chambolle
 from so3g.proj import RangesMatrix
 
@@ -59,11 +60,11 @@ def _jumpfinder(x, min_chunk, min_size, win_size, nsigma, max_depth=1, depth=0):
     if min_chunk is None:
         min_chunk = 20
     if min_size is None:
-        min_size = 0.1
+        min_size = ss.iqr(x, -1)
     if win_size is None:
-        win_size = 10
+        win_size = 20
     if nsigma is None:
-        nsigma = 5
+        nsigma = 25
 
     # Since this is intended for det data lets assume we either 1d or 2d data
     # and in the case of 2d data we find jumps along rows
@@ -79,7 +80,8 @@ def _jumpfinder(x, min_chunk, min_size, win_size, nsigma, max_depth=1, depth=0):
         return jumps.reshape(orig_shape)
 
     # If std is basically 0 no need to check for jumps
-    std_msk = np.isclose(x.std(axis=-1), 0.0) + (std_est(x, axis=-1) == 0)
+    std = np.std(x, axis=-1)
+    std_msk = np.isclose(std, 0.0) + np.isclose(std_est(x, axis=-1), std)
 
     msk = ~(size_msk + std_msk)
     if not np.any(msk):
@@ -132,7 +134,11 @@ def _jumpfinder(x, min_chunk, min_size, win_size, nsigma, max_depth=1, depth=0):
     )
 
     # Make a jump size cut
-    size_cut = jump_sizes > min_size
+    if isinstance(min_size, np.ndarray):
+        _min_size = min_size[jump_rows]
+    else:
+        _min_size = min_size
+    size_cut = jump_sizes > _min_size
     jump_rows = jump_rows[size_cut]
     jump_cols = jump_cols[size_cut]
 
@@ -418,6 +424,9 @@ def jumpfix_median_sub(x, jumps, inplace=False):
     x_fixed = x
     if not inplace:
         x_fixed = x.copy()
+    orig_shape = x.shape
+    x_fixed = np.atleast_2d(x_fixed)
+    jumps = np.atleast_2d(jumps)
 
     padded_shape = list(jumps.shape)
     padded_shape[-1] += 2
@@ -436,7 +445,7 @@ def jumpfix_median_sub(x, jumps, inplace=False):
     for r, (c1, c2) in zip(rows, cols):
         x_fixed[r, c1:c2] -= np.median(x_fixed[r, c1:c2])
 
-    return x_fixed
+    return x_fixed.reshape(orig_shape)
 
 
 def find_jumps(
@@ -446,7 +455,7 @@ def find_jumps(
     buff_size=0,
     jumpfinder=_jumpfinder,
     min_chunk=None,
-    min_sigma=5,
+    min_sigma=None,
     min_size=None,
     win_size=None,
     nsigma=None,
@@ -483,6 +492,7 @@ def find_jumps(
         min_size: The smallest jump size counted as a jump.
                   By default this is set to None and min_sigma is used instead,
                   if set this will override min_sigma.
+                  If both min_sigma and min_size are None then the IQR is used as min_size.
 
         win_size: Number of samples to average over when checking jump size.
                   Also used to apply the SG filter when peak finding.
@@ -524,24 +534,36 @@ def find_jumps(
     if len(signal.shape) > 2:
         raise ValueError("Jumpfinder only works on 1D or 2D data")
 
-    if min_size is None:
+    if min_size is None and min_sigma is not None:
         min_size = min_sigma * std_est(signal, axis=-1)
+    if np.ndim(min_size) > 1:  # type: ignore
+        raise ValueError("min_size must be 1d or a scalar")
+    elif np.ndim(min_size) == 1:  # type: ignore
+        min_size = np.array(min_size)
 
     do_fix = fix is not None
     is_med = False
     if do_fix:
         is_med = fix.__name__ == "jumpfix_median_sub"
-    orig_signal = signal
+    _signal = signal
     if not (inplace and is_med):
         _signal = signal.copy()
 
+    # Median subtract, if we don't do this then when we cumsum we get floats
+    # that are too big and lack the precicion to find jumps well
+    _signal -= np.median(_signal, axis=-1)[..., None]
+
     jumps = np.zeros(signal.shape, dtype=bool)
     msk = np.ones(len(jumps), dtype=bool)
-    for i in range(max_iters):
+    for _ in range(max_iters):
+        if isinstance(min_size, np.ndarray):
+            _min_size = min_size[msk]
+        else:
+            _min_size = min_size
         _jumps = jumpfinder(
             _signal[msk],
             min_chunk=min_chunk,
-            min_size=min_size,
+            min_size=_min_size,
             win_size=win_size,
             nsigma=nsigma,
             max_depth=max_depth,
@@ -562,6 +584,6 @@ def find_jumps(
         if is_med:
             fixed = _signal
         else:
-            fixed = fix(signal, jumps, inplace)
+            fixed = fix(_signal, jumps, inplace)
         return jump_ranges, fixed
     return jump_ranges
