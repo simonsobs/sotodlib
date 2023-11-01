@@ -9,6 +9,7 @@ import toast
 import toast.ops
 
 from .. import ops as so_ops
+from .job import workflow_timer
 
 
 def setup_deconvolve_detector_timeconstant(operators):
@@ -28,6 +29,7 @@ def setup_deconvolve_detector_timeconstant(operators):
     )
 
 
+@workflow_timer
 def deconvolve_detector_timeconstant(job, otherargs, runargs, data):
     """Deconvolve the detector timeconstants.
 
@@ -41,23 +43,11 @@ def deconvolve_detector_timeconstant(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
     if job_ops.deconvolve_time_constant.enabled:
-        log.info_rank(
-            "Running detector timeconstant deconvolution...", comm=data.comm.comm_world
-        )
         job_ops.deconvolve_time_constant.apply(data)
-        log.info_rank(
-            "Deconvolved time constant in", comm=data.comm.comm_world, timer=timer
-        )
-        job_ops.mem_count.prefix = "After deconvolving time constant"
-        job_ops.mem_count.apply(data)
 
 
 def setup_filter_hwpss(operators):
@@ -73,6 +63,7 @@ def setup_filter_hwpss(operators):
     operators.append(toast.ops.HWPFilter(name="hwpfilter", enabled=False))
 
 
+@workflow_timer
 def filter_hwpss(job, otherargs, runargs, data):
     """Filter HWP synchronous signal.
 
@@ -89,17 +80,11 @@ def filter_hwpss(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
     if job_ops.hwpfilter.enabled:
-        log.info_rank("Running HWPSS filtering...", comm=data.comm.comm_world)
         job_ops.hwpfilter.apply(data)
-        log.info_rank("HWP-filtered in", comm=data.comm.comm_world, timer=timer)
 
 
 def setup_filter_ground(operators):
@@ -115,6 +100,7 @@ def setup_filter_ground(operators):
     operators.append(toast.ops.GroundFilter(name="groundfilter", enabled=False))
 
 
+@workflow_timer
 def filter_ground(job, otherargs, runargs, data):
     """Filter Azimuth synchronous signal.
 
@@ -128,19 +114,11 @@ def filter_ground(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
     if job_ops.groundfilter.enabled:
-        log.info_rank("Running ground filter...", comm=data.comm.comm_world)
         job_ops.groundfilter.apply(data)
-        log.info_rank(
-            "Finished ground-filtering in", comm=data.comm.comm_world, timer=timer
-        )
 
 
 def setup_filter_poly1d(operators):
@@ -156,6 +134,7 @@ def setup_filter_poly1d(operators):
     operators.append(toast.ops.PolyFilter(name="polyfilter1D"))
 
 
+@workflow_timer
 def filter_poly1d(job, otherargs, runargs, data):
     """Filter scans with 1D polynomial.
 
@@ -169,19 +148,11 @@ def filter_poly1d(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
     if job_ops.polyfilter1D.enabled:
-        log.info_rank("Running 1D polynomial filtering", comm=data.comm.comm_world)
         job_ops.polyfilter1D.apply(data)
-        log.info_rank(
-            "Finished 1D-poly-filtering in", comm=data.comm.comm_world, timer=timer
-        )
 
 
 def setup_filter_poly2d(operators):
@@ -197,6 +168,7 @@ def setup_filter_poly2d(operators):
     operators.append(toast.ops.PolyFilter2D(name="polyfilter2D", enabled=False))
 
 
+@workflow_timer
 def filter_poly2d(job, otherargs, runargs, data):
     """Filter data with a 2D polynomial.
 
@@ -210,19 +182,11 @@ def filter_poly2d(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
     if job_ops.polyfilter2D.enabled:
-        log.info_rank("Running 2D polynomial filtering", comm=data.comm.comm_world)
         job_ops.polyfilter2D.apply(data)
-        log.info_rank(
-            "Finished 2D-poly-filtering in", comm=data.comm.comm_world, timer=timer
-        )
 
 
 def setup_filter_common_mode(operators):
@@ -240,6 +204,7 @@ def setup_filter_common_mode(operators):
     )
 
 
+@workflow_timer
 def filter_common_mode(job, otherargs, runargs, data):
     """Filter data to remove common modes across the detectors.
 
@@ -253,16 +218,8 @@ def filter_common_mode(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
     if job_ops.common_mode_filter.enabled:
-        log.info_rank("Running common mode filtering...", comm=data.comm.comm_world)
         job_ops.common_mode_filter.apply(data)
-        log.info_rank(
-            "Finished common-mode-filtering in", comm=data.comm.comm_world, timer=timer
-        )

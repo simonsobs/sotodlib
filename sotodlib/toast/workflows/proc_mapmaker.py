@@ -10,6 +10,7 @@ import toast.ops
 from toast.observation import default_values as defaults
 
 from .. import ops as so_ops
+from .job import workflow_timer
 
 
 def setup_mapmaker(operators, templates):
@@ -30,7 +31,7 @@ def setup_mapmaker(operators, templates):
     )
     templates.append(
         toast.templates.Periodic(
-            name="sss",
+            name="azss",
             key=defaults.azimuth,
             flags=defaults.shared_flags,
             flag_mask=defaults.shared_mask_invalid,
@@ -47,6 +48,7 @@ def setup_mapmaker(operators, templates):
     operators.append(toast.ops.MapMaker(name="mapmaker"))
 
 
+@workflow_timer
 def mapmaker(job, otherargs, runargs, data):
     """Run the TOAST mapmaker.
 
@@ -61,8 +63,6 @@ def mapmaker(job, otherargs, runargs, data):
 
     """
     log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
 
     # Configured templates for this job
     job_tmpls = job.templates
@@ -70,21 +70,20 @@ def mapmaker(job, otherargs, runargs, data):
     # Configured operators for this job
     job_ops = job.operators
 
-    job_ops.mapmaker.binning = job_ops.binner
-    job_ops.mapmaker.template_matrix = toast.ops.TemplateMatrix(
-        templates=[job_tmpls.baselines, job_tmpls.sss]
-    )
-    job_ops.mapmaker.map_binning = job_ops.binner_final
-    job_ops.mapmaker.det_data = job_ops.sim_noise.det_data
-    job_ops.mapmaker.output_dir = otherargs.out_dir
-
     if job_ops.mapmaker.enabled:
+        job_ops.mapmaker.binning = job_ops.binner
+        job_ops.mapmaker.template_matrix = toast.ops.TemplateMatrix(
+            templates=[job_tmpls.baselines, job_tmpls.sss]
+        )
+        job_ops.mapmaker.map_binning = job_ops.binner_final
+        job_ops.mapmaker.det_data = job_ops.sim_noise.det_data
+        job_ops.mapmaker.output_dir = otherargs.out_dir
         tmsg = "  "
         for tmpl in job_ops.mapmaker.template_matrix.templates:
             estr = "(enabled)" if tmpl.enabled else "(disabled)"
             tmsg += f"{tmpl.name} {estr}, "
         log.info_rank(
-            "Running template regression mapmaker with templates:",
+            "  Using regression templates:",
             comm=data.comm.comm_world,
         )
         log.info_rank(
@@ -96,7 +95,7 @@ def mapmaker(job, otherargs, runargs, data):
         noise_model = None
         if job_ops.noise_estim.enabled and job_ops.noise_estim_fit.enabled:
             # We have a noise estimate
-            log.info_rank("Using estimated noise model", comm=data.comm.comm_world)
+            log.info_rank("  Using estimated noise model", comm=data.comm.comm_world)
             noise_model = job_ops.noise_estim_fit.out_model
         else:
             have_noise = True
@@ -105,7 +104,7 @@ def mapmaker(job, otherargs, runargs, data):
                     have_noise = False
             if have_noise:
                 log.info_rank(
-                    "Using noise model from data files", comm=data.comm.comm_world
+                    "  Using noise model from data files", comm=data.comm.comm_world
                 )
                 noise_model = "noise_model"
             else:
@@ -125,7 +124,7 @@ def mapmaker(job, otherargs, runargs, data):
                         },
                     )
                 log.info_rank(
-                    "Using fake noise model with uniform weighting",
+                    "  Using fake noise model with uniform weighting",
                     comm=data.comm.comm_world,
                 )
                 noise_model = "fake_noise"
@@ -164,8 +163,3 @@ def mapmaker(job, otherargs, runargs, data):
             data._comm = orig_comm
         else:
             job_ops.mapmaker.apply(data)
-        log.info_rank(
-            "Finished template regression map-making in",
-            comm=data.comm.comm_world,
-            timer=timer,
-        )

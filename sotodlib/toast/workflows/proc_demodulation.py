@@ -9,6 +9,7 @@ import toast
 import toast.ops
 
 from .. import ops as so_ops
+from .job import workflow_timer
 
 
 def setup_demodulate(operators):
@@ -24,6 +25,7 @@ def setup_demodulate(operators):
     operators.append(toast.ops.Demodulate(name="demodulate", enabled=False))
 
 
+@workflow_timer
 def demodulate(job, otherargs, runargs, data):
     """Run timestream demodulation.
 
@@ -37,10 +39,6 @@ def demodulate(job, otherargs, runargs, data):
         (Data):  The new, demodulated data.
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
@@ -49,9 +47,7 @@ def demodulate(job, otherargs, runargs, data):
         # new TOAST data object
         job_ops.demodulate.stokes_weights = job_ops.weights_radec
         job_ops.demodulate.hwp_angle = job_ops.sim_ground.hwp_angle
-        log.info_rank("Running demodulation...", comm=data.comm.comm_world)
         data = job_ops.demodulate.apply(data)
-        log.info_rank("Demodulated in", comm=data.comm.comm_world, timer=timer)
         demod_weights = toast.ops.StokesWeightsDemod()
         job_ops.weights_radec = demod_weights
         if hasattr(job_ops, "binner"):

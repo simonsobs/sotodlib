@@ -9,6 +9,7 @@ import toast
 import toast.ops
 
 from .. import ops as so_ops
+from .job import workflow_timer
 
 
 def setup_simulate_wiregrid_signal(operators):
@@ -21,11 +22,10 @@ def setup_simulate_wiregrid_signal(operators):
         None
 
     """
-    operators.append(
-        so_ops.SimWireGrid(name="sim_wiregrid", enabled=False)
-    )
+    operators.append(so_ops.SimWireGrid(name="sim_wiregrid", enabled=False))
 
 
+@workflow_timer
 def simulate_wiregrid_signal(job, otherargs, runargs, data):
     """Simulate wire grid signal.
 
@@ -39,19 +39,13 @@ def simulate_wiregrid_signal(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
     if job_ops.sim_wiregrid.enabled:
         job_ops.sim_wiregrid.detector_pointing = job_ops.det_pointing_azel
         job_ops.sim_wiregrid.detector_weights = job_ops.weights_azel
-        log.info_rank("Running wiregrid simulation...", comm=data.comm.comm_world)
         job_ops.sim_wiregrid.apply(data)
-        log.info_rank("Simulated wiregrid in", comm=data.comm.comm_world, timer=timer)
 
 
 def setup_simulate_stimulator_signal(operators):
@@ -64,11 +58,10 @@ def setup_simulate_stimulator_signal(operators):
         None
 
     """
-    operators.append(
-        so_ops.SimStimulator(name="sim_stimulator", enabled=False)
-    )
+    operators.append(so_ops.SimStimulator(name="sim_stimulator", enabled=False))
 
 
+@workflow_timer
 def simulate_stimulator_signal(job, otherargs, runargs, data):
     """Simulate stimulator signal.
 
@@ -82,14 +75,8 @@ def simulate_stimulator_signal(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
     if job_ops.sim_stimulator.enabled:
-        log.info_rank("Running stimulator simulation...", comm=data.comm.comm_world)
         job_ops.sim_stimulator.apply(data)
-        log.info_rank("Simulated stimulator in", comm=data.comm.comm_world, timer=timer)

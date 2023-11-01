@@ -9,6 +9,7 @@ import toast
 import toast.ops
 
 from .. import ops as so_ops
+from .job import workflow_timer
 
 
 def setup_raw_statistics(operators):
@@ -24,6 +25,7 @@ def setup_raw_statistics(operators):
     operators.append(toast.ops.Statistics(name="raw_statistics", enabled=False))
 
 
+@workflow_timer
 def raw_statistics(job, otherargs, runargs, data):
     """Compute timestream statistics on the raw data.
 
@@ -37,23 +39,12 @@ def raw_statistics(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
-    job_ops.raw_statistics.output_dir = otherargs.out_dir
-
     if job_ops.raw_statistics.enabled:
-        log.info_rank("Running raw statistics...", comm=data.comm.comm_world)
+        job_ops.raw_statistics.output_dir = otherargs.out_dir
         job_ops.raw_statistics.apply(data)
-        log.info_rank(
-            "Calculated raw statistics in", comm=data.comm.comm_world, timer=timer
-        )
-        job_ops.mem_count.prefix = "After raw statistics"
-        job_ops.mem_count.apply(data)
 
 
 def setup_filtered_statistics(operators):
@@ -69,6 +60,7 @@ def setup_filtered_statistics(operators):
     operators.append(toast.ops.Statistics(name="filtered_statistics", enabled=False))
 
 
+@workflow_timer
 def filtered_statistics(job, otherargs, runargs, data):
     """Compute timestream statistics on the filtered data.
 
@@ -82,25 +74,12 @@ def filtered_statistics(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
-    job_ops.filtered_statistics.output_dir = otherargs.out_dir
-
     if job_ops.filtered_statistics.enabled:
-        log.info_rank(
-            "Running statistics on filtered data...", comm=data.comm.comm_world
-        )
+        job_ops.filtered_statistics.output_dir = otherargs.out_dir
         job_ops.filtered_statistics.apply(data)
-        log.info_rank(
-            "Calculated filtered statistics in", comm=data.comm.comm_world, timer=timer
-        )
-        job_ops.mem_count.prefix = "After filtered statistics"
-        job_ops.mem_count.apply(data)
 
 
 def setup_hn_map(operators):
@@ -116,6 +95,7 @@ def setup_hn_map(operators):
     operators.append(so_ops.Hn(name="h_n", enabled=False))
 
 
+@workflow_timer
 def hn_map(job, otherargs, runargs, data):
     """Compute the H_n map.
 
@@ -129,23 +109,14 @@ def hn_map(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
-    job_ops.h_n.pixel_pointing = job.pixels_final
-    job_ops.h_n.pixel_dist = job_ops.binner_final.pixel_dist
-    job_ops.h_n.output_dir = otherargs.out_dir
-
     if job_ops.h_n.enabled:
-        log.info_rank("Running h_n calculation...", comm=data.comm.comm_world)
+        job_ops.h_n.pixel_pointing = job.pixels_final
+        job_ops.h_n.pixel_dist = job_ops.binner_final.pixel_dist
+        job_ops.h_n.output_dir = otherargs.out_dir
         job_ops.h_n.apply(data)
-        log.info_rank("Calculated h_n in", comm=data.comm.comm_world, timer=timer)
-        job_ops.mem_count.prefix = "After h_n map"
-        job_ops.mem_count.apply(data)
 
 
 def setup_cadence_map(operators):
@@ -161,6 +132,7 @@ def setup_cadence_map(operators):
     operators.append(toast.ops.CadenceMap(name="cadence_map", enabled=False))
 
 
+@workflow_timer
 def cadence_map(job, otherargs, runargs, data):
     """Compute the cadence map.
 
@@ -174,25 +146,14 @@ def cadence_map(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
-    job_ops.cadence_map.pixel_pointing = job.pixels_final
-    job_ops.cadence_map.pixel_dist = job_ops.binner_final.pixel_dist
-    job_ops.cadence_map.output_dir = otherargs.out_dir
-
     if job_ops.cadence_map.enabled:
-        log.info_rank("Running cadence map...", comm=data.comm.comm_world)
+        job_ops.cadence_map.pixel_pointing = job.pixels_final
+        job_ops.cadence_map.pixel_dist = job_ops.binner_final.pixel_dist
+        job_ops.cadence_map.output_dir = otherargs.out_dir
         job_ops.cadence_map.apply(data)
-        log.info_rank(
-            "Calculated cadence map in", comm=data.comm.comm_world, timer=timer
-        )
-        job_ops.mem_count.prefix = "After cadence map"
-        job_ops.mem_count.apply(data)
 
 
 def setup_crosslinking_map(operators):
@@ -208,6 +169,7 @@ def setup_crosslinking_map(operators):
     operators.append(toast.ops.CrossLinking(name="crosslinking", enabled=False))
 
 
+@workflow_timer
 def crosslinking_map(job, otherargs, runargs, data):
     """Compute the crosslinking map.
 
@@ -221,22 +183,11 @@ def crosslinking_map(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
-    job_ops.crosslinking.pixel_pointing = job.pixels_final
-    job_ops.crosslinking.pixel_dist = job_ops.binner_final.pixel_dist
-    job_ops.crosslinking.output_dir = otherargs.out_dir
-
     if job_ops.crosslinking.enabled:
-        log.info_rank("Running crosslinking map...", comm=data.comm.comm_world)
+        job_ops.crosslinking.pixel_pointing = job.pixels_final
+        job_ops.crosslinking.pixel_dist = job_ops.binner_final.pixel_dist
+        job_ops.crosslinking.output_dir = otherargs.out_dir
         job_ops.crosslinking.apply(data)
-        log.info_rank(
-            "Calculated crosslinking map in", comm=data.comm.comm_world, timer=timer
-        )
-        job_ops.mem_count.prefix = "After crosslinking map"
-        job_ops.mem_count.apply(data)

@@ -2,8 +2,48 @@
 # Full license can be found in the top level "LICENSE" file.
 
 import argparse
+from functools import wraps
 
 import toast
+import toast.mpi
+
+
+def workflow_timer(f):
+    """Decorator for timing workflow functions.
+
+    This requires that the workflow function conform to the standard
+    function signature.
+
+    """
+    fname = f.__qualname__
+
+    @wraps(f)
+    def df(job, otherargs, runargs, *args):
+        log = toast.utils.Logger.get()
+        timer = toast.timing.Timer()
+        timer.start()
+
+        data = None
+        comm = None
+        for arg in args:
+            if isinstance(arg, toast.Data):
+                data = arg
+            elif isinstance(arg, toast.mpi.MPI_Comm):
+                comm = arg
+        if comm is None:
+            comm = data.comm.comm_world
+
+        log.info_rank(f"Running {fname}...", comm=comm)
+
+        result = f(job, otherargs, runargs, data)
+
+        log.info_rank(f"Finished {fname} in", comm=comm, timer=timer)
+        if data is not None:
+            job.operators.mem_count.prefix = f"After {fname}"
+            job.operators.mem_count.apply(data)
+        return result
+
+    return df
 
 
 def setup_job(

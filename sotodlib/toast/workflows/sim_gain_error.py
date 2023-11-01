@@ -9,6 +9,7 @@ import toast
 import toast.ops
 
 from .. import ops as so_ops
+from .job import workflow_timer
 
 
 def setup_simulate_calibration_error(operators):
@@ -24,6 +25,7 @@ def setup_simulate_calibration_error(operators):
     operators.append(toast.ops.GainScrambler(name="gainscrambler", enabled=False))
 
 
+@workflow_timer
 def simulate_calibration_error(job, otherargs, runargs, data):
     """Simulate calibration errors.
 
@@ -37,10 +39,6 @@ def simulate_calibration_error(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
@@ -48,8 +46,4 @@ def simulate_calibration_error(job, otherargs, runargs, data):
         job_ops.gainscrambler.realization = otherargs.realization
 
     if job_ops.gainscrambler.enabled:
-        log.info_rank("Running simulated gain errors...", comm=data.comm.comm_world)
         job_ops.gainscrambler.apply(data)
-        log.info_rank(
-            "Simulated gain errors in", comm=data.comm.comm_world, timer=timer
-        )

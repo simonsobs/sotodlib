@@ -9,6 +9,7 @@ import toast
 import toast.ops
 
 from .. import ops as so_ops
+from .job import workflow_timer
 
 
 def setup_simulate_atmosphere_signal(operators):
@@ -59,6 +60,7 @@ def setup_simulate_atmosphere_signal(operators):
     )
 
 
+@workflow_timer
 def simulate_atmosphere_signal(job, otherargs, runargs, data):
     """Simulate atmosphere signal.
 
@@ -76,10 +78,6 @@ def simulate_atmosphere_signal(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
@@ -93,10 +91,5 @@ def simulate_atmosphere_signal(job, otherargs, runargs, data):
         sim_atm.detector_pointing = job_ops.det_pointing_azel
         if sim_atm.polarization_fraction != 0:
             sim_atm.detector_weights = job_ops.weights_azel
-        log.info_rank(f"Running {sim_atm.name}...", comm=data.comm.comm_world)
         sim_atm.apply(data)
-        log.info_rank(
-            f"Applied {sim_atm.name} in", comm=data.comm.comm_world, timer=timer
-        )
-        job_ops.mem_count.prefix = f"After {sim_atm.name}"
-        job_ops.mem_count.apply(data)
+

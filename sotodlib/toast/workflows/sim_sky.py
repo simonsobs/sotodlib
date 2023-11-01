@@ -10,6 +10,7 @@ import toast.ops
 
 from .. import ops as so_ops
 from ..instrument import simulated_telescope
+from .job import workflow_timer
 
 
 def setup_simulate_sky_map_signal(operators):
@@ -26,6 +27,7 @@ def setup_simulate_sky_map_signal(operators):
     operators.append(toast.ops.ScanWCSMap(name="scan_wcs_map", enabled=False))
 
 
+@workflow_timer
 def simulate_sky_map_signal(job, otherargs, runargs, data):
     """Scan a sky map into detector signals.
 
@@ -47,8 +49,6 @@ def simulate_sky_map_signal(job, otherargs, runargs, data):
 
     """
     log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
 
     # Configured operators for this job
     job_ops = job.operators
@@ -63,26 +63,14 @@ def simulate_sky_map_signal(job, otherargs, runargs, data):
         job_ops.scan_map.pixel_pointing = job.pixels_final
         job_ops.scan_map.stokes_weights = job_ops.weights_radec
         job_ops.scan_map.save_pointing = otherargs.full_pointing
-        log.info_rank("Simulating sky map signal", comm=data.comm.comm_world)
         job_ops.scan_map.apply(data)
-        log.info_rank(
-            "Simulated sky map signal in", comm=data.comm.comm_world, timer=timer
-        )
-        job_ops.mem_count.prefix = "After simulating sky signal"
-        job_ops.mem_count.apply(data)
 
     if job_ops.scan_wcs_map.enabled:
         job_ops.scan_wcs_map.pixel_dist = job_ops.binner_final.pixel_dist
         job_ops.scan_wcs_map.pixel_pointing = job.pixels_final
         job_ops.scan_wcs_map.stokes_weights = job_ops.weights_radec
         job_ops.scan_wcs_map.save_pointing = otherargs.full_pointing
-        log.info_rank("Simulating sky map signal", comm=data.comm.comm_world)
         job_ops.scan_wcs_map.apply(data)
-        log.info_rank(
-            "Simulated sky map signal in", comm=data.comm.comm_world, timer=timer
-        )
-        job_ops.mem_count.prefix = "After simulating sky signal"
-        job_ops.mem_count.apply(data)
 
 
 def setup_simulate_conviqt_signal(operators):
@@ -99,6 +87,7 @@ def setup_simulate_conviqt_signal(operators):
     operators.append(toast.ops.SimTEBConviqt(name="conviqt_teb", enabled=False))
 
 
+@workflow_timer
 def simulate_conviqt_signal(job, otherargs, runargs, data):
     """Use libconviqt to generate beam-convolved sky signal timestreams.
 
@@ -116,8 +105,6 @@ def simulate_conviqt_signal(job, otherargs, runargs, data):
 
     """
     log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
 
     # Configured operators for this job
     job_ops = job.operators
@@ -138,30 +125,10 @@ def simulate_conviqt_signal(job, otherargs, runargs, data):
         if job_ops.conviqt.enabled:
             job_ops.conviqt.comm = data.comm.comm_world
             job_ops.conviqt.detector_pointing = job_ops.det_pointing_radec
-            log.info_rank(
-                "Running conviqt beam convolution...", comm=data.comm.comm_world
-            )
             job_ops.conviqt.apply(data)
-            log.info_rank(
-                "Simulated beam convolved signal in",
-                comm=data.comm.comm_world,
-                timer=timer,
-            )
-            job_ops.mem_count.prefix = "After conviqt 4-pi beam convolution"
-            job_ops.mem_count.apply(data)
     else:
         if job_ops.conviqt_teb.enabled:
             job_ops.conviqt_teb.comm = data.comm.comm_world
             job_ops.conviqt_teb.detector_pointing = job_ops.det_pointing_radec
             job_ops.conviqt_teb.hwp_angle = job_ops.sim_ground.hwp_angle
-            log.info_rank(
-                "Running conviqt TEB beam convolution...", comm=data.comm.comm_world
-            )
             job_ops.conviqt_teb.apply(data)
-            log.info_rank(
-                "Simulated beam convolved signal in",
-                comm=data.comm.comm_world,
-                timer=timer,
-            )
-            job_ops.mem_count.prefix = "After conviqt_teb 4-pi beam convolution"
-            job_ops.mem_count.apply(data)

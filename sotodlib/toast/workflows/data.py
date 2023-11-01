@@ -9,6 +9,7 @@ import toast
 import toast.ops
 
 from .. import ops as so_ops
+from .job import workflow_timer
 
 
 def setup_load_data_context(operators):
@@ -21,6 +22,7 @@ def setup_load_data_context(operators):
         None
 
     """
+    raise NotImplementedError("LoadContext operator not yet merged.")
     # operators.append(
     #     so_ops.LoadContext(
     #         name="load_context",
@@ -29,6 +31,7 @@ def setup_load_data_context(operators):
     return
 
 
+@workflow_timer
 def load_data_context(job, otherargs, runargs, data):
     """Load data from a Context.
 
@@ -43,18 +46,12 @@ def load_data_context(job, otherargs, runargs, data):
 
     """
     raise NotImplementedError("LoadContext operator not yet merged.")
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
     # Load it
     if job_ops.load_context.enabled:
         job_ops.load_context.apply(data)
-        job_ops.mem_count.prefix = "After loading data from Context"
-        job_ops.mem_count.apply(data)
 
 
 def setup_load_data_hdf5(operators):
@@ -70,6 +67,7 @@ def setup_load_data_hdf5(operators):
     operators.append(toast.ops.LoadHDF5(name="load_hdf5", enabled=False))
 
 
+@workflow_timer
 def load_data_hdf5(job, otherargs, runargs, data):
     """Load data from one or more HDF5 files.
 
@@ -83,18 +81,12 @@ def load_data_hdf5(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
     # Load it
     if job_ops.load_hdf5.enabled:
         job_ops.load_hdf5.apply(data)
-        job_ops.mem_count.prefix = "After loading HDF5 data"
-        job_ops.mem_count.apply(data)
 
 
 def setup_load_data_books(operators):
@@ -110,6 +102,7 @@ def setup_load_data_books(operators):
     operators.append(so_ops.LoadBooks(name="load_books", enabled=False))
 
 
+@workflow_timer
 def load_data_books(job, otherargs, runargs, data):
     """Load data from one or more books.
 
@@ -123,18 +116,12 @@ def load_data_books(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
     # Load it
     if job_ops.load_books.enabled:
         job_ops.load_books.apply(data)
-        job_ops.mem_count.prefix = "After loading books"
-        job_ops.mem_count.apply(data)
 
 
 def setup_save_data_hdf5(operators):
@@ -150,6 +137,7 @@ def setup_save_data_hdf5(operators):
     operators.append(toast.ops.SaveHDF5(name="save_hdf5", enabled=False))
 
 
+@workflow_timer
 def save_data_hdf5(job, otherargs, runargs, data):
     """Save data to HDF5 files.
 
@@ -163,18 +151,12 @@ def save_data_hdf5(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
     # Load it
     if job_ops.save_hdf5.enabled:
         job_ops.save_hdf5.apply(data)
-        job_ops.mem_count.prefix = "After saving HDF5 data"
-        job_ops.mem_count.apply(data)
 
 
 def setup_save_data_books(operators):
@@ -190,6 +172,7 @@ def setup_save_data_books(operators):
     operators.append(so_ops.SaveBooks(name="save_books", enabled=False))
 
 
+@workflow_timer
 def save_data_books(job, otherargs, runargs, data):
     """Save data to books.
 
@@ -203,15 +186,9 @@ def save_data_books(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
     # Load it
     if job_ops.save_books.enabled:
         job_ops.save_books.apply(data)
-        job_ops.mem_count.prefix = "After saving book data"
-        job_ops.mem_count.apply(data)

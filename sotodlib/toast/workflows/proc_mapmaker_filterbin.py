@@ -10,6 +10,7 @@ import toast.ops
 from toast.observation import default_values as defaults
 
 from .. import ops as so_ops
+from .job import workflow_timer
 
 
 def setup_mapmaker_filterbin(operators):
@@ -25,6 +26,7 @@ def setup_mapmaker_filterbin(operators):
     operators.append(toast.ops.FilterBin(name="filterbin", enabled=False))
 
 
+@workflow_timer
 def mapmaker_filterbin(job, otherargs, runargs, data):
     """Run the TOAST FilterBin mapmaker.
 
@@ -39,18 +41,14 @@ def mapmaker_filterbin(job, otherargs, runargs, data):
 
     """
     log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
 
     # Configured operators for this job
     job_ops = job.operators
 
-    job_ops.filterbin.binning = job_ops.binner_final
-    job_ops.filterbin.det_data = job_ops.sim_noise.det_data
-    job_ops.filterbin.output_dir = otherargs.out_dir
-
     if job_ops.filterbin.enabled:
-        log.info_rank("Running FilterBin mapmaker", comm=data.comm.comm_world)
+        job_ops.filterbin.binning = job_ops.binner_final
+        job_ops.filterbin.det_data = job_ops.sim_noise.det_data
+        job_ops.filterbin.output_dir = otherargs.out_dir
         if otherargs.obsmaps:
             # Map each observation separately
             timer_obs = toast.timing.Timer()
@@ -83,8 +81,3 @@ def mapmaker_filterbin(job, otherargs, runargs, data):
             data._comm = orig_comm
         else:
             job_ops.filterbin.apply(data)
-        log.info_rank(
-            "Finished FilterBin map-making in", comm=data.comm.comm_world, timer=timer
-        )
-        job_ops.mem_count.prefix = "After FilterBin mapmaker"
-        job_ops.mem_count.apply(data)

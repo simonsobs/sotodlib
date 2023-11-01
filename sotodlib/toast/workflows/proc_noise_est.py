@@ -9,6 +9,7 @@ import toast
 import toast.ops
 
 from .. import ops as so_ops
+from .job import workflow_timer
 
 
 def setup_noise_estimation(operators):
@@ -39,6 +40,7 @@ def setup_noise_estimation(operators):
     )
 
 
+@workflow_timer
 def noise_estimation(job, otherargs, runargs, data):
     """Run noise estimation and create a best-fit 1/f model.
 
@@ -67,19 +69,19 @@ def noise_estimation(job, otherargs, runargs, data):
 
     # Estimate noise.
     log.info_rank(
-        "Running noise estimation for mapmaking...", comm=data.comm.comm_world
+        "  Building noise estimate...", comm=data.comm.comm_world
     )
     job_ops.noise_estim.apply(data)
     log.info_rank(
-        "Estimated mapmaking noise model in", comm=data.comm.comm_world, timer=timer
+        "  Finished noise estimate in", comm=data.comm.comm_world, timer=timer
     )
 
     # Create a fit to this noise model
     job_ops.noise_estim_fit.noise_model = job_ops.noise_estim.out_model
     log.info_rank(
-        "Running fit to mapmaking noise estimate...", comm=data.comm.comm_world
+        "  Running fit to noise estimate...", comm=data.comm.comm_world
     )
     job_ops.noise_estim_fit.apply(data)
     log.info_rank(
-        "Fit 1/f mapmaking noise model in", comm=data.comm.comm_world, timer=timer
+        "  Fit 1/f noise model in", comm=data.comm.comm_world, timer=timer
     )

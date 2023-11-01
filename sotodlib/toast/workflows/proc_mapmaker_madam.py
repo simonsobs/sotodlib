@@ -10,6 +10,7 @@ import toast.ops
 from toast.observation import default_values as defaults
 
 from .. import ops as so_ops
+from .job import workflow_timer
 
 
 def setup_mapmaker_madam(operators):
@@ -26,6 +27,7 @@ def setup_mapmaker_madam(operators):
         operators.append(toast.ops.Madam(name="madam", enabled=False))
 
 
+@workflow_timer
 def mapmaker_madam(job, otherargs, runargs, data):
     """Run the MADAM mapmaker.
 
@@ -39,10 +41,6 @@ def mapmaker_madam(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
@@ -50,8 +48,4 @@ def mapmaker_madam(job, otherargs, runargs, data):
         job_ops.madam.params = toast.ops.madam_params_from_mapmaker(job_ops.mapmaker)
         job_ops.madam.pixel_pointing = job.pixels_final
         job_ops.madam.stokes_weights = job.weights_final
-        log.info_rank("Running Madam...", comm=data.comm.comm_world)
         job_ops.madam.apply(data)
-        log.info_rank("Finished Madam in", comm=data.comm.comm_world, timer=timer)
-        job_ops.mem_count.prefix = "After Madam"
-        job_ops.mem_count.apply(data)

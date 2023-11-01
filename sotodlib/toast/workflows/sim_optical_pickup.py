@@ -9,6 +9,7 @@ import toast
 import toast.ops
 
 from .. import ops as so_ops
+from .job import workflow_timer
 
 
 def setup_simulate_scan_synchronous_signal(operators):
@@ -24,6 +25,7 @@ def setup_simulate_scan_synchronous_signal(operators):
     operators.append(toast.ops.SimScanSynchronousSignal(name="sim_sss", enabled=False))
 
 
+@workflow_timer
 def simulate_scan_synchronous_signal(job, otherargs, runargs, data):
     """Simulate scan-synchronous signal.
 
@@ -37,10 +39,6 @@ def simulate_scan_synchronous_signal(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
@@ -49,15 +47,7 @@ def simulate_scan_synchronous_signal(job, otherargs, runargs, data):
 
     if job_ops.sim_sss.enabled:
         job_ops.sim_sss.detector_pointing = job_ops.det_pointing_azel
-        log.info_rank(
-            "Running scan-synchronous signal simulation...", comm=data.comm.comm_world
-        )
         job_ops.sim_sss.apply(data)
-        log.info_rank(
-            "Simulated Scan-synchronous signal", comm=data.comm.comm_world, timer=timer
-        )
-        job_ops.mem_count.prefix = "After simulating scan-synchronous signal"
-        job_ops.mem_count.apply(data)
 
 
 def setup_simulate_hwpss_signal(operators):
@@ -73,6 +63,7 @@ def setup_simulate_hwpss_signal(operators):
     operators.append(so_ops.SimHWPSS(name="sim_hwpss", enabled=False))
 
 
+@workflow_timer
 def simulate_hwpss_signal(job, otherargs, runargs, data):
     """Simulate HWP synchronous signal.
 
@@ -86,10 +77,6 @@ def simulate_hwpss_signal(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
@@ -97,10 +84,4 @@ def simulate_hwpss_signal(job, otherargs, runargs, data):
         job_ops.sim_hwpss.hwp_angle = job_ops.sim_ground.hwp_angle
         job_ops.sim_hwpss.detector_pointing = job_ops.det_pointing_azel
         job_ops.sim_hwpss.stokes_weights = job_ops.weights_azel
-        log.info_rank("Running HWPSS simulation...", comm=data.comm.comm_world)
         job_ops.sim_hwpss.apply(data)
-        log.info_rank(
-            "Simulated HWP-synchronous signal",
-            comm=data.comm.comm_world,
-            timer=timer,
-        )

@@ -10,6 +10,7 @@ import toast.ops
 from toast.observation import default_values as defaults
 
 from .. import ops as so_ops
+from .job import workflow_timer
 
 
 def setup_mapmaker_ml(operators):
@@ -25,6 +26,7 @@ def setup_mapmaker_ml(operators):
     operators.append(so_ops.MLMapmaker(name="mlmapmaker", enabled=False, comps="TQU"))
 
 
+@workflow_timer
 def mapmaker_ml(job, otherargs, runargs, data):
     """Run the S.O. maximum likelihood mapmaker.
 
@@ -38,20 +40,10 @@ def mapmaker_ml(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
-    job_ops.mlmapmaker.out_dir = otherargs.out_dir
-
     if job_ops.mlmapmaker.enabled:
-        log.info_rank("Running ML mapmaker...", comm=data.comm.comm_world)
+        job_ops.mlmapmaker.out_dir = otherargs.out_dir
         job_ops.mlmapmaker.apply(data)
-        log.info_rank(
-            "Finished ML map-making in", comm=data.comm.comm_world, timer=timer
-        )
-        job_ops.mem_count.prefix = "After ML mapmaker"
-        job_ops.mem_count.apply(data)
+

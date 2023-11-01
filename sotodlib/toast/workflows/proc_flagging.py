@@ -9,6 +9,7 @@ import toast
 import toast.ops
 
 from .. import ops as so_ops
+from .job import workflow_timer
 
 
 def setup_flag_sso(operators):
@@ -24,6 +25,7 @@ def setup_flag_sso(operators):
     operators.append(toast.ops.FlagSSO(name="flag_sso", enabled=False))
 
 
+@workflow_timer
 def flag_sso(job, otherargs, runargs, data):
     """Flag solarsystem objects.
 
@@ -37,21 +39,12 @@ def flag_sso(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
-    job_ops.flag_sso.detector_pointing = job_ops.det_pointing_azel
-
     if job_ops.flag_sso.enabled:
-        log.info_rank("Running SSO flagging...", comm=data.comm.comm_world)
+        job_ops.flag_sso.detector_pointing = job_ops.det_pointing_azel
         job_ops.flag_sso.apply(data)
-        log.info_rank("Flagged SSOs in", comm=data.comm.comm_world, timer=timer)
-        job_ops.mem_count.prefix = "After flagging SSOs"
-        job_ops.mem_count.apply(data)
 
 
 def setup_flag_noise_outliers(operators):
@@ -89,6 +82,7 @@ def setup_flag_noise_outliers(operators):
     )
 
 
+@workflow_timer
 def flag_noise_outliers(job, otherargs, runargs, data):
     """Flag detectors with extremely bad noise properties.
 
@@ -122,26 +116,32 @@ def flag_noise_outliers(job, otherargs, runargs, data):
         return
 
     # Estimate noise.
-    log.info_rank("Running noise estimation on raw data...", comm=data.comm.comm_world)
+    log.info_rank(
+        "  Running noise estimation on raw data...", comm=data.comm.comm_world
+    )
     job_ops.noise_cut.apply(data)
-    log.info_rank("Estimated raw data noise in", comm=data.comm.comm_world, timer=timer)
+    log.info_rank(
+        "  Estimated raw data noise in", comm=data.comm.comm_world, timer=timer
+    )
 
     # Create a fit to this noise model
     job_ops.noise_cut_fit.noise_model = job_ops.noise_cut.out_model
     log.info_rank(
-        "Running 1/f fit to estimated raw noise model", comm=data.comm.comm_world
+        "  Running 1/f fit to estimated raw noise model", comm=data.comm.comm_world
     )
     job_ops.noise_cut_fit.apply(data)
-    log.info_rank("Fit raw 1/f noise model in", comm=data.comm.comm_world, timer=timer)
+    log.info_rank(
+        "  Fit raw 1/f noise model in", comm=data.comm.comm_world, timer=timer
+    )
 
     # Flag detector outliers
     job_ops.noise_cut_flag.noise_model = job_ops.noise_cut.out_model
     log.info_rank(
-        "Running flagging of noise model outliers...", comm=data.comm.comm_world
+        "  Running flagging of noise model outliers...", comm=data.comm.comm_world
     )
     job_ops.noise_cut_flag.apply(data)
     log.info_rank(
-        "Flag raw noise model outliers in", comm=data.comm.comm_world, timer=timer
+        "  Flag raw noise model outliers in", comm=data.comm.comm_world, timer=timer
     )
 
     # Delete these temporary models

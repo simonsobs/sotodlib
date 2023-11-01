@@ -13,6 +13,7 @@ import toast
 import toast.ops
 
 from .. import ops as so_ops
+from .job import workflow_timer
 
 
 def setup_simulate_source_signal(operators):
@@ -28,6 +29,7 @@ def setup_simulate_source_signal(operators):
     operators.append(so_ops.SimSource(name="sim_source", enabled=False))
 
 
+@workflow_timer
 def simulate_source_signal(job, otherargs, runargs, data):
     """Simulate detector response from artificial sources.
 
@@ -44,10 +46,6 @@ def simulate_source_signal(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
@@ -60,15 +58,7 @@ def simulate_source_signal(job, otherargs, runargs, data):
         raise NotImplementedError("SimSource disabled until FoV fixed.")
         if job_ops.sim_source.polarization_fraction != 0:
             job_ops.sim_source.detector_weights = job_ops.weights_azel
-        log.info_rank(
-            "Running artificial source simulation...", comm=data.comm.comm_world
-        )
         job_ops.sim_source.apply(data)
-        log.info_rank(
-            "Simulated and observed artificial source",
-            comm=data.comm.comm_world,
-            timer=timer,
-        )
 
 
 def setup_simulate_sso_signal(operators):
@@ -84,6 +74,7 @@ def setup_simulate_sso_signal(operators):
     operators.append(so_ops.SimSSO(name="sim_sso", enabled=False))
 
 
+@workflow_timer
 def simulate_sso_signal(job, otherargs, runargs, data):
     """Simulate detector response from solar system objects.
 
@@ -97,23 +88,13 @@ def simulate_sso_signal(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
     if job_ops.sim_sso.enabled:
         job_ops.sim_sso.detector_pointing = job_ops.det_pointing_azel
         job_ops.sim_sso.detector_weights = job_ops.weights_azel
-        log.info_rank("Running SSO simulation...", comm=data.comm.comm_world)
         job_ops.sim_sso.apply(data)
-        log.info_rank(
-            "Simulated and observed solar system objects",
-            comm=data.comm.comm_world,
-            timer=timer,
-        )
 
 
 def setup_simulate_catalog_signal(operators):
@@ -129,6 +110,7 @@ def setup_simulate_catalog_signal(operators):
     operators.append(so_ops.SimCatalog(name="sim_catalog", enabled=False))
 
 
+@workflow_timer
 def simulate_catalog_signal(job, otherargs, runargs, data):
     """Simulate detector response from a point source catalog.
 
@@ -142,19 +124,9 @@ def simulate_catalog_signal(job, otherargs, runargs, data):
         None
 
     """
-    log = toast.utils.Logger.get()
-    timer = toast.timing.Timer()
-    timer.start()
-
     # Configured operators for this job
     job_ops = job.operators
 
     if job_ops.sim_catalog.enabled:
         job_ops.sim_catalog.detector_pointing = job_ops.det_pointing_radec
-        log.info_rank("Running catalog simulation...", comm=data.comm.comm_world)
         job_ops.sim_catalog.apply(data)
-        log.info_rank(
-            "Simulated and observed catalog",
-            comm=data.comm.comm_world,
-            timer=timer,
-        )
