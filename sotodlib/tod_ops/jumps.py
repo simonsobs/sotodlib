@@ -442,6 +442,7 @@ def jumpfix_median_sub(x, jumps, inplace=False):
 def find_jumps(
     tod,
     signal=None,
+    max_iters=1,
     buff_size=0,
     jumpfinder=_jumpfinder,
     min_chunk=None,
@@ -449,7 +450,7 @@ def find_jumps(
     min_size=None,
     win_size=None,
     nsigma=None,
-    max_depth=1,
+    max_depth=0,
     fix=None,
     inplace=False,
     **kwargs
@@ -467,6 +468,9 @@ def find_jumps(
         buff_size: How many samples to flag around each jump in RangesMatrix.
 
         jumpfinder: Jumpfinding function to use.
+
+        max_iters: Maximum iterations of the jumpfind -> median sub -> jumpfind loop.
+                   This is prefered over increasing depth in general.
 
         min_chunk: The smallest chunk of data to look for jumps in.
 
@@ -522,20 +526,42 @@ def find_jumps(
 
     if min_size is None:
         min_size = min_sigma * std_est(signal, axis=-1)
-    jumps = jumpfinder(
-        signal,
-        min_chunk=min_chunk,
-        min_size=min_size,
-        win_size=win_size,
-        nsigma=nsigma,
-        max_depth=max_depth,
-        **kwargs
-    )
+
+    do_fix = fix is not None
+    is_med = False
+    if do_fix:
+        is_med = fix.__name__ == "jumpfix_median_sub"
+    orig_signal = signal
+    if not (inplace and is_med):
+        _signal = signal.copy()
+
+    jumps = np.zeros(signal.shape, dtype=bool)
+    msk = np.ones(len(jumps), dtype=bool)
+    for i in range(max_iters):
+        _jumps = jumpfinder(
+            _signal[msk],
+            min_chunk=min_chunk,
+            min_size=min_size,
+            win_size=win_size,
+            nsigma=nsigma,
+            max_depth=max_depth,
+            **kwargs
+        )
+        if np.sum(_jumps) == 0:
+            break
+
+        jumps[msk] += _jumps
+        _signal[msk] = jumpfix_median_sub(_signal[msk], _jumps, True)
+        msk = np.any(jumps, axis=-1)
 
     # TODO: include heights in output
 
-    if fix is not None:
-        fixed = fix(signal, jumps, inplace)
-        return RangesMatrix.from_mask(jumps).buffer(buff_size), fixed
+    jump_ranges = RangesMatrix.from_mask(jumps).buffer(buff_size)
 
-    return RangesMatrix.from_mask(jumps).buffer(buff_size)
+    if do_fix:
+        if is_med:
+            fixed = _signal
+        else:
+            fixed = fix(signal, jumps, inplace)
+        return jump_ranges, fixed
+    return jump_ranges
