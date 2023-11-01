@@ -8,11 +8,11 @@ This script runs an SO time domain simulation.
 
 You can see the automatically generated command line options with:
 
-    toast_so_sim.py --help
+    toast_so_sim --help
 
 Or you can dump a config file with all the default values with:
 
-    toast_so_sim.py --default_toml config.toml
+    toast_so_sim --default_toml config.toml
 
 This script contains just comments about what is going on.  For details about all the
 options for a specific Operator, see the documentation or use the help() function from
