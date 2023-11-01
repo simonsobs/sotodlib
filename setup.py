@@ -24,10 +24,10 @@ setup_opts["entry_points"] = {
         "so_hardware_info = sotodlib.scripts.hardware_info:main",
         "so-metadata = sotodlib.core.metadata.cli:main",
         "so-site-pipeline = sotodlib.site_pipeline.cli:main",
-        "toast_so_sim = sotodlib.toast.workflows.so_sim:cli",
-        "toast_so_map = sotodlib.toast.workflows.so_map:cli",
-        "toast_so_convert = sotodlib.toast.workflows.so_convert:cli",
-        "get_wafer_offset = sotodlib.toast.workflows.get_wafer_offset:main",
+        "toast_so_sim = sotodlib.toast.scripts.so_sim:cli",
+        "toast_so_map = sotodlib.toast.scripts.so_map:cli",
+        "toast_so_convert = sotodlib.toast.scripts.so_convert:cli",
+        "get_wafer_offset = sotodlib.toast.scripts.get_wafer_offset:main",
     ]
 }
 
