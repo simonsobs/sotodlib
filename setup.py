@@ -31,15 +31,6 @@ setup_opts["entry_points"] = {
     ]
 }
 
-# left here for backward compatibility
-# new scripts should be put to console_scripts above instead
-scripts = [
-    "workflows/toast_so_sim.py",
-    "workflows/toast_so_map.py",
-    "workflows/toast_so_convert.py",
-    "workflows/get_wafer_offset.py",
-]
-
 setup_opts["name"] = "sotodlib"
 setup_opts["provides"] = "sotodlib"
 setup_opts["version"] = versioneer.get_version()
