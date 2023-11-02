@@ -283,5 +283,5 @@ Local coordinate systems
 Focal Plane from Physical Optics
 --------------------------------
 
-.. automodule:: sotodlib.coords.focal_plane
+.. automodule:: sotodlib.coords.optics
    :members:
