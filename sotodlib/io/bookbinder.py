@@ -320,6 +320,8 @@ class SmurfStreamProcessor:
 
         self.nframes = 0
         ts = []
+        smurf_frame_counters = [] # smurf frame-counter
+        fc_idx = None
         frame_idxs = []
         frame_idx = 0
         for frame in get_frame_iter(self.files):
@@ -330,6 +332,7 @@ class SmurfStreamProcessor:
             if self.nchans is None:
                 self.nchans = len(self.readout_ids)
                 self.primary_names = frame['primary'].names
+                fc_idx = list(self.primary_names).index("FrameCounter")
                 self.bias_names = frame['tes_biases'].names
                 self.timing_paradigm = frame['timing_paradigm']
                 self.session_id = frame['session_id']
@@ -340,13 +343,24 @@ class SmurfStreamProcessor:
 
             t = get_frame_times(frame)[1]
             ts.append(t)
+            smurf_frame_counters.append(frame['primary'].data[fc_idx])
             frame_idxs.append(np.full(len(t), frame_idx, dtype=np.int32))
 
             self.nframes += 1
             frame_idx += 1
 
         self.times = np.hstack(ts)
+        self.smurf_frame_counters = np.hstack(smurf_frame_counters)
         self.frame_idxs = np.hstack(frame_idxs)
+
+        # If low-precision, we need to linearize timestamps in order for
+        # bookbinder to work properly
+        if self.timing_paradigm == 'Low Precision':
+            self.log.info(
+                "Timestamps are Low Precision, linearizing from frame-counter"
+            )
+            dt, offset = np.polyfit(self.smurf_frame_counters, self.times, 1)
+            self.times = offset + dt * self.smurf_frame_counters
 
     def bind(self, outdir, times, frame_idxs, file_idxs, pbar=False, ancil=None,
              atol=1e-4):
