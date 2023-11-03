@@ -233,10 +233,10 @@ def main(config:str,
                 logger.error(f"Unable to compute roll for obs_id {obs_id}")
                 pass
 
-            if tags != [] and tags != [""]:
-                bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
-            else:
-                bookcartobsdb.update_obs(obs_id, very_clean)
+            # Make sure no invalid tags before update.
+            tags = [t.strip() for t in tags if t.strip() != '']
+
+            bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
            
         else:
             bookcart.remove(bookpath)
