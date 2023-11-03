@@ -73,7 +73,7 @@ def mapmaker(job, otherargs, runargs, data):
     if job_ops.mapmaker.enabled:
         job_ops.mapmaker.binning = job_ops.binner
         job_ops.mapmaker.template_matrix = toast.ops.TemplateMatrix(
-            templates=[job_tmpls.baselines, job_tmpls.sss]
+            templates=[job_tmpls.baselines, job_tmpls.azss]
         )
         job_ops.mapmaker.map_binning = job_ops.binner_final
         job_ops.mapmaker.det_data = job_ops.sim_noise.det_data
