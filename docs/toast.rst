@@ -109,13 +109,13 @@ workflow functions will get their arguments exclusively from config files and
 commandline arguments.
 
 There is a large-scale simulation and reduction workflow in
-``sotodlib/workflows/so_sim.py``. This script has nearly every possible
+``sotodlib/toast/scripts/so_sim.py``. This script has nearly every possible
 operator and focuses on a typical sequence of simulating different effects and
 multiple different analyses. Different reduction paths and mapmakers can be
 selectively enabled or disabled from the commandline or config files.
 
 For processing data that already exists on disk, you can look at
-``sotodlib/workflows/so_map.py`` as an example workflow. This loads data in any
+``sotodlib/toast/scripts/so_map.py`` as an example workflow. This loads data in any
 of the supported formats and has multiple mapmaking / reduction code paths that
 can be enabled.
 
