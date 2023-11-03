@@ -782,7 +782,8 @@ class BookBinder:
         # book should have at least one tag
         assert len(tags) > 0
         meta['subtype'] = tags[1] if len(tags) > 1 else ""
-        meta['tags'] = tags[2:]
+        # sanitize rest of tags
+        meta['tags'] = [t.strip() for t in tags[2:] if t.strip() != '']
         
         if (self.book.type == 'oper') and self.meta_files:
             meta['meta_files'] = self.meta_files
