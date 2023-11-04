@@ -404,8 +404,11 @@ def _scramble_bgs(bg):
 
 
 def _gen_template(ufm):
-    logger.info("Generating template for " + ufm)
-    wafer = MapMaker(north_is_highband=False, array_name=ufm)
+    logger.info(f"Generating template for {ufm}")
+    try:
+        wafer = MapMaker(north_is_highband=False, array_name=ufm, verbose=False)
+    except ValueError:
+        wafer = MapMaker(north_is_highband=False, array_name=ufm, verbose=False, use_solution_as_design=False)
     det_x = []
     det_y = []
     polang = []
@@ -417,7 +420,7 @@ def _gen_template(ufm):
             continue
         det_x.append(det.det_x)
         det_y.append(det.det_y)
-        polang.append(det.angle)
+        polang.append(det.angle_actual_deg)
         det_ids.append(det.detector_id)
         template_bg.append(det.bias_line)
         is_north.append(det.is_north)
