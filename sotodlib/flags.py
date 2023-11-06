@@ -15,95 +15,117 @@ from .tod_ops import filters
 from .tod_ops import fourier_filter
 
 
-def get_turnaround_flags_by_dazdt(
-    aman, t_buffer=1.8 ,az=None, merge=True, overwrite=False, name="turnarounds_dazdt"
+def get_turnaround_flags(
+    aman, t_buffer=1.8 ,az=None, merge=True, merge_lr=True, overwrite=False, 
+    name="turnarounds", method="scanspeed", kernel_size=400, num_min=10, qlim=1
 ):
 
     """
     Args:
         aman: AxisManager object
         t_buffer: buffer length to avoid the flactuation of daz [sec]
-        merge: If true, merge into tod.flags
+        az: The azimuth signal to look for turnarounds. If None, it defaults to
+            tod.boresight.az
+        merge: If true, merge turn-around flag into aman.flags
+        merge_lr: If true, merge left/right scan flag into aman.flags
         overwrite: If true and merge is True, write over existing flag
         name: name of flag when merged into tod.flags
+        method: If "az", flag is calculated looking at az itself.
+                If "scanspeed", flag is calculated looking at daz/dt.
+        kernel_size: size of kernel in square wave search
+        num_min: if flag has shorter range than num_min (in index unit) because of 
+                 daz/dt flactuation, that part will be removed.
 
     Returns:
         flag: Ranges object of turn-arounds
     """
     
-    # Get daz and time 
+    # Get daz
     if az == None : 
         az = np.copy(aman.boresight.az)
+             
     daz = np.diff(az)
     daz = np.append(daz,daz[-1])
-    time = aman.timestamps - aman.timestamps[0]
 
-    # derive approx daz
-    approx_daz = np.mean(daz[daz>np.percentile(daz, 95)])
-
-    # derive approx aprox daz/dt and rough number of samples in one_scan period 
-    dt = np.mean(np.diff(aman.timestamps))
-    approx_dazdt = approx_daz / dt
-    approx_samps_onescan = int(np.ptp(az) / approx_dazdt / dt)
-
-    # Make a step-function like matched filter
-    kernel_size = 400
-    kernel = np.zeros(kernel_size)
-    # normalize with approx_daz so that peaks height be ~1
-    kernel[:kernel_size//2] = 1/approx_daz
-    kernel[kernel_size//2:] = - 1/approx_daz
-    kernel /= kernel_size
-
-    # convolve signal with the kernel
-    matched = np.convolve(np.diff(aman.boresight.az), kernel, mode='same')
-    matched[:kernel_size] = 0
-    matched[-kernel_size:] = 0 
-
-    # find peaks in matched daz, height=0.1, distance=approx_samps_onescan//3 would be robust enough
-    peaks, properties = find_peaks(matched, height=0.1, distance=approx_samps_onescan//3)
-
-    # turn around flag 
-    turnaround_mask = np.zeros_like(aman.timestamps,dtype=bool)
-
-    ### flagging
     
-    mean_length = np.mean(np.diff(peaks))
-    prev = 0    
-    nbuffer = int(t_buffer/dt) # A finite buffer is needed to avoid the fluctuation of daz/dt
+    # flag of turn-around mask      
+    assert method=="az" or method=="scanspeed", "Invalid argument 'method'."
 
-    # Check the beggining part 
-    first_is_positive = False
-    if peaks[0] < mean_length//2 : 
-        first_is_positive = True
+    # original method 
+    if method=="az" : 
+        lo, hi = np.percentile(az, [qlim, 100 - qlim])
+        m = np.logical_or(az < lo, az > hi)
 
-    # search for edges of square waves looking at the peaks
-    for p in peaks : 
-        start = prev
-        end = p
-        length = p-prev
-        middle = start + length//2
-        prev = p
-
-        turnaround_mask[middle-nbuffer:middle+nbuffer] = True
-        turnaround_mask[prev-nbuffer:prev+nbuffer] = True
-        
-    # we don't know the end of the last square wave, so use the mean of wave width
-    start = prev
-    end = prev + mean_length
-    middle = start + mean_length//2
-    
-    turnaround_mask[int(middle-nbuffer):int(middle+nbuffer)] = True
-    turnaround_mask[int(prev-nbuffer):int(prev+nbuffer)] = True    
-    
-    # treatment of the begining
-    if first_is_positive : 
-        turnaround_mask[:peaks[0]+nbuffer] = True
-
+        ta_flag = Ranges.from_bitmask(m)
+    # daz/dt
     else : 
-        turnaround_mask[:int(peaks[0]-mean_length//2)] = True
-        
-    ta_flag = Ranges.from_bitmask(turnaround_mask)
+        # derive approx daz
+        approx_daz = np.mean(daz[daz>np.percentile(daz, 95)])
 
+        # derive approx aprox daz/dt and rough number of samples in one_scan period 
+        dt = np.mean(np.diff(aman.timestamps))
+        approx_dazdt = approx_daz / dt
+        approx_samps_onescan = int(np.ptp(az) / approx_dazdt / dt)
+
+        # Make a step-function like matched filter
+        kernel = np.zeros(kernel_size)
+        # normalize with approx_daz so that peaks height be ~1
+        kernel[:kernel_size//2] = 1/approx_daz
+        kernel[kernel_size//2:] = - 1/approx_daz
+        kernel /= kernel_size
+
+        # convolve signal with the kernel
+        matched = np.convolve(np.diff(aman.boresight.az), kernel, mode='same')
+
+        # find peaks in matched daz, height=0.1, distance=approx_samps_onescan//3 would be robust enough
+        peaks_pos, properties_pos = find_peaks(matched, height=0.1, distance=approx_samps_onescan//3)
+        peaks_neg, properties_neg = find_peaks(-matched, height=0.1, distance=approx_samps_onescan//3)
+        peaks = np.sort(np.append(peaks_pos,peaks_neg))
+        mean_length = np.mean(np.diff(peaks[1:-1]))
+        
+
+            
+        # Is first positive or negative?
+        is_pos = np.zeros(len(peaks),dtype=bool)
+        if peaks_pos[0] < peaks_neg[0] : is_pos[0::2] = True
+        else : is_pos[1::2] = True
+        
+        # fill flags 
+        turnaround_mask = np.zeros_like(aman.timestamps,dtype=bool)
+        _left_flag = np.zeros_like(aman.timestamps,dtype=bool)
+        _right_flag = np.zeros_like(aman.timestamps,dtype=bool) 
+        nbuffer = int(t_buffer/dt) # A finite buffer is needed to avoid the fluctuation of daz/dt
+
+        for ip,p in enumerate(peaks) : 
+            turnaround_mask[p-nbuffer:p+nbuffer] = True
+            turnaround_mask[p-nbuffer:p+nbuffer] = True
+            
+            if ip < len(peaks)-1 : 
+                if is_pos[ip] : _right_flag[peaks[ip]:peaks[ip+1]] = True
+                else : _left_flag[peaks[ip]:peaks[ip+1]] = True
+            elif ip == len(peaks)-1:
+                if is_pos[ip] : _right_flag[peaks[ip]:int(peaks[ip]+mean_length)] = True
+                else : _left_flag[peaks[ip]:int(peaks[ip]+mean_length)] = True                
+
+
+        # treatment of begining and ending parts 
+        turnaround_mask[:peaks[0]] = True
+        turnaround_mask[peaks[-1]+int(mean_length):] = True   
+        
+        # flag if the end of the observation is stationary
+        is_daz_zero = (np.abs(daz) < 0.00005)
+        last_moving_index = np.max(np.where(is_daz_zero==False)[0]) 
+        if len(daz) - last_moving_index > nbuffer : 
+            turnaround_mask[last_moving_index:] = True
+            _left_flag[last_moving_index:] = False
+            _right_flag[last_moving_index:] = False
+            
+        ta_flag = Ranges.from_bitmask(turnaround_mask)
+        left_flag = Ranges.from_bitmask(_left_flag)
+        right_flag = Ranges.from_bitmask(_right_flag)
+    
+    
+    # merge turn-around
     if merge:
         if name in aman.flags and not overwrite:
             raise ValueError("Flag name {} already exists in aman.flags".format(name))
@@ -111,160 +133,24 @@ def get_turnaround_flags_by_dazdt(
             aman.flags[name] = ta_flag
         else:
             aman.flags.wrap(name, ta_flag)
+            
+    # merge left/right mask 
+    if merge_lr:
+        if ("left_scan" in aman.flags or "right_scan" in aman.flags ) and not overwrite:
+            raise ValueError("Flag name left/right_flag already exists in aman.flags")
+        else : 
+            if "left_scan" in aman.flags:
+                aman.flags["left_scan"] = left_flag
+            else :
+                aman.flags.wrap("left_scan", left_flag)
+                
+            if "right_scan" in aman.flags:
+                aman.flags["right_scan"] = right_flag
+            else :
+                aman.flags.wrap("right_scan", right_flag)
+
     return ta_flag
     
-
-def get_leftright_flags_by_dazdt(
-    aman, t_buffer=1.8, w_turnaround=True, az=None, merge=True, overwrite=False, name=["left", "right"]
-):
-
-    """
-    Args:
-        aman: AxisManager object
-        t_buffer: buffer length to avoid the flactuation of daz [sec]
-        merge: If true, merge into tod.flags
-        overwrite: If true and merge is True, write over existing flag
-        name: list of names of flags when merged into tod.flags
-
-    Returns:
-        flag: Ranges object of left/right scan
-    """
-    
-    # Get daz and time 
-    if az == None : 
-        az = np.copy(aman.boresight.az)
-    daz = np.diff(az)
-    daz = np.append(daz,daz[-1])
-    time = aman.timestamps - aman.timestamps[0]
-
-    # derive approx daz
-    approx_daz = np.mean(daz[daz>np.percentile(daz, 95)])
-
-    # derive approx aprox daz/dt and rough number of samples in one_scan period 
-    dt = np.mean(np.diff(aman.timestamps))
-    approx_dazdt = approx_daz / dt
-    approx_samps_onescan = int(np.ptp(az) / approx_dazdt / dt)
-
-    # Make a step-function like matched filter
-    kernel_size = 400
-    kernel = np.zeros(kernel_size)
-    # normalize with approx_daz so that peaks height be ~1
-    kernel[:kernel_size//2] = 1/approx_daz
-    kernel[kernel_size//2:] = - 1/approx_daz
-    kernel /= kernel_size
-
-    # convolve signal with the kernel
-    matched = np.convolve(np.diff(aman.boresight.az), kernel, mode='same')
-    matched[:kernel_size] = 0
-    matched[-kernel_size:] = 0 
-
-    # find peaks in matched daz, height=0.1, distance=approx_samps_onescan//3 would be robust enough
-    peaks, properties = find_peaks(matched, height=0.1, distance=approx_samps_onescan//3)
-
-    # flag that involves turnaround part 
-    left_ent = (daz > 0.)
-    right_ent = (daz <= 0.)
-    
-    # flag that does not involve turnaround part
-    left = np.zeros_like(aman.timestamps,dtype=bool)
-    right = np.zeros_like(aman.timestamps,dtype=bool)
-
-    ### flagging
-    
-    mean_length = np.mean(np.diff(peaks))
-    prev = 0    
-    nbuffer = int(t_buffer/dt) # A finite buffer is needed to avoid the fluctuation of daz/dt
-
-    # Check the beggining part 
-    first_is_positive = False
-    if peaks[0] < mean_length//2 : 
-        first_is_positive = True
-
-    # search for edges of square waves looking at the peaks
-    for p in peaks : 
-        start = prev
-        end = p
-        length = p-prev
-        middle = start + length//2
-        prev = p
-
-        left[start+nbuffer:middle-nbuffer] = True
-        right[middle+nbuffer:end-nbuffer] = True
-        
-    # we don't know the end of the last square wave, so use the mean of wave width
-    start = prev
-    end = prev + mean_length
-    middle = start + mean_length//2
-    
-    left[int(start+nbuffer):int(middle-nbuffer)] = True
-    right[int(middle+nbuffer):int(end-nbuffer)] = True
-    
-    # treatment of the begining
-    if first_is_positive : 
-        left[:peaks[0]+nbuffer] = False
-        right[:peaks[0]+nbuffer] = False
-    else : 
-        right[int(peaks[0]-mean_length//2):peaks[0]-nbuffer] = True
-        left[:peaks[0]+nbuffer] = False
-        
-    if w_turnaround : 
-        left_flag = Ranges.from_bitmask(left_ent)
-        right_flag = Ranges.from_bitmask(right_ent)        
-    else : 
-        left_flag = Ranges.from_bitmask(left)
-        right_flag = Ranges.from_bitmask(right)
-        
-    if merge:
-        if (name[0] in aman.flags or name[1] in aman.flags) and not overwrite:
-            raise ValueError("Flag name {} already exists in aman.flags".format(name))
-        else : 
-            if name[0] in aman.flags:
-                aman.flags[name[0]] = left_flag
-            else:            
-                aman.flags.wrap(name[0], left_flag)
-            if name[1] in aman.flags:
-                aman.flags[name[1]] = right_flag
-            else:
-                aman.flags.wrap(name[1], right_flag)
-
-    return left_flag, right_flag
-        
-
-
-def get_turnaround_flags(
-    tod, qlim=1, az=None, merge=True, overwrite=False, name="turnarounds"
-):
-    """Flag the scan turnaround times.
-
-    Args:
-        tod: AxisManager object
-        qlim: percentile used to find turnaround
-        az: The azimuth signal to look for turnarounds. If None it defaults to
-            tod.boresight.az
-        merge: If true, merge into tod.flags
-        overwrite: If true and merge is True, write over existing flag
-        name: name of flag when merged into tod.flags
-
-    Returns:
-        flag: Ranges object of turn-arounds
-
-    """
-    if az is None:
-        az = tod.boresight.az
-    lo, hi = np.percentile(az, [qlim, 100 - qlim])
-    m = np.logical_or(az < lo, az > hi)
-
-    flag = Ranges.from_bitmask(m)
-
-    if merge:
-        if name in tod.flags and not overwrite:
-            raise ValueError("Flag name {} already exists in tod.flags".format(name))
-        elif name in tod.flags:
-            tod.flags[name] = flag
-        else:
-            tod.flags.wrap(name, flag)
-    return flag
-
 
 def get_glitch_flags(
     aman,
