@@ -26,7 +26,7 @@ def subscan_polyfilter(aman, degree, signal='signal', subscan_def=None, mask=Non
         if  ("left_scan" in aman.flags) and ("right_scan" in aman.flags) :
             pass
         else :
-            flag.get_turnaround_flags(aman, merge=False)
+            flags.get_turnaround_flags(aman, merge=False)
             
         ta_list_l = _get_subscan_range_index(aman.flags["left_scan"].mask())
         ta_list_r = _get_subscan_range_index(aman.flags["right_scan"].mask())
