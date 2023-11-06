@@ -35,7 +35,7 @@ def workflow_timer(f):
 
         log.info_rank(f"Running {fname}...", comm=comm)
 
-        result = f(job, otherargs, runargs, data)
+        result = f(job, otherargs, runargs, *args)
 
         log.info_rank(f"Finished {fname} in", comm=comm, timer=timer)
         if data is not None:
