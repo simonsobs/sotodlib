@@ -6,12 +6,12 @@ logger = logging.getLogger(__name__)
 def subscan_polyfilter(aman, degree, signal='signal', exclude_turnarounds=True, mask=None):
     """
     Apply polynomial filtering to subscan segments in a data array.
-
     This function applies polynomial filtering to subscan segments within aman[`signal`] for each detector.
     Subscan segments are defined based on the presence of flags such as 'left_scan' and 'right_scan'. Polynomial filtering
     is used to remove low-degree polynomial trends within each subscan segment.
 
-    Parameters:
+    Parameters
+    ----------
     - aman (object): AxisManager object
     - degree (int): The degree of the polynomial to be removed.
     - signal (str, optional): The name of the signal in 'aman' to which polynomial filtering is applied. Default is 'signal'.
