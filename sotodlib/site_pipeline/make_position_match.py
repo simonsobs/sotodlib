@@ -297,6 +297,7 @@ def _scramble_bgs(bg):
 
 
 def _get_wafer(ufm):
+    # TODO: Switch to det-match code here
     try:
         wafer = MapMaker(north_is_highband=False, array_name=ufm, verbose=False)
     except ValueError:
@@ -334,7 +335,9 @@ def _get_wafer(ufm):
 
 
 def _get_pointing(wafer, pointing_cfg):
-    xi, eta, gamma = op.get_focal_plane(None, x=wafer[:, 1], y=wafer[:, 2], pol=wafer[:, 3], **pointing_cfg)
+    xi, eta, gamma = op.get_focal_plane(
+        None, x=wafer[:, 1], y=wafer[:, 2], pol=wafer[:, 3], **pointing_cfg
+    )
     pointing = wafer.copy()
     pointing[:, 1] = xi
     pointing[:, 2] = eta
@@ -349,10 +352,10 @@ def _load_template(template_path, ufm):
     det_ids = template_rset["dets:det_ids"][msk]
     template = np.column_stack(
         (
-            _scramble_bgs(template_rset["bg"].astype(float)),
-            template_rset["xi"],
-            template_rset["eta"],
-            template_rset["gamma"],
+            _scramble_bgs(np.array(template_rset["bg"], dtype=float)),
+            np.array(template_rset["xi"]),
+            np.array(template_rset["eta"]),
+            np.array(template_rset["gamma"]),
         )
     )[msk]
     template_n = template_rset["is_north"][msk]
@@ -360,7 +363,9 @@ def _load_template(template_path, ufm):
     return det_ids, template, template_n
 
 
-def _load_bg(aman, bg_map):
+def _load_bg(aman, bg_path):
+    logger.info("loading bg_map from " + bg_path)
+    bg_map = np.load(bg_path, allow_pickle=True).item()
     bias_group = np.zeros(aman.dets.count) - 1
     for i in range(aman.dets.count):
         msk = np.all(
@@ -399,7 +404,7 @@ def _do_match(
     for msk, msk_str, t_msk, prior in zip(msks, msk_strs, template_msks, priors):
         logger.info("\tPerforming match with mask: %s", msk_str)
         _match_config = _update_vis(match_config, msk_str)
-        _map, _out, _P, _TY = match_template(
+        _map, _P, _TY = match_template(
             focal_plane[msk],
             template[t_msk],
             priors=prior,
@@ -534,6 +539,11 @@ def main():
     outpath = os.path.abspath(outpath)
 
     # If a template is provided load it, otherwise generate one
+    det_ids, template, template_n = (
+        [],
+        np.empty((0, 0)),
+        [],
+    )  # Just to make pyright shut up
     gen_template = "template" not in config
     if not gen_template:
         template_path = config["template"]
@@ -548,31 +558,10 @@ def main():
             raise ValueError("Need pointing_cfg to generate template")
         det_ids, template, template_n = _get_wafer(ufm)
         template = _get_pointing(template, config["pointing_cfg"])
-
-    # Check if we can load a bgmap and load it if we can
-    have_bgmap = "bias_map" in config
-    if have_bgmap:
-        logger.info("loading bg_map from " + config["bias_map"])
-        if os.path.isfile(config["bias_map"]):
-            bg_map = np.load(config["bias_map"], allow_pickle=True).item()
-        else:
-            logger.error(
-                "Requested bgmap doesn't exist. Running without bias line info."
-            )
-            have_bgmap = False
     else:
-        logger.warning("Running without bias line info. This can effect performance.")
-        config["matching"]["bias_lines"] = False
-
-    # Check if we can load a detmap
-    have_detmap = "detmap" in config
-    if have_detmap:
-        logger.info("Using detmap from " + config["detmap"])
-        if not os.path.isfile(config["detmap"]):
-            logger.error("Requested detmap doesn't exist. Running without one.")
-            have_detmap = False
-    else:
-        logger.warning("Running without detmap info. This can effect performance.")
+        raise ValueError(
+            "No template provided and unable to generate one for some reason"
+        )
 
     match_config = config.get("matching", {})
     vis = match_config.get("vis", False)
@@ -583,12 +572,13 @@ def main():
         logger.warning(
             "Matching running in reverse mode. Transform will now be template -> fits."
         )
-    make_priors = ("priors" in config) and have_detmap
 
+    # Add smurf band and channel
     smurf = AxisManager(aman.dets)
     have_band = "band" in aman[pointing_name]
     if have_band:
-        template_msks = [template_n, ~template_n]
+        template_n = np.array(template_n)
+        template_msks = [template_n, np.logical_not(template_n)]
         smurf.wrap("band", aman[pointing_name].band, [(0, smurf.dets)])
         band = smurf.band.astype(int)
     else:
@@ -615,16 +605,29 @@ def main():
         det_info.wrap("smurf", smurf)
         aman.wrap("det_info", det_info)
 
-    if have_detmap and have_band and have_ch:
+    # Check if we can load a detmap and load if we can
+    if "detmap" in config and have_band and have_ch:
+        logger.info("Using detmap from " + config["detmap"])
+        if not os.path.isfile(config["detmap"]):
+            logger.error("Requested detmap doesn't exist. Running without one.")
+            have_detmap = False
         g3u.add_detmap_info(aman, config["detmap"], columns="all")
+    # Even if we didn't include a file, context could have been magic
     have_detmap = "det_id" in aman.det_info
+    if not have_detmap:
+        logger.warning("Running without detmap info. This can effect performance.")
+
     if have_detmap and config["dm_transform"]:
         logger.info("\tApplying transformation from detmap")
         transform_from_detmap(aman, pointing_name, det_ids, template)
 
-    # Load bias group info
+    # Check if we can load a bgmap and load it if we can
+    have_bgmap = "bias_map" in config
+    if have_bgmap and os.path.isfile(config["bias_map"]):
+        logger.error("Requested bgmap doesn't exist. Running without bias line info.")
+        have_bgmap = False
     if have_bgmap and have_band and have_ch:
-        bias_group, msk_bg = _load_bg(aman, bg_map)
+        bias_group, msk_bg = _load_bg(aman, config["bias_map"])
         bl_diff = np.sum(~(bias_group == aman.det_info.wafer.bias_line)) - np.sum(
             ~(msk_bg)
         )
@@ -635,10 +638,14 @@ def main():
         )
         bias_group = _scramble_bgs(bias_group)
     else:
+        have_bgmap = False
         bias_group = np.nan + np.zeros(aman.dets.count)
         msk_bg = np.ones(aman.dets.count, dtype=bool)
+        logger.warning("Running without bias line info. This can effect performance.")
+        match_config["bias_lines"] = False
 
     # Do a radial cut
+    # TODO: Something more robust to ghosts...
     r = np.sqrt(
         (aman[pointing_name].xi0 - np.median(aman[pointing_name].xi0)) ** 2
         + (aman[pointing_name].eta0 - np.median(aman[pointing_name].eta0)) ** 2
@@ -659,7 +666,7 @@ def main():
     msk_strs = [f"{ufm}{obs_id}{append}-{msk_str}" for msk_str in msk_strs]
 
     # Prep inputs
-    if make_priors and "wafer" in aman.det_info:
+    if ("priors" in config) and have_detmap:
         _priors = gen_priors(
             aman,
             det_ids,
@@ -693,7 +700,6 @@ def main():
     _template = template[:, pol_slice]
 
     # Do actual matching
-    match_config["bias_lines"] &= have_bgmap and have_band and have_ch
     mapped_det_ids, P, transformed, matched_bg = _do_match(
         det_ids,
         _focal_plane,
@@ -708,7 +714,7 @@ def main():
     transformed_fp[inliers, pol_slice] = transformed
 
     bias_group[msk_bg] = np.abs(bias_group)
-    bias_group = np.nan_to_num(bias_group, -2).astype(int)
+    bias_group = np.nan_to_num(bias_group, nan=-2).astype(int)
     bg_mismap = bias_group != matched_bg
 
     # TODO: Another round of outlier flagging
