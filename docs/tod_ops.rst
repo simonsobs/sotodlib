@@ -191,3 +191,10 @@ tod_ops.binning
 Function for binning signal along specified axis (i.e. azimuth, time, hwp angle).
 
 .. autofunction:: sotodlib.tod_ops.binning.bin_signal
+
+tod_ops.sub_polyf
+=================
+
+Function for remove low order polynominal component in each subscan.
+
+.. autofunction:: sotodlib.tod_ops.sub_polyf.subscan_polyfilter
