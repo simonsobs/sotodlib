@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.optimize import curve_fit
 from sotodlib import core, tod_ops
+from sotodlib.tod_ops import bin_signal, filters
 import logging
 
 logger = logging.getLogger(__name__)
@@ -84,14 +85,14 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
         if apply_prefilt:
             if prefilt_cfg is None:
                 prefilt_cfg = {'type': 'sine2', 'cutoff': 1.0, 'trans_width': 1.0}
-            prefilt = tod_ops.filters.get_hpf(prefilt_cfg)
+            prefilt = filters.get_hpf(prefilt_cfg)
             signal = np.array(tod_ops.fourier_filter(
                 aman, prefilt, detrend=prefilt_detrend, signal_name='signal'))
         else:
             signal = aman.signal
     else:
         if apply_prefilt:
-            raise ValueError('tod_ops.filters module does not support'+
+            raise ValueError('filters module does not support'+
                     ' passing an axis other than aman.signal, you must'+
                     ' run with apply_prefilt=False, signal=<your signal>'+
                     ' apply_prefilt=True, signal=None, or apply_prefilt'+
@@ -109,7 +110,7 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
     hwpss_stats = core.AxisManager(aman.dets, core.LabelAxis(
         name='modes', vals=np.array(mode_names, dtype='<U3')))
     if bin_signal:
-        hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = get_binned_signal(
+        hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = get_binned_hwpss(
             aman, signal, hwp_angle=None, bins=bins, flags=flags)
         
         # check bin count
@@ -175,7 +176,7 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
     return hwpss_stats
 
 
-def get_binned_signal(aman, signal=None, hwp_angle=None,
+def get_binned_hwpss(aman, signal=None, hwp_angle=None,
                bins=360, flags=None):
     """
     Bin time-ordered data by the HWP angle and return the binned signal and its standard deviation.
@@ -205,46 +206,19 @@ def get_binned_signal(aman, signal=None, hwp_angle=None,
     if signal is None:
         signal = aman.signal
     if hwp_angle is None:
-        hwp_angle = aman.hwp_angle
-
-    # binning hwp_angle tod
-    hwpss_denom, hwp_angle_bins = np.histogram(
-        hwp_angle, bins=bins, range=[0, 2 * np.pi])
-    bin_counts = np.where(hwpss_denom == 0, 1, hwpss_denom)
-    # find bins with non-zero counts
-    mcnts = bin_counts > 1
-
-    # convert bin edges into bin centers
-    hwp_angle_bin_centers = (
-        hwp_angle_bins[1]-hwp_angle_bins[0])/2 + hwp_angle_bins[:-1]
-
-    # prepare binned signals
-    binned_hwpss = np.full([aman.dets.count, bins], np.nan)
-    binned_hwpss_squared_mean = np.full(
-        [aman.dets.count, bins], np.nan)
-    binned_hwpss_sigma = np.full([aman.dets.count, bins], np.nan)
-
-    # get mask from flags
-    if flags is None:
-        m = np.ones([aman.dets.count, aman.samps.count], dtype=bool)
-    else:
-        m = ~flags.mask()
-
-    # binning tod
-    for i in range(aman.dets.count):
-        binned_hwpss[i][mcnts] = np.histogram(hwp_angle[m[i]], bins=bins, range=[0, 2*np.pi],
-                                          weights=signal[i][m[i]])[0][mcnts] / bin_counts[mcnts]
-
-        binned_hwpss_squared_mean[i][mcnts] = np.histogram(hwp_angle[m[i]], bins=bins, range=[0, 2*np.pi],
-                                                       weights=signal[i][m[i]]**2)[0][mcnts] / bin_counts[mcnts]
-
-    # get sigma of each bin
-    binned_hwpss_sigma[:, mcnts] = np.sqrt(np.abs(binned_hwpss_squared_mean[:,mcnts] - binned_hwpss[:,mcnts]**2)
-                                 ) / np.sqrt(bin_counts[mcnts])
+        hwp_angle = aman['hwp_angle']
+        
+    binning_dict = bin_signal(aman, bin_by=hwp_angle, range=[0, 2*np.pi],
+                              bins=bins, signal=signal, flags=flags)
+    
+    bin_centers = binning_dict['bin_centers']
+    binned_hwpss = binning_dict['binned_signal']
+    binned_hwpss_sigma = binning_dict['binned_signal_sigma']
+    
     # use median of sigma of each bin as uniform sigma for a detector
     hwpss_sigma = np.nanmedian(binned_hwpss_sigma, axis=-1)
-
-    return hwp_angle_bin_centers, binned_hwpss, hwpss_sigma
+    
+    return bin_centers, binned_hwpss, hwpss_sigma
 
 
 def hwpss_linreg(x, ys, yerrs, modes):
@@ -531,13 +505,13 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
         If not specified, a 4th-order Butterworth filter of 
         (demod_mode * HWP speed) +/- 0.95*(HWP speed) is used.
         Example) bpf_cfg = {'type': 'butter4', 'center': 8.0, 'width': 3.8}
-        See tod_ops.filters.get_bpf for details.
+        See filters.get_bpf for details.
     lpf_cfg : dict
         Configuration for Low-pass filter applied to the demodulated TOD data. If not specified,
         a 4th-order Butterworth filter with a cutoff frequency of 0.95*(HWP speed)
         is used.
         Example) lpf_cfg = {'type': 'butter4', 'cutoff': 1.9}
-        See tod_ops.filters.get_lpf for details.
+        See filters.get_lpf for details.
 
     Returns
     -------
@@ -559,14 +533,14 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
                    'center': bpf_center,
                    'width': bpf_width,
                    'trans_width': 0.1}
-    bpf = tod_ops.filters.get_bpf(bpf_cfg)
+    bpf = filters.get_bpf(bpf_cfg)
     
     if lpf_cfg is None:
         lpf_cutoff = speed * 0.95
         lpf_cfg = {'type': 'sine2',
                    'cutoff': lpf_cutoff,
                    'trans_width': 0.1}
-    lpf = tod_ops.filters.get_lpf(lpf_cfg)
+    lpf = filters.get_lpf(lpf_cfg)
         
     phasor = np.exp(demod_mode * 1.j * aman.hwp_angle)
     demod = tod_ops.fourier_filter(aman, bpf, detrend=None,

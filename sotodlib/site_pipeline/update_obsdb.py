@@ -86,13 +86,13 @@ def main(config:str,
         logger = globals()['logger']
     else:
         globals()['logger'] = logger
-    if args.verbosity == 0:
+    if verbosity == 0:
         logger.setLevel(logging.ERROR)
-    elif args.verbosity == 1:
+    elif verbosity == 1:
         logger.setLevel(logging.WARNING)
-    elif args.verbosity == 2:
+    elif verbosity == 2:
         logger.setLevel(logging.INFO)
-    elif args.verbosity == 3:
+    elif verbosity == 3:
         logger.setLevel(logging.DEBUG)
 
     logger.info("Updating obsdb")
@@ -207,7 +207,7 @@ def main(config:str,
             stream_file = os.path.join(bookpath,"*{}*.g3".format(stream_ids[0]))
             stream = load_book.load_book_file(stream_file, no_signal=True)
 
-            for coor in ["az", "el", "boresight"]:
+            for coor in ["az", "el"]:
                 try:
                     coor_enc = stream.ancil[coor+"_enc"]
                     bookcartobsdb.add_obs_columns([f"{coor}_center float", 
@@ -217,11 +217,26 @@ def main(config:str,
                 except KeyError:
                     logger.error(f"No {coor} pointing in some streams for obs_id {obs_id}")
                     pass
+            try:
+                if index.get("telescope_flavor")=="SAT":
+                    bore_enc = stream.ancil["boresight_enc"]
+                    very_clean["roll_center"] = -.5 * (bore_enc.max() + bore_enc.min())
+                    very_clean["roll_throw"] = .5 * (bore_enc.max() - bore_enc.min())
+                if index.get("telescope_flavor")=="LAT":
+                    el_enc = stream.ancil["el_enc"]
+                    corot_enc = stream.ancil["corotator_enc"]
+                    roll = el_enc - 60. - corot_enc
+                    very_clean["roll_center"] = .5 * (roll.max() + roll.min())
+                    very_clean["roll_throw"] = .5 * (roll.max() - roll.min())
 
-            if tags != [] and tags != [""]:
-                bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
-            else:
-                bookcartobsdb.update_obs(obs_id, very_clean)
+            except KeyError:
+                logger.error(f"Unable to compute roll for obs_id {obs_id}")
+                pass
+
+            # Make sure no invalid tags before update.
+            tags = [t.strip() for t in tags if t.strip() != '']
+
+            bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
            
         else:
             bookcart.remove(bookpath)
