@@ -1,5 +1,7 @@
 import numpy as np 
-from sotodlib import flags
+import sotodlib.flags as flags
+import logging
+logger = logging.getLogger(__name__)
 
 def subscan_polyfilter(aman, degree, signal='signal', exclude_turnarounds=True, mask=None):
     """
