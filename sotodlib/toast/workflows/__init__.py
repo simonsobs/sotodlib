@@ -96,6 +96,8 @@ from .sim_detector_readout import (
     simulate_readout_effects,
     setup_simulate_detector_yield,
     simulate_detector_yield,
+    setup_simulate_mumux_crosstalk,
+    simulate_mumux_crosstalk,
 )
 from .sim_gain_error import (
     setup_simulate_calibration_error,

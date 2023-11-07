@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2021 Simons Observatory.
+# Copyright (c) 2020-2023 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Simons Observatory processing modules.
 
@@ -18,3 +18,4 @@ from .sim_stimulator import SimStimulator
 from .save_books import SaveBooks
 from .load_books import LoadBooks
 from .sim_readout import SimReadout
+from .sim_mumux_crosstalk import SimMuMUXCrosstalk
