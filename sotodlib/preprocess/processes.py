@@ -272,7 +272,28 @@ class GlitchFill(_Preprocess):
 
         tod_ops.gapfill.fill_glitches(aman, signal=signal, glitch_flags=flags, **args)
 
-
+class FlagTurnarounds(_Preprocess):
+    """From the Azimuth encoder data, flag turnarounds, left-going, and right-going.
+        All process configs go to `get_turnaround_flags`.
+    
+    .. autofunction:: sotodlib.flags.get_turnaround_flags
+    """
+    name = 'flag_turnarounds'
+    
+    def process(self, aman, proc_aman):
+        flags.get_turnaround_flags(aman, **self.process_cfgs)
+        
+class SubPolyf(_Preprocess):
+    """Fit TOD in each subscan with polynominal of given order and subtract it.
+        All process configs go to `sotodlib.tod_ops.sub_polyf`.
+    
+    .. autofunction:: sotodlib.tod_ops.sub_polyf
+    """
+    name = 'sub_polyf'
+    
+    def process(self, aman, proc_aman):
+        tod_ops.sub_polyf.subscan_polyfilter(aman, **self.process_cfgs)
+        
 _Preprocess.register(Trends.name, Trends)
 _Preprocess.register(FFTTrim.name, FFTTrim)
 _Preprocess.register(Detrend.name, Detrend)
@@ -285,3 +306,5 @@ _Preprocess.register(SubtractHWPSS.name, SubtractHWPSS)
 _Preprocess.register(Apodize.name, Apodize)
 _Preprocess.register(Demodulate.name, Demodulate)
 _Preprocess.register(GlitchFill.name, GlitchFill)
+_Preprocess.register(FlagTurnarounds.name, FlagTurnarounds)
+_Preprocess.register(SubPolyf.name, SubPolyf)
