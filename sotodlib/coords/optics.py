@@ -9,7 +9,6 @@ from functools import lru_cache, partial
 import numpy as np
 from scipy.interpolate import interp1d, bisplrep, bisplev
 from scipy.spatial.transform import Rotation as R
-import scipy.linalg as la
 from sotodlib import core
 from so3g.proj import quat
 import yaml
@@ -74,106 +73,6 @@ def _interp_func(x, y, spline):
         return z[0]
 
     return z.reshape(x.shape)
-
-
-def get_affine(src, dst):
-    """
-    Get affine transformation between two point clouds.
-    Transformation is dst = affine@src + shift
-
-    Arguments:
-
-        src: (ndim, npoints) array of source points.
-
-        dst: (ndim, npoints) array of destination points.
-
-    Returns:
-
-        affine: The transformation matrix.
-
-        shift: Shift to apply after transformation.
-    """
-    msk = np.isfinite(src).all(axis=0) * np.isfinite(dst).all(axis=0)
-    if np.sum(msk) < 7:
-        raise ValueError("Not enough finite points to compute transformation")
-
-    M = np.vstack(
-        (
-            src[:, msk] - np.median(src[:, msk], axis=1)[:, None],
-            dst[:, msk] - np.median(dst[:, msk], axis=1)[:, None],
-        )
-    ).T
-    *_, vh = la.svd(M)
-    vh_splits = [
-        quad for half in np.split(vh.T, 2, axis=0) for quad in np.split(half, 2, axis=1)
-    ]
-    affine = np.dot(vh_splits[2], la.pinv(vh_splits[0]))
-
-    transformed = affine @ src[:, msk]
-    shift = np.median(dst[:, msk] - transformed, axis=1)
-
-    return affine, shift
-
-
-def decompose_affine(affine):
-    """
-    Decompose an affine transformation into its components.
-    This decomposetion treats the affine matrix as: rotation * shear * scale.
-
-    Arguments:
-
-        affine: The affine transformation matrix.
-
-    Returns:
-
-        scale: Array of ndim scale parameters.
-
-        shear: Array of shear parameters.
-
-        rot: Rotation matrix.
-             Not currently decomposed in this function because the easiest
-             way to do that is not n-dimensional but the rest of this function is.
-    """
-    # Use the fact that rotation matrix times its transpose is the identity
-    no_rot = affine.T @ affine
-    # Decompose to get a matrix with just scale and shear
-    no_rot = la.cholesky(no_rot).T
-
-    scale = np.diag(no_rot)
-    shear = (no_rot / scale[:, None])[np.triu_indices(len(no_rot), k=1)]
-    rot = affine @ la.inv(no_rot)
-
-    return scale, shear, rot
-
-
-def decompose_rotation(rotation):
-    """
-    Decompose a rotation matrix into its xyz rotation angles.
-    This currently won't work on anything higher than 3 dimensions.
-
-    Arguments:
-
-        rotation: (ndim, ndim) rotation matrix.
-
-    Returns:
-
-        angles: Array of rotation angles in radians.
-                If the input is 2d then the first 2 angles will be nan.
-    """
-    ndim = len(rotation)
-    if ndim > 3:
-        raise ValueError("No support for rotations in more than 3 dimensions")
-    if ndim < 2:
-        raise ValueError("Rotations with less than 2 dimensions don't make sense")
-    if rotation.shape != (ndim, ndim):
-        raise ValueError("Rotation matrix should be ndim by ndim")
-    _rotation = np.eye(3)
-    _rotation[:ndim, :ndim] = rotation
-    angles = R.from_matrix(_rotation).as_euler("xyz")
-
-    if ndim == 2:
-        angles[:2] = np.nan
-    return angles
 
 
 def gen_pol_endpoints(x, y, pol):
@@ -653,5 +552,82 @@ def SAT_focal_plane(aman, x=None, y=None, pol=None, rot=0, mapping_data=None):
             aman.focal_plane.merge(focal_plane)
         else:
             aman.wrap("focal_plane", focal_plane)
+
+    return xi, eta, gamma
+
+
+def get_focal_plane(
+    aman,
+    x=None,
+    y=None,
+    pol=None,
+    rot=0,
+    telescope="LAT",
+    tube="c1",
+    slot="ws0",
+    config_path=None,
+    zemax_path=None,
+    mapping_data=None,
+):
+    """
+    Unified interface for LAT_focal_plane and SAT_focal_plane including the step of applying ufm_to_fp.
+
+    Arguments:
+
+        aman: AxisManager nominally containing aman.det_info.wafer.det_x and aman.det_info.wafer.det_y.
+              If provided focal plane will be stored in aman.focal_plane.
+
+        x: Detector x positions, if provided will override positions loaded from aman.
+
+        y: Detector y positions, if provided will override positions loaded from aman.
+
+        pol: Detector polarization angle, if provided will override positions loaded from aman.
+
+        rot: Rotation about the line of sight.
+             For the LAT this is elev - 60 - corotator.
+             For the SAT this is -1*boresight. including the step of applying ufm.
+
+        telescope: What the telescope flavor is ('LAT' or 'SAT')
+
+        tube: Which optics tube of the telescope to use.
+              Only used by the LAT.
+
+        slot: Which wafer slot to use.
+
+        config_path: Path to the ufm_to_fp config file.
+
+        zemax_path: Path to the data file from Zemax.
+                    Only used by the LAT.
+
+        mapping_data: Tuple of (x, theta) that can be interpolated to map the focal plane to the sky.
+                      Leave as None to use the default mapping.
+                      Only used by the SAT.
+
+    Returns:
+
+        xi: Detector elev on sky from physical optics in radians.
+            If aman is provided then will be wrapped as aman.focal_plane.xi.
+
+        eta: Detector xel on sky from physical optics in radians.
+             If aman is provided then will be wrapped as aman.focal_plane.eta.
+
+        gamma: Detector gamma on sky from physical optics in radians.
+               If aman is provided then will be wrapped as aman.focal_plane.eta.
+    """
+    if telescope not in ["LAT", "SAT"]:
+        raise ValueError("Telescope should be LAT or SAT")
+
+    ufm_to_fp_pars = get_ufm_to_fp_pars(telescope, slot, config_path)
+    x_fp, y_fp, pol_fp = ufm_to_fp(aman, x=x, y=y, pol=pol, **ufm_to_fp_pars)
+    if telescope == "LAT":
+        if zemax_path is None:
+            raise ValueError("Must provide zemax_path for LAT")
+        xi, eta, gamma = LAT_focal_plane(
+            aman, zemax_path, x=x_fp, y=y_fp, pol=pol_fp, rot=rot, tube=tube
+        )
+    else:
+        xi, eta, gamma = SAT_focal_plane(
+            aman, x=x_fp, y=y_fp, pol=pol_fp, rot=rot, mapping_data=mapping_data
+        )
 
     return xi, eta, gamma

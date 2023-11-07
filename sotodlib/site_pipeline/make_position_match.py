@@ -334,27 +334,7 @@ def _get_wafer(ufm):
 
 
 def _get_pointing(wafer, pointing_cfg):
-    ufm_to_fp_pars = op.get_ufm_to_fp_pars(
-        pointing_cfg["telescope"], pointing_cfg["slot"], pointing_cfg["config_path"]
-    )
-    x_fp, y_fp, pol_fp = op.ufm_to_fp(
-        None, x=wafer[:, 1], y=wafer[:, 2], pol=wafer[:, 3], **ufm_to_fp_pars
-    )
-    rot = pointing_cfg.get("rot", 0)
-    if pointing_cfg["telescope"] == "SAT":
-        xi, eta, gamma = op.SAT_focal_plane(None, x=x_fp, y=y_fp, pol=pol_fp, rot=rot)
-    elif pointing_cfg["telescope"] == "LAT":
-        xi, eta, gamma = op.LAT_focal_plane(
-            None,
-            pointing_cfg["zemax_path"],
-            x=x_fp,
-            y=y_fp,
-            pol=pol_fp,
-            rot=rot,
-            tube=pointing_cfg["tube"],
-        )
-    else:
-        raise ValueError("Telescope should be LAT and SAT")
+    xi, eta, gamma = op.get_focal_plane(None, x=wafer[:, 1], y=wafer[:, 2], pol=wafer[:, 3], **pointing_cfg)
     pointing = wafer.copy()
     pointing[:, 1] = xi
     pointing[:, 2] = eta
