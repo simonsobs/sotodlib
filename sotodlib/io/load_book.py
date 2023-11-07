@@ -39,6 +39,9 @@ logger = logging.getLogger(__name__)
 
 _TES_BIAS_COUNT = 12  # per detset / primary file group
 
+#: Signal DAC units are rescaled to phase before returning.
+SIGNAL_RESCALE = np.pi / 2**15
+
 DEG = np.pi / 180
 
 
@@ -384,6 +387,7 @@ def _concat_filesets(results, ancil=None, timestamps=None,
                 d = v['signal'].finalize()
                 aman['signal'][dets_ofs:dets_ofs + len(d)] = d
                 dets_ofs += len(d)
+        aman['signal'] *= SIGNAL_RESCALE
 
     # Biases
     all_bias_names = []

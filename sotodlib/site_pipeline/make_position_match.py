@@ -38,6 +38,7 @@ def create_db(filename):
     scheme.add_exact_match("obs:obs_id")
     scheme.add_data_field("dataset")
     scheme.add_data_field("input_paths")
+    scheme.add_data_field("encoders")
 
     metadata.ManifestDb(scheme=scheme).to_file(filename)
 
@@ -416,7 +417,7 @@ def _gen_template(ufm):
             continue
         det_x.append(det.det_x)
         det_y.append(det.det_y)
-        polang.append(det.angle_actual_deg)
+        polang.append(det.angle)
         det_ids.append(det.detector_id)
         template_bg.append(det.bias_line)
         is_north.append(det.is_north)
@@ -522,6 +523,26 @@ def _do_match(
     logger.info("\tAverage matched likelihood = " + str(np.median(P)))
 
     return mapped_det_ids, out_msk, P, transformed
+
+
+def _get_encoder(aman, out_msk):
+    if "az_avg" in aman:
+        az = np.nanmedian(aman.az_avg[~out_msk])
+    else:
+        logger.warning("\tAz encoder information information not found, setting to nan")
+        az = np.nan
+    if "el_avg" in aman:
+        el = np.nanmedian(aman.el_avg[~out_msk])
+    else:
+        logger.warning("\tEl encoder information information not found, setting to nan")
+        el = np.nan
+    if "bs_avg" in aman:
+        bs = np.nanmedian(aman.bs_avg[~out_msk])
+    else:
+        logger.warning("\tBs encoder information information not found, setting to nan")
+        bs = np.nan
+
+    return az, el, bs
 
 
 def _mk_output(
@@ -719,6 +740,7 @@ def main():
     avg_fp = {}
     master_template = []
     results = [[], [], []]
+    encoder = []
     num = 0
     for obs_id in obs_ids:
         logger.info("Starting match on observation " + obs_id)
@@ -914,8 +936,24 @@ def main():
                 avg_fp[ri].append(fp)
             except KeyError:
                 avg_fp[ri] = [fp]
+
+        # Save nominal encoder angles
+        encoder.append((obs_id,) + _get_encoder(aman[pointing_name], out_msk))
         num += 1
 
+    encoder = np.array(
+        encoder,
+        dtype=np.dtype(
+            [
+                ("obs_id", obs_id.dtype),
+                ("az", np.float32),
+                ("el", np.float32),
+                ("bs", np.float32),
+            ]
+        ),
+    )
+    rset_encoder = metadata.ResultSet.from_friend(encoder)
+    encoders = "encoders"
     out_dt = np.dtype(
         [
             ("dets:readout_id", aman.det_info.readout_id.dtype),
@@ -954,8 +992,14 @@ def main():
         )
         write_dataset(rset_data, outpath, dataset, overwrite=True)
         write_dataset(rset_paths, outpath, input_paths, overwrite=True)
+        write_dataset(rset_encoder, outpath, encoders, overwrite=True)
         db.add_entry(
-            {"obs:obs_id": obs_id, "dataset": dataset, "input_paths": input_paths},
+            {
+                "obs:obs_id": obs_id,
+                "dataset": dataset,
+                "input_paths": input_paths,
+                "encoders": encoders,
+            },
             outpath,
             replace=True,
         )
@@ -1036,6 +1080,7 @@ def main():
     )
     write_dataset(rset_data, outpath, dataset, overwrite=True)
     write_dataset(rset_paths, outpath, input_paths, overwrite=True)
+    write_dataset(rset_encoder, outpath, encoders, overwrite=True)
 
 
 if __name__ == "__main__":
