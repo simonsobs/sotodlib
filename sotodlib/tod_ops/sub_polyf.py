@@ -61,7 +61,7 @@ def subscan_polyfilter(aman, degree, signal='signal', exclude_turnarounds=True, 
                         deg=degree)
 
                 aman[signal][i_det,start:end+1] -= np.polyval(pars, t[start:end+1]-t_mean)
-                
+    return
                 
 def _get_subscan_range_index(scan_flag,_min=0):
     """
