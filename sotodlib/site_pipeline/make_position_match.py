@@ -10,7 +10,7 @@ import yaml
 from detmap.makemap import MapMaker
 from pycpd import AffineRegistration
 from scipy.optimize import linear_sum_assignment
-from sotodlib.coords import optics as op
+from sotodlib.coords import optics as op, affine as af
 from sotodlib.core import AxisManager, Context, metadata
 from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
@@ -105,18 +105,43 @@ def gen_priors(aman, template_det_ids, prior, method="flat", width=1, basis=None
     return priors.T
 
 
-def transform_from_detmap(aman, pointing_name, det_ids, template):
+def transform_from_detmap(aman, pointing_name, inliers, det_ids, template):
     """
     Do an approximate transformation of the pointing back to
     the focal plane using the mapping from the loaded detmap.
 
     Arguments:
 
-        aman: AxisManager containing both pointing and datmap results.
+        aman: AxisManager containing both pointing and detmap results.
 
         pointing_name: Name of sub-AxisManager containing pointing info
+
+        inliers: Flag marking whick dets are inliers.
+
+        det_ids: Detector IDs of the rows in the template
+
+        template: The nominal pointing
     """
-    logger.error("Transform from detmap not implemented")
+    # TODO: Gamma support
+    dm_det_ids = aman.det_info.det_id.copy()
+    dm_det_ids[~inliers] = "outlier"
+    _, msk, template_msk = np.intersect1d(
+        aman.det_info.det_id, det_ids, return_indices=True
+    )
+    if np.sum(msk) != aman.dets.count:
+        logger.error("There are matched dets not found in the template")
+    src = np.vstack((aman[pointing_name].xi0[msk], aman[pointing_name].eta0[msk]))
+    mapping = np.argsort(np.argsort(aman.det_info.det_ids[msk]))
+
+    template_sort = np.argsort(det_ids[template_msk])
+    dst = template[template_msk][template_sort][mapping].T
+
+    afn, sft = af.get_affine(src, dst)
+    transformed = afn @ src + sft[..., None]
+
+    aman[pointing_name].xi0[msk] = transformed[0]
+    aman[pointing_name].eta0[msk] = transformed[1]
+
     return aman
 
 
@@ -617,10 +642,6 @@ def main():
     if not have_detmap:
         logger.warning("Running without detmap info. This can effect performance.")
 
-    if have_detmap and config["dm_transform"]:
-        logger.info("\tApplying transformation from detmap")
-        transform_from_detmap(aman, pointing_name, det_ids, template)
-
     # Check if we can load a bgmap and load it if we can
     have_bgmap = "bias_map" in config
     if have_bgmap and os.path.isfile(config["bias_map"]):
@@ -652,6 +673,10 @@ def main():
     )
     inliers = r < config["radial_thresh"] * np.median(r)
     logger.info("\tCut " + str(np.sum(~inliers)) + " detectors with bad pointing")
+
+    if have_detmap and config["dm_transform"]:
+        logger.info("\tApplying transformation from detmap")
+        transform_from_detmap(aman, pointing_name, inliers, det_ids, template)
 
     msks = []
     msk_strs = []
