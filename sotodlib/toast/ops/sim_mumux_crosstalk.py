@@ -72,13 +72,6 @@ class SimMuMUXCrosstalk(Operator):
             chi = 1e-3
         return chi
 
-    def _temperature_to_rf_phase(self, input_signal):
-        """ Translate temperature-valued signal into RF phase
-        """
-        # FIXME: implement _temperature_to_rf_phase()
-        output_signal = input_signal.copy()
-        return output_signal
-
     def _temperature_to_squid_phase(self, input_signal):
         """ Translate temperature-valued signal into SQUID phase
         """
@@ -95,6 +88,8 @@ class SimMuMUXCrosstalk(Operator):
 
     def _mix_detector_data(self, target_squid_phase, source_squid_phase, chi):
         """ Evaluate and return the additive crosstalk term
+
+        Returned signal is in RF phase units.
         """
         # FIXME: double-check this
         return chi * np.sin(source_squid_phase - target_squid_phase)
@@ -143,9 +138,7 @@ class SimMuMUXCrosstalk(Operator):
             #     Get crosstalk strength, chi
             #     Generate output data by mixing input data
             for row_target, det_target in zip(rows, detectors):
-                target_rf_phase = self._temperature_to_rf_phase(
-                    input_data[row_target]
-                )
+                crosstalk = np.zeros_like(input_data[row_target])
                 target_squid_phase = self._temperature_to_squid_phase(
                     input_data[row_target]
                 )
@@ -156,14 +149,14 @@ class SimMuMUXCrosstalk(Operator):
                     source_squid_phase = self._temperature_to_squid_phase(
                         input_data[row_source]
                     )
-                    target_rf_phase += chi * np.sin(
+                    crosstalk += chi * np.sin(
                         source_squid_phase - target_squid_phase
                     )
 
-                # Translate output data into temperature units and scale to
+                # Translate crosstalk into temperature units and scale to
                 # match input data
-                output_data[row_target] = self._rf_phase_to_temperature(
-                    target_rf_phase
+                output_data[row_target] += self._rf_phase_to_temperature(
+                    crosstalk
                 ) / det_scale
 
             # Redistribute back
