@@ -49,27 +49,37 @@ class Resonator:
     Data structure to hold any resonator information.
     """
     idx: int
-    res_freq: float
-    is_north: int
 
+    is_north: int
+    res_freq: float
     res_qi: float = np.nan
     smurf_res_idx: int = -1
     smurf_band: int = -1
     smurf_channel: int = -1
-    bg: int = -1
+    smurf_subband: int = -1
+    readout_id: str = ''
 
     xi: float = np.nan
     eta: float = np.nan
     gamma: float = np.nan
 
+    bg: int = -1
     det_x: float = np.nan
     det_y: float = np.nan
+    det_row: int = 0
+    det_col: int = 0
+    pixel_num: int = 0
     det_rhomb: str = ''
     det_pol: str = ''
     det_freq: int = 0
     det_bandpass: str = ''
+    det_angle_raw_deg: float = np.nan
+    det_angle_actual_deg: float = np.nan
+    det_type: str = ''
+    det_id: str = ''
     is_optical: int = 1
-
+    mux_bondpad: int = 0
+    mux_subband: str = ''
     mux_band: int = -1
     mux_channel: int = -1
     mux_layout_pos: int = -1
@@ -97,20 +107,17 @@ def apply_design_properties(smurf_res, design_res, in_place=False):
         r = smurf_res
     else:
         r = deepcopy(smurf_res)
+    
+    design_props = [
+        'bg', 'det_x', 'det_y', 'det_row', 'det_col', 'pixel_num', 'det_rhomb',
+        'det_pol', 'det_freq', 'det_bandpass', 'det_angle_raw_deg',
+        'det_angle_actual_deg', 'det_type', 'det_id', 'is_optical',
+        'mux_bondpad', 'mux_subband', 'mux_band', 'mux_channel',
+        'mux_layout_pos'
+    ]
 
-    r.det_x = design_res.det_x
-    r.det_y = design_res.det_y
-    r.det_rhomb = design_res.det_rhomb
-    r.det_pol = design_res.det_pol
-    r.det_freq = design_res.det_freq
-    r.det_bandpass = design_res.det_bandpass
-    r.is_optical = design_res.is_optical
-
-    r.mux_band = design_res.mux_band
-    r.mux_channel = design_res.mux_channel
-    r.mux_layout_pos = design_res.mux_layout_pos
-
-    r.matched = 1
+    for prop in design_props:
+        setattr(r, prop, getattr(design_res, prop))
 
     return r
 
@@ -135,15 +142,24 @@ class ResSet:
     def __len__(self):
         return len(self.resonances)
 
+    @classmethod
+    def from_array(cls, arr):
+        resonators = []
+        names = arr.dtype.names
+        for a in arr:
+            resonators.append(Resonator(**dict(zip(names, a))))
+        return cls(resonators)
+
+
     def as_array(self):
         """
         Returns resonance data in the form of a numpy structured array.
         """
         dtype = []
         data = []
-        for field in fields(self.resonances[0]):
+        for field in fields(Resonator):
             if field.type == str:
-                typ = '<U20'
+                typ = '<U50'
             else:
                 typ = field.type
             dtype.append((field.name, typ))
@@ -236,28 +252,43 @@ class ResSet:
     
         with open(sol_file, 'r') as f:
             labels  = f.readline().split(',') # Read header
+            for i in range(len(labels)):
+                labels[i] = labels[i].strip()
+
+            #Helper needed for when sol file has saved ints as floats
+            def _int(val, null_val=None): 
+                if val == 'null' and null_val is not None:
+                    return null_val
+                return int(float(val))
 
             i = 0
             for line in f.readlines():
                 d = dict(zip(labels, line.split(',')))
                 if not d['bias_line']:  # Skip incomplete lines
                     continue
-                
-                is_north = north_is_highband ^ (int(d['smurf_band']) < 4)
+                # is_north = north_is_highband ^ (_int(d['smurf_band']) < 4)
+                # is_north = d['is_north'].lower().strip() == 'true'
+                is_north = _int(d['bias_line']) < 6
                 is_optical = (d['is_optical'].lower() == 'true')
                 r = Resonator(
-                    i, res_freq=float(d['freq_mhz']), smurf_band=int(d['smurf_band']),
-                    bg=int(d['bias_line']), det_x=float(d['det_x']),
+                    i, res_freq=float(d['freq_mhz']), smurf_band=_int(d['smurf_band']),
+                    bg=_int(d['bias_line']), det_x=float(d['det_x']),
                     det_y=float(d['det_y']), det_rhomb=d['rhomb'],
-                    mux_band=int(d['mux_band']), mux_channel=int(d['mux_channel']),
-                    mux_layout_pos=int(d['mux_layout_position']),
+                    det_row=_int(d['det_row']), det_col=_int(d['det_col']),
+                    pixel_num=_int(d['pixel_num'], null_val=-1),
+                    det_type=d['det_type'], det_id=d['detector_id'],
+                    mux_band=_int(d['mux_band']), mux_channel=_int(d['mux_channel']),
+                    mux_subband=d['mux_subband'], mux_bondpad=d['bond_pad'],
+                    det_angle_raw_deg=d['angle_raw_deg'],
+                    det_angle_actual_deg=d['angle_actual_deg'],
+                    mux_layout_pos=_int(d['mux_layout_position']),
                     det_bandpass=d['bandpass'], det_pol=d['pol'],
                     is_optical=is_optical,
                     is_north=is_north
                 )
 
-                if int(d['smurf_channel']) != -1:
-                    r.smurf_channel = int(d['smurf_channel'])
+                if _int(d['smurf_channel']) != -1:
+                    r.smurf_channel = _int(d['smurf_channel'])
 
                 if fp_pars is not None:
                     x, y = float(d['det_x']), float(d['det_y'])
@@ -522,7 +553,7 @@ class Match:
             if r1.matched:
                 # print(r1.match_idx)
                 r2 = self.dst[r1.match_idx]
-                r = apply_design_properties(r2, r1, in_place=False)
+                r = apply_design_properties(r1, r2, in_place=False)
             else:
                 r = deepcopy(r1)
             resonances.append(r)
@@ -672,4 +703,21 @@ def plot_match_freqs(m: Match, is_north=True, show_offset=False, xlim=None):
 
     ax.set_xlabel("Resonance Freq (MHz)", fontsize=14)
     ax.set_title(f"Freq Matching (north={is_north})")
+    return fig, ax
+
+
+def plot_match_pointing(match: Match, show_pairs=True):
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sa, da = match.src.as_array(), match.dst.as_array()
+    plt.plot(np.rad2deg(da['xi']), np.rad2deg(da['eta']), '.')
+    plt.plot(np.rad2deg(sa['xi']), np.rad2deg(sa['eta']), '.')
+    if show_pairs:
+        for r1, r2 in match.get_match_iter(include_unmatched=False):
+            plt.plot(
+                *np.rad2deg(np.array([[r1.xi, r2.xi], [r1.eta, r2.eta]])),
+                color='red', alpha=.2
+            )
+    ax.set_xlabel("Xi (deg)")
+    ax.set_ylabel("Eta (deg)")
+
     return fig, ax
