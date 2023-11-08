@@ -9,8 +9,10 @@ import sotodlib.io.g3tsmurf_utils as g3u
 import yaml
 from detmap.makemap import MapMaker
 from pycpd import AffineRegistration
+from scipy.cluster import vq
 from scipy.optimize import linear_sum_assignment
-from sotodlib.coords import optics as op, affine as af
+from sotodlib.coords import affine as af
+from sotodlib.coords import optics as op
 from sotodlib.core import AxisManager, Context, metadata
 from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
@@ -310,6 +312,38 @@ def match_template(
     return mapping, P, TY
 
 
+def _get_inliers(aman, rad_thresh, template=None):
+    focal_plane = np.column_stack((aman.xi0, aman.eta0))
+    inliers = np.ones(len(focal_plane), dtype=bool)
+    if template is not None:
+        cent = np.median(template[:, 1:3], axis=0)
+        r = np.linalg.norm(focal_plane - cent, axis=1)
+        inliers *= r <= rad_thresh
+
+    fp_white = vq.whiten(focal_plane[inliers])
+    codebook, _ = vq.kmeans(fp_white, 2)
+    codes, _ = vq.vq(fp_white, codebook)
+
+    c0 = codes == 0
+    c1 = codes == 1
+    m0 = np.median(focal_plane[inliers][c0], axis=0)
+    m1 = np.median(focal_plane[inliers][c1], axis=0)
+    dist = np.linalg.norm(m0 - m1)
+
+    if dist < 1.5 * rad_thresh:
+        cluster = c0 + c1
+    elif np.sum(c0) >= np.sum(c1):
+        cluster = c0
+    else:
+        cluster = c1
+
+    cent = np.median(focal_plane[inliers][cluster], axis=0)
+    r = np.linalg.norm(focal_plane[inliers] - cent, axis=1)
+    inliers[inliers] *= cluster * (r <= rad_thresh)
+
+    return inliers
+
+
 def _scramble_bgs(bg):
     """
     Transform bias group information so that CPD is more strongly punished
@@ -373,11 +407,12 @@ def _get_pointing(wafer, pointing_cfg):
 
 def _load_template(template_path, ufm):
     template_rset = read_dataset(template_path, ufm)
-    msk = template_rset["bg"] in valid_bg
-    det_ids = template_rset["dets:det_ids"][msk]
+    bg = np.array(template_rset["bg"], dtype=int)
+    msk = np.isin(bg, valid_bg)
+    det_ids = template_rset["dets:det_id"][msk]
     template = np.column_stack(
         (
-            _scramble_bgs(np.array(template_rset["bg"], dtype=float)),
+            _scramble_bgs(bg.astype(float)),
             np.array(template_rset["xi"]),
             np.array(template_rset["eta"]),
             np.array(template_rset["gamma"]),
@@ -423,11 +458,16 @@ def _do_match(
 ):
     ndim = focal_plane.shape[1] - 1
     mapped_det_ids = np.zeros(len(focal_plane), dtype=det_ids.dtype)
-    P = np.zeros(len(focal_plane))
+    P = np.nan + np.zeros(len(focal_plane))
     transformed = np.nan + np.zeros((len(focal_plane), 3))
-    matched_bg = -2 + np.zeros(len(focal_plane), dtype=int)
+    mapped_template = np.nan + np.zeros_like(focal_plane)
     for msk, msk_str, t_msk, prior in zip(msks, msk_strs, template_msks, priors):
-        logger.info("\tPerforming match with mask: %s", msk_str)
+        logger.info("Performing match with mask: %s", msk_str)
+        ndets = np.sum(msk)
+        logger.info("\tMask has %d detectors", ndets)
+        if ndets == 0:
+            logger.info("\tSkipping...")
+            continue
         _match_config = _update_vis(match_config, msk_str)
         _map, _P, _TY = match_template(
             focal_plane[msk],
@@ -438,10 +478,10 @@ def _do_match(
         mapped_det_ids[msk] = det_ids[t_msk][_map]
         P[msk] = _P[_map, range(_P.shape[1])]
         transformed[msk, :ndim] = _TY[:, 1:]
-        matched_bg = np.around(np.abs(template[t_msk][_map][:, 0])).astype(int)
-    logger.info("\tAverage matched likelihood = " + str(np.median(P)))
+        mapped_template[msk] = template[t_msk][_map]
+    logger.info("Average matched likelihood = %f", np.nanmedian(P))
 
-    return mapped_det_ids, P, transformed, matched_bg
+    return mapped_det_ids, P, transformed, mapped_template
 
 
 def _mk_output(
@@ -516,6 +556,7 @@ def _load_ctx(config):
 
 
 def _load_rset(config):
+    obs_id = config["resultsets"].get("obs_id", "")
     pointing_rset = read_dataset(*config["resultsets"]["pointing"])
     pointing_aman = pointing_rset.to_axismanager(axis_key="dets:readout_id")
     aman = AxisManager(pointing_aman.dets)
@@ -528,7 +569,7 @@ def _load_rset(config):
         aman = aman.wrap("polarization", polarization_aman)
         pol = True
 
-    return aman, "", pol, "pointing", "polarization"
+    return aman, obs_id, pol, "pointing", "polarization"
 
 
 def main():
@@ -557,11 +598,14 @@ def main():
         append = "_" + append
     if obs_id:
         obs_id = "_" + obs_id
-    create_db(config["manifest_db"])
-    db = metadata.ManifestDb(config["manifest_db"])
-    outpath = os.path.join(config["outdir"], f"{ufm}{obs_id}{append}.h5")
+    db = None
+    if "manifest_db" in config:
+        create_db(config["manifest_db"])
+        db = metadata.ManifestDb(config["manifest_db"])
+    outdir = os.path.abspath(config["outdir"])
+    os.makedirs(outdir, exist_ok=True)
+    outpath = os.path.join(outdir, f"{ufm}{obs_id}{append}.h5")
     dataset = "focal_plane"
-    outpath = os.path.abspath(outpath)
 
     # If a template is provided load it, otherwise generate one
     det_ids, template, template_n = (
@@ -574,6 +618,9 @@ def main():
         template_path = config["template"]
         if os.path.exists(template_path):
             det_ids, template, template_n = _load_template(template_path, ufm)
+            plt.scatter(template[:, 1], template[:, 2])
+            plt.savefig("/so/home/saianeesh/public_html/a.png")
+            plt.close()
         else:
             logger.error("Provided template doesn't exist, trying to generate one")
             gen_template = True
@@ -610,8 +657,8 @@ def main():
         template_msks = [np.ones(len(det_ids), dtype=bool)]
         band = -1 + np.zeros(aman.dets.counts, dtype=int)
         logger.error(
-            "\tInput is missing band information.\n"
-            + "\t\tWon't be able to load detmap or bgmap and north/south split cannot be performed."
+            "Input is missing band information.\n"
+            + "\tWon't be able to load detmap or bgmap and north/south split cannot be performed."
         )
     have_ch = "channel" in aman[pointing_name]
     if have_ch:
@@ -620,8 +667,8 @@ def main():
     else:
         channel = -1 + np.zeros(aman.dets.counts, dtype=int)
         logger.error(
-            "\tInput is missing channel information.\n"
-            + "\t\tWon't be able to load detmap or bgmap."
+            "Input is missing channel information.\n"
+            + "\tWon't be able to load detmap or bgmap."
         )
     if "det_info" in aman:
         aman.det_info.wrap("smurf", smurf)
@@ -644,19 +691,18 @@ def main():
 
     # Check if we can load a bgmap and load it if we can
     have_bgmap = "bias_map" in config
-    if have_bgmap and os.path.isfile(config["bias_map"]):
+    if have_bgmap and not os.path.isfile(config["bias_map"]):
         logger.error("Requested bgmap doesn't exist. Running without bias line info.")
         have_bgmap = False
     if have_bgmap and have_band and have_ch:
         bias_group, msk_bg = _load_bg(aman, config["bias_map"])
-        bl_diff = np.sum(~(bias_group == aman.det_info.wafer.bias_line)) - np.sum(
-            ~(msk_bg)
-        )
-        logger.info(
-            "\t"
-            + str(bl_diff)
-            + " detectors have bias lines that don't match the detmap"
-        )
+        if have_detmap:
+            bl_diff = np.sum(~(bias_group == aman.det_info.wafer.bias_line)) - np.sum(
+                ~(msk_bg)
+            )
+            logger.info(
+                "%d detectors have bias lines that don't match the detmap", bl_diff
+            )
         bias_group = _scramble_bgs(bias_group)
     else:
         have_bgmap = False
@@ -665,27 +711,27 @@ def main():
         logger.warning("Running without bias line info. This can effect performance.")
         match_config["bias_lines"] = False
 
-    # Do a radial cut
-    # TODO: Something more robust to ghosts...
-    r = np.sqrt(
-        (aman[pointing_name].xi0 - np.median(aman[pointing_name].xi0)) ** 2
-        + (aman[pointing_name].eta0 - np.median(aman[pointing_name].eta0)) ** 2
-    )
-    inliers = r < config["radial_thresh"] * np.median(r)
-    logger.info("\tCut " + str(np.sum(~inliers)) + " detectors with bad pointing")
+    # Cut outliers
+    if config["outliers"].get("use_template", False):
+        inliers = _get_inliers(
+            aman[pointing_name], config["outliers"]["radial_thresh"], template
+        )
+    else:
+        inliers = _get_inliers(aman[pointing_name], config["outliers"]["radial_thresh"])
+    logger.info("Found %d detectors with bad pointing", np.sum(~inliers))
 
     if have_detmap and config["dm_transform"]:
-        logger.info("\tApplying transformation from detmap")
+        logger.info("Applying transformation from detmap")
         transform_from_detmap(aman, pointing_name, inliers, det_ids, template)
 
     msks = []
     msk_strs = []
     if have_band:
         north = np.isin(aman.det_info.smurf.band.astype(int), (0, 1, 2, 3))
-        msks += [north & msk_bg, (~north) & msk_bg]
+        msks += [north * msk_bg * inliers, (~north) * msk_bg * inliers]
         msk_strs += ["valid_bg-and-north", "valid_bg-and-south"]
     else:
-        msks += [np.ones(aman.dets.count, dtype=bool)]
+        msks += [inliers]
         msk_strs += ["no_mask"]
     # So that the plots will be associated with an obs_id
     msk_strs = [f"{ufm}{obs_id}{append}-{msk_str}" for msk_str in msk_strs]
@@ -723,9 +769,13 @@ def main():
     )
     _focal_plane = focal_plane[:, pol_slice]
     _template = template[:, pol_slice]
+    plt.scatter(focal_plane[msks[1], 1], focal_plane[msks[1], 2])
+    plt.scatter(template[:, 1], template[:, 2])
+    plt.savefig("/so/home/saianeesh/public_html/a.png")
+    plt.close()
 
     # Do actual matching
-    mapped_det_ids, P, transformed, matched_bg = _do_match(
+    mapped_det_ids, P, transformed, mapped_template = _do_match(
         det_ids,
         _focal_plane,
         _template,
@@ -735,14 +785,22 @@ def main():
         template_msks,
         match_config,
     )
-    transformed_fp = np.nan + np.zeros((aman.dets.counts, 3))
-    transformed_fp[inliers, pol_slice] = transformed
+    transformed_fp = np.nan + np.zeros((aman.dets.count, 3))
+    transformed_fp[inliers, pol_slice] = transformed[inliers, pol_slice]
 
-    bias_group[msk_bg] = np.abs(bias_group)
+    # BG mismap
+    bias_group[msk_bg] = np.abs(bias_group[msk_bg])
     bias_group = np.nan_to_num(bias_group, nan=-2).astype(int)
+    matched_bg = np.nan_to_num(np.abs(mapped_template[:, 0]), nan=-2).astype(int)
     bg_mismap = bias_group != matched_bg
+    if have_bgmap:
+        logger.info("%d bias line mismaps", np.sum(bg_mismap))
 
-    # TODO: Another round of outlier flagging
+    # Another round of outlier flagging
+    dist = np.linalg.norm(transformed_fp[:, :2] - mapped_template[:, 1:3], axis=1)
+    print(np.nanmedian(dist))
+    inliers *= dist < config["outliers"]["pixel_dist"]
+    logger.info("Total of %d detectors with bad pointing", np.sum(~inliers))
 
     rset_data = _mk_output(
         aman.dets.vals,
@@ -756,7 +814,8 @@ def main():
         bg_mismap,
     )
     write_dataset(rset_data, outpath, dataset, overwrite=True)
-    db.add_entry({"obs:obs_id": obs_id, "dataset": dataset}, outpath, replace=True)
+    if db is not None:
+        db.add_entry({"obs:obs_id": obs_id, "dataset": dataset}, outpath, replace=True)
 
 
 if __name__ == "__main__":
