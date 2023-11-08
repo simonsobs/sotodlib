@@ -6,7 +6,7 @@ from sotodlib.io import metadata   # PerDetectorHdf5 work-around
 from sotodlib import tod_ops
 from sotodlib.tod_ops import filters
 from pixell import enmap, utils, fft, bunch, wcsutils, mpi
-import moby2.analysis.socompat
+#import moby2.analysis.socompat
 import yaml
 
 def get_parser(parser=None):
