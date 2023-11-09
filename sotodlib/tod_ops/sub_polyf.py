@@ -3,10 +3,10 @@ import logging
 from sotodlib import flags
 logger = logging.getLogger(__name__)
 
-def subscan_polyfilter(aman, degree, signal='signal', exclude_turnarounds=True, mask=None):
+def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=True, mask=None, in_place=True):
     """
     Apply polynomial filtering to subscan segments in a data array.
-    This function applies polynomial filtering to subscan segments within aman[`signal`] for each detector.
+    This function applies polynomial filtering to subscan segments within signal for each detector.
     Subscan segments are defined based on the presence of flags such as 'left_scan' and 'right_scan'. Polynomial filtering
     is used to remove low-degree polynomial trends within each subscan segment.
 
@@ -15,20 +15,25 @@ def subscan_polyfilter(aman, degree, signal='signal', exclude_turnarounds=True, 
     aman : AxisManager
     degree : int
         The degree of the polynomial to be removed.
-    signal : str
-        Optional. The field of the signal in ``aman`` to which polynomial filtering is applied. Default is ``signal``.
+    signal : array-like, optional
+        The TOD signal to use. If not provided, `aman.signal` will be used.
     exclude_turnarounds : bool
         Optional. If True, turnarounds are excluded from subscan identification. Default is True.
-    Mask : str or RangesMatrix
+    mask : str or RangesMatrix
         Optional. A mask used to select specific data points for filtering. Default is None.
-        If None, no mask is applied. If the mask is given in str, ``aman.flags['mask']`` is used as mask. Arbitrary mask can be 
-        specified in the style of RangesMatrix.
+        If None, no mask is applied. If the mask is given in str, ``aman.flags['mask']`` is used as mask.
+        Arbitrary mask can be specified in the style of RangesMatrix.
+    in_place: bool
+        Optional. If True, `aman.signal` is overwritten with the processed signal.
 
     Returns
     -------
-    None
-        Modifies signal field of aman in place.
+    signal : array-like
+        The processed signal.
     """
+    if signal is None:
+        signal = aman.signal
+        
     if exclude_turnarounds:
         if ("left_scan" not in aman.flags) or ("turnarounds" not in aman.flags):
             logger.warning('aman does not have left/right scan or turnarounds flag. `sotodlib.flags.get_turnaround_flags` will be ran with default parameters')
@@ -63,16 +68,19 @@ def subscan_polyfilter(aman, degree, signal='signal', exclude_turnarounds=True, 
         for start, end in subscan_indices:
             if np.count_nonzero(~each_det_mask[start:end+1]) < degree:
                 # If degree of freedom is lower than zero, just subtract mean
-                aman[signal][i_det, start:end+1] -= np.mean(aman[signal][i_det, start:end+1])
+                signal[i_det, start:end+1] -= np.mean(signal[i_det, start:end+1])
             else:
                 t_mean = np.mean(t[start:end+1])
                 pars = np.ma.polyfit(
                         np.ma.array(t[start:end+1]-t_mean, mask=each_det_mask[start:end+1]),
-                        np.ma.array(aman[signal][i_det,start:end+1], mask=each_det_mask[start:end+1]),
+                        np.ma.array(signal[i_det,start:end+1], mask=each_det_mask[start:end+1]),
                         deg=degree)
 
-                aman[signal][i_det,start:end+1] -= np.polyval(pars, t[start:end+1]-t_mean)
-    return
+                signal[i_det,start:end+1] -= np.polyval(pars, t[start:end+1]-t_mean)
+    if in_place:
+        aman.signal = signal
+        
+    return signal
                 
 def _get_subscan_range_index(scan_flag,_min=0):
     """
