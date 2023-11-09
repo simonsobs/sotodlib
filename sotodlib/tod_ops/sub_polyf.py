@@ -1,5 +1,6 @@
 import numpy as np
 import logging
+from sotodlib import flags
 logger = logging.getLogger(__name__)
 
 def subscan_polyfilter(aman, degree, signal='signal', exclude_turnarounds=True, mask=None):
@@ -30,13 +31,15 @@ def subscan_polyfilter(aman, degree, signal='signal', exclude_turnarounds=True, 
     """
     if exclude_turnarounds:
         if ("left_scan" not in aman.flags) or ("turnarounds" not in aman.flags):
-            raise ValueError('Flag turnarounds,left_scan, and right_scan by `sotodlib.flags.get_turnaround_flags`')
+            logger.warning('aman does not have left/right scan or turnarounds flag. `sotodlib.flags.get_turnaround_flags` will be ran with default parameters')
+            _ = flags.get_turnaround_flags(aman)
         valid_scan = np.logical_and(np.logical_or(aman.flags["left_scan"].mask(), aman.flags["right_scan"].mask()),
                                     ~aman.flags["turnarounds"].mask())
         subscan_indices = _get_subscan_range_index(valid_scan)
     else:
         if ("left_scan" not in aman.flags):
-            raise ValueError('Flag left_scan and right_scan by `sotodlib.flags.get_turnaround_flags`')
+            logger.warning('aman does not have left/right scan. `sotodlib.flags.get_turnaround_flags` will be ran with default parameters')
+            _ = flags.get_turnaround_flags(aman)
         subscan_indices_l = _get_subscan_range_index(aman.flags["left_scan"].mask())
         subscan_indices_r = _get_subscan_range_index(aman.flags["right_scan"].mask())
         subscan_indices = np.vstack([subscan_idx_l, subscan_idx_r])
