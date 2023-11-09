@@ -53,6 +53,37 @@ def check_meta_type(bookpath):
     else:
         return meta["type"]
 
+
+def telescope_lookup(telescope:str):
+    """
+    Set a number of common queries given a telescope name
+
+    Arguments
+    ----------
+    telescope : str
+        Name of telescope in M_index
+
+    """
+    if telescope == "sat" or telescope== "satp1":
+        return {"telescope" : "satp1", "telescope_flavor" : "sat",
+                "tube_flavor" : "mf", "detector_flavor" : "tes"}
+    elif telescope == "satp2":
+        return {"telescope" : "satp2","telescope_flavor" : "sat",
+                "tube_flavor":"mf", "detector_flavor":"tes"}
+    elif telescope == "satp3":
+        return {"telescope" : "satp3", "telescope_flavor":"sat",
+                "tube_flavor":"uhf", "detector_flavor":"tes"}
+    elif telescope == "lati1":
+        return {"telescope" : "lati1", "telescope_flavor" : "lat",
+                "tube_flavor" : "mf", "detector_flavor" : "tes"}
+    elif telescope == "lati6":
+        return {"telescope" : "lati6", "telescope_flavor" : "lat",
+                "tube_flavor" : "mf", "detector_flavor" : "tes"}
+    else:
+        logger.warning("unknown telescope type given by bookbinder")
+        return {}
+
+
 def main(config:str, 
         recency:float=None, 
         booktype:Optional[str]="both",
@@ -157,7 +188,7 @@ def main(config:str,
                 checkbook(bookpath, config, add=True, overwrite=True)
             except Exception as e:
                 if config_dict["skip_bad_books"]:
-                    print(f"failed to add {bookpath}")
+                    logger.warning(f"failed to add {bookpath}")
                     continue
                 else:
                     raise e
@@ -180,29 +211,32 @@ def main(config:str,
                 config_dict["skip_bad_books"] = False
             #Adding info that should be there for all observations
             #Descriptive string columns
-            frequent_cols = ["telescope", 
-                             "telescope_flavor", 
-                             "tube_slot", 
-                             "tube_flavor", 
-                             "detector_flavor"]
-            for fc in frequent_cols:
-                fcvalue = index.get(fc)
-                if fcvalue is not None:
-                    bookcartobsdb.add_obs_columns([fc+" str"])
-                    very_clean[fc] = fcvalue
+            try:
+                telescope = index["telescope"]
+                flavors = telescope_lookup(telescope)
+                for flav in flavors:
+                    bookcartobsdb.add_obs_columns([flav+" str"])
+                    very_clean[flav] = flavors[flav]
+
+            except KeyError:
+                logger.warning("No telescope key in index file")
+                pass
+
             stream_ids = index.pop("stream_ids")
             if stream_ids is not None:
                 bookcartobsdb.add_obs_columns(["wafer_count int"])
                 very_clean["wafer_count"] = len(stream_ids)
 
             #Time
-            start = index.get("start_time")
-            end = index.get("end_time") 
-            if None not in [start, end]:
+            try:
+                start = index["start_time"]
+                end = index["stop_time"] 
                 bookcartobsdb.add_obs_columns(["timestamp float", "duration float"])
                 very_clean["timestamp"] = start
                 very_clean["duration"] = end - start
-
+            except KeyError:
+                logger.error("Incomplete timing information for obs_id {obs_id}")
+                pass
             #Scanning motion
             stream_file = os.path.join(bookpath,"*{}*.g3".format(stream_ids[0]))
             stream = load_book.load_book_file(stream_file, no_signal=True)
@@ -218,17 +252,18 @@ def main(config:str,
                     logger.error(f"No {coor} pointing in some streams for obs_id {obs_id}")
                     pass
             try:
-                if index.get("telescope_flavor")=="SAT":
+                if very_clean.get("telescope_flavor")=="sat":
                     bore_enc = stream.ancil["boresight_enc"]
                     very_clean["roll_center"] = -.5 * (bore_enc.max() + bore_enc.min())
                     very_clean["roll_throw"] = .5 * (bore_enc.max() - bore_enc.min())
-                if index.get("telescope_flavor")=="LAT":
+                if very_clean.get("telescope_flavor")=="lat":
                     el_enc = stream.ancil["el_enc"]
                     corot_enc = stream.ancil["corotator_enc"]
                     roll = el_enc - 60. - corot_enc
                     very_clean["roll_center"] = .5 * (roll.max() + roll.min())
                     very_clean["roll_throw"] = .5 * (roll.max() - roll.min())
 
+                bookcartobsdb.add_obs_columns(["roll_center float", "roll_throw float"])
             except KeyError:
                 logger.error(f"Unable to compute roll for obs_id {obs_id}")
                 pass
