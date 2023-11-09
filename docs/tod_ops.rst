@@ -197,4 +197,5 @@ tod_ops.sub_polyf
 
 Function for remove low order polynominal component in each subscan.
 
-.. autofunction:: sotodlib.tod_ops.sub_polyf
+.. automodule:: sotodlib.tod_ops.sub_polyf
+   :members:

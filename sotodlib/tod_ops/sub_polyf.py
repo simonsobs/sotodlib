@@ -9,15 +9,24 @@ def subscan_polyfilter(aman, degree, signal='signal', exclude_turnarounds=True, 
     Subscan segments are defined based on the presence of flags such as 'left_scan' and 'right_scan'. Polynomial filtering
     is used to remove low-degree polynomial trends within each subscan segment.
 
-    Parameters
-    ----------
-    - aman (object): AxisManager object
-    - degree (int): The degree of the polynomial to be removed.
-    - signal (str, optional): The name of the signal in 'aman' to which polynomial filtering is applied. Default is 'signal'.
-    - exclude_turnarounds (bool, optional): If True, turnarounds are excluded from subscan identification. Default is True.
-    - mask (str or RangesMatrix, optional): A mask used to select specific data points for filtering. Default is None.
-        If None, no mask is applied. If the mask is given in str, aman.flags[`mask`] is used as mask. Arbitrary mask can be 
+    Arguments
+    ---------
+    aman : AxisManager
+    degree : int
+        The degree of the polynomial to be removed.
+    signal : str
+        Optional. The field of the signal in ``aman`` to which polynomial filtering is applied. Default is ``signal``.
+    exclude_turnarounds : bool
+        Optional. If True, turnarounds are excluded from subscan identification. Default is True.
+    Mask : str or RangesMatrix
+        Optional. A mask used to select specific data points for filtering. Default is None.
+        If None, no mask is applied. If the mask is given in str, ``aman.flags['mask']`` is used as mask. Arbitrary mask can be 
         specified in the style of RangesMatrix.
+
+    Returns
+    -------
+    None
+        Modifies signal field of aman in place.
     """
     if exclude_turnarounds:
         if ("left_scan" not in aman.flags) or ("turnarounds" not in aman.flags):
