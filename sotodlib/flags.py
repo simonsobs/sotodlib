@@ -17,8 +17,8 @@ from .tod_ops import fourier_filter
 
 def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
                          merge=True, merge_lr=True, overwrite=True, 
-                         t_buffer=1., kernel_size=400, peak_threshold=0.1, rel_distance_peaks=0.3,
-                         truncate=True, qlim=1):
+                         t_buffer=2., kernel_size=400, peak_threshold=0.1, rel_distance_peaks=0.3,
+                         truncate=False, qlim=1):
     """
     Compute turnaround flags for a dataset.
 
