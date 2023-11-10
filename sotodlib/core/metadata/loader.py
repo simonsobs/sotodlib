@@ -338,15 +338,20 @@ class SuperLoader:
         # request will be added back into this by check tags.
         aug_request = _filter_items('obs:', request, False)
         if self.obsdb is not None and 'obs:obs_id' in request:
-            obs_info = self.obsdb.get(request['obs:obs_id'], add_prefix='obs:')
-            if obs_info is not None:
-                obs_info.update(aug_request)
-                aug_request.update(obs_info)
             if dest is None:
                 dest = core.AxisManager()
             obs_man = core.AxisManager()
-            for k, v in _filter_items('obs:', obs_info).items():
-                obs_man.wrap(k, v)
+            obs_info = self.obsdb.get(request['obs:obs_id'], add_prefix='obs:')
+            if obs_info is None:
+                logger.warning(
+                    f"Observation {request['obs:obs_id']} not found in obsdb; "
+                    "trying to proceed anyway. You might have metadata failures.")
+                obs_man.wrap('obs_id', request['obs:obs_id'])
+            else:
+                obs_info.update(aug_request)
+                aug_request.update(obs_info)
+                for k, v in _filter_items('obs:', obs_info).items():
+                    obs_man.wrap(k, v)
             dest.wrap('obs_info', obs_man)
             
         def reraise(spec, e):
