@@ -19,6 +19,12 @@ def get_parser(parser=None):
     parser.add_argument("odir", help='output directory')
     parser.add_argument("--mode", type=str, default='per_obs')
     parser.add_argument("--comps",   type=str, default="TQU")
+    
+    # detector position splits
+    parser.add_argument("--det-in-out", action="store_true")
+    parser.add_argument("--det-left-right", action="store_true")
+    parser.add_argument("--det-upper-lower", action="store_true")
+    
     parser.add_argument("--ntod",    type=int, default=None)
     parser.add_argument("--tods",    type=str, default=None)
     parser.add_argument("--nset",    type=int, default=None)
@@ -186,9 +192,8 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
     # Set up our mapmaking equation
-    signal_cut = mapmaking.DemodSignalCut(comm, dtype=dtype_tod)
     signal_map = mapmaking.DemodSignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=True, ofmt="")
-    signals    = [signal_cut, signal_map]
+    signals    = [signal_map]
     mapmaker   = mapmaking.DemodMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0)
     if comm.rank == 0: L.info(pre + "Building RHS")
     time_rhs   = signal_map.rhs*0
@@ -227,11 +232,10 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         Nt  = np.zeros_like(obs.signal, dtype=dtype_tod)
         Nt += obs.timestamps - t0
         Nt *= mapmaker.data[-1].nmat.ivar[:,None]
-        signal_cut.data[name].pcut.clear(Nt)
         # Bin into pixels
         pmap = signal_map.data[name].pmap
         obs_time_rhs = pmap.zeros()
-        pmap.to_map(dest=obs_time_rhs, signal=Nt)
+        pmap.to_map(dest=obs_time_rhs, signal=Nt,)
         # Accumulate into output array
         time_rhs = time_rhs.insert(obs_time_rhs, op=np.ndarray.__iadd__)
         del obs, pmap, Nt, obs_time_rhs
@@ -302,7 +306,7 @@ def handle_empty(prefix, tag, comm, e):
         utils.mkdir(os.path.dirname(prefix))
         with open(prefix + ".empty", "w") as ofile: ofile.write("\n")
     
-def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='TQU', ntod=None, tods=None, nset=None, max_dets=None, fixed_time=None, mindur=None, tasks_per_group=1, site='so_sat1', verbose=0, quiet=0, window=5.0, cont=False, dtype_tod=np.float32, dtype_map=np.float64):
+def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='TQU', det_in_out=False, det_left_right=False, det_upper_lower=False, ntod=None, tods=None, nset=None, max_dets=None, fixed_time=None, mindur=None, tasks_per_group=1, site='so_sat1', verbose=0, quiet=0, window=5.0, cont=False, dtype_tod=np.float32, dtype_map=np.float64):
     warnings.simplefilter('ignore')
     # Set up our communicators
     comm       = mpi.COMM_WORLD

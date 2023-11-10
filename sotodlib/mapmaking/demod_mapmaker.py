@@ -78,9 +78,6 @@ class DemodSignal:
         self.ready  = False
     def add_obs(self, id, obs, nmat, Nd): pass
     def prepare(self): self.ready = True
-    def forward (self, id, tod, x): pass
-    def backward(self, id, tod, x): pass
-    def precon(self, x): return x
     def to_work  (self, x): return x.copy()
     def from_work(self, x): return x
     def write   (self, prefix, tag, x): pass
@@ -122,27 +119,24 @@ class DemodSignalMap(DemodSignal):
         for i in range(self.ncomp):
             Nd[i]     = Nd[i].copy() # This copy can be avoided if build_obs is split into two parts
         ctime  = obs.timestamps
-        pcut   = PmatCut(obs.glitch_flags) # could pass this in, but fast to construct
         if pmap is None:
             # Build the local geometry and pointing matrix for this observation
             if self.recenter:
                 rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter,
                     ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
             else: rot = None
-            pmap = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry,
-                rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site))
+            # we handle cuts here through obs.glitch_flags
+            pmap = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=obs.glitch_flags)
         # Build the RHS for this observation
         obs_rhs = pmap.zeros() # this is the final RHS, we will fill it at the end
         
         obs_rhs_T = pmap.zeros(super_shape=(1),comps='T')
-        for i in range(self.ncomp):
-            pcut.clear(Nd[i])  # I don't know what this does
         pmap.to_map(dest=obs_rhs_T, signal=Nd[0], comps='T') # this is only the RHS for T
         
         # RHS for QU. We save it to dummy maps
         obs_rhs_demodQ = pmap.to_map(signal=Nd[1], comps='QU') # Do I need to pass tod=obs ?
         obs_rhs_demodU = pmap.to_map(signal=Nd[2], comps='QU') # Do I need to pass tod=obs ?
-        obs_rhs_demodQU = pmap.zeros(super_shape=(2),comps='QU')
+        obs_rhs_demodQU = pmap.zeros(super_shape=(2),comps='QU',)
         if wrong_definition == True:
             # CAUTION: Here the definition of mQU_weighted uses a wrong way of definition, as toast simulation defines that in the wrong way.
             obs_rhs_demodQU[0][:] = obs_rhs_demodQ[0] - obs_rhs_demodU[1]
@@ -163,28 +157,14 @@ class DemodSignalMap(DemodSignal):
         # Build the per-pixel inverse covmat for this observation
         #obs_div = enmap.zeros((3, 3) + pmap.geom.shape, wcs=pmap.geom.wcs)
         #det_weights = 1/np.std(obs.demodQ, axis=1)**2
-        wT = pmap.to_weights(obs, signal=obs.dsT, comps='T', det_weights=nmat.ivar)
-        wQU = pmap.to_weights(obs, signal=obs.demodQ, comps='T', det_weights=nmat.ivar)
+        wT = pmap.to_weights(obs, signal=obs.dsT, comps='T', det_weights=nmat.ivar,)
+        wQU = pmap.to_weights(obs, signal=obs.demodQ, comps='T', det_weights=nmat.ivar,)
         obs_div[0,0] = wT
         obs_div[1,1] = wQU
         obs_div[2,2] = wQU
-        """
-        for i in range(self.ncomp):
-            obs_div[i]   = 0
-            obs_div[i,i] = 1
-            Nd[i,:]      = 0
-            pmap.from_map(obs_div[i], dest=Nd[i])
-            pcut.clear(Nd[i])
-            Nd[i] = nmat.white(Nd[i])
-            obs_div[i]   = 0
-            pmap.to_map(signal=Nd[i], dest=obs_div[i])
-#        if self.ncomp==3:
-#            obs_div[2,2] = obs_div[1,1]
-        """
         # Build hitcount
         Nd[0,:] = 1
-        pcut.clear(Nd[0])
-        obs_hits = pmap.to_map(signal=Nd[0])
+        obs_hits = pmap.to_map(signal=Nd[0],)
         del Nd
         # Update our full rhs and div. This works for both plain and distributed maps
         self.rhs = self.rhs.insert(obs_rhs, op=np.ndarray.__iadd__)
@@ -215,22 +195,6 @@ class DemodSignalMap(DemodSignal):
 
     @property
     def ncomp(self): return len(self.comps)
-    
-    def forward(self, id, tod, map, tmul=1, mmul=1):
-        """map2tod operation. For tiled maps, the map should be in work distribution,
-        as returned by unzip. Adds into tod."""
-        if id not in self.data: return # Should this really skip silently like this?
-        if tmul != 1: tod *= tmul
-        if mmul != 1: map = map*mmul
-        self.data[id].pmap.from_map(dest=tod, signal_map=map, comps=self.comps)
-
-    def backward(self, id, tod, map, tmul=1, mmul=1):
-        """tod2map operation. For tiled maps, the map should be in work distribution,
-        as returned by unzip. Adds into map"""
-        if id not in self.data: return
-        if tmul != 1: tod  = tod*tmul
-        if mmul != 1: map *= mmul
-        self.data[id].pmap.to_map(signal=tod, dest=map, comps=self.comps)
 
     def to_work(self, map):
         if self.tiled: return tilemap.redistribute(map, self.comm, self.geo_work.active)
@@ -250,73 +214,3 @@ class DemodSignalMap(DemodSignal):
             if self.comm is None or self.comm.rank == 0:
                 enmap.write_map(oname, m)
         return oname
-
-class DemodSignalCut(DemodSignal):
-    def __init__(self, comm, name="cut", ofmt="{name}_{rank:02}", dtype=np.float32,
-            output=False, cut_type=None):
-        """Signal for handling the ML solution for the values of the cut samples."""
-        DemodSignal.__init__(self, name, ofmt, output, ext="hdf")
-        self.comm  = comm
-        self.data  = {}
-        self.dtype = dtype
-        self.cut_type = cut_type
-        self.off   = 0
-        self.rhs   = []
-        self.div   = []
-
-    def add_obs(self, id, obs, nmat, Nd):
-        """Add and process an observation. "obs" should be an Observation axis manager,
-        nmat a noise model, representing the inverse noise covariance matrix,
-        and Nd the result of applying the noise model to the detector time-ordered data."""
-        # Nd will be 3 timestreams, dsT, demodQ and demodU
-        # we do this only for dsT
-        Nd[0]      = Nd[0].copy() # This copy can be avoided if build_obs is split into two parts
-        pcut    = PmatCut(obs.glitch_flags, model=self.cut_type)
-        # Build our RHS
-        obs_rhs = np.zeros(pcut.njunk, self.dtype)
-        pcut.backward(Nd[0], obs_rhs)
-        # Build our per-pixel inverse covmat
-        obs_div = np.ones(pcut.njunk, self.dtype)
-        Nd[0][:]     = 0
-        pcut.forward(Nd[0], obs_div)
-        Nd[0]       *= nmat.ivar[:,None]
-        pcut.backward(Nd[0], obs_div)
-        self.data[id] = bunch.Bunch(pcut=pcut, i1=self.off, i2=self.off+pcut.njunk)
-        self.off += pcut.njunk
-        self.rhs.append(obs_rhs)
-        self.div.append(obs_div)
-
-    def prepare(self):
-        """Process the added observations, determining our degrees of freedom etc.
-        Should be done before calling forward and backward."""
-        if self.ready: return
-        self.rhs = np.concatenate(self.rhs)
-        self.div = np.concatenate(self.div)
-        self.dof = ArrayZipper(self.rhs.shape, dtype=self.dtype, comm=self.comm)
-        self.ready = True
-
-    def forward(self, id, tod, junk):
-        if id not in self.data: return
-        d = self.data[id]
-        d.pcut.forward(tod, junk[d.i1:d.i2])
-
-    def precon(self, junk):
-        return junk/self.div
-
-    def backward(self, id, tod, junk):
-        if id not in self.data: return
-        d = self.data[id]
-        d.pcut.backward(tod, junk[d.i1:d.i2])
-
-    def write(self, prefix, tag, m):
-        if not self.output: return
-        if self.comm is None:
-            rank = 0
-        else:
-            rank = self.comm.rank
-        oname = self.ofmt.format(name=self.name, rank=rank)
-        oname = "%s%s_%s.%s" % (prefix, oname, tag, self.ext)
-        with h5py.File(oname, "w") as hfile:
-            hfile["data"] = m
-        return oname
-    
