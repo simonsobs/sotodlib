@@ -11,7 +11,8 @@ from .resultset import ResultSet
 TABLE_DEFS = {
     'detsets': [
         "`name`    varchar(16)",
-        "`det`     varchar(32) unique",
+        "`det`     varchar(32)",
+        "CONSTRAINT name_det UNIQUE (name, det)",
     ],
     'files': [
         "`name`    varchar(256) unique",
@@ -29,8 +30,8 @@ TABLE_DEFS = {
         "`sample_stop` int",
     ],
     'meta': [
-        "`param` varchar(32)",
-        "`value` varchar"
+        "`param` varchar(32) UNIQUE",
+        "`value` varchar",
     ],
 }
 
@@ -157,6 +158,15 @@ class ObsFileDb:
         new_db.prefix = self.prefix
         return new_db
 
+    def _get_version(self, conn=None):
+        if conn is None:
+            conn = self.conn
+        rows = conn.execute('select value from meta where '
+                            'param="obsfiledb_version"').fetchall()
+        if len(rows) == 0:
+            return None
+        return int(rows[0][0])
+
     def _create(self):
         """
         Create the database tables if they do not already exist.
@@ -169,9 +179,10 @@ class ObsFileDb:
                  ','.join(column_defs) + ')')
             c.execute(q)
 
-        # Forward looking...
-        c.execute('insert into meta (param,value) values (?,?)',
-                  ('obsfiledb_version', 1))
+        if self._get_version(conn=c) is None:
+            c.execute('insert or ignore into meta (param,value) values (?,?)',
+                      ('obsfiledb_version', 2))
+
         self.conn.commit()
 
     def add_detset(self, detset_name, detector_names, commit=True):
@@ -546,6 +557,21 @@ Examples:
     p.add_argument('--dry-run', action='store_true', help=
                    "Run the conversion steps but do not write the results anywhere.")
 
+    # "fix-db"
+    p = cmdsubp.add_parser(
+        'fix-db', help=
+        "Upgrade database (schema fixes, etc).",
+        usage="""Syntax:
+
+    %(prog)s [output options]
+        """)
+    p.add_argument('--overwrite', action='store_true', help=
+                   "Store modified database in the same file.")
+    p.add_argument('--output-db', '-o', help=
+                   "Store modified database in this file.")
+    p.add_argument('--dry-run', action='store_true', help=
+                   "Run the conversion steps but do not write the results anywhere.")
+
     return parser
 
 def main(args=None, parser=None):
@@ -627,6 +653,54 @@ def main(args=None, parser=None):
             db.conn.commit()
             c.execute('vacuum')
             db.to_file(args.output_db)
+
+    elif args.mode == 'fix-db':
+        # Reconnect with write?
+        if args.overwrite:
+            if args.output_db:
+                parser.error("Specify only one of --overwrite or --output-db.")
+            db = ObsFileDb.from_file(args.filename, force_new_db=True)
+            args.output_db = args.filename
+        else:
+            if args.output_db is None:
+                parser.error("Specify an output database name with --output-db, "
+                             "or pass --overwrite to clobber.")
+            db = ObsFileDb.from_file(args.filename, force_new_db=True)
+
+        # Get version ...
+        v = db._get_version()
+        print(f'Database reports as version = {v}')
+
+        changes = False
+        if v == 1:
+            # Copy detsets to new table, where uniqueness has been
+            # relaxed.  Re-do the meta table, where uniqueness is
+            # enforced to prevent lots of redundant rows added by
+            # _create().
+            changes = True
+            for line in [
+                    'drop table meta',
+                    'alter table detsets rename to old_detsets',
+                    '*',
+                    'insert into detsets (name, det) select name, det from old_detsets',
+                    'drop table old_detsets',
+            ]:
+                if line == '*':
+                    print('Creating updated tables.')
+                    db._create()
+                    continue
+                print(f'Running: {line}')
+                db.conn.execute(line)
+            print()
+
+        if changes:
+            print('Saving to %s' % args.output_db)
+            if not args.dry_run:
+                db.conn.commit()
+                db.conn.execute('vacuum')
+                db.to_file(args.output_db)
+        else:
+            print('No changes to make.')
 
     else:
         parser.error(f'Unimplemented mode, "{args.mode}".')
