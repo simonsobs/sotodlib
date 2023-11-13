@@ -6,6 +6,7 @@ Functions for working with affine transformations.
 
 import numpy as np
 import scipy.linalg as la
+from scipy.spatial.transform import Rotation as R
 
 
 def get_affine(src, dst):
