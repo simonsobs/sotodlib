@@ -128,7 +128,7 @@ class AncilProcessor:
         self.blocks = {
             name: HKBlock(name) 
             for name in ['ACU_broadcast', 'ACU_summary_output', 
-                         'HWPEncoder_freq']
+                         'HWPEncoder_freq', 'ACU_corotator']
         }
         self.anc_frame_data = None
         self.out_files = []
@@ -195,8 +195,13 @@ class AncilProcessor:
                 block.times, 
                 block.data['Corrected_Boresight']
             )
-        if 'Corrected_Corotation' in block.data:
-            corotation = np.interp(times, block.times, block.data['Corrected_Corotation'])
+        block = self.blocks['ACU_corotator']
+        if 'Corotator_current_position' in block.data:
+            corotation = np.interp(
+                times, 
+                block.times, 
+                block.data['Corotator_current_position']
+            )
 
         anc_frame_data = []
         for oframe_idx in np.unique(frame_idxs):
@@ -225,7 +230,7 @@ class AncilProcessor:
             if boresight is not None:
                 anc_data['boresight_enc'] = core.G3VectorDouble(boresight[m])
             if corotation is not None:
-                anc_data['corotation_enc'] = core.G3VectorDouble(corotation[m])
+                anc_data['corotator_enc'] = core.G3VectorDouble(corotation[m])
             oframe['ancil'] = anc_data
             writer(oframe)
             anc_frame_data.append(anc_data)
