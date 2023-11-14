@@ -47,7 +47,7 @@ def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=True, mask
             _ = flags.get_turnaround_flags(aman)
         subscan_indices_l = _get_subscan_range_index(aman.flags["left_scan"].mask())
         subscan_indices_r = _get_subscan_range_index(aman.flags["right_scan"].mask())
-        subscan_indices = np.vstack([subscan_idx_l, subscan_idx_r])
+        subscan_indices = np.vstack([subscan_indices_l, subscan_indices_r])
         subscan_indices= subscan_indices[np.argsort(subscan_indices[:, 0])]
     
     if mask is None:
