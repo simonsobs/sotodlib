@@ -2,6 +2,7 @@
 import numpy as np
 from pixell import utils
 from scipy import ndimage
+import so3g.proj
 
 from .utilities import *
 
@@ -124,7 +125,7 @@ def build_period_obslists(obs_info, periods, nset=None):
             obslists[key].append((row.obs_id, detset, band, i))
     return obslists
 
-def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, fixed_time=None, mindur=None):
+def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, fixed_time=None, mindur=None, det_in_out=False, det_left_right=False, det_upper_lower=False ):
     """ 
     Return an obslists dictionary (described in build_period_obslists), along with all ancillary data necessary for the mapmaker
     
@@ -146,6 +147,8 @@ def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, f
             Optional, if mode=='fixed_interval', this is the fixed time in seconds
     mindur : int or None
             Optional, minimum duration of an observation to be included in the mapping. If not defined it will be 120 seconds
+    det_in_out: bool
+            Optional, if true then map the detectors into inner and outer for splits
            
     Output
     ______
@@ -184,8 +187,49 @@ def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, f
     else:
         print("Invalid mode!")
         sys.exit(1)
+    # Map the detectors into splits,
+    det_split_masks = {}
+    split_labels = []
+    if det_left_right or det_in_out or det_upper_lower: 
+        # add the labels always in the same order, this will be the order of the splits that must be preserved
+        if det_left_right:
+            split_labels.append('detleft')
+            split_labels.append('detright')
+        if det_upper_lower:
+            split_labels.append('detupper')
+            split_labels.append('detlower')
+        if det_in_out:
+            split_labels.append('detin')
+            split_labels.append('detout')
+        # get the list of wafers
+        wafer_list = obs_infos[0].wafer_slots.split(",")[0:nset]
+        #print(wafer_list)
+        for wafer in wafer_list:
+            meta = context.get_meta(obs_id=ids[0], dets={"wafer_slot" : [wafer]})
+            if det_left_right or det_in_out:
+                xi = meta.focal_plane.xi
+                # sort xi 
+                xi_median = np.median(xi)    
+            if det_upper_lower or det_in_out:
+                eta = meta.focal_plane.eta
+                # sort eta
+                eta_median = np.median(eta)
+            if det_left_right:
+                det_split_masks[wafer+'_detleft'] = xi <= xi_median
+                det_split_masks[wafer+'_detright'] = xi > xi_median
+            if det_upper_lower:
+                det_split_masks[wafer+'_detupper'] = eta <= eta_median
+                det_split_masks[wafer+'_detlower'] = eta > eta_median
+            if det_in_out:
+                # the bounding box is the center of the detset
+                xi_center = np.min(xi) + 0.5 * (np.max(xi) - np.min(xi))
+                eta_center = np.min(eta) + 0.5 * (np.max(eta) - np.min(eta))
+                radii = np.sqrt((xi_center-xi)**2 + (eta_center-eta)**2)
+                radius_median = np.median(radii)
+                det_split_masks[wafer+'_detin'] = radii <= radius_median
+                det_split_masks[wafer+'_detout'] = radii > radius_median
+
     # We will make one map per period-detset-band
     obslists = build_period_obslists(obs_infos, periods, nset=nset)
     obskeys  = sorted(obslists.keys())
-    
-    return obslists, obskeys, periods, obs_infos
+    return obslists, obskeys, periods, obs_infos, det_split_masks, split_labels

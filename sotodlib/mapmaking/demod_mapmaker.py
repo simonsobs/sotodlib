@@ -1,5 +1,6 @@
 import numpy as np
 from pixell import enmap, utils, tilemap, bunch
+import so3g.proj
 
 from .. import coords
 from .utilities import *
@@ -28,7 +29,7 @@ class DemodMapmaker:
         self.ready        = False
         self.ncomp        = len(comps)
 
-    def add_obs(self, id, obs, noise_model=None, deslope=False):
+    def add_obs(self, id, obs, noise_model=None, deslope=False, det_split_masks=None, split_labels=None, detset=None):
         # Prepare our tod
         ctime  = obs.timestamps
         srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
@@ -55,7 +56,7 @@ class DemodMapmaker:
             tod[i]    = nmat.apply(tod[i])
         # Add the observation to each of our signals
         for signal in self.signals:
-            signal.add_obs(id, obs, nmat, tod)
+            signal.add_obs(id, obs, nmat, tod, det_split_masks=det_split_masks, split_labels=split_labels, detset=detset)
         # Save what we need about this observation
         self.data.append(bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime), dets=obs.dets.vals, nmat=nmat))
 
@@ -85,7 +86,7 @@ class DemodSignal:
 class DemodSignalMap(DemodSignal):
     """Signal describing a non-distributed sky map."""
     def __init__(self, shape, wcs, comm, comps="TQU", name="sky", ofmt="{name}", output=True,
-            ext="fits", dtype=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False):
+            ext="fits", dtype=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False, Nsplits=1):
         """Signal describing a sky map in the coordinate system given by "sys", which defaults
         to equatorial coordinates. If tiled==True, then this will be a distributed map with
         the given tile_shape, otherwise it will be a plain enmap."""
@@ -97,82 +98,97 @@ class DemodSignalMap(DemodSignal):
         self.dtype = dtype
         self.tiled = tiled
         self.data  = {}
+        self.Nsplits = Nsplits
         ncomp      = len(comps)
         shape      = tuple(shape[-2:])
         if tiled:
             geo = tilemap.geometry(shape, wcs, tile_shape=tile_shape)
-            self.rhs = tilemap.zeros(geo.copy(pre=(ncomp,)),      dtype=dtype)
-            self.div = tilemap.zeros(geo.copy(pre=(ncomp,ncomp)), dtype=dtype)
-            self.hits= tilemap.zeros(geo.copy(pre=()),            dtype=dtype)
+            self.rhs = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,)),      dtype=dtype)
+            self.div = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,ncomp)), dtype=dtype)
+            self.hits= tilemap.zeros(geo.copy(pre=(Nsplits,)),            dtype=dtype)
         else:
-            self.rhs = enmap.zeros((ncomp,)     +shape, wcs, dtype=dtype)
-            self.div = enmap.zeros((ncomp,ncomp)+shape, wcs, dtype=dtype)
-            self.hits= enmap.zeros(              shape, wcs, dtype=dtype)
+            self.rhs = enmap.zeros((Nsplits, ncomp)     +shape, wcs, dtype=dtype)
+            self.div = enmap.zeros((Nsplits,ncomp,ncomp)+shape, wcs, dtype=dtype)
+            self.hits= enmap.zeros((Nsplits,)+shape, wcs, dtype=dtype)
 
-    def add_obs(self, id, obs, nmat, Nd, pmap=None, wrong_definition=False):
+    def add_obs(self, id, obs, nmat, Nd, pmap=None, wrong_definition=False, det_split_masks=None, split_labels=None, detset=None):
         # Nd will have 3 components, corresponding to ds_T, demodQ, demodU with the noise model applied
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
         nmat a noise model, representing the inverse noise covariance matrix,
         and Nd the result of applying the noise model to the detector time-ordered data.
         """
-        for i in range(self.ncomp):
-            Nd[i]     = Nd[i].copy() # This copy can be avoided if build_obs is split into two parts
         ctime  = obs.timestamps
-        if pmap is None:
-            # Build the local geometry and pointing matrix for this observation
-            if self.recenter:
-                rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter,
-                    ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
-            else: rot = None
-            # we handle cuts here through obs.glitch_flags
-            pmap = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=obs.glitch_flags)
-        # Build the RHS for this observation
-        obs_rhs = pmap.zeros() # this is the final RHS, we will fill it at the end
-        
-        obs_rhs_T = pmap.zeros(super_shape=(1),comps='T')
-        pmap.to_map(dest=obs_rhs_T, signal=Nd[0], comps='T') # this is only the RHS for T
-        
-        # RHS for QU. We save it to dummy maps
-        obs_rhs_demodQ = pmap.to_map(signal=Nd[1], comps='QU') # Do I need to pass tod=obs ?
-        obs_rhs_demodU = pmap.to_map(signal=Nd[2], comps='QU') # Do I need to pass tod=obs ?
-        obs_rhs_demodQU = pmap.zeros(super_shape=(2),comps='QU',)
-        if wrong_definition == True:
-            # CAUTION: Here the definition of mQU_weighted uses a wrong way of definition, as toast simulation defines that in the wrong way.
-            obs_rhs_demodQU[0][:] = obs_rhs_demodQ[0] - obs_rhs_demodU[1]
-            # (= Q_{flipped detector coord}*cos(2 theta_pa) - U_{flipped detector coord}*sin(2 theta_pa) )
-            obs_rhs_demodQU[1][:] = obs_rhs_demodQ[1] + obs_rhs_demodU[0]
-            # (= Q_{flipped detector coord}*sin(2 theta_pa) + U_{flipped detector coord}*cos(2 theta_pa) )
-        else:
-            #### In field, you should use instead ####
-            obs_rhs_demodQU[0][:] = obs_rhs_demodQ[0] + obs_rhs_demodU[1]
-            # (= Q_{flipped detector coord}*cos(2 theta_pa) + U_{flipped detector coord}*sin(2 theta_pa) )
-            obs_rhs_demodQU[1][:] = -obs_rhs_demodQ[1] + obs_rhs_demodU[0] 
-            # (= -Q_{flipped detector coord}*sin(2 theta_pa) + U_{flipped detector coord}*cos(2 theta_pa) )
-        # we write into the obs_rhs. 
-        obs_rhs[0] = obs_rhs_T[0]
-        obs_rhs[1] = obs_rhs_demodQU[0]
-        obs_rhs[2] = obs_rhs_demodQU[1]
-        obs_div    = pmap.zeros(super_shape=(self.ncomp,self.ncomp))
-        # Build the per-pixel inverse covmat for this observation
-        #obs_div = enmap.zeros((3, 3) + pmap.geom.shape, wcs=pmap.geom.wcs)
-        #det_weights = 1/np.std(obs.demodQ, axis=1)**2
-        wT = pmap.to_weights(obs, signal=obs.dsT, comps='T', det_weights=nmat.ivar,)
-        wQU = pmap.to_weights(obs, signal=obs.demodQ, comps='T', det_weights=nmat.ivar,)
-        obs_div[0,0] = wT
-        obs_div[1,1] = wQU
-        obs_div[2,2] = wQU
-        # Build hitcount
-        Nd[0,:] = 1
-        obs_hits = pmap.to_map(signal=Nd[0],)
+        for n_split in range(self.Nsplits):
+            for i in range(self.ncomp):
+                Nd[i]     = Nd[i].copy() # This copy can be avoided if build_obs is split into two parts
+            if pmap is None:
+                # Build the local geometry and pointing matrix for this observation
+                if self.recenter:
+                    rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter,
+                        ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
+                else: rot = None
+                # we handle cuts here through obs.glitch_flags
+                if split_labels == None:
+                    # this is the case with no splits, cuts will only have the glitches
+                    pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=obs.glitch_flags)
+                else:
+                    # this is the case where we are processing a split. We need to figure out what type of split it is (detector fixed in time, detector variable in time, samples), build the RangesMatrix mask and create the pmap.
+                    if split_labels[n_split] in ['detleft','detright','detin','detout','detupper','detlower']:
+                        # then we are in a detector fixed in time split.
+                        key = detset+'_'+split_labels[n_split]
+                        mask = det_split_masks[key]
+                        mask_for_split = np.repeat(mask[:,None], int(obs.samps.count), axis=1)
+                        rangesmatrix = obs.glitch_flags and so3g.proj.RangesMatrix.from_mask(mask_for_split)
+                    pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix)
+            else:
+                pmap_local = pmap
+                    
+            # Build the RHS for this observation
+            obs_rhs = pmap_local.zeros() # this is the final RHS, we will fill it at the end
+
+            obs_rhs_T = pmap_local.zeros(super_shape=(1),comps='T')
+            pmap_local.to_map(dest=obs_rhs_T, signal=Nd[0], comps='T') # this is only the RHS for T
+            # RHS for QU. We save it to dummy maps
+            obs_rhs_demodQ = pmap_local.to_map(signal=Nd[1], comps='QU') # Do I need to pass tod=obs ?
+            obs_rhs_demodU = pmap_local.to_map(signal=Nd[2], comps='QU') # Do I need to pass tod=obs ?
+            obs_rhs_demodQU = pmap_local.zeros(super_shape=(2),comps='QU',)
+            if wrong_definition == True:
+                # CAUTION: Here the definition of mQU_weighted uses a wrong way of definition, as toast simulation defines that in the wrong way.
+                obs_rhs_demodQU[0][:] = obs_rhs_demodQ[0] - obs_rhs_demodU[1]
+                # (= Q_{flipped detector coord}*cos(2 theta_pa) - U_{flipped detector coord}*sin(2 theta_pa) )
+                obs_rhs_demodQU[1][:] = obs_rhs_demodQ[1] + obs_rhs_demodU[0]
+                # (= Q_{flipped detector coord}*sin(2 theta_pa) + U_{flipped detector coord}*cos(2 theta_pa) )
+            else:
+                #### In field, you should use instead ####
+                obs_rhs_demodQU[0][:] = obs_rhs_demodQ[0] + obs_rhs_demodU[1]
+                # (= Q_{flipped detector coord}*cos(2 theta_pa) + U_{flipped detector coord}*sin(2 theta_pa) )
+                obs_rhs_demodQU[1][:] = -obs_rhs_demodQ[1] + obs_rhs_demodU[0] 
+                # (= -Q_{flipped detector coord}*sin(2 theta_pa) + U_{flipped detector coord}*cos(2 theta_pa) )
+            # we write into the obs_rhs. 
+            obs_rhs[0] = obs_rhs_T[0]
+            obs_rhs[1] = obs_rhs_demodQU[0]
+            obs_rhs[2] = obs_rhs_demodQU[1]
+            obs_div    = pmap_local.zeros(super_shape=(self.ncomp,self.ncomp))
+            # Build the per-pixel inverse covmat for this observation
+            #obs_div = enmap.zeros((3, 3) + pmap.geom.shape, wcs=pmap.geom.wcs)
+            #det_weights = 1/np.std(obs.demodQ, axis=1)**2
+            wT = pmap_local.to_weights(obs, signal=obs.dsT, comps='T', det_weights=nmat.ivar,)
+            wQU = pmap_local.to_weights(obs, signal=obs.demodQ, comps='T', det_weights=nmat.ivar,)
+            obs_div[0,0] = wT
+            obs_div[1,1] = wQU
+            obs_div[2,2] = wQU
+            # Build hitcount
+            Nd[0,:] = 1
+            obs_hits = pmap_local.to_map(signal=Nd[0],)
+            # Update our full rhs and div. This works for both plain and distributed maps
+            self.rhs[n_split] = self.rhs[n_split].insert(obs_rhs, op=np.ndarray.__iadd__)
+            self.div[n_split] = self.div[n_split].insert(obs_div, op=np.ndarray.__iadd__)
+            self.hits[n_split] = self.hits[n_split].insert(obs_hits[0],op=np.ndarray.__iadd__)
+            # Save the per-obs things we need. Just the pointing matrix in our case.
+            # Nmat and other non-Signal-specific things are handled in the mapmaker itself.
+            self.data[(id,n_split)] = bunch.Bunch(pmap=pmap_local, obs_geo=obs_rhs.geometry)
         del Nd
-        # Update our full rhs and div. This works for both plain and distributed maps
-        self.rhs = self.rhs.insert(obs_rhs, op=np.ndarray.__iadd__)
-        self.div = self.div.insert(obs_div, op=np.ndarray.__iadd__)
-        self.hits= self.hits.insert(obs_hits[0],op=np.ndarray.__iadd__)
-        # Save the per-obs things we need. Just the pointing matrix in our case.
-        # Nmat and other non-Signal-specific things are handled in the mapmaker itself.
-        self.data[id] = bunch.Bunch(pmap=pmap, obs_geo=obs_rhs.geometry)
 
     def prepare(self):
         """Called when we're done adding everything. Sets up the map distribution,
@@ -183,14 +199,14 @@ class DemodSignalMap(DemodSignal):
             self.rhs  = tilemap.redistribute(self.rhs, self.comm)
             self.div  = tilemap.redistribute(self.div, self.comm)
             self.hits = tilemap.redistribute(self.hits,self.comm)
-            self.dof  = TileMapZipper(self.rhs.geometry, dtype=self.dtype, comm=self.comm)
         else:
             if self.comm is not None:
                 self.rhs  = utils.allreduce(self.rhs, self.comm)
                 self.div  = utils.allreduce(self.div, self.comm)
                 self.hits = utils.allreduce(self.hits,self.comm)
-            self.dof  = MapZipper(*self.rhs.geometry, dtype=self.dtype)
-        self.idiv  = safe_invert_div(self.div)
+        self.idiv = []
+        for n_split in range(self.Nsplits):
+            self.idiv.append( safe_invert_div(self.div[n_split]) )
         self.ready = True
 
     @property
