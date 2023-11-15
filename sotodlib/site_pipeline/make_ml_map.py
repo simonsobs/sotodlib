@@ -71,7 +71,6 @@ def _get_config(config_file):
 def main(config_file=None, defaults=defaults, **args):
     
     cfg = defaults
-    print(cfg['maxiter'])
     if config_file is not None:
         # Load in config file
         cfg_from_file = _get_config(config_file)
@@ -88,13 +87,11 @@ def main(config_file=None, defaults=defaults, **args):
                 cfg[field] = file_val
     else:
         print("No config file provided, assuming default values") 
-    print(cfg['maxiter'])
 
     # Merge flags from config file and defaults with any passed through CLI
     for key, item in args.items():
         if item is not None:
             cfg[key] = item
-    print(cfg['maxiter'])
     # Certain fields are required. Check if they are all supplied here
     required_fields = ['query','freq','area','odir','prefix','context']
     for req in required_fields:
