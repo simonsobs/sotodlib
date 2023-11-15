@@ -44,8 +44,9 @@ def setup_pointing(operators):
     operators.append(
         toast.ops.PixelsWCS(
             name="pixels_wcs_azel",
-            project="CAR",
+            projection="CAR",
             resolution=(0.005 * u.degree, 0.005 * u.degree),
+            submaps=1,
             auto_bounds=True,
             enabled=False,
         )
@@ -55,8 +56,9 @@ def setup_pointing(operators):
     operators.append(
         toast.ops.PixelsWCS(
             name="pixels_wcs_radec",
-            project="CAR",
+            projection="CAR",
             resolution=(0.005 * u.degree, 0.005 * u.degree),
+            submaps=1,
             auto_bounds=True,
             enabled=False,
         )
