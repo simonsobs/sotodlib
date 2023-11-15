@@ -238,8 +238,6 @@ def get_cal_resset(ctx: core.Context, obs_id):
             if rtm_bit_to_volt is None:
                 rtm_bit_to_volt = ivas[dset]['meta']['rtm_bit_to_volt']
 
-
-
     bias_step_obsids = get_cal_obsids(ctx, obs_id, 'bias_steps')
     bsas = {dset: None for dset in bias_step_obsids}
     for dset, oid in bias_step_obsids.items():
@@ -249,8 +247,6 @@ def get_cal_resset(ctx: core.Context, obs_id):
                 rtm_bit_to_volt = bsas[dset]['meta']['rtm_bit_to_volt']
 
     rtm_bit_to_volt = DEFAULT_RTM_BIT_TO_VOLT
-
-
 
     # Add IV info
     for i, cal in enumerate(cals):
