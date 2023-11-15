@@ -112,7 +112,7 @@ def simulate_observing(job, otherargs, runargs, comm):
         comm (MPI.Comm):  The MPI world communicator (or None).
 
     Returns:
-        None
+        (Data):  The simulated data.
 
     """
     log = toast.utils.Logger.get()

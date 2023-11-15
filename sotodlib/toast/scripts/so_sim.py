@@ -80,6 +80,11 @@ def simulate_data(job, otherargs, runargs, comm):
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"After simulating data:  {mem}", comm)
 
+    # If the user has not separately specified the output directory,
+    # write it to workflow output directory
+    if job.operators.save_hdf5.volume is None:
+        hdf5_out = os.path.join(otherargs.out_dir, "data")
+        job.operators.save_hdf5.volume = hdf5_out
     wrk.save_data_hdf5(job, otherargs, runargs, data)
 
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
