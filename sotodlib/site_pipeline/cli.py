@@ -47,7 +47,7 @@ from . import (
     update_g3tsmurf_db,
     preprocess_tod,
     update_obsdb,
-    ml_mapmaking,
+    make_ml_map,
 )
 
 # Dictionary matching element name to a submodule (which must have
@@ -63,7 +63,7 @@ ELEMENTS = {
     'update-g3tsmurf-db': update_g3tsmurf_db,
     'preprocess-tod': preprocess_tod,
     'update-obsdb': update_obsdb,
-    'ml-mapmaking': ml_mapmaking,
+    'make-ml-map': make_ml_map,
 }
 
 CLI_NAME = 'so-site-pipeline'
