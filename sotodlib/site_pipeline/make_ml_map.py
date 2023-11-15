@@ -78,8 +78,7 @@ def main(config_file=None, defaults=defaults, **args):
 
     # Check which fields have been supplied in config.yaml
     # If an optional arg is not supplied, supply a default here
-    fields = list(defaults.keys())
-    for field in fields:
+    for field,default_val in defaults.items():
         if field not in cfg.keys():
             cfg[field] = defaults[field]
     # Merge flags from config file and defaults with any passed through CLI
@@ -105,15 +104,15 @@ def main(config_file=None, defaults=defaults, **args):
     ncomp = len(comps)
     dtype_tod = np.float32
     dtype_map = np.float64
-    nmat_dir  = args['nmat_dir'].format(odir=args['odir']) # Not sure if this works - Tanay
+    nmat_dir = os.path.join(args['odir'],args['nmat_dir'])
     prefix= args['odir'] + "/"
     if args['prefix']: prefix += args['prefix'] + "_"
     utils.mkdir(args['odir'])
     L = mapmaking.init(level=mapmaking.DEBUG, rank=comm.rank)
 
     recenter = None
-    if args['center-at']:
-        recenter = mapmaking.parse_recentering(args['center-at'])
+    if args['center_at']:
+        recenter = mapmaking.parse_recentering(args['center_at'])
 
     with mapmaking.mark('context'):
         context = Context(args['context'])
