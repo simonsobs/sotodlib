@@ -713,7 +713,7 @@ class BookBinder:
 
         self.meta_files = meta_files
 
-    def get_metadata(self):
+    def get_metadata(self, telescope=None, tube_config={}):
         """
         Returns metadata dict for the book
         """
@@ -735,9 +735,18 @@ class BookBinder:
             sample_ranges.append([i0, i1+1])
         meta['sample_ranges'] = sample_ranges
 
-        meta['telescope'] = self.book.tel_tube[:3].lower()
+        if telescope is None:
+            meta['telescope'] = self.book.tel_tube[:3].lower()
+        else: 
+            meta['telescope'] = telescope
         # parse e.g., sat1 -> st1, latc1 -> c1
-        meta['tube_slot'] = self.book.tel_tube.lower().replace("sat","satst")[3:]
+        meta['tube_slot'] = tube_config.get(
+            'tube_slot',
+            self.book.tel_tube.lower().replace("sat","satst")[3:]
+        )
+        meta['tube_flavor'] = tube_config.get('tube_flavor')
+        meta['wafer_slots'] = tube_config.get('wafer_slots')
+
         meta['type'] = self.book.type
         detsets = []
         tags = []
