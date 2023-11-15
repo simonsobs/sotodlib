@@ -6,9 +6,28 @@ from sotodlib.io import metadata   # PerDetectorHdf5 work-around
 from sotodlib import tod_ops
 from sotodlib.tod_ops import filters
 from pixell import enmap, utils, fft, bunch, wcsutils, mpi
-#import moby2.analysis.socompat
 import yaml
 
+defaults = {"comps":"T",
+            "ntod": None,    
+            "tods": None,
+            "nset": None,
+            "nmat": "corr",
+            "max_dets": None,
+            "verbose": 0,
+            "quiet": 0,
+            "center_at": None,
+            "window": 0.0,
+            "inject": None,
+            "nocal": True,
+            "nmat_dir": "/nmats",
+            "nmat_mode": "build",
+            "downsample": 1,
+            "maxiter": 500,
+            "tiled": 1,
+            "wafer": None,
+           }
+    
 def get_parser(parser=None):
     if parser is None:
         parser = ArgumentParser()
@@ -48,7 +67,7 @@ def _get_config(config_file):
 
 
 
-def main(config_file=None, **args):
+def main(config_file=None, defaults=defaults, **args):
     cfg = _get_config(config_file)
     
     # Certain fields are required. Check if they are all supplied here
@@ -57,26 +76,6 @@ def main(config_file=None, **args):
         if req not in cfg.keys():
             raise KeyError("Please supply a {}".format(req))
 
-    defaults = {"comps":"T",
-                "ntod": None,    
-                "tods": None,
-                "nset": None,
-                "nmat": "corr",
-                "max_dets": None,
-                "verbose": 0,
-                "quiet": 0,
-                "center-at": None,
-                "window": 0.0,
-                "inject": None,
-                "nocal": True,
-                "nmat_dir": "/nmats",
-                "nmat_mode": "build",
-                "downsample": 1,
-                "maxiter": 500,
-                "tiled": 1,
-                "wafer": None,
-               }
-    
     # Check which fields have been supplied in config.yaml
     # If an optional arg is not supplied, supply a default here
     fields = list(defaults.keys())
