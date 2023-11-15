@@ -8,10 +8,11 @@ from sotodlib.tod_ops import filters
 from pixell import enmap, utils, fft, bunch, wcsutils, mpi
 import yaml
 
-defaults = {"comps":"T",
-            "ntod": None,    
+defaults = {"comps": "T",
+            "ntod": None,
             "tods": None,
             "nset": None,
+            "site": 'so_lat',
             "nmat": "corr",
             "max_dets": None,
             "verbose": 0,
@@ -68,23 +69,37 @@ def _get_config(config_file):
 
 
 def main(config_file=None, defaults=defaults, **args):
-    cfg = _get_config(config_file)
     
-    # Certain fields are required. Check if they are all supplied here
-    required_fields = ['query','freq','area','odir','prefix']
-    for req in required_fields:
-        if req not in cfg.keys():
-            raise KeyError("Please supply a {}".format(req))
+    cfg = defaults
+    print(cfg['maxiter'])
+    if config_file is not None:
+        # Load in config file
+        cfg_from_file = _get_config(config_file)
+        
+        # Check which fields have been supplied in config.yaml
+        for field, file_val in cfg_from_file.items():
+            # If an optional arg is supplied, in the config file
+            # add it here
+            if field not in cfg.keys():
+                cfg[field] = cfg_from_file[field]
+            # If the value in the config file is different from the 
+            # default, update it
+            elif cfg[field] != file_val:
+                cfg[field] = file_val
+    else:
+        print("No config file provided, assuming default values") 
+    print(cfg['maxiter'])
 
-    # Check which fields have been supplied in config.yaml
-    # If an optional arg is not supplied, supply a default here
-    for field,default_val in defaults.items():
-        if field not in cfg.keys():
-            cfg[field] = defaults[field]
     # Merge flags from config file and defaults with any passed through CLI
     for key, item in args.items():
         if item is not None:
             cfg[key] = item
+    print(cfg['maxiter'])
+    # Certain fields are required. Check if they are all supplied here
+    required_fields = ['query','freq','area','odir','prefix','context']
+    for req in required_fields:
+        if req not in cfg.keys():
+            raise KeyError("{} is a required argument. Please supply it in a config file or via the command line".format(req))
 
     args = cfg
     warnings.simplefilter('ignore')
