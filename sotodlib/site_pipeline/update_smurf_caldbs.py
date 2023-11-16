@@ -30,7 +30,7 @@ from dataclasses import dataclass, astuple
 import numpy as np
 from tqdm.auto import tqdm
 
-from typing import Optional, List
+from typing import Optional, Union
 
 from sotodlib import core
 from sotodlib.io.metadata import write_dataset
@@ -43,13 +43,13 @@ DEFAULT_RTM_BIT_TO_VOLT = 10 / 2**19
 
 default_logger = sp_util.init_logger("smurf_caldbs")
 
-def main(config:str | dict, 
+def main(config: Union[str, dict], 
         overwrite:Optional[bool]=False,
         logger=None):
     smurf_detset_info(config, overwrite, logger)
     run_update_det_caldb(config, log=logger)
 
-def smurf_detset_info(config:str | dict, 
+def smurf_detset_info(config: Union[str, dict], 
         overwrite:Optional[bool]=False,
         logger=None):
     """Write out the updates for the manifest database with information about
@@ -137,7 +137,17 @@ def smurf_detset_info(config:str | dict,
 def get_cal_obsids(ctx, obs_id, cal_type):
     """
     Returns set of obs-ids corresponding to the most recent calibration
-    operations for a given obsid:
+    operations for a given obsid.
+
+    Args
+    ------
+    ctx: core.Context
+        Context object
+    obs_id: str
+        obs_id for which you want to get relevant calibration info
+    cal_type: str
+        Calibration subtype to use in the obsdb query. For example: 'iv' or
+        'bias_steps'.
 
     Returns
     ----------
@@ -170,14 +180,15 @@ def get_cal_obsids(ctx, obs_id, cal_type):
 # Dtype for calibration set
 cal_dtype = [
     ('dets:readout_id', '<U40'),
-    ('dets:cal.r_tes', float),
-    ('dets:cal.r_frac', float),
-    ('dets:cal.p_bias', float),
-    ('dets:cal.s_i', float),
-    ('dets:cal.bg', int),
-    ('dets:cal.bg_polarity', int),
-    ('dets:cal.r_n', float),
-    ('dets:cal.p_sat', float),
+    ('r_tes', float),
+    ('r_frac', float),
+    ('p_bias', float),
+    ('s_i', float),
+    ('phase_to_pW', float),
+    ('bg', int),
+    ('polarity', int),
+    ('r_n', float),
+    ('p_sat', float),
 ]
 
 @dataclass
@@ -190,6 +201,7 @@ class CalInfo:
     r_frac: float = np.nan
     p_bias: float = np.nan  # J
     s_i: float = np.nan     # 1/V
+    phase_to_pW: float = np.nan  # pW/rad
 
     # From IV
     bg: int = -1
@@ -198,7 +210,7 @@ class CalInfo:
     p_sat: float = np.nan   # J
 
 
-def _load_smurf_npy(obs_id, substr):
+def _load_smurf_npy(ctx, obs_id, substr):
     """
     Loads npy file from Z_smurf archive of book.
 
@@ -222,10 +234,12 @@ def _load_smurf_npy(obs_id, substr):
     return res
 
 
-def get_cal_resset(ctx: core.Context, obs_id):
+def get_cal_resset(ctx: core.Context, obs_id, logger=None):
     """Returns calibration ResultSet for a given ObsId"""
-    am = ctx.get_obs(obs_id, samples=(0, 1), ignore_missing=True)
+    if logger is None:
+        logger=default_logger
 
+    am = ctx.get_obs(obs_id, samples=(0, 1), ignore_missing=True, no_signal=True)
     cals = [CalInfo(rid) for rid in am.det_info.readout_id]
 
     iv_obsids = get_cal_obsids(ctx, obs_id, 'iv')
@@ -234,19 +248,24 @@ def get_cal_resset(ctx: core.Context, obs_id):
     ivas = {dset: None for dset in iv_obsids}
     for dset, oid in iv_obsids.items():
         if oid is not None:
-            ivas[dset] = _load_smurf_npy(oid, 'iv')
+            ivas[dset] = _load_smurf_npy(ctx, oid, 'iv')
             if rtm_bit_to_volt is None:
                 rtm_bit_to_volt = ivas[dset]['meta']['rtm_bit_to_volt']
+        else:
+            logger.debug("missing IV data for %s", dset)
 
     bias_step_obsids = get_cal_obsids(ctx, obs_id, 'bias_steps')
     bsas = {dset: None for dset in bias_step_obsids}
     for dset, oid in bias_step_obsids.items():
         if oid is not None:
-            bsas[dset] = _load_smurf_npy(oid, 'bias_step_analysis')
+            bsas[dset] = _load_smurf_npy(ctx, oid, 'bias_step_analysis')
             if rtm_bit_to_volt is None:
                 rtm_bit_to_volt = bsas[dset]['meta']['rtm_bit_to_volt']
+        else:
+            logger.debug("missing bias step data for %s", dset)
 
-    rtm_bit_to_volt = DEFAULT_RTM_BIT_TO_VOLT
+    if rtm_bit_to_volt is None:
+        rtm_bit_to_volt = DEFAULT_RTM_BIT_TO_VOLT
 
     # Add IV info
     for i, cal in enumerate(cals):
@@ -271,6 +290,20 @@ def get_cal_resset(ctx: core.Context, obs_id):
         cal.p_sat = iva['p_sat'][ridx]
     
     obs_biases = dict(zip(am.bias_lines.vals, am.biases[:, 0] * 2*rtm_bit_to_volt))
+    bias_line_is_valid = {k: True for k in obs_biases.keys()}
+
+    # check to see if biases have changed between bias steps and obs
+    for bsa in bsas.values():
+        for bg, vb_bsa in enumerate(bsa['Vbias']):
+            bl_label = f"{bsa['meta']['stream_id']}_b{bg:0>2}"
+            if np.isnan(vb_bsa):
+                bias_line_is_valid[bl_label] = False
+                continue
+
+            if np.abs(vb_bsa - obs_biases[bl_label]) > 0.1:
+                logger.debug("bias step and obs biases don't match for %s", bl_label)
+                bias_line_is_valid[bl_label] = False
+
     for i, cal in enumerate(cals):
         band = am.det_info.smurf.band[i]
         chan = am.det_info.smurf.channel[i]
@@ -283,9 +316,7 @@ def get_cal_resset(ctx: core.Context, obs_id):
             continue
 
         bl_label = f'{stream_id}_b{bg:0>2}'
-        # If observation bias differs from bias-steps by more than 0.1 V,
-        # don't include bias step calibration info
-        if np.abs(obs_biases[bl_label] - bsa['Vbias'][bg]) > 0.1:
+        if not bias_line_is_valid[bl_label]:
             continue
 
         ridx = np.where(
@@ -299,6 +330,7 @@ def get_cal_resset(ctx: core.Context, obs_id):
         cal.r_frac = bsa['Rfrac'][ridx]
         cal.p_bias = bsa['Pj'][ridx]
         cal.s_i = bsa['Si'][ridx]
+        cal.phase_to_pW = 9e6 / (2*np.pi) / cal.s_i * cal.polarity
 
     rset = core.metadata.ResultSet.from_friend(np.array(
         [astuple(c) for c in cals], dtype=cal_dtype
@@ -320,10 +352,10 @@ def get_obs_with_detsets(ctx, detset_idx):
     return obs_ids
 
 
-def update_det_caldb(ctx, idx_path, detset_idx, h5_path, log=None, 
+def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None, 
                      show_pb=False, format_exc=False):
-    if log is None:
-        log = default_logger
+    if logger is None:
+        logger = default_logger
 
     if not os.path.exists(idx_path):
         scheme = core.metadata.ManifestScheme()
@@ -338,19 +370,19 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path, log=None,
     all_obsids = get_obs_with_detsets(ctx, detset_idx)
     remaining_obsids = \
         sorted(list(set(all_obsids) - set(existing_obsids)),
-            key=(lambda s: s.split('_')[1]))
-    
-    log.info(f"{len(remaining_obsids)} bias step datasets to add.....")
+               key=(lambda s: s.split('_')[1]))
+
+    logger.info("%d datasets to add", len(remaining_obsids))
     for obs_id in tqdm(remaining_obsids, disable=(not show_pb)):
         try:
             rset = get_cal_resset(ctx, obs_id)
         except Exception as e:
-            log.error(f"Failed on {obs_id}: {e}")
+            logger.error("Failed on %s: %s", obs_id, e)
             if format_exc:
-                log.error(traceback.format_exc())
+                logger.error(traceback.format_exc())
             continue
-        
-        log.info(f"Writing metadata for {obs_id}")
+
+        logger.info("Writing metadata for %s", obs_id)
         write_dataset(rset, h5_path, obs_id, overwrite=True)
         db.add_entry({
             'obs:obs_id': obs_id,
@@ -366,7 +398,7 @@ def run_update_det_caldb(config, log=None):
         config['archive']['detset']['index'],
         config['archive']['det_cal']['h5file'],
         show_pb=False,
-        log=log
+        logger=log
     )
 
 
