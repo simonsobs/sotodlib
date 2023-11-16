@@ -69,10 +69,10 @@ def telescope_lookup(telescope:str):
                 "tube_flavor": "mf", "detector_flavor": "tes"}
     elif telescope == "satp2":
         return {"telescope": "satp2","telescope_flavor": "sat",
-                "tube_flavor": "mf", "detector_flavor": "tes"}
+                "tube_flavor": "uhf", "detector_flavor": "tes"}
     elif telescope == "satp3":
         return {"telescope": "satp3", "telescope_flavor": "sat",
-                "tube_flavor": "uhf", "detector_flavor": "tes"}
+                "tube_flavor": "mf", "detector_flavor": "tes"}
     elif telescope == "lati1":
         return {"telescope": "lati1", "telescope_flavor": "lat",
                 "tube_flavor": "mf", "detector_flavor": "tes"}
