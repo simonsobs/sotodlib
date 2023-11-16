@@ -73,28 +73,17 @@ def _get_config(config_file):
 
 def main(config_file=None, defaults=defaults, **args):
     
-    cfg = defaults
+    cfg = dict(defaults)
+    
+    # Update the default dict with values provided from a config.yaml file
     if config_file is not None:
-        # Load in config file
         cfg_from_file = _get_config(config_file)
-        
-        # Check which fields have been supplied in config.yaml
-        for field, file_val in cfg_from_file.items():
-            # If an optional arg is supplied, in the config file
-            # add it here
-            if field not in cfg.keys():
-                cfg[field] = cfg_from_file[field]
-            # If the value in the config file is different from the 
-            # default, update it
-            elif cfg[field] != file_val:
-                cfg[field] = file_val
+        cfg.update({k: v for k, v in cfg_from_file.items() if v is not None})
     else:
         print("No config file provided, assuming default values") 
 
     # Merge flags from config file and defaults with any passed through CLI
-    for key, item in args.items():
-        if item is not None:
-            cfg[key] = item
+    cfg.update({k: v for k, v in args.items() if v is not None})
     # Certain fields are required. Check if they are all supplied here
     required_fields = ['freq','area','context']
     for req in required_fields:
