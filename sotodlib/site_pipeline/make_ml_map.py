@@ -42,7 +42,7 @@ def get_parser(parser=None):
     parser.add_argument("--freq", type=str, help="Frequency band. (f090, f150...)")
     parser.add_argument("--area", type=str, help="Path to FITS file describing the mapping geometry")
     parser.add_argument("--odir", type=str, help="Directory for saving output maps")
-    parser.add_argument("--prefix", type=str, help="Filename prefix. ({prefix}_sky_map.fits")
+    parser.add_argument("--prefix", type=str, help="Filename prefix. ({prefix}_sky_map.fits)")
     parser.add_argument('-C', "--comps",   type=str, help="T,Q, and/or U")
     parser.add_argument("-c", "--context", type=str, help="Context containing TODs")
     parser.add_argument("-n", "--ntod",    type=int, help="Special case of `tods` above. Implemented as follows: [:ntod]")
