@@ -8,7 +8,10 @@ from sotodlib.tod_ops import filters
 from pixell import enmap, utils, fft, bunch, wcsutils, mpi
 import yaml
 
-defaults = {"comps": "T",
+defaults = {"query": "1",
+            "odir": "./outputs",
+            "prefix": "map",
+            "comps": "T",
             "ntod": None,
             "tods": None,
             "nset": None,
@@ -93,7 +96,7 @@ def main(config_file=None, defaults=defaults, **args):
         if item is not None:
             cfg[key] = item
     # Certain fields are required. Check if they are all supplied here
-    required_fields = ['query','freq','area','odir','prefix','context']
+    required_fields = ['freq','area','context']
     for req in required_fields:
         if req not in cfg.keys():
             raise KeyError("{} is a required argument. Please supply it in a config file or via the command line".format(req))
