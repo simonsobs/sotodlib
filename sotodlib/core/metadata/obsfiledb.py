@@ -229,6 +229,13 @@ class ObsFileDb:
         """
         c = self.conn.execute('select distinct obs_id from files')
         return [r[0] for r in c]
+    
+    def get_obs_with_detset(self, detset):
+        """Returns a list of all obs_ids that include a specified detset"""
+        c =self.conn.execute(
+            f"select distinct obs_id from files where detset='{detset}'"
+        )
+        return [r[0] for r in c]
 
     def get_detsets(self, obs_id):
         """Returns a list of all detsets represented in the observation
