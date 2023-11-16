@@ -29,12 +29,14 @@ import yaml
 from dataclasses import dataclass, astuple
 import numpy as np
 from tqdm.auto import tqdm
+import logging
 
 from typing import Optional, Union
 
 from sotodlib import core
 from sotodlib.io.metadata import write_dataset
 from sotodlib.io.load_smurf import G3tSmurf, TuneSets
+from sotodlib.io.load_book import load_smurf_npy_data
 from sotodlib.io.imprinter import Imprinter
 import sotodlib.site_pipeline.util as sp_util
 
@@ -42,13 +44,19 @@ import sotodlib.site_pipeline.util as sp_util
 DEFAULT_RTM_BIT_TO_VOLT = 10 / 2**19
 DEFAULT_pA_per_phi0 = 9e6
 
-default_logger = sp_util.init_logger("smurf_caldbs")
+default_logger = logging.getLogger('smurf_caldbs')
+if not default_logger.hasHandlers():
+    sp_util.init_logger('smurf_caldbs')
+
 
 def main(config: Union[str, dict], 
         overwrite:Optional[bool]=False,
         logger=None):
     smurf_detset_info(config, overwrite, logger)
-    run_update_det_caldb(config, log=logger)
+
+
+
+    run_update_det_caldb(config, logger=logger)
 
 def smurf_detset_info(config: Union[str, dict], 
         overwrite:Optional[bool]=False,
@@ -211,30 +219,6 @@ class CalInfo:
     p_sat: float = np.nan   # J
 
 
-def _load_smurf_npy(ctx, obs_id, substr):
-    """
-    Loads npy file from Z_smurf archive of book.
-
-    Args
-    _____
-    obs_id: str
-        obs-id of book to load file from
-    substr: str
-        substring to use to find numpy file in Z_smurf
-    """
-    files = ctx.obsfiledb.get_files(obs_id)
-    book_dir = os.path.dirname(list(files.values())[0][0][0])
-    smurf_dir = os.path.join(book_dir, 'Z_smurf')
-    for f in os.listdir(smurf_dir):
-        if substr in f:
-            fpath = os.path.join(smurf_dir, f)
-            break
-    else:
-        raise FileNotFoundError("Could not find npy file")
-    res = np.load(fpath, allow_pickle=True).item()
-    return res
-
-
 def get_cal_resset(ctx: core.Context, obs_id, logger=None):
     """Returns calibration ResultSet for a given ObsId"""
     if logger is None:
@@ -250,7 +234,7 @@ def get_cal_resset(ctx: core.Context, obs_id, logger=None):
     ivas = {dset: None for dset in iv_obsids}
     for dset, oid in iv_obsids.items():
         if oid is not None:
-            ivas[dset] = _load_smurf_npy(ctx, oid, 'iv')
+            ivas[dset] = load_smurf_npy_data(ctx, oid, 'iv')
             if rtm_bit_to_volt is None:
                 rtm_bit_to_volt = ivas[dset]['meta']['rtm_bit_to_volt']
                 pA_per_phi0 = ivas[dset]['meta']['pA_per_phi0']
@@ -261,7 +245,7 @@ def get_cal_resset(ctx: core.Context, obs_id, logger=None):
     bsas = {dset: None for dset in bias_step_obsids}
     for dset, oid in bias_step_obsids.items():
         if oid is not None:
-            bsas[dset] = _load_smurf_npy(ctx, oid, 'bias_step_analysis')
+            bsas[dset] = load_smurf_npy_data(ctx, oid, 'bias_step_analysis')
             if rtm_bit_to_volt is None:
                 rtm_bit_to_volt = bsas[dset]['meta']['rtm_bit_to_volt']
                 pA_per_phi0 = ivas[dset]['meta']['pA_per_phi0']
@@ -300,6 +284,9 @@ def get_cal_resset(ctx: core.Context, obs_id, logger=None):
 
     # check to see if biases have changed between bias steps and obs
     for bsa in bsas.values():
+        if bsa is None:
+            continue
+
         for bg, vb_bsa in enumerate(bsa['Vbias']):
             bl_label = f"{bsa['meta']['stream_id']}_b{bg:0>2}"
             if np.isnan(vb_bsa):
@@ -345,16 +332,16 @@ def get_cal_resset(ctx: core.Context, obs_id, logger=None):
 
 
 def get_obs_with_detsets(ctx, detset_idx):
-    """Gets all observations with detset data"""
+    """Gets all observations with type 'obs' that have detset data"""
     db = core.metadata.ManifestDb(detset_idx)
     detsets = db.get_entries(['dataset'])['dataset']
-
     obs_ids = set()
     for dset in detsets:
-        cur = ctx.obsfiledb.conn.execute(
-            f"select distinct obs_id from files where detset='{dset}'"
-        )
-        obs_ids = obs_ids.union({r[0] for r in cur})
+        # I'm sorry matthew....
+        obs_ids = obs_ids.union({
+            oid for oid in ctx.obsfiledb.get_obs_with_detset(dset)
+            if oid.split('_')[0] == 'obs'
+        })
     return obs_ids
 
 
@@ -396,15 +383,16 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None,
         }, filename=h5_path,)
 
 
-def run_update_det_caldb(config, log=None):
+def run_update_det_caldb(config, logger=None, format_exc=False, show_pb=False):
     ctx = core.Context(config['context'])
     update_det_caldb(
         ctx, 
         config['archive']['det_cal']['index'],
         config['archive']['detset']['index'],
         config['archive']['det_cal']['h5file'],
-        show_pb=False,
-        logger=log
+        show_pb=show_pb,
+        logger=logger,
+        format_exc=format_exc,
     )
 
 

@@ -194,6 +194,30 @@ def load_book_file(filename, dets=None, samples=None, no_signal=False):
                             no_signal=no_signal)
 
 
+def load_smurf_npy_data(ctx, obs_id, substr):
+    """
+    Loads an sodetlib npy file from Z_smurf archive of book.
+
+    Args
+    _____
+    obs_id: str
+        obs-id of book to load file from
+    substr: str
+        substring to use to find numpy file in Z_smurf
+    """
+    files = ctx.obsfiledb.get_files(obs_id)
+    book_dir = os.path.dirname(list(files.values())[0][0][0])
+    smurf_dir = os.path.join(book_dir, 'Z_smurf')
+    for f in os.listdir(smurf_dir):
+        if substr in f:
+            fpath = os.path.join(smurf_dir, f)
+            break
+    else:
+        raise FileNotFoundError("Could not find npy file")
+    res = np.load(fpath, allow_pickle=True).item()
+    return res
+
+
 def _load_book_detset(files, prefix='', load_ancil=True,
                       dets=None, samples=None, no_signal=False,
                       signal_buffer=None):
