@@ -40,6 +40,7 @@ import sotodlib.site_pipeline.util as sp_util
 
 # stolen  from pysmurf, max bias volt / num_bits
 DEFAULT_RTM_BIT_TO_VOLT = 10 / 2**19
+DEFAULT_pA_per_phi0 = 9e6
 
 default_logger = sp_util.init_logger("smurf_caldbs")
 
@@ -245,12 +246,14 @@ def get_cal_resset(ctx: core.Context, obs_id, logger=None):
     iv_obsids = get_cal_obsids(ctx, obs_id, 'iv')
 
     rtm_bit_to_volt = None
+    pA_per_phi0 = None
     ivas = {dset: None for dset in iv_obsids}
     for dset, oid in iv_obsids.items():
         if oid is not None:
             ivas[dset] = _load_smurf_npy(ctx, oid, 'iv')
             if rtm_bit_to_volt is None:
                 rtm_bit_to_volt = ivas[dset]['meta']['rtm_bit_to_volt']
+                pA_per_phi0 = ivas[dset]['meta']['pA_per_phi0']
         else:
             logger.debug("missing IV data for %s", dset)
 
@@ -261,11 +264,14 @@ def get_cal_resset(ctx: core.Context, obs_id, logger=None):
             bsas[dset] = _load_smurf_npy(ctx, oid, 'bias_step_analysis')
             if rtm_bit_to_volt is None:
                 rtm_bit_to_volt = bsas[dset]['meta']['rtm_bit_to_volt']
+                pA_per_phi0 = ivas[dset]['meta']['pA_per_phi0']
         else:
             logger.debug("missing bias step data for %s", dset)
 
     if rtm_bit_to_volt is None:
         rtm_bit_to_volt = DEFAULT_RTM_BIT_TO_VOLT
+    if pA_per_phi0 is None:
+        pA_per_phi0 = DEFAULT_pA_per_phi0
 
     # Add IV info
     for i, cal in enumerate(cals):
@@ -330,7 +336,7 @@ def get_cal_resset(ctx: core.Context, obs_id, logger=None):
         cal.r_frac = bsa['Rfrac'][ridx]
         cal.p_bias = bsa['Pj'][ridx]
         cal.s_i = bsa['Si'][ridx]
-        cal.phase_to_pW = 9e6 / (2*np.pi) / cal.s_i * cal.polarity
+        cal.phase_to_pW = pA_per_phi0 / (2*np.pi) / cal.s_i * cal.polarity
 
     rset = core.metadata.ResultSet.from_friend(np.array(
         [astuple(c) for c in cals], dtype=cal_dtype
