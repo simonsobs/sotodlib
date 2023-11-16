@@ -493,6 +493,107 @@ Command line arguments
     :prog: make_hwp_solutions
 
 
+make-ml-map
+-----------
+
+This submodule can be used to call the maximum likelihood mapmaker.
+The mapmaker will produce ``bin``, ``div`` and ``sky`` maps. The mapmaker
+has several different flags (see the example config file below) that can
+be passed via the CLI or a ``config.yaml`` file. If an argument is not 
+specified, a value is selected from a set of defaults.
+
+The arguments ``freq``,  ``area`` and ``context`` are required; they should
+either be supplied through the CLI or the ``config.yaml``.
+
+Command line arguments
+``````````````````````
+.. argparse::
+   :module: sotodlib.site_pipeline.make_ml_map
+   :func: get_parser
+
+
+
+Default Mapmaker Values
+```````````````````````
+The following code block contains the hard-coded default values for non-
+essential mapmaker arguments. The can be overidden in the CLI or in the
+``config.yaml``.
+   
+.. code-block:: python 
+
+        defaults = {"query": "1",
+                    "comps": "T",
+                    "ntod": None,
+                    "tods": None,
+                    "nset": None,
+                    "site": 'so_lat',
+                    "nmat": "corr",
+                    "max_dets": None,
+                    "verbose": 0,
+                    "quiet": 0,
+                    "center_at": None,
+                    "window": 0.0,
+                    "inject": None,
+                    "nocal": True,
+                    "nmat_dir": "/nmats",
+                    "nmat_mode": "build",
+                    "downsample": 1,
+                    "maxiter": 500,
+                    "tiled": 1,
+                    "wafer": None,
+                   }
+
+
+
+Config file format
+``````````````````
+
+Example of a config file:
+
+.. code-block:: yaml
+       
+         # Query
+        query: "1"
+
+        # Context file containing TODs
+        context: 'context.yaml'
+
+        # Telescope info
+        freq: 'f150'
+        site: 'so_lat'
+
+        # Mapping area footprint
+        area: 'geometry.fits'
+
+        # Output Directory and file name prefix
+        odir: './output/'
+        prefix: 'my_maps'
+
+        # Detectors info. null by default
+        tods: [::100] # Restrict TOD selections by index
+        ntod: 3 # Special case of `tods` above. Implemented as follows: [:ntod]
+        nset: 10 # Number of detsets kept
+        max-dets: 200 # Maximum dets kept
+        wafer: 'w17' # Restrict which wafers are mapped. Can do multiple wafers
+
+        # Mapmaking meta
+        comps: 'T' # TQU
+        inject: null 
+        nocal: True # No relcal or abscal
+        downsample: 1 # Downsample TOD by this factor
+        tiled: 0 # Tiling boolean (0 or 1)
+        nmat-dir: './nmats/' # Dir to save or load nmat
+        nmat: 'corr' # 'corr' or 'uncorr' 
+        maxiter: 500 # Max number of iterative steps
+        nmat-mode: 'build' # 'cache', 'build', 'load' or 'save'
+        center-at: null 
+        window: 0.0
+        inject: null
+
+        # Scripting tools
+        verbose: True
+        quiet: False
+
 
 QDS Monitor
 ===========
