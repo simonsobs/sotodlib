@@ -43,7 +43,7 @@ from typing import Optional
 
 logger = util.init_logger(__name__, 'update-obsdb: ')
 
-def check_meta_type(bookpath):
+def check_meta_type(bookpath:str):
     metapath = os.path.join(bookpath, "M_index.yaml")
     meta = yaml.safe_load(open(metapath, "rb"))
     if meta is None:
@@ -64,32 +64,32 @@ def telescope_lookup(telescope:str):
         Name of telescope in M_index
 
     """
-    if telescope == "sat" or telescope== "satp1":
-        return {"telescope" : "satp1", "telescope_flavor" : "sat",
-                "tube_flavor" : "mf", "detector_flavor" : "tes"}
+    if telescope == "sat" or telescope == "satp1":
+        return {"telescope": "satp1", "telescope_flavor": "sat",
+                "tube_flavor": "mf", "detector_flavor": "tes"}
     elif telescope == "satp2":
-        return {"telescope" : "satp2","telescope_flavor" : "sat",
-                "tube_flavor":"mf", "detector_flavor":"tes"}
+        return {"telescope": "satp2","telescope_flavor": "sat",
+                "tube_flavor": "mf", "detector_flavor": "tes"}
     elif telescope == "satp3":
-        return {"telescope" : "satp3", "telescope_flavor":"sat",
-                "tube_flavor":"uhf", "detector_flavor":"tes"}
+        return {"telescope": "satp3", "telescope_flavor": "sat",
+                "tube_flavor": "uhf", "detector_flavor": "tes"}
     elif telescope == "lati1":
-        return {"telescope" : "lati1", "telescope_flavor" : "lat",
-                "tube_flavor" : "mf", "detector_flavor" : "tes"}
+        return {"telescope": "lati1", "telescope_flavor": "lat",
+                "tube_flavor": "mf", "detector_flavor": "tes"}
     elif telescope == "lati6":
-        return {"telescope" : "lati6", "telescope_flavor" : "lat",
-                "tube_flavor" : "mf", "detector_flavor" : "tes"}
+        return {"telescope": "lati6", "telescope_flavor": "lat",
+                "tube_flavor": "mf", "detector_flavor": "tes"}
     else:
-        logger.warning("unknown telescope type given by bookbinder")
+        logger.error("unknown telescope type given by bookbinder")
         return {}
 
 
 def main(config:str, 
-        recency:float=None, 
-        booktype:Optional[str]="both",
-        verbosity:Optional[int]=2,
-        overwrite:Optional[bool]=False,
-        logger=None):
+        recency:float = None, 
+        booktype:Optional[str] = "both",
+        verbosity:Optional[int] = 2,
+        overwrite:Optional[bool] = False,
+        logger = None):
 
     """
     Create or update an obsdb for observation or operations data.
@@ -133,7 +133,7 @@ def main(config:str,
     if booktype not in ["obs", "oper", "both"]:
         logger.warning("Specified booktype inadapted to update_obsdb")
     
-    if booktype=="both":
+    if booktype == "both":
         accept_type = ["obs", "oper"]
     else:
         accept_type = [booktype]
@@ -219,9 +219,8 @@ def main(config:str,
                     very_clean[flav] = flavors[flav]
 
             except KeyError:
-                logger.warning("No telescope key in index file")
-                pass
-
+                logger.error("No telescope key in index file")
+                very_clean["telescope_flavor"] = "unknown"
             stream_ids = index.pop("stream_ids")
             if stream_ids is not None:
                 bookcartobsdb.add_obs_columns(["wafer_count int"])
@@ -236,7 +235,7 @@ def main(config:str,
                 very_clean["duration"] = end - start
             except KeyError:
                 logger.error("Incomplete timing information for obs_id {obs_id}")
-                pass
+
             #Scanning motion
             stream_file = os.path.join(bookpath,"*{}*.g3".format(stream_ids[0]))
             stream = load_book.load_book_file(stream_file, no_signal=True)
@@ -250,13 +249,13 @@ def main(config:str,
                     very_clean[f"{coor}_throw"] = .5 * (coor_enc.max() - coor_enc.min())
                 except KeyError:
                     logger.error(f"No {coor} pointing in some streams for obs_id {obs_id}")
-                    pass
+
             try:
-                if very_clean.get("telescope_flavor")=="sat":
+                if very_clean["telescope_flavor"] == "sat":
                     bore_enc = stream.ancil["boresight_enc"]
                     very_clean["roll_center"] = -.5 * (bore_enc.max() + bore_enc.min())
                     very_clean["roll_throw"] = .5 * (bore_enc.max() - bore_enc.min())
-                if very_clean.get("telescope_flavor")=="lat":
+                if very_clean["telescope_flavor"] == "lat":
                     el_enc = stream.ancil["el_enc"]
                     corot_enc = stream.ancil["corotator_enc"]
                     roll = el_enc - 60. - corot_enc
@@ -266,7 +265,7 @@ def main(config:str,
                 bookcartobsdb.add_obs_columns(["roll_center float", "roll_throw float"])
             except KeyError:
                 logger.error(f"Unable to compute roll for obs_id {obs_id}")
-                pass
+                
 
             # Make sure no invalid tags before update.
             tags = [t.strip() for t in tags if t.strip() != '']
@@ -285,20 +284,20 @@ def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
     parser.add_argument("--config", help="ObsDb, ObsfileDb configuration file", 
-        type=str, required=True)
-    parser.add_argument('--recency', default=None, type=float,
-        help="Days to subtract from now to set as minimum ctime. If None, no minimum")
-    parser.add_argument("--verbosity", default=2, type=int,
-        help="Increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug")
-    parser.add_argument("--booktype", default="both", type=str,
-        help="Select book type to look for: obs, oper, both(default)")
-    parser.add_argument("--overwrite", action="store_true",
-        help="If true, writes over existing entries")
+        type = str, required = True)
+    parser.add_argument('--recency', default = None, type = float,
+        help = "Days to subtract from now to set as minimum ctime. If None, no minimum")
+    parser.add_argument("--verbosity", default = 2, type = int,
+        help = "Increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug")
+    parser.add_argument("--booktype", default = "both", type = str,
+        help = "Select book type to look for: obs, oper, both(default)")
+    parser.add_argument("--overwrite", action = "store_true",
+        help = "If true, writes over existing entries")
     return parser
 
 
 
 if __name__ == '__main__':
-    parser = get_parser(parser=None)
+    parser = get_parser(parser = None)
     args = parser.parse_args()
     main(**vars(args))
