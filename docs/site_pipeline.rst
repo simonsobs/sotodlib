@@ -97,6 +97,28 @@ Module documentation
    :members:
    :undoc-members:
 
+update-smurf-caldbs
+-----------------------
+This update script is used to add detset and calibration metadata to manifest
+dbs
+
+Module Docs
+`````````````````````````
+.. automodule:: sotodlib.site_pipeline.update_smurf_caldbs
+   :no-members:
+  
+The calibration info described below is used to populate the calibration db:
+
+.. autoclass:: sotodlib.site_pipeline.update_smurf_caldbs.CalInfo
+   :no-members:
+
+Command line arguments
+`````````````````````````
+.. argparse::
+   :module: sotodlib.site_pipeline.update_smurf_caldbs
+   :func: get_parser
+   :prog: update_smurf_caldbs.py
+
 Detector and Readout ID Mapping
 -------------------------------
 
