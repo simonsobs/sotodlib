@@ -585,8 +585,8 @@ Example of a config file:
         nmat-dir: './nmats/' # Dir to save or load nmat
         nmat: 'corr' # 'corr' or 'uncorr' 
         maxiter: 500 # Max number of iterative steps
-        nmat-mode: 'build' # 'cache', 'build', 'load' or 'save'
-        center-at: null 
+        nmat_mode: 'build' # 'cache', 'build', 'load' or 'save'
+        center_at: null 
         window: 0.0
         inject: null
 
