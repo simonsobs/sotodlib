@@ -53,9 +53,9 @@ class G3tHWP():
 
         # 1st/2nd encoder readout
         self._field_instance = self.configs.get('field_instance',
-                                                'observatory.HBA.feeds.HWPEncoder')
+                                                'satp1.hwp-bbb-e1.feeds.HWPEncoder')
         self._field_instance_sub = self.configs.get('field_instance_sub',
-                                                    'observatory.HBA2.feeds.HWPEncoder')
+                                                    'satp1.hwp-bbb-e2.feeds.HWPEncoder')
 
         self._field_list = self.configs.get('field_list',
                                             ['rising_edge_count', 'irig_time', 'counter',
@@ -118,7 +118,9 @@ class G3tHWP():
                 path to HK g3 file, overwrite config file
             instance : str or None
                 instance of field list, overwrite config file
-                ex.) 'HBA' or 'observatory.HBA.feeds.HWPEncoder'
+                ex.) lab data 'observatory.HBA.feeds.HWPEncoder'
+                ex.) site data 'satp1.hwp-bbb-e1.feeds.HWPEncoder'
+                ex.) site data 'satp3.hwp-bbb-a1.feeds.HWPEncoder'
 
         Returns
         ----
@@ -149,10 +151,7 @@ class G3tHWP():
             logger.error("Cannot find data directory")
             return {}
         if instance is not None:
-            if 'observatory' in instance:
-                self._field_instance = instance
-            else:
-                self._field_instance = 'observatory.' + instance + '.feeds.HWPEncoder'
+            self._field_instance = instance
 
         # load housekeeping data with hwp keys
         logger.info('Loading HK data files ')
@@ -183,9 +182,10 @@ class G3tHWP():
             file_list : str or list or None
                 path and file name of input level 2 HK g3 file
             instance : str or None
-                instance of field list, overwrite config file 
-
-                ex.) 'HBA' or 'observatory.HBA.feeds.HWPEncoder'
+                instance of field list, overwrite config file
+                ex.) lab data 'observatory.HBA.feeds.HWPEncoder'
+                ex.) site data 'satp1.hwp-bbb-e1.feeds.HWPEncoder'
+                ex.) site data 'satp3.hwp-bbb-a1.feeds.HWPEncoder'
         Returns
         ----
         dict
@@ -199,10 +199,7 @@ class G3tHWP():
             self._file_list = file_list
 
         if instance is not None:
-            if 'observatory' in instance:
-                self._field_instance = instance
-            else:
-                self._field_instance = 'observatory.' + instance + '.feeds.HWPEncoder'
+            self._field_instance = instance
 
         # load housekeeping files with hwp keys
         scanner = so3g.hk.HKArchiveScanner()
