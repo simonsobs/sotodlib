@@ -381,7 +381,7 @@ def get_obs_with_detsets(ctx, detset_idx):
 
 
 def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None, 
-                     show_pb=False, format_exc=False, overwrite=True):
+                     show_pb=False, format_exc=False, overwrite=False):
     if logger is None:
         logger = default_logger
 
@@ -394,11 +394,14 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None,
     db = core.metadata.ManifestDb(idx_path)
     
     # detset_db = metadata.Manifest(detset_idx)
-    existing_obsids = set(db.get_entries(['dataset'])['dataset'])
     obsids_with_detsets = get_obs_with_detsets(ctx, detset_idx)
     obsids_with_obs = set(ctx.obsdb.query("type=='obs'")['obs_id'])
-    remaining_obsids = obsids_with_detsets.intersection(obsids_with_obs) \
-                        - existing_obsids
+
+    remaining_obsids = obsids_with_detsets.intersection(obsids_with_obs)
+    if not overwrite: 
+        existing_obsids = set(db.get_entries(['dataset'])['dataset'])
+        remaining_obsids = remaining_obsids - existing_obsids
+
     # Sort remaining obs_ids by timestamp
     remaining_obsids = sorted(remaining_obsids,
                               key=(lambda s: s.split('_')[1]))
@@ -418,10 +421,10 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None,
         db.add_entry({
             'obs:obs_id': obs_id,
             'dataset': obs_id,
-        }, filename=h5_path,)
+        }, filename=h5_path, replace=overwrite)
 
 
-def run_update_det_caldb(config, logger=None, format_exc=False, show_pb=False, overwrite=True):
+def run_update_det_caldb(config, logger=None, format_exc=False, show_pb=False, overwrite=False):
     ctx = core.Context(config['context'])
     update_det_caldb(
         ctx, 
