@@ -337,11 +337,7 @@ def get_obs_with_detsets(ctx, detset_idx):
     detsets = db.get_entries(['dataset'])['dataset']
     obs_ids = set()
     for dset in detsets:
-        # I'm sorry matthew....
-        obs_ids = obs_ids.union({
-            oid for oid in ctx.obsfiledb.get_obs_with_detset(dset)
-            if oid.split('_')[0] == 'obs'
-        })
+        obs_ids = obs_ids.union(ctx.obsfiledb.get_obs_with_detset(dset))
     return obs_ids
 
 
@@ -359,11 +355,14 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None,
     db = core.metadata.ManifestDb(idx_path)
     
     # detset_db = metadata.Manifest(detset_idx)
-    existing_obsids = db.get_entries(['dataset'])['dataset']
-    all_obsids = get_obs_with_detsets(ctx, detset_idx)
-    remaining_obsids = \
-        sorted(list(set(all_obsids) - set(existing_obsids)),
-               key=(lambda s: s.split('_')[1]))
+    existing_obsids = set(db.get_entries(['dataset'])['dataset'])
+    obsids_with_detsets = get_obs_with_detsets(ctx, detset_idx)
+    obsids_with_obs = set(ctx.obsdb.query("type=='obs'")['obs_id'])
+    remaining_obsids = obsids_with_detsets.intersection(obsids_with_obs) \
+                        - existing_obsids
+    # Sort remaining obs_ids by timestamp
+    remaining_obsids = sorted(remaining_obsids,
+                              key=(lambda s: s.split('_')[1]))
 
     logger.info("%d datasets to add", len(remaining_obsids))
     for obs_id in tqdm(remaining_obsids, disable=(not show_pb)):
