@@ -29,7 +29,7 @@ and save the output.
 
 .. code-block:: python
 
-    from sotodlib.io.coords import det_match as dm
+    from sotodlib.coords import det_match as dm
 
     tunefile = <path_to_tune_file>
     bgmap_file = <path_to_bgmap_file>
