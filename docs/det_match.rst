@@ -90,3 +90,11 @@ lenient with the frequency penalty:
         dist_width=np.deg2rad(0.3), # radians
     )
     match = dm.Match(src, dst, match_params=mpars)
+
+
+API
+-------
+.. automodule:: sotodlib.coords.det_match
+   :members:
+   :undoc-members:
+   :show-inheritance:
