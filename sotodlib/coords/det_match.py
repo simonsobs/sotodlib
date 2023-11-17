@@ -218,7 +218,7 @@ class ResSet:
 
     @classmethod
     def from_solutions(cls, sol_file, north_is_highband=True, name=None, 
-                       fp_pars=None, platform='SAT'):
+                       fp_pars=None, platform='SAT', zemax_path=None):
         """
         Creates an instance from an input-solution file. This will include both design data, along with smurf-band
         and smurf-channel info. Resonance frequencies used here are the VNA
@@ -238,6 +238,8 @@ class ResSet:
             platform (str):
                 'SAT' or 'LAT'. Used to determine which focal plane function to
                 use for pointing
+            zemax_path (str):
+                zemax path, required to get pointing for LAT optics
         """
         resonances = []
 
@@ -245,11 +247,6 @@ class ResSet:
             theta = -np.deg2rad(fp_pars['theta'])
             dx, dy = fp_pars['dx'], fp_pars['dy']
 
-            if platform.upper() == 'SAT':
-                fp_func = optics.SAT_focal_plane
-            elif platform.upper() == 'LAT':
-                fp_func = optics.LAT_focal_plane
-    
         with open(sol_file, 'r') as f:
             labels  = f.readline().split(',') # Read header
             for i in range(len(labels)):
@@ -294,7 +291,18 @@ class ResSet:
                     x, y = float(d['det_x']), float(d['det_y'])
                     xp = x * np.cos(theta) - y * np.sin(theta) + dx
                     yp = x * np.sin(theta) + y * np.cos(theta) + dy
-                    xi, eta, gamma = fp_func(None, x=xp, y=yp, pol=0)
+                    if platform.upper == 'SAT':
+                        xi, eta, gamma = optics.SAT_focal_plane(
+                            None, x=xp, y=yp, pol=0
+                        )
+                    elif platform.upper == 'LAT':
+                        xi, eta, gamma = optics.LAT_focal_plane(
+                            None, zemax_path, x=xp, y=yp, pol=0,
+                        )
+                    else:
+                        raise ValueError(
+                            f"Unknown platform {platform}. Must be 'SAT' or 'LAT'"
+                        )
                     r.xi = xi
                     r.eta = eta
                     r.gamma = gamma
