@@ -416,9 +416,10 @@ class Match:
     Class for performing a Resonance Matching between two sets of resonators,
     labeled `src` and `dst`. In the matching algorithm there is basically no
     difference between `src` and `dst` res-sets, except:
+
      - When merged, smurf-data such as band, channel, and res-idx will be taken
-       from the `src` res-set
-     - The `force_src_pointing` param can be used to assign a very high penalty
+       from the ``src`` res-set
+     - The ``force_src_pointing`` param can be used to assign a very high penalty
        to leaving any `src` resonator that has pointing info unassigned.
     
     Args:
