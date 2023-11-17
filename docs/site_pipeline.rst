@@ -107,7 +107,13 @@ Module Docs
 .. automodule:: sotodlib.site_pipeline.update_smurf_caldbs
    :no-members:
   
-The calibration info described below is used to populate the calibration db:
+The calibration info described below is used to populate the calibration db.
+For more information on how calibration info is computed in sodetlib, checkout
+the following docs and source code:
+
+- `Bias step docs <https://sodetlib.readthedocs.io/en/latest/operations/bias_steps.html>`_
+- `IV docs <https://sodetlib.readthedocs.io/en/latest/operations/iv.html>`_
+- `sodetlib source code <https://github.com/simonsobs/sodetlib>`_
 
 .. autoclass:: sotodlib.site_pipeline.update_smurf_caldbs.CalInfo
    :no-members:
