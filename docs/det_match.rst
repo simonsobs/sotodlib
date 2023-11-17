@@ -1,4 +1,3 @@
-.. py:module:: sotodlib.coords.det_match
 
 ==========
 DetMatch
