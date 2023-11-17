@@ -172,7 +172,7 @@ class Imprinter:
                 - wafer_slot: ws1
                   stream_id: stream_id1
                 - wafer_slot: ws2
-                  stream_id: stream_id12
+                  stream_id: stream_id2
             tel_tube2:
               tube_slot: i1
               wafer_slots:
