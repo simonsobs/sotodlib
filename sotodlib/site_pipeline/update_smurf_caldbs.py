@@ -1,25 +1,27 @@
-""" Script to import tuning and readout id channel mapping into a manifest
-database for book loading. At present this just works in the configuration where
-it has access to both level 2 and level 3 indexing. This is technically possible
-with just level 3 data / indexing but requires some still non-existant tools. 
+""" 
+Script to import tuning and readout id channel mapping, and detector calibration
+information into manifest dbs for book loading.  At present this just works in
+the configuration where it has access to both level 2 and level 3 indexing. This
+is technically possible with just level 3 data / indexing but requires some
+still non-existant tools. 
 
-Configuration file required:
+Configuration file required::
 
-config = {
-    'context': 'context.yaml',
-    'archive': {
-        'detset': {
-            'index': 'manifest.sqlite',
-            'h5file': 'manifest.h5'
+    config = {
+        'context': 'context.yaml',
+        'archive': {
+            'detset': {
+                'index': 'detset.sqlite',
+                'h5file': 'detset.h5'
+            },
+            'det_cal': {
+                'index': 'det_cal.sqlite',
+                'h5file': 'det_cal.h5
+            },
         },
-        'det_cal': {
-            'index': 'det_cal.sqlite',
-            'h5file': 'det_cal.h5
-        },
-    },
-    'g3tsmurf': g3tsmurf_hwp_config.yaml',
-    'imprinter': imprinter.yaml,
-}
+        'g3tsmurf': g3tsmurf_hwp_config.yaml',
+        'imprinter': imprinter.yaml,
+    }
 """
 
 import traceback
@@ -53,10 +55,7 @@ def main(config: Union[str, dict],
         overwrite:Optional[bool]=False,
         logger=None):
     smurf_detset_info(config, overwrite, logger)
-
-
-
-    run_update_det_caldb(config, logger=logger)
+    run_update_det_caldb(config, logger=logger, overwrite=overwrite)
 
 def smurf_detset_info(config: Union[str, dict], 
         overwrite:Optional[bool]=False,
@@ -202,6 +201,42 @@ cal_dtype = [
 
 @dataclass
 class CalInfo:
+    """
+    Class that contains detector calibration information that will go into the
+    caldb.
+
+    Attributes
+    ------------
+    readout_id: str
+        Readout id of detector
+    r_tes: float
+        Detector resistance [ohms], determined through bias steps while the
+        detector is biased
+    r_frac: float
+        Fractional resistance of TES, given by r_tes / r_n
+    p_bias: float
+        Bias power on the TES [J] computed using bias steps at the bias point
+    s_i: float
+        Current responsivity of the TES [1/V] computed using bias steps at the
+        bias point
+    phase_to_pW: float
+        Phase to power conversion factor [pW/rad] computed using s_i,
+        pA_per_phi0, and detector polarity
+    bg: int
+        Bias group of the detector. Taken from IV curve data, which contains
+        bgmap data taken immediately prior to IV. This will be -1 if the
+        detector is unassigned
+    polarity: int
+        Polarity of the detector response for a positive change in bias current
+        while the detector is superconducting. This is needed to correct for
+        detectors that have reversed response. 
+    r_n: float
+        Normal resistance of the TES [Ohms] calculated from IV curve data
+    p_sat: float
+        "saturation power" of the TES [J] calculated from IV curve data.
+        This is defined  as the electrical bias power at which the TES
+        resistance is 90% of the normal resistance.
+    """
     # Fields must be ordered like cal_dtype!
     readout_id: str = ''
 
@@ -220,7 +255,11 @@ class CalInfo:
 
 
 def get_cal_resset(ctx: core.Context, obs_id, logger=None):
-    """Returns calibration ResultSet for a given ObsId"""
+    """
+    Returns calibration ResultSet for a given ObsId. This pulls IV and bias step
+    data for each detset in the observation, and uses that to compute CalInfo
+    for each detector in the observation
+    """
     if logger is None:
         logger=default_logger
 
@@ -278,7 +317,7 @@ def get_cal_resset(ctx: core.Context, obs_id, logger=None):
         cal.polarity = iva['polarity'][ridx]
         cal.r_n = iva['R_n'][ridx]
         cal.p_sat = iva['p_sat'][ridx]
-    
+
     obs_biases = dict(zip(am.bias_lines.vals, am.biases[:, 0] * 2*rtm_bit_to_volt))
     bias_line_is_valid = {k: True for k in obs_biases.keys()}
 
@@ -342,7 +381,7 @@ def get_obs_with_detsets(ctx, detset_idx):
 
 
 def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None, 
-                     show_pb=False, format_exc=False):
+                     show_pb=False, format_exc=False, overwrite=True):
     if logger is None:
         logger = default_logger
 
@@ -375,14 +414,14 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None,
             continue
 
         logger.info("Writing metadata for %s", obs_id)
-        write_dataset(rset, h5_path, obs_id, overwrite=True)
+        write_dataset(rset, h5_path, obs_id, overwrite=overwrite)
         db.add_entry({
             'obs:obs_id': obs_id,
             'dataset': obs_id,
         }, filename=h5_path,)
 
 
-def run_update_det_caldb(config, logger=None, format_exc=False, show_pb=False):
+def run_update_det_caldb(config, logger=None, format_exc=False, show_pb=False, overwrite=True):
     ctx = core.Context(config['context'])
     update_det_caldb(
         ctx, 
@@ -392,6 +431,7 @@ def run_update_det_caldb(config, logger=None, format_exc=False, show_pb=False):
         show_pb=show_pb,
         logger=logger,
         format_exc=format_exc,
+        overwrite=overwrite
     )
 
 
