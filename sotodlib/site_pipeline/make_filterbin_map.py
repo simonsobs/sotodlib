@@ -2,8 +2,7 @@ from argparse import ArgumentParser
 import numpy as np, sys, time, warnings, os, so3g, logging
 from sotodlib.core import Context,  metadata as metadata_core
 from sotodlib.io import metadata   # PerDetectorHdf5 work-around
-from sotodlib import tod_ops, coords
-from sotodlib import mapmaking
+from sotodlib import tod_ops, coords, mapmaking
 from sotodlib.tod_ops import filters
 from sotodlib.hwp import hwp
 from pixell import enmap, utils, fft, bunch, wcsutils, tilemap, colors, memory, mpi
@@ -20,6 +19,12 @@ def get_parser(parser=None):
     parser.add_argument("odir", help='output directory')
     parser.add_argument("--mode", type=str, default='per_obs')
     parser.add_argument("--comps",   type=str, default="TQU")
+    
+    # detector position splits (fixed in time)
+    parser.add_argument("--det-in-out", action="store_true")
+    parser.add_argument("--det-left-right", action="store_true")
+    parser.add_argument("--det-upper-lower", action="store_true")
+    
     parser.add_argument("--ntod",    type=int, default=None)
     parser.add_argument("--tods",    type=str, default=None)
     parser.add_argument("--nset",    type=int, default=None)
@@ -136,8 +141,6 @@ def calibrate_obs(obs, dtype_tod=np.float32):
     obs.restrict("dets", good_dets)
     #if obs.signal is not None and len(good_dets) > 0:
     if has_signal and len(good_dets) > 0:
-        # Gapfill glitches. This function name isn't the clearest
-        tod_ops.get_gap_fill(obs, flags=obs.glitch_flags, swap=True)
         # Gain calibration
         gain  = 1
         # CARLOS: no calibration in sims for the moment, so we skip everything for now
@@ -182,17 +185,23 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False,
         except RuntimeError: continue
     return my_tods, my_inds
 
-def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", verbose=0):
+def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", verbose=0, det_split_masks=None, split_labels=None, time_split_leftright=False):
+    #det_split_masks is the dictionary that contains detector masks for each split we want to make. Each key has format wafer_split, e.g. w25_left, w26_upper, w27_in. We need to figure out how many split we'll make 2 per split mode.
     L = logging.getLogger(__name__)
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
     # Set up our mapmaking equation
-    signal_cut = mapmaking.DemodSignalCut(comm, dtype=dtype_tod)
-    signal_map = mapmaking.DemodSignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=True, ofmt="")
-    signals    = [signal_cut, signal_map]
+    if split_labels==None:
+        # this is the case where we did not request any splits at all
+        signal_map = mapmaking.DemodSignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=False, ofmt="", )
+    else:
+        # this is the case where we asked for at least 2 splits (1 split set). We count how many split we'll make, we need to define the Nsplits maps inside the DemodSignalMap
+        Nsplits = len(split_labels)
+        signal_map = mapmaking.DemodSignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=False, ofmt="", Nsplits=Nsplits)
+    signals    = [signal_map]
     mapmaker   = mapmaking.DemodMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0)
     if comm.rank == 0: L.info(pre + "Building RHS")
-    time_rhs   = signal_map.rhs*0
+    time_rhs   = signal_map.rhs*0 # this has an extra axis now for different splits, because signal_map.rhs does
     # And feed it with our observations
     nobs_kept  = 0
     for oi in range(len(obslist)):
@@ -221,25 +230,45 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         #obs.demodU = filters.fourier_filter(obs, filters.high_pass_butter4(0.5), signal_name='demodU')
                 
         if obs.dets.count == 0: continue
+        
         # And add it to the mapmaker
-        mapmaker.add_obs(name, obs)
-        # Also build the RHS for the per-pixel timestamp. First
-        # make a white noise weighted timestamp per sample timestream
-        Nt  = np.zeros_like(obs.signal, dtype=dtype_tod)
-        Nt += obs.timestamps - t0
-        Nt *= mapmaker.data[-1].nmat.ivar[:,None]
-        signal_cut.data[name].pcut.clear(Nt)
-        # Bin into pixels
-        pmap = signal_map.data[name].pmap
-        obs_time_rhs = pmap.zeros()
-        pmap.to_map(dest=obs_time_rhs, signal=Nt)
-        # Accumulate into output array
-        time_rhs = time_rhs.insert(obs_time_rhs, op=np.ndarray.__iadd__)
+        if det_split_masks==None:
+            # this is the case of no splits
+            mapmaker.add_obs(name, obs)
+        else:
+            # this is the case of having splits. We need to pass the split_labels at least. If we have detector splits fixed in time, then we pass the masks in det_split_masks. Otherwise, det_split_masks will be None
+            mapmaker.add_obs(name, obs, det_split_masks=det_split_masks, split_labels=split_labels, detset=detset)
+        
+        if det_split_masks==None:
+            # Case of no splits 
+            # Also build the RHS for the per-pixel timestamp. First
+            # make a white noise weighted timestamp per sample timestream
+            Nt  = np.zeros_like(obs.signal, dtype=dtype_tod)
+            Nt += obs.timestamps - t0
+            Nt *= mapmaker.data[-1].nmat.ivar[:,None] # this is the data in the mapmaker object, which is simply a list 
+            # Bin into pixels
+            pmap = signal_map.data[(name,0)].pmap
+            obs_time_rhs = pmap.zeros()
+            pmap.to_map(dest=obs_time_rhs, signal=Nt,)
+            # Accumulate into output array
+            time_rhs[0] = time_rhs[0].insert(obs_time_rhs, op=np.ndarray.__iadd__)
+        else:
+            for n_split in range(Nsplits):
+                # Also build the RHS for the per-pixel timestamp. First
+                # make a white noise weighted timestamp per sample timestream
+                Nt  = np.zeros_like(obs.signal, dtype=dtype_tod)
+                Nt += obs.timestamps - t0
+                Nt *= mapmaker.data[-1].nmat.ivar[:,None] # this is the data in the mapmaker object, which is simply a list 
+                # Bin into pixels
+                pmap = signal_map.data[(name,n_split)].pmap
+                obs_time_rhs = pmap.zeros()
+                pmap.to_map(dest=obs_time_rhs, signal=Nt,)
+                # Accumulate into output array
+                time_rhs[n_split] = time_rhs[n_split].insert(obs_time_rhs, op=np.ndarray.__iadd__)
         del obs, pmap, Nt, obs_time_rhs
         nobs_kept += 1
-        
         L.info('Done with tod %s:%s:%s'%(obs_id,detset,band))
-
+    
     nobs_kept = comm.allreduce(nobs_kept)
     if nobs_kept == 0: raise DataMissing("All data cut")
     for signal in signals:
@@ -249,16 +278,29 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
     else:                time_rhs = utils.allreduce     (time_rhs, comm)
     
     if comm.rank == 0: L.info(pre + "Writing F+B map")
-    map  = tilemap.map_mul(signal_map.idiv,signal_map.rhs)
-    ivar = signal_map.div[0,0]
-    with utils.nowarn(): tmap = utils.remove_nan(time_rhs / ivar)
-    return bunch.Bunch(map=map, ivar=ivar, tmap=tmap, signal=signal_map, t0=t0)
+    map = [] ; ivar = [] ; tmap =[]
+    for n_split in range(signal_map.Nsplits):
+        if signal_map.tiled: 
+            map.append( tilemap.map_mul(signal_map.idiv[n_split], signal_map.rhs[n_split]) )
+        else: 
+            map.append( enmap.map_mul(signal_map.idiv[n_split], signal_map.rhs[n_split]) )
+        ivar.append( signal_map.div[n_split,0,0] )
+        with utils.nowarn(): tmap.append( utils.remove_nan(time_rhs[n_split] / ivar[-1]) )
+    return bunch.Bunch(map=map, ivar=ivar, tmap=tmap, signal=signal_map, t0=t0, )
 
-def write_depth1_map(prefix, data):
-    data.signal.write(prefix, "map",  data.map)
-    data.signal.write(prefix, "ivar", data.ivar)
-    data.signal.write(prefix, "time", data.tmap)
-    data.signal.write(prefix, "hits", data.signal.hits)
+def write_depth1_map(prefix, data, split_labels=None):
+    if split_labels==None:
+        # we have no splits, so we save index 0 of the lists
+        data.signal.write(prefix, "map",  data.map[0])
+        data.signal.write(prefix, "ivar", data.ivar[0])
+        data.signal.write(prefix, "time", data.tmap[0])
+    else:
+        # we have splits
+        Nsplits = len(split_labels)
+        for n_split in range(Nsplits):
+            data.signal.write(prefix, "%s_map"%split_labels[n_split],  data.map[n_split])
+            data.signal.write(prefix, "%s_ivar"%split_labels[n_split], data.ivar[n_split])
+            data.signal.write(prefix, "%s_time"%split_labels[n_split], data.tmap[n_split])
 
 def write_depth1_info(oname, info):
     utils.mkdir(os.path.dirname(oname))
@@ -303,7 +345,7 @@ def handle_empty(prefix, tag, comm, e):
         utils.mkdir(os.path.dirname(prefix))
         with open(prefix + ".empty", "w") as ofile: ofile.write("\n")
     
-def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='TQU', ntod=None, tods=None, nset=None, max_dets=None, fixed_time=None, mindur=None, tasks_per_group=1, site='so_sat1', verbose=0, quiet=0, window=5.0, cont=False, dtype_tod=np.float32, dtype_map=np.float64):
+def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='TQU', det_in_out=False, det_left_right=False, det_upper_lower=False, ntod=None, tods=None, nset=None, max_dets=None, fixed_time=None, mindur=None, tasks_per_group=1, site='so_sat1', verbose=0, quiet=0, window=5.0, cont=False, dtype_tod=np.float32, dtype_map=np.float64):
     warnings.simplefilter('ignore')
     # Set up our communicators
     comm       = mpi.COMM_WORLD
@@ -331,7 +373,17 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
     L.addHandler(ch)
 
     context = Context(context)
-    obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, query, mode=mode, nset=nset, ntod=ntod, tods=tods, fixed_time=fixed_time, mindur=mindur)
+    obslists, obskeys, periods, obs_infos, det_split_masks, split_labels = mapmaking.build_obslists(context, query, mode=mode, nset=nset, ntod=ntod, tods=tods, fixed_time=fixed_time, mindur=mindur, det_left_right=det_left_right, det_upper_lower=det_upper_lower, det_in_out=det_in_out )
+    #print(split_labels)
+    #exit()
+    # if we did not request any split, then det_split_masks will be an empty dictionary
+    if bool(det_split_masks)==False:
+        det_split_masks = None
+        split_labels = None
+    else:
+        # this is the case where we requested at least one split. We will have the labels of the splits in split_labels, e.g. 'detleft', 'detin', 'detupper'. We add to the list the other splits (i.e time dependent).
+        pass
+        # later we will add the time dependent splits here to the labels
 
     # Loop over obslists and map them
     for oi in range(comm_inter.rank, len(obskeys), comm_inter.size):
@@ -339,7 +391,7 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         obslist = obslists[obskeys[oi]]
         t       = utils.floor(periods[pid,0])
         t5      = ("%05d" % t)[:5]
-        prefix  = "%s/%s/depth1_%010d_%s_%s" % (odir, t5, t, detset, band)
+        prefix  = "%s/%s/atomic_%010d_%s_%s" % (odir, t5, t, detset, band)
         tag     = "%5d/%d" % (oi+1, len(obskeys))
         utils.mkdir(os.path.dirname(prefix))
         meta_done = os.path.isfile(prefix + "_info.hdf")
@@ -385,9 +437,9 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         if len(my_inds) == 0: continue
         #try:
             # 5. make the maps
-        mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds], subshape, subwcs, noise_model, t0=t, comm=comm_good, tag=tag, dtype_map=dtype_map, dtype_tod=dtype_tod, comps=comps, verbose=verbose)
+        mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds], subshape, subwcs, noise_model, t0=t, comm=comm_good, tag=tag, dtype_map=dtype_map, dtype_tod=dtype_tod, comps=comps, verbose=verbose, det_split_masks=det_split_masks, split_labels=split_labels)
             # 6. write them
-        write_depth1_map(prefix, mapdata)
+        write_depth1_map(prefix, mapdata, split_labels=split_labels, )
         #except DataMissing as e:
         #    handle_empty(prefix, tag, comm_good, e)
     comm.Barrier()
