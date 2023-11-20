@@ -165,31 +165,19 @@ class SimMuMUXCrosstalk(Operator):
         return chi
 
     def _temperature_to_squid_phase(
-            self, input_signal, detector, Phi0, dPhi0dT
+            self, input_signal, Phi0, dPhi0dT
     ):
         """ Translate temperature-valued signal into SQUID phase
         """
-        # FIXME: implement _temperature_to_squid_phase()
         output_signal = input_signal.copy()
-        # Need a mechanism for retrieving phi0 and dPhi0dT
-        # We probably want to draw a random table of Phi0 (at T0) somewhere
-        output_signal = Phi0[detector] + input_signal * dPhi0dT[detector]
+        output_signal = Phi0 + input_signal * dPhi0dT
         return output_signal
 
-    def _rf_phase_to_temperature(self, input_signal):
-        """ Translate RF phase-valued signal into temperature
+    def _squid_phase_to_temperature(self, input_signal, dPhi0dT):
+        """ Translate SQUID phase-valued signal into temperature
         """
-        # FIXME: implement _rf_phase_to_temperature()
-        output_signal = input_signal.copy()
+        output_signal = input_signal / dPhi0dT
         return output_signal
-
-    def _mix_detector_data(self, target_squid_phase, source_squid_phase, chi):
-        """ Evaluate and return the additive crosstalk term
-
-        Returned signal is in RF phase units.
-        """
-        # FIXME: double-check this
-        return chi * np.sin(source_squid_phase - target_squid_phase)
 
     def _draw_Phi0(self, obs, detectors, vmin=0.3, vmax=1.3):
         """ Draw initial SQUID phases from a flat distribution
@@ -244,7 +232,7 @@ class SimMuMUXCrosstalk(Operator):
             P_opt += P_atm - P_atm_ref
             dPdT = bandpass.kcmb2w(det)  # K_CMB -> W
             dIdP = 1 / np.sqrt((P_sat - P_opt) * R_FRAC * R_BOLO)  # W -> A
-            dPhi0dI = Phi0[det] / 9e-6  # A -> [rad]
+            dPhi0dI = 1 / 9e-6  # A -> [rad]
             dPhi0dT[det] = dPdT * dIdP * dPhi0dI  # K_CMB -> [rad]
 
         return dPhi0dT
@@ -298,14 +286,18 @@ class SimMuMUXCrosstalk(Operator):
             for row_target, det_target in zip(rows, detectors):
                 crosstalk = np.zeros_like(input_data[row_target])
                 target_squid_phase = self._temperature_to_squid_phase(
-                    input_data[row_target], det_target, Phi0[det], dPhi0dT[det]
+                    input_data[row_target],
+                    Phi0[det_source],
+                    dPhi0dT[det_source],
                 )
                 for row_source, det_source in zip(rows, detectors):
                     chi = self._get_chi(det_target, det_source)
                     if chi == 0:
                         continue
                     source_squid_phase = self._temperature_to_squid_phase(
-                        input_data[row_source], det_source, Phi0[det], dPhi0dT[det]
+                        input_data[row_source],
+                        Phi0[det_source],
+                        dPhi0dT[det_source],
                     )
                     crosstalk += chi * np.sin(
                         source_squid_phase - target_squid_phase
@@ -313,8 +305,8 @@ class SimMuMUXCrosstalk(Operator):
 
                 # Translate crosstalk into temperature units and scale to
                 # match input data
-                output_data[row_target] += self._rf_phase_to_temperature(
-                    crosstalk
+                output_data[row_target] += self._squid_phase_to_temperature(
+                    crosstalk, dPhi0dT[det_target]
                 ) / det_scale
 
             # Redistribute back
