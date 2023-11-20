@@ -77,7 +77,7 @@ def smurf_detset_info(config: Union[str, dict],
     ctx = core.Context(config['context'])
 
 
-    if not os.path.exists(config['archive']['index']):
+    if not os.path.exists(config['archive']['detset']['index']):
         scheme = core.metadata.ManifestScheme()
         scheme.add_exact_match('dets:detset')
         scheme.add_data_field('dataset')
@@ -424,7 +424,10 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None,
         }, filename=h5_path, replace=overwrite)
 
 
-def run_update_det_caldb(config, logger=None, format_exc=False, show_pb=False, overwrite=False):
+def run_update_det_caldb(config_path, logger=None, format_exc=False, show_pb=False, overwrite=False):
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+
     ctx = core.Context(config['context'])
     update_det_caldb(
         ctx, 
