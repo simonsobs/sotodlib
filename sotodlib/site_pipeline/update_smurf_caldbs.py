@@ -175,6 +175,8 @@ def get_cal_obsids(ctx, obs_id, cal_type):
     obs_ids = {
         ds: None for ds in detsets
     }
+    ids_to_find = len(obs_ids)
+    ids_found = 0
 
     for o in cal_all:
         dsets = ctx.obsfiledb.get_files(o['obs_id']).keys()
@@ -182,6 +184,9 @@ def get_cal_obsids(ctx, obs_id, cal_type):
             if ds in obs_ids:
                 if obs_ids[ds] is None:
                     obs_ids[ds] = o['obs_id']
+                    ids_found += 1
+        if ids_to_find == ids_found:
+            break
 
     return obs_ids
 
