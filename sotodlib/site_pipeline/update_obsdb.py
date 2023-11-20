@@ -43,7 +43,7 @@ from typing import Optional
 
 logger = util.init_logger(__name__, 'update-obsdb: ')
 
-def check_meta_type(bookpath:str):
+def check_meta_type(bookpath: str):
     metapath = os.path.join(bookpath, "M_index.yaml")
     meta = yaml.safe_load(open(metapath, "rb"))
     if meta is None:
@@ -54,7 +54,7 @@ def check_meta_type(bookpath:str):
         return meta["type"]
 
 
-def telescope_lookup(telescope:str):
+def telescope_lookup(telescope: str):
     """
     Set a number of common queries given a telescope name
 
@@ -84,12 +84,12 @@ def telescope_lookup(telescope:str):
         return {}
 
 
-def main(config:str, 
-        recency:float = None, 
-        booktype:Optional[str] = "both",
-        verbosity:Optional[int] = 2,
-        overwrite:Optional[bool] = False,
-        logger = None):
+def main(config: str, 
+        recency: float = None, 
+        booktype: Optional[str] = "both",
+        verbosity: Optional[int] = 2,
+        overwrite: Optional[bool] = False,
+        logger=None):
 
     """
     Create or update an obsdb for observation or operations data.
@@ -284,20 +284,20 @@ def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
     parser.add_argument("--config", help="ObsDb, ObsfileDb configuration file", 
-        type = str, required = True)
-    parser.add_argument('--recency', default = None, type = float,
-        help = "Days to subtract from now to set as minimum ctime. If None, no minimum")
-    parser.add_argument("--verbosity", default = 2, type = int,
-        help = "Increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug")
-    parser.add_argument("--booktype", default = "both", type = str,
-        help = "Select book type to look for: obs, oper, both(default)")
-    parser.add_argument("--overwrite", action = "store_true",
-        help = "If true, writes over existing entries")
+        type=str, required=True)
+    parser.add_argument('--recency', default=None, type=float,
+        help="Days to subtract from now to set as minimum ctime. If None, no minimum")
+    parser.add_argument("--verbosity", default=2, type=int,
+        help="Increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug")
+    parser.add_argument("--booktype", default="both", type=str,
+        help="Select book type to look for: obs, oper, both(default)")
+    parser.add_argument("--overwrite", action="store_true",
+        help="If true, writes over existing entries")
     return parser
 
 
 
 if __name__ == '__main__':
-    parser = get_parser(parser = None)
+    parser = get_parser(parser=None)
     args = parser.parse_args()
     main(**vars(args))
