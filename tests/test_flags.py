@@ -2,7 +2,8 @@ import unittest
 
 
 import numpy as np
-from sotodlib import core, flags
+from sotodlib import core
+from sotodlib.tod_ops import flags
 
 
 class TestFlags(unittest.TestCase):

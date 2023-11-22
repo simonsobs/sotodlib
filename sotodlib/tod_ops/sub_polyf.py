@@ -1,9 +1,9 @@
 import numpy as np
 import logging
-from sotodlib import flags
+from . import flags
 logger = logging.getLogger(__name__)
 
-def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=True, mask=None, in_place=True):
+def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mask=None, in_place=True):
     """
     Apply polynomial filtering to subscan segments in a data array.
     This function applies polynomial filtering to subscan segments within signal for each detector.
@@ -18,7 +18,7 @@ def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=True, mask
     signal : array-like, optional
         The TOD signal to use. If not provided, `aman.signal` will be used.
     exclude_turnarounds : bool
-        Optional. If True, turnarounds are excluded from subscan identification. Default is True.
+        Optional. If True, turnarounds are excluded from subscan identification. Default is False.
     mask : str or RangesMatrix
         Optional. A mask used to select specific data points for filtering. Default is None.
         If None, no mask is applied. If the mask is given in str, ``aman.flags['mask']`` is used as mask.
