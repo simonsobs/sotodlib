@@ -10,9 +10,9 @@ except ImportError:
 
 from so3g.proj import Ranges, RangesMatrix
 
-from . import core
-from .tod_ops import filters
-from .tod_ops import fourier_filter
+from .. import core
+from . import filters
+from . import fourier_filter
 
 
 def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
@@ -22,27 +22,41 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
     """
     Compute turnaround flags for a dataset.
 
-    Parameters:
-    -----------
-    aman (object): AxisManager object
-    az (array-like, optional): Azimuth data for turnaround flag computation. If not provided, it uses aman.boresight.az.
-    method (str, optional): The method for computing turnaround flags. Options are 'az' or 'scanspeed'.
-    name (str, optional): The name of the turnaround flag in aman.flags. Default is 'turnarounds'
-    merge (bool, optional): Merge the computed turnaround flags into aman.flags if True.
-    merge_lr (bool, optional): Merge left and right scan flags as `aman.flags.left_scan` and `aman.flags.right_scan` if True.
-    overwrite (bool, optional): Overwrite an existing flag in aman.flags with the same name.
-    t_buffer (float, optional): Buffer time (in seconds) for flagging turnarounds in 'scanspeed' method.
-    kernel_size (int, optional): Size of the step-wise matched filter kernel used in 'scanspeed' method.
-    peak_threshold (float, optional): Peak threshold for identifying peaks in the matched filter response. 
+    Parameters
+    ----------
+    aman : AxisManager
+        Input axis manager.
+    az : Array
+        (Optional). Azimuth data for turnaround flag computation. If not provided, it uses ``aman.boresight.az.``
+    method : str
+        (Optional). The method for computing turnaround flags. Options are ``az`` or ``scanspeed``.
+    name : str
+        (Optional). The name of the turnaround flag in ``aman.flags``. Default is ``turnarounds``
+    merge : bool
+        (Optional). Merge the computed turnaround flags into ``aman.flags`` if ``True``.
+    merge_lr : bool
+        (Optional). Merge left and right scan flags as ``aman.flags.left_scan`` and ``aman.flags.right_scan`` if ``True``.
+    overwrite : bool
+        (Optional). Overwrite an existing flag in ``aman.flags`` with the same name.
+    t_buffer : float
+        (Optional). Buffer time (in seconds) for flagging turnarounds in ``scanspeed`` method.
+    kernel_size : int
+        (Optional). Size of the step-wise matched filter kernel used in ``scanspeed`` method.
+    peak_threshold : float
+        (Optional). Peak threshold for identifying peaks in the matched filter response.
         It is a value used to determine the minimum peak height in the signal.
-    rel_distance_peaks (float, optional): Relative distance between peaks. It specifies the minimum distance 
-        between peaks as a fraction of the approximate number of samples in one scan period.
-    truncate (bool, optional): Truncate unstable scan segments if True in 'scanspeed' method.
-    qlim (float, optional): Azimuth threshold percentile for 'az' method turnaround detection.
+    rel_distance_peaks : float
+        (Optional). Relative distance between peaks.
+        It specifies the minimum distance between peaks as a fraction of the approximate number of samples in one scan period.
+    truncate : bool
+        (Optional). Truncate unstable scan segments if True in ``scanspeed`` method.
+    qlim : float
+        (Optional). Azimuth threshold percentile for ``az`` method turnaround detection.
 
-    Returns:
-    --------
-    Ranges: The turnaround flags as a Ranges object.
+    Returns
+    -------
+    Ranges : RangesMatrix
+        The turnaround flags as a Ranges object.
     """
     if az is None : 
         az = aman.boresight.az
@@ -164,52 +178,58 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
             aman.flags[name] = ta_flag
         else:
             print(ta_flag)
-            aman.flags.wrap(name, ta_flag)
-    
+            aman.flags.wrap(name, ta_flag)   
     return ta_flag
     
+def get_glitch_flags(aman,
+                     t_glitch=0.002,
+                     hp_fc=0.5,
+                     n_sig=10,
+                     buffer=200,
+                     detrend=None,
+                     signal=None,
+                     merge=True,
+                     overwrite=False,
+                     name="glitches",
+                     full_output=False):
+    """
+    Find glitches with fourier filtering. Translation from moby2 as starting point
 
-def get_glitch_flags(
-    aman,
-    t_glitch=0.002,
-    hp_fc=0.5,
-    n_sig=10,
-    buffer=200,
-    detrend=None,
-    signal=None,
-    merge=True,
-    overwrite=False,
-    name="glitches",
-    full_output=False,
-):
-    """Find glitches with fourier filtering
-    Translation from moby2 as starting point
+    Parameters
+    ----------
+    aman : AxisManager
+        The tod.
+    t_glitch : float
+        Gaussian filter width.
+    hp_fc : float
+        High pass filter cutoff.
+    n_sig : int or float
+        Significance of detection.
+    buffer : int
+        Amount to buffer flags around found location
+    detrend : str
+        Detrend method to pass to fourier_filter
+    signal : str
+        Field name in aman to detect glitches on if None, defaults to ``signal``
+    merge : bool)
+        If true, add to ``aman.flags``
+    name : string
+        Name of flag to add to ``aman.flags``
+    overwrite : bool
+        If true, write over flag. If false, raise ValueError if name already exists in AxisManager
+    full_output : bool
+        If true, return sparse matrix with the significance of the detected glitches
 
-    Args:
-        aman (AxisManager): the tod
-        t_glitch (float): Gaussian filter width
-        hp_fc: high pass filter cutoff
-        n_sig (int or float): significance of detection
-        buffer (int): amount to buffer flags around found location
-        detrend (str): detrend method to pass to fourier_filter
-        signal (str): if None, defaults to 'signal'
-        merge (bool): if true, add to aman.flags
-        name (string): name of flag to add to aman.flags
-        overwrite (bool): if true, write over flag. if false, raise ValueError
-            if name already exists in AxisManager
-        full_output (bool): if true, return sparse matrix with the significance of
-            the detected glitches
-
-    Returns:
-        flag: RangesMatrix object of glitches
+    Returns
+    -------
+    flag : RangesMatrix
+        RangesMatrix object containing glitch mask.
     """
 
     if signal is None:
         signal = "signal"
     # f-space filtering
-    filt = filters.high_pass_sine2(cutoff=hp_fc) * filters.gaussian_filter(
-        t_sigma=t_glitch
-    )
+    filt = filters.high_pass_sine2(cutoff=hp_fc) * filters.gaussian_filter(t_sigma=t_glitch)
     fvec = fourier_filter(
         aman, filt, detrend=detrend, signal_name=signal, resize="zero_pad"
     )
@@ -255,40 +275,50 @@ def get_glitch_flags(
     return flag
 
 
-def get_trending_flags(
-    aman,
-    max_trend=1.2,
-    n_pieces=1,
-    max_samples=500,
-    signal=None,
-    timestamps=None,
-    merge=True,
-    overwrite=True,
-    name="trends",
-    full_output=False,
-):
+def get_trending_flags(aman,
+                       max_trend=1.2,
+                       n_pieces=1,
+                       max_samples=500,
+                       signal=None,
+                       timestamps=None,
+                       merge=True,
+                       overwrite=True,
+                       name="trends",
+                       full_output=False):
     """
-    Flag Detectors with trends larger than max_trend.
+    Flag Detectors with trends larger than max_trend. 
     This function can be used to find unlocked detectors.
     Note that this is a rough cut and unflagged detectors can still have poor tracking.
 
-    Args:
-        aman (AxisManager): the tod
-        max_trend: Slope at which detectors are unlocked.
-                   The default is for use with phase units.
-        n_pieces: number of pieces to cut the timestream in to to look for trends.
-        max_samples: Maximum samples to compute the slope with.
-        signal: Signal to use to generate flags, default is aman.signal.
-        timestamps: Timestamps to use to generate flags, default is aman.timestamps.
-        merge (bool): if true, merges the generated flag into aman
-        overwrite (bool): if true, write over flag. if false, don't
-        name (string): name of flag to add to aman.flags if merge is True
-        full_output(bool): if true, returns calculated slope sizes
+    Parameters
+    ----------
+    aman : AxisManager
+        The tod
+    max_trend : float
+        Slope at which detectors are unlocked. The default is for use with phase units.
+    n_pieces : int
+        Number of pieces to cut the timestream in to to look for trends.
+    max_samples : int
+        Maximum samples to compute the slope with.
+    signal : array
+        (Optional). Signal to use to generate flags, if None default is aman.signal.
+    timestamps : array
+        (Optional). Timestamps to use to generate flags, default is aman.timestamps.
+    merge : bool
+        If true, merges the generated flag into aman.
+    overwrite : bool
+        If true, write over flag. If false, don't.
+    name : str
+        Name of flag to add to aman.flags if merge is True.
+    full_output : bool
+        If true, returns calculated slope sizes
 
-    Returns:
-        cut: RangesMatrix of trending regions
-        trends: if full_output is true, calculated slopes and the
-        sample edges where they were calculated.
+    Returns
+    -------
+    cut : RangesMatrix
+        RangesMatrix of trending regions
+    trends : AxisManager
+        If full_output is true, calculated slopes and the sample edges where they were calculated.
     """
     if 'flags' not in aman:
         overwrite = False

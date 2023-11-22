@@ -199,3 +199,11 @@ Function for remove low order polynominal component in each subscan.
 
 .. automodule:: sotodlib.tod_ops.sub_polyf
    :members:
+
+tod_ops.flags
+=============
+
+Module containing functions for generating flags for cuts and tod masking.
+
+.. automodule:: sotodlib.tod_ops.flags
+   :members:
