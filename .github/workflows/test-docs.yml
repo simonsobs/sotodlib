@@ -11,6 +11,11 @@ jobs:
     - name: Clone repo
       uses: actions/checkout@v4
 
+    - name: Install sotodlib
+      run: |
+        pip3 install -r requirements.txt
+        pip3 install -e .
+
     - name: Install docs dependencies
       working-directory: ./docs
       run: pip3 install -r requirements.txt
