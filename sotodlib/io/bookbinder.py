@@ -736,13 +736,15 @@ class BookBinder:
         meta['sample_ranges'] = sample_ranges
 
         if telescope is None:
-            log.warning("telescope not explicitly defined. guessing from book")
+            self.log.warning(
+                "telescope not explicitly defined. guessing from book"
+            )
             meta['telescope'] = self.book.tel_tube[:3].lower()
         else: 
             meta['telescope'] = telescope
         # parse e.g., sat1 -> st1, latc1 -> c1
         if 'tube_slot' not in tube_config:
-            log.warning("tube_slot key missing from tube_config. guessing")
+            self.log.warning("tube_slot key missing from tube_config. guessing")
         meta['tube_slot'] = tube_config.get(
             'tube_slot',
             self.book.tel_tube.lower().replace("sat","satst")[3:]
