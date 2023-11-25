@@ -678,7 +678,7 @@ class G3tHWP():
         Notes
         -----
 
-        Output file formatt
+        Output file format
 
         - timestamp:
             SMuRF synched timestamp
