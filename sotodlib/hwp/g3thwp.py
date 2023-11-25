@@ -540,7 +540,7 @@ class G3tHWP():
 
         Notes
         -----------
-        Output file format 
+        Output file format
 
         * Provider: 'hwp'
             * Fast block
@@ -678,7 +678,7 @@ class G3tHWP():
         Notes
         -----
 
-        Output file formatt s
+        Output file formatt
 
         - timestamp:
             SMuRF synched timestamp
