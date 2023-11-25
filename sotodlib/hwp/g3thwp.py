@@ -1045,10 +1045,12 @@ class G3tHWP():
             _diff = int(np.diff(self._encd_cnt)[ii])
             # Fill dropped counters with counters one before or one after rotation.
             # This filling method works even when the reference slot counter is dropped.
-            if ii ii - self._num_edges + self._ref_edges + 1 >= 0:
-                gap_clk = self._encd_clk[ii - self._num_edges + self._ref_edges + 1 : ii+_diff - self._num_edges + self._ref_edges] - self._encd_clk[ii-self._num_edges + self._ref_edges] + self._encd_clk[ii]
+            if ii - self._num_edges + self._ref_edges + 1 >= 0:
+                gap_clk = self._encd_clk[ii - self._num_edges + self._ref_edges + 1 : ii+_diff - self._num_edges + self._ref_edges] \
+                     - self._encd_clk[ii-self._num_edges + self._ref_edges] + self._encd_clk[ii]
             else:
-                gap_clk = self._encd_clk[ii - _diff + self._num_edges: ii -1 + self._num_edges] - self._encd_clk[ii - _diff + self._num_edges -1] + self._encd_clk[ii]
+                gap_clk = self._encd_clk[ii - _diff + self._num_edges: ii -1 + self._num_edges] \
+                    - self._encd_clk[ii - _diff + self._num_edges -1] + self._encd_clk[ii]
             gap_cnt = np.arange(self._encd_cnt[ii]+1,self._encd_cnt[ii+1])
             self._encd_cnt = np.insert(self._encd_cnt, ii+1, gap_cnt)
             self._encd_clk = np.insert(self._encd_clk, ii+1, gap_clk)
@@ -1089,7 +1091,7 @@ class G3tHWP():
                 np.abs(
                     quad_split.mean() -
                     quad_split) > 0.5).flatten()
-            if len(outlier) > 5: 
+            if len(outlier) > 5:
                 logger.warning(
                     "flipping quad is corrected by mean value, please consider to use force_quad")
             for i in outlier:
