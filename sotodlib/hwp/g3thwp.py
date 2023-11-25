@@ -428,7 +428,7 @@ class G3tHWP():
 
         if not any(data):
             logger.info("no HWP field data")
-        
+
         d = self._data_formatting(data)
         if 'irig_time_2' in data.keys() and 'counter_2' in data.keys():
             d2 = self._data_formatting(data, suffix='_2')
@@ -634,9 +634,9 @@ class G3tHWP():
             start_time += frame_length
 
         return
-    
+
     def _set_empty_axes(self, aman):
-        
+
         aman.wrap_new('timestamps', shape=('samps', ), dtype=np.float64)
         aman.wrap_new('hwp_angle_ver1', shape=('samps', ), dtype=np.float64)
         aman.wrap_new('hwp_angle_ver2', shape=('samps', ), dtype=np.float64)
@@ -644,17 +644,17 @@ class G3tHWP():
         aman.wrap_new('locked', shape=('samps', ), dtype=bool)
         aman.wrap_new('hwp_rate', shape=('samps', ), dtype=np.float16)
         aman.wrap_new('eval', shape=('samps', ), dtype=bool)
-        
-        return 
-        
+
+        return
+
     def _write_empty_solution_h5(self, tod, output=None, h5_address=None):
-        
+
         logger.info('Writing empty solutions')
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         self._set_empty_axes(aman)
         aman.timestamps[:] = tod.timestamps
         aman.save(output, h5_address, overwrite=True)
-        
+
         return
 
     def _bool_interpolation(self, timestamp1, data, timestamp2):
@@ -663,7 +663,7 @@ class G3tHWP():
         result = (interp > 0.999)
 
         return result
-    
+
     def write_solution_h5(self, tod, output=None, h5_address=None):
         """
         Output HWP angle + flags as AxisManager format
@@ -678,7 +678,7 @@ class G3tHWP():
         Notes
         -----
 
-        Output file format 
+        Output file formatt s
 
         - timestamp:
             SMuRF synched timestamp
@@ -712,11 +712,11 @@ class G3tHWP():
             return
         if output is not None:
             self._output = output
-            
+
         if len(tod.timestamps) == 0:
             logger.warning('Input data is empty.')
-            return 
-        
+            return
+
         start = int(tod.timestamps[0])-self._margin
         end = int(tod.timestamps[-1])+self._margin
         try:
@@ -725,34 +725,34 @@ class G3tHWP():
             logger.error(f"Exception '{e}' thrown while loading HWP data. The specified encoder field is missing.")
             self._write_empty_solution_h5(tod, output, h5_address)
             return
-            
+
         if len(data) == 0:
             logger.warning('No HWP data in the specified timestamps.')
             self._write_empty_solution_h5(tod, output, h5_address)
             return
-        
-        # calculate HWP angle 
+
+        # calculate HWP angle
         logger.debug("analyze")
-        
+
         try:
             solved = self.analyze(data, mod2pi=False)
         except Exception as e:
             logger.error(f"Exception '{e}' thrown while calculating HWP angle. Encoder signal might have too much noise.")
             self._write_empty_solution_h5(tod, output, h5_address)
-            return 
-            
+            return
+
         if len(solved['fast_time']) == 0:
             logger.info('No rotation data in the specified timestamps.')
             self._write_empty_solution_h5(tod, output, h5_address)
             return
-            
+
         # calculate template subtracted angle
         try:
             self.eval_angle(solved)
         except Exception as e:
             logger.error(f"Exception '{e}' thrown while the template subtraction")
             pass
-        
+
         # write solution
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         self._set_empty_axes(aman)
@@ -770,11 +770,11 @@ class G3tHWP():
             logger.info('Template subtraction failed')
             aman.hwp_angle_ver1[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
             aman.hwp_angle_ver2[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
-    
+
         aman.save(output, h5_address, overwrite=True)
 
         return
-    
+
     def _hwp_angle_calculator(
             self,
             counter,
@@ -805,7 +805,7 @@ class G3tHWP():
 
         # treat counter index reset due to agent reboot
         self._process_counter_index_reset()
-        
+
         # check packet drop
         self._encoder_packet_sort()
         self._fill_dropped_packets()
@@ -1028,8 +1028,8 @@ class G3tHWP():
         idx = np.where(np.diff(self._encd_cnt<-1e4))[0] + 1
         for i in range(len(idx)):
             self._encd_cnt[idx[i]:] = self._encd_cnt[idx[i]:] + abs(np.diff(self._encd_cnt)[idx[i]-1]) + 1
-        
-    
+
+
     def _fill_dropped_packets(self):
         """ Estimate the number of dropped packets """
         cnt_diff = np.diff(self._encd_cnt)
@@ -1038,13 +1038,17 @@ class G3tHWP():
         if self._num_dropped_pkts > 0:
             logger.warning('{} dropped packets are found, performing fill process'.format(
                 self._num_dropped_pkts))
-        
+
         idx = np.where(np.diff(self._encd_cnt) > 1)[0]
         for i in range(len(idx)):
             ii = (np.where(np.diff(self._encd_cnt) > 1)[0])[0]
             _diff = int(np.diff(self._encd_cnt)[ii])
-            clk = (self._encd_clk[ii+1] - self._encd_clk[ii]) / _diff
-            gap_clk = np.array([self._encd_clk[ii] + clk * j for j in range(1, _diff)])
+            # Fill dropped counters with counters one before or one after rotation.
+            # This filling method works even when the reference slot counter is dropped.
+            if ii ii - self._num_edges + self._ref_edges + 1 >= 0:
+                gap_clk = self._encd_clk[ii - self._num_edges + self._ref_edges + 1 : ii+_diff - self._num_edges + self._ref_edges] - self._encd_clk[ii-self._num_edges + self._ref_edges] + self._encd_clk[ii]
+            else:
+                gap_clk = self._encd_clk[ii - _diff + self._num_edges: ii -1 + self._num_edges] - self._encd_clk[ii - _diff + self._num_edges -1] + self._encd_clk[ii]
             gap_cnt = np.arange(self._encd_cnt[ii]+1,self._encd_cnt[ii+1])
             self._encd_cnt = np.insert(self._encd_cnt, ii+1, gap_cnt)
             self._encd_clk = np.insert(self._encd_clk, ii+1, gap_clk)
@@ -1068,8 +1072,7 @@ class G3tHWP():
         return
 
     def _quad_form(self, quad):
-        
-        if self._force_quad==1: 
+        if self._force_quad==1:
             return np.ones_like(quad)
         # bit process
         quad[(quad >= 0.5)] = 1
