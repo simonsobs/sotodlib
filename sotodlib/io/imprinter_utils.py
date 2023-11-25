@@ -6,6 +6,8 @@ from sqlalchemy import or_
 import datetime as dt
 import os
 import os.path as op
+import shutil
+
 
 from sotodlib.io.imprinter import ( 
     Books,
@@ -75,11 +77,11 @@ def set_book_rebind(imprint, book):
         binder = None
     if binder is not None:
         book_dir = op.abspath(binder.outdir)
-        print(f"Removing all files from {book_dir}")
-        os.removedirs(book_dir)
+        if op.exists(book_dir):
+            print(f"Removing all files from {book_dir}")
+            shutil.rmtree(book_dir)
     book.status = 0
     imprint.get_session().commit()
-
 
     
 def get_timecode_final(imprint, time_code, type='all'):
