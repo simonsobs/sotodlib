@@ -721,6 +721,8 @@ class BookBinder:
 
         meta = {}
         meta['book_id'] = self.book.bid
+        meta['type'] = self.book.type
+
         meta['start_time'] = float(self.times[0])
         meta['stop_time'] = float(self.times[-1])
         meta['n_frames'] = len(np.unique(self.frame_idxs))
@@ -742,7 +744,7 @@ class BookBinder:
             meta['telescope'] = self.book.tel_tube[:3].lower()
         else: 
             meta['telescope'] = telescope
-        # parse e.g., sat1 -> st1, latc1 -> c1
+
         if 'tube_slot' not in tube_config:
             self.log.warning("tube_slot key missing from tube_config. guessing")
         meta['tube_slot'] = tube_config.get(
@@ -752,7 +754,6 @@ class BookBinder:
         meta['tube_flavor'] = tube_config.get('tube_flavor')
         meta['wafer_slots'] = tube_config.get('wafer_slots')
 
-        meta['type'] = self.book.type
         detsets = []
         tags = []
 
