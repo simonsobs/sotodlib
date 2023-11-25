@@ -619,13 +619,13 @@ class Imprinter:
                     self.indir = indir
                     self.outdir = outdir
 
-                def get_metadata(self):
+                def get_metadata(self, telescope=None, tube_config={}):
                     return {
                         "book_id": book.bid,
                         # dummy start and stop times
                         "start_time": float(first5) * 1e5,
                         "stop_time": (float(first5) + 1) * 1e5,
-                        "telescope": book.tel_tube.lower(),
+                        "telescope": telescope,
                         "type": book.type,
                     }
 
@@ -661,13 +661,13 @@ class Imprinter:
                     self.outdir = outdir
                     self.file_list = file_list
 
-                def get_metadata(self):
+                def get_metadata(self, telescope=None, tube_config={}):
                     return {
                         "book_id": book.bid,
                         # dummy start and stop times
                         "start_time": float(first5) * 1e5,
                         "stop_time": (float(first5) + 1) * 1e5,
-                        "telescope": book.tel_tube.lower(),
+                        "telescope": telescope,
                         "type": book.type,
                     }
 
