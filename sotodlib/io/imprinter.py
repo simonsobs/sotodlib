@@ -741,6 +741,8 @@ class Imprinter:
                 book, 
                 ignore_tags=ignore_tags,
             )
+            book.path = op.abspath(binder.outdir)
+
             binder.bind(pbar=pbar)
 
             # write M_book file
@@ -761,17 +763,18 @@ class Imprinter:
                 yaml.dump(book_meta, f)
 
             # write M_index file
+            if book.type in ['obs', 'oper']:
+                tc = self.tube_configs[book.tel_tube]
+            else:
+                tc = {}
             mfile = os.path.join(binder.outdir, "M_index.yaml")
             with open(mfile, "w") as f:
                 yaml.dump(
                     binder.get_metadata(
                         telescope=self.daq_node,
-                        tube_config = self.tube_configs[book.tel_tube],
-                    ), 
-                    f
+                        tube_config = tc,
+                    ), f
                 )
-
-            book.path = op.abspath(binder.outdir)
 
             if book.type in ['obs', 'oper']:
                 # check that detectors books were written out correctly
