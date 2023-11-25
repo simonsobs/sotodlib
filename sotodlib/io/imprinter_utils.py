@@ -4,6 +4,8 @@ imprinter setup. Functions run as part of the automated pipeline are defined in 
 """
 from sqlalchemy import or_
 import datetime as dt
+import os
+import os.path as op
 
 from sotodlib.io.imprinter import ( 
     Books,
@@ -53,6 +55,33 @@ def set_book_wont_bind(imprint, book, message=None, session=None):
         book.message = message
     session.commit()
 
+def set_book_rebind(imprint, book):
+    """ Delete any existing staged files for a book as 
+    set it's status to UNBOUND
+
+    Parameters
+    -----------
+    imprint: Imprinter instance
+    book: str or Book 
+    """
+    try:
+        # find appropriate binder for the book type
+        binder = imprint._get_binder_for_book(
+            book, 
+            ignore_tags=False,
+        )
+    except:
+         # if binder making failed there's no files
+        binder = None
+    if binder is not None:
+        book_dir = op.abspath(binder.outdir)
+        print(f"Removing all files from {book_dir}")
+        os.removedirs(book_dir)
+    book.status = 0
+    imprint.get_session().commit()
+
+
+    
 def get_timecode_final(imprint, time_code, type='all'):
     """Check if all required entries in the g3tsmurf database are present for
     smurf or stray book regisitration.
