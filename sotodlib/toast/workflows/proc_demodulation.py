@@ -30,17 +30,6 @@ def setup_demodulate(operators):
             enabled=False,
         )
     )
-    # This is for estimating the white noise levels after demodulation
-    operators.append(
-        toast.ops.NoiseEstim(
-            name="demod_noise_estim",
-            out_model="noise_model",
-            lagmax=1,
-            nbin_psd=1,
-            nsum=1,
-            naverage=1,
-        )
-    )
 
 
 @workflow_timer
@@ -57,13 +46,34 @@ def demodulate(job, otherargs, runargs, data):
         (Data):  The new, demodulated data.
 
     """
+    log = toast.utils.Logger.get()
+
     # Configured operators for this job
     job_ops = job.operators
 
     if job_ops.demodulate.enabled:
+        # The pre-demodulation noise model to use
+        if job_ops.noise_estim.enabled and job_ops.noise_estim_fit.enabled:
+            # We have a noise estimate
+            log.info_rank("Demodulation using estimated noise model", comm=data.comm.comm_world)
+            noise_model = job_ops.noise_estim_fit.out_model
+        else:
+            have_noise = True
+            for ob in data.obs:
+                if "noise_model" not in ob:
+                    have_noise = False
+            if have_noise:
+                log.info_rank(
+                    "Demodulation using noise model from data files", comm=data.comm.comm_world
+                )
+                noise_model = "noise_model"
+            else:
+                # Use the synthetic elevation weighted model
+                noise_model = "elevation_model"
         # The Demodulation operator is special because it returns a
         # new TOAST data object
         job_ops.demodulate.stokes_weights = job_ops.weights_radec
+        job_ops.demodulate.noise_model = noise_model
         data = job_ops.demodulate.apply(data)
         demod_weights = toast.ops.StokesWeightsDemod()
         job_ops.weights_radec = demod_weights
@@ -71,5 +81,3 @@ def demodulate(job, otherargs, runargs, data):
             job_ops.binner.stokes_weights = demod_weights
         if hasattr(job_ops, "binner_final"):
             job_ops.binner_final.stokes_weights = demod_weights
-        job_ops.demod_noise_estim.apply(data)
-
