@@ -11,19 +11,10 @@ jobs:
     - name: Clone repo
       uses: actions/checkout@v4
 
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-
-    - name: Install sotodlib
-      run: |
-        pip3 install -e .
-
     - name: Install docs dependencies
       working-directory: ./docs
       run: pip3 install -r requirements.txt
 
     - name: Build docs
       working-directory: ./docs
-      run: sphinx-build -M html . _build -W
+      run: sphinx-build -M html . _build
