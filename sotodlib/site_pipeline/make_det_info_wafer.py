@@ -49,7 +49,7 @@ def main(args=None):
     else:
         logger.info(f"Creating Det Info {configs['det_db']}.")
         scheme = core.metadata.ManifestScheme()
-        scheme.add_range_match('obs:timestamp')
+        scheme.add_data_field('dets:stream_id')
         scheme.add_data_field('dataset')
         db = core.metadata.ManifestDb(configs["det_db"], scheme=scheme)
         existing = []
@@ -77,7 +77,10 @@ def main(args=None):
         w + "coax",
     ]
 
-    for array_name in array_names:
+    for array_cfg in configs['arrays']:
+        array_name = array_cfg['name']
+        stream_id = array_cfg['stream_id']
+
         # make result set per array
         if array_name in existing and not args.overwrite:
             logger.info(f"{array_name} exists in database, pass --overwrite to"
@@ -105,9 +108,13 @@ def main(args=None):
             else:
                 angle = np.nan
 
+            # recapitalize Mv in det_id
+            det_id = tune.detector_id
+            det_id = det_id[0].upper() + det_id[1:]
+
             # add detector name to database
             det_rs.append({
-                "dets:det_id": tune.detector_id,
+                "dets:det_id": det_id,
                 w + "array": array_name,
                 w + "bond_pad": tune.bond_pad,
                 w + "mux_band": str(tune.mux_band),
@@ -153,7 +160,7 @@ def main(args=None):
         write_dataset(det_rs, configs["det_info"], array_name, args.overwrite)
         # Update the index if it's a new entry
         if not array_name in existing:
-            db_data = {'obs:timestamp': [0, 2e11],
+            db_data = {'dets:stream_id': stream_id,
                        'dataset': array_name}
             db.add_entry(db_data, configs["det_info"])
 
