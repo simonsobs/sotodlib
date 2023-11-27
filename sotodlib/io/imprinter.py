@@ -1122,8 +1122,10 @@ class Imprinter:
             G3tObservations.timestamp >= min_ctime,
             G3tObservations.timestamp <= max_ctime,
             stream_filt,
-            G3tObservations.stop == None,
-            G3tObservations.stop >= dt.datetime.utcfromtimestamp(max_ctime),
+            or_(
+                G3tObservations.stop == None,
+                G3tObservations.stop >= dt.datetime.utcfromtimestamp(max_ctime),
+            ),
         )
         # if we have incomplete observations in our stream_id list we cannot
         # bookbind any observations overlapping the incomplete ones.
