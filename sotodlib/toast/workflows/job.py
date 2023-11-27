@@ -28,10 +28,9 @@ def workflow_timer(f):
         for arg in args:
             if isinstance(arg, toast.Data):
                 data = arg
+                comm = data.comm.comm_world
             elif isinstance(arg, toast.mpi.MPI_Comm):
                 comm = arg
-        if comm is None:
-            comm = data.comm.comm_world
 
         log.info_rank(f"Running {fname}...", comm=comm)
 

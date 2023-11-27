@@ -7,6 +7,7 @@ import numpy as np
 from astropy import units as u
 import toast
 import toast.ops
+from toast.observation import default_values as defaults
 
 from .. import ops as so_ops
 from .job import workflow_timer
@@ -22,7 +23,24 @@ def setup_demodulate(operators):
         None
 
     """
-    operators.append(toast.ops.Demodulate(name="demodulate", enabled=False))
+    operators.append(
+        toast.ops.Demodulate(
+            name="demodulate",
+            hwp_angle=defaults.hwp_angle,
+            enabled=False,
+        )
+    )
+    # This is for estimating the white noise levels after demodulation
+    operators.append(
+        toast.ops.NoiseEstim(
+            name="demod_noise_estim",
+            out_model="noise_model",
+            lagmax=1,
+            nbin_psd=1,
+            nsum=1,
+            naverage=1,
+        )
+    )
 
 
 @workflow_timer
@@ -46,7 +64,6 @@ def demodulate(job, otherargs, runargs, data):
         # The Demodulation operator is special because it returns a
         # new TOAST data object
         job_ops.demodulate.stokes_weights = job_ops.weights_radec
-        job_ops.demodulate.hwp_angle = job_ops.sim_ground.hwp_angle
         data = job_ops.demodulate.apply(data)
         demod_weights = toast.ops.StokesWeightsDemod()
         job_ops.weights_radec = demod_weights
@@ -54,4 +71,5 @@ def demodulate(job, otherargs, runargs, data):
             job_ops.binner.stokes_weights = demod_weights
         if hasattr(job_ops, "binner_final"):
             job_ops.binner_final.stokes_weights = demod_weights
+        job_ops.demod_noise_estim.apply(data)
 
