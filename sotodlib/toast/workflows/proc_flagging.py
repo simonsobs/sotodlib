@@ -71,6 +71,7 @@ def setup_flag_noise_outliers(operators):
     operators.append(
         toast.ops.FitNoiseModel(
             name="noise_cut_fit",
+            out_model="noise_cut_fit",
         )
     )
     operators.append(
@@ -135,7 +136,7 @@ def flag_noise_outliers(job, otherargs, runargs, data):
     )
 
     # Flag detector outliers
-    job_ops.noise_cut_flag.noise_model = job_ops.noise_cut.out_model
+    job_ops.noise_cut_flag.noise_model = job_ops.noise_cut_fit.out_model
     log.info_rank(
         "  Running flagging of noise model outliers...", comm=data.comm.comm_world
     )
@@ -148,5 +149,6 @@ def flag_noise_outliers(job, otherargs, runargs, data):
     toast.ops.Delete(
         meta=[
             job_ops.noise_cut.out_model,
+            job_ops.noise_cut_fit.out_model,
         ]
     ).apply(data)

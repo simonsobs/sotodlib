@@ -45,7 +45,7 @@ def setup_mapmaker(operators, templates):
             name="binner_final", enabled=False, pixel_dist="pix_dist_final"
         )
     )
-    operators.append(toast.ops.MapMaker(name="mapmaker"))
+    operators.append(toast.ops.MapMaker(name="mapmaker", det_data=defaults.det_data))
 
 
 @workflow_timer
@@ -76,7 +76,6 @@ def mapmaker(job, otherargs, runargs, data):
             templates=[job_tmpls.baselines, job_tmpls.azss]
         )
         job_ops.mapmaker.map_binning = job_ops.binner_final
-        job_ops.mapmaker.det_data = job_ops.sim_noise.det_data
         job_ops.mapmaker.output_dir = otherargs.out_dir
         tmsg = "  "
         for tmpl in job_ops.mapmaker.template_matrix.templates:
@@ -130,6 +129,9 @@ def mapmaker(job, otherargs, runargs, data):
                 noise_model = "fake_noise"
         job_ops.binner.noise_model = noise_model
         job_ops.binner_final.noise_model = noise_model
+
+        if job_tmpls.baselines.enabled:
+            job_tmpls.noise_model = noise_model
 
         if otherargs.obsmaps:
             # Map each observation separately
