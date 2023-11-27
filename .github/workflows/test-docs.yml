@@ -17,4 +17,4 @@ jobs:
 
     - name: Build docs
       working-directory: ./docs
-      run: sphinx-build -M html . _build
+      run: sphinx-build -M html . _build -W
