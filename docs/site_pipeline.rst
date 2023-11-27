@@ -143,6 +143,19 @@ The detector info mapping created by this script will be stable as long as the
 same UFMs are used in the same optics tube positions, meaning it only needs to
 be re-made if the physical hardware setup changes. 
 
+Although the full config presented for ``make_read_det_match`` will
+work, here's a more basic example that will work::
+
+  det_db : "./det_info_wafer.db"
+  det_info : "./det_info_wafer.h5"
+
+  arrays:
+    - name: mv7
+      stream_id: ufm_mv7
+    - name: mv9
+      stream_id: ufm_mv9
+
+
 make_read_det_match
 ```````````````````
 This script generates the readout ID to detector ID mapping required to
