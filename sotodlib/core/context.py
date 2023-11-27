@@ -444,8 +444,7 @@ class Context(odict):
 
         # Incorporate detset info from obsfiledb.
         detsets_info = self.obsfiledb.get_det_table(obs_id)
-        det_info = metadata.merge_det_info(det_info, detsets_info,
-                                           ['readout_id'])
+        det_info = metadata.merge_det_info(det_info, detsets_info)
 
         # Make the request for SuperLoader
         request = {'obs:obs_id': obs_id}
