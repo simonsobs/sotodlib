@@ -307,7 +307,7 @@ class SubPolyf(_Preprocess):
     """Fit TOD in each subscan with polynominal of given order and subtract it.
         All process configs go to `sotodlib.tod_ops.sub_polyf`.
     
-    .. autofunction:: sotodlib.tod_ops.sub_polyf
+    .. autofunction:: sotodlib.tod_ops.subscan_polyfilter
     """
     name = 'sub_polyf'
     
