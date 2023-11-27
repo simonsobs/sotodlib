@@ -38,7 +38,7 @@ from typing import Optional, Union
 from sotodlib import core
 from sotodlib.io.metadata import write_dataset
 from sotodlib.io.load_smurf import G3tSmurf, TuneSets
-from sotodlib.io.load_book import load_smurf_npy_data
+from sotodlib.io.load_book import load_smurf_npy_data, get_cal_obsids
 from sotodlib.io.imprinter import Imprinter
 import sotodlib.site_pipeline.util as sp_util
 
@@ -141,54 +141,6 @@ def smurf_detset_info(config: Union[str, dict],
                     'dataset': ts.name}
             db.add_entry(db_data, config['archive']['detset']['h5file'])
 
-
-def get_cal_obsids(ctx, obs_id, cal_type):
-    """
-    Returns set of obs-ids corresponding to the most recent calibration
-    operations for a given obsid.
-
-    Args
-    ------
-    ctx: core.Context
-        Context object
-    obs_id: str
-        obs_id for which you want to get relevant calibration info
-    cal_type: str
-        Calibration subtype to use in the obsdb query. For example: 'iv' or
-        'bias_steps'.
-
-    Returns
-    ----------
-        obs_ids: dict
-            Dict of obs_ids for each detset in specified operation
-    """
-    obs = ctx.obsdb.query(f"obs_id == '{obs_id}'")[0]
-    detsets = ctx.obsfiledb.get_detsets(obs_id)
-    min_ct = obs['start_time'] - 3600*24*7
-    cal_all = ctx.obsdb.query(
-        f"""
-        start_time <= {obs['start_time']} and subtype=='{cal_type}'
-        and start_time > {min_ct}
-        """, sort=['start_time']
-    )[::-1]
-
-    obs_ids = {
-        ds: None for ds in detsets
-    }
-    ids_to_find = len(obs_ids)
-    ids_found = 0
-
-    for o in cal_all:
-        dsets = ctx.obsfiledb.get_files(o['obs_id']).keys()
-        for ds in dsets:
-            if ds in obs_ids:
-                if obs_ids[ds] is None:
-                    obs_ids[ds] = o['obs_id']
-                    ids_found += 1
-        if ids_to_find == ids_found:
-            break
-
-    return obs_ids
 
 # Dtype for calibration set
 cal_dtype = [
