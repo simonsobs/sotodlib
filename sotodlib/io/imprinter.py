@@ -165,14 +165,23 @@ class Imprinter:
 
           tel_tubes:
             tel_tube1:
-              slots:
-                - stream_id1
-                - stream_id2
-                - stream_id3
+              tube_slot: c0
+              wafer_slots:
+                - wafer_slot: ws0
+                  stream_id: stream_id0
+                - wafer_slot: ws1
+                  stream_id: stream_id1
+                - wafer_slot: ws2
+                  stream_id: stream_id2
             tel_tube2:
-              slots:
-                - stream_id4
-                - stream_id5
+              tube_slot: i1
+              wafer_slots:
+                - wafer_slot: ws0
+                  stream_id: stream_id3
+                - wafer_slot: ws1
+                  stream_id: stream_id4
+                - wafer_slot: ws2
+                  stream_id: None
           
         Standard Book directory structure based off config file example:
         output_root/
@@ -188,9 +197,12 @@ class Imprinter:
                 hk/
         
         The tel_tubes entry lists the different tel-tubes that will be bound
-        into separate books containing only the stream_ids listed under slots.
-        For the SATs we expect one entry under tel_tubes but the LAT will have
-        many. TODO: There is currently no option to have an empty slot. 
+        into separate books. Each tel_tube entry is expected to have a tube_slot
+        name and is required to have a wafer_slots list. Each wafer slot must
+        have a wafer_slot and stream_id entry. If stream_id is None then it will
+        be treated as an empty slot. The wafers/stream_ids listed in each
+        tel_tube are bound together. For the SATs we expect one entry under 
+        tel_tubes but the LAT will have many.
         
         The build_det_data and build_hk entries determines if detector books
         (obs,oper,smurf,stray) and housekeeping (hk) books should be made,
@@ -218,7 +230,32 @@ class Imprinter:
         self.build_hk = self.config.get("build_hk")
         self.build_det = self.config.get("build_det")
 
-        self.tubes = self.config.get("tel_tubes", {})
+        self.logger = logger
+        if logger is None:
+            self.logger = logging.getLogger("imprinter")
+            if not self.logger.hasHandlers():
+                self.logger = init_logger("imprinter")
+
+        self.tube_configs = self.config.get("tel_tubes", {})
+        self.tubes = dict()
+        for tube, cfg in self.tube_configs.items():
+            self.tubes[tube] = dict()
+            self.tubes[tube]['slots'] = list()
+            if 'wafer_slots' not in self.tube_configs[tube]:
+                if 'slots' in self.tube_configs[tube]:
+                    self.tubes[tube]['slots'] = self.tube_configs[tube]['slots']
+                    self.logger.warning(f"Tube {tube} missing wafer_slots "
+                    "entry. Are you using an old configuration format?")
+                    continue
+                
+            for slot in self.tube_configs[tube]['wafer_slots']:
+                if slot['stream_id'].lower() == 'none':
+                    self.tubes[tube]['slots'].append(
+                        f"NONE_{slot['wafer_slot']}"
+                    )
+                else:
+                    self.tubes[tube]['slots'].append(slot['stream_id'])
+                                        
 
         # check whether db_path directory exists
         if not op.exists(op.dirname(self.db_path)):
@@ -235,11 +272,7 @@ class Imprinter:
         self.hk_archive = None
         self.librarian = None
 
-        self.logger = logger
-        if logger is None:
-            self.logger = logging.getLogger("imprinter")
-            if not self.logger.hasHandlers():
-                self.logger = init_logger("imprinter")
+        
 
     def get_session(self):
         """Get a new session or return the existing one
@@ -586,13 +619,13 @@ class Imprinter:
                     self.indir = indir
                     self.outdir = outdir
 
-                def get_metadata(self):
+                def get_metadata(self, telescope=None, tube_config={}):
                     return {
                         "book_id": book.bid,
                         # dummy start and stop times
                         "start_time": float(first5) * 1e5,
                         "stop_time": (float(first5) + 1) * 1e5,
-                        "telescope": book.tel_tube.lower(),
+                        "telescope": telescope,
                         "type": book.type,
                     }
 
@@ -628,13 +661,13 @@ class Imprinter:
                     self.outdir = outdir
                     self.file_list = file_list
 
-                def get_metadata(self):
+                def get_metadata(self, telescope=None, tube_config={}):
                     return {
                         "book_id": book.bid,
                         # dummy start and stop times
                         "start_time": float(first5) * 1e5,
                         "stop_time": (float(first5) + 1) * 1e5,
-                        "telescope": book.tel_tube.lower(),
+                        "telescope": telescope,
                         "type": book.type,
                     }
 
@@ -708,6 +741,8 @@ class Imprinter:
                 book, 
                 ignore_tags=ignore_tags,
             )
+            book.path = op.abspath(binder.outdir)
+
             binder.bind(pbar=pbar)
 
             # write M_book file
@@ -728,11 +763,18 @@ class Imprinter:
                 yaml.dump(book_meta, f)
 
             # write M_index file
+            if book.type in ['obs', 'oper']:
+                tc = self.tube_configs[book.tel_tube]
+            else:
+                tc = {}
             mfile = os.path.join(binder.outdir, "M_index.yaml")
             with open(mfile, "w") as f:
-                yaml.dump(binder.get_metadata(), f)
-
-            book.path = op.abspath(binder.outdir)
+                yaml.dump(
+                    binder.get_metadata(
+                        telescope=self.daq_node,
+                        tube_config = tc,
+                    ), f
+                )
 
             if book.type in ['obs', 'oper']:
                 # check that detectors books were written out correctly
@@ -1080,7 +1122,10 @@ class Imprinter:
             G3tObservations.timestamp >= min_ctime,
             G3tObservations.timestamp <= max_ctime,
             stream_filt,
-            G3tObservations.stop == None,
+            or_(
+                G3tObservations.stop == None,
+                G3tObservations.stop >= dt.datetime.utcfromtimestamp(max_ctime),
+            ),
         )
         # if we have incomplete observations in our stream_id list we cannot
         # bookbind any observations overlapping the incomplete ones.
