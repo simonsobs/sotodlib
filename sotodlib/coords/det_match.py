@@ -43,6 +43,18 @@ def map_band_chans(b1, c1, b2, c2, chans_per_band=512):
     return mapping
 
 
+def get_north_is_highband(bands, bgs):
+    """
+    Checks if north is highband based on bgmapping. This will tell you if
+    the majority of dets on the north side of the ufm (bgs 0-5) belong to
+    highband (bands 4-7).
+    """
+    highband = (bands > 3).astype(int) * 2 - 1   # 1 if highband, -1 if not
+    north = (bgs < 6).astype(int) * 2 - 1        # 1 if north, -1 if not
+    north[bgs == -1] = 0
+    return np.mean(highband * north) > 0
+
+
 @dataclass
 class Resonator:
     """
@@ -168,6 +180,48 @@ class ResSet:
         return np.array(data, dtype=dtype)
 
     @classmethod
+    def from_aman(cls, aman, stream_id, det_cal=None):
+        """
+        Load a resonator set from a Context object based on an obs_id
+
+        Args
+        ----------
+        aman: AxisManager
+            Axis manager containing metadata
+        stream_id: str
+            Stream id for ResSet to load
+        det_cal: AxisManager
+            Detector calibration metadata. If not specified, will default to
+            ``aman.det_cal``
+        """
+        m = aman.det_info.stream_id == stream_id
+        if not np.any(m):
+            raise ValueError(f"No channels with stream_id {stream_id} in obs")
+        
+        if det_cal is None:
+            det_cal = aman.det_cal
+        north_is_highband = get_north_is_highband(
+            aman.det_info.smurf.band[m], det_cal.bg[m]
+        )
+        resonators = []
+        for i, ri in enumerate(np.where(m)[0]):
+            band, channel = aman.det_info.smurf.band[ri], aman.det_info.smurf.channel[ri]
+            is_north = north_is_highband ^ (band < 4)
+            readout_id = aman.det_info.readout_id[ri]
+            bg = det_cal.bg[ri]
+            res_freq=aman.det_info.smurf.frequency[ri]
+            if res_freq >= 6000:
+                res_freq -= 2000
+
+            res = Resonator(
+                idx=i, is_north=is_north, res_freq=res_freq, smurf_band=band,
+                smurf_channel=channel, readout_id=readout_id, bg=bg
+            )
+            resonators.append(res)
+
+        return cls(resonators)
+
+    @classmethod
     def from_tunefile(cls, tunefile, name=None, north_is_highband=True,
                       resfit_file=None, bgmap_file=None):
         """
@@ -273,7 +327,7 @@ class ResSet:
                     det_y=float(d['det_y']), det_rhomb=d['rhomb'],
                     det_row=_int(d['det_row']), det_col=_int(d['det_col']),
                     pixel_num=_int(d['pixel_num'], null_val=-1),
-                    det_type=d['det_type'], det_id=d['detector_id'],
+                    det_type=d['det_type'], det_id=d['detector_id'].strip(),
                     mux_band=_int(d['mux_band']), mux_channel=_int(d['mux_channel']),
                     mux_subband=d['mux_subband'], mux_bondpad=d['bond_pad'],
                     det_angle_raw_deg=d['angle_raw_deg'],
@@ -291,11 +345,11 @@ class ResSet:
                     x, y = float(d['det_x']), float(d['det_y'])
                     xp = x * np.cos(theta) - y * np.sin(theta) + dx
                     yp = x * np.sin(theta) + y * np.cos(theta) + dy
-                    if platform.upper == 'SAT':
+                    if platform.upper() == 'SAT':
                         xi, eta, gamma = optics.SAT_focal_plane(
                             None, x=xp, y=yp, pol=0
                         )
-                    elif platform.upper == 'LAT':
+                    elif platform.upper() == 'LAT':
                         xi, eta, gamma = optics.LAT_focal_plane(
                             None, zemax_path, x=xp, y=yp, pol=0,
                         )
