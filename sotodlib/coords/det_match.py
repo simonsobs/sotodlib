@@ -180,42 +180,36 @@ class ResSet:
         return np.array(data, dtype=dtype)
 
     @classmethod
-    def from_ctx(cls, ctx, obs_id, stream_id, cal_name='det_cal', am=None):
+    def from_aman(cls, aman, stream_id, det_cal=None):
         """
         Load a resonator set from a Context object based on an obs_id
 
         Args
         ----------
-        ctx: Context
-            Context object
-        obs_id: str
-            Obs id to base ResSet off
+        aman: AxisManager
+            Axis manager containing metadata
         stream_id: str
             Stream id for ResSet to load
-        cal_name: str
-            Attribute of the axismanager that holds detector calibration info
-        am: AxisManager
-            Optional pre-loaded axismanager containing metadata. If passed,
-            will not load a new one from disk
+        det_cal: AxisManager
+            Detector calibration metadata. If not specified, will default to
+            ``aman.det_cal``
         """
-        if am is None:
-            am = ctx.get_meta(obs_id)
-        
-        m = am.det_info.stream_id == stream_id
+        m = aman.det_info.stream_id == stream_id
         if not np.any(m):
             raise ValueError(f"No channels with stream_id {stream_id} in obs")
-
-        cal = getattr(am, cal_name)
+        
+        if det_cal is None:
+            det_cal = aman.det_cal
         north_is_highband = get_north_is_highband(
-            am.det_info.smurf.band[m], cal.bg[m]
+            aman.det_info.smurf.band[m], det_cal.bg[m]
         )
         resonators = []
         for i, ri in enumerate(np.where(m)[0]):
-            band, channel = am.det_info.smurf.band[ri], am.det_info.smurf.channel[ri]
+            band, channel = aman.det_info.smurf.band[ri], aman.det_info.smurf.channel[ri]
             is_north = north_is_highband ^ (band < 4)
-            readout_id = am.det_info.readout_id[ri]
-            bg = cal.bg[ri]
-            res_freq=am.det_info.smurf.frequency[ri]
+            readout_id = aman.det_info.readout_id[ri]
+            bg = det_cal.bg[ri]
+            res_freq=aman.det_info.smurf.frequency[ri]
             if res_freq >= 6000:
                 res_freq -= 2000
 
@@ -333,7 +327,7 @@ class ResSet:
                     det_y=float(d['det_y']), det_rhomb=d['rhomb'],
                     det_row=_int(d['det_row']), det_col=_int(d['det_col']),
                     pixel_num=_int(d['pixel_num'], null_val=-1),
-                    det_type=d['det_type'], det_id=d['detector_id'],
+                    det_type=d['det_type'], det_id=d['detector_id'].strip(),
                     mux_band=_int(d['mux_band']), mux_channel=_int(d['mux_channel']),
                     mux_subband=d['mux_subband'], mux_bondpad=d['bond_pad'],
                     det_angle_raw_deg=d['angle_raw_deg'],
