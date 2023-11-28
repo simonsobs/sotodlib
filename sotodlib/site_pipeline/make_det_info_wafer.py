@@ -13,32 +13,29 @@ from sotodlib.site_pipeline import util
 
 logger = util.init_logger(__name__)
 
-def parse_args():
-    parser = ArgumentParser()
-    parser.add_argument('-c', '--config-file', 
-        help="Configuration File for running DetMap")
+def get_parser(parser=None):
+    if parser is None:
+        parser = ArgumentParser()
+    parser.add_argument('config_file',
+        help="Configuration file name.")
     parser.add_argument('--overwrite', action='store_true', 
         help="Overwrite existing entries.")
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--log-file', help="Output log filename")
-    args = parser.parse_args()
-    return args
+    return parser
 
-def main(args=None):
-    if args is None:
-        args = parse_args()
-        
-    if args.debug:
+def main(config_file=None, overwrite=False, debug=False, log_file=None):
+    if debug:
         logger.setLevel("DEBUG")
     
-    if args.log_file is not None:
+    if log_file is not None:
         formatter = util._ReltimeFormatter('%(asctime)s: %(message)s (%(levelname)s)')
-        file_handler = logging.FileHandler(args.log_file)
+        file_handler = logging.FileHandler(log_file)
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
-    configs = yaml.safe_load(open(args.config_file, "r"))
+    configs = yaml.safe_load(open(config_file, "r"))
     array_names = [array["name"] for array in configs["arrays"]]
     logger.info(f"Creating Det Info for UFMs-{','.join([array for array in array_names])}")
 
@@ -82,7 +79,7 @@ def main(args=None):
         stream_id = array_cfg['stream_id']
 
         # make result set per array
-        if array_name in existing and not args.overwrite:
+        if array_name in existing and not overwrite:
             logger.info(f"{array_name} exists in database, pass --overwrite to"
             " overwrite existing information.")
             continue
@@ -157,14 +154,13 @@ def main(args=None):
                 w + "coax" : "X",
         })
             
-        write_dataset(det_rs, configs["det_info"], array_name, args.overwrite)
+        write_dataset(det_rs, configs["det_info"], array_name, overwrite)
         # Update the index if it's a new entry
         if not array_name in existing:
             db_data = {'dets:stream_id': stream_id,
                        'dataset': array_name}
             db.add_entry(db_data, configs["det_info"])
 
-    return None
 
 def replace_none(val, replace_val=np.nan):
     if val is None:
@@ -173,4 +169,4 @@ def replace_none(val, replace_val=np.nan):
 
 
 if __name__ == '__main__':
-    aman = main()
+    util.main_launcher(main, get_parser)
