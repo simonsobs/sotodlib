@@ -306,8 +306,11 @@ class G3tHWP():
 
         return out
 
-    def _slowdata_process(self, fast_time, irig_time):
+    def _slowdata_process(self, fast_time, irig_time, suffix=''):
         """ Diagnose hwp status and output status flags
+        Args
+        -----
+        suffix: '' for 1st encoder, '_2' for 2nd encoder
 
         Returns
         --------
@@ -325,10 +328,10 @@ class G3tHWP():
 
         if len(irig_time) == 0:
             out = {
-                'locked': np.zeros_like(slow_time, dtype=bool),
-                'stable': np.zeros_like(slow_time, dtype=bool),
-                'hwp_rate': np.zeros_like(slow_time, dtype=np.float32),
-                'slow_time': slow_time,
+                'locked'+suffix: np.zeros_like(slow_time, dtype=bool),
+                'stable'+suffix: np.zeros_like(slow_time, dtype=bool),
+                'hwp_rate'+suffix: np.zeros_like(slow_time, dtype=np.float32),
+                'slow_time'+suffix: slow_time,
             }
             return out
 
@@ -382,7 +385,7 @@ class G3tHWP():
 
         locked[np.where(hwp_rate == 0)] = False
 
-        return {'locked': locked, 'stable': stable, 'hwp_rate': hwp_rate, 'slow_time': slow_time}
+        return {'locked'+suffix: locked, 'stable'+suffix: stable, 'hwp_rate'+suffix: hwp_rate, 'slow_time'+suffix: slow_time}
 
     def analyze(self, data, ratio=None, mod2pi=True, fast=True):
         """
@@ -429,31 +432,48 @@ class G3tHWP():
         if not any(data):
             logger.info("no HWP field data")
 
-        d = self._data_formatting(data)
-        if 'irig_time_2' in data.keys() and 'counter_2' in data.keys():
-            d2 = self._data_formatting(data, suffix='_2')
-            if len(d['counter']) < len(d2['counter']):
-                logger.info('Use 2nd encoder.')
-                d = d2
-        if len(d['irig_time']) == 0:
-            logger.warning('There is no correct IRIG timing. Stop analyze.')
-            return {}
+        d1 = self._data_formatting(data)
+        d2 = self._data_formatting(data, suffix='_2')
+        for k, v in d1.items():
+            print(k, len(v))
+        for k, v in d2.items():
+            print(k, len(v))
 
         # hwp angle calc.
         if ratio is not None:
             logger.info(f"Overwriting reference slit threshold by {ratio}.")
             self._ref_range = ratio
-        fast_time, angle = self._hwp_angle_calculator(
-            d['counter'], d['counter_index'], d['irig_time'],
-            d['rising_edge_count'], d['quad_time'], d['quad'],
-            mod2pi, fast)
-        if len(fast_time) == 0:
-            logger.warning('analyzed encoder data is None')
 
-        # hwp status calc.
-        out = self._slowdata_process(fast_time, d['irig_time'])
-        out['fast_time'] = fast_time
-        out['angle'] = angle
+        out = {}
+        # 1st encoder
+        logger.info("Start calclulating angle of 1st encoder")
+        if len(d1['irig_time']) == 0:
+            logger.warning('There is no correct IRIG timing. Stop analyze.')
+        else:
+            fast_time, angle = self._hwp_angle_calculator(
+                d1['counter'], d1['counter_index'], d1['irig_time'],
+                d1['rising_edge_count'], d1['quad_time'], d1['quad'],
+                mod2pi, fast)
+            if len(fast_time) == 0:
+                logger.warning('analyzed encoder data is None')
+            out.update(self._slowdata_process(fast_time, d1['irig_time']))
+            out['fast_time'] = fast_time
+            out['angle'] = angle
+
+        # 2nd encoder
+        logger.info("Start calclulating angle of 2st encoder")
+        if len(d2['irig_time']) == 0:
+            logger.warning('There is no correct IRIG timing. Stop analyze.')
+        else:
+            fast_time, angle = self._hwp_angle_calculator(
+                d2['counter'], d2['counter_index'], d2['irig_time'],
+                d2['rising_edge_count'], d2['quad_time'], d2['quad'],
+                mod2pi, fast)
+            if len(fast_time) == 0:
+                logger.warning('analyzed encoder data is None')
+            out.update(self._slowdata_process(fast_time, d2['irig_time'], suffix='_2'))
+            out['fast_time_2'] = fast_time
+            out['angle_2'] = angle
 
         return out
 
@@ -496,7 +516,7 @@ class G3tHWP():
         if 'fast_time_raw' in solved.keys():
             logger.info('Non-uniformity is already subtracted. Calculation is skipped.')
             return
-                    
+
         def moving_average(array, n):
             return np.convolve(array, np.ones(n), 'valid')/n
 
@@ -526,6 +546,40 @@ class G3tHWP():
             self._ref_indexes) + 1), self._ref_indexes[0] + 1)[:len(solved['fast_time'])])
         solved['fast_time_raw'] = solved['fast_time']
         solved['fast_time'] = solved['fast_time'] - subtract
+
+    def eval_offcentering(solved):
+        """
+        Evaluate the off-centering of the hwp from the phase difference between two encoders.
+        Assume that slot pattern subraction is already applied
+
+        * Definition of offcentering must be clear.
+
+        Args
+        -----
+        solved: dict
+            dict solved from eval_angle
+            {fast_time, angle, fast_time_2, angle_2, ...}
+
+        Returns
+        --------
+        output: dict
+            {fast_time, angle, fast_time_2, angle_2, ...}
+
+        Notes
+        """
+
+        # please implement here
+
+        return solved
+
+    def correct_offcentering(solved, offcentering=None):
+        """
+        * We should allow to correct the offcentering by external output, since offcentering measurement is not always available.
+        """
+
+        # please implement here
+
+        return solved
 
     def write_solution(self, solved, output=None):
         """
@@ -670,13 +724,15 @@ class G3tHWP():
 
         Args
         ----
-        data: g3 file
-          data = G3tHWP.load_data(start, end)
+        tod: AxisManager
+
         output: str or None
           output path + file name, overwrite config file
 
         Notes
         -----
+        data: g3 file
+            data = G3tHWP.load_data(start, end)
 
         Output file format
 
@@ -688,6 +744,9 @@ class G3tHWP():
             SMuRF synched HWP angle after the template subtraction (the systematics from the non-uniform encoder slot pattern is subtracted ) in radian. 
 
             if 'eval' is zero, template subtraction is not completed and its value is same as 'hwp_angle_ver1'.
+        - hwp_angle_ver3: float
+            SMuRF synched HWP angle after the template subtraction and the offcenter correction
+            * THIS IS NOT IMPLEMENTED YET
         - stable: bool
             if non-zero, indicates the HWP spin state is known. 
 
@@ -704,6 +763,7 @@ class G3tHWP():
             the "approximate" HWP spin rate, with sign, in revs / second. 
 
             Use placeholder value of 0 for cases when not "locked".
+
         - eval: bool
             if non-zero, the template subtraction is completed.
         """
@@ -983,13 +1043,6 @@ class G3tHWP():
 
         return
 
-    def _flatten_counter(self):
-        cnt_diff = np.diff(self._encd_cnt)
-        loop_indexes = np.argwhere(cnt_diff <= -(self._max_cnt - 1)).flatten()
-        for ind in loop_indexes:
-            self._encd_cnt[(ind + 1):] += -(cnt_diff[ind] - 1)
-        return
-
     def _calc_angle_linear(self, mod2pi=True):
 
         quad = self._quad_form(
@@ -1127,11 +1180,3 @@ class G3tHWP():
             irig_time = np.array([])
             rising_edge = np.array([])
         return irig_time, rising_edge
-
-    def interp_smurf(self, smurf_timestamp):
-        smurf_angle = scipy.interpolate.interp1d(
-            self._time,
-            self._angle,
-            kind='linear',
-            fill_value='extrapolate')(smurf_timestamp)
-        return smurf_angle
