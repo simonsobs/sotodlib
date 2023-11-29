@@ -74,10 +74,13 @@ def demodulate(job, otherargs, runargs, data):
         # new TOAST data object
         job_ops.demodulate.stokes_weights = job_ops.weights_radec
         job_ops.demodulate.noise_model = noise_model
-        data = job_ops.demodulate.apply(data)
+        new_data = job_ops.demodulate.apply(data)
         demod_weights = toast.ops.StokesWeightsDemod()
         job_ops.weights_radec = demod_weights
         if hasattr(job_ops, "binner"):
             job_ops.binner.stokes_weights = demod_weights
         if hasattr(job_ops, "binner_final"):
             job_ops.binner_final.stokes_weights = demod_weights
+        return new_data
+    else:
+        return data

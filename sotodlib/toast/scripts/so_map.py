@@ -64,8 +64,10 @@ def reduce_data(job, otherargs, runargs, data):
 
     wrk.flag_noise_outliers(job, otherargs, runargs, data)
     wrk.filter_hwpss(job, otherargs, runargs, data)
-    wrk.demodulate(job, otherargs, runargs, data)
     wrk.noise_estimation(job, otherargs, runargs, data)
+
+    data = wrk.demodulate(job, otherargs, runargs, data)
+
     wrk.flag_sso(job, otherargs, runargs, data)
     wrk.hn_map(job, otherargs, runargs, data)
     wrk.cadence_map(job, otherargs, runargs, data)
@@ -107,9 +109,6 @@ def load_data(job, otherargs, runargs, data):
     wrk.load_data_hdf5(job, otherargs, runargs, data)
     wrk.load_data_books(job, otherargs, runargs, data)
     # wrk.load_data_context(job, otherargs, runargs, data)
-
-    if len(data.obs) == 0:
-        raise RuntimeError("No input data specified!")
 
     job_ops.mem_count.prefix = "After Data Load"
     job_ops.mem_count.apply(data)
@@ -212,7 +211,7 @@ def main():
         log.info_rank(msg, comm=comm)
         group_size = runargs.group_size
     else:
-        if job.operators.mapmaker_ml.enabled:
+        if job.operators.mlmapmaker.enabled:
             msg = f"ML mapmaker is enabled, forcing process group size to 1"
             log.info_rank(msg, comm=comm)
             group_size = 1
