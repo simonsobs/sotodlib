@@ -92,7 +92,11 @@ def mapmaker(job, otherargs, runargs, data):
         # Noise model.  If noise estimation is not enabled, and no existing noise model
         # is found, then create a fake noise model with uniform weighting.
         noise_model = None
-        if job_ops.noise_estim.enabled and job_ops.noise_estim_fit.enabled:
+        if job_ops.demodulate.enabled:
+            # We will use the noise estimate made after demodulation
+            log.info_rank("  Using demodulated noise model", comm=data.comm.comm_world)
+            noise_model = job_ops.demod_noise_estim_fit.out_model
+        elif job_ops.noise_estim.enabled and job_ops.noise_estim_fit.enabled:
             # We have a noise estimate
             log.info_rank("  Using estimated noise model", comm=data.comm.comm_world)
             noise_model = job_ops.noise_estim_fit.out_model

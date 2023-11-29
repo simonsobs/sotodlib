@@ -30,6 +30,22 @@ def setup_demodulate(operators):
             enabled=False,
         )
     )
+    operators.append(
+        toast.ops.NoiseEstim(
+            name="demod_noise_estim",
+            out_model="demod_noise",
+            lagmax=1024,
+            nbin_psd=64,
+            nsum=1,
+            naverage=64,
+        )
+    )
+    operators.append(
+        toast.ops.FitNoiseModel(
+            name="demod_noise_estim_fit",
+            out_model="demod_noise_fit",
+        )
+    )
 
 
 @workflow_timer
@@ -81,6 +97,11 @@ def demodulate(job, otherargs, runargs, data):
             job_ops.binner.stokes_weights = demod_weights
         if hasattr(job_ops, "binner_final"):
             job_ops.binner_final.stokes_weights = demod_weights
+
+        # Estimate the (mostly white) noise on the demodulated data
+        job_ops.demod_noise_estim.apply(new_data)
+        job_ops.demod_noise_estim_fit.noise_model = job_ops.demod_noise_estim.out_model
+        job_ops.demod_noise_estim_fit.apply(new_data)
         return new_data
     else:
         return data
