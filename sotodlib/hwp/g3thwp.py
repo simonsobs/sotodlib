@@ -434,10 +434,6 @@ class G3tHWP():
 
         d1 = self._data_formatting(data)
         d2 = self._data_formatting(data, suffix='_2')
-        for k, v in d1.items():
-            print(k, len(v))
-        for k, v in d2.items():
-            print(k, len(v))
 
         # hwp angle calc.
         if ratio is not None:
@@ -459,6 +455,7 @@ class G3tHWP():
             out.update(self._slowdata_process(fast_time, d1['irig_time']))
             out['fast_time'] = fast_time
             out['angle'] = angle
+            out['ref_indexes'] = self._ref_indexes
 
         # 2nd encoder
         logger.info("Start calclulating angle of 2st encoder")
@@ -474,10 +471,11 @@ class G3tHWP():
             out.update(self._slowdata_process(fast_time, d2['irig_time'], suffix='_2'))
             out['fast_time_2'] = fast_time
             out['angle_2'] = angle
+            out['ref_indexes_2'] = self._ref_indexes
 
         return out
 
-    def eval_angle(self, solved, poly_order=3):
+    def eval_angle(self, solved, poly_order=3, suffix=''):
         """
         Evaluate the non-uniformity of hwp angle timestamp and subtract
         The raw hwp angle timestamp is kept.
@@ -485,7 +483,12 @@ class G3tHWP():
         Args
         -----
         solved: dict
-          dict data from analyze
+            dict data from analyze
+        poly_order:
+            order of polynomial filtering for removing drift of hwp speed
+            for evaluating the non-uniformity of hwp angle.
+        suffix:
+            '' for 1st encoder, '_2' for 2nd encoder
 
         Returns
         --------
@@ -513,7 +516,7 @@ class G3tHWP():
         The more carful and accurate method is to make an template of encoder slits,
         and subtract it from the timestamp.
         """
-        if 'fast_time_raw' in solved.keys():
+        if 'fast_time_raw'+suffix in solved.keys():
             logger.info('Non-uniformity is already subtracted. Calculation is skipped.')
             return
 
@@ -521,10 +524,10 @@ class G3tHWP():
             return np.convolve(array, np.ones(n), 'valid')/n
 
         logger.info('Remove non-uniformity from hwp angle and overwrite')
-        solved['fast_time_moving_ave'] = moving_average(
-            solved['fast_time'], self._num_edges)
-        solved['angle_moving_ave'] = moving_average(
-            solved['angle'], self._num_edges)
+        solved['fast_time_moving_ave'+suffix] = moving_average(
+            solved['fast_time'+suffix], self._num_edges)
+        solved['angle_moving_ave'+suffix] = moving_average(
+            solved['angle'+suffix], self._num_edges)
 
         def detrend(array, deg=poly_order):
             x = np.linspace(-1, 1, len(array))
@@ -533,19 +536,19 @@ class G3tHWP():
             return array - pv
 
         # template subtraction
-        ft = solved['fast_time'][self._ref_indexes[0]:self._ref_indexes[-2]+1]
+        ft = solved['fast_time'+suffix][solved['ref_indexes'+suffix][0]:solved['ref_indexes'+suffix][-2]+1]
         # remove rotation frequency drift for making a template of encoder slits
         ft = detrend(ft, deg=3)
         # make template
         template_slit = np.diff(ft).reshape(
-            len(self._ref_indexes)-2, self._num_edges)
+            len(solved['ref_indexes'+suffix])-2, self._num_edges)
         template_slit = np.average(template_slit, axis=0)
         average_slit = np.average(template_slit)
         # subtract template, keep raw timestamp
-        subtract = np.cumsum(np.roll(np.tile(template_slit-average_slit, len(
-            self._ref_indexes) + 1), self._ref_indexes[0] + 1)[:len(solved['fast_time'])])
-        solved['fast_time_raw'] = solved['fast_time']
-        solved['fast_time'] = solved['fast_time'] - subtract
+        subtract = np.cumsum(np.roll(np.tile(template_slit-average_slit,
+            len(solved['ref_indexes'+suffix]) + 1), solved['ref_indexes'+suffix][0] + 1)[:len(solved['fast_time'+suffix])])
+        solved['fast_time_raw'+suffix] = solved['fast_time'+suffix]
+        solved['fast_time'+suffix] = solved['fast_time'+suffix] - subtract
 
     def eval_offcentering(solved):
         """
@@ -574,7 +577,7 @@ class G3tHWP():
 
     def correct_offcentering(solved, offcentering=None):
         """
-        * We should allow to correct the offcentering by external output, since offcentering measurement is not always available.
+        * We should allow to correct the offcentering by external input, since offcentering measurement is not always available.
         """
 
         # please implement here
@@ -1078,7 +1081,7 @@ class G3tHWP():
 
     def _process_counter_index_reset(self):
         """ Treat counter index reset due to agent reboot """
-        idx = np.where(np.diff(self._encd_cnt<-1e4))[0] + 1
+        idx = np.where(np.diff(self._encd_cnt)<-1e4)[0] + 1
         for i in range(len(idx)):
             self._encd_cnt[idx[i]:] = self._encd_cnt[idx[i]:] + abs(np.diff(self._encd_cnt)[idx[i]-1]) + 1
 
