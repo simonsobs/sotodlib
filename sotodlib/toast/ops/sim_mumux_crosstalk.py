@@ -34,6 +34,8 @@ from toast.utils import Environment, Logger, Timer, unit_conversion
 
 from toast.observation import default_values as defaults
 
+from .mumux_crosstalk_util import detmap_available, pos_to_chi
+
 
 XAXIS, YAXIS, ZAXIS = np.eye(3)
 
@@ -273,12 +275,16 @@ class SimMuMUXCrosstalk(Operator):
             det_scale = unit_conversion(det_units, u.K)
             focalplane = temp_obs.telescope.focalplane
 
+            chis = pos_to_chi(focalplane, detectors)
+
             # Make a copy of the detector data in K_CMB
             input_data = det_data.data.copy() * det_scale
             output_data = det_data.data  # just a reference
 
             Phi0 = self._draw_Phi0(obs, detectors)
-            dPhi0dT = self._evaluate_dPhi0dT(obs, input_data, detectors, rows, Phi0)
+            dPhi0dT = self._evaluate_dPhi0dT(
+                obs, input_data, detectors, rows, Phi0
+            )
 
             # For each detector-detector pair:
             #     Get crosstalk strength, chi
@@ -291,8 +297,9 @@ class SimMuMUXCrosstalk(Operator):
                     dPhi0dT[det_source],
                 )
                 for row_source, det_source in zip(rows, detectors):
-                    chi = self._get_chi(det_target, det_source)
-                    if chi == 0:
+                    if (det_target, det_source) in chis:
+                        chi = chis[(det_target, det_source)]
+                    else:
                         continue
                     source_squid_phase = self._temperature_to_squid_phase(
                         input_data[row_source],
@@ -311,11 +318,20 @@ class SimMuMUXCrosstalk(Operator):
 
             # Redistribute back
             temp_obs.redistribute(
-                proc_rows, times=self.times, override_sample_sets=obs.dist.sample_set
+                proc_rows,
+                times=self.times,
+                override_sample_sets=obs.dist.sample_set,
             )
 
             # Copy data to original observation
-            obs.detdata[self.det_data][:] = temp_obs.detdata[self.det_data][:]
+            for det in obs.select_local_detectors():
+                # Unit conversion does not preserve offset so we do it
+                # explicitly here
+                offset_old = np.median(obs.detdata[self.det_data][det])
+                offset_new = np.median(temp_obs.detdata[self.det_data][det])
+                obs.detdata[self.det_data][det] = (
+                    temp_obs.detdata[self.det_data][det] - offset_new + offset_old
+                )
 
             # Free data copy
             temp_obs.clear()
