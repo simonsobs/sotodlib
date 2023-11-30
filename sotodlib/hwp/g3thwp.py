@@ -1025,7 +1025,7 @@ class G3tHWP():
 
     def _process_counter_index_reset(self):
         """ Treat counter index reset due to agent reboot """
-        idx = np.where(np.diff(self._encd_cnt<-1e4))[0] + 1
+        idx = np.where(np.diff(self._encd_cnt)<-1e4)[0] + 1
         for i in range(len(idx)):
             self._encd_cnt[idx[i]:] = self._encd_cnt[idx[i]:] + abs(np.diff(self._encd_cnt)[idx[i]-1]) + 1
 
