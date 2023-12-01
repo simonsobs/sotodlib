@@ -181,7 +181,7 @@ class SimMuMUXCrosstalk(Operator):
         output_signal = input_signal / dPhi0dT
         return output_signal
 
-    def _draw_Phi0(self, obs, detectors, vmin=0.3, vmax=1.3):
+    def _draw_Phi0(self, obs, focalplane, detectors, vmin=0.3, vmax=1.3):
         """ Draw initial SQUID phases from a flat distribution
         """
         Phi0 = {}
@@ -225,12 +225,14 @@ class SimMuMUXCrosstalk(Operator):
             good = np.logical_and(
                 common_good, (det_flags & self.det_flag_mask) == 0
             )
+            #import pdb
+            #pdb.set_trace()
             median_signal = np.median(signal[row][good])
             P_opt = P_OPT[band] * 1e-12  # W
             P_atm_ref = P_ATM[band] * 1e-12  # W
             efficiency = ETA_ATM[band]
             P_sat = P_SAT[band] * 1e-12  # W
-            P_atm = efficiency * bandpass.optical_loading(median_signal)  # W
+            P_atm = efficiency * bandpass.optical_loading(det, median_signal)  # W
             P_opt += P_atm - P_atm_ref
             dPdT = bandpass.kcmb2w(det)  # K_CMB -> W
             dIdP = 1 / np.sqrt((P_sat - P_opt) * R_FRAC * R_BOLO)  # W -> A
@@ -249,6 +251,9 @@ class SimMuMUXCrosstalk(Operator):
             )
 
         for obs in data.obs:
+            # Get the original number of process rows in the observation
+            proc_rows = obs.dist.process_rows
+
             if self.det_data not in obs.detdata:
                 msg = f"Cannot apply crosstalk: {self.det_data} "
                 msg += "does not exist in {obs.name}"
@@ -260,14 +265,14 @@ class SimMuMUXCrosstalk(Operator):
             temp_obs = obs.duplicate(
                 times=self.times,
                 meta=[],
-                shared=[],
-                detdata=[self.det_data],
+                shared=[self.shared_flags],
+                detdata=[self.det_data, self.det_flags],
                 intervals=[],
             )
-            temps_obs.redistribute(1, times=self.times, override_sample_sets=None)
+            temp_obs.redistribute(1, times=self.times, override_sample_sets=None)
 
             # Crosstalk the detector data
-            det_data = temp_obs.det_data[self.det_data]
+            det_data = temp_obs.detdata[self.det_data]
             detectors = det_data.keys()
             rows = det_data.indices(detectors)
             # Determine the units and potential scaling factor
@@ -281,9 +286,9 @@ class SimMuMUXCrosstalk(Operator):
             input_data = det_data.data.copy() * det_scale
             output_data = det_data.data  # just a reference
 
-            Phi0 = self._draw_Phi0(obs, detectors)
+            Phi0 = self._draw_Phi0(temp_obs, focalplane, detectors)
             dPhi0dT = self._evaluate_dPhi0dT(
-                obs, input_data, detectors, rows, Phi0
+                temp_obs, input_data, detectors, rows, Phi0
             )
 
             # For each detector-detector pair:
@@ -293,8 +298,8 @@ class SimMuMUXCrosstalk(Operator):
                 crosstalk = np.zeros_like(input_data[row_target])
                 target_squid_phase = self._temperature_to_squid_phase(
                     input_data[row_target],
-                    Phi0[det_source],
-                    dPhi0dT[det_source],
+                    Phi0[det_target],
+                    dPhi0dT[det_target],
                 )
                 for row_source, det_source in zip(rows, detectors):
                     if (det_target, det_source) in chis:
@@ -320,7 +325,7 @@ class SimMuMUXCrosstalk(Operator):
             temp_obs.redistribute(
                 proc_rows,
                 times=self.times,
-                override_sample_sets=obs.dist.sample_set,
+                override_sample_sets=obs.dist.sample_sets,
             )
 
             # Copy data to original observation
