@@ -203,7 +203,7 @@ def ufm_to_fp(aman, x=None, y=None, pol=None, theta=0, dx=0, dy=0):
 
         y_fp: Y position on focal plane.
 
-        pol_fp: Y position on focal plane.
+        pol_fp: Pol angle on focal plane.
     """
     if x is None:
         x = aman.det_info.wafer.det_x
@@ -568,6 +568,7 @@ def get_focal_plane(
     config_path=None,
     zemax_path=None,
     mapping_data=None,
+    return_fp=False,
 ):
     """
     Unified interface for LAT_focal_plane and SAT_focal_plane including the step of applying ufm_to_fp.
@@ -603,6 +604,8 @@ def get_focal_plane(
                       Leave as None to use the default mapping.
                       Only used by the SAT.
 
+        return_fp: If True also return the transformed focal plane in mm.
+
     Returns:
 
         xi: Detector elev on sky from physical optics in radians.
@@ -613,6 +616,15 @@ def get_focal_plane(
 
         gamma: Detector gamma on sky from physical optics in radians.
                If aman is provided then will be wrapped as aman.focal_plane.eta.
+        
+        x_fp: X position on focal plane.
+              Only returned if return_fp is True.
+
+        y_fp: Y position on focal plane.
+              Only returned if return_fp is True.
+
+        pol_fp: Pol angle on focal plane.
+                Only returned if return_fp is True.
     """
     if telescope not in ["LAT", "SAT"]:
         raise ValueError("Telescope should be LAT or SAT")
@@ -630,4 +642,6 @@ def get_focal_plane(
             aman, x=x_fp, y=y_fp, pol=pol_fp, rot=rot, mapping_data=mapping_data
         )
 
+    if return_fp:
+        return xi, eta, gamma, x_fp, y_fp, pol_fp
     return xi, eta, gamma
