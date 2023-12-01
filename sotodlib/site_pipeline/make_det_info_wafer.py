@@ -9,9 +9,30 @@ from detmap.makemap import MapMaker
 import sotodlib
 from sotodlib import core
 from sotodlib.io.metadata import write_dataset
+from sotodlib.io import so_ufm
 from sotodlib.site_pipeline import util
 
 logger = util.init_logger(__name__)
+
+def get_wafer_info_new(array_name, cfg, array_cfg):
+    rows = so_ufm.get_wafer_info(array_name, cfg, array_cfg,
+                                 include_no_match=True)
+
+    assert(len(rows))
+    key_map = {}
+    w = "dets:wafer."
+    for k in rows[0].keys():
+        if k == 'det_id':
+            key_map[k] = 'dets:' + k
+        else:
+            key_map[k] =  w + k
+
+    det_rs = core.metadata.ResultSet(keys=list(key_map.values()))
+    for row in rows:
+        det_rs.append({key_map[k]: v for k, v in row.items()})
+
+    return det_rs
+
 
 def get_parser(parser=None):
     if parser is None:
@@ -132,28 +153,62 @@ def main(config_file=None, overwrite=False, debug=False, log_file=None):
                 w + "coax" : "N" if tune.is_north else "S",
             })
 
+        # modifications here make NO_MATCH more consistent with ^^^
         det_rs.append({
                 "dets:det_id": "NO_MATCH",
                 w + "array": array_name,
                 w + "bond_pad": -1,
-                w + "mux_band": -1,
+                w + "mux_band": '-1',
                 w + "mux_channel": -1,
                 w + "mux_subband": -1,
                 w + "mux_position": -1,
                 w + "design_freq_mhz": np.nan,
                 w + "bias_line": -1,
-                w + "pol": "NC",
+                w + "pol": "None",
                 w + "bandpass": "NC",
                 w + "det_row": -1,
                 w + "det_col": -1,
-                w + "rhombus": "NC",
+                w + "rhombus": "None",
                 w + "type": "NC",
                 w + "det_x": np.nan,
                 w + "det_y": np.nan,
                 w + "angle": np.nan,
                 w + "coax" : "X",
         })
-            
+
+        ### ALTERNATIVE
+
+        det_r2 = get_wafer_info_new(array_name, configs, array_cfg)
+
+        ### CHECK IT
+
+        names1 = list(det_rs['dets:det_id'])
+        names2 = list(det_r2['dets:det_id'])
+        common_names = set(names1).intersection(names2)
+        assert(len(common_names) == len(names1))
+        assert(len(common_names) == len(names2))
+
+        # Stats -- what is in disagreement?
+        def smart_equals(k, a, b):
+            if k in ['dets:wafer.angle', 'dets:wafer.design_freq_mhz',
+                     'dets:wafer.det_x', 'dets:wafer.det_y']:
+                return (np.isnan(a) and np.isnan(b)) or (abs(a-b) < 1e-7)
+            return a == b
+
+        discrepancies = {(): 0}
+        for c in common_names:
+            a = det_rs[names1.index(c)]
+            b = det_r2[names2.index(c)]
+            key = tuple([k for k in a.keys() if not smart_equals(k, a[k], b[k])])
+            discrepancies[key] = discrepancies.get(key, 0) + 1
+
+        print('Difference patterns:')
+        for k, v in discrepancies.items():
+            print('%6i ' % v, k)
+        print()
+
+        ### END CHECK
+
         write_dataset(det_rs, configs["det_info"], array_name, overwrite)
         # Update the index if it's a new entry
         if not array_name in existing:
