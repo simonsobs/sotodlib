@@ -223,16 +223,6 @@ def _process_row(row):
         'array': output['array'].lower(),
     })
 
-    #
-    # Temp hacks for match-checking!!
-    #
-    output['mux_band'] = str(output['mux_band'])
-    output['angle'] = output['angle'] * np.pi/180
-    if output['rhombus'] == 'X':
-        output['rhombus'] = 'None'
-    if output['pol'] == 'X':
-        output['pol'] = 'None'
-
     return output
 
 
