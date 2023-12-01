@@ -2,11 +2,11 @@
 # Full license can be found in the top level "LICENSE" file.
 
 import astropy.units as u
-import pandas as pd
 import numpy as np
 import warnings
 
 try:
+    import pandas as pd
     from detmap.data_io.solution_select import AvailableSolutions
     available_solutions = AvailableSolutions()
     detmap_available = True
