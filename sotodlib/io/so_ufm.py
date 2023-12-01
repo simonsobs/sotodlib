@@ -177,9 +177,10 @@ def _process_row(row):
         ('det_col', 'DTPixelcolumn', int, -1),
         ('rhombus', 'rhomb', str, 'X'),
         ('type', 'PLACEHOLDER'),
-        ('det_x', 'DTPixelxcenter', float, np.nan),
-        ('det_y', 'DTPixelycenter', float, np.nan),
+        ('x', 'DTPixelxcenter', float, np.nan),
+        ('y', 'DTPixelycenter', float, np.nan),
         ('angle', 'DTActualangle', float, np.nan),
+        ('crossover', 'DTPadlabel', str, 'X'),
         ('coax', 'is_north', str, None),
     ]}
 
@@ -202,6 +203,7 @@ def _process_row(row):
         else:
             # SLOT
             output['angle'] = np.nan
+            output['crossover'] = 'X'
         mux_pos = '%02i' % _get('mux_pos_num', int)
         label = f'{_get("array_name")}_{det_type}_Mp{mux_pos}b{b}D'
     else:
@@ -210,17 +212,18 @@ def _process_row(row):
 
     if det_type == 'DARK':
         # The position is taken from 'x' and 'y', not Pixel*center.
-        output['det_x'] = _get('x', float)
-        output['det_y'] = _get('y', float)
+        output['x'] = _get('x', float)
+        output['y'] = _get('y', float)
         output['angle'] = np.nan
 
     output.update({
         'det_id': label,
         'type': det_type,
         'coax': {'True': 'N', 'False': 'S'}.get(output['coax'], 'X'),
-        'det_x': output['det_x'] / 1000.,
-        'det_y': output['det_y'] / 1000.,
+        'x': output['x'] / 1000.,
+        'y': output['y'] / 1000.,
         'array': output['array'].lower(),
+        'crossover': output['crossover'][0],
     })
 
     return output
