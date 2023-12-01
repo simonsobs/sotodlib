@@ -21,6 +21,7 @@ try:
 except ImportError as e:
     toast_available = False
 
+from sotodlib.toast.ops import detmap_available
 from ._helpers import calibration_schedule, close_data_and_comm, simulation_test_data
 
 
@@ -28,6 +29,13 @@ class SimMuMUXCrosstalkTest(unittest.TestCase):
     def test_sim_mumux_crosstalk(self):
         if not toast_available:
             print("toast cannot be imported- skipping unit tests", flush=True)
+            return
+
+        if not detmap_available:
+            print(
+                "DetMap cannot be imported- skipping muMUX unit tests",
+                flush=True,
+            )
             return
 
         comm, procs, rank = toast.get_world()

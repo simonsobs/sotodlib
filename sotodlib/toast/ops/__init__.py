@@ -19,3 +19,4 @@ from .save_books import SaveBooks
 from .load_books import LoadBooks
 from .sim_readout import SimReadout
 from .sim_mumux_crosstalk import SimMuMUXCrosstalk
+from .mumux_crosstalk_util import detmap_available
