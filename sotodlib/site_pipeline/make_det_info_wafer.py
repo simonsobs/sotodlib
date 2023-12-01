@@ -14,25 +14,6 @@ from sotodlib.site_pipeline import util
 
 logger = util.init_logger(__name__)
 
-def get_wafer_info_new(array_name, cfg, array_cfg):
-    rows = so_ufm.get_wafer_info(array_name, cfg, array_cfg,
-                                 include_no_match=True)
-
-    assert(len(rows))
-    key_map = {}
-    w = "dets:wafer."
-    for k in rows[0].keys():
-        if k == 'det_id':
-            key_map[k] = 'dets:' + k
-        else:
-            key_map[k] =  w + k
-
-    det_rs = core.metadata.ResultSet(keys=list(key_map.values()))
-    for row in rows:
-        det_rs.append({key_map[k]: v for k, v in row.items()})
-
-    return det_rs
-
 
 def get_parser(parser=None):
     if parser is None:
@@ -72,29 +53,6 @@ def main(config_file=None, overwrite=False, debug=False, log_file=None):
         db = core.metadata.ManifestDb(configs["det_db"], scheme=scheme)
         existing = []
 
-    w = "dets:wafer."
-    keys = [
-        "dets:det_id",
-        w + "array",
-        w + "bond_pad",
-        w + "mux_band",
-        w + "mux_channel",
-        w + "mux_subband",
-        w + "mux_position",
-        w + "design_freq_mhz",
-        w + "bias_line",
-        w + "pol",
-        w + "bandpass",
-        w + "det_row",
-        w + "det_col",
-        w + "rhombus",
-        w + "type",
-        w + "det_x",
-        w + "det_y",
-        w + "angle",
-        w + "coax",
-    ]
-
     for array_cfg in configs['arrays']:
         array_name = array_cfg['name']
         stream_id = array_cfg['stream_id']
@@ -104,112 +62,26 @@ def main(config_file=None, overwrite=False, debug=False, log_file=None):
             logger.info(f"{array_name} exists in database, pass --overwrite to"
             " overwrite existing information.")
             continue
-        det_rs = core.metadata.ResultSet(keys=keys)
-        
-        # Initialize a detmap.makemap.MapMaker() instance 
-        # that will have ideal/design metadata for this array.
-        map_maker = MapMaker(north_is_highband=False,                              
-                             array_name=array_name,
-                             verbose=False)
 
-        # iterate over the ideal/design metadata for this array
-        for tune in map_maker.grab_metadata():
-            
-            if tune.bandpass is None or (type(tune.bandpass)==str and "NC" in tune.bandpass):
-                bp = "NC"    
+        # Get one row per resonator
+        rows = so_ufm.get_wafer_info(array_name, configs, array_cfg,
+                                     include_no_match=True)
+
+        # Output key names are formatted for det_info consumption.
+        prefix = "dets:wafer."
+        key_map = {}
+        for k in rows[0].keys():
+            if k == 'det_id':
+                key_map[k] = 'dets:' + k
             else:
-                bp = f"f{str(tune.bandpass).rjust(3,'0')}" 
+                key_map[k] = prefix + k
 
-            # some dark detectors are reporting non-nan angles            
-            if str(tune.det_type) == "OPTC":
-                angle = np.radians(replace_none(tune.angle_actual_deg))
-            else:
-                angle = np.nan
-
-            # recapitalize Mv in det_id
-            det_id = tune.detector_id
-            det_id = det_id[0].upper() + det_id[1:]
-
-            # add detector name to database
-            det_rs.append({
-                "dets:det_id": det_id,
-                w + "array": array_name,
-                w + "bond_pad": tune.bond_pad,
-                w + "mux_band": str(tune.mux_band),
-                w + "mux_channel": replace_none(tune.mux_channel, -1),
-                w + "mux_subband": replace_none(tune.mux_subband, -1),
-                w + "mux_position": replace_none(tune.mux_layout_position, -1),
-                w + "design_freq_mhz": replace_none(tune.design_freq_mhz),
-                w + "bias_line": replace_none(tune.bias_line, -1),
-                w + "pol": str(tune.pol),
-                w + "bandpass": bp,
-                w + "det_row": replace_none(tune.det_row, -1),
-                w + "det_col": replace_none(tune.det_col, -1),
-                w + "rhombus": str(tune.rhomb),
-                w + "type": str(tune.det_type),
-                w + "det_x": replace_none(tune.det_x),
-                w + "det_y": replace_none(tune.det_y),
-                w + "angle": angle,
-                w + "coax" : "N" if tune.is_north else "S",
-            })
-
-        # modifications here make NO_MATCH more consistent with ^^^
-        det_rs.append({
-                "dets:det_id": "NO_MATCH",
-                w + "array": array_name,
-                w + "bond_pad": -1,
-                w + "mux_band": '-1',
-                w + "mux_channel": -1,
-                w + "mux_subband": -1,
-                w + "mux_position": -1,
-                w + "design_freq_mhz": np.nan,
-                w + "bias_line": -1,
-                w + "pol": "None",
-                w + "bandpass": "NC",
-                w + "det_row": -1,
-                w + "det_col": -1,
-                w + "rhombus": "None",
-                w + "type": "NC",
-                w + "det_x": np.nan,
-                w + "det_y": np.nan,
-                w + "angle": np.nan,
-                w + "coax" : "X",
-        })
-
-        ### ALTERNATIVE
-
-        det_r2 = get_wafer_info_new(array_name, configs, array_cfg)
-
-        ### CHECK IT
-
-        names1 = list(det_rs['dets:det_id'])
-        names2 = list(det_r2['dets:det_id'])
-        common_names = set(names1).intersection(names2)
-        assert(len(common_names) == len(names1))
-        assert(len(common_names) == len(names2))
-
-        # Stats -- what is in disagreement?
-        def smart_equals(k, a, b):
-            if k in ['dets:wafer.angle', 'dets:wafer.design_freq_mhz',
-                     'dets:wafer.det_x', 'dets:wafer.det_y']:
-                return (np.isnan(a) and np.isnan(b)) or (abs(a-b) < 1e-7)
-            return a == b
-
-        discrepancies = {(): 0}
-        for c in common_names:
-            a = det_rs[names1.index(c)]
-            b = det_r2[names2.index(c)]
-            key = tuple([k for k in a.keys() if not smart_equals(k, a[k], b[k])])
-            discrepancies[key] = discrepancies.get(key, 0) + 1
-
-        print('Difference patterns:')
-        for k, v in discrepancies.items():
-            print('%6i ' % v, k)
-        print()
-
-        ### END CHECK
+        det_rs = core.metadata.ResultSet(keys=list(key_map.values()))
+        for row in rows:
+            det_rs.append({key_map[k]: v for k, v in row.items()})
 
         write_dataset(det_rs, configs["det_info"], array_name, overwrite)
+
         # Update the index if it's a new entry
         if not array_name in existing:
             db_data = {'dets:stream_id': stream_id,
