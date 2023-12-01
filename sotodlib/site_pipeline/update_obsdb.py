@@ -180,12 +180,15 @@ def main(config: str,
     #Check the books for the observations we want
 
 
-    for bookpath in bookcart:
+    for bookpath in sorted(bookcart):
         if check_meta_type(bookpath) in accept_type:
 
             try:
                 #obsfiledb creation
-                checkbook(bookpath, config, add=True, overwrite=True)
+                checkbook(
+                    bookpath, config, add=True, 
+                    overwrite=True, logger=logger
+                )
             except Exception as e:
                 if config_dict["skip_bad_books"]:
                     logger.warning(f"failed to add {bookpath}")
