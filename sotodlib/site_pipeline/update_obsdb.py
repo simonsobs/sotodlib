@@ -180,7 +180,7 @@ def main(config: str,
     #Check the books for the observations we want
 
 
-    for bookpath in bookcart:
+    for bookpath in sorted(bookcart):
         if check_meta_type(bookpath) in accept_type:
 
             try:
