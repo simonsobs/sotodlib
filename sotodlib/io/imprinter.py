@@ -1222,20 +1222,37 @@ class Imprinter:
                                 np.min([o.stop for o in obs_list]) - 
                                 np.max([o.start for o in obs_list])
                             )
-
+                            
                             if overlap_time.total_seconds() < 0:
                                 continue
                             if overlap_time.total_seconds() < min_overlap:
                                 continue
-                            # add all of the possible overlaps
-                            output.append(
-                                ObsSet(
-                                    obs_list,
-                                    mode="obs",
-                                    slots=self.tubes[tube]["slots"],
-                                    tel_tube=tube,
+
+                            if np.all([o.timing for o in obs_list]):
+                                # add all of the possible overlaps
+                                output.append(
+                                    ObsSet(
+                                        obs_list,
+                                        mode="obs",
+                                        slots=self.tubes[tube]["slots"],
+                                        tel_tube=tube,
+                                    )
                                 )
-                            )
+                            else:
+                                self.logger.debug(
+                                    "registering single wafer books"       
+                                    f" for {obs_list} because of low "
+                                    "precision timing"
+                                )
+                                for obs in obs_list:
+                                    output.append(
+                                        ObsSet(
+                                            [obs],
+                                            mode="obs",
+                                            slots=self.tubes[tube]["slots"],
+                                            tel_tube=tube,
+                                        )
+                                    )
 
         # remove exact duplicates in output
         output = drop_duplicates(output)
