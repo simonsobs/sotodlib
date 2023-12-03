@@ -507,6 +507,7 @@ class SmurfStreamProcessor:
                     f"No samples properly mapped in oframe frame {oframe_idx}!"
                     "Cannot properly interpolate for this frame."
                 )
+                raise ValueError(f"Cannot finish binding {self.obs_id}")
             elif np.any(~filled):
                 self.log.debug(
                     f"{np.sum(~filled)} missing samples in out-frame {oframe_idx}"
