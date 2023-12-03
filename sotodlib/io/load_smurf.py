@@ -1081,7 +1081,8 @@ class G3tSmurf:
             obs.n_samples = obs_samps
             obs.duration = flist[-1].stop.timestamp() - flist[0].start.timestamp()
             obs.stop = flist[-1].stop
-            obs.timing = np.all([f.timing for f in flist])
+            # f.timing is None if the file has no Scan Frames
+            obs.timing = np.all([f.timing or (f.timing is None) for f in flist])
             logger.debug(f"Setting {obs.obs_id} stop time to {obs.stop}")
         session.commit()
 
