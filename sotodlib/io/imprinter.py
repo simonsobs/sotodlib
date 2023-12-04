@@ -1228,23 +1228,25 @@ class Imprinter:
                             if overlap_time.total_seconds() < min_overlap:
                                 continue
 
-                            if np.all([o.timing for o in obs_list]):
+                            t_list = [o for o in obs_list if o.timing]
+                            nt_list = [o for o in obs_list if ~o.timing]
+                            if len(t_list) > 0:
                                 # add all of the possible overlaps
                                 output.append(
                                     ObsSet(
-                                        obs_list,
+                                        t_list,
                                         mode="obs",
                                         slots=self.tubes[tube]["slots"],
                                         tel_tube=tube,
                                     )
                                 )
-                            else:
+                            if len(nt_list) > 0:
                                 self.logger.debug(
                                     "registering single wafer books"       
-                                    f" for {obs_list} because of low "
+                                    f" for {nt_list} because of low "
                                     "precision timing"
                                 )
-                                for obs in obs_list:
+                                for obs in nt_list:
                                     output.append(
                                         ObsSet(
                                             [obs],
