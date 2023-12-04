@@ -550,7 +550,7 @@ class G3tHWP():
         solved['fast_time_raw'+suffix] = solved['fast_time'+suffix]
         solved['fast_time'+suffix] = solved['fast_time'+suffix] - subtract
 
-    def eval_offcentering(solved):
+    def eval_offcentering(self, solved):
         """
         Evaluate the off-centering of the hwp from the phase difference between two encoders.
         Assume that slot pattern subraction is already applied
@@ -566,21 +566,117 @@ class G3tHWP():
         Returns
         --------
         output: dict
+            {idx1, idx2, offcentering, offset_time}
+
+        Notes
+        ------
+            * idx1: int
+                * index of the solved['fast_time'] for which offcentering is estimated.
+            * idx2: int
+                * index of the solved['fast_time_2'] for which offcentering is estimated.
+            * offcentering: float
+                * Offcentering (mm) at solved['fast_time(_2)'][idx1(2)].
+            * offset_time: float
+                * Offset time of the encoder signals induced by the offcentering.
+                * Offset time is the delayed (advanced) timing of the encoder1 (2) in sec.           
+
+        """
+
+        # Skip the offcentering evaluation if 'solved' doesn't include second encoder data.
+        if not ('fast_time' and 'fast_time_2') in solved.keys():
+            logger.warning('Offcentering calculation is only available when two encoders are operating. Skipped.')
+            return None
+        # Run the template subtraction if not completed yet.
+        if not 'fast_time_raw' in solved.keys():
+            logger.info('Running the template subtraction.')
+            self.eval_angle(solved, poly_order=3, suffix='')
+            self.eval_angle(solved, poly_order=3, suffix='_2')
+
+        # Calculate offcentering from where the first reference slot was detected by the 2nd encoder. 
+        if solved["ref_indexes"][0] > self._num_edges/2-1:
+            idx1_start, idx2_start = int(solved["ref_indexes"][0]-self._num_edges/2), int(solved["ref_indexes_2"][0])
+        else:
+            idx1_start, idx2_start = int(solved["ref_indexes"][1]-self._num_edges/2), int(solved["ref_indexes_2"][0])
+        # Calculate offcentering to the end of the shorter encoder data.
+        if len(solved["fast_time"][idx1_start:]) > len(solved["fast_time_2"][idx2_start:]):
+            idx_length = len(solved["fast_time_2"][idx2_start:])
+        else:
+            idx_length = len(solved["fast_time"][idx1_start:])
+        idx1 = np.arange(idx1_start, idx1_start+idx_length-1)
+        idx2 = np.arange(idx2_start, idx2_start+idx_length-1)
+        # Calculate the offset time of the encoders induced by the offcentering.
+        offset_time = (solved["fast_time"][idx1]-solved["fast_time_2"][idx2])/2
+        # Calculate the offcentering (mm).
+        period = (solved["fast_time"][idx1+1]-solved["fast_time"][idx1])*self._num_edges
+        offset_angle = offset_time/period*2*np.pi
+        offcentering = np.tan(offset_angle)*self._encoder_disk_radius
+        
+        out = {}
+        out['idx1'] = idx1
+        out['idx2'] = idx2
+        out['offcentering'] = offcentering
+        out['offset_time'] = offset_time
+
+        return out
+
+    def correct_offcentering(self, solved, offcentering=None):
+        """
+        Correct the timing of solved['fast_time'] which is delayed (advanced) by the offcentering.
+
+        Args
+        -----
+        solved: dict
+            dict solved from eval_angle
+            {fast_time, angle, fast_time_2, angle_2, ...}
+        offcentering: dict
+            dict solved from eval_offcentering
+            {idx1, idx2, offcentering, offset_time}
+
+        Returns
+        --------
+        output: dict
             {fast_time, angle, fast_time_2, angle_2, ...}
 
         Notes
-        """
+        ------
+            * idx1: int
+                * index of the solved['fast_time'] for which offcentering is estimated.
+            * idx2: int
+                * index of the solved['fast_time_2'] for which offcentering is estimated.
+            * offcentering: float
+                * Offcentering (mm) at solved['fast_time(_2)'][idx1(2)].
+            * offset_time: float
+                * Offset time of the encoder signals induced by the offcentering.
+                * Offset time is the delayed (advanced) timing of the encoder1 (2) in sec.           
 
-        # please implement here
-
-        return solved
-
-    def correct_offcentering(solved, offcentering=None):
-        """
         * We should allow to correct the offcentering by external input, since offcentering measurement is not always available.
         """
 
-        # please implement here
+        # Skip the correction when the offcentering estimation doesn't exist.
+        if offcentering == None:
+            logger.warning('Offcentering input does not exist. Offcentering correction is skipped.')
+            return solved
+        # Skip the calculation when the correction is already done.
+        elif 'fast_time_v2' in solved.keys():
+            logger.info('The offcentring correction is already completed. Skipped.')
+            return solved
+        
+        idx1 = offcentering['idx1']
+        idx2 = offcentering['idx2']
+        offset_time = offcentering['offset_time']
+        
+        solved['fast_time'][idx1] - offset_time
+        solved['fast_time_2'][idx2] + offset_time
+        
+        solved['fast_time_v2'] = solved['fast_time']
+        solved['fast_time_v2_2'] = solved['fast_time_2']
+        solved['fast_time'] = solved['fast_time'][idx1] - offset_time
+        solved['fast_time_2'] = solved['fast_time_2'][idx2] + offset_time
+        solved['angle_v2'] = solved['angle']
+        solved['angle'] = solved['angle'][idx1]
+        solved['angle_v2_2'] = solved['angle_2']
+        solved['angle_2'] = solved['angle_2'][idx2]
+        solved['offcentering'] = offcentering['offcentering']
 
         return solved
 
