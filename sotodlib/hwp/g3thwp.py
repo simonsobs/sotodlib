@@ -655,11 +655,11 @@ class G3tHWP():
         # Skip the correction when the offcentering estimation doesn't exist.
         if offcentering == None:
             logger.warning('Offcentering input does not exist. Offcentering correction is skipped.')
-            return solved
+            return
         # Skip the calculation when the correction is already done.
         elif 'fast_time_v2' in solved.keys():
             logger.info('The offcentring correction is already completed. Skipped.')
-            return solved
+            return
         
         idx1 = offcentering['idx1']
         idx2 = offcentering['idx2']
@@ -678,7 +678,7 @@ class G3tHWP():
         solved['angle_2'] = solved['angle_2'][idx2]
         solved['offcentering'] = offcentering['offcentering']
 
-        return solved
+        return
 
     def write_solution(self, solved, output=None):
         """
