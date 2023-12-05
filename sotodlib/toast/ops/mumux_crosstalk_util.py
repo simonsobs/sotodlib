@@ -1,9 +1,10 @@
 # Copyright (c) 2023 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
+import warnings
+
 import astropy.units as u
 import numpy as np
-import warnings
 
 try:
     import pandas as pd

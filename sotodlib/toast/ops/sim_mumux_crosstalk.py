@@ -1,43 +1,17 @@
 # Copyright (c) 2023 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
-import h5py
-import os
-import pickle
-
-import traitlets
-
 import numpy as np
-
-from astropy import constants
-from astropy import units as u
-
-import ephem
-
-import healpy as hp
-
-from scipy.constants import au as AU
-from scipy.interpolate import RectBivariateSpline, splrep, splev
-
-from toast.timing import function_timer
-
-from toast import qarray as qa
 import toast.rng
-
+from astropy import units as u
 from toast.data import Data
-
-from toast.traits import trait_docs, Int, Unicode, Bool, Quantity, Float, Instance
-
+from toast.observation import default_values as defaults
 from toast.ops.operator import Operator
-
+from toast.timing import function_timer
+from toast.traits import Int, Unicode, trait_docs
 from toast.utils import Environment, Logger, Timer, unit_conversion
 
-from toast.observation import default_values as defaults
-
 from .mumux_crosstalk_util import detmap_available, pos_to_chi
-
-
-XAXIS, YAXIS, ZAXIS = np.eye(3)
 
 # https://github.com/simonsobs/bolocalc-so-model/blob/master/V3r7/V3r7_Baseline
 # Total optical power in pW
