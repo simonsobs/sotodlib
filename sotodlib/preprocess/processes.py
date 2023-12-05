@@ -1,7 +1,6 @@
 import numpy as np
 
 import sotodlib.core as core
-import sotodlib.flags as flags
 import sotodlib.tod_ops as tod_ops
 from sotodlib.hwp import hwp
 
@@ -39,12 +38,12 @@ class Trends(_Preprocess):
 
     Data selection can have key "kind" equal to "any" or "all."
     
-    .. autofunction:: sotodlib.flags.get_trending_flags
+    .. autofunction:: sotodlib.tod_ops.flags.get_trending_flags
     """
     name = "trends"
     
     def calc_and_save(self, aman, proc_aman):
-        trend_cut, trend_aman = flags.get_trending_flags(
+        trend_cut, trend_aman = tod_ops.flags.get_trending_flags(
             aman, merge=False, full_output=True, 
             **self.calc_cfgs
         )
@@ -79,12 +78,12 @@ class GlitchDetection(_Preprocess):
     Data section should define a glitch significant "sig_glitch" and a maximum
     number of glitches "max_n_glitch."
 
-    .. autofunction:: sotodlib.flags.get_glitch_flags
+    .. autofunction:: sotodlib.tod_ops.flags.get_glitch_flags
     """
     name = "glitches"
     
     def calc_and_save(self, aman, proc_aman):
-        glitch_cut, glitch_aman = flags.get_glitch_flags(
+        glitch_cut, glitch_aman = tod_ops.flags.get_glitch_flags(
             aman, merge=False, full_output=True,
             **self.calc_cfgs
         ) 
@@ -293,6 +292,27 @@ class GlitchFill(_Preprocess):
         tod_ops.gapfill.fill_glitches(aman, signal=signal, glitch_flags=flags, **args)
 
 
+class FlagTurnarounds(_Preprocess):
+    """From the Azimuth encoder data, flag turnarounds, left-going, and right-going.
+        All process configs go to `get_turnaround_flags`.
+    
+    .. autofunction:: sotodlib.tod_ops.flags.get_turnaround_flags
+    """
+    name = 'flag_turnarounds'
+    
+    def process(self, aman, proc_aman):
+        tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
+        
+class SubPolyf(_Preprocess):
+    """Fit TOD in each subscan with polynominal of given order and subtract it.
+        All process configs go to `sotodlib.tod_ops.sub_polyf`.
+    
+    .. autofunction:: sotodlib.tod_ops.subscan_polyfilter
+    """
+    name = 'sub_polyf'
+    
+    def process(self, aman, proc_aman):
+        tod_ops.sub_polyf.subscan_polyfilter(aman, **self.process_cfgs)
 
 _Preprocess.register(Trends.name, Trends)
 _Preprocess.register(FFTTrim.name, FFTTrim)
@@ -307,4 +327,6 @@ _Preprocess.register(Apodize.name, Apodize)
 _Preprocess.register(Demodulate.name, Demodulate)
 _Preprocess.register(EstimateAzSS.name, EstimateAzSS)
 _Preprocess.register(GlitchFill.name, GlitchFill)
+_Preprocess.register(FlagTurnarounds.name, FlagTurnarounds)
+_Preprocess.register(SubPolyf.name, SubPolyf)
 
