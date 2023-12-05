@@ -32,10 +32,10 @@ def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mas
         The processed signal.
     """
     if signal is None:
-        if in_place:
-            signal = aman.signal
-        else:
-            signal = aman.signal.copy()
+        signal = aman.signal
+
+    if not(in_place):
+        signal = signal.copy()
         
     if exclude_turnarounds:
         if ("left_scan" not in aman.flags) or ("turnarounds" not in aman.flags):
