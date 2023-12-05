@@ -87,21 +87,10 @@ def pos_to_ind(pos, mapping, tol=1.0, verbose=False):
     # Check to make sure the match is credible
     dist_min = dist.iloc[ind]
     if dist_min > tol:
-        """
-        import matplotlib.pyplot as plt
-        xs = mapping["det_x"]
-        ys = mapping["det_y"]
-        fig = plt.figure()
-        ax = fig.add_subplot(1, 1, 1)
-        plt.plot(xs, ys, "bo", ms=3, zorder=100)
-        plt.plot(x, y, "ro", ms=6, zorder=1)
-        ax.grid()
-        plt.show()
-        """
-        msg = f"Failed to match ({x} mm, {y} mm) to a detector in mapping.  "
-        msg += f"Minimum distance is {dist_min} mm"
-        #raise RuntimeError(msg)
-        warnings.warn(msg)
+        if verbose:
+            msg = f"Failed to match ({x} mm, {y} mm) to a detector in "
+            msg += f"mapping.  Minimum distance is {dist_min} mm"
+            warnings.warn(msg)
         return None
 
     if verbose:

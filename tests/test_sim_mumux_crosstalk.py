@@ -6,23 +6,26 @@
 """
 
 import unittest
-import numpy as np
 
 import astropy.units as u
+import numpy as np
 
 try:
     # Import sotodlib toast module first, which sets global toast defaults
-    import sotodlib.toast as sotoast
-    import sotodlib.toast.ops as so_ops
     import toast
     import toast.ops
     from toast.observation import default_values as defaults
+
+    import sotodlib.toast as sotoast
+    import sotodlib.toast.ops as so_ops
     toast_available = True
 except ImportError as e:
     toast_available = False
 
-from sotodlib.toast.ops import detmap_available
-from ._helpers import calibration_schedule, close_data_and_comm, simulation_test_data
+from _helpers import (calibration_schedule, close_data_and_comm,
+                      simulation_test_data)
+
+from sotodlib.toast.ops import detmap_available, pos_to_chi
 
 
 class SimMuMUXCrosstalkTest(unittest.TestCase):
@@ -45,7 +48,7 @@ class SimMuMUXCrosstalkTest(unittest.TestCase):
             wafer_slot="w17",
             bands="LAT_f090",
             sample_rate=10.0 * u.Hz,
-            thin_fp=64,
+            thin_fp=1,
             cal_schedule=False,
         )
 
@@ -83,7 +86,8 @@ class SimMuMUXCrosstalkTest(unittest.TestCase):
             name="sim_mumux_crosstalk",
         ).apply(data)
 
-        # Compare signal before and after
+        # Compare signal before and after to make sure the magnitude
+        # of the effect is not crazy
 
         signal1 = data.obs[0].detdata["signal"].data.copy()
 
@@ -92,6 +96,22 @@ class SimMuMUXCrosstalkTest(unittest.TestCase):
 
         assert rms0 != 0
         assert rmsdiff / rms0 < 1e-3
+
+        # Check that the crosstalk strength is as expected
+
+        obs = data.obs[0]
+        fp = obs.telescope.focalplane
+        dets = obs.detdata["signal"].keys()
+        chis = pos_to_chi(fp, dets)
+        ndet = len(dets)
+        nnz = len(chis)
+        med = np.median(np.log10(list(chis.values())))
+
+        print(f"ndet = {ndet}",flush=True)
+        print(f"nnz = {nnz} = {nnz / ndet} ndet",flush=True)
+        print(f"median(log10(chi)) = {med}",flush=True)
+        assert nnz > ndet and nnz < 2 * ndet
+        assert med > -3 and med < -2
 
         close_data_and_comm(data)
 
