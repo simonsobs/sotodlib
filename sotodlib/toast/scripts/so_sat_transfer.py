@@ -104,19 +104,20 @@ def reduce_data(job, otherargs, runargs, data):
 
     wrk.flag_noise_outliers(job, otherargs, runargs, data)
     wrk.filter_hwpss(job, otherargs, runargs, data)
-    wrk.demodulate(job, otherargs, runargs, data)
     wrk.noise_estimation(job, otherargs, runargs, data)
-    wrk.flag_sso(job, otherargs, runargs, data)
 
+    data = wrk.demodulate(job, otherargs, runargs, data)
+
+    wrk.flag_sso(job, otherargs, runargs, data)
     wrk.deconvolve_detector_timeconstant(job, otherargs, runargs, data)
 
     wrk.mapmaker_ml(job, otherargs, runargs, data)
-    
+
     wrk.filter_ground(job, otherargs, runargs, data)
     wrk.filter_poly1d(job, otherargs, runargs, data)
     wrk.filter_poly2d(job, otherargs, runargs, data)
     wrk.filter_common_mode(job, otherargs, runargs, data)
-    
+
     wrk.mapmaker(job, otherargs, runargs, data)
     wrk.mapmaker_filterbin(job, otherargs, runargs, data)
 
@@ -252,7 +253,7 @@ def main():
     if otherargs.dry_run:
         log.info_rank("Dry-run complete", comm=comm)
         return
-    
+
     # Determine the process group size
     if runargs.group_size is not None:
         msg = f"Using user-specifed process group size of {runargs.group_size}"
@@ -303,10 +304,10 @@ def main():
 
             # Simulate this realization
             simulate_signal(job, otherargs, runargs, data, signal_file)
-            
+
             # Do the data reduction
             reduce_data(job, otherargs, runargs, data)
-        
+
     # Collect optional timing information
     alltimers = toast.timing.gather_timers(comm=comm)
     if data.comm.world_rank == 0:
