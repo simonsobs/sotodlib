@@ -47,7 +47,8 @@ def setup_simulate_observing(parser, operators):
     )
     parser.add_argument(
         "--bands",
-        required=True,
+        required=False,
+        default=None,
         help="Comma-separated list of bands: LAT_f030 (27GHz), LAT_f040 (39GHz), "
         "LAT_f090 (93GHz), LAT_f150 (145GHz), "
         "LAT_f230 (225GHz), LAT_f290 (285GHz), "
@@ -55,7 +56,7 @@ def setup_simulate_observing(parser, operators):
         "SAT_f090 (93GHz), SAT_f150 (145GHz), "
         "SAT_f230 (225GHz), SAT_f290 (285GHz). ",
     )
-    group = parser.add_mutually_exclusive_group(required=True)
+    group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument(
         "--telescope",
         default=None,
@@ -79,7 +80,7 @@ def setup_simulate_observing(parser, operators):
         type=float,
     )
     parser.add_argument(
-        "--schedule", required=True, default=None, help="Input observing schedule"
+        "--schedule", required=False, default=None, help="Input observing schedule"
     )
     parser.add_argument(
         "--realization",
@@ -125,6 +126,18 @@ def simulate_observing(job, otherargs, runargs, comm):
     if not job_ops.sim_ground.enabled:
         log.info_rank("Simulated observing is disabled", comm=comm)
         return None
+
+    # Make sure we have the required bands and schedule.  These might
+    # not be set during a dry-run, but if we got this far they need to
+    # be set.
+    if otherargs.bands is None:
+        msg = "bands must be specified for simulated observing"
+        log.error_rank(msg, comm=comm)
+        raise RuntimeError(msg)
+    if otherargs.schedule is None:
+        msg = "schedule must be specified for simulated observing"
+        log.error_rank(msg, comm=comm)
+        raise RuntimeError(msg)
 
     # Simulated telescope
     telescope = simulated_telescope(
