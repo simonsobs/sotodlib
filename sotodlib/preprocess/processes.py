@@ -52,10 +52,10 @@ class DetBiasCuts(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("det_bias_cuts", dbc_aman)
 
-    def select(self, aman):
-        keep = ~has_all_cut(aman.preprocess.det_bias_cuts.det_bias_cuts)
-        aman.restrict("dets", aman.dets.vals[keep])
-        return aman
+    def select(self, meta):
+        keep = ~meta.preprocess.det_bias_cuts.det_bias_cuts
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
 
 class Trends(_Preprocess):
     """Calculate the trends in the data to look for unlocked detectors. All
