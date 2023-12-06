@@ -15,6 +15,62 @@ from . import filters
 from . import fourier_filter
 
 
+def get_det_bias_cuts(aman, detcal=None, rfrac_range=(0.01, 0.7),
+                      psat_range=(0, 15), merge=True, overwrite=True,
+                      name='det_bias_cuts'):
+    """
+    Function for selecting detectors in appropriate bias range.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        Input axis manager.
+    detcal : AxisManager
+        AxisManager containing detector calibration information
+        from bias steps and IVs. If None defaults to aman.det_cal.
+    rfrac_range : Tuple
+        Tuple (lower_bound, upper_bound) for rfrac det selection.
+    merge : bool
+        If true, merges the generated flag into aman.
+    overwrite : bool
+        If true, write over flag. If false, don't.
+    name : str
+        Name of flag to add to aman.flags if merge is True.
+
+    Returns
+    -------
+    mask : Boolean Array
+        Boolean mask that selects detector cuts. 
+    """
+    if detcal is None:
+        if 'det_cal' not in aman:
+            raise ValueError("AxisManager missing required 'det_cal' field " 
+                             "with detector calibration information")
+        detcal = aman.det_cal
+
+    if 'flags' not in aman:
+        overwrite = False
+        merge = False
+    if overwrite and name in aman.flags:
+        aman.flags.move(name, None)
+    
+    msk = np.all([detcal.bg >= 0,
+                  detcal.r_tes > 0,
+                  detcal.r_frac >= rfrac_range[0],
+                  detcal.r_frac <= rfrac_range[1],
+                  detcal.p_sat*1e12 >= psat_range[0],
+                  detcal.p_sat*1e12 <= psat_range[1]], axis=0)
+    
+    if merge:
+        if name in aman.flags and not overwrite:
+            raise ValueError(f"Flag name {name} already exists in aman.flags")
+        if name in aman.flags:
+            aman.flags[name] = msk
+        else:
+            aman.flags.wrap(name, msk, [(0, 'dets')])
+    
+    return msk
+
 def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
                          merge=True, merge_lr=True, overwrite=True, 
                          t_buffer=2., kernel_size=400, peak_threshold=0.1, rel_distance_peaks=0.3,
