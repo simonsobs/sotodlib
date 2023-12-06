@@ -22,7 +22,7 @@ try:
 except ImportError as e:
     toast_available = False
 
-from _helpers import (calibration_schedule, close_data_and_comm,
+from ._helpers import (calibration_schedule, close_data_and_comm,
                       simulation_test_data)
 
 from sotodlib.toast.ops import detmap_available, pos_to_chi
