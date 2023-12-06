@@ -586,10 +586,12 @@ class G3tHWP():
         if not ('fast_time' and 'fast_time_2') in solved.keys():
             logger.warning('Offcentering calculation is only available when two encoders are operating. Skipped.')
             return None
-        # Run the template subtraction if not completed yet.
+        # Run the template subtraction if not processed yet.
         if not 'fast_time_raw' in solved.keys():
-            logger.info('Running the template subtraction.')
+            logger.info('Running the template subtraction for the 1st encoder.')
             self.eval_angle(solved, poly_order=3, suffix='')
+        if not 'fast_time_raw_2' in solved.keys():
+            logger.info('Running the template subtraction for the 2nd encoder.')
             self.eval_angle(solved, poly_order=3, suffix='_2')
 
         # Calculate offcentering from where the first reference slot was detected by the 2nd encoder. 
