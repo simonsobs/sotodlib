@@ -254,7 +254,7 @@ class EstimateAzSS(_Preprocess):
     """
     name = "estimate_azss"
 
-    def calc_and_save(self, aman):
+    def calc_and_save(self, aman, proc_aman):
         azss_stats, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
         self.save(proc_aman, azss_stats)
     
