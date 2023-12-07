@@ -218,7 +218,11 @@ class NmatDetvecs(Nmat):
         for field in ["bin_edges", "eig_lim", "single_lim", "window", "nwin", "downweight",
                 "bins", "D", "V", "iD", "iV", "s", "ivar"]:
             data[field] = getattr(self, field)
-        bunch.write(fname, data)
+        try:
+            bunch.write(fname, data)
+        except Exception as e:
+            msg = f"Failed to write {fname}: {e}"
+            raise RuntimeError(msg)
 
     @staticmethod
     def from_bunch(data):
