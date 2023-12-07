@@ -369,7 +369,6 @@ class G3tSmurf:
         file_start, file_stop = None, None
         frame_idx = -1
         timing = None
-        
 
         while True:
             try:
