@@ -338,6 +338,10 @@ operators in toast.
    :members:
    :noindex:
 
+.. autoclass:: sotodlib.toast.ops.SimMuMUXCrosstalk
+   :members:
+   :noindex:
+
 
 Data Reduction Operators
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
