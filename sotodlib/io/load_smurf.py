@@ -368,6 +368,7 @@ class G3tSmurf:
         total_channels = 0
         file_start, file_stop = None, None
         frame_idx = -1
+        timing = None
         
 
         while True:
