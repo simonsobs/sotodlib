@@ -1050,6 +1050,30 @@ class Imprinter:
             session = self.get_session()
         session.rollback()
 
+    def _find_incomplete(self, min_ctime, max_ctime, stream_filt=None):
+        """return G3tSmurf session query for incomplete observations
+        """
+        if stream_filt is None:
+            streams = []
+            streams.extend(
+                *[t.get("slots") for (_,t) in self.tubes.items()]
+            )
+            stream_filt = or_(
+                *[G3tObservations.stream_id == s for s in streams]
+            )
+
+        session = self.get_g3tsmurf_session()
+        q = session.query(G3tObservations).filter(
+            G3tObservations.timestamp >= min_ctime,
+            G3tObservations.timestamp <= max_ctime,
+            stream_filt,
+            or_(
+                G3tObservations.stop == None,
+                G3tObservations.stop >= dt.datetime.utcfromtimestamp(max_ctime),
+            ),
+        )
+        return q
+
     @loop_over_tubes
     def update_bookdb_from_g3tsmurf(
         self,
@@ -1118,23 +1142,21 @@ class Imprinter:
         self.logger.debug(f"Searching between {min_ctime} and {max_ctime}")
 
         # check for incomplete observations in time range
-        q_incomplete = session.query(G3tObservations).filter(
-            G3tObservations.timestamp >= min_ctime,
-            G3tObservations.timestamp <= max_ctime,
-            stream_filt,
-            or_(
-                G3tObservations.stop == None,
-                G3tObservations.stop >= dt.datetime.utcfromtimestamp(max_ctime),
-            ),
-        )
+        q_incomplete = self._find_incomplete(min_ctime, max_ctime, stream_filt)
+
         # if we have incomplete observations in our stream_id list we cannot
         # bookbind any observations overlapping the incomplete ones.
         if q_incomplete.count() > 0:
-            max_ctime = min([obs.timestamp for obs in q_incomplete.all()])
-            self.logger.debug(
+            new_ctime = min([obs.timestamp for obs in q_incomplete.all()])
+            if max_ctime - new_ctime > 3600*3:
+                level = self.logger.warning
+            else:
+                level = self.logger.debug
+            level(
                 f"Found {q_incomplete.count()} incomplete observations. "
-                f"updating max ctime to {max_ctime}"
+                f"updating max ctime to {new_ctime}"
             )
+            max_ctime = new_ctime
         max_stop = dt.datetime.utcfromtimestamp(max_ctime)
 
         # find all complete observations that start within the time range
@@ -1150,31 +1172,27 @@ class Imprinter:
         )
 
         output = []
+        def add_to_output(obs_list, mode):
+            output.append(
+                ObsSet( 
+                    obs_list,
+                    mode=mode,
+                    slots=self.tubes[tube]["slots"],
+                    tel_tube=tube,
+                )
+            )
+
         for stream in streams:
             # loop through all observations for this particular stream_id
             for str_obs in obs_q.filter(G3tObservations.stream_id == stream).all():
                 # distinguish different types of books
                 # operation book
                 if get_obs_type(str_obs) == "oper":
-                    output.append(
-                        ObsSet(
-                            [str_obs],
-                            mode="oper",
-                            slots=self.tubes[tube]["slots"],
-                            tel_tube=tube,
-                        )
-                    )
+                    add_to_output([str_obs], "oper")
                 elif get_obs_type(str_obs) == "obs":
                     # force each observation to be its own book
                     if force_single_stream:
-                        output.append(
-                            ObsSet(
-                                [str_obs],
-                                mode="obs",
-                                slots=self.tubes[tube]["slots"],
-                                tel_tube=tube,
-                            )
-                        )
+                        add_to_output([str_obs], "obs")
                     else:
                         # query for all possible types of overlapping 
                         # observations from other streams
@@ -1201,14 +1219,7 @@ class Imprinter:
                         if q.count() == 0 and not ignore_singles:
                             # append only this one when there's no overlapping 
                             # segments
-                            output.append(
-                                ObsSet(
-                                    [str_obs],
-                                    mode="obs",
-                                    slots=self.tubes[tube]["slots"],
-                                    tel_tube=tube,
-                                )
-                            )
+                            add_to_output([str_obs], "obs")
 
                         elif q.count() > 0:
                             # obtain overlapping observations (returned as a tuple of stream_id)
@@ -1227,15 +1238,22 @@ class Imprinter:
                                 continue
                             if overlap_time.total_seconds() < min_overlap:
                                 continue
-                            # add all of the possible overlaps
-                            output.append(
-                                ObsSet(
-                                    obs_list,
-                                    mode="obs",
-                                    slots=self.tubes[tube]["slots"],
-                                    tel_tube=tube,
+
+                            t_list = [o for o in obs_list if o.timing]
+                            nt_list = [o for o in obs_list if ~o.timing]
+                            assert len(t_list)+len(nt_list) == len(obs_list)
+                            if len(t_list) > 0:
+                                # add all of the possible overlaps
+                                add_to_output(t_list, "obs")
+
+                            if len(nt_list) > 0:
+                                self.logger.debug(
+                                    "registering single wafer books"       
+                                    f" for {nt_list} because of low "
+                                    "precision timing"
                                 )
-                            )
+                                for obs in nt_list:
+                                    add_to_output([obs], "obs")
 
         # remove exact duplicates in output
         output = drop_duplicates(output)
