@@ -125,7 +125,7 @@ class Observations(Base):
         across stream_ids.
     timing : bool
         If true, the files of the entry observation were made with times
-        referenced to the timing system.
+        referenced to the external timing system and high precision timestamps.
     duration : float
         The total observation time in seconds
     n_samples : integer
@@ -231,7 +231,8 @@ class Files(Base):
     stream_id : The stream_id for the file. Generally of the form crateXslotY.
         These are expected to map one per UXM.
     timing : bool
-        If true, every frame in the file has times that are referenced to the timing system
+        If true, every frame in the file has high precision timestamps (slightly
+        different definition than obs.timing)
     n_frames : Integer
         Number of frames in the .g3 file
     frames : list of SQLALchemy Frame Instances
