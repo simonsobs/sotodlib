@@ -136,6 +136,7 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         timestamps = _res['timestamps']
 
     return _concat_filesets(results, ancil, timestamps,
+                            sample0=samples[0], obs_id=obs_id,
                             signal_buffer=signal_buffer,
                             get_frame_det_info=False)
 
@@ -192,6 +193,7 @@ def load_book_file(filename, dets=None, samples=None, no_signal=False):
     return _concat_filesets({'?': this_detset},
                             this_detset['ancil'],
                             this_detset['timestamps'],
+                            sample0=samples[0],
                             no_signal=no_signal)
 
 
@@ -364,7 +366,10 @@ def _concat_filesets(results, ancil=None, timestamps=None,
 
     aman = core.AxisManager(
         core.LabelAxis('dets', dets),
-        core.OffsetAxis('samps', len(timestamps), sample0, obs_id))
+        core.OffsetAxis('samps',
+                        count=len(timestamps),
+                        offset=sample0,
+                        origin_tag=obs_id))
 
     aman.wrap('timestamps', timestamps, axis_map=[(0, 'samps')])
 
