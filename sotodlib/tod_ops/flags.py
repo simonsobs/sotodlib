@@ -15,9 +15,9 @@ from . import filters
 from . import fourier_filter
 
 
-def get_det_bias_cuts(aman, detcal=None, rfrac_range=(0.01, 0.7),
+def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.01, 0.7),
                       psat_range=(0, 15), merge=True, overwrite=True,
-                      name='det_bias_cuts'):
+                      name='det_bias_flags'):
     """
     Function for selecting detectors in appropriate bias range.
 
@@ -60,16 +60,20 @@ def get_det_bias_cuts(aman, detcal=None, rfrac_range=(0.01, 0.7),
                   detcal.r_frac <= rfrac_range[1],
                   detcal.p_sat*1e12 >= psat_range[0],
                   detcal.p_sat*1e12 <= psat_range[1]], axis=0)
+    # Expand mask to ndets x nsamps RangesMatrix
+    x = Ranges(aman.samps.count)
+    mskexp = RangesMatrix([Ranges.ones_like(x) if Y
+                           else Ranges.zeros_like(x) for Y in msk])
     
     if merge:
         if name in aman.flags and not overwrite:
             raise ValueError(f"Flag name {name} already exists in aman.flags")
         if name in aman.flags:
-            aman.flags[name] = msk
+            aman.flags[name] = mskexp
         else:
-            aman.flags.wrap(name, msk, [(0, 'dets')])
+            aman.flags.wrap(name, mskexp, [(0, 'dets'), (1, 'samps')])
     
-    return msk
+    return mskexp
 
 def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
                          merge=True, merge_lr=True, overwrite=True, 
