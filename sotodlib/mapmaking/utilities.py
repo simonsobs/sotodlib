@@ -46,7 +46,7 @@ class MapZipper:
     def unzip(self, x): return enmap.ndmap(x.reshape(self.shape), self.wcs).astype(self.dtype, copy=False)
 
     def dot(self, a, b):
-        return np.sum(a*b) if self.comm is None else self.comm.allreduce(np.sum(a*b))
+        return np.sum(a*b) if self.comm is None else utils.allreduce(np.sum(a*b), self.comm)
 
 class TileMapZipper:
     def __init__(self, geo, dtype, comm):
@@ -62,7 +62,7 @@ class TileMapZipper:
         return tilemap.TileMap(x.reshape(self.geo.pre+(-1,)).astype(self.dtype, copy=False), self.geo)
 
     def dot(self, a, b):
-        return np.sum(a*b) if self.comm is None else self.comm.allreduce(np.sum(a*b))
+        return np.sum(a*b) if self.comm is None else utils.allreduce(np.sum(a*b), self.comm)
 
 class MultiZipper:
     def __init__(self):
