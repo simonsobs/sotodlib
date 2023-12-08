@@ -197,6 +197,6 @@ def processing_mask(job, otherargs, runargs, data):
             job_ops.processing_mask.pixel_pointing = job_ops.processing_mask_pixels
         else:
             # We are using the same pointing matrix as the mapmaking
-            job_ops.processing_mask.pixel_dist = job_ops.binner_final.pixel_dist
-            job_ops.processing_mask.pixel_pointing = job.pixels_final
+            job_ops.processing_mask.pixel_dist = job_ops.binner.pixel_dist
+            job_ops.processing_mask.pixel_pointing = job.pixels_solve
         job_ops.processing_mask.apply(data)
