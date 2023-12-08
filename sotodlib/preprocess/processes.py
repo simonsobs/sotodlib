@@ -30,30 +30,30 @@ class Detrend(_Preprocess):
     def process(self, aman, proc_aman):
         tod_ops.detrend_tod(aman, **self.process_cfgs)
 
-class DetBiasCuts(_Preprocess):
+class DetBiasFlags(_Preprocess):
     """
     Derive poorly biased detectors from IV and Bias Step data. Save results
     in proc_aman under the "det_bias_cuts" field. 
 
-    .. autofunction:: sotodlib.tod_ops.flags.get_det_bias_cuts
+    .. autofunction:: sotodlib.tod_ops.flags.get_det_bias_flags
     """
-    name = "det_bias_cuts"
+    name = "det_bias_flags"
 
     def calc_and_save(self, aman, proc_aman):
-        msk = tod_ops.flags.get_det_bias_cuts(aman, merge=False,
-                                              **self.calc_cfgs)
+        msk = tod_ops.flags.get_det_bias_flags(aman, merge=False,
+                                               **self.calc_cfgs)
         dbc_aman = core.AxisManager(aman.dets)
-        dbc_aman.wrap('det_bias_cuts', msk, [(0, 'dets')])
+        dbc_aman.wrap('det_bias_flags', msk, [(0, 'dets')])
         self.save(proc_aman, dbc_aman)
     
     def save(self, proc_aman, dbc_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("det_bias_cuts", dbc_aman)
+            proc_aman.wrap("det_bias_flags", dbc_aman)
 
     def select(self, meta):
-        keep = ~meta.preprocess.det_bias_cuts.det_bias_cuts
+        keep = ~meta.preprocess.det_bias_flags.det_bias_flags
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
 
@@ -356,4 +356,4 @@ _Preprocess.register(EstimateAzSS.name, EstimateAzSS)
 _Preprocess.register(GlitchFill.name, GlitchFill)
 _Preprocess.register(FlagTurnarounds.name, FlagTurnarounds)
 _Preprocess.register(SubPolyf.name, SubPolyf)
-_Preprocess.register(DetBiasCuts.name, DetBiasCuts)
+_Preprocess.register(DetBiasFlags.name, DetBiasFlags)
