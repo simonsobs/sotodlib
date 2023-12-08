@@ -136,7 +136,8 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         timestamps = _res['timestamps']
 
     return _concat_filesets(results, ancil, timestamps,
-                            signal_buffer=signal_buffer)
+                            signal_buffer=signal_buffer,
+                            get_frame_det_info=False)
 
 
 def load_book_file(filename, dets=None, samples=None, no_signal=False):
@@ -347,7 +348,8 @@ def _load_book_detset(files, prefix='', load_ancil=True,
 
 def _concat_filesets(results, ancil=None, timestamps=None,
                      sample0=0, obs_id=None, dets=None,
-                     no_signal=False, signal_buffer=None):
+                     no_signal=False, signal_buffer=None,
+                     get_frame_det_info=True):
     """Assemble multiple detset results (as returned by _load_book_detset)
     into a full AxisManager.
 
@@ -441,6 +443,22 @@ def _concat_filesets(results, ancil=None, timestamps=None,
                 _iir.wrap(k, v)
         aman['iir_params'].wrap(r['stream_id'], _iir)
 
+    # flags place
+    aman.wrap("flags", core.FlagManager.for_tod(aman, "dets", "samps"))
+
+    if not get_frame_det_info:
+        return aman
+
+    # The detset, stream_id, and smurf.* channel info will normally be
+    # populated by a downstream data product, so that they are
+    # available without having to read the main G3 data (and thus with
+    # get_meta).  But the block below should be maintained for use
+    # with load_book_file, where the user is unlikely to also have
+    # good metadata ready to go.
+    #
+    # Even if the smurf info isn't merged in here, it still gets
+    # parsed.  The main need seems to be to populate the iir_params.
+
     # det_info
     det_info = core.metadata.ResultSet(
         ['detset', '_readout_id', 'stream_id'])
@@ -481,9 +499,6 @@ def _concat_filesets(results, ancil=None, timestamps=None,
         for k, v in ch_info.items():
             smurf.wrap(k, np.array(v), [(0, 'dets')])
         aman['det_info'].wrap('smurf', smurf)
-
-    # flags place
-    aman.wrap("flags", core.FlagManager.for_tod(aman, "dets", "samps"))
 
     return aman
 
