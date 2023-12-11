@@ -15,7 +15,7 @@ from . import filters
 from . import fourier_filter
 
 
-def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.01, 0.7),
+def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                       psat_range=(0, 15), merge=True, overwrite=True,
                       name='det_bias_flags'):
     """
