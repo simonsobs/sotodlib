@@ -88,6 +88,9 @@ class G3tHWP():
         # Threshoild for outlier data to calculate nominal slit width
         self._slit_width_lim = self.configs.get('slit_width_lim', 0.1)
 
+        # The distance from the hwp center to the fine encoder slots (mm)
+        self._encoder_disk_radius = 346.25
+
         # force to quad value
         # 0: use readout quad value (default)
         # 1: positive rotation direction, -1: negative rotation direction
