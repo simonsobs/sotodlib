@@ -588,7 +588,7 @@ class G3tHWP():
         # Skip the offcentering evaluation if 'solved' doesn't include second encoder data.
         if not ('fast_time' and 'fast_time_2') in solved.keys():
             logger.warning('Offcentering calculation is only available when two encoders are operating. Skipped.')
-            return None
+            return
         # Run the template subtraction if not processed yet.
         if not 'fast_time_raw' in solved.keys():
             logger.info('Running the template subtraction for the 1st encoder.')
@@ -615,16 +615,13 @@ class G3tHWP():
         period = (solved["fast_time"][idx1+1]-solved["fast_time"][idx1])*self._num_edges
         offset_angle = offset_time/period*2*np.pi
         offcentering = np.tan(offset_angle)*self._encoder_disk_radius
-        
-        out = {}
-        out['idx1'] = idx1
-        out['idx2'] = idx2
-        out['offcentering'] = offcentering
-        out['offset_time'] = offset_time
 
-        return out
+        solved['idx1'] = idx1
+        solved['idx2'] = idx2
+        solved['offcentering'] = offcentering
+        solved['offset_time'] = offset_time
 
-    def correct_offcentering(self, solved, offcentering=None):
+    def correct_offcentering(self, solved):
         """
         Correct the timing of solved['fast_time'] which is delayed (advanced) by the offcentering.
 
@@ -633,7 +630,6 @@ class G3tHWP():
         solved: dict
             dict solved from eval_angle
             {fast_time, angle, fast_time_2, angle_2, ...}
-        offcentering: dict
             dict solved from eval_offcentering
             {idx1, idx2, offcentering, offset_time}
 
@@ -652,36 +648,33 @@ class G3tHWP():
                 * Offcentering (mm) at solved['fast_time(_2)'][idx1(2)].
             * offset_time: float
                 * Offset time of the encoder signals induced by the offcentering.
-                * Offset time is the delayed (advanced) timing of the encoder1 (2) in sec.           
+                * Offset time is the delayed (advanced) timing of the encoder1 (2) in sec.
 
         * We should allow to correct the offcentering by external input, since offcentering measurement is not always available.
         """
 
         # Skip the correction when the offcentering estimation doesn't exist.
-        if offcentering == None:
-            logger.warning('Offcentering input does not exist. Offcentering correction is skipped.')
+        if 'offset_time' not in solved.keys():
+            logger.warning('Offcentering info does not exist. Offcentering correction is skipped.')
             return
         # Skip the calculation when the correction is already done.
         elif 'fast_time_v2' in solved.keys():
             logger.info('The offcentring correction is already completed. Skipped.')
             return
-        
-        idx1 = offcentering['idx1']
-        idx2 = offcentering['idx2']
-        offset_time = offcentering['offset_time']
-        
-        solved['fast_time'][idx1] - offset_time
-        solved['fast_time_2'][idx2] + offset_time
-        
+
+
+        solved['fast_time'][solved['idx1']] - solved['offset_time']
+        solved['fast_time_2'][solved['idx2']] + solved['offset_time']
+
         solved['fast_time_v2'] = solved['fast_time']
         solved['fast_time_v2_2'] = solved['fast_time_2']
-        solved['fast_time'] = solved['fast_time'][idx1] - offset_time
-        solved['fast_time_2'] = solved['fast_time_2'][idx2] + offset_time
+        solved['fast_time'] = solved['fast_time'][solved['idx1']] - solved['offset_time']
+        solved['fast_time_2'] = solved['fast_time_2'][solved['idx2']] + solved['offset_time']
+
         solved['angle_v2'] = solved['angle']
-        solved['angle'] = solved['angle'][idx1]
+        solved['angle'] = solved['angle'][solved['idx1']]
         solved['angle_v2_2'] = solved['angle_2']
-        solved['angle_2'] = solved['angle_2'][idx2]
-        solved['offcentering'] = offcentering['offcentering']
+        solved['angle_2'] = solved['angle_2'][solved['idx2']]
 
         return
 
