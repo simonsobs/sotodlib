@@ -30,6 +30,9 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         from bias steps and IVs. If None defaults to aman.det_cal.
     rfrac_range : Tuple
         Tuple (lower_bound, upper_bound) for rfrac det selection.
+    psat_range : Tuple
+        Tuple (lower_bound, upper_bound) for P_SAT from IV analysis.
+        P_SAT in the IV analysis is the bias power at 90% Rn in Watts.
     merge : bool
         If true, merges the generated flag into aman.
     overwrite : bool
@@ -39,8 +42,13 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
 
     Returns
     -------
-    mask : Boolean Array
-        Boolean mask that selects detector cuts. 
+    mask : RangesMatrix
+        RangesMatrix shaped N_dets x N_samps that is True is the detector
+        is flagged to be cut and false if it should be kept based on 
+        the rfrac, and psat ranges. To create a boolean mask from
+        the RangesMatrix that can be used for aman.restrict() use
+        ``keep = ~has_all_cut(mask)`` and then restrict with 
+        ``aman.restrict('dets', aman.dets.vals[keep])``.
     """
     if detcal is None:
         if 'det_cal' not in aman:
