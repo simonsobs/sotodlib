@@ -15,6 +15,74 @@ from . import filters
 from . import fourier_filter
 
 
+def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
+                      psat_range=(0, 15), merge=True, overwrite=True,
+                      name='det_bias_flags'):
+    """
+    Function for selecting detectors in appropriate bias range.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        Input axis manager.
+    detcal : AxisManager
+        AxisManager containing detector calibration information
+        from bias steps and IVs. If None defaults to aman.det_cal.
+    rfrac_range : Tuple
+        Tuple (lower_bound, upper_bound) for rfrac det selection.
+    psat_range : Tuple
+        Tuple (lower_bound, upper_bound) for P_SAT from IV analysis.
+        P_SAT in the IV analysis is the bias power at 90% Rn in pW.
+    merge : bool
+        If true, merges the generated flag into aman.
+    overwrite : bool
+        If true, write over flag. If false, don't.
+    name : str
+        Name of flag to add to aman.flags if merge is True.
+
+    Returns
+    -------
+    mask : RangesMatrix
+        RangesMatrix shaped N_dets x N_samps that is True is the detector
+        is flagged to be cut and false if it should be kept based on 
+        the rfrac, and psat ranges. To create a boolean mask from
+        the RangesMatrix that can be used for aman.restrict() use
+        ``keep = ~has_all_cut(mask)`` and then restrict with 
+        ``aman.restrict('dets', aman.dets.vals[keep])``.
+    """
+    if detcal is None:
+        if 'det_cal' not in aman:
+            raise ValueError("AxisManager missing required 'det_cal' field " 
+                             "with detector calibration information")
+        detcal = aman.det_cal
+
+    if 'flags' not in aman:
+        overwrite = False
+        merge = False
+    if overwrite and name in aman.flags:
+        aman.flags.move(name, None)
+    
+    msk = np.all([detcal.bg >= 0,
+                  detcal.r_tes > 0,
+                  detcal.r_frac >= rfrac_range[0],
+                  detcal.r_frac <= rfrac_range[1],
+                  detcal.p_sat*1e12 >= psat_range[0],
+                  detcal.p_sat*1e12 <= psat_range[1]], axis=0)
+    # Expand mask to ndets x nsamps RangesMatrix
+    x = Ranges(aman.samps.count)
+    mskexp = RangesMatrix([Ranges.ones_like(x) if Y
+                           else Ranges.zeros_like(x) for Y in msk])
+    
+    if merge:
+        if name in aman.flags and not overwrite:
+            raise ValueError(f"Flag name {name} already exists in aman.flags")
+        if name in aman.flags:
+            aman.flags[name] = mskexp
+        else:
+            aman.flags.wrap(name, mskexp, [(0, 'dets'), (1, 'samps')])
+    
+    return mskexp
+
 def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
                          merge=True, merge_lr=True, overwrite=True, 
                          t_buffer=2., kernel_size=400, peak_threshold=0.1, rel_distance_peaks=0.3,
