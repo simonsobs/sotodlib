@@ -32,7 +32,7 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         Tuple (lower_bound, upper_bound) for rfrac det selection.
     psat_range : Tuple
         Tuple (lower_bound, upper_bound) for P_SAT from IV analysis.
-        P_SAT in the IV analysis is the bias power at 90% Rn in Watts.
+        P_SAT in the IV analysis is the bias power at 90% Rn in pW.
     merge : bool
         If true, merges the generated flag into aman.
     overwrite : bool
