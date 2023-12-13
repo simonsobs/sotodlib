@@ -131,7 +131,7 @@ def setup_filter_poly1d(operators):
         None
 
     """
-    operators.append(toast.ops.PolyFilter(name="polyfilter1D"))
+    operators.append(toast.ops.PolyFilter(name="polyfilter1D", enabled=False))
 
 
 @workflow_timer

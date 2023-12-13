@@ -38,12 +38,14 @@ def setup_demodulate(operators):
             nbin_psd=64,
             nsum=1,
             naverage=64,
+            enabled=False,
         )
     )
     operators.append(
         toast.ops.FitNoiseModel(
             name="demod_noise_estim_fit",
             out_model="demod_noise_fit",
+            enabled=False,
         )
     )
 

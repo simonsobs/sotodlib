@@ -72,6 +72,7 @@ def setup_flag_noise_outliers(operators):
         toast.ops.FitNoiseModel(
             name="noise_cut_fit",
             out_model="noise_cut_fit",
+            enabled=False,
         )
     )
     operators.append(
@@ -79,6 +80,7 @@ def setup_flag_noise_outliers(operators):
             name="noise_cut_flag",
             sigma_NET=5.0,
             sigma_fknee=5.0,
+            enabled=False,
         )
     )
 
