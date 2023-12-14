@@ -327,6 +327,26 @@ class FlagTurnarounds(_Preprocess):
     """
     name = 'flag_turnarounds'
     
+    def calc_and_save(self, aman, proc_aman):
+        if self.calc_cfgs['method'] == 'scanspeed':
+            ta, left, right = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
+            turn_aman = core.AxisManager(aman.dets, aman.samps)
+            turn_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
+            turn_aman.wrap('left_scan', left, [(0, 'dets'), (1, 'samps')])
+            turn_aman.wrap('right_scan', right, [(0, 'dets'), (1, 'samps')])
+            self.save(proc_aman, turn_aman)
+        if self.calc_cfgs['method'] == 'az':
+            ta = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
+            turn_aman = core.AxisManager(aman.dets, aman.samps)
+            turn_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
+            self.save(proc_aman, turn_aman)
+
+    def save(self, proc_aman, turn_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("turnaround_flags", turn_aman)
+
     def process(self, aman, proc_aman):
         tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
         
