@@ -2,6 +2,7 @@ import numpy as np
 
 import sotodlib.core as core
 import sotodlib.tod_ops as tod_ops
+import sotodlib.coords as coords
 from sotodlib.hwp import hwp
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
@@ -341,6 +342,12 @@ class SubPolyf(_Preprocess):
     def process(self, aman, proc_aman):
         tod_ops.sub_polyf.subscan_polyfilter(aman, **self.process_cfgs)
 
+class FlagSource(_Preprocess):
+    name = 'source_flag'
+    
+    def process(self, aman, proc_aman):
+        coords.planets.compute_source_flags(aman, **self.process_cfgs)
+
 _Preprocess.register(Trends.name, Trends)
 _Preprocess.register(FFTTrim.name, FFTTrim)
 _Preprocess.register(Detrend.name, Detrend)
@@ -357,3 +364,4 @@ _Preprocess.register(GlitchFill.name, GlitchFill)
 _Preprocess.register(FlagTurnarounds.name, FlagTurnarounds)
 _Preprocess.register(SubPolyf.name, SubPolyf)
 _Preprocess.register(DetBiasFlags.name, DetBiasFlags)
+_Preprocess.register(FlagSource.name, FlagSource)

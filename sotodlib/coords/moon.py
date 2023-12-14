@@ -11,7 +11,7 @@ from pixell import enmap
 import h5py
 from scipy.ndimage.filters import maximum_filter
 
-def get_moon_trajectry(tod, _split=20):
+def get_moon_trajectry(tod, _split=20, return_model=False):
     timestamps_sparse = np.linspace(tod.timestamps[0], tod.timestamps[-1], _split)
     
     moon_az_sparse = np.zeros_like(timestamps_sparse)
@@ -22,11 +22,13 @@ def get_moon_trajectry(tod, _split=20):
         moon_el_sparse[i] = el
     moon_az_func = interpolate.interp1d(timestamps_sparse, moon_az_sparse, kind="quadratic", fill_value='extrapolate')
     moon_el_func = interpolate.interp1d(timestamps_sparse, moon_el_sparse, kind="quadratic", fill_value='extrapolate')
-    moon_az = moon_az_func(tod.timestamps)
-    moon_el = moon_el_func(tod.timestamps)
-    
-    q_moon = quat.rotation_lonlat(moon_az, moon_el)
-    return q_moon
+    if return_model:
+        return moon_az_func, moon_el_func
+    else:
+        moon_az = moon_az_func(tod.timestamps)
+        moon_el = moon_el_func(tod.timestamps)
+        q_moon = quat.rotation_lonlat(moon_az, moon_el)
+        return q_moon
 
 def get_det_centered_sight(tod, q_moon=None, q_bs=None, q_dets=None,):
     if q_moon is None:
