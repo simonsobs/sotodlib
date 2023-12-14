@@ -27,6 +27,7 @@ def setup_mapmaker(operators, templates):
         toast.templates.Offset(
             name="baselines",
             step_time=2.0 * u.second,
+            enabled=False,
         )
     )
     templates.append(
