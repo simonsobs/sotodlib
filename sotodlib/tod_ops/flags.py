@@ -247,7 +247,14 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         else:
             print(ta_flag)
             aman.flags.wrap(name, ta_flag)   
-    return ta_flag
+    if method == 'az':
+        ta_exp = RangesMatrix([ta_flag for i in range(aman.dets.count)])
+        return ta_exp
+    if method == 'scanspeed':
+        ta_exp = RangesMatrix([ta_flag for i in range(aman.dets.count)])
+        left_exp = RangesMatrix([left_flag for i in range(aman.dets.count)])
+        right_exp = RangesMatrix([right_flag for i in range(aman.dets.count)])
+        return ta_exp, left_exp, right_exp
     
 def get_glitch_flags(aman,
                      t_glitch=0.002,
