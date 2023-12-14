@@ -40,7 +40,7 @@ command line wrapper, edit ``cli.py`` and see comments inline.
 import argparse
 
 from . import (
-    analyze_bright_ptsrc,
+    # analyze_bright_ptsrc,
     check_book,
     make_det_info_wafer,
     make_source_flags,
@@ -50,7 +50,7 @@ from . import (
     update_obsdb,
     make_cosamp_hk
     make_ml_map,
-    make_filterbin_map
+    make_filterbin_map,
 )
 
 # Dictionary matching element name to a submodule (which must have
@@ -59,7 +59,7 @@ from . import (
 # the module comments above.
 
 ELEMENTS = {
-    'analyze-bright-ptsrc': analyze_bright_ptsrc,
+    #'analyze-bright-ptsrc': analyze_bright_ptsrc,
     'check-book': check_book,
     'make-det-info-wafer': make_det_info_wafer,
     'make-source-flags': make_source_flags,
@@ -69,7 +69,7 @@ ELEMENTS = {
     'update-obsdb': update_obsdb,
     'make-cosamp-hk': make_cosamp_hk,
     'make-ml-map': make_ml_map,
-    'make-filterbin-map': make_filterbin_map
+    'make-filterbin-map': make_filterbin_map,
 }
 
 CLI_NAME = 'so-site-pipeline'
