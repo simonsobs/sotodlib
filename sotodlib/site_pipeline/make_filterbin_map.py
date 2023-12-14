@@ -19,6 +19,7 @@ def get_parser(parser=None):
     parser.add_argument("odir", help='output directory')
     parser.add_argument("--mode", type=str, default='per_obs')
     parser.add_argument("--comps",   type=str, default="TQU")
+    parser.add_argument("--singlestream", action="store_true")
     
     # detector position splits (fixed in time)
     parser.add_argument("--det-in-out", action="store_true")
@@ -80,8 +81,8 @@ def find_scan_profile(context, my_tods, my_infos, comm=mpi.COMM_WORLD, npoint=10
         eta0 = np.mean(utils.minmax(fp.eta))
         # Build a boresight corresponding to a single az sweep at constant time
         # CARLOS: change throw with span for now
-        azs  = info.az_nom + np.linspace(-info.az_span/2, info.az_span/2, npoint)
-        els  = np.full(npoint, info.el_nom)
+        azs  = info.az_center + np.linspace(-info.az_throw/2, info.az_throw/2, npoint)
+        els  = np.full(npoint, info.el_center)
         profile[:] = tele2equ(np.array([azs, els])*utils.degree, info.timestamp, detoffs=[xi0, eta0]).T[1::-1] # dec,ra
     comm.Bcast(profile, root=first)
     return profile
@@ -118,34 +119,41 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
 def calibrate_obs(obs, dtype_tod=np.float32):
     # The following stuff is very redundant with the normal mapmaker,
     # and should probably be factorized out
-    mapmaking.fix_boresight_glitches(obs)
+    #mapmaking.fix_boresight_glitches(obs)
     srate = (obs.samps.count-1)/(obs.timestamps[-1]-obs.timestamps[0])
     # Add site and weather, since they're not in obs yet
     obs.wrap("weather", np.full(1, "toco"))
-    obs.wrap("site",    np.full(1, "so"))
+    obs.wrap("site",    np.full(1, "so_sat1"))
     # CARLOS: We have to add glitch_flags by hand
-    obs.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape),[(0, 'dets'), (1, 'samps')])
-    obs.restrict("samps", [0, fft.fft_len(obs.samps.count)])
-    # CARLOS: I had to do this because for some reason when I load a tod with no_signal=True obs.signal raises a keyerror instead of being None
-    try:
-        obs.signal
-        has_signal = True
-    except KeyError:
-        has_signal = False
-    if has_signal == True:
-    #if obs.signal is not None:
+    obs = obs.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape[:2]),[(0, 'dets'), (1, 'samps')])
+    obs = obs.restrict("samps", [0, fft.fft_len(obs.samps.count)])
+    
+    if obs.signal is not None:
+        # FLAGS
+        tod_ops.flags.get_turnaround_flags(obs)
+        tod_ops.flags.get_det_bias_flags(obs)
+        
+        # DETRENDING
+        tod_ops.detrend.detrend_tod(obs, in_place=True)
         utils.deslope(obs.signal, w=5, inplace=True)
         obs.signal = obs.signal.astype(dtype_tod)
     # Disqualify overly cut detectors
-    good_dets = mapmaking.find_usable_detectors(obs)
-    obs.restrict("dets", good_dets)
-    #if obs.signal is not None and len(good_dets) > 0:
-    if has_signal and len(good_dets) > 0:
+    #good_dets = mapmaking.find_usable_detectors(obs)
+    #obs.restrict("dets", good_dets)
+    
+    # remove detectors with an std greater than 5
+    #if obs.signal is not None:
+    #    mask = np.std(obs.signal, axis=1) > 0.01
+    #    good_dets = obs.dets.vals[mask]
+    #    obs.restrict("dets", good_dets)
+
+    if obs.signal is not None and len(good_dets) > 0:
         # Gain calibration
         gain  = 1
         # CARLOS: no calibration in sims for the moment, so we skip everything for now
         #for gtype in ["relcal","abscal"]:
-        #    gain *= obs[gtype][:,None]
+        #for gtype in ["phase_to_pW"]:
+        #    gain *= obs.det_cal[gtype][:,None]
         obs.signal *= gain
         # Fourier-space calibration
         #fsig  = fft.rfft(obs.signal)
@@ -172,20 +180,18 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False,
         obs_id, detset, band, obs_ind = obslist[ind]
         try:
             # CARLOS: I change how the wafers are loaded
-            tod = context.get_obs(obs_id, dets={"wafer_slot" : [detset], "band":band}, no_signal=no_signal )
-            #tod = context.get_obs(obs_id, dets={"detset":detset+'_'+band, "band":band}, no_signal=no_signal)
+            #tod = context.get_obs(obs_id, dets={"wafer_slot" : [detset], "band":band}, no_signal=no_signal )
+            tod = context.get_obs(obs_id, dets={"stream_id":detset, "bandpass":band}, no_signal=no_signal)
             #det_mask = np.logical_and(0 < np.degrees(tod.focal_plane.gamma), np.degrees(tod.focal_plane.gamma)< 10 )
             #det_mask = np.logical_and(50 < np.degrees(tod.focal_plane.gamma), np.degrees(tod.focal_plane.gamma)< 55 )
-            #tod = context.get_obs(obs_id, dets={"detset":detset+'_'+band, "band":band, 'readout_id':tod.det_info.readout_id[det_mask]}, no_signal=no_signal)
-            #tod.focal_plane.gamma *= -1
-            
+            #tod = context.get_obs(obs_id, dets={"detset":detset+'_'+band, "band":band, 'readout_id':tod.det_info.readout_id[det_mask]}, no_signal=no_signal)         
             tod = calibrate_obs(tod, dtype_tod=dtype_tod)
             my_tods.append(tod)
             my_inds.append(ind)
         except RuntimeError: continue
     return my_tods, my_inds
 
-def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", verbose=0, det_split_masks=None, split_labels=None, time_split_leftright=False):
+def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", verbose=0, det_split_masks=None, split_labels=None, time_split_leftright=False, singlestream=False):
     #det_split_masks is the dictionary that contains detector masks for each split we want to make. Each key has format wafer_split, e.g. w25_left, w26_upper, w27_in. We need to figure out how many split we'll make 2 per split mode.
     L = logging.getLogger(__name__)
     pre = "" if tag is None else tag + " "
@@ -193,13 +199,13 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
     # Set up our mapmaking equation
     if split_labels==None:
         # this is the case where we did not request any splits at all
-        signal_map = mapmaking.DemodSignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=False, ofmt="", )
+        signal_map = mapmaking.DemodSignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=False, ofmt="", singlestream=singlestream )
     else:
         # this is the case where we asked for at least 2 splits (1 split set). We count how many split we'll make, we need to define the Nsplits maps inside the DemodSignalMap
         Nsplits = len(split_labels)
-        signal_map = mapmaking.DemodSignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=False, ofmt="", Nsplits=Nsplits)
+        signal_map = mapmaking.DemodSignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=False, ofmt="", Nsplits=Nsplits, singlestream=singlestream)
     signals    = [signal_map]
-    mapmaker   = mapmaking.DemodMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0)
+    mapmaker   = mapmaking.DemodMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0, singlestream=singlestream)
     if comm.rank == 0: L.info(pre + "Building RHS")
     time_rhs   = signal_map.rhs*0 # this has an extra axis now for different splits, because signal_map.rhs does
     # And feed it with our observations
@@ -210,8 +216,8 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         # Read in the signal too. This seems to read in all the metadata from scratch,
         # which is pointless, but shouldn't cost that much time.
         # CARLOS: modify how the wafer is read
-        obs = context.get_obs(obs_id, dets={"wafer_slot" : [detset], "band":band})
-        #obs = context.get_obs(obs_id, dets={"detset":detset+'_'+band, "band":band})
+        #obs = context.get_obs(obs_id, dets={"wafer_slot" : [detset], "band":band})
+        obs = context.get_obs(obs_id, dets={"stream_id":detset, "bandpass":band}, )
         #det_mask = np.logical_and(0 < np.degrees(obs.focal_plane.gamma), np.degrees(obs.focal_plane.gamma)<10)
         # = np.logical_and(50 < np.degrees(obs.focal_plane.gamma), np.degrees(obs.focal_plane.gamma)<55)
         #obs = context.get_obs(obs_id, dets={"detset":detset+'_'+band, "band":band, 'readout_id':obs.det_info.readout_id[det_mask]})
@@ -220,14 +226,17 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         obs = calibrate_obs(obs, dtype_tod=dtype_tod)
         
         # demodulate
-        hwp.demod_tod(obs)
-        # flip demodU
-        #obs.demodU *= -1
+        if singlestream == False:
+            hwp.demod_tod(obs)
         
         # filter 
-        #obs.dsT    = filters.fourier_filter(obs, filters.high_pass_butter4(0.5), signal_name='dsT')
-        #obs.demodQ = filters.fourier_filter(obs, filters.high_pass_butter4(0.5), signal_name='demodQ')
-        #obs.demodU = filters.fourier_filter(obs, filters.high_pass_butter4(0.5), signal_name='demodU')
+        if singlestream:
+            obs.signal = filters.fourier_filter(obs, filters.high_pass_sine2(0.5))
+        else:
+            #obs.dsT    = filters.fourier_filter(obs, filters.high_pass_sine2(0.5), signal_name='dsT')
+            #obs.demodQ = filters.fourier_filter(obs, filters.high_pass_sine2(0.5), signal_name='demodQ')
+            #obs.demodU = filters.fourier_filter(obs, filters.high_pass_sine2(0.5), signal_name='demodU')
+            pass
                 
         if obs.dets.count == 0: continue
         
@@ -293,14 +302,14 @@ def write_depth1_map(prefix, data, split_labels=None):
         # we have no splits, so we save index 0 of the lists
         data.signal.write(prefix, "map",  data.map[0])
         data.signal.write(prefix, "ivar", data.ivar[0])
-        data.signal.write(prefix, "time", data.tmap[0])
+        #data.signal.write(prefix, "time", data.tmap[0])
     else:
         # we have splits
         Nsplits = len(split_labels)
         for n_split in range(Nsplits):
             data.signal.write(prefix, "%s_map"%split_labels[n_split],  data.map[n_split])
             data.signal.write(prefix, "%s_ivar"%split_labels[n_split], data.ivar[n_split])
-            data.signal.write(prefix, "%s_time"%split_labels[n_split], data.tmap[n_split])
+            #data.signal.write(prefix, "%s_time"%split_labels[n_split], data.tmap[n_split])
 
 def write_depth1_info(oname, info):
     utils.mkdir(os.path.dirname(oname))
@@ -345,7 +354,7 @@ def handle_empty(prefix, tag, comm, e):
         utils.mkdir(os.path.dirname(prefix))
         with open(prefix + ".empty", "w") as ofile: ofile.write("\n")
     
-def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='TQU', det_in_out=False, det_left_right=False, det_upper_lower=False, ntod=None, tods=None, nset=None, max_dets=None, fixed_time=None, mindur=None, tasks_per_group=1, site='so_sat1', verbose=0, quiet=0, window=5.0, cont=False, dtype_tod=np.float32, dtype_map=np.float64):
+def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='TQU', det_in_out=False, det_left_right=False, det_upper_lower=False, ntod=None, tods=None, nset=None, max_dets=None, fixed_time=None, mindur=None, tasks_per_group=1, site='so_sat1', verbose=0, quiet=0, window=5.0, cont=False, dtype_tod=np.float32, dtype_map=np.float64, singlestream=False):
     warnings.simplefilter('ignore')
     # Set up our communicators
     comm       = mpi.COMM_WORLD
@@ -437,7 +446,7 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         if len(my_inds) == 0: continue
         #try:
             # 5. make the maps
-        mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds], subshape, subwcs, noise_model, t0=t, comm=comm_good, tag=tag, dtype_map=dtype_map, dtype_tod=dtype_tod, comps=comps, verbose=verbose, det_split_masks=det_split_masks, split_labels=split_labels)
+        mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds], subshape, subwcs, noise_model, t0=t, comm=comm_good, tag=tag, dtype_map=dtype_map, dtype_tod=dtype_tod, comps=comps, verbose=verbose, det_split_masks=det_split_masks, split_labels=split_labels, singlestream=singlestream)
             # 6. write them
         write_depth1_map(prefix, mapdata, split_labels=split_labels, )
         #except DataMissing as e:
