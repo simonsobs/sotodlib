@@ -10,7 +10,7 @@ def find_scan_periods(obs_info, ttol=60, atol=2*utils.degree, mindur=120):
     """Given a scan db, return the set of contiguous scanning periods in the form
     [:,{ctime_from,ctime_to}]."""
     atol = atol/utils.degree
-    info = np.array([obs_info[a] for a in ["az_nom", "el_nom", "az_span", "timestamp", "duration"]]).T
+    info = np.array([obs_info[a] for a in ["az_center", "el_center", "az_throw", "timestamp", "duration"]]).T
     # Get rid of nan entries
     bad  = np.any(~np.isfinite(info),1)
     # get rid of too short tods, since those don't have reliable az bounds
@@ -97,7 +97,7 @@ def split_periods(periods, maxdur):
     t2     = np.minimum(periods[group,0]+(sub+1)*maxdur, periods[group,1])
     return np.array([t1,t2]).T
 
-def build_period_obslists(obs_info, periods, nset=None):
+def build_period_obslists(obs_info, periods, context, nset=None):
     """For each period for each detset-band, make a list of (id,detset,band)
     for the ids that fall inside that period. Returns a dictionary
     that maps (pid,deset,band) to those lists. pid is here the index into
@@ -112,17 +112,21 @@ def build_period_obslists(obs_info, periods, nset=None):
         # CARLOS: the names of the wafers included are in the "wafer_slots", like "w25,w26,..." 
         #listt = ['w25','w26','w27','w28','w29','w30','w31']
         #for detset_band in listt[0:nset]:
-        for detset_band in row.wafer_slots.split(",")[0:nset]: # CARLOS: this is to limit the number of detsets
-        #for detset_band in row.detsets.split(","):
-            #detset, band = detset_band.split(":")
-            band = row.obs_id.split('_')[2] # CARLOS: we get the band name from the obs_id, which has the format ctime_tube_band_11111
-            detset = detset_band
-            key = (pids[i], detset, band)
-            if key not in obslists: obslists[key] = []
-            # A bit redundant to have detset and band here too, but it
-            # makes the concept of an obslist more general, not just
-            # tied to this particular dictionary
-            obslists[key].append((row.obs_id, detset, band, i))
+        wafer_list = context.obsfiledb.get_detsets(row.obs_id)
+        band_list = ['f090', 'f150']
+        #for detset_band in row.wafer_slots.split(",")[0:nset]: # CARLOS: this is to limit the number of detsets
+        for detset in wafer_list[0:nset]:
+            for band in band_list:
+                #detset, band = detset_band.split(":")
+                #band = row.obs_id.split('_')[2] # CARLOS: we get the band name from the obs_id, which has the format ctime_tube_band_11111
+                array = detset.split('_')
+                detset = array[0]+'_'+array[1]
+                key = (pids[i], detset, band)
+                if key not in obslists: obslists[key] = []
+                # A bit redundant to have detset and band here too, but it
+                # makes the concept of an obslist more general, not just
+                # tied to this particular dictionary
+                obslists[key].append((row.obs_id, detset, band, i))
     return obslists
 
 def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, fixed_time=None, mindur=None, det_in_out=False, det_left_right=False, det_upper_lower=False ):
@@ -203,7 +207,6 @@ def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, f
             split_labels.append('detout')
         # get the list of wafers
         wafer_list = obs_infos[0].wafer_slots.split(",")[0:nset]
-        #print(wafer_list)
         for wafer in wafer_list:
             meta = context.get_meta(obs_id=ids[0], dets={"wafer_slot" : [wafer]})
             if det_left_right or det_in_out:
@@ -230,6 +233,6 @@ def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, f
                 det_split_masks[wafer+'_detout'] = radii > radius_median
 
     # We will make one map per period-detset-band
-    obslists = build_period_obslists(obs_infos, periods, nset=nset)
+    obslists = build_period_obslists(obs_infos, periods, context, nset=nset)
     obskeys  = sorted(obslists.keys())
     return obslists, obskeys, periods, obs_infos, det_split_masks, split_labels
