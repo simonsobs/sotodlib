@@ -321,13 +321,21 @@ class GlitchFill(_Preprocess):
 
 class FlagTurnarounds(_Preprocess):
     """From the Azimuth encoder data, flag turnarounds, left-going, and right-going.
-        All process configs go to `get_turnaround_flags`.
+        All process configs go to ``get_turnaround_flags``. If the ``method`` key
+        is not included in the preprocess config file calc configs then it will
+        default to 'scanspeed'.
     
     .. autofunction:: sotodlib.tod_ops.flags.get_turnaround_flags
     """
     name = 'flag_turnarounds'
     
     def calc_and_save(self, aman, proc_aman):
+        if self.calc_cfgs is None:
+            self.calc_cfgs = {}
+            self.calc_cfgs['method'] = 'scanspeed'
+        elif not('method' in self.calc_cfgs):
+            self.calc_cfgs['method'] = 'scanspeed'
+
         if self.calc_cfgs['method'] == 'scanspeed':
             ta, left, right = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
             turn_aman = core.AxisManager(aman.dets, aman.samps)
