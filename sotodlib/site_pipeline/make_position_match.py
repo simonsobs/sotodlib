@@ -13,6 +13,7 @@ from scipy.cluster import vq
 from scipy.optimize import linear_sum_assignment
 from sotodlib.coords import affine as af
 from sotodlib.coords import optics as op
+from sotodlib.coords.det_match import get_north_is_highband
 from sotodlib.core import AxisManager, Context, metadata
 from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
@@ -281,6 +282,7 @@ def match_template(
 
     if vis:
         frames = []
+
         def store_frames(target, transformed, iteration, error, frames):
             frames += [[target, transformed, iteration, error]]
 
@@ -315,15 +317,13 @@ def match_template(
     P_msk = _P > np.median(_P)
     aff, sft = af.get_affine(source[P_msk].T, target[mapping][P_msk].T)
     transformed = (aff @ (source.T) + sft[..., None]).T
-    
+
     if vis:
-        frames += [[target, transformed, 0, 0]] # type: ignore 
-        fig, ax = fig, fig.axes[0] # type: ignore
+        frames += [[target, transformed, 0, 0]]  # type: ignore
+        fig, ax = fig, fig.axes[0]  # type: ignore
         anim = ani.FuncAnimation(
             fig=fig,
-            func=partial(
-                visualize, frames=frames, ax=ax, bias_lines=bias_lines
-            ),
+            func=partial(visualize, frames=frames, ax=ax, bias_lines=bias_lines),
             frames=len(frames),
             interval=200,
         )
@@ -332,7 +332,6 @@ def match_template(
             plt.close()
         else:
             plt.show()
-
 
     return mapping, P, transformed
 
@@ -433,7 +432,7 @@ def _load_template(template_path, ufm):
     )[msk]
     template_n = template_rset["is_north"][msk]
 
-    return det_ids, template, ~template_n
+    return det_ids, template, template_n
 
 
 def _load_bg(aman, bg_path):
@@ -713,6 +712,9 @@ def main():
             logger.info(
                 "%d detectors have bias lines that don't match the detmap", bl_diff
             )
+        if get_north_is_highband(aman[pointing_name]["band"], bias_group):
+            template_n = np.logical_not(template_n)
+            template_msks = [template_n, np.logical_not(template_n)]
     else:
         have_bgmap = False
         bias_group = np.nan + np.zeros(aman.dets.count)
