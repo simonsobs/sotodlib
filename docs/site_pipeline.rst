@@ -97,6 +97,34 @@ Module documentation
    :members:
    :undoc-members:
 
+update-smurf-caldbs
+-----------------------
+This update script is used to add detset and calibration metadata to manifest
+dbs
+
+Module Docs
+`````````````````````````
+.. automodule:: sotodlib.site_pipeline.update_smurf_caldbs
+   :no-members:
+  
+The calibration info described below is used to populate the calibration db.
+For more information on how calibration info is computed in sodetlib, checkout
+the following docs and source code:
+
+- `Bias step docs <https://sodetlib.readthedocs.io/en/latest/operations/bias_steps.html>`_
+- `IV docs <https://sodetlib.readthedocs.io/en/latest/operations/iv.html>`_
+- `sodetlib source code <https://github.com/simonsobs/sodetlib>`_
+
+.. autoclass:: sotodlib.site_pipeline.update_smurf_caldbs.CalInfo
+   :no-members:
+
+Command line arguments
+`````````````````````````
+.. argparse::
+   :module: sotodlib.site_pipeline.update_smurf_caldbs
+   :func: get_parser
+   :prog: update_smurf_caldbs.py
+
 Detector and Readout ID Mapping
 -------------------------------
 
@@ -107,13 +135,27 @@ resulting ManifestDbs should work for both level 2 and level 3 SMuRf data.
 
 make_det_info_wafer
 ```````````````````
-This script uses the DetMap software package to build detector IDs for a set of
+This script uses based array construction inputs to build detector IDs for a set of
 UFMs and save them in a ManifestDb / HDF5 file. The formatting of the ResultSet 
 saved in HDF5 file will map all this information into ``det_info.wafer`` when used 
 with a correctly formatted context file and a readout to detector id mapping.
 The detector info mapping created by this script will be stable as long as the
 same UFMs are used in the same optics tube positions, meaning it only needs to
 be re-made if the physical hardware setup changes. 
+
+Although the full config presented for ``make_read_det_match`` will
+work, here's a more basic example that will work::
+
+  det_db: "./det_info_wafer.db"
+  det_info: "./det_info_wafer.h5"
+  array_info_dir: "/home/so/git/site-pipeline-configs/shared/detmapping/design/"
+
+  arrays:
+    - name: mv7
+      stream_id: ufm_mv7
+    - name: mv9
+      stream_id: ufm_mv9
+
 
 make_read_det_match
 ```````````````````
@@ -643,6 +685,107 @@ Command line arguments
     :func: get_parser
     :prog: make_hwp_solutions
 
+
+make-ml-map
+-----------
+
+This submodule can be used to call the maximum likelihood mapmaker.
+The mapmaker will produce ``bin``, ``div`` and ``sky`` maps. The mapmaker
+has several different flags (see the example config file below) that can
+be passed via the CLI or a ``config.yaml`` file. If an argument is not 
+specified, a value is selected from a set of defaults.
+
+The arguments ``freq``,  ``area`` and ``context`` are required; they should
+either be supplied through the CLI or the ``config.yaml``.
+
+Command line arguments
+``````````````````````
+.. argparse::
+   :module: sotodlib.site_pipeline.make_ml_map
+   :func: get_parser
+
+
+
+Default Mapmaker Values
+```````````````````````
+The following code block contains the hard-coded default values for non-
+essential mapmaker arguments. The can be overidden in the CLI or in the
+``config.yaml``.
+   
+.. code-block:: python 
+
+        defaults = {"query": "1",
+                    "comps": "T",
+                    "ntod": None,
+                    "tods": None,
+                    "nset": None,
+                    "site": 'so_lat',
+                    "nmat": "corr",
+                    "max_dets": None,
+                    "verbose": 0,
+                    "quiet": 0,
+                    "center_at": None,
+                    "window": 0.0,
+                    "inject": None,
+                    "nocal": True,
+                    "nmat_dir": "/nmats",
+                    "nmat_mode": "build",
+                    "downsample": 1,
+                    "maxiter": 500,
+                    "tiled": 1,
+                    "wafer": None,
+                   }
+
+
+
+Config file format
+``````````````````
+
+Example of a config file:
+
+.. code-block:: yaml
+       
+         # Query
+        query: "1"
+
+        # Context file containing TODs
+        context: 'context.yaml'
+
+        # Telescope info
+        freq: 'f150'
+        site: 'so_lat'
+
+        # Mapping area footprint
+        area: 'geometry.fits'
+
+        # Output Directory and file name prefix
+        odir: './output/'
+        prefix: 'my_maps'
+
+        # Detectors info. null by default
+        tods: [::100] # Restrict TOD selections by index
+        ntod: 3 # Special case of `tods` above. Implemented as follows: [:ntod]
+        nset: 10 # Number of detsets kept
+        max-dets: 200 # Maximum dets kept
+        wafer: 'w17' # Restrict which wafers are mapped. Can do multiple wafers
+
+        # Mapmaking meta
+        comps: 'T' # TQU
+        inject: null 
+        nocal: True # No relcal or abscal
+        downsample: 1 # Downsample TOD by this factor
+        tiled: 0 # Tiling boolean (0 or 1)
+        nmat-dir: './nmats/' # Dir to save or load nmat
+        nmat: 'corr' # 'corr' or 'uncorr' 
+        maxiter: 500 # Max number of iterative steps
+        nmat_mode: 'build' # 'cache', 'build', 'load' or 'save'
+        center_at: null 
+        window: 0.0
+        inject: null
+
+        # Scripting tools
+        verbose: True
+        quiet: False
 
 
 QDS Monitor

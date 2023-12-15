@@ -244,6 +244,8 @@ class SOFocalplane(Focalplane):
             pol_angs_wafer,
             pol_orientations_wafer,
             gamma,
+            wafer_xs,
+            wafer_ys,
             card_slots,
             channels,
             AMCs,
@@ -253,6 +255,8 @@ class SOFocalplane(Focalplane):
             mux_positions,
             tele_wf_band,
         ) = (
+            [],
+            [],
             [],
             [],
             [],
@@ -306,6 +310,8 @@ class SOFocalplane(Focalplane):
             pol_angs_wafer.append(det_data["pol_ang_wafer"] * u.degree)
             pol_orientations_wafer.append(det_data["pol_orientation_wafer"] * u.degree)
             gamma.append(det_data["pol_ang"] * u.degree)
+            wafer_xs.append(det_data["wafer_x_mm"] * u.mm)
+            wafer_ys.append(det_data["wafer_y_mm"] * u.mm)
             card_slots.append(det_data["card_slot"])
             channels.append(det_data["channel"])
             AMCs.append(det_data["AMC"])
@@ -380,6 +386,8 @@ class SOFocalplane(Focalplane):
                 pol_angs_wafer,
                 pol_orientations_wafer,
                 gamma,
+                wafer_xs,
+                wafer_ys,
                 channels,
                 AMCs,
                 biases,
@@ -413,6 +421,8 @@ class SOFocalplane(Focalplane):
                 "pol_ang_wafer",
                 "pol_orientation_wafer",
                 "gamma",
+                "wafer_x",
+                "wafer_y",
                 "channel",
                 "AMC",
                 "bias",

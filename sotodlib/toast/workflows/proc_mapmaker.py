@@ -45,7 +45,7 @@ def setup_mapmaker(operators, templates):
             name="binner_final", enabled=False, pixel_dist="pix_dist_final"
         )
     )
-    operators.append(toast.ops.MapMaker(name="mapmaker"))
+    operators.append(toast.ops.MapMaker(name="mapmaker", det_data=defaults.det_data))
 
 
 @workflow_timer
@@ -73,10 +73,9 @@ def mapmaker(job, otherargs, runargs, data):
     if job_ops.mapmaker.enabled:
         job_ops.mapmaker.binning = job_ops.binner
         job_ops.mapmaker.template_matrix = toast.ops.TemplateMatrix(
-            templates=[job_tmpls.baselines, job_tmpls.sss]
+            templates=[job_tmpls.baselines, job_tmpls.azss]
         )
         job_ops.mapmaker.map_binning = job_ops.binner_final
-        job_ops.mapmaker.det_data = job_ops.sim_noise.det_data
         job_ops.mapmaker.output_dir = otherargs.out_dir
         tmsg = "  "
         for tmpl in job_ops.mapmaker.template_matrix.templates:
@@ -93,7 +92,11 @@ def mapmaker(job, otherargs, runargs, data):
         # Noise model.  If noise estimation is not enabled, and no existing noise model
         # is found, then create a fake noise model with uniform weighting.
         noise_model = None
-        if job_ops.noise_estim.enabled and job_ops.noise_estim_fit.enabled:
+        if job_ops.demodulate.enabled:
+            # We will use the noise estimate made after demodulation
+            log.info_rank("  Using demodulated noise model", comm=data.comm.comm_world)
+            noise_model = job_ops.demod_noise_estim_fit.out_model
+        elif job_ops.noise_estim.enabled and job_ops.noise_estim_fit.enabled:
             # We have a noise estimate
             log.info_rank("  Using estimated noise model", comm=data.comm.comm_world)
             noise_model = job_ops.noise_estim_fit.out_model
@@ -130,6 +133,9 @@ def mapmaker(job, otherargs, runargs, data):
                 noise_model = "fake_noise"
         job_ops.binner.noise_model = noise_model
         job_ops.binner_final.noise_model = noise_model
+
+        if job_tmpls.baselines.enabled:
+            job_tmpls.noise_model = noise_model
 
         if otherargs.obsmaps:
             # Map each observation separately

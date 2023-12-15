@@ -1,7 +1,6 @@
 import numpy as np
 
 import sotodlib.core as core
-import sotodlib.flags as flags
 import sotodlib.tod_ops as tod_ops
 from sotodlib.hwp import hwp
 
@@ -30,7 +29,34 @@ class Detrend(_Preprocess):
     name = "detrend"
     def process(self, aman, proc_aman):
         tod_ops.detrend_tod(aman, **self.process_cfgs)
-        
+
+class DetBiasFlags(_Preprocess):
+    """
+    Derive poorly biased detectors from IV and Bias Step data. Save results
+    in proc_aman under the "det_bias_cuts" field. 
+
+    .. autofunction:: sotodlib.tod_ops.flags.get_det_bias_flags
+    """
+    name = "det_bias_flags"
+
+    def calc_and_save(self, aman, proc_aman):
+        msk = tod_ops.flags.get_det_bias_flags(aman, merge=False,
+                                               **self.calc_cfgs)
+        dbc_aman = core.AxisManager(aman.dets)
+        dbc_aman.wrap('det_bias_flags', msk, [(0, 'dets')])
+        self.save(proc_aman, dbc_aman)
+    
+    def save(self, proc_aman, dbc_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("det_bias_flags", dbc_aman)
+
+    def select(self, meta):
+        keep = ~meta.preprocess.det_bias_flags.det_bias_flags
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+
 class Trends(_Preprocess):
     """Calculate the trends in the data to look for unlocked detectors. All
     calculation configs go to `get_trending_flags`.
@@ -39,12 +65,12 @@ class Trends(_Preprocess):
 
     Data selection can have key "kind" equal to "any" or "all."
     
-    .. autofunction:: sotodlib.flags.get_trending_flags
+    .. autofunction:: sotodlib.tod_ops.flags.get_trending_flags
     """
     name = "trends"
     
     def calc_and_save(self, aman, proc_aman):
-        trend_cut, trend_aman = flags.get_trending_flags(
+        trend_cut, trend_aman = tod_ops.flags.get_trending_flags(
             aman, merge=False, full_output=True, 
             **self.calc_cfgs
         )
@@ -79,12 +105,12 @@ class GlitchDetection(_Preprocess):
     Data section should define a glitch significant "sig_glitch" and a maximum
     number of glitches "max_n_glitch."
 
-    .. autofunction:: sotodlib.flags.get_glitch_flags
+    .. autofunction:: sotodlib.tod_ops.flags.get_glitch_flags
     """
     name = "glitches"
     
     def calc_and_save(self, aman, proc_aman):
-        glitch_cut, glitch_aman = flags.get_glitch_flags(
+        glitch_cut, glitch_aman = tod_ops.flags.get_glitch_flags(
             aman, merge=False, full_output=True,
             **self.calc_cfgs
         ) 
@@ -255,7 +281,7 @@ class EstimateAzSS(_Preprocess):
     """
     name = "estimate_azss"
 
-    def calc_and_save(self, aman):
+    def calc_and_save(self, aman, proc_aman):
         azss_stats, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
         self.save(proc_aman, azss_stats)
     
@@ -293,6 +319,55 @@ class GlitchFill(_Preprocess):
         tod_ops.gapfill.fill_glitches(aman, signal=signal, glitch_flags=flags, **args)
 
 
+class FlagTurnarounds(_Preprocess):
+    """From the Azimuth encoder data, flag turnarounds, left-going, and right-going.
+        All process configs go to ``get_turnaround_flags``. If the ``method`` key
+        is not included in the preprocess config file calc configs then it will
+        default to 'scanspeed'.
+    
+    .. autofunction:: sotodlib.tod_ops.flags.get_turnaround_flags
+    """
+    name = 'flag_turnarounds'
+    
+    def calc_and_save(self, aman, proc_aman):
+        if self.calc_cfgs is None:
+            self.calc_cfgs = {}
+            self.calc_cfgs['method'] = 'scanspeed'
+        elif not('method' in self.calc_cfgs):
+            self.calc_cfgs['method'] = 'scanspeed'
+
+        if self.calc_cfgs['method'] == 'scanspeed':
+            ta, left, right = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
+            turn_aman = core.AxisManager(aman.dets, aman.samps)
+            turn_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
+            turn_aman.wrap('left_scan', left, [(0, 'dets'), (1, 'samps')])
+            turn_aman.wrap('right_scan', right, [(0, 'dets'), (1, 'samps')])
+            self.save(proc_aman, turn_aman)
+        if self.calc_cfgs['method'] == 'az':
+            ta = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
+            turn_aman = core.AxisManager(aman.dets, aman.samps)
+            turn_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
+            self.save(proc_aman, turn_aman)
+
+    def save(self, proc_aman, turn_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("turnaround_flags", turn_aman)
+
+    def process(self, aman, proc_aman):
+        tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
+        
+class SubPolyf(_Preprocess):
+    """Fit TOD in each subscan with polynominal of given order and subtract it.
+        All process configs go to `sotodlib.tod_ops.sub_polyf`.
+    
+    .. autofunction:: sotodlib.tod_ops.subscan_polyfilter
+    """
+    name = 'sub_polyf'
+    
+    def process(self, aman, proc_aman):
+        tod_ops.sub_polyf.subscan_polyfilter(aman, **self.process_cfgs)
 
 _Preprocess.register(Trends.name, Trends)
 _Preprocess.register(FFTTrim.name, FFTTrim)
@@ -307,4 +382,6 @@ _Preprocess.register(Apodize.name, Apodize)
 _Preprocess.register(Demodulate.name, Demodulate)
 _Preprocess.register(EstimateAzSS.name, EstimateAzSS)
 _Preprocess.register(GlitchFill.name, GlitchFill)
-
+_Preprocess.register(FlagTurnarounds.name, FlagTurnarounds)
+_Preprocess.register(SubPolyf.name, SubPolyf)
+_Preprocess.register(DetBiasFlags.name, DetBiasFlags)

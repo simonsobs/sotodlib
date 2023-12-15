@@ -282,6 +282,16 @@ def sim_wafer_detectors(
                 dprops["fwhm"] = fwhm[b]
                 dprops["pol"] = pl
 
+                # Translate the wafer-centric detector quaternion into
+                # x/y [mm] position in the UFM basis use by DetMap
+                xi, eta, _ = quat_to_xieta(layout[pxstr]["quat"])
+                x, y = np.degrees([eta, xi]) / platescale
+                # Rotate x and y by 120 degrees
+                theta = np.radians(120)
+                x, y = np.cos(theta) * x - np.sin(theta) * y, np.sin(theta) * x + np.cos(theta) * y
+                dprops["wafer_x_mm"] = x
+                dprops["wafer_y_mm"] = y
+
                 # Polarization angle in wafer basis.  This is the gamma angle
                 # returned by the layout functions above, less the rotation
                 # of the wafer.

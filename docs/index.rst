@@ -21,6 +21,7 @@ Welcome to SOTODLib's documentation!
    coords.rst
    toast.rst
    preprocess.rst
+   det_match.rst
    site_pipeline.rst
    reference.rst
    dev.rst

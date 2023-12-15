@@ -39,6 +39,9 @@ logger = logging.getLogger(__name__)
 
 _TES_BIAS_COUNT = 12  # per detset / primary file group
 
+#: Signal DAC units are rescaled to phase before returning.
+SIGNAL_RESCALE = np.pi / 2**15
+
 DEG = np.pi / 180
 
 
@@ -133,7 +136,9 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         timestamps = _res['timestamps']
 
     return _concat_filesets(results, ancil, timestamps,
-                            signal_buffer=signal_buffer)
+                            sample0=samples[0], obs_id=obs_id,
+                            signal_buffer=signal_buffer,
+                            get_frame_det_info=False)
 
 
 def load_book_file(filename, dets=None, samples=None, no_signal=False):
@@ -188,7 +193,32 @@ def load_book_file(filename, dets=None, samples=None, no_signal=False):
     return _concat_filesets({'?': this_detset},
                             this_detset['ancil'],
                             this_detset['timestamps'],
+                            sample0=samples[0],
                             no_signal=no_signal)
+
+
+def load_smurf_npy_data(ctx, obs_id, substr):
+    """
+    Loads an sodetlib npy file from Z_smurf archive of book.
+
+    Args
+    _____
+    obs_id: str
+        obs-id of book to load file from
+    substr: str
+        substring to use to find numpy file in Z_smurf
+    """
+    files = ctx.obsfiledb.get_files(obs_id)
+    book_dir = os.path.dirname(list(files.values())[0][0][0])
+    smurf_dir = os.path.join(book_dir, 'Z_smurf')
+    for f in os.listdir(smurf_dir):
+        if substr in f:
+            fpath = os.path.join(smurf_dir, f)
+            break
+    else:
+        raise FileNotFoundError("Could not find npy file")
+    res = np.load(fpath, allow_pickle=True).item()
+    return res
 
 
 def _load_book_detset(files, prefix='', load_ancil=True,
@@ -320,7 +350,8 @@ def _load_book_detset(files, prefix='', load_ancil=True,
 
 def _concat_filesets(results, ancil=None, timestamps=None,
                      sample0=0, obs_id=None, dets=None,
-                     no_signal=False, signal_buffer=None):
+                     no_signal=False, signal_buffer=None,
+                     get_frame_det_info=True):
     """Assemble multiple detset results (as returned by _load_book_detset)
     into a full AxisManager.
 
@@ -335,7 +366,10 @@ def _concat_filesets(results, ancil=None, timestamps=None,
 
     aman = core.AxisManager(
         core.LabelAxis('dets', dets),
-        core.OffsetAxis('samps', len(timestamps), sample0, obs_id))
+        core.OffsetAxis('samps',
+                        count=len(timestamps),
+                        offset=sample0,
+                        origin_tag=obs_id))
 
     aman.wrap('timestamps', timestamps, axis_map=[(0, 'samps')])
 
@@ -384,6 +418,7 @@ def _concat_filesets(results, ancil=None, timestamps=None,
                 d = v['signal'].finalize()
                 aman['signal'][dets_ofs:dets_ofs + len(d)] = d
                 dets_ofs += len(d)
+        aman['signal'] *= SIGNAL_RESCALE
 
     # Biases
     all_bias_names = []
@@ -412,6 +447,22 @@ def _concat_filesets(results, ancil=None, timestamps=None,
             for k, v in r['iir_params'].items():
                 _iir.wrap(k, v)
         aman['iir_params'].wrap(r['stream_id'], _iir)
+
+    # flags place
+    aman.wrap("flags", core.FlagManager.for_tod(aman, "dets", "samps"))
+
+    if not get_frame_det_info:
+        return aman
+
+    # The detset, stream_id, and smurf.* channel info will normally be
+    # populated by a downstream data product, so that they are
+    # available without having to read the main G3 data (and thus with
+    # get_meta).  But the block below should be maintained for use
+    # with load_book_file, where the user is unlikely to also have
+    # good metadata ready to go.
+    #
+    # Even if the smurf info isn't merged in here, it still gets
+    # parsed.  The main need seems to be to populate the iir_params.
 
     # det_info
     det_info = core.metadata.ResultSet(
@@ -453,9 +504,6 @@ def _concat_filesets(results, ancil=None, timestamps=None,
         for k, v in ch_info.items():
             smurf.wrap(k, np.array(v), [(0, 'dets')])
         aman['det_info'].wrap('smurf', smurf)
-
-    # flags place
-    aman.wrap("flags", core.FlagManager.for_tod(aman, "dets", "samps"))
 
     return aman
 
@@ -739,6 +787,55 @@ def _frames_iterator(files, prefix, samples, smurf_proc=None):
             yield frame, offset
             offset += len(frame['ancil'].times)
             # Alternately, use frame['sample_range']
+
+
+def get_cal_obsids(ctx, obs_id, cal_type):
+    """
+    Returns set of obs-ids corresponding to the most recent calibration
+    operations for a given obsid.
+
+    Args
+    ------
+    ctx: core.Context
+        Context object
+    obs_id: str
+        obs_id for which you want to get relevant calibration info
+    cal_type: str
+        Calibration subtype to use in the obsdb query. For example: 'iv' or
+        'bias_steps'.
+
+    Returns
+    ----------
+        obs_ids: dict
+            Dict of obs_ids for each detset in specified operation
+    """
+    obs = ctx.obsdb.query(f"obs_id == '{obs_id}'")[0]
+    detsets = ctx.obsfiledb.get_detsets(obs_id)
+    min_ct = obs['start_time'] - 3600*24*7
+    cal_all = ctx.obsdb.query(
+        f"""
+        start_time <= {obs['start_time']} and subtype=='{cal_type}'
+        and start_time > {min_ct}
+        """, sort=['start_time']
+    )[::-1]
+
+    obs_ids = {
+        ds: None for ds in detsets
+    }
+    ids_to_find = len(obs_ids)
+    ids_found = 0
+
+    for o in cal_all:
+        dsets = ctx.obsfiledb.get_files(o['obs_id']).keys()
+        for ds in dsets:
+            if ds in obs_ids:
+                if obs_ids[ds] is None:
+                    obs_ids[ds] = o['obs_id']
+                    ids_found += 1
+        if ids_to_find == ids_found:
+            break
+
+    return obs_ids
 
 
 core.OBSLOADER_REGISTRY['obs-book'] = load_obs_book

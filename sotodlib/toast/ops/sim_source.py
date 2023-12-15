@@ -511,7 +511,7 @@ class SimSource(Operator):
     )
 
     source_azimuth_acceleration = Quantity(
-        u.Quantity(2, u.Unit("deg / s / s")),
+        u.Quantity(2, u.Unit("deg / s2")),
         help = 'Maximum acceleration of the drone along the azimuthal axis'
     )
 
@@ -531,7 +531,7 @@ class SimSource(Operator):
     )
 
     source_elevation_acceleration = Quantity(
-        u.Quantity(2, u.Unit("deg / s / s")),
+        u.Quantity(2, u.Unit("deg / s2")),
         help = 'Maximum acceleration of the drone along the elevation axis'
     )
 

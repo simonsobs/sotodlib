@@ -16,11 +16,11 @@ running null tests, building observation matrices, etc.
 
 You can see the automatically generated command line options with:
 
-    toast_so_map.py --help
+    toast_so_map --help
 
 Or you can dump a config file with all the default values with:
 
-    toast_so_map.py --default_toml config.toml
+    toast_so_map --default_toml config.toml
 
 This script contains just comments about what is going on.  For details about all the
 options for a specific Operator, see the documentation or use the help() function from
@@ -59,10 +59,15 @@ pixell.fft.engine = "fftw"
 def reduce_data(job, otherargs, runargs, data):
     log = toast.utils.Logger.get()
 
+    wrk.select_pointing(job, otherargs, runargs, data)
+    wrk.simple_noise_models(job, otherargs, runargs, data)
+
     wrk.flag_noise_outliers(job, otherargs, runargs, data)
     wrk.filter_hwpss(job, otherargs, runargs, data)
-    wrk.demodulate(job, otherargs, runargs, data)
     wrk.noise_estimation(job, otherargs, runargs, data)
+
+    data = wrk.demodulate(job, otherargs, runargs, data)
+
     wrk.flag_sso(job, otherargs, runargs, data)
     wrk.hn_map(job, otherargs, runargs, data)
     wrk.cadence_map(job, otherargs, runargs, data)
@@ -104,9 +109,6 @@ def load_data(job, otherargs, runargs, data):
     wrk.load_data_hdf5(job, otherargs, runargs, data)
     wrk.load_data_books(job, otherargs, runargs, data)
     # wrk.load_data_context(job, otherargs, runargs, data)
-
-    if len(data.obs) == 0:
-        raise RuntimeError("No input data specified!")
 
     job_ops.mem_count.prefix = "After Data Load"
     job_ops.mem_count.apply(data)
@@ -209,7 +211,7 @@ def main():
         log.info_rank(msg, comm=comm)
         group_size = runargs.group_size
     else:
-        if job.operators.mapmaker_ml.enabled:
+        if job.operators.mlmapmaker.enabled:
             msg = f"ML mapmaker is enabled, forcing process group size to 1"
             log.info_rank(msg, comm=comm)
             group_size = 1

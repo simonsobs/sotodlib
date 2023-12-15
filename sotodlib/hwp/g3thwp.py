@@ -53,9 +53,9 @@ class G3tHWP():
 
         # 1st/2nd encoder readout
         self._field_instance = self.configs.get('field_instance',
-                                                'observatory.HBA.feeds.HWPEncoder')
+                                                'satp1.hwp-bbb-e1.feeds.HWPEncoder')
         self._field_instance_sub = self.configs.get('field_instance_sub',
-                                                    'observatory.HBA2.feeds.HWPEncoder')
+                                                    'satp1.hwp-bbb-e2.feeds.HWPEncoder')
 
         self._field_list = self.configs.get('field_list',
                                             ['rising_edge_count', 'irig_time', 'counter',
@@ -118,7 +118,9 @@ class G3tHWP():
                 path to HK g3 file, overwrite config file
             instance : str or None
                 instance of field list, overwrite config file
-                ex.) 'HBA' or 'observatory.HBA.feeds.HWPEncoder'
+                ex.) lab data 'observatory.HBA.feeds.HWPEncoder'
+                ex.) site data 'satp1.hwp-bbb-e1.feeds.HWPEncoder'
+                ex.) site data 'satp3.hwp-bbb-a1.feeds.HWPEncoder'
 
         Returns
         ----
@@ -149,10 +151,7 @@ class G3tHWP():
             logger.error("Cannot find data directory")
             return {}
         if instance is not None:
-            if 'observatory' in instance:
-                self._field_instance = instance
-            else:
-                self._field_instance = 'observatory.' + instance + '.feeds.HWPEncoder'
+            self._field_instance = instance
 
         # load housekeeping data with hwp keys
         logger.info('Loading HK data files ')
@@ -183,9 +182,10 @@ class G3tHWP():
             file_list : str or list or None
                 path and file name of input level 2 HK g3 file
             instance : str or None
-                instance of field list, overwrite config file 
-
-                ex.) 'HBA' or 'observatory.HBA.feeds.HWPEncoder'
+                instance of field list, overwrite config file
+                ex.) lab data 'observatory.HBA.feeds.HWPEncoder'
+                ex.) site data 'satp1.hwp-bbb-e1.feeds.HWPEncoder'
+                ex.) site data 'satp3.hwp-bbb-a1.feeds.HWPEncoder'
         Returns
         ----
         dict
@@ -199,10 +199,7 @@ class G3tHWP():
             self._file_list = file_list
 
         if instance is not None:
-            if 'observatory' in instance:
-                self._field_instance = instance
-            else:
-                self._field_instance = 'observatory.' + instance + '.feeds.HWPEncoder'
+            self._field_instance = instance
 
         # load housekeeping files with hwp keys
         scanner = so3g.hk.HKArchiveScanner()
@@ -543,7 +540,7 @@ class G3tHWP():
 
         Notes
         -----------
-        Output file format 
+        Output file format
 
         * Provider: 'hwp'
             * Fast block
@@ -637,9 +634,9 @@ class G3tHWP():
             start_time += frame_length
 
         return
-    
+
     def _set_empty_axes(self, aman):
-        
+
         aman.wrap_new('timestamps', shape=('samps', ), dtype=np.float64)
         aman.wrap_new('hwp_angle_ver1', shape=('samps', ), dtype=np.float64)
         aman.wrap_new('hwp_angle_ver2', shape=('samps', ), dtype=np.float64)
@@ -647,17 +644,17 @@ class G3tHWP():
         aman.wrap_new('locked', shape=('samps', ), dtype=bool)
         aman.wrap_new('hwp_rate', shape=('samps', ), dtype=np.float16)
         aman.wrap_new('eval', shape=('samps', ), dtype=bool)
-        
-        return 
-        
+
+        return
+
     def _write_empty_solution_h5(self, tod, output=None, h5_address=None):
-        
+
         logger.info('Writing empty solutions')
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         self._set_empty_axes(aman)
         aman.timestamps[:] = tod.timestamps
         aman.save(output, h5_address, overwrite=True)
-        
+
         return
 
     def _bool_interpolation(self, timestamp1, data, timestamp2):
@@ -666,7 +663,7 @@ class G3tHWP():
         result = (interp > 0.999)
 
         return result
-    
+
     def write_solution_h5(self, tod, output=None, h5_address=None):
         """
         Output HWP angle + flags as AxisManager format
@@ -681,7 +678,7 @@ class G3tHWP():
         Notes
         -----
 
-        Output file format 
+        Output file format
 
         - timestamp:
             SMuRF synched timestamp
@@ -715,11 +712,11 @@ class G3tHWP():
             return
         if output is not None:
             self._output = output
-            
+
         if len(tod.timestamps) == 0:
             logger.warning('Input data is empty.')
-            return 
-        
+            return
+
         start = int(tod.timestamps[0])-self._margin
         end = int(tod.timestamps[-1])+self._margin
         try:
@@ -728,34 +725,34 @@ class G3tHWP():
             logger.error(f"Exception '{e}' thrown while loading HWP data. The specified encoder field is missing.")
             self._write_empty_solution_h5(tod, output, h5_address)
             return
-            
+
         if len(data) == 0:
             logger.warning('No HWP data in the specified timestamps.')
             self._write_empty_solution_h5(tod, output, h5_address)
             return
-        
-        # calculate HWP angle 
+
+        # calculate HWP angle
         logger.debug("analyze")
-        
+
         try:
             solved = self.analyze(data, mod2pi=False)
         except Exception as e:
             logger.error(f"Exception '{e}' thrown while calculating HWP angle. Encoder signal might have too much noise.")
             self._write_empty_solution_h5(tod, output, h5_address)
-            return 
-            
+            return
+
         if len(solved['fast_time']) == 0:
             logger.info('No rotation data in the specified timestamps.')
             self._write_empty_solution_h5(tod, output, h5_address)
             return
-            
+
         # calculate template subtracted angle
         try:
             self.eval_angle(solved)
         except Exception as e:
             logger.error(f"Exception '{e}' thrown while the template subtraction")
             pass
-        
+
         # write solution
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         self._set_empty_axes(aman)
@@ -773,11 +770,11 @@ class G3tHWP():
             logger.info('Template subtraction failed')
             aman.hwp_angle_ver1[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
             aman.hwp_angle_ver2[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
-    
+
         aman.save(output, h5_address, overwrite=True)
 
         return
-    
+
     def _hwp_angle_calculator(
             self,
             counter,
@@ -806,9 +803,12 @@ class G3tHWP():
         self._time = []
         self._angle = []
 
+        # treat counter index reset due to agent reboot
+        self._process_counter_index_reset()
+
         # check packet drop
         self._encoder_packet_sort()
-        self._find_dropped_packets()
+        self._fill_dropped_packets()
 
         # assign IRIG synched timestamp
         self._time = scipy.interpolate.interp1d(
@@ -1023,7 +1023,14 @@ class G3tHWP():
 
         return
 
-    def _find_dropped_packets(self):
+    def _process_counter_index_reset(self):
+        """ Treat counter index reset due to agent reboot """
+        idx = np.where(np.diff(self._encd_cnt)<-1e4)[0] + 1
+        for i in range(len(idx)):
+            self._encd_cnt[idx[i]:] = self._encd_cnt[idx[i]:] + abs(np.diff(self._encd_cnt)[idx[i]-1]) + 1
+
+
+    def _fill_dropped_packets(self):
         """ Estimate the number of dropped packets """
         cnt_diff = np.diff(self._encd_cnt)
         dropped_samples = np.sum(cnt_diff[cnt_diff >= self._pkt_size])
@@ -1032,23 +1039,27 @@ class G3tHWP():
             logger.warning('{} dropped packets are found, performing fill process'.format(
                 self._num_dropped_pkts))
 
-            idx = np.where(np.diff(self._encd_cnt) > 1)[0]
-            offset = 0
-            for i in idx:
-                i += offset
-                _diff = np.diff(self._encd_cnt)[i]
-                clk = (self._encd_clk[i + 1] - self._encd_clk[i]) / _diff
-                gap = np.array(
-                    [self._encd_clk[i] + clk * ii for ii in range(1, _diff)])
-                self._encd_clk = np.insert(self._encd_clk, i + 1, gap)
-                offset += _diff - 1
-            self._encd_cnt = self._encd_cnt[0] + np.arange(len(self._encd_clk))
+        idx = np.where(np.diff(self._encd_cnt) > 1)[0]
+        for i in range(len(idx)):
+            ii = (np.where(np.diff(self._encd_cnt) > 1)[0])[0]
+            _diff = int(np.diff(self._encd_cnt)[ii])
+            # Fill dropped counters with counters one before or one after rotation.
+            # This filling method works even when the reference slot counter is dropped.
+            if ii - self._num_edges + self._ref_edges + 1 >= 0:
+                gap_clk = self._encd_clk[ii - self._num_edges + self._ref_edges + 1 : ii+_diff - self._num_edges + self._ref_edges] \
+                     - self._encd_clk[ii-self._num_edges + self._ref_edges] + self._encd_clk[ii]
+            else:
+                gap_clk = self._encd_clk[ii - _diff + self._num_edges: ii -1 + self._num_edges] \
+                    - self._encd_clk[ii - _diff + self._num_edges -1] + self._encd_clk[ii]
+            gap_cnt = np.arange(self._encd_cnt[ii]+1,self._encd_cnt[ii+1])
+            self._encd_cnt = np.insert(self._encd_cnt, ii+1, gap_cnt)
+            self._encd_clk = np.insert(self._encd_clk, ii+1, gap_clk)
         return
 
     def _encoder_packet_sort(self):
         cnt_diff = np.diff(self._encd_cnt)
         if np.any(cnt_diff != 1):
-            logger.warning(
+            logger.debug(
                 'a part of the counter is incorrect')
             if np.any(cnt_diff < 0):
                 if 1 - self._pkt_size in cnt_diff:
@@ -1057,25 +1068,20 @@ class G3tHWP():
                 idx = np.argsort(self._encd_cnt)
                 self._encd_clk = self._encd_clk[idx]
             else:
-                logger.warning('maybe packet drop exists')
+                logger.warning('Packet drop exists')
         else:
             logger.debug('no need to fix encoder index')
+        return
 
     def _quad_form(self, quad):
-        
-        if self._force_quad==1: 
+        if self._force_quad==1:
             return np.ones_like(quad)
         # bit process
         quad[(quad >= 0.5)] = 1
         quad[(quad < 0.5)] = 0
         offset = 0
-        logger_bit = True
         for quad_split in np.array_split(quad, 1 + np.floor(len(quad) / 100)):
             if quad_split.mean() > 0.1 and quad_split.mean() < 0.9:
-                if logger_bit:
-                    logger.warning(
-                        "flipping quad is corrected by mean value, please consider to use force_quad")
-                    logger_bit = False
                 for j in range(len(quad_split)):
                     quad[j + offset] = int(quad_split.mean() + 0.5)
                 offset += len(quad_split)
@@ -1085,6 +1091,9 @@ class G3tHWP():
                 np.abs(
                     quad_split.mean() -
                     quad_split) > 0.5).flatten()
+            if len(outlier) > 5:
+                logger.warning(
+                    "flipping quad is corrected by mean value, please consider to use force_quad")
             for i in outlier:
                 if i == 0:
                     ii, iii = i + 1, i + 2
@@ -1108,7 +1117,7 @@ class G3tHWP():
             return irig_time, rising_edge
         elif len(irig_time) > len(idx) and len(idx) > 0:
             if np.any(np.diff(irig_time) > 5):
-                logger.warning(
+                logger.debug(
                     'a part of the IRIG time is incorrect, performing the correction process...')
             irig_time = irig_time[idx]
             rising_edge = rising_edge[idx]

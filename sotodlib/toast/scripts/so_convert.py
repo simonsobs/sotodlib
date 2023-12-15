@@ -19,11 +19,11 @@ And then writes these out to:
 
 You can see the automatically generated command line options with:
 
-    toast_so_convert.py --help
+    toast_so_convert --help
 
 Or you can dump a config file with all the default values with:
 
-    toast_so_convert.py --default_toml config.toml
+    toast_so_convert --default_toml config.toml
 
 This script contains just comments about what is going on.  For details about all the
 options for a specific Operator, see the documentation or use the help() function from

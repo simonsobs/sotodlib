@@ -36,6 +36,7 @@ def setup_noise_estimation(operators):
     operators.append(
         toast.ops.FitNoiseModel(
             name="noise_estim_fit",
+            out_model="noise_estim_fit",
         )
     )
 

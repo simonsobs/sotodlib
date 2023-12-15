@@ -104,11 +104,14 @@ def get_parser(parser=None):
     return parser
 
 
-def main(book_dir, config=None, add=None, overwrite=None):
-    print(f'Examining {book_dir}')
+def main(book_dir, config=None, add=None, overwrite=None, logger=None):
+    if logger is None:
+        logger = util.init_logger(__name__, 'check_book: ')
+
+    logger.info(f'Examining {book_dir}')
 
     if config is not None:
-        print(f'Loading config from {config}')
+        logger.debug(f'Loading config from {config}')
         config = yaml.safe_load(open(config, 'rb'))
     else:
         config = {}
@@ -118,7 +121,7 @@ def main(book_dir, config=None, add=None, overwrite=None):
     bs.report()
 
     if len(bs.results['errors']):
-        print('Cannot register this obs due to errors.')
+        logger.error('Cannot register this obs due to errors.')
         sys.exit(1)
 
     if not add:
@@ -128,16 +131,19 @@ def main(book_dir, config=None, add=None, overwrite=None):
 
     # Write to obsfiledb
     obsfiledb_file = config.get('obsfiledb', 'obsfiledb.sqlite')
-    print('Updating %s ...' % obsfiledb_file)
+    logger.debug('Updating %s ...' % obsfiledb_file)
     db = metadata.ObsFileDb(obsfiledb_file)
 
     if overwrite:
         # Note this only drops the obs ... if detsets need to be
         # rewritten, you'd better start over entirely.
-        print(' -- removing any existing references.')
+        logger.debug(' -- removing any existing references.')
         db.drop_obs(file_rows[0]['obs_id'])
 
-    print(' -- adding %i detsets and %i file refs' % (len(detset_rows), len(file_rows)))
+    logger.debug(
+        ' -- adding %i detsets and %i file refs' % (len(detset_rows), 
+        len(file_rows))
+    )
     for name, dets in detset_rows:
         if len(db.get_dets(name)) == 0:
             db.add_detset(name, dets)

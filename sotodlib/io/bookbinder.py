@@ -128,7 +128,7 @@ class AncilProcessor:
         self.blocks = {
             name: HKBlock(name) 
             for name in ['ACU_broadcast', 'ACU_summary_output', 
-                         'HWPEncoder_freq']
+                         'HWPEncoder_freq', 'ACU_corotator']
         }
         self.anc_frame_data = None
         self.out_files = []
@@ -195,8 +195,13 @@ class AncilProcessor:
                 block.times, 
                 block.data['Corrected_Boresight']
             )
-        if 'Corrected_Corotation' in block.data:
-            corotation = np.interp(times, block.times, block.data['Corrected_Corotation'])
+        block = self.blocks['ACU_corotator']
+        if 'Corotator_current_position' in block.data:
+            corotation = np.interp(
+                times, 
+                block.times, 
+                block.data['Corotator_current_position']
+            )
 
         anc_frame_data = []
         for oframe_idx in np.unique(frame_idxs):
@@ -225,7 +230,7 @@ class AncilProcessor:
             if boresight is not None:
                 anc_data['boresight_enc'] = core.G3VectorDouble(boresight[m])
             if corotation is not None:
-                anc_data['corotation_enc'] = core.G3VectorDouble(corotation[m])
+                anc_data['corotator_enc'] = core.G3VectorDouble(corotation[m])
             oframe['ancil'] = anc_data
             writer(oframe)
             anc_frame_data.append(anc_data)
@@ -502,6 +507,7 @@ class SmurfStreamProcessor:
                     f"No samples properly mapped in oframe frame {oframe_idx}!"
                     "Cannot properly interpolate for this frame."
                 )
+                raise ValueError(f"Cannot finish binding {self.obs_id}")
             elif np.any(~filled):
                 self.log.debug(
                     f"{np.sum(~filled)} missing samples in out-frame {oframe_idx}"
@@ -708,7 +714,7 @@ class BookBinder:
 
         self.meta_files = meta_files
 
-    def get_metadata(self):
+    def get_metadata(self, telescope=None, tube_config={}):
         """
         Returns metadata dict for the book
         """
@@ -716,6 +722,8 @@ class BookBinder:
 
         meta = {}
         meta['book_id'] = self.book.bid
+        meta['type'] = self.book.type
+
         meta['start_time'] = float(self.times[0])
         meta['stop_time'] = float(self.times[-1])
         meta['n_frames'] = len(np.unique(self.frame_idxs))
@@ -730,10 +738,23 @@ class BookBinder:
             sample_ranges.append([i0, i1+1])
         meta['sample_ranges'] = sample_ranges
 
-        meta['telescope'] = self.book.tel_tube[:3].lower()
-        # parse e.g., sat1 -> st1, latc1 -> c1
-        meta['tube_slot'] = self.book.tel_tube.lower().replace("sat","satst")[3:]
-        meta['type'] = self.book.type
+        if telescope is None:
+            self.log.warning(
+                "telescope not explicitly defined. guessing from book"
+            )
+            meta['telescope'] = self.book.tel_tube[:3].lower()
+        else: 
+            meta['telescope'] = telescope
+
+        if 'tube_slot' not in tube_config:
+            self.log.warning("tube_slot key missing from tube_config. guessing")
+        meta['tube_slot'] = tube_config.get(
+            'tube_slot',
+            self.book.tel_tube.lower().replace("sat","satst")[3:]
+        )
+        meta['tube_flavor'] = tube_config.get('tube_flavor')
+        meta['wafer_slots'] = tube_config.get('wafer_slots')
+
         detsets = []
         tags = []
 
@@ -782,7 +803,8 @@ class BookBinder:
         # book should have at least one tag
         assert len(tags) > 0
         meta['subtype'] = tags[1] if len(tags) > 1 else ""
-        meta['tags'] = tags[2:]
+        # sanitize rest of tags
+        meta['tags'] = [t.strip() for t in tags[2:] if t.strip() != '']
         
         if (self.book.type == 'oper') and self.meta_files:
             meta['meta_files'] = self.meta_files

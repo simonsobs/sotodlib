@@ -230,7 +230,7 @@ class SignalMap(Signal):
             if self.comm is not None:
                 self.rhs  = utils.allreduce(self.rhs, self.comm)
                 self.div  = utils.allreduce(self.div, self.comm)
-                self.hits = utils.allreduce(self.hits,self.comm)
+                self.hits = utils.allreduce(self.hits, self.comm)
             self.dof  = MapZipper(*self.rhs.geometry, dtype=self.dtype)
         self.idiv  = safe_invert_div(self.div)
         self.ready = True
