@@ -337,7 +337,7 @@ def jumpfinder_sliding_window(
     window_size=10000,
     overlap=1000,
     jumpfinder_func=jumpfinder_tv,
-    **kwargs
+    **kwargs,
 ):
     """
     Run jumpfinder through a sliding window.
@@ -396,7 +396,7 @@ def jumpfinder_sliding_window(
             win_size=win_size,
             nsigma=nsigma,
             max_depth=max_depth,
-            **kwargs
+            **kwargs,
         )
         jumps[..., start:end] += _jumps
     return jumps
@@ -448,6 +448,125 @@ def jumpfix_median_sub(x, jumps, inplace=False):
     return x_fixed.reshape(orig_shape)
 
 
+def jumpfix_subtract_heights(x, jumps, heights, inplace=False):
+    """
+    Naive jump fixing routine where we subtract known heights between jumps.
+    Note that you should exepect a glitch at the jump locations.
+
+    Arguments:
+
+        x: Data to jumpfix on, expects 1D or 2D.
+
+        jumps: Boolean mask of that is True at jump locations.
+               Should be the same shape at x.
+
+        heights: Array of jump heights.
+                 Should be a flat array of length n_jumps.
+
+        inplace: Whether of not x should be fixed inplace.
+
+    Returns:
+
+        x_fixed: x with jumps removed.
+                 If inplace is True this is just a reference to x.
+    """
+    x_fixed = x
+    if not inplace:
+        x_fixed = x.copy()
+    orig_shape = x.shape
+    x_fixed = np.atleast_2d(x_fixed)
+    jumps = np.atleast_2d(jumps)
+
+    rows, cols = np.nonzero(np.diff(~jumps, axis=-1))
+    rows = rows[::2]
+    cols = cols.reshape((-1, 2))
+
+    diff = np.diff(cols, axis=-1).ravel()
+    has_jumps = diff < x.shape[-1]
+    rows = rows[has_jumps]
+    cols = cols[has_jumps]
+
+    n = 0
+    for r, (c1, c2) in zip(rows, cols):
+        m = n + (c2 - c1)
+        _heights = heights[n:m]
+        height = _heights[np.argmax(np.abs(_heights))]
+        x_fixed[r, int(np.mean([c1, c2])) :] -= height
+        n = m
+
+    return x_fixed.reshape(orig_shape)
+
+
+def twopi_jumps(tod, signal=None, win_size=20, atol=None, fix=True, inplace=False):
+    """
+    Find and optionally fix jumps that are height ~N*2pi.
+    TOD is expected to have detectors with high trends already cut.
+    Data is assumed to have units of phase here.
+
+    Arguments:
+
+        tod: The axis manager containing signal to find jumps on.
+
+        signal: Signal to jumpfind on. If None than tod.signal is used.
+
+        win_size: Size of window to use when looking for jumps.
+                  This should be set to something of order the width of the jumps.
+
+        atol: How close the jump height needs to be to N*2pi to count.
+              If set to None, then 3 times the WN level of the TOD is used.
+
+        fix: If True the jumps will be fixed by adding N*2*pi at the jump locations.
+
+        inplace: If True jumps will be fixed inplace.
+
+    Returns:
+
+        jumps: RangesMatrix containing jumps in signal,
+               if signal is 1D Ranges in returned instead.
+               Buffered to win_size.
+
+        fixed: signal with jump fixed. Only returned if fix is set.
+    """
+    if signal is None:
+        signal = tod.signal
+    if atol is None:
+        atol = 3 * std_est(signal)
+        np.clip(atol, 1e-8, 1e-2)
+
+    diff_buffed = signal - np.roll(signal, win_size, axis=-1)
+
+    if np.isscalar(atol):
+        jumps = (np.isclose(0, np.abs(diff_buffed) % (2 * np.pi), atol=atol)) & (
+            (np.abs(diff_buffed) // (2 * np.pi)) >= 1
+        )
+        jumps[:win_size] = False
+    else:
+        jumps = np.atleast_2d(np.zeros_like(signal, dtype=bool))
+        diff_buffed = np.atleast_2d(diff_buffed)
+        if len(atol) != len(jumps):
+            raise ValueError(f"Non-scalar atol provided with length {len(atol)}")
+        for i, _atol in enumerate(atol):
+            jumps[i] = (
+                np.isclose(0, np.abs(diff_buffed[i]) % (2 * np.pi), atol=_atol)
+            ) & ((np.abs(diff_buffed[i]) // (2 * np.pi)) >= 1)
+        jumps[:, :win_size] = False
+        jumps.reshape(signal.shape)
+
+    jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
+
+    if fix:
+        jumps = jump_ranges.mask()
+        jumps[:, -2:] = False
+        heights = diff_buffed[jump_ranges.mask()]
+        # Round heights to the nearest 2pi
+        heights = np.round(heights / (2 * np.pi)) * 2 * np.pi
+
+        fixed = jumpfix_subtract_heights(signal, jumps, heights, inplace)
+
+        return jump_ranges, fixed
+    return jump_ranges
+
+
 def find_jumps(
     tod,
     signal=None,
@@ -462,7 +581,7 @@ def find_jumps(
     max_depth=0,
     fix=None,
     inplace=False,
-    **kwargs
+    **kwargs,
 ):
     """
     Find jumps in tod.signal_name.
@@ -567,7 +686,7 @@ def find_jumps(
             win_size=win_size,
             nsigma=nsigma,
             max_depth=max_depth,
-            **kwargs
+            **kwargs,
         )
         if np.sum(_jumps) == 0:
             break
