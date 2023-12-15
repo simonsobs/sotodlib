@@ -8,7 +8,7 @@ import numpy as np
 import sotodlib.io.g3tsmurf_utils as g3u
 import yaml
 from detmap.makemap import MapMaker
-from pycpd import AffineRegistration
+from megham.registration import cpd
 from scipy.cluster import vq
 from scipy.optimize import linear_sum_assignment
 from sotodlib.coords import affine as af
@@ -156,7 +156,7 @@ def visualize(frame, frames, ax=None, bias_lines=True):
 
         frame: The frame to display.
 
-        frames: List of frames, each frame should be [iteration, error, X, Y]
+        frames: List of frames, each frame should be [target, transformed, iteration, error]
 
         ax: Axes to use for plots.
 
@@ -164,25 +164,23 @@ def visualize(frame, frames, ax=None, bias_lines=True):
     """
     if ax is None:
         ax = plt.gca()
-    iteration, error, X, Y = frames[frame]
+    target, transformed, iteration, error = frames[frame]
     cmap = "Set3"
+    x = int(bias_lines)
+    y = x + 1
     if bias_lines:
-        x = 1
-        y = 2
-        c_t = np.around(np.abs(X[:, 0])) / 11.0
-        c_s = np.around(np.abs(Y[:, 0])) / 11.0
-        srt = np.lexsort(X.T[1:3])
+        c_t = np.around(target[:, 0]) / 11.0
+        c_s = np.around(transformed[:, 0]) / 11.0
+        srt = np.lexsort(target.T[1:3])
     else:
-        x = 0
-        y = 1
-        c_t = np.zeros(len(X))
-        c_s = np.ones(len(Y))
-        srt = np.lexsort(X.T[0:2])
+        c_t = np.zeros(len(target))
+        c_s = np.ones(len(transformed))
+        srt = np.lexsort(target.T[0:2])
     ax.cla()
     for i in range(4):
         ax.scatter(
-            X[:, x][srt[i::4]],
-            X[:, y][srt[i::4]],
+            target[:, x][srt[i::4]],
+            target[:, y][srt[i::4]],
             c=c_t[srt[i::4]],
             cmap=cmap,
             alpha=0.5,
@@ -191,7 +189,14 @@ def visualize(frame, frames, ax=None, bias_lines=True):
             vmax=1,
         )
     ax.scatter(
-        Y[:, x], Y[:, y], c=c_s, cmap=cmap, alpha=0.5, marker="X", vmin=0, vmax=1
+        transformed[:, x],
+        transformed[:, y],
+        c=c_s,
+        cmap=cmap,
+        alpha=0.5,
+        marker="X",
+        vmin=0,
+        vmax=1,
     )
     ax.text(
         0.87,
@@ -245,8 +250,8 @@ def match_template(
              so it should only be used when debugging with human interaction.
              If this is running headless you should pass in a path instead.
 
-        cpd_args: Dictionairy of kwargs to be passed into AffineRegistration.
-                  See the pycpd docs for what these can be.
+        cpd_args: Dictionairy of kwargs to be passed into joint_cpd.
+                  See the megham docs for what these can be.
     Returns:
 
         mapping: Mapping between elements in template and focal_plane.
@@ -254,31 +259,70 @@ def match_template(
 
         P: The likelihood array without priors applied.
 
-        TY: The transformed points.
+        transformed: The transformed points.
     """
+    have_gamma = focal_plane.shape[1] == 4
     if not bias_lines:
         focal_plane = focal_plane[:, 1:]
         template = template[:, 1:]
-    if reverse:
-        cpd_args.update({"X": focal_plane, "Y": template})
+        dim_groups = [[0, 1]]
     else:
-        cpd_args.update({"Y": focal_plane, "X": template})
-    reg = AffineRegistration(**cpd_args)
+        # dim_groups = [[1, 2]]
+        dim_groups = [[0], [1, 2]]
+    if have_gamma:
+        dim_groups += [[focal_plane.shape[1]]]
+
+    if reverse:
+        target = focal_plane
+        source = template
+    else:
+        source = focal_plane
+        target = template
 
     if vis:
         frames = []
-
-        def store_frames(frames, iteration, error, X, Y):
-            frames += [[iteration, error, X, Y]]
+        def store_frames(target, transformed, iteration, error, frames):
+            frames += [[target, transformed, iteration, error]]
 
         fig = plt.figure()
         fig.add_axes([0, 0, 1, 1])
         callback = partial(store_frames, frames=frames)
-        reg.register(callback)
+
+        *_, transformed, P = cpd.joint_cpd(
+            source, target, dim_groups, callback=callback, **cpd_args
+        )
+
+    else:
+        *_, transformed, P = cpd.joint_cpd(source, target, dim_groups, **cpd_args)
+
+    if not reverse:
+        P = P.T
+    if not bias_lines:
+        transformed = np.column_stack((-2 + np.zeros(len(transformed)), transformed))
+
+    if priors is None:
+        priors = 1
+
+    # Solve the assignment problem
+    row_ind, col_ind = linear_sum_assignment(np.log(P * priors), True)
+    if len(row_ind) < len(focal_plane):
+        mapping = np.argmax(P * priors, axis=0)
+        mapping[col_ind] = row_ind
+    else:
+        mapping = row_ind[np.argsort(col_ind)]
+
+    _P = P[mapping, range(P.shape[1])]
+    P_msk = _P > np.median(_P)
+    aff, sft = af.get_affine(source[P_msk].T, target[mapping][P_msk].T)
+    transformed = (aff @ (source.T) + sft[..., None]).T
+    
+    if vis:
+        frames += [[target, transformed, 0, 0]] # type: ignore 
+        fig, ax = fig, fig.axes[0] # type: ignore
         anim = ani.FuncAnimation(
             fig=fig,
             func=partial(
-                visualize, frames=frames, ax=fig.axes[0], bias_lines=bias_lines
+                visualize, frames=frames, ax=ax, bias_lines=bias_lines
             ),
             frames=len(frames),
             interval=200,
@@ -288,28 +332,9 @@ def match_template(
             plt.close()
         else:
             plt.show()
-    else:
-        reg.register()
 
-    P = reg.P.T
-    if reverse:
-        P = reg.P
-    TY = reg.TY
-    if not bias_lines:
-        TY = np.column_stack((-2 + np.zeros(len(TY)), TY))
 
-    if priors is None:
-        priors = 1
-
-    # Solve the assignment problem
-    row_ind, col_ind = linear_sum_assignment(P * priors, True)
-    if len(row_ind) < len(focal_plane):
-        mapping = np.argmax(P * priors, axis=0)
-        mapping[col_ind] = row_ind
-    else:
-        mapping = row_ind[np.argsort(col_ind)]
-
-    return mapping, P, TY
+    return mapping, P, transformed
 
 
 def _get_inliers(aman, rad_thresh, template=None):
@@ -344,17 +369,6 @@ def _get_inliers(aman, rad_thresh, template=None):
     return inliers
 
 
-def _scramble_bgs(bg):
-    """
-    Transform bias group information so that CPD is more strongly punished
-    for swapping nearby bias lines.
-
-    Currently this is just a simple sign flip on every other bias line.
-    """
-    bg[bg % 2 == 1] *= -1
-    return bg
-
-
 def _get_wafer(ufm):
     # TODO: Switch to det-match code here
     try:
@@ -385,7 +399,6 @@ def _get_wafer(ufm):
     msk = np.isin(template_bg, valid_bg)
     det_ids = np.array(det_ids)[msk]
     template_n = np.array(is_north)[msk]
-    template_bg = _scramble_bgs(template_bg)
     template = np.column_stack(
         (template_bg, np.array(det_x), np.array(det_y), np.array(polang))
     )[msk]
@@ -412,7 +425,7 @@ def _load_template(template_path, ufm):
     det_ids = template_rset["dets:det_id"][msk]
     template = np.column_stack(
         (
-            _scramble_bgs(bg.astype(float)),
+            bg.astype(float),
             np.array(template_rset["xi"]),
             np.array(template_rset["eta"]),
             np.array(template_rset["gamma"]),
@@ -420,7 +433,7 @@ def _load_template(template_path, ufm):
     )[msk]
     template_n = template_rset["is_north"][msk]
 
-    return det_ids, template, template_n
+    return det_ids, template, ~template_n
 
 
 def _load_bg(aman, bg_path):
@@ -618,9 +631,6 @@ def main():
         template_path = config["template"]
         if os.path.exists(template_path):
             det_ids, template, template_n = _load_template(template_path, ufm)
-            plt.scatter(template[:, 1], template[:, 2])
-            plt.savefig("/so/home/saianeesh/public_html/a.png")
-            plt.close()
         else:
             logger.error("Provided template doesn't exist, trying to generate one")
             gen_template = True
@@ -703,7 +713,6 @@ def main():
             logger.info(
                 "%d detectors have bias lines that don't match the detmap", bl_diff
             )
-        bias_group = _scramble_bgs(bias_group)
     else:
         have_bgmap = False
         bias_group = np.nan + np.zeros(aman.dets.count)
@@ -769,10 +778,6 @@ def main():
     )
     _focal_plane = focal_plane[:, pol_slice]
     _template = template[:, pol_slice]
-    plt.scatter(focal_plane[msks[1], 1], focal_plane[msks[1], 2])
-    plt.scatter(template[:, 1], template[:, 2])
-    plt.savefig("/so/home/saianeesh/public_html/a.png")
-    plt.close()
 
     # Do actual matching
     mapped_det_ids, P, transformed, mapped_template = _do_match(
@@ -789,16 +794,15 @@ def main():
     transformed_fp[inliers, pol_slice] = transformed[inliers, pol_slice]
 
     # BG mismap
-    bias_group[msk_bg] = np.abs(bias_group[msk_bg])
+    bias_group[msk_bg] = bias_group[msk_bg]
     bias_group = np.nan_to_num(bias_group, nan=-2).astype(int)
-    matched_bg = np.nan_to_num(np.abs(mapped_template[:, 0]), nan=-2).astype(int)
+    matched_bg = np.nan_to_num(mapped_template[:, 0], nan=-2).astype(int)
     bg_mismap = bias_group != matched_bg
     if have_bgmap:
         logger.info("%d bias line mismaps", np.sum(bg_mismap))
 
     # Another round of outlier flagging
     dist = np.linalg.norm(transformed_fp[:, :2] - mapped_template[:, 1:3], axis=1)
-    print(np.nanmedian(dist))
     inliers *= dist < config["outliers"]["pixel_dist"]
     logger.info("Total of %d detectors with bad pointing", np.sum(~inliers))
 
