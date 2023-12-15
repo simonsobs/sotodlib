@@ -135,13 +135,27 @@ resulting ManifestDbs should work for both level 2 and level 3 SMuRf data.
 
 make_det_info_wafer
 ```````````````````
-This script uses the DetMap software package to build detector IDs for a set of
+This script uses based array construction inputs to build detector IDs for a set of
 UFMs and save them in a ManifestDb / HDF5 file. The formatting of the ResultSet 
 saved in HDF5 file will map all this information into ``det_info.wafer`` when used 
 with a correctly formatted context file and a readout to detector id mapping.
 The detector info mapping created by this script will be stable as long as the
 same UFMs are used in the same optics tube positions, meaning it only needs to
 be re-made if the physical hardware setup changes. 
+
+Although the full config presented for ``make_read_det_match`` will
+work, here's a more basic example that will work::
+
+  det_db: "./det_info_wafer.db"
+  det_info: "./det_info_wafer.h5"
+  array_info_dir: "/home/so/git/site-pipeline-configs/shared/detmapping/design/"
+
+  arrays:
+    - name: mv7
+      stream_id: ufm_mv7
+    - name: mv9
+      stream_id: ufm_mv9
+
 
 make_read_det_match
 ```````````````````
