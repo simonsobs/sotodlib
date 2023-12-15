@@ -321,12 +321,40 @@ class GlitchFill(_Preprocess):
 
 class FlagTurnarounds(_Preprocess):
     """From the Azimuth encoder data, flag turnarounds, left-going, and right-going.
-        All process configs go to `get_turnaround_flags`.
+        All process configs go to ``get_turnaround_flags``. If the ``method`` key
+        is not included in the preprocess config file calc configs then it will
+        default to 'scanspeed'.
     
     .. autofunction:: sotodlib.tod_ops.flags.get_turnaround_flags
     """
     name = 'flag_turnarounds'
     
+    def calc_and_save(self, aman, proc_aman):
+        if self.calc_cfgs is None:
+            self.calc_cfgs = {}
+            self.calc_cfgs['method'] = 'scanspeed'
+        elif not('method' in self.calc_cfgs):
+            self.calc_cfgs['method'] = 'scanspeed'
+
+        if self.calc_cfgs['method'] == 'scanspeed':
+            ta, left, right = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
+            turn_aman = core.AxisManager(aman.dets, aman.samps)
+            turn_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
+            turn_aman.wrap('left_scan', left, [(0, 'dets'), (1, 'samps')])
+            turn_aman.wrap('right_scan', right, [(0, 'dets'), (1, 'samps')])
+            self.save(proc_aman, turn_aman)
+        if self.calc_cfgs['method'] == 'az':
+            ta = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
+            turn_aman = core.AxisManager(aman.dets, aman.samps)
+            turn_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
+            self.save(proc_aman, turn_aman)
+
+    def save(self, proc_aman, turn_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("turnaround_flags", turn_aman)
+
     def process(self, aman, proc_aman):
         tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
         
