@@ -125,7 +125,7 @@ class Observations(Base):
         across stream_ids.
     timing : bool
         If true, the files of the entry observation were made with times
-        referenced to the external timing system and high precision timestamps.
+        aligned to the external timing system and high precision timestamps.
     duration : float
         The total observation time in seconds
     n_samples : integer
