@@ -1240,8 +1240,14 @@ class Imprinter:
                                 continue
 
                             t_list = [o for o in obs_list if o.timing]
-                            nt_list = [o for o in obs_list if ~o.timing]
-                            assert len(t_list)+len(nt_list) == len(obs_list)
+                            nt_list = [o for o in obs_list if not o.timing]
+                            
+                            if len(t_list)+len(nt_list) != len(obs_list):
+                                raise ValueError(f"Cannot safely split timing"  
+                                    f"info for {obs_list}"
+                                )
+                                
+
                             if len(t_list) > 0:
                                 # add all of the possible overlaps
                                 add_to_output(t_list, "obs")
