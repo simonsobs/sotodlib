@@ -45,7 +45,7 @@ def setup_demodulate(operators):
         toast.ops.FitNoiseModel(
             name="demod_noise_estim_fit",
             out_model="demod_noise_fit",
-            enabled=False,
+            enabled=True,
         )
     )
 
@@ -73,7 +73,10 @@ def demodulate(job, otherargs, runargs, data):
         # The pre-demodulation noise model to use
         if job_ops.noise_estim.enabled and job_ops.noise_estim_fit.enabled:
             # We have a noise estimate
-            log.info_rank("Demodulation using estimated noise model", comm=data.comm.comm_world)
+            log.info_rank(
+                "Demodulation using estimated noise model",
+                comm=data.comm.comm_world,
+            )
             noise_model = job_ops.noise_estim_fit.out_model
         else:
             have_noise = True
@@ -82,7 +85,8 @@ def demodulate(job, otherargs, runargs, data):
                     have_noise = False
             if have_noise:
                 log.info_rank(
-                    "Demodulation using noise model from data files", comm=data.comm.comm_world
+                    "Demodulation using noise model from data files",
+                    comm=data.comm.comm_world
                 )
                 noise_model = "noise_model"
             else:
@@ -100,10 +104,12 @@ def demodulate(job, otherargs, runargs, data):
         if hasattr(job_ops, "binner_final"):
             job_ops.binner_final.stokes_weights = demod_weights
 
-        # Estimate the (mostly white) noise on the demodulated data
-        job_ops.demod_noise_estim.apply(new_data)
-        job_ops.demod_noise_estim_fit.noise_model = job_ops.demod_noise_estim.out_model
-        job_ops.demod_noise_estim_fit.apply(new_data)
+        if job_obs.demod_noise_estim.enabled:
+            # Estimate the (mostly white) noise on the demodulated data
+            job_ops.demod_noise_estim.apply(new_data)
+            job_ops.demod_noise_estim_fit.noise_model = \
+                job_ops.demod_noise_estim.out_model
+            job_ops.demod_noise_estim_fit.apply(new_data)
         return new_data
     else:
         return data
