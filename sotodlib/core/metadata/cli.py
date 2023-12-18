@@ -166,7 +166,7 @@ def main(args=None):
             if item is None:
                 print(f'  "{args.obs_id}" not found!')
             else:
-                for k, v in db.get(args.obs_id).items():
+                for k, v in db.get(args.obs_id, tags=True).items():
                     print(f'  {k:<20}: {v}')
 
     elif args._subcmd == 'obsfiledb':
