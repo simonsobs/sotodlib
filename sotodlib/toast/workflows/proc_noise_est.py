@@ -37,6 +37,7 @@ def setup_noise_estimation(operators):
         toast.ops.FitNoiseModel(
             name="noise_estim_fit",
             out_model="noise_estim_fit",
+            enabled=False,
         )
     )
 
