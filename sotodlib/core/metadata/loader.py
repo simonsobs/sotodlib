@@ -213,7 +213,7 @@ class SuperLoader:
             # invent one so that we at least get the structure of the
             # metadata (even though we'll throw out all the actual
             # results).  You can get here if someone passes dets=[].
-            candidate_index_lines = man.inspect(request, False)
+            candidate_index_lines = man.inspect(request, False, prefix=dbpath)
             index_lines.append(candidate_index_lines[0])
             to_skip = [False]
 
