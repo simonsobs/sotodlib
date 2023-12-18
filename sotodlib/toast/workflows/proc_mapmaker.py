@@ -27,6 +27,7 @@ def setup_mapmaker(operators, templates):
         toast.templates.Offset(
             name="baselines",
             step_time=2.0 * u.second,
+            enabled=False,
         )
     )
     templates.append(
@@ -37,6 +38,7 @@ def setup_mapmaker(operators, templates):
             flag_mask=defaults.shared_mask_invalid,
             increment=np.pi / 180.0,  # One degree, az field is in radians
             bins=None,
+            enabled=False,
         )
     )
     operators.append(toast.ops.BinMap(name="binner", pixel_dist="pix_dist"))

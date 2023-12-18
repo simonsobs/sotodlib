@@ -67,7 +67,7 @@ def setup_simulate_detector_noise(operators):
         None
 
     """
-    operators.append(toast.ops.SimNoise(name="sim_noise"))
+    operators.append(toast.ops.SimNoise(name="sim_noise", enabled=False))
 
 
 @workflow_timer
