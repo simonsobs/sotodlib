@@ -644,14 +644,18 @@ class BookBinder:
 
         t0 = np.max([s.times[0] for s in self.streams.values()])
         t1 = np.min([s.times[-1] for s in self.streams.values()])
-        ts, _ = fill_time_gaps(stream.times)
+        # prioritizes the last stream
+        # implicitly assumes co-sampled (this is where we could throw errors
+        # after looking for co-sampled data)
+        ts, _ = fill_time_gaps(stream.times) 
         m = (t0 <= ts) & (ts <= t1)
         ts = ts[m]
 
         self.ancil.preprocess()
 
-        # Divide up frames
-        frame_splits = find_frame_splits(self.ancil)
+        # Divide up frames, only look within detector data and +/-30 seconds
+        frame_splits = find_frame_splits(self.ancil, ts[0]-30, ts[-1]+30)
+
         if frame_splits is None:
             frame_idxs = np.arange(len(ts)) // self.max_samps_per_frame
         else:
@@ -1126,18 +1130,35 @@ def locate_scan_events(az, dy=0.001, min_gap=200, filter_window=100):
 
     return events + offset, starts + offset, stops + offset
 
-def find_frame_splits(ancil):
+def find_frame_splits(ancil, t0=None, t1=None):
     """
     Determines timestamps of frame-splits from ACU data. If it cannot determine
     frame-splits, returns None.
+
+    Arguments
+    ----------
+    ancil: AncillaryProcesser
+    t0: float (optional)
+        start time to analyze ACU behavior 
+    t1: float (optional)
+        stop time to analyze ACU behavior
     """
     block = ancil.blocks['ACU_broadcast']
     if 'Corrected_Azimuth' not in block.data:
         return None 
 
-    az = block.data['Corrected_Azimuth']
+    if t0 is None:
+        t0 = block.data.times[0]
+    if t1 is None:
+        t1 = block.data.times[-1]
+
+    msk = np.all(
+        [block.times >= t0, block.times <= t1],
+        axis=0
+    )
+    az = block.data['Corrected_Azimuth'][msk]
     idxs = locate_scan_events(az, filter_window=100)[0]
-    return block.times[idxs]
+    return block.times[msk][idxs]
 
 
 def get_smurf_files(obs, meta_path, all_files=False):
