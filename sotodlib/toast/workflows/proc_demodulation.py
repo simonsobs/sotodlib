@@ -104,7 +104,7 @@ def demodulate(job, otherargs, runargs, data):
         if hasattr(job_ops, "binner_final"):
             job_ops.binner_final.stokes_weights = demod_weights
 
-        if job_obs.demod_noise_estim.enabled:
+        if job_ops.demod_noise_estim.enabled:
             # Estimate the (mostly white) noise on the demodulated data
             job_ops.demod_noise_estim.apply(new_data)
             job_ops.demod_noise_estim_fit.noise_model = \
