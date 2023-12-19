@@ -1001,10 +1001,15 @@ intended to carry precision results needed for mapping, such as
 calibration information or precise pointing and polarization angle
 data.
 
-Certain properties may change with time, for example if wiring or
-optics tube arrangements are adjusted from one season of observations
-to the next.  The ``DetDb`` is intended to support values that change
-with time.  **The timestamp support is still under development.**
+
+.. note::
+
+   DetDb is not planned for use in SO, because of the complexity of
+   the ``readout_id`` to ``det_id`` mapping problem.  The ``det_info``
+   system (described in the :ref:`metadata-section` section) is used
+   for making detector information available in the loaded TOD object.
+   DetDb is still used for simulations and for wrapping of data from
+   other readout systems.
 
 
 Using a DetDb (Tutorial)
@@ -1202,9 +1207,10 @@ properties::
   'geometry.wafer_pol']
 
 
-Creating a DetDb [empty]
-========================
+Creating a DetDb
+================
 
+For an example, see source code of :func:`get_example<detdb.get_example>`.
 
 Database organization
 =====================
@@ -1274,6 +1280,8 @@ Auto-generated documentation should appear here.
 .. autoclass:: DetDb
    :special-members: __init__
    :members:
+
+.. autofunction:: sotodlib.core.metadata.detdb.get_example
 
 
 ---------------------------
