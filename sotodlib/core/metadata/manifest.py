@@ -680,14 +680,16 @@ def get_parser(parser=None):
         endpoint fields.  (This mode is chosen by default.)
         """)
 
-    # "table"
+    # "entries"
     p = cmdsubp.add_parser(
-        'table', usage="""Syntax:
+        'entries', help=
+        "Show all entries in the database.",
+        usage="""Syntax:
 
     %(prog)s
 
         This will print every row of the metadata map table,
-        including the filename.
+        including the filename, and with two header rows.
         """)
 
 
@@ -827,7 +829,7 @@ def main(args=None):
 
         print()
 
-    elif args.mode == 'table':
+    elif args.mode == 'entries':
         # Print the table of entries.
         schema = db.scheme.as_resultset()
         keys = []
@@ -942,3 +944,6 @@ def main(args=None):
             db.conn.commit()
             c.execute('vacuum')
             db.to_file(args.output_db)
+
+    else:
+        print(f'Sorry, {args.mode} not implemented.')
