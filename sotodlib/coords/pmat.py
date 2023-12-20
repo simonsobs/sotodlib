@@ -79,9 +79,9 @@ class P:
     - cuts (optional): RangesMatrix indicating what samples to exclude
       from projection operations (the indicated samples have
       projection matrix element 0 in all components). [dets, samps]
-    - threads (optional): RangesMatrix that assigns ranges of samples
-      to specific threads.  This is necessary for TOD-to-map
-      operations that use OpenMP. [dets, samps]
+    - threads (optional): list of RangesMatrix objects, to control the
+      use of threads in TOD-to-map operations using OpenMP.  See so3g
+      documentation. [[threads, dets, samps], ...]
     - det_weights (optional): weights (one per detector) to apply to
       time-ordered data when binning a map (and also when binning a
       weights matrix).  [dets]
@@ -466,7 +466,7 @@ class P:
             else:
                 raise ValueError('Request for unknown algo threads="%s"' % self.threads)
         if cuts:
-            threads = self.threads * ~cuts
+            threads = [_t * ~cuts for _t in self.threads]
         else:
             threads = self.threads
         return proj, threads
@@ -508,15 +508,23 @@ def wrap_geom(geom):
     else:
         return geom
 
-# Helpers for backwards compatibility with old so3g. Consider removing these
-# once transition is done.
+# Helpers for backwards compatibility with old so3g. Consider removing
+# these once transition is done.  The idea is for sotodlib to use the
+# more recent interface ("threads" is a list of RangesMatrix objects)
+# while supporting use with older so3g (where "threads" is a single
+# 3-d RangesMatrix).
+
 def wrap_ranges(ranges):
+    # Run this on the "threads" result returned from so3g thread
+    # assignement routines, before storing the result internally.
     if _so3g_ivals_format() == 1:
-        return so3g.proj.ranges.RangesMatrix([ranges])
+        return [ranges]
     else:
         return ranges
 
 def unwrap_ranges(ranges):
+    # Run this on the internally stored threads object before passing
+    # it to so3g projection routines.
     if _so3g_ivals_format() == 1:
         assert len(ranges) == 1, "Old so3g only supports simple (1-bunch) thread ranges, but got thread ranges with shape %s" % (str(ranges.shape))
         return ranges[0]
