@@ -62,7 +62,19 @@ def setup_mapmaker(operators, templates):
     operators.append(toast.ops.BinMap(name="binner", pixel_dist="pix_dist"))
     operators.append(
         toast.ops.BinMap(
-            name="binner_final", enabled=False, pixel_dist="pix_dist_final"
+            name="binner",
+            pixel_dist="pix_dist",
+            # Flag invalid data and turnarounds by default
+            shared_flag_mask=3,
+        )
+    )
+    operators.append(
+        toast.ops.BinMap(
+            name="binner_final",
+            enabled=False,
+            pixel_dist="pix_dist_final",
+            # Flag invalid data and turnarounds by default
+            shared_flag_mask=3,
         )
     )
     operators.append(toast.ops.MapMaker(name="mapmaker", det_data=defaults.det_data))

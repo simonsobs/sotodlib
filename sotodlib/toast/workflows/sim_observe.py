@@ -97,6 +97,9 @@ def setup_simulate_observing(parser, operators):
             detset_key="pixel",
             session_split_key="wafer_slot",
             enabled=False,
+            # Flagging turnarounds as invalid (bit#1)
+            # breaks the atmospheric simulation
+            turnaround_mask=2,
         )
     )
     operators.append(so_ops.CoRotator(name="corotate_lat"))
