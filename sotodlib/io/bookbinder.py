@@ -91,11 +91,18 @@ class HKBlock:
                 self.data[k] = []
             self.data[k].append(v)
     
-    def finalize(self):
+    def finalize(self,drop_duplicates=False):
         if self.times:
             self.times = np.hstack(self.times)
+            clean_times, idxs = np.unique(self.times, return_index=True)
+            if len(self.times) != len(clean_times):
+                if not drop_duplicates:
+                    raise ValueError(f"HK data from block {self.name} has" 
+                                    " duplicate timestamps")
+                self.times = self.times[idxs]
+            assert np.all(np.diff(self.times)>0)
             for k, v in self.data.items():
-                self.data[k] = np.hstack(v)
+                self.data[k] = np.hstack(v)[idxs]
         else:
             self.times = np.array([], dtype=np.float64)
             self.data = {}
@@ -122,7 +129,7 @@ class AncilProcessor:
         populated on bind and should be used to add copies of the anc data to
         the detector frames. 
     """
-    def __init__(self, files, book_id, log=None):
+    def __init__(self, files, book_id, drop_duplicates=False, log=None):
         self.files = files
         self.times = None
         self.blocks = {
@@ -134,6 +141,7 @@ class AncilProcessor:
         self.out_files = []
         self.book_id = book_id
         self.preprocessed = False
+        self.drop_duplicates = drop_duplicates
 
         if log is None:
             self.log = logging.getLogger('bookbinder')
@@ -158,7 +166,7 @@ class AncilProcessor:
                 block.process_frame(fr)
 
         for block in self.blocks.values():
-            block.finalize()
+            block.finalize(drop_duplicates=self.drop_duplicates)
         self.preprocessed = True
 
     
@@ -578,6 +586,13 @@ class BookBinder:
         Dict of readout_ids to use for each stream_id. If provided, these
         will be used to set the `names` in the signal frames. If not provided,
         names will be taken from the input frames.
+    ignore_tags : bool, optional
+        if true, will ignore tags if the level 2 observations have unmatched
+        tags
+    ancil_drop_duplicates: bool, optional
+        if true, will drop duplicate timestamp data from ancillary files. added
+        to deal with an occassional hk aggregator error where it is picking up
+        multiple copies of the same data
 
     
     Attributes
@@ -595,7 +610,7 @@ class BookBinder:
     """
     def __init__(self, book, obsdb, filedb, data_root, readout_ids, outdir,
                  max_samps_per_frame=50_000, max_file_size=1e9, 
-                ignore_tags=False):
+                ignore_tags=False, ancil_drop_duplicates=False):
         self.filedb = filedb
         self.book = book
         self.data_root = data_root
@@ -617,7 +632,12 @@ class BookBinder:
         logfile = os.path.join(outdir, 'Z_bookbinder_log.txt')
         self.log = setup_logger(logfile)
 
-        self.ancil = AncilProcessor(self.hkfiles, book.bid, log=self.log)
+        self.ancil = AncilProcessor(
+            self.hkfiles, 
+            book.bid, 
+            log=self.log, 
+            drop_duplicates=ancil_drop_duplicates
+        )
         self.streams = {}
         for obs_id, files in filedb.items():
             stream_id = '_'.join(obs_id.split('_')[1:-1])

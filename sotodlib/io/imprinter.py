@@ -572,7 +572,8 @@ class Imprinter:
     def _get_binder_for_book(self, 
         book, 
         pbar=False, 
-        ignore_tags=False
+        ignore_tags=False,
+        ancil_drop_duplicates=False,
     ):
         """get the appropriate bookbinder for the book based on its type"""
         with open(self.g3tsmurf_config, "r") as f:
@@ -598,6 +599,7 @@ class Imprinter:
             bookbinder = BookBinder(
                 book, obsdb, filedb, lvl2_data_root, readout_ids, book_path,
                 ignore_tags=ignore_tags,
+                ancil_drop_duplicates=ancil_drop_duplicates,
             )
             return bookbinder
 
@@ -696,6 +698,7 @@ class Imprinter:
         test_mode=False,
         pbar=False,
         ignore_tags=False,
+        ancil_drop_duplicates=False,
         check_configs={}
     ):
         """Bind book using bookbinder
@@ -714,6 +717,9 @@ class Imprinter:
         ignore_tags : bool
             If true, book will be bound even if the tags between different level 2
             operations don't match. Only ever expected to be turned on by hand.
+        ancil_drop_duplicates: if true, will drop duplicate data from ancilary  
+            files. added to deal with an ocs aggregator error. Only ever 
+            expected to be turned on by hand.
         check_configs: dict
             additional non-default configurations to send to check book
         """
@@ -740,6 +746,7 @@ class Imprinter:
             binder = self._get_binder_for_book(
                 book, 
                 ignore_tags=ignore_tags,
+                ancil_drop_duplicates=ancil_drop_duplicates,
             )
             book.path = op.abspath(binder.outdir)
 

@@ -54,8 +54,9 @@ def check_failed_books(imprint:Imprinter):
             resp = input(
                 "Possible Actions to Take: "
                 "\n\t1. Retry Binding"
-                "\n\t2. Permanently Skip Binding"
-                "\n\t3. Do Nothing"
+                "\n\t2. Rebind with flag(s)"
+                "\n\t3. Permanently Skip Binding"
+                "\n\t4. Do Nothing"
                 "\nInput Response: "
             )
             try: 
@@ -63,15 +64,24 @@ def check_failed_books(imprint:Imprinter):
             except:
                 print(f"Invalid Response {resp}")
                 resp=None
-            if resp is None or resp < 1 or resp > 3:
+            if resp is None or resp < 1 or resp > 4:
                 print(f"Invalid Response {resp}")
                 resp=None
         print(f"You selected {resp}")
         if resp == 1:
             utils.set_book_rebind(imprint, book)
-        elif resp == 2:
-            utils.set_book_wont_bind(imprint, book)
+        if resp == 2:
+            utils.set_book_rebind(imprint, book)
+            resp = input("Ignore Tags? (y/n)")
+            ignore_tags = resp.lower() == 'y'
+            resp = input("Drop Ancillary Duplicates? (y/n)")
+            ancil_drop_duplicates = resp.lower() == 'y'
+            imprint.bind_book(
+                book, ignore_tags=ignore_tags, ancil_drop_duplicates=ancil_drop_duplicates
+            )
         elif resp == 3:
+            utils.set_book_wont_bind(imprint, book)
+        elif resp == 4:
             pass
         else:
             raise ValueError("how did I get here?")
