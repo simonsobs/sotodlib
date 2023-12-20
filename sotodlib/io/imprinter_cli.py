@@ -1,3 +1,12 @@
+""" Command-line interface for helping to clear out or clean up failed books. 
+
+--action=failed: the script will cycle through failed books and
+give the option to retry binding (useful if software changes mean we expect the
+books to now be successfully bound), to skip binding those files (push
+timestreams into the stray books), or do nothing.
+
+--action=timecodes: not implemented yet
+"""
 import os
 import argparse
 from typing import Optional
