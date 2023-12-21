@@ -11,7 +11,16 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
 
 from .core import _Preprocess
 
+class MoveField(_Preprocess):
+    name = 'move'
+    def process(self, aman, proc_aman):
+        aman.move(**self.process_cfgs)
 
+class ReduceFlags(_Preprocess):
+    name = 'reduce_flags'
+    def process(self, aman, proc_aman):
+        aman.flags.reduce(**self.process_cfgs)
+        
 class FFTTrim(_Preprocess):
     """Trim the AxisManager to optimize for faster FFTs later in the pipeline.
     All processing configs go to `fft_trim`
@@ -110,6 +119,9 @@ class GlitchDetection(_Preprocess):
     """
     name = "glitches"
     
+    def process(self, aman, proc_aman):
+        tod_ops.flags.get_glitch_flags(aman, **self.process_cfgs)
+        
     def calc_and_save(self, aman, proc_aman):
         glitch_cut, glitch_aman = tod_ops.flags.get_glitch_flags(
             aman, merge=False, full_output=True,
@@ -365,3 +377,5 @@ _Preprocess.register(FlagTurnarounds.name, FlagTurnarounds)
 _Preprocess.register(SubPolyf.name, SubPolyf)
 _Preprocess.register(DetBiasFlags.name, DetBiasFlags)
 _Preprocess.register(FlagSource.name, FlagSource)
+_Preprocess.register(MoveField.name, MoveField)
+_Preprocess.register(ReduceFlags.name, ReduceFlags)

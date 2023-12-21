@@ -11,52 +11,52 @@ from pixell import enmap
 import h5py
 from scipy.ndimage.filters import maximum_filter
 
-def get_moon_trajectry(tod, _split=20, return_model=False):
+def get_planet_trajectry(tod, planet, _split=20, return_model=False):
     timestamps_sparse = np.linspace(tod.timestamps[0], tod.timestamps[-1], _split)
     
-    moon_az_sparse = np.zeros_like(timestamps_sparse)
-    moon_el_sparse = np.zeros_like(timestamps_sparse)
+    planet_az_sparse = np.zeros_like(timestamps_sparse)
+    planet_el_sparse = np.zeros_like(timestamps_sparse)
     for i, timestamp in enumerate(timestamps_sparse):
-        az, el, _ = coords.planets.get_source_azel('moon', timestamp)
-        moon_az_sparse[i] = az
-        moon_el_sparse[i] = el
-    moon_az_func = interpolate.interp1d(timestamps_sparse, moon_az_sparse, kind="quadratic", fill_value='extrapolate')
-    moon_el_func = interpolate.interp1d(timestamps_sparse, moon_el_sparse, kind="quadratic", fill_value='extrapolate')
+        az, el, _ = coords.planets.get_source_azel('planet', timestamp)
+        planet_az_sparse[i] = az
+        planet_el_sparse[i] = el
+    planet_az_func = interpolate.interp1d(timestamps_sparse, planet_az_sparse, kind="quadratic", fill_value='extrapolate')
+    planet_el_func = interpolate.interp1d(timestamps_sparse, planet_el_sparse, kind="quadratic", fill_value='extrapolate')
     if return_model:
-        return moon_az_func, moon_el_func
+        return planet_az_func, planet_el_func
     else:
-        moon_az = moon_az_func(tod.timestamps)
-        moon_el = moon_el_func(tod.timestamps)
-        q_moon = quat.rotation_lonlat(moon_az, moon_el)
-        return q_moon
+        planet_az = planet_az_func(tod.timestamps)
+        planet_el = planet_el_func(tod.timestamps)
+        q_planet = quat.rotation_lonlat(planet_az, planet_el)
+        return q_planet
 
-def get_det_centered_sight(tod, q_moon=None, q_bs=None, q_dets=None,):
-    if q_moon is None:
-        q_moon = get_moon_trajectry(tod)
+def get_det_centered_sight(tod, planet, q_planet=None, q_bs=None, q_dets=None,):
+    if q_planet is None:
+        q_planet = get_planet_trajectry(tod, planet)
     if q_bs is None:
         q_bs = quat.rotation_lonlat(tod.boresight.az, tod.boresight.el)
     if q_dets is None:
         q_dets = quat.rotation_xieta(tod.focal_plane.xi, tod.focal_plane.eta)
     z_to_x = quat.rotation_lonlat(0, 0)
-    sight = z_to_x * ~(q_bs * q_dets) * q_moon    
+    sight = z_to_x * ~(q_bs * q_dets) * q_planet    
     return sight
 
-def get_moon_centered_P(tod, q_moon=None, q_bs=None, q_dets=None,):
-    if q_moon is None:
-        q_moon = get_moon_trajectry(tod)
+def get_planet_centered_P(tod, q_planet=None, q_bs=None, q_dets=None,):
+    if q_planet is None:
+        q_planet = get_planet_trajectry(tod)
     if q_bs is None:
         q_bs = quat.rotation_lonlat(tod.boresight.az, tod.boresight.el)
     if q_dets is None:
         q_dets = quat.rotation_xieta(tod.focal_plane.xi, tod.focal_plane.eta)    
     z_to_x = quat.rotation_lonlat(0, 0)
-    sight = z_to_x * ~q_moon * q_bs * q_dets
+    sight = z_to_x * ~q_planet * q_bs * q_dets
     return sight
 
 def make_det_centered_maps(tod, hdf_path, cuts=None, wcs_kernel=None, res=0.1*coords.DEG, signal='signal'):
     if wcs_kernel is None:
         wcs_kernel = coords.get_wcs_kernel('car', 0, 0, res)
         
-    sight_bs_centered_moon = get_det_centered_sight(tod, q_dets=quat.rotation_xieta(0, 0))
+    sight_bs_centered_planet = get_det_centered_sight(tod, q_dets=quat.rotation_xieta(0, 0))
     for di, det in enumerate(tod.dets.vals):
         tod_single = tod.restrict('dets', tod.dets.vals[di:di+1], in_place=False)
         if cuts is None:
@@ -65,7 +65,7 @@ def make_det_centered_maps(tod, hdf_path, cuts=None, wcs_kernel=None, res=0.1*co
             cuts_single = cuts[di]
         
         xi0, eta0 = tod_single.focal_plane.xi[0], tod_single.focal_plane.eta[0]
-        sight = sight_bs_centered_moon * quat.rotation_xieta(xi0, eta0)
+        sight = sight_bs_centered_planet * quat.rotation_xieta(xi0, eta0)
         P = coords.P.for_tod(tod=tod_single, wcs_kernel=wcs_kernel, comps='T', cuts=cuts_single, sight=sight)
         
         mT_weighted = P.to_map(tod=tod_single, signal=signal, comps='T', det_weights=None)
@@ -184,13 +184,11 @@ def get_xieta_from_maps(map_hdf_file, r_tune_circle=1.0*coords.DEG, q_tune=50,
             eta0 = float(ifile[det]['eta0'][...])
             xi, eta = _add_xieta((xi0, eta0), (xi, eta))
             xieta_dict[det] = {'xi':xi, 'eta':eta}
-    
     if save:
         fp = metadata.ResultSet(keys=['dets:readout_id', 'xi', 'eta', 'gamma'])
         for det in dets:
             fp.rows.append((det, xieta_dict[det]['xi'], xieta_dict[det]['eta'], 0.))
         write_dataset(fp, output_file, 'focalplane', overwrite=True)
-        
     return xieta_dict
 
 def _add_xieta(xieta1, xieta2):

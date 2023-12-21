@@ -125,9 +125,9 @@ def get_azss(aman, signal=None, az=None, range=None, bins=100, flags=None,
         If None, [min(az), max(az)] will be used for binning.
     bins: integer
         The number of bins to divide the azimuth angle range into. Defaults to 360.
-    flags : RangesMatrix, optinal
+    flags : RangesMatrix or str, optinal
         Flag indicating whether to exclude flagged samples when binning the signal.
-        Default is no mask applied.
+        Default is no mask applied. If given in str, aman.flags[`flags`] is used.
     method: str
         The method to use for azss modeling. Options are 'interpolate' and 'fit'. 
         In 'interpolate', binned signal is used directly.
@@ -159,7 +159,9 @@ def get_azss(aman, signal=None, az=None, range=None, bins=100, flags=None,
         signal = aman.signal
     if az is None:
         az = aman.boresight.az
-        
+    if type(flags) == str:
+        flags = aman.flags[flags]
+    
     # do binning
     binning_dict = bin_by_az(aman, signal=signal, az=az, range=range, bins=bins, flags=flags)
     bin_centers = binning_dict['bin_centers']
