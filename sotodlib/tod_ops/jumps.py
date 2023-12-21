@@ -4,6 +4,7 @@ import scipy.signal as sig
 import scipy.stats as ss
 from skimage.restoration import denoise_tv_chambolle
 from so3g.proj import RangesMatrix
+from sotodlib.core import AxisManager
 
 
 def std_est(x, axis=-1):
@@ -497,7 +498,17 @@ def jumpfix_subtract_heights(x, jumps, heights, inplace=False):
     return x_fixed.reshape(orig_shape)
 
 
-def twopi_jumps(tod, signal=None, win_size=20, atol=None, fix=True, inplace=False):
+def twopi_jumps(
+    tod,
+    signal=None,
+    win_size=20,
+    atol=None,
+    fix=True,
+    inplace=False,
+    merge=True,
+    overwrite=False,
+    flagname="jumps_2pi",
+):
     """
     Find and optionally fix jumps that are height ~N*2pi.
     TOD is expected to have detectors with high trends already cut.
@@ -518,6 +529,12 @@ def twopi_jumps(tod, signal=None, win_size=20, atol=None, fix=True, inplace=Fals
         fix: If True the jumps will be fixed by adding N*2*pi at the jump locations.
 
         inplace: If True jumps will be fixed inplace.
+
+        merge: If True will wrap ranges matrix into ``tod.flags.<flagname>``
+
+        overwrite: If True will overwrite existing content of ``tod.flags.<flagname>``
+
+        flagname: String used to populate field in flagmanager if merge is True.
 
     Returns:
 
@@ -554,6 +571,15 @@ def twopi_jumps(tod, signal=None, win_size=20, atol=None, fix=True, inplace=Fals
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
 
+    if merge:
+        if overwrite:
+            if flagname in tod.flags._fields:
+                tod.flags.move(flagname, None)
+        if "flags" not in tod._fields:
+            flags = AxisManager(tod.dets, tod.samps)
+            tod.wrap("flags", flags)
+        tod.flags.wrap(flagname, jump_ranges, [(0, "dets"), (1, "samps")])
+
     if fix:
         jumps = jump_ranges.mask()
         jumps[:, -2:] = False
@@ -581,6 +607,9 @@ def find_jumps(
     max_depth=0,
     fix=None,
     inplace=False,
+    merge=True,
+    overwrite=False,
+    flagname="jumps",
     **kwargs,
 ):
     """
@@ -625,6 +654,12 @@ def find_jumps(
              Set to None to not fix.
 
         inplace: Whether of not signal should be fixed inplace.
+
+        merge: If True will wrap ranges matrix into ``tod.flags.<flagname>``
+
+        overwrite: If True will overwrite existing content of ``tod.flags.<flagname>``
+
+        flagname: String used to populate field in flagmanager if merge is True.
 
         **kwargs: Additional keyword args to pass to jumpfinder.
 
@@ -698,6 +733,15 @@ def find_jumps(
     # TODO: include heights in output
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(buff_size)
+
+    if merge:
+        if overwrite:
+            if flagname in tod.flags._fields:
+                tod.flags.move(flagname, None)
+        if "flags" not in tod._fields:
+            flags = AxisManager(tod.dets, tod.samps)
+            tod.wrap("flags", flags)
+        tod.flags.wrap(flagname, jump_ranges, [(0, "dets"), (1, "samps")])
 
     if do_fix:
         if is_med:
