@@ -100,7 +100,8 @@ class HKBlock:
                     raise ValueError(f"HK data from block {self.name} has" 
                                     " duplicate timestamps")
                 self.times = self.times[idxs]
-            assert np.all(np.diff(self.times)>0)
+            assert (np.all(np.diff(self.times)>0), f"Times from {self.name} are"
+                            " not increasing")
             for k, v in self.data.items():
                 self.data[k] = np.hstack(v)[idxs]
         else:

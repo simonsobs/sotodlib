@@ -70,7 +70,7 @@ def check_failed_books(imprint:Imprinter):
         print(f"You selected {resp}")
         if resp == 1:
             utils.set_book_rebind(imprint, book)
-        if resp == 2:
+        elif resp == 2:
             utils.set_book_rebind(imprint, book)
             resp = input("Ignore Tags? (y/n)")
             ignore_tags = resp.lower() == 'y'
