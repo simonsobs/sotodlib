@@ -1,4 +1,6 @@
 import so3g
+from so3g.proj import Ranges
+
 from spt3g import core
 import itertools
 import numpy as np
@@ -1027,129 +1029,80 @@ def get_hk_files(hkdir, start, stop, tbuff=10*60):
 
     return files[m].tolist()
 
-def locate_scan_events(az, dy=0.001, min_gap=200, filter_window=100):
+def locate_scan_events(
+        times, az, 
+        vel_thresh=0.01, # mount noise for satps is 0.015 deg/s level
+        min_gap=200, 
+        filter_window=100
+    ):
     """
-    Locate places where a noisy vector t changes sign: +ve, -ve, and 0. To
-    handle noise, "zero" is defined to be a threshold region from -dy to +dy.
-    Thus t is said to have a zero-crossing if it fully crosses the threshold
-    region, with the actual crossing approximated as halfway between entering
-    and exiting the region. Entrances and exits without a crossing are also
-    identified (as "stops" and "starts" respectively).
+    Locate places where the azimuth velocity changes sign, including starts and
+    stops. These locations are where we should start determining the scan 
+    framing.
 
     Parameters
     ----------
-    dy : float, optional
-        Amplitude of threshold region
+    times : ndarray float
+        times 
+    az: ndarray float
+        azimuth positions
+    vel_thresh : float, optional
+        threshold for what is considered stopped
     min_gap : int, optional
         Length of gap (in samples) longer than which events are considered separate
 
     Returns
     -------
     events : list
-        Full list containing all zero-crossings, starts, and stops
-    starts : list
-        List of places where t exits the threshold region (subset of events)
-    stops : list
-        List of places where t enters the threshold region (subset of events)
+        Full list containing all zero-crossings, starts, and stops that should become frame edges
     """
 
+    if len(az) < 1:
+        return []
+
     offset = 0
+    vel = np.diff(az)/np.diff(times)
+
     if filter_window is not None:
-        boxcar = np.ones(filter_window) / filter_window
-        az = convolve(az, boxcar, mode='same')[filter_window:-filter_window]
+        win = np.hanning(filter_window) / np.sum(np.hanning(filter_window))
+        vel = convolve(vel, win, mode='same')[filter_window:-filter_window]
         offset = filter_window
+
+    ## find places with "zero" velocity
+    zero_vel = np.abs(vel) < vel_thresh
+    if np.all(zero_vel):
+        return []
     
-    t = np.diff(az)
-
-    tmin = np.min(t)
-    tmax = np.max(t)
-
-    if len(t) == 0:
-        return [], [], []
-
-    if np.sign(tmax) == np.sign(tmin):
-        return [], [], []
-
-    # If the data does not entirely cross the threshold region,
-    # do not consider it a sign change
-    if tmin > -dy and tmax < dy:
-        return [], [], []
-
-    # Find where the data crosses the lower and upper boundaries of the threshold region
-    c_lower = (np.where(np.sign(t[:-1]+dy) != np.sign(t[1:]+dy))[0] + 1)
-    c_upper = (np.where(np.sign(t[:-1]-dy) != np.sign(t[1:]-dy))[0] + 1)
-
-    # Classify each crossing as entering or exiting the threshold region
-    c_lower_enter = []; c_lower_exit = []
-    c_upper_enter = []; c_upper_exit = []
-
-    # Noise handling:
-    # If there are multiple crossings of the same boundary (upper or lower) in
-    # quick succession (i.e., less than min_gap), it is mostly likely due to
-    # noise. In this case, take the average of each group of crossings.
-    if len(c_lower) > 0:
-        spl = np.array_split(c_lower, np.where(np.ediff1d(c_lower) > min_gap)[0] + 1)
-        c_lower = np.array([int(np.ceil(np.mean(s))) for s in spl])
-        # Determine if this crossing is entering or exiting threshold region
-        for i, s in enumerate(spl):
-            if t[s[0]-1] < t[s[-1]+1]:
-                c_lower_enter.append(c_lower[i])
-            else:
-                c_lower_exit.append(c_lower[i])
-    if len(c_upper) > 0:
-        spu = np.array_split(c_upper, np.where(np.ediff1d(c_upper) > min_gap)[0] + 1)
-        c_upper = np.array([int(np.ceil(np.mean(s))) for s in spu])
-        # Determine if this crossing is entering or exiting threshold region
-        for i, s in enumerate(spu):
-            if t[s[0]-1] < t[s[-1]+1]:
-                c_upper_exit.append(c_upper[i])
-            else:
-                c_upper_enter.append(c_upper[i])
-
-    # If any empty lists are passed to concatenate, this will be cast
-    # into an array of floats instead of ints
-    starts = np.sort(np.concatenate((c_lower_exit, c_upper_exit)))
-    stops = np.sort(np.concatenate((c_lower_enter, c_upper_enter)))
-    events = np.sort(np.concatenate((starts, stops)))
-
-    # cast back to ints just in case
-    starts = starts.astype(int)
-    stops = stops.astype(int)
-    events = events.astype(int)
+    zeros = Ranges.from_mask(zero_vel)
+    zeros.close_gaps(min_gap)
     
-    # Look for zero-crossings
-    zc = []
-    while len(c_lower) > 0 and len(c_upper) > 0:
-        # Crossing from -ve to +ve
-        if c_lower[0] < c_upper[0]:
-            b = c_lower[c_lower < c_upper[0]]
-            zc.append(int( np.ceil(np.mean([b[-1], c_upper[0]])) ))
-            c_lower = c_lower[len(b):]
-        # Crossing from +ve to -ve
-        elif c_upper[0] < c_lower[0]:
-            b = c_upper[c_upper < c_lower[0]]
-            zc.append(int( np.ceil(np.mean([b[-1], c_lower[0]])) ))
-            c_upper = c_upper[len(b):]
-
-    # Replace all upper and lower crossings that contain a zero-crossing in
-    # between with the zero-crossing itself, but ONLY if those three events
-    # happen in quick succession (i.e., shorter than min_gap). Otherwise, they
-    # are separate events -- there is likely a stop state in between; in this
-    # case, do NOT perform the replacement.
-    for z in zc:
-        before_z = events[events < z]
-        after_z  = events[events > z]
-        if (after_z[0] - before_z[-1]) < min_gap:
-            events = np.concatenate((before_z[:-1], [z], after_z[1:]))
-
-    # Ignore first / last event if it is too close to the start or end
-    if (len(t) - events[-1] < min_gap) and events[-1] not in zc:
-        events = events[:-1]
-
-    if events[0] < min_gap:
-        events = events[1:]
-
-    return events + offset, starts + offset, stops + offset
+    ## find places where velocity changes sign in case the velocity
+    ## is so fast it never gets close enough to zero
+    x = np.where( np.sign(vel) > 0 )[0]
+    y = np.where( np.diff(x) > 1 )[0]
+    cross = Ranges.zeros_like(zeros)
+    for z in y:
+        cross.add_interval( x[z]+1, x[z]+2)
+    x = np.where( np.sign(vel) < 0 )[0]
+    y = np.where( np.diff(x) > 1 )[0]
+    for z in y:
+        cross.add_interval( x[z]+1, x[z]+2)
+    
+    zeros = zeros + cross
+    events = []
+    
+    for c in zeros.ranges():   
+        # if zero period is longer than min_gap, it's a start or stop add each side to the list
+        if c[1] - c[0] > min_gap:
+            if c[0] != 0:
+                events.append( c[0] )
+            if c[1] != len(vel):
+                events.append( c[1] )
+        # otherwise, it's a zero crossing, add mean
+        else:
+            events.append( int(round( sum(c)/2 )) )
+    
+    return np.array(events, dtype='int')+offset
 
 def find_frame_splits(ancil, t0=None, t1=None):
     """
@@ -1178,7 +1131,7 @@ def find_frame_splits(ancil, t0=None, t1=None):
         axis=0
     )
     az = block.data['Corrected_Azimuth'][msk]
-    idxs = locate_scan_events(az, filter_window=100)[0]
+    idxs = locate_scan_events(block.times[msk], az, filter_window=100)
     return block.times[msk][idxs]
 
 
