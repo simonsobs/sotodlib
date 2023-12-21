@@ -87,9 +87,9 @@ class G3tHWP():
 
         # Threshoild for outlier data to calculate nominal slit width
         self._slit_width_lim = self.configs.get('slit_width_lim', 0.1)
-
+        
         # The distance from the hwp center to the fine encoder slots (mm)
-        self._encoder_disk_radius = 346.25
+        self._encoder_disk_radius = self.configs.get('encoder_disk_radius', 346.25)
 
         # force to quad value
         # 0: use readout quad value (default)
@@ -417,7 +417,7 @@ class G3tHWP():
         ------
             * fast_time: timestamp
                 * IRIG synched timing (~2kHz)
-                * angle (float): IRIG synched HWP angle in radian
+            * angle (float): IRIG synched HWP angle in radian
             * slow_time: timestamp
                 * time list of slow block
             * stable: bool
@@ -458,10 +458,10 @@ class G3tHWP():
             out.update(self._slowdata_process(fast_time, d1['irig_time']))
             out['fast_time'] = fast_time
             out['angle'] = angle
-            out['ref_indexes'] = self._ref_indexes
+            out['ref_indexes'] = self._ref_indexes  
 
         # 2nd encoder
-        logger.info("Start calclulating angle of 2st encoder")
+        logger.info("Start calclulating angle of 2nd encoder")
         if len(d2['irig_time']) == 0:
             logger.warning('There is no correct IRIG timing. Stop analyze.')
         else:
@@ -477,6 +477,78 @@ class G3tHWP():
             out['ref_indexes_2'] = self._ref_indexes
 
         return out
+
+    def analyze_single(self, data, ratio=None, mod2pi=True, fast=True, suffix=''):
+        """
+        Analyze HWP angle solution
+        to be checked by hardware that 0 is CW and 1 is CCW from (sky side) consistently for all SAT
+
+        Args
+        -----
+            data : dict
+                HWP HK data from load_data
+            ratio : float, optional
+                parameter for referelce slit
+                threshold = 2 slit distances +/- ratio
+            mod2pi : bool, optional
+                If True, return hwp angle % 2pi
+            fast : bool, optional
+                If True, run fast fill_ref algorithm
+
+        Returns
+        --------
+        dict
+            {fast_time, angle, slow_time, stable, locked, hwp_rate}
+
+
+        Notes
+        ------
+            * fast_time: timestamp
+                * IRIG synched timing (~2kHz)
+            * angle (float): IRIG synched HWP angle in radian
+            * slow_time: timestamp
+                * time list of slow block
+            * stable: bool
+                * if non-zero, indicates the HWP spin state is known.
+                * i.e. it is either spinning at a measurable rate, or stationary.
+                * When this flag is non-zero, the hwp_rate field can be taken at face value.
+            * locked: bool
+                * if non-zero, indicates the HWP is spinning and the position solution is working.
+                * In this case one should find the hwp_angle populated in the fast data block.
+            * hwp_rate: float:
+                * the "approximate" HWP spin rate, with sign, in revs / second.
+                * Use placeholder value of 0 for cases when not "stable".
+        """
+
+        if not any(data):
+            logger.info("no HWP field data")
+
+        d = self._data_formatting(data, suffix)
+
+        # hwp angle calc.
+        if ratio is not None:
+            logger.info(f"Overwriting reference slit threshold by {ratio}.")
+            self._ref_range = ratio
+
+        out = {}
+
+        logger.info("Start calclulating angle.")
+        if len(d['irig_time']) == 0:
+            logger.warning('There is no correct IRIG timing. Stop analyze.')
+        else:
+            fast_time, angle = self._hwp_angle_calculator(
+                d['counter'], d['counter_index'], d['irig_time'],
+                d['rising_edge_count'], d['quad_time'], d['quad'],
+                mod2pi, fast)
+            if len(fast_time) == 0:
+                logger.warning('analyzed encoder data is None')
+            out.update(self._slowdata_process(fast_time, d['irig_time'], suffix))
+            out['fast_time'+suffix] = fast_time
+            out['angle'+suffix] = angle
+            out['ref_indexes'+suffix] = self._ref_indexes  
+
+        return out
+
 
     def eval_angle(self, solved, poly_order=3, suffix=''):
         """
@@ -569,16 +641,16 @@ class G3tHWP():
         Returns
         --------
         output: dict
-            {idx1, idx2, offcentering, offset_time}
+            {offcenter_idx1, offcenter_idx2, offcentering, offset_time}
 
         Notes
         ------
-            * idx1: int
+            * offcenter_idx1: int
                 * index of the solved['fast_time'] for which offcentering is estimated.
-            * idx2: int
+            * offcenter_idx2: int
                 * index of the solved['fast_time_2'] for which offcentering is estimated.
             * offcentering: float
-                * Offcentering (mm) at solved['fast_time(_2)'][idx1(2)].
+                * Offcentering (mm) at solved['fast_time(_2)'][offcenter_idx1(2)].
             * offset_time: float
                 * Offset time of the encoder signals induced by the offcentering.
                 * Offset time is the delayed (advanced) timing of the encoder1 (2) in sec.           
@@ -588,40 +660,43 @@ class G3tHWP():
         # Skip the offcentering evaluation if 'solved' doesn't include second encoder data.
         if not ('fast_time' and 'fast_time_2') in solved.keys():
             logger.warning('Offcentering calculation is only available when two encoders are operating. Skipped.')
-            return
+            return None
         # Run the template subtraction if not processed yet.
-        if not 'fast_time_raw' in solved.keys():
-            logger.info('Running the template subtraction for the 1st encoder.')
-            self.eval_angle(solved, poly_order=3, suffix='')
-        if not 'fast_time_raw_2' in solved.keys():
-            logger.info('Running the template subtraction for the 2nd encoder.')
-            self.eval_angle(solved, poly_order=3, suffix='_2')
+        #if not 'fast_time_raw' in solved.keys():
+            #logger.info('Running the template subtraction for the 1st encoder.')
+            #self.eval_angle(solved, poly_order=3, suffix='')
+        #if not 'fast_time_raw_2' in solved.keys():
+            #logger.info('Running the template subtraction for the 2nd encoder.')
+            #self.eval_angle(solved, poly_order=3, suffix='_2')
 
         # Calculate offcentering from where the first reference slot was detected by the 2nd encoder. 
         if solved["ref_indexes"][0] > self._num_edges/2-1:
-            idx1_start, idx2_start = int(solved["ref_indexes"][0]-self._num_edges/2), int(solved["ref_indexes_2"][0])
+            offcenter_idx1_start, offcenter_idx2_start = int(solved["ref_indexes"][0]-self._num_edges/2), int(solved["ref_indexes_2"][0])
         else:
-            idx1_start, idx2_start = int(solved["ref_indexes"][1]-self._num_edges/2), int(solved["ref_indexes_2"][0])
+            offcenter_idx1_start, offcenter_idx2_start = int(solved["ref_indexes"][1]-self._num_edges/2), int(solved["ref_indexes_2"][0])
         # Calculate offcentering to the end of the shorter encoder data.
-        if len(solved["fast_time"][idx1_start:]) > len(solved["fast_time_2"][idx2_start:]):
-            idx_length = len(solved["fast_time_2"][idx2_start:])
+        if len(solved["fast_time"][offcenter_idx1_start:]) > len(solved["fast_time_2"][offcenter_idx2_start:]):
+            idx_length = len(solved["fast_time_2"][offcenter_idx2_start:])
         else:
-            idx_length = len(solved["fast_time"][idx1_start:])
-        idx1 = np.arange(idx1_start, idx1_start+idx_length-1)
-        idx2 = np.arange(idx2_start, idx2_start+idx_length-1)
+            idx_length = len(solved["fast_time"][offcenter_idx1_start:])
+        offcenter_idx1 = np.arange(offcenter_idx1_start, offcenter_idx1_start+idx_length-1)
+        offcenter_idx2 = np.arange(offcenter_idx2_start, offcenter_idx2_start+idx_length-1)
         # Calculate the offset time of the encoders induced by the offcentering.
-        offset_time = (solved["fast_time"][idx1]-solved["fast_time_2"][idx2])/2
+        offset_time = (solved["fast_time"][offcenter_idx1]-solved["fast_time_2"][offcenter_idx2])/2
         # Calculate the offcentering (mm).
-        period = (solved["fast_time"][idx1+1]-solved["fast_time"][idx1])*self._num_edges
+        period = (solved["fast_time"][offcenter_idx1+1]-solved["fast_time"][offcenter_idx1])*self._num_edges
         offset_angle = offset_time/period*2*np.pi
         offcentering = np.tan(offset_angle)*self._encoder_disk_radius
+        
+        out = {}
+        out['offcenter_idx1'] = offcenter_idx1
+        out['offcenter_idx2'] = offcenter_idx2
+        out['offcentering'] = offcentering
+        out['offset_time'] = offset_time
 
-        solved['idx1'] = idx1
-        solved['idx2'] = idx2
-        solved['offcentering'] = offcentering
-        solved['offset_time'] = offset_time
+        return out
 
-    def correct_offcentering(self, solved):
+    def correct_offcentering(self, solved, offcentering=None):
         """
         Correct the timing of solved['fast_time'] which is delayed (advanced) by the offcentering.
 
@@ -630,8 +705,9 @@ class G3tHWP():
         solved: dict
             dict solved from eval_angle
             {fast_time, angle, fast_time_2, angle_2, ...}
+        offcentering: dict
             dict solved from eval_offcentering
-            {idx1, idx2, offcentering, offset_time}
+            {offcenter_idx1, offcenter_idx2, offcentering, offset_time}
 
         Returns
         --------
@@ -640,41 +716,41 @@ class G3tHWP():
 
         Notes
         ------
-            * idx1: int
+            * offcenter_idx1: int
                 * index of the solved['fast_time'] for which offcentering is estimated.
-            * idx2: int
+            * offcenter_idx2: int
                 * index of the solved['fast_time_2'] for which offcentering is estimated.
             * offcentering: float
-                * Offcentering (mm) at solved['fast_time(_2)'][idx1(2)].
+                * Offcentering (mm) at solved['fast_time(_2)'][offcenter_idx1(2)].
             * offset_time: float
                 * Offset time of the encoder signals induced by the offcentering.
-                * Offset time is the delayed (advanced) timing of the encoder1 (2) in sec.
+                * Offset time is the delayed (advanced) timing of the encoder1 (2) in sec.           
 
         * We should allow to correct the offcentering by external input, since offcentering measurement is not always available.
         """
 
         # Skip the correction when the offcentering estimation doesn't exist.
-        if 'offset_time' not in solved.keys():
-            logger.warning('Offcentering info does not exist. Offcentering correction is skipped.')
+        if offcentering == None:
+            logger.warning('Offcentering input does not exist. Offcentering correction is skipped.')
             return
         # Skip the calculation when the correction is already done.
-        elif 'fast_time_v2' in solved.keys():
+        elif 'fast_time_ver2' in solved.keys():
             logger.info('The offcentring correction is already completed. Skipped.')
             return
 
+        offcenter_idx1 = offcentering['offcenter_idx1']
+        offcenter_idx2 = offcentering['offcenter_idx2']
+        offset_time = offcentering['offset_time']
 
-        solved['fast_time'][solved['idx1']] - solved['offset_time']
-        solved['fast_time_2'][solved['idx2']] + solved['offset_time']
-
-        solved['fast_time_v2'] = solved['fast_time']
-        solved['fast_time_v2_2'] = solved['fast_time_2']
-        solved['fast_time'] = solved['fast_time'][solved['idx1']] - solved['offset_time']
-        solved['fast_time_2'] = solved['fast_time_2'][solved['idx2']] + solved['offset_time']
-
-        solved['angle_v2'] = solved['angle']
-        solved['angle'] = solved['angle'][solved['idx1']]
-        solved['angle_v2_2'] = solved['angle_2']
-        solved['angle_2'] = solved['angle_2'][solved['idx2']]
+        solved['fast_time_ver2'] = solved['fast_time']
+        solved['fast_time_ver2_2'] = solved['fast_time_2']
+        solved['fast_time'] = solved['fast_time'][offcenter_idx1] - offset_time
+        solved['fast_time_2'] = solved['fast_time_2'][offcenter_idx2] + offset_time
+        solved['angle_old'] = solved['angle']
+        solved['angle'] = solved['angle'][offcenter_idx1]
+        solved['angle_old_2'] = solved['angle_2']
+        solved['angle_2'] = solved['angle_2'][offcenter_idx2]
+        solved['offcentering'] = offcentering['offcentering']
 
         return
 
@@ -709,19 +785,13 @@ class G3tHWP():
             time list of slow block
         - stable: bool
             if non-zero, indicates the HWP spin state is known. 
-
             i.e. it is either spinning at a measurable rate, or stationary. 
-
             When this flag is non-zero, the hwp_rate field can be taken at face value. 
-
         - locked: bool
             if non-zero, indicates the HWP is spinning and the position solution is working. 
-
             In this case one should find the hwp_angle populated in the fast data block. 
-
         - hwp_rate: float
             the "approximate" HWP spin rate, with sign, in revs / second. 
-
             Use placeholder value of 0 for cases when not "locked".
         """
         if self._output is None and output is None:
@@ -787,14 +857,15 @@ class G3tHWP():
         return
 
     def _set_empty_axes(self, aman):
-
         aman.wrap_new('timestamps', shape=('samps', ), dtype=np.float64)
-        aman.wrap_new('hwp_angle_ver1', shape=('samps', ), dtype=np.float64)
-        aman.wrap_new('hwp_angle_ver2', shape=('samps', ), dtype=np.float64)
-        aman.wrap_new('stable', shape=('samps', ), dtype=bool)
-        aman.wrap_new('locked', shape=('samps', ), dtype=bool)
-        aman.wrap_new('hwp_rate', shape=('samps', ), dtype=np.float16)
-        aman.wrap_new('eval', shape=('samps', ), dtype=bool)
+        for suffix in ['', '_2']:
+            aman.wrap_new('hwp_angle'+suffix, shape=('samps', ), dtype=np.float64)
+            aman.wrap_new('hwp_angle_ver1'+suffix, shape=('samps', ), dtype=np.float64)
+            aman.wrap_new('hwp_angle_ver2'+suffix, shape=('samps', ), dtype=np.float64)
+            aman.wrap_new('stable'+suffix, shape=('samps', ), dtype=bool)
+            aman.wrap_new('locked'+suffix, shape=('samps', ), dtype=bool)
+            aman.wrap_new('hwp_rate'+suffix, shape=('samps', ), dtype=np.float16)
+            aman.wrap_new('version'+suffix, shape=('samps', ), dtype=np.uint8)
 
         return
 
@@ -835,34 +906,37 @@ class G3tHWP():
 
         - timestamp:
             SMuRF synched timestamp
-        - hwp_angle_ver1: float
-            SMuRF synched HWP angle (calculated from raw encoder signals) in radian
+
+        - hwp_angle: float
+            The latest version of the SMuRF synched HWP angle in radian. 
+            * ver1: HWP angle calculated from the raw encoder signal.
+            * ver2: HWP angle after the template subtraction.
+            * ver3: HWP angle after the template and off-centering subtraction.
+            The field 'version' indicates which version this hwp_angle is.
+
         - hwp_angle_ver2: float
-            SMuRF synched HWP angle after the template subtraction (the systematics from the non-uniform encoder slot pattern is subtracted ) in radian. 
+            This field stores the ver2 angle data when ver3 angle data exist.
 
-            if 'eval' is zero, template subtraction is not completed and its value is same as 'hwp_angle_ver1'.
-        - hwp_angle_ver3: float
-            SMuRF synched HWP angle after the template subtraction and the offcenter correction
-            * THIS IS NOT IMPLEMENTED YET
+        - hwp_angle_ver1: float
+            This field stores the ver1 angle data when ver2 angle data exist.
+
         - stable: bool
-            if non-zero, indicates the HWP spin state is known. 
-
             i.e. it is either spinning at a measurable rate, or stationary. 
-
             When this flag is non-zero, the hwp_rate field can be taken at face value. 
 
         - locked: bool
             if non-zero, indicates the HWP is spinning and the position solution is working. 
-
             In this case one should find the hwp_angle populated in the fast data block. 
 
         - hwp_rate: float
             the "approximate" HWP spin rate, with sign, in revs / second. 
-
             Use placeholder value of 0 for cases when not "locked".
 
-        - eval: bool
-            if non-zero, the template subtraction is completed.
+        - version: bool
+            This field indicates the version of the HWP angle in hwp_angle.
+        
+        The suffix '_2' stands for the 2nd encoder.
+            
         """
         if self._output is None and output is None:
             logger.warning('Output file not specified')
@@ -882,51 +956,73 @@ class G3tHWP():
             logger.error(f"Exception '{e}' thrown while loading HWP data. The specified encoder field is missing.")
             self._write_empty_solution_h5(tod, output, h5_address)
             return
-
-        if len(data) == 0:
+        if not ('counter' or 'counter_2') in data.keys():
             logger.warning('No HWP data in the specified timestamps.')
             self._write_empty_solution_h5(tod, output, h5_address)
             return
 
         # calculate HWP angle
         logger.debug("analyze")
-
         try:
-            solved = self.analyze(data, mod2pi=False)
+            solved1 = self.analyze_single(data, mod2pi=False)
         except Exception as e:
-            logger.error(f"Exception '{e}' thrown while calculating HWP angle. Encoder signal might have too much noise.")
-            self._write_empty_solution_h5(tod, output, h5_address)
-            return
-
-        if len(solved['fast_time']) == 0:
-            logger.info('No rotation data in the specified timestamps.')
-            self._write_empty_solution_h5(tod, output, h5_address)
-            return
+            logger.error(f"Exception '{e}' thrown while analyzing 1st encoder data.")
+        try:
+            solved2 = self.analyze_single(data, mod2pi=False, suffix='_2')
+        except Exception as e:
+            logger.error(f"Exception '{e}' thrown while analyzing 2nd encoder data.")
 
         # calculate template subtracted angle
-        try:
-            self.eval_angle(solved)
-        except Exception as e:
-            logger.error(f"Exception '{e}' thrown while the template subtraction")
-            pass
+        if 'fast_time' in solved1.keys():
+            try:
+                self.eval_angle(solved1)
+            except Exception as e:
+                logger.error(f"Exception '{e}' thrown while the template subtraction for the 1st encoder.")
+        else:
+            logger.info('No correct rotation data in the 1st encoder in the specified timestamps.')
+        if 'fast_time_2' in solved2.keys():
+            try:
+                self.eval_angle(solved2, suffix='_2')
+            except Exception as e:
+                logger.error(f"Exception '{e}' thrown while the template subtraction for the 2nd encoder.")
+        else:
+            logger.info('No correct rotation data in the 2nd encoder in the specified timestamps.')
+        solved = dict(**solved1, **solved2)
+
+        # calculate off-centering corrected angle
+        if ('fast_time_ver2' and 'fast_time_ver2_2') in solved.keys():
+            try:
+                offcentering = self.eval_offcentering(solved)
+                self.correct_offcentering(solved, offcentering)
+            except Exception as e:
+                logger.error(f"Exception '{e}' thrown while the off-centering correction.")
 
         # write solution
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         self._set_empty_axes(aman)
-        if solved['fast_time'][0] > tod.timestamps[0] or solved['fast_time'][-1] < tod.timestamps[-1]:
-            logger.error("The angle solution contains empty data at the beginning or end of the timestamps.")
         aman.timestamps[:] = tod.timestamps
-        aman.stable[:] = self._bool_interpolation(solved['slow_time'], solved['stable'], tod.timestamps)
-        aman.locked[:] = self._bool_interpolation(solved['slow_time'], solved['locked'], tod.timestamps)
-        aman.hwp_rate[:] = scipy.interpolate.interp1d(solved['slow_time'], solved['hwp_rate'], kind='linear', bounds_error=False)(tod.timestamps)
-        if 'fast_time_raw' in solved.keys():
-            aman.hwp_angle_ver1[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
-            aman.hwp_angle_ver2[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
-            aman.eval[:] = np.ones(len(tod.timestamps))
-        else:
-            logger.info('Template subtraction failed')
-            aman.hwp_angle_ver1[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
-            aman.hwp_angle_ver2[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
+        for suffix in ['', '_2']:
+            if not 'fast_time'+suffix in solved.keys():
+                logger.info('No angle data in the encoder'+suffix)
+            else:
+                if solved['fast_time'+suffix][0] > tod.timestamps[0] or solved['fast_time'+suffix][-1] < tod.timestamps[-1]:
+                    logger.info("The angle solution contains empty data at the beginning or end of the timestamps.")
+                getattr(aman, 'stable'+suffix)[:] = self._bool_interpolation(solved['slow_time'+suffix], solved['stable'+suffix], tod.timestamps)
+                getattr(aman, 'locked'+suffix)[:] = self._bool_interpolation(solved['slow_time'+suffix], solved['locked'+suffix], tod.timestamps)
+                getattr(aman, 'hwp_rate'+suffix)[:] = scipy.interpolate.interp1d(solved['slow_time'+suffix], solved['hwp_rate'+suffix], kind='linear', bounds_error=False)(tod.timestamps)
+
+                if 'fast_time_ver2'+suffix in solved.keys():
+                    getattr(aman, 'hwp_angle_ver1'+suffix)[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time_raw'+suffix], solved['angle_old'+suffix], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
+                    getattr(aman, 'hwp_angle_ver2'+suffix)[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time_ver2'+suffix], solved['angle_old'+suffix], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
+                    getattr(aman, 'hwp_angle'+suffix)[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'+suffix], solved['angle'+suffix], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
+                    getattr(aman, 'version'+suffix)[:] = np.ones(len(tod.timestamps))*3
+                elif 'fast_time_raw'+suffix in solved.keys():
+                    getattr(aman, 'hwp_angle_ver1'+suffix)[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time_raw'+suffix], solved['angle'+suffix], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
+                    getattr(aman, 'hwp_angle'+suffix)[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'+suffix], solved['angle'+suffix], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
+                    getattr(aman, 'version'+suffix)[:] = np.ones(len(tod.timestamps))*2
+                else:
+                    getattr(aman, 'hwp_angle'+suffix)[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
+                    getattr(aman, 'version'+suffix)[:] = np.ones(len(tod.timestamps))
 
         aman.save(output, h5_address, overwrite=True)
 
