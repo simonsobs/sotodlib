@@ -660,14 +660,7 @@ class G3tHWP():
         # Skip the offcentering evaluation if 'solved' doesn't include second encoder data.
         if not ('fast_time' and 'fast_time_2') in solved.keys():
             logger.warning('Offcentering calculation is only available when two encoders are operating. Skipped.')
-            return None
-        # Run the template subtraction if not processed yet.
-        #if not 'fast_time_raw' in solved.keys():
-            #logger.info('Running the template subtraction for the 1st encoder.')
-            #self.eval_angle(solved, poly_order=3, suffix='')
-        #if not 'fast_time_raw_2' in solved.keys():
-            #logger.info('Running the template subtraction for the 2nd encoder.')
-            #self.eval_angle(solved, poly_order=3, suffix='_2')
+            return
 
         # Calculate offcentering from where the first reference slot was detected by the 2nd encoder. 
         if solved["ref_indexes"][0] > self._num_edges/2-1:
@@ -687,16 +680,14 @@ class G3tHWP():
         period = (solved["fast_time"][offcenter_idx1+1]-solved["fast_time"][offcenter_idx1])*self._num_edges
         offset_angle = offset_time/period*2*np.pi
         offcentering = np.tan(offset_angle)*self._encoder_disk_radius
-        
-        out = {}
-        out['offcenter_idx1'] = offcenter_idx1
-        out['offcenter_idx2'] = offcenter_idx2
-        out['offcentering'] = offcentering
-        out['offset_time'] = offset_time
+        solved['offcenter_idx1'] = offcenter_idx1
+        solved['offcenter_idx2'] = offcenter_idx2
+        solved['offcentering'] = offcentering
+        solved['offset_time'] = offset_time
 
-        return out
+        return
 
-    def correct_offcentering(self, solved, offcentering=None):
+    def correct_offcentering(self, solved):
         """
         Correct the timing of solved['fast_time'] which is delayed (advanced) by the offcentering.
 
@@ -730,17 +721,17 @@ class G3tHWP():
         """
 
         # Skip the correction when the offcentering estimation doesn't exist.
-        if offcentering == None:
-            logger.warning('Offcentering input does not exist. Offcentering correction is skipped.')
+        if not 'offcentering' in solved.keys():
+            logger.warning('Offcentering info does not exist. Offcentering correction is skipped.')
             return
         # Skip the calculation when the correction is already done.
         elif 'fast_time_ver2' in solved.keys():
             logger.info('The offcentring correction is already completed. Skipped.')
             return
 
-        offcenter_idx1 = offcentering['offcenter_idx1']
-        offcenter_idx2 = offcentering['offcenter_idx2']
-        offset_time = offcentering['offset_time']
+        offcenter_idx1 = solved['offcenter_idx1']
+        offcenter_idx2 = solved['offcenter_idx2']
+        offset_time = solved['offset_time']
 
         solved['fast_time_ver2'] = solved['fast_time']
         solved['fast_time_ver2_2'] = solved['fast_time_2']
@@ -750,7 +741,6 @@ class G3tHWP():
         solved['angle'] = solved['angle'][offcenter_idx1]
         solved['angle_old_2'] = solved['angle_2']
         solved['angle_2'] = solved['angle_2'][offcenter_idx2]
-        solved['offcentering'] = offcentering['offcentering']
 
         return
 
