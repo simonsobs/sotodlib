@@ -453,20 +453,28 @@ def _load_bg(aman, bg_path):
     return bias_group, msk_bg
 
 
-def _update_vis(match_config, msk_str):
+def _update_vis(match_config, msk_str, plot_dir):
     vis = match_config.get("vis", False)
     # If we aren't saving a plot
-    if isinstance(vis, bool):
+    if plot_dir is not None:
         return match_config
     # Otherwise update the save path
-    vis = os.path.join(vis, msk_str + ".webp")
+    vis = os.path.join(plot_dir, msk_str + ".webp")
     new_config = match_config.copy()
     new_config["vis"] = vis
     return new_config
 
 
 def _do_match(
-    det_ids, focal_plane, template, priors, msks, msk_strs, template_msks, match_config
+    det_ids,
+    focal_plane,
+    template,
+    priors,
+    msks,
+    msk_strs,
+    template_msks,
+    match_config,
+    plot_dir,
 ):
     ndim = focal_plane.shape[1] - 1
     mapped_det_ids = np.zeros(len(focal_plane), dtype=det_ids.dtype)
@@ -480,7 +488,7 @@ def _do_match(
         if ndets == 0:
             logger.info("\tSkipping...")
             continue
-        _match_config = _update_vis(match_config, msk_str)
+        _match_config = _update_vis(match_config, msk_str, plot_dir)
         _map, _P, _TY = match_template(
             focal_plane[msk],
             template[t_msk],
@@ -540,6 +548,36 @@ def _mk_output(
     rset_data = metadata.ResultSet.from_friend(data_out)
 
     return rset_data
+
+
+def _plot_result(plot_dir, froot, focal_plane, template, transformed_fp, P):
+    if plot_dir is not None:
+        os.makedirs(plot_dir, exist_ok=True)
+    plt.hist(P, bins=min(25, int(len(P) / 2)))
+    if plot_dir is None:
+        plt.show()
+    else:
+        plt.savefig(os.path.join(plot_dir, f"{froot}_P_hist.png"))
+    plt.close()
+    plt.scatter(
+        focal_plane[:, 0], focal_plane[:, 1], alpha=0.2, color="orange", label="fit"
+    )
+    plt.scatter(
+        template[:, 0], template[:, 1], alpha=0.2, color="blue", label="nomninal"
+    )
+    plt.scatter(
+        transformed_fp[:, 0],
+        transformed_fp[:, 1],
+        alpha=0.2,
+        color="black",
+        label="transformed",
+    )
+    plt.legend()
+    if plot_dir is None:
+        plt.show()
+    else:
+        plt.savefig(os.path.join(plot_dir, f"{froot}_final.png"))
+    plt.close()
 
 
 def _load_ctx(config):
@@ -616,7 +654,8 @@ def main():
         db = metadata.ManifestDb(config["manifest_db"])
     outdir = os.path.abspath(config["outdir"])
     os.makedirs(outdir, exist_ok=True)
-    outpath = os.path.join(outdir, f"{ufm}{obs_id}{append}.h5")
+    froot = f"{ufm}{obs_id}{append}"
+    outpath = os.path.join(outdir, f"{froot}.h5")
     dataset = "focal_plane"
 
     # If a template is provided load it, otherwise generate one
@@ -645,6 +684,8 @@ def main():
         )
 
     match_config = config.get("matching", {})
+    if match_config is None:
+        match_config = {}
     vis = match_config.get("vis", False)
     if isinstance(vis, str):
         os.makedirs(vis, exist_ok=True)
@@ -791,6 +832,7 @@ def main():
         msk_strs,
         template_msks,
         match_config,
+        config.get("plot_dir", None),
     )
     transformed_fp = np.nan + np.zeros((aman.dets.count, 3))
     transformed_fp[inliers, pol_slice] = transformed[inliers, pol_slice]
@@ -814,7 +856,7 @@ def main():
         band,
         channel,
         P,
-        transformed,
+        transformed_fp,
         ~inliers,
         matched_bg,
         bg_mismap,
@@ -822,6 +864,15 @@ def main():
     write_dataset(rset_data, outpath, dataset, overwrite=True)
     if db is not None:
         db.add_entry({"obs:obs_id": obs_id, "dataset": dataset}, outpath, replace=True)
+    if config.get("plot", False):
+        _plot_result(
+            config.get("plot_dir", None),
+            froot,
+            focal_plane[:, 1:],
+            template[:, 1:],
+            transformed_fp,
+            P,
+        )
 
 
 if __name__ == "__main__":
