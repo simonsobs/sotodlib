@@ -304,9 +304,14 @@ def match_template(
 
     if priors is None:
         priors = 1
+    P *= priors
+    max_P = np.max(P)
+    if max_P > 1:
+        logger.info("With priors the max P is %f, normalizing...", max_P)
+        P /= max_P
 
     # Solve the assignment problem
-    row_ind, col_ind = linear_sum_assignment(np.log(P * priors), True)
+    row_ind, col_ind = linear_sum_assignment(np.log(P), True)
     if len(row_ind) < len(focal_plane):
         mapping = np.argmax(P * priors, axis=0)
         mapping[col_ind] = row_ind
@@ -619,6 +624,35 @@ def _load_rset(config):
         aman = aman.wrap("polarization", polarization_aman)
         pol = True
 
+    det_info = AxisManager(aman.dets)
+    if "detmap" in config["resultsets"]:
+        dm_rset = read_dataset(*config["resultsets"]["detmap"])
+        dm_aman = dm_rset.to_axismanager(axis_key="readout_id")
+        det_info.wrap("wafer", dm_aman)
+        det_info.wrap("readout_id", det_info.dets.vals, [(0, det_info.dets)])
+        det_info.wrap("det_id", det_info.wafer.det_id, [(0, det_info.dets)])
+        det_info.restrict("dets", det_info.dets.vals[det_info.det_id != ""])
+    aman = aman.wrap("det_info", det_info)
+
+    smurf = AxisManager(aman.dets)
+    if "band" in aman.pointing:
+        smurf.wrap("band", np.array(aman.pointing.band, dtype=int), [(0, smurf.dets)])
+    elif "wafer" in det_info and "smurf_band" in det_info.wafer:
+        smurf.wrap(
+            "band", np.array(det_info.wafer.smurf_band, dtype=int), [(0, smurf.dets)]
+        )
+    if "channel" in aman.pointing:
+        smurf.wrap(
+            "channel", np.array(aman.pointing.channel, dtype=int), [(0, smurf.dets)]
+        )
+    elif "wafer" in det_info and "smurf_channel" in det_info.wafer:
+        smurf.wrap(
+            "channel",
+            np.array(det_info.wafer.smurf_channel, dtype=int),
+            [(0, smurf.dets)],
+        )
+    aman.det_info.wrap("smurf", smurf)
+
     return aman, obs_id, pol, "pointing", "polarization"
 
 
@@ -695,45 +729,28 @@ def main():
             "Matching running in reverse mode. Transform will now be template -> fits."
         )
 
-    # Add smurf band and channel
-    smurf = AxisManager(aman.dets)
-    have_band = "band" in aman[pointing_name]
+    # Check smurf band and channel
+    have_band = "band" in aman.det_info.smurf
     if have_band:
         template_n = np.array(template_n)
         template_msks = [template_n, np.logical_not(template_n)]
-        smurf.wrap("band", aman[pointing_name].band, [(0, smurf.dets)])
-        band = smurf.band.astype(int)
+        band = aman.det_info.smurf.band
     else:
         template_msks = [np.ones(len(det_ids), dtype=bool)]
         band = -1 + np.zeros(aman.dets.counts, dtype=int)
         logger.error(
             "Input is missing band information.\n"
-            + "\tWon't be able to load detmap or bgmap and north/south split cannot be performed."
+            + "\tWon't be able to load bgmap and north/south split cannot be performed."
         )
-    have_ch = "channel" in aman[pointing_name]
+    have_ch = "channel" in aman.det_info.smurf
     if have_ch:
-        smurf.wrap("channel", aman[pointing_name].channel, [(0, smurf.dets)])
-        channel = smurf.band.astype(int)
+        channel = aman.det_info.smurf.channel
     else:
         channel = -1 + np.zeros(aman.dets.counts, dtype=int)
         logger.error(
-            "Input is missing channel information.\n"
-            + "\tWon't be able to load detmap or bgmap."
+            "Input is missing channel information.\n" + "\tWon't be able to load bgmap."
         )
-    if "det_info" in aman:
-        aman.det_info.wrap("smurf", smurf)
-    else:
-        det_info = AxisManager(aman.dets)
-        det_info.wrap("smurf", smurf)
-        aman.wrap("det_info", det_info)
 
-    # Check if we can load a detmap and load if we can
-    if "detmap" in config and have_band and have_ch:
-        logger.info("Using detmap from " + config["detmap"])
-        if not os.path.isfile(config["detmap"]):
-            logger.error("Requested detmap doesn't exist. Running without one.")
-            have_detmap = False
-        g3u.add_detmap_info(aman, config["detmap"], columns="all")
     # Even if we didn't include a file, context could have been magic
     have_detmap = "det_id" in aman.det_info
     if not have_detmap:
@@ -747,13 +764,13 @@ def main():
     if have_bgmap and have_band and have_ch:
         bias_group, msk_bg = _load_bg(aman, config["bias_map"])
         if have_detmap:
-            bl_diff = np.sum(~(bias_group == aman.det_info.wafer.bias_line)) - np.sum(
+            bl_diff = np.sum(~(bias_group == aman.det_info.wafer.bg)) - np.sum(
                 ~(msk_bg)
             )
             logger.info(
                 "%d detectors have bias lines that don't match the detmap", bl_diff
             )
-        if get_north_is_highband(aman[pointing_name]["band"], bias_group):
+        if get_north_is_highband(band, bias_group):
             template_n = np.logical_not(template_n)
             template_msks = [template_n, np.logical_not(template_n)]
     else:
@@ -772,7 +789,7 @@ def main():
         inliers = _get_inliers(aman[pointing_name], config["outliers"]["radial_thresh"])
     logger.info("Found %d detectors with bad pointing", np.sum(~inliers))
 
-    if have_detmap and config["dm_transform"]:
+    if have_detmap and config.get("dm_transform", False):
         logger.info("Applying transformation from detmap")
         transform_from_detmap(aman, pointing_name, inliers, det_ids, template)
 
