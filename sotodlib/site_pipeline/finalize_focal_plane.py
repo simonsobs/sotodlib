@@ -8,30 +8,15 @@ import matplotlib.pyplot as plt
 import yaml
 
 from so3g import proj
-import sotodlib.io.g3tsmurf_utils as g3u
 from sotodlib.core import AxisManager, metadata, Context
 from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
-from sotodlib.site_pipeline.make_position_match import _gen_template
+from sotodlib.site_pipeline import make_position_match as mpm
 from sotodlib.coords import optics as op
+from sotodlib.coords import affine as af
 
 
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
-
-
-def _get_db(ctx, name):
-    db = None
-    for meta in ctx["metadata"]:
-        if "name" not in meta:
-            continue
-        if meta["name"] == "position_match":
-            db = meta["db"]
-            break
-    if db is None:
-        raise ValueError(f"Context does not contain {name}")
-    if db.startswith("./"):
-        db = os.path.join(os.path.dirname(ctx.filename), db[2:])
-    return metadata.ManifestDb(db)
 
 
 def _encs_notclose(az, el, bs):
@@ -42,18 +27,20 @@ def _encs_notclose(az, el, bs):
     )
 
 
-def _avg_focalplane(fp_dict):
-    focal_plane = []
-    det_ids = np.array(list(fp_dict.keys()))
-    for did in det_ids:
-        avg_pointing = np.nanmedian(np.vstack(fp_dict[did]), axis=0)
-        focal_plane.append(avg_pointing)
-    focal_plane = np.column_stack(focal_plane)
+def _avg_focalplane(xi, eta, gamma, tot_weight):
+    avg_xi = np.nansum(xi, axis=1) / tot_weight
+    avg_eta = np.nansum(eta, axis=1) / tot_weight
+    focal_plane = np.vstack((avg_xi, avg_eta))
 
-    if np.isnan(focal_plane[:2]).all():
-        raise ValueError("All detectors are outliers. Check your inputs")
+    if np.any(np.isfinite(gamma)):
+        avg_gamma = np.nansum(gamma, axis=1) / tot_weight
+    else:
+        avg_gamma = np.nan + np.zeros_like(avg_xi)
 
-    return det_ids, focal_plane
+    n_obs = np.sum(np.isfinite(xi).astype(int), axis=1)
+    avg_weight = tot_weight / n_obs
+
+    return focal_plane, avg_gamma, avg_weight
 
 
 def _log_vals(shift, scale, shear, rot, axis):
@@ -75,16 +62,33 @@ def _log_vals(shift, scale, shear, rot, axis):
     logger.info("Rotation of the %s-%s plane is %f radians", axis[0], axis[1], rot)
 
 
-def _mk_fpout(det_id, focal_plane):
+def _mk_fpout(det_id, transformed, measured, measured_gamma):
     outdt = [
         ("dets:det_id", det_id.dtype),
         ("xi", np.float32),
         ("eta", np.float32),
         ("gamma", np.float32),
     ]
-    fpout = np.fromiter(zip(det_id, *focal_plane[:3]), dtype=outdt, count=len(det_id))
+    fpout = np.fromiter(zip(det_id, *transformed.T), dtype=outdt, count=len(det_id))
 
-    return metadata.ResultSet.from_friend(fpout)
+    outdt_full = [
+        ("dets:det_id", det_id.dtype),
+        ("xi_t", np.float32),
+        ("eta_t", np.float32),
+        ("gamma_t", np.float32),
+        ("xi_m", np.float32),
+        ("eta_m", np.float32),
+        ("gamma_m", np.float32),
+    ]
+    fpfullout = np.fromiter(
+        zip(det_id, *transformed.T, *measured, measured_gamma),
+        dtype=outdt_full,
+        count=len(det_id),
+    )
+
+    return metadata.ResultSet.from_friend(fpout), metadata.ResultSet.from_friend(
+        fpfullout
+    )
 
 
 def _mk_tpout(xieta, horiz):
@@ -111,7 +115,7 @@ def _mk_refout(lever_arm, encoders):
         ("y", np.float32),
         ("z", np.float32),
     ]
-    refout = np.array([lever_arm, tuple(encoders)], outdt)
+    refout = np.array([tuple(np.squeeze(lever_arm)), tuple(encoders)], outdt)
 
     return refout
 
@@ -121,68 +125,22 @@ def _add_attrs(dset, attrs):
         dset.attrs[k] = v
 
 
-def _mk_plot(nominal, measured, affine, shift, show_or_save):
+def _mk_plot(plot_dir, froot, nominal, measured, transformed):
     plt.style.use("tableau-colorblind10")
-    _, ax = plt.subplots()
-    ax.set_xlabel("Xi Nominal (rad)")
-    ax.set_ylabel("Eta Nominal (rad)")
-    p1 = ax.scatter(nominal[0], nominal[1], label="nominal", color="grey")
-    ax1 = ax.twinx()
-    ax1.set_ylabel("Eta Measured (rad)")
-    ax2 = ax1.twiny()
-    ax2.set_xlabel("Xi Measured (rad)")
-    p2 = ax2.scatter(measured[0], measured[1], label="measured")
-    transformed = affine @ nominal + shift[:, None]
-    p3 = ax2.scatter(transformed[0], transformed[1], label="transformed")
-    ax2.legend(handles=[p1, p2, p3])
-    if isinstance(show_or_save, str):
-        plt.savefig(show_or_save)
-        plt.cla()
-    else:
+    plt.scatter(measured[0], measured[1], alpha=0.2, color="orange", label="fit")
+    plt.scatter(nominal[0], nominal[1], alpha=0.2, color="blue", label="nominal")
+    plt.scatter(
+        transformed[0], transformed[1], alpha=0.2, color="black", label="transformed"
+    )
+    plt.xlabel("Xi (rad)")
+    plt.ylabel("Eta (rad)")
+    plt.legend()
+    if plot_dir is None:
         plt.show()
-
-
-def get_nominal(focal_plane, config, encoders):
-    """
-    Get nominal pointing from detector xy positions.
-
-    Arguments:
-
-        focal_plane: Focal plane array as generated by _avg_focalplane.
-
-        config: Transformation configuration.
-                Nominally config["coord_transform"].
-
-        encoders: Encoder values to compute LOS rotation from.
-
-    Returns:
-
-        xi_nominal: The nominal xi values.
-
-        eta_nominal: The nominal eta values.
-
-        gamma_nominal: The nominal gamma values.
-    """
-    transform_pars = op.get_ufm_to_fp_pars(
-        config["telescope"], config["slot"], config["config_path"]
-    )
-    x, y, pol = op.ufm_to_fp(
-        None, x=focal_plane[3], y=focal_plane[4], pol=focal_plane[5], **transform_pars
-    )
-    if config["telescope"] == "LAT":
-        rot = np.nan_to_num(np.rad2deg(encoders[1]) - 60 - np.rad2deg(encoders[2]))
-        xi_nominal, eta_nominal, gamma_nominal = op.LAT_focal_plane(
-            None, config["zemax_path"], x, y, pol, rot, config["tube"]
-        )
-    elif config["coord_transform"]["telescope"] == "SAT":
-        rot = np.nan_to_num(-1.0 * np.rad2deg(encoders[2]))
-        xi_nominal, eta_nominal, gamma_nominal = op.SAT_focal_plane(
-            None, x, y, pol, rot
-        )
     else:
-        raise ValueError("Invalid telescope provided")
-
-    return xi_nominal, eta_nominal, gamma_nominal
+        os.makedirs(plot_dir, exist_ok=True)
+        plt.savefig(os.path.join(plot_dir, f"{froot}.png"))
+        plt.cla()
 
 
 def gamma_fit(src, dst):
@@ -255,6 +213,60 @@ def to_horiz(points, encoders):
     return horiz
 
 
+def _load_ctx(config):
+    ctx = Context(config["context"]["path"])
+    pm_name = config["context"].get("position_match", "position_match")
+    pointing_name = config["context"].get("position_match", "pointing")
+    pol_name = config["context"].get("position_match", "polarization")
+    query = []
+    if "query" in config["context"]:
+        query = (ctx.obsdb.query(config["context"]["query"])["obs_id"],)
+    obs_ids = np.append(config["context"].get("obs_ids", []), query)
+    obs_ids = np.unique(obs_ids)
+    if len(obs_ids) == 0:
+        raise ValueError("No observations provided in configuration")
+    _config = config.copy()
+    if "query" in _config["context"]:
+        del _config["context"]["query"]
+    amans = [None] * len(obs_ids)
+    have_pol = [False] * len(obs_ids)
+    for i, obs_id in enumerate(obs_ids):
+        _config["context"]["obs_ids"] = [obs_id]
+        aman, _, pol, *_ = mpm._load_ctx(_config)
+        if pm_name not in aman:
+            raise ValueError(f"No position match in {obs_id}")
+        if "det_info" not in aman or "det_id" not in aman.det_info:
+            raise ValueError(f"No detmap for {obs_id}")
+        amans[i] = aman
+        have_pol[i] = pol
+
+    return amans, obs_ids, have_pol, pointing_name, pol_name, pm_name
+
+
+def _load_rset(config):
+    obs = config["resultsets"]
+    _config = config.copy()
+    obs_ids = np.array(list(obs.keys()))
+    amans = [None] * len(obs_ids)
+    have_pol = [False] * len(obs_ids)
+    for i, (obs_id, rsets) in enumerate(obs.items()):
+        _config["resultsets"] = rsets
+        _config["resultsets"]["obs_id"] = obs_id
+        aman, _, pol, *_ = mpm._load_rset(_config)
+        if "det_info" not in aman or "det_id" not in aman.det_info:
+            raise ValueError(f"No detmap for {obs_id}")
+        if "position_match" not in rsets:
+            raise ValueError(f"No position match in {obs_id}")
+        pm_aman = read_dataset(*rsets["position_match"]).to_axismanager(
+            axis_key="dets:readout_id"
+        )
+        aman.wrap("position_match", pm_aman)
+        amans[i] = aman
+        have_pol[i] = pol
+
+    return amans, obs_ids, have_pol, "pointing", "polarization", "position_match"
+
+
 def main():
     # Read in input pars
     parser = ap.ArgumentParser()
@@ -266,23 +278,13 @@ def main():
     with open(args.config_path, "r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
 
-    # Load context
-    ctx = Context(config["context"]["path"])
-    name = config["context"]["position_match"]
-    db = _get_db(ctx, name)
-    query = []
-    if "query" in config["context"]:
-        query = (ctx.obsdb.query(config["context"]["query"])["obs_id"],)
-    obs_ids = np.append(config["context"].get("obs_ids", []), query)
-    # Add in manually loaded paths
-    obs_ids = np.append(obs_ids, config.get("multi_obs", []))
-    if len(obs_ids) == 0:
-        raise ValueError("No position match results provided in configuration")
-    detmaps = config["detmaps"]
-    if len(obs_ids) != len(detmaps):
-        raise ValueError(
-            "Number of DetMaps doesn't match number of position match results"
-        )
+    # Load data
+    if "context" in config:
+        amans, obs_ids, have_pol, pointing_name, pol_name, pm_name = _load_ctx(config)
+    elif "resultsets" in config:
+        amans, obs_ids, have_pol, pointing_name, pol_name, pm_name = _load_rset(config)
+    else:
+        raise ValueError("No valid inputs provided")
 
     # Build output path
     ufm = config["ufm"]
@@ -290,181 +292,205 @@ def main():
     if "append" in config:
         append = "_" + config["append"]
     os.makedirs(config["outdir"], exist_ok=True)
-    outpath = os.path.join(config["outdir"], f"{ufm}{append}.h5")
+    froot = f"{ufm}{append}"
+    outpath = os.path.join(config["outdir"], f"{froot}.h5")
     outpath = os.path.abspath(outpath)
 
-    fp_dict = {}
-    encoders = []
+    # If a template is provided load it, otherwise generate one
+    (
+        template_det_ids,
+        template,
+    ) = [], np.empty(
+        (0, 0)
+    )  # Just to make pyright shut up
+    gen_template = "template" not in config
+    if not gen_template:
+        template_path = config["template"]
+        if os.path.exists(template_path):
+            template_det_ids, template, _ = mpm._load_template(template_path, ufm)
+        else:
+            logger.error("Provided template doesn't exist, trying to generate one")
+            gen_template = True
+    elif gen_template:
+        logger.info(f"Generating template for {ufm}")
+        if "pointing_cfg" not in config:
+            raise ValueError("Need pointing_cfg to generate template")
+        template_det_ids, template, _ = mpm._get_wafer(ufm)
+        template = mpm._get_pointing(template, config["pointing_cfg"])
+    else:
+        raise ValueError(
+            "No template provided and unable to generate one for some reason"
+        )
+
+    check_enc = config.get("check_enc", False)
+    encoders = np.nan + np.zeros((3, len(obs_ids)))
     use_matched = config.get("use_matched", False)
-    if use_matched:
-        template, _, __, template_det_ids = _gen_template(ufm)
-        template = {det_id: det[1:4] for det_id, det in zip(template_det_ids, template)}
 
-    for obs_id, detmap in zip(obs_ids, detmaps):
-        # Load data
-        if os.path.isfile(obs_id):
-            logger.info("Loading information from file at %s", obs_id)
-            rset = read_dataset(obs_id, "focal_plane")
-            _aman = rset.to_axismanager(axis_key="dets:readout_id")
-            aman = AxisManager(_aman.dets)
-            aman.wrap(name, _aman)
-            try:
-                encs = read_dataset(obs_id, "encoders")
-            except KeyError:
-                logger.warning("\tMissing encoder information, nans will be used")
-                encs = None
-        else:
-            logger.info("Loading information from observation %s", obs_id)
-            aman = ctx.get_meta(obs_id, dets=config["context"].get("dets", {}))
-            db_match = db.match({"obs:obs_id": obs_id})
-            if db_match:
-                try:
-                    encs = read_dataset(db_match["filename"], "encoders")
-                except KeyError:
-                    logger.warning("\tMissing encoder information, nans will be used")
-                    encs = None
-            else:
-                logger.warning("\tMissing encoder information, nans will be used")
-                encs = None
-        if name not in aman:
-            logger.warning(
-                "\tNo position_match associated with this observation. Skipping."
-            )
-            continue
+    xi = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
+    eta = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
+    gamma = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
+    tot_weight = np.zeros(len(template_det_ids))
+    for i, (aman, obs_id, pol) in enumerate(zip(amans, obs_ids, have_pol)):
+        logger.info("Working on %s", obs_id)
+        if aman is None:
+            raise ValueError("AxisManager doesn't exist?")
+        # Cut outliers
+        aman.restrict("dets", aman.dets.vals[~aman[pm_name].pointing_outlier])
 
-        # Figure out encoders
-        if encs is None:
-            encoders.append((np.nan,) * 3)
-        else:
-            az = encs["az"]
-            el = encs["el"]
-            bs = encs["bs"]
-            if _encs_notclose(az, el, bs):
-                logger.warning("\tNot all encoder values are close. Skipping.")
-                continue
-            encoders.append((np.nanmedian(az), np.nanmedian(el), np.nanmedian(bs)))
-        # Put SMuRF band channel in the correct place
-        smurf = AxisManager(aman.dets)
-        smurf.wrap("band", aman[name].band, [(0, smurf.dets)])
-        smurf.wrap("channel", aman[name].channel, [(0, smurf.dets)])
-        aman.det_info.wrap("smurf", smurf)
-
-        if detmap is not None:
-            g3u.add_detmap_info(aman, detmap)
-        have_wafer = "wafer" in aman.det_info
-        if not have_wafer:
-            logger.error("\tThis observation has no detmap results, skipping")
-            continue
-
+        # Mapping to template
         if use_matched:
-            det_ids = aman[name].matched_det_id
-            x, y, pol = np.array([template[det] for det in det_ids]).T
+            det_ids = aman[pm_name].matched_det_id
         else:
             det_ids = aman.det_info.det_id
-            x = aman.det_info.wafer.det_x
-            y = aman.det_info.wafer.det_y
-            pol = aman.det_info.wafer.angle
-
-        focal_plane = np.column_stack(
-            (aman[name].xi, aman[name].eta, aman[name].polang, x, y, pol)
-        ).astype(float)
-        out_msk = aman[name].outliers
-        focal_plane[out_msk, :3] = np.nan
-
-        for di, fp in zip(det_ids, focal_plane):
-            try:
-                fp_dict[di].append(fp)
-            except KeyError:
-                fp_dict[di] = [fp]
-
-    if not fp_dict:
-        logger.error("No valid observations provided")
-        sys.exit()
-
-    # Compute nominal encoder vals
-    encoders = np.column_stack(encoders)
-    if _encs_notclose(*encoders):
-        encoders = (np.nan,) * 3
-        logger.error(
-            "Not all of the inputs were taken at similar measurements. Outputs will have nans for encoder related fields."
+        _, msk, template_msk = np.intersect1d(
+            det_ids, template_det_ids, return_indices=True
         )
-        logger.warning("FOV rotation will be 0")
-    else:
-        encoders = np.nanmedian(encoders, axis=1)
-        if np.isnan(encoders).any():
-            logger.error("Some or all of the encoders are nan")
-            logger.warning("FOV rotation may be 0")
+        if np.sum(msk) != aman.dets.count:
+            logger.warning("There are matched dets not found in the template")
+        mapping = np.argsort(np.argsort(template_det_ids[template_msk]))
+        srt = np.argsort(det_ids[msk])
+        _xi = aman[pointing_name].xi0[msk][srt][mapping]
+        _eta = aman[pointing_name].eta0[msk][srt][mapping]
+        if pol:
+            _gamma = aman[pol_name].polang[msk][mapping]
+        else:
+            _gamma = np.nan + np.zeros_like(_xi)
+        weights = aman[pm_name].likelihood[msk][srt][mapping]
+
+        # Store weighted values
+        xi[template_msk, i] = _xi * weights
+        eta[template_msk, i] = _eta * weights
+        gamma[template_msk, i] = _gamma * weights
+        tot_weight[template_msk] += weights
+
+        if not check_enc:
+            continue
+        if (
+            "az" not in aman[pointing_name]
+            or "el" not in aman[pointing_name]
+            or "roll" not in aman[pointing_name]
+        ):
+            raise ValueError("No encoder values included with pointing")
+        az, el, roll = (
+            aman[pointing_name].az,
+            aman[pointing_name].el,
+            aman[pointing_name].roll,
+        )
+        if _encs_notclose(az, el, roll):
+            raise ValueError("Encoder values not close")
+        encoders[0, i] = np.nanmedian(az)
+        encoders[1, i] = np.nanmedian(el)
+        encoders[2, i] = np.nanmedian(roll)
+    tot_weight[tot_weight == 0] = np.nan
 
     # Compute the average focal plane while ignoring outliers
-    det_id, focal_plane = _avg_focalplane(fp_dict)
-    measured = focal_plane[:3]
+    measured, measured_gamma, weights = _avg_focalplane(xi, eta, gamma, tot_weight)
 
-    # Get nominal xi, eta, gamma
-    nominal = get_nominal(focal_plane, config["coord_transform"], encoders)
+    # Compute the lever arm
+    lever_arm = np.array(
+        op.get_focal_plane(None, x=0, y=0, pol=0, **config["coord_transform"])
+    )
 
     # Compute transformation between the two nominal and measured pointing
-    measured_gamma = np.isfinite(measured[2]).all()
-    if measured_gamma:
-        gamma_scale, gamma_shift = gamma_fit(nominal[2], measured[2])
+    fp_transformed = template[:, 1:].copy()
+    have_gamma = np.sum(np.isfinite(measured_gamma).astype(int)) > 10
+    if have_gamma:
+        gamma_scale, gamma_shift = gamma_fit(template[:, 3], measured_gamma)
+        fp_transformed[:, 2] = template[:, 3] * gamma_scale + gamma_shift
     else:
         logger.warning(
             "No polarization data availible, gammas will be filled with the nominal values."
         )
-        focal_plane[2] = nominal[2]
-        measured[2] = nominal[2]
         gamma_scale = 1.0
         gamma_shift = 0.0
 
-    nominal = np.vstack(nominal[:3])
-    measured = np.vstack(measured[:3])
-    affine, shift = op.get_affine(nominal[:2], measured[:2])
-    scale, shear, rot = op.decompose_affine(affine)
-    shear = shear.item()
-    rot = op.decompose_rotation(rot)[-1]
+    nominal = template[:, 1:3].T.copy()
+    # Center on UFM center
+    nominal -= lever_arm[:2]
+    _measured = measured.copy() - lever_arm[:2]
+    # Compute transform, do a few iters to account for centers being off
+    affine = np.eye(2)
+    shift = af.weighted_shift(nominal, _measured, weights)
+    for i in range(config.get("iters", 5)):
+        affine, _ = af.get_affine(nominal, _measured - shift[..., None], centered=True)
+        shift = af.weighted_shift(affine @ nominal, _measured, weights)
+    nominal = template[:, 1:3].T.copy()
 
-    plot = config.get("plot", False)
-    if plot:
-        _mk_plot(nominal[:2], measured[:2], affine, shift, plot)
+    scale, shear, rot = af.decompose_affine(affine)
+    shear = shear.item()
+    rot = af.decompose_rotation(rot)[-1]
+    transformed = affine @ nominal + shift[..., None]
+    fp_transformed[:, :2] = transformed.T
 
     shift = (*shift, gamma_shift)
     scale = (*scale, gamma_scale)
     xieta = (shift, scale, shear, rot)
     _log_vals(shift, scale, shear, rot, ("xi", "eta", "gamma"))
 
-    # Compute the lever arm
-    lever_arm = get_nominal(np.zeros(6), config["coord_transform"], encoders)
+    plot = config.get("plot", False)
+    if plot:
+        _mk_plot(config.get("plot_dir", None), froot, nominal, measured, transformed)
 
-    # Put nominal and measured into horiz basis and compute transformation.
-    if np.isnan(encoders).any():
+    # Compute nominal encoder vals
+    if check_enc:
+        if _encs_notclose(*encoders):
+            raise ValueError("Not all encoder values are similar")
+        else:
+            encoders = np.nanmedian(encoders, axis=1)
+            if np.isnan(encoders).any():
+                logger.error("Some or all of the encoders are nan")
+                horiz = ((np.nan,) * 3,) * 2 + (np.nan,) * 2
+                horiz_affine = np.nan * np.empty_like(affine)
+            else:
+                # Put nominal and measured into horiz basis and compute transformation.
+                nominal = np.vstack((nominal, template[:, 3]))
+                _measured = np.vstack((measured - lever_arm[..., None], measured_gamma))
+                nominal_horiz = to_horiz(nominal, encoders)
+                measured_horiz = to_horiz(_measured, encoders)
+
+                if have_gamma:
+                    bs_scale, bs_shift = gamma_fit(nominal_horiz[2], measured_horiz[2])
+                else:
+                    bs_scale = 1.0
+                    bs_shift = 0.0
+                nominal_horiz = nominal_horiz[:2]
+                measured_horiz = measured_horiz[:2]
+                # Compute transform, do a few iters to account for centers being off
+                horiz_affine = np.eye(2)
+                horiz_shift = af.weighted_shift(nominal_horiz, measured_horiz, weights)
+                for i in range(config.get("iters", 5)):
+                    horiz_affine, _ = af.get_affine(
+                        nominal, measured_horiz - horiz_shift[..., None], centered=True
+                    )
+                    horiz_shift = af.weighted_shift(
+                        horiz_affine @ nominal, measured_horiz, weights
+                    )
+                horiz_scale, horiz_shear, horiz_rot = op.decompose_affine(horiz_affine)
+                horiz_shear = horiz_shear.item()
+                horiz_rot = op.decompose_rotation(horiz_rot)[-1]
+
+                horiz_shift = (*horiz_shift, bs_shift)
+                horiz_scale = (*horiz_scale, bs_scale)
+                horiz = (horiz_shift, horiz_scale, horiz_shear, horiz_rot)
+                _log_vals(
+                    horiz_shift, horiz_scale, horiz_shear, horiz_rot, ("az", "el", "bs")
+                )
+    else:
+        encoders = np.nan + np.zeros(3)
         horiz = ((np.nan,) * 3,) * 2 + (np.nan,) * 2
         horiz_affine = np.nan * np.empty_like(affine)
-    else:
-        nominal_horiz = to_horiz(nominal, encoders)
-        measured_horiz = to_horiz(measured, encoders)
-
-        if measured_gamma:
-            bs_scale, bs_shift = gamma_fit(nominal_horiz[2], measured_horiz[2])
-        else:
-            bs_scale = 1.0
-            bs_shift = 0.0
-        horiz_affine, horiz_shift = op.get_affine(nominal_horiz[:2], measured_horiz[:2])
-        horiz_scale, horiz_shear, horiz_rot = op.decompose_affine(horiz_affine)
-        horiz_shear = horiz_shear.item()
-        horiz_rot = op.decompose_rotation(horiz_rot)[-1]
-
-        horiz_shift = (*horiz_shift, bs_shift)
-        horiz_scale = (*horiz_scale, bs_scale)
-        horiz = (horiz_shift, horiz_scale, horiz_shear, horiz_rot)
-        _log_vals(horiz_shift, horiz_scale, horiz_shear, horiz_rot, ("az", "el", "bs"))
 
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)
-    fpout = _mk_fpout(det_id, focal_plane)
+    fpout, fpfullout = _mk_fpout(
+        template_det_ids, fp_transformed, measured, measured_gamma
+    )
     tpout = _mk_tpout(xieta, horiz)
     refout = _mk_refout(lever_arm, encoders)
     with h5py.File(outpath, "w") as f:
         write_dataset(fpout, f, "focal_plane", overwrite=True)
         _add_attrs(f["focal_plane"], {"measured_gamma": measured_gamma})
+        write_dataset(fpfullout, f, "focal_plane_full", overwrite=True)
         write_dataset(tpout, f, "offsets", overwrite=True)
         _add_attrs(f["offsets"], {"affine_xieta": affine, "affine_horiz": horiz_affine})
         write_dataset(refout, f, "reference", overwrite=True)
