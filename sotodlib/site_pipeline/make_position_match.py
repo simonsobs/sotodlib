@@ -577,6 +577,8 @@ def _plot_result(plot_dir, froot, focal_plane, template, transformed_fp, P):
         color="black",
         label="transformed",
     )
+    plt.xlabel("Xi (rad)")
+    plt.ylabel("Eta (rad)")
     plt.legend()
     if plot_dir is None:
         plt.show()
@@ -587,8 +589,8 @@ def _plot_result(plot_dir, froot, focal_plane, template, transformed_fp, P):
 
 def _load_ctx(config):
     ctx = Context(config["context"]["path"])
-    pointing_name = config["context"]["pointing"]
-    pol_name = config["context"]["polarization"]
+    pointing_name = config["context"].get("position_match", "pointing")
+    pol_name = config["context"].get("position_match", "polarization")
     pol = True
     if pol_name is None:
         logger.warning("No polarization data in context")
