@@ -586,7 +586,7 @@ def get_focal_plane(
 
         rot: Rotation about the line of sight.
              For the LAT this is elev - 60 - corotator.
-             For the SAT this is -1*boresight. including the step of applying ufm.
+             For the SAT this is -1*boresight.
 
         telescope: What the telescope flavor is ('LAT' or 'SAT')
 
@@ -616,7 +616,7 @@ def get_focal_plane(
 
         gamma: Detector gamma on sky from physical optics in radians.
                If aman is provided then will be wrapped as aman.focal_plane.eta.
-        
+
         x_fp: X position on focal plane.
               Only returned if return_fp is True.
 
