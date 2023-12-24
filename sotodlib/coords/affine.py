@@ -9,7 +9,7 @@ import scipy.linalg as la
 from scipy.spatial.transform import Rotation as R
 
 
-def get_affine(src, dst):
+def get_affine(src, dst, centered=False):
     """
     Get affine transformation between two point clouds.
     Transformation is dst = affine@src + shift
@@ -19,6 +19,9 @@ def get_affine(src, dst):
         src: (ndim, npoints) array of source points.
 
         dst: (ndim, npoints) array of destination points.
+
+        centered: If True then src and dst are assumed to be pre-centered.
+                  If False the median is taken to be the center.
 
     Returns:
 
@@ -30,12 +33,11 @@ def get_affine(src, dst):
     if np.sum(msk) < 7:
         raise ValueError("Not enough finite points to compute transformation")
 
-    M = np.vstack(
-        (
-            src[:, msk] - np.median(src[:, msk], axis=1)[:, None],
-            dst[:, msk] - np.median(dst[:, msk], axis=1)[:, None],
-        )
-    ).T
+    src_c, dst_c = src, dst
+    if not centered:
+        src_c = src - np.median(src[:, msk], axis=1)[:, None]
+        dst_c = dst - np.median(dst[:, msk], axis=1)[:, None]
+    M = np.vstack((src_c[:, msk], dst_c[:, msk])).T
     *_, vh = la.svd(M)
     vh_splits = [
         quad for half in np.split(vh.T, 2, axis=0) for quad in np.split(half, 2, axis=1)
@@ -107,3 +109,26 @@ def decompose_rotation(rotation):
     if ndim == 2:
         angles[:2] = np.nan
     return angles
+
+
+def weighted_shift(src, dst, weights):
+    """
+    Compute a weighted shift between two point clouds.
+    Can be applied at dst = src + weights[..., None]
+
+    Arguments:
+
+        src: (ndim, npoints) array of source points.
+
+        dst: (ndim, npoints) array of destination points.
+
+        weights (npoints) array of weights.
+
+    Returns:
+
+        shift: Shift computed to line up src and dst.
+    """
+    wdiff = weights * (dst - src)
+    shift = np.nansum(wdiff, axis=1) / np.nansum(weights)
+
+    return shift
