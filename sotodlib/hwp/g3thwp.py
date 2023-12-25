@@ -980,10 +980,10 @@ class G3tHWP():
         solved = dict(**solved1, **solved2)
 
         # calculate off-centering corrected angle
-        if ('fast_time_ver2' and 'fast_time_ver2_2') in solved.keys():
+        if ('fast_time_raw' or 'fast_time_raw_2') in solved.keys():
             try:
                 offcentering = self.eval_offcentering(solved)
-                self.correct_offcentering(solved, offcentering)
+                self.correct_offcentering(solved)
             except Exception as e:
                 logger.error(f"Exception '{e}' thrown while the off-centering correction.")
 
