@@ -994,6 +994,8 @@ class G3tHWP():
         for suffix in ['', '_2']:
             if not 'fast_time'+suffix in solved.keys():
                 logger.info('No angle data in the encoder'+suffix)
+            elif len(solved['fast_time'+suffix])==0:
+                logger.info('No angle data in the encoder'+suffix)
             else:
                 if solved['fast_time'+suffix][0] > tod.timestamps[0] or solved['fast_time'+suffix][-1] < tod.timestamps[-1]:
                     logger.info("The angle solution contains empty data at the beginning or end of the timestamps.")
