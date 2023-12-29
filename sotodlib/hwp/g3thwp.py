@@ -88,17 +88,6 @@ class G3tHWP():
         # Threshoild for outlier data to calculate nominal slit width
         self._slit_width_lim = self.configs.get('slit_width_lim', 0.1)
 
-        # force to quad value
-        # 0: use readout quad value (default)
-        # 1: positive rotation direction, -1: negative rotation direction
-        self._force_quad = int(self.configs.get('force_quad', 0))
-        if np.abs(self._force_quad) > 1:
-            logger.warning("force_quad in config file must be 0 or 1 or -1")
-            if self._force_quad > 1:
-                self._force_quad = 1
-            else:
-                self._force_quad = -1
-
         # Output path + filename
         self._output = self.configs.get('output', None)
 
@@ -384,7 +373,7 @@ class G3tHWP():
 
         return {'locked': locked, 'stable': stable, 'hwp_rate': hwp_rate, 'slow_time': slow_time}
 
-    def analyze(self, data, ratio=None, mod2pi=True, fast=True):
+    def analyze(self, data, ratio=None, force_quad=None, mod2pi=True, fast=True):
         """
         Analyze HWP angle solution
         to be checked by hardware that 0 is CW and 1 is CCW from (sky side) consistently for all SAT
@@ -396,6 +385,8 @@ class G3tHWP():
             ratio : float, optional
                 parameter for referelce slit
                 threshold = 2 slit distances +/- ratio
+            force_quad : 0 or 1, otional
+                forced quad value to use
             mod2pi : bool, optional
                 If True, return hwp angle % 2pi
             fast : bool, optional
@@ -428,6 +419,9 @@ class G3tHWP():
 
         if not any(data):
             logger.info("no HWP field data")
+
+        assert force_quad in [0, 1, None], "force_quad must be 0, 1 or None"
+        self._force_quad = force_quad
 
         d = self._data_formatting(data)
         if 'irig_time_2' in data.keys() and 'counter_2' in data.keys():
@@ -496,7 +490,7 @@ class G3tHWP():
         if 'fast_time_raw' in solved.keys():
             logger.info('Non-uniformity is already subtracted. Calculation is skipped.')
             return
-                    
+
         def moving_average(array, n):
             return np.convolve(array, np.ones(n), 'valid')/n
 
@@ -999,10 +993,7 @@ class G3tHWP():
                 kind='linear',
                 fill_value='extrapolate')(
                 self._time))
-        if self._force_quad == 0:
-            direction = list(map(lambda x: 1 if x == 0 else -1, quad))
-        else:
-            direction = self._force_quad
+        direction = list(map(lambda x: 1 if x == 0 else -1, quad))
 
         self._encd_cnt_split = np.split(self._encd_cnt, self._ref_indexes)
         angle_first_revolution = (self._encd_cnt_split[0] - self._ref_cnt[0]) * \
@@ -1074,8 +1065,8 @@ class G3tHWP():
         return
 
     def _quad_form(self, quad):
-        if self._force_quad==1:
-            return np.ones_like(quad)
+        if self._force_quad is not None:
+            return np.full_like(quad, self._force_quad)
         # bit process
         quad[(quad >= 0.5)] = 1
         quad[(quad < 0.5)] = 0
