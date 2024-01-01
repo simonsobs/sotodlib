@@ -8,15 +8,16 @@ still non-existant tools.
 Configuration file required::
 
     config = {
-        'context': 'context.yaml',
         'archive': {
             'detset': {
                 'index': 'detset.sqlite',
-                'h5file': 'detset.h5'
+                'h5file': 'detset.h5',
+                'context': 'context.yaml',
             },
             'det_cal': {
                 'index': 'det_cal.sqlite',
-                'h5file': 'det_cal.h5
+                'h5file': 'det_cal.h5,
+                'context': 'context.yaml',
             },
         },
         'g3tsmurf': g3tsmurf_hwp_config.yaml',
@@ -74,7 +75,7 @@ def smurf_detset_info(config: Union[str, dict],
     session = SMURF.Session()
 
     imprinter = Imprinter(config['imprinter'])
-    ctx = core.Context(config['context'])
+    ctx = core.Context(config['archive']['detset']['context'])
 
 
     if not os.path.exists(config['archive']['detset']['index']):
@@ -385,7 +386,7 @@ def run_update_det_caldb(config_path, logger=None, format_exc=False, show_pb=Fal
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
 
-    ctx = core.Context(config['context'])
+    ctx = core.Context(config['archive']['det_cal']['context'])
     update_det_caldb(
         ctx, 
         config['archive']['det_cal']['index'],
