@@ -11,6 +11,8 @@ import logging
 import yaml
 import datetime as dt
 import scipy 
+from typing import Optional
+
 import sotodlib
 from sotodlib import core
 from sotodlib.hwp.g3thwp import G3tHWP
@@ -60,15 +62,15 @@ def get_parser(parser=None):
     return parser
 
 def main(
-    context=None, 
-    HWPconfig=None, 
-    output_dir=None, 
-    verbose=None,
-    overwrite=False,
-    query=None,
-    min_ctime=None,
-    max_ctime=None,
-    obs_id=None,    
+    context: str, 
+    HWPconfig: str, 
+    output_dir:Optional[str] = None, 
+    verbose:Optional[int] = 2,
+    overwrite:Optional[bool] = False,
+    query:Optional[str] = None,
+    min_ctime:Optional[float] = None,
+    max_ctime:Optional[float] = None,
+    obs_id:Optional[str] = None,    
     logger=None,
  ):
     if logger is None:
@@ -171,5 +173,6 @@ def main(
     
     
 if __name__ == '__main__':
-    parser = get_parser()
-    util.main_launcher(main, get_parser)
+    parser = get_parser(parser=None)
+    args = parser.parse_args()
+    main(**vars(args))
