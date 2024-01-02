@@ -76,11 +76,8 @@ def main(
     if logger is None:
         logger = default_logger
     logger.info(f"Using context {context} and HWPconfig {HWPconfig}")
-    configs = yaml.safe_load(open(HWPconfig, "r"))
-    args = parser.parse_args()
-    if args.output_dir is None:
-        args.output_dir = configs["output_dir"]
     
+    configs = yaml.safe_load(open(HWPconfig, "r"))
     logger.info("Starting make_hwp_solutions")
 
     # Specify output directory
