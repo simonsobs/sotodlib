@@ -177,7 +177,6 @@ class Context(odict):
                 detsets=None,
                 meta=None,
                 ignore_missing=None,
-                ignore_missing_dets=False,
                 free_tags=None,
                 no_signal=None,
                 loader_type=None,
@@ -212,8 +211,6 @@ class Context(odict):
             obs_colon_tags fields for detector restrictions.
           ignore_missing (bool): If True, don't fail when a metadata
             item can't be loaded, just try to proceed without it.
-          ignore_missing_dets (bool): If True, don't fail when metadata entries
-            are missing information for a subset of detectors.
           no_signal (bool): If True, the .signal will be set to None.
             This is a way to get the axes and pointing info without
             the (large) TOD blob.  Not all loaders may support this.
@@ -282,8 +279,7 @@ class Context(odict):
         """
         meta = self.get_meta(obs_id=obs_id, dets=dets, samples=samples,
                              filename=filename, detsets=detsets, meta=meta,
-                             free_tags=free_tags, ignore_missing=ignore_missing,
-                             ignore_missing_dets=ignore_missing_dets)
+                             free_tags=free_tags, ignore_missing=ignore_missing)
 
         # Use the obs_id, dets, and samples from meta.
         obs_id = meta['obs_info']['obs_id']
@@ -339,7 +335,6 @@ class Context(odict):
                  free_tags=None,
                  check=False,
                  ignore_missing=False,
-                 ignore_missing_dets=False,
                  det_info_scan=False):
         """Load supporting metadata for an observation and return it in an
         AxisManager.
@@ -476,8 +471,7 @@ class Context(odict):
         metadata_list = self._get_warn_missing('metadata', [])
         meta = self.loader.load(metadata_list, request, det_info=det_info, check=check,
                                 free_tags=free_tags, free_tag_fields=free_tag_fields,
-                                det_info_scan=det_info_scan,ignore_missing=ignore_missing,
-                                ignore_missing_dets=ignore_missing_dets)
+                                det_info_scan=det_info_scan, ignore_missing=ignore_missing)
         if check:
             return meta
 

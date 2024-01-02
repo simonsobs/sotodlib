@@ -20,6 +20,14 @@ class LoaderError(RuntimeError):
     """
 
 
+class IncompleteMetadataError(RuntimeError):
+    pass
+
+
+class IncompleteDetInfoError(RuntimeError):
+    pass
+
+
 class SuperLoader:
     def __init__(self, context=None, detdb=None, obsdb=None, working_dir=None):
         """Metadata batch loader.
@@ -211,6 +219,9 @@ class SuperLoader:
             if not skip_this:
                 mask = np.ones(len(det_info), bool)
                 for k, v in _filter_items('dets:', index_line, remove=True).items():
+                    if k not in det_info.keys:
+                        raise IncompleteDetInfoError(
+                            f"Entry requires det_info['{k}'], and that is not defined.")
                     mask *= (det_info[k] == v)
                 skip_this = (mask.sum() == 0)
             to_skip.append(skip_this)
@@ -304,7 +315,7 @@ class SuperLoader:
 
     def load(self, spec_list, request, det_info=None, free_tags=[],
              free_tag_fields=[], dest=None, check=False, det_info_scan=False,
-             ignore_missing=False, ignore_missing_dets=False):
+             ignore_missing=False):
         """Loads metadata objects and processes them into a single
         AxisManager.
 
@@ -326,9 +337,7 @@ class SuperLoader:
             directly update det_info.
           ignore_missing (bool): If True, don't fail when a metadata
             item can't be loaded, just try to proceed without it.
-          ignore_missing_dets (bool): If True, don't fail with a metadata
-            entry *that is not used for detector selection* does not contain
-            information for any subset of detectors.
+
         Returns:
           In normal mode, an AxisManager containing the metadata
           (dest).  In check mode, a list of tuples (spec, exception).
@@ -346,9 +355,6 @@ class SuperLoader:
         # Augmented request -- note that dets:* restrictions from
         # request will be added back into this by check tags.
         aug_request = _filter_items('obs:', request, False)
-        # detector fields in request to know if data selection could be
-        # happening
-        det_request_fields = _filter_items('dets:', request.keys(), True)
 
         if self.obsdb is not None and 'obs:obs_id' in request:
             if dest is None:
@@ -423,7 +429,7 @@ class SuperLoader:
         det_info, aug_request = check_tags(det_info, aug_request)
         n_dets = len(det_info)
 
-        # process each item
+        # Process each item.
         items = []
         for spec in spec_list:
             if det_info_scan and not spec.get('det_info'):
@@ -432,13 +438,16 @@ class SuperLoader:
             logger.debug(f'Processing metadata spec={spec} with augmented '
                          f'request={aug_request}')
 
+            on_missing = spec.get('on_missing', 'trim')
+            assert on_missing in ['trim', 'skip', 'fail']
+
             try:
                 item = self.load_one(spec, aug_request, det_info)
                 error = None
             except Exception as e:
                 if check:
                     error = e
-                elif ignore_missing:
+                elif ignore_missing or on_missing == 'skip':
                     logger.warning(f'Failed to load metadata for spec={spec}; ignoring.')
                     continue
                 else:
@@ -446,27 +455,26 @@ class SuperLoader:
 
             if spec.get('det_info') and error is None:
                 item_keys = _filter_items('dets:', item.keys)
-                new_keys = [k for k in item_keys if k not in det_info.keys]
-                det_info = merge_det_info(det_info, item)
+                try:
+                    det_info = merge_det_info(
+                        det_info, item,
+                        on_missing=on_missing)
+                except IncompleteMetadataError as e:
+                    if check:
+                        # I guess we report this, either way.
+                        error = e
+                    elif on_missing == 'fail':
+                        reraise(spec, e)
+                    elif on_missing == 'skip':
+                        # print a warning I guess
+                        logger.warning(f'Skipping failed det_info load, spec={spec}')
+
                 item = None
+
+                # The check_tags call can cause truncation of the
+                # dataset, and that's ok.
                 det_info, aug_request = check_tags(det_info, aug_request)
-                if (np.any([k in free_tag_fields for k in new_keys]) or
-                    np.any([k in det_request_fields for k in new_keys])):
-                    # free_tag_fields and det_request_fielsa are fields where
-                    # detector selection could be made. So we have to assume
-                    # THESE metadata are known to be complete
-                    n_dets = len(det_info)
-                if len(det_info) < n_dets:
-                    if ignore_missing_dets:
-                        logger.warning(f"{n_dets-len(det_info)} detectors are "
-                                       f"missing det_info information in "
-                                       f"spec={spec}. ")
-                        # reset count so warning doesn't propagate
-                        n_dets = len(det_info) 
-                    else:
-                        raise ValueError(f"{n_dets-len(det_info)} detectors are "
-                                         f"missing metadata information in "
-                                         f"spec={spec}. ")
+                n_dets = len(det_info)
 
             if check:
                 items.append((spec, error))
@@ -478,12 +486,31 @@ class SuperLoader:
 
             # Make everything an axisman.
             if isinstance(item, ResultSet):
+                # Note this might raise an IncompleteDetInfoError.
                 item = broadcast_resultset(item, det_info=det_info)
 
             elif not isinstance(item, core.AxisManager):
                 logger.error(
                     f'The decoded item {item} is not an AxisManager or '
                     f'other well-understood type.  Request was: {request}.')
+
+            # You have to check for detector loss here -- compare
+            # item.dets.vals to what's in det_info.
+            i0 = core.util.get_multi_index(
+                item.dets.vals, det_info['readout_id'])
+
+            n_dets_item = len(set(i0[i0>=0]))
+            if n_dets_item < n_dets:
+                message = (f"Only {n_dets_item} of {n_dets} detectors "
+                           "have data for metadata specified by "
+                           f"spec={spec}. ")
+                if on_missing == 'trim':
+                    logger.warning(message + 'Trimming.')
+                elif on_missing == 'fail':
+                    raise IncompleteMetadataError(message)
+                else:  # skip
+                    logger.warning(message + 'Discarding.')
+                    continue
 
             # Unpack it.
             try:
@@ -494,18 +521,7 @@ class SuperLoader:
                 reraise(spec, e)
 
             logger.debug(f'load(): dest now has shape {dest.shape}')
-
-            if dest.dets.count < n_dets:
-                if ignore_missing_dets:
-                    logger.warning(f"{n_dets-dest.dets.count} detectors are "
-                                   f"missing metadata information in "
-                                   f"spec={spec}. ")
-                    # reset count so warning doesn't propagate
-                    n_dets = dest.dets.count 
-                else:
-                    raise ValueError(f"{n_dets-dest.dets.count} detectors are "
-                                     f"missing metadata information in "
-                                     f"spec={spec}. ")
+            n_dets = dest.dets.count
 
         check_tags(det_info, aug_request, final=True)
 
@@ -526,7 +542,7 @@ def _filter_items(prefix, d, remove=True):
     return [k[len(prefix)*remove:] for k in d if k.startswith(prefix)]
 
 
-def merge_det_info(det_info, new_info, multi=True):
+def merge_det_info(det_info, new_info, multi=True, on_missing='trim'):
     """Args:
 
       det_info (ResultSet or None): The det_info table to start from,
@@ -535,6 +551,8 @@ def merge_det_info(det_info, new_info, multi=True):
         det_info; only columns with dets: prefix are processed.
       multi (bool): whether to permit some rows to match multiple
         rows; this is True by default.
+      on_missing (str): what to do if the new_info does not fully cover
+        the dets in det_info.
 
     Returns:
       A (possibly) new det_info table, containing updates and
@@ -560,7 +578,7 @@ def merge_det_info(det_info, new_info, multi=True):
 
     join_on = list(set(new_info.keys).intersection(det_info.keys))
     if len(join_on) == 0:
-        raise ValueError(
+        raise IncompleteMetadataError(
             f'Cannot merge det_info: no common keys in '
             f'{det_info} and {new_info}.')
 
@@ -591,6 +609,9 @@ def merge_det_info(det_info, new_info, multi=True):
                 'When reconciling new det_info, a disagreement in the value '
                 f'of field {k} was observed.  If this is due to ambiguity '
                 f'in the det_id, maybe add {k} to the match_keys?')
+
+    if len(det_info) != len(i1) and on_missing != 'trim':
+        raise IncompleteMetadataError('{len(det_info)} -> {len(i1)})')
 
     logger.debug(f' ... updating det_info (row count '
                  f'{len(det_info)} -> {len(i1)})')
@@ -736,6 +757,12 @@ def broadcast_resultset(
         row_map[key] = i
 
     # Get index of rs that corresponds to each row in det_info.
+    missing_keys = [k for k in index_cols.values()
+                    if k not in det_info.keys]
+    if len(missing_keys):
+        raise IncompleteDetInfoError(
+            f"Loaded metadata requires det_info keys {missing_keys}.")
+
     indices = np.array(
         [row_map.get(tuple(row.values()), -1)
          for row in det_info.subset(keys=index_cols.values())],
