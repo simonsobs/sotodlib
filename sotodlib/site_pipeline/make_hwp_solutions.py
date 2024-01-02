@@ -15,7 +15,7 @@ import sotodlib
 from sotodlib import core
 from sotodlib.hwp.g3thwp import G3tHWP
 from sotodlib.site_pipeline import util
-logger = util.init_logger(__name__, 'make-hwp-solutions: ')
+default_logger = util.init_logger(__name__, 'make-hwp-solutions: ')
 
 def get_parser(parser=None):
     if parser is None:
@@ -69,8 +69,10 @@ def main(
     min_ctime=None,
     max_ctime=None,
     obs_id=None,    
+    logger=None,
  ):
-    
+    if logger is None:
+        logger = default_logger
     logger.info(f"Using context {context} and HWPconfig {HWPconfig}")
     configs = yaml.safe_load(open(HWPconfig, "r"))
     args = parser.parse_args()
