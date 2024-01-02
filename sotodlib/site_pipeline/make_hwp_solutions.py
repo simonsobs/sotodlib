@@ -41,7 +41,8 @@ def get_parser(parser=None):
     )
     parser.add_argument(
         '--query', 
-        help="Query to pass to the observation list",  
+        help="Query to pass to the observation list. Use \\'string\\' to "
+             "pass in strings within the query.",  
         type=str
     )
     parser.add_argument(
@@ -70,7 +71,7 @@ def main(
     obs_id=None,    
  ):
     
-    print(context, HWPconfig)
+    logger.info(f"Using context {context} and HWPconfig {HWPconfig}")
     configs = yaml.safe_load(open(HWPconfig, "r"))
     args = parser.parse_args()
     if args.output_dir is None:
@@ -124,6 +125,8 @@ def main(
         tot_query = tot_query[4:-4]
         if tot_query=="":
             tot_query="1"
+
+    logger.debug(f"Sending query to obsdb: {tot_query}")
     obs_list = ctx.obsdb.query(tot_query)
         
     if len(obs_list)==0:
@@ -143,12 +146,16 @@ def main(
     #write solutions
     for obs in run_list:
         h5_address = obs["obs_id"]
-        print(h5_address)
+        logger.info(f"Calculating Angles for {h5_address}")
         tod = ctx.get_obs(obs, no_signal=True)
         
         # make angle solutions
         g3thwp = G3tHWP(HWPconfig)
-        g3thwp.write_solution_h5(tod, output=output_filename, h5_address=h5_address)
+        g3thwp.write_solution_h5(
+            tod, 
+            output=output_filename, 
+            h5_address=h5_address
+        )
         
         del g3thwp
         
