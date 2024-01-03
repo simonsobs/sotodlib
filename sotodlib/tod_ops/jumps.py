@@ -176,40 +176,6 @@ def _jumpfinder(x, min_chunk, min_size, win_size, nsigma, max_depth=1, depth=0):
     return jumps.reshape(orig_shape)
 
 
-def get_jump_sizes(x, jumps, win_size):
-    """
-    Estimate jumps sizes.
-
-    Arguments:
-
-        x: Data with jumps, expects 1D.
-
-        jumps: Indices of jumps in x.
-
-        win_size: Number of samples to average over when checking jump size.
-
-    Returns:
-
-        sizes: Array of jump sizes, same order and jumps.
-    """
-    sizes = np.zeros(len(jumps))
-    for i, j in enumerate(jumps):
-        if i + 1 < len(jumps):
-            right = min(j + win_size, len(x), int((jumps[i + 1] + j) / 2))
-        else:
-            right = min(j + win_size, len(x))
-        right_height = np.median(x[int((j + right) / 2) : right])
-
-        if i > 0:
-            left = max(j - win_size, 0, int((jumps[i - 1] + j) / 2))
-        else:
-            left = max(j - win_size, 0)
-        left_height = np.median(x[left : int((j + left) / 2)])
-
-        sizes[i] = right_height - left_height
-    return sizes.astype(float)
-
-
 def jumpfinder_tv(
     x,
     min_chunk=None,
@@ -403,7 +369,7 @@ def jumpfinder_sliding_window(
     return jumps
 
 
-def jumpfix_median_sub(x, jumps, inplace=False):
+def jumpfix_median_sub(x, jumps, inplace=False, **kwargs):
     """
     Naive jump fixing routine where we median subtract between jumps.
     Note that you should exepect a glitch at the jump locations.
@@ -416,6 +382,8 @@ def jumpfix_median_sub(x, jumps, inplace=False):
                Should be the same shape at x.
 
         inplace: Whether of not x should be fixed inplace.
+
+        **kwargs: Currently unused, here to keep signatures uniform.
 
     Returns:
 
@@ -449,7 +417,7 @@ def jumpfix_median_sub(x, jumps, inplace=False):
     return x_fixed.reshape(orig_shape)
 
 
-def jumpfix_subtract_heights(x, jumps, heights, inplace=False):
+def jumpfix_subtract_heights(x, jumps, inplace=False, heights=None, **kwargs):
     """
     Naive jump fixing routine where we subtract known heights between jumps.
     Note that you should exepect a glitch at the jump locations.
@@ -461,16 +429,22 @@ def jumpfix_subtract_heights(x, jumps, heights, inplace=False):
         jumps: Boolean mask of that is True at jump locations.
                Should be the same shape at x.
 
+        inplace: Whether of not x should be fixed inplace.
+
         heights: Array of jump heights.
                  Should be a flat array of length n_jumps.
+                 If None then will be calculated from estimate_heights.
 
-        inplace: Whether of not x should be fixed inplace.
+        **kwargs: Additional arguments to pass to estimate_heights if heights is None.
 
     Returns:
 
         x_fixed: x with jumps removed.
                  If inplace is True this is just a reference to x.
     """
+    if heights is None:
+        heights = estimate_heights(x, jumps, **kwargs)
+
     x_fixed = x
     if not inplace:
         x_fixed = x.copy()
@@ -496,6 +470,32 @@ def jumpfix_subtract_heights(x, jumps, heights, inplace=False):
         n = m
 
     return x_fixed.reshape(orig_shape)
+
+
+def estimate_heights(signal, jumps, win_size=20, twopi=False):
+    """
+    Simple jump estimation routine.
+
+    Arguments:
+
+        signal: The signal with jumps.
+
+        jumps: Boolean mask of jump locations in signal.
+
+        win_size: Number of samples to buffer when estimating heights.
+
+        twopi: If True, heights will be rounded to the nearest 2*pi
+
+    Returns:
+
+        heights: Array of jump heights has length sum(jumps)
+    """
+    diff_buffed = signal - np.roll(signal, win_size, axis=-1)
+    heights = diff_buffed[jumps]
+
+    if twopi:
+        heights = np.round(heights / (2 * np.pi)) * 2 * np.pi
+    return heights
 
 
 def twopi_jumps(
@@ -587,7 +587,7 @@ def twopi_jumps(
         # Round heights to the nearest 2pi
         heights = np.round(heights / (2 * np.pi)) * 2 * np.pi
 
-        fixed = jumpfix_subtract_heights(signal, jumps, heights, inplace)
+        fixed = jumpfix_subtract_heights(signal, jumps, inplace, heights)
 
         return jump_ranges, fixed
     return jump_ranges
@@ -606,6 +606,7 @@ def find_jumps(
     nsigma=None,
     max_depth=0,
     fix=None,
+    fix_kwargs={},
     inplace=False,
     merge=True,
     overwrite=False,
@@ -653,6 +654,8 @@ def find_jumps(
         fix: Method to use for jumpfixing.
              Set to None to not fix.
 
+        fix_kwargs: kwargs other than inplace to pass to the jumpfixer.
+
         inplace: Whether of not signal should be fixed inplace.
 
         merge: If True will wrap ranges matrix into ``tod.flags.<flagname>``
@@ -696,9 +699,9 @@ def find_jumps(
         min_size = np.array(min_size)
 
     do_fix = fix is not None
-    is_med = False
+    is_sub = False
     if do_fix:
-        is_med = fix.__name__ == "jumpfix_median_sub"
+        is_sub = fix.__name__ == "jumpfix_subtract_heights"
     _signal = signal
     if not (inplace and is_med):
         _signal = signal.copy()
@@ -727,7 +730,7 @@ def find_jumps(
             break
 
         jumps[msk] += _jumps
-        _signal[msk] = jumpfix_median_sub(_signal[msk], _jumps, True)
+        _signal[msk] = jumpfix_subtract_heights(_signal[msk], _jumps, True)
         msk = np.any(jumps, axis=-1)
 
     # TODO: include heights in output
@@ -744,9 +747,9 @@ def find_jumps(
         tod.flags.wrap(flagname, jump_ranges, [(0, "dets"), (1, "samps")])
 
     if do_fix:
-        if is_med:
+        if is_sub:
             fixed = _signal
         else:
-            fixed = fix(_signal, jumps, inplace)
+            fixed = fix(_signal, jumps, inplace=inplace, **fix_kwargs)
         return jump_ranges, fixed
     return jump_ranges
