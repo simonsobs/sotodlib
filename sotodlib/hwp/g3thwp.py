@@ -650,6 +650,7 @@ class G3tHWP():
     def _write_empty_solution_h5(self, tod, output=None, h5_address=None):
 
         logger.info('Writing empty solutions')
+        # metadata loader requires a dets axis
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         self._set_empty_axes(aman)
         aman.timestamps[:] = tod.timestamps
@@ -741,7 +742,7 @@ class G3tHWP():
             self._write_empty_solution_h5(tod, output, h5_address)
             return
 
-        if len(solved['fast_time']) == 0:
+        if len(solved) == 0 or len(solved['fast_time']) == 0:
             logger.info('No rotation data in the specified timestamps.')
             self._write_empty_solution_h5(tod, output, h5_address)
             return
@@ -753,7 +754,7 @@ class G3tHWP():
             logger.error(f"Exception '{e}' thrown while the template subtraction")
             pass
 
-        # write solution
+        # write solution, metadata loader requires a dets axis
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         self._set_empty_axes(aman)
         if solved['fast_time'][0] > tod.timestamps[0] or solved['fast_time'][-1] < tod.timestamps[-1]:
