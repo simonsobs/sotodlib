@@ -73,12 +73,8 @@ def telescope_lookup(telescope: str):
     elif telescope == "satp3":
         return {"telescope": "satp3", "telescope_flavor": "sat",
                 "tube_flavor": "mf", "detector_flavor": "tes"}
-    elif telescope == "lati1":
-        return {"telescope": "lati1", "telescope_flavor": "lat",
-                "tube_flavor": "mf", "detector_flavor": "tes"}
-    elif telescope == "lati6":
-        return {"telescope": "lati6", "telescope_flavor": "lat",
-                "tube_flavor": "mf", "detector_flavor": "tes"}
+    elif telescope == "lat":
+        return {"telescope": "lat"}
     else:
         logger.error("unknown telescope type given by bookbinder")
         return {}
@@ -220,6 +216,12 @@ def main(config: str,
                 for flav in flavors:
                     bookcartobsdb.add_obs_columns([flav+" str"])
                     very_clean[flav] = flavors[flav]
+                if telescope == "lat":
+                   lat_tubefile_loc = "/so/home/aeadler/site-pipeline-configs/lat"
+                   lat_tube_list = yaml.safe_load(open(os.path.join(lat_tubefile_loc, "lat_tube_list.yaml"), "rb"))
+                   tube_flavor = lat_tube_list[index["tube_slot"]]
+                   bookcartobsdb.add_obs_columns("tube_flavor str")
+                   very_clean["tube_flavor"] = tube_flavor
 
             except KeyError:
                 logger.error("No telescope key in index file")
