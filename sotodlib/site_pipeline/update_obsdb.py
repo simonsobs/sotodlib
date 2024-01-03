@@ -17,6 +17,7 @@ The config file could be of the form:
 
     obsdb: dummyobsdb.sqlite
     obsfiledb: dummyobsfiledb.sqlite
+    lat_tube_list_dir: path to lat_tube_list.yaml,a dict matching tubes and bands
     tolerate_stray_files: True
     skip_bad_books: True
     extra_extra_files:
@@ -217,14 +218,14 @@ def main(config: str,
                     bookcartobsdb.add_obs_columns([flav+" str"])
                     very_clean[flav] = flavors[flav]
                 if telescope == "lat":
-                   lat_tubefile_loc = "/so/home/aeadler/site-pipeline-configs/lat"
-                   lat_tube_list = yaml.safe_load(open(os.path.join(lat_tubefile_loc, "lat_tube_list.yaml"), "rb"))
+                   lat_tube_list_dir = config_dict["lat_tube_list_dir"]
+                   lat_tube_list = yaml.safe_load(open(os.path.join(lat_tube_list_dir, "lat_tube_list.yaml"), "rb"))
                    tube_flavor = lat_tube_list[index["tube_slot"]]
                    bookcartobsdb.add_obs_columns("tube_flavor str")
                    very_clean["tube_flavor"] = tube_flavor
 
             except KeyError:
-                logger.error("No telescope key in index file")
+                logger.error("No telescope key in index file or error with lat_tube_list")
                 very_clean["telescope_flavor"] = "unknown"
             stream_ids = index.pop("stream_ids")
             if stream_ids is not None:
