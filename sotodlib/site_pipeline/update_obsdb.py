@@ -74,7 +74,7 @@ def telescope_lookup(telescope: str):
         return {"telescope": "satp3", "telescope_flavor": "sat",
                 "tube_flavor": "mf", "detector_flavor": "tes"}
     elif telescope == "lat":
-        return {"telescope": "lat"}
+        return {"telescope": "lat", "telescope_flavor": "lat"}
     else:
         logger.error("unknown telescope type given by bookbinder")
         return {}
