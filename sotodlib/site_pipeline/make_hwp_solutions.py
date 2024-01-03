@@ -11,11 +11,13 @@ import logging
 import yaml
 import datetime as dt
 import scipy 
+from typing import Optional
+
 import sotodlib
 from sotodlib import core
 from sotodlib.hwp.g3thwp import G3tHWP
 from sotodlib.site_pipeline import util
-logger = util.init_logger(__name__, 'make-hwp-solutions: ')
+default_logger = util.init_logger(__name__, 'make-hwp-solutions: ')
 
 def get_parser(parser=None):
     if parser is None:
@@ -41,7 +43,8 @@ def get_parser(parser=None):
     )
     parser.add_argument(
         '--query', 
-        help="Query to pass to the observation list",  
+        help="Query to pass to the observation list. Use \\'string\\' to "
+             "pass in strings within the query.",  
         type=str
     )
     parser.add_argument(
@@ -59,23 +62,22 @@ def get_parser(parser=None):
     return parser
 
 def main(
-    context=None, 
-    HWPconfig=None, 
-    output_dir=None, 
-    verbose=None,
-    overwrite=False,
-    query=None,
-    min_ctime=None,
-    max_ctime=None,
-    obs_id=None,    
+    context: str, 
+    HWPconfig: str, 
+    output_dir:Optional[str] = None, 
+    verbose:Optional[int] = 2,
+    overwrite:Optional[bool] = False,
+    query:Optional[str] = None,
+    min_ctime:Optional[float] = None,
+    max_ctime:Optional[float] = None,
+    obs_id:Optional[str] = None,    
+    logger=None,
  ):
+    if logger is None:
+        logger = default_logger
+    logger.info(f"Using context {context} and HWPconfig {HWPconfig}")
     
-    print(context, HWPconfig)
     configs = yaml.safe_load(open(HWPconfig, "r"))
-    args = parser.parse_args()
-    if args.output_dir is None:
-        args.output_dir = configs["output_dir"]
-    
     logger.info("Starting make_hwp_solutions")
 
     # Specify output directory
@@ -124,6 +126,8 @@ def main(
         tot_query = tot_query[4:-4]
         if tot_query=="":
             tot_query="1"
+
+    logger.debug(f"Sending query to obsdb: {tot_query}")
     obs_list = ctx.obsdb.query(tot_query)
         
     if len(obs_list)==0:
@@ -143,12 +147,16 @@ def main(
     #write solutions
     for obs in run_list:
         h5_address = obs["obs_id"]
-        print(h5_address)
+        logger.info(f"Calculating Angles for {h5_address}")
         tod = ctx.get_obs(obs, no_signal=True)
         
         # make angle solutions
         g3thwp = G3tHWP(HWPconfig)
-        g3thwp.write_solution_h5(tod, output=output_filename, h5_address=h5_address)
+        g3thwp.write_solution_h5(
+            tod, 
+            output=output_filename, 
+            h5_address=h5_address
+        )
         
         del g3thwp
         
@@ -162,5 +170,6 @@ def main(
     
     
 if __name__ == '__main__':
-    parser = get_parser()
-    util.main_launcher(main, get_parser)
+    parser = get_parser(parser=None)
+    args = parser.parse_args()
+    main(**vars(args))
