@@ -572,6 +572,16 @@ def twopi_jumps(
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
 
     if merge:
+        if not isinstance(tod, AxisManager):
+            merge = False
+            print("TOD is not an AxisManager, not merging")
+        elif "dets" not in tod or "samps" not in tod:
+            merge = False
+            print("dets or samps axis not in TOD, not merging")
+        elif jumps.shape != (tod.dets.count, tod.samps.count):
+            merge = False
+            print("Shape of jumps does not match that of TOD, not merging")
+    if merge:
         if overwrite:
             if flagname in tod.flags._fields:
                 tod.flags.move(flagname, None)
@@ -737,6 +747,16 @@ def find_jumps(
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(buff_size)
 
+    if merge:
+        if not isinstance(tod, AxisManager):
+            merge = False
+            print("TOD is not an AxisManager, not merging")
+        elif "dets" not in tod or "samps" not in tod:
+            merge = False
+            print("dets or samps axis not in TOD, not merging")
+        elif jumps.shape != (tod.dets.count, tod.samps.count):
+            merge = False
+            print("Shape of jumps does not match that of TOD, not merging")
     if merge:
         if overwrite:
             if flagname in tod.flags._fields:
