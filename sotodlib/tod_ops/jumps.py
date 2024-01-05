@@ -341,7 +341,10 @@ def estimate_heights(signal, jumps, win_size=20, twopi=False, medfilt=False):
     """
     win_size = int(win_size)
     if medfilt:
-        signal = simg.median_filter(signal, win_size - 1 + (win_size % 2), axes=(-1,))
+        _size = win_size - 1 + (win_size % 2)
+        size = np.ones(len(signal.shape), dtype=int)
+        size[-1] = _size
+        signal = simg.median_filter(signal, size) 
     diff_buffed = signal - np.roll(signal, win_size, axis=-1)
     heights = diff_buffed[jumps]
 
