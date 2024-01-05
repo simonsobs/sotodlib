@@ -1,3 +1,5 @@
+from functools import partial
+
 import numpy as np
 import scipy.ndimage as simg
 import scipy.signal as sig
@@ -26,7 +28,9 @@ def std_est(x, axis=-1):
     return (lims[1] - lims[0]) / 8**0.5
 
 
-def _jumpfinder(x, min_chunk, min_size, win_size, nsigma, max_depth=1, depth=0):
+def _jumpfinder(
+    x, min_chunk=20, min_size=None, win_size=20, nsigma=25, max_depth=1, depth=0
+):
     """
     Recursive edge detection based jumpfinder.
 
@@ -42,8 +46,7 @@ def _jumpfinder(x, min_chunk, min_size, win_size, nsigma, max_depth=1, depth=0):
 
         min_size: The smallest jump size counted as a jump.
 
-        win_size: Number of samples to average over when checking jump size.
-                  Also used to apply the SG filter when peak finding.
+        win_size: Size of window used by SG filter when peak finding.
 
         nsigma: Number of sigma above the mean for something to be a peak.
 
@@ -58,14 +61,8 @@ def _jumpfinder(x, min_chunk, min_size, win_size, nsigma, max_depth=1, depth=0):
                There is some uncertainty on order of 1 sample.
                Jumps within min_chunk of each other may not be distinguished.
     """
-    if min_chunk is None:
-        min_chunk = 20
     if min_size is None:
         min_size = ss.iqr(x, -1)
-    if win_size is None:
-        win_size = 20
-    if nsigma is None:
-        nsigma = 25
 
     # Since this is intended for det data lets assume we either 1d or 2d data
     # and in the case of 2d data we find jumps along rows
@@ -176,134 +173,10 @@ def _jumpfinder(x, min_chunk, min_size, win_size, nsigma, max_depth=1, depth=0):
     return jumps.reshape(orig_shape)
 
 
-def jumpfinder_tv(
-    x,
-    min_chunk=None,
-    min_size=None,
-    win_size=None,
-    nsigma=None,
-    max_depth=1,
-    weight=0.5,
-):
-    """
-    Apply total variance filter and then search for jumps.
-
-    Arguments:
-
-        x: Data to jumpfind on, expects 1D.
-
-        min_chunk: The smallest chunk of data to look for jumps in.
-
-        min_size: The smallest jump size counted as a jump.
-
-        win_size: Number of samples to average over when checking jump size.
-                  Also used to apply the SG filter when peak finding.
-
-        nsigma: Number of sigma above the mean for something to be a peak.
-
-        max_depth: The maximum recursion depth.
-                   Set negative for infite depth and 0 for no recursion.
-
-        weight: Denoising weight. Higher weights denoise more, lower weights
-                preserve the input signal better.
-
-    Returns:
-
-        jumps: The indices of jumps in x.
-               There is some uncertainty on order of 1 sample.
-               Jumps within min_chunk of each other may not be distinguished.
-    """
-    if min_chunk is None:
-        min_chunk = 5
-    if min_size is None:
-        min_size = 0.1
-    if win_size is None:
-        win_size = 5
-
-    channel_axis = 1
-    if len(x.shape) == 1:
-        channel_axis = None
-    x_filt = denoise_tv_chambolle(x, weight, channel_axis=channel_axis)
-    return _jumpfinder(
-        x_filt,
-        min_chunk,
-        min_size,
-        win_size,
-        nsigma,
-        max_depth,
-        0,
-    )
-
-
-def jumpfinder_gaussian(
-    x,
-    min_chunk=None,
-    min_size=None,
-    win_size=None,
-    nsigma=None,
-    max_depth=1,
-    sigma=0.5,
-):
-    """
-    Apply gaussian filter to data and then search for jumps.
-
-    Arguments:
-
-        x: Data to jumpfind on, expects 1D.
-
-        min_chunk: The smallest chunk of data to look for jumps in.
-
-        min_size: The smallest jump size counted as a jump.
-                  Note that this is in terms of the filtered data.
-
-        win_size: Number of samples to average over when checking jump size.
-                  Also used to apply the SG filter when peak finding.
-
-        nsigma: Number of sigma above the mean for something to be a peak.
-
-        max_depth: The maximum recursion depth.
-                   Set negative for infite depth and 0 for no recursion.
-
-        sigma: Kernal size of the gaussian filter.
-
-    Returns:
-
-        jumps: The indices of jumps in x.
-               There is some uncertainty on order of 1 sample.
-               Jumps within min_chunk of each other may not be distinguished.
-    """
-    if min_chunk is None:
-        min_chunk = 20
-    if min_size is None:
-        min_size = 0.1
-    if win_size is None:
-        win_size = 10
-
-    # Apply filter
-    x_filt = simg.gaussian_filter1d(x, sigma, axis=-1)
-
-    # Search for jumps in filtered data
-    return _jumpfinder(
-        x_filt,
-        min_chunk,
-        min_size,
-        win_size,
-        nsigma,
-        max_depth,
-        0,
-    )
-
-
 def jumpfinder_sliding_window(
     x,
-    min_chunk=None,
-    min_size=None,
-    win_size=None,
-    nsigma=None,
-    max_depth=1,
     window_size=10000,
     overlap=1000,
-    jumpfinder_func=jumpfinder_tv,
     **kwargs,
 ):
     """
@@ -316,34 +189,11 @@ def jumpfinder_sliding_window(
 
         x: Data to jumpfind on, expects 1D.
 
-        min_chunk: The smallest chunk of data to look for jumps in.
-
-        min_size: The smallest jump size counted as a jump.
-
-        win_size: Number of samples to average over when checking jump size.
-                  Also used to apply the SG filter when peak finding.
-
-        nsigma: Number of sigma above the mean for something to be a peak.
-
-        max_depth: The maximum recursion depth.
-                   Set negative for infite depth and 0 for no recursion.
-
         window_size: Size of window to use.
 
         overlap: Overlap between adjacent windows.
 
-        jumpfinder_func: Jumpfinding function to use.
-
-        **kwargs: Additional keyword args to pass to jumpfinder.
-                  Arguments that will ultimately be passed to scipy.signal.find_peaks
-                  should be passed after arguments specific to the jumpfinder.
-                  The additional arguments to pass for each jumpfinder are below:
-
-                  * _jumpfinder: None
-                  * jumpfinder_tv: weight
-                  * jumpfinder_gaussian: sigma
-
-                  See docstrings of each jumpfinder for more details.
+        **kwargs: kwargs to pass to _jumpfinder
 
     Returns:
 
@@ -356,13 +206,8 @@ def jumpfinder_sliding_window(
     for i in range(tot // (window_size - overlap)):
         start = i * (window_size - overlap)
         end = np.min((start + window_size, tot))
-        _jumps = jumpfinder_func(
+        _jumps = _jumpfinder(
             x=x[..., start:end],
-            min_chunk=min_chunk,
-            min_size=min_size,
-            win_size=win_size,
-            nsigma=nsigma,
-            max_depth=max_depth,
             **kwargs,
         )
         jumps[..., start:end] += _jumps
@@ -421,6 +266,7 @@ def jumpfix_subtract_heights(x, jumps, inplace=False, heights=None, **kwargs):
     """
     Naive jump fixing routine where we subtract known heights between jumps.
     Note that you should exepect a glitch at the jump locations.
+    Works best if you buffer the jumps mask by a bit.
 
     Arguments:
 
@@ -451,6 +297,7 @@ def jumpfix_subtract_heights(x, jumps, inplace=False, heights=None, **kwargs):
     orig_shape = x.shape
     x_fixed = np.atleast_2d(x_fixed)
     jumps = np.atleast_2d(jumps)
+    jumps[:, [0, -1]] = False
 
     rows, cols = np.nonzero(np.diff(~jumps, axis=-1))
     rows = rows[::2]
@@ -472,7 +319,7 @@ def jumpfix_subtract_heights(x, jumps, inplace=False, heights=None, **kwargs):
     return x_fixed.reshape(orig_shape)
 
 
-def estimate_heights(signal, jumps, win_size=20, twopi=False):
+def estimate_heights(signal, jumps, win_size=20, twopi=False, medfilt=False):
     """
     Simple jump estimation routine.
 
@@ -486,10 +333,15 @@ def estimate_heights(signal, jumps, win_size=20, twopi=False):
 
         twopi: If True, heights will be rounded to the nearest 2*pi
 
+        medfilt: If True, a median filter of size ~win_size will be applied.
+
     Returns:
 
         heights: Array of jump heights has length sum(jumps)
     """
+    win_size = int(win_size)
+    if medfilt:
+        signal = simg.median_filter(signal, win_size - 1 + (win_size % 2), axes=(-1,))
     diff_buffed = signal - np.roll(signal, win_size, axis=-1)
     heights = diff_buffed[jumps]
 
@@ -503,6 +355,8 @@ def twopi_jumps(
     signal=None,
     win_size=20,
     atol=None,
+    gaussian_width=0,
+    tv_weight=0,
     fix=True,
     inplace=False,
     merge=True,
@@ -525,6 +379,12 @@ def twopi_jumps(
 
         atol: How close the jump height needs to be to N*2pi to count.
               If set to None, then 3 times the WN level of the TOD is used.
+
+        gaussian_width: Width of gaussian filter.
+                        If <= 0, filter is not applied.
+
+        tv_weight: Weight used by total variance filter.
+                   If <= 0, filter is not applied.
 
         fix: If True the jumps will be fixed by adding N*2*pi at the jump locations.
 
@@ -550,7 +410,8 @@ def twopi_jumps(
         atol = 3 * std_est(signal)
         np.clip(atol, 1e-8, 1e-2)
 
-    diff_buffed = signal - np.roll(signal, win_size, axis=-1)
+    _signal = _filter(signal, gaussian_width, tv_weight)
+    diff_buffed = _signal - np.roll(_signal, win_size, axis=-1)
 
     if np.isscalar(atol):
         jumps = (np.isclose(0, np.abs(diff_buffed) % (2 * np.pi), atol=atol)) & (
@@ -572,27 +433,10 @@ def twopi_jumps(
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
 
     if merge:
-        if not isinstance(tod, AxisManager):
-            merge = False
-            print("TOD is not an AxisManager, not merging")
-        elif "dets" not in tod or "samps" not in tod:
-            merge = False
-            print("dets or samps axis not in TOD, not merging")
-        elif jumps.shape != (tod.dets.count, tod.samps.count):
-            merge = False
-            print("Shape of jumps does not match that of TOD, not merging")
-    if merge:
-        if overwrite:
-            if flagname in tod.flags._fields:
-                tod.flags.move(flagname, None)
-        if "flags" not in tod._fields:
-            flags = AxisManager(tod.dets, tod.samps)
-            tod.wrap("flags", flags)
-        tod.flags.wrap(flagname, jump_ranges, [(0, "dets"), (1, "samps")])
+        _merge(tod, jump_ranges, flagname, overwrite)
 
     if fix:
         jumps = jump_ranges.mask()
-        jumps[:, -2:] = False
         heights = diff_buffed[jump_ranges.mask()]
         # Round heights to the nearest 2pi
         heights = np.round(heights / (2 * np.pi)) * 2 * np.pi
@@ -607,21 +451,21 @@ def find_jumps(
     tod,
     signal=None,
     max_iters=1,
-    buff_size=0,
-    jumpfinder=_jumpfinder,
-    min_chunk=None,
+    min_chunk=20,
     min_sigma=None,
     min_size=None,
-    win_size=None,
-    nsigma=None,
+    win_size=20,
+    nsigma=25,
     max_depth=0,
+    gaussian_width=0,
+    tv_weight=0,
+    window_args=None,
     fix=None,
     fix_kwargs={},
     inplace=False,
     merge=True,
     overwrite=False,
     flagname="jumps",
-    **kwargs,
 ):
     """
     Find jumps in tod.signal_name.
@@ -632,10 +476,6 @@ def find_jumps(
         tod: axis manager.
 
         signal: Signal to jumpfind on. If None than tod.signal is used.
-
-        buff_size: How many samples to flag around each jump in RangesMatrix.
-
-        jumpfinder: Jumpfinding function to use.
 
         max_iters: Maximum iterations of the jumpfind -> median sub -> jumpfind loop.
                    This is prefered over increasing depth in general.
@@ -653,13 +493,21 @@ def find_jumps(
                   if set this will override min_sigma.
                   If both min_sigma and min_size are None then the IQR is used as min_size.
 
-        win_size: Number of samples to average over when checking jump size.
-                  Also used to apply the SG filter when peak finding.
+        win_size: Size of window used by SG filter when peak finding.
 
         nsigma: Number of sigma above the mean for something to be a peak.
 
         max_depth: The maximum recursion depth.
                    Set negative for infite depth and 0 for no recursion.
+
+        gaussian_width: Width of gaussian filter.
+                        If <= 0, filter is not applied.
+
+        tv_weight: Weight used by total variance filter.
+                   If <= 0, filter is not applied.
+
+        window_args: Arguments for sliding window.
+                     Set to None to not use, set to a dict of arguments otherwise.
 
         fix: Method to use for jumpfixing.
              Set to None to not fix.
@@ -673,18 +521,6 @@ def find_jumps(
         overwrite: If True will overwrite existing content of ``tod.flags.<flagname>``
 
         flagname: String used to populate field in flagmanager if merge is True.
-
-        **kwargs: Additional keyword args to pass to jumpfinder.
-
-                  * _jumpfinder: None
-                  * jumpfinder_tv: weight
-                  * jumpfinder_gaussian: sigma
-                  * jumpfinder_sliding_window: window_size, overlap, jumpfinder_func
-
-                  See docstrings of each jumpfinder for more details.
-
-                  Note that jumpfinder_sliding_window accepts kwargs to pass
-                  on to whichever jumpfinder it calls as well.
 
     Returns:
 
@@ -709,16 +545,16 @@ def find_jumps(
         min_size = np.array(min_size)
 
     do_fix = fix is not None
-    is_sub = False
-    if do_fix:
-        is_sub = fix.__name__ == "jumpfix_subtract_heights"
-    _signal = signal
-    if not (inplace and is_med):
-        _signal = signal.copy()
 
+    _signal = _filter(signal, gaussian_width, tv_weight, force_copy=True)
     # Median subtract, if we don't do this then when we cumsum we get floats
     # that are too big and lack the precicion to find jumps well
     _signal -= np.median(_signal, axis=-1)[..., None]
+
+    if window_args is None:
+        jumpfinder = _jumpfinder
+    else:
+        jumpfinder = partial(jumpfinder_sliding_window, **window_args)
 
     jumps = np.zeros(signal.shape, dtype=bool)
     msk = np.ones(len(jumps), dtype=bool)
@@ -734,7 +570,6 @@ def find_jumps(
             win_size=win_size,
             nsigma=nsigma,
             max_depth=max_depth,
-            **kwargs,
         )
         if np.sum(_jumps) == 0:
             break
@@ -745,31 +580,46 @@ def find_jumps(
 
     # TODO: include heights in output
 
-    jump_ranges = RangesMatrix.from_mask(jumps).buffer(buff_size)
+    jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(min_chunk / 2))
 
     if merge:
-        if not isinstance(tod, AxisManager):
-            merge = False
-            print("TOD is not an AxisManager, not merging")
-        elif "dets" not in tod or "samps" not in tod:
-            merge = False
-            print("dets or samps axis not in TOD, not merging")
-        elif jumps.shape != (tod.dets.count, tod.samps.count):
-            merge = False
-            print("Shape of jumps does not match that of TOD, not merging")
-    if merge:
-        if overwrite:
-            if flagname in tod.flags._fields:
-                tod.flags.move(flagname, None)
-        if "flags" not in tod._fields:
-            flags = AxisManager(tod.dets, tod.samps)
-            tod.wrap("flags", flags)
-        tod.flags.wrap(flagname, jump_ranges, [(0, "dets"), (1, "samps")])
+        _merge(tod, jump_ranges, flagname, overwrite)
 
     if do_fix:
-        if is_sub:
-            fixed = _signal
-        else:
-            fixed = fix(_signal, jumps, inplace=inplace, **fix_kwargs)
+        fixed = fix(signal, jumps, inplace=inplace, **fix_kwargs)
         return jump_ranges, fixed
     return jump_ranges
+
+
+def _merge(tod, jump_ranges, flagname, overwrite):
+    if not isinstance(tod, AxisManager):
+        print("TOD is not an AxisManager, not merging")
+        return
+    elif "dets" not in tod or "samps" not in tod:
+        print("dets or samps axis not in TOD, not merging")
+        return
+    elif jump_ranges.shape != (tod.dets.count, tod.samps.count):
+        print("Shape of jumps does not match that of TOD, not merging")
+        return
+    if flagname in tod.flags._fields:
+        if overwrite:
+            tod.flags.move(flagname, None)
+        else:
+            print("Flag already exists and overwrite is False")
+    if "flags" not in tod._fields:
+        flags = AxisManager(tod.dets, tod.samps)
+        tod.wrap("flags", flags)
+    tod.flags.wrap(flagname, jump_ranges, [(0, "dets"), (1, "samps")])
+
+
+def _filter(x, gaussian_width, tv_weight, force_copy=False):
+    if force_copy or gaussian_width > 0 or tv_weight > 0:
+        x = x.copy()
+    if gaussian_width > 0:
+        x = simg.gaussian_filter1d(x, gaussian_width, axis=-1, output=x)
+    if tv_weight > 0:
+        channel_axis = 1
+        if len(x.shape) == 1:
+            channel_axis = None
+        x = denoise_tv_chambolle(x, tv_weight, channel_axis=channel_axis)
+    return x
