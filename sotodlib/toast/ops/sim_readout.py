@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2023 Simons Observatory.
+# Copyright (c) 2018-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import os
@@ -17,10 +17,10 @@ from toast import qarray as qa
 from toast.data import Data
 from toast.observation import default_values as defaults
 from toast.ops.operator import Operator
-from toast.timing import function_timer
+from toast.timing import function_timer, Timer
 from toast.traits import (Bool, Float, Instance, Int, Quantity, Unicode,
                           trait_docs)
-from toast.utils import Environment, Logger, Timer, unit_conversion, name_UID
+from toast.utils import Environment, Logger, unit_conversion, name_UID
 
 XAXIS, YAXIS, ZAXIS = np.eye(3)
 

@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2021 Simons Observatory.
+# Copyright (c) 2020-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import re
@@ -13,7 +13,7 @@ from astropy import units as u
 
 import healpy as hp
 
-from toast.timing import function_timer
+from toast.timing import function_timer, Timer
 
 from toast import qarray as qa
 
@@ -23,7 +23,7 @@ from toast.traits import trait_docs, Int, Unicode, Bool, Quantity, Float, Instan
 
 from toast.ops.operator import Operator
 
-from toast.utils import Environment, Logger, Timer
+from toast.utils import Environment, Logger
 
 from toast.observation import default_values as defaults
 
