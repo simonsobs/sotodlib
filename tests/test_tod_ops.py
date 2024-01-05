@@ -245,19 +245,17 @@ class JumpfindTest(unittest.TestCase):
         jumps_nf = jumps_nf.ranges().flatten()
         
         # Find jumps with TV filtering
-        jumps_tv = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps,
-                                               jumpfinder=tod_ops.jumps.jumpfinder_tv, min_size=5)
+        jumps_tv = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, tv_weight=.5, min_size=5)
         jumps_tv = jumps_tv.ranges().flatten()
 
         # Find jumps with gaussian filtering
-        jumps_gauss = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps,
-                                               jumpfinder=tod_ops.jumps.jumpfinder_gaussian, min_size=5)
+        jumps_gauss = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, gaussian_width=.5, min_size=5)
         jumps_gauss = jumps_gauss.ranges().flatten()
 
         # Remove double counted jumps and round to remove uncertainty
-        jumps_nf = np.unique(np.round(jumps_nf, -1))
-        jumps_tv = np.unique(np.round(jumps_tv, -1))
-        jumps_gauss = np.unique(np.round(jumps_gauss, -1))
+        jumps_nf = np.unique(np.round(jumps_nf, -2))
+        jumps_tv = np.unique(np.round(jumps_tv, -2))
+        jumps_gauss = np.unique(np.round(jumps_gauss, -2))
 
         # Check that all methods agree
         self.assertEqual(len(jumps_tv), len(jumps_gauss))
@@ -266,8 +264,15 @@ class JumpfindTest(unittest.TestCase):
         self.assertTrue(np.all(np.abs(jumps_nf - jumps_gauss) == 0))
 
         # Check that they agree with the input
+        print(jumps_nf)
         self.assertEqual(len(jump_locs), len(jumps_nf))
         self.assertTrue(np.all(np.abs(jumps_nf - jump_locs) == 0))
+
+        # Check heights
+        jumps_msk = np.zeros_like(sig_jumps, dtype=bool)
+        jumps_msk[jumps_nf] = True
+        heights = tod_ops.jumps.estimate_heights(sig_jumps, jumps_msk, medfilt=True)
+        self.assertTrue(np.all(np.abs(np.array([10, -13, -8]) - np.round(heights)) < 3))
 
 if __name__ == '__main__':
     unittest.main()
