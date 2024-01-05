@@ -114,6 +114,14 @@ class PcaTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             tod_ops.detrend_tod(tod, signal_name='sig1e')
 
+    def test_detrend_inplace(self):
+        tod = get_tod('trendy')
+        sig_id = id(tod.signal)
+
+        for method in ["linear", "mean", "median"]:
+            tod_ops.detrend_tod(tod, method=method, in_place=True)
+            self.assertEqual(sig_id, id(tod.signal))
+
 class GapFillTest(unittest.TestCase):
     def test_basic(self):
         """Test linear fill on simple linear data."""
