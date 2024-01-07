@@ -4,6 +4,7 @@ import numpy as np
 import scipy.ndimage as simg
 import scipy.signal as sig
 import scipy.stats as ss
+from scipy.sparse import lil_array
 from skimage.restoration import denoise_tv_chambolle
 from so3g.proj import RangesMatrix
 from sotodlib.core import AxisManager
@@ -277,9 +278,7 @@ def jumpfix_subtract_heights(x, jumps, inplace=False, heights=None, **kwargs):
 
         inplace: Whether of not x should be fixed inplace.
 
-        heights: Array of jump heights.
-                 Should be a flat array of length n_jumps.
-                 If None then will be calculated from estimate_heights.
+        heights: Sparse array of jump heights.
 
         **kwargs: Additional arguments to pass to estimate_heights if heights is None.
 
@@ -288,9 +287,6 @@ def jumpfix_subtract_heights(x, jumps, inplace=False, heights=None, **kwargs):
         x_fixed: x with jumps removed.
                  If inplace is True this is just a reference to x.
     """
-    if heights is None:
-        heights = estimate_heights(x, jumps, **kwargs)
-
     x_fixed = x
     if not inplace:
         x_fixed = x.copy()
@@ -298,6 +294,13 @@ def jumpfix_subtract_heights(x, jumps, inplace=False, heights=None, **kwargs):
     x_fixed = np.atleast_2d(x_fixed)
     jumps = np.atleast_2d(jumps)
     jumps[:, [0, -1]] = False
+
+    if heights is None:
+        heights = estimate_heights(x_fixed, jumps, **kwargs)
+    else:
+        heights = heights.copy()
+        heights[:, [0, -1]] = 0
+    heights = np.array(heights[jumps])
 
     rows, cols = np.nonzero(np.diff(~jumps, axis=-1))
     rows = rows[::2]
@@ -319,7 +322,23 @@ def jumpfix_subtract_heights(x, jumps, inplace=False, heights=None, **kwargs):
     return x_fixed.reshape(orig_shape)
 
 
-def estimate_heights(signal, jumps, win_size=20, twopi=False, medfilt=False):
+def _diff_buffed(signal, win_size, medfilt):
+    win_size = int(win_size)
+    if medfilt:
+        _size = win_size - 1 + (win_size % 2)
+        size = np.ones(len(signal.shape), dtype=int)
+        size[-1] = _size
+        signal = simg.median_filter(signal, size)
+    pad = np.zeros((len(signal.shape), 2), dtype=int)
+    pad[-1, 0] = win_size
+    diff_buffed = signal - np.pad(signal, pad, mode="edge")[..., : (-1 * win_size)]
+
+    return diff_buffed
+
+
+def estimate_heights(
+    signal, jumps, win_size=20, twopi=False, medfilt=False, diff_buffed=None
+):
     """
     Simple jump estimation routine.
 
@@ -335,18 +354,24 @@ def estimate_heights(signal, jumps, win_size=20, twopi=False, medfilt=False):
 
         medfilt: If True, a median filter of size ~win_size will be applied.
 
+        diff_buffed: Difference between signal and a signal shifted by win_size.
+                     If None will be computed.
+
     Returns:
 
-        heights: Array of jump heights has length sum(jumps)
+        heights: Sparse array of jump heights.
     """
-    win_size = int(win_size)
-    if medfilt:
-        _size = win_size - 1 + (win_size % 2)
-        size = np.ones(len(signal.shape), dtype=int)
-        size[-1] = _size
-        signal = simg.median_filter(signal, size) 
-    diff_buffed = signal - np.roll(signal, win_size, axis=-1)
-    heights = diff_buffed[jumps]
+    if diff_buffed is None:
+        diff_buffed = _diff_buffed(signal, win_size, medfilt)
+
+    jumps = np.atleast_2d(jumps)
+    diff_buffed = np.atleast_2d(diff_buffed)
+    if len(jumps.shape) > 2:
+        raise ValueError("Only 1d and 2d arrays are supported")
+
+    heights = lil_array(jumps.shape, dtype=diff_buffed.dtype)
+    heights[jumps] = diff_buffed[jumps]
+    heights = heights.tocsr()
 
     if twopi:
         heights = np.round(heights / (2 * np.pi)) * 2 * np.pi
@@ -414,7 +439,7 @@ def twopi_jumps(
         np.clip(atol, 1e-8, 1e-2)
 
     _signal = _filter(signal, gaussian_width, tv_weight)
-    diff_buffed = _signal - np.roll(_signal, win_size, axis=-1)
+    diff_buffed = _diff_buffed(_signal, win_size, False)
 
     if np.isscalar(atol):
         jumps = (np.isclose(0, np.abs(diff_buffed) % (2 * np.pi), atol=atol)) & (
@@ -440,10 +465,7 @@ def twopi_jumps(
 
     if fix:
         jumps = jump_ranges.mask()
-        heights = diff_buffed[jump_ranges.mask()]
-        # Round heights to the nearest 2pi
-        heights = np.round(heights / (2 * np.pi)) * 2 * np.pi
-
+        heights = estimate_heights(signal, jumps, twopi=True, diff_buffed=diff_buffed)
         fixed = jumpfix_subtract_heights(signal, jumps, inplace, heights)
 
         return jump_ranges, fixed
@@ -625,4 +647,4 @@ def _filter(x, gaussian_width, tv_weight, force_copy=False):
         if len(x.shape) == 1:
             channel_axis = None
         x = denoise_tv_chambolle(x, tv_weight, channel_axis=channel_axis)
-    return x
+    return np.array(x, dtype=np.float32)
