@@ -272,6 +272,7 @@ class JumpfindTest(unittest.TestCase):
         jumps_msk = np.zeros_like(sig_jumps, dtype=bool)
         jumps_msk[jumps_nf] = True
         heights = tod_ops.jumps.estimate_heights(sig_jumps, jumps_msk, medfilt=True)
+        heights = heights[heights.nonzero()].ravel()
         self.assertTrue(np.all(np.abs(np.array([10, -13, -8]) - np.round(heights)) < 3))
 
 if __name__ == '__main__':
