@@ -382,7 +382,7 @@ class G3tHWP():
                 parameter for referelce slit
                 threshold = 2 slit distances +/- ratio
             force_quad : 0, 1 or None, optional
-                forced quad value to use
+                If not None, force quad value to be 0 or 1
             mod2pi : bool, optional
                 If True, return hwp angle % 2pi
             fast : bool, optional
