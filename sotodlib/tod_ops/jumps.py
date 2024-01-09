@@ -229,56 +229,6 @@ class JumpFix(Protocol):
         ...
 
 
-def jumpfix_median_sub(
-    x: NDArray[np.floating], jumps: NDArray[np.bool_], inplace: bool = False, **kwargs
-) -> NDArray[np.floating]:
-    """
-    Naive jump fixing routine where we median subtract between jumps.
-    Note that you should exepect a glitch at the jump locations.
-
-    Arguments:
-
-        x: Data to jumpfix on, expects 1D or 2D.
-
-        jumps: Boolean mask of that is True at jump locations.
-               Should be the same shape at x.
-
-        inplace: Whether of not x should be fixed inplace.
-
-        **kwargs: Currently unused, here to keep signatures uniform.
-
-    Returns:
-
-        x_fixed: x with jumps removed.
-                 If inplace is True this is just a reference to x.
-    """
-    x_fixed = x
-    if not inplace:
-        x_fixed = x.copy()
-    orig_shape = x.shape
-    x_fixed = np.atleast_2d(x_fixed)
-    jumps = np.atleast_2d(jumps)
-
-    padded_shape = list(jumps.shape)
-    padded_shape[-1] += 2
-    jumps_padded = np.ones(padded_shape, dtype=bool)
-    jumps_padded[..., 1:-1] = jumps
-
-    rows, cols = np.nonzero(np.diff(~jumps_padded, axis=-1))
-    rows = rows[::2]
-    cols = cols.reshape((-1, 2))
-
-    diff = np.diff(cols, axis=-1).ravel()
-    has_jumps = diff < x.shape[-1]
-    rows = rows[has_jumps]
-    cols = cols[has_jumps]
-
-    for r, (c1, c2) in zip(rows, cols):
-        x_fixed[r, c1:c2] -= np.median(x_fixed[r, c1:c2])
-
-    return x_fixed.reshape(orig_shape)
-
-
 def jumpfix_subtract_heights(
     x: NDArray[np.floating],
     jumps: NDArray[np.bool_],
