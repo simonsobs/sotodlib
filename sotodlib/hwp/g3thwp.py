@@ -280,10 +280,6 @@ class G3tHWP():
             out['irig_time'] = data['irig_synch_pulse_clock_time'+suffix][1]
             out['rising_edge_count'] = data['irig_synch_pulse_clock_counts'+suffix][1]
 
-        logger.info('IRIG timing quality check.')
-        out['irig_time'], out['rising_edge_count'] = self._irig_quality_check(
-            out['irig_time'], out['rising_edge_count'])
-
         # encoder part
         if 'counter'+suffix not in data.keys():
             logger.warning(
@@ -797,6 +793,12 @@ class G3tHWP():
         self._time = []
         self._angle = []
 
+        # check duplication in data
+        self._duplication_check()
+
+        # check IRIG timing quality
+        self._irig_quality_check()
+
         # treat counter index reset due to agent reboot
         self._process_counter_index_reset()
 
@@ -810,6 +812,7 @@ class G3tHWP():
             self._irig_time,
             kind='linear',
             fill_value='extrapolate')(self._encd_clk)
+
         # Reject unexpected counter
         idx = np.where((1 / np.diff(self._time) / self._num_edges) > 5.0)[0]
         if len(idx) > 0:
@@ -1014,6 +1017,38 @@ class G3tHWP():
 
         return
 
+    def _duplication_check(self):
+        """ Check the duplication in hk data and remove it """
+        unique_array, unique_index = np.unique(self._encd_cnt, return_index=True)
+        if len(unique_array) != len(self._encd_cnt):
+            logger.warning('Duplication is found in encoder data, performing correction.')
+            self._encd_cnt = unique_array
+            self._encd_clk = self._encd_clk[unique_index]
+        unique_array, unique_index = np.unique(self._rising_edge, return_index=True)
+        if len(unique_array) != len(self._rising_edge):
+            logger.warning('Duplication is found in IRIG data, performing correction.')
+            self._rising_edge = unique_array
+            self._irig_time = self._irig_time[unique_index]
+
+    def _irig_quality_check(self):
+        """ IRIG timing quality check """
+        idx = np.where(np.diff(self._irig_time) == 1)[0]
+        if self._irig_type == 1:
+            idx = np.where(np.isclose(np.diff(self._irig_time), np.full(len(self._irig_time)-1, 0.1)))[0]
+        if len(self._irig_time) - 1 == len(idx):
+            return
+        elif len(self._irig_time) > len(idx) and len(idx) > 0:
+            if np.any(np.diff(self._irig_time) > 5):
+                logger.warning(
+                    'a part of the IRIG time is incorrect, performing the correction process...')
+            self._irig_time = self._irig_time[idx]
+            self._rising_edge = self._rising_edge[idx]
+            logger.warning('deleted wrong irig_time, indices: ' +
+                         str(np.where(np.diff(self._irig_time) != 1)[0]))
+        else:
+            self._irig_time = np.array([])
+            self._rising_edge = np.array([])
+
     def _process_counter_index_reset(self):
         """ Treat counter index reset due to agent reboot """
         idx = np.where(np.diff(self._encd_cnt)<-1e4)[0] + 1
@@ -1099,25 +1134,6 @@ class G3tHWP():
             offset += len(quad_split)
 
         return quad
-
-    def _irig_quality_check(self, irig_time, rising_edge):
-        idx = np.where(np.diff(irig_time) == 1)[0]
-        if self._irig_type == 1:
-            idx = np.where(np.isclose(np.diff(irig_time), np.full(len(irig_time)-1, 0.1)))[0]
-        if len(irig_time) - 1 == len(idx):
-            return irig_time, rising_edge
-        elif len(irig_time) > len(idx) and len(idx) > 0:
-            if np.any(np.diff(irig_time) > 5):
-                logger.debug(
-                    'a part of the IRIG time is incorrect, performing the correction process...')
-            irig_time = irig_time[idx]
-            rising_edge = rising_edge[idx]
-            logger.debug('deleted wrong irig_time, indices: ' +
-                         str(np.where(np.diff(irig_time) != 1)[0]))
-        else:
-            irig_time = np.array([])
-            rising_edge = np.array([])
-        return irig_time, rising_edge
 
     def interp_smurf(self, smurf_timestamp):
         smurf_angle = scipy.interpolate.interp1d(
