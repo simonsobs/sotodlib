@@ -198,19 +198,21 @@ class ContextTest(unittest.TestCase):
             ctx = dataset_sim.get_context(with_incomplete_det_info='skip',
                                           with_dependent_metadata=dep)
             with self.assertRaises(metadata.loader.IncompleteDetInfoError):
-                meta = ctx.get_meta(obs_id)
+                ctx.get_meta(obs_id)
 
         # Check det_info with unacceptable partial coverage.
         ctx = dataset_sim.get_context(with_incomplete_det_info='fail')
         with self.assertRaises(metadata.loader.IncompleteMetadataError):
             ctx.get_meta(obs_id)
-        # manual override.
-        ##ctx.get_meta(obs_id, )#ignore_missing_dets=True)
-        ##self.assertTrue('newcal' in meta.det_info)
-        ##self.assertLess(meta.dets.count, 8)
-        ##ctx.get_meta(obs_id, )#ignore_missing_dets=True)
-        ##self.assertFalse('newcal' in meta.det_info)
-        ##self.assertEqual(meta.dets.count, 8)
+
+        # Manual overrides.
+        meta = ctx.get_meta(obs_id, on_missing={'newcal': 'trim'})
+        self.assertTrue('newcal' in meta.det_info)
+        self.assertLess(meta.dets.count, 8)
+
+        meta = ctx.get_meta(obs_id, on_missing={'newcal': 'skip'})
+        self.assertFalse('newcal' in meta.det_info)
+        self.assertEqual(meta.dets.count, 8)
 
         # Check metadata with acceptable partial coverage.
         ctx = dataset_sim.get_context(with_incomplete_metadata='trim')
@@ -229,10 +231,16 @@ class ContextTest(unittest.TestCase):
         # Check metadata with unacceptable partial coverage.
         ctx = dataset_sim.get_context(with_incomplete_metadata='fail')
         with self.assertRaises(metadata.loader.IncompleteMetadataError):
-            m = ctx.get_meta(obs_id)
-        # manual overrides .
-        ## ctx.get_meta('obs_number_12', )# ignore_missing_dets=True)
-        ## ...
+            ctx.get_meta(obs_id)
+
+        # Manual overrides.
+        meta = ctx.get_meta(obs_id, on_missing={'othercal': 'trim'})
+        self.assertTrue('othercal' in meta)
+        self.assertLess(meta.dets.count, 8)
+
+        meta = ctx.get_meta(obs_id, on_missing={'othercal': 'skip'})
+        self.assertEqual(meta.dets.count, 8)
+        self.assertFalse('othercal' in meta)
 
         # Nothing wrong with good old obs 13 though
         ctx.get_meta('obs_number_13')
@@ -330,13 +338,10 @@ class DatasetSim:
         """Args:
           with_detdb: if False, no detdb is included.
           with_metadata: if False, no metadata are included.
-
           with_bad_metadata: if True, an entry that refers to a
             non-existant sqlite database is included.
-
           with_incomplete_det_info: if True, include det_info entries
             that are missing some dets, or a complete detset.
-
           with_incomplete_metadata: if True, include entries that are
             missing some dets, or a complete detset.
 
@@ -451,7 +456,7 @@ class DatasetSim:
              'det_info': True},
             {'db': abscal_db,
              'name': 'cal&abscal',
-             'on_missing': 'fail'}, #on_missing},
+             'on_missing': on_missing},
             {'db': flags_db,
              'name': 'flags&',
              'on_missing': on_missing},
@@ -480,6 +485,7 @@ class DatasetSim:
                 'db': _db_single_dataset('incomplete_det_info.h5'),
                 'det_info': True,
                 'on_missing': with_incomplete_det_info,
+                'label': 'newcal',
             })
 
             if with_dependent_metadata:
@@ -513,6 +519,8 @@ class DatasetSim:
                 'db': bad_meta_db,
                 'name': 'othercal',
                 'on_missing': with_incomplete_metadata,
+                ## leave label unset here; should fall back on name.
+                #'label': 'othercal',
             })
 
         return ctx

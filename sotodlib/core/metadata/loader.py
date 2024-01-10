@@ -315,7 +315,7 @@ class SuperLoader:
 
     def load(self, spec_list, request, det_info=None, free_tags=[],
              free_tag_fields=[], dest=None, check=False, det_info_scan=False,
-             ignore_missing=False, on_missing={}):
+             ignore_missing=False, on_missing=None):
         """Loads metadata objects and processes them into a single
         AxisManager.
 
@@ -359,6 +359,9 @@ class SuperLoader:
         # Augmented request -- note that dets:* restrictions from
         # request will be added back into this by check tags.
         aug_request = _filter_items('obs:', request, False)
+
+        if on_missing is None:
+            on_missing = {}
 
         if self.obsdb is not None and 'obs:obs_id' in request:
             if dest is None:
@@ -442,10 +445,10 @@ class SuperLoader:
             logger.debug(f'Processing metadata spec={spec} with augmented '
                          f'request={aug_request}')
 
-            label = spec.get('label', spec.get('name'), None)
+            label = spec.get('label', spec.get('name', None))
             _on_missing = spec.get('on_missing', 'trim')
             if label is not None and label in on_missing:
-                _on_missing = on_missing['label']
+                _on_missing = on_missing[label]
                 logger.debug(f'User overrides on_missing={_on_missing} for {label}')
 
             assert _on_missing in ['trim', 'skip', 'fail']
