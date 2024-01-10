@@ -92,12 +92,7 @@ class G3tHWP():
         # 0: use readout quad value (default)
         # 1: positive rotation direction, -1: negative rotation direction
         self._force_quad = int(self.configs.get('force_quad', 0))
-        if np.abs(self._force_quad) > 1:
-            logger.warning("force_quad in config file must be 0 or 1 or -1")
-            if self._force_quad > 1:
-                self._force_quad = 1
-            else:
-                self._force_quad = -1
+        assert self._force_quad in [0, 1, -1], "force_quad must be 0, 1 or -1"
 
         # Output path + filename
         self._output = self.configs.get('output', None)
@@ -291,10 +286,6 @@ class G3tHWP():
             out['irig_time'] = data['irig_synch_pulse_clock_time'+suffix][1]
             out['rising_edge_count'] = data['irig_synch_pulse_clock_counts'+suffix][1]
 
-        logger.info('IRIG timing quality check.')
-        out['irig_time'], out['rising_edge_count'] = self._irig_quality_check(
-            out['irig_time'], out['rising_edge_count'])
-
         # encoder part
         if 'counter'+suffix not in data.keys():
             logger.warning(
@@ -384,7 +375,7 @@ class G3tHWP():
 
         return {'locked': locked, 'stable': stable, 'hwp_rate': hwp_rate, 'slow_time': slow_time}
 
-    def analyze(self, data, ratio=None, mod2pi=True, fast=True):
+    def analyze(self, data, ratio=None, force_quad=None, mod2pi=True, fast=True):
         """
         Analyze HWP angle solution
         to be checked by hardware that 0 is CW and 1 is CCW from (sky side) consistently for all SAT
@@ -396,6 +387,9 @@ class G3tHWP():
             ratio : float, optional
                 parameter for referelce slit
                 threshold = 2 slit distances +/- ratio
+            force_quad : 0, 1 or -1, optional
+                0: use readout quad value
+                1: positive rotation direction, -1: negative rotation direction
             mod2pi : bool, optional
                 If True, return hwp angle % 2pi
             fast : bool, optional
@@ -428,6 +422,11 @@ class G3tHWP():
 
         if not any(data):
             logger.info("no HWP field data")
+
+        if force_quad is not None:
+            assert force_quad in [0, 1, -1], "force_quad must be 0, 1 or -1"
+            logger.info(f"Overwriting force_quad by {force_quad}.")
+            self._force_quad = force_quad
 
         d = self._data_formatting(data)
         if 'irig_time_2' in data.keys() and 'counter_2' in data.keys():
@@ -496,7 +495,7 @@ class G3tHWP():
         if 'fast_time_raw' in solved.keys():
             logger.info('Non-uniformity is already subtracted. Calculation is skipped.')
             return
-                    
+
         def moving_average(array, n):
             return np.convolve(array, np.ones(n), 'valid')/n
 
@@ -804,6 +803,12 @@ class G3tHWP():
         self._time = []
         self._angle = []
 
+        # check duplication in data
+        self._duplication_check()
+
+        # check IRIG timing quality
+        self._irig_quality_check()
+
         # treat counter index reset due to agent reboot
         self._process_counter_index_reset()
 
@@ -817,6 +822,7 @@ class G3tHWP():
             self._irig_time,
             kind='linear',
             fill_value='extrapolate')(self._encd_clk)
+
         # Reject unexpected counter
         idx = np.where((1 / np.diff(self._time) / self._num_edges) > 5.0)[0]
         if len(idx) > 0:
@@ -1000,10 +1006,7 @@ class G3tHWP():
                 kind='linear',
                 fill_value='extrapolate')(
                 self._time))
-        if self._force_quad == 0:
-            direction = list(map(lambda x: 1 if x == 0 else -1, quad))
-        else:
-            direction = self._force_quad
+        direction = list(map(lambda x: 1 if x == 0 else -1, quad))
 
         self._encd_cnt_split = np.split(self._encd_cnt, self._ref_indexes)
         angle_first_revolution = (self._encd_cnt_split[0] - self._ref_cnt[0]) * \
@@ -1023,6 +1026,38 @@ class G3tHWP():
             self._angle = self._angle % (2 * np.pi)
 
         return
+
+    def _duplication_check(self):
+        """ Check the duplication in hk data and remove it """
+        unique_array, unique_index = np.unique(self._encd_cnt, return_index=True)
+        if len(unique_array) != len(self._encd_cnt):
+            logger.warning('Duplication is found in encoder data, performing correction.')
+            self._encd_cnt = unique_array
+            self._encd_clk = self._encd_clk[unique_index]
+        unique_array, unique_index = np.unique(self._rising_edge, return_index=True)
+        if len(unique_array) != len(self._rising_edge):
+            logger.warning('Duplication is found in IRIG data, performing correction.')
+            self._rising_edge = unique_array
+            self._irig_time = self._irig_time[unique_index]
+
+    def _irig_quality_check(self):
+        """ IRIG timing quality check """
+        idx = np.where(np.diff(self._irig_time) == 1)[0]
+        if self._irig_type == 1:
+            idx = np.where(np.isclose(np.diff(self._irig_time), np.full(len(self._irig_time)-1, 0.1)))[0]
+        if len(self._irig_time) - 1 == len(idx):
+            return
+        elif len(self._irig_time) > len(idx) and len(idx) > 0:
+            if np.any(np.diff(self._irig_time) > 5):
+                logger.warning(
+                    'a part of the IRIG time is incorrect, performing the correction process...')
+            self._irig_time = self._irig_time[idx]
+            self._rising_edge = self._rising_edge[idx]
+            logger.warning('deleted wrong irig_time, indices: ' +
+                         str(np.where(np.diff(self._irig_time) != 1)[0]))
+        else:
+            self._irig_time = np.array([])
+            self._rising_edge = np.array([])
 
     def _process_counter_index_reset(self):
         """ Treat counter index reset due to agent reboot """
@@ -1075,8 +1110,8 @@ class G3tHWP():
         return
 
     def _quad_form(self, quad):
-        if self._force_quad==1:
-            return np.ones_like(quad)
+        if self._force_quad != 0:
+            return np.full_like(quad, (self._force_quad+1)/2)
         # bit process
         quad[(quad >= 0.5)] = 1
         quad[(quad < 0.5)] = 0
@@ -1109,25 +1144,6 @@ class G3tHWP():
             offset += len(quad_split)
 
         return quad
-
-    def _irig_quality_check(self, irig_time, rising_edge):
-        idx = np.where(np.diff(irig_time) == 1)[0]
-        if self._irig_type == 1:
-            idx = np.where(np.isclose(np.diff(irig_time), np.full(len(irig_time)-1, 0.1)))[0]
-        if len(irig_time) - 1 == len(idx):
-            return irig_time, rising_edge
-        elif len(irig_time) > len(idx) and len(idx) > 0:
-            if np.any(np.diff(irig_time) > 5):
-                logger.debug(
-                    'a part of the IRIG time is incorrect, performing the correction process...')
-            irig_time = irig_time[idx]
-            rising_edge = rising_edge[idx]
-            logger.debug('deleted wrong irig_time, indices: ' +
-                         str(np.where(np.diff(irig_time) != 1)[0]))
-        else:
-            irig_time = np.array([])
-            rising_edge = np.array([])
-        return irig_time, rising_edge
 
     def interp_smurf(self, smurf_timestamp):
         smurf_angle = scipy.interpolate.interp1d(
