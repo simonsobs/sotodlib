@@ -7,6 +7,7 @@ from sotodlib.tod_ops import filters
 from sotodlib.hwp import hwp
 from pixell import enmap, utils, fft, bunch, wcsutils, tilemap, colors, memory, mpi
 from scipy import ndimage
+import sqlite3 
 
 from . import util
 
@@ -40,6 +41,7 @@ def get_parser(parser=None):
     parser.add_argument("--cont",    action="store_true")
     parser.add_argument("--dtype_tod",    default=np.float32)
     parser.add_argument("--dtype_map",    default=np.float64)
+    parser.add_argument("--atomic-db",    default='atomic_maps.db', help='name of the atomic map database, will be saved where make_filterbin_map is being run')
     
     return parser
 
@@ -144,8 +146,10 @@ def calibrate_obs(obs, dtype_tod=np.float32):
     # remove detectors with an std greater than 5
     if obs.signal is not None:
         mask = np.std(obs.signal, axis=1) > 0.01
-        good_dets = obs.dets.vals[mask]
-        obs.restrict("dets", good_dets)
+        mask = np.repeat(mask[:,None], int(obs.samps.count), axis=1)
+        obs = obs.wrap("flags_stuck", so3g.proj.RangesMatrix.from_mask(mask),[(0, 'dets'), (1, 'samps')])
+        #good_dets = obs.dets.vals[mask]
+        #obs.restrict("dets", good_dets)
 
     if obs.signal is not None and len(good_dets) > 0:
         # Gain calibration
@@ -157,7 +161,7 @@ def calibrate_obs(obs, dtype_tod=np.float32):
         #obs.signal *= gain
         obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
         # since some of the calibrations are nans, we make a flags
-        mask_notfinite = np.logical_not(np.isfinite(obs.signal))
+        mask_notfinite = np.logical_not(np.isfinite(obs.signal)) # we want the nan detectors to be true in this mask
         obs = obs.wrap("flags_notfinite", so3g.proj.RangesMatrix.from_mask(mask_notfinite),[(0, 'dets'), (1, 'samps')])
         
         # Fourier-space calibration
@@ -184,12 +188,7 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False,
     for ind in inds:
         obs_id, detset, band, obs_ind = obslist[ind]
         try:
-            # CARLOS: I change how the wafers are loaded
-            #tod = context.get_obs(obs_id, dets={"wafer_slot" : [detset], "band":band}, no_signal=no_signal )
             tod = context.get_obs(obs_id, dets={"stream_id":detset, "bandpass":band}, no_signal=no_signal)
-            #det_mask = np.logical_and(0 < np.degrees(tod.focal_plane.gamma), np.degrees(tod.focal_plane.gamma)< 10 )
-            #det_mask = np.logical_and(50 < np.degrees(tod.focal_plane.gamma), np.degrees(tod.focal_plane.gamma)< 55 )
-            #tod = context.get_obs(obs_id, dets={"detset":detset+'_'+band, "band":band, 'readout_id':tod.det_info.readout_id[det_mask]}, no_signal=no_signal)         
             tod = calibrate_obs(tod, dtype_tod=dtype_tod)
             my_tods.append(tod)
             my_inds.append(ind)
@@ -197,7 +196,7 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False,
     return my_tods, my_inds
 
 def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", verbose=0, det_split_masks=None, split_labels=None, time_split_leftright=False, singlestream=False):
-    #det_split_masks is the dictionary that contains detector masks for each split we want to make. Each key has format wafer_split, e.g. w25_left, w26_upper, w27_in. We need to figure out how many split we'll make 2 per split mode.
+    #det_split_masks is the dictionary that contains detector masks for each split we want to make. Each key has format freq_wafer_split, e.g. f090_w25_detleft, f150_w26_detupper, f090_w27_detin. We need to figure out how many split we'll make 2 per split mode.
     L = logging.getLogger(__name__)
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
@@ -220,14 +219,8 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         name = "%s:%s:%s" % (obs_id, detset, band)
         # Read in the signal too. This seems to read in all the metadata from scratch,
         # which is pointless, but shouldn't cost that much time.
-        # CARLOS: modify how the wafer is read
         #obs = context.get_obs(obs_id, dets={"wafer_slot" : [detset], "band":band})
-        obs = context.get_obs(obs_id, dets={"stream_id":detset, "bandpass":band}, )
-        #det_mask = np.logical_and(0 < np.degrees(obs.focal_plane.gamma), np.degrees(obs.focal_plane.gamma)<10)
-        # = np.logical_and(50 < np.degrees(obs.focal_plane.gamma), np.degrees(obs.focal_plane.gamma)<55)
-        #obs = context.get_obs(obs_id, dets={"detset":detset+'_'+band, "band":band, 'readout_id':obs.det_info.readout_id[det_mask]})
-        #obs.focal_plane.gamma *= -1
-        
+        obs = context.get_obs(obs_id, dets={"stream_id":detset, "bandpass":band}, )        
         obs = calibrate_obs(obs, dtype_tod=dtype_tod)
         
         # demodulate
@@ -251,7 +244,7 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
             mapmaker.add_obs(name, obs)
         else:
             # this is the case of having splits. We need to pass the split_labels at least. If we have detector splits fixed in time, then we pass the masks in det_split_masks. Otherwise, det_split_masks will be None
-            mapmaker.add_obs(name, obs, det_split_masks=det_split_masks, split_labels=split_labels, detset=detset)
+            mapmaker.add_obs(name, obs, det_split_masks=det_split_masks, split_labels=split_labels, detset=detset, freq=band)
         
         if det_split_masks==None:
             # Case of no splits 
@@ -359,7 +352,7 @@ def handle_empty(prefix, tag, comm, e):
         utils.mkdir(os.path.dirname(prefix))
         with open(prefix + ".empty", "w") as ofile: ofile.write("\n")
     
-def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='TQU', det_in_out=False, det_left_right=False, det_upper_lower=False, ntod=None, tods=None, nset=None, max_dets=None, fixed_time=None, mindur=None, tasks_per_group=1, site='so_sat1', verbose=0, quiet=0, window=5.0, cont=False, dtype_tod=np.float32, dtype_map=np.float64, singlestream=False):
+def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='TQU', det_in_out=False, det_left_right=False, det_upper_lower=False, ntod=None, tods=None, nset=None, max_dets=None, fixed_time=None, mindur=None, tasks_per_group=1, site='so_sat1', verbose=0, quiet=0, window=5.0, cont=False, dtype_tod=np.float32, dtype_map=np.float64, singlestream=False, atomic_db='atomic_maps.db'):
     warnings.simplefilter('ignore')
     # Set up our communicators
     comm       = mpi.COMM_WORLD
@@ -388,8 +381,12 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
 
     context = Context(context)
     obslists, obskeys, periods, obs_infos, det_split_masks, split_labels = mapmaking.build_obslists(context, query, mode=mode, nset=nset, ntod=ntod, tods=tods, fixed_time=fixed_time, mindur=mindur, det_left_right=det_left_right, det_upper_lower=det_upper_lower, det_in_out=det_in_out )
-    #print(split_labels)
-    #exit()
+    tags = []
+    cwd = os.getcwd()
+    
+    #for key, mask in det_split_masks.items():
+    #    print(key, mask.shape)
+    
     # if we did not request any split, then det_split_masks will be an empty dictionary
     if bool(det_split_masks)==False:
         det_split_masks = None
@@ -406,6 +403,7 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         t       = utils.floor(periods[pid,0])
         t5      = ("%05d" % t)[:5]
         prefix  = "%s/%s/atomic_%010d_%s_%s" % (odir, t5, t, detset, band)
+        
         tag     = "%5d/%d" % (oi+1, len(obskeys))
         utils.mkdir(os.path.dirname(prefix))
         meta_done = os.path.isfile(prefix + "_info.hdf")
@@ -424,6 +422,16 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
             # 2. prune tods that have no valid detectors
             valid     = np.where(my_costs>0)[0]
             my_tods, my_inds, my_costs = [[a[vi] for vi in valid] for a in [my_tods, my_inds, my_costs]]
+            
+            # this is for the tags
+            if split_labels is None:
+                # this means the mapmaker was run without any splits requested
+                tags.append( (obs_infos[obslist[0][3]].telescope, band, detset, int(t), 'full', 'full', cwd+'/'+prefix, obs_infos[obslist[0][3]].el_center, 0.0) )
+            else:
+                # splits were requested and we loop over them
+                for split_label in split_labels:
+                    tags.append( (obs_infos[obslist[0][3]].telescope, band, detset, int(t), split_label, '', cwd+'/'+prefix, obs_infos[obslist[0][3]].el_center, 0.0) )
+            
             all_inds  = utils.allgatherv(my_inds,     comm_intra)
             all_costs = utils.allgatherv(my_costs,    comm_intra)
             if len(all_inds)  == 0: raise DataMissing("No valid tods")
@@ -458,6 +466,30 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         #    handle_empty(prefix, tag, comm_good, e)
     comm.Barrier()
     if comm.rank == 0:
+        # Write into the atomic map database.
+        conn = sqlite3.connect('./'+atomic_db) # open the conector, if the database exists then it will be opened, otherwise it will be created
+        cursor = conn.cursor()
+        
+        # Check if the table exists, if not create it
+        # the tags will be telescope, frequency channel, wafer, ctime, split_label, split_details, prefix_path, elevation, pwv
+        cursor.execute("""CREATE TABLE IF NOT EXISTS atomic (
+                          telescope TEXT, 
+                          freq_channel TEXT, 
+                          wafer TEXT, 
+                          ctime INTEGER,
+                          split_label TEXT,
+                          split_detail TEXT,
+                          prefix_path TEXT,
+                          elevation REAL,
+                          pwv REAL
+                          )""")
+        conn.commit()
+        
+        for tuple_ in tags:
+            cursor.execute("INSERT INTO atomic VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", tuple_)
+        conn.commit()
+        
+        conn.close()
         print("Done")
     return True
 
