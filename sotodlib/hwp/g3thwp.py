@@ -88,6 +88,12 @@ class G3tHWP():
         # Threshoild for outlier data to calculate nominal slit width
         self._slit_width_lim = self.configs.get('slit_width_lim', 0.1)
 
+        # force to quad value
+        # 0: use readout quad value (default)
+        # 1: positive rotation direction, -1: negative rotation direction
+        self._force_quad = int(self.configs.get('force_quad', 0))
+        assert self._force_quad in [0, 1, -1], "force_quad must be 0, 1 or -1"
+
         # Output path + filename
         self._output = self.configs.get('output', None)
 
@@ -381,8 +387,9 @@ class G3tHWP():
             ratio : float, optional
                 parameter for referelce slit
                 threshold = 2 slit distances +/- ratio
-            force_quad : 0, 1 or None, optional
-                If not None, force quad value to be 0 or 1
+            force_quad : 0, 1 or -1, optional
+                0: use readout quad value
+                1: positive rotation direction, -1: negative rotation direction
             mod2pi : bool, optional
                 If True, return hwp angle % 2pi
             fast : bool, optional
@@ -416,8 +423,10 @@ class G3tHWP():
         if not any(data):
             logger.info("no HWP field data")
 
-        assert force_quad in [0, 1, None], "force_quad must be 0, 1 or None"
-        self._force_quad = force_quad
+        if force_quad is not None:
+            assert force_quad in [0, 1, -1], "force_quad must be 0, 1 or -1"
+            logger.info(f"Overwriting force_quad by {force_quad}.")
+            self._force_quad = force_quad
 
         d = self._data_formatting(data)
         if 'irig_time_2' in data.keys() and 'counter_2' in data.keys():
@@ -1100,8 +1109,8 @@ class G3tHWP():
         return
 
     def _quad_form(self, quad):
-        if self._force_quad is not None:
-            return np.full_like(quad, self._force_quad)
+        if self._force_quad != 0:
+            return np.full_like(quad, (self._force_quad+1)/2)
         # bit process
         quad[(quad >= 0.5)] = 1
         quad[(quad < 0.5)] = 0
