@@ -30,7 +30,7 @@ class DemodMapmaker:
         self.ncomp        = len(comps)
         self.singlestream = singlestream
 
-    def add_obs(self, id, obs, noise_model=None, deslope=False, det_split_masks=None, split_labels=None, detset=None):
+    def add_obs(self, id, obs, noise_model=None, deslope=False, det_split_masks=None, split_labels=None, detset=None, freq=None):
         # Prepare our tod
         ctime  = obs.timestamps
         srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
@@ -68,7 +68,7 @@ class DemodMapmaker:
             tod = nmat.apply(tod)
         # Add the observation to each of our signals
         for signal in self.signals:
-            signal.add_obs(id, obs, nmat, tod, det_split_masks=det_split_masks, split_labels=split_labels, detset=detset)
+            signal.add_obs(id, obs, nmat, tod, det_split_masks=det_split_masks, split_labels=split_labels, detset=detset, freq=freq)
         # Save what we need about this observation
         self.data.append(bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime), dets=obs.dets.vals, nmat=nmat))
 
@@ -124,7 +124,7 @@ class DemodSignalMap(DemodSignal):
             self.div = enmap.zeros((Nsplits,ncomp,ncomp)+shape, wcs, dtype=dtype)
             self.hits= enmap.zeros((Nsplits,)+shape, wcs, dtype=dtype)
 
-    def add_obs(self, id, obs, nmat, Nd, pmap=None, wrong_definition=False, det_split_masks=None, split_labels=None, detset=None):
+    def add_obs(self, id, obs, nmat, Nd, pmap=None, wrong_definition=False, det_split_masks=None, split_labels=None, detset=None, freq=None):
         # Nd will have 3 components, corresponding to ds_T, demodQ, demodU with the noise model applied
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
@@ -149,16 +149,17 @@ class DemodSignalMap(DemodSignal):
                     # this is the case with no splits
                     # turnarounds has the size of samples, we need to add the detector axis
                     mask_for_turnarounds = np.repeat(obs.flags.turnarounds.mask()[None,:], int(obs.dets.count), axis=0)
-                    rangesmatrix = obs.flags.det_bias_flags + so3g.proj.RangesMatrix.from_mask(mask_for_turnarounds) + obs.flags_notfinite
+                    rangesmatrix = obs.flags.det_bias_flags + so3g.proj.RangesMatrix.from_mask(mask_for_turnarounds) + obs.flags_notfinite + obs.flags_stuck
                     pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix)
                 else:
                     # this is the case where we are processing a split. We need to figure out what type of split it is (detector fixed in time, detector variable in time, samples), build the RangesMatrix mask and create the pmap.
                     if split_labels[n_split] in ['detleft','detright','detin','detout','detupper','detlower']:
                         # then we are in a detector fixed in time split.
-                        key = detset+'_'+split_labels[n_split]
+                        key = freq+'_'+detset+'_'+split_labels[n_split]
+                        mask_for_turnarounds = np.repeat(obs.flags.turnarounds.mask()[None,:], int(obs.dets.count), axis=0)
                         mask = det_split_masks[key]
                         mask_for_split = np.repeat(mask[:,None], int(obs.samps.count), axis=1)
-                        rangesmatrix = obs.glitch_flags * so3g.proj.RangesMatrix.from_mask(mask_for_split)
+                        rangesmatrix = obs.flags.det_bias_flags + so3g.proj.RangesMatrix.from_mask(mask_for_turnarounds) + obs.flags_notfinite + so3g.proj.RangesMatrix.from_mask(mask_for_split) + obs.flags_stuck
                     pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix)
             else:
                 pmap_local = pmap
