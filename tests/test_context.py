@@ -263,6 +263,9 @@ class ContextTest(unittest.TestCase):
         # Check if NO_MATCH det_id seemed to broadcast propertly ...
         self.assertEqual(list(tod.det_info['det_param'] == -1),
                          list(dataset_sim.dets['det_id'] == 'NO_MATCH'))
+        for di, ds, AB in zip(tod.det_info.det_id, tod.det_info.detset,
+                              tod.focal_plane2.AB):
+            self.assertEqual(AB, len(ds) * (di == 'NO_MATCH'))
 
         tod = ctx.get_obs(obs_id + ':f090')
         self.assertEqual(tod.signal.shape, (n_det // 2, n_samp))
@@ -474,6 +477,9 @@ class DatasetSim:
             {'db': _db_multi_dataset('some_detset_info.h5'),
              'name': 'focal_plane',
              'on_missing': on_missing},
+            {'db': _db_multi_dataset('more_detset_info.h5'),
+             'name': 'focal_plane2',
+             'on_missing': on_missing},
             {'db': _db_single_dataset('det_param.h5'),
              'det_info': True},
             {'db': _db_multi_dataset('detinfo_multimatch.h5'),
@@ -595,6 +601,17 @@ class DatasetSim:
             for row in self.dets.subset(rows=self.dets['detset'] == kw['dets:detset']):
                 rs.append({'dets:readout_id': row['readout_id'],
                            'x': 100., 'y': 102.})
+            return rs
+        elif filename == 'more_detset_info.h5':
+            # Here, match against det_id and makes sure there's only
+            # one NO_MATCH entry _per detset_.  AB will be 0 unless
+            # NO_MATCH, in which case it's the len of the detset name.
+            rs = metadata.ResultSet(['dets:det_id', 'AB'])
+            for row in self.dets.subset(rows=self.dets['detset'] == kw['dets:detset']):
+                rs.append({'dets:det_id': row['det_id'],
+                           'AB': len(kw['dets:detset']) * (row['det_id'] == 'NO_MATCH')})
+            while sum(rs['dets:det_id'] == 'NO_MATCH') > 1:
+                rs.rows.pop(list(rs['dets:det_id']).index('NO_MATCH'))
             return rs
         elif filename == 'detinfo_multimatch.h5':
             # This is to test whether det_info fields (bp_code) can be
