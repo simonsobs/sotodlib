@@ -133,7 +133,7 @@ def transform_from_detmap(aman, pointing_name, inliers, det_ids, template):
     )
     if np.sum(msk) != aman.dets.count:
         logger.error("There are matched dets not found in the template")
-    src = np.vstack((aman[pointing_name].xi0[msk], aman[pointing_name].eta0[msk]))
+    src = np.vstack((aman[pointing_name].xi[msk], aman[pointing_name].eta[msk]))
     mapping = np.argsort(np.argsort(aman.det_info.det_ids[msk]))
 
     template_sort = np.argsort(det_ids[template_msk])
@@ -142,8 +142,8 @@ def transform_from_detmap(aman, pointing_name, inliers, det_ids, template):
     afn, sft = af.get_affine(src, dst)
     transformed = afn @ src + sft[..., None]
 
-    aman[pointing_name].xi0[msk] = transformed[0]
-    aman[pointing_name].eta0[msk] = transformed[1]
+    aman[pointing_name].xi[msk] = transformed[0]
+    aman[pointing_name].eta[msk] = transformed[1]
 
     return aman
 
@@ -342,7 +342,7 @@ def match_template(
 
 
 def _get_inliers(aman, rad_thresh, template=None):
-    focal_plane = np.column_stack((aman.xi0, aman.eta0))
+    focal_plane = np.column_stack((aman.xi, aman.eta))
     inliers = np.ones(len(focal_plane), dtype=bool)
     if template is not None:
         cent = np.median(template[:, 1:3], axis=0)
@@ -828,13 +828,13 @@ def main():
         pol_val = aman[pol_name].polang
     else:
         pol_slice = slice(0, -1)
-        pol_val = np.zeros_like(aman[pointing_name].eta0) + np.nan
+        pol_val = np.zeros_like(aman[pointing_name].eta) + np.nan
 
     focal_plane = np.column_stack(
         (
             bias_group,
-            aman[pointing_name].xi0,
-            aman[pointing_name].eta0,
+            aman[pointing_name].xi,
+            aman[pointing_name].eta,
             pol_val,
         )
     )
