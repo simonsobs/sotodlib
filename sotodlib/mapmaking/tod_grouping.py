@@ -191,7 +191,7 @@ def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, f
     else:
         print("Invalid mode!")
         sys.exit(1)
-    # Map the detectors into splits,
+    # Map the detectors into splits, we process freq / wafer pairs since the number of detectors will be different for different frequencies
     det_split_masks = {}
     split_labels = []
     if det_left_right or det_in_out or det_upper_lower: 
@@ -205,10 +205,17 @@ def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, f
         if det_in_out:
             split_labels.append('detin')
             split_labels.append('detout')
-        # get the list of wafers
-        wafer_list = obs_infos[0].wafer_slots.split(",")[0:nset]
-        for wafer in wafer_list:
-            meta = context.get_meta(obs_id=ids[0], dets={"wafer_slot" : [wafer]})
+        # get the list of wafers and frequencies
+        wafer_list = context.obsfiledb.get_detsets(ids[0])
+        band_list = ['f090', 'f150']
+        list_freq_wafer = []
+        for detset in wafer_list[0:nset]:
+            for band in band_list:
+                array = detset.split('_')
+                detset = array[0]+'_'+array[1]
+                list_freq_wafer.append((band, detset))
+        for (freq, wafer) in list_freq_wafer:
+            meta = context.get_meta(obs_id=ids[0], dets={"stream_id":wafer, "bandpass":freq})
             if det_left_right or det_in_out:
                 xi = meta.focal_plane.xi
                 # sort xi 
@@ -218,19 +225,19 @@ def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, f
                 # sort eta
                 eta_median = np.median(eta)
             if det_left_right:
-                det_split_masks[wafer+'_detleft'] = xi <= xi_median
-                det_split_masks[wafer+'_detright'] = xi > xi_median
+                det_split_masks[freq+'_'+wafer+'_detleft'] = xi <= xi_median
+                det_split_masks[freq+'_'+wafer+'_detright'] = xi > xi_median
             if det_upper_lower:
-                det_split_masks[wafer+'_detupper'] = eta <= eta_median
-                det_split_masks[wafer+'_detlower'] = eta > eta_median
+                det_split_masks[freq+'_'+wafer+'_detupper'] = eta <= eta_median
+                det_split_masks[freq+'_'+wafer+'_detlower'] = eta > eta_median
             if det_in_out:
                 # the bounding box is the center of the detset
                 xi_center = np.min(xi) + 0.5 * (np.max(xi) - np.min(xi))
                 eta_center = np.min(eta) + 0.5 * (np.max(eta) - np.min(eta))
                 radii = np.sqrt((xi_center-xi)**2 + (eta_center-eta)**2)
                 radius_median = np.median(radii)
-                det_split_masks[wafer+'_detin'] = radii <= radius_median
-                det_split_masks[wafer+'_detout'] = radii > radius_median
+                det_split_masks[freq+'_'+wafer+'_detin'] = radii <= radius_median
+                det_split_masks[freq+'_'+wafer+'_detout'] = radii > radius_median
 
     # We will make one map per period-detset-band
     obslists = build_period_obslists(obs_infos, periods, context, nset=nset)
