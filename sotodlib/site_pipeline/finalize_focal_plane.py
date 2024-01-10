@@ -349,8 +349,8 @@ def main():
             logger.warning("There are matched dets not found in the template")
         mapping = np.argsort(np.argsort(template_det_ids[template_msk]))
         srt = np.argsort(det_ids[msk])
-        _xi = aman[pointing_name].xi0[msk][srt][mapping]
-        _eta = aman[pointing_name].eta0[msk][srt][mapping]
+        _xi = aman[pointing_name].xi[msk][srt][mapping]
+        _eta = aman[pointing_name].eta[msk][srt][mapping]
         if pol:
             _gamma = aman[pol_name].polang[msk][mapping]
         else:
