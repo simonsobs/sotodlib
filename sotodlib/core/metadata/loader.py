@@ -941,3 +941,38 @@ class LoaderInterface:
 
         """
         return [self.from_loadspec(p) for p in load_params]
+
+
+def load_metadata(tod, spec):
+    """Process a metadata entry for an AxisManager.
+
+    Args:
+
+      tod (AxisManager): The data structure from which to source any
+        obs_info and det_info that are needed to process the metadata
+        specification.  This
+      spec (dict): a metadata specification, such as one might find as
+        an element of the "metadata" list in a context.yaml file.
+
+    Returns:
+      The loaded metadata item, which could be an AxisManager or
+      ResultSet.  In the AxisManager case, the axes have likely not
+      been resolved against the provided `tod`, so the sample count
+      and detector count / ordering may be different.  (The caller can
+      merge after the fact.)
+
+    Notes:
+
+      The ``tod`` container needs to contain ``obs_info`` and
+      ``det_info`` (including the ``dets`` axis), in order to follow
+      any branching instructions for loading the metadata.  This would
+      normally be an AxisManager returned by ``Context.get_obs()`` or
+      ``get_meta()``.
+
+    """
+    loader = SuperLoader()
+    det_info = unconvert_det_info(tod.det_info)
+    request = {}
+    for k, v in tod.obs_info._fields.items():
+        request[f'obs:{k}'] = v
+    return loader.load_one(spec, request, det_info)

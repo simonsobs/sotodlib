@@ -295,6 +295,17 @@ class ContextTest(unittest.TestCase):
         tod = ctx.get_obs(obs_id, dets=det_info)
         self.assertEqual(tod.signal.shape, (n_det // 2, n_samp))
 
+    def test_200_load_metadata(self):
+        """Test the simple metadata load wrapper."""
+        dataset_sim = DatasetSim()
+        obs_id = dataset_sim.obss['obs_id'][1]
+
+        ctx = dataset_sim.get_context()
+        tod = ctx.get_meta(obs_id)
+        for spec in ctx['metadata']:
+            item = metadata.loader.load_metadata(tod, spec)
+            assert(item is not None)
+
 
 class DatasetSim:
     """Provide in-RAM Context objects and tod/metadata loader functions
