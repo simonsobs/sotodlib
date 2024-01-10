@@ -148,8 +148,8 @@ class DemodSignalMap(DemodSignal):
                 if split_labels == None:
                     # this is the case with no splits
                     # turnarounds has the size of samples, we need to add the detector axis
-                    mask_for_turnarounds = np.repeat(obs.turnarounds.mask()[None,:], int(obs.dets.count), axis=0)
-                    rangesmatrix = obs.det_bias_flags * so3g.proj.RangesMatrix.from_mask(mask_for_turnarounds)
+                    mask_for_turnarounds = np.repeat(obs.flags.turnarounds.mask()[None,:], int(obs.dets.count), axis=0)
+                    rangesmatrix = obs.flags.det_bias_flags + so3g.proj.RangesMatrix.from_mask(mask_for_turnarounds) + obs.flags_notfinite
                     pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix)
                 else:
                     # this is the case where we are processing a split. We need to figure out what type of split it is (detector fixed in time, detector variable in time, samples), build the RangesMatrix mask and create the pmap.

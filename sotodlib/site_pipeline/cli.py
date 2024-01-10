@@ -40,7 +40,7 @@ command line wrapper, edit ``cli.py`` and see comments inline.
 import argparse
 
 from . import (
-    # analyze_bright_ptsrc,
+    analyze_bright_ptsrc,
     check_book,
     make_det_info_wafer,
     make_source_flags,
@@ -59,7 +59,7 @@ from . import (
 # the module comments above.
 
 ELEMENTS = {
-    #'analyze-bright-ptsrc': analyze_bright_ptsrc,
+    'analyze-bright-ptsrc': analyze_bright_ptsrc,
     'check-book': check_book,
     'make-det-info-wafer': make_det_info_wafer,
     'make-source-flags': make_source_flags,
