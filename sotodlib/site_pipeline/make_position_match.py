@@ -217,7 +217,7 @@ def match_template(
     bias_lines=True,
     reverse=False,
     vis=False,
-    cpd_args={},
+    **kwargs,
 ):
     """
     Match fit focal plane againts a template.
@@ -251,7 +251,7 @@ def match_template(
              so it should only be used when debugging with human interaction.
              If this is running headless you should pass in a path instead.
 
-        cpd_args: Dictionairy of kwargs to be passed into joint_cpd.
+        **kwargs: kwargs to be passed into joint_cpd.
                   See the megham docs for what these can be.
     Returns:
 
@@ -268,7 +268,6 @@ def match_template(
         template = template[:, 1:]
         dim_groups = [[0, 1]]
     else:
-        # dim_groups = [[1, 2]]
         dim_groups = [[0], [1, 2]]
     if have_gamma:
         dim_groups += [[focal_plane.shape[1]]]
@@ -291,11 +290,11 @@ def match_template(
         callback = partial(store_frames, frames=frames)
 
         *_, transformed, P = cpd.joint_cpd(
-            source, target, dim_groups, callback=callback, **cpd_args
+            source, target, dim_groups, callback=callback, **kwargs
         )
 
     else:
-        *_, transformed, P = cpd.joint_cpd(source, target, dim_groups, **cpd_args)
+        *_, transformed, P = cpd.joint_cpd(source, target, dim_groups, **kwargs)
 
     if not reverse:
         P = P.T
