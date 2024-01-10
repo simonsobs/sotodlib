@@ -315,7 +315,7 @@ class SuperLoader:
 
     def load(self, spec_list, request, det_info=None, free_tags=[],
              free_tag_fields=[], dest=None, check=False, det_info_scan=False,
-             ignore_missing=False):
+             ignore_missing=False, on_missing={}):
         """Loads metadata objects and processes them into a single
         AxisManager.
 
@@ -337,6 +337,10 @@ class SuperLoader:
             directly update det_info.
           ignore_missing (bool): If True, don't fail when a metadata
             item can't be loaded, just try to proceed without it.
+          on_missing (dict): If a key here matches the label of a
+            metadata entry, the value will override the on_missing
+            entry of the metadata entry.  (Each value must be "trim",
+            "skip" or "fail".)
 
         Returns:
           In normal mode, an AxisManager containing the metadata
@@ -438,8 +442,13 @@ class SuperLoader:
             logger.debug(f'Processing metadata spec={spec} with augmented '
                          f'request={aug_request}')
 
-            on_missing = spec.get('on_missing', 'trim')
-            assert on_missing in ['trim', 'skip', 'fail']
+            label = spec.get('label', spec.get('name'), None)
+            _on_missing = spec.get('on_missing', 'trim')
+            if label is not None and label in on_missing:
+                _on_missing = on_missing['label']
+                logger.debug(f'User overrides on_missing={_on_missing} for {label}')
+
+            assert _on_missing in ['trim', 'skip', 'fail']
 
             try:
                 item = self.load_one(spec, aug_request, det_info)
@@ -447,7 +456,7 @@ class SuperLoader:
             except Exception as e:
                 if check:
                     error = e
-                elif ignore_missing or on_missing == 'skip':
+                elif ignore_missing or _on_missing == 'skip':
                     logger.warning(f'Failed to load metadata for spec={spec}; ignoring.')
                     continue
                 else:
@@ -458,14 +467,14 @@ class SuperLoader:
                 try:
                     det_info = merge_det_info(
                         det_info, item,
-                        on_missing=on_missing)
+                        on_missing=_on_missing)
                 except IncompleteMetadataError as e:
                     if check:
                         # I guess we report this, either way.
                         error = e
-                    elif on_missing == 'fail':
+                    elif _on_missing == 'fail':
                         reraise(spec, e)
-                    elif on_missing == 'skip':
+                    elif _on_missing == 'skip':
                         # print a warning I guess
                         logger.warning(f'Skipping failed det_info load, spec={spec}')
 
@@ -504,9 +513,9 @@ class SuperLoader:
                 message = (f"Only {n_dets_item} of {n_dets} detectors "
                            "have data for metadata specified by "
                            f"spec={spec}. ")
-                if on_missing == 'trim':
+                if _on_missing == 'trim':
                     logger.warning(message + 'Trimming.')
-                elif on_missing == 'fail':
+                elif _on_missing == 'fail':
                     raise IncompleteMetadataError(message)
                 else:  # skip
                     logger.warning(message + 'Discarding.')
