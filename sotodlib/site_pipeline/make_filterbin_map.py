@@ -138,23 +138,28 @@ def calibrate_obs(obs, dtype_tod=np.float32):
         utils.deslope(obs.signal, w=5, inplace=True)
         obs.signal = obs.signal.astype(dtype_tod)
     # Disqualify overly cut detectors
-    #good_dets = mapmaking.find_usable_detectors(obs)
+    good_dets = mapmaking.find_usable_detectors(obs)
     #obs.restrict("dets", good_dets)
     
     # remove detectors with an std greater than 5
-    #if obs.signal is not None:
-    #    mask = np.std(obs.signal, axis=1) > 0.01
-    #    good_dets = obs.dets.vals[mask]
-    #    obs.restrict("dets", good_dets)
+    if obs.signal is not None:
+        mask = np.std(obs.signal, axis=1) > 0.01
+        good_dets = obs.dets.vals[mask]
+        obs.restrict("dets", good_dets)
 
     if obs.signal is not None and len(good_dets) > 0:
         # Gain calibration
-        gain  = 1
+        #gain  = 1
         # CARLOS: no calibration in sims for the moment, so we skip everything for now
         #for gtype in ["relcal","abscal"]:
         #for gtype in ["phase_to_pW"]:
         #    gain *= obs.det_cal[gtype][:,None]
-        obs.signal *= gain
+        #obs.signal *= gain
+        obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
+        # since some of the calibrations are nans, we make a flags
+        mask_notfinite = np.logical_not(np.isfinite(obs.signal))
+        obs = obs.wrap("flags_notfinite", so3g.proj.RangesMatrix.from_mask(mask_notfinite),[(0, 'dets'), (1, 'samps')])
+        
         # Fourier-space calibration
         #fsig  = fft.rfft(obs.signal)
         #freq  = fft.rfftfreq(obs.samps.count, 1/srate)
@@ -371,7 +376,7 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
     ncomp      = len(comps)
     meta_only  = False
     utils.mkdir(odir)
-
+    
     # Set up logging.
     L   = logging.getLogger(__name__)
     L.setLevel(logging.INFO)
