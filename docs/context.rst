@@ -208,32 +208,11 @@ Context system:
     :func:`sotodlib.core.context.obsloader_template`.
 
 ``metadata``
-
-    A list of metadata specs.  For more detailed description, see the
+    A list of metadata specs.  For a detailed description, see the
     docstring for
-    :func:`SuperLoader.load_raw<metadata.SuperLoader.load_raw>`.  But
-    briefly each metadata spec is a dictionary with the following
-    entries:
-
-    ``db``
-        The path to a ManifestDb.
-
-    ``name``
-
-        A string describing what field to extract from the metadata,
-        and where to store it in the output AxisManager.  For details
-        on the syntax, see
-        :func:`Unpacker.decode<metadata.Unpacker.decode>`.
-
-    ``loader``
-        The name of the metadata loader function to use; these
-        functions must be registered in module variable
-        sotodlib.core.metadata.REGISTRY.  This is optional; if absent
-        it will default to 'HdfPerDetector' or (more likely) to
-        whatever is specified in the ManifestDb.
+    :func:`SuperLoader.load_one<metadata.SuperLoader.load_one>`.
 
 ``context_hooks``
-
     A string that identifies a set of functions to hook into
     particular parts of the Context system.  See uses of _call_hook()
     in the Context code, for any implemented hook function names and
@@ -263,20 +242,6 @@ storage format.  The API is documented in the ``obsloader_template``
 function:
 
 .. autofunction:: sotodlib.core.context.obsloader_template
-
-SuperLoader
------------
-
-.. autoclass:: sotodlib.core.metadata.SuperLoader
-   :special-members: __init__
-   :members:
-
-Unpacker
---------
-
-.. autoclass:: sotodlib.core.metadata.Unpacker
-   :special-members: __init__
-   :members:
 
 
 .. py:module:: sotodlib.core.metadata
@@ -988,6 +953,50 @@ However, it is expected that in most cases either ``readout_id`` or
 ``det_id`` will be used to label det_info contributions.
 
 
+Metadata System APIs
+====================
+
+SuperLoader
+-----------
+
+.. autoclass:: SuperLoader
+   :special-members: __init__
+   :members:
+
+Unpacker
+--------
+
+.. autoclass:: Unpacker
+   :special-members: __init__
+   :members:
+
+ResultSet
+---------
+
+.. autoclass:: ResultSet
+   :special-members: __init__
+   :members:
+
+sotodlib.io.metadata
+--------------------
+
+This module contains functions for working with ResultSet in HDF5.
+
+Here's the docstring for ``write_dataset``:
+
+.. autofunction:: sotodlib.io.metadata.write_dataset
+
+Here's the docstring for ``read_dataset``:
+
+.. autofunction:: sotodlib.io.metadata.read_dataset
+
+Here's the class documentation for ResultSetHdfLoader:
+
+.. autoclass:: sotodlib.io.metadata.ResultSetHdfLoader
+   :inherited-members: __init__
+   :members:
+
+
 ------------------------------------
 DetDb: Detector Information Database
 ------------------------------------
@@ -1632,36 +1641,6 @@ Class Documentation
    :special-members: __init__
    :members:
 
-
----------
-ResultSet
----------
-
-Auto-generated documentation should appear here.
-
-.. autoclass:: ResultSet
-   :special-members: __init__
-   :members:
-
---------------------
-sotodlib.io.metadata
---------------------
-
-This module contains functions for working with ResultSet in HDF5.
-
-Here's the docstring for ``write_dataset``:
-
-.. autofunction:: sotodlib.io.metadata.write_dataset
-
-Here's the docstring for ``read_dataset``:
-
-.. autofunction:: sotodlib.io.metadata.read_dataset
-
-Here's the class documentation for ResultSetHdfLoader:
-
-.. autoclass:: sotodlib.io.metadata.ResultSetHdfLoader
-   :inherited-members: __init__
-   :members:
 
 -----------------
 Command Line Tool
