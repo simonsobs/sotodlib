@@ -90,13 +90,26 @@ class SuperLoader:
           The metadata ``spec`` dict has the following schema:
 
             ``db`` (str)
-                The path to a ManifestDb file.
+                The path to a ManifestDb file.  (For testing and other
+                purposes, this may be passed as a ManifestDb object
+                instead.)
 
             ``name`` (str)
-                Naively, the name to give to the extracted data.  But
-                the string may encode more complicated instructions,
-                which are understood by the Unpacker class in this
-                module.
+                Address in the containing AxisManager to which the
+                data should be unpacked.  This string may encode more
+                complicated instructions; see the Unpacker class in
+                this module.
+
+            ``on_missing`` (str)
+                An optional string describing how to proceed in the event that
+                the metadata is incomplete (or missing entirely) for the
+                target Observation.  The value should one of 'trim', 'skip',
+                or 'fail'.  The default is 'trim'.
+
+            ``label`` (str)
+                A short string describing the metadata (optional).  This is
+                used to target the entry when overriding the default
+                ``on_missing`` behavior.  If absent, defaults to ``name``.
 
             ``loader`` (str, optional)
                 The name of the loader class to use when loading the
