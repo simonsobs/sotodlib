@@ -43,14 +43,23 @@ from . import (
     analyze_bright_ptsrc,
     check_book,
     make_det_info_wafer,
+<<<<<<< HEAD
+=======
+    make_filterbin_map,
+    make_ml_map,
+>>>>>>> a796da53 (quick fix to cli.py)
     make_source_flags,
     make_uncal_beam_map,
     preprocess_tod,
     update_g3tsmurf_db,
+<<<<<<< HEAD
     update_obsdb,
     make_cosamp_hk
     make_ml_map,
     make_filterbin_map,
+=======
+    update_obsdb
+>>>>>>> a796da53 (quick fix to cli.py)
 )
 
 # Dictionary matching element name to a submodule (which must have
@@ -62,14 +71,23 @@ ELEMENTS = {
     'analyze-bright-ptsrc': analyze_bright_ptsrc,
     'check-book': check_book,
     'make-det-info-wafer': make_det_info_wafer,
+<<<<<<< HEAD
+=======
+    'make-filterbin-map': make_filterbin_map,
+    'make-ml-map': make_ml_map,
+>>>>>>> a796da53 (quick fix to cli.py)
     'make-source-flags': make_source_flags,
     'make-uncal-beam-map': make_uncal_beam_map,
     'preprocess-tod': preprocess_tod,
     'update-g3tsmurf-db': update_g3tsmurf_db,
+<<<<<<< HEAD
     'update-obsdb': update_obsdb,
     'make-cosamp-hk': make_cosamp_hk,
     'make-ml-map': make_ml_map,
     'make-filterbin-map': make_filterbin_map,
+=======
+    'update-obsdb': update_obsdb
+>>>>>>> a796da53 (quick fix to cli.py)
 }
 
 CLI_NAME = 'so-site-pipeline'
