@@ -317,11 +317,6 @@ def match_template(
     else:
         mapping = row_ind[np.argsort(col_ind)]
 
-    _P = P[mapping, range(P.shape[1])]
-    P_msk = _P > np.median(_P)
-    aff, sft = af.get_affine(source[P_msk].T, target[mapping][P_msk].T)
-    transformed = (aff @ (source.T) + sft[..., None]).T
-
     if vis:
         frames += [[target, transformed, 0, 0]]  # type: ignore
         fig, ax = fig, fig.axes[0]  # type: ignore
@@ -504,6 +499,10 @@ def _do_match(
         transformed[msk, :ndim] = _TY[:, 1:]
         mapped_template[msk] = template[t_msk][_map]
     logger.info("Average matched likelihood = %f", np.nanmedian(P))
+
+    P_msk = (P > np.nanmedian(P)) * (np.isfinite(P))
+    aff, sft = af.get_affine(focal_plane[P_msk, 1:].T, mapped_template[P_msk, 1:].T)
+    transformed[:, :ndim] = (aff @ (focal_plane.T[1:]) + sft[..., None]).T
 
     return mapped_det_ids, P, transformed, mapped_template
 
