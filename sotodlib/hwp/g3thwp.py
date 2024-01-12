@@ -4,6 +4,7 @@
 import os
 import numpy as np
 import scipy.interpolate
+import scipy.stats
 import so3g
 from spt3g import core
 import logging
@@ -617,7 +618,7 @@ class G3tHWP():
         # make template
         template_slit = np.diff(ft).reshape(
             len(solved['ref_indexes'+suffix])-2, self._num_edges)
-        template_slit = np.average(template_slit, axis=0)
+        template_slit = scipy.stats.trim_mean(template_slit, 0.01, axis=0)
         average_slit = np.average(template_slit)
         # subtract template, keep raw timestamp
         subtract = np.cumsum(np.roll(np.tile(template_slit-average_slit,
