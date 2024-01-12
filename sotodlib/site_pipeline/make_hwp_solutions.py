@@ -127,7 +127,7 @@ def main(
     obs_list = ctx.obsdb.query(tot_query)
         
     if len(obs_list)==0:
-        logger.warning(f"No observations returned from query: {query}")
+        logger.warning(f"No observations returned from query: {tot_query}")
     run_list = []
 
     if not os.path.exists(man_db_filename):
