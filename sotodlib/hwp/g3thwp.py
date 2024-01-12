@@ -965,28 +965,38 @@ class G3tHWP():
 
         # calculate template subtracted angle
         if 'fast_time' in solved1.keys():
+            template_subtraction_1 = True
             try:
                 self.eval_angle(solved1)
             except Exception as e:
                 logger.error(f"Exception '{e}' thrown while the template subtraction for the 1st encoder.")
+                template_subtraction_1 = False
         else:
             logger.info('No correct rotation data in the 1st encoder in the specified timestamps.')
         if 'fast_time_2' in solved2.keys():
+            template_subtraction_2 = True
             try:
                 self.eval_angle(solved2, suffix='_2')
             except Exception as e:
                 logger.error(f"Exception '{e}' thrown while the template subtraction for the 2nd encoder.")
+                template_subtraction_2 = False
         else:
             logger.info('No correct rotation data in the 2nd encoder in the specified timestamps.')
         solved = dict(**solved1, **solved2)
+        template_subtraction = {'': template_subtraction_1, '_2': template_subtraction_2}
 
         # calculate off-centering corrected angle
-        if ('fast_time_raw' or 'fast_time_raw_2') in solved.keys():
+        if template_subtraction_1 and template_subtraction_2:
+            offcenter_subtraction = True
             try:
                 offcentering = self.eval_offcentering(solved)
                 self.correct_offcentering(solved)
             except Exception as e:
                 logger.error(f"Exception '{e}' thrown while the off-centering correction.")
+                offcenter_subtraction = False
+        else:
+            logger.info('Template subtraction failed. Off-center subtraction is skipped.')
+            offcenter_subtraction = False
 
         # write solution
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
@@ -1004,12 +1014,12 @@ class G3tHWP():
                 getattr(aman, 'locked'+suffix)[:] = self._bool_interpolation(solved['slow_time'+suffix], solved['locked'+suffix], tod.timestamps)
                 getattr(aman, 'hwp_rate'+suffix)[:] = scipy.interpolate.interp1d(solved['slow_time'+suffix], solved['hwp_rate'+suffix], kind='linear', bounds_error=False)(tod.timestamps)
 
-                if 'fast_time_ver2'+suffix in solved.keys():
+                if offcenter_subtraction:
                     getattr(aman, 'hwp_angle_ver1'+suffix)[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time_raw'+suffix], solved['angle_old'+suffix], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
                     getattr(aman, 'hwp_angle_ver2'+suffix)[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time_ver2'+suffix], solved['angle_old'+suffix], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
                     getattr(aman, 'hwp_angle'+suffix)[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'+suffix], solved['angle'+suffix], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
                     getattr(aman, 'version'+suffix)[:] = np.ones(len(tod.timestamps))*3
-                elif 'fast_time_raw'+suffix in solved.keys():
+                elif template_subtraction[suffix]:
                     getattr(aman, 'hwp_angle_ver1'+suffix)[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time_raw'+suffix], solved['angle'+suffix], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
                     getattr(aman, 'hwp_angle'+suffix)[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'+suffix], solved['angle'+suffix], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
                     getattr(aman, 'version'+suffix)[:] = np.ones(len(tod.timestamps))*2
