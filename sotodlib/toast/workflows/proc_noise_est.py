@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2024 Simons Observatory.
+# Copyright (c) 2023-2023 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Noise estimation for mapmaking.
 """
@@ -63,6 +63,12 @@ def noise_estimation(job, otherargs, runargs, data):
     # Configured operators for this job
     job_ops = job.operators
 
+    # If any operators are disabled, just return
+    all_enabled = job_ops.noise_estim.enabled and job_ops.noise_estim_fit.enabled
+    if not all_enabled:
+        log.info_rank("Noise estimation disabled", comm=data.comm.comm_world)
+        return
+
     # Estimate noise.
     log.info_rank(
         "  Building noise estimate...", comm=data.comm.comm_world
@@ -71,13 +77,6 @@ def noise_estimation(job, otherargs, runargs, data):
     log.info_rank(
         "  Finished noise estimate in", comm=data.comm.comm_world, timer=timer
     )
-
-    # Only run noise fitting if estimation is enabled
-    if not job_ops.noise_estim.enabled and job_ops.noise_estim_fit.enabled:
-        log.info_rank(
-            "Noise_estim disabled, nothing to fit", comm=data.comm.comm_world
-        )
-        return
 
     # Create a fit to this noise model
     job_ops.noise_estim_fit.noise_model = job_ops.noise_estim.out_model
