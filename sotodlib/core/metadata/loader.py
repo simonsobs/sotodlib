@@ -4,6 +4,7 @@ import collections
 import logging
 import os
 import numpy as np
+import warnings
 
 from . import ResultSet
 
@@ -25,6 +26,14 @@ class IncompleteMetadataError(RuntimeError):
 
 
 class IncompleteDetInfoError(RuntimeError):
+    pass
+
+
+class MetadataSpecError(RuntimeError):
+    pass
+
+
+class MetadataSpecWarning(Warning):
     pass
 
 
@@ -79,7 +88,8 @@ class SuperLoader:
 
         Args:
           spec (dict): A metadata specification dict (corresponding to
-            a metadata list entry in context.yaml).
+            a metadata list entry in context.yaml), or MetadataSpec
+            object.
           request (dict): A metadata request dict (stating what
             observation and detectors are of interest).
           det_info (ResultSet): Table of detector properties to use
@@ -87,42 +97,8 @@ class SuperLoader:
             fields.
 
         Notes:
-          The metadata ``spec`` dict has the following schema:
-
-            ``db`` (str)
-                The path to a ManifestDb file.  (For testing and other
-                purposes, this may be passed as a ManifestDb object
-                instead.)
-
-            ``name`` (str)
-                Address in the containing AxisManager to which the
-                data should be unpacked.  This string may encode more
-                complicated instructions; see the Unpacker class in
-                this module.
-
-            ``on_missing`` (str)
-                An optional string describing how to proceed in the event that
-                the metadata is incomplete (or missing entirely) for the
-                target Observation.  The value should one of 'trim', 'skip',
-                or 'fail'.  The default is 'trim'.
-
-            ``label`` (str)
-                A short string describing the metadata (optional).  This is
-                used to target the entry when overriding the default
-                ``on_missing`` behavior.
-
-            ``loader`` (str, optional)
-                The name of the loader class to use when loading the
-                data.  This will take precedence over what is
-                specified in the ManifestDb, and is normally
-                unnecessary but can be used for debugging /
-                work-arounds.
-
-            ``det_info`` (bool, optional)
-                If True, treat the metadata as a contribution to
-                det_info. The metadata will be merged into the active
-                det_info object.
-
+          If passing ``spec`` as a dict, see the schema described in
+          :class:`MetadataSpec`.
 
           Any filenames in the ManifestDb that are given as relative
           paths will be resolved relative to the directory where the
@@ -159,10 +135,13 @@ class SuperLoader:
           already applied.
 
         """
+        if isinstance(spec, dict):
+            spec = MetadataSpec.from_dict(spec)
+
         # Load the database, match the request,
-        if isinstance(spec['db'], str):
+        if isinstance(spec.db, str):
             # The usual case.
-            dbfile = os.path.join(self.working_dir, spec['db'])
+            dbfile = os.path.join(self.working_dir, spec.db)
             dbpath = os.path.split(dbfile)[0]
             if dbfile not in self.manifest_cache:
                 if dbfile.endswith('sqlite'):
@@ -171,10 +150,10 @@ class SuperLoader:
                     man = core.metadata.ManifestDb.from_file(dbfile)
                 self.manifest_cache[dbfile] = man
             man = self.manifest_cache[dbfile]
-        elif isinstance(spec['db'], core.metadata.ManifestDb):
+        elif isinstance(spec.db, core.metadata.ManifestDb):
             # Useful for testing and hacking
             dbpath = self.working_dir
-            man = spec['db']
+            man = spec.db
 
         # Do we have all the keys we need?
         required_obs_keys = _filter_items(
@@ -261,7 +240,7 @@ class SuperLoader:
                 continue
             logger.debug(f'Loading for index_line={index_line}')
 
-            loader = spec.get('loader', None)
+            loader = spec.loader
             if loader is None:
                 loader = index_line.get('loader', REGISTRY['_default'])
             try:
@@ -452,14 +431,15 @@ class SuperLoader:
         # Process each item.
         items = []
         for spec in spec_list:
-            if det_info_scan and not spec.get('det_info'):
+            spec, _spec = MetadataSpec.from_dict(spec), spec
+            if det_info_scan and not spec.det_info:
                 continue
 
-            logger.debug(f'Processing metadata spec={spec} with augmented '
+            logger.debug(f'Processing metadata spec={_spec} with augmented '
                          f'request={aug_request}')
 
-            label = spec.get('label', None)
-            _on_missing = spec.get('on_missing', 'trim')
+            label = spec.label
+            _on_missing = spec.on_missing
             if label is not None and label in on_missing:
                 _on_missing = on_missing[label]
                 logger.debug(f'User overrides on_missing={_on_missing} for {label}')
@@ -473,12 +453,12 @@ class SuperLoader:
                 if check:
                     error = e
                 elif ignore_missing or _on_missing == 'skip':
-                    logger.warning(f'Failed to load metadata for spec={spec}; ignoring.')
+                    logger.warning(f'Failed to load metadata for spec={_spec}; ignoring.')
                     continue
                 else:
-                    reraise(spec, e)
+                    reraise(_spec, e)
 
-            if spec.get('det_info') and error is None:
+            if spec.det_info and error is None:
                 item_keys = _filter_items('dets:', item.keys)
                 try:
                     det_info = merge_det_info(
@@ -489,10 +469,10 @@ class SuperLoader:
                         # I guess we report this, either way.
                         error = e
                     elif _on_missing == 'fail':
-                        reraise(spec, e)
+                        reraise(_spec, e)
                     elif _on_missing == 'skip':
                         # print a warning I guess
-                        logger.warning(f'Skipping failed det_info load, spec={spec}')
+                        logger.warning(f'Skipping failed det_info load, spec={_spec}')
 
                 item = None
 
@@ -528,7 +508,7 @@ class SuperLoader:
             if n_dets_item < n_dets:
                 message = (f"Only {n_dets_item} of {n_dets} detectors "
                            "have data for metadata specified by "
-                           f"spec={spec}. ")
+                           f"spec={_spec}. ")
                 if _on_missing == 'trim':
                     logger.warning(message + 'Trimming.')
                 elif _on_missing == 'fail':
@@ -539,10 +519,11 @@ class SuperLoader:
 
             # Unpack it.
             try:
-                unpacker = Unpacker.from_spec(spec, target=item)
-                dest = unpacker.unpack(item, dest=dest)
+                dest = unpack_item(spec.unpack, item, dest=dest)
+                #unpacker = _Unpacker.from_spec(spec, target=item)
+                #dest = unpacker.unpack(item, dest=dest)
             except Exception as e:
-                reraise(spec, e)
+                reraise(_spec, e)
 
             logger.debug(f'load(): dest now has shape {dest.shape}')
             n_dets = dest.dets.count
@@ -803,134 +784,175 @@ def broadcast_resultset(
     return aman
 
 
-class Unpacker:
-    @classmethod
-    def from_spec(cls, spec, target=None, wildcard=None):
-        """Args:
-          spec (dict): Metadata spec.  Only the elements relevant to
-            unpacking (unpack, item) are inspected.  See description
-            below.
-          target (AxisManager): The object from which the targets will
-            be unpacked.  This is only accessed if wildcard is None.
-          wildcard (list of str): source_name values to draw from if
-            the user has requested wildcard matching.  Currently only
-            a single wildcard item may be extracted, so the list must
-            have length 1.  If not passed explicitly, wildcard list
-            will be taken from ``target``.  Passing [] for this option
-            will effectively disable the wildcard feature.
+class MetadataSpec:
+    """Container for the canonical metadata specification.
 
-        Returns:
-          An Unpacker object.
+    When constructed from a dict, the following attributes are set
+    directly from the corresponding key:
 
-        Notes:
-          Each coded request must be in one of 4 possible forms, shown
-          below, to the left of the :.  The resulting assignment
-          operation is shown to the right of the colon::
+    ``db`` (str, ManifestDb)
+        The path to a ManifestDb file. For testing and other purposes,
+        this may be passed as a ManifestDb object.  Defaults to None.
+
+    ``det_info`` (bool)
+        If True, treat the metadata as a contribution to
+        det_info. The metadata will be merged into the active
+        det_info object.  Defaults to False.
+
+    ``label`` (str)
+        A short string describing the metadata.  This is
+        used to target the entry when overriding the default
+        ``on_missing`` behavior.  Defaults to None.
+
+    ``loader`` (str)
+        The name of the loader class to use when loading the
+        data.  This will take precedence over what is
+        specified in the ManifestDb, and is normally
+        unnecessary but can be used for debugging /
+        work-arounds.  Defaults to None.
+
+    ``on_missing`` (str)
+        String describing how to proceed in the event that the
+        metadata is incomplete (or missing entirely) for the target
+        Observation.  The value should one of 'trim', 'skip', or
+        'fail'.  Defaults to 'trim'.
+
+    ``unpack`` (list of str)
+        Instructions for how to populate the destination AxisManager
+        with fields found in this metadata item.  See notes below.
+
+    The following dict keys are deprecated, but are processed for
+    backwards compatibility.
+
+    ``name`` (str or list of str)
+        (Deprecated.)  This has been renamed as "unpack", and will be
+        copied into that attribute if unpack is not otherwise set.
+
+
+    In the ``unpack`` list, each must be in one of 4 possible forms,
+    shown below, to the left of the ``:``.  The resulting assignment
+    operation is shown to the right of the ``:``.  ::
 
             'dest_name&source_name'  : dest[dest_name] = source[source_name]
             'dest_name&'             : dest[dest_name] = source[dest_name]
             'dest_name&*'            : dest[dest_name] = source[wildcard[0]]
             'dest_name'              : dest[dest_name] = source
 
-          The first three forms cause a single field to be extracted.
-          When combining multiple such entries, note that each source
-          field may be referenced only once (so for example ``['a&a',
-          'b&b']`` is valid but ``['a&a, 'b&a']`` is not).
+    The first three forms cause a single field to be extracted.  The
+    3rd form is used to extract a single field and rename it, assuming
+    that name is the only one in source (it is an error otherwise).
 
-          The fourth form causes the entire item to be merged into the
-          target at dest_name.  This can operate alongside any number
-          of individual field extractions.
+    The ``unpack`` list may include multiple single field extraction
+    entries, but each source field may only be referenced once. (So
+    for example ``['a&a', 'b&b']`` is valid but ``['a&a, 'b&a']`` is
+    not).
 
-        """
-        if wildcard is None and target is not None:
-            wildcard = list(target._fields.keys())[:1]
+    The fourth form causes the entire item to be merged into the
+    target at dest_name.  This can operate alongside any number of
+    individual field extractions.
 
-        if 'unpack' in spec:
-            assert 'name' not in spec  # don't use 'name' and 'unpack'!
-            coded = spec['unpack']
-        elif 'name' in spec:
-            coded = spec['name']
-        else:
-            coded = '&'
+    """
 
-        if isinstance(coded, str):
-            coded = [coded]
+    db = None
+    det_info = False
+    label = None
+    loader = None
+    on_missing = 'trim'
+    unpack = None
 
-        # Make a plan based on the name list.
-        instructions = []
-        for name in coded:
-            if '&' in name:
-                dest_name, src_name = name.split('&') # check count...
-                if src_name == '':
-                    src_name = dest_name
-                elif src_name == '*':
-                    assert(len(wildcard) == 1)
-                    src_name = wildcard[0]
-                instructions.append(('extract', dest_name, src_name))
+    @classmethod
+    def from_dict(cls, spec):
+        self = cls()
+        # canonical ...
+        for k in ['db', 'label', 'unpack', 'det_info', 'loader', 'on_missing']:
+            if k in spec:
+                setattr(self, k, spec[k])
+        # "name" used to be unpacking instructions.
+        if 'name' in spec:
+            name = spec['name']
+            if isinstance(name, str):
+                name = [name]
+            if self.label is None:
+                self.label = name[0].split('&')[0]
+            if self.unpack is None:
+                self.unpack = name
             else:
-                instructions.append(('full', name, None))
+                # Prefer self.unpack but warn.
+                warnings.warn(
+                    "metadata spec contains 'unpack' and 'name' entries; "
+                    "ignoring the latter (except to set the 'label', maybe).",
+                    MetadataSpecWarning)
+        # Make sure unpack is non-empty.
+        if self.unpack is None:
+            self.unpack = ['&']
+        elif isinstance(self.unpack, str):
+            self.unpack = [self.unpack]
+        return self
 
-        return cls(instructions)
 
-    def __init__(self, instructions):
-        self.instructions = instructions
+def unpack_item(unpack, item, dest=None, wildcard=None):
+    # Execute the unpacking of item described in unpack (assumed from
+    # MetadataSpec.unpack).
+    if wildcard is None:
+        wildcard = list(item._fields.keys())[:1]
 
-    def unpack(self, item, dest=None):
-        """Extract desired fields from an AxisManager and merge them into
-        another one.
+    # Make a plan based on the unpacking list
+    instructions = []
+    for name in unpack:
+        if '&' in name:
+            dest_name, src_name = name.split('&') # check count...
+            if src_name == '':
+                src_name = dest_name
+            elif src_name == '*':
+                assert(len(wildcard) == 1)
+                src_name = wildcard[0]
+            instructions.append(('extract', dest_name, src_name))
+        else:
+            instructions.append(('full', name, None))
 
-        Args:
-          item (AxisManager): Source object from which to extract
-            fields.
-          dest (AxisManager): Place to put them.
+    if dest is None:
+        dest = core.AxisManager()
 
-        Returns:
-          dest, or a new AxisManager if dest=None was passed in.
+    # Based on instructions, we may need multiple copies of this
+    # item; one for any "full" extraction, and one to extract data
+    # members from.
+    copy_count = sum([inst[0] == 'full' for inst in instructions])
+    extr_counts = collections.Counter([inst[2] for inst in instructions
+                                       if inst[0] == 'extract'])
+    extr_max_count = max(extr_counts.values(), default=0)
+    assert extr_max_count <= 1  # Multiple extraction of child fields not supported.
+    copy_count += extr_max_count
 
-        """
-        if dest is None:
-            dest = core.AxisManager()
+    # Start with the full copies.
+    for inst, dest_name, src_name in instructions:
+        if inst != 'full':
+            continue
+        assert src_name is None
+        copy_count -= 1
+        _item = item
+        if copy_count > 0:
+            _item = item.copy()
+        dest.wrap(dest_name, _item)
 
-        # Based on instructions, we may need multiple copies of this
-        # item; one for any "full" extraction, and one to extract data
-        # members from.
-        copy_count = sum([inst[0] == 'full' for inst in self.instructions])
-        extr_counts = collections.Counter([inst[2] for inst in self.instructions
-                                           if inst[0] == 'extract'])
-        extr_max_count = max(extr_counts.values(), default=0)
-        assert extr_max_count <= 1  # Multiple extraction of child fields not supported.
-        copy_count += extr_max_count
-
-        # Start with the full copies.
-        for inst, dest_name, src_name in self.instructions:
-            if inst != 'full':
-                continue
-            assert src_name is None
-            copy_count -= 1
-            _item = item
-            if copy_count > 0:
-                _item = item.copy()
-            dest.wrap(dest_name, _item)
-
-        if extr_max_count == 0:
-            return dest
-
-        # And now the partial copies.  By assertion, each field is
-        # extracted at most once.
-        fields_to_delete = list(item._fields.keys())
-
-        for inst, dest_name, src_name in self.instructions:
-            if inst != 'extract':
-                continue
-            fields_to_delete.remove(src_name)
-            if src_name != dest_name:
-                item.move(src_name, dest_name)
-
-        for f in fields_to_delete:
-            del item[f]
-
-        dest.merge(item)
+    if extr_max_count == 0:
         return dest
+
+    # And now the partial copies.  By assertion, each field is
+    # extracted at most once.
+    fields_to_delete = list(item._fields.keys())
+
+    for inst, dest_name, src_name in instructions:
+        if inst != 'extract':
+            continue
+        fields_to_delete.remove(src_name)
+        if src_name != dest_name:
+            item.move(src_name, dest_name)
+
+    for f in fields_to_delete:
+        del item[f]
+
+    dest.merge(item)
+    return dest
 
 
 class LoaderInterface:
@@ -973,7 +995,7 @@ class LoaderInterface:
         return [self.from_loadspec(p) for p in load_params]
 
 
-def load_metadata(tod, spec):
+def load_metadata(tod, spec, unpack=False):
     """Process a metadata entry for an AxisManager.
 
     Args:
@@ -983,6 +1005,10 @@ def load_metadata(tod, spec):
         specification.  This
       spec (dict): a metadata specification, such as one might find as
         an element of the "metadata" list in a context.yaml file.
+      unpack (bool): if True, and if the spec does not identify as
+        det_info, try to unpack the result into an AxisManager and
+        return that.  This will result in broadcasting of items
+        indexed by det_info fields into a full .dets axis.
 
     Returns:
       The loaded metadata item, which could be an AxisManager or
@@ -992,7 +1018,6 @@ def load_metadata(tod, spec):
       merge after the fact.)
 
     Notes:
-
       The ``tod`` container needs to contain ``obs_info`` and
       ``det_info`` (including the ``dets`` axis), in order to follow
       any branching instructions for loading the metadata.  This would
@@ -1005,4 +1030,13 @@ def load_metadata(tod, spec):
     request = {}
     for k, v in tod.obs_info._fields.items():
         request[f'obs:{k}'] = v
-    return loader.load_one(spec, request, det_info)
+    spec = MetadataSpec.from_dict(spec)
+    item = loader.load_one(spec, request, det_info)
+    if not unpack or spec.det_info:
+        return item
+
+    if isinstance(item, ResultSet):
+        # Note this might raise an IncompleteDetInfoError.
+        item = broadcast_resultset(item, det_info=det_info)
+
+    return unpack_item(spec.unpack, item)
