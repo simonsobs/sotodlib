@@ -109,7 +109,7 @@ class SuperLoader:
             ``label`` (str)
                 A short string describing the metadata (optional).  This is
                 used to target the entry when overriding the default
-                ``on_missing`` behavior.  If absent, defaults to ``name``.
+                ``on_missing`` behavior.
 
             ``loader`` (str, optional)
                 The name of the loader class to use when loading the
@@ -458,7 +458,7 @@ class SuperLoader:
             logger.debug(f'Processing metadata spec={spec} with augmented '
                          f'request={aug_request}')
 
-            label = spec.get('label', spec.get('name', None))
+            label = spec.get('label', None)
             _on_missing = spec.get('on_missing', 'trim')
             if label is not None and label in on_missing:
                 _on_missing = on_missing[label]
@@ -539,9 +539,8 @@ class SuperLoader:
 
             # Unpack it.
             try:
-                unpackers = Unpacker.decode(spec['name'], item)
-                for unpacker in unpackers:
-                    dest = unpacker.unpack(item, dest=dest)
+                unpacker = Unpacker.from_spec(spec, target=item)
+                dest = unpacker.unpack(item, dest=dest)
             except Exception as e:
                 reraise(spec, e)
 
@@ -805,29 +804,12 @@ def broadcast_resultset(
 
 
 class Unpacker:
-    """Encapsulation of instructions for what information to extract from
-    some source container, and what to call it in the destination
-    container.
-
-    The classmethod :func:`decode` is used to populate
-    Unpacker objects from metadata instructions; see docstring.
-
-    Attributes:
-      dest (str): The field name in the destination container.
-      src (str): The field name in the source container.  If this is
-        None, then the entire source container (or whatever it may be)
-        should be stored in the destination container under the dest
-        name.
-
-    """
     @classmethod
-    def decode(cls, coded, target=None, wildcard=None):
+    def from_spec(cls, spec, target=None, wildcard=None):
         """Args:
-          coded (list of str or str): Each entry of the string is a
-            "coded request" which is converted to an Unpacker, as
-            described below.  Passing a string here yields the same
-            results as passing a single-element list containing that
-            string.
+          spec (dict): Metadata spec.  Only the elements relevant to
+            unpacking (unpack, item) are inspected.  See description
+            below.
           target (AxisManager): The object from which the targets will
             be unpacked.  This is only accessed if wildcard is None.
           wildcard (list of str): source_name values to draw from if
@@ -838,59 +820,66 @@ class Unpacker:
             will effectively disable the wildcard feature.
 
         Returns:
-          A list of Unpacker objects, one per entry in coded.
+          An Unpacker object.
 
         Notes:
           Each coded request must be in one of 4 possible forms, shown
           below, to the left of the :.  The resulting assignment
           operation is shown to the right of the colon::
 
-            'dest_name&source_name'  : dest[dest_name] = source['source_name']
-            'dest_name&'             : dest[dest_name] = source['dest_name']
+            'dest_name&source_name'  : dest[dest_name] = source[source_name]
+            'dest_name&'             : dest[dest_name] = source[dest_name]
             'dest_name&*'            : dest[dest_name] = source[wildcard[0]]
             'dest_name'              : dest[dest_name] = source
 
-        """
-        if isinstance(coded, str):
-            coded = [coded]
+          The first three forms cause a single field to be extracted.
+          When combining multiple such entries, note that each source
+          field may be referenced only once (so for example ``['a&a',
+          'b&b']`` is valid but ``['a&a, 'b&a']`` is not).
 
+          The fourth form causes the entire item to be merged into the
+          target at dest_name.  This can operate alongside any number
+          of individual field extractions.
+
+        """
         if wildcard is None and target is not None:
             wildcard = list(target._fields.keys())[:1]
 
+        if 'unpack' in spec:
+            assert 'name' not in spec  # don't use 'name' and 'unpack'!
+            coded = spec['unpack']
+        elif 'name' in spec:
+            coded = spec['name']
+        else:
+            coded = '&'
+
+        if isinstance(coded, str):
+            coded = [coded]
+
         # Make a plan based on the name list.
-        unpackers = []
-        wrap_name = None
+        instructions = []
         for name in coded:
             if '&' in name:
-                assert(wrap_name is None) # You already initiated a merge...
                 dest_name, src_name = name.split('&') # check count...
                 if src_name == '':
                     src_name = dest_name
                 elif src_name == '*':
                     assert(len(wildcard) == 1)
                     src_name = wildcard[0]
-                unpackers.append(cls(dest_name, src_name))
+                instructions.append(('extract', dest_name, src_name))
             else:
-                assert(len(unpackers) == 0) # You already initiated a wrap...
-                assert(wrap_name is None) # Multiple 'merge' names? Use & to multiwrap.
-                wrap_name = name
-                unpackers.append(cls(wrap_name, None))
-        return unpackers
+                instructions.append(('full', name, None))
 
-    def __init__(self, dest, src):
-        self.dest, self.src = dest, src
+        return cls(instructions)
 
-    def __repr__(self):
-        if self.src is None:
-            return f'<Unpacker:{self.dest}>'
-        return f'<Unpacker:{self.dest}<-{self.src}>'
+    def __init__(self, instructions):
+        self.instructions = instructions
 
     def unpack(self, item, dest=None):
         """Extract desired fields from an AxisManager and merge them into
         another one.
 
         Args:
-
           item (AxisManager): Source object from which to extract
             fields.
           dest (AxisManager): Place to put them.
@@ -901,17 +890,45 @@ class Unpacker:
         """
         if dest is None:
             dest = core.AxisManager()
-        fields_to_delete = list(item._fields.keys())
-        # Unpack to requested field names.
-        if self.src is None:
-            dest.wrap(self.dest, item)
+
+        # Based on instructions, we may need multiple copies of this
+        # item; one for any "full" extraction, and one to extract data
+        # members from.
+        copy_count = sum([inst[0] == 'full' for inst in self.instructions])
+        extr_counts = collections.Counter([inst[2] for inst in self.instructions
+                                           if inst[0] == 'extract'])
+        extr_max_count = max(extr_counts.values(), default=0)
+        assert extr_max_count <= 1  # Multiple extraction of child fields not supported.
+        copy_count += extr_max_count
+
+        # Start with the full copies.
+        for inst, dest_name, src_name in self.instructions:
+            if inst != 'full':
+                continue
+            assert src_name is None
+            copy_count -= 1
+            _item = item
+            if copy_count > 0:
+                _item = item.copy()
+            dest.wrap(dest_name, _item)
+
+        if extr_max_count == 0:
             return dest
-        else:
-            fields_to_delete.remove(self.src)
-            if self.src != self.dest:
-                item.move(self.src, self.dest)
+
+        # And now the partial copies.  By assertion, each field is
+        # extracted at most once.
+        fields_to_delete = list(item._fields.keys())
+
+        for inst, dest_name, src_name in self.instructions:
+            if inst != 'extract':
+                continue
+            fields_to_delete.remove(src_name)
+            if src_name != dest_name:
+                item.move(src_name, dest_name)
+
         for f in fields_to_delete:
-            item.move(f, None)
+            del item[f]
+
         dest.merge(item)
         return dest
 

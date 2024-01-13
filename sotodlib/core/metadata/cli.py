@@ -114,6 +114,8 @@ def main(args=None):
             name = entry.get('name')
             if name is None:
                 name = '(unnamed)'
+            if not isinstance(name, str):  # it could be a list!
+                name = str(name)
             if entry.get('det_info'):
                 name += ' -- [det_info]'
             print(f'  {name:<30}: {db_path}')
