@@ -33,11 +33,12 @@ def setup_noise_estimation(operators):
             enabled=False,
         )
     )
+    # Fitting is only performed if noise_estim is enabled
     operators.append(
         toast.ops.FitNoiseModel(
             name="noise_estim_fit",
             out_model="noise_estim_fit",
-            enabled=False,
+            enabled=True,
         )
     )
 
@@ -63,28 +64,34 @@ def noise_estimation(job, otherargs, runargs, data):
     # Configured operators for this job
     job_ops = job.operators
 
-    # Estimate noise.
-    log.info_rank(
-        "  Building noise estimate...", comm=data.comm.comm_world
-    )
-    job_ops.noise_estim.apply(data)
-    log.info_rank(
-        "  Finished noise estimate in", comm=data.comm.comm_world, timer=timer
-    )
+    if job_ops.noise_estim.enabled:
+        # Estimate noise.
+        log.info_rank(
+            "  Building noise estimate...", comm=data.comm.comm_world
+        )
+        job_ops.noise_estim.apply(data)
+        log.info_rank(
+            "  Finished noise estimate in",
+            comm=data.comm.comm_world,
+            timer=timer,
+        )
 
     # Only run noise fitting if estimation is enabled
-    if not job_ops.noise_estim.enabled and job_ops.noise_estim_fit.enabled:
-        log.info_rank(
-            "Noise_estim disabled, nothing to fit", comm=data.comm.comm_world
-        )
-        return
-
-    # Create a fit to this noise model
-    job_ops.noise_estim_fit.noise_model = job_ops.noise_estim.out_model
-    log.info_rank(
-        "  Running fit to noise estimate...", comm=data.comm.comm_world
-    )
-    job_ops.noise_estim_fit.apply(data)
-    log.info_rank(
-        "  Fit 1/f noise model in", comm=data.comm.comm_world, timer=timer
-    )
+    if job_ops.noise_estim_fit.enabled:
+        if not job_ops.noise_estim.enabled:
+            log.info_rank(
+                "Noise_estim disabled, nothing to fit",
+                comm=data.comm.comm_world,
+            )
+        else:
+            # Create a fit to this noise model
+            job_ops.noise_estim_fit.noise_model = job_ops.noise_estim.out_model
+            log.info_rank(
+                "  Running fit to noise estimate...", comm=data.comm.comm_world
+            )
+            job_ops.noise_estim_fit.apply(data)
+            log.info_rank(
+                "  Fit 1/f noise model in",
+                comm=data.comm.comm_world,
+                timer=timer,
+            )
