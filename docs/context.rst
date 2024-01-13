@@ -208,9 +208,8 @@ Context system:
     :func:`sotodlib.core.context.obsloader_template`.
 
 ``metadata``
-    A list of metadata specs.  For a detailed description, see the
-    docstring for
-    :func:`SuperLoader.load_one<metadata.SuperLoader.load_one>`.
+    A list of metadata specs.  Each metadata spec is a dict with the
+    schema as described by :class:`metadata.MetadataSpec`.
 
 ``context_hooks``
     A string that identifies a set of functions to hook into
@@ -956,6 +955,24 @@ However, it is expected that in most cases either ``readout_id`` or
 Metadata System APIs
 ====================
 
+load_metadata
+-------------
+
+*This function provides a way to load metadata for an AxisManager,
+from a ManifestDb, without having to encode the result in a
+context.yaml metadata entry.*
+
+.. autofunction:: load_metadata
+
+
+MetadataSpec
+------------
+
+.. autoclass:: MetadataSpec
+   :special-members: __init__
+   :members:
+
+
 SuperLoader
 -----------
 
@@ -963,12 +980,6 @@ SuperLoader
    :special-members: __init__
    :members:
 
-Unpacker
---------
-
-.. autoclass:: Unpacker
-   :special-members: __init__
-   :members:
 
 ResultSet
 ---------
