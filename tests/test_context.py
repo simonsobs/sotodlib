@@ -263,9 +263,10 @@ class ContextTest(unittest.TestCase):
         # Check if NO_MATCH det_id seemed to broadcast propertly ...
         self.assertEqual(list(tod.det_info['det_param'] == -1),
                          list(dataset_sim.dets['det_id'] == 'NO_MATCH'))
-        for di, ds, AB in zip(tod.det_info.det_id, tod.det_info.detset,
-                              tod.focal_plane2.AB):
-            self.assertEqual(AB, len(ds) * (di == 'NO_MATCH'))
+        for di, ds, AB1, AB2 in zip(tod.det_info.det_id, tod.det_info.detset,
+                                    tod.XY, tod.focal_plane2.AB):
+            self.assertEqual(AB1, len(ds) * (di == 'NO_MATCH'))
+            self.assertEqual(AB2, len(ds) * (di == 'NO_MATCH'))
 
         tod = ctx.get_obs(obs_id + ':f090')
         self.assertEqual(tod.signal.shape, (n_det // 2, n_samp))
@@ -478,7 +479,11 @@ class DatasetSim:
              'name': 'focal_plane',
              'on_missing': on_missing},
             {'db': _db_multi_dataset('more_detset_info.h5'),
-             'name': 'focal_plane2',
+             'label': 'focal_plane2',
+             'unpack': [
+                 'focal_plane2',
+                 'XY&AB',
+                 ],
              'on_missing': on_missing},
             {'db': _db_single_dataset('det_param.h5'),
              'det_info': True},
@@ -536,8 +541,7 @@ class DatasetSim:
                 'db': bad_meta_db,
                 'name': 'othercal',
                 'on_missing': with_incomplete_metadata,
-                ## leave label unset here; should fall back on name.
-                #'label': 'othercal',
+                'label': 'othercal',
             })
 
         return ctx
