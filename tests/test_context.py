@@ -309,7 +309,8 @@ class ContextTest(unittest.TestCase):
         for spec in ctx['metadata']:
             item = metadata.loader.load_metadata(tod, spec)
             assert(item is not None)
-
+            item = metadata.loader.load_metadata(tod, spec, unpack=True)
+            assert(item is not None)
 
 class DatasetSim:
     """Provide in-RAM Context objects and tod/metadata loader functions
