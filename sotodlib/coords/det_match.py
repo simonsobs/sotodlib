@@ -87,7 +87,6 @@ class Resonator:
     det_bandpass: str = ''
     det_angle_raw_deg: float = np.nan
     det_angle_actual_deg: float = np.nan
-    det_pol_angle: float = np.nan
     det_type: str = ''
     det_id: str = 'NO_MATCH'
     is_optical: int = 1
@@ -335,7 +334,6 @@ class ResSet:
                     mux_subband=d['mux_subband'], mux_bondpad=d['bond_pad'],
                     det_angle_raw_deg=float(d['angle_raw_deg']),
                     det_angle_actual_deg=float(d['angle_actual_deg']),
-                    det_pol_angle=float(d['angle_actual_deg']) % 180,
                     mux_layout_pos=_int(d['mux_layout_position']),
                     det_bandpass=d['bandpass'], det_pol=d['pol'],
                     is_optical=is_optical,
