@@ -87,8 +87,9 @@ class Resonator:
     det_bandpass: str = ''
     det_angle_raw_deg: float = np.nan
     det_angle_actual_deg: float = np.nan
+    det_pol_angle: float = np.nan
     det_type: str = ''
-    det_id: str = ''
+    det_id: str = 'NO_MATCH'
     is_optical: int = 1
     mux_bondpad: int = 0
     mux_subband: str = ''
@@ -100,7 +101,7 @@ class Resonator:
     match_idx: int = -1
  
 
-def apply_design_properties(smurf_res, design_res, in_place=False):
+def apply_design_properties(smurf_res, design_res, in_place=False, apply_pointing=True):
     """
     Combines two resonators into one, taking smurf-properties such as res-idx,
     smurf-band, and smurf-channel one, and design properties such as det
@@ -127,6 +128,8 @@ def apply_design_properties(smurf_res, design_res, in_place=False):
         'mux_bondpad', 'mux_subband', 'mux_band', 'mux_channel',
         'mux_layout_pos'
     ]
+    if apply_pointing:
+        design_props += ['xi', 'eta', 'gamma']
 
     for prop in design_props:
         setattr(r, prop, getattr(design_res, prop))
@@ -330,8 +333,9 @@ class ResSet:
                     det_type=d['det_type'], det_id=d['detector_id'].strip(),
                     mux_band=_int(d['mux_band']), mux_channel=_int(d['mux_channel']),
                     mux_subband=d['mux_subband'], mux_bondpad=d['bond_pad'],
-                    det_angle_raw_deg=d['angle_raw_deg'],
-                    det_angle_actual_deg=d['angle_actual_deg'],
+                    det_angle_raw_deg=float(d['angle_raw_deg']),
+                    det_angle_actual_deg=float(d['angle_actual_deg']),
+                    det_pol_angle=float(d['angle_actual_deg']) % 180,
                     mux_layout_pos=_int(d['mux_layout_position']),
                     det_bandpass=d['bandpass'], det_pol=d['pol'],
                     is_optical=is_optical,
@@ -447,7 +451,7 @@ class MatchParams:
     dist_width: float =0.01
     unmatched_good_res_pen: float = 10.
     good_res_qi_thresh: float = 100e3
-    force_src_pointing: bool = True
+    force_src_pointing: bool = False
     assigned_bg_unmatched_pen: float = 100000
     unassigned_bg_unmatched_pen: float = 10000
     assigned_bg_mismatch_pen: float = 100000
@@ -484,6 +488,9 @@ class Match:
         match_pars (MatchParams):
             MatchParams object used in the matching algorithm. This
             can be used to tune the cost-function and matching.
+        apply_dst_pointing (bool):
+            If True, the ``merged`` res-set will take its pointing information
+            from ``dst`` instead of ``src``.
     
     Attributes:
         src (ResSet):
@@ -508,7 +515,8 @@ class Match:
             A MatchingStats object containing some statistics about the
             matching.
     """
-    def __init__(self, src: ResSet, dst: ResSet, match_pars: Optional[MatchParams]=None):
+    def __init__(self, src: ResSet, dst: ResSet, match_pars: Optional[MatchParams]=None,
+                 apply_dst_pointing=True):
         self.src = src
         self.dst = dst
 
@@ -516,7 +524,9 @@ class Match:
             self.match_pars = MatchParams()
         else:
             self.match_pars = match_pars
+        self.apply_dst_pointing = apply_dst_pointing
 
+        self.matching_cost = np.nan
         self.matching, self.merged = self._match()
         self.stats = self.get_stats()
 
@@ -574,6 +584,7 @@ class Match:
 
         return arr
 
+
     def _match(self):
         nside = max(len(self.src), len(self.dst)) + self.match_pars.unassigned_slots
 
@@ -597,6 +608,7 @@ class Match:
             mat_full[len(self.src):, len(self.dst):] = 0
 
         self.matching = np.array(linear_sum_assignment(mat_full))
+        self.matching_cost = mat_full[self.matching[0], self.matching[1]].sum()
 
         for r1, r2 in self.get_match_iter(include_unmatched=True):
             if r1 is None:
@@ -616,7 +628,10 @@ class Match:
             if r1.matched:
                 # print(r1.match_idx)
                 r2 = self.dst[r1.match_idx]
-                r = apply_design_properties(r1, r2, in_place=False)
+                r = apply_design_properties(
+                    r1, r2, in_place=False,
+                    apply_pointing=self.apply_dst_pointing
+                )
             else:
                 r = deepcopy(r1)
             resonances.append(r)
@@ -700,8 +715,10 @@ class Match:
             fout.create_group('meta/match_pars')
             for k, v in asdict(self.match_pars).items():
                 fout['meta/match_pars'][k] = v
-            fout['meta/src_name'] = self.src.name
-            fout['meta/dst_name'] = self.dst.name
+            if self.src.name is not None:
+                fout['meta/src_name'] = self.src.name
+            if self.dst.name is not None:
+                fout['meta/dst_name'] = self.dst.name
 
             write_dataset(
                 metadata.ResultSet.from_friend(self.src.as_array()), fout, 'src')
@@ -710,7 +727,7 @@ class Match:
             write_dataset(np.array(self.matching), fout, 'matching')
             write_dataset(
                 metadata.ResultSet.from_friend(self.merged.as_array()), fout, 'merged')
-
+    
 
 def plot_match_freqs(m: Match, is_north=True, show_offset=False, xlim=None):
     """
