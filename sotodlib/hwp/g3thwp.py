@@ -622,7 +622,7 @@ class G3tHWP():
         average_slit = np.average(template_slit)
         # subtract template, keep raw timestamp
         subtract = np.cumsum(np.roll(np.tile(template_slit-average_slit,
-            len(solved['ref_indexes'+suffix]) + 1), solved['ref_indexes'+suffix][0] + 1)[:len(solved['fast_time'+suffix])])
+            len(solved['ref_indexes'+suffix]) + 1 + self._num_dropped_pkts), solved['ref_indexes'+suffix][0] + 1)[:len(solved['fast_time'+suffix])])
         solved['fast_time_raw'+suffix] = solved['fast_time'+suffix]
         solved['fast_time'+suffix] = solved['fast_time'+suffix] - subtract
 
@@ -1140,7 +1140,7 @@ class G3tHWP():
             # Define mean value as nominal slit distance
             if len(__diff) == 0:
                 continue
-            slit_dist = np.mean(__diff)
+            slit_dist = scipy.stats.trim_mean(__diff, 0.01)
 
             # Conditions for idenfitying the ref slit
             # Slit distance somewhere between 2 slits:
