@@ -1,4 +1,4 @@
-# Copyright (c) 2020 Simons Observatory.
+# Copyright (c) 2020-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import os
