@@ -1,4 +1,4 @@
-# Copyright (c) 2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import numpy as np
@@ -7,9 +7,9 @@ from astropy import units as u
 from toast.data import Data
 from toast.observation import default_values as defaults
 from toast.ops.operator import Operator
-from toast.timing import function_timer
+from toast.timing import function_timer, Timer
 from toast.traits import Int, Unicode, trait_docs
-from toast.utils import Environment, Logger, Timer, unit_conversion
+from toast.utils import Environment, Logger, unit_conversion
 
 from .mumux_crosstalk_util import detmap_available, pos_to_chi
 
