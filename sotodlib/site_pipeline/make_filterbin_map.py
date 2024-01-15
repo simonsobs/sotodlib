@@ -8,6 +8,7 @@ from sotodlib.hwp import hwp
 from pixell import enmap, utils, fft, bunch, wcsutils, tilemap, colors, memory, mpi
 from scipy import ndimage
 import sqlite3 
+import itertools
 
 from . import util
 
@@ -298,8 +299,8 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
 def write_depth1_map(prefix, data, split_labels=None):
     if split_labels==None:
         # we have no splits, so we save index 0 of the lists
-        data.signal.write(prefix, "map",  data.map[0])
-        data.signal.write(prefix, "ivar", data.ivar[0])
+        data.signal.write(prefix, "full_map",  data.map[0])
+        data.signal.write(prefix, "full_ivar", data.ivar[0])
         #data.signal.write(prefix, "time", data.tmap[0])
     else:
         # we have splits
@@ -465,7 +466,10 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         #except DataMissing as e:
         #    handle_empty(prefix, tag, comm_good, e)
     comm.Barrier()
-    if comm.rank == 0:
+    # gather the tags for writing into the sqlite database
+    tags_total = comm_inter.gather(tags, root=0)
+    if comm_inter.rank == 0:
+        tags_total = list(itertools.chain.from_iterable(tags_total)) # this is because tags_total is a list of lists of tuples, and we want a list of tuples
         # Write into the atomic map database.
         conn = sqlite3.connect('./'+atomic_db) # open the conector, if the database exists then it will be opened, otherwise it will be created
         cursor = conn.cursor()
@@ -485,7 +489,7 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
                           )""")
         conn.commit()
         
-        for tuple_ in tags:
+        for tuple_ in tags_total:
             cursor.execute("INSERT INTO atomic VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", tuple_)
         conn.commit()
         
