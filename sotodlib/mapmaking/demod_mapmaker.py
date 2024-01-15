@@ -158,7 +158,7 @@ class DemodSignalMap(DemodSignal):
                         key = freq+'_'+detset+'_'+split_labels[n_split]
                         mask_for_turnarounds = np.repeat(obs.flags.turnarounds.mask()[None,:], int(obs.dets.count), axis=0)
                         mask = det_split_masks[key]
-                        mask_for_split = np.repeat(mask[:,None], int(obs.samps.count), axis=1)
+                        mask_for_split = np.repeat(np.logical_not(mask)[:,None], int(obs.samps.count), axis=1) # the split mask is not since the detectors we want must be false
                         rangesmatrix = obs.flags.det_bias_flags + so3g.proj.RangesMatrix.from_mask(mask_for_turnarounds) + obs.flags_notfinite + so3g.proj.RangesMatrix.from_mask(mask_for_split) + obs.flags_stuck
                     pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix)
             else:
