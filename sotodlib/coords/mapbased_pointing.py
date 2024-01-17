@@ -170,48 +170,53 @@ def _gauss1d(x, peak, sigma, base):
 def map_to_xieta(mT, edge_avoidance=1.0*coords.DEG, edge_check='nan',
                  r_tune_circle=1.0*coords.DEG, q_tune=50, 
                  R2_threshold=0.5, r_fit_circle=3.0*coords.DEG, beam_sigma_init=0.5*coords.DEG, ):
-    xi_peak, eta_peak, ra_peak, dec_peak, peak_i, peak_j = detect_peak_xieta(mT)
-    edge_map = get_edgemap(mT, edge_avoidance=edge_avoidance, edge_check=edge_check)
-    edge_valid = not edge_map[peak_i, peak_j]
     
-    if edge_valid:
-        dec_flat, ra_flat = mT.posmap()
-        dec_flat = dec_flat.flatten()
-        ra_flat = ra_flat.flatten()
-        xi_flat, eta_flat = radec2xieta(ra_flat, dec_flat)
-
-        circle_mask = {'x0':xi_peak, 'y0':eta_peak, 'r_circle':r_tune_circle}
-        percentile_mask = {'q': q_tune}
-        xi_peak, eta_peak = get_center_of_mass(xi_flat, eta_flat, mT.flatten(), 
-                                              circle_mask=circle_mask, percentile_mask=percentile_mask)
-        
-        # check R2(=coefficient of determination)
-        r = np.sqrt((xi_flat - xi_peak)**2 + (eta_flat - eta_peak)**2)
-        z = mT.flatten()
-        mask_fit = np.logical_and(~np.isnan(z), r<r_fit_circle)
-        _r = r[mask_fit]
-        _z = z[mask_fit]
-        
-        if _r.shape[0] == 0:
-            xi_det = np.nan
-            eta_det = np.nan
-        else:
-            popt, pcov = curve_fit(_gauss1d, _r, _z,
-                                   p0=[np.ptp(_z), beam_sigma_init, np.percentile(_z, 1)],
-                                   bounds = ((-np.inf, beam_sigma_init/5, -np.inf),
-                                              (np.inf, beam_sigma_init*5, np.inf),),
-                                   max_nfev = 1000000
-                                  )
-            R2 = 1 - np.sum((_z - _gauss1d(_r, *popt))**2)/np.sum((_z - np.mean(_z))**2) # R2(=coefficient of determination)
-            if R2 >= R2_threshold:
-                xi_det = -xi_peak
-                eta_det = eta_peak
-            else:
-                xi_det = np.nan
-                eta_det = np.nan
-    else:
+    if np.all(np.isnan(mT)):
         xi_det = np.nan
         eta_det = np.nan
+    else:
+        xi_peak, eta_peak, ra_peak, dec_peak, peak_i, peak_j = detect_peak_xieta(mT)
+        edge_map = get_edgemap(mT, edge_avoidance=edge_avoidance, edge_check=edge_check)
+        edge_valid = not edge_map[peak_i, peak_j]
+
+        if edge_valid:
+            dec_flat, ra_flat = mT.posmap()
+            dec_flat = dec_flat.flatten()
+            ra_flat = ra_flat.flatten()
+            xi_flat, eta_flat = radec2xieta(ra_flat, dec_flat)
+
+            circle_mask = {'x0':xi_peak, 'y0':eta_peak, 'r_circle':r_tune_circle}
+            percentile_mask = {'q': q_tune}
+            xi_peak, eta_peak = get_center_of_mass(xi_flat, eta_flat, mT.flatten(), 
+                                                  circle_mask=circle_mask, percentile_mask=percentile_mask)
+
+            # check R2(=coefficient of determination)
+            r = np.sqrt((xi_flat - xi_peak)**2 + (eta_flat - eta_peak)**2)
+            z = mT.flatten()
+            mask_fit = np.logical_and(~np.isnan(z), r<r_fit_circle)
+            _r = r[mask_fit]
+            _z = z[mask_fit]
+
+            if _r.shape[0] == 0:
+                xi_det = np.nan
+                eta_det = np.nan
+            else:
+                popt, pcov = curve_fit(_gauss1d, _r, _z,
+                                       p0=[np.ptp(_z), beam_sigma_init, np.percentile(_z, 1)],
+                                       bounds = ((-np.inf, beam_sigma_init/5, -np.inf),
+                                                  (np.inf, beam_sigma_init*5, np.inf),),
+                                       max_nfev = 1000000
+                                      )
+                R2 = 1 - np.sum((_z - _gauss1d(_r, *popt))**2)/np.sum((_z - np.mean(_z))**2) # R2(=coefficient of determination)
+                if R2 >= R2_threshold:
+                    xi_det = -xi_peak
+                    eta_det = eta_peak
+                else:
+                    xi_det = np.nan
+                    eta_det = np.nan
+        else:
+            xi_det = np.nan
+            eta_det = np.nan
     return xi_det, eta_det    
 
 def get_xieta_from_maps(map_hdf_file, 
