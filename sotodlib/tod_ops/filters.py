@@ -577,3 +577,13 @@ def get_bpf(cfg):
                 high_pass_sine2(cutoff=center - width/2., width=trans_width)
     else:
         raise ValueError('Unsupported filter type. Supported filters are `identity`, `butter4` and `sine2`')
+        
+def get_fourier_filter(cfg):
+    if cfg['pass_type'] == 'lpf':
+        return get_lpf(cfg)
+    elif cfg['pass_type'] == 'hpf':
+        return get_hpf(cfg)
+    elif cfg['pass_type'] == 'bpf':
+        return get_bpf(cfg)
+    else:
+        raise ValueError('Unsupported pass_type. Supported pass_type are `lpf`, `hpf`, and `bpf`')

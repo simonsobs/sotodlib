@@ -229,7 +229,15 @@ class Calibrate(_Preprocess):
         else:
             raise ValueError(f"Entry '{self.process_cfgs['kind']}'"
                               " not understood")
-
+class ApplyFourierFilter(_Preprocess):
+    name = "fourier_filter"
+    def process(self, aman, proc_aman):
+        cfg = self.process_cfgs['cfg']
+        signal_name = self.process_cfgs['signal']
+        fourierfilter = tod_ops.filters.get_fourier_filter(cfg)
+        aman.signal = tod_ops.fourier_filter(aman, fourierfilter, signal_name=signal_name)
+        
+        
 class EstimateHWPSS(_Preprocess):
     """
     Builds a HWPSS Template. Calc configs go to ``hwpss_model``.
@@ -379,3 +387,4 @@ _Preprocess.register(DetBiasFlags.name, DetBiasFlags)
 _Preprocess.register(FlagSource.name, FlagSource)
 _Preprocess.register(MoveField.name, MoveField)
 _Preprocess.register(ReduceFlags.name, ReduceFlags)
+_Preprocess.register(ApplyFourierFilter.name, ApplyFourierFilter)
