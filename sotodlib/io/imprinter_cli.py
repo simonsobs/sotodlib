@@ -83,16 +83,12 @@ def check_failed_books(imprint:Imprinter):
                 book, ignore_tags=ignore_tags, ancil_drop_duplicates=ancil_drop_duplicates
             )
             if imprint.docker_output_root is not None:
-                session = imprint.get_session()
-                db_book = session.query(Books).filter(
-                    Books.bid == book
-                ).one()
-                db_book.path = db_book.replace(
+                book.path = book.path.replace(
                     imprint.output_root, 
                     imprint.docker_output_root
                 )
-                session.commit()
-                print(f"Updated book path to {db_book.path}")
+                imprinter.get_session().commit()
+                print(f"Updated book path to {book.path}")
         elif resp == 3:
             utils.set_book_wont_bind(imprint, book)
         elif resp == 4:
