@@ -87,7 +87,7 @@ def check_failed_books(imprint:Imprinter):
                     imprint.output_root, 
                     imprint.docker_output_root
                 )
-                imprinter.get_session().commit()
+                imprint.get_session().commit()
                 print(f"Updated book path to {book.path}")
         elif resp == 3:
             utils.set_book_wont_bind(imprint, book)
