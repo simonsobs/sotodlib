@@ -28,7 +28,10 @@ def main(
     if output_root is not None:
         if not os.path.exists(output_root):
             raise ValueError(f"Output root {output_root} does not exist")
+        imprint.docker_output_root = imprint.output_root
         imprint.output_root = output_root
+    else:
+        imprint.docker_output_root = None
     if g3_config is not None:
         if not os.path.exists(g3_config):
             raise ValueError(f"G3tSmurf config file {g3_config} does not exist")
@@ -79,6 +82,17 @@ def check_failed_books(imprint:Imprinter):
             imprint.bind_book(
                 book, ignore_tags=ignore_tags, ancil_drop_duplicates=ancil_drop_duplicates
             )
+            if imprint.docker_output_root is not None:
+                session = imprint.get_session()
+                db_book = session.query(Books).filter(
+                    Books.bid == book
+                ).one()
+                db_book.path = db_book.replace(
+                    imprint.output_root, 
+                    imprint.docker_output_root
+                )
+                session.commit()
+                print(f"Updated book path to {db_book.path}")
         elif resp == 3:
             utils.set_book_wont_bind(imprint, book)
         elif resp == 4:
