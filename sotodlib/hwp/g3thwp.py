@@ -622,7 +622,7 @@ class G3tHWP():
         average_slit = np.average(template_slit)
         # subtract template, keep raw timestamp
         subtract = np.cumsum(np.roll(np.tile(template_slit-average_slit,
-            len(solved['ref_indexes'+suffix]) + 1 + self._num_dropped_pkts), solved['ref_indexes'+suffix][0] + 1)[:len(solved['fast_time'+suffix])])
+            len(solved['ref_indexes'+suffix]) + 1), solved['ref_indexes'+suffix][0] + 1)[:len(solved['fast_time'+suffix])])
         solved['fast_time_raw'+suffix] = solved['fast_time'+suffix]
         solved['fast_time'+suffix] = solved['fast_time'+suffix] - subtract
 
