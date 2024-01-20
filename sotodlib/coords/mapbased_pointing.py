@@ -4,15 +4,16 @@ import numpy as np
 from scipy import interpolate
 from scipy.optimize import curve_fit
 
+from sotodlib import core
 from sotodlib import coords
-
+from sotodlib.coords import optics
 from sotodlib.core import metadata
 from sotodlib.io.metadata import write_dataset
 
 from so3g.proj import quat
 from pixell import enmap
 import h5py
-from scipy.ndimage.filters import maximum_filter
+from scipy.ndimage import maximum_filter
 
 def get_planet_trajectry(tod, planet, _split=20, return_model=False):
     timestamps_sparse = np.linspace(tod.timestamps[0], tod.timestamps[-1], _split)
@@ -33,62 +34,95 @@ def get_planet_trajectry(tod, planet, _split=20, return_model=False):
         q_planet = quat.rotation_lonlat(planet_az, planet_el)
         return q_planet
 
-def get_det_centered_sight(tod, planet, q_planet=None, q_bs=None, q_det=None, 
-                           det=None):
+def get_wafer_centered_sight(tod, planet, q_planet=None, q_bs=None, q_wafer=None):
     if q_planet is None:
         q_planet = get_planet_trajectry(tod, planet)
     if q_bs is None:
         q_bs = quat.rotation_lonlat(tod.boresight.az, tod.boresight.el)
-    if q_det is None:
-        di = np.where(tod.dets.vals == det)[0][0]
-        xi = tod.focal_plane.xi[di]
-        eta = tod.focal_plane.eta[di]
-        q_det = quat.rotation_xieta(-xi, eta)
+    if q_wafer is None:
+        q_wafer = quat.rotation_xieta(-np.nanmedian(tod.focal_plane.xi), 
+                                      np.nanmedian(tod.focal_plane.eta))
     
     z_to_x = quat.rotation_lonlat(0, 0)
-    sight = z_to_x * ~(q_bs * q_det) * q_planet
+    sight = z_to_x * ~(q_bs * q_wafer) * q_planet
     return sight
 
-def make_det_centered_maps(tod, planet, hdf_path, have_same_xieta=True, cuts=None,
-                           wcs_kernel=None, res=0.1*coords.DEG, signal='signal'):
+def get_wafer_xieta(wafer_slot, xieta_bs_offset=(0., 0.), roll_bs_offset=0.,
+                    optics_config_fn=None, wrap_to_tod=True, tod=None):    
+    optics_config = optics.load_ufm_to_fp_config(optics_config_fn)['SAT']
+    wafer_x, wafer_y = optics_config[wafer_slot]['dx'], optics_config[wafer_slot]['dy']
+    wafer_r = np.sqrt(wafer_x**2 + wafer_y**2)
+    wafer_theta = np.arctan2(wafer_y, wafer_x)
+
+    fp_to_sky = optics.sat_to_sky(optics.SAT_X, optics.SAT_LON)
+    lon = fp_to_sky(wafer_r)
+    
+    q1 = quat.rotation_iso(lon, 0)
+    q2 = quat.rotation_iso(0, 0, np.pi/2 - wafer_theta - roll_bs_offset)
+    q3 = quat.rotation_xieta(xieta_bs_offset[0], xieta_bs_offset[1])
+    q = q3 * q2 * q1
+    
+    xi_wafer, eta_wafer, _ = quat.decompose_xieta(q)
+    if wrap_to_tod:
+        if tod is None:
+            raise ValueError('tod is not provided.')
+        if 'focal_plane' in tod._fields.keys():
+            tod.move('focal_plane', None)
+        focal_plane = core.AxisManager(tod.dets)
+        focal_plane.wrap('xi', np.ones(tod.dets.count, dtype='float32') * xi_wafer, [(0, 'dets')])
+        focal_plane.wrap('eta', np.ones(tod.dets.count, dtype='float32') * eta_wafer, [(0, 'dets')])
+        focal_plane.wrap('gamma', np.zeros(tod.dets.count, dtype='float32'), [(0, 'dets')])
+        tod.wrap('focal_plane', focal_plane)
+        tod.boresight.roll *= 0.
+    return xi_wafer, eta_wafer
+
+
+def make_det_centered_maps(tod, planet, hdf_path, 
+                           xieta_bs_offset=(0., 0.), roll_bs_offset=0.,
+                           map_make_style = 'old',
+                           signal='signal', wcs_kernel=None, res=0.3*coords.DEG, cuts=None,):
     if wcs_kernel is None:
         wcs_kernel = coords.get_wcs_kernel('car', 0, 0, res)
     
     q_planet = get_planet_trajectry(tod, planet)
     q_bs = quat.rotation_lonlat(tod.boresight.az, tod.boresight.el)
-    if have_same_xieta:
-        xi_det, eta_det = tod.focal_plane.xi[0], tod.focal_plane.eta[0]
-        q_det = quat.rotation_xieta(-xi_det, eta_det)
-        tod_single = tod.restrict('dets', tod.dets.vals[:1], in_place=False)
-        sight = get_det_centered_sight(tod_single, planet, q_planet=q_planet, q_bs=q_bs, q_det=q_det)
-        tod_single.focal_plane.xi *= 0.
-        tod_single.focal_plane.eta *= 0.
-        tod_single.boresight.roll *= 0.
-        if cuts is None:
-            cuts_single = None
-        else:
-            cuts_single = cuts[0]
-        P = coords.P.for_tod(tod=tod_single, wcs_kernel=wcs_kernel, comps='T', cuts=cuts_single, sight=sight)
-            
-    for di, det in enumerate(tqdm(tod.dets.vals)):
-        tod_single = tod.restrict('dets', tod.dets.vals[di:di+1], in_place=False)
-        
-        if not have_same_xieta:
-            xi_det, eta_det = tod_single.focal_plane.xi[0], tod_single.focal_plane.eta[0]
-            q_det = quat.rotation_xieta(-xi_det, eta_det)
-            sight = get_det_centered_sight(tod_single, planet, q_planet=q_planet, q_bs=q_bs, q_det=q_det)
-            tod_single.focal_plane.xi *= 0.
-            tod_single.focal_plane.eta *= 0.
-            if cuts is None:
-                cuts_single = None
-            else:
-                cuts_single = cuts[di]
-            P = coords.P.for_tod(tod=tod_single, wcs_kernel=wcs_kernel, comps='T', cuts=cuts_single, sight=sight)
-        
-        mT_weighted = P.to_map(tod=tod_single, signal=signal, comps='T', det_weights=None)
-        wT = P.to_weights(tod_single, signal=signal, comps='T', det_weights=None)
-        mT = P.remove_weights(signal_map=mT_weighted, weights_map=wT, comps='T')[0]
-        enmap.write_hdf(hdf_path, mT, address=det, extra={'xi0': xi_det, 'eta0': eta_det})
+    
+    xi0 = np.nanmedian(tod.focal_plane.xi)
+    eta0 = np.nanmedian(tod.focal_plane.eta)
+    sight = get_wafer_centered_sight(tod, planet)
+    q_wafer = quat.rotation_xieta(-xi0, eta0)
+    
+    xi_bs_offset, eta_bs_offset = xieta_bs_offset
+    
+    tod.focal_plane.xi *= 0.
+    tod.focal_plane.eta *= 0.
+    tod.boresight.roll *= 0.
+    if map_make_style == 'old':
+        for di, det in enumerate(tqdm(tod.dets.vals)):
+            tod_single = tod.restrict('dets', tod.dets.vals[di:di+1], in_place=False)
+            if di == 0:
+                if cuts is None:
+                    cuts_single = None
+                else:
+                    cuts_single = cuts[di]
+                P = coords.P.for_tod(tod=tod_single, wcs_kernel=wcs_kernel, comps='T', cuts=cuts_single, sight=sight)
+            mT_weighted = P.to_map(tod=tod_single, signal=signal, comps='T')
+            wT = P.to_weights(tod_single, signal=signal, comps='T')
+            mT = P.remove_weights(signal_map=mT_weighted, weights_map=wT, comps='T')[0]
+            enmap.write_hdf(hdf_path, mT, address=det,
+                            extra={'xi0': xi0, 'eta0': eta0, 
+                                   'xi_bs_offset': xi_bs_offset, 'eta_bs_offset': eta_bs_offset, 'roll_bs_offset': roll_bs_offset})
+
+    elif map_make_style == 'new':
+        P = coords.P.for_tod(tod=tod, wcs_kernel=wcs_kernel, comps='T', cuts=cuts, sight=sight)
+        for di, det in enumerate(tqdm(tod.dets.vals)):
+            det_weights = np.zeros(tod.dets.count, dtype='float32')
+            det_weights[di] = 1.
+            mT_weighted = P.to_map(tod=tod, signal=signal, comps='T', det_weights=det_weights)
+            wT = P.to_weights(tod, signal=signal, comps='T', det_weights=det_weights)
+            mT = P.remove_weights(signal_map=mT_weighted, weights_map=wT, comps='T')[0]
+            enmap.write_hdf(hdf_path, mT, address=det,
+                            extra={'xi0': xi0, 'eta0': eta0, 'roll0': roll0})
     return
 
 def detect_peak_xieta(mT, filter_size=None):
@@ -221,8 +255,8 @@ def map_to_xieta(mT, edge_avoidance=1.0*coords.DEG, edge_check='nan',
 
 def get_xieta_from_maps(map_hdf_file, 
                         edge_avoidance=1.0*coords.DEG, edge_check='nan',
-                        r_tune_circle=1.0*coords.DEG, q_tune=50,
-                        save=False, output_dir=None, filename=None):
+                        r_tune_circle=1.0*coords.DEG, q_tune=50, R2_threshold=0.5,
+                        save=False, output_dir=None, filename=None, force_zero_roll=False):
     _input_file = h5py.File(map_hdf_file, 'r')
     
     with _input_file as ifile:
@@ -233,21 +267,37 @@ def get_xieta_from_maps(map_hdf_file,
             mT = enmap.read_hdf(ifile[det])
             mT[mT==0] = np.nan
             xi, eta = map_to_xieta(mT, edge_avoidance=edge_avoidance, edge_check=edge_check,
-                                    r_tune_circle=r_tune_circle, q_tune=q_tune)
-            xi0 = float(ifile[det]['xi0'][...])
-            eta0 = float(ifile[det]['eta0'][...])
+                                   R2_threshold=R2_threshold, r_tune_circle=r_tune_circle, q_tune=q_tune)
+            xi0 = ifile[det]['xi0'][...].item()
+            eta0 = ifile[det]['eta0'][...].item()
             xi, eta = _add_xieta((xi0, eta0), (xi, eta))
-            xieta_dict[det] = {'xi':xi, 'eta':eta}
+            if force_zero_roll:
+                xieta_dict[det] = {'xi':xi, 'eta':eta}
+            else:
+                xi_bs_offset = ifile[det]['xi_bs_offset'][...].item()
+                eta_bs_offset = ifile[det]['eta_bs_offset'][...].item()
+                roll_bs_offset = ifile[det]['roll_bs_offset'][...].item()
+                
+                q1 = quat.rotation_xieta(xi, eta)
+                q2 = quat.rotation_xieta(xi_bs_offset, eta_bs_offset)
+                q3 = quat.rotation_iso(0, 0, roll_bs_offset)
+                q = q3 * ~q2 * q1
+                xieta = quat.decompose_xieta(q)
+                xi, eta = xieta[0], xieta[1]
+                xieta_dict[det] = {'xi':xi, 'eta':eta}
     if save:
         if output_dir is None:
-            output_dir = os.path.join(os.getcwd(), 'pointing_results')
+            if force_zero_roll:
+                output_dir = os.path.join(os.getcwd(), 'pointing_results_force_zero_roll')
+            else:
+                output_dir = os.path.join(os.getcwd(), 'pointing_results')
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
         if filename is None:
             filename = 'focalplane_' + os.path.splitext(os.path.basename(map_hdf_file))[0] + '.hdf'
         output_file = os.path.join(output_dir, filename)
         
-        focalplane = metadata.ResultSet(keys=['dets:readout_id', 'band', 'channel', 'xi0', 'eta0', 'gamma'])
+        focalplane = metadata.ResultSet(keys=['dets:readout_id', 'band', 'channel', 'xi', 'eta', 'gamma'])
         for det in dets:
             band = int(det.split('_')[-2])
             channel = int(det.split('_')[-1])
