@@ -1,4 +1,5 @@
 import os
+import re
 from tqdm import tqdm
 import numpy as np
 from scipy import interpolate
@@ -8,7 +9,7 @@ from sotodlib import core
 from sotodlib import coords
 from sotodlib.coords import optics
 from sotodlib.core import metadata
-from sotodlib.io.metadata import write_dataset
+from sotodlib.io.metadata import write_dataset, read_dataset
 
 from so3g.proj import quat
 from pixell import enmap
@@ -114,7 +115,7 @@ def make_det_centered_maps(tod, planet, hdf_path,
                                    'xi_bs_offset': xi_bs_offset, 'eta_bs_offset': eta_bs_offset, 'roll_bs_offset': roll_bs_offset})
 
     elif map_make_style == 'new':
-        P = coords.P.for_tod(tod=tod, wcs_kernel=wcs_kernel, comps='T', cuts=cuts, sight=sight)
+        P = coords.P.for_tod(tod=tod, wcs_kernel=wcs_kernel, comps='T', cuts=cuts, sight=sight, threads=False)
         for di, det in enumerate(tqdm(tod.dets.vals)):
             det_weights = np.zeros(tod.dets.count, dtype='float32')
             det_weights[di] = 1.
@@ -122,7 +123,8 @@ def make_det_centered_maps(tod, planet, hdf_path,
             wT = P.to_weights(tod, signal=signal, comps='T', det_weights=det_weights)
             mT = P.remove_weights(signal_map=mT_weighted, weights_map=wT, comps='T')[0]
             enmap.write_hdf(hdf_path, mT, address=det,
-                            extra={'xi0': xi0, 'eta0': eta0, 'roll0': roll0})
+                            extra={'xi0': xi0, 'eta0': eta0, 
+                                   'xi_bs_offset': xi_bs_offset, 'eta_bs_offset': eta_bs_offset, 'roll_bs_offset': roll_bs_offset})
     return
 
 def detect_peak_xieta(mT, filter_size=None):
@@ -315,3 +317,61 @@ def _add_xieta(xieta1, xieta2):
     q_add = q2*q1
     xi_add, eta_add, _ = quat.decompose_xieta(q_add)
     return xi_add, eta_add
+
+
+
+def combine_pointings(pointing_result_files, method='mean', save=False, output_dir=None, save_name=None):
+    combined_dict = {}
+    for file in pointing_result_files:
+        rset = read_dataset(file, 'focalplane')
+        for row in rset[:]:
+            if row['dets:readout_id'] not in combined_dict.keys():
+                combined_dict[row['dets:readout_id']] = {}
+                combined_dict[row['dets:readout_id']]['band'] = row['band']
+                combined_dict[row['dets:readout_id']]['channel'] = row['channel']
+                combined_dict[row['dets:readout_id']]['xi'] = np.atleast_1d([])
+                combined_dict[row['dets:readout_id']]['eta'] = np.atleast_1d([])
+                combined_dict[row['dets:readout_id']]['gamma'] = np.atleast_1d([])
+
+            combined_dict[row['dets:readout_id']]['xi'] = np.append(combined_dict[row['dets:readout_id']]['xi'], row['xi'])
+            combined_dict[row['dets:readout_id']]['eta'] = np.append(combined_dict[row['dets:readout_id']]['eta'], row['eta'])
+            combined_dict[row['dets:readout_id']]['gamma'] = np.append(combined_dict[row['dets:readout_id']]['gamma'], row['gamma'])
+
+    focalplane = metadata.ResultSet(keys=['dets:readout_id', 'band', 'channel', 'xi', 'eta', 'gamma'])
+    for det, val in combined_dict.items():
+        band = int(val['band'])
+        channel = int(val['channel'])
+        if method == 'mean':
+            xi = np.nanmean(val['xi'])
+            eta = np.nanmean(val['eta'])
+            gamma = np.nanmean(val['gamma'])
+        elif method == 'median':
+            xi = np.nanmedian(val['xi'])
+            eta = np.nanmedian(val['eta'])
+            gamma = np.nanmedian(val['gamma'])
+        else:
+            raise ValueError('Not supported method. Supported methods are `mean` or `median`')
+        focalplane.rows.append((det, band, channel, xi, eta, gamma))
+    if save:
+        if output_dir is None:
+            output_dir = os.path.join(os.getcwd(), 'combined_pointing_results')
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        if save_name is None:
+            ctimes = np.atleast_1d([])
+            wafer_slots = np.atleast_1d([])
+            
+            for file in pointing_result_files:
+                filename = os.path.basename(file)
+                match = re.search('\d{10}', filename)
+                ctime = int(match.group(0) if match else None)
+                match = re.search('ws\d{1}', filename)
+                ws = match.group(0)
+                ctimes = np.append(ctimes, ctime)
+                wafer_slots = np.append(wafer_slots, ws)
+            ctimes = ctimes.astype('int')
+            wafer_slots = np.sort(np.unique(wafer_slots.astype('U3')))
+            save_name = f'focalplane_{ctimes.min()}_{ctimes.max()}_' + ''.join(wafer_slots) + '.hdf'
+            
+        write_dataset(focalplane, os.path.join(output_dir, save_name), 'focalplane', overwrite=True)
+    return focalplane
