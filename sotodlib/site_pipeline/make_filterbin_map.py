@@ -427,11 +427,11 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
             # this is for the tags
             if split_labels is None:
                 # this means the mapmaker was run without any splits requested
-                tags.append( (obs_infos[obslist[0][3]].telescope, band, detset, int(t), 'full', 'full', cwd+'/'+prefix, obs_infos[obslist[0][3]].el_center, 0.0) )
+                tags.append( (obs_infos[obslist[0][3]].telescope, band, detset, int(t), 'full', 'full', cwd+'/'+prefix+'_full', obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, 0.0) )
             else:
                 # splits were requested and we loop over them
                 for split_label in split_labels:
-                    tags.append( (obs_infos[obslist[0][3]].telescope, band, detset, int(t), split_label, '', cwd+'/'+prefix, obs_infos[obslist[0][3]].el_center, 0.0) )
+                    tags.append( (obs_infos[obslist[0][3]].telescope, band, detset, int(t), split_label, '', cwd+'/'+prefix+'_%s'%split_label, obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, 0.0) )
             
             all_inds  = utils.allgatherv(my_inds,     comm_intra)
             all_costs = utils.allgatherv(my_costs,    comm_intra)
@@ -485,12 +485,13 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
                           split_detail TEXT,
                           prefix_path TEXT,
                           elevation REAL,
+                          azimuth REAL,
                           pwv REAL
                           )""")
         conn.commit()
         
         for tuple_ in tags_total:
-            cursor.execute("INSERT INTO atomic VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", tuple_)
+            cursor.execute("INSERT INTO atomic VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", tuple_)
         conn.commit()
         
         conn.close()
