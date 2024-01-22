@@ -271,8 +271,10 @@ def _diff_buffed(
         size[-1] = _size
         signal = simg.median_filter(signal, size)
     pad = np.zeros((len(signal.shape), 2), dtype=int)
-    pad[-1, 0] = win_size
-    diff_buffed = signal - np.pad(signal, pad, mode="edge")[..., : (-1 * win_size)]
+    half_win = int(win_size / 2)
+    pad[-1, :] = half_win
+    padded = np.pad(signal, pad, mode="edge")
+    diff_buffed = padded[..., win_size:] - padded[..., : (-1 * win_size)]
 
     return diff_buffed
 
