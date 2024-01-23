@@ -140,7 +140,6 @@ def main(config: str,
     except KeyError:
         logger.error("No base directory base_dir specified in config file!")
 
-    new_obsdb = True
     if "obsdb" in config_dict:
         bookcartobsdb = ObsDb(map_file=config_dict["obsdb"])
     else:
