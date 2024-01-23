@@ -17,7 +17,7 @@ The config file could be of the form:
 
     obsdb: dummyobsdb.sqlite
     obsfiledb: dummyobsfiledb.sqlite
-    lat_tube_list_dir: path to lat_tube_list.yaml,a dict matching tubes and bands
+    lat_tube_list_file: path to yaml dict matching tubes and bands
     tolerate_stray_files: True
     skip_bad_books: True
     extra_extra_files:
@@ -227,8 +227,9 @@ def main(config: str,
                     bookcartobsdb.add_obs_columns([flav+" str"])
                     very_clean[flav] = flavors[flav]
                 if telescope == "lat":
-                   lat_tube_list_dir = config_dict["lat_tube_list_dir"]
-                   lat_tube_list = yaml.safe_load(open(os.path.join(lat_tube_list_dir, "lat_tube_list.yaml"), "rb"))
+                   lat_tube_list = yaml.safe_load(
+                       open(config_dict["lat_tube_list_file"], "rb")
+                   )
                    tube_flavor = lat_tube_list[index["tube_slot"]]
                    bookcartobsdb.add_obs_columns("tube_flavor str")
                    very_clean["tube_flavor"] = tube_flavor
