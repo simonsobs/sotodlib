@@ -3,11 +3,12 @@ import numpy as np
 import os
 import yaml
 from copy import deepcopy
-from typing import Optional
+from typing import Optional, Dict
 from dataclasses import dataclass
 from tqdm.auto import tqdm
 import logging
 import argparse
+from pprint import pprint
 
 from sotodlib.coords import det_match, optics
 from sotodlib import core
@@ -57,6 +58,9 @@ class UpdateDetMatchesConfig:
     apply_solution_pointing: bool
         If True, pointing information computed from design-detector positions
         will be used in the ``merged`` detset of the match.
+    write_relpath: bool
+        If True, will use the relative path to the h5 file (relative to the db
+        path) when writing to the manifestdb
     
     Attriutes
     -------------
@@ -68,10 +72,12 @@ class UpdateDetMatchesConfig:
     context_path: str
     site_pipeline_root:str = os.environ.get('SITE_PIPELINE_CONFIG_DIR')
     freq_offset_range_args: Optional[tuple[float, float, float]] = (-4, 4, 0.3)
+    match_pars: Optional[Dict] = None
     detset_meta_name : str = 'smurf'
     detcal_meta_name: str = 'det_cal'
     show_pb: bool = False
     apply_solution_pointing: bool = True
+    write_relpath: bool = True
 
     def __post_init__(self):
         if self.site_pipeline_root is None:
@@ -81,6 +87,9 @@ class UpdateDetMatchesConfig:
             self.freq_offsets = np.arange(*self.freq_offset_range_args)
         else:
             self.freq_offsets = None
+
+        if self.match_pars is None:
+            self.match_pars = {}
 
 
 class Runner:
@@ -167,10 +176,13 @@ def run_match_aman(runner: Runner, aman, detset, wafer_slot=None):
     rs1 = det_match.ResSet.from_solutions(sol_file, fp_pars=fp_pars, platform=teltype)
     rs1.name = 'sol'
 
-    match_pars = det_match.MatchParams()
+    match_pars = det_match.MatchParams(**runner.cfg.match_pars)
     freq_offsets = runner.cfg.freq_offsets
     if freq_offsets is not None:
-        costs, opt_freq = scan_for_freq_offset(rs0, rs1, freq_offsets, show_pb=runner.cfg.show_pb)
+        costs, opt_freq = scan_for_freq_offset(
+            rs0, rs1, freq_offsets, show_pb=runner.cfg.show_pb,
+            match_pars=match_pars,
+        )
         match_pars.freq_offset_mhz = opt_freq
     match = det_match.Match(rs0, rs1, match_pars=match_pars, 
                      apply_dst_pointing=runner.cfg.apply_solution_pointing)
@@ -206,7 +218,7 @@ def run_match(runner: Runner, detset: str):
     with open(book_idx_file, 'r') as f:
         book_idx = yaml.safe_load(f)
 
-    aman = runner.ctx.get_meta(obs_id)
+    aman = runner.ctx.get_meta(obs_id, ignore_missing=True)
     finished_detsets = set([os.path.splitext(f)[0] for f in os.listdir(runner.match_dir)])
     new_detsets = []
     for detset in np.unique(aman.det_info.detset):
@@ -293,13 +305,16 @@ def update_manifests(runner: Runner, detset):
     ra.dtype.names = tuple(names)
     assignment = ra[['dets:readout_id', 'det_id']]
 
-    def add_to_db(arr, db_path, h5_path, detset):
+    def add_to_db(arr, db_path, h5_path, detset, write_relpath=True):
         write_dataset(core.metadata.ResultSet.from_friend(arr), h5_path, detset, overwrite=True)
         if not os.path.exists(db_path):
             scheme = core.metadata.ManifestScheme()
             scheme.add_exact_match('dets:detset')
             scheme.add_data_field('dataset')
             db = core.metadata.ManifestDb(db_path, scheme=scheme)
+
+        if write_relpath:
+            h5_path = os.path.relpath(h5_path, start=os.path.dirname(db_path))
 
         db = core.metadata.ManifestDb(db_path)
         if detset not in db.get_entries(['dataset'])['dataset']:
@@ -310,8 +325,11 @@ def update_manifests(runner: Runner, detset):
         else:
             logger.warning(f"Dataset {detset} already exists in db: {db_path}")
     
-    add_to_db(ra, det_match_idx, det_match_h5, detset)
-    add_to_db(assignment, assignment_idx, assignment_h5, detset)
+    write_relpath = runner.cfg.write_relpath
+    add_to_db(ra, det_match_idx, det_match_h5, detset,
+              write_relpath=write_relpath)
+    add_to_db(assignment, assignment_idx, assignment_h5, detset,
+              write_relpath=write_relpath)
 
 
 def update_manifests_all(runner):
