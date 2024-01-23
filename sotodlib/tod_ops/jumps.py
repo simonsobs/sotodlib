@@ -7,7 +7,7 @@ import scipy.stats as ss
 from numpy.typing import NDArray
 from scipy.sparse import csr_array, lil_array
 from skimage.restoration import denoise_tv_chambolle
-from so3g.proj import RangesMatrix
+from so3g.proj import Ranges, RangesMatrix
 
 from sotodlib.core import AxisManager
 
@@ -187,7 +187,7 @@ class JumpFix(Protocol):
     def __call__(
         self,
         x: NDArray[np.floating],
-        jumps: NDArray[np.bool_],
+        jumps: Tuple[Ranges, RangesMatrix, NDArray[np.bool_]],
         inplace: bool = False,
         **kwargs,
     ) -> NDArray[np.floating]:
@@ -196,7 +196,7 @@ class JumpFix(Protocol):
 
 def jumpfix_subtract_heights(
     x: NDArray[np.floating],
-    jumps: NDArray[np.bool_],
+    jumps: Tuple[Ranges, RangesMatrix, NDArray[np.bool_]],
     inplace: bool = False,
     heights: Optional[csr_array] = None,
     **kwargs,
@@ -210,7 +210,7 @@ def jumpfix_subtract_heights(
 
         x: Data to jumpfix on, expects 1D or 2D.
 
-        jumps: Boolean mask of that is True at jump locations.
+        jumps: Boolean mask or Ranges(Matrix) of jump locations.
                Should be the same shape at x.
 
         inplace: Whether of not x should be fixed inplace.
@@ -230,6 +230,8 @@ def jumpfix_subtract_heights(
         x_fixed = x.copy()
     orig_shape = x.shape
     x_fixed = np.atleast_2d(x_fixed)
+    if isinstance(jumps, (Ranges, RangesMatrix)):
+        jumps = jumps.mask()
     jumps = np.atleast_2d(jumps)
     jumps[:, [0, -1]] = False
 
@@ -493,7 +495,7 @@ def twopi_jumps(
     if fix:
         jumps = jump_ranges.mask()
         heights = estimate_heights(signal, jumps, twopi=True, diff_buffed=diff_buffed)
-        fixed = jumpfix_subtract_heights(signal, jumps, inplace, heights)
+        fixed = jumpfix_subtract_heights(signal, jump, inplace, heights)
 
         return jump_ranges, fixed
     return jump_ranges
