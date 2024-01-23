@@ -154,6 +154,7 @@ def main(
     for obs in run_list:
         h5_address = obs["obs_id"]
         logger.info(f"Calculating Angles for {h5_address}")
+        ctx = core.Context(context)
         tod = ctx.get_obs(obs, no_signal=True)
         
         # make angle solutions
