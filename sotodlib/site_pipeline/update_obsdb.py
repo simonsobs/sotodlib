@@ -142,15 +142,10 @@ def main(config: str,
 
     new_obsdb = True
     if "obsdb" in config_dict:
-        if os.path.isfile(config_dict["obsdb"]):
-            bookcartobsdb = ObsDb(map_file=config_dict["obsdb"])
-            new_obsdb = False
-        else:
-            logger.error("No obsdb at the indicated location")
-            bookcartobsdb = ObsDb()
+        bookcartobsdb = ObsDb(map_file=config_dict["obsdb"])
     else:
         logger.warning("No obsdb named in the configuration file")
-        bookcartobsdb = ObsDb()
+        bookcartobsdb = ObsDb("obsdb.sqlite")
         
     if "obsdb_cols" in config_dict:
         col_list = []
@@ -290,11 +285,6 @@ def main(config: str,
            
         else:
             bookcart.remove(bookpath)
-    if new_obsdb:
-        if "obsdb" in config_dict:
-            bookcartobsdb.to_file(config_dict["obsdb"])
-        else:
-            bookcartobsdb.to_file("obsdb_from_{}_to_{}.sqlite".format(int(tback), int(tnow)))
 
 
 def get_parser(parser=None):
