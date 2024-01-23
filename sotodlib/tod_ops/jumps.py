@@ -7,7 +7,8 @@ import scipy.stats as ss
 from numpy.typing import NDArray
 from scipy.sparse import csr_array, lil_array
 from skimage.restoration import denoise_tv_chambolle
-from so3g.proj import RangesMatrix
+from so3g.proj import Ranges, RangesMatrix
+from pixell.utils import block_reduce, block_expand
 
 from sotodlib.core import AxisManager
 
@@ -183,20 +184,9 @@ def _jumpfinder(
     return jumps.reshape(orig_shape)
 
 
-class JumpFix(Protocol):
-    def __call__(
-        self,
-        x: NDArray[np.floating],
-        jumps: NDArray[np.bool_],
-        inplace: bool = False,
-        **kwargs,
-    ) -> NDArray[np.floating]:
-        ...
-
-
 def jumpfix_subtract_heights(
     x: NDArray[np.floating],
-    jumps: NDArray[np.bool_],
+    jumps: Union[Ranges, RangesMatrix, NDArray[np.bool_]],
     inplace: bool = False,
     heights: Optional[csr_array] = None,
     **kwargs,
@@ -210,7 +200,7 @@ def jumpfix_subtract_heights(
 
         x: Data to jumpfix on, expects 1D or 2D.
 
-        jumps: Boolean mask of that is True at jump locations.
+        jumps: Boolean mask or Ranges(Matrix) of jump locations.
                Should be the same shape at x.
 
         inplace: Whether of not x should be fixed inplace.
@@ -230,6 +220,8 @@ def jumpfix_subtract_heights(
         x_fixed = x.copy()
     orig_shape = x.shape
     x_fixed = np.atleast_2d(x_fixed)
+    if isinstance(jumps, (Ranges, RangesMatrix)):
+        jumps = jumps.mask()
     jumps = np.atleast_2d(jumps)
     jumps[:, [0, -1]] = False
 
@@ -261,8 +253,24 @@ def jumpfix_subtract_heights(
     return x_fixed.reshape(orig_shape)
 
 
+def _make_step(signal: NDArray[np.floating], jumps: NDArray[np.bool_]):
+    ranges = RangesMatrix.from_mask(np.atleast_2d(jumps))
+    signal_step = np.atleast_2d(signal.copy())
+    samps = signal_step.shape[-1]
+    for i, det in enumerate(ranges.ranges):
+        for r in det.ranges():
+            mid = int((r[0] + r[1]) / 2)
+            signal_step[i, r[0] : mid] = signal_step[i, max(r[0] - 1, 0)]
+            signal_step[i, mid : r[1]] = signal_step[i, min(r[1] + 1, samps)]
+    return signal_step.reshape(signal.shape)
+
+
 def _diff_buffed(
-    signal: NDArray[np.floating], win_size: int, medfilt: bool
+    signal: NDArray[np.floating],
+    jumps: Optional[NDArray[np.bool_]],
+    win_size: int,
+    medfilt: bool,
+    make_step: bool,
 ) -> NDArray[np.floating]:
     win_size = int(win_size)
     if medfilt:
@@ -273,6 +281,8 @@ def _diff_buffed(
     pad = np.zeros((len(signal.shape), 2), dtype=int)
     half_win = int(win_size / 2)
     pad[-1, :] = half_win
+    if jumps is not None and make_step:
+        signal = _make_step(signal, jumps)
     padded = np.pad(signal, pad, mode="edge")
     diff_buffed = padded[..., win_size:] - padded[..., : (-1 * win_size)]
 
@@ -285,6 +295,7 @@ def estimate_heights(
     win_size: int = 20,
     twopi: bool = False,
     medfilt: bool = False,
+    make_step: bool = False,
     diff_buffed: Optional[NDArray[np.floating]] = None,
 ) -> csr_array:
     """
@@ -302,6 +313,8 @@ def estimate_heights(
 
         medfilt: If True, a median filter of size ~win_size will be applied.
 
+        make_step: If True jump ranges will be turned into clean step functions.
+
         diff_buffed: Difference between signal and a signal shifted by win_size.
                      If None will be computed.
 
@@ -310,7 +323,7 @@ def estimate_heights(
         heights: Sparse array of jump heights.
     """
     if diff_buffed is None:
-        diff_buffed = _diff_buffed(signal, win_size, medfilt)
+        diff_buffed = _diff_buffed(signal, jumps, win_size, medfilt, make_step)
 
     jumps = np.atleast_2d(jumps)
     diff_buffed = np.atleast_2d(diff_buffed)
@@ -357,7 +370,7 @@ def twopi_jumps(
     merge=...,
     overwrite=...,
     name=...,
-) -> Tuple[RangesMatrix, NDArray[np.floating]]:
+) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]:
     ...
 
 
@@ -374,7 +387,7 @@ def twopi_jumps(
     merge=...,
     overwrite=...,
     name=...,
-) -> RangesMatrix:
+) -> Tuple[RangesMatrix, csr_array]:
     ...
 
 
@@ -390,7 +403,9 @@ def twopi_jumps(
     merge: bool = True,
     overwrite: bool = False,
     name: str = "jumps_2pi",
-) -> Union[RangesMatrix, Tuple[RangesMatrix, NDArray[np.floating]]]:
+) -> Union[
+    Tuple[RangesMatrix, csr_array], Tuple[RangesMatrix, csr_array, NDArray[np.floating]]
+]:
     """
     Find and optionally fix jumps that are height ~N*2pi.
     TOD is expected to have detectors with high trends already cut.
@@ -430,6 +445,8 @@ def twopi_jumps(
                if signal is 1D Ranges in returned instead.
                Buffered to win_size.
 
+        heights: csr_array of jump heights.
+
         fixed: signal with jump fixed. Only returned if fix is set.
     """
     if signal is None:
@@ -441,7 +458,7 @@ def twopi_jumps(
         np.clip(atol, 1e-8, 1e-2)
 
     _signal = _filter(signal, gaussian_width, tv_weight)
-    diff_buffed = _diff_buffed(_signal, win_size, False)
+    diff_buffed = _diff_buffed(_signal, None, win_size, False, False)
 
     if isinstance(atol, int):
         atol = float(atol)
@@ -465,17 +482,144 @@ def twopi_jumps(
         raise TypeError(f"Invalid atol type: {type(atol)}")
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
+    jumps = jump_ranges.mask()
+    heights = estimate_heights(
+        signal, jumps, win_size=win_size, twopi=True, diff_buffed=diff_buffed
+    )
 
     if merge:
         _merge(aman, jump_ranges, name, overwrite)
 
     if fix:
-        jumps = jump_ranges.mask()
-        heights = estimate_heights(signal, jumps, twopi=True, diff_buffed=diff_buffed)
         fixed = jumpfix_subtract_heights(signal, jumps, inplace, heights)
 
-        return jump_ranges, fixed
-    return jump_ranges
+        return jump_ranges, heights, fixed
+    return jump_ranges, heights
+
+
+@overload
+def slow_jumps(
+    aman,
+    signal=...,
+    win_size=...,
+    thresh=...,
+    abs_thresh=...,
+    gaussian_width=...,
+    tv_weight=...,
+    fix: Literal[True] = True,
+    inplace=...,
+    merge=...,
+    overwrite=...,
+    name=...,
+) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]:
+    ...
+
+
+@overload
+def slow_jumps(
+    aman,
+    signal=...,
+    win_size=...,
+    thresh=...,
+    abs_thresh=...,
+    gaussian_width=...,
+    tv_weight=...,
+    fix: Literal[False] = False,
+    inplace=...,
+    merge=...,
+    overwrite=...,
+    name=...,
+) -> Tuple[RangesMatrix, csr_array]:
+    ...
+
+
+def slow_jumps(
+    aman: AxisManager,
+    signal: Optional[NDArray[np.floating]] = None,
+    win_size: int = 800,
+    thresh: float = 20,
+    abs_thresh: bool = True,
+    gaussian_width: float = 0,
+    tv_weight: float = 0,
+    fix: bool = True,
+    inplace: bool = False,
+    merge: bool = True,
+    overwrite: bool = False,
+    name: str = "jumps_slow",
+) -> Union[
+    Tuple[RangesMatrix, csr_array], Tuple[RangesMatrix, csr_array, NDArray[np.floating]]
+]:
+    """
+    Find and optionally fix slow jumps.
+    This is useful for catching things that aren't really jumps but
+    change the DC level in a jumplike way (ie: a short unlock period).
+
+    Arguments:
+
+        aman: The axis manager containing signal to find jumps on.
+
+        signal: Signal to jumpfind on. If None than aman.signal is used.
+
+        win_size: Size of window to use when looking for jumps.
+                  This should be set to something of order the width of the jumps.
+
+        thresh: ptp value at which to flag things as jumps.
+                Default value is in phase units.
+                You can also pass a percentile to use here if abs_thresh is False.
+
+        abs_thresh: If True thresh is an absolute threshold.
+                    If False it is a percential in range [0, 1).
+
+        gaussian_width: Width of gaussian filter.
+                        If <= 0, filter is not applied.
+
+        tv_weight: Weight used by total variance filter.
+                   If <= 0, filter is not applied.
+
+        fix: If True the jumps will be fixed by adding N*2*pi at the jump locations.
+
+        inplace: If True jumps will be fixed inplace.
+
+        merge: If True will wrap ranges matrix into ``aman.flags.<name>``
+
+        overwrite: If True will overwrite existing content of ``aman.flags.<name>``
+
+        name: String used to populate field in flagmanager if merge is True.
+
+    Returns:
+
+        jumps: RangesMatrix containing jumps in signal,
+               if signal is 1D Ranges in returned instead.
+               Buffered to win_size.
+
+        fixed: signal with jump fixed. Only returned if fix is set.
+    """
+    if signal is None:
+        signal = aman.signal
+    if not isinstance(signal, np.ndarray):
+        raise TypeError("Signal is not an array")
+
+    _signal = _filter(signal, gaussian_width, tv_weight)
+    bptp = block_reduce(_signal, win_size, op=np.ptp, inclusive=True)
+
+    if not abs_thresh:
+        thresh = np.quantile(bptp.ravel(), thresh)
+    bptp = block_expand(bptp, win_size, _signal.shape[-1], inclusive=True)
+    jumps = bptp > thresh
+
+    jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
+    heights = estimate_heights(
+        signal, jump_ranges.mask(), win_size=win_size, medfilt=True, make_step=True
+    )
+
+    if merge:
+        _merge(aman, jump_ranges, name, overwrite)
+
+    if fix:
+        fixed = jumpfix_subtract_heights(signal, jump_ranges, inplace, heights)
+
+        return jump_ranges, heights, fixed
+    return jump_ranges, heights
 
 
 @overload
@@ -491,13 +635,12 @@ def find_jumps(
     max_depth=...,
     gaussian_width=...,
     tv_weight=...,
-    fix: None = None,
-    fix_kwargs=...,
+    fix: Literal[False] = False,
     inplace=...,
     merge=...,
     overwrite=...,
     name=...,
-) -> RangesMatrix:
+) -> Tuple[RangesMatrix, csr_array]:
     ...
 
 
@@ -514,13 +657,12 @@ def find_jumps(
     max_depth=...,
     gaussian_width=...,
     tv_weight=...,
-    fix: JumpFix = ...,
-    fix_kwargs=...,
+    fix: Literal[True] = True,
     inplace=...,
     merge=...,
     overwrite=...,
     name=...,
-) -> Tuple[RangesMatrix, NDArray[np.floating]]:
+) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]:
     ...
 
 
@@ -536,13 +678,14 @@ def find_jumps(
     max_depth: int = 0,
     gaussian_width: float = 0,
     tv_weight: float = 0,
-    fix: Optional[JumpFix] = None,
-    fix_kwargs: Dict = {},
+    fix: bool = False,
     inplace: bool = False,
     merge: bool = True,
     overwrite: bool = False,
     name: str = "jumps",
-) -> Union[RangesMatrix, Tuple[RangesMatrix, NDArray[np.floating]]]:
+) -> Union[
+    Tuple[RangesMatrix, csr_array], Tuple[RangesMatrix, csr_array, NDArray[np.floating]]
+]:
     """
     Find jumps in aman.signal_name.
     Expects aman.signal_name to be 1D of 2D.
@@ -570,6 +713,7 @@ def find_jumps(
                   If both min_sigma and min_size are None then the IQR is used as min_size.
 
         win_size: Size of window used by SG filter when peak finding.
+                  Also used for height estimation, should be of order jump width.
 
         nsigma: Number of sigma above the mean for something to be a peak.
 
@@ -582,10 +726,7 @@ def find_jumps(
         tv_weight: Weight used by total variance filter.
                    If <= 0, filter is not applied.
 
-        fix: Method to use for jumpfixing.
-             Set to None to not fix.
-
-        fix_kwargs: kwargs other than inplace to pass to the jumpfixer.
+        fix: Set to True to fix.
 
         inplace: Whether of not signal should be fixed inplace.
 
@@ -619,8 +760,6 @@ def find_jumps(
     elif np.ndim(min_size) == 1:  # type: ignore
         min_size = np.array(min_size)
 
-    do_fix = fix is not None
-
     _signal = _filter(signal, gaussian_width, tv_weight, force_copy=True)
     # Median subtract, if we don't do this then when we cumsum we get floats
     # that are too big and lack the precicion to find jumps well
@@ -651,11 +790,42 @@ def find_jumps(
     # TODO: include heights in output
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(min_chunk / 2))
+    jumps = jump_ranges.mask()
+    heights = estimate_heights(signal, jumps, win_size=win_size, medfilt=True)
 
     if merge:
         _merge(aman, jump_ranges, name, overwrite)
 
-    if do_fix:
-        fixed = fix(signal, jumps, inplace=inplace, **fix_kwargs)
-        return jump_ranges, fixed
-    return jump_ranges
+    if fix:
+        fixed = jumpfix_subtract_heights(
+            signal, jumps, inplace=inplace, heights=heights
+        )
+        return jump_ranges, heights, fixed
+    return jump_ranges, heights
+
+
+def jumps_aman(
+    aman: AxisManager, jump_ranges: RangesMatrix, heights: csr_array
+) -> AxisManager:
+    """
+    Helper to wrap the jumpfinder outputs into a AxisManager for use with preprocess.
+
+
+    Arguments:
+
+        aman: AxisManager to steam axis information from.
+
+        jump_ranges: RangesMatrix containing the jump flag.
+
+        heights: csr_array of jump heights.
+
+    Returns:
+
+        jumps_aman: AxisManager containing the jump information wrapped in
+                    'jump_flag' and 'jump_heights'.
+    """
+    jump_aman = AxisManager(aman.dets, aman.samps)
+    jump_aman.wrap("jump_flag", jump_ranges, [(0, "dets"), (1, "samps")])
+    jump_aman.wrap("jump_heights", heights, [(0, "dets"), (1, "samps")])
+
+    return jump_aman
