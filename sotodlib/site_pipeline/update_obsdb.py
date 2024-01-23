@@ -125,7 +125,6 @@ def main(config: str,
 
     logger.info("Updating obsdb")
     bookcart = []
-    bookcartobsdb = ObsDb()
 
     if booktype not in ["obs", "oper", "both"]:
         logger.warning("Specified booktype inadapted to update_obsdb")
@@ -140,9 +139,19 @@ def main(config: str,
         base_dir = config_dict["base_dir"]
     except KeyError:
         logger.error("No base directory base_dir specified in config file!")
+
+    new_obsdb = True
     if "obsdb" in config_dict:
         if os.path.isfile(config_dict["obsdb"]):
-            bookcartobsdb = ObsDb.from_file(config_dict["obsdb"])
+            bookcartobsdb = ObsDb(map_file=config_dict["obsdb"])
+            new_obsdb = False
+        else:
+            logger.error("No obsdb at the indicated location")
+            bookcartobsdb = ObsDb()
+    else:
+        logger.warning("No obsdb named in the configuration file")
+        bookcartobsdb = ObsDb()
+        
     if "obsdb_cols" in config_dict:
         col_list = []
         for col, typ in config_dict["obsdb_cols"].items():
@@ -280,10 +289,11 @@ def main(config: str,
            
         else:
             bookcart.remove(bookpath)
-    if "obsdb" in config_dict:
-        bookcartobsdb.to_file(config_dict["obsdb"])
-    else:
-        bookcartobsdb.to_file("obsdb_from{}_to{}".format(tback, tnow))
+    if new_obsdb:
+        if "obsdb" in config_dict:
+            bookcartobsdb.to_file(config_dict["obsdb"])
+        else:
+            bookcartobsdb.to_file("obsdb_from_{}_to_{}.sqlite".format(int(tback), int(tnow)))
 
 
 def get_parser(parser=None):
