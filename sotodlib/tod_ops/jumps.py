@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 from scipy.sparse import csr_array, lil_array
 from skimage.restoration import denoise_tv_chambolle
 from so3g.proj import Ranges, RangesMatrix
+from pixell.utils import block_reduce, block_expand
 
 from sotodlib.core import AxisManager
 
@@ -270,8 +271,8 @@ def _make_step(signal: NDArray[np.floating], jumps: NDArray[np.bool_]):
     for i, det in enumerate(ranges.ranges):
         for r in det.ranges():
             mid = int((r[0] + r[1]) / 2)
-            signal_step[i, r[0] : mid] = signal[i, max(r[0] - 1, 0)]
-            signal_step[i, mid : r[1]] = signal[i, min(r[1] + 1, samps)]
+            signal_step[i, r[0] : mid] = signal_step[i, max(r[0] - 1, 0)]
+            signal_step[i, mid : r[1]] = signal_step[i, min(r[1] + 1, samps)]
     return signal_step.reshape(signal.shape)
 
 
@@ -494,8 +495,97 @@ def twopi_jumps(
 
     if fix:
         jumps = jump_ranges.mask()
-        heights = estimate_heights(signal, jumps, twopi=True, diff_buffed=diff_buffed)
+        heights = estimate_heights(
+            signal, jumps, win_size=win_size, twopi=True, diff_buffed=diff_buffed
+        )
         fixed = jumpfix_subtract_heights(signal, jump, inplace, heights)
+
+        return jump_ranges, fixed
+    return jump_ranges
+
+
+def slow_jumps(
+    aman: AxisManager,
+    signal: Optional[NDArray[np.floating]] = None,
+    win_size: int = 800,
+    thresh: float = 20,
+    abs_thresh: bool = True,
+    gaussian_width: float = 0,
+    tv_weight: float = 0,
+    fix: bool = True,
+    inplace: bool = False,
+    merge: bool = True,
+    overwrite: bool = False,
+    name: str = "jumps_slow",
+) -> Union[RangesMatrix, Tuple[RangesMatrix, NDArray[np.floating]]]:
+    """
+    Find and optionally fix slow jumps.
+    This is useful for catching things that aren't really jumps but
+    change the DC level in a jumplike way (ie: a short unlock period).
+
+    Arguments:
+
+        aman: The axis manager containing signal to find jumps on.
+
+        signal: Signal to jumpfind on. If None than aman.signal is used.
+
+        win_size: Size of window to use when looking for jumps.
+                  This should be set to something of order the width of the jumps.
+
+        thresh: ptp value at which to flag things as jumps.
+                Default value is in phase units.
+                You can also pass a percentile to use here if abs_thresh is False.
+
+        abs_thresh: If True thresh is an absolute threshold.
+                    If False it is a percential in range [0, 1).
+
+        gaussian_width: Width of gaussian filter.
+                        If <= 0, filter is not applied.
+
+        tv_weight: Weight used by total variance filter.
+                   If <= 0, filter is not applied.
+
+        fix: If True the jumps will be fixed by adding N*2*pi at the jump locations.
+
+        inplace: If True jumps will be fixed inplace.
+
+        merge: If True will wrap ranges matrix into ``aman.flags.<name>``
+
+        overwrite: If True will overwrite existing content of ``aman.flags.<name>``
+
+        name: String used to populate field in flagmanager if merge is True.
+
+    Returns:
+
+        jumps: RangesMatrix containing jumps in signal,
+               if signal is 1D Ranges in returned instead.
+               Buffered to win_size.
+
+        fixed: signal with jump fixed. Only returned if fix is set.
+    """
+    if signal is None:
+        signal = aman.signal
+    if not isinstance(signal, np.ndarray):
+        raise TypeError("Signal is not an array")
+
+    _signal = _filter(signal, gaussian_width, tv_weight)
+    bptp = block_reduce(_signal, win_size, op=np.ptp, inclusive=True)
+
+    if not abs_thresh:
+        thresh = np.quantile(bptp.ravel(), thresh)
+    bptp = block_expand(bptp, win_size, _signal.shape[-1], inclusive=True)
+    jumps = bptp > thresh
+
+    jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
+    heights = estimate_heights(
+        signal, jump_ranges.mask(), win_size=win_size, medfilt=True, make_step=True
+    )
+
+    if merge:
+        _merge(aman, jump_ranges, name, overwrite)
+
+    if fix:
+        fixed = jumpfix_subtract_heights(signal, jump_ranges, inplace, heights)
 
         return jump_ranges, fixed
     return jump_ranges
