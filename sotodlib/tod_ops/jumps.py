@@ -261,8 +261,24 @@ def jumpfix_subtract_heights(
     return x_fixed.reshape(orig_shape)
 
 
+def _make_step(signal: NDArray[np.floating], jumps: NDArray[np.bool_]):
+    ranges = RangesMatrix.from_mask(np.atleast_2d(jumps))
+    signal_step = np.atleast_2d(signal.copy())
+    samps = signal_step.shape[-1]
+    for i, det in enumerate(ranges.ranges):
+        for r in det.ranges():
+            mid = int((r[0] + r[1]) / 2)
+            signal_step[i, r[0] : mid] = signal[i, max(r[0] - 1, 0)]
+            signal_step[i, mid : r[1]] = signal[i, min(r[1] + 1, samps)]
+    return signal_step.reshape(signal.shape)
+
+
 def _diff_buffed(
-    signal: NDArray[np.floating], win_size: int, medfilt: bool
+    signal: NDArray[np.floating],
+    jumps: Optional[NDArray[np.bool_]],
+    win_size: int,
+    medfilt: bool,
+    make_step: bool,
 ) -> NDArray[np.floating]:
     win_size = int(win_size)
     if medfilt:
@@ -273,6 +289,8 @@ def _diff_buffed(
     pad = np.zeros((len(signal.shape), 2), dtype=int)
     half_win = int(win_size / 2)
     pad[-1, :] = half_win
+    if jumps is not None and make_step:
+        signal = _make_step(signal, jumps)
     padded = np.pad(signal, pad, mode="edge")
     diff_buffed = padded[..., win_size:] - padded[..., : (-1 * win_size)]
 
@@ -285,6 +303,7 @@ def estimate_heights(
     win_size: int = 20,
     twopi: bool = False,
     medfilt: bool = False,
+    make_step: bool = False,
     diff_buffed: Optional[NDArray[np.floating]] = None,
 ) -> csr_array:
     """
@@ -302,6 +321,8 @@ def estimate_heights(
 
         medfilt: If True, a median filter of size ~win_size will be applied.
 
+        make_step: If True jump ranges will be turned into clean step functions.
+
         diff_buffed: Difference between signal and a signal shifted by win_size.
                      If None will be computed.
 
@@ -310,7 +331,7 @@ def estimate_heights(
         heights: Sparse array of jump heights.
     """
     if diff_buffed is None:
-        diff_buffed = _diff_buffed(signal, win_size, medfilt)
+        diff_buffed = _diff_buffed(signal, jumps, win_size, medfilt, make_step)
 
     jumps = np.atleast_2d(jumps)
     diff_buffed = np.atleast_2d(diff_buffed)
@@ -441,7 +462,7 @@ def twopi_jumps(
         np.clip(atol, 1e-8, 1e-2)
 
     _signal = _filter(signal, gaussian_width, tv_weight)
-    diff_buffed = _diff_buffed(_signal, win_size, False)
+    diff_buffed = _diff_buffed(_signal, None, win_size, False, False)
 
     if isinstance(atol, int):
         atol = float(atol)
