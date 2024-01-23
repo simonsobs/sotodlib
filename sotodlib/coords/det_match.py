@@ -310,7 +310,8 @@ class ResSet:
 
             #Helper needed for when sol file has saved ints as floats
             def _int(val, null_val=None): 
-                if val == 'null' and null_val is not None:
+                is_null = (val == 'null' or val == '')
+                if is_null and null_val is not None:
                     return null_val
                 return int(float(val))
 
