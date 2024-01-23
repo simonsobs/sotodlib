@@ -241,15 +241,15 @@ class JumpfindTest(unittest.TestCase):
         tod.wrap('sig_jumps', sig_jumps, [(0, 'samps')])
 
         # Find jumps without filtering
-        jumps_nf = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=5)
+        jumps_nf, _ = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=5)
         jumps_nf = jumps_nf.ranges().flatten()
         
         # Find jumps with TV filtering
-        jumps_tv = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, tv_weight=.5, min_size=5)
+        jumps_tv, _ = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, tv_weight=.5, min_size=5)
         jumps_tv = jumps_tv.ranges().flatten()
 
         # Find jumps with gaussian filtering
-        jumps_gauss = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, gaussian_width=.5, min_size=5)
+        jumps_gauss, _ = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, gaussian_width=.5, min_size=5)
         jumps_gauss = jumps_gauss.ranges().flatten()
 
         # Remove double counted jumps and round to remove uncertainty
@@ -268,7 +268,7 @@ class JumpfindTest(unittest.TestCase):
         self.assertEqual(len(jump_locs), len(jumps_nf))
         self.assertTrue(np.all(np.abs(jumps_nf - jump_locs) == 0))
 
-        # Check heights
+        # Check height
         jumps_msk = np.zeros_like(sig_jumps, dtype=bool)
         jumps_msk[jumps_nf] = True
         heights = tod_ops.jumps.estimate_heights(sig_jumps, jumps_msk, medfilt=True)
