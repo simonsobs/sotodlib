@@ -535,7 +535,7 @@ class G3tHWP():
         solved: dict
           dict data from analyze
         output: str or None
-          output path + file name, overwirte config file
+          output path + file name, override config file
 
         Notes
         -----------

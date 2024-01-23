@@ -100,18 +100,29 @@ def main(
         
     ctx = core.Context(context)
 
-    scheme = core.metadata.ManifestScheme()
-    scheme.add_exact_match('obs:obs_id')
-    scheme.add_data_field('dataset')
-    man_db = core.metadata.ManifestDb(scheme=scheme)
-    
     # Get file + dataset from policy.
     # policy = util.ArchivePolicy.from_params(config['archive']['policy'])
     # dest_file, dest_dataset = policy.get_dest(obs_id)
     # Use 'output_dir' argument for now    
+    h5_filename = 'hwp_angle.h5'
     man_db_filename = os.path.join(output_dir, 'hwp_angle.sqlite')
-    output_filename = os.path.join(output_dir, 'hwp_angle.h5')
+    output_filename = os.path.join(output_dir, h5_filename)
     
+    if os.path.exists(man_db_filename):
+        logger.info(f"Mapping {man_db_filename} for the "
+                    "archive index.")
+        man_db = core.metadata.ManifestDb(man_db_filename)
+    else: 
+        logger.info(f"Creating {man_db_filename} for the "
+                     "archive index.")
+        scheme = core.metadata.ManifestScheme()
+        scheme.add_exact_match('obs:obs_id')
+        scheme.add_data_field('dataset')
+        man_db = core.metadata.ManifestDb(
+            man_db_filename,
+            scheme=scheme
+        )
+
     # load observation data
     if obs_id is not None:
         tot_query = f"obs_id=='{obs_id}'"
@@ -133,21 +144,17 @@ def main(
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
     run_list = []
+    completed = man_db.get_entries(['dataset'])['dataset']
 
-    if not os.path.exists(man_db_filename):
-        #run on all if database doesn't exist
-        run_list = obs_list
-    else:
-        db = core.metadata.ManifestDb(man_db_filename)
-        for obs in obs_list:
-            x = db.match({'obs:obs_id': obs["obs_id"]}, multi=True)
-            if overwrite or not x:
-                run_list.append(obs)
+    for obs in obs_list:
+        if overwrite or not obs['obs_id'] in completed:
+            run_list.append(obs)
 
     #write solutions
     for obs in run_list:
         h5_address = obs["obs_id"]
         logger.info(f"Calculating Angles for {h5_address}")
+        ctx = core.Context(context)
         tod = ctx.get_obs(obs, no_signal=True)
         
         # make angle solutions
@@ -161,11 +168,9 @@ def main(
         del g3thwp
         
         # Add an entry to the database
-        man_db.add_entry({'obs:obs_id': obs["obs_id"], 'dataset': h5_address}, filename=output_filename)
-
-        # Commit the ManifestDb to file.
-        man_db.to_file(man_db_filename)
-   
+        man_db.add_entry(
+            {'obs:obs_id': obs["obs_id"], 'dataset': h5_address}, filename=h5_filename,
+        )   
     return
     
     

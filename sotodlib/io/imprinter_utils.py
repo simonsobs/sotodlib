@@ -82,7 +82,7 @@ def set_book_rebind(imprint, book):
         if op.exists(book_dir):
             print(f"Removing all files from {book_dir}")
             shutil.rmtree(book_dir)
-    book.status = 0
+    book.status = UNBOUND
     imprint.get_session().commit()
 
     
