@@ -55,7 +55,6 @@ DEFAULT_pA_per_phi0 = 9e6
 default_logger = logging.getLogger('smurf_caldbs')
 if not default_logger.hasHandlers():
     sp_util.init_logger('smurf_caldbs')
-default_logger.setLevel(logging.DEBUG)
 
 
 
