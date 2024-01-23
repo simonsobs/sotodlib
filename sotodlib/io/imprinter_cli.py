@@ -6,6 +6,20 @@ books to now be successfully bound), to skip binding those files (push
 timestreams into the stray books), or do nothing.
 
 --action=timecodes: not implemented yet
+
+Additional Arguments for working with system running in a docker image (note
+that if we implement an environment variable prefix for the data-packaging
+system then this setup will be unnecessary):
+
+--g3-config: point directly to the g3tsmurf configuration file. The site setup
+mounts the site-pipeline-configs folder into /config, when running this script
+outside of the docker container you have to override this imprinter configuration.
+
+--output-root: the output root for the books when running outside the docker
+image. The docker container mounts /so/staged into /staged. Means when running
+outside the docker container you have to override this imprinter configuration
+AND fix the path in the imprinter database to match books made inside the docker
+container. 
 """
 import os
 import argparse
