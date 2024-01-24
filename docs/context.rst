@@ -119,20 +119,20 @@ annotated example.
   # specified in the database.
   metadata:
     - db: "{metadata_lib}/cuts_s17_c11_200327_cuts.sqlite"
-      name: "glitch_flags&flags"
+      unpack: "glitch_flags&flags"
     - db: "{metadata_lib}/cuts_s17_c11_200327_planet_cuts.sqlite"
-      name: "source_flags&flags"
+      unpack: "source_flags&flags"
     - db: "{metadata_lib}/cal_s17_c11_200327.sqlite"
-      name: "relcal&cal"
+      unpack: "relcal&cal"
     - db: "{metadata_lib}/timeconst_200327.sqlite"
-      name: "timeconst&"
+      unpack: "timeconst&"
       loader: "PerDetectorHdf5"
     - db: "{metadata_lib}/abscal_190126.sqlite"
-      name: "abscal&cal"
+      unpack: "abscal&cal"
     - db: "{metadata_lib}/detofs_200218.sqlite"
-      name: "focal_plane"
+      unpack: "focal_plane"
     - db: "{metadata_lib}/pointofs_200218.sqlite"
-      name: "pointofs"
+      unpack: "pointofs"
 
 
 With a context like the one above, a user can load a TOD and its
@@ -250,8 +250,8 @@ function:
 Metadata
 --------
 
-Overview and Examples
-=====================
+Background
+==========
 
 The "metadata" we are talking about here consists of things like
 detector pointing offsets, calibration factors, detector time
@@ -282,6 +282,12 @@ observations and the wafer for each detector), the system can support
 resolving the metadata request, loading the results, and broadcasting
 them to their intended targets.
 
+
+Examples
+========
+
+These examples demonstrate the creation of a metadata archive and
+index, and adding an entry to the context.yaml metadata list.
 
 Example 1
 ---------
@@ -323,8 +329,8 @@ metadata index::
 Then have a new context file that includes::
 
     metadata:
-        - db : 'thing_db.gz'
-          name : 'thing'
+        - db: 'thing_db.gz'
+          unpack: 'thing'
 
 Using that context file::
 
@@ -397,7 +403,7 @@ a metadata list that includes::
 
     metadata:
       - db: 'my_new_info.sqlite'
-        name: 'new_info'
+        unpack: 'new_info'
 
 If you want to load the single vector ``my_special_vector`` into the
 top level of the AxisManager, under name ``special``, use this
@@ -405,7 +411,7 @@ syntax::
 
     metadata:
       - db: 'my_new_info.sqlite'
-        name: 'special&my_special_vector'
+        unpack: 'special&my_special_vector'
 
 
 Tips
@@ -782,7 +788,7 @@ The context.yaml metadata entry would probably look like this::
   metadata:
     ...
     - db: '{metadata_lib}/cal_bad_det_issue.gz'
-      name: 'cal_remove_bad&cal'
+      unpack: 'cal_remove_bad&cal'
     ...
 
 
@@ -878,6 +884,62 @@ steps are performed:
    field from the result, for example).
 
 
+Incomplete or missing metadata
+------------------------------
+
+Metadata is considered "incomplete" for a particular request, if any
+of the following are true:
+
+- No endpoints were returned from the query to the ManifestDb;
+  i.e. the database has no records of what files contain data
+  pertinent to the request.
+- The results loaded from the metadata archive do not cover the
+  requested sample range or detector set completely (this includes the
+  case where there is zero overlap).
+
+When a metadata result is incomplete, the metadata loader code will
+take one of the following actions:
+
+- `trim`: take the limited metadata result, and trim the merged data
+  object down so it contains only the detectors and samples that are
+  found in the metadata result.
+- `skip`: discard this metadata result; do not include it in the
+  merged data object.
+- `fail`: raise an error.
+
+In the metadata list in ``context.yaml``, each metadata entry can
+declare a preferred action using the ``on_missing`` key.  For
+example::
+
+  metadata:
+    - label: optional_relcal
+      on_missing: skip
+      db: "relcal1.sqlite"
+      unpack: "optional_relcal&cal"
+    - label: critical_relcal
+      on_missing: fail
+      db: "relcal2.sqlite"
+      unpack: "critical_relcal&cal"
+
+The default behavior is ``trim``.  The behavior specified in
+``context.yaml`` can be overridden through the call to
+:func:`Context.get_obs()<sotodlib.core.Context.get_obs>` or
+:func:`Context.get_meta()<sotodlib.core.Context.get_meta>`; just use
+the ``on_missing`` argument to specify what should happen for metadata
+with a specific label.  Examples::
+
+  # Suppose this fails because relcal2.sqlite does not cover the obs ...
+  tod = ctx.get_obs(obs_id)
+
+  # This will instead ignore the result, and not populate critical_relcal.
+  tod = ctx.get_obs(obs_id, on_missing={'critical_relcal': 'skip'})
+
+
+Note that "skipping" can have confusing downstream consequences, such
+as when a ``det_info`` entry doesn't get added and then some metadata
+product tries to use it as an index field.
+
+
 Rules for augmenting and using det_info
 ---------------------------------------
 
@@ -911,7 +973,7 @@ following additional steps will usually be performed to augment the
 
 Special metadata entries in context.yaml are used to augment the
 ``det_info``.  table; these are marked with ``det_info: true`` and do
-not have a ``name: ...`` field.  For example::
+not have a ``unpack: ...`` field.  For example::
 
   metadata:
   - ...
