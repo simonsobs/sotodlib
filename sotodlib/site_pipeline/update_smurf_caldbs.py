@@ -60,7 +60,7 @@ if not default_logger.hasHandlers():
 
 def main(config: Union[str, dict], 
         overwrite:Optional[bool]=False,
-        logger=None, skip_detset=False, skip_detcal=False):
+        skip_detset=False, skip_detcal=False, logger=None):
     if not skip_detset:
         smurf_detset_info(config, overwrite, logger)
     if not skip_detcal:
