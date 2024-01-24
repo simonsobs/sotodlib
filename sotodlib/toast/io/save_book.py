@@ -649,7 +649,6 @@ def write_book(
         obs_meta["observatory"] = "Simons Observatory"
         obs_meta["telescope"] = obs_props["telescope_name"]
         obs_meta["stream_ids"] = [str(x) for x in all_wafers.keys()]
-        # FIXME: is this right?
         obs_meta["detsets"] = obs_meta["stream_ids"]
         obs_meta["start_time"] = timestamp_start
         obs_meta["stop_time"] = timestamp_end

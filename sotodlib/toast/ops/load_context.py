@@ -327,6 +327,7 @@ class LoadContext(Operator):
             # Convert any focalplane quaternion offsets to toast format
 
             name_col = Column(name="name", data=det_props["det_info_readout_id"])
+            det_props.add_column(name_col, index=0)
 
             if "focal_plane_xi" in det_props.colnames:
                 quat_data = toast.instrument_coords.xieta_to_quat(
@@ -345,7 +346,6 @@ class LoadContext(Operator):
                 data=quat_data,
             )
             det_props.add_column(quat_col, index=0)
-            det_props.add_column(name_col, index=0)
 
             focalplane = toast.instrument.Focalplane(
                 detector_data=det_props,
