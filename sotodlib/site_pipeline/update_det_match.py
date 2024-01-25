@@ -40,6 +40,9 @@ class UpdateDetMatchesConfig:
     site_pipeline_root: str
         Path to root of site-pipeline-configs. If ``$SITE_PIPELINE_CONFIG_DIR``
         is set in the environment, that will be used as the default.
+    wafer_map_path: str
+        Path to wafer-map to be used to find det-match solution files. If not specified,
+        defaults to ``<site_pipeline_root>/shared/detmapping/wafer_map.yaml``.
     run_freq_offset_scan: bool
         If true, this will scan through a range of freq-offsets (between src and
         dst res-sets) to find an optimal offset for each match.
@@ -71,6 +74,7 @@ class UpdateDetMatchesConfig:
     results_path: str
     context_path: str
     site_pipeline_root:str = os.environ.get('SITE_PIPELINE_CONFIG_DIR')
+    wafer_map_path: Optional[str] = None
     freq_offset_range_args: Optional[tuple[float, float, float]] = (-4, 4, 0.3)
     match_pars: Optional[Dict] = None
     detset_meta_name : str = 'smurf'
@@ -82,6 +86,10 @@ class UpdateDetMatchesConfig:
     def __post_init__(self):
         if self.site_pipeline_root is None:
             raise ValueError("Must set site_pipeline_root, or SITE_PIPELINE_CONFIG_DIR env var")
+
+        if self.wafer_map_path is None:
+            self.wafer_map_path = os.path.join(
+                self.site_pipeline_root, 'shared/detmapping/wafer_map.yaml')
         
         if self.freq_offset_range_args is not None:
             self.freq_offsets = np.arange(*self.freq_offset_range_args)
@@ -96,19 +104,10 @@ class Runner:
     def __init__(self, cfg: UpdateDetMatchesConfig):
         self.cfg = cfg
         self.ctx = core.Context(cfg.context_path)
-        dmap_cfg_file = os.path.join(
-            cfg.site_pipeline_root, 'shared/detmapping/wafer_map.yaml'
-        )
-        with open(dmap_cfg_file, 'r') as f:
-            self.wafer_map = yaml.safe_load(f)
-        
         self.detset_db = None
         self.detcal_db = None
-
-        self.detmap_cfg_path = os.path.join(
-            cfg.site_pipeline_root, 'shared/detmapping/wafer_map.yaml')
-        with open(self.detmap_cfg_path, 'r') as f:
-            self.detmap_cfg = yaml.safe_load(f)
+        with open(self.cfg.wafer_map_path, 'r') as f:
+            self.wafer_map = yaml.safe_load(f)
         
         self.ufm_to_fp_file = os.path.join(
             cfg.site_pipeline_root, 'shared/focalplane/ufm_to_fp.yaml')
@@ -120,10 +119,10 @@ class Runner:
                 self.detcal_db = core.metadata.ManifestDb(d['db'])
         if self.detset_db is None:
             raise Exception(
-                f"Could not find detset metadtata entry with name: {cfg.detset_meta_name}")
+                f"Could not find detset metadata entry with name: {cfg.detset_meta_name}")
         if self.detcal_db is None:
             raise Exception(
-                f"Could not find detset metadtata entry with name: {cfg.detcal_meta_name}")
+                f"Could not find detcal metadata entry with name: {cfg.detcal_meta_name}")
         
         self.failed_detset_cache_path = os.path.join(cfg.results_path, 'failed_detsets.yaml')
         self.match_dir = os.path.join(cfg.results_path, 'matches')
@@ -163,15 +162,15 @@ def run_match_aman(runner: Runner, aman, detset, wafer_slot=None):
     stream_id = aman.det_info.stream_id[aman.det_info.detset == detset][0]
     sol_file = os.path.join(
         os.path.dirname(runner.detmap_cfg_path), 
-        runner.detmap_cfg[stream_id]['solution']
+        runner.wafer_map[stream_id]['solution']
     )
 
     rs0 = det_match.ResSet.from_aman(aman, stream_id)
     rs0.name = 'meas'
 
-    teltype = runner.detmap_cfg[stream_id]['tel_type']
+    teltype = runner.wafer_map[stream_id]['tel_type']
     if wafer_slot is None:  # Pull from detmapping cfg
-        wafer_slot = runner.detmap_cfg[stream_id]['wafer_slot']
+        wafer_slot = runner.wafer_map[stream_id]['wafer_slot']
     fp_pars = optics.get_ufm_to_fp_pars(teltype, wafer_slot, runner.ufm_to_fp_file)
     rs1 = det_match.ResSet.from_solutions(sol_file, fp_pars=fp_pars, platform=teltype)
     rs1.name = 'sol'
@@ -300,10 +299,10 @@ def update_manifests(runner: Runner, detset):
         ra = np.array(f['merged'])
 
     names = list(ra.dtype.names)
-    idx = names.index('readout_id')
-    names[idx] = 'dets:readout_id'
+    names[names.index('readout_id')] = 'dets:readout_id'
+    names[names.index('det_id')] = 'dets:det_id'
     ra.dtype.names = tuple(names)
-    assignment = ra[['dets:readout_id', 'det_id']]
+    assignment = ra[['dets:readout_id', 'dets:det_id']]
 
     def add_to_db(arr, db_path, h5_path, detset, write_relpath=True):
         write_dataset(core.metadata.ResultSet.from_friend(arr), h5_path, detset, overwrite=True)
