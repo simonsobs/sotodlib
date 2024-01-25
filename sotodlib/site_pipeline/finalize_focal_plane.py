@@ -127,11 +127,18 @@ def _add_attrs(dset, attrs):
 
 def _mk_plot(plot_dir, froot, nominal, measured, transformed):
     plt.style.use("tableau-colorblind10")
-    plt.scatter(measured[0], measured[1], alpha=0.2, color="orange", label="fit")
-    plt.scatter(nominal[0], nominal[1], alpha=0.2, color="blue", label="nominal")
     plt.scatter(
-        transformed[0], transformed[1], alpha=0.2, color="black", label="transformed"
+        nominal[0], nominal[1], alpha=0.4, color="blue", label="nominal", marker="P"
     )
+    plt.scatter(
+        transformed[0],
+        transformed[1],
+        alpha=0.4,
+        color="black",
+        label="transformed",
+        marker="X",
+    )
+    plt.scatter(measured[0], measured[1], alpha=0.4, color="orange", label="fit")
     plt.xlabel("Xi (rad)")
     plt.ylabel("Eta (rad)")
     plt.legend()
@@ -345,7 +352,7 @@ def main():
         _, msk, template_msk = np.intersect1d(
             det_ids, template_det_ids, return_indices=True
         )
-        if np.sum(msk) != aman.dets.count:
+        if len(msk) != aman.dets.count:
             logger.warning("There are matched dets not found in the template")
         mapping = np.argsort(np.argsort(template_det_ids[template_msk]))
         srt = np.argsort(det_ids[msk])
@@ -405,16 +412,13 @@ def main():
         gamma_shift = 0.0
 
     nominal = template[:, 1:3].T.copy()
-    # Center on UFM center
-    nominal -= lever_arm[:2]
-    _measured = measured.copy() - lever_arm[:2]
-    # Compute transform, do a few iters to account for centers being off
-    affine = np.eye(2)
-    shift = af.weighted_shift(nominal, _measured, weights)
-    for i in range(config.get("iters", 5)):
-        affine, _ = af.get_affine(nominal, _measured - shift[..., None], centered=True)
-        shift = af.weighted_shift(affine @ nominal, _measured, weights)
-    nominal = template[:, 1:3].T.copy()
+    # Do an initial alignment without weights
+    affine_0, shift_0 = af.get_affine(nominal, measured)
+    init_align = affine_0 @ nominal + shift_0[..., None]
+    # Now compute the actual transform
+    affine, shift = af.get_affine_weighted(init_align, measured, weights)
+    affine = affine @ affine_0
+    shift += (affine @ shift_0[..., None])[:, 0]
 
     scale, shear, rot = af.decompose_affine(affine)
     shear = shear.item()
