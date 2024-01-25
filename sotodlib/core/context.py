@@ -296,7 +296,7 @@ class Context(odict):
         loader_func = OBSLOADER_REGISTRY[loader_type]  # Register your loader?
         aman = loader_func(self.obsfiledb, obs_id, dets=dets,
                            samples=samples, no_signal=no_signal)
- 
+
         if aman is None:
             return meta
         if meta is not None:
