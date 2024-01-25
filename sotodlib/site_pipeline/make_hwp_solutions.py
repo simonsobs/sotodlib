@@ -140,6 +140,7 @@ def main(
 
     logger.debug(f"Sending query to obsdb: {tot_query}")
     obs_list = ctx.obsdb.query(tot_query)
+    print(obs_list['obs_id'])
         
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")

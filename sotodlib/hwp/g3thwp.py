@@ -643,18 +643,20 @@ class G3tHWP():
         aman.wrap_new('locked', shape=('samps', ), dtype=bool)
         aman.wrap_new('hwp_rate', shape=('samps', ), dtype=np.float16)
         aman.wrap_new('eval', shape=('samps', ), dtype=bool)
+        aman.wrap_new('hwp_err', shape=('samps', ), dtype=bool)
 
         return
 
-    def _write_empty_solution_h5(self, tod, output=None, h5_address=None):
-
+    def _write_empty_solution_h5(self, tod, output=None, h5_address=None, err=False):
+        
         logger.info('Writing empty solutions')
         # metadata loader requires a dets axis
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         self._set_empty_axes(aman)
         aman.timestamps[:] = tod.timestamps
+        if err: aman.hwp_err[:] = np.ones(len(tod.timestamps))
         aman.save(output, h5_address, overwrite=True)
-
+        
         return
 
     def _bool_interpolation(self, timestamp1, data, timestamp2):
@@ -704,8 +706,12 @@ class G3tHWP():
             the "approximate" HWP spin rate, with sign, in revs / second. 
 
             Use placeholder value of 0 for cases when not "locked".
+        
         - eval: bool
             if non-zero, the template subtraction is completed.
+        
+        - hwp_err: bool
+            if non-zero, error in angle calculations.
         """
         if self._output is None and output is None:
             logger.warning('Output file not specified')
@@ -723,7 +729,7 @@ class G3tHWP():
             data = self.load_data(start, end)
         except Exception as e:
             logger.error(f"Exception '{e}' thrown while loading HWP data. The specified encoder field is missing.")
-            self._write_empty_solution_h5(tod, output, h5_address)
+            self._write_empty_solution_h5(tod, output, h5_address, True)
             return
 
         if len(data) == 0:
@@ -738,7 +744,7 @@ class G3tHWP():
             solved = self.analyze(data, mod2pi=False)
         except Exception as e:
             logger.error(f"Exception '{e}' thrown while calculating HWP angle. Encoder signal might have too much noise.")
-            self._write_empty_solution_h5(tod, output, h5_address)
+            self._write_empty_solution_h5(tod, output, h5_address, True)
             return
 
         if len(solved) == 0 or len(solved['fast_time']) == 0:
