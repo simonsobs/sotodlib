@@ -1,8 +1,6 @@
 """
 Functions for working with affine transformations.
 """
-# NOTE: These originated from some snippets I wrote for CLASS
-#       that are now organized in github.com/skhrg/megham
 
 import numpy as np
 import scipy.linalg as la
@@ -46,6 +44,47 @@ def get_affine(src, dst, centered=False):
 
     transformed = affine @ src[:, msk]
     shift = np.median(dst[:, msk] - transformed, axis=1)
+
+    return affine, shift
+
+
+def get_affine_weighted(src, dst, weights):
+    """
+    Get affine transformation between two point clouds with weights.
+    Note that unlike get_affine this is a simple least squares solution
+    so it is not as robust to outliers, WLRA version someday.
+    Transformation is dst = affine@src + shift
+
+    Arguments:
+
+        src: (ndim, npoints) array of source points.
+
+        dst: (ndim, npoints) array of destination points.
+
+        weights: (npoint,) array of weights.
+
+    Returns:
+
+        affine: The transformation matrix.
+
+        shift: Shift to apply after transformation.
+    """
+    msk = (
+        np.isfinite(src).all(axis=0)
+        * np.isfinite(dst).all(axis=0)
+        * np.isfinite(weights)
+    )
+    if np.sum(msk) < 7:
+        raise ValueError("Not enough finite points to compute transformation")
+    init_shift = weighted_shift(src, dst, weights)
+    rt_weight = np.sqrt(weights[msk])
+    wsrc = rt_weight * src[:, msk]
+    wdst = rt_weight * (dst[:, msk] - init_shift[..., None])
+    x, *_ = la.lstsq(
+        np.vstack((wsrc, np.ones(wsrc.shape[-1]))).T, wdst.T, check_finite=False
+    )
+    shift = x[-1] + init_shift
+    affine = x[:-1]
 
     return affine, shift
 
