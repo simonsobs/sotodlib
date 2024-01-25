@@ -1,5 +1,5 @@
 """
-Script to make hwp angle of CalDB.
+Script to make hwp angle metadata.
 This script will run:
 1. automatically if data are acquired as preliminary version.
 2. New versions of the metadata can be created as the analysis evolves.
