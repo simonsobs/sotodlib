@@ -31,7 +31,7 @@ class UpdateDetMatchesConfig:
     Configuration for update script
 
     Args
-    ----
+    ------
     results_path: str
         Path to directory where results such as matches, manifestdbs, and
         h5 files will be stored.
@@ -43,15 +43,15 @@ class UpdateDetMatchesConfig:
     wafer_map_path: str
         Path to wafer-map to be used to find det-match solution files. If not specified,
         defaults to ``<site_pipeline_root>/shared/detmapping/wafer_map.yaml``.
-    run_freq_offset_scan: bool
-        If true, this will scan through a range of freq-offsets (between src and
-        dst res-sets) to find an optimal offset for each match.
     freq_offset_range_args: Optional[Tuple[float, float, float]]
         If this is not None, for each match, we will scan over a range of
         freq-offsets to determine the optimal offset to use. If set, must
         contain a tuple of floats, containing ([start,] stop, [step,]) that will
         be passed directly to ``np.arange``. If it is None, will just run with
         the match with freq_offset_mhz=0.
+    match_pars: Optional[Dict]
+        If not None, will be passed directly to ``det_match.MatchParams`` that
+        is used by the det-match function.
     detset_meta_name: str
         Name of the metadata entry in the context that contains detset info.
     detcal_meta_name: str
@@ -65,7 +65,7 @@ class UpdateDetMatchesConfig:
         If True, will use the relative path to the h5 file (relative to the db
         path) when writing to the manifestdb
     
-    Attriutes
+    Attributes
     -------------
     freq_offsets : Optional[np.ndarray]
         If not None, contains freq_offsets determined by
@@ -352,11 +352,14 @@ def update_manifests_all(runner):
         logger.info(f"Adding {ds} to manifests")
         update_manifests(runner, ds)
 
-
-if __name__ == '__main__':
+def make_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('config', type=str, help='path to config file')
     parser.add_argument('--all', action='store_true', help='run all detsets')
+    return parser
+
+if __name__ == '__main__':
+    parser = make_parser()
     args = parser.parse_args()
 
     with open(args.config, 'r') as f:
