@@ -308,6 +308,7 @@ def match_template(
     if max_P > 1:
         logger.info("With priors the max P is %f, normalizing...", max_P)
         P /= max_P
+    P[P == 0] = 1e-10
 
     # Solve the assignment problem
     row_ind, col_ind = linear_sum_assignment(np.log(P), True)
@@ -563,17 +564,23 @@ def _plot_result(plot_dir, froot, focal_plane, template, transformed_fp, P):
         plt.savefig(os.path.join(plot_dir, f"{froot}_P_hist.png"))
     plt.close()
     plt.scatter(
-        focal_plane[:, 0], focal_plane[:, 1], alpha=0.2, color="orange", label="fit"
-    )
-    plt.scatter(
-        template[:, 0], template[:, 1], alpha=0.2, color="blue", label="nomninal"
+        template[:, 0],
+        template[:, 1],
+        alpha=0.4,
+        color="blue",
+        label="nomninal",
+        marker="P",
     )
     plt.scatter(
         transformed_fp[:, 0],
         transformed_fp[:, 1],
-        alpha=0.2,
+        alpha=0.4,
         color="black",
         label="transformed",
+        marker="X",
+    )
+    plt.scatter(
+        focal_plane[:, 0], focal_plane[:, 1], alpha=0.4, color="orange", label="fit"
     )
     plt.xlabel("Xi (rad)")
     plt.ylabel("Eta (rad)")
@@ -759,7 +766,7 @@ def main():
     # Check if we can load a bgmap and load it if we can
     have_bgmap = "bias_map" in config
     if have_bgmap and not os.path.isfile(config["bias_map"]):
-        logger.error("Requested bgmap doesn't exist. Running without bias line info.")
+        logger.error("Requested bgmap doesn't exist.")
         have_bgmap = False
     if have_bgmap and have_band and have_ch:
         bias_group, msk_bg = _load_bg(aman, config["bias_map"])
@@ -770,15 +777,20 @@ def main():
             logger.info(
                 "%d detectors have bias lines that don't match the detmap", bl_diff
             )
-        if get_north_is_highband(band, bias_group):
-            template_n = np.logical_not(template_n)
-            template_msks = [template_n, np.logical_not(template_n)]
+    elif have_detmap:
+        have_bgmap = True
+        bias_group = aman.det_info.wafer.bg
+        msk_bg = np.isin(bias_group, valid_bg)
+        logger.info("Getting bias group information from detmap.")
     else:
         have_bgmap = False
         bias_group = np.nan + np.zeros(aman.dets.count)
         msk_bg = np.ones(aman.dets.count, dtype=bool)
         logger.warning("Running without bias line info. This can effect performance.")
         match_config["bias_lines"] = False
+    if have_bgmap and get_north_is_highband(band, bias_group):
+        template_n = np.logical_not(template_n)
+        template_msks = [template_n, np.logical_not(template_n)]
 
     # Cut outliers
     if config["outliers"].get("use_template", False):
@@ -867,6 +879,14 @@ def main():
     inliers *= dist < config["outliers"]["pixel_dist"]
     logger.info("Total of %d detectors with bad pointing", np.sum(~inliers))
 
+    # Now realign without the outliers
+    msk = (P > np.nanmedian(P)) * (np.isfinite(P))
+    msk = inliers
+    aff, sft = af.get_affine(focal_plane[msk, 1:3].T, mapped_template[msk, 1:3].T)
+    transformed_fp[inliers, :-1] = (
+        aff @ (focal_plane[inliers, 1:3].T) + sft[..., None]
+    ).T
+
     rset_data = _mk_output(
         aman.dets.vals,
         mapped_det_ids,
@@ -885,9 +905,9 @@ def main():
         _plot_result(
             config.get("plot_dir", None),
             froot,
-            focal_plane[:, 1:],
+            focal_plane[inliers, 1:],
             template[:, 1:],
-            transformed_fp,
+            transformed_fp[inliers],
             P,
         )
 
