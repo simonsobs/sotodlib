@@ -1,6 +1,7 @@
 """update_obsdb.py
 
 Create and/or update an obsdb and obsfiledb based on some books.
+Alternatively, update an obsdb based on an obsfiledb.
 The config file could be of the form:
 
 .. code-block:: yaml
@@ -16,7 +17,7 @@ The config file could be of the form:
       subtype: str
 
     obsdb: dummyobsdb.sqlite
-    obsfiledb: dummyobsfiledb.sqlite
+    obsfiledb: dummyobsfiledb.sqlite Needed if running with the --update_cols option
     lat_tube_list_file: path to yaml dict matching tubes and bands
     tolerate_stray_files: True
     skip_bad_books: True
@@ -28,7 +29,7 @@ The config file could be of the form:
 
 """
 
-from sotodlib.core.metadata import ObsDb
+from sotodlib.core.metadata import ObsDb, ObsFileDb
 from sotodlib.core import Context 
 from sotodlib.site_pipeline.check_book import main as checkbook
 from sotodlib.io import load_book
@@ -86,6 +87,7 @@ def main(config: str,
         booktype: Optional[str] = "both",
         verbosity: Optional[int] = 2,
         overwrite: Optional[bool] = False,
+        update_cols: Optional[bool] = False,
         logger=None):
 
     """
@@ -104,6 +106,9 @@ def main(config: str,
         Output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug
     overwrite : bool
         if False, do not re-check existing entries
+    update_cols : bool
+        If True, update obsdb entries for obs_ids in obsfiledb with new columns
+        instead of searching from books from base directories in the config file.
     logger : logging
         When to output the print statements
 
@@ -135,16 +140,28 @@ def main(config: str,
         accept_type = [booktype]
 
     config_dict = yaml.safe_load(open(config, "r"))
+    obsfiledb_based_update = ("obsfiledb" in config_dict) and update_cols
+
     try:
         base_dir = config_dict["base_dir"]
     except KeyError:
-        logger.error("No base directory base_dir specified in config file!")
+        if not obsfiledb_based_update:
+            logger.error("No base directory base_dir specified in config file!")
 
     if "obsdb" in config_dict:
         bookcartobsdb = ObsDb(map_file=config_dict["obsdb"])
     else:
         logger.warning("No obsdb named in the configuration file")
         bookcartobsdb = ObsDb("obsdb.sqlite")
+
+    if update_cols:
+        try:
+            obsfiledb_path = config_dict["obsfiledb"]
+            obsfiledb = ObsFileDb(map_file=obsfiledb_path)
+            logger.info(f"Will update obsdb columns for obs_ids in {obsfiledb_path}")
+        except KeyError:
+            logger.error("Trying to update based on obsfiledb, but none specified in the configuration file")
+    
         
     if "obsdb_cols" in config_dict:
         col_list = []
@@ -162,39 +179,55 @@ def main(config: str,
         tback = 0 #Back to the UNIX Big Bang 
     
     existing = bookcartobsdb.query()["obs_id"]
-    #Check if there are one or multiple base_dir specified
-    if isinstance(base_dir,str):
-        base_dir = [base_dir]
-    for bd in base_dir:
-        #Find folders that are book-like and recent
-        for dirpath, _, _ in os.walk(bd):
-            last_mod = max(os.path.getmtime(root) for root, _, _ in os.walk(dirpath))
-            if last_mod < tback:#Ignore older directories
+    
+    #Look through obsfiledb obs_ids 
+    if obsfiledb_based_update:
+        obs_ids = obsfiledb.get_obs()
+        for obs_id in obs_ids:
+            obs = bookcartobsdb.get(obs_id)
+            if (obs is not None) and (obs["start_time"]<tback):
+                logger.info(f"{obs_id} starts too far in the past, skipping")
                 continue
+
+            obs_files = obsfiledb.get_files(obs_id)
+            first_file_key = next(iter(obs_files))
+            dirpath = os.path.dirname(obs_files[first_file_key][0][0])
             if os.path.exists(os.path.join(dirpath, "M_index.yaml")):
-                _, book_id = os.path.split(dirpath)
-                if book_id in existing and not overwrite:
-                    continue
-                #Looks like a book folder
                 bookcart.append(dirpath)
+
+    #Do a tree search if the obsfiledb wasn't provided
+    else:
+        #Check if there are one or multiple base_dir specified
+        if isinstance(base_dir,str):
+            base_dir = [base_dir]
+        for bd in base_dir:
+            #Find folders that are book-like and recent
+            for dirpath, _, _ in os.walk(bd):
+                last_mod = max(os.path.getmtime(root) for root, _, _ in os.walk(dirpath))
+                if last_mod < tback:#Ignore older directories
+                    continue
+                if os.path.exists(os.path.join(dirpath, "M_index.yaml")):
+                    _, book_id = os.path.split(dirpath)
+                    if book_id in existing and not overwrite:
+                        continue
+                    #Looks like a book folder
+                    bookcart.append(dirpath)
     #Check the books for the observations we want
-
-
     for bookpath in sorted(bookcart):
         if check_meta_type(bookpath) in accept_type:
-
-            try:
-                #obsfiledb creation
-                checkbook(
-                    bookpath, config, add=True, 
-                    overwrite=True, logger=logger
-                )
-            except Exception as e:
-                if config_dict["skip_bad_books"]:
-                    logger.warning(f"failed to add {bookpath}")
-                    continue
-                else:
-                    raise e
+            if not obsfiledb_based_update:
+                try:
+                    #obsfiledb creation
+                    checkbook(
+                        bookpath, config, add=True, 
+                        overwrite=True, logger=logger
+                    )
+                except Exception as e:
+                    if config_dict["skip_bad_books"]:
+                        logger.warning(f"failed to add {bookpath}")
+                        continue
+                    else:
+                        raise e
 
             index = yaml.safe_load(open(os.path.join(bookpath, "M_index.yaml"), "rb"))
             obs_id = index.pop("book_id")
@@ -235,7 +268,12 @@ def main(config: str,
             if stream_ids is not None:
                 bookcartobsdb.add_obs_columns(["wafer_count int"])
                 very_clean["wafer_count"] = len(stream_ids)
-
+                bookcartobsdb.add_obs_columns(["ufms str"])
+                very_clean["ufms"] = (",".join(stream_ids)).replace("ufm_","")
+            wafer_slots = index.pop("wafer_slots")
+            if wafer_slots is not None:
+                bookcartobsdb.add_obs_columns(["wafer_slots str"])
+                very_clean["wafer_slots"] = (",".join([sl["wafer_slot"] for sl in wafer_slots]))
             #Time
             try:
                 start = index["start_time"]
@@ -298,7 +336,9 @@ def get_parser(parser=None):
     parser.add_argument("--booktype", default="both", type=str,
         help="Select book type to look for: obs, oper, both(default)")
     parser.add_argument("--overwrite", action="store_true",
-        help="If true, writes over existing entries")
+        help="If True, overwrite existing entries")
+    parser.add_argument("--update_cols", action="store_true",
+        help="If True, update obsdb entries for obs_ids in obsfiledb with new columns")
     return parser
 
 
