@@ -341,12 +341,18 @@ def estimate_heights(
 
 def _filter(
     x: NDArray[np.floating],
+    medfilt: int,
     gaussian_width: float,
     tv_weight: float,
     force_copy: bool = False,
 ) -> NDArray[np.floating]:
-    if force_copy or gaussian_width > 0 or tv_weight > 0:
+    if force_copy or gaussian_width > 0 or tv_weight > 0 or medfilt > 0:
         x = x.copy()
+    if medfilt > 0:
+        _size = medfilt - 1 + (medfilt % 2)
+        size = np.ones(len(x.shape), dtype=int)
+        size[-1] = _size
+        x = simg.median_filter(x, size)
     if gaussian_width > 0:
         x = simg.gaussian_filter1d(x, gaussian_width, axis=-1, output=x).astype(float)
     if tv_weight > 0:
@@ -457,7 +463,7 @@ def twopi_jumps(
         atol = 3 * std_est(signal.astype(float))
         np.clip(atol, 1e-8, 1e-2)
 
-    _signal = _filter(signal, gaussian_width, tv_weight)
+    _signal = _filter(signal, 3, gaussian_width, tv_weight)
     diff_buffed = _diff_buffed(_signal, None, win_size, False, False)
 
     if isinstance(atol, int):
@@ -599,7 +605,9 @@ def slow_jumps(
     if not isinstance(signal, np.ndarray):
         raise TypeError("Signal is not an array")
 
-    _signal = _filter(signal, gaussian_width, tv_weight)
+    _signal = _filter(signal, 3, gaussian_width, tv_weight)
+
+    # Block ptp
     bptp = block_reduce(_signal, win_size, op=np.ptp, inclusive=True)
 
     if not abs_thresh:
@@ -609,7 +617,7 @@ def slow_jumps(
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
     heights = estimate_heights(
-        signal, jump_ranges.mask(), win_size=win_size, medfilt=True, make_step=True
+        _signal, jump_ranges.mask(), win_size=win_size, medfilt=False, make_step=True
     )
 
     if merge:
@@ -760,7 +768,7 @@ def find_jumps(
     elif np.ndim(min_size) == 1:  # type: ignore
         min_size = np.array(min_size)
 
-    _signal = _filter(signal, gaussian_width, tv_weight, force_copy=True)
+    _signal = _filter(signal, 3, gaussian_width, tv_weight, force_copy=True)
     # Median subtract, if we don't do this then when we cumsum we get floats
     # that are too big and lack the precicion to find jumps well
     _signal -= np.median(_signal, axis=-1)[..., None]
