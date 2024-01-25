@@ -360,7 +360,7 @@ class SuperLoader:
                 for k, v in _filter_items('obs:', obs_info).items():
                     obs_man.wrap(k, v)
             dest.wrap('obs_info', obs_man)
-            
+
         def reraise(spec, e):
             logger.error(
                 f"An error occurred while processing a meta entry:\n\n"

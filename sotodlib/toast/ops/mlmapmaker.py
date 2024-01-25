@@ -7,11 +7,8 @@
 import os
 
 import numpy as np
-
 import traitlets
-
 from astropy import units as u
-
 from pixell import enmap, tilemap, fft
 
 import toast

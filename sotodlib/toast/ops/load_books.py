@@ -105,8 +105,8 @@ class LoadBooks(Operator):
     )
 
     hwp_angle = Unicode(
-        defaults.hwp_angle, 
-        allow_none=True, 
+        defaults.hwp_angle,
+        allow_none=True,
         help="Observation shared key for HWP angle",
     )
 
@@ -209,9 +209,9 @@ class LoadBooks(Operator):
         if data.comm.group_rank == 0:
             for name in book_names:
                 props = book_props[name]
-                m_obs_file = os.path.join(props["path"], "M_observation.yaml")
+                m_obs_file = os.path.join(props["path"], "M_index.yaml")
                 if not os.path.isfile(m_obs_file):
-                    msg = f"Book directory {path} does not contain 'M_observation.yaml'"
+                    msg = f"Book directory {path} does not contain 'M_index.yaml'"
                     log.error(msg)
                     raise RuntimeError(msg)
                 with open(m_obs_file, "r") as f:
