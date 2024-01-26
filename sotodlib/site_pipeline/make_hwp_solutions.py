@@ -165,7 +165,6 @@ def main(
             output=output_filename, 
             h5_address=h5_address
         )
-        
         del g3thwp
         
         # Add an entry to the database
@@ -173,9 +172,9 @@ def main(
             {'obs:obs_id': obs["obs_id"], 'dataset': h5_address}, filename=h5_filename,
         )   
     return
-    
-    
+        
 if __name__ == '__main__':
     parser = get_parser(parser=None)
     args = parser.parse_args()
     main(**vars(args))
+    
