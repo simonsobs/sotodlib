@@ -25,7 +25,8 @@ from typing import Optional
 
 logger = util.init_logger(__name__, 'update-obsdb: ')
 
-def main(config: str, 
+def main(config: str,
+        complete_obsdb: Optional[bool] = False,
         recency: float = None, 
         verbosity: Optional[int] = 2,
         logger=None):
@@ -37,6 +38,9 @@ def main(config: str,
     ----------
     config : str
         Path to config file
+    complete_obsdb : bool
+        Whether to add to the ObsDb books found in ObsFileDb but not 
+        already in the ObsDb.
     recency : float
         How far back in time to look for databases, in days. If None, 
         goes back to the UNIX start date (default: None)
@@ -69,7 +73,9 @@ def main(config: str,
     else:
         logger.error("No obsdb named in the configuration file")
         return
-
+    if complete_obsdb:
+        obsdb_keys = list(obsdb.info()["fields"].keys())
+        
     if "obsfiledb" in config_dict:
         obsfiledb = ObsFileDb(map_file=config_dict["obsfiledb"])
     else:
@@ -85,19 +91,21 @@ def main(config: str,
         logger.error("No obsdb_extra_cols specified in the configuration file")
         return
 
+
     #How far back we should look
     tnow = time.time()
     if recency is not None:
         tback = tnow - recency*86400
     else:
         tback = 0 #Back to the UNIX Big Bang 
-    
+
     obs_ids = obsfiledb.get_obs()
     for obs_id in obs_ids:
-        if obsdb.get(obs_id) is None:
+        obs = obsdb.get(obs_id)
+        if (obs is None) and (not complete_obsdb):
             logger.info(f"{obs_id} in obsfiledb but not in obsdb, skipping")
             continue
-        if obsdb.get(obs_id)["start_time"]<tback:
+        if (obs is not None) and (obs["start_time"]<tback):
             logger.info(f"{obs_id} starts too far in the past, skipping")
             continue
 
@@ -106,9 +114,16 @@ def main(config: str,
         book_path = os.path.dirname(obs_files[first_file_key][0][0])
         if os.path.exists(os.path.join(book_path, "M_index.yaml")):
             index = yaml.safe_load(open(os.path.join(book_path, "M_index.yaml"), "rb"))
+            if (obsdb.get(obs_id) is None) and complete_obsdb and (index["start_time"]>=tback):
+                existing_cols_dict = {key:index[key] for key in iter(obsdb_keys) if key in index}
+                obsdb.update_obs(obs_id, existing_cols_dict)
+                logger.info(f"Added {obs_id} to obsdb")
+
             new_cols_dict = {col:index[col] for col in iter(config_dict["obsdb_extra_cols"]) if col in index}
             obsdb.update_obs(obs_id, new_cols_dict)
             logger.debug(f"Added {new_cols_dict.items()} to {obs_id}")
+        else:
+            logger.error(f"No index file found for book {obs_id}")
 
 def get_parser(parser=None):
     if parser is None:
@@ -117,6 +132,8 @@ def get_parser(parser=None):
         type=str, required=True)
     parser.add_argument('--recency', default=None, type=float,
         help="Days to subtract from now to set as minimum ctime. If None, no minimum")
+    parser.add_argument('--complete_obsdb', action="store_true",
+        help="Whether to add to the ObsDb books found in ObsFileDb but not already in the ObsDb.")
     parser.add_argument("--verbosity", default=2, type=int,
         help="Increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug")
     return parser
