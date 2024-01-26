@@ -1063,7 +1063,7 @@ class G3tHWP():
             self._rising_edge = np.array([])
 
     def _process_counter_overflow_glitch(self):
-        """ Treat glitches due to 32 bits counter overflow """
+        """ Treat glitches due to 32 bit internal counter overflow """
         idx = np.where(np.diff(self._encd_clk)>2**32)[0] + 1
         for i in idx:
             self._encd_clk[i] -= 2**32
