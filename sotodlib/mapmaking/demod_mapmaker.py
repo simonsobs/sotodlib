@@ -149,7 +149,7 @@ class DemodSignalMap(DemodSignal):
                     # this is the case with no splits
                     # turnarounds has the size of samples, we need to add the detector axis
                     mask_for_turnarounds = np.repeat(obs.flags.turnarounds.mask()[None,:], int(obs.dets.count), axis=0)
-                    rangesmatrix = obs.flags.det_bias_flags + so3g.proj.RangesMatrix.from_mask(mask_for_turnarounds) + obs.flags_notfinite + obs.flags_stuck
+                    rangesmatrix = so3g.proj.RangesMatrix.from_mask(mask_for_turnarounds) + obs.flags_notfinite + obs.flags_stuck #+ obs.flags.det_bias_flags
                     pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix)
                 else:
                     # this is the case where we are processing a split. We need to figure out what type of split it is (detector fixed in time, detector variable in time, samples), build the RangesMatrix mask and create the pmap.
@@ -159,7 +159,7 @@ class DemodSignalMap(DemodSignal):
                         mask_for_turnarounds = np.repeat(obs.flags.turnarounds.mask()[None,:], int(obs.dets.count), axis=0)
                         mask = det_split_masks[key]
                         mask_for_split = np.repeat(np.logical_not(mask)[:,None], int(obs.samps.count), axis=1) # the split mask is not since the detectors we want must be false
-                        rangesmatrix = obs.flags.det_bias_flags + so3g.proj.RangesMatrix.from_mask(mask_for_turnarounds) + obs.flags_notfinite + so3g.proj.RangesMatrix.from_mask(mask_for_split) + obs.flags_stuck
+                        rangesmatrix = so3g.proj.RangesMatrix.from_mask(mask_for_turnarounds) + obs.flags_notfinite + so3g.proj.RangesMatrix.from_mask(mask_for_split) + obs.flags_stuck #+ obs.flags.det_bias_flags
                     pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix)
             else:
                 pmap_local = pmap
@@ -206,6 +206,7 @@ class DemodSignalMap(DemodSignal):
                 pmap_local.to_map(dest=obs_rhs, signal=Nd, comps='TQU')
                 obs_div    = pmap_local.zeros(super_shape=(self.ncomp,self.ncomp))
                 pmap_local.to_weights(dest=obs_div, signal=Nd, comps='TQU')
+                Nd[:] = 1
                 obs_hits = pmap_local.to_map(signal=Nd,)
                 
             # Update our full rhs and div. This works for both plain and distributed maps
