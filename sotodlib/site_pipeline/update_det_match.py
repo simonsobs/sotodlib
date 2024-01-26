@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from tqdm.auto import tqdm
 import logging
 import argparse
-from pprint import pprint
 
 from sotodlib.coords import det_match, optics
 from sotodlib import core
@@ -99,6 +98,9 @@ class UpdateDetMatchesConfig:
         if self.match_pars is None:
             self.match_pars = {}
 
+        if not os.path.exists(self.results_path):
+            raise FileNotFoundError(f"Results dir does not exist: {self.results_path}")
+
 
 class Runner:
     def __init__(self, cfg: UpdateDetMatchesConfig):
@@ -126,6 +128,8 @@ class Runner:
         
         self.failed_detset_cache_path = os.path.join(cfg.results_path, 'failed_detsets.yaml')
         self.match_dir = os.path.join(cfg.results_path, 'matches')
+        if not os.path.exists(self.match_dir):
+            os.mkdir(self.match_dir)
         
     def run_next_match(self):
         detsets_all = set(self.detset_db.get_entries(['dataset'])['dataset'])
