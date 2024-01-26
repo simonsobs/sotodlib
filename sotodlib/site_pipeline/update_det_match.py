@@ -161,7 +161,7 @@ def get_failed_detsets(cache_file):
 def run_match_aman(runner: Runner, aman, detset, wafer_slot=None):
     stream_id = aman.det_info.stream_id[aman.det_info.detset == detset][0]
     sol_file = os.path.join(
-        os.path.dirname(runner.detmap_cfg_path), 
+        os.path.dirname(runner.cfg.wafer_map_path),
         runner.wafer_map[stream_id]['solution']
     )
 
