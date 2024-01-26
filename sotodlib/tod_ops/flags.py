@@ -62,12 +62,12 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     if overwrite and name in aman.flags:
         aman.flags.move(name, None)
     
-    msk = not(np.all([detcal.bg >= 0,
-                      detcal.r_tes > 0,
-                      detcal.r_frac >= rfrac_range[0],
-                      detcal.r_frac <= rfrac_range[1],
-                      detcal.p_sat*1e12 >= psat_range[0],
-                      detcal.p_sat*1e12 <= psat_range[1]], axis=0))
+    msk = ~(np.all([detcal.bg >= 0,
+                    detcal.r_tes > 0,
+                    detcal.r_frac >= rfrac_range[0],
+                    detcal.r_frac <= rfrac_range[1],
+                    detcal.p_sat*1e12 >= psat_range[0],
+                    detcal.p_sat*1e12 <= psat_range[1]], axis=0))
     # Expand mask to ndets x nsamps RangesMatrix
     x = Ranges(aman.samps.count)
     mskexp = RangesMatrix([Ranges.ones_like(x) if Y
