@@ -110,17 +110,17 @@ def build_period_obslists(obs_info, periods, context, nset=None):
     for i, row in enumerate(obs_info):
         #print('the wafers are ',i,row.wafer_slots)
         # CARLOS: the names of the wafers included are in the "wafer_slots", like "w25,w26,..." 
-        #listt = ['w25','w26','w27','w28','w29','w30','w31']
+        wafer_list = ['ws0','ws1','ws2','ws3','ws4','ws5','ws6']
         #for detset_band in listt[0:nset]:
-        wafer_list = context.obsfiledb.get_detsets(row.obs_id)
+        #wafer_list = context.obsfiledb.get_detsets(row.obs_id)
         band_list = ['f090', 'f150']
         #for detset_band in row.wafer_slots.split(",")[0:nset]: # CARLOS: this is to limit the number of detsets
         for detset in wafer_list[0:nset]:
             for band in band_list:
                 #detset, band = detset_band.split(":")
                 #band = row.obs_id.split('_')[2] # CARLOS: we get the band name from the obs_id, which has the format ctime_tube_band_11111
-                array = detset.split('_')
-                detset = array[0]+'_'+array[1]
+                #array = detset.split('_')
+                #detset = array[0]+'_'+array[1]
                 key = (pids[i], detset, band)
                 if key not in obslists: obslists[key] = []
                 # A bit redundant to have detset and band here too, but it
@@ -161,6 +161,7 @@ def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, f
     
     # Get the full list of tods we will work with
     ids = get_ids(query, context=context)
+    #print(ids)
     # restrict tod selection further. E.g. --tods [0], --tods[:1], --tods[::100], --tods[[0,1,5,10]], etc.
     if tods: ids = np.array(eval("ids"+tods)).reshape(-1)
     if ntod: ids = ids[:ntod]
@@ -206,7 +207,7 @@ def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, f
             split_labels.append('detin')
             split_labels.append('detout')
         # get the list of wafers and frequencies
-        wafer_list = context.obsfiledb.get_detsets(ids[0])
+        wafer_list = ['ws0', 'ws1', 'ws2', 'ws3', 'ws4', 'ws5', 'ws6']
         band_list = ['f090', 'f150']
         list_freq_wafer = []
         for detset in wafer_list[0:nset]:
