@@ -97,6 +97,9 @@ class G3tHWP():
         # Output path + filename
         self._output = self.configs.get('output', None)
 
+        # logger for write_solution_h5
+        self._write_solution_h5_logger = 'Not set'
+
     def load_data(self, start=None, end=None,
                   data_dir=None, instance=None):
         """
@@ -642,19 +645,19 @@ class G3tHWP():
         aman.wrap_new('stable', shape=('samps', ), dtype=bool)
         aman.wrap_new('locked', shape=('samps', ), dtype=bool)
         aman.wrap_new('hwp_rate', shape=('samps', ), dtype=np.float16)
-        aman.wrap_new('eval', shape=('samps', ), dtype=bool)
-        aman.wrap_new('hwp_err', shape=('samps', ), dtype=bool)
+        aman.wrap('hwp_angle_ver2_flag', None)
+        aman.wrap('hwp_logger', self._write_solution_h5_logger)
 
         return
 
-    def _write_empty_solution_h5(self, tod, output=None, h5_address=None, err=False):
+    def _write_empty_solution_h5(self, tod, output=None, h5_address=None):
         
         logger.info('Writing empty solutions')
         # metadata loader requires a dets axis
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         self._set_empty_axes(aman)
         aman.timestamps[:] = tod.timestamps
-        if err: aman.hwp_err[:] = np.ones(len(tod.timestamps))
+        aman.hwp_logger=self._write_solution_h5_logger
         aman.save(output, h5_address, overwrite=True)
         
         return
@@ -689,7 +692,7 @@ class G3tHWP():
         - hwp_angle_ver2: float
             SMuRF synched HWP angle after the template subtraction (the systematics from the non-uniform encoder slot pattern is subtracted ) in radian. 
 
-            if 'eval' is zero, template subtraction is not completed and its value is same as 'hwp_angle_ver1'.
+            if 'hwp_angle_ver2_flag' is False, template subtraction is not completed and its value is same as 'hwp_angle_ver1'.
         - stable: bool
             if non-zero, indicates the HWP spin state is known. 
 
@@ -707,11 +710,13 @@ class G3tHWP():
 
             Use placeholder value of 0 for cases when not "locked".
         
-        - eval: bool
-            if non-zero, the template subtraction is completed.
+        - hwp_angle_ver2_flag: bool
+            if True, the template subtraction is completed.
         
-        - hwp_err: bool
-            if non-zero, error in angle calculations.
+        - hwp_logger: str
+            Log message for angle calculation status
+            'No HWP data', 'HWP data too short', 
+            'Angle calculation failed', 'Angle calculation succeeded'
         """
         if self._output is None and output is None:
             logger.warning('Output file not specified')
@@ -729,11 +734,13 @@ class G3tHWP():
             data = self.load_data(start, end)
         except Exception as e:
             logger.error(f"Exception '{e}' thrown while loading HWP data. The specified encoder field is missing.")
-            self._write_empty_solution_h5(tod, output, h5_address, True)
+            self._write_solution_h5_logger = 'HWP data too short'
+            self._write_empty_solution_h5(tod, output, h5_address)
             return
 
         if len(data) == 0:
             logger.warning('No HWP data in the specified timestamps.')
+            self._write_solution_h5_logger = 'No HWP data'
             self._write_empty_solution_h5(tod, output, h5_address)
             return
 
@@ -743,15 +750,19 @@ class G3tHWP():
         try:
             solved = self.analyze(data, mod2pi=False)
         except Exception as e:
-            logger.error(f"Exception '{e}' thrown while calculating HWP angle. Encoder signal might have too much noise.")
-            self._write_empty_solution_h5(tod, output, h5_address, True)
-            return
-
-        if len(solved) == 0 or len(solved['fast_time']) == 0:
-            logger.info('No rotation data in the specified timestamps.')
+            logger.error(f"Exception '{e}' thrown while calculating HWP angle. Angle calculation failed.")
+            self._write_solution_h5_logger = 'Angle calculation failed'
             self._write_empty_solution_h5(tod, output, h5_address)
             return
-
+        
+        if len(solved) == 0 or len(solved['fast_time']) == 0:
+            logger.info('No rotation data in the specified timestamps.')
+            self._write_solution_h5_logger = 'No HWP data'
+            self._write_empty_solution_h5(tod, output, h5_address)
+            return
+        
+        self._write_solution_h5_logger = 'Angle calculation succeeded'
+        
         # calculate template subtracted angle
         try:
             self.eval_angle(solved)
@@ -771,12 +782,14 @@ class G3tHWP():
         if 'fast_time_raw' in solved.keys():
             aman.hwp_angle_ver1[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time_raw'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
             aman.hwp_angle_ver2[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
-            aman.eval[:] = np.ones(len(tod.timestamps))
+            aman.hwp_angle_ver2_flag = True
         else:
             logger.info('Template subtraction failed')
             aman.hwp_angle_ver1[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
             aman.hwp_angle_ver2[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
-
+            aman.hwp_angle_ver2_flag = False
+        
+        aman.hwp_logger=self._write_solution_h5_logger
         aman.save(output, h5_address, overwrite=True)
 
         return

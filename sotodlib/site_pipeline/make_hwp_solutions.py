@@ -18,6 +18,7 @@ from sotodlib import core
 from sotodlib.hwp.g3thwp import G3tHWP
 from sotodlib.site_pipeline import util
 default_logger = util.init_logger(__name__, 'make-hwp-solutions: ')
+print(sotodlib.hwp.g3thwp.__file__)
 
 def get_parser(parser=None):
     if parser is None:
