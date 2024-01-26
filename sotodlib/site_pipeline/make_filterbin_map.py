@@ -134,7 +134,8 @@ def calibrate_obs(obs, dtype_tod=np.float32):
     if obs.signal is not None:
         # FLAGS
         tod_ops.flags.get_turnaround_flags(obs)
-        tod_ops.flags.get_det_bias_flags(obs)
+        #tod_ops.flags.get_det_bias_flags(obs)
+        #obs.wrap('flags.det_bias_flags', so3g.proj.RangesMatrix.zeros(obs.shape[:2]),[(0, 'dets'), (1, 'samps')])
         
         # DETRENDING
         tod_ops.detrend.detrend_tod(obs, in_place=True)
@@ -189,7 +190,7 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False,
     for ind in inds:
         obs_id, detset, band, obs_ind = obslist[ind]
         try:
-            tod = context.get_obs(obs_id, dets={"stream_id":detset, "bandpass":band}, no_signal=no_signal)
+            tod = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, no_signal=no_signal)
             tod = calibrate_obs(tod, dtype_tod=dtype_tod)
             my_tods.append(tod)
             my_inds.append(ind)
@@ -221,7 +222,7 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         # Read in the signal too. This seems to read in all the metadata from scratch,
         # which is pointless, but shouldn't cost that much time.
         #obs = context.get_obs(obs_id, dets={"wafer_slot" : [detset], "band":band})
-        obs = context.get_obs(obs_id, dets={"stream_id":detset, "bandpass":band}, )        
+        obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, )        
         obs = calibrate_obs(obs, dtype_tod=dtype_tod)
         
         # demodulate
@@ -232,10 +233,9 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         if singlestream:
             obs.signal = filters.fourier_filter(obs, filters.high_pass_sine2(0.5))
         else:
-            #obs.dsT    = filters.fourier_filter(obs, filters.high_pass_sine2(0.5), signal_name='dsT')
-            #obs.demodQ = filters.fourier_filter(obs, filters.high_pass_sine2(0.5), signal_name='demodQ')
-            #obs.demodU = filters.fourier_filter(obs, filters.high_pass_sine2(0.5), signal_name='demodU')
-            pass
+            obs.dsT    = filters.fourier_filter(obs, filters.high_pass_sine2(0.5), signal_name='dsT')
+            obs.demodQ = filters.fourier_filter(obs, filters.high_pass_sine2(0.5), signal_name='demodQ')
+            obs.demodU = filters.fourier_filter(obs, filters.high_pass_sine2(0.5), signal_name='demodU')
                 
         if obs.dets.count == 0: continue
         
@@ -294,21 +294,21 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
             map.append( enmap.map_mul(signal_map.idiv[n_split], signal_map.rhs[n_split]) )
         ivar.append( signal_map.div[n_split,0,0] )
         with utils.nowarn(): tmap.append( utils.remove_nan(time_rhs[n_split] / ivar[-1]) )
-    return bunch.Bunch(map=map, ivar=ivar, tmap=tmap, signal=signal_map, t0=t0, )
+    return bunch.Bunch(map=map, ivar=ivar, tmap=tmap, signal=signal_map, t0=t0 )
 
 def write_depth1_map(prefix, data, split_labels=None):
     if split_labels==None:
         # we have no splits, so we save index 0 of the lists
         data.signal.write(prefix, "full_map",  data.map[0])
         data.signal.write(prefix, "full_ivar", data.ivar[0])
-        #data.signal.write(prefix, "time", data.tmap[0])
+        data.signal.write(prefix, "full_hits", data.signal.hits)
     else:
         # we have splits
         Nsplits = len(split_labels)
         for n_split in range(Nsplits):
             data.signal.write(prefix, "%s_map"%split_labels[n_split],  data.map[n_split])
             data.signal.write(prefix, "%s_ivar"%split_labels[n_split], data.ivar[n_split])
-            #data.signal.write(prefix, "%s_time"%split_labels[n_split], data.tmap[n_split])
+            data.signal.write(prefix, "%s_hits"%split_labels[n_split], data.signal.hits[n_split])
 
 def write_depth1_info(oname, info):
     utils.mkdir(os.path.dirname(oname))
@@ -384,10 +384,7 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
     obslists, obskeys, periods, obs_infos, det_split_masks, split_labels = mapmaking.build_obslists(context, query, mode=mode, nset=nset, ntod=ntod, tods=tods, fixed_time=fixed_time, mindur=mindur, det_left_right=det_left_right, det_upper_lower=det_upper_lower, det_in_out=det_in_out )
     tags = []
     cwd = os.getcwd()
-    
-    #for key, mask in det_split_masks.items():
-    #    print(key, mask.shape)
-    
+        
     # if we did not request any split, then det_split_masks will be an empty dictionary
     if bool(det_split_masks)==False:
         det_split_masks = None
@@ -409,9 +406,10 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         utils.mkdir(os.path.dirname(prefix))
         meta_done = os.path.isfile(prefix + "_info.hdf")
         maps_done = os.path.isfile(prefix + ".empty") or (
-            os.path.isfile(prefix + "_time.fits") and
             os.path.isfile(prefix + "_map.fits") and
-            os.path.isfile(prefix + "_ivar.fits"))
+            os.path.isfile(prefix + "_ivar.fits") and 
+            os.path.isfile(prefix + "_hits.fits")
+        )
         if cont and meta_done and (maps_done or meta_only): continue
         if comm_intra.rank == 0:
             L.info("%s Proc period %4d dset %s:%s @%.0f dur %5.2f h with %2d obs" % (tag, pid, detset, band, t, (periods[pid,1]-periods[pid,0])/3600, len(obslist)))
