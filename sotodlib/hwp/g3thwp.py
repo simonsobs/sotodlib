@@ -637,7 +637,7 @@ class G3tHWP():
         aman.wrap_new('locked', shape=('samps', ), dtype=bool)
         aman.wrap_new('hwp_rate', shape=('samps', ), dtype=np.float16)
         aman.wrap('hwp_angle_ver2_flag', None)
-        aman.wrap('hwp_logger', self._write_solution_h5_logger)
+        aman.wrap('logger', self._write_solution_h5_logger)
         return
 
     def _write_empty_solution_h5(self, tod, output=None, h5_address=None):
@@ -646,7 +646,7 @@ class G3tHWP():
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         self._set_empty_axes(aman)
         aman.timestamps[:] = tod.timestamps
-        aman.hwp_logger=self._write_solution_h5_logger
+        aman.logger=self._write_solution_h5_logger
         aman.save(output, h5_address, overwrite=True)  
         return
 
@@ -668,38 +668,28 @@ class G3tHWP():
 
         Notes
         -----
-
         Output file format
-
+        
         - timestamp:
             SMuRF synched timestamp
         - hwp_angle_ver1: float
             SMuRF synched HWP angle (calculated from raw encoder signals) in radian
         - hwp_angle_ver2: float
             SMuRF synched HWP angle after the template subtraction (the systematics from the non-uniform encoder slot pattern is subtracted ) in radian. 
-
             if 'hwp_angle_ver2_flag' is False, template subtraction is not completed and its value is same as 'hwp_angle_ver1'.
         - stable: bool
             if non-zero, indicates the HWP spin state is known. 
-
             i.e. it is either spinning at a measurable rate, or stationary. 
-
             When this flag is non-zero, the hwp_rate field can be taken at face value. 
-
         - locked: bool
             if non-zero, indicates the HWP is spinning and the position solution is working. 
-
             In this case one should find the hwp_angle populated in the fast data block. 
-
         - hwp_rate: float
             the "approximate" HWP spin rate, with sign, in revs / second. 
-
             Use placeholder value of 0 for cases when not "locked".
-        
         - hwp_angle_ver2_flag: bool
             if True, the template subtraction is completed.
-        
-        - hwp_logger: str
+        - logger: str
             Log message for angle calculation status
             'No HWP data', 'HWP data too short', 
             'Angle calculation failed', 'Angle calculation succeeded'
@@ -723,7 +713,6 @@ class G3tHWP():
             self._write_solution_h5_logger = 'HWP data too short'
             self._write_empty_solution_h5(tod, output, h5_address)
             return
-
         if len(data) == 0:
             logger.warning('No HWP data in the specified timestamps.')
             self._write_solution_h5_logger = 'No HWP data'
@@ -732,21 +721,18 @@ class G3tHWP():
 
         # calculate HWP angle
         logger.debug("analyze")
-
         try:
             solved = self.analyze(data, mod2pi=False)
         except Exception as e:
             logger.error(f"Exception '{e}' thrown while calculating HWP angle. Angle calculation failed.")
             self._write_solution_h5_logger = 'Angle calculation failed'
             self._write_empty_solution_h5(tod, output, h5_address)
-            return
-        
+            return  
         if len(solved) == 0 or len(solved['fast_time']) == 0:
             logger.info('No rotation data in the specified timestamps.')
             self._write_solution_h5_logger = 'No HWP data'
             self._write_empty_solution_h5(tod, output, h5_address)
             return
-        
         self._write_solution_h5_logger = 'Angle calculation succeeded'
         
         # calculate template subtracted angle
@@ -773,9 +759,8 @@ class G3tHWP():
             logger.info('Template subtraction failed')
             aman.hwp_angle_ver1[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
             aman.hwp_angle_ver2[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
-            aman.hwp_angle_ver2_flag = False
-        
-        aman.hwp_logger=self._write_solution_h5_logger
+            aman.hwp_angle_ver2_flag = False    
+        aman.logger=self._write_solution_h5_logger
         aman.save(output, h5_address, overwrite=True)
         return
 
