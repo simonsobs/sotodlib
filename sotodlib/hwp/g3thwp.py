@@ -410,7 +410,7 @@ class G3tHWP():
         Returns
         --------
         dict
-            {fast_time, angle, slow_time, stable, locked, hwp_rate, template, filled_fast_indexes}
+            {fast_time, angle, slow_time, stable, locked, hwp_rate, template, filled_indexes}
 
 
         Notes
@@ -546,7 +546,7 @@ class G3tHWP():
             self._ref_indexes) + 1), self._ref_indexes[0] + 1)[:len(solved['fast_time'])])
         solved['fast_time_raw'] = solved['fast_time']
         solved['fast_time'] = solved['fast_time'] - subtract
-        solved['template'] = template_slit/np.average(np.diff(solved['fast_time']))#*self._num_edges**2
+        solved['template'] = template_slit/np.average(np.diff(solved['fast_time']))
 
     def write_solution(self, solved, output=None):
         """
@@ -662,6 +662,7 @@ class G3tHWP():
         aman.wrap_new('locked', shape=('samps', ), dtype=bool)
         aman.wrap_new('filled_flag', shape=('samps', ), dtype=bool)
         aman.wrap_new('hwp_rate', shape=('samps', ), dtype=np.float16)
+        aman.wrap('template', None)
         aman.wrap('hwp_angle_ver2_flag', None)
         aman.wrap('logger', self._write_solution_h5_logger)
         return
@@ -788,11 +789,13 @@ class G3tHWP():
             aman.hwp_angle_ver2_flag = False
         aman.logger=self._write_solution_h5_logger
 
-        # write filled flag
-        filled_flag = np.zeros(solved['fast_time'], dtype=bool)
+        # write metadata
+        filled_flag = np.zeros_like(solved['fast_time'], dtype=bool)
         filled_flag[solved['filled_indexes']] = 1
         filled_flag = scipy.interpolate.interp1d(solved['fast_time'], filled_flag, kind='linear', bounds_error=False)(tod.timestamps)
         aman.filled_flag[:] = filled_flag.astype(bool)
+
+        aman.template = solved['template']
 
         aman.save(output, h5_address, overwrite=True)
         return
