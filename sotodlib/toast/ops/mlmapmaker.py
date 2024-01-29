@@ -403,7 +403,7 @@ class MLMapmaker(Operator):
 
             # Maybe load precomputed noise model
             if self.nmat_dir is None:
-                nmat_dir  = os.path.join(self.outdir, "nmats")
+                nmat_dir  = os.path.join(self.out_dir, "nmats")
             else:
                 nmat_dir  = self.nmat_dir
             nmat_file = nmat_dir + "/nmat_%s.hdf" % ob.name
