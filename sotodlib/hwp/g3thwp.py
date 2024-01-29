@@ -664,6 +664,7 @@ class G3tHWP():
         aman.wrap_new('hwp_rate', shape=('samps', ), dtype=np.float16)
         aman.wrap('template', None)
         aman.wrap('hwp_angle_ver2_flag', None)
+        aman.wrap('pid_direction', None)
         aman.wrap('logger', self._write_solution_h5_logger)
         return
 
@@ -796,6 +797,9 @@ class G3tHWP():
         aman.filled_flag[:] = filled_flag.astype(bool)
 
         aman.template = solved['template']
+
+        if 'pid_direction' in data.keys():
+            aman.pid_direction = np.nanmedian(data['pid_direction'][1])
 
         aman.save(output, h5_address, overwrite=True)
         return
