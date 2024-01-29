@@ -251,6 +251,19 @@ class G3tHWP():
             fields += [self._field_instance_sub + '_full.' + f if 'counter' in f
                        else self._field_instance_sub + '.' + f for f in self._field_list]
             alias += [a + '_2' for a in self._field_list]
+
+        # metadata key
+        meta_keys = {
+            'pid_direction': 'hwp-pid.feeds.hwppid.direction',
+            'az': 'acu.feeds.acu_udp_stream.Corrected_Azimuth',
+            'el': 'acu.feeds.acu_udp_stream.Corrected_Boresight',
+            'bs': 'acu.feeds.acu_udp_stream.Corrected_Elevation',
+        }
+        platform = self._field_instance.split('.')[0]
+        for k, f in meta_keys.items():
+            alias.append(k)
+            fields.append(platform + '.' + f)
+
         return fields, alias
 
     def _data_formatting(self, data, suffix=''):
@@ -397,7 +410,7 @@ class G3tHWP():
         Returns
         --------
         dict
-            {fast_time, angle, slow_time, stable, locked, hwp_rate}
+            {fast_time, angle, slow_time, stable, locked, hwp_rate, template, filled_fast_indexes}
 
 
         Notes
@@ -414,9 +427,11 @@ class G3tHWP():
             * locked: bool
                 * if non-zero, indicates the HWP is spinning and the position solution is working.
                 * In this case one should find the hwp_angle populated in the fast data block.
-            * hwp_rate: float:
+            * hwp_rate: float
                 * the "approximate" HWP spin rate, with sign, in revs / second.
                 * Use placeholder value of 0 for cases when not "stable".
+            * filled_indexes: boolean array
+                * indexes where we filled due to packet drop etc.
         """
         if not any(data):
             logger.info("no HWP field data")
@@ -451,6 +466,10 @@ class G3tHWP():
         out = self._slowdata_process(fast_time, d['irig_time'])
         out['fast_time'] = fast_time
         out['angle'] = angle
+
+        # filled indexes
+        out['filled_indexes'] = self._filled_indexes
+
         return out
 
     def eval_angle(self, solved, poly_order=3):
@@ -466,10 +485,15 @@ class G3tHWP():
         Returns
         --------
         output: dict
-            {fast_time, fast_time_raw, angle, slow_time, stable, locked, hwp_rate, fast_time_moving_ave, angle_moving_ave}
+            {fast_time, fast_time_raw, angle, slow_time, stable, locked, hwp_rate, template, fast_time_moving_ave, angle_moving_ave}
+
 
         Notes
         ------
+            * template: float array (ratio)
+                * Averaged non-uniformity of the hwp angle
+                * normalized by the step of the angle encoder
+
         non-uniformity of hwp angle comes from following reasons,
             - non-uniformity of encoder slits
             - sag of rotor
@@ -522,6 +546,7 @@ class G3tHWP():
             self._ref_indexes) + 1), self._ref_indexes[0] + 1)[:len(solved['fast_time'])])
         solved['fast_time_raw'] = solved['fast_time']
         solved['fast_time'] = solved['fast_time'] - subtract
+        solved['template'] = template_slit/np.average(np.diff(solved['fast_time']))#*self._num_edges**2
 
     def write_solution(self, solved, output=None):
         """
@@ -635,6 +660,7 @@ class G3tHWP():
         aman.wrap_new('hwp_angle_ver2', shape=('samps', ), dtype=np.float64)
         aman.wrap_new('stable', shape=('samps', ), dtype=bool)
         aman.wrap_new('locked', shape=('samps', ), dtype=bool)
+        aman.wrap_new('filled_flag', shape=('samps', ), dtype=bool)
         aman.wrap_new('hwp_rate', shape=('samps', ), dtype=np.float16)
         aman.wrap('hwp_angle_ver2_flag', None)
         aman.wrap('logger', self._write_solution_h5_logger)
@@ -647,7 +673,7 @@ class G3tHWP():
         self._set_empty_axes(aman)
         aman.timestamps[:] = tod.timestamps
         aman.logger=self._write_solution_h5_logger
-        aman.save(output, h5_address, overwrite=True)  
+        aman.save(output, h5_address, overwrite=True)
         return
 
     def _bool_interpolation(self, timestamp1, data, timestamp2):
@@ -669,7 +695,7 @@ class G3tHWP():
         Notes
         -----
         Output file format
-        
+
         - timestamp:
             SMuRF synched timestamp
         - hwp_angle_ver1: float
@@ -727,14 +753,14 @@ class G3tHWP():
             logger.error(f"Exception '{e}' thrown while calculating HWP angle. Angle calculation failed.")
             self._write_solution_h5_logger = 'Angle calculation failed'
             self._write_empty_solution_h5(tod, output, h5_address)
-            return  
+            return
         if len(solved) == 0 or len(solved['fast_time']) == 0:
             logger.info('No rotation data in the specified timestamps.')
             self._write_solution_h5_logger = 'No HWP data'
             self._write_empty_solution_h5(tod, output, h5_address)
             return
         self._write_solution_h5_logger = 'Angle calculation succeeded'
-        
+
         # calculate template subtracted angle
         try:
             self.eval_angle(solved)
@@ -759,8 +785,15 @@ class G3tHWP():
             logger.info('Template subtraction failed')
             aman.hwp_angle_ver1[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
             aman.hwp_angle_ver2[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'], solved['angle'], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
-            aman.hwp_angle_ver2_flag = False    
+            aman.hwp_angle_ver2_flag = False
         aman.logger=self._write_solution_h5_logger
+
+        # write filled flag
+        filled_flag = np.zeros(solved['fast_time'], dtype=bool)
+        filled_flag[solved['filled_indexes']] = 1
+        filled_flag = scipy.interpolate.interp1d(solved['fast_time'], filled_flag, kind='linear', bounds_error=False)(tod.timestamps)
+        aman.filled_flag[:] = filled_flag.astype(bool)
+
         aman.save(output, h5_address, overwrite=True)
         return
 
@@ -791,6 +824,10 @@ class G3tHWP():
         # return arrays
         self._time = []
         self._angle = []
+
+        # metadata of packet drop
+        self._num_dropped_pkts = 0
+        self._filled_indexes = []
 
         # check duplication in data
         self._duplication_check()
@@ -1067,6 +1104,7 @@ class G3tHWP():
             _diff = int(np.diff(self._encd_cnt)[ii])
             # Fill dropped counters with counters one before or one after rotation.
             # This filling method works even when the reference slot counter is dropped.
+            self._filled_indexes += list(range(ii + 1, ii + 1 + self._pkt_size))
             if ii - self._num_edges + self._ref_edges + 1 >= 0:
                 gap_clk = self._encd_clk[ii - self._num_edges + self._ref_edges + 1 : ii+_diff - self._num_edges + self._ref_edges] \
                      - self._encd_clk[ii-self._num_edges + self._ref_edges] + self._encd_clk[ii]
