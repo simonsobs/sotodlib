@@ -255,9 +255,6 @@ class G3tHWP():
         # metadata key
         meta_keys = {
             'pid_direction': 'hwp-pid.feeds.hwppid.direction',
-            'az': 'acu.feeds.acu_udp_stream.Corrected_Azimuth',
-            'el': 'acu.feeds.acu_udp_stream.Corrected_Boresight',
-            'bs': 'acu.feeds.acu_udp_stream.Corrected_Elevation',
         }
         platform = self._field_instance.split('.')[0]
         for k, f in meta_keys.items():
