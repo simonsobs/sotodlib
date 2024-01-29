@@ -1064,19 +1064,19 @@ class G3tHWP():
 
     def _process_counter_overflow_glitch(self):
         """ Treat glitches due to 32 bit internal counter overflow """
-        idx = np.where(np.diff(self._encd_clk)>2**32)[0] + 1
+        idx = np.where((np.diff(self._encd_clk)>2**32) & (np.diff(self._encd_clk)<2**32+1e6))[0] + 1
+        if len(idx) > 0:
+            logger.warning(f'{len(idx)} counter overflow glitches are found, perform correction.')
         for i in idx:
             self._encd_clk[i] -= 2**32
-        if len(idx) > 0:
-            logger.warning(f'{len(idx)} counter overflow glitches are found, performed correction.')
 
     def _process_counter_index_reset(self):
         """ Treat counter index reset due to agent reboot """
         idx = np.where(np.diff(self._encd_cnt)<-1e4)[0] + 1
+        if len(idx) > 0:
+            logger.warning(f'{len(idx)} counter resets are found, perform correction.')
         for i in idx:
             self._encd_cnt[i:] = self._encd_cnt[i:] + abs(np.diff(self._encd_cnt)[i-1]) + 1
-        if len(idx) > 0:
-            logger.warning(f'{len(idx)} counter resets are found, performed correction.')
 
     def _fill_dropped_packets(self):
         """ Estimate the number of dropped packets """
