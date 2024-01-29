@@ -1,5 +1,5 @@
 """
-Script to make hwp angle of CalDB.
+Script to make hwp angle metadata.
 This script will run:
 1. automatically if data are acquired as preliminary version.
 2. New versions of the metadata can be created as the analysis evolves.
@@ -164,7 +164,6 @@ def main(
             output=output_filename, 
             h5_address=h5_address
         )
-        
         del g3thwp
         
         # Add an entry to the database
@@ -172,9 +171,9 @@ def main(
             {'obs:obs_id': obs["obs_id"], 'dataset': h5_address}, filename=h5_filename,
         )   
     return
-    
-    
+        
 if __name__ == '__main__':
     parser = get_parser(parser=None)
     args = parser.parse_args()
     main(**vars(args))
+    
