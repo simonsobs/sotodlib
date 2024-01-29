@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import argparse
@@ -6,6 +6,7 @@ from functools import wraps
 
 import toast
 import toast.mpi
+import toast.traits
 
 
 def workflow_timer(f):
@@ -154,7 +155,7 @@ def setup_job(
     )
 
     # Instantiate operators and templates
-    job = toast.config.create_from_config(config)
+    job = toast.traits.create_from_config(config)
 
     if verbose:
         out = ""
