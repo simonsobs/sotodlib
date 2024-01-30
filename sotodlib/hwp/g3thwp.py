@@ -1064,7 +1064,7 @@ class G3tHWP():
 
     def _process_counter_overflow_glitch(self):
         """ Treat glitches due to 32 bit internal counter overflow """
-        idx = np.where((np.diff(self._encd_clk)>2**32) & (np.diff(self._encd_clk)<2**32+1e6))[0] + 1
+        idx = np.where((np.diff(self._encd_clk)>=2**32-1) & (np.diff(self._encd_clk)<2**32+1e6))[0] + 1
         if len(idx) > 0:
             logger.warning(f'{len(idx)} counter overflow glitches are found, perform correction.')
         for i in idx:
