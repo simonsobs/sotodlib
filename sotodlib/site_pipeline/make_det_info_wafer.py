@@ -19,13 +19,19 @@ def get_parser(parser=None):
         parser = ArgumentParser()
     parser.add_argument('config_file',
         help="Configuration file name.")
+    parser.add_argument('target', nargs='*', default=None,
+                        help="Target override: array_name stream_id.")
     parser.add_argument('--overwrite', action='store_true', 
         help="Overwrite existing entries.")
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--log-file', help="Output log filename")
     return parser
 
-def main(config_file=None, overwrite=False, debug=False, log_file=None):
+def get_array_name(stream_id):
+    # ufm_mv56 -> Mv56
+    return stream_id.split('_')[1].capitalize()
+
+def main(config_file=None, target=None, overwrite=False, debug=False, log_file=None):
     if debug:
         logger.setLevel("DEBUG")
     
@@ -36,34 +42,47 @@ def main(config_file=None, overwrite=False, debug=False, log_file=None):
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
-    configs = yaml.safe_load(open(config_file, "r"))
-    array_names = [array["name"] for array in configs["arrays"]]
-    logger.info(f"Creating Det Info for UFMs-{','.join([array for array in array_names])}")
+    config = yaml.safe_load(open(config_file, "r"))
 
-    if os.path.exists(configs["det_db"]):
-        logger.info(f"Det Info {configs['det_db']} exists, looking for updates")
-        db = core.metadata.ManifestDb(configs["det_db"])
+    if target is not None and len(target) > 0:
+        assert(len(target) == 2)  # array_name stream_id
+        targets = [tuple(target)]
+    else:
+        targets = [(get_array_name(stream_id), stream_id) for stream_id in config['stream_ids']]
+
+    array_names = [target[0] for target in targets]
+    logger.info(f"Requested Det Info for UFMs: {','.join([array for array in array_names])}")
+
+    # Outputs
+    db_file = os.path.join(config['output_dir'], 'wafer_info.sqlite')
+    h5_rel = 'wafer_info.h5'
+    h5_file = os.path.join(config['output_dir'], h5_rel)
+
+    if os.path.exists(db_file):
+        logger.info(f"Det Info {db_file} exists, looking for updates")
+        db = core.metadata.ManifestDb(db_file)
         existing = list(db.get_entries(["dataset"])["dataset"])
     else:
-        logger.info(f"Creating Det Info {configs['det_db']}.")
+        os.makedirs(config['output_dir'], exist_ok=True)
+        logger.info(f"Creating Det Info {db_file}.")
         scheme = core.metadata.ManifestScheme()
         scheme.add_data_field('dets:stream_id')
         scheme.add_data_field('dataset')
-        db = core.metadata.ManifestDb(configs["det_db"], scheme=scheme)
+        db = core.metadata.ManifestDb(db_file, scheme=scheme)
         existing = []
 
-    for array_cfg in configs['arrays']:
-        array_name = array_cfg['name']
-        stream_id = array_cfg['stream_id']
+    for array_name, stream_id in targets:
 
         # make result set per array
         if array_name in existing and not overwrite:
             logger.info(f"{array_name} exists in database, pass --overwrite to"
             " overwrite existing information.")
             continue
+        else:
+            logger.info(f"Creating entry for {array_name}.")
 
         # Get one row per resonator
-        rows = so_ufm.get_wafer_info(array_name, configs, array_cfg,
+        rows = so_ufm.get_wafer_info(array_name, config, {},
                                      include_no_match=True)
 
         # Output key names are formatted for det_info consumption.
@@ -79,13 +98,13 @@ def main(config_file=None, overwrite=False, debug=False, log_file=None):
         for row in rows:
             det_rs.append({key_map[k]: v for k, v in row.items()})
 
-        write_dataset(det_rs, configs["det_info"], array_name, overwrite)
+        write_dataset(det_rs, h5_file, array_name, overwrite)
 
         # Update the index if it's a new entry
         if not array_name in existing:
             db_data = {'dets:stream_id': stream_id,
                        'dataset': array_name}
-            db.add_entry(db_data, configs["det_info"])
+            db.add_entry(db_data, h5_rel)
 
 
 def replace_none(val, replace_val=np.nan):
