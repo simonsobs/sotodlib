@@ -36,7 +36,6 @@ def std_est(x: NDArray[np.floating], axis: int = -1) -> NDArray[np.floating]:
 
 def _jumpfinder(
     x: NDArray[np.floating],
-    min_chunk: int = 20,
     min_size: Optional[Union[float, NDArray[np.floating]]] = None,
     win_size: int = 20,
     nsigma: float = 25,
@@ -54,8 +53,6 @@ def _jumpfinder(
 
         x: Data to jumpfind on, expects 1D or 2D.
 
-        min_chunk: The smallest chunk of data to look for jumps in.
-
         min_size: The smallest jump size counted as a jump.
 
         win_size: Size of window used by SG filter when peak finding.
@@ -70,7 +67,7 @@ def _jumpfinder(
     Returns:
 
         jumps: Mask with the same shape as x that is True at jumps.
-               Jumps within min_chunk of each other may not be distinguished.
+               Jumps within win_size of each other may not be distinguished.
     """
     if min_size is None:
         min_size = ss.iqr(x, -1)
@@ -81,7 +78,7 @@ def _jumpfinder(
     x = np.atleast_2d(x)
 
     jumps = np.zeros(x.shape, dtype=bool)
-    if x.shape[-1] < min_chunk:
+    if x.shape[-1] < win_size:
         return jumps.reshape(orig_shape)
 
     size_msk = (np.max(x, axis=-1) - np.min(x, axis=-1)) < min_size
@@ -173,7 +170,6 @@ def _jumpfinder(
         for i in range(len(_jumps) - 1):
             sub_jumps = _jumpfinder(
                 x[row, (_jumps[i]) : (_jumps[i + 1])],
-                min_chunk,
                 min_size,
                 win_size,
                 nsigma,
@@ -635,7 +631,6 @@ def find_jumps(
     aman,
     signal=...,
     max_iters=...,
-    min_chunk=...,
     min_sigma=...,
     min_size=...,
     win_size=...,
@@ -657,7 +652,6 @@ def find_jumps(
     aman,
     signal=...,
     max_iters=...,
-    min_chunk=...,
     min_sigma=...,
     min_size=...,
     win_size=...,
@@ -678,7 +672,6 @@ def find_jumps(
     aman: AxisManager,
     signal: Optional[NDArray[np.floating]] = None,
     max_iters: int = 1,
-    min_chunk: int = 20,
     min_sigma: Optional[float] = None,
     min_size: Optional[Union[float, NDArray[np.floating]]] = None,
     win_size: int = 20,
@@ -706,8 +699,6 @@ def find_jumps(
 
         max_iters: Maximum iterations of the jumpfind -> median sub -> jumpfind loop.
                    This is prefered over increasing depth in general.
-
-        min_chunk: The smallest chunk of data to look for jumps in.
 
         min_sigma: Number of standard deviations to count as a jump, note that
                    the standard deviation here is computed by std_est and is
@@ -782,7 +773,6 @@ def find_jumps(
             _min_size = min_size
         _jumps = _jumpfinder(
             _signal[msk],
-            min_chunk=min_chunk,
             min_size=_min_size,
             win_size=win_size,
             nsigma=nsigma,
@@ -797,7 +787,7 @@ def find_jumps(
 
     # TODO: include heights in output
 
-    jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(min_chunk / 2))
+    jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
     jumps = jump_ranges.mask()
     heights = estimate_heights(signal, jumps, win_size=win_size, medfilt=True)
 
