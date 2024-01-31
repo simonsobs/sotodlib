@@ -140,9 +140,13 @@ class Books(Base):
 # convenient decorator to repeat a method over all data sources
 def loop_over_tubes(method):
     def wrapper(self, *args, **kwargs):
+        outs = []
         for tube in self.tubes:
-            method(self, tube, *args, **kwargs)
-
+            x = method(self, tube, *args, **kwargs)
+            if x is not None:
+                outs.extend(x)
+        if len(outs)>0:
+            return outs        
     return wrapper
 
 
@@ -1091,6 +1095,7 @@ class Imprinter:
         ignore_singles=False,
         stream_ids=None,
         force_single_stream=False,
+        return_obsset=False
     ):
         """Update bdb with new observations from g3tsmurf db.
 
@@ -1111,6 +1116,9 @@ class Imprinter:
             imprinter configuration file.
         force_single_stream: boolean
             if True, treat observations from different streams separately
+        return_obsset: boolean
+            if True, return the list of observation sets instead of registering
+            books. Useful as a debugging tool
         """
         if not self.build_det:
             return
@@ -1233,6 +1241,11 @@ class Imprinter:
                             obs_list = q.all()
                             # add the current obs too
                             obs_list.append(str_obs)
+
+                            # remove overlapping operations
+                            obs_list = [obs for obs in obs_list 
+                                if get_obs_type(obs) == "obs"
+                            ]
                             # check to make sure ALL observations overlap all 
                             # others and the overlap passes the minimum 
                             # requirement
@@ -1274,6 +1287,8 @@ class Imprinter:
         # now our output is a list of ObsSet, where each ObsSet contains
         # all observations that overlap each other which should go
         # into the same book.
+        if return_obsset:
+            return output
 
         # register books in the book database (bdb)
         for oset in output:
