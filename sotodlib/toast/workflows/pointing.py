@@ -111,8 +111,8 @@ def select_pointing(job, otherargs, runargs, data):
 
     # Configure Az/El and RA/DEC boresight and detector pointing and weights
 
-    job_ops.det_pointing_azel.boresight = job_ops.sim_ground.boresight_azel
-    job_ops.det_pointing_radec.boresight = job_ops.sim_ground.boresight_radec
+    job_ops.det_pointing_azel.boresight = defaults.boresight_azel
+    job_ops.det_pointing_radec.boresight = defaults.boresight_radec
 
     job_ops.pixels_wcs_azel.detector_pointing = job_ops.det_pointing_azel
     job_ops.pixels_wcs_radec.detector_pointing = job_ops.det_pointing_radec
@@ -125,7 +125,7 @@ def select_pointing(job, otherargs, runargs, data):
     job_ops.weights_azel.detector_pointing = job_ops.det_pointing_azel
     job_ops.weights_radec.detector_pointing = job_ops.det_pointing_radec
 
-    if defaults.hwp_angle in data.obs[0].shared:
+    if len(data.obs) > 0 and defaults.hwp_angle in data.obs[0].shared:
         job_ops.weights_azel.hwp_angle = defaults.hwp_angle
         job_ops.weights_radec.hwp_angle = defaults.hwp_angle
 
@@ -159,9 +159,11 @@ def select_pointing(job, otherargs, runargs, data):
     if hasattr(job_ops, "binner"):
         job_ops.binner.pixel_pointing = job.pixels_solve
         job_ops.binner.stokes_weights = job.weights_solve
+        job_ops.binner.full_pointing = otherargs.full_pointing
     if hasattr(job_ops, "binner_final"):
         job_ops.binner_final.pixel_pointing = job.pixels_final
         job_ops.binner_final.stokes_weights = job.weights_final
+        job_ops.binner_final.full_pointing = otherargs.full_pointing
         # If we are not using a different binner for our final binning, use the
         # same one as the solve.
         if not job_ops.binner_final.enabled:

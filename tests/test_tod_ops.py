@@ -114,6 +114,14 @@ class PcaTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             tod_ops.detrend_tod(tod, signal_name='sig1e')
 
+    def test_detrend_inplace(self):
+        tod = get_tod('trendy')
+        sig_id = id(tod.signal)
+
+        for method in ["linear", "mean", "median"]:
+            tod_ops.detrend_tod(tod, method=method, in_place=True)
+            self.assertEqual(sig_id, id(tod.signal))
+
 class GapFillTest(unittest.TestCase):
     def test_basic(self):
         """Test linear fill on simple linear data."""
@@ -232,26 +240,40 @@ class JumpfindTest(unittest.TestCase):
 
         tod.wrap('sig_jumps', sig_jumps, [(0, 'samps')])
 
+        # Find jumps without filtering
+        jumps_nf = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=5)
+        jumps_nf = jumps_nf.ranges().flatten()
+        
         # Find jumps with TV filtering
-        jumps_tv = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=5)
+        jumps_tv = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, tv_weight=.5, min_size=5)
         jumps_tv = jumps_tv.ranges().flatten()
 
         # Find jumps with gaussian filtering
-        jumps_gauss = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps,
-                                               jumpfinder=tod_ops.jumps.jumpfinder_gaussian, min_size=5)
+        jumps_gauss = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, gaussian_width=.5, min_size=5)
         jumps_gauss = jumps_gauss.ranges().flatten()
 
         # Remove double counted jumps and round to remove uncertainty
+        jumps_nf = np.unique(np.round(jumps_nf, -2))
         jumps_tv = np.unique(np.round(jumps_tv, -2))
         jumps_gauss = np.unique(np.round(jumps_gauss, -2))
 
-        # Check that both methods agree
+        # Check that all methods agree
         self.assertEqual(len(jumps_tv), len(jumps_gauss))
         self.assertTrue(np.all(np.abs(jumps_tv - jumps_gauss) == 0))
+        self.assertEqual(len(jumps_nf), len(jumps_gauss))
+        self.assertTrue(np.all(np.abs(jumps_nf - jumps_gauss) == 0))
 
         # Check that they agree with the input
-        self.assertEqual(len(jump_locs), len(jumps_tv))
-        self.assertTrue(np.all(np.abs(jumps_tv - jump_locs) == 0))
+        print(jumps_nf)
+        self.assertEqual(len(jump_locs), len(jumps_nf))
+        self.assertTrue(np.all(np.abs(jumps_nf - jump_locs) == 0))
+
+        # Check heights
+        jumps_msk = np.zeros_like(sig_jumps, dtype=bool)
+        jumps_msk[jumps_nf] = True
+        heights = tod_ops.jumps.estimate_heights(sig_jumps, jumps_msk, medfilt=True)
+        heights = heights[heights.nonzero()].ravel()
+        self.assertTrue(np.all(np.abs(np.array([10, -13, -8]) - np.round(heights)) < 3))
 
 if __name__ == '__main__':
     unittest.main()

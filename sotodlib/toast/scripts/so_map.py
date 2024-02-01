@@ -61,11 +61,14 @@ def reduce_data(job, otherargs, runargs, data):
 
     wrk.select_pointing(job, otherargs, runargs, data)
     wrk.simple_noise_models(job, otherargs, runargs, data)
+    wrk.create_az_intervals(job, otherargs, runargs, data)
 
     wrk.flag_noise_outliers(job, otherargs, runargs, data)
     wrk.filter_hwpss(job, otherargs, runargs, data)
-    wrk.demodulate(job, otherargs, runargs, data)
     wrk.noise_estimation(job, otherargs, runargs, data)
+
+    data = wrk.demodulate(job, otherargs, runargs, data)
+
     wrk.flag_sso(job, otherargs, runargs, data)
     wrk.hn_map(job, otherargs, runargs, data)
     wrk.cadence_map(job, otherargs, runargs, data)
@@ -106,10 +109,8 @@ def load_data(job, otherargs, runargs, data):
     # Load data from all formats
     wrk.load_data_hdf5(job, otherargs, runargs, data)
     wrk.load_data_books(job, otherargs, runargs, data)
-    # wrk.load_data_context(job, otherargs, runargs, data)
-
-    if len(data.obs) == 0:
-        raise RuntimeError("No input data specified!")
+    wrk.load_data_context(job, otherargs, runargs, data)
+    wrk.act_responsivity_sign(job, otherargs, runargs, data)
 
     job_ops.mem_count.prefix = "After Data Load"
     job_ops.mem_count.apply(data)
@@ -164,8 +165,11 @@ def main():
 
     wrk.setup_load_data_hdf5(operators)
     wrk.setup_load_data_books(operators)
+    wrk.setup_load_data_context(operators)
+    wrk.setup_act_responsivity_sign(operators)
 
     wrk.setup_pointing(operators)
+    wrk.setup_az_intervals(operators)
     wrk.setup_simple_noise_models(operators)
     wrk.setup_flag_noise_outliers(operators)
 
@@ -207,22 +211,7 @@ def main():
         return
 
     # Determine the process group size
-    if runargs.group_size is not None:
-        msg = f"Using user-specifed process group size of {runargs.group_size}"
-        log.info_rank(msg, comm=comm)
-        group_size = runargs.group_size
-    else:
-        if job.operators.mapmaker_ml.enabled:
-            msg = f"ML mapmaker is enabled, forcing process group size to 1"
-            log.info_rank(msg, comm=comm)
-            group_size = 1
-        else:
-            msg = f"Using default process group size"
-            log.info_rank(msg, comm=comm)
-            if comm is None:
-                group_size = 1
-            else:
-                group_size = comm.size
+    group_size = wrk.reduction_group_size(job, runargs, comm)
 
     # Create the toast communicator
     toast_comm = toast.Comm(world=comm, groupsize=group_size)

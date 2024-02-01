@@ -135,13 +135,27 @@ resulting ManifestDbs should work for both level 2 and level 3 SMuRf data.
 
 make_det_info_wafer
 ```````````````````
-This script uses the DetMap software package to build detector IDs for a set of
+This script uses based array construction inputs to build detector IDs for a set of
 UFMs and save them in a ManifestDb / HDF5 file. The formatting of the ResultSet 
 saved in HDF5 file will map all this information into ``det_info.wafer`` when used 
 with a correctly formatted context file and a readout to detector id mapping.
 The detector info mapping created by this script will be stable as long as the
 same UFMs are used in the same optics tube positions, meaning it only needs to
 be re-made if the physical hardware setup changes. 
+
+Although the full config presented for ``make_read_det_match`` will
+work, here's a more basic example that will work::
+
+  det_db: "./det_info_wafer.db"
+  det_info: "./det_info_wafer.h5"
+  array_info_dir: "/home/so/git/site-pipeline-configs/shared/detmapping/design/"
+
+  arrays:
+    - name: mv7
+      stream_id: ufm_mv7
+    - name: mv9
+      stream_id: ufm_mv9
+
 
 make_read_det_match
 ```````````````````
@@ -213,6 +227,59 @@ entries mater.
           det_info: true
           multi: true
 
+update_det_match
+------------------
+
+The ``update_det_match`` script will run the ``det_match`` module on any new
+detsets with available calibration metadata. It loads smurf and resonator
+information from the AxisManager metadata, and matches resonators against a
+solution file in the site-pipeline-configs.
+
+To run, this script requires a config file described below. If run without the
+``--all`` flag, it will only run one detset at a time.  If run with the
+``--all`` flag, will continue running until all detsets have been mantched.
+
+.. argparse::
+   :module: sotodlib.site_pipeline.update_det_match
+   :func: make_parser
+
+Generated results
+```````````````````
+This generates the following data in the specified ``results`` directory:
+
+ - A match file, with the path ``<results_path>/matches/<detset>.h5`` is written
+   for every detset.
+ - The file ``<results_path>/assignment.sqlite`` is a manifestdb, that contains
+   the mapping from readout-id to detector-id. This is compatible with
+   the ``det_info_wafer`` and ``focal_plane`` metadata.
+ - The ``<results_path>/det_match.sqlite`` file, that contains the
+   ``det_match.Resonator`` data from the match for each resonator.
+
+Configuration
+`````````````````
+This script takes in a config yaml file, which corresponds directly to the
+``UpdateDetMatchesConfig`` class (see docs below).
+
+For example, this can run simply with the config file:
+
+.. code-block:: yaml
+
+  results_path: /path/to/results
+  context_path: /path/to/context.yaml
+
+Note that by default, this will run a scan of frequency offsets between the
+solution and the resonator metadata to find the freq-offset with the best
+match. To disable this, you can run a config file like the following:
+
+.. code-block:: yaml
+
+  results_path: /path/to/results
+  context_path: /path/to/context.yaml
+  freq_offset_range_args: None
+
+Below is the full docs of the configuration class.
+
+.. autoclass:: sotodlib.site_pipeline.update_det_match.UpdateDetMatchesConfig
 
 analyze-bright-ptsrc
 --------------------
@@ -601,7 +668,7 @@ Here's an annotated example:
     cal_keys: ['abscal', 'relcal']
     pointing_keys: ['boresight_offset']
 
-  # Mapmaking parameters
+  # mapmaking parameters
   mapmaking:
     force_source: Uranus
     res:
