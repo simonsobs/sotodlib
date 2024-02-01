@@ -103,6 +103,9 @@ class G3tHWP():
         # logger for write_solution_h5
         self._write_solution_h5_logger = 'Not set'
 
+        # encoder suffixes
+        self._suffixes = ['_1', '_2']
+
     def load_data(self, start=None, end=None,
                   data_dir=None, instance=None):
         """
@@ -268,7 +271,7 @@ class G3tHWP():
 
         return fields, alias
 
-    def _data_formatting(self, data, suffix=''):
+    def _data_formatting(self, data, suffix):
         """
         Formatting encoder data
 
@@ -276,16 +279,14 @@ class G3tHWP():
         -----
         data : dict
             HWP HK data from load_data
-        suffix: Specify whether to use 1st or 2nd encoder, '' or '_2'
-            '' for 1st encoder, '_2' for 2nd encoder
+        suffix: Specify whether to use 1st or 2nd encoder, '_1' or '_2'
+            '_1' for 1st encoder, '_2' for 2nd encoder
 
         Returns
         --------
         dict
             {'rising_edge_count', 'irig_time', 'counter', 'counter_index', 'quad', 'quad_time'}
         """
-        enc_key = {'': '1st', '_2': '2nd'}
-
         keys = ['rising_edge_count', 'irig_time',
                 'counter', 'counter_index', 'quad', 'quad_time']
         out = {k: data[k+suffix][1] if k+suffix in data.keys() else []
@@ -294,7 +295,7 @@ class G3tHWP():
         # irig part
         if 'irig_time'+suffix not in data.keys():
             logger.warning(
-                f'All IRIG time is not correct for {enc_key[suffix]} encoder')
+                'All IRIG time is not correct for encoder' + suffix)
             return out
 
         if self._irig_type == 1:
@@ -304,7 +305,7 @@ class G3tHWP():
         # encoder part
         if 'counter'+suffix not in data.keys():
             logger.warning(
-                f'No encoder data is available for {enc_key[suffix]} encoder')
+                'No encoder data is available for encoder'+suffix)
             return out
 
         out['quad'] = self._quad_form(data['quad'+suffix][1])
@@ -312,11 +313,8 @@ class G3tHWP():
 
         return out
 
-    def _slowdata_process(self, fast_time, irig_time, suffix=''):
+    def _slowdata_process(self, fast_time, irig_time, suffix):
         """ Diagnose hwp status and output status flags
-        Args
-        -----
-        suffix: '' for 1st encoder, '_2' for 2nd encoder
 
         Returns
         --------
@@ -394,7 +392,7 @@ class G3tHWP():
 
         return {'locked'+suffix: locked, 'stable'+suffix: stable, 'hwp_rate'+suffix: hwp_rate, 'slow_time'+suffix: slow_time}
 
-    def analyze(self, data, ratio=None, force_quad=None, mod2pi=True, fast=True, suffix=''):
+    def analyze(self, data, ratio=None, force_quad=None, mod2pi=True, fast=True, suffix='_1'):
         """
         Analyze HWP angle solution
         to be checked by hardware that 0 is CW and 1 is CCW from (sky side) consistently for all SAT
@@ -477,7 +475,7 @@ class G3tHWP():
 
         return out
 
-    def eval_angle(self, solved, poly_order=3, suffix=''):
+    def eval_angle(self, solved, poly_order=3, suffix='_1'):
         """
         Evaluate the non-uniformity of hwp angle timestamp and subtract
         The raw hwp angle timestamp is kept.
@@ -490,7 +488,7 @@ class G3tHWP():
             order of polynomial filtering for removing drift of hwp speed
             for evaluating the non-uniformity of hwp angle.
         suffix:
-            '' for 1st encoder, '_2' for 2nd encoder
+            '_1' for 1st encoder, '_2' for 2nd encoder
 
         Returns
         --------
@@ -800,7 +798,7 @@ class G3tHWP():
         aman.wrap_new('hwp_rate'+suffix, shape=('samps', ), dtype=np.float16)
         aman.wrap('template'+suffix, None)
         aman.wrap('version'+suffix, 0)
-        aman.wrap('logger'+suffix, 'No log')
+        aman.wrap('logger'+suffix, 'Not set')
         return aman
 
     def _bool_interpolation(self, timestamp1, data, timestamp2):
@@ -809,7 +807,7 @@ class G3tHWP():
         result = (interp > 0.999)
         return result
 
-    def write_solution_h5(self, tod, output=None, h5_address=None, suffix=''):
+    def write_solution_h5(self, tod, output=None, h5_address=None):
         """
         Output HWP angle + flags as AxisManager format
 
@@ -894,7 +892,8 @@ class G3tHWP():
             self._write_solution_h5_logger = 'HWP data too short'
             self._write_empty_solution_h5(tod, output, h5_address)
 
-        for suffix in ['', '_2']:
+        solved = {}
+        for suffix in self.suffixes:
             logger.info('Start analyzing encoder'+suffix)
             # load data
             if not 'counter' + suffix in data.keys():
@@ -906,14 +905,14 @@ class G3tHWP():
             # version 1
             # calculate HWP angle
             try:
-                solved = self.analyze(data, mod2pi=False, suffux=suffix)
+                solved = solved | self.analyze(data, mod2pi=False, suffix=suffix)
             except Exception as e:
                 logger.error(
                     f"Exception '{e}' thrown while calculating HWP angle. Angle calculation failed.")
                 self._write_solution_h5_logger = 'Angle calculation failed'
                 self._set_empty_axes(aman, suffix)
                 continue
-            if len(solved) == 0 or ('fast_time'+suffix not in solved.keys()) or len(solved['fast_time']) == 0:
+            if len(solved) == 0 or ('fast_time'+suffix not in solved.keys()) or len(solved['fast_time'+suffix]) == 0:
                 logger.info(
                     'No correct rotation data in the specified timestamps.')
                 self._write_solution_h5_logger = 'No HWP data'
@@ -954,16 +953,15 @@ class G3tHWP():
 
         # version 3
         # calculate off-centering corrected angle
-        if aman.version_1 == 2 and aman.version_2 == 2:
-            try:
-                self.eval_offcentering(solved)
-                self.correct_offcentering(solved)
-                getattr(aman, 'hwp_angle_ver3'+suffix)[:] = np.mod(scipy.interpolate.interp1d(
-                    solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
-                getattr(aman, 'version'+suffix)[:] = 3
-            except Exception as e:
-                logger.error(
-                    f"Exception '{e}' thrown while the off-centering correction.")
+        try:
+            self.eval_offcentering(solved)
+            self.correct_offcentering(solved)
+            getattr(aman, 'hwp_angle_ver3'+suffix)[:] = np.mod(scipy.interpolate.interp1d(
+                solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
+            getattr(aman, 'version'+suffix)[:] = 3
+        except Exception as e:
+            logger.error(
+                f"Exception '{e}' thrown while the off-centering correction.")
 
         # make the highers version, best encoder solution as hwp_angle
         # getattr(aman, 'hwp_angle'+suffix)[:] =
