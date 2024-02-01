@@ -9,7 +9,6 @@ from spt3g import core
 import logging
 import yaml
 import datetime
-import h5py
 import sotodlib
 
 
@@ -395,7 +394,7 @@ class G3tHWP():
 
         return {'locked'+suffix: locked, 'stable'+suffix: stable, 'hwp_rate'+suffix: hwp_rate, 'slow_time'+suffix: slow_time}
 
-    def analyze(self, data, ratio=None, mod2pi=True, fast=True, suffix=''):
+    def analyze(self, data, ratio=None, force_quad=None, mod2pi=True, fast=True, suffix=''):
         """
         Analyze HWP angle solution
         to be checked by hardware that 0 is CW and 1 is CCW from (sky side) consistently for all SAT
@@ -665,7 +664,7 @@ class G3tHWP():
         """
 
         # Skip the correction when the offcentering estimation doesn't exist.
-        if not 'offcentering' in solved.keys():
+        if 'offcentering' not in solved.keys():
             logger.warning(
                 'Offcentering info does not exist. Offcentering correction is skipped.')
             return
@@ -879,15 +878,16 @@ class G3tHWP():
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         aman.timestamps[:] = tod.timestamps
 
-        aman.wrap('pid_direction', None)
-        if 'pid_direction' in data.keys():
-            aman.pid_direction = np.nanmedian(data['pid_direction'][1])
-
         start = int(tod.timestamps[0])-self._margin
         end = int(tod.timestamps[-1])+self._margin
 
         try:
             data = self.load_data(start, end)
+
+            aman.wrap('pid_direction', None)
+            if 'pid_direction' in data.keys():
+                aman.pid_direction = np.nanmedian(data['pid_direction'][1])
+
         except Exception as e:
             logger.error(
                 f"Exception '{e}' thrown while loading HWP data. The specified encoder field is missing.")
@@ -931,13 +931,13 @@ class G3tHWP():
 
             getattr(aman, 'hwp_angle_ver1'+suffix)[:] = np.mod(scipy.interpolate.interp1d(
                 solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
-            getattr(aman, 'version'+suffix) = 1
+            getattr(aman, 'version'+suffix)[:] = 1
 
             filled_flag = np.zeros_like(solved['fast_time'+suffix], dtype=bool)
             filled_flag[solved['filled_indexes'+suffix]] = 1
             filled_flag = scipy.interpolate.interp1d(
                 solved['fast_time'+suffix], filled_flag, kind='linear', bounds_error=False)(tod.timestamps)
-            getattr(aman, 'filled_flag'+suffix) = filled_flag.astype(bool)
+            getattr(aman, 'filled_flag'+suffix)[:] = filled_flag.astype(bool)
 
             # version 2
             # calculate template subtracted angle
@@ -946,8 +946,8 @@ class G3tHWP():
                 aman.save(output, h5_address, overwrite=True)
                 getattr(aman, 'hwp_angle_ver2'+suffix)[:] = np.mod(scipy.interpolate.interp1d(
                     solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
-                getattr(aman, 'version'+suffix) = 2
-                getattr(aman, 'template'+suffix) = solved['template'+suffix]
+                getattr(aman, 'version'+suffix)[:] = 2
+                getattr(aman, 'template'+suffix)[:] = solved['template'+suffix]
             except Exception as e:
                 logger.error(
                     f"Exception '{e}' thrown while the template subtraction.")
@@ -956,18 +956,18 @@ class G3tHWP():
         # calculate off-centering corrected angle
         if aman.version_1 == 2 and aman.version_2 == 2:
             try:
-                offcentering = self.eval_offcentering(solved)
+                self.eval_offcentering(solved)
                 self.correct_offcentering(solved)
                 getattr(aman, 'hwp_angle_ver3'+suffix)[:] = np.mod(scipy.interpolate.interp1d(
                     solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
-                getattr(aman, 'version'+suffix) = 3
+                getattr(aman, 'version'+suffix)[:] = 3
             except Exception as e:
                 logger.error(
                     f"Exception '{e}' thrown while the off-centering correction.")
 
         # make the highers version, best encoder solution as hwp_angle
         # getattr(aman, 'hwp_angle'+suffix)[:] =
-        # getattr(aman, 'primary_encoder') = 1
+        # getattr(aman, 'primary_encoder')[:] = 1
         aman.save(output, h5_address, overwrite=True)
 
     def _hwp_angle_calculator(
@@ -1119,7 +1119,7 @@ class G3tHWP():
                     'cannot find reference points, please adjust parameters!')
             return -1
 
-        ## delete unexpected ref slit indexes ##
+        # delete unexpected ref slit indexes
         self._ref_indexes = np.delete(self._ref_indexes, np.where(
             np.diff(self._ref_indexes) < self._num_edges - 10)[0])
         self._ref_clk = self._encd_clk[self._ref_indexes]
