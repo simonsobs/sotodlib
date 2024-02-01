@@ -165,14 +165,23 @@ class Imprinter:
 
           tel_tubes:
             tel_tube1:
-              slots:
-                - stream_id1
-                - stream_id2
-                - stream_id3
+              tube_slot: c0
+              wafer_slots:
+                - wafer_slot: ws0
+                  stream_id: stream_id0
+                - wafer_slot: ws1
+                  stream_id: stream_id1
+                - wafer_slot: ws2
+                  stream_id: stream_id2
             tel_tube2:
-              slots:
-                - stream_id4
-                - stream_id5
+              tube_slot: i1
+              wafer_slots:
+                - wafer_slot: ws0
+                  stream_id: stream_id3
+                - wafer_slot: ws1
+                  stream_id: stream_id4
+                - wafer_slot: ws2
+                  stream_id: None
           
         Standard Book directory structure based off config file example:
         output_root/
@@ -188,9 +197,12 @@ class Imprinter:
                 hk/
         
         The tel_tubes entry lists the different tel-tubes that will be bound
-        into separate books containing only the stream_ids listed under slots.
-        For the SATs we expect one entry under tel_tubes but the LAT will have
-        many. TODO: There is currently no option to have an empty slot. 
+        into separate books. Each tel_tube entry is expected to have a tube_slot
+        name and is required to have a wafer_slots list. Each wafer slot must
+        have a wafer_slot and stream_id entry. If stream_id is None then it will
+        be treated as an empty slot. The wafers/stream_ids listed in each
+        tel_tube are bound together. For the SATs we expect one entry under 
+        tel_tubes but the LAT will have many.
         
         The build_det_data and build_hk entries determines if detector books
         (obs,oper,smurf,stray) and housekeeping (hk) books should be made,
@@ -218,7 +230,32 @@ class Imprinter:
         self.build_hk = self.config.get("build_hk")
         self.build_det = self.config.get("build_det")
 
-        self.tubes = self.config.get("tel_tubes", {})
+        self.logger = logger
+        if logger is None:
+            self.logger = logging.getLogger("imprinter")
+            if not self.logger.hasHandlers():
+                self.logger = init_logger("imprinter")
+
+        self.tube_configs = self.config.get("tel_tubes", {})
+        self.tubes = dict()
+        for tube, cfg in self.tube_configs.items():
+            self.tubes[tube] = dict()
+            self.tubes[tube]['slots'] = list()
+            if 'wafer_slots' not in self.tube_configs[tube]:
+                if 'slots' in self.tube_configs[tube]:
+                    self.tubes[tube]['slots'] = self.tube_configs[tube]['slots']
+                    self.logger.warning(f"Tube {tube} missing wafer_slots "
+                    "entry. Are you using an old configuration format?")
+                    continue
+                
+            for slot in self.tube_configs[tube]['wafer_slots']:
+                if slot['stream_id'].lower() == 'none':
+                    self.tubes[tube]['slots'].append(
+                        f"NONE_{slot['wafer_slot']}"
+                    )
+                else:
+                    self.tubes[tube]['slots'].append(slot['stream_id'])
+                                        
 
         # check whether db_path directory exists
         if not op.exists(op.dirname(self.db_path)):
@@ -235,11 +272,7 @@ class Imprinter:
         self.hk_archive = None
         self.librarian = None
 
-        self.logger = logger
-        if logger is None:
-            self.logger = logging.getLogger("imprinter")
-            if not self.logger.hasHandlers():
-                self.logger = init_logger("imprinter")
+        
 
     def get_session(self):
         """Get a new session or return the existing one
@@ -539,7 +572,8 @@ class Imprinter:
     def _get_binder_for_book(self, 
         book, 
         pbar=False, 
-        ignore_tags=False
+        ignore_tags=False,
+        ancil_drop_duplicates=False,
     ):
         """get the appropriate bookbinder for the book based on its type"""
         with open(self.g3tsmurf_config, "r") as f:
@@ -565,6 +599,7 @@ class Imprinter:
             bookbinder = BookBinder(
                 book, obsdb, filedb, lvl2_data_root, readout_ids, book_path,
                 ignore_tags=ignore_tags,
+                ancil_drop_duplicates=ancil_drop_duplicates,
             )
             return bookbinder
 
@@ -586,13 +621,13 @@ class Imprinter:
                     self.indir = indir
                     self.outdir = outdir
 
-                def get_metadata(self):
+                def get_metadata(self, telescope=None, tube_config={}):
                     return {
                         "book_id": book.bid,
                         # dummy start and stop times
                         "start_time": float(first5) * 1e5,
                         "stop_time": (float(first5) + 1) * 1e5,
-                        "telescope": book.tel_tube.lower(),
+                        "telescope": telescope,
                         "type": book.type,
                     }
 
@@ -628,13 +663,13 @@ class Imprinter:
                     self.outdir = outdir
                     self.file_list = file_list
 
-                def get_metadata(self):
+                def get_metadata(self, telescope=None, tube_config={}):
                     return {
                         "book_id": book.bid,
                         # dummy start and stop times
                         "start_time": float(first5) * 1e5,
                         "stop_time": (float(first5) + 1) * 1e5,
-                        "telescope": book.tel_tube.lower(),
+                        "telescope": telescope,
                         "type": book.type,
                     }
 
@@ -663,6 +698,7 @@ class Imprinter:
         test_mode=False,
         pbar=False,
         ignore_tags=False,
+        ancil_drop_duplicates=False,
         check_configs={}
     ):
         """Bind book using bookbinder
@@ -681,6 +717,9 @@ class Imprinter:
         ignore_tags : bool
             If true, book will be bound even if the tags between different level 2
             operations don't match. Only ever expected to be turned on by hand.
+        ancil_drop_duplicates: if true, will drop duplicate data from ancilary  
+            files. added to deal with an ocs aggregator error. Only ever 
+            expected to be turned on by hand.
         check_configs: dict
             additional non-default configurations to send to check book
         """
@@ -707,7 +746,10 @@ class Imprinter:
             binder = self._get_binder_for_book(
                 book, 
                 ignore_tags=ignore_tags,
+                ancil_drop_duplicates=ancil_drop_duplicates,
             )
+            book.path = op.abspath(binder.outdir)
+
             binder.bind(pbar=pbar)
 
             # write M_book file
@@ -728,11 +770,18 @@ class Imprinter:
                 yaml.dump(book_meta, f)
 
             # write M_index file
+            if book.type in ['obs', 'oper']:
+                tc = self.tube_configs[book.tel_tube]
+            else:
+                tc = {}
             mfile = os.path.join(binder.outdir, "M_index.yaml")
             with open(mfile, "w") as f:
-                yaml.dump(binder.get_metadata(), f)
-
-            book.path = op.abspath(binder.outdir)
+                yaml.dump(
+                    binder.get_metadata(
+                        telescope=self.daq_node,
+                        tube_config = tc,
+                    ), f
+                )
 
             if book.type in ['obs', 'oper']:
                 # check that detectors books were written out correctly
@@ -1008,6 +1057,30 @@ class Imprinter:
             session = self.get_session()
         session.rollback()
 
+    def _find_incomplete(self, min_ctime, max_ctime, stream_filt=None):
+        """return G3tSmurf session query for incomplete observations
+        """
+        if stream_filt is None:
+            streams = []
+            streams.extend(
+                *[t.get("slots") for (_,t) in self.tubes.items()]
+            )
+            stream_filt = or_(
+                *[G3tObservations.stream_id == s for s in streams]
+            )
+
+        session = self.get_g3tsmurf_session()
+        q = session.query(G3tObservations).filter(
+            G3tObservations.timestamp >= min_ctime,
+            G3tObservations.timestamp <= max_ctime,
+            stream_filt,
+            or_(
+                G3tObservations.stop == None,
+                G3tObservations.stop >= dt.datetime.utcfromtimestamp(max_ctime),
+            ),
+        )
+        return q
+
     @loop_over_tubes
     def update_bookdb_from_g3tsmurf(
         self,
@@ -1076,20 +1149,21 @@ class Imprinter:
         self.logger.debug(f"Searching between {min_ctime} and {max_ctime}")
 
         # check for incomplete observations in time range
-        q_incomplete = session.query(G3tObservations).filter(
-            G3tObservations.timestamp >= min_ctime,
-            G3tObservations.timestamp <= max_ctime,
-            stream_filt,
-            G3tObservations.stop == None,
-        )
+        q_incomplete = self._find_incomplete(min_ctime, max_ctime, stream_filt)
+
         # if we have incomplete observations in our stream_id list we cannot
         # bookbind any observations overlapping the incomplete ones.
         if q_incomplete.count() > 0:
-            max_ctime = min([obs.timestamp for obs in q_incomplete.all()])
-            self.logger.debug(
+            new_ctime = min([obs.timestamp for obs in q_incomplete.all()])
+            if max_ctime - new_ctime > 3600*3:
+                level = self.logger.warning
+            else:
+                level = self.logger.debug
+            level(
                 f"Found {q_incomplete.count()} incomplete observations. "
-                f"updating max ctime to {max_ctime}"
+                f"updating max ctime to {new_ctime}"
             )
+            max_ctime = new_ctime
         max_stop = dt.datetime.utcfromtimestamp(max_ctime)
 
         # find all complete observations that start within the time range
@@ -1105,31 +1179,27 @@ class Imprinter:
         )
 
         output = []
+        def add_to_output(obs_list, mode):
+            output.append(
+                ObsSet( 
+                    obs_list,
+                    mode=mode,
+                    slots=self.tubes[tube]["slots"],
+                    tel_tube=tube,
+                )
+            )
+
         for stream in streams:
             # loop through all observations for this particular stream_id
             for str_obs in obs_q.filter(G3tObservations.stream_id == stream).all():
                 # distinguish different types of books
                 # operation book
                 if get_obs_type(str_obs) == "oper":
-                    output.append(
-                        ObsSet(
-                            [str_obs],
-                            mode="oper",
-                            slots=self.tubes[tube]["slots"],
-                            tel_tube=tube,
-                        )
-                    )
+                    add_to_output([str_obs], "oper")
                 elif get_obs_type(str_obs) == "obs":
                     # force each observation to be its own book
                     if force_single_stream:
-                        output.append(
-                            ObsSet(
-                                [str_obs],
-                                mode="obs",
-                                slots=self.tubes[tube]["slots"],
-                                tel_tube=tube,
-                            )
-                        )
+                        add_to_output([str_obs], "obs")
                     else:
                         # query for all possible types of overlapping 
                         # observations from other streams
@@ -1156,14 +1226,7 @@ class Imprinter:
                         if q.count() == 0 and not ignore_singles:
                             # append only this one when there's no overlapping 
                             # segments
-                            output.append(
-                                ObsSet(
-                                    [str_obs],
-                                    mode="obs",
-                                    slots=self.tubes[tube]["slots"],
-                                    tel_tube=tube,
-                                )
-                            )
+                            add_to_output([str_obs], "obs")
 
                         elif q.count() > 0:
                             # obtain overlapping observations (returned as a tuple of stream_id)
@@ -1182,15 +1245,28 @@ class Imprinter:
                                 continue
                             if overlap_time.total_seconds() < min_overlap:
                                 continue
-                            # add all of the possible overlaps
-                            output.append(
-                                ObsSet(
-                                    obs_list,
-                                    mode="obs",
-                                    slots=self.tubes[tube]["slots"],
-                                    tel_tube=tube,
+
+                            t_list = [o for o in obs_list if o.timing]
+                            nt_list = [o for o in obs_list if not o.timing]
+                            
+                            if len(t_list)+len(nt_list) != len(obs_list):
+                                raise ValueError(f"Cannot safely split timing"  
+                                    f"info for {obs_list}"
                                 )
-                            )
+                                
+
+                            if len(t_list) > 0:
+                                # add all of the possible overlaps
+                                add_to_output(t_list, "obs")
+
+                            if len(nt_list) > 0:
+                                self.logger.debug(
+                                    "registering single wafer books"       
+                                    f" for {nt_list} because of low "
+                                    "precision timing"
+                                )
+                                for obs in nt_list:
+                                    add_to_output([obs], "obs")
 
         # remove exact duplicates in output
         output = drop_duplicates(output)

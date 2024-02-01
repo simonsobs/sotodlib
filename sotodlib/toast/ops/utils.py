@@ -1,7 +1,9 @@
+# Copyright (c) 2018-2024 Simons Observatory.
+# Full license can be found in the top level "LICENSE" file.
+
 from astropy import constants
 from astropy import units as u
 import numpy as np
-
 
 def tb2s(tb, nu):
     """Convert blackbody temperature to spectral radiance s_nu at frequency nu.

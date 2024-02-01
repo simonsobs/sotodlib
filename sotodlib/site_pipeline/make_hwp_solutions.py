@@ -1,5 +1,5 @@
 """
-Script to make hwp angle of CalDB.
+Script to make hwp angle metadata.
 This script will run:
 1. automatically if data are acquired as preliminary version.
 2. New versions of the metadata can be created as the analysis evolves.
@@ -11,11 +11,13 @@ import logging
 import yaml
 import datetime as dt
 import scipy 
+from typing import Optional
+
 import sotodlib
 from sotodlib import core
 from sotodlib.hwp.g3thwp import G3tHWP
 from sotodlib.site_pipeline import util
-logger = util.init_logger(__name__, 'make-hwp-solutions: ')
+default_logger = util.init_logger(__name__, 'make-hwp-solutions: ')
 
 def get_parser(parser=None):
     if parser is None:
@@ -41,7 +43,8 @@ def get_parser(parser=None):
     )
     parser.add_argument(
         '--query', 
-        help="Query to pass to the observation list",  
+        help="Query to pass to the observation list. Use \\'string\\' to "
+             "pass in strings within the query.",  
         type=str
     )
     parser.add_argument(
@@ -59,23 +62,22 @@ def get_parser(parser=None):
     return parser
 
 def main(
-    context=None, 
-    HWPconfig=None, 
-    output_dir=None, 
-    verbose=None,
-    overwrite=False,
-    query=None,
-    min_ctime=None,
-    max_ctime=None,
-    obs_id=None,    
+    context: str, 
+    HWPconfig: str, 
+    output_dir:Optional[str] = None, 
+    verbose:Optional[int] = 2,
+    overwrite:Optional[bool] = False,
+    query:Optional[str] = None,
+    min_ctime:Optional[float] = None,
+    max_ctime:Optional[float] = None,
+    obs_id:Optional[str] = None,    
+    logger=None,
  ):
+    if logger is None:
+        logger = default_logger
+    logger.info(f"Using context {context} and HWPconfig {HWPconfig}")
     
-    print(context, HWPconfig)
     configs = yaml.safe_load(open(HWPconfig, "r"))
-    args = parser.parse_args()
-    if args.output_dir is None:
-        args.output_dir = configs["output_dir"]
-    
     logger.info("Starting make_hwp_solutions")
 
     # Specify output directory
@@ -98,18 +100,29 @@ def main(
         
     ctx = core.Context(context)
 
-    scheme = core.metadata.ManifestScheme()
-    scheme.add_exact_match('obs:obs_id')
-    scheme.add_data_field('dataset')
-    man_db = core.metadata.ManifestDb(scheme=scheme)
-    
     # Get file + dataset from policy.
     # policy = util.ArchivePolicy.from_params(config['archive']['policy'])
     # dest_file, dest_dataset = policy.get_dest(obs_id)
     # Use 'output_dir' argument for now    
+    h5_filename = 'hwp_angle.h5'
     man_db_filename = os.path.join(output_dir, 'hwp_angle.sqlite')
-    output_filename = os.path.join(output_dir, 'hwp_angle.h5')
+    output_filename = os.path.join(output_dir, h5_filename)
     
+    if os.path.exists(man_db_filename):
+        logger.info(f"Mapping {man_db_filename} for the "
+                    "archive index.")
+        man_db = core.metadata.ManifestDb(man_db_filename)
+    else: 
+        logger.info(f"Creating {man_db_filename} for the "
+                     "archive index.")
+        scheme = core.metadata.ManifestScheme()
+        scheme.add_exact_match('obs:obs_id')
+        scheme.add_data_field('dataset')
+        man_db = core.metadata.ManifestDb(
+            man_db_filename,
+            scheme=scheme
+        )
+
     # load observation data
     if obs_id is not None:
         tot_query = f"obs_id=='{obs_id}'"
@@ -124,43 +137,43 @@ def main(
         tot_query = tot_query[4:-4]
         if tot_query=="":
             tot_query="1"
+
+    logger.debug(f"Sending query to obsdb: {tot_query}")
     obs_list = ctx.obsdb.query(tot_query)
         
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
     run_list = []
+    completed = man_db.get_entries(['dataset'])['dataset']
 
-    if not os.path.exists(man_db_filename):
-        #run on all if database doesn't exist
-        run_list = obs_list
-    else:
-        db = core.metadata.ManifestDb(man_db_filename)
-        for obs in obs_list:
-            x = db.match({'obs:obs_id': obs["obs_id"]}, multi=True)
-            if overwrite or not x:
-                run_list.append(obs)
+    for obs in obs_list:
+        if overwrite or not obs['obs_id'] in completed:
+            run_list.append(obs)
 
     #write solutions
     for obs in run_list:
         h5_address = obs["obs_id"]
-        print(h5_address)
+        logger.info(f"Calculating Angles for {h5_address}")
+        ctx = core.Context(context)
         tod = ctx.get_obs(obs, no_signal=True)
         
         # make angle solutions
         g3thwp = G3tHWP(HWPconfig)
-        g3thwp.write_solution_h5(tod, output=output_filename, h5_address=h5_address)
-        
+        g3thwp.write_solution_h5(
+            tod, 
+            output=output_filename, 
+            h5_address=h5_address
+        )
         del g3thwp
         
         # Add an entry to the database
-        man_db.add_entry({'obs:obs_id': obs["obs_id"], 'dataset': h5_address}, filename=output_filename)
-
-        # Commit the ManifestDb to file.
-        man_db.to_file(man_db_filename)
-   
+        man_db.add_entry(
+            {'obs:obs_id': obs["obs_id"], 'dataset': h5_address}, filename=h5_filename,
+        )   
     return
-    
-    
+        
 if __name__ == '__main__':
-    parser = get_parser()
-    util.main_launcher(main, get_parser)
+    parser = get_parser(parser=None)
+    args = parser.parse_args()
+    main(**vars(args))
+    

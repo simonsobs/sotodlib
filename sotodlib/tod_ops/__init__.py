@@ -7,3 +7,6 @@ from .gapfill import \
 from . import jumps
 from . import pca
 from .apodize import apodize_cosine
+from .binning import bin_signal
+from .sub_polyf import subscan_polyfilter
+from .azss import get_azss

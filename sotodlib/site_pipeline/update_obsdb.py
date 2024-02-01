@@ -17,6 +17,7 @@ The config file could be of the form:
 
     obsdb: dummyobsdb.sqlite
     obsfiledb: dummyobsfiledb.sqlite
+    lat_tube_list_file: path to yaml dict matching tubes and bands
     tolerate_stray_files: True
     skip_bad_books: True
     extra_extra_files:
@@ -43,7 +44,7 @@ from typing import Optional
 
 logger = util.init_logger(__name__, 'update-obsdb: ')
 
-def check_meta_type(bookpath):
+def check_meta_type(bookpath: str):
     metapath = os.path.join(bookpath, "M_index.yaml")
     meta = yaml.safe_load(open(metapath, "rb"))
     if meta is None:
@@ -53,11 +54,38 @@ def check_meta_type(bookpath):
     else:
         return meta["type"]
 
-def main(config:str, 
-        recency:float=None, 
-        booktype:Optional[str]="both",
-        verbosity:Optional[int]=2,
-        overwrite:Optional[bool]=False,
+
+def telescope_lookup(telescope: str):
+    """
+    Set a number of common queries given a telescope name
+
+    Arguments
+    ----------
+    telescope : str
+        Name of telescope in M_index
+
+    """
+    if telescope == "sat" or telescope == "satp1":
+        return {"telescope": "satp1", "telescope_flavor": "sat",
+                "tube_flavor": "mf", "detector_flavor": "tes"}
+    elif telescope == "satp2":
+        return {"telescope": "satp2","telescope_flavor": "sat",
+                "tube_flavor": "uhf", "detector_flavor": "tes"}
+    elif telescope == "satp3":
+        return {"telescope": "satp3", "telescope_flavor": "sat",
+                "tube_flavor": "mf", "detector_flavor": "tes"}
+    elif telescope == "lat":
+        return {"telescope": "lat", "telescope_flavor": "lat"}
+    else:
+        logger.error("unknown telescope type given by bookbinder")
+        return {}
+
+
+def main(config: str, 
+        recency: float = None, 
+        booktype: Optional[str] = "both",
+        verbosity: Optional[int] = 2,
+        overwrite: Optional[bool] = False,
         logger=None):
 
     """
@@ -97,12 +125,11 @@ def main(config:str,
 
     logger.info("Updating obsdb")
     bookcart = []
-    bookcartobsdb = ObsDb()
 
     if booktype not in ["obs", "oper", "both"]:
         logger.warning("Specified booktype inadapted to update_obsdb")
     
-    if booktype=="both":
+    if booktype == "both":
         accept_type = ["obs", "oper"]
     else:
         accept_type = [booktype]
@@ -112,9 +139,13 @@ def main(config:str,
         base_dir = config_dict["base_dir"]
     except KeyError:
         logger.error("No base directory base_dir specified in config file!")
+
     if "obsdb" in config_dict:
-        if os.path.isfile(config_dict["obsdb"]):
-            bookcartobsdb = ObsDb.from_file(config_dict["obsdb"])
+        bookcartobsdb = ObsDb(map_file=config_dict["obsdb"])
+    else:
+        logger.warning("No obsdb named in the configuration file")
+        bookcartobsdb = ObsDb("obsdb.sqlite")
+        
     if "obsdb_cols" in config_dict:
         col_list = []
         for col, typ in config_dict["obsdb_cols"].items():
@@ -149,15 +180,18 @@ def main(config:str,
     #Check the books for the observations we want
 
 
-    for bookpath in bookcart:
+    for bookpath in sorted(bookcart):
         if check_meta_type(bookpath) in accept_type:
 
             try:
                 #obsfiledb creation
-                checkbook(bookpath, config, add=True, overwrite=True)
+                checkbook(
+                    bookpath, config, add=True, 
+                    overwrite=True, logger=logger
+                )
             except Exception as e:
                 if config_dict["skip_bad_books"]:
-                    print(f"failed to add {bookpath}")
+                    logger.warning(f"failed to add {bookpath}")
                     continue
                 else:
                     raise e
@@ -180,28 +214,37 @@ def main(config:str,
                 config_dict["skip_bad_books"] = False
             #Adding info that should be there for all observations
             #Descriptive string columns
-            frequent_cols = ["telescope", 
-                             "telescope_flavor", 
-                             "tube_slot", 
-                             "tube_flavor", 
-                             "detector_flavor"]
-            for fc in frequent_cols:
-                fcvalue = index.get(fc)
-                if fcvalue is not None:
-                    bookcartobsdb.add_obs_columns([fc+" str"])
-                    very_clean[fc] = fcvalue
+            try:
+                telescope = index["telescope"]
+                flavors = telescope_lookup(telescope)
+                for flav in flavors:
+                    bookcartobsdb.add_obs_columns([flav+" str"])
+                    very_clean[flav] = flavors[flav]
+                if telescope == "lat":
+                   lat_tube_list = yaml.safe_load(
+                       open(config_dict["lat_tube_list_file"], "rb")
+                   )
+                   tube_flavor = lat_tube_list[index["tube_slot"]]
+                   bookcartobsdb.add_obs_columns("tube_flavor str")
+                   very_clean["tube_flavor"] = tube_flavor
+
+            except KeyError:
+                logger.error("No telescope key in index file or error with lat_tube_list")
+                very_clean["telescope_flavor"] = "unknown"
             stream_ids = index.pop("stream_ids")
             if stream_ids is not None:
                 bookcartobsdb.add_obs_columns(["wafer_count int"])
                 very_clean["wafer_count"] = len(stream_ids)
 
             #Time
-            start = index.get("start_time")
-            end = index.get("end_time") 
-            if None not in [start, end]:
+            try:
+                start = index["start_time"]
+                end = index["stop_time"] 
                 bookcartobsdb.add_obs_columns(["timestamp float", "duration float"])
                 very_clean["timestamp"] = start
                 very_clean["duration"] = end - start
+            except KeyError:
+                logger.error("Incomplete timing information for obs_id {obs_id}")
 
             #Scanning motion
             stream_file = os.path.join(bookpath,"*{}*.g3".format(stream_ids[0]))
@@ -216,34 +259,31 @@ def main(config:str,
                     very_clean[f"{coor}_throw"] = .5 * (coor_enc.max() - coor_enc.min())
                 except KeyError:
                     logger.error(f"No {coor} pointing in some streams for obs_id {obs_id}")
-                    pass
+
             try:
-                if index.get("telescope_flavor")=="SAT":
+                if very_clean["telescope_flavor"] == "sat":
                     bore_enc = stream.ancil["boresight_enc"]
                     very_clean["roll_center"] = -.5 * (bore_enc.max() + bore_enc.min())
                     very_clean["roll_throw"] = .5 * (bore_enc.max() - bore_enc.min())
-                if index.get("telescope_flavor")=="LAT":
+                if very_clean["telescope_flavor"] == "lat":
                     el_enc = stream.ancil["el_enc"]
                     corot_enc = stream.ancil["corotator_enc"]
                     roll = el_enc - 60. - corot_enc
                     very_clean["roll_center"] = .5 * (roll.max() + roll.min())
                     very_clean["roll_throw"] = .5 * (roll.max() - roll.min())
 
+                bookcartobsdb.add_obs_columns(["roll_center float", "roll_throw float"])
             except KeyError:
                 logger.error(f"Unable to compute roll for obs_id {obs_id}")
-                pass
+                
 
-            if tags != [] and tags != [""]:
-                bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
-            else:
-                bookcartobsdb.update_obs(obs_id, very_clean)
+            # Make sure no invalid tags before update.
+            tags = [t.strip() for t in tags if t.strip() != '']
+
+            bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
            
         else:
             bookcart.remove(bookpath)
-    if "obsdb" in config_dict:
-        bookcartobsdb.to_file(config_dict["obsdb"])
-    else:
-        bookcartobsdb.to_file("obsdb_from{}_to{}".format(tback, tnow))
 
 
 def get_parser(parser=None):

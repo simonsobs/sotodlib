@@ -7,6 +7,10 @@ on:
   pull_request:
     branches: [ master ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
 
   linux:
@@ -27,15 +31,10 @@ jobs:
           - python: "3.10"
             pyshort: "310"
     steps:
-      - name: Cancel Previous Runs
-        uses: styfle/cancel-workflow-action@0.12.0
-        with:
-          access_token: ${{ github.token }}
-
       - name: Checkout
         uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         name: Install Python
         with:
           python-version: ${{ matrix.python }}
@@ -98,7 +97,7 @@ jobs:
   #     - name: Checkout
   #       uses: actions/checkout@v4
 
-  #     - uses: actions/setup-python@v4
+  #     - uses: actions/setup-python@v5
   #       name: Install Python
   #       with:
   #         python-version: ${{ matrix.python }}

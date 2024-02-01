@@ -1081,7 +1081,14 @@ class G3tSmurf:
             obs.n_samples = obs_samps
             obs.duration = flist[-1].stop.timestamp() - flist[0].start.timestamp()
             obs.stop = flist[-1].stop
-            obs.timing = np.all([f.timing for f in flist])
+            # f.timing is None if the file has no Scan Frames
+            # timing requires external downsampling AND high precision 
+            # timestamps. file.timing checks high precision. obs.timing
+            # includes external downsampling
+            obs.timing = (
+                np.all([f.timing or (f.timing is None) for f in flist]) 
+                and status.downsample_external
+            )
             logger.debug(f"Setting {obs.obs_id} stop time to {obs.stop}")
         session.commit()
 
@@ -2072,6 +2079,9 @@ class SmurfStatus:
         self.downsample_factor = self.status.get(f"{ds_root}.Factor")
         self.aman = self.aman.wrap("downsample_factor", self.downsample_factor)
         self.downsample_enabled = not self.status.get(f"{ds_root}.Disable")
+
+        ds_mode = self.status.get(f"{ds_root}.DownsamplerMode", "Internal")
+        self.downsample_external = ds_mode.lower() == 'external'
 
         # Tries to make resonator frequency map
         self.freq_map = np.full((self.NUM_BANDS, self.CHANS_PER_BAND), np.nan)

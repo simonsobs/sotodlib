@@ -1,5 +1,6 @@
 from sotodlib import core
 
+import collections
 import logging
 import os
 import numpy as np
@@ -95,6 +96,12 @@ class SuperLoader:
                 specified in the ManifestDb, and is normally
                 unnecessary but can be used for debugging /
                 work-arounds.
+
+            ``det_info`` (bool, optional)
+                If True, treat the metadata as a contribution to
+                det_info. The metadata will be merged into the active
+                det_info object.
+
 
           Any filenames in the ManifestDb that are given as relative
           paths will be resolved relative to the directory where the
@@ -213,7 +220,7 @@ class SuperLoader:
             # invent one so that we at least get the structure of the
             # metadata (even though we'll throw out all the actual
             # results).  You can get here if someone passes dets=[].
-            candidate_index_lines = man.inspect(request, False)
+            candidate_index_lines = man.inspect(request, False, prefix=dbpath)
             index_lines.append(candidate_index_lines[0])
             to_skip = [False]
 
@@ -338,17 +345,22 @@ class SuperLoader:
         # request will be added back into this by check tags.
         aug_request = _filter_items('obs:', request, False)
         if self.obsdb is not None and 'obs:obs_id' in request:
-            obs_info = self.obsdb.get(request['obs:obs_id'], add_prefix='obs:')
-            if obs_info is not None:
-                obs_info.update(aug_request)
-                aug_request.update(obs_info)
             if dest is None:
                 dest = core.AxisManager()
             obs_man = core.AxisManager()
-            for k, v in _filter_items('obs:', obs_info).items():
-                obs_man.wrap(k, v)
+            obs_info = self.obsdb.get(request['obs:obs_id'], add_prefix='obs:')
+            if obs_info is None:
+                logger.warning(
+                    f"Observation {request['obs:obs_id']} not found in obsdb; "
+                    "trying to proceed anyway. You might have metadata failures.")
+                obs_man.wrap('obs_id', request['obs:obs_id'])
+            else:
+                obs_info.update(aug_request)
+                aug_request.update(obs_info)
+                for k, v in _filter_items('obs:', obs_info).items():
+                    obs_man.wrap(k, v)
             dest.wrap('obs_info', obs_man)
-            
+
         def reraise(spec, e):
             logger.error(
                 f"An error occurred while processing a meta entry:\n\n"
@@ -426,10 +438,8 @@ class SuperLoader:
                     reraise(spec, e)
 
             if spec.get('det_info') and error is None:
-                det_info = merge_det_info(
-                    det_info, item, multi=spec.get('multi', False))
+                det_info = merge_det_info(det_info, item)
                 item = None
-
                 det_info, aug_request = check_tags(det_info, aug_request)
 
             if check:
@@ -478,8 +488,7 @@ def _filter_items(prefix, d, remove=True):
     return [k[len(prefix)*remove:] for k in d if k.startswith(prefix)]
 
 
-def merge_det_info(det_info, new_info, multi=False,
-                   index_columns=['readout_id', 'det_id']):
+def merge_det_info(det_info, new_info, multi=True):
     """Args:
 
       det_info (ResultSet or None): The det_info table to start from,
@@ -487,9 +496,7 @@ def merge_det_info(det_info, new_info, multi=False,
       new_info (ResultSet): New data to merge/check against
         det_info; only columns with dets: prefix are processed.
       multi (bool): whether to permit some rows to match multiple
-        rows.
-      index_columns: columns that will be recognized as indexing
-        columns.
+        rows; this is True by default.
 
     Returns:
       A (possibly) new det_info table, containing updates and
@@ -510,41 +517,49 @@ def merge_det_info(det_info, new_info, multi=False,
             f'{new_info}')
     new_info.keys = new_keys
 
-    for match_key in index_columns:
-        if match_key in new_info.keys and \
-           (det_info is None or match_key in det_info.keys):
-            break
-    else:
-        raise ValueError(
-            f'No co-index key ({index_columns}) was found in both '
-            f'{det_info} and {new_info}')
-
     if det_info is None:
         return new_info
 
-    if multi:
-        # Permit duplicate keys.
-        i0 = core.util.get_multi_index(
-            new_info[match_key], det_info[match_key])
-        i1 = np.arange(len(det_info[match_key]))
-        i0, i1 = i0[i0>=0], i1[i0>=0]
-    else:
-        both, i0, i1 = core.util.get_coindices(
-            new_info[match_key], det_info[match_key],
-            check_unique=True)
+    join_on = list(set(new_info.keys).intersection(det_info.keys))
+    if len(join_on) == 0:
+        raise ValueError(
+            f'Cannot merge det_info: no common keys in '
+            f'{det_info} and {new_info}.')
+
+    new_index = list(zip(*[new_info[k] for k in join_on]))
+    det_index = list(zip(*[det_info[k] for k in join_on]))
+
+    # Perform the row-row matching, accepting that rows of new_info
+    # may match multiple entries of det_info.  (This is so new_info
+    # can have a det_id = 'NO_MATCH' entry.)
+    i0 = core.util.get_multi_index(
+        new_index, det_index)
+    i1 = np.arange(len(det_index))
+    i0, i1 = i0[i0>=0], i1[i0>=0]
+
+    if not multi and len(i0) != len(set(i0)):
+        offenders = collections.Counter(i0)
+        offenders = [new_index[i] for i, v in offenders.items() if v > 1][:10]
+        raise ValueError(
+            'Some new items matched up to more than one entry in the '
+            'existing det_info.  Should this entry have multi=True? '
+            f'Offenders: {join_on} = {offenders}')
 
     # Common fields need to be in accordance, then drop them.
     common_keys = set(new_info.keys) & set(det_info.keys)
     for k in common_keys:
         if len(i0) and np.any(new_info[k][i0] != det_info[k][i1]):
-            raise ValueError(f'Conflict in field "{k}"')
+            raise ValueError(
+                'When reconciling new det_info, a disagreement in the value '
+                f'of field {k} was observed.  If this is due to ambiguity '
+                f'in the det_id, maybe add {k} to the match_keys?')
 
     logger.debug(f' ... updating det_info (row count '
                  f'{len(det_info)} -> {len(i1)})')
     det_info = det_info.subset(rows=i1)
-    new_info = new_info.subset([k for k in new_info.keys
-                        if k != match_key and k not in common_keys],
-                       rows=i0)
+    new_info = new_info.subset(
+        [k for k in new_info.keys if k not in common_keys],
+        rows=i0)
     det_info.merge(new_info)
     return det_info
 

@@ -123,12 +123,14 @@ TOD Operations
 .. autoclass:: sotodlib.preprocess.processes.PSDCalc
 .. autoclass:: sotodlib.preprocess.processes.Calibrate
 .. autoclass:: sotodlib.preprocess.processes.Apodize
+.. autoclass:: sotodlib.preprocess.processes.SubPolyf
 
 Flagging and Products
 :::::::::::::::::::::
 .. autoclass:: sotodlib.preprocess.processes.Trends
 .. autoclass:: sotodlib.preprocess.processes.GlitchDetection
 .. autoclass:: sotodlib.preprocess.processes.Noise
+.. autoclass:: sotodlib.preprocess.processes.FlagTurnarounds
 
 HWP Related
 :::::::::::

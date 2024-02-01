@@ -42,11 +42,13 @@ import argparse
 from . import (
     analyze_bright_ptsrc,
     check_book,
+    make_det_info_wafer,
+    make_ml_map,
     make_source_flags,
     make_uncal_beam_map,
-    update_g3tsmurf_db,
     preprocess_tod,
-    update_obsdb
+    update_g3tsmurf_db,
+    update_obsdb,
 )
 
 # Dictionary matching element name to a submodule (which must have
@@ -57,10 +59,12 @@ from . import (
 ELEMENTS = {
     'analyze-bright-ptsrc': analyze_bright_ptsrc,
     'check-book': check_book,
+    'make-det-info-wafer': make_det_info_wafer,
+    'make-ml-map': make_ml_map,
     'make-source-flags': make_source_flags,
     'make-uncal-beam-map': make_uncal_beam_map,
-    'update-g3tsmurf-db': update_g3tsmurf_db,
     'preprocess-tod': preprocess_tod,
+    'update-g3tsmurf-db': update_g3tsmurf_db,
     'update-obsdb': update_obsdb,
 }
 

@@ -113,7 +113,7 @@ class ContextTest(unittest.TestCase):
                 ({'dets:detset': ['neard'], 'dets:readout_id': ['read00', 'read05']}, 1),
                 ({'dets:band': ['f090']}, 4),
                 ({'dets:band': ['f090'], 'dets:detset': ['neard']}, 2),
-                ({'dets:det_id': ['NO_MATCH']}, 2),
+                ({'dets:det_id': ['NO_MATCH']}, 3),
         ]:
             meta = ctx.get_meta(obs_id, dets=selection)
             self.assertEqual(meta.dets.count, count, msg=f"{selection}")
@@ -232,7 +232,7 @@ class DatasetSim:
             ['readout_id', 'band', 'pol_code', 'x', 'y', 'detset', 'det_id', 'det_param'],
             [('read00', 'f090', 'A', 0.0, 0.0, 'neard', 'det00', 120.),
              ('read01', 'f090', 'B', 0.0, 0.0, 'neard', 'det01', 121.),
-             ('read02', 'f150', 'A', 0.0, 0.0, 'neard', 'det02', 122.),
+             ('read02', 'f150', 'A', 0.0, 0.0, 'neard', 'NO_MATCH', -1.),
              ('read03', 'f150', 'B', 0.0, 0.0, 'neard', 'NO_MATCH', -1.),
              ('read04', 'f090', 'A', 1.0, 0.0, 'fard',  'det04', 124.), 
              ('read05', 'f090', 'B', 1.0, 0.0, 'fard',  'det05', 125.),
@@ -368,6 +368,32 @@ class DatasetSim:
                  'dets:detset': detset,
                  }, 'some_detset_info.h5')
 
+        # metadata: detinfo_multimatch.h5
+        _scheme = metadata.ManifestScheme() \
+                  .add_data_field('dataset') \
+                  .add_exact_match('dets:detset') \
+                  .add_data_field('loader')
+        detinfo_db1 = metadata.ManifestDb(scheme=_scheme)
+        for detset in ['neard', 'fard']:
+            detinfo_db1.add_entry(
+                {'loader': 'unittest_loader',
+                 'dataset': detset,
+                 'dets:detset': detset,
+                 }, 'detinfo_multimatch.h5')
+
+        # metadata: detinfo_nomatch.h5
+        _scheme = metadata.ManifestScheme() \
+                  .add_data_field('dataset') \
+                  .add_exact_match('dets:detset') \
+                  .add_data_field('loader')
+        detinfo_db2 = metadata.ManifestDb(scheme=_scheme)
+        for detset in ['neard', 'fard']:
+            detinfo_db2.add_entry(
+                {'loader': 'unittest_loader',
+                 'dataset': detset,
+                 'dets:detset': detset,
+                 }, 'detinfo_nomatch.h5')
+
         # metadata into context.
         ctx['metadata'] = [
             {'db': bands_db,
@@ -384,7 +410,12 @@ class DatasetSim:
              'name': 'focal_plane'},
             {'db': det_par_db,
              'det_info': True,
-             'multi': True,
+            },
+            {'db': detinfo_db1,
+             'det_info': True,
+            },
+            {'db': detinfo_db2,
+             'det_info': True,
             },
         ]
 
@@ -455,6 +486,29 @@ class DatasetSim:
             for row in self.dets.subset(rows=self.dets['detset'] == kw['dets:detset']):
                 rs.append({'dets:readout_id': row['readout_id'],
                            'x': 100., 'y': 102.})
+            return rs
+        elif filename == 'detinfo_multimatch.h5':
+            # This is to test whether det_info fields (bp_code) can be
+            # populated based on matching against multiple other
+            # det_info fields (band, pol_code).
+            rs = metadata.ResultSet(
+                ['dets:band', 'dets:pol_code', 'dets:bp_code'], [
+                    ['f090', 'A', 'f090-A'],
+                    ['f090', 'B', 'f090-B'],
+                    ['f150', 'A', 'f150-A'],
+                    ['f150', 'B', 'f150-B'],
+                ])
+            return rs
+        elif filename == 'detinfo_nomatch.h5':
+            # This is to test that det_info can reconcile against
+            # multiple det_id=NO_MATCH entries.  So at least one of
+            # the detsets should have multiple det_id=NO_MATCH
+            # entries.
+            farness = 100. if kw['dataset'] == 'fard' else 0.001
+            rs = metadata.ResultSet(['dets:det_id', 'dets:farness'])
+            for row in self.dets.subset(rows=self.dets['detset'] == kw['dataset']):
+                rs.append({'dets:det_id': row['det_id'],
+                           'dets:farness': farness})
             return rs
         else:
             raise ValueError(f'metadata request for "{filename}"')
