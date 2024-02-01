@@ -846,10 +846,19 @@ Metadata Request Processing
 ===========================
 
 Metadata loading is triggered automatically when
-:func:`Context.get_obs()<sotodlib.core.Context.get_obs>` is called.
-The Context code creates a dictionary of parameters, which might
-contain only the ``obs_id``.  For each item in the context.yaml
-``metadata`` entry, a series of steps are performed:
+:func:`Context.get_obs()<sotodlib.core.Context.get_obs>` (or
+``get_meta``) is called.  The parameters to ``get_obs`` define an
+observation of interest, through an ``obs_id``, as well as
+(potentially) a limited set of detectors of interest.  Processing the
+metadata request may require the code to refer to the ObsDb for more
+information about the specified ``obs_id``, and to the DetDb or
+``det_info`` dataset for more information about the detectors.
+
+Steps in metadata request processing
+------------------------------------
+
+For each item in the context.yaml ``metadata`` entry, a series of
+steps are performed:
 
 1. Read ManifestDb.
 
@@ -867,8 +876,8 @@ contain only the ``obs_id``.  For each item in the context.yaml
    is interrogated for what ``obs`` and ``dets`` fields it requires as
    Index Data.  If those fields are not already in the request, then
    the request is augmented to include them; this typically requires
-   interaction with the ObsDb and/or DetDb.  The augmented request is
-   the result of the Promotion Step.
+   interaction with the ObsDb and/or DetDb and det_info.  The
+   augmented request is the result of the Promotion Step.
 
 3. Get Endpoints.
 
@@ -905,12 +914,40 @@ contain only the ``obs_id``.  For each item in the context.yaml
    field from the result, for example).
 
 
+Rules for augmenting and using det_info
+---------------------------------------
 
-Changing det_info
------------------
+The metadata loader associates metadata results to individual
+detectors using fields from the observation's ``det_info``.  For any
+single observation, the ``det_info`` is first initialized from:
 
-Metadata entries can be used to augment the  ``det_info`` table
-that is used to screen and match metadata results.  For example::
+- The ObsFileDb; this provides the unique ``readout_id`` for each
+  channel, as well as the ``detset`` to which each belongs.
+- If a DetDb has been specified, everything in there is copied into
+  ``det_info``.
+
+From that starting point, additional fields can be loaded into the
+``det_info``; these fields can then be used to load metadata indexed
+in a variety of ways.  For the mu-mux readout used in SO, the
+following additional steps will usually be performed to augment the
+``det_info``:
+
+- A "channel map" (a.k.a. "det map", "det match", ...) result will be
+  loaded, to associate a ``det_id`` with each of the loaded
+  ``readout_id`` values (or most of them, hopefully).  While the
+  ``readout_id`` describes a specific channel of the readout hardware,
+  the ``det_id`` corresponds to a particular optical device (e.g. a
+  detector with known position, orientation, and passband).
+- Some "wafer info" will be loaded, containing various properties of
+  the detectors, as designed (for example, their approximate
+  locations; passbands; wiring information; etc.).  This is a single
+  table of data for each physical wafer, indexed naturally by
+  ``det_id``, but the rows here can not be associated with each
+  ``readout_id`` until we have loaded the "channel map".
+
+Special metadata entries in context.yaml are used to augment the
+``det_info``.  table; these are marked with ``det_info: true`` and do
+not have a ``name: ...`` field.  For example::
 
   metadata:
   - ...
@@ -918,39 +955,37 @@ that is used to screen and match metadata results.  For example::
     det_info: true
   - ...
 
-The boolean ``'det_info': true`` marks the above as a special metadata
-entry to update ``det_info``.  It is expected that the database
-(``more_det_info.sqlite``) is a standard ManifestDb, which will be
-queried in the usual way except that when we get to the "Wrap
-Metadata" step, instead the following is performed:
+It is expected that the database (``more_det_info.sqlite``) is a
+standard ManifestDb, which will be queried in the usual way except
+that when we get to the "Wrap Metadata" step, instead the following is
+performed:
 
-  - An index field will be identified in the current active
-    ``det_info`` -- it can be either ``dets:readout_id`` or
-    ``dets:det_id`` -- to match against the new metadata.
-  - The columns from the new metadata are merged into the active
-    ``det_info``, ensuring that the index field values correspond.
-  - Only the rows for which the index field has the same value in the
-    two objects are kept.
+- All the loaded fields are inspected, and any fields that are already
+  found in the current ``det_info`` are used as Index fields.
+- The columns from the new metadata are merged into the active
+  ``det_info``, ensuring that the index field values correspond.
+- Only the rows for which the index field has the same value in the
+  two objects are kept.
 
-As subsequent metadata are processed, they can match against any
-fields that have been added to ``det_info`` by preceding entries in
-the metadata list.  However, currently it is only possible to augment
-``det_info`` using ``readout_id`` or ``det_id``.
+Here are a few more tips about det_info:
 
-By default, ``readout_id`` / ``det_id`` are expected to be unique
-indices.  It is often useful to permit multiple matches, especially
-for the special value "NOT_FOUND" in ``det_id``.  To permit this, add
-'multi: true' to the metadata block.  For example::
+- *All* fields in the det_info metdata should be prefixed with
+  ``dets:``, to signify that they are associated with the dets axis
+  (this is similar to fields used as index fields in standard
+  metadata.
+- The field called ``dets:readout_id`` is assumed, throughout the
+  Context/Metdata code, to correspond to the values in the ``.dets``
+  axis of the TOD AxisManager.
+- By convention, ``dets:det_id`` is used for the physical detector (or
+  pseudo-detector device) identifier.  The special value "NO_MATCH" is
+  used for cases where the ``det_id`` could not be determined.
 
-  metadata:
-  ...
-  - db: 'wafer_det_map.sqlite'   # the 'readout_id' -> 'det_id' mapping
-    det_info: true
-  - db: 'wafer_info.sqlite'      # the 'det_id' -> misc properties table
-    det_info: true
-    multi: true                  # Set multi=true if det_id=NOT_FOUND might
-                                 # need to be broadcast to multiple readout_id
-  ...
+When new det_info are merged in, any fields found in both the existing
+and new det_info will be used to form the association.  Many-to-many
+matching is fully supported, meaning that a unique index
+(e.g. ``readout_id``) does not need to be used in the new det_info.
+However, it is expected that in most cases either ``readout_id`` or
+``det_id`` will be used to label det_info contributions.
 
 
 ------------------------------------
@@ -966,10 +1001,15 @@ intended to carry precision results needed for mapping, such as
 calibration information or precise pointing and polarization angle
 data.
 
-Certain properties may change with time, for example if wiring or
-optics tube arrangements are adjusted from one season of observations
-to the next.  The ``DetDb`` is intended to support values that change
-with time.  **The timestamp support is still under development.**
+
+.. note::
+
+   DetDb is not planned for use in SO, because of the complexity of
+   the ``readout_id`` to ``det_id`` mapping problem.  The ``det_info``
+   system (described in the :ref:`metadata-section` section) is used
+   for making detector information available in the loaded TOD object.
+   DetDb is still used for simulations and for wrapping of data from
+   other readout systems.
 
 
 Using a DetDb (Tutorial)
@@ -1167,9 +1207,10 @@ properties::
   'geometry.wafer_pol']
 
 
-Creating a DetDb [empty]
-========================
+Creating a DetDb
+================
 
+For an example, see source code of :func:`get_example<detdb.get_example>`.
 
 Database organization
 =====================
@@ -1239,6 +1280,8 @@ Auto-generated documentation should appear here.
 .. autoclass:: DetDb
    :special-members: __init__
    :members:
+
+.. autofunction:: sotodlib.core.metadata.detdb.get_example
 
 
 ---------------------------

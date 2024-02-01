@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2021 Simons Observatory.
+# Copyright (c) 2020-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Operator for interfacing with the Maximum Likelihood Mapmaker.
 
@@ -7,11 +7,8 @@
 import os
 
 import numpy as np
-
 import traitlets
-
 from astropy import units as u
-
 from pixell import enmap, tilemap, fft
 
 import toast
@@ -32,7 +29,7 @@ from ...core import AxisManager, IndexAxis, OffsetAxis, LabelAxis
 @trait_docs
 class MLMapmaker(Operator):
     """Operator which accumulates data to the Maximum Likelihood Mapmaker.
-    
+
     """
 
     # Class traits
@@ -79,7 +76,7 @@ class MLMapmaker(Operator):
 
     nmat_type = Unicode(
         "NmatDetvecs",
-        help="Noise matrix type is either `NmatDetvecs` or `NmatUncorr`",
+        help="Noise matrix type is either `NmatDetvecs`, `NmatUncorr` or `Nmat`",
     )
 
     nmat_mode = Unicode(
@@ -92,9 +89,11 @@ class MLMapmaker(Operator):
     )
 
     nmat_dir = Unicode(
-        "{out_dir}/nmats",
+        None,
+        allow_none=True,
         help="Where to read/write/cache noise matrices. See nmat_mode. "
-        "If {out_dir} is in the string, then it will be expanded to the value of the out_dir parameter")
+        "If None, write to {out_dir}/nmats"
+    )
 
     dtype_map = Unicode("float64", help="Numpy dtype of map products")
 
@@ -403,7 +402,10 @@ class MLMapmaker(Operator):
             # AxisManager(az[samps], el[samps], roll[samps], samps:OffsetAxis(372680))
 
             # Maybe load precomputed noise model
-            nmat_dir  = self.nmat_dir.format(out_dir=self.out_dir)
+            if self.nmat_dir is None:
+                nmat_dir  = os.path.join(self.out_dir, "nmats")
+            else:
+                nmat_dir  = self.nmat_dir
             nmat_file = nmat_dir + "/nmat_%s.hdf" % ob.name
             there = os.path.isfile(nmat_file)
             if self.nmat_mode == "load" and not there:
@@ -412,7 +414,19 @@ class MLMapmaker(Operator):
                 )
             if self.nmat_mode == "load" or (self.nmat_mode == "cache" and there):
                 log.info_rank(f"Loading noise model from '{nmat_file}'", comm=gcomm)
-                nmat = mm.read_nmat(nmat_file)
+                try:
+                    nmat = mm.read_nmat(nmat_file)
+                except Exception as e:
+                    if self.nmat_mode == "cache":
+                        log.info_rank(
+                            f"Failed to load noise model from '{nmat_file}'"
+                            f" : '{e}'. Will cache a new one",
+                            comm=gcomm,
+                        )
+                        nmat = None
+                    else:
+                        msg = f"Failed to load noise model from '{nmat_file}' : {e}"
+                        raise RuntimeError(msg)
             else:
                 nmat = None
 

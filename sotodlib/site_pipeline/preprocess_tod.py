@@ -215,7 +215,8 @@ def get_parser(parser=None):
     parser.add_argument('configs', help="Preprocessing Configuration File")
     parser.add_argument(
         '--query', 
-        help="Query to pass to the observation list",  
+        help="Query to pass to the observation list. Use \\'string\\' to "
+             "pass in strings within the query.",  
         type=str
     )
     parser.add_argument(

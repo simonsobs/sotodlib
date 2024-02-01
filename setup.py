@@ -24,21 +24,13 @@ setup_opts["entry_points"] = {
         "so_hardware_info = sotodlib.scripts.hardware_info:main",
         "so-metadata = sotodlib.core.metadata.cli:main",
         "so-site-pipeline = sotodlib.site_pipeline.cli:main",
-        "toast_so_sim = sotodlib.toast.workflows.toast_so_sim:cli",
-        "toast_so_map = sotodlib.toast.workflows.toast_so_map:cli",
-        "toast_so_convert = sotodlib.toast.workflows.toast_so_convert:cli",
-        "get_wafer_offset = sotodlib.toast.workflows.get_wafer_offset:main",
+        "toast_so_sim = sotodlib.toast.scripts.so_sim:cli",
+        "toast_so_map = sotodlib.toast.scripts.so_map:cli",
+        "toast_so_sat_transfer = sotodlib.toast.scripts.so_sat_transfer:cli",
+        "toast_so_convert = sotodlib.toast.scripts.so_convert:cli",
+        "get_wafer_offset = sotodlib.toast.scripts.get_wafer_offset:main",
     ]
 }
-
-# left here for backward compatibility
-# new scripts should be put to console_scripts above instead
-scripts = [
-    "workflows/toast_so_sim.py",
-    "workflows/toast_so_map.py",
-    "workflows/toast_so_convert.py",
-    "workflows/get_wafer_offset.py",
-]
 
 setup_opts["name"] = "sotodlib"
 setup_opts["provides"] = "sotodlib"
@@ -50,7 +42,6 @@ setup_opts["url"] = "https://github.com/simonsobs/sotodlib"
 setup_opts["packages"] = find_packages(where=".", exclude="tests")
 setup_opts["license"] = "MIT"
 setup_opts["requires"] = ["Python (>3.7.0)", ]
-setup_opts["scripts"] = scripts
 setup_opts["package_data"] = {
     "sotodlib": [
         "toast/ops/data/*"

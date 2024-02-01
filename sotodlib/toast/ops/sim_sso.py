@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2023 Simons Observatory.
+# Copyright (c) 2018-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import h5py
@@ -13,12 +13,12 @@ from scipy.interpolate import RectBivariateSpline
 from scipy.signal import fftconvolve
 
 import toast
-from toast.timing import function_timer
+from toast.timing import function_timer, Timer
 from toast import qarray as qa
 from toast.data import Data
 from toast.traits import trait_docs, Int, Unicode, Bool, Quantity, Float, Instance
 from toast.ops.operator import Operator
-from toast.utils import Environment, Logger, Timer
+from toast.utils import Environment, Logger
 from toast.observation import default_values as defaults
 from toast.coordinates import azel_to_radec
 
@@ -152,7 +152,6 @@ class SimSSO(Operator):
             # Check that this operator has the traits we expect
             for trt in [
                 "view",
-                "quats",
                 "weights",
                 "mode",
             ]:

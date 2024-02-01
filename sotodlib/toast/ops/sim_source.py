@@ -1,108 +1,477 @@
-# Copyright (c) 2018-2023 Simons Observatory.
+# Copyright (c) 2018-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import os
 import h5py
-import copy
 
 import traitlets
 
 import numpy as np
+import copy
 
 from astropy import units as u
 
 import ephem
 
 from scipy.interpolate import RectBivariateSpline
+from scipy.signal import square
 
-from toast.timing import function_timer
-
+from toast.timing import function_timer, Timer
 from toast import qarray as qa
-
-from toast.data import Data
-
-from toast.traits import trait_docs, Int, Unicode, Float, Instance, List, Bool, Quantity
-
+from toast.traits import trait_docs, Int, Unicode, Float, Instance, List, Quantity
 from toast.ops.operator import Operator
 from toast.instrument import Focalplane
-
-from toast.utils import Logger, Timer, unit_conversion
-
+from toast.utils import Logger, unit_conversion
 from toast.observation import default_values as defaults
 
 from sotodlib.coords import local
 
 from . import utils
 
+def source_spectrum(fc, width, power, gain, amplitude, diameter, noise_bw, noise_out):
 
-def spectrum(power, fc, sigma, base, err_fc, noise, az_size, el_size, dist):
-    """Generate a power spectrum in W/m^2/sr/Hz for a source.
+    """Generate a power spectrum for a source.
 
-    The source has a delta-like emission and a top-hat beam in 2D.
+    The source has a delta-like emission.
 
     Args:
-        power: total power of the signal in dBm
-        fc: frequency of the signal in GHz
-        sigma: width of the signal in kHz
-        base: base level of the signal in dBm
-        err_fc: error in the signal frequency in kHz
-        noise: noise of the signal in W/Hz
-        ang_size: beam size of the signal in degrees as [az_size, el_size]
-        dist: distance of the source in meter
-
+        fc (Quantity): Central frequency of the source signal
+        width (Quantity): total width of the source signal
+        power (Float): total power of the source signal in dBm
+        gain (Float): Antenna gain of the source in dBi
+        amplitude (Float): amplitude of the signal with respect to the the base in dB
+        diameter (Quantity): source diameter
+        noise_bw (Quantity): in-band noise
+        noise_out (Quantity): out-of-band noise
     Returns:
-        (tuple): The (frequency, spectrum) arrays.
+        I_nu (Quantity): spectrum of the source
 
     """
 
-    fc *= 1e9  ### Conversion to Hz
-    err_fc *= 1e3
+    amplitude = 10**(-amplitude/10)
+    power_watts = 10**(power/10)/1000
 
-    fc = fc + np.random.normal(0, err_fc)
+    freqs = np.linspace(20., 350., 1001, endpoint=True)*1e9 * u.Hz
+    fc = fc.to(u.Hz)
+    width = width.to(u.Hz)
+    radius = diameter.to(u.meter)/2
+    
+    if np.amin(np.diff(freqs)) >= 2*width:
+        idx = np.argmin(np.abs(freqs-fc))
+        
+        idx = np.array([idx-1, idx, idx+1])
+    
+    else:
+        fmin = fc-width
+        fmax = fc+width
+        
+        idx_min = np.argmin(np.abs(freqs-fmin))
+        idx_max = np.argmin(np.abs(freqs-fmax))
+        
+        idx = np.arange(idx_min, idx_max+1, dtype=int)
+        
+    bandwidth = np.ptp(freqs[idx])
+        
+    rho_bw = power_watts/bandwidth/(1+amplitude) * u.W
 
-    sigma *= 1e3  ### Conversion to Hz
+    power_bw = rho_bw*bandwidth
 
-    factor = 10  # Increase by a factor the width of the signal
-    freq_step = 10
+    out1 = np.ptp(freqs[:idx[0]])
+    out2 = np.ptp(freqs[idx[-1]+1:])
 
-    freq = np.arange(0.5, 400, freq_step) * 1e9
-    central = np.arange(-factor * sigma, factor * sigma, sigma) + fc
+    rho_out = power_bw*amplitude/(out1+out2)
 
-    # Add edges to fill the gap for future interpolations
-    nstep = 20
-    edge_l = np.linspace(fc - freq_step * 1e9, fc - factor * sigma, nstep)
-    edge_u = np.linspace(fc + factor * sigma, fc + freq_step * 1e9, nstep)
+    signal = np.zeros(len(freqs)) * u.W / u.Hz
 
-    edges = np.append(edge_l, edge_u)
-    freq = np.append(freq, central)
+    if noise_bw.value != 0:
+        rho_bw += np.random.normal(0, np.abs(noise_bw), len(rho_bw))
 
-    freq = np.sort(np.unique(np.append(freq, edges)))
+    if noise_out.value != 0:
+        rho_out += np.random.normal(0, np.abs(noise_out), len(rho_out))
 
-    mask = np.in1d(freq, central)
+    signal[:idx[0]] = rho_out
+    signal[idx] = rho_bw
+    signal[idx[-1]+1:] = rho_out
+    
+    g = 10**(gain/10)
+       
+    I_nu = signal*g/np.pi/radius**2
+    
+    return freqs, I_nu
 
-    signal = np.zeros_like(freq)
+class SimulateDroneMovement:
+    
+    def __init__(self, params):
 
-    signal[mask] = power - 10 * np.log10(sigma)
-    signal[~mask] = base
+        """Class containing the necessary functions to simulate a drone scanning above the telescope.
 
-    signal = 10 ** (signal / 10) / 1000  ### Conversion from dBm to W
+        Args:
+            params (Dictionary): Dictionary with the parameters required to generate the movement of the drone.
+                                 Keys available on the dictionary:
+                                    azimuth_starting (Quantity): Starting value for the azimuth
+                                    azimuth_range (Quantity): Range of the azimuth scan
+                                    azimuth_velocity (Quantity): Maximum velocity of the drone along the azimuthal axis
+                                    azimuth_acceleration (Quantity): Maximum velocity of the drone along the azimuthal axis
+                                    azimuth_direction (String): Determine if the azimuth value is increasing or decreasing.
+                                                                Accepted values: 'increasing' or 'decresing'
+                                    elevation_starting (Quantity): Starting value for the elevation
+                                    elevation_range (Quantity): Range of the elevation scan
+                                    elevation_velocity (Quantity): Maximum velocity of the drone along the elevational axis
+                                    elevation_acceleration (Quantity): Maximum velocity of the drone along the elevational axis
+                                    elevation_direction (String): Determine if the elevation value is increasing or decreasing.
+                                                                  Accepted values: 'increasing' or 'decresing'
+                                    elevation_step (Quantity): Step along the elevation axis for a grid scan
+                                    scan_time (Quantity): Time of the scan
+                                    scan_type (String): Type of the scan
+                                                        Accepted values:
+                                                            elevation_only
+                                                            azimuth_only
+                                                            elevation_only_single
+                                                            azimuth_only_single
+                                                            grid
+                                                            fixed
+        
+        """
+        
+        self.params = params
+        
+    def _check_maximum_velocity(self, delta_axis, vel, acc, direction):
 
-    signal += np.random.normal(0, noise, size=(len(signal)))
+        """Internal Function to control if the drone achieves the maximum velocity along a specific axis.
+        Args:
+            delta_axis (Quantity): span of the scan
+            vel (Quantity): maximum velocity achievable
+            acc (Quantity): value of the acceleration
+            direction (Float): value that indicates the direction of movement
 
-    az_size = np.radians(az_size) / 2 / np.pi  # Half size in unit of pi
-    el_size = np.radians(el_size) / 2 / np.pi  # Half size in unit of pi
+        Returns:
+            t_acc (Quantity): total time of the acceleration (deceleration) phase
+            t_vel (Quantity): total time at the maximum velocity achivable (0 if v_max < vel)
+            v_max (Quantity): maximum velocity of the drone
+        
+        """
+        
+        if self.params['scan_type'] == 'elevation_only_single' or \
+           self.params['scan_type'] == 'azimuth_only_single':
+                v_max = (acc * self.params['scan_time']
+                         - np.sqrt((acc * self.params['scan_time'])**2
+                                   - 4 * acc * delta_axis)
+                         )/2
+                t_acc = np.abs(v_max/acc)
+                t_vel = self.params['scan_time'] - 2 * t_acc
+        else:
+        
+            fact = delta_axis-np.abs(vel**2/acc)
 
-    signal /= (
-        4 * np.pi * az_size * np.sin(el_size * np.pi)
-    )  # Normalize in the solid angle
-    signal /= dist**2  # Normalize based on the distance
+            if fact > 0 :
+                t_acc = np.abs(vel/acc)
+                t_vel = (delta_axis-np.abs(vel**2/acc))/np.abs(vel)
+                v_max = vel
+            else:
+                v_max = np.sqrt(np.abs(delta_axis*acc))*direction
+                t_acc = np.abs(v_max/acc)
+                t_vel = 0
+            
+        return t_acc, t_vel, v_max
 
-    # Set units
-    freq *= u.Hz
-    signal *= u.W / (u.m**2 * u.Hz)
+    def create_scan(self, time_interp=None):
 
-    return freq, signal
+        """ Calculate the movement of the drone using the parameters dictionary.
+        Args:
+            times_interp (Quantity): times where to compute the position using a linear interpolation
 
+        Return:
+            time (Quantity): total duration of the scan
+            azimuth (Quantity): positions during the scan along the azimuth axis
+            elevation (Quantity): positions during the scan along the elevation axis
+        """
+
+        if self.params['scan_type'] == 'elevation_only':
+            time, azimuth, elevation = self.single_axis_scan(axis='elevation')
+        elif self.params['scan_type'] == 'azimuth_only':
+            time, azimuth, elevation = self.single_axis_scan(axis='azimuth')
+        elif self.params['scan_type'] == 'elevation_only_single':
+
+            if self.params['elevation_direction'].lower() == 'decreasing':
+                direction = -1
+            else:
+                direction = 1
+
+            time, elevation = self.single_movement(axis = 'elevation',
+                                                   direction = direction,
+                                                   axis0 = self.params['elevation_starting'])
+
+            azimuth = np.ones(len(elevation))*self.params['azimuth_starting']
+
+        elif self.params['scan_type'] == 'azimuth_only_single':
+
+            if self.params['azimuth_direction'].lower() == 'decreasing':
+                direction = -1
+            else:
+                direction = 1
+
+            time, azimuth = self.single_movement(axis = 'azimuth',
+                                                 direction = direction,
+                                                 axis0 = self.params['azimuth_starting'])
+
+            elevation = np.ones(len(azimuth))*self.params['elevation_starting']
+
+        elif self.params['scan_type'] == 'grid_scan':
+
+            time, azimuth, elevation = self.grid_scan()
+        
+        elif self.params['scan_type'] == 'fixed':
+
+            time = np.linspace(0, self.params['scan_time'], 1001, endpoint=True)
+            azimuth = np.ones(len(time))*self.params['azimuth_starting']
+            elevation = np.ones(len(time))*self.params['elevation_starting']
+
+        if time_interp is not None:
+
+            azimuth = np.interp(time_interp-time_interp[0], time, azimuth)
+            elevation = np.interp(time_interp-time_interp[0], time, elevation)
+
+            time = copy.copy(time_interp)
+        
+        return time, azimuth, elevation
+
+    def single_movement(self, axis=None, direction=1, axis0=0, step=False, step_value=0):
+
+        """ Calculate the movement along a specific axis for a single movement (i.e. up to down or down to up,
+        left to right or right to left).
+        Args:
+            axis (String): axis along the movement needs to be generated
+            direction (Float): value that indicates the direction of movement
+            axis0 (Quantity): Starting point of the movement
+            step (Bool): True is the movement is a stepping movement during a grid scan
+            step_value (Quantity): range value of the step
+
+        Return:
+            time (Quantity): total duration of the single movement
+            axis_val (Quantity): positions during the single movement
+        """
+        
+        range_string = axis+'_range'
+        vel_string = axis+'_velocity'
+        acc_string = axis+'_acceleration'
+        
+        vel = self.params[vel_string]*direction
+        acc = self.params[acc_string]*direction
+        if step:
+            delta_axis = step_value
+        else:
+            delta_axis = self.params[range_string]
+            
+        t_acc, t_vel, v_max = self._check_maximum_velocity(delta_axis, vel, acc, direction)
+        
+        axis_val = np.array([]) * u.rad
+        time = np.array([]) * u.s
+        
+        time_acc = np.linspace(0, t_acc, 101, endpoint=True)
+        time = np.append(time, time_acc)
+        
+        dx_acc = 0.5*acc*time_acc**2
+        axis_val = np.append(axis_val, axis0+dx_acc)
+
+        if t_vel > 0:
+            time_vel = np.linspace(0, t_vel, 101 , endpoint=True)
+            time = np.append(time, time[-1]+time_vel[1:])
+
+            dx_vel = v_max*time_vel[1:]
+            axis_val = np.append(axis_val, axis_val[-1]+dx_vel)
+            
+        dx_dec = v_max*time_acc[1:]-0.5*acc*time_acc[1:]**2
+        axis_val = np.append(axis_val, axis_val[-1]+dx_dec)
+        
+        time = np.append(time, time[-1]+time_acc[1:])
+        
+        return time, axis_val
+    
+    def single_axis_scan(self, axis='elevation'):
+
+        """ Calculate the movement along a specific axis for a scan (i.e. multiple up to down/down to up,
+        multiple left to right/right to left).
+        Args:
+            axis (String): axis along the movement needs to be generated
+
+        Return:
+            time (Quantity): total duration of the scan
+            azimuth (Quantity): positions during the scan along the azimuth axis
+            elevation (Quantity): positions during the scan along the elevation axis
+        """
+        
+        axis_value = np.array([]) * u.rad
+        time = np.array([]) * u.s
+        
+        axis0_string = axis+'_starting'
+        
+        axis0 = copy.copy(self.params[axis0_string])
+        t0 = 0
+        
+        if self.params[axis+'_direction'].lower() == 'decreasing':
+            direction = -1
+        else:
+            direction = 1
+            
+        self.scan_cycles = 0
+        self._scan_idxs = np.array([], dtype=int)
+        
+        start = axis+'_starting'
+        rng = axis+'_range'
+        
+        while True:
+            time_temp, axis_temp = self.single_movement(axis=axis,
+                                                        direction=direction,
+                                                        axis0 = axis0)
+            axis0 = axis_temp[-1]
+            direction *= -1
+            
+            time = np.append(time, time_temp+t0)
+            axis_value = np.append(axis_value, axis_temp)
+            t0 = copy.copy(time[-1])
+            
+            self.scan_cycles += 1
+            
+            if time[-1] > self.params['scan_time']:
+                
+                idx = np.argmin(np.abs(time-self.params['scan_time']))
+                
+                time = time[:idx+1]
+                axis_value = axis_value[:idx+1]
+                self._scan_idxs = np.append(self._scan_idxs, len(time)-1)
+                
+                if direction == 1:
+                    self.scan_cycles += (axis_value[-1]-self.params[start])/self.params[rng]
+                elif direction == -1:
+                    self.scan_cycles += ((self.params[start]+self.params[rng]-axis_value[-1]))/self.params[rng]
+                
+                break
+            
+            self._scan_idxs = np.append(self._scan_idxs, len(time)-1)
+            
+        self.scan_cycles /= 2
+        self.scan_time = time
+        if axis == 'elevation':
+            elevation = axis_value
+            azimuth = np.ones(len(axis_value))*self.params['azimuth_starting']
+        if axis == 'azimuth':
+            azimuth = axis_value
+            elevation = np.ones(len(axis_value))*self.params['elevation_starting']
+            
+        return time, azimuth, elevation
+    
+    def grid_scan(self):
+
+        """ Calculate the movement during a grid scan with an elevation step.
+        Args:
+            None
+        Return:
+            time (Quantity): total duration of the scan
+            azimuth (Quantity): positions during the scan along the azimuth axis
+            elevation (Quantity): positions during the scan along the elevation axis
+        """
+        
+        el_step = self.params['el_step']
+        
+        az0 = self.params['azimuth_starting']
+        el0 = self.params['elevation_starting']
+        
+        if self.params['azimuth_direction'].lower() == 'decreasing':
+            azimuth_direction = -1
+        else:
+            azimuth_direction = 1
+        
+        if self.params['elevation_direction'].lower() == 'decreasing':
+            elevation_direction = -1
+        else:
+            elevation_direction = 1
+        
+        el_cumulative = 0 * u.degree
+        t0 = 0 * u.s
+        
+        time = np.array([]) * u.s
+        azimuth_value = np.array([]) * u.rad
+        elevation_value = np.array([]) * u.rad
+        
+        self.scan_cycles = 0
+        self._scan_idxs = np.array([], dtype=int)
+        
+        while True:
+            
+            time_temp, axis_temp = self.single_movement(axis = 'azimuth',
+                                                        direction = azimuth_direction,
+                                                        axis0 = az0,
+                                                        points = 101)
+            
+            azimuth_direction *= -1
+            az0 = copy.copy(axis_temp[-1])
+            
+            time = np.append(time, time_temp[1:]+t0)
+            azimuth_value = np.append(azimuth_value, axis_temp[1:])
+            elevation_value = np.append(elevation_value, np.ones_like(axis_temp[1:])*el0)
+            t0 = copy.copy(time[-1])
+            
+            if time[-1] > self.params['scan_time']:
+                
+                idx = np.argmin(np.abs(time-self.params['scan_time']))
+                
+                time = time[:idx+1]
+                azimuth_value = azimuth_value[:idx+1]
+                elevation_value = elevation_value[:idx+1]
+                
+                break
+                
+            el_cumulative += el_step
+            
+            if el_cumulative >= self.params['elevation_range']:
+                time_temp, axis_temp = self.single_movement(axis='elevation',
+                                                            direction=elevation_direction,
+                                                            axis0=el0,
+                                                            step=True,
+                                                            step_value=np.abs(self.params['elevation_range']-el_cumulative),
+                                                            points=101)
+                el_cumulative = 0
+                elevation_direction *= -1
+                self.scan_cycles += 1
+                self._scan_idxs = np.append(self._scan_idxs, len(time)+len(time_temp)-1)
+            else:
+                time_temp, axis_temp = self.single_movement(axis='elevation',
+                                                            direction=elevation_direction,
+                                                            axis0=el0,
+                                                            step=True,
+                                                            step_value=el_step,
+                                                            points=101)
+
+            el0 = copy.copy(axis_temp[-1])
+            time = np.append(time, time_temp[1:]+t0)
+            elevation_value = np.append(elevation_value, axis_temp[1:])
+            azimuth_value = np.append(azimuth_value, np.ones_like(axis_temp[1:])*az0)
+            
+            t0 = copy.copy(time[-1])
+            
+            if time[-1] > self.params['scan_time']:
+                
+                idx = np.argmin(np.abs(time-self.params['scan_time']))
+                
+                time = time[:idx+1]
+                azimuth_value = azimuth_value[:idx+1]
+                elevation_value = elevation_value[:idx+1]
+                
+                self._scan_idxs = np.append(self._scan_idxs, len(time)-1)
+                
+                if elevation_direction == 1:
+                    self.scan_cycles += (elevation_value[-1]-self.params['elevation_starting'])/self.params['elevation_range']
+                elif elevation_direction == -1:
+                    self.scan_cycles += ((self.params['elevation_starting']+self.params['elevation_range']-elevation_value[-1]))/self.params['elevation_range']
+                
+                break
+                
+        idx, = np.where(np.diff(time)!=-1000)
+            
+        azimuth = azimuth_value
+        elevation = elevation_value
+
+        return time, azimuth, elevation
 
 @trait_docs
 class SimSource(Operator):
@@ -117,16 +486,61 @@ class SimSource(Operator):
         help="Observation shared key for timestamps",
     )
 
-    source_init_dist = Quantity(
-        u.Quantity(500.0, u.meter),
+    # Drone Position parameters
+
+    source_distance = Quantity(
+        500*u.meter,
         help="Initial distance of the artificial source in meters",
     )
 
-    variable_elevation = Bool(False, help="Set True to change the drone elevation")
+    source_azimuth_range = Quantity(
+        u.Quantity(0, u.degree),
+        help = 'Range of the scan along the azimuthal axis'
+    )
 
-    keep_distance = Bool(
-        False,
-        help="Set True to maintain the distance always the same throughout a scan",
+    source_azimuth_velocity = Quantity(
+        u.Quantity(2, u.Unit("deg / s")),
+        help = 'Maximum velocity of the drone along the azimuthal axis'
+    )
+
+    source_azimuth_acceleration = Quantity(
+        u.Quantity(2, u.Unit("deg / s2")),
+        help = 'Maximum acceleration of the drone along the azimuthal axis'
+    )
+
+    source_azimuth_direction = Unicode(
+        'increasing',
+        help = 'Determine if the azimuth value is increasing or decreasing'
+    )
+
+    source_elevation_range = Quantity(
+        u.Quantity(0, u.degree),
+        help = 'Range of the scan along the elevation axis'
+    )
+
+    source_elevation_velocity = Quantity(
+        u.Quantity(2, u.Unit("deg / s")),
+        help = 'Maximum velocity of the drone along the elevation axis'
+    )
+
+    source_elevation_acceleration = Quantity(
+        u.Quantity(2, u.Unit("deg / s2")),
+        help = 'Maximum acceleration of the drone along the elevation axis'
+    )
+
+    source_elevation_direction = Unicode(
+        'increasing',
+        help = 'Determine if the elevation value is increasing or decreasing'
+    )
+
+    source_elevation_step = Quantity(
+        u.Quantity(0, u.degree),
+        help = 'Step along the elevation axis for a grid scan'
+    )
+
+    source_scan_type = Unicode(
+        'elevation_only',
+        help = 'Type of the scan'
     )
 
     focalplane = Instance(
@@ -140,38 +554,55 @@ class SimSource(Operator):
         help="Source Position Error in ECEF Coordinates as [[X, Y, Z]] in meters",
     )
 
-    source_size = Float(
-        0.1,
-        help="Source Size in meters",
+    source_size = Quantity(
+        u.Quantity(0.1, u.meter),
+        help = 'Source Size in meters',
     )
 
-    source_amp = Float(help="Max amplitude of the source in dBm")
-
-    source_freq = Float(help="Central frequency of the source in GHz")
-
-    source_width = Float(help="Width of the source signal in kHz")
-
-    source_baseline = Float(help="Baseline signal level of the source in dBm")
-
-    source_noise = Float(help="Noise level in W/Hz")
-
-    source_beam_az = Float(
-        115,
-        help="Beam size along the azimuthal axis of the source in degrees",
+    source_power = Float(
+        help = 'Max amplitude of the source in dBm'
     )
 
-    source_beam_el = Float(
-        65,
-        help="Beam size along the elevation axis of the source in degrees",
+    source_fc = Quantity(
+        u.Quantity(90e9, u.Hz),
+        help = 'Central frequency of the source'
     )
 
-    source_pol_angle = Float(
-        90,
+    source_width = Quantity(
+        u.Quantity(100e3, u.Hz),
+        help = 'Width of the source signal'
+    )
+
+    source_amplitude = Float(
+        help = 'Amplitude of the source signal with the respect to the background in dB'
+    )
+
+    source_gain = Float(
+        help = 'Gain of the source Antenna in dBi'
+    )
+
+    source_noise_bw = Quantity(
+        u.Quantity(0, u.W / u.Hz),
+        help = 'White noise level in the emission band'
+    )
+
+    source_noise_out = Quantity(
+        u.Quantity(0, u.W / u.Hz),
+        help = 'White noise level outside the emission band'
+    )
+
+    source_freq_chopping = Quantity(
+        u.Quantity(0, u.Hz),
+        help = 'Frequency of the source chopping system'
+    )
+
+    source_pol_angle = Quantity(
+        u.Quantity(90, u.degree),
         help="Angle of the polarization vector emitted by the source in degrees (0 means parallel to the gorund and 90 vertical)",
     )
 
-    source_pol_angle_error = Float(
-        0,
+    source_pol_angle_error = Quantity(
+        u.Quantity(0, u.degree),
         help="Error in the angle of the polarization vector",
     )
 
@@ -185,6 +616,25 @@ class SimSource(Operator):
         allow_none=True,
         help="HDF5 file that stores the simulated beam",
     )
+
+    #Drone parameters
+
+    drone_temp = Quantity(
+        u.Quantity(0, u.K),
+        help = 'BlackBody temperature of the Drone'
+    )
+
+    drone_emiss = Float(
+        0,
+        help = 'Emissivity of the drone'
+    )
+
+    drone_size = Quantity(
+        u.Quantity(0, u.meter),
+        help = 'Drone size in meters',
+    )
+
+    #Wind Parameters
 
     wind_gusts_amp = Quantity(
         u.Quantity(0.0, u.Unit("m / s")), help="Amplitude of gusts of wind"
@@ -320,7 +770,7 @@ class SimSource(Operator):
                 source_az,
                 source_el,
                 source_dist,
-                source_diameter,
+                source_diameter
             ) = self._get_source_position(obs, observer, times)
 
             # Make sure detector data output exists
@@ -342,6 +792,7 @@ class SimSource(Operator):
                 prefix,
                 dets,
                 scale,
+                times
             )
 
         if data.comm.group_rank == 0:
@@ -353,6 +804,23 @@ class SimSource(Operator):
 
         return
 
+    def _check_scan_type(self, scan_string):
+
+        log = Logger.get()
+
+        available_scans = ['elevation_only', 'azimuth_only', 'elevation_only_single', \
+                           'azimuth_only_single', 'grid', 'fixed']
+
+        if scan_string in available_scans:
+            return scan_string
+        else:
+            log.debug(
+                "Invalid Scan Type input"
+                "Set scan to elevation_only"
+            )
+
+            return 'elevation_only'
+
     @function_timer
     def _get_source_position(self, obs, observer, times):
 
@@ -360,38 +828,86 @@ class SimSource(Operator):
         timer = Timer()
         timer.start()
 
-        az_start = np.median(np.array(obs.shared[self.azimuth])) * u.rad
+        scan_type = self._check_scan_type(self.source_scan_type)
 
-        az_init = np.ones_like(times) * az_start
+        FoV = self.focalplane.field_of_view
 
-        if not self.variable_elevation:
-            el_init = (
-                np.ones(len(times))
-                * np.amax(np.array(obs.shared[self.elevation]))
-                * u.rad
-            )
-            el_start = el_init[0]
-
+        if self.source_azimuth_range == 0:
+            az_range = FoV
         else:
-            # Always consider a discending drone, it is easier to fly this way
-
-            FoV = self.focalplane.field_of_view
-
-            el_start = np.array(obs.shared[self.elevation])[0] * u.rad + FoV / 2
-            el_end = el_start - FoV
-            el_init = np.linspace(el_start, el_end, len(times), endpoint=True)
-
-        if self.keep_distance:
-            distance = np.ones_like(times) * self.source_init_dist
+            az_range = self.source_azimuth_range
+        if self.source_elevation_range == 0:
+            el_range = FoV
         else:
-            distance = self.source_init_dist * np.cos(el_start) / np.cos(el_init)
+            el_range = self.source_elevation_range
+        
+        if scan_type == 'fixed':
+            
+            el_start = np.median(np.array(obs.shared[self.elevation])) * u.rad
+            az_start = np.median(np.array(obs.shared[self.azimuth])) * u.rad
+
+        elif scan_type == 'azimuth_only' or scan_type == 'azimuth_only_single':
+
+            if self.source_azimuth_direction == 'increasing':
+                az_start = np.amin(np.array(obs.shared[self.azimuth])) * u.rad
+                az_start -= az_range/2
+            else:
+                az_start = np.amax(np.array(obs.shared[self.azimuth])) * u.rad
+                az_start += az_range/2
+            
+            el_start = np.median(np.array(obs.shared[self.elevation])) * u.rad
+
+        elif scan_type == 'elevation_only' or scan_type == 'elevation_only_single':
+
+            if self.source_elevation_direction == 'increasing':
+                el_start = np.amin(np.array(obs.shared[self.elevation])) * u.rad
+                el_start -= el_range/2
+            else:
+                el_start = np.amax(np.array(obs.shared[self.elevation])) * u.rad
+                el_start += el_range/2
+            
+            az_start = np.median(np.array(obs.shared[self.azimuth])) * u.rad
+
+        elif scan_type == 'grid_scan':
+
+            if self.source_elevation_direction == 'increasing':
+                el_start = np.amin(np.array(obs.shared[self.elevation])) * u.rad
+                el_start -= el_range/2
+            else:
+                el_start = np.amax(np.array(obs.shared[self.elevation])) * u.rad
+                el_start += el_range/2
+
+            if self.source_azimuth_direction == 'increasing':
+                az_start = np.amin(np.array(obs.shared[self.azimuth])) * u.rad
+                az_start -= az_range/2
+            else:
+                az_start = np.amax(np.array(obs.shared[self.azimuth])) * u.rad
+                az_start += az_range/2
+
+        source_scan_params = {
+            'azimuth_starting': az_start,
+            'azimuth_range': az_range,
+            'azimuth_velocity': self.source_azimuth_velocity,
+            'azimuth_acceleration': self.source_azimuth_acceleration,
+            'azimuth_direction': self.source_azimuth_direction,
+            'elevation_starting': el_start,
+            'elevation_range': el_range,
+            'elevation_velocity': self.source_elevation_velocity,
+            'elevation_acceleration': self.source_elevation_acceleration,
+            'elevation_direction': self.source_elevation_direction,
+            'elevation_step': self.source_elevation_step,
+            'scan_time': np.ptp(times) * u.s,
+            'scan_type': scan_type
+        }
+
+        scan = SimulateDroneMovement(source_scan_params)
+
+        _, source_azimuth, source_elevation = scan.create_scan(time_interp=times*u.s)
 
         if np.any(np.array(self.source_err) >= 1e-4) or self.wind_gusts_amp.value != 0:
 
-            E, N, U = local.hor2enu(az_init, el_init, distance)
-            X, Y, Z = local.enu2ecef(
-                E, N, U, observer.lon, observer.lat, observer.elevation, ell="WGS84"
-            )
+            E, N, U = local.hor2enu(source_azimuth, source_elevation, self.source_distance)
+            X, Y, Z = local.enu2ecef(E, N, U, observer.lon, observer.lat, observer.elevation, ell='WGS84')
 
             if np.any(np.array(self.source_err) >= 1e-4):
                 X = (
@@ -502,21 +1018,19 @@ class SimSource(Operator):
                 observer.lat,
             )
 
-            source_az, source_el, source_distance, _, _, _ = local.enu2hor(
-                E, N, U, 0, 0, 0
-            )
+            source_az, source_el, source_dist, _,_,_ = local.enu2hor(E, N, U, 0,0,0)
 
         else:
-            source_az = az_init.copy()
-            source_el = el_init.copy()
-            source_distance = distance.copy()
+            source_az = source_azimuth.copy()
+            source_el = source_elevation.copy()
+            source_dist = self.source_distance.copy()
 
         size = local._check_quantity(self.source_size, u.m)
-        size = (size / source_distance) * u.rad
+        size = (size/source_dist)*u.rad
 
-        obs["source_az"] = source_az
-        obs["source_el"] = source_el
-        obs["source_distance"] = source_distance
+        obs['source_az'] = source_az
+        obs['source_el'] = source_el
+        obs['source_distance'] = source_dist
 
         # Create a shared data object with the source location
         source_coord = np.column_stack(
@@ -535,33 +1049,34 @@ class SimSource(Operator):
                 f"{timer.seconds():.1f} seconds"
             )
 
-        return source_az, source_el, source_distance, size
+        return source_az, source_el, source_dist, size
 
-    def _get_source_temp(self, distance):
+    def _get_source_temp(self):
 
-        dist = np.median(distance.value)  ### Get the median distance
-
-        amp = self.source_amp
-        fc = self.source_freq
-        sigma = self.source_width
-        base = self.source_baseline
-        noise = self.source_noise
-
-        freq, spec = spectrum(
-            amp,
-            fc,
-            sigma,
-            base,
-            sigma,
-            noise,
-            self.source_beam_az,
-            self.source_beam_el,
-            dist,
-        )
+        power = self.source_power
+        fc = self.source_fc
+        width = self.source_width
+        gain = self.source_gain
+        diameter = self.source_size
+        amplitude = self.source_amplitude
+        noise_bw = self.source_noise_bw
+        noise_out = self.source_noise_out
+        
+        freq, spec = source_spectrum(fc, width, power, gain, amplitude, diameter, noise_bw, noise_out)
 
         temp = utils.s2tcmb(spec, freq)
 
         return freq, temp
+
+    def _get_drone_temp(self):
+        """
+        Compute the drone CMB temperature as a grey body
+        """
+
+        freqs = np.linspace(20., 350., 1001, endpoint=True)*1e9 * u.Hz
+        temp = utils.tb2tcmb(self.drone_temp, freqs)*self.drone_emiss
+
+        return freqs, temp
 
     def _get_beam_map(self, det, source_diameter, ttemp_det):
         """
@@ -613,6 +1128,7 @@ class SimSource(Operator):
         prefix,
         dets,
         scale,
+        times
     ):
         """
         Observe the Source with each detector in tod
@@ -620,8 +1136,8 @@ class SimSource(Operator):
         log = Logger.get()
         timer = Timer()
 
-        source_freq, source_temp = self._get_source_temp(source_dist)
-
+        source_freq, source_temp = self._get_source_temp()
+        
         # Get a view of the data which contains just this single
         # observation
         obs_data = data.select(obs_uid=obs.uid)
@@ -659,7 +1175,31 @@ class SimSource(Operator):
             y = el - source_el.to_value(u.rad)
             r = np.sqrt(x**2 + y**2)
             good = r < radius
-            sig = beam(x[good], y[good], grid=False)
+
+            sig = np.zeros(len(times))
+            sig[good] = beam(x[good], y[good], grid=False)
+
+            if self.source_freq_chopping.value > 0:
+                sampling = 1/np.mean(np.diff(times))
+                chop = square(2*np.pi*sampling*self.source_freq_chopping)
+                chop[chop<1] = 0
+
+                sig *= chop
+
+            if self.drone_temp > 250*u.K and self.drone_emiss > 0:
+                
+                drone_diameter = local._check_quantity(self.drone_size, u.m)
+                drone_diameter = (drone_diameter/source_dist)*u.rad
+
+                drone_freq, drone_temp = self._get_drone_temp()
+                det_drone_temp = bandpass.convolve(det, drone_freq, drone_temp)
+
+                beam_drone, _ = self._get_beam_map(det, drone_diameter, det_drone_temp)
+
+                sig_drone = np.zeros(len(times))
+                sig_drone[good] = beam_drone(x[good], y[good], grid=False)
+
+                sig += sig_drone
 
             # Stokes weights for observing polarized source
             if self.detector_weights is None:
@@ -671,31 +1211,36 @@ class SimSource(Operator):
                 weight_mode = self.detector_weights.mode
                 if "I" in weight_mode:
                     ind = weight_mode.index("I")
-                    weights_I = weights[good, ind].copy()
+                    weights_I = weights[:, ind].copy()
                 else:
                     weights_I = 0
                 if "Q" in weight_mode:
                     ind = weight_mode.index("Q")
-                    weights_Q = weights[good, ind].copy()
+                    weights_Q = weights[:, ind].copy()
                 else:
                     weights_Q = 0
                 if "U" in weight_mode:
                     ind = weight_mode.index("U")
-                    weights_U = weights[good, ind].copy()
+                    weights_U = weights[:, ind].copy()
                 else:
                     weights_U = 0
 
             pfrac = self.polarization_fraction
-            angle = np.radians(
+            angle = (
                 self.source_pol_angle
-                + np.random.normal(0, self.source_pol_angle_error, size=(len(sig)))
+                + np.random.normal(0, self.source_pol_angle_error.to(u.deg).value, size=(len(sig))) * u.deg
             )
+            
+            I = sig.copy()
+            Q = pfrac * sig * np.cos(2 * angle)
+            U = pfrac * sig * np.sin(2 * angle)
 
-            sig *= weights_I + pfrac * (
-                np.cos(2 * angle) * weights_Q + np.sin(2 * angle) * weights_U
-            )
+            drone_sig = (I * weights_I
+                         + Q * weights_Q
+                         + U * weights_U
+                         ).value
 
-            signal[good] += sig
+            signal += drone_sig
 
             timer.stop()
             if data.comm.world_rank == 0:

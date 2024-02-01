@@ -170,5 +170,44 @@ sum of mean subtracted data (which may be filtered) and looking for peaks in the
 output. Taking the cumulative sum is functionally the same as convolving with
 an unit step, so it is acting as a matched filter.
 
+This jumpfinder supports recursion, this is a feature intended to find smaller jumps
+hiding between larger jumps that skew peak finding statistics.
+The recursive calls to the jumpfinder are not fully vectorized, so using it can hurt performance.
+
 .. automodule:: sotodlib.tod_ops.jumps
+   :members:
+
+tod_ops.azss
+=============
+
+Function for binning signal by azimuth and fitting it with legendre polynomials in 
+az-vs-signal space. This has been used in ABS and other experiments to get 
+an Azimuth synchronous signal (AzSS) template largely due to polarized ground signal 
+to remove from the data.
+
+.. autofunction:: sotodlib.tod_ops.azss.get_azss
+
+.. autofunction:: sotodlib.tod_ops.azss.subtract_azss
+
+tod_ops.binning
+===============
+
+Function for binning signal along specified axis (i.e. azimuth, time, hwp angle).
+
+.. autofunction:: sotodlib.tod_ops.binning.bin_signal
+
+tod_ops.sub_polyf
+=================
+
+Function for remove low order polynominal component in each subscan.
+
+.. automodule:: sotodlib.tod_ops.sub_polyf
+   :members:
+
+tod_ops.flags
+=============
+
+Module containing functions for generating flags for cuts and tod masking.
+
+.. automodule:: sotodlib.tod_ops.flags
    :members:

@@ -48,6 +48,8 @@ def get_parser():
     sp.add_argument('--key', '-k', action='append', default=[], help=
                     'If listing observations, also include the speficied db fields '
                     'in addition to obs_id.')
+    sp.add_argument('--tag', '-t', action='append', default=[], help=
+                    'Add a tag as an eligible column for query.')
     sp.add_argument('obs_id', nargs='?')
 
     # obsfiledb
@@ -63,7 +65,7 @@ def get_parser():
     return parser
 
 
-def _set_type(args):
+def _set_type(args, parser):
     if args.type is None:
         ext = os.path.splitext(args.db_file)[1]
         if ext in ['.yaml', '.yml']:
@@ -74,6 +76,14 @@ def _set_type(args):
             parser.error(
                 f'Not sure how to decode file with extension "{ext}"; pass --type=...')
     return args.type
+
+
+def _all_tokens(args, subdelim=','):
+    # ['a', 'b,c', 'd'] -> ['a', 'b', 'c', 'd']
+    out = []
+    for a in args:
+        out.extend([_x.strip() for _x in a.split(subdelim)])
+    return out
 
 
 def main(args=None):
@@ -110,7 +120,7 @@ def main(args=None):
         print()
 
     elif args._subcmd == 'obsdb':
-        _set_type(args)
+        _set_type(args, parser)
 
         if args.type == 'context':
             ctx = context.Context(args.db_file)
@@ -121,12 +131,12 @@ def main(args=None):
         # Summary mode?
         if args.obs_id is None:
             if args.list:
-                rows = db.query(args.query)
+                tags = _all_tokens(args.tag)
+
+                rows = db.query(args.query, tags=tags)
 
                 if args.list:
-                    fields = ['obs_id']
-                    for k in args.key:
-                        fields.extend([_k.strip() for _k in k.split(',')])
+                    fields = ['obs_id'] + _all_tokens(args.key)
                     for line in rows:
                         print(' '.join([str(line[k]) for k in fields]))
             else:
@@ -156,7 +166,7 @@ def main(args=None):
             if item is None:
                 print(f'  "{args.obs_id}" not found!')
             else:
-                for k, v in db.get(args.obs_id).items():
+                for k, v in db.get(args.obs_id, tags=True).items():
                     print(f'  {k:<20}: {v}')
 
     elif args._subcmd == 'obsfiledb':
