@@ -89,7 +89,8 @@ class G3tHWP():
         self._slit_width_lim = self.configs.get('slit_width_lim', 0.1)
 
         # The distance from the hwp center to the fine encoder slots (mm)
-        self._encoder_disk_radius = self.configs.get('encoder_disk_radius', 346.25)
+        self._encoder_disk_radius = self.configs.get(
+            'encoder_disk_radius', 346.25)
 
         # force to quad value
         # 0: use readout quad value (default)
@@ -137,12 +138,14 @@ class G3tHWP():
 
         if isinstance(start, datetime.datetime):
             if start.tzinfo is None:
-                logger.warning('No tzinfo info in start argument, set to utc timezone')
+                logger.warning(
+                    'No tzinfo info in start argument, set to utc timezone')
                 start = start.replace(tzinfo=datetime.timezone.utc)
             self._start = start.timestamp()
         if isinstance(end, datetime.datetime):
             if end.tzinfo is None:
-                logger.warning('No tzinfo info in end argument, set to utc timezone')
+                logger.warning(
+                    'No tzinfo info in end argument, set to utc timezone')
                 end = start.replace(tzinfo=datetime.timezone.utc)
             self._end = end.timestamp()
 
@@ -364,7 +367,8 @@ class G3tHWP():
             irig_only_time = irig_time[np.where(
                 (irig_time < fast_time[0]) | (irig_time > fast_time[-1]))]
             irig_only_locked = np.zeros_like(irig_only_time, dtype=bool)
-            irig_only_hwp_rate = np.zeros_like(irig_only_time, dtype=np.float32)
+            irig_only_hwp_rate = np.zeros_like(
+                irig_only_time, dtype=np.float32)
 
             fast_irig_time = np.append(irig_only_time, fast_time)
             fast_irig_idx = np.argsort(fast_irig_time)
@@ -465,14 +469,14 @@ class G3tHWP():
                 mod2pi, fast)
             if len(fast_time) == 0:
                 logger.warning('analyzed encoder data is None')
-            out.update(self._slowdata_process(fast_time, d['irig_time'], suffix))
+            out.update(self._slowdata_process(
+                fast_time, d['irig_time'], suffix))
             out['fast_time'+suffix] = fast_time
             out['angle'+suffix] = angle
             out['ref_indexes'+suffix] = self._ref_indexes
             out['filled_indexes'] = self._filled_indexes
 
         return out
-
 
     def eval_angle(self, solved, poly_order=3, suffix=''):
         """
@@ -521,7 +525,8 @@ class G3tHWP():
         and subtract it from the timestamp.
         """
         if 'fast_time_raw'+suffix in solved.keys():
-            logger.info('Non-uniformity is already subtracted. Calculation is skipped.')
+            logger.info(
+                'Non-uniformity is already subtracted. Calculation is skipped.')
             return
 
         def moving_average(array, n):
@@ -540,7 +545,8 @@ class G3tHWP():
             return array - pv
 
         # template subtraction
-        ft = solved['fast_time'+suffix][solved['ref_indexes'+suffix][0]:solved['ref_indexes'+suffix][-2]+1]
+        ft = solved['fast_time'+suffix][solved['ref_indexes'+suffix]
+                                        [0]:solved['ref_indexes'+suffix][-2]+1]
         # remove rotation frequency drift for making a template of encoder slits
         ft = detrend(ft, deg=3)
         # make template
@@ -553,7 +559,8 @@ class G3tHWP():
             self._ref_indexes) + 1), self._ref_indexes[0] + 1)[:len(solved['fast_time'])])
         solved['fast_time_raw'] = solved['fast_time']
         solved['fast_time'] = solved['fast_time'] - subtract
-        solved['template'] = template_slit/np.average(np.diff(solved['fast_time']))
+        solved['template'] = template_slit / \
+            np.average(np.diff(solved['fast_time']))
 
     def eval_offcentering(self, solved):
         """
@@ -589,25 +596,32 @@ class G3tHWP():
 
         # Skip the offcentering evaluation if 'solved' doesn't include second encoder data.
         if not ('fast_time' and 'fast_time_2') in solved.keys():
-            logger.warning('Offcentering calculation is only available when two encoders are operating. Skipped.')
+            logger.warning(
+                'Offcentering calculation is only available when two encoders are operating. Skipped.')
             return
 
         # Calculate offcentering from where the first reference slot was detected by the 2nd encoder.
         if solved["ref_indexes"][0] > self._num_edges/2-1:
-            offcenter_idx1_start, offcenter_idx2_start = int(solved["ref_indexes"][0]-self._num_edges/2), int(solved["ref_indexes_2"][0])
+            offcenter_idx1_start, offcenter_idx2_start = int(
+                solved["ref_indexes"][0]-self._num_edges/2), int(solved["ref_indexes_2"][0])
         else:
-            offcenter_idx1_start, offcenter_idx2_start = int(solved["ref_indexes"][1]-self._num_edges/2), int(solved["ref_indexes_2"][0])
+            offcenter_idx1_start, offcenter_idx2_start = int(
+                solved["ref_indexes"][1]-self._num_edges/2), int(solved["ref_indexes_2"][0])
         # Calculate offcentering to the end of the shorter encoder data.
         if len(solved["fast_time"][offcenter_idx1_start:]) > len(solved["fast_time_2"][offcenter_idx2_start:]):
             idx_length = len(solved["fast_time_2"][offcenter_idx2_start:])
         else:
             idx_length = len(solved["fast_time"][offcenter_idx1_start:])
-        offcenter_idx1 = np.arange(offcenter_idx1_start, offcenter_idx1_start+idx_length-1)
-        offcenter_idx2 = np.arange(offcenter_idx2_start, offcenter_idx2_start+idx_length-1)
+        offcenter_idx1 = np.arange(
+            offcenter_idx1_start, offcenter_idx1_start+idx_length-1)
+        offcenter_idx2 = np.arange(
+            offcenter_idx2_start, offcenter_idx2_start+idx_length-1)
         # Calculate the offset time of the encoders induced by the offcentering.
-        offset_time = (solved["fast_time"][offcenter_idx1]-solved["fast_time_2"][offcenter_idx2])/2
+        offset_time = (solved["fast_time"][offcenter_idx1] -
+                       solved["fast_time_2"][offcenter_idx2])/2
         # Calculate the offcentering (mm).
-        period = (solved["fast_time"][offcenter_idx1+1]-solved["fast_time"][offcenter_idx1])*self._num_edges
+        period = (solved["fast_time"][offcenter_idx1+1] -
+                  solved["fast_time"][offcenter_idx1])*self._num_edges
         offset_angle = offset_time/period*2*np.pi
         offcentering = np.tan(offset_angle)*self._encoder_disk_radius
         solved['offcenter_idx1'] = offcenter_idx1
@@ -652,11 +666,13 @@ class G3tHWP():
 
         # Skip the correction when the offcentering estimation doesn't exist.
         if not 'offcentering' in solved.keys():
-            logger.warning('Offcentering info does not exist. Offcentering correction is skipped.')
+            logger.warning(
+                'Offcentering info does not exist. Offcentering correction is skipped.')
             return
         # Skip the calculation when the correction is already done.
         elif 'fast_time_ver2' in solved.keys():
-            logger.info('The offcentring correction is already completed. Skipped.')
+            logger.info(
+                'The offcentring correction is already completed. Skipped.')
             return
 
         offcenter_idx1 = solved['offcenter_idx1']
@@ -776,8 +792,10 @@ class G3tHWP():
 
     def _set_empty_axes(self, aman, suffix):
         aman.wrap_new('hwp_angle'+suffix, shape=('samps', ), dtype=np.float64)
-        aman.wrap_new('hwp_angle_ver1'+suffix, shape=('samps', ), dtype=np.float64)
-        aman.wrap_new('hwp_angle_ver2'+suffix, shape=('samps', ), dtype=np.float64)
+        aman.wrap_new('hwp_angle_ver1'+suffix,
+                      shape=('samps', ), dtype=np.float64)
+        aman.wrap_new('hwp_angle_ver2'+suffix,
+                      shape=('samps', ), dtype=np.float64)
         aman.wrap_new('stable'+suffix, shape=('samps', ), dtype=bool)
         aman.wrap_new('locked'+suffix, shape=('samps', ), dtype=bool)
         aman.wrap_new('hwp_rate'+suffix, shape=('samps', ), dtype=np.float16)
@@ -787,7 +805,8 @@ class G3tHWP():
         return aman
 
     def _bool_interpolation(self, timestamp1, data, timestamp2):
-        interp = scipy.interpolate.interp1d(timestamp1, data, kind='linear', bounds_error=False)(timestamp2)
+        interp = scipy.interpolate.interp1d(
+            timestamp1, data, kind='linear', bounds_error=False)(timestamp2)
         result = (interp > 0.999)
         return result
 
@@ -870,69 +889,81 @@ class G3tHWP():
         try:
             data = self.load_data(start, end)
         except Exception as e:
-            logger.error(f"Exception '{e}' thrown while loading HWP data. The specified encoder field is missing.")
+            logger.error(
+                f"Exception '{e}' thrown while loading HWP data. The specified encoder field is missing.")
             self._write_solution_h5_logger = 'HWP data too short'
             self._write_empty_solution_h5(tod, output, h5_address)
 
         for suffix in ['', '_2']:
             logger.info('Start analyzing encoder'+suffix)
-            #load data
+            # load data
             if not 'counter' + suffix in data.keys():
                 logger.warning('No HWP data in the specified timestamps.')
                 self._write_solution_h5_logger = 'No HWP data'
                 self._set_empty_axes(aman, suffix)
                 continue
 
-            ### version 1
+            # version 1
             # calculate HWP angle
             try:
                 solved = self.analyze(data, mod2pi=False, suffux=suffix)
             except Exception as e:
-                logger.error(f"Exception '{e}' thrown while calculating HWP angle. Angle calculation failed.")
+                logger.error(
+                    f"Exception '{e}' thrown while calculating HWP angle. Angle calculation failed.")
                 self._write_solution_h5_logger = 'Angle calculation failed'
                 self._set_empty_axes(aman, suffix)
                 continue
             if len(solved) == 0 or ('fast_time'+suffix not in solved.keys()) or len(solved['fast_time']) == 0:
-                logger.info('No correct rotation data in the specified timestamps.')
+                logger.info(
+                    'No correct rotation data in the specified timestamps.')
                 self._write_solution_h5_logger = 'No HWP data'
                 self._set_empty_axes(aman, suffix)
                 continue
 
             self._write_solution_h5_logger = 'Angle calculation succeeded'
-            getattr(aman, 'stable'+suffix)[:] = self._bool_interpolation(solved['slow_time'+suffix], solved['stable'+suffix], tod.timestamps)
-            getattr(aman, 'locked'+suffix)[:] = self._bool_interpolation(solved['slow_time'+suffix], solved['locked'+suffix], tod.timestamps)
-            getattr(aman, 'hwp_rate'+suffix)[:] = scipy.interpolate.interp1d(solved['slow_time'+suffix], solved['hwp_rate'+suffix], kind='linear', bounds_error=False)(tod.timestamps)
+            getattr(aman, 'stable'+suffix)[:] = self._bool_interpolation(
+                solved['slow_time'+suffix], solved['stable'+suffix], tod.timestamps)
+            getattr(aman, 'locked'+suffix)[:] = self._bool_interpolation(
+                solved['slow_time'+suffix], solved['locked'+suffix], tod.timestamps)
+            getattr(aman, 'hwp_rate'+suffix)[:] = scipy.interpolate.interp1d(
+                solved['slow_time'+suffix], solved['hwp_rate'+suffix], kind='linear', bounds_error=False)(tod.timestamps)
             getattr(aman, 'logger'+suffix)[:] = self._write_solution_h5_logger
 
-            getattr(aman, 'hwp_angle_ver1'+suffix)[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
+            getattr(aman, 'hwp_angle_ver1'+suffix)[:] = np.mod(scipy.interpolate.interp1d(
+                solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
             getattr(aman, 'version'+suffix) = 1
 
             filled_flag = np.zeros_like(solved['fast_time'+suffix], dtype=bool)
             filled_flag[solved['filled_indexes'+suffix]] = 1
-            filled_flag = scipy.interpolate.interp1d(solved['fast_time'+suffix], filled_flag, kind='linear', bounds_error=False)(tod.timestamps)
+            filled_flag = scipy.interpolate.interp1d(
+                solved['fast_time'+suffix], filled_flag, kind='linear', bounds_error=False)(tod.timestamps)
             getattr(aman, 'filled_flag'+suffix) = filled_flag.astype(bool)
 
-            ### version 2
+            # version 2
             # calculate template subtracted angle
             try:
                 self.eval_angle(solved, suffix)
                 aman.save(output, h5_address, overwrite=True)
-                getattr(aman, 'hwp_angle_ver2'+suffix)[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'+suffix], solved['angle'+suffix], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
+                getattr(aman, 'hwp_angle_ver2'+suffix)[:] = np.mod(scipy.interpolate.interp1d(
+                    solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
                 getattr(aman, 'version'+suffix) = 2
                 getattr(aman, 'template'+suffix) = solved['template'+suffix]
             except Exception as e:
-                logger.error(f"Exception '{e}' thrown while the template subtraction.")
+                logger.error(
+                    f"Exception '{e}' thrown while the template subtraction.")
 
-        ### version 3
+        # version 3
         # calculate off-centering corrected angle
         if aman.version_1 == 2 and aman.version_2 == 2:
             try:
                 offcentering = self.eval_offcentering(solved)
                 self.correct_offcentering(solved)
-                getattr(aman, 'hwp_angle_ver3'+suffix)[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'+suffix], solved['angle'+suffix], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
+                getattr(aman, 'hwp_angle_ver3'+suffix)[:] = np.mod(scipy.interpolate.interp1d(
+                    solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
                 getattr(aman, 'version'+suffix) = 3
             except Exception as e:
-                logger.error(f"Exception '{e}' thrown while the off-centering correction.")
+                logger.error(
+                    f"Exception '{e}' thrown while the off-centering correction.")
 
         # make the highers version, best encoder solution as hwp_angle
         # getattr(aman, 'hwp_angle'+suffix)[:] =
@@ -1187,14 +1218,18 @@ class G3tHWP():
 
     def _duplication_check(self):
         """ Check the duplication in hk data and remove it """
-        unique_array, unique_index = np.unique(self._encd_cnt, return_index=True)
+        unique_array, unique_index = np.unique(
+            self._encd_cnt, return_index=True)
         if len(unique_array) != len(self._encd_cnt):
-            logger.warning('Duplication is found in encoder data, performing correction.')
+            logger.warning(
+                'Duplication is found in encoder data, performing correction.')
             self._encd_cnt = unique_array
             self._encd_clk = self._encd_clk[unique_index]
-        unique_array, unique_index = np.unique(self._rising_edge, return_index=True)
+        unique_array, unique_index = np.unique(
+            self._rising_edge, return_index=True)
         if len(unique_array) != len(self._rising_edge):
-            logger.warning('Duplication is found in IRIG data, performing correction.')
+            logger.warning(
+                'Duplication is found in IRIG data, performing correction.')
             self._rising_edge = unique_array
             self._irig_time = self._irig_time[unique_index]
 
@@ -1202,7 +1237,8 @@ class G3tHWP():
         """ IRIG timing quality check """
         idx = np.where(np.diff(self._irig_time) == 1)[0]
         if self._irig_type == 1:
-            idx = np.where(np.isclose(np.diff(self._irig_time), np.full(len(self._irig_time)-1, 0.1)))[0]
+            idx = np.where(np.isclose(np.diff(self._irig_time),
+                           np.full(len(self._irig_time)-1, 0.1)))[0]
         if len(self._irig_time) - 1 == len(idx):
             return
         elif len(self._irig_time) > len(idx) and len(idx) > 0:
@@ -1212,17 +1248,17 @@ class G3tHWP():
             self._irig_time = self._irig_time[idx]
             self._rising_edge = self._rising_edge[idx]
             logger.warning('deleted wrong irig_time, indices: ' +
-                         str(np.where(np.diff(self._irig_time) != 1)[0]))
+                           str(np.where(np.diff(self._irig_time) != 1)[0]))
         else:
             self._irig_time = np.array([])
             self._rising_edge = np.array([])
 
     def _process_counter_index_reset(self):
         """ Treat counter index reset due to agent reboot """
-        idx = np.where(np.diff(self._encd_cnt)<-1e4)[0] + 1
+        idx = np.where(np.diff(self._encd_cnt) < -1e4)[0] + 1
         for i in range(len(idx)):
-            self._encd_cnt[idx[i]:] = self._encd_cnt[idx[i]:] + abs(np.diff(self._encd_cnt)[idx[i]-1]) + 1
-
+            self._encd_cnt[idx[i]:] = self._encd_cnt[idx[i]:] + \
+                abs(np.diff(self._encd_cnt)[idx[i]-1]) + 1
 
     def _fill_dropped_packets(self):
         """ Estimate the number of dropped packets """
@@ -1239,14 +1275,17 @@ class G3tHWP():
             _diff = int(np.diff(self._encd_cnt)[ii])
             # Fill dropped counters with counters one before or one after rotation.
             # This filling method works even when the reference slot counter is dropped.
-            self._filled_indexes += list(range(ii + 1, ii + 1 + self._pkt_size))
+            self._filled_indexes += list(range(ii + 1,
+                                         ii + 1 + self._pkt_size))
             if ii - self._num_edges + self._ref_edges + 1 >= 0:
-                gap_clk = self._encd_clk[ii - self._num_edges + self._ref_edges + 1 : ii+_diff - self._num_edges + self._ref_edges] \
-                     - self._encd_clk[ii-self._num_edges + self._ref_edges] + self._encd_clk[ii]
+                gap_clk = self._encd_clk[ii - self._num_edges + self._ref_edges + 1: ii+_diff - self._num_edges + self._ref_edges] \
+                    - self._encd_clk[ii-self._num_edges +
+                                     self._ref_edges] + self._encd_clk[ii]
             else:
-                gap_clk = self._encd_clk[ii - _diff + self._num_edges: ii -1 + self._num_edges] \
-                    - self._encd_clk[ii - _diff + self._num_edges -1] + self._encd_clk[ii]
-            gap_cnt = np.arange(self._encd_cnt[ii]+1,self._encd_cnt[ii+1])
+                gap_clk = self._encd_clk[ii - _diff + self._num_edges: ii - 1 + self._num_edges] \
+                    - self._encd_clk[ii - _diff +
+                                     self._num_edges - 1] + self._encd_clk[ii]
+            gap_cnt = np.arange(self._encd_cnt[ii]+1, self._encd_cnt[ii+1])
             self._encd_cnt = np.insert(self._encd_cnt, ii+1, gap_cnt)
             self._encd_clk = np.insert(self._encd_clk, ii+1, gap_clk)
         return
