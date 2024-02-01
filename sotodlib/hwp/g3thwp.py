@@ -822,11 +822,8 @@ class G3tHWP():
             * ver3: HWP angle after the template and off-centering subtraction.
             The field 'version' indicates which version this hwp_angle is.
 
-        - hwp_angle_ver2: float
-            This field stores the ver2 angle data when ver3 angle data exist.
-
-        - hwp_angle_ver1: float
-            This field stores the ver1 angle data when ver2 angle data exist.
+        - hwp_angle_verx: float
+            This field stores the verx angle data.
 
         - stable: bool
             if non-zero, indicates the HWP spin state is known.
@@ -841,16 +838,22 @@ class G3tHWP():
             the "approximate" HWP spin rate, with sign, in revs / second.
             Use placeholder value of 0 for cases when not "locked".
 
-        - version: bool
+        - version: int
             This field indicates the version of the HWP angle in hwp_angle.
-
-        - hwp_angle_ver2_flag: bool
-            if True, the template subtraction is completed.
 
         - logger: str
             Log message for angle calculation status
             'No HWP data', 'HWP data too short',
             'Angle calculation failed', 'Angle calculation succeeded'
+
+        - filled_flag: bool
+
+        - pid_direction: int
+
+        - template: float
+
+        - offcenter: float
+
         """
         if self._output is None and output is None:
             logger.warning('Output file not specified')
@@ -943,9 +946,7 @@ class G3tHWP():
 
         # version 3
         # calculate off-centering corrected angle
-        if not (aman.version_1 == 2 and aman.version_2 == 2):
-            logger.warning(
-                'Offcentering calculation is only available when two encoders are operating. Skipped.')
+        if (aman.version_1 == 2 and aman.version_2 == 2):
             try:
                 self.eval_offcentering(solved)
                 self.correct_offcentering(solved)
@@ -955,10 +956,15 @@ class G3tHWP():
             except Exception as e:
                 logger.error(
                     f"Exception '{e}' thrown while the off-centering correction.")
+        else:
+            logger.warning(
+                'Offcentering calculation is only available when two encoders are operating. Skipped.')
 
-        # make the highers version, best encoder solution as hwp_angle
-        # getattr(aman, 'hwp_angle'+suffix)[:] =
-        # getattr(aman, 'primary_encoder')[:] = 1
+        # make the hwp angle solution with highest version as hwp_angle
+        highest_version = np.max([aman.version_1, aman.version_2])
+        primary_encoder = np.argmax([aman.version_1, aman.version_2]) + 1
+        #getattr(aman, 'primary_encoder')[:] = primary_encoder
+        #getattr(aman, 'hwp_angle')[:] = getattr(aman, f'hwp_angle_ver{highest_version}_{primary_encoder}')[:]
         aman.save(output, h5_address, overwrite=True)
 
     def _hwp_angle_calculator(
