@@ -471,7 +471,7 @@ class G3tHWP():
             out['fast_time'+suffix] = fast_time
             out['angle'+suffix] = angle
             out['ref_indexes'+suffix] = self._ref_indexes
-            out['filled_indexes'] = self._filled_indexes
+            out['filled_indexes'+suffix] = self._filled_indexes
 
         return out
 
@@ -553,11 +553,11 @@ class G3tHWP():
         average_slit = np.average(template_slit)
         # subtract template, keep raw timestamp
         subtract = np.cumsum(np.roll(np.tile(template_slit-average_slit, len(
-            self._ref_indexes) + 1), self._ref_indexes[0] + 1)[:len(solved['fast_time'])])
-        solved['fast_time_raw'] = solved['fast_time']
-        solved['fast_time'] = solved['fast_time'] - subtract
-        solved['template'] = template_slit / \
-            np.average(np.diff(solved['fast_time']))
+            self._ref_indexes) + 1), self._ref_indexes[0] + 1)[:len(solved['fast_time'+suffix])])
+        solved['fast_time_raw'+suffix] = solved['fast_time'+suffix]
+        solved['fast_time'+suffix] = solved['fast_time'+suffix] - subtract
+        solved['template'+suffix] = template_slit / \
+            np.average(np.diff(solved['fast_time'+suffix]))
 
     def eval_offcentering(self, solved):
         """
@@ -570,7 +570,7 @@ class G3tHWP():
         -----
         solved: dict
             dict solved from eval_angle
-            {fast_time, angle, fast_time_2, angle_2, ...}
+            {fast_time_1, angle_2, fast_time_2, angle_2, ...}
 
         Returns
         --------
@@ -580,7 +580,7 @@ class G3tHWP():
         Notes
         ------
             * offcenter_idx1: int
-                * index of the solved['fast_time'] for which offcentering is estimated.
+                * index of the solved['fast_time_1'] for which offcentering is estimated.
             * offcenter_idx2: int
                 * index of the solved['fast_time_2'] for which offcentering is estimated.
             * offcentering: float
@@ -591,34 +591,28 @@ class G3tHWP():
 
         """
 
-        # Skip the offcentering evaluation if 'solved' doesn't include second encoder data.
-        if not ('fast_time' and 'fast_time_2') in solved.keys():
-            logger.warning(
-                'Offcentering calculation is only available when two encoders are operating. Skipped.')
-            return
-
         # Calculate offcentering from where the first reference slot was detected by the 2nd encoder.
-        if solved["ref_indexes"][0] > self._num_edges/2-1:
+        if solved["ref_indexes_1"][0] > self._num_edges/2-1:
             offcenter_idx1_start, offcenter_idx2_start = int(
-                solved["ref_indexes"][0]-self._num_edges/2), int(solved["ref_indexes_2"][0])
+                solved["ref_indexes_1"][0]-self._num_edges/2), int(solved["ref_indexes_2"][0])
         else:
             offcenter_idx1_start, offcenter_idx2_start = int(
-                solved["ref_indexes"][1]-self._num_edges/2), int(solved["ref_indexes_2"][0])
+                solved["ref_indexes_1"][1]-self._num_edges/2), int(solved["ref_indexes_2"][0])
         # Calculate offcentering to the end of the shorter encoder data.
-        if len(solved["fast_time"][offcenter_idx1_start:]) > len(solved["fast_time_2"][offcenter_idx2_start:]):
+        if len(solved["fast_time_1"][offcenter_idx1_start:]) > len(solved["fast_time_2"][offcenter_idx2_start:]):
             idx_length = len(solved["fast_time_2"][offcenter_idx2_start:])
         else:
-            idx_length = len(solved["fast_time"][offcenter_idx1_start:])
+            idx_length = len(solved["fast_time_1"][offcenter_idx1_start:])
         offcenter_idx1 = np.arange(
             offcenter_idx1_start, offcenter_idx1_start+idx_length-1)
         offcenter_idx2 = np.arange(
             offcenter_idx2_start, offcenter_idx2_start+idx_length-1)
         # Calculate the offset time of the encoders induced by the offcentering.
-        offset_time = (solved["fast_time"][offcenter_idx1] -
+        offset_time = (solved["fast_time_1"][offcenter_idx1] -
                        solved["fast_time_2"][offcenter_idx2])/2
         # Calculate the offcentering (mm).
-        period = (solved["fast_time"][offcenter_idx1+1] -
-                  solved["fast_time"][offcenter_idx1])*self._num_edges
+        period = (solved["fast_time_1"][offcenter_idx1+1] -
+                  solved["fast_time_1"][offcenter_idx1])*self._num_edges
         offset_angle = offset_time/period*2*np.pi
         offcentering = np.tan(offset_angle)*self._encoder_disk_radius
         solved['offcenter_idx1'] = offcenter_idx1
@@ -636,7 +630,7 @@ class G3tHWP():
         -----
         solved: dict
             dict solved from eval_angle
-            {fast_time, angle, fast_time_2, angle_2, ...}
+            {fast_time_1, angle_1, fast_time_2, angle_2, ...}
         offcentering: dict
             dict solved from eval_offcentering
             {offcenter_idx1, offcenter_idx2, offcentering, offset_time}
@@ -649,11 +643,11 @@ class G3tHWP():
         Notes
         ------
             * offcenter_idx1: int
-                * index of the solved['fast_time'] for which offcentering is estimated.
+                * index of the solved['fast_time_1'] for which offcentering is estimated.
             * offcenter_idx2: int
                 * index of the solved['fast_time_2'] for which offcentering is estimated.
             * offcentering: float
-                * Offcentering (mm) at solved['fast_time(_2)'][offcenter_idx1(2)].
+                * Offcentering (mm) at solved['fast_time_1(2)'][offcenter_idx1(2)].
             * offset_time: float
                 * Offset time of the encoder signals induced by the offcentering.
                 * Offset time is the delayed (advanced) timing of the encoder1 (2) in sec.
@@ -676,13 +670,9 @@ class G3tHWP():
         offcenter_idx2 = solved['offcenter_idx2']
         offset_time = solved['offset_time']
 
-        solved['fast_time_ver2'] = solved['fast_time']
-        solved['fast_time_ver2_2'] = solved['fast_time_2']
-        solved['fast_time'] = solved['fast_time'][offcenter_idx1] - offset_time
+        solved['fast_time_1'] = solved['fast_time_1'][offcenter_idx1] - offset_time
         solved['fast_time_2'] = solved['fast_time_2'][offcenter_idx2] + offset_time
-        solved['angle_old'] = solved['angle']
-        solved['angle'] = solved['angle'][offcenter_idx1]
-        solved['angle_old_2'] = solved['angle_2']
+        solved['angle_1'] = solved['angle_1'][offcenter_idx1]
         solved['angle_2'] = solved['angle_2'][offcenter_idx2]
 
         return
@@ -798,7 +788,7 @@ class G3tHWP():
         aman.wrap_new('hwp_rate'+suffix, shape=('samps', ), dtype=np.float16)
         aman.wrap('template'+suffix, None)
         aman.wrap('version'+suffix, 0)
-        aman.wrap('logger'+suffix, 'Not set')
+        aman.wrap('logger'+suffix, self._write_solution_h5_logger)
         return aman
 
     def _bool_interpolation(self, timestamp1, data, timestamp2):
@@ -953,15 +943,18 @@ class G3tHWP():
 
         # version 3
         # calculate off-centering corrected angle
-        try:
-            self.eval_offcentering(solved)
-            self.correct_offcentering(solved)
-            getattr(aman, 'hwp_angle_ver3'+suffix)[:] = np.mod(scipy.interpolate.interp1d(
-                solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
-            getattr(aman, 'version'+suffix)[:] = 3
-        except Exception as e:
-            logger.error(
-                f"Exception '{e}' thrown while the off-centering correction.")
+        if not (aman.version_1 == 2 and aman.version_2 == 2):
+            logger.warning(
+                'Offcentering calculation is only available when two encoders are operating. Skipped.')
+            try:
+                self.eval_offcentering(solved)
+                self.correct_offcentering(solved)
+                getattr(aman, 'hwp_angle_ver3'+suffix)[:] = np.mod(scipy.interpolate.interp1d(
+                    solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
+                getattr(aman, 'version'+suffix)[:] = 3
+            except Exception as e:
+                logger.error(
+                    f"Exception '{e}' thrown while the off-centering correction.")
 
         # make the highers version, best encoder solution as hwp_angle
         # getattr(aman, 'hwp_angle'+suffix)[:] =
