@@ -176,3 +176,24 @@ def setup_job(
         print(out)
 
     return job, config, otherargs, runargs
+
+
+def reduction_group_size(job, runargs, comm):
+    log = toast.utils.Logger.get()
+    if runargs.group_size is not None:
+        msg = f"Using user-specifed process group size of {runargs.group_size}"
+        log.info_rank(msg, comm=comm)
+        group_size = runargs.group_size
+    else:
+        if job.operators.mlmapmaker.enabled:
+            msg = f"ML mapmaker is enabled, forcing process group size to 1"
+            log.info_rank(msg, comm=comm)
+            group_size = 1
+        else:
+            msg = f"Using default process group size"
+            log.info_rank(msg, comm=comm)
+            if comm is None:
+                group_size = 1
+            else:
+                group_size = comm.size
+    return group_size

@@ -518,10 +518,11 @@ class DetDb(object):
 
 
 def get_example():
-    """
-    Returns an example DetDb, mapped to RAM, for the SO LAT-like
-    array.  The two property tables are called "base" and "geometry".
-    The geometry table is not currently populated.
+    """Returns an example DetDb, mapped to RAM.  The two property tables
+    are called "base" and "geometry".  This example is for
+    demonstrating the code and interface and has no relation to any
+    instrument's actual detector layout!
+
     """
     db = DetDb()
 

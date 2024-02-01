@@ -1,4 +1,6 @@
 import so3g
+from so3g.proj import Ranges
+
 from spt3g import core
 import itertools
 import numpy as np
@@ -91,11 +93,19 @@ class HKBlock:
                 self.data[k] = []
             self.data[k].append(v)
     
-    def finalize(self):
+    def finalize(self,drop_duplicates=False):
         if self.times:
             self.times = np.hstack(self.times)
+            clean_times, idxs = np.unique(self.times, return_index=True)
+            if len(self.times) != len(clean_times):
+                if not drop_duplicates:
+                    raise ValueError(f"HK data from block {self.name} has" 
+                                    " duplicate timestamps")
+                self.times = self.times[idxs]
+            assert (np.all(np.diff(self.times)>0), f"Times from {self.name} are"
+                            " not increasing")
             for k, v in self.data.items():
-                self.data[k] = np.hstack(v)
+                self.data[k] = np.hstack(v)[idxs]
         else:
             self.times = np.array([], dtype=np.float64)
             self.data = {}
@@ -122,7 +132,7 @@ class AncilProcessor:
         populated on bind and should be used to add copies of the anc data to
         the detector frames. 
     """
-    def __init__(self, files, book_id, log=None):
+    def __init__(self, files, book_id, drop_duplicates=False, log=None):
         self.files = files
         self.times = None
         self.blocks = {
@@ -134,6 +144,7 @@ class AncilProcessor:
         self.out_files = []
         self.book_id = book_id
         self.preprocessed = False
+        self.drop_duplicates = drop_duplicates
 
         if log is None:
             self.log = logging.getLogger('bookbinder')
@@ -158,7 +169,7 @@ class AncilProcessor:
                 block.process_frame(fr)
 
         for block in self.blocks.values():
-            block.finalize()
+            block.finalize(drop_duplicates=self.drop_duplicates)
         self.preprocessed = True
 
     
@@ -507,6 +518,7 @@ class SmurfStreamProcessor:
                     f"No samples properly mapped in oframe frame {oframe_idx}!"
                     "Cannot properly interpolate for this frame."
                 )
+                raise ValueError(f"Cannot finish binding {self.obs_id}")
             elif np.any(~filled):
                 self.log.debug(
                     f"{np.sum(~filled)} missing samples in out-frame {oframe_idx}"
@@ -577,6 +589,13 @@ class BookBinder:
         Dict of readout_ids to use for each stream_id. If provided, these
         will be used to set the `names` in the signal frames. If not provided,
         names will be taken from the input frames.
+    ignore_tags : bool, optional
+        if true, will ignore tags if the level 2 observations have unmatched
+        tags
+    ancil_drop_duplicates: bool, optional
+        if true, will drop duplicate timestamp data from ancillary files. added
+        to deal with an occassional hk aggregator error where it is picking up
+        multiple copies of the same data
 
     
     Attributes
@@ -594,7 +613,7 @@ class BookBinder:
     """
     def __init__(self, book, obsdb, filedb, data_root, readout_ids, outdir,
                  max_samps_per_frame=50_000, max_file_size=1e9, 
-                ignore_tags=False):
+                ignore_tags=False, ancil_drop_duplicates=False):
         self.filedb = filedb
         self.book = book
         self.data_root = data_root
@@ -616,7 +635,12 @@ class BookBinder:
         logfile = os.path.join(outdir, 'Z_bookbinder_log.txt')
         self.log = setup_logger(logfile)
 
-        self.ancil = AncilProcessor(self.hkfiles, book.bid, log=self.log)
+        self.ancil = AncilProcessor(
+            self.hkfiles, 
+            book.bid, 
+            log=self.log, 
+            drop_duplicates=ancil_drop_duplicates
+        )
         self.streams = {}
         for obs_id, files in filedb.items():
             stream_id = '_'.join(obs_id.split('_')[1:-1])
@@ -643,14 +667,18 @@ class BookBinder:
 
         t0 = np.max([s.times[0] for s in self.streams.values()])
         t1 = np.min([s.times[-1] for s in self.streams.values()])
-        ts, _ = fill_time_gaps(stream.times)
+        # prioritizes the last stream
+        # implicitly assumes co-sampled (this is where we could throw errors
+        # after looking for co-sampled data)
+        ts, _ = fill_time_gaps(stream.times) 
         m = (t0 <= ts) & (ts <= t1)
         ts = ts[m]
 
         self.ancil.preprocess()
 
-        # Divide up frames
-        frame_splits = find_frame_splits(self.ancil)
+        # Divide up frames, only look within detector data and +/-30 seconds
+        frame_splits = find_frame_splits(self.ancil, ts[0]-30, ts[-1]+30)
+
         if frame_splits is None:
             frame_idxs = np.arange(len(ts)) // self.max_samps_per_frame
         else:
@@ -1001,142 +1029,110 @@ def get_hk_files(hkdir, start, stop, tbuff=10*60):
 
     return files[m].tolist()
 
-def locate_scan_events(az, dy=0.001, min_gap=200, filter_window=100):
+def locate_scan_events(
+        times, az, 
+        vel_thresh=0.01, # mount noise for satps is 0.015 deg/s level
+        min_gap=200, 
+        filter_window=100
+    ):
     """
-    Locate places where a noisy vector t changes sign: +ve, -ve, and 0. To
-    handle noise, "zero" is defined to be a threshold region from -dy to +dy.
-    Thus t is said to have a zero-crossing if it fully crosses the threshold
-    region, with the actual crossing approximated as halfway between entering
-    and exiting the region. Entrances and exits without a crossing are also
-    identified (as "stops" and "starts" respectively).
+    Locate places where the azimuth velocity changes sign, including starts and
+    stops. These locations are where we should start determining the scan 
+    framing.
 
     Parameters
     ----------
-    dy : float, optional
-        Amplitude of threshold region
+    times : ndarray float
+        times 
+    az: ndarray float
+        azimuth positions
+    vel_thresh : float, optional
+        threshold for what is considered stopped
     min_gap : int, optional
         Length of gap (in samples) longer than which events are considered separate
 
     Returns
     -------
     events : list
-        Full list containing all zero-crossings, starts, and stops
-    starts : list
-        List of places where t exits the threshold region (subset of events)
-    stops : list
-        List of places where t enters the threshold region (subset of events)
+        Full list containing all zero-crossings, starts, and stops that should become frame edges
     """
 
+    if len(az) < 1:
+        return []
+
     offset = 0
+    vel = np.diff(az)/np.diff(times)
+
     if filter_window is not None:
-        boxcar = np.ones(filter_window) / filter_window
-        az = convolve(az, boxcar, mode='same')[filter_window:-filter_window]
+        win = np.hanning(filter_window) / np.sum(np.hanning(filter_window))
+        vel = convolve(vel, win, mode='same')[filter_window:-filter_window]
         offset = filter_window
+
+    ## find places with "zero" velocity
+    zero_vel = np.abs(vel) < vel_thresh
+    if np.all(zero_vel):
+        return []
     
-    t = np.diff(az)
-
-    tmin = np.min(t)
-    tmax = np.max(t)
-
-    if len(t) == 0:
-        return [], [], []
-
-    if np.sign(tmax) == np.sign(tmin):
-        return [], [], []
-
-    # If the data does not entirely cross the threshold region,
-    # do not consider it a sign change
-    if tmin > -dy and tmax < dy:
-        return [], [], []
-
-    # Find where the data crosses the lower and upper boundaries of the threshold region
-    c_lower = (np.where(np.sign(t[:-1]+dy) != np.sign(t[1:]+dy))[0] + 1)
-    c_upper = (np.where(np.sign(t[:-1]-dy) != np.sign(t[1:]-dy))[0] + 1)
-
-    # Classify each crossing as entering or exiting the threshold region
-    c_lower_enter = []; c_lower_exit = []
-    c_upper_enter = []; c_upper_exit = []
-
-    # Noise handling:
-    # If there are multiple crossings of the same boundary (upper or lower) in
-    # quick succession (i.e., less than min_gap), it is mostly likely due to
-    # noise. In this case, take the average of each group of crossings.
-    if len(c_lower) > 0:
-        spl = np.array_split(c_lower, np.where(np.ediff1d(c_lower) > min_gap)[0] + 1)
-        c_lower = np.array([int(np.ceil(np.mean(s))) for s in spl])
-        # Determine if this crossing is entering or exiting threshold region
-        for i, s in enumerate(spl):
-            if t[s[0]-1] < t[s[-1]+1]:
-                c_lower_enter.append(c_lower[i])
-            else:
-                c_lower_exit.append(c_lower[i])
-    if len(c_upper) > 0:
-        spu = np.array_split(c_upper, np.where(np.ediff1d(c_upper) > min_gap)[0] + 1)
-        c_upper = np.array([int(np.ceil(np.mean(s))) for s in spu])
-        # Determine if this crossing is entering or exiting threshold region
-        for i, s in enumerate(spu):
-            if t[s[0]-1] < t[s[-1]+1]:
-                c_upper_exit.append(c_upper[i])
-            else:
-                c_upper_enter.append(c_upper[i])
-
-    # If any empty lists are passed to concatenate, this will be cast
-    # into an array of floats instead of ints
-    starts = np.sort(np.concatenate((c_lower_exit, c_upper_exit)))
-    stops = np.sort(np.concatenate((c_lower_enter, c_upper_enter)))
-    events = np.sort(np.concatenate((starts, stops)))
-
-    # cast back to ints just in case
-    starts = starts.astype(int)
-    stops = stops.astype(int)
-    events = events.astype(int)
+    zeros = Ranges.from_mask(zero_vel)
+    zeros.close_gaps(min_gap)
     
-    # Look for zero-crossings
-    zc = []
-    while len(c_lower) > 0 and len(c_upper) > 0:
-        # Crossing from -ve to +ve
-        if c_lower[0] < c_upper[0]:
-            b = c_lower[c_lower < c_upper[0]]
-            zc.append(int( np.ceil(np.mean([b[-1], c_upper[0]])) ))
-            c_lower = c_lower[len(b):]
-        # Crossing from +ve to -ve
-        elif c_upper[0] < c_lower[0]:
-            b = c_upper[c_upper < c_lower[0]]
-            zc.append(int( np.ceil(np.mean([b[-1], c_lower[0]])) ))
-            c_upper = c_upper[len(b):]
+    ## find places where velocity changes sign in case the velocity
+    ## is so fast it never gets close enough to zero
+    x = np.where( np.sign(vel) > 0 )[0]
+    y = np.where( np.diff(x) > 1 )[0]
+    cross = Ranges.zeros_like(zeros)
+    for z in y:
+        cross.add_interval( x[z]+1, x[z]+2)
+    x = np.where( np.sign(vel) < 0 )[0]
+    y = np.where( np.diff(x) > 1 )[0]
+    for z in y:
+        cross.add_interval( x[z]+1, x[z]+2)
+    
+    zeros = zeros + cross
+    events = []
+    
+    for c in zeros.ranges():   
+        # if zero period is longer than min_gap, it's a start or stop add each side to the list
+        if c[1] - c[0] > min_gap:
+            if c[0] != 0:
+                events.append( c[0] )
+            if c[1] != len(vel):
+                events.append( c[1] )
+        # otherwise, it's a zero crossing, add mean
+        else:
+            events.append( int(round( sum(c)/2 )) )
+    
+    return np.array(events, dtype='int')+offset
 
-    # Replace all upper and lower crossings that contain a zero-crossing in
-    # between with the zero-crossing itself, but ONLY if those three events
-    # happen in quick succession (i.e., shorter than min_gap). Otherwise, they
-    # are separate events -- there is likely a stop state in between; in this
-    # case, do NOT perform the replacement.
-    for z in zc:
-        before_z = events[events < z]
-        after_z  = events[events > z]
-        if (after_z[0] - before_z[-1]) < min_gap:
-            events = np.concatenate((before_z[:-1], [z], after_z[1:]))
-
-    # Ignore first / last event if it is too close to the start or end
-    if (len(t) - events[-1] < min_gap) and events[-1] not in zc:
-        events = events[:-1]
-
-    if events[0] < min_gap:
-        events = events[1:]
-
-    return events + offset, starts + offset, stops + offset
-
-def find_frame_splits(ancil):
+def find_frame_splits(ancil, t0=None, t1=None):
     """
     Determines timestamps of frame-splits from ACU data. If it cannot determine
     frame-splits, returns None.
+
+    Arguments
+    ----------
+    ancil: AncillaryProcesser
+    t0: float (optional)
+        start time to analyze ACU behavior 
+    t1: float (optional)
+        stop time to analyze ACU behavior
     """
     block = ancil.blocks['ACU_broadcast']
     if 'Corrected_Azimuth' not in block.data:
         return None 
 
-    az = block.data['Corrected_Azimuth']
-    idxs = locate_scan_events(az, filter_window=100)[0]
-    return block.times[idxs]
+    if t0 is None:
+        t0 = block.data.times[0]
+    if t1 is None:
+        t1 = block.data.times[-1]
+
+    msk = np.all(
+        [block.times >= t0, block.times <= t1],
+        axis=0
+    )
+    az = block.data['Corrected_Azimuth'][msk]
+    idxs = locate_scan_events(block.times[msk], az, filter_window=100)
+    return block.times[msk][idxs]
 
 
 def get_smurf_files(obs, meta_path, all_files=False):

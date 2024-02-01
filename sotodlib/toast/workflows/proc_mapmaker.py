@@ -27,6 +27,7 @@ def setup_mapmaker(operators, templates):
         toast.templates.Offset(
             name="baselines",
             step_time=2.0 * u.second,
+            enabled=False,
         )
     )
     templates.append(
@@ -37,6 +38,7 @@ def setup_mapmaker(operators, templates):
             flag_mask=defaults.shared_mask_invalid,
             increment=np.pi / 180.0,  # One degree, az field is in radians
             bins=None,
+            enabled=False,
         )
     )
     operators.append(toast.ops.BinMap(name="binner", pixel_dist="pix_dist"))
@@ -92,7 +94,15 @@ def mapmaker(job, otherargs, runargs, data):
         # Noise model.  If noise estimation is not enabled, and no existing noise model
         # is found, then create a fake noise model with uniform weighting.
         noise_model = None
-        if job_ops.noise_estim.enabled and job_ops.noise_estim_fit.enabled:
+        if (
+                job_ops.demodulate.enabled
+                and job_ops.demod_noise_estim.enabled
+                and job_ops.demod_noise_estim_fit.enabled
+            ):
+            # We will use the noise estimate made after demodulation
+            log.info_rank("  Using demodulated noise model", comm=data.comm.comm_world)
+            noise_model = job_ops.demod_noise_estim_fit.out_model
+        elif job_ops.noise_estim.enabled and job_ops.noise_estim_fit.enabled:
             # We have a noise estimate
             log.info_rank("  Using estimated noise model", comm=data.comm.comm_world)
             noise_model = job_ops.noise_estim_fit.out_model

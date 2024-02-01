@@ -67,7 +67,7 @@ def setup_simulate_detector_noise(operators):
         None
 
     """
-    operators.append(toast.ops.SimNoise(name="sim_noise"))
+    operators.append(toast.ops.SimNoise(name="sim_noise", enabled=False))
 
 
 @workflow_timer
@@ -160,3 +160,37 @@ def simulate_detector_yield(job, otherargs, runargs, data):
 
     if job_ops.yield_cut.enabled:
         job_ops.yield_cut.apply(data)
+
+
+def setup_simulate_mumux_crosstalk(operators):
+    """Add commandline args and operators for simulating nonlinear muMUX crosstalk.
+
+    Args:
+        operators (list):  The list of operators to extend.
+
+    Returns:
+        None
+
+    """
+    operators.append(so_ops.SimMuMUXCrosstalk(name="sim_mumux_crosstalk", enabled=False))
+
+
+@workflow_timer
+def simulate_mumux_crosstalk(job, otherargs, runargs, data):
+    """Simulate nonlinear muMUX crosstalk.
+
+    Args:
+        job (namespace):  The configured operators and templates for this job.
+        otherargs (namespace):  Other commandline arguments.
+        runargs (namespace):  Job related runtime parameters.
+        data (Data):  The data container.
+
+    Returns:
+        None
+
+    """
+    # Configured operators for this job
+    job_ops = job.operators
+
+    if job_ops.sim_mumux_crosstalk.enabled:
+        job_ops.sim_mumux_crosstalk.apply(data)

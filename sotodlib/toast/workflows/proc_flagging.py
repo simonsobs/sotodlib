@@ -72,6 +72,7 @@ def setup_flag_noise_outliers(operators):
         toast.ops.FitNoiseModel(
             name="noise_cut_fit",
             out_model="noise_cut_fit",
+            enabled=True,
         )
     )
     operators.append(
@@ -79,6 +80,7 @@ def setup_flag_noise_outliers(operators):
             name="noise_cut_flag",
             sigma_NET=5.0,
             sigma_fknee=5.0,
+            enabled=True,
         )
     )
 
@@ -152,3 +154,52 @@ def flag_noise_outliers(job, otherargs, runargs, data):
             job_ops.noise_cut_fit.out_model,
         ]
     ).apply(data)
+
+
+def setup_processing_mask(operators):
+    """Add commandline args and operators for processing mask flagging.
+
+    Args:
+        operators (list):  The list of operators to extend.
+
+    Returns:
+        None
+
+    """
+    operators.append(
+        toast.ops.PixelsHealpix(
+            name="processing_mask_pixels", pixels="pixels_processing_mask", enabled=False
+        )
+    )
+    operators.append(toast.ops.ScanHealpixMask(name="processing_mask", enabled=False))
+
+
+@workflow_timer
+def processing_mask(job, otherargs, runargs, data):
+    """Raise data processing flags based on a mask.
+
+    Args:
+        job (namespace):  The configured operators and templates for this job.
+        otherargs (namespace):  Other commandline arguments.
+        runargs (namespace):  Job related runtime parameters.
+        data (Data):  The data container.
+
+    Returns:
+        None
+
+    """
+    # Configured operators for this job
+    job_ops = job.operators
+
+    if job_ops.processing_mask.enabled:
+        if job_ops.processing_mask_pixels.enabled:
+            # We are using a custom pointing matrix
+            job_ops.processing_mask_pixels.detector_pointing = job_ops.det_pointing_radec
+            job_ops.processing_mask.pixel_dist = "processing_mask_pixel_dist"
+            job_ops.processing_mask.pixel_pointing = job_ops.processing_mask_pixels
+        else:
+            # We are using the same pointing matrix as the mapmaking
+            job_ops.processing_mask.pixel_dist = job_ops.binner.pixel_dist
+            job_ops.processing_mask.pixel_pointing = job.pixels_solve
+        job_ops.processing_mask.save_pointing = otherargs.full_pointing
+        job_ops.processing_mask.apply(data)

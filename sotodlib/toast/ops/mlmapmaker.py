@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2021 Simons Observatory.
+# Copyright (c) 2020-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Operator for interfacing with the Maximum Likelihood Mapmaker.
 
@@ -7,11 +7,8 @@
 import os
 
 import numpy as np
-
 import traitlets
-
 from astropy import units as u
-
 from pixell import enmap, tilemap, fft
 
 import toast
@@ -79,7 +76,7 @@ class MLMapmaker(Operator):
 
     nmat_type = Unicode(
         "NmatDetvecs",
-        help="Noise matrix type is either `NmatDetvecs` or `NmatUncorr`",
+        help="Noise matrix type is either `NmatDetvecs`, `NmatUncorr` or `Nmat`",
     )
 
     nmat_mode = Unicode(
@@ -412,7 +409,19 @@ class MLMapmaker(Operator):
                 )
             if self.nmat_mode == "load" or (self.nmat_mode == "cache" and there):
                 log.info_rank(f"Loading noise model from '{nmat_file}'", comm=gcomm)
-                nmat = mm.read_nmat(nmat_file)
+                try:
+                    nmat = mm.read_nmat(nmat_file)
+                except Exception as e:
+                    if self.nmat_mode == "cache":
+                        log.info_rank(
+                            f"Failed to load noise model from '{nmat_file}'"
+                            f" : '{e}'. Will cache a new one",
+                            comm=gcomm,
+                        )
+                        nmat = None
+                    else:
+                        msg = f"Failed to load noise model from '{nmat_file}' : {e}"
+                        raise RuntimeError(msg)
             else:
                 nmat = None
 

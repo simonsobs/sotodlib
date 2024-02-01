@@ -7,7 +7,7 @@ import datetime as dt
 import os
 import os.path as op
 import shutil
-
+import time
 
 from sotodlib.io.imprinter import ( 
     Books,
@@ -77,10 +77,12 @@ def set_book_rebind(imprint, book):
         binder = None
     if binder is not None:
         book_dir = op.abspath(binder.outdir)
+        del binder
+        time.sleep(1)
         if op.exists(book_dir):
             print(f"Removing all files from {book_dir}")
             shutil.rmtree(book_dir)
-    book.status = 0
+    book.status = UNBOUND
     imprint.get_session().commit()
 
     
