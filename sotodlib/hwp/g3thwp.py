@@ -254,6 +254,16 @@ class G3tHWP():
             fields += [self._field_instance_sub + '_full.' + f if 'counter' in f
                        else self._field_instance_sub + '.' + f for f in self._field_list]
             alias += [a + '_2' for a in self._field_list]
+
+        # metadata key
+        meta_keys = {
+            'pid_direction': 'hwp-pid.feeds.hwppid.direction',
+        }
+        platform = self._field_instance.split('.')[0]
+        for k, f in meta_keys.items():
+            alias.append(k)
+            fields.append(platform + '.' + f)
+
         return fields, alias
 
     def _data_formatting(self, data, suffix=''):
@@ -404,7 +414,7 @@ class G3tHWP():
         Returns
         --------
         dict
-            {fast_time, angle, slow_time, stable, locked, hwp_rate}
+            {fast_time, angle, slow_time, stable, locked, hwp_rate, template, filled_indexes}
 
 
         Notes
@@ -421,9 +431,11 @@ class G3tHWP():
             * locked: bool
                 * if non-zero, indicates the HWP is spinning and the position solution is working.
                 * In this case one should find the hwp_angle populated in the fast data block.
-            * hwp_rate: float:
+            * hwp_rate: float
                 * the "approximate" HWP spin rate, with sign, in revs / second.
                 * Use placeholder value of 0 for cases when not "stable".
+            * filled_indexes: boolean array
+                * indexes where we filled due to packet drop etc.
         """
 
         if not any(data):
@@ -457,6 +469,7 @@ class G3tHWP():
             out['fast_time'+suffix] = fast_time
             out['angle'+suffix] = angle
             out['ref_indexes'+suffix] = self._ref_indexes
+            out['filled_indexes'] = self._filled_indexes
 
         return out
 
@@ -479,10 +492,15 @@ class G3tHWP():
         Returns
         --------
         output: dict
-            {fast_time, fast_time_raw, angle, slow_time, stable, locked, hwp_rate, fast_time_moving_ave, angle_moving_ave}
+            {fast_time, fast_time_raw, angle, slow_time, stable, locked, hwp_rate, template, fast_time_moving_ave, angle_moving_ave}
+
 
         Notes
         ------
+            * template: float array (ratio)
+                * Averaged non-uniformity of the hwp angle
+                * normalized by the step of the angle encoder
+
         non-uniformity of hwp angle comes from following reasons,
             - non-uniformity of encoder slits
             - sag of rotor
@@ -531,10 +549,11 @@ class G3tHWP():
         template_slit = np.average(template_slit, axis=0)
         average_slit = np.average(template_slit)
         # subtract template, keep raw timestamp
-        subtract = np.cumsum(np.roll(np.tile(template_slit-average_slit,
-            len(solved['ref_indexes'+suffix]) + 1), solved['ref_indexes'+suffix][0] + 1)[:len(solved['fast_time'+suffix])])
-        solved['fast_time_raw'+suffix] = solved['fast_time'+suffix]
-        solved['fast_time'+suffix] = solved['fast_time'+suffix] - subtract
+        subtract = np.cumsum(np.roll(np.tile(template_slit-average_slit, len(
+            self._ref_indexes) + 1), self._ref_indexes[0] + 1)[:len(solved['fast_time'])])
+        solved['fast_time_raw'] = solved['fast_time']
+        solved['fast_time'] = solved['fast_time'] - subtract
+        solved['template'] = template_slit/np.average(np.diff(solved['fast_time']))
 
     def eval_offcentering(self, solved):
         """
@@ -564,7 +583,7 @@ class G3tHWP():
                 * Offcentering (mm) at solved['fast_time(_2)'][offcenter_idx1(2)].
             * offset_time: float
                 * Offset time of the encoder signals induced by the offcentering.
-                * Offset time is the delayed (advanced) timing of the encoder1 (2) in sec.           
+                * Offset time is the delayed (advanced) timing of the encoder1 (2) in sec.
 
         """
 
@@ -573,7 +592,7 @@ class G3tHWP():
             logger.warning('Offcentering calculation is only available when two encoders are operating. Skipped.')
             return
 
-        # Calculate offcentering from where the first reference slot was detected by the 2nd encoder. 
+        # Calculate offcentering from where the first reference slot was detected by the 2nd encoder.
         if solved["ref_indexes"][0] > self._num_edges/2-1:
             offcenter_idx1_start, offcenter_idx2_start = int(solved["ref_indexes"][0]-self._num_edges/2), int(solved["ref_indexes_2"][0])
         else:
@@ -626,7 +645,7 @@ class G3tHWP():
                 * Offcentering (mm) at solved['fast_time(_2)'][offcenter_idx1(2)].
             * offset_time: float
                 * Offset time of the encoder signals induced by the offcentering.
-                * Offset time is the delayed (advanced) timing of the encoder1 (2) in sec.           
+                * Offset time is the delayed (advanced) timing of the encoder1 (2) in sec.
 
         * We should allow to correct the offcentering by external input, since offcentering measurement is not always available.
         """
@@ -685,14 +704,14 @@ class G3tHWP():
         - slow_time: timestamp
             time list of slow block
         - stable: bool
-            if non-zero, indicates the HWP spin state is known. 
-            i.e. it is either spinning at a measurable rate, or stationary. 
-            When this flag is non-zero, the hwp_rate field can be taken at face value. 
+            if non-zero, indicates the HWP spin state is known.
+            i.e. it is either spinning at a measurable rate, or stationary.
+            When this flag is non-zero, the hwp_rate field can be taken at face value.
         - locked: bool
-            if non-zero, indicates the HWP is spinning and the position solution is working. 
-            In this case one should find the hwp_angle populated in the fast data block. 
+            if non-zero, indicates the HWP is spinning and the position solution is working.
+            In this case one should find the hwp_angle populated in the fast data block.
         - hwp_rate: float
-            the "approximate" HWP spin rate, with sign, in revs / second. 
+            the "approximate" HWP spin rate, with sign, in revs / second.
             Use placeholder value of 0 for cases when not "locked".
         """
         if self._output is None and output is None:
@@ -762,6 +781,7 @@ class G3tHWP():
         aman.wrap_new('stable'+suffix, shape=('samps', ), dtype=bool)
         aman.wrap_new('locked'+suffix, shape=('samps', ), dtype=bool)
         aman.wrap_new('hwp_rate'+suffix, shape=('samps', ), dtype=np.float16)
+        aman.wrap('template'+suffix, None)
         aman.wrap('version'+suffix, 0)
         aman.wrap('logger'+suffix, 'No log')
         return aman
@@ -785,8 +805,6 @@ class G3tHWP():
         Notes
         -----
         Output file format
-
-        The suffix '_2' stands for the 2nd encoder.
 
         - timestamp:
             SMuRF synched timestamp
@@ -842,6 +860,10 @@ class G3tHWP():
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         aman.timestamps[:] = tod.timestamps
 
+        aman.wrap('pid_direction', None)
+        if 'pid_direction' in data.keys():
+            aman.pid_direction = np.nanmedian(data['pid_direction'][1])
+
         start = int(tod.timestamps[0])-self._margin
         end = int(tod.timestamps[-1])+self._margin
 
@@ -851,7 +873,6 @@ class G3tHWP():
             logger.error(f"Exception '{e}' thrown while loading HWP data. The specified encoder field is missing.")
             self._write_solution_h5_logger = 'HWP data too short'
             self._write_empty_solution_h5(tod, output, h5_address)
-
 
         for suffix in ['', '_2']:
             logger.info('Start analyzing encoder'+suffix)
@@ -886,6 +907,11 @@ class G3tHWP():
             getattr(aman, 'hwp_angle_ver1'+suffix)[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps),2*np.pi)
             getattr(aman, 'version'+suffix) = 1
 
+            filled_flag = np.zeros_like(solved['fast_time'+suffix], dtype=bool)
+            filled_flag[solved['filled_indexes'+suffix]] = 1
+            filled_flag = scipy.interpolate.interp1d(solved['fast_time'+suffix], filled_flag, kind='linear', bounds_error=False)(tod.timestamps)
+            getattr(aman, 'filled_flag'+suffix) = filled_flag.astype(bool)
+
             ### version 2
             # calculate template subtracted angle
             try:
@@ -893,6 +919,7 @@ class G3tHWP():
                 aman.save(output, h5_address, overwrite=True)
                 getattr(aman, 'hwp_angle_ver2'+suffix)[:] = np.mod(scipy.interpolate.interp1d(solved['fast_time'+suffix], solved['angle'+suffix], kind='linear',bounds_error=False)(tod.timestamps),2*np.pi)
                 getattr(aman, 'version'+suffix) = 2
+                getattr(aman, 'template'+suffix) = solved['template'+suffix]
             except Exception as e:
                 logger.error(f"Exception '{e}' thrown while the template subtraction.")
 
@@ -939,6 +966,10 @@ class G3tHWP():
         # return arrays
         self._time = []
         self._angle = []
+
+        # metadata of packet drop
+        self._num_dropped_pkts = 0
+        self._filled_indexes = []
 
         # check duplication in data
         self._duplication_check()
@@ -1208,6 +1239,7 @@ class G3tHWP():
             _diff = int(np.diff(self._encd_cnt)[ii])
             # Fill dropped counters with counters one before or one after rotation.
             # This filling method works even when the reference slot counter is dropped.
+            self._filled_indexes += list(range(ii + 1, ii + 1 + self._pkt_size))
             if ii - self._num_edges + self._ref_edges + 1 >= 0:
                 gap_clk = self._encd_clk[ii - self._num_edges + self._ref_edges + 1 : ii+_diff - self._num_edges + self._ref_edges] \
                      - self._encd_clk[ii-self._num_edges + self._ref_edges] + self._encd_clk[ii]
