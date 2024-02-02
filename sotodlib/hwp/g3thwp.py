@@ -91,11 +91,15 @@ class G3tHWP():
         self._encoder_disk_radius = self.configs.get(
             'encoder_disk_radius', 346.25)
 
-        # force to quad value
-        # 0: use readout quad value (default)
+        # Method to determine the rotation direction
+        self._method_direction = self.configs.get('method_direction', 'quad')
+        assert self._method_direction in ['quad', 'pid', 'scan', 'template']
+
+        # Forced direction value
+        # 0: use direction value using specified method (default)
         # 1: positive rotation direction, -1: negative rotation direction
-        self._force_quad = int(self.configs.get('force_quad', 0))
-        assert self._force_quad in [0, 1, -1], "force_quad must be 0, 1 or -1"
+        self._force_direction = int(self.configs.get('force_direction', 0))
+        assert self._force_direction in [0, 1, -1], "force_direction must be 0, 1 or -1"
 
         # Output path + filename
         self._output = self.configs.get('output', None)
@@ -308,7 +312,7 @@ class G3tHWP():
                 'No encoder data is available for encoder'+suffix)
             return out
 
-        out['quad'] = self._quad_form(data['quad'+suffix][1])
+        out['quad'] = data['quad'+suffix][1]
         out['quad_time'] = data['quad'+suffix][0]
 
         return out
@@ -392,7 +396,7 @@ class G3tHWP():
 
         return {'locked'+suffix: locked, 'stable'+suffix: stable, 'hwp_rate'+suffix: hwp_rate, 'slow_time'+suffix: slow_time}
 
-    def analyze(self, data, ratio=None, force_quad=None, mod2pi=True, fast=True, suffix='_1'):
+    def analyze(self, data, ratio=None, mod2pi=True, fast=True, suffix='_1'):
         """
         Analyze HWP angle solution
         to be checked by hardware that 0 is CW and 1 is CCW from (sky side) consistently for all SAT
@@ -404,9 +408,6 @@ class G3tHWP():
             ratio : float, optional
                 parameter for referelce slit
                 threshold = 2 slit distances +/- ratio
-            force_quad : 0, 1 or -1, optional
-                0: use readout quad value
-                1: positive rotation direction, -1: negative rotation direction
             mod2pi : bool, optional
                 If True, return hwp angle % 2pi
             fast : bool, optional
@@ -444,11 +445,6 @@ class G3tHWP():
 
         d = self._data_formatting(data, suffix)
 
-        if force_quad is not None:
-            assert force_quad in [0, 1, -1], "force_quad must be 0, 1 or -1"
-            logger.info(f"Overwriting force_quad by {force_quad}.")
-            self._force_quad = force_quad
-
         # hwp angle calc.
         if ratio is not None:
             logger.info(f"Overwriting reference slit threshold by {ratio}.")
@@ -470,6 +466,7 @@ class G3tHWP():
                 fast_time, d['irig_time'], suffix))
             out['fast_time'+suffix] = fast_time
             out['angle'+suffix] = angle
+            out['quad'+suffix] = self._quad_corrected
             out['ref_indexes'+suffix] = self._ref_indexes
             out['filled_indexes'+suffix] = self._filled_indexes
 
@@ -646,11 +643,6 @@ class G3tHWP():
             logger.warning(
                 'Offcentering info does not exist. Offcentering correction is skipped.')
             return
-        # Skip the calculation when the correction is already done.
-        elif 'fast_time_ver2' in solved.keys():
-            logger.info(
-                'The offcentring correction is already completed. Skipped.')
-            return
 
         offcenter_idx1 = solved['offcenter_idx1']
         offcenter_idx2 = solved['offcenter_idx2']
@@ -763,20 +755,28 @@ class G3tHWP():
             start_time += frame_length
         return
 
-    def _set_empty_axes(self, aman, suffix):
-        aman.wrap_new('hwp_angle_ver1'+suffix,
-                      shape=('samps', ), dtype=np.float64)
-        aman.wrap_new('hwp_angle_ver2'+suffix,
-                      shape=('samps', ), dtype=np.float64)
-        aman.wrap_new('hwp_angle_ver3'+suffix,
-                      shape=('samps', ), dtype=np.float64)
-        aman.wrap_new('stable'+suffix, shape=('samps', ), dtype=bool)
-        aman.wrap_new('locked'+suffix, shape=('samps', ), dtype=bool)
-        aman.wrap_new('hwp_rate'+suffix, shape=('samps', ), dtype=np.float16)
-        aman.wrap_new('template'+suffix, shape=(self._num_edges, ), dtype=np.float64)
-        aman.wrap_new('filled_flag'+suffix, shape=('samps', ), dtype=bool)
-        aman.wrap('version'+suffix, 1)
-        aman.wrap('logger'+suffix, self._write_solution_h5_logger)
+    def _set_empty_axes(self, aman, suffix=None):
+        if suffix is None:
+            aman.wrap_new('hwp_angle', shape=('samps', ), dtype=np.float64)
+            aman.wrap('primary_encoder', 0)
+            aman.wrap('pid_direction', 0)
+            aman.wrap_new('offcenter', shape=(2,), dtype=np.float64)
+        else:
+            aman.wrap_new('hwp_angle_ver1'+suffix,
+                          shape=('samps', ), dtype=np.float64)
+            aman.wrap_new('hwp_angle_ver2'+suffix,
+                          shape=('samps', ), dtype=np.float64)
+            aman.wrap_new('hwp_angle_ver3'+suffix,
+                          shape=('samps', ), dtype=np.float64)
+            aman.wrap_new('quad'+suffix, shape=('samps', ), dtype=int)
+            aman.wrap('quad_direction'+suffix, 0)
+            aman.wrap_new('stable'+suffix, shape=('samps', ), dtype=bool)
+            aman.wrap_new('locked'+suffix, shape=('samps', ), dtype=bool)
+            aman.wrap_new('hwp_rate'+suffix, shape=('samps', ), dtype=np.float16)
+            aman.wrap_new('template'+suffix, shape=(self._num_edges, ), dtype=np.float64)
+            aman.wrap_new('filled_flag'+suffix, shape=('samps', ), dtype=bool)
+            aman.wrap('version'+suffix, 1)
+            aman.wrap('logger'+suffix, self._write_solution_h5_logger)
         return aman
 
     def _bool_interpolation(self, timestamp1, data, timestamp2):
@@ -800,47 +800,63 @@ class G3tHWP():
         -----
         Output file format
 
-        - timestamp:
-            SMuRF synched timestamp
+        - Primary output
 
-        - hwp_angle: float
-            The latest version of the SMuRF synched HWP angle in radian.
-            * ver1: HWP angle calculated from the raw encoder signal.
-            * ver2: HWP angle after the template subtraction.
-            * ver3: HWP angle after the template and off-centering subtraction.
-            The field 'version' indicates which version this hwp_angle is.
+            - timestamp:
+                SMuRF synched timestamp
 
-        - hwp_angle_verx: float
-            This field stores the verx angle data.
+            - hwp_angle: float
+                The latest version of the SMuRF synched HWP angle in radian.
+                * ver1: HWP angle calculated from the raw encoder signal.
+                * ver2: HWP angle after the template subtraction.
+                * ver3: HWP angle after the template and off-centering subtraction.
+                The field 'version' indicates which version this hwp_angle is.
 
-        - stable: bool
-            if non-zero, indicates the HWP spin state is known.
-            i.e. it is either spinning at a measurable rate, or stationary.
-            When this flag is non-zero, the hwp_rate field can be taken at face value.
+        - Supplementary output
+            * suffix _1/2 indicates the encoder_1 or encoder_2
 
-        - locked: bool
-            if non-zero, indicates the HWP is spinning and the position solution is working.
-            In this case one should find the hwp_angle populated in the fast data block.
+            - primaty encoder: int
+                This field indicates which encoder is used for hwp_angle, 1 or 2
 
-        - hwp_rate: float
-            the "approximate" HWP spin rate, with sign, in revs / second.
-            Use placeholder value of 0 for cases when not "locked".
+            - hwp_angle_ver1/2/3_1/2: float
+                This field stores the ver1/2/3 angle data.
 
-        - version: int
-            This field indicates the version of the HWP angle in hwp_angle.
+            - stable_1/2: bool
+                if non-zero, indicates the HWP spin state is known.
+                i.e. it is either spinning at a measurable rate, or stationary.
+                When this flag is non-zero, the hwp_rate field can be taken at face value.
 
-        - logger: str
-            Log message for angle calculation status
-            'No HWP data', 'HWP data too short',
-            'Angle calculation failed', 'Angle calculation succeeded'
+            - locked_1/2: bool
+                if non-zero, indicates the HWP is spinning and the position solution is working.
+                In this case one should find the hwp_angle populated in the fast data block.
 
-        - filled_flag: bool
+            - hwp_rate_1/2: float
+                the "approximate" HWP spin rate, with sign, in revs / second.
+                Use placeholder value of 0 for cases when not "locked".
 
-        - pid_direction: int
+            - version_1/2: int
+                This field indicates the version of the HWP angle in hwp_angle.
 
-        - template: float
+            - logger_1/2: str
+                Log message for angle calculation status
+                'No HWP data', 'HWP data too short',
+                'Angle calculation failed', 'Angle calculation succeeded'
 
-        - offcenter: float
+            - filled_flag_1/2: bool
+
+            - quad_1/2: int
+                0 or 1 or -1. 0 means no data
+
+            - quad_direction_1/2: int
+                0 or 1 or -1. 0 means no data
+
+            - pid_direction: int
+                0 or 1 or -1. 0 means no data
+
+            - template_1/2: float
+
+            - offcenter: float (mm)
+                - [average offcenter, std of offcenter]
 
         """
         if self._output is None and output is None:
@@ -862,10 +878,8 @@ class G3tHWP():
 
         try:
             data = self.load_data(start, end)
-
-            aman.wrap('pid_direction', np.nan)
             if 'pid_direction' in data.keys():
-                aman.pid_direction = np.nanmedian(data['pid_direction'][1])
+                aman.pid_direction = np.nanmedian(data['pid_direction'][1])*2 - 1
 
         except Exception as e:
             logger.error(
@@ -874,6 +888,7 @@ class G3tHWP():
             self._write_empty_solution_h5(tod, output, h5_address)
 
         solved = {}
+        self._set_empty_axes(aman)
         for suffix in self._suffixes:
             logger.info('Start analyzing encoder'+suffix)
             self._set_empty_axes(aman, suffix)
@@ -899,6 +914,7 @@ class G3tHWP():
                 continue
 
             self._write_solution_h5_logger = 'Angle calculation succeeded'
+            aman['version'+suffix] = 1
             aman['stable'+suffix] = self._bool_interpolation(
                 solved['slow_time'+suffix], solved['stable'+suffix], tod.timestamps)
             aman['locked'+suffix] = self._bool_interpolation(
@@ -907,15 +923,32 @@ class G3tHWP():
                 solved['slow_time'+suffix], solved['hwp_rate'+suffix], kind='linear', bounds_error=False)(tod.timestamps)
             aman['logger'+suffix] = self._write_solution_h5_logger
 
-            aman['hwp_angle_ver1'+suffix] = np.mod(scipy.interpolate.interp1d(
-                solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
-            aman['version'+suffix] = 1
+            quad = self._bool_interpolation(
+                solved['fast_time'+suffix], solved['quad'+suffix], tod.timestamps)
+            aman['quad'+suffix] = np.array([1 if q else -1 for q in quad])
+            aman['quad_direction'+suffix] = np.nanmedian(aman['quad'+suffix])
 
             filled_flag = np.zeros_like(solved['fast_time'+suffix], dtype=bool)
             filled_flag[solved['filled_indexes'+suffix]] = 1
             filled_flag = scipy.interpolate.interp1d(
                 solved['fast_time'+suffix], filled_flag, kind='linear', bounds_error=False)(tod.timestamps)
             aman['filled_flag'+suffix] = filled_flag.astype(bool)
+
+            if self._force_direction != 0:
+                logger.info(f'Correct rotation direction by force method')
+                solved['angle'+suffix] *= self._force_direction
+            else:
+                logger.info(f'Correct rotation direction by {self._method_direction} method')
+                try:
+                    method = self._method_direction + '_direction'
+                    if self._method_direction == 'quad':
+                        method += suffix
+                    solved['angle'+suffix] *= aman[method]
+                except Exception as e:
+                    logger.error(f"Exception '{e}' thrown while correcting HWP angle. Skip.")
+
+            aman['hwp_angle_ver1'+suffix] = np.mod(scipy.interpolate.interp1d(
+                solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
 
             # version 2
             # calculate template subtracted angle
@@ -936,9 +969,11 @@ class G3tHWP():
             try:
                 self.eval_offcentering(solved)
                 self.correct_offcentering(solved)
-                aman['hwp_angle_ver3'+suffix] = np.mod(scipy.interpolate.interp1d(
-                    solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
-                aman['version'+suffix] = 3
+                for suffix in self._suffixes:
+                    aman['hwp_angle_ver3'+suffix] = np.mod(scipy.interpolate.interp1d(
+                        solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
+                    aman['version'+suffix] = 3
+                aman['offcenter'] = np.array([np.average(solved['offcentering']), np.std(solved['offcentering'])])
             except Exception as e:
                 logger.error(
                     f"Exception '{e}' thrown while the off-centering correction.")
@@ -949,8 +984,9 @@ class G3tHWP():
         # make the hwp angle solution with highest version as hwp_angle
         highest_version = np.max([aman.version_1, aman.version_2])
         primary_encoder = np.argmax([aman.version_1, aman.version_2]) + 1
-        aman.wrap_new('hwp_angle', ('samps', ))[:] = aman[f'hwp_angle_ver{highest_version}_{primary_encoder}']
-        aman.wrap('primary_encoder', primary_encoder)
+        aman.hwp_angle = aman[f'hwp_angle_ver{highest_version}_{primary_encoder}']
+        aman.primary_encoder, primary_encoder
+
         aman.save(output, h5_address, overwrite=True)
 
     def _hwp_angle_calculator(
@@ -1028,6 +1064,13 @@ class G3tHWP():
             self._irig_time,
             kind='linear',
             fill_value='extrapolate')(self._encd_clk)
+
+        self._quad_corrected = self._quad_form(
+            scipy.interpolate.interp1d(
+                self._quad_time,
+                self._quad_form(self._quad),
+                kind='linear',
+                fill_value='extrapolate')(self._time))
 
         # calculate hwp angle with IRIG timing
         self._calc_angle_linear(mod2pi)
@@ -1172,15 +1215,6 @@ class G3tHWP():
 
     def _calc_angle_linear(self, mod2pi=True):
 
-        quad = self._quad_form(
-            scipy.interpolate.interp1d(
-                self._quad_time,
-                self._quad,
-                kind='linear',
-                fill_value='extrapolate')(
-                self._time))
-        direction = list(map(lambda x: 1 if x == 0 else -1, quad))
-
         self._encd_cnt_split = np.split(self._encd_cnt, self._ref_indexes)
         angle_first_revolution = (self._encd_cnt_split[0] - self._ref_cnt[0]) * \
             (2 * np.pi / self._num_edges) % (2 * np.pi)
@@ -1194,7 +1228,7 @@ class G3tHWP():
                                       for i in range(1, len(self._encd_cnt_split) - 1)])
         self._angle = np.concatenate(
             [angle_first_revolution, self._angle.flatten(), angle_last_revolution])
-        self._angle = direction * self._angle
+
         if mod2pi:
             self._angle = self._angle % (2 * np.pi)
         return
@@ -1291,8 +1325,6 @@ class G3tHWP():
         return
 
     def _quad_form(self, quad):
-        if self._force_quad != 0:
-            return np.full_like(quad, (self._force_quad+1)/2)
         # bit process
         quad[(quad >= 0.5)] = 1
         quad[(quad < 0.5)] = 0
@@ -1310,7 +1342,7 @@ class G3tHWP():
                     quad_split) > 0.5).flatten()
             if len(outlier) > 5:
                 logger.warning(
-                    "flipping quad is corrected by mean value, please consider to use force_quad")
+                    "flipping quad is corrected by mean value")
             for i in outlier:
                 if i == 0:
                     ii, iii = i + 1, i + 2
