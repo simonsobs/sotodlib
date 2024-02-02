@@ -493,7 +493,7 @@ class G3tHWP():
         Returns
         --------
         output: dict
-            {fast_time, fast_time_raw, angle, slow_time, stable, locked, hwp_rate, template, fast_time_moving_ave, angle_moving_ave}
+            {fast_time, fast_time_raw, angle, slow_time, stable, locked, hwp_rate, template}
 
 
         Notes
@@ -512,28 +512,12 @@ class G3tHWP():
         Need to evaluate and subtract it before interpolating hwp angle into Smurf timestamps.
         The non-uniformity of encoder slots creates additional hwp angle jitter.
         The maximum possible additional jitter is comparable to the requirement of angle jitter.
-
-        The simple method to subrtact the non-uniformity
-        is to take the moving average of hwp angle per one revolution.
-        The advantages of moving averaging method is is it's simplicity and robustness.
-        The disadvantage is that this method is assuming no real angle fluctuation within one revolution.
-
-        The more carful and accurate method is to make an template of encoder slits,
-        and subtract it from the timestamp.
+        We make an template of encoder slits and subtract it from the timestamp.
         """
         if 'fast_time_raw'+suffix in solved.keys():
             logger.info(
                 'Non-uniformity is already subtracted. Calculation is skipped.')
             return
-
-        def moving_average(array, n):
-            return np.convolve(array, np.ones(n), 'valid')/n
-
-        logger.info('Remove non-uniformity from hwp angle and overwrite')
-        solved['fast_time_moving_ave'+suffix] = moving_average(
-            solved['fast_time'+suffix], self._num_edges)
-        solved['angle_moving_ave'+suffix] = moving_average(
-            solved['angle'+suffix], self._num_edges)
 
         def detrend(array, deg=poly_order):
             x = np.linspace(-1, 1, len(array))
@@ -541,6 +525,7 @@ class G3tHWP():
             pv = np.polyval(p, x)
             return array - pv
 
+        logger.info('Remove non-uniformity from hwp angle and overwrite')
         # template subtraction
         ft = solved['fast_time'+suffix][solved['ref_indexes'+suffix]
                                         [0]:solved['ref_indexes'+suffix][-2]+1]
