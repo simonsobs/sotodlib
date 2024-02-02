@@ -4,12 +4,14 @@
 import os
 import numpy as np
 import scipy.interpolate
+import h5py
 import so3g
 from spt3g import core
 import logging
 import yaml
 import datetime
 import sotodlib
+import traceback
 
 
 logger = logging.getLogger(__name__)
@@ -780,13 +782,31 @@ class G3tHWP():
             aman.wrap('logger'+suffix, self._write_solution_h5_logger)
         return aman
 
+    def _set_raw_axes(self, aman, data):
+        """ Set raw encoder data in aman """
+        for k, v in data.items():
+            aman.wrap('raw_' + k, np.array(v))
+        return aman
+
+    def _load_raw_axes(self, aman, output, h5_address):
+        """ Load raw encoder data from h5 """
+        fileds, alias = self._key_formatting()
+        data = {}
+        f = h5py.File(output)
+        for a in alias:
+            if 'raw_' + a in f[h5_address].keys():
+                v = f[h5_address]['raw_' + a][:]
+                data[a] = v
+        f.close()
+        return data
+
     def _bool_interpolation(self, timestamp1, data, timestamp2):
         interp = scipy.interpolate.interp1d(
             timestamp1, data, kind='linear', bounds_error=False)(timestamp2)
         result = (interp > 0.999)
         return result
 
-    def write_solution_h5(self, tod, output=None, h5_address=None):
+    def write_solution_h5(self, tod, output=None, h5_address=None, load_h5=True):
         """
         Output HWP angle + flags as AxisManager format
 
@@ -880,16 +900,30 @@ class G3tHWP():
         start = int(tod.timestamps[0])-self._margin
         end = int(tod.timestamps[-1])+self._margin
 
+        data = {}
         try:
-            data = self.load_data(start, end)
+            if load_h5:
+                logger.info('Loading raw encoder data from h5')
+                try:
+                    data = self._load_raw_axes(aman, output, h5_address)
+                except:
+                    logger.error(f"Exception '{e}' thrown while loading HWP data from h5. Attempt to load from hk.")
+                    data = self.load_data(start, end)
+
+            else:
+                data = self.load_data(start, end)
+
             if 'pid_direction' in data.keys():
                 aman.pid_direction = np.nanmedian(data['pid_direction'][1])*2 - 1
+
+            logger.info('Saving raw encoder data')
+            self._set_raw_axes(aman, data)
 
         except Exception as e:
             logger.error(
                 f"Exception '{e}' thrown while loading HWP data. The specified encoder field is missing.")
             self._write_solution_h5_logger = 'HWP data too short'
-            self._write_empty_solution_h5(tod, output, h5_address)
+            print(traceback.format_exc())
 
         solved = {}
         self._set_empty_axes(aman)
@@ -910,11 +944,13 @@ class G3tHWP():
                 logger.error(
                     f"Exception '{e}' thrown while calculating HWP angle. Angle calculation failed.")
                 self._write_solution_h5_logger = 'Angle calculation failed'
+                print(traceback.format_exc())
                 continue
             if len(solved) == 0 or ('fast_time'+suffix not in solved.keys()) or len(solved['fast_time'+suffix]) == 0:
                 logger.info(
                     'No correct rotation data in the specified timestamps.')
                 self._write_solution_h5_logger = 'No HWP data'
+                print(traceback.format_exc())
                 continue
 
             self._write_solution_h5_logger = 'Angle calculation succeeded'
@@ -939,7 +975,7 @@ class G3tHWP():
             aman['filled_flag'+suffix] = filled_flag.astype(bool)
 
             if self._force_direction != 0:
-                logger.info(f'Correct rotation direction by force method')
+                logger.info('Correct rotation direction by force method')
                 solved['angle'+suffix] *= self._force_direction
             else:
                 logger.info(f'Correct rotation direction by {self._method_direction} method')
@@ -950,6 +986,7 @@ class G3tHWP():
                     solved['angle'+suffix] *= aman[method]
                 except Exception as e:
                     logger.error(f"Exception '{e}' thrown while correcting HWP angle. Skip.")
+                    print(traceback.format_exc())
 
             aman['hwp_angle_ver1'+suffix] = np.mod(scipy.interpolate.interp1d(
                 solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
@@ -966,6 +1003,7 @@ class G3tHWP():
             except Exception as e:
                 logger.error(
                     f"Exception '{e}' thrown while the template subtraction.")
+                print(traceback.format_exc())
 
         # version 3
         # calculate off-centering corrected angle
@@ -981,6 +1019,7 @@ class G3tHWP():
             except Exception as e:
                 logger.error(
                     f"Exception '{e}' thrown while the off-centering correction.")
+                print(traceback.format_exc())
         else:
             logger.warning(
                 'Offcentering calculation is only available when two encoders are operating. Skipped.')
