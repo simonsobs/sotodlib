@@ -80,9 +80,6 @@ class G3tHWP():
         # Reference slit angle
         self._delta_angle = 2 * np.pi / self._num_edges
 
-        # Reference slit indexes
-        self._ref_indexes = []
-
         # Search range of reference slot
         self._ref_range = self.configs.get('ref_range', 0.1)
 
@@ -950,7 +947,6 @@ class G3tHWP():
                 logger.info(
                     'No correct rotation data in the specified timestamps.')
                 self._write_solution_h5_logger = 'No HWP data'
-                print(traceback.format_exc())
                 continue
 
             self._write_solution_h5_logger = 'Angle calculation succeeded'
@@ -1047,16 +1043,25 @@ class G3tHWP():
 
         #   counter: BBB counter values for encoder signal edges
         self._encd_clk = counter
+
         #   counter_index: index numbers for detected edges by BBB
         self._encd_cnt = counter_idx
+
         #   irig_time: decoded time in second since the unix epoch
         self._irig_time = irig_time
+
         # rising_edge_count: BBB clcok count values for the IRIG on-time
         # reference marker risinge edge
         self._rising_edge = rising_edge
+
+        # Reference slit indexes
+        self._ref_indexes = []
+
         #   quad: quadrature signal to determine rotation direction
         self._quad_time = quad_time
         self._quad = quad
+
+        self._quad_corrected = []
 
         # return arrays
         self._time = []
@@ -1136,7 +1141,6 @@ class G3tHWP():
 
     def _find_refs(self):
         """ Find reference slits """
-        self._ref_indexes = []
         # Calculate spacing between all clock values
         diff = np.ediff1d(self._encd_clk)  # [1:]
         n = 0
