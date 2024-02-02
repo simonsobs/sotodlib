@@ -252,7 +252,7 @@ class G3tHWP():
         # 1st encoder readout
         fields = [self._field_instance + '_full.' + f if 'counter' in f
                   else self._field_instance + '.' + f for f in self._field_list]
-        alias = self._field_list
+        alias = [a + '_1' for a in self._field_list]
 
         # 2nd encoder readout
         if self._field_instance_sub is not None:
@@ -576,6 +576,7 @@ class G3tHWP():
 
         """
 
+        logger.info('Remove offcentering effect from hwp angle and overwrite')
         # Calculate offcentering from where the first reference slot was detected by the 2nd encoder.
         if solved["ref_indexes_1"][0] > self._num_edges/2-1:
             offcenter_idx1_start, offcenter_idx2_start = int(
@@ -768,12 +769,14 @@ class G3tHWP():
                       shape=('samps', ), dtype=np.float64)
         aman.wrap_new('hwp_angle_ver2'+suffix,
                       shape=('samps', ), dtype=np.float64)
+        aman.wrap_new('hwp_angle_ver3'+suffix,
+                      shape=('samps', ), dtype=np.float64)
         aman.wrap_new('stable'+suffix, shape=('samps', ), dtype=bool)
         aman.wrap_new('locked'+suffix, shape=('samps', ), dtype=bool)
         aman.wrap_new('hwp_rate'+suffix, shape=('samps', ), dtype=np.float16)
         aman.wrap('template'+suffix, None)
         aman.wrap('filled_flag'+suffix, None)
-        aman.wrap('version'+suffix, 0)
+        aman.wrap('version'+suffix, 1)
         aman.wrap('logger'+suffix, self._write_solution_h5_logger)
         return aman
 
@@ -918,7 +921,7 @@ class G3tHWP():
             # version 2
             # calculate template subtracted angle
             try:
-                self.eval_angle(solved, suffix)
+                self.eval_angle(solved, poly_order=3, suffix=suffix)
                 aman.save(output, h5_address, overwrite=True)
                 aman['hwp_angle_ver2'+suffix] = np.mod(scipy.interpolate.interp1d(
                     solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
@@ -947,8 +950,8 @@ class G3tHWP():
         # make the hwp angle solution with highest version as hwp_angle
         highest_version = np.max([aman.version_1, aman.version_2])
         primary_encoder = np.argmax([aman.version_1, aman.version_2]) + 1
-        #getattr(aman, 'primary_encoder')[:] = primary_encoder
-        #getattr(aman, 'hwp_angle')[:] = getattr(aman, f'hwp_angle_ver{highest_version}_{primary_encoder}')[:]
+        aman.wrap_new('hwp_angle', ('samps', ))[:] = aman[f'hwp_angle_ver{highest_version}_{primary_encoder}']
+        aman.wrap('primary_encoder', primary_encoder)
         aman.save(output, h5_address, overwrite=True)
 
     def _hwp_angle_calculator(
