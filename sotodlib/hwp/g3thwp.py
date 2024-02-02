@@ -764,7 +764,6 @@ class G3tHWP():
         return
 
     def _set_empty_axes(self, aman, suffix):
-        aman.wrap_new('hwp_angle'+suffix, shape=('samps', ), dtype=np.float64)
         aman.wrap_new('hwp_angle_ver1'+suffix,
                       shape=('samps', ), dtype=np.float64)
         aman.wrap_new('hwp_angle_ver2'+suffix,
@@ -774,8 +773,8 @@ class G3tHWP():
         aman.wrap_new('stable'+suffix, shape=('samps', ), dtype=bool)
         aman.wrap_new('locked'+suffix, shape=('samps', ), dtype=bool)
         aman.wrap_new('hwp_rate'+suffix, shape=('samps', ), dtype=np.float16)
-        aman.wrap('template'+suffix, None)
-        aman.wrap('filled_flag'+suffix, None)
+        aman.wrap_new('template'+suffix, shape=(self._num_edges, ), dtype=np.float64)
+        aman.wrap_new('filled_flag'+suffix, shape=('samps', ), dtype=bool)
         aman.wrap('version'+suffix, 1)
         aman.wrap('logger'+suffix, self._write_solution_h5_logger)
         return aman
@@ -864,7 +863,7 @@ class G3tHWP():
         try:
             data = self.load_data(start, end)
 
-            aman.wrap('pid_direction', None)
+            aman.wrap('pid_direction', np.nan)
             if 'pid_direction' in data.keys():
                 aman.pid_direction = np.nanmedian(data['pid_direction'][1])
 
