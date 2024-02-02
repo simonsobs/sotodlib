@@ -759,6 +759,7 @@ class G3tHWP():
         if suffix is None:
             aman.wrap_new('hwp_angle', shape=('samps', ), dtype=np.float64)
             aman.wrap('primary_encoder', 0)
+            aman.wrap('version', 1)
             aman.wrap('pid_direction', 0)
             aman.wrap_new('offcenter', shape=(2,), dtype=np.float64)
         else:
@@ -818,6 +819,12 @@ class G3tHWP():
             - primaty encoder: int
                 This field indicates which encoder is used for hwp_angle, 1 or 2
 
+            - version: int
+                This field indicates the version of the HWP angle in hwp_angle.
+
+            - version_1/2: int
+                This field indicates the version of the HWP angle of each encoder.
+
             - hwp_angle_ver1/2/3_1/2: float
                 This field stores the ver1/2/3 angle data.
 
@@ -833,9 +840,6 @@ class G3tHWP():
             - hwp_rate_1/2: float
                 the "approximate" HWP spin rate, with sign, in revs / second.
                 Use placeholder value of 0 for cases when not "locked".
-
-            - version_1/2: int
-                This field indicates the version of the HWP angle in hwp_angle.
 
             - logger_1/2: str
                 Log message for angle calculation status
@@ -982,10 +986,12 @@ class G3tHWP():
                 'Offcentering calculation is only available when two encoders are operating. Skipped.')
 
         # make the hwp angle solution with highest version as hwp_angle
-        highest_version = np.max([aman.version_1, aman.version_2])
-        primary_encoder = np.argmax([aman.version_1, aman.version_2]) + 1
+        highest_version = int(np.max([aman.version_1, aman.version_2]))
+        primary_encoder = int(np.argmax([aman.version_1, aman.version_2]) + 1)
+        logger.info(f'Save hwp_angle_ver{highest_version}_{primary_encoder} as hwp_angle')
         aman.hwp_angle = aman[f'hwp_angle_ver{highest_version}_{primary_encoder}']
-        aman.primary_encoder, primary_encoder
+        aman.primary_encoder = primary_encoder
+        aman.version = highest_version
 
         aman.save(output, h5_address, overwrite=True)
 
