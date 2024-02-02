@@ -772,6 +772,7 @@ class G3tHWP():
         aman.wrap_new('locked'+suffix, shape=('samps', ), dtype=bool)
         aman.wrap_new('hwp_rate'+suffix, shape=('samps', ), dtype=np.float16)
         aman.wrap('template'+suffix, None)
+        aman.wrap('filled_flag'+suffix, None)
         aman.wrap('version'+suffix, 0)
         aman.wrap('logger'+suffix, self._write_solution_h5_logger)
         return aman
@@ -852,7 +853,7 @@ class G3tHWP():
 
         # write solution, metadata loader requires a dets axis
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
-        aman.timestamps[:] = tod.timestamps
+        aman.wrap_new('timestamps', ('samps', ))[:] = tod.timestamps
 
         start = int(tod.timestamps[0])-self._margin
         end = int(tod.timestamps[-1])+self._margin
@@ -871,13 +872,13 @@ class G3tHWP():
             self._write_empty_solution_h5(tod, output, h5_address)
 
         solved = {}
-        for suffix in self.suffixes:
+        for suffix in self._suffixes:
             logger.info('Start analyzing encoder'+suffix)
+            self._set_empty_axes(aman, suffix)
             # load data
             if not 'counter' + suffix in data.keys():
                 logger.warning('No HWP data in the specified timestamps.')
                 self._write_solution_h5_logger = 'No HWP data'
-                self._set_empty_axes(aman, suffix)
                 continue
 
             # version 1
@@ -888,43 +889,41 @@ class G3tHWP():
                 logger.error(
                     f"Exception '{e}' thrown while calculating HWP angle. Angle calculation failed.")
                 self._write_solution_h5_logger = 'Angle calculation failed'
-                self._set_empty_axes(aman, suffix)
                 continue
             if len(solved) == 0 or ('fast_time'+suffix not in solved.keys()) or len(solved['fast_time'+suffix]) == 0:
                 logger.info(
                     'No correct rotation data in the specified timestamps.')
                 self._write_solution_h5_logger = 'No HWP data'
-                self._set_empty_axes(aman, suffix)
                 continue
 
             self._write_solution_h5_logger = 'Angle calculation succeeded'
-            getattr(aman, 'stable'+suffix)[:] = self._bool_interpolation(
+            aman['stable'+suffix] = self._bool_interpolation(
                 solved['slow_time'+suffix], solved['stable'+suffix], tod.timestamps)
-            getattr(aman, 'locked'+suffix)[:] = self._bool_interpolation(
+            aman['locked'+suffix] = self._bool_interpolation(
                 solved['slow_time'+suffix], solved['locked'+suffix], tod.timestamps)
-            getattr(aman, 'hwp_rate'+suffix)[:] = scipy.interpolate.interp1d(
+            aman['hwp_rate'+suffix] = scipy.interpolate.interp1d(
                 solved['slow_time'+suffix], solved['hwp_rate'+suffix], kind='linear', bounds_error=False)(tod.timestamps)
-            getattr(aman, 'logger'+suffix)[:] = self._write_solution_h5_logger
+            aman['logger'+suffix] = self._write_solution_h5_logger
 
-            getattr(aman, 'hwp_angle_ver1'+suffix)[:] = np.mod(scipy.interpolate.interp1d(
+            aman['hwp_angle_ver1'+suffix] = np.mod(scipy.interpolate.interp1d(
                 solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
-            getattr(aman, 'version'+suffix)[:] = 1
+            aman['version'+suffix] = 1
 
             filled_flag = np.zeros_like(solved['fast_time'+suffix], dtype=bool)
             filled_flag[solved['filled_indexes'+suffix]] = 1
             filled_flag = scipy.interpolate.interp1d(
                 solved['fast_time'+suffix], filled_flag, kind='linear', bounds_error=False)(tod.timestamps)
-            getattr(aman, 'filled_flag'+suffix)[:] = filled_flag.astype(bool)
+            aman['filled_flag'+suffix] = filled_flag.astype(bool)
 
             # version 2
             # calculate template subtracted angle
             try:
                 self.eval_angle(solved, suffix)
                 aman.save(output, h5_address, overwrite=True)
-                getattr(aman, 'hwp_angle_ver2'+suffix)[:] = np.mod(scipy.interpolate.interp1d(
+                aman['hwp_angle_ver2'+suffix] = np.mod(scipy.interpolate.interp1d(
                     solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
-                getattr(aman, 'version'+suffix)[:] = 2
-                getattr(aman, 'template'+suffix)[:] = solved['template'+suffix]
+                aman['version'+suffix] = 2
+                aman['template'+suffix] = solved['template'+suffix]
             except Exception as e:
                 logger.error(
                     f"Exception '{e}' thrown while the template subtraction.")
@@ -935,9 +934,9 @@ class G3tHWP():
             try:
                 self.eval_offcentering(solved)
                 self.correct_offcentering(solved)
-                getattr(aman, 'hwp_angle_ver3'+suffix)[:] = np.mod(scipy.interpolate.interp1d(
+                aman['hwp_angle_ver3'+suffix] = np.mod(scipy.interpolate.interp1d(
                     solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
-                getattr(aman, 'version'+suffix)[:] = 3
+                aman['version'+suffix] = 3
             except Exception as e:
                 logger.error(
                     f"Exception '{e}' thrown while the off-centering correction.")
