@@ -38,6 +38,11 @@ def get_parser(parser=None):
         action='store_true',
     )
     parser.add_argument(
+        '--load-h5',
+        help="If true, try to load raw encoder data from h5 file",
+        action='store_true',
+    )
+    parser.add_argument(
         '--query',
         help="Query to pass to the observation list. Use \\'string\\' to "
              "pass in strings within the query.",
@@ -68,6 +73,7 @@ def main(
     max_ctime: Optional[float] = None,
     obs_id: Optional[str] = None,
     logger = None,
+    load_h5: Optional[bool] = False,
  ):
     if logger is None:
         logger = default_logger
@@ -158,13 +164,14 @@ def main(
         g3thwp.write_solution_h5(
             tod,
             output=output_filename,
-            h5_address=h5_address
+            h5_address=h5_address,
+            load_h5=load_h5,
         )
         del g3thwp
 
         # Add an entry to the database
         man_db.add_entry(
-            {'obs:obs_id': obs["obs_id"], 'dataset': h5_address}, filename=h5_filename,
+            {'obs:obs_id': obs["obs_id"], 'dataset': h5_address}, filename=h5_filename, replace=overwrite,
         )
     return
 
