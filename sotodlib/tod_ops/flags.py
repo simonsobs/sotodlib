@@ -282,7 +282,9 @@ def get_glitch_flags(aman,
                      overwrite=False,
                      name="glitches",
                      full_output=False,
-                     edge_guard=2000):
+                     edge_guard=2000,
+                     save_plot=False,
+                     save_path="./"):
     """
     Find glitches with fourier filtering. Translation from moby2 as starting point
 
@@ -313,6 +315,10 @@ def get_glitch_flags(aman,
     edge_guard : int
         Number of samples at the beginning and end of the tod to exclude from
         the returned glitch RangesMatrix. Defaults to 2000 samples (10 sec).
+    save_plot : bool
+        If true, creates plot after calculation.
+    save_path : str
+        Path to plot output directory.
 
     Returns
     -------
@@ -367,6 +373,19 @@ def get_glitch_flags(aman,
         glitches.wrap("glitch_flags", flag, [(0, "dets"), (1, "samps")])
         glitches.wrap("glitch_detection", smat, [(0, "dets"), (1, "samps")])
         return flag, glitches
+    
+    if save_plot:
+        n_glitch = np.array([len(x.ranges()) for x in flag])
+        idx = np.where(n_glitch > 10)[0][0]
+        plt.figure()
+        plt.plot( aman.timestamps[::10], aman.signal[idx][::10], color = 'C0')
+
+        msk = flag[idx].mask()
+        plt.plot( aman.timestamps[ msk ][::10], aman.signal[idx][ msk ][::10], 'C1.', alpha = 0.5)
+        plt.xlabel('Timestamp')
+        plt.ylabel('Signal [Readout Radians]')
+        plt.title('First Detector w/ Glitch Cuts, every 10th Sample')
+        plt.savefig(os.path.join(save_path, str(aman.obs_info.timestamp)[:5] + '_' + aman.obs_info.obs_id + '_glitch_cuts.png'))
 
     return flag
 
