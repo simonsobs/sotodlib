@@ -161,35 +161,58 @@ def mapmaker(job, otherargs, runargs, data):
         if job_tmpls.baselines.enabled:
             job_tmpls.noise_model = noise_model
 
-        if otherargs.obsmaps:
-            # Map each observation separately
-            timer_obs = toast.timing.Timer()
-            timer_obs.start()
-            group = data.comm.group
-            orig_name = job_ops.mapmaker.name
-            orig_comm = data.comm
-            new_comm = toast.Comm(world=data.comm.comm_group)
-            for iobs, obs in enumerate(data.obs):
-                log.info_rank(
-                    f"{group} : mapping observation {iobs + 1} / {len(data.obs)}.",
-                    comm=new_comm.comm_world,
-                )
-                # Data object that only covers one observation
-                obs_data = data.select(obs_uid=obs.uid)
-                # Replace comm_world with the group communicator
-                obs_data._comm = new_comm
-                job_ops.mapmaker.name = f"{orig_name}_{obs.name}"
-                job_ops.mapmaker.reset_pix_dist = True
-                job_ops.mapmaker.apply(obs_data)
-                log.info_rank(
-                    f"{group} : Mapped {obs.name} in",
-                    comm=new_comm.comm_world,
-                    timer=timer_obs,
-                )
-            log.info_rank(
-                f"{group} : Done mapping {len(data.obs)} observations.",
-                comm=new_comm.comm_world,
-            )
-            data._comm = orig_comm
+        # See if user wants separate detector maps
+        if hasattr(otherargs, "detmaps") and otherargs.detmaps:
+            my_dets = data.all_local_detectors()
+            if data.comm.comm_world is None:
+                all_dets = my_dets
+            else:
+                from matplotlib.cbook import flatten
+                all_dets = data.comm.comm_world.allgather(my_dets)
+                all_dets = sorted(set(flatten(all_dets)))
         else:
-            job_ops.mapmaker.apply(data)
+            all_dets = [None]
+
+        mapmaker_name = job_ops.mapmaker.name
+        for det in all_dets:
+            if det is None:
+                # Map all detectors together
+                detectors = None
+            else:
+                # Single detector mode, append detector name to all
+                # data products
+                job_ops.mapmaker.name = f"{mapmaker_name}_{det}"
+                detectors = [det]
+            if hasattr(otherargs, "obsmaps") and otherargs.obsmaps:
+                # Map each observation separately
+                timer_obs = toast.timing.Timer()
+                timer_obs.start()
+                group = data.comm.group
+                orig_comm = data.comm
+                orig_name = job_ops.mapmaker.name
+                new_comm = toast.Comm(world=data.comm.comm_group)
+                for iobs, obs in enumerate(data.obs):
+                    log.info_rank(
+                        f"{group} : mapping observation {iobs + 1} / {len(data.obs)}.",
+                        comm=new_comm.comm_world,
+                    )
+                    # Data object that only covers one observation
+                    obs_data = data.select(obs_uid=obs.uid)
+                    # Replace comm_world with the group communicator
+                    obs_data._comm = new_comm
+                    job_ops.mapmaker.name = f"{orig_name}_{obs.name}"
+                    job_ops.mapmaker.reset_pix_dist = True
+                    job_ops.mapmaker.apply(obs_data, detectors=detectors)
+                    log.info_rank(
+                        f"{group} : Mapped {obs.name}, dets={detectors} in",
+                        comm=new_comm.comm_world,
+                        timer=timer_obs,
+                    )
+                log.info_rank(
+                    f"{group} : Done mapping {len(data.obs)} observations.",
+                    comm=new_comm.comm_world,
+                )
+                data._comm = orig_comm
+            else:
+                job_ops.mapmaker.apply(data, detectors=detectors)
+            job_ops.mapmaker.name = mapmaker_name
