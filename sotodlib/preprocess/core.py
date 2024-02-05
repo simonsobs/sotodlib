@@ -30,7 +30,7 @@ class _Preprocess(object):
         self.calc_cfgs = step_cfgs.get("calc")
         self.save_cfgs = step_cfgs.get("save")
         self.select_cfgs = step_cfgs.get("select")
-    
+
     def process(self, aman, proc_aman):
         """ This function makes changes to the time ordered data AxisManager.
         Ex: calibrating or detrending the timestreams. This function will use
@@ -114,7 +114,26 @@ class _Preprocess(object):
         if self.select_cfgs is None:
             return meta
         raise NotImplementedError
-    
+
+    @classmethod
+    def gen_metric(cls, meta, proc_aman):
+        """ Generate a QA metric from the output of this process.
+
+        Arguments
+        ---------
+        meta : AxisManager
+            Metadata related to the specific observation
+        proc_aman : AxisManager
+            The output of the preprocessing pipeline.
+
+        Returns
+        -------
+        line : dict
+            InfluxDB line entry elements to be fed to
+            `site_pipeline.monitor.Monitor.record`
+        """
+        raise NotImplementedError
+
     @staticmethod
     def register(process_class):
         """Registers a new modules with the PIPELINE"""
@@ -126,7 +145,6 @@ class _Preprocess(object):
             raise ValueError(
                 f"Preprocess Module of name {name} is already Registered"
             )
-
 
 
 class Pipeline(list):
