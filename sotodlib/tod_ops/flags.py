@@ -94,7 +94,7 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         plt.xlabel('Timestamp')
         plt.ylabel('Signal [Readout Radians]')
         plt.title('Every 20th Detector and 100th Sample\nAfter Detector Bias Cuts')
-        plt.savefig(os.path.join(save_path, str(aman.obs_info.timestamp)[:5] + '_' + aman.obs_info.obs_id + '_bias_cuts.png'))
+        plt.savefig(os.path.join(save_path, str(aman.obs_info.timestamp)[:5], aman.obs_info.obs_id + '_bias_cuts.png'))
     
     return mskexp
 
@@ -385,7 +385,7 @@ def get_glitch_flags(aman,
         plt.xlabel('Timestamp')
         plt.ylabel('Signal [Readout Radians]')
         plt.title('First Detector w/ Glitch Cuts, every 10th Sample')
-        plt.savefig(os.path.join(save_path, str(aman.obs_info.timestamp)[:5] + '_' + aman.obs_info.obs_id + '_glitch_cuts.png'))
+        plt.savefig(os.path.join(save_path, str(aman.obs_info.timestamp)[:5], aman.obs_info.obs_id + '_glitch_cuts.png'))
 
     return flag
 
