@@ -13,8 +13,9 @@ except ImportError:
 from so3g.proj import Ranges, RangesMatrix
 
 from .. import core
+from .. import flag_utils
 from . import filters
-from . import fourier_filter
+from . import fourier_filter 
 
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
@@ -375,17 +376,7 @@ def get_glitch_flags(aman,
         return flag, glitches
     
     if save_plot:
-        n_glitch = np.array([len(x.ranges()) for x in flag])
-        idx = np.where(n_glitch > 10)[0][0]
-        plt.figure()
-        plt.plot( aman.timestamps[::10], aman.signal[idx][::10], color = 'C0')
-
-        msk = flag[idx].mask()
-        plt.plot( aman.timestamps[ msk ][::10], aman.signal[idx][ msk ][::10], 'C1.', alpha = 0.5)
-        plt.xlabel('Timestamp')
-        plt.ylabel('Signal [Readout Radians]')
-        plt.title('First Detector w/ Glitch Cuts, every 10th Sample')
-        plt.savefig(os.path.join(save_path, str(aman.obs_info.timestamp)[:5], aman.obs_info.obs_id + '_glitch_cuts.png'))
+        flag_utils.plot_glitch_stats(aman, save_plot=True, save_path=save_path)
 
     return flag
 
