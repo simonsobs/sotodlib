@@ -92,7 +92,7 @@ class G3tHWP():
 
         # Method to determine the rotation direction
         self._method_direction = self.configs.get('method_direction', 'quad')
-        assert self._method_direction in ['quad', 'pid', 'scan', 'template']
+        assert self._method_direction in ['offcenter', 'pid', 'quad', 'scan', 'template']
 
         # Forced direction value
         # 0: use direction value using specified method (default)
