@@ -300,7 +300,7 @@ class ResSet:
         resonances = []
 
         if fp_pars is not None:
-            theta = -np.deg2rad(fp_pars['theta'])
+            theta = np.deg2rad(fp_pars['theta'])
             dx, dy = fp_pars['dx'], fp_pars['dy']
 
         with open(sol_file, 'r') as f:
