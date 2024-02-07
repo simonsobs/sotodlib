@@ -3,6 +3,7 @@ import scipy.stats as stats
 from scipy.signal import find_peaks
 import os
 import matplotlib.pyplot as plt
+import time
 
 ## "temporary" fix to deal with scipy>1.8 changing the sparse setup
 try:
@@ -20,7 +21,7 @@ from . import fourier_filter
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                       psat_range=(0, 15), merge=True, overwrite=True,
-                      name='det_bias_flags', save_plot=False, save_path="./"):
+                      name='det_bias_flags', save_plot=False, save_path="./", save_name="bias_cuts.png"):
     """
     Function for selecting detectors in appropriate bias range.
 
@@ -46,6 +47,8 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         If true, creates plot after calculation.
     save_path : str
         Path to plot output directory.
+    save_name : str
+        Filename of plot.
 
     Returns
     -------
@@ -89,13 +92,13 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
             aman.flags.wrap(name, mskexp, [(0, 'dets'), (1, 'samps')])
 
     if save_plot:
+        save_ts = str(int(time.time()))
         bad_dets = core.flagman.has_all_cut(aman.flags.det_bias_flags)
-        aman.restrict('dets', aman.dets.vals[~bad_dets])
-        _ = plt.plot(aman.timestamps[::100], aman.signal[::20,::100].T, color = 'C0', alpha = 0.5)
+        _ = plt.plot(aman.timestamps[::100], aman.signal[~bad_dets][::20,::100].T, color = 'C0', alpha = 0.5)
         plt.xlabel('Timestamp')
         plt.ylabel('Signal [Readout Radians]')
         plt.title('Every 20th Detector and 100th Sample\nAfter Detector Bias Cuts')
-        plt.savefig(os.path.join(save_path, str(aman.obs_info.timestamp)[:5], aman.obs_info.obs_id + '_bias_cuts.png'))
+        plt.savefig(os.path.join(save_path, save_ts + '_' + save_name))
     
     return mskexp
 
