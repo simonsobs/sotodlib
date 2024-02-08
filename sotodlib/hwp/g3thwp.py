@@ -96,7 +96,8 @@ class G3tHWP():
 
         # Forced direction value
         # 0: use direction value using specified method (default)
-        # 1: positive rotation direction, -1: negative rotation direction
+        # 1: positive rotation direction
+        # -1: negative rotation direction
         self._force_direction = int(self.configs.get('force_direction', 0))
         assert self._force_direction in [0, 1, -1], "force_direction must be 0, 1 or -1"
 
@@ -805,14 +806,21 @@ class G3tHWP():
 
     def write_solution_h5(self, tod, output=None, h5_address=None, load_h5=True):
         """
-        Output HWP angle + flags as AxisManager format
+        Output HWP angle, flags, metadata as AxisManager format
+        The results are stored in HDF5 files. Since HWP angle solution HDF5 files are large,
+        we automatically split into the new output files.
+        We save the copy of raw hwp encoder hk data into HDF5 file, to save time for
+        re-calculating the hwp angle solutions.
 
         Args
         ----
         tod: AxisManager
 
         output: str or None
-          output path + file name, overwrite config file
+            output path + file name, overwrite config file
+
+        load_h5:
+            If true, try to load raw encoder data from hdf5 file
 
         Notes
         -----
@@ -820,18 +828,15 @@ class G3tHWP():
 
         - Primary output
 
-            - timestamp:
+            - timestamp: float (samps,)
                 SMuRF synched timestamp
 
-            - hwp_angle: float
+            - hwp_angle: float (samps,)
                 The latest version of the SMuRF synched HWP angle in radian.
                 * ver1: HWP angle calculated from the raw encoder signal.
                 * ver2: HWP angle after the template subtraction.
                 * ver3: HWP angle after the template and off-centering subtraction.
                 The field 'version' indicates which version this hwp_angle is.
-
-        - Supplementary output
-            * suffix _1/2 indicates the encoder_1 or encoder_2
 
             - primaty encoder: int
                 This field indicates which encoder is used for hwp_angle, 1 or 2
@@ -839,23 +844,26 @@ class G3tHWP():
             - version: int
                 This field indicates the version of the HWP angle in hwp_angle.
 
+        - Supplementary output
+            Suffix _1/2 indicates the encoder_1 or encoder_2
+
             - version_1/2: int
                 This field indicates the version of the HWP angle of each encoder.
 
-            - hwp_angle_ver1/2/3_1/2: float
+            - hwp_angle_ver1/2/3_1/2: float (samps,)
                 This field stores the ver1/2/3 angle data.
 
-            - stable_1/2: bool
-                if non-zero, indicates the HWP spin state is known.
+            - stable_1/2: bool (samps,)
+                If non-zero, indicates the HWP spin state is known.
                 i.e. it is either spinning at a measurable rate, or stationary.
                 When this flag is non-zero, the hwp_rate field can be taken at face value.
 
-            - locked_1/2: bool
-                if non-zero, indicates the HWP is spinning and the position solution is working.
+            - locked_1/2: bool (samp,)
+                If non-zero, indicates the HWP is spinning and the position solution is working.
                 In this case one should find the hwp_angle populated in the fast data block.
 
-            - hwp_rate_1/2: float
-                the "approximate" HWP spin rate, with sign, in revs / second.
+            - hwp_rate_1/2: float (samps,)
+                The "approximate" HWP spin rate, with sign, in revs / second.
                 Use placeholder value of 0 for cases when not "locked".
 
             - logger_1/2: str
@@ -863,21 +871,57 @@ class G3tHWP():
                 'No HWP data', 'HWP data too short',
                 'Angle calculation failed', 'Angle calculation succeeded'
 
-            - filled_flag_1/2: bool
+            - filled_flag_1/2: bool (samps,)
+                Array to indicate the index of hwp angle filled due to packet drop, etc.
 
-            - quad_1/2: int
+            - quad_1/2: int (quad,)
                 0 or 1 or -1. 0 means no data
+
+            - template_1/2: float (1140,)
+                Template of the non uniformity of hwp encoder plate
+
+            - offcenter: float (2,)
+                - (average offcenter, std of offcenter) unit is (mm)
+
+        - Rotation direction
+            Rotation direction estimated by several methods.
+            0 or 1 or -1. 0 means no data.
 
             - quad_direction_1/2: int
-                0 or 1 or -1. 0 means no data
+                Estimation by median encoder quadrature for each encoder
 
             - pid_direction: int
-                0 or 1 or -1. 0 means no data
+                Estimation by median pid controller commanded direction
 
-            - template_1/2: float
+            - offcenter_direction: int
+                Estimation by the offcentering measured by the time offset between two encoders.
+                To be implemented.
 
-            - offcenter: float (mm)
-                - [average offcenter, std of offcenter]
+            - template_direction: int
+                Estimation by the template of encoder plate.
+                To be implemented.
+
+            - scan_direction: int
+                Estimation by scan synchronous modulation of rotation speed.
+
+        - Raw output
+            x is a number different for each data and each observation
+
+            - raw_rising_edge_count_1/2: int (2, x)
+
+            - raw_irig_time_1/2: float (2, x)
+
+            - raw_counter_1/2: float (2, x)
+
+            - raw_counter_index_1/2: int (2, x)
+
+            - raw_irig_synch_pulse_clock_time_1/2: float (2, x)
+
+            - raw_irig_synch_pulse_clock_counts_1/2: int (2, x)
+
+            - raw_quad_1/2: bool (2, x)
+
+            - raw_pid_direction: bool (2, x)
 
         """
         if self._output is None and output is None:
@@ -903,7 +947,7 @@ class G3tHWP():
                 logger.info('Loading raw encoder data from h5')
                 try:
                     data = self._load_raw_axes(aman, output, h5_address)
-                except:
+                except Exception as e:
                     logger.error(f"Exception '{e}' thrown while loading HWP data from h5. Attempt to load from hk.")
                     data = self.load_data(start, end)
 
