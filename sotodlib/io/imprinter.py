@@ -5,7 +5,7 @@ from typing import List
 import yaml, traceback
 import shutil
 import logging
-from pathlib import PATH
+from pathlib import Path
 from glob import glob
 
 import sqlalchemy as db
@@ -1522,8 +1522,8 @@ class Imprinter:
         self.logger.info(f"Uploading book {book.bid} to librarian")
         try:     
             self.librarian.upload(
-                PATH(book.path), 
-                PATH(dest_path), 
+                Path(book.path), 
+                Path(dest_path), 
             )
             book.status = UPLOADED
             session.commit()
