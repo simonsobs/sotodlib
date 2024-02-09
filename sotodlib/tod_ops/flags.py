@@ -2,6 +2,8 @@ import numpy as np
 import scipy.stats as stats
 from scipy.signal import find_peaks
 import os
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import time
 
@@ -14,14 +16,12 @@ except ImportError:
 from so3g.proj import Ranges, RangesMatrix
 
 from .. import core
-from .. import flag_utils
 from . import filters
 from . import fourier_filter 
 
-
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                       psat_range=(0, 15), merge=True, overwrite=True,
-                      name='det_bias_flags', save_plot=False, save_path="./", save_name="bias_cuts.png"):
+                      name='det_bias_flags'):
     """
     Function for selecting detectors in appropriate bias range.
 
@@ -43,12 +43,6 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         If true, write over flag. If false, don't.
     name : str
         Name of flag to add to aman.flags if merge is True.
-    save_plot : bool
-        If true, creates plot after calculation.
-    save_path : str
-        Path to plot output directory.
-    save_name : str
-        Filename of plot.
 
     Returns
     -------
@@ -90,15 +84,6 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
             aman.flags[name] = mskexp
         else:
             aman.flags.wrap(name, mskexp, [(0, 'dets'), (1, 'samps')])
-
-    if save_plot:
-        save_ts = str(int(time.time()))
-        bad_dets = core.flagman.has_all_cut(aman.flags.det_bias_flags)
-        _ = plt.plot(aman.timestamps[::100], aman.signal[~bad_dets][::20,::100].T, color = 'C0', alpha = 0.5)
-        plt.xlabel('Timestamp')
-        plt.ylabel('Signal [Readout Radians]')
-        plt.title('Every 20th Detector and 100th Sample\nAfter Detector Bias Cuts')
-        plt.savefig(os.path.join(save_path, save_ts + '_' + save_name))
     
     return mskexp
 
@@ -377,9 +362,6 @@ def get_glitch_flags(aman,
         glitches.wrap("glitch_flags", flag, [(0, "dets"), (1, "samps")])
         glitches.wrap("glitch_detection", smat, [(0, "dets"), (1, "samps")])
         return flag, glitches
-    
-    if save_plot:
-        flag_utils.plot_glitch_stats(aman, save_plot=True, save_path=save_path)
 
     return flag
 

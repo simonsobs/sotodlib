@@ -9,6 +9,8 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                     sparse_to_ranges_matrix)
 
 from .core import _Preprocess
+from . import preprocess_plot
+from .. import flag_utils
 
 
 class FFTTrim(_Preprocess):
@@ -52,6 +54,8 @@ class DetBiasFlags(_Preprocess):
         dbc_aman = core.AxisManager(aman.dets)
         dbc_aman.wrap('det_bias_flags', msk, [(0, 'dets')])
         self.save(proc_aman, dbc_aman)
+        if self.calc_cfgs.get('save_plot', False):
+            preprocess_plot.plot_det_bias_flags(aman, msk, save_path=self.calc_cfgs['save_plot'])
     
     def save(self, proc_aman, dbc_aman):
         if self.save_cfgs is None:
@@ -166,6 +170,8 @@ class GlitchDetection(_Preprocess):
         ) 
         aman.wrap("glitches", glitch_aman)
         self.save(proc_aman, glitch_aman)
+        if self.calc_cfgs.get('save_plot', False):
+            flag_utils.plot_glitch_stats(aman, save_path=self.calc_cfgs['save_plot'])
     
     def save(self, proc_aman, glitch_aman):
         if self.save_cfgs is None:
