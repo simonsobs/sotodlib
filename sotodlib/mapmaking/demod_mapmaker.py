@@ -30,7 +30,7 @@ class DemodMapmaker:
         self.ncomp        = len(comps)
         self.singlestream = singlestream
 
-    def add_obs(self, id, obs, noise_model=None, deslope=False, det_split_masks=None, split_labels=None, detset=None, freq=None):
+    def add_obs(self, id, obs, noise_model=None, deslope=False, split_labels=None):
         # Prepare our tod
         ctime  = obs.timestamps
         srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
@@ -61,14 +61,16 @@ class DemodMapmaker:
                 msg = f"FAILED to build a noise model for observation='{id}' : '{e}'"
                 raise RuntimeError(msg)
         # And apply it to the tod
+        '''
         if self.singlestream==False:
             for i in range(self.ncomp):
                 tod[i]    = nmat.apply(tod[i])
         else:
             tod = nmat.apply(tod)
+        '''
         # Add the observation to each of our signals
         for signal in self.signals:
-            signal.add_obs(id, obs, nmat, tod, det_split_masks=det_split_masks, split_labels=split_labels, detset=detset, freq=freq)
+            signal.add_obs(id, obs, nmat, tod, split_labels=split_labels)
         # Save what we need about this observation
         self.data.append(bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime), dets=obs.dets.vals, nmat=nmat))
 
@@ -124,7 +126,7 @@ class DemodSignalMap(DemodSignal):
             self.div = enmap.zeros((Nsplits,ncomp,ncomp)+shape, wcs, dtype=dtype)
             self.hits= enmap.zeros((Nsplits,)+shape, wcs, dtype=dtype)
 
-    def add_obs(self, id, obs, nmat, Nd, pmap=None, wrong_definition=False, det_split_masks=None, split_labels=None, detset=None, freq=None):
+    def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None):
         # Nd will have 3 components, corresponding to ds_T, demodQ, demodU with the noise model applied
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
@@ -133,11 +135,13 @@ class DemodSignalMap(DemodSignal):
         """
         ctime  = obs.timestamps
         for n_split in range(self.Nsplits):
+            '''
             if self.singlestream == False:
                 for i in range(self.ncomp):
                     Nd[i]     = Nd[i].copy() # This copy can be avoided if build_obs is split into two parts
             else:
                 Nd = Nd.copy()
+            '''
             if pmap is None:
                 # Build the local geometry and pointing matrix for this observation
                 if self.recenter:
@@ -149,17 +153,14 @@ class DemodSignalMap(DemodSignal):
                     # this is the case with no splits
                     # turnarounds has the size of samples, we need to add the detector axis
                     mask_for_turnarounds = np.repeat(obs.flags.turnarounds.mask()[None,:], int(obs.dets.count), axis=0)
-                    rangesmatrix = so3g.proj.RangesMatrix.from_mask(mask_for_turnarounds) + obs.flags_notfinite + obs.flags_stuck #+ obs.flags.det_bias_flags
+                    rangesmatrix = so3g.proj.RangesMatrix.from_mask(mask_for_turnarounds) + obs.flags.jumps_2pi + obs.flags.glitches
                     pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix)
                 else:
-                    # this is the case where we are processing a split. We need to figure out what type of split it is (detector fixed in time, detector variable in time, samples), build the RangesMatrix mask and create the pmap.
-                    if split_labels[n_split] in ['detleft','detright','detin','detout','detupper','detlower']:
+                    # this is the case where we are processing a split. We need to figure out what type of split it is (detector, samples), build the RangesMatrix mask and create the pmap.
+                    if split_labels[n_split] in ['det_left','det_right','det_in','det_out','det_upper','det_lower']:
                         # then we are in a detector fixed in time split.
-                        key = freq+'_'+detset+'_'+split_labels[n_split]
                         mask_for_turnarounds = np.repeat(obs.flags.turnarounds.mask()[None,:], int(obs.dets.count), axis=0)
-                        mask = det_split_masks[key]
-                        mask_for_split = np.repeat(np.logical_not(mask)[:,None], int(obs.samps.count), axis=1) # the split mask is not since the detectors we want must be false
-                        rangesmatrix = so3g.proj.RangesMatrix.from_mask(mask_for_turnarounds) + obs.flags_notfinite + so3g.proj.RangesMatrix.from_mask(mask_for_split) + obs.flags_stuck #+ obs.flags.det_bias_flags
+                        rangesmatrix = so3g.proj.RangesMatrix.from_mask(mask_for_turnarounds) + obs.flags.jumps_2pi + obs.flags.glitches + obs.det_flags[split_labels[n_split]]
                     pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix)
             else:
                 pmap_local = pmap
@@ -168,33 +169,30 @@ class DemodSignalMap(DemodSignal):
             obs_rhs = pmap_local.zeros() # this is the final RHS, we will fill it at the end
             
             if self.singlestream==False:
-                obs_rhs_T = pmap_local.zeros(super_shape=(1),comps='T')
-                pmap_local.to_map(dest=obs_rhs_T, signal=Nd[0], comps='T') # this is only the RHS for T
+                #obs_rhs_T = pmap_local.zeros(super_shape=(1),comps='T')
+                obs_rhs_T = pmap_local.to_map(tod=obs, signal=obs.dsT, comps='T', det_weights=2*nmat.ivar)
+                #pmap_local.to_map(dest=obs_rhs_T, signal=Nd[0], comps='T') # this is only the RHS for T
                 # RHS for QU. We save it to dummy maps
-                obs_rhs_demodQ = pmap_local.to_map(signal=Nd[1], comps='QU') # Do I need to pass tod=obs ?
-                obs_rhs_demodU = pmap_local.to_map(signal=Nd[2], comps='QU') # Do I need to pass tod=obs ?
+                #obs_rhs_demodQ = pmap_local.to_map(signal=Nd[1], comps='QU') # Do I need to pass tod=obs ?
+                #obs_rhs_demodU = pmap_local.to_map(signal=Nd[2], comps='QU') # Do I need to pass tod=obs ?
+                
+                obs_rhs_demodQ = pmap_local.to_map(tod=obs, signal=obs.demodQ, comps='QU', det_weights=nmat.ivar)
+                obs_rhs_demodU = pmap_local.to_map(tod=obs, signal=obs.demodU, comps='QU', det_weights=nmat.ivar)
                 obs_rhs_demodQU = pmap_local.zeros(super_shape=(2),comps='QU',)
-                if wrong_definition == True:
-                    # CAUTION: Here the definition of mQU_weighted uses a wrong way of definition, as toast simulation defines that in the wrong way.
-                    obs_rhs_demodQU[0][:] = obs_rhs_demodQ[0] - obs_rhs_demodU[1]
-                    # (= Q_{flipped detector coord}*cos(2 theta_pa) - U_{flipped detector coord}*sin(2 theta_pa) )
-                    obs_rhs_demodQU[1][:] = obs_rhs_demodQ[1] + obs_rhs_demodU[0]
-                    # (= Q_{flipped detector coord}*sin(2 theta_pa) + U_{flipped detector coord}*cos(2 theta_pa) )
-                else:
-                    #### In field, you should use instead ####
-                    obs_rhs_demodQU[0][:] = obs_rhs_demodQ[0] + obs_rhs_demodU[1]
-                    # (= Q_{flipped detector coord}*cos(2 theta_pa) + U_{flipped detector coord}*sin(2 theta_pa) )
-                    obs_rhs_demodQU[1][:] = -obs_rhs_demodQ[1] + obs_rhs_demodU[0] 
-                    # (= -Q_{flipped detector coord}*sin(2 theta_pa) + U_{flipped detector coord}*cos(2 theta_pa) )
+                
+                #### In field, you should use instead #### this what inside wrong_definition=False, but I got rid of that
+                obs_rhs_demodQU[0][:] = obs_rhs_demodQ[0] + obs_rhs_demodU[1]
+                obs_rhs_demodQU[1][:] = -obs_rhs_demodQ[1] + obs_rhs_demodU[0]
                 # we write into the obs_rhs. 
                 obs_rhs[0] = obs_rhs_T[0]
                 obs_rhs[1] = obs_rhs_demodQU[0]
                 obs_rhs[2] = obs_rhs_demodQU[1]
-                obs_div    = pmap_local.zeros(super_shape=(self.ncomp,self.ncomp))
+                                
+                obs_div    = pmap_local.zeros(super_shape=(self.ncomp, self.ncomp))
                 # Build the per-pixel inverse covmat for this observation
                 #obs_div = enmap.zeros((3, 3) + pmap.geom.shape, wcs=pmap.geom.wcs)
                 #det_weights = 1/np.std(obs.demodQ, axis=1)**2
-                wT = pmap_local.to_weights(obs, signal=obs.dsT, comps='T', det_weights=nmat.ivar,)
+                wT = pmap_local.to_weights(obs, signal=obs.dsT, comps='T', det_weights=2*nmat.ivar,)
                 wQU = pmap_local.to_weights(obs, signal=obs.demodQ, comps='T', det_weights=nmat.ivar,)
                 obs_div[0,0] = wT
                 obs_div[1,1] = wQU
