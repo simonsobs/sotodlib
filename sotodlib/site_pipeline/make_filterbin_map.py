@@ -1,9 +1,10 @@
 from argparse import ArgumentParser
 import numpy as np, sys, time, warnings, os, so3g, logging
-from sotodlib.core import Context,  metadata as metadata_core
+from sotodlib.core import Context,  metadata as metadata_core, FlagManager
+from sotodlib.core.flagman import has_any_cuts, has_all_cut
 from sotodlib.io import metadata   # PerDetectorHdf5 work-around
 from sotodlib import tod_ops, coords, mapmaking
-from sotodlib.tod_ops import filters
+from sotodlib.tod_ops import flags, jumps, gapfill, filters, detrend_tod, apodize, pca
 from sotodlib.hwp import hwp
 from pixell import enmap, utils, fft, bunch, wcsutils, tilemap, colors, memory, mpi
 from scipy import ndimage
@@ -119,6 +120,141 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
     if return_pixboxes: return shape, wcs, pixboxes
     else: return shape, wcs
 
+
+def calibrate_obs_new(obs, dtype_tod=np.float32, det_left_right=False, det_in_out=False, det_upper_lower=False):
+    obs.wrap("weather", np.full(1, "toco"))
+    obs.wrap("site",    np.full(1, "so_sat1"))
+    obs.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape[:2]),[(0, 'dets'), (1, 'samps')])
+    
+    if obs.signal is not None:
+        # this will happen in the read_tod call, where we will add the detector flags
+        if det_left_right or det_in_out or det_upper_lower:
+            # we add a flagmanager for the detector flags
+            obs.wrap('det_flags', FlagManager.for_tod(obs))
+            if det_left_right or det_in_out:
+                xi = obs.focal_plane.xi
+                # sort xi 
+                xi_median = np.median(xi)    
+            if det_upper_lower or det_in_out:
+                eta = obs.focal_plane.eta
+                # sort eta
+                eta_median = np.median(eta)
+            if det_left_right:
+                mask = xi <= xi_median
+                mask_for_rangesmatrix = np.repeat(np.logical_not(mask)[:,None], int(obs.samps.count), axis=1)
+                obs.det_flags.wrap('det_left', so3g.proj.RangesMatrix.from_mask(mask_for_rangesmatrix), [(0, 'dets'), (1, 'samps')])
+                mask = xi > xi_median
+                mask_for_rangesmatrix = np.repeat(np.logical_not(mask)[:,None], int(obs.samps.count), axis=1)
+                obs.det_flags.wrap('det_right', so3g.proj.RangesMatrix.from_mask(mask_for_rangesmatrix), [(0, 'dets'), (1, 'samps')])
+            if det_upper_lower:
+                mask = eta <= eta_median
+                mask_for_rangesmatrix = np.repeat(np.logical_not(mask)[:,None], int(obs.samps.count), axis=1)
+                obs.det_flags.wrap('det_lower', so3g.proj.RangesMatrix.from_mask(mask_for_rangesmatrix), [(0, 'dets'), (1, 'samps')])
+                mask = eta > eta_median
+                mask_for_rangesmatrix = np.repeat(np.logical_not(mask)[:,None], int(obs.samps.count), axis=1)
+                obs.det_flags.wrap('det_upper', so3g.proj.RangesMatrix.from_mask(mask_for_rangesmatrix), [(0, 'dets'), (1, 'samps')])
+            if det_in_out:
+                # the bounding box is the center of the detset
+                xi_center = np.min(xi) + 0.5 * (np.max(xi) - np.min(xi))
+                eta_center = np.min(eta) + 0.5 * (np.max(eta) - np.min(eta))
+                radii = np.sqrt((xi_center-xi)**2 + (eta_center-eta)**2)
+                radius_median = np.median(radii)
+                mask = radii <= radius_median
+                mask_for_rangesmatrix = np.repeat(np.logical_not(mask)[:,None], int(obs.samps.count), axis=1)
+                obs.det_flags.wrap('det_in', so3g.proj.RangesMatrix.from_mask(mask_for_rangesmatrix), [(0, 'dets'), (1, 'samps')])
+                mask = radii > radius_median
+                mask_for_rangesmatrix = np.repeat(np.logical_not(mask)[:,None], int(obs.samps.count), axis=1)
+                obs.det_flags.wrap('det_out', so3g.proj.RangesMatrix.from_mask(mask_for_rangesmatrix), [(0, 'dets'), (1, 'samps')])
+                
+    # this is from Max's notebook
+    if obs.signal is not None:
+        flags.get_turnaround_flags(obs)
+        flags.get_det_bias_flags(obs, rfrac_range=(0.05, 0.9), psat_range=(0, 20))
+        bad_dets = has_all_cut(obs.flags.det_bias_flags)
+        obs.restrict('dets', obs.dets.vals[~bad_dets])
+        detrend_tod(obs, method='median')
+        hwp.get_hwpss(obs)
+        hwp.subtract_hwpss(obs)
+        flags.get_trending_flags(obs, max_trend=2.5, n_pieces=10)
+        tdets = has_any_cuts(obs.flags.trends)
+        obs.restrict('dets', obs.dets.vals[~tdets])
+        jflags, jfix = jumps.twopi_jumps(obs, signal=obs.hwpss_remove, fix=True, overwrite=True)
+        obs.hwpss_remove = jfix
+        gfilled = gapfill.fill_glitches(obs, nbuf=10, use_pca=False, modes=1, signal=obs.hwpss_remove, glitch_flags=obs.flags.jumps_2pi)
+        obs.hwpss_remove = gfilled
+        gflags = flags.get_glitch_flags(obs, t_glitch=1e-5, buffer=10, signal='hwpss_remove', hp_fc=1, n_sig=10, overwrite=True)
+        #gdets = has_any_cuts(obs.flags.glitches)
+        gstats = obs.flags.glitches.get_stats()
+        obs.restrict('dets', obs.dets.vals[np.asarray(gstats['intervals']) < 10])
+        detrend_tod(obs, method='median', signal_name='hwpss_remove')
+        obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
+        obs.hwpss_remove = np.multiply(obs.hwpss_remove.T, obs.det_cal.phase_to_pW).T
+        
+        #LPF and PCA
+        if True:
+            filt = filters.low_pass_sine2(1, width=0.1)
+            sigfilt = filters.fourier_filter(obs, filt, signal_name='hwpss_remove')
+            obs.wrap('lpf_hwpss_remove', sigfilt, [(0,'dets'),(1,'samps')])
+            obs.restrict('samps',(10*200, -10*200))
+            pca_out = pca.get_pca(obs,signal=obs.lpf_hwpss_remove)
+            pca_signal = pca.get_pca_model(obs, pca_out, signal=obs.lpf_hwpss_remove)
+            median = np.median(pca_signal.weights[:,0])
+            obs.signal = np.divide(obs.signal.T, pca_signal.weights[:,0]/median).T
+        apodize.apodize_cosine(obs, apodize_samps=800)  
+    return obs
+
+def calibrate_obs_after_demod(obs, dtype_tod=np.float32):
+    # project out T
+    filt = filters.low_pass_sine2(0.5, width=0.1)
+    T_lpf = filters.fourier_filter(obs, filt, signal_name='dsT')
+    Q_lpf = filters.fourier_filter(obs, filt, signal_name='demodQ')
+    U_lpf = filters.fourier_filter(obs, filt, signal_name='demodU')
+    obs.wrap('T_lpf', T_lpf, axis_map=[(0,'dets'), (1,'samps')])
+    obs.wrap('Q_lpf', Q_lpf, axis_map=[(0,'dets'), (1,'samps')])
+    obs.wrap('U_lpf', U_lpf, axis_map=[(0,'dets'), (1,'samps')])
+    
+    obs.restrict('samps', (obs.samps.offset+10*200, obs.samps.offset+obs.samps.count-10*200))
+    
+    detrend_tod(obs, method='mean', signal_name='demodQ')
+    detrend_tod(obs, method='mean', signal_name='demodU')
+    detrend_tod(obs, method='mean', signal_name='Q_lpf')
+    detrend_tod(obs, method='mean', signal_name='U_lpf')
+    detrend_tod(obs, method='mean', signal_name='T_lpf')
+
+    coeffsQ = np.zeros(obs.dets.count)
+    coeffsU = np.zeros(obs.dets.count)
+
+    for di in range(obs.dets.count):
+        I = np.linalg.inv(np.tensordot(np.atleast_2d(obs.T_lpf[di]), np.atleast_2d(obs.T_lpf[di]), (1, 1)))
+        c = np.matmul(np.atleast_2d(obs.Q_lpf[di]), np.atleast_2d(obs.T_lpf[di]).T)
+        c = np.dot(I, c.T).T
+        coeffsQ[di] = c[0]
+        I = np.linalg.inv(np.tensordot(np.atleast_2d(obs.T_lpf[di]), np.atleast_2d(obs.T_lpf[di]), (1, 1)))
+        c = np.matmul(np.atleast_2d(obs.U_lpf[di]), np.atleast_2d(obs.T_lpf[di]).T)
+        c = np.dot(I, c.T).T
+        coeffsU[di] = c[0]
+    obs.demodQ -= np.multiply(obs.T_lpf.T, coeffsQ).T
+    obs.demodU -= np.multiply(obs.T_lpf.T, coeffsU).T
+    
+    obs.move('hwpss_model', None)
+    obs.move('hwpss_remove', None)
+    obs.move('gap_filled', None)
+    obs.move('lpf_hwpss_remove', None)
+    
+    hpf = filters.counter_1_over_f(0.1, 2, 1)
+    hpf_Q = filters.fourier_filter(obs, hpf, signal_name='demodQ')
+    hpf_U = filters.fourier_filter(obs, hpf, signal_name='demodU')
+    obs.demodQ = hpf_Q
+    obs.demodU = hpf_U
+    
+    # cut 5% of higher ivar detectors
+    ivar = 1.0/np.var(obs.demodQ, axis=-1)
+    mask_det = ivar > np.percentile(ivar, 95)
+    obs.restrict('dets', obs.dets.vals[~mask_det])
+    
+    return obs
+
+
 def calibrate_obs(obs, dtype_tod=np.float32):
     # The following stuff is very redundant with the normal mapmaker,
     # and should probably be factorized out
@@ -183,7 +319,7 @@ def calibrate_obs(obs, dtype_tod=np.float32):
     #obs.focal_plane.gamma += obs.boresight_offset.gamma
     return obs
 
-def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False, dtype_tod=np.float32):
+def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False, dtype_tod=np.float32, ):
     my_tods = []
     my_inds = []
     if inds is None: inds = list(range(comm.rank, len(obslist), comm.size))
@@ -191,13 +327,13 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False,
         obs_id, detset, band, obs_ind = obslist[ind]
         try:
             tod = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, no_signal=no_signal)
-            tod = calibrate_obs(tod, dtype_tod=dtype_tod)
+            tod = calibrate_obs_new(tod, dtype_tod=dtype_tod)
             my_tods.append(tod)
             my_inds.append(ind)
         except RuntimeError: continue
     return my_tods, my_inds
 
-def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", verbose=0, det_split_masks=None, split_labels=None, time_split_leftright=False, singlestream=False):
+def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", verbose=0, split_labels=None, time_split_leftright=False, singlestream=False, det_in_out=False, det_left_right=False, det_upper_lower=False):
     #det_split_masks is the dictionary that contains detector masks for each split we want to make. Each key has format freq_wafer_split, e.g. f090_w25_detleft, f150_w26_detupper, f090_w27_detin. We need to figure out how many split we'll make 2 per split mode.
     L = logging.getLogger(__name__)
     pre = "" if tag is None else tag + " "
@@ -223,31 +359,32 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         # which is pointless, but shouldn't cost that much time.
         #obs = context.get_obs(obs_id, dets={"wafer_slot" : [detset], "band":band})
         obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, )        
-        obs = calibrate_obs(obs, dtype_tod=dtype_tod)
+        obs = calibrate_obs_new(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower)
         
         # demodulate
         if singlestream == False:
             hwp.demod_tod(obs)
+            obs = calibrate_obs_after_demod(obs, dtype_tod=dtype_tod)
         
         # filter 
-        if singlestream:
-            obs.signal = filters.fourier_filter(obs, filters.high_pass_sine2(0.5))
-        else:
-            obs.dsT    = filters.fourier_filter(obs, filters.high_pass_sine2(0.5), signal_name='dsT')
-            obs.demodQ = filters.fourier_filter(obs, filters.high_pass_sine2(0.5), signal_name='demodQ')
-            obs.demodU = filters.fourier_filter(obs, filters.high_pass_sine2(0.5), signal_name='demodU')
+        #if singlestream:
+        #    obs.signal = filters.fourier_filter(obs, filters.high_pass_sine2(0.5))
+        #else:
+        #    obs.dsT    = filters.fourier_filter(obs, filters.high_pass_sine2(0.3), signal_name='dsT')
+        #    obs.demodQ = filters.fourier_filter(obs, filters.high_pass_sine2(0.3), signal_name='demodQ')
+        #    obs.demodU = filters.fourier_filter(obs, filters.high_pass_sine2(0.3), signal_name='demodU')
                 
         if obs.dets.count == 0: continue
         
         # And add it to the mapmaker
-        if det_split_masks==None:
+        if split_labels==None:
             # this is the case of no splits
             mapmaker.add_obs(name, obs)
         else:
             # this is the case of having splits. We need to pass the split_labels at least. If we have detector splits fixed in time, then we pass the masks in det_split_masks. Otherwise, det_split_masks will be None
-            mapmaker.add_obs(name, obs, det_split_masks=det_split_masks, split_labels=split_labels, detset=detset, freq=band)
+            mapmaker.add_obs(name, obs, split_labels=split_labels)
         
-        if det_split_masks==None:
+        if split_labels==None:
             # Case of no splits 
             # Also build the RHS for the per-pixel timestamp. First
             # make a white noise weighted timestamp per sample timestream
@@ -292,8 +429,8 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
             map.append( tilemap.map_mul(signal_map.idiv[n_split], signal_map.rhs[n_split]) )
         else: 
             map.append( enmap.map_mul(signal_map.idiv[n_split], signal_map.rhs[n_split]) )
-        ivar.append( signal_map.div[n_split,0,0] )
-        with utils.nowarn(): tmap.append( utils.remove_nan(time_rhs[n_split] / ivar[-1]) )
+        ivar.append( signal_map.div[n_split] )
+        with utils.nowarn(): tmap.append( utils.remove_nan(time_rhs[n_split] / ivar[-1][0,0]) )
     return bunch.Bunch(map=map, ivar=ivar, tmap=tmap, signal=signal_map, t0=t0 )
 
 def write_depth1_map(prefix, data, split_labels=None):
@@ -381,19 +518,24 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
     L.addHandler(ch)
 
     context = Context(context)
-    obslists, obskeys, periods, obs_infos, det_split_masks, split_labels = mapmaking.build_obslists(context, query, mode=mode, nset=nset, ntod=ntod, tods=tods, fixed_time=fixed_time, mindur=mindur, det_left_right=det_left_right, det_upper_lower=det_upper_lower, det_in_out=det_in_out )
+    obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, query, mode=mode, nset=nset, ntod=ntod, tods=tods, fixed_time=fixed_time, mindur=mindur)
     tags = []
     cwd = os.getcwd()
-        
-    # if we did not request any split, then det_split_masks will be an empty dictionary
-    if bool(det_split_masks)==False:
-        det_split_masks = None
+    
+    split_labels = []
+    if det_in_out:
+        split_labels.append('det_in')
+        split_labels.append('det_out')
+    if det_left_right:
+        split_labels.append('det_left')
+        split_labels.append('det_right')
+    if det_upper_lower:
+        split_labels.append('det_upper')
+        split_labels.append('det_lower')
+    if not split_labels:
+        #if the list 
         split_labels = None
-    else:
-        # this is the case where we requested at least one split. We will have the labels of the splits in split_labels, e.g. 'detleft', 'detin', 'detupper'. We add to the list the other splits (i.e time dependent).
-        pass
-        # later we will add the time dependent splits here to the labels
-
+    
     # Loop over obslists and map them
     for oi in range(comm_inter.rank, len(obskeys), comm_inter.size):
         pid, detset, band= obskeys[oi]
@@ -404,11 +546,11 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         
         tag     = "%5d/%d" % (oi+1, len(obskeys))
         utils.mkdir(os.path.dirname(prefix))
-        meta_done = os.path.isfile(prefix + "_info.hdf")
+        meta_done = os.path.isfile(prefix + "_full_info.hdf")
         maps_done = os.path.isfile(prefix + ".empty") or (
-            os.path.isfile(prefix + "_map.fits") and
-            os.path.isfile(prefix + "_ivar.fits") and 
-            os.path.isfile(prefix + "_hits.fits")
+            os.path.isfile(prefix + "_full_map.fits") and
+            os.path.isfile(prefix + "_full_ivar.fits") and 
+            os.path.isfile(prefix + "_full_hits.fits")
         )
         if cont and meta_done and (maps_done or meta_only): continue
         if comm_intra.rank == 0:
@@ -416,7 +558,8 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         try:
             # 1. read in the metadata and use it to determine which tods are
             #    good and estimate how costly each is
-            my_tods, my_inds = read_tods(context, obslist, comm=comm_intra, no_signal=True, dtype_tod=dtype_tod)
+            my_tods, my_inds = read_tods(context, obslist, comm=comm_intra, no_signal=True, dtype_tod=dtype_tod, )
+            # after read_tods the detector flags will be added to the axis manager
             my_costs  = np.array([tod.samps.count*len(mapmaking.find_usable_detectors(tod)) for tod in my_tods])
             # 2. prune tods that have no valid detectors
             valid     = np.where(my_costs>0)[0]
@@ -458,7 +601,7 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         if len(my_inds) == 0: continue
         #try:
             # 5. make the maps
-        mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds], subshape, subwcs, noise_model, t0=t, comm=comm_good, tag=tag, dtype_map=dtype_map, dtype_tod=dtype_tod, comps=comps, verbose=verbose, det_split_masks=det_split_masks, split_labels=split_labels, singlestream=singlestream)
+        mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds], subshape, subwcs, noise_model, t0=t, comm=comm_good, tag=tag, dtype_map=dtype_map, dtype_tod=dtype_tod, comps=comps, verbose=verbose, split_labels=split_labels, singlestream=singlestream, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower)
             # 6. write them
         write_depth1_map(prefix, mapdata, split_labels=split_labels, )
         #except DataMissing as e:
