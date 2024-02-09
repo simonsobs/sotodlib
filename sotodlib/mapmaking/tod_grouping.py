@@ -108,28 +108,16 @@ def build_period_obslists(obs_info, periods, context, nset=None):
     pids       = np.searchsorted(periods[:,0], ctimes_mid)-1
     # 2. Build our lists. Not sure how to do this without looping
     for i, row in enumerate(obs_info):
-        #print('the wafers are ',i,row.wafer_slots)
-        # CARLOS: the names of the wafers included are in the "wafer_slots", like "w25,w26,..." 
         wafer_list = ['ws0','ws1','ws2','ws3','ws4','ws5','ws6']
-        #for detset_band in listt[0:nset]:
-        #wafer_list = context.obsfiledb.get_detsets(row.obs_id)
         band_list = ['f090', 'f150']
-        #for detset_band in row.wafer_slots.split(",")[0:nset]: # CARLOS: this is to limit the number of detsets
         for detset in wafer_list[0:nset]:
             for band in band_list:
-                #detset, band = detset_band.split(":")
-                #band = row.obs_id.split('_')[2] # CARLOS: we get the band name from the obs_id, which has the format ctime_tube_band_11111
-                #array = detset.split('_')
-                #detset = array[0]+'_'+array[1]
                 key = (pids[i], detset, band)
                 if key not in obslists: obslists[key] = []
-                # A bit redundant to have detset and band here too, but it
-                # makes the concept of an obslist more general, not just
-                # tied to this particular dictionary
                 obslists[key].append((row.obs_id, detset, band, i))
     return obslists
 
-def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, fixed_time=None, mindur=None, det_in_out=False, det_left_right=False, det_upper_lower=False ):
+def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, fixed_time=None, mindur=None, ):
     """ 
     Return an obslists dictionary (described in build_period_obslists), along with all ancillary data necessary for the mapmaker
     
@@ -151,8 +139,6 @@ def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, f
             Optional, if mode=='fixed_interval', this is the fixed time in seconds
     mindur : int or None
             Optional, minimum duration of an observation to be included in the mapping. If not defined it will be 120 seconds
-    det_in_out: bool
-            Optional, if true then map the detectors into inner and outer for splits
            
     Output
     ______
@@ -192,55 +178,8 @@ def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, f
     else:
         print("Invalid mode!")
         sys.exit(1)
-    # Map the detectors into splits, we process freq / wafer pairs since the number of detectors will be different for different frequencies
-    det_split_masks = {}
-    split_labels = []
-    if det_left_right or det_in_out or det_upper_lower: 
-        # add the labels always in the same order, this will be the order of the splits that must be preserved
-        if det_left_right:
-            split_labels.append('detleft')
-            split_labels.append('detright')
-        if det_upper_lower:
-            split_labels.append('detupper')
-            split_labels.append('detlower')
-        if det_in_out:
-            split_labels.append('detin')
-            split_labels.append('detout')
-        # get the list of wafers and frequencies
-        wafer_list = ['ws0', 'ws1', 'ws2', 'ws3', 'ws4', 'ws5', 'ws6']
-        band_list = ['f090', 'f150']
-        list_freq_wafer = []
-        for detset in wafer_list[0:nset]:
-            for band in band_list:
-                array = detset.split('_')
-                detset = array[0]+'_'+array[1]
-                list_freq_wafer.append((band, detset))
-        for (freq, wafer) in list_freq_wafer:
-            meta = context.get_meta(obs_id=ids[0], dets={"stream_id":wafer, "bandpass":freq})
-            if det_left_right or det_in_out:
-                xi = meta.focal_plane.xi
-                # sort xi 
-                xi_median = np.median(xi)    
-            if det_upper_lower or det_in_out:
-                eta = meta.focal_plane.eta
-                # sort eta
-                eta_median = np.median(eta)
-            if det_left_right:
-                det_split_masks[freq+'_'+wafer+'_detleft'] = xi <= xi_median
-                det_split_masks[freq+'_'+wafer+'_detright'] = xi > xi_median
-            if det_upper_lower:
-                det_split_masks[freq+'_'+wafer+'_detupper'] = eta <= eta_median
-                det_split_masks[freq+'_'+wafer+'_detlower'] = eta > eta_median
-            if det_in_out:
-                # the bounding box is the center of the detset
-                xi_center = np.min(xi) + 0.5 * (np.max(xi) - np.min(xi))
-                eta_center = np.min(eta) + 0.5 * (np.max(eta) - np.min(eta))
-                radii = np.sqrt((xi_center-xi)**2 + (eta_center-eta)**2)
-                radius_median = np.median(radii)
-                det_split_masks[freq+'_'+wafer+'_detin'] = radii <= radius_median
-                det_split_masks[freq+'_'+wafer+'_detout'] = radii > radius_median
-
+    
     # We will make one map per period-detset-band
     obslists = build_period_obslists(obs_infos, periods, context, nset=nset)
     obskeys  = sorted(obslists.keys())
-    return obslists, obskeys, periods, obs_infos, det_split_masks, split_labels
+    return obslists, obskeys, periods, obs_infos
