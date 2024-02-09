@@ -1025,7 +1025,7 @@ class G3tHWP():
                         method += suffix
                     solved['angle'+suffix] *= aman[method]
                 except Exception as e:
-                    logger.error(f"Exception '{e}' thrown while correcting HWP angle. Skip.")
+                    logger.error(f"Exception '{e}' thrown while correcting rotation direction. Skip.")
                     print(traceback.format_exc())
 
             aman['hwp_angle_ver1'+suffix] = np.mod(scipy.interpolate.interp1d(
@@ -1035,7 +1035,6 @@ class G3tHWP():
             # calculate template subtracted angle
             try:
                 self.eval_angle(solved, poly_order=3, suffix=suffix)
-                aman.save(output, h5_address, overwrite=True)
                 aman['hwp_angle_ver2'+suffix] = np.mod(scipy.interpolate.interp1d(
                     solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
                 aman['version'+suffix] = 2
