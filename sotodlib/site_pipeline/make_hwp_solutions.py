@@ -72,8 +72,8 @@ def main(
     min_ctime: Optional[float] = None,
     max_ctime: Optional[float] = None,
     obs_id: Optional[str] = None,
-    logger = None,
     load_h5: Optional[bool] = False,
+    logger = None,
  ):
     if logger is None:
         logger = default_logger
@@ -143,7 +143,7 @@ def main(
     logger.debug(f"Sending query to obsdb: {tot_query}")
     obs_list = ctx.obsdb.query(tot_query)
 
-    if len(obs_list)==0:
+    if len(obs_list) == 0:
         logger.warning(f"No observations returned from query: {query}")
     run_list = []
     completed = man_db.get_entries(['dataset'])['dataset']
@@ -152,7 +152,7 @@ def main(
         if overwrite or not obs['obs_id'] in completed:
             run_list.append(obs)
 
-    #write solutions
+    # write solutions
     for obs in run_list:
         h5_address = obs["obs_id"]
         logger.info(f"Calculating Angles for {h5_address}")
