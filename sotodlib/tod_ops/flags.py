@@ -1,11 +1,6 @@
 import numpy as np
 import scipy.stats as stats
 from scipy.signal import find_peaks
-import os
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import time
 
 ## "temporary" fix to deal with scipy>1.8 changing the sparse setup
 try:
@@ -271,9 +266,7 @@ def get_glitch_flags(aman,
                      overwrite=False,
                      name="glitches",
                      full_output=False,
-                     edge_guard=2000,
-                     save_plot=False,
-                     save_path="./"):
+                     edge_guard=2000):
     """
     Find glitches with fourier filtering. Translation from moby2 as starting point
 
@@ -304,10 +297,6 @@ def get_glitch_flags(aman,
     edge_guard : int
         Number of samples at the beginning and end of the tod to exclude from
         the returned glitch RangesMatrix. Defaults to 2000 samples (10 sec).
-    save_plot : bool
-        If true, creates plot after calculation.
-    save_path : str
-        Path to plot output directory.
 
     Returns
     -------
