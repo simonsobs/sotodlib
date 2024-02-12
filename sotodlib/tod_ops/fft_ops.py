@@ -396,7 +396,7 @@ def fit_noise_model(aman, signal=None, f=None, pxx=None, psdargs=None,
         #                                  maxfev=1600)
 
 
-    noise_model_coeffs = ['fknee', 'w', 'alpha', 's']
+    noise_model_coeffs = ['fknee', 'w', 'alpha']
     noise_fit_stats = core.AxisManager(aman.dets, core.LabelAxis(
         name='noise_model_coeffs', vals=np.array(noise_model_coeffs, dtype='<U8')))
     noise_fit_stats.wrap('fit', fitout, [(0, 'dets'), (1, 'noise_model_coeffs')])
