@@ -1,9 +1,9 @@
 """FFTs and related operations
 """
 from scipy.signal import welch
-from scipy.optimize import curve_fit
-import numpy as np
+from scipy.optimize import minimize
 import pyfftw
+import numpy as np
 from sotodlib import core
 
 import so3g
@@ -295,17 +295,32 @@ def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
     wn = np.sqrt(wn2)
     return wn
 
-def noise_model(f, fknee, w, alpha, s):
+def noise_model(f, fknee, w, alpha):
     """
     Noise model for power spectrum with white noise, and 1/f noise.
     """
-    return w*(1 + s*(fknee/f)**alpha)
+    return w*(1 + (fknee/f)**alpha)
+
+def neglnlike(params, x, y):
+    model = noise_model(x, params)
+    output = np.sum(np.log(model) + y/model)
+    if not np.isfinite(output):
+        return 1.0e30
+    return output
+
+def errFit(hess_inv, resVariance):
+    return np.sqrt( np.diag( hess_inv * resVariance))
 
 def fit_noise_model(aman, signal=None, f=None, pxx=None, psdargs=None,
                     fwhite=(10,100), lowf=1, merge_fit=False,
                     merge_name='noise_fit_stats', merge_psd=True):
     """
     Fits noise model with white and 1/f noise to the PSD of signal.
+    This uses a MLE method that minimizes a log likelihood. This is
+    better for chi^2 distributed data like the PSD.
+
+    Reference: http://keatonb.github.io/archivers/powerspectrumfits
+    
     Args
     ----
     aman : AxisManager
@@ -351,26 +366,30 @@ def fit_noise_model(aman, signal=None, f=None, pxx=None, psdargs=None,
     f = f[1:]
     pxx = pxx[:,1:]
 
-    fitout = np.zeros((aman.dets.count, 4))
-    covout = np.zeros((aman.dets.count, 4, 4))
+    fitout = np.zeros((aman.dets.count, 3))
+    # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
+    covout = np.zeros((aman.dets.count, 3))
     for i in range(aman.dets.count):
         p = pxx[i]
         wnest = np.median(p[((f>fwhite[0]) & (f<fwhite[1]))])
         pfit = np.polyfit(np.log10(f[f<lowf]), np.log10(p[f<lowf]), 1)
         fidx = np.argmin(np.abs(10**np.polyval(pfit, np.log10(f)) - wnest))
-        p0 = [f[fidx], wnest, -pfit[0], 0.5]
-        fitout[i], covout[i] = curve_fit(noise_model, f[f < fwhite[1]], p[f < fwhite[1]],
-                                         p0=p0, bounds=([0,0,0,0],
-                                                        [np.inf,np.inf,np.inf,np.inf]),
-                                         maxfev=1600)
+        p0 = [f[fidx], wnest, -pfit[0]]
+        res = minimize(neglnlike, p0, args=(f, p), method='Nelder-Mead')
+        dFit = errFit(res.hess_inv,  res.fun/(len(p)-len(p0)))
+        fitout[i] = res.x
+        covout[i] = dFit*np.sqrt(2)
+        # fitout[i], covout[i] = curve_fit(noise_model, f[f < fwhite[1]], p[f < fwhite[1]],
+        #                                  p0=p0, bounds=([0,0,0,0],
+        #                                                 [np.inf,np.inf,np.inf,np.inf]),
+        #                                  maxfev=1600)
 
 
     noise_model_coeffs = ['fknee', 'w', 'alpha', 's']
     noise_fit_stats = core.AxisManager(aman.dets, core.LabelAxis(
         name='noise_model_coeffs', vals=np.array(noise_model_coeffs, dtype='<U8')))
     noise_fit_stats.wrap('fit', fitout, [(0, 'dets'), (1, 'noise_model_coeffs')])
-    noise_fit_stats.wrap('cov', covout, [(0, 'dets'), (1, 'noise_model_coeffs'),
-                                         (2, 'noise_model_coeffs')])
+    noise_fit_stats.wrap('cov', covout, [(0, 'dets'), (1, 'noise_model_coeffs')])
 
     if merge_fit:
         aman.wrap(merge_name, noise_fit_stats)
