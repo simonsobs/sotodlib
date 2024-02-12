@@ -382,9 +382,13 @@ def fit_noise_model(aman, signal=None, f=None, pxx=None, psdargs=None,
         fidx = np.argmin(np.abs(10**np.polyval(pfit, np.log10(f)) - wnest))
         p0 = [f[fidx], wnest, -pfit[0]]
         res = minimize(neglnlike, p0, args=(f, p), method='Nelder-Mead')
-        Hfun = ndt.Hessian(lambda params : neglnlike(params, f, p), full_output=True)
-        hessian_ndt, _ = Hfun(res['x'])
-        covout[i] = np.sqrt(np.diag(np.linalg.inv(hessian_ndt)))
+        try:
+            Hfun = ndt.Hessian(lambda params : neglnlike(params, f, p), full_output=True)
+            hessian_ndt, _ = Hfun(res['x'])
+            covout[i] = np.sqrt(np.diag(np.linalg.inv(hessian_ndt)))
+        except LinAlgError:
+            print(f'Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping.')
+            covout[i] = [np.nan, np.nan, np.nan]
         fitout[i] = res.x
         # fitout[i], covout[i] = curve_fit(noise_model, f[f < fwhite[1]], p[f < fwhite[1]],
         #                                  p0=p0, bounds=([0,0,0,0],
