@@ -4,7 +4,7 @@ from scipy.signal import welch
 from scipy.optimize import minimize
 import pyfftw
 import numpy as np
-from sotodlib import core
+import numdifftools as ndt
 
 import so3g
 
@@ -309,12 +309,10 @@ def neglnlike(params, x, y):
         return 1.0e30
     return output
 
-def errFit(hess_inv, resVariance):
-    return np.sqrt( np.diag( hess_inv * resVariance))
-
 def fit_noise_model(aman, signal=None, f=None, pxx=None, psdargs=None,
                     fwhite=(10,100), lowf=1, merge_fit=False,
-                    merge_name='noise_fit_stats', merge_psd=True):
+                    f_max = 100, merge_name='noise_fit_stats', 
+                    merge_psd=True):
     """
     Fits noise model with white and 1/f noise to the PSD of signal.
     This uses a MLE method that minimizes a log likelihood. This is
@@ -345,8 +343,14 @@ def fit_noise_model(aman, signal=None, f=None, pxx=None, psdargs=None,
         for initial guess passed to ``scipy.signal.curve_fit``.
     merge_fit : bool
         Merges fit and fit statistics into input axis manager.
+    f_max : float
+        Maximum frequency to include in the fitting. This is particularly
+        important for lowpass filtered data such as that post demodulation
+        if the data is not downsampled after lowpass filtering.
     merge_name : bool
         If ``merge_fit`` is True then addes into axis manager with merge_name.
+    merge_psd : bool
+        If ``merg_psd`` is True then adds fres and Pxx to the axis manager.
     Returns
     -------
     noise_fit_stats : AxisManager
@@ -364,8 +368,9 @@ def fit_noise_model(aman, signal=None, f=None, pxx=None, psdargs=None,
         else:
             f, pxx = calc_psd(aman, signal=signal, timestamps=aman.timestamps,
                               merge=merge_psd, **psdargs)
-    f = f[1:]
-    pxx = pxx[:,1:]
+    eix = np.argmin(np.abs(f-f_max))
+    f = f[1:eix]
+    pxx = pxx[:,1:eix]
 
     fitout = np.zeros((aman.dets.count, 3))
     # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
@@ -377,9 +382,10 @@ def fit_noise_model(aman, signal=None, f=None, pxx=None, psdargs=None,
         fidx = np.argmin(np.abs(10**np.polyval(pfit, np.log10(f)) - wnest))
         p0 = [f[fidx], wnest, -pfit[0]]
         res = minimize(neglnlike, p0, args=(f, p), method='Nelder-Mead')
-        dFit = errFit(res.hess_inv,  res.fun/(len(p)-len(p0)))
+        Hfun = ndt.Hessian(lambda params : neglnlike(params, f, p), full_output=True)
+        hessian_ndt, _ = Hfun(res['x'])
+        covout[i] = np.sqrt(np.diag(np.linalg.inv(hessian_ndt)))
         fitout[i] = res.x
-        covout[i] = dFit*np.sqrt(2)
         # fitout[i], covout[i] = curve_fit(noise_model, f[f < fwhite[1]], p[f < fwhite[1]],
         #                                  p0=p0, bounds=([0,0,0,0],
         #                                                 [np.inf,np.inf,np.inf,np.inf]),
