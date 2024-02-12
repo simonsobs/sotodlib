@@ -5,6 +5,7 @@ from typing import List
 import yaml, traceback
 import shutil
 import logging
+from pathlib import Path
 from glob import glob
 
 import sqlalchemy as db
@@ -1508,24 +1509,29 @@ class Imprinter:
             session = self.get_session()
         if self.librarian is None:
             from hera_librarian import LibrarianClient
-            conn = self.config.get("librarian_conn")
+            from hera_librarian.settings import client_settings
+            conn = client_settings.connections.get(
+                self.config.get("librarian_conn")
+            )
             if conn is None:
                 raise ValueError(f"'librarian_conn' not in imprinter config")
-            self.librarian = LibrarianClient(conn)
+            self.librarian = LibrarianClient.from_info(conn)
         
-        assert book.status == BOUND, "cannot upload unboard books"
+        assert book.status == BOUND, "cannot upload unbound books"
         dest_path = op.relpath(book.path, self.output_root)
         self.logger.info(f"Uploading book {book.bid} to librarian")
-        result = self.librarian.upload_file(
-            book.path, 
-            dest_path, 
-            meta_mode="infer"
-        )
-        if not result.get('success'):
-            raise ValueError(f"Failed to upload book {book.bid}. Received result"
-                             f" {result}")
-        book.status = UPLOADED
-        session.commit()
+        try:     
+            self.librarian.upload(
+                Path(book.path), 
+                Path(dest_path), 
+            )
+            book.status = UPLOADED
+            session.commit()
+        except Exception as e:
+            self.logger.error(
+                f"Failed to upload book {book.bid}."
+            )
+            raise e
 
     def delete_level2_files(self, book, dry_run=True):
         """Delete level 2 data from already bound books
