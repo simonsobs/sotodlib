@@ -3,7 +3,7 @@ import logging
 from . import flags
 logger = logging.getLogger(__name__)
 
-def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mask=None, in_place=True):
+def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mask=None, in_place=True, wrap=None):
     """
     Apply polynomial filtering to subscan segments in a data array.
     This function applies polynomial filtering to subscan segments within signal for each detector.
@@ -25,6 +25,8 @@ def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mas
         Arbitrary mask can be specified in the style of RangesMatrix.
     in_place: bool
         Optional. If True, `aman.signal` is overwritten with the processed signal.
+    wrap: None or str
+        Optional. Only used when in_place is False. If not None, the filtered TOD is wraped into aman[wrap].
 
     Returns
     -------
@@ -82,7 +84,8 @@ def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mas
                 signal[i_det,start:end+1] -= np.polyval(pars, t[start:end+1]-t_mean)
     if in_place:
         aman.signal = signal
-        
+    if wrap is not None:
+        aman.wrap(wrap, signal, [(0, 'dets'), (1, 'samps')])
     return signal
                 
 def _get_subscan_range_index(scan_flag,_min=0):

@@ -245,7 +245,6 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         elif name in aman.flags:
             aman.flags[name] = ta_flag
         else:
-            print(ta_flag)
             aman.flags.wrap(name, ta_flag)   
     if method == 'az':
         ta_exp = RangesMatrix([ta_flag for i in range(aman.dets.count)])

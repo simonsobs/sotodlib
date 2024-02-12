@@ -178,9 +178,10 @@ def run_preprocess(aman, pipe=None, configs=None, logger=None):
 
     for process in pipe:
         logger.info(f"Processing {process.name}")
-
-        process.process(aman, proc_aman) ## make changes to aman
-        process.calc_and_save(aman, proc_aman) ## calculate data products
+        if process.process_cfgs is not None:
+            process.process(aman, proc_aman) ## make changes to aman
+        if process.calc_cfgs is not None:
+            process.calc_and_save(aman, proc_aman) ## calculate data products
     logger.info("Finished Processing")
 
     return aman, proc_aman
