@@ -4,16 +4,12 @@ This script will run:
 1. automatically if data are acquired as preliminary version.
 2. New versions of the metadata can be created as the analysis evolves.
 """
-import sys
 import os
 import argparse
 import logging
 import yaml
-import datetime as dt
-import scipy 
 from typing import Optional
 
-import sotodlib
 from sotodlib import core
 from sotodlib.hwp.g3thwp import G3tHWP
 from sotodlib.site_pipeline import util
@@ -23,11 +19,11 @@ def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
     parser.add_argument(
-        'context', 
+        'context',
         help="Path to context yaml file to define observation\
         for which to generate hwp angle.")
     parser.add_argument(
-        'HWPconfig', 
+        'HWPconfig',
         help="Path to HWP configuration yaml file.")
     parser.add_argument(
         '-o', '--output-dir', action='store', default=None, type=str,
@@ -42,9 +38,14 @@ def get_parser(parser=None):
         action='store_true',
     )
     parser.add_argument(
-        '--query', 
+        '--load-h5',
+        help="If true, try to load raw encoder data from h5 file",
+        action='store_true',
+    )
+    parser.add_argument(
+        '--query',
         help="Query to pass to the observation list. Use \\'string\\' to "
-             "pass in strings within the query.",  
+             "pass in strings within the query.",
         type=str
     )
     parser.add_argument(
@@ -62,21 +63,22 @@ def get_parser(parser=None):
     return parser
 
 def main(
-    context: str, 
-    HWPconfig: str, 
-    output_dir:Optional[str] = None, 
-    verbose:Optional[int] = 2,
-    overwrite:Optional[bool] = False,
-    query:Optional[str] = None,
-    min_ctime:Optional[float] = None,
-    max_ctime:Optional[float] = None,
-    obs_id:Optional[str] = None,    
-    logger=None,
+    context: str,
+    HWPconfig: str,
+    output_dir: Optional[str] = None,
+    verbose: Optional[int] = 2,
+    overwrite: Optional[bool] = False,
+    query: Optional[str] = None,
+    min_ctime: Optional[float] = None,
+    max_ctime: Optional[float] = None,
+    obs_id: Optional[str] = None,
+    load_h5: Optional[bool] = False,
+    logger = None,
  ):
     if logger is None:
         logger = default_logger
     logger.info(f"Using context {context} and HWPconfig {HWPconfig}")
-    
+
     configs = yaml.safe_load(open(HWPconfig, "r"))
     logger.info("Starting make_hwp_solutions")
 
@@ -87,7 +89,7 @@ def main(
     if not os.path.exists(output_dir):
         logger.info(f"Making output directory {output_dir}")
         os.mkdir(output_dir)
-    
+
     # Set verbose
     if verbose == 0:
         logger.setLevel(logging.ERROR)
@@ -97,22 +99,22 @@ def main(
         logger.setLevel(logging.INFO)
     elif verbose == 3:
         logger.setLevel(logging.DEBUG)
-        
+
     ctx = core.Context(context)
 
     # Get file + dataset from policy.
     # policy = util.ArchivePolicy.from_params(config['archive']['policy'])
     # dest_file, dest_dataset = policy.get_dest(obs_id)
-    # Use 'output_dir' argument for now    
+    # Use 'output_dir' argument for now
     h5_filename = 'hwp_angle.h5'
     man_db_filename = os.path.join(output_dir, 'hwp_angle.sqlite')
     output_filename = os.path.join(output_dir, h5_filename)
-    
+
     if os.path.exists(man_db_filename):
         logger.info(f"Mapping {man_db_filename} for the "
                     "archive index.")
         man_db = core.metadata.ManifestDb(man_db_filename)
-    else: 
+    else:
         logger.info(f"Creating {man_db_filename} for the "
                      "archive index.")
         scheme = core.metadata.ManifestScheme()
@@ -135,13 +137,13 @@ def main(
         if query is not None:
             tot_query += query + " and "
         tot_query = tot_query[4:-4]
-        if tot_query=="":
-            tot_query="1"
+        if tot_query == "":
+            tot_query = "1"
 
     logger.debug(f"Sending query to obsdb: {tot_query}")
     obs_list = ctx.obsdb.query(tot_query)
-        
-    if len(obs_list)==0:
+
+    if len(obs_list) == 0:
         logger.warning(f"No observations returned from query: {query}")
     run_list = []
     completed = man_db.get_entries(['dataset'])['dataset']
@@ -150,30 +152,30 @@ def main(
         if overwrite or not obs['obs_id'] in completed:
             run_list.append(obs)
 
-    #write solutions
+    # write solutions
     for obs in run_list:
         h5_address = obs["obs_id"]
         logger.info(f"Calculating Angles for {h5_address}")
         ctx = core.Context(context)
         tod = ctx.get_obs(obs, no_signal=True)
-        
+
         # make angle solutions
         g3thwp = G3tHWP(HWPconfig)
         g3thwp.write_solution_h5(
-            tod, 
-            output=output_filename, 
-            h5_address=h5_address
+            tod,
+            output=output_filename,
+            h5_address=h5_address,
+            load_h5=load_h5,
         )
         del g3thwp
-        
+
         # Add an entry to the database
         man_db.add_entry(
-            {'obs:obs_id': obs["obs_id"], 'dataset': h5_address}, filename=h5_filename,
-        )   
+            {'obs:obs_id': obs["obs_id"], 'dataset': h5_address}, filename=h5_filename, replace=overwrite,
+        )
     return
-        
+
 if __name__ == '__main__':
     parser = get_parser(parser=None)
     args = parser.parse_args()
     main(**vars(args))
-    
