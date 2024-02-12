@@ -295,10 +295,11 @@ def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
     wn = np.sqrt(wn2)
     return wn
 
-def noise_model(f, fknee, w, alpha):
+def noise_model(f, p):
     """
     Noise model for power spectrum with white noise, and 1/f noise.
     """
+    fknee, w, alpha = p[0], p[1], p[2]
     return w*(1 + (fknee/f)**alpha)
 
 def neglnlike(params, x, y):
@@ -320,7 +321,7 @@ def fit_noise_model(aman, signal=None, f=None, pxx=None, psdargs=None,
     better for chi^2 distributed data like the PSD.
 
     Reference: http://keatonb.github.io/archivers/powerspectrumfits
-    
+
     Args
     ----
     aman : AxisManager
