@@ -386,7 +386,7 @@ def fit_noise_model(aman, signal=None, f=None, pxx=None, psdargs=None,
             Hfun = ndt.Hessian(lambda params : neglnlike(params, f, p), full_output=True)
             hessian_ndt, _ = Hfun(res['x'])
             covout[i] = np.sqrt(np.diag(np.linalg.inv(hessian_ndt)))
-        except LinAlgError:
+        except np.linalg.LinAlgError:
             print(f'Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping.')
             covout[i] = [np.nan, np.nan, np.nan]
         fitout[i] = res.x
