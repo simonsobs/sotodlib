@@ -394,7 +394,7 @@ def fit_noise_model(aman, signal=None, f=None, pxx=None, psdargs=None,
         fitout[i] = res.x
 
 
-    noise_model_coeffs = ['fknee', 'w', 'alpha']
+    noise_model_coeffs = ['fknee', 'white_noise', 'alpha']
     noise_fit_stats = core.AxisManager(aman.dets, core.LabelAxis(
         name='noise_model_coeffs', vals=np.array(noise_model_coeffs, dtype='<U8')))
     noise_fit_stats.wrap('fit', fitout, [(0, 'dets'), (1, 'noise_model_coeffs')])
@@ -403,5 +403,4 @@ def fit_noise_model(aman, signal=None, f=None, pxx=None, psdargs=None,
 
     if merge_fit:
         aman.wrap(merge_name, noise_fit_stats)
-    else:
-        return noise_fit_stats
+    return noise_fit_stats
