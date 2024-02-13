@@ -1,0 +1,43 @@
+# path to L2 HK directory
+data_dir: "/so/level2-daq/satp1/hk/"
+
+# path to L2.5 HK directory
+output_dir: "/so/home/msilvafe/shared_files/hwp_g3/satp1"
+
+# prefix of field name
+# for 1st encoder
+field_instance: 'satp1.hwp-bbb-e1.feeds.HWPEncoder'
+# for 2nd encoder
+field_instance_sub: 'satp1.hwp-bbb-e2.feeds.HWPEncoder'
+
+# name list of HWP_encoder field variable
+field_list:
+- 'rising_edge_count'
+- 'irig_time'
+- 'counter'
+- 'counter_index'
+- 'irig_synch_pulse_clock_time'
+- 'irig_synch_pulse_clock_counts'
+- 'quad'
+- 'approx_hwp_freq'
+
+# HWP OCS packet size
+packet_size: 120
+
+# IRIG type
+irig_type: 0
+
+# number of slots * 2
+num_edges: 1140
+
+# Number of slots representing the width of the reference slot
+ref_edges: 2
+
+# Threshoild for outlier data to calculate nominal slit width
+slit_width_lim: 0.1
+
+# Search range of reference slot
+ref_range: 0.1
+
+# Force quad value (rotation direction)
+force_quad: 0
