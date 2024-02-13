@@ -1,0 +1,22 @@
+tags:
+  basedir: /so/level2-daq/satp1/
+
+# smurf and house-keeping settings
+metakey:
+  archive_path: '{basedir}/timestreams/'
+  db_path: '{basedir}/g3tsmurf.db'
+  meta_path: '{basedir}/smurf/'
+  hk_db_path: '{basedir}/g3hk.db'
+  hk_dir: '{basedir}/hk'
+
+# wire grid specific
+wgfield:
+  encoder: 'satp1.wg-encoder.feeds.wgencoder_full.reference_count'
+  LSL1: 'satp1.wg-actuator.feeds.wgactuator.limitswitch_LSL1'
+  LSL2: 'satp1.wg-actuator.feeds.wgactuator.limitswitch_LSL2'
+  LSR1: 'satp1.wg-actuator.feeds.wgactuator.limitswitch_LSR1'
+  LSR2: 'satp1.wg-actuator.feeds.wgactuator.limitswitch_LSR2'
+
+wg_agent_names:
+  encoder: 'wg-encoder'
+  actuator: 'wg-actuator'
