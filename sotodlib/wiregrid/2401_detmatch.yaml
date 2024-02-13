@@ -1,0 +1,31 @@
+tags:
+  basedir:  /so/metadata/satp1
+  manifestdir: /so/metadata/satp1/manifests
+  #fpdir: /so/home/mhasse/work/231128
+  fpdir: /so/home/hnakata/scratch/metadata/context/mhasse_fp
+  #detmatch_results: /so/home/jlashner/work/daily/2024-01-25/satp1-detmatch/results
+  detmatch_results: /so/home/hnakata/scratch/metadata/context/jldetmatch2401 # copied the directory above
+
+imports:
+  - sotodlib.io.load_book
+  - sotodlib.io.metadata
+
+obsfiledb: '{basedir}/obsfiledb.sqlite'
+obsdb: '{basedir}/obsdb.sqlite'
+
+obs_loader_type: 'obs-book'
+
+metadata:
+  - db: '{manifestdir}/smurf_detsets/v0/smurf_detset_info.sqlite'
+    name: smurf
+    det_info: true
+  - db: '{manifestdir}/det_cal/v0/det_cal.sqlite'
+    name: det_cal
+  - db: '{detmatch_results}/assignment.sqlite'
+    name: det_assignment
+    det_info: true
+  - db: '{fpdir}/focalplane_satp1_231121.sqlite'
+    name: focal_plane
+  - db: '{fpdir}/det_info_wafer.db'
+    det_info: true
+    multi: true
