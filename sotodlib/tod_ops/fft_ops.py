@@ -374,7 +374,7 @@ def fit_noise_model(aman, signal=None, f=None, pxx=None, psdargs=None,
 
     fitout = np.zeros((aman.dets.count, 3))
     # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
-    covout = np.zeros((aman.dets.count, 3))
+    covout = np.zeros((aman.dets.count, 3, 3))
     for i in range(aman.dets.count):
         p = pxx[i]
         wnest = np.median(p[((f>fwhite[0]) & (f<fwhite[1]))])
@@ -385,22 +385,21 @@ def fit_noise_model(aman, signal=None, f=None, pxx=None, psdargs=None,
         try:
             Hfun = ndt.Hessian(lambda params : neglnlike(params, f, p), full_output=True)
             hessian_ndt, _ = Hfun(res['x'])
-            covout[i] = np.sqrt(np.diag(np.linalg.inv(hessian_ndt)))
+            # Inverse of the hessian is an estimator of the covariance matrix
+            # sqrt of the diagonals gives you the standard errors.
+            covout[i] = np.linalg.inv(hessian_ndt)
         except np.linalg.LinAlgError:
             print(f'Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping.')
-            covout[i] = [np.nan, np.nan, np.nan]
+            covout[i] = np.full((3,3), np.nan)
         fitout[i] = res.x
-        # fitout[i], covout[i] = curve_fit(noise_model, f[f < fwhite[1]], p[f < fwhite[1]],
-        #                                  p0=p0, bounds=([0,0,0,0],
-        #                                                 [np.inf,np.inf,np.inf,np.inf]),
-        #                                  maxfev=1600)
 
 
     noise_model_coeffs = ['fknee', 'w', 'alpha']
     noise_fit_stats = core.AxisManager(aman.dets, core.LabelAxis(
         name='noise_model_coeffs', vals=np.array(noise_model_coeffs, dtype='<U8')))
     noise_fit_stats.wrap('fit', fitout, [(0, 'dets'), (1, 'noise_model_coeffs')])
-    noise_fit_stats.wrap('cov', covout, [(0, 'dets'), (1, 'noise_model_coeffs')])
+    noise_fit_stats.wrap('cov', covout, [(0, 'dets'), (1, 'noise_model_coeffs'),
+                                         (2, 'noise_model_coeffs')])
 
     if merge_fit:
         aman.wrap(merge_name, noise_fit_stats)
