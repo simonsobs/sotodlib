@@ -5,6 +5,7 @@ from typing import List
 import yaml, traceback
 import shutil
 import logging
+from pathlib import Path
 from glob import glob
 
 import sqlalchemy as db
@@ -140,9 +141,13 @@ class Books(Base):
 # convenient decorator to repeat a method over all data sources
 def loop_over_tubes(method):
     def wrapper(self, *args, **kwargs):
+        outs = []
         for tube in self.tubes:
-            method(self, tube, *args, **kwargs)
-
+            x = method(self, tube, *args, **kwargs)
+            if x is not None:
+                outs.extend(x)
+        if len(outs)>0:
+            return outs        
     return wrapper
 
 
@@ -572,7 +577,8 @@ class Imprinter:
     def _get_binder_for_book(self, 
         book, 
         pbar=False, 
-        ignore_tags=False
+        ignore_tags=False,
+        ancil_drop_duplicates=False,
     ):
         """get the appropriate bookbinder for the book based on its type"""
         with open(self.g3tsmurf_config, "r") as f:
@@ -598,6 +604,7 @@ class Imprinter:
             bookbinder = BookBinder(
                 book, obsdb, filedb, lvl2_data_root, readout_ids, book_path,
                 ignore_tags=ignore_tags,
+                ancil_drop_duplicates=ancil_drop_duplicates,
             )
             return bookbinder
 
@@ -696,6 +703,7 @@ class Imprinter:
         test_mode=False,
         pbar=False,
         ignore_tags=False,
+        ancil_drop_duplicates=False,
         check_configs={}
     ):
         """Bind book using bookbinder
@@ -714,6 +722,9 @@ class Imprinter:
         ignore_tags : bool
             If true, book will be bound even if the tags between different level 2
             operations don't match. Only ever expected to be turned on by hand.
+        ancil_drop_duplicates: if true, will drop duplicate data from ancilary  
+            files. added to deal with an ocs aggregator error. Only ever 
+            expected to be turned on by hand.
         check_configs: dict
             additional non-default configurations to send to check book
         """
@@ -740,6 +751,7 @@ class Imprinter:
             binder = self._get_binder_for_book(
                 book, 
                 ignore_tags=ignore_tags,
+                ancil_drop_duplicates=ancil_drop_duplicates,
             )
             book.path = op.abspath(binder.outdir)
 
@@ -1084,6 +1096,7 @@ class Imprinter:
         ignore_singles=False,
         stream_ids=None,
         force_single_stream=False,
+        return_obsset=False
     ):
         """Update bdb with new observations from g3tsmurf db.
 
@@ -1104,6 +1117,9 @@ class Imprinter:
             imprinter configuration file.
         force_single_stream: boolean
             if True, treat observations from different streams separately
+        return_obsset: boolean
+            if True, return the list of observation sets instead of registering
+            books. Useful as a debugging tool
         """
         if not self.build_det:
             return
@@ -1226,6 +1242,11 @@ class Imprinter:
                             obs_list = q.all()
                             # add the current obs too
                             obs_list.append(str_obs)
+
+                            # remove overlapping operations
+                            obs_list = [obs for obs in obs_list 
+                                if get_obs_type(obs) == "obs"
+                            ]
                             # check to make sure ALL observations overlap all 
                             # others and the overlap passes the minimum 
                             # requirement
@@ -1267,6 +1288,8 @@ class Imprinter:
         # now our output is a list of ObsSet, where each ObsSet contains
         # all observations that overlap each other which should go
         # into the same book.
+        if return_obsset:
+            return output
 
         # register books in the book database (bdb)
         for oset in output:
@@ -1486,24 +1509,29 @@ class Imprinter:
             session = self.get_session()
         if self.librarian is None:
             from hera_librarian import LibrarianClient
-            conn = self.config.get("librarian_conn")
+            from hera_librarian.settings import client_settings
+            conn = client_settings.connections.get(
+                self.config.get("librarian_conn")
+            )
             if conn is None:
                 raise ValueError(f"'librarian_conn' not in imprinter config")
-            self.librarian = LibrarianClient(conn)
+            self.librarian = LibrarianClient.from_info(conn)
         
-        assert book.status == BOUND, "cannot upload unboard books"
+        assert book.status == BOUND, "cannot upload unbound books"
         dest_path = op.relpath(book.path, self.output_root)
         self.logger.info(f"Uploading book {book.bid} to librarian")
-        result = self.librarian.upload_file(
-            book.path, 
-            dest_path, 
-            meta_mode="infer"
-        )
-        if not result.get('success'):
-            raise ValueError(f"Failed to upload book {book.bid}. Received result"
-                             f" {result}")
-        book.status = UPLOADED
-        session.commit()
+        try:     
+            self.librarian.upload(
+                Path(book.path), 
+                Path(dest_path), 
+            )
+            book.status = UPLOADED
+            session.commit()
+        except Exception as e:
+            self.logger.error(
+                f"Failed to upload book {book.bid}."
+            )
+            raise e
 
     def delete_level2_files(self, book, dry_run=True):
         """Delete level 2 data from already bound books

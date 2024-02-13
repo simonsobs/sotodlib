@@ -374,6 +374,6 @@ Observatory:
    :members:
    :noindex:
 
-.. .. autoclass:: sotodlib.toast.ops.LoadContext
-..    :members:
-..    :noindex:
+.. autoclass:: sotodlib.toast.ops.LoadContext
+   :members:
+   :noindex:

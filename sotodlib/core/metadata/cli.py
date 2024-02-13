@@ -114,6 +114,8 @@ def main(args=None):
             name = entry.get('name')
             if name is None:
                 name = '(unnamed)'
+            if not isinstance(name, str):  # it could be a list!
+                name = str(name)
             if entry.get('det_info'):
                 name += ' -- [det_info]'
             print(f'  {name:<30}: {db_path}')
@@ -166,7 +168,7 @@ def main(args=None):
             if item is None:
                 print(f'  "{args.obs_id}" not found!')
             else:
-                for k, v in db.get(args.obs_id).items():
+                for k, v in db.get(args.obs_id, tags=True).items():
                     print(f'  {k:<20}: {v}')
 
     elif args._subcmd == 'obsfiledb':
