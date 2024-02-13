@@ -201,7 +201,9 @@ class Jumps(_Preprocess):
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        n_cut = count_cuts(proc_aman.jumps_twopi.jump_flag)
+        name = self.save_cfgs.get('jumps_name', 'jumps')
+
+        n_cut = count_cuts(proc_aman[name].jump_flag)
         keep = n_cut <= self.select_cfgs["max_n_jumps"]
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
