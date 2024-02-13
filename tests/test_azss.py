@@ -56,6 +56,7 @@ def make_fake_azss_tod(max_mode=20, noise_amp=1, n_scans=10,
     Makes an axis manager with azimuth synchronous signal
     in it, populated via legendre polynomials plus gaussian noise.
     """
+    np.random.seed(0)
     ts, azpoint = get_scan(n_scans=n_scans)
     az_min, az_max = np.min(azpoint), np.max(azpoint)
     x = ( 2*azpoint - (az_min+az_max) ) / (az_max - az_min)

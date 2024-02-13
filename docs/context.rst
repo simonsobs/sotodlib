@@ -119,20 +119,20 @@ annotated example.
   # specified in the database.
   metadata:
     - db: "{metadata_lib}/cuts_s17_c11_200327_cuts.sqlite"
-      name: "glitch_flags&flags"
+      unpack: "glitch_flags&flags"
     - db: "{metadata_lib}/cuts_s17_c11_200327_planet_cuts.sqlite"
-      name: "source_flags&flags"
+      unpack: "source_flags&flags"
     - db: "{metadata_lib}/cal_s17_c11_200327.sqlite"
-      name: "relcal&cal"
+      unpack: "relcal&cal"
     - db: "{metadata_lib}/timeconst_200327.sqlite"
-      name: "timeconst&"
+      unpack: "timeconst&"
       loader: "PerDetectorHdf5"
     - db: "{metadata_lib}/abscal_190126.sqlite"
-      name: "abscal&cal"
+      unpack: "abscal&cal"
     - db: "{metadata_lib}/detofs_200218.sqlite"
-      name: "focal_plane"
+      unpack: "focal_plane"
     - db: "{metadata_lib}/pointofs_200218.sqlite"
-      name: "pointofs"
+      unpack: "pointofs"
 
 
 With a context like the one above, a user can load a TOD and its
@@ -208,32 +208,10 @@ Context system:
     :func:`sotodlib.core.context.obsloader_template`.
 
 ``metadata``
-
-    A list of metadata specs.  For more detailed description, see the
-    docstring for
-    :func:`SuperLoader.load_raw<metadata.SuperLoader.load_raw>`.  But
-    briefly each metadata spec is a dictionary with the following
-    entries:
-
-    ``db``
-        The path to a ManifestDb.
-
-    ``name``
-
-        A string describing what field to extract from the metadata,
-        and where to store it in the output AxisManager.  For details
-        on the syntax, see
-        :func:`Unpacker.decode<metadata.Unpacker.decode>`.
-
-    ``loader``
-        The name of the metadata loader function to use; these
-        functions must be registered in module variable
-        sotodlib.core.metadata.REGISTRY.  This is optional; if absent
-        it will default to 'HdfPerDetector' or (more likely) to
-        whatever is specified in the ManifestDb.
+    A list of metadata specs.  Each metadata spec is a dict with the
+    schema as described by :class:`metadata.MetadataSpec`.
 
 ``context_hooks``
-
     A string that identifies a set of functions to hook into
     particular parts of the Context system.  See uses of _call_hook()
     in the Context code, for any implemented hook function names and
@@ -264,20 +242,6 @@ function:
 
 .. autofunction:: sotodlib.core.context.obsloader_template
 
-SuperLoader
------------
-
-.. autoclass:: sotodlib.core.metadata.SuperLoader
-   :special-members: __init__
-   :members:
-
-Unpacker
---------
-
-.. autoclass:: sotodlib.core.metadata.Unpacker
-   :special-members: __init__
-   :members:
-
 
 .. py:module:: sotodlib.core.metadata
 .. _metadata-section:
@@ -286,8 +250,8 @@ Unpacker
 Metadata
 --------
 
-Overview and Examples
-=====================
+Background
+==========
 
 The "metadata" we are talking about here consists of things like
 detector pointing offsets, calibration factors, detector time
@@ -318,6 +282,12 @@ observations and the wafer for each detector), the system can support
 resolving the metadata request, loading the results, and broadcasting
 them to their intended targets.
 
+
+Examples
+========
+
+These examples demonstrate the creation of a metadata archive and
+index, and adding an entry to the context.yaml metadata list.
 
 Example 1
 ---------
@@ -359,8 +329,8 @@ metadata index::
 Then have a new context file that includes::
 
     metadata:
-        - db : 'thing_db.gz'
-          name : 'thing'
+        - db: 'thing_db.gz'
+          unpack: 'thing'
 
 Using that context file::
 
@@ -433,7 +403,7 @@ a metadata list that includes::
 
     metadata:
       - db: 'my_new_info.sqlite'
-        name: 'new_info'
+        unpack: 'new_info'
 
 If you want to load the single vector ``my_special_vector`` into the
 top level of the AxisManager, under name ``special``, use this
@@ -441,7 +411,7 @@ syntax::
 
     metadata:
       - db: 'my_new_info.sqlite'
-        name: 'special&my_special_vector'
+        unpack: 'special&my_special_vector'
 
 
 Tips
@@ -818,7 +788,7 @@ The context.yaml metadata entry would probably look like this::
   metadata:
     ...
     - db: '{metadata_lib}/cal_bad_det_issue.gz'
-      name: 'cal_remove_bad&cal'
+      unpack: 'cal_remove_bad&cal'
     ...
 
 
@@ -846,10 +816,19 @@ Metadata Request Processing
 ===========================
 
 Metadata loading is triggered automatically when
-:func:`Context.get_obs()<sotodlib.core.Context.get_obs>` is called.
-The Context code creates a dictionary of parameters, which might
-contain only the ``obs_id``.  For each item in the context.yaml
-``metadata`` entry, a series of steps are performed:
+:func:`Context.get_obs()<sotodlib.core.Context.get_obs>` (or
+``get_meta``) is called.  The parameters to ``get_obs`` define an
+observation of interest, through an ``obs_id``, as well as
+(potentially) a limited set of detectors of interest.  Processing the
+metadata request may require the code to refer to the ObsDb for more
+information about the specified ``obs_id``, and to the DetDb or
+``det_info`` dataset for more information about the detectors.
+
+Steps in metadata request processing
+------------------------------------
+
+For each item in the context.yaml ``metadata`` entry, a series of
+steps are performed:
 
 1. Read ManifestDb.
 
@@ -867,8 +846,8 @@ contain only the ``obs_id``.  For each item in the context.yaml
    is interrogated for what ``obs`` and ``dets`` fields it requires as
    Index Data.  If those fields are not already in the request, then
    the request is augmented to include them; this typically requires
-   interaction with the ObsDb and/or DetDb.  The augmented request is
-   the result of the Promotion Step.
+   interaction with the ObsDb and/or DetDb and det_info.  The
+   augmented request is the result of the Promotion Step.
 
 3. Get Endpoints.
 
@@ -905,12 +884,96 @@ contain only the ``obs_id``.  For each item in the context.yaml
    field from the result, for example).
 
 
+Incomplete or missing metadata
+------------------------------
 
-Changing det_info
------------------
+Metadata is considered "incomplete" for a particular request, if any
+of the following are true:
 
-Metadata entries can be used to augment the  ``det_info`` table
-that is used to screen and match metadata results.  For example::
+- No endpoints were returned from the query to the ManifestDb;
+  i.e. the database has no records of what files contain data
+  pertinent to the request.
+- The results loaded from the metadata archive do not cover the
+  requested sample range or detector set completely (this includes the
+  case where there is zero overlap).
+
+When a metadata result is incomplete, the metadata loader code will
+take one of the following actions:
+
+- `trim`: take the limited metadata result, and trim the merged data
+  object down so it contains only the detectors and samples that are
+  found in the metadata result.
+- `skip`: discard this metadata result; do not include it in the
+  merged data object.
+- `fail`: raise an error.
+
+In the metadata list in ``context.yaml``, each metadata entry can
+declare a preferred action using the ``on_missing`` key.  For
+example::
+
+  metadata:
+    - label: optional_relcal
+      on_missing: skip
+      db: "relcal1.sqlite"
+      unpack: "optional_relcal&cal"
+    - label: critical_relcal
+      on_missing: fail
+      db: "relcal2.sqlite"
+      unpack: "critical_relcal&cal"
+
+The default behavior is ``trim``.  The behavior specified in
+``context.yaml`` can be overridden through the call to
+:func:`Context.get_obs()<sotodlib.core.Context.get_obs>` or
+:func:`Context.get_meta()<sotodlib.core.Context.get_meta>`; just use
+the ``on_missing`` argument to specify what should happen for metadata
+with a specific label.  Examples::
+
+  # Suppose this fails because relcal2.sqlite does not cover the obs ...
+  tod = ctx.get_obs(obs_id)
+
+  # This will instead ignore the result, and not populate critical_relcal.
+  tod = ctx.get_obs(obs_id, on_missing={'critical_relcal': 'skip'})
+
+
+Note that "skipping" can have confusing downstream consequences, such
+as when a ``det_info`` entry doesn't get added and then some metadata
+product tries to use it as an index field.
+
+
+Rules for augmenting and using det_info
+---------------------------------------
+
+The metadata loader associates metadata results to individual
+detectors using fields from the observation's ``det_info``.  For any
+single observation, the ``det_info`` is first initialized from:
+
+- The ObsFileDb; this provides the unique ``readout_id`` for each
+  channel, as well as the ``detset`` to which each belongs.
+- If a DetDb has been specified, everything in there is copied into
+  ``det_info``.
+
+From that starting point, additional fields can be loaded into the
+``det_info``; these fields can then be used to load metadata indexed
+in a variety of ways.  For the mu-mux readout used in SO, the
+following additional steps will usually be performed to augment the
+``det_info``:
+
+- A "channel map" (a.k.a. "det map", "det match", ...) result will be
+  loaded, to associate a ``det_id`` with each of the loaded
+  ``readout_id`` values (or most of them, hopefully).  While the
+  ``readout_id`` describes a specific channel of the readout hardware,
+  the ``det_id`` corresponds to a particular optical device (e.g. a
+  detector with known position, orientation, and passband).
+- Some "wafer info" will be loaded, containing various properties of
+  the detectors, as designed (for example, their approximate
+  locations; passbands; wiring information; etc.).  This is a single
+  table of data for each physical wafer, indexed naturally by
+  ``det_id``, but the rows here can not be associated with each
+  ``readout_id`` until we have loaded the "channel map".
+
+Special metadata entries in context.yaml are used to augment the
+``det_info``.  table; these are marked with ``det_info: true`` and do
+not have a ``unpack: ...`` field.  For example::
 
   metadata:
   - ...
@@ -918,39 +981,93 @@ that is used to screen and match metadata results.  For example::
     det_info: true
   - ...
 
-The boolean ``'det_info': true`` marks the above as a special metadata
-entry to update ``det_info``.  It is expected that the database
-(``more_det_info.sqlite``) is a standard ManifestDb, which will be
-queried in the usual way except that when we get to the "Wrap
-Metadata" step, instead the following is performed:
+It is expected that the database (``more_det_info.sqlite``) is a
+standard ManifestDb, which will be queried in the usual way except
+that when we get to the "Wrap Metadata" step, instead the following is
+performed:
 
-  - An index field will be identified in the current active
-    ``det_info`` -- it can be either ``dets:readout_id`` or
-    ``dets:det_id`` -- to match against the new metadata.
-  - The columns from the new metadata are merged into the active
-    ``det_info``, ensuring that the index field values correspond.
-  - Only the rows for which the index field has the same value in the
-    two objects are kept.
+- All the loaded fields are inspected, and any fields that are already
+  found in the current ``det_info`` are used as Index fields.
+- The columns from the new metadata are merged into the active
+  ``det_info``, ensuring that the index field values correspond.
+- Only the rows for which the index field has the same value in the
+  two objects are kept.
 
-As subsequent metadata are processed, they can match against any
-fields that have been added to ``det_info`` by preceding entries in
-the metadata list.  However, currently it is only possible to augment
-``det_info`` using ``readout_id`` or ``det_id``.
+Here are a few more tips about det_info:
 
-By default, ``readout_id`` / ``det_id`` are expected to be unique
-indices.  It is often useful to permit multiple matches, especially
-for the special value "NOT_FOUND" in ``det_id``.  To permit this, add
-'multi: true' to the metadata block.  For example::
+- *All* fields in the det_info metdata should be prefixed with
+  ``dets:``, to signify that they are associated with the dets axis
+  (this is similar to fields used as index fields in standard
+  metadata.
+- The field called ``dets:readout_id`` is assumed, throughout the
+  Context/Metdata code, to correspond to the values in the ``.dets``
+  axis of the TOD AxisManager.
+- By convention, ``dets:det_id`` is used for the physical detector (or
+  pseudo-detector device) identifier.  The special value "NO_MATCH" is
+  used for cases where the ``det_id`` could not be determined.
 
-  metadata:
-  ...
-  - db: 'wafer_det_map.sqlite'   # the 'readout_id' -> 'det_id' mapping
-    det_info: true
-  - db: 'wafer_info.sqlite'      # the 'det_id' -> misc properties table
-    det_info: true
-    multi: true                  # Set multi=true if det_id=NOT_FOUND might
-                                 # need to be broadcast to multiple readout_id
-  ...
+When new det_info are merged in, any fields found in both the existing
+and new det_info will be used to form the association.  Many-to-many
+matching is fully supported, meaning that a unique index
+(e.g. ``readout_id``) does not need to be used in the new det_info.
+However, it is expected that in most cases either ``readout_id`` or
+``det_id`` will be used to label det_info contributions.
+
+
+Metadata System APIs
+====================
+
+load_metadata
+-------------
+
+*This function provides a way to load metadata for an AxisManager,
+from a ManifestDb, without having to encode the result in a
+context.yaml metadata entry.*
+
+.. autofunction:: load_metadata
+
+
+MetadataSpec
+------------
+
+.. autoclass:: MetadataSpec
+   :special-members: __init__
+   :members:
+
+
+SuperLoader
+-----------
+
+.. autoclass:: SuperLoader
+   :special-members: __init__
+   :members:
+
+
+ResultSet
+---------
+
+.. autoclass:: ResultSet
+   :special-members: __init__
+   :members:
+
+sotodlib.io.metadata
+--------------------
+
+This module contains functions for working with ResultSet in HDF5.
+
+Here's the docstring for ``write_dataset``:
+
+.. autofunction:: sotodlib.io.metadata.write_dataset
+
+Here's the docstring for ``read_dataset``:
+
+.. autofunction:: sotodlib.io.metadata.read_dataset
+
+Here's the class documentation for ResultSetHdfLoader:
+
+.. autoclass:: sotodlib.io.metadata.ResultSetHdfLoader
+   :inherited-members: __init__
+   :members:
 
 
 ------------------------------------
@@ -966,10 +1083,15 @@ intended to carry precision results needed for mapping, such as
 calibration information or precise pointing and polarization angle
 data.
 
-Certain properties may change with time, for example if wiring or
-optics tube arrangements are adjusted from one season of observations
-to the next.  The ``DetDb`` is intended to support values that change
-with time.  **The timestamp support is still under development.**
+
+.. note::
+
+   DetDb is not planned for use in SO, because of the complexity of
+   the ``readout_id`` to ``det_id`` mapping problem.  The ``det_info``
+   system (described in the :ref:`metadata-section` section) is used
+   for making detector information available in the loaded TOD object.
+   DetDb is still used for simulations and for wrapping of data from
+   other readout systems.
 
 
 Using a DetDb (Tutorial)
@@ -1167,9 +1289,10 @@ properties::
   'geometry.wafer_pol']
 
 
-Creating a DetDb [empty]
-========================
+Creating a DetDb
+================
 
+For an example, see source code of :func:`get_example<detdb.get_example>`.
 
 Database organization
 =====================
@@ -1239,6 +1362,8 @@ Auto-generated documentation should appear here.
 .. autoclass:: DetDb
    :special-members: __init__
    :members:
+
+.. autofunction:: sotodlib.core.metadata.detdb.get_example
 
 
 ---------------------------
@@ -1589,36 +1714,6 @@ Class Documentation
    :special-members: __init__
    :members:
 
-
----------
-ResultSet
----------
-
-Auto-generated documentation should appear here.
-
-.. autoclass:: ResultSet
-   :special-members: __init__
-   :members:
-
---------------------
-sotodlib.io.metadata
---------------------
-
-This module contains functions for working with ResultSet in HDF5.
-
-Here's the docstring for ``write_dataset``:
-
-.. autofunction:: sotodlib.io.metadata.write_dataset
-
-Here's the docstring for ``read_dataset``:
-
-.. autofunction:: sotodlib.io.metadata.read_dataset
-
-Here's the class documentation for ResultSetHdfLoader:
-
-.. autoclass:: sotodlib.io.metadata.ResultSetHdfLoader
-   :inherited-members: __init__
-   :members:
 
 -----------------
 Command Line Tool

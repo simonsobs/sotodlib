@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2023 Simons Observatory.
+# Copyright (c) 2018-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import os
@@ -16,19 +16,12 @@ import ephem
 from scipy.interpolate import RectBivariateSpline
 from scipy.signal import square
 
-from toast.timing import function_timer
-
+from toast.timing import function_timer, Timer
 from toast import qarray as qa
-
-from toast.data import Data
-
 from toast.traits import trait_docs, Int, Unicode, Float, Instance, List, Quantity
-
 from toast.ops.operator import Operator
 from toast.instrument import Focalplane
-
-from toast.utils import Logger, Timer, unit_conversion
-
+from toast.utils import Logger, unit_conversion
 from toast.observation import default_values as defaults
 
 from sotodlib.coords import local

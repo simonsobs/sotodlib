@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import argparse
@@ -6,6 +6,7 @@ from functools import wraps
 
 import toast
 import toast.mpi
+import toast.traits
 
 
 def workflow_timer(f):
@@ -154,7 +155,7 @@ def setup_job(
     )
 
     # Instantiate operators and templates
-    job = toast.config.create_from_config(config)
+    job = toast.traits.create_from_config(config)
 
     if verbose:
         out = ""
@@ -176,3 +177,24 @@ def setup_job(
         print(out)
 
     return job, config, otherargs, runargs
+
+
+def reduction_group_size(job, runargs, comm):
+    log = toast.utils.Logger.get()
+    if runargs.group_size is not None:
+        msg = f"Using user-specifed process group size of {runargs.group_size}"
+        log.info_rank(msg, comm=comm)
+        group_size = runargs.group_size
+    else:
+        if job.operators.mlmapmaker.enabled:
+            msg = f"ML mapmaker is enabled, forcing process group size to 1"
+            log.info_rank(msg, comm=comm)
+            group_size = 1
+        else:
+            msg = f"Using default process group size"
+            log.info_rank(msg, comm=comm)
+            if comm is None:
+                group_size = 1
+            else:
+                group_size = comm.size
+    return group_size

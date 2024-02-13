@@ -1,4 +1,4 @@
-# Copyright (c) 2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import warnings

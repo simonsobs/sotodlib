@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2021 Simons Observatory.
+# Copyright (c) 2020-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Operator for interfacing with the Maximum Likelihood Mapmaker.
 
@@ -7,11 +7,8 @@
 import os
 
 import numpy as np
-
 import traitlets
-
 from astropy import units as u
-
 from pixell import enmap, tilemap, fft
 
 import toast
@@ -32,7 +29,7 @@ from ...core import AxisManager, IndexAxis, OffsetAxis, LabelAxis
 @trait_docs
 class MLMapmaker(Operator):
     """Operator which accumulates data to the Maximum Likelihood Mapmaker.
-    
+
     """
 
     # Class traits
@@ -92,9 +89,11 @@ class MLMapmaker(Operator):
     )
 
     nmat_dir = Unicode(
-        "{out_dir}/nmats",
+        None,
+        allow_none=True,
         help="Where to read/write/cache noise matrices. See nmat_mode. "
-        "If {out_dir} is in the string, then it will be expanded to the value of the out_dir parameter")
+        "If None, write to {out_dir}/nmats"
+    )
 
     dtype_map = Unicode("float64", help="Numpy dtype of map products")
 
@@ -403,7 +402,10 @@ class MLMapmaker(Operator):
             # AxisManager(az[samps], el[samps], roll[samps], samps:OffsetAxis(372680))
 
             # Maybe load precomputed noise model
-            nmat_dir  = self.nmat_dir.format(out_dir=self.out_dir)
+            if self.nmat_dir is None:
+                nmat_dir  = os.path.join(self.out_dir, "nmats")
+            else:
+                nmat_dir  = self.nmat_dir
             nmat_file = nmat_dir + "/nmat_%s.hdf" % ob.name
             there = os.path.isfile(nmat_file)
             if self.nmat_mode == "load" and not there:
