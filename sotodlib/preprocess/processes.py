@@ -204,7 +204,7 @@ class Noise(_Preprocess):
         
         if self.calc_cfgs['fit']:
             noise = tod_ops.fft_ops.fit_noise_model(aman, pxx=psd.Pxx, 
-                                                    freqs=psd.freqs, 
+                                                    f=psd.freqs, 
                                                     merge_fit=True,
                                                     **self.calc_cfgs['noise_args'])
         else:
