@@ -52,8 +52,12 @@ class DetBiasFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("det_bias_flags", dbc_aman)
 
-    def select(self, meta):
-        keep = ~meta.preprocess.det_bias_flags.det_bias_flags
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~proc_aman.det_bias_flags.det_bias_flags
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
 
@@ -83,13 +87,15 @@ class Trends(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("trends", trend_aman)
     
-    def select(self, meta):
+    def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
             return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
         if self.select_cfgs["kind"] == "any":
-            keep = ~has_any_cuts(meta.preprocess.trends.trend_flags)
+            keep = ~has_any_cuts(proc_aman.trends.trend_flags)
         elif self.select_cfgs == "all":
-            keep = ~has_all_cut(meta.preprocess.trends.trend_flags)
+            keep = ~has_all_cut(proc_aman.trends.trend_flags)
         else:
             raise ValueError(f"Entry '{self.select_cfgs['kind']}' not"
                                 "understood. Expect 'any' or 'all'")
@@ -123,12 +129,13 @@ class GlitchDetection(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("glitches", glitch_aman)
  
-    def select(self, meta):
+    def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
             return meta
-        
+        if proc_aman is None:
+            proc_aman = meta.preprocess
         flag = sparse_to_ranges_matrix(
-            meta.preprocess.glitches.glitch_detection > self.select_cfgs["sig_glitch"]
+            proc_aman.glitches.glitch_detection > self.select_cfgs["sig_glitch"]
         )
         n_cut = count_cuts(flag)
         keep = n_cut <= self.select_cfgs["max_n_glitch"]
@@ -191,10 +198,13 @@ class Noise(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("noise", noise)
 
-    def select(self, meta):
+    def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
             return meta
-        keep = meta.preprocess.noise.white_noise <= self.select_cfgs["max_noise"]
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+
+        keep = proc_aman.noise.white_noise <= self.select_cfgs["max_noise"]
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
     
