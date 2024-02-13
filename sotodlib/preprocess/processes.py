@@ -175,16 +175,24 @@ class Noise(_Preprocess):
     def calc_and_save(self, aman, proc_aman):
         if "psd" not in aman:
             raise ValueError("PSD is not saved in AxisManager")
+        
+        if self.calc_cfgs['fit']:
+            fit_args = {x: self.calc_cfgs[x] for x in self.calc_cfgs if x != 'fit'}
+            noise = tod_ops.fft_ops.fit_noise_model(aman, pxx=aman.psd.Pxx, 
+                                                    freqs=aman.psd.freqs, 
+                                                    merge_fit=True,
+                                                    **fit_args)
+        else:
+            wn = tod_ops.fft_ops.calc_wn(
+                aman, 
+                pxx=aman.psd.Pxx, 
+                freqs=aman.psd.freqs, 
+                **self.calc_cfgs
+            )
+            noise = core.AxisManager(aman.dets)
+            noise.wrap("white_noise", wn, [(0,"dets")])
+            aman.wrap("noise", noise)
 
-        wn = tod_ops.fft_ops.calc_wn(
-            aman, 
-            pxx=aman.psd.Pxx, 
-            freqs=aman.psd.freqs, 
-            **self.calc_cfgs
-        )
-        noise = core.AxisManager(aman.dets)
-        noise.wrap("white_noise", wn, [(0,"dets")])
-        aman.wrap("noise", noise)
         self.save(proc_aman, noise)
     
     def save(self, proc_aman, noise):
