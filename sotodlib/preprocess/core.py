@@ -89,7 +89,7 @@ class _Preprocess(object):
             return
         raise NotImplementedError
         
-    def select(self, meta):
+    def select(self, meta, proc_aman=None):
         """ This function runs any desired data selection of the preprocessing
         pipeline results. Assumes the pipeline has already been run and that the
         resulting proc_aman is now saved under the ``preprocess`` key in the
