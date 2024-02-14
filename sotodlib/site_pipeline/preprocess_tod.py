@@ -135,7 +135,7 @@ def preprocess_tod(
         db_data['dets:'+group_by] = group
         
         logger.info(f"Saving to database under {db_data}")
-        if db.match(db_data) is None:
+        if len(db.inspect(db_data)) == 0:
             db.add_entry(db_data, dest_file)
 
 def load_preprocess_det_select(obs_id, configs, context=None):
