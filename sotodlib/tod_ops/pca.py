@@ -10,7 +10,7 @@ import numpy as np
 
 
 def get_pca_model(tod=None, pca=None, n_modes=None, signal=None,
-                  wrap=None, wrap_pca=None):
+                  wrap=None):
     """Convert a PCA decomposition into the signal basis, i.e. into
     time-dependent modes that one might use for cleaning or
     calibrating.
@@ -68,6 +68,8 @@ def get_pca_model(tod=None, pca=None, n_modes=None, signal=None,
     output.wrap('weights', R, [(0, 'dets'), (1, 'eigen')])
     output.wrap('modes', np.dot(R.transpose(), signal),
                 [(0, 'eigen'), (1, 'samps')])
+    if not(wrap is None):
+        tod.wrap(wrap, output)
     return output
 
 
@@ -117,6 +119,8 @@ def get_pca(tod=None, cov=None, signal=None, wrap=None):
     idx = np.argsort(-E)
     output.wrap('E', E[idx], [(0, mode_axis.name)])
     output.wrap('R', R[:, idx], [(0, dets.name), (1, mode_axis.name)])
+    if not(wrap is None):
+        tod.wrap(wrap, output)
     return output
 
 
