@@ -5,23 +5,9 @@ import argparse
 
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
-from sotodlib.preprocess import _Preprocess, PIPELINE, processes
+from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
 logger = sp_util.init_logger("preprocess")
-
-def _build_pipe_from_configs(configs):
-    pipe = []
-    for process in configs["process_pipe"]:
-        name = process.get("name")
-        if name is None:
-            raise ValueError(f"Every process step must have a 'name' key")
-        cls = PIPELINE.get(name)
-        if cls is None:
-            logger.warning(f"'{name}' not registered as a pipeline element,"
-                            "ignoring")
-            continue
-        pipe.append(cls(process))
-    return pipe
 
 def _get_preprocess_context(configs, context=None):
     if type(configs) == str:
@@ -126,14 +112,13 @@ def preprocess_tod(
             scheme=scheme
         )
 
-    pipe = _build_pipe_from_configs(configs)
-    
-    logger.info(f"{len(groups)} groups to run for {obs_id}")
+    pipe = Pipeline(configs["process_pipe"], logger=logger)
+
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
 
         aman = context.get_obs(obs_id, dets={group_by:group})
-        aman, proc_aman = run_preprocess(aman, pipe, logger=logger)
+        proc_aman = pipe.run(aman)
 
         policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
         dest_file, dest_dataset = policy.get_dest(obs_id)
@@ -153,38 +138,6 @@ def preprocess_tod(
         if db.match(db_data) is None:
             db.add_entry(db_data, dest_file)
 
-def run_preprocess(aman, pipe=None, configs=None, logger=None):
-    """Run preprocessing on any loaded AxisManager. Broken out so
-    the pipeline can be easily run without databases.
-
-    Arguments
-    ---------
-    aman: AxisManager
-        loaded AxisManager
-    pipe: list
-        pipeline list as built by _build_pipe_from_configs 
-    configs: string or dict 
-        a preprocessing config file or loaded config dictionary
-    """
-    if logger is None: 
-        logger = sp_util.init_logger("preprocess")
-    
-    if pipe is None:
-        if configs is None:
-            raise ValueError("Either pipe or configs must be specified")
-        pipe = _build_pipe_from_configs(configs)
-
-    proc_aman = core.AxisManager( aman.dets, aman.samps)
-
-    for process in pipe:
-        logger.info(f"Processing {process.name}")
-
-        process.process(aman, proc_aman) ## make changes to aman
-        process.calc_and_save(aman, proc_aman) ## calculate data products
-    logger.info("Finished Processing")
-
-    return aman, proc_aman
-
 def load_preprocess_det_select(obs_id, configs, context=None):
     """ Loads the metadata information for the Observation and runs through any
     data selection specified by the Preprocessing Pipeline.
@@ -199,7 +152,7 @@ def load_preprocess_det_select(obs_id, configs, context=None):
     """
     configs, context = _get_preprocess_context(configs, context)
     
-    pipe = _build_pipe_from_configs(configs)
+    pipe = Pipeline(configs["process_pipe"], logger=logger)
     meta = context.get_meta(obs_id)
 
     for process in pipe:
@@ -225,11 +178,9 @@ def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml", context=None 
     configs, context = _get_preprocess_context(configs, context)
     meta = load_preprocess_det_select(obs_id, configs=configs, context=context)
     
-    pipe = _build_pipe_from_configs(configs)
+    pipe = Pipeline(configs["process_pipe"], logger=logger)
     aman = context.get_obs(meta)
-    for process in pipe:
-        logger.info(f"Processing {process.name}")
-        process.process(aman, aman.preprocess)
+    pipe.run(aman, aman.preprocess)
     return aman
 
 

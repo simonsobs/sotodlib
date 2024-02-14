@@ -1,6 +1,6 @@
 """Base Class and PIPELINE register for the preprocessing pipeline scripts."""
-
-PIPELINE = {}
+import logging
+from .. import core
 
 class _Preprocess(object):
     """The base class for Preprocessing modules which defines the required
@@ -115,11 +115,76 @@ class _Preprocess(object):
         raise NotImplementedError
     
     @staticmethod
-    def register(name, process_class):
+    def register(process_class):
         """Registers a new modules with the PIPELINE"""
+        name = process_class.name
 
-        if PIPELINE.get(name) is None:
-            PIPELINE[name] = process_class
+        if Pipeline.PIPELINE.get(name) is None:
+            Pipeline.PIPELINE[name] = process_class
+        else:
+            raise ValueError(
+                f"Preprocess Module of name {name} is already Registered"
+            )
 
 
 
+class Pipeline(list):
+    """This class is designed to create and run pipelines out of all the
+    different preprocessing modules (classes that inherent from _Preprocess)
+    """
+    PIPELINE = {}
+
+    def __init__(self, config_dict, logger=None):
+        if logger is None:
+            logger = logging.getLogger("pipeline")
+        self.logger = logger
+        super().__init__( [self._check_item(item) for item in config_dict])
+    
+    def _check_item(self, item):
+        if isinstance(item, _Preprocess):
+            return item
+        elif isinstance(item, dict):
+            name = item.get("name")
+            if name is None:
+                raise ValueError(f"Processes made from dictionary must have a 'name' key")
+            cls = self.PIPELINE.get(name)
+            if cls is None:
+                raise ValueError(f"'{name}' not registered as a pipeline element")
+            return cls(item)
+        else:
+            raise ValueError(f"Unknown type created a pipeline element")
+    
+    # make pipeline have all the list pieces
+    def append(self, item):
+        super().append( self._check_item(item) )
+    def insert(self, index, item):
+        super().insert(index, self._check_item(item))
+    def extend(self, index, other):
+        if isinstance(other, type(self)):
+            super().extend(other)
+        else:
+            super().extend( [self._check_item(item) for item in other])
+    def __setitem__(self, index, item):
+        super().__setitem__(index, self._check_item(item))
+    
+    def run(self, aman, proc_aman=None, select=True):
+        if proc_aman is None:
+            proc_aman = core.AxisManager( aman.dets, aman.samps)
+            run_calc = True
+        else:
+            if aman.dets.count != proc_aman.dets.count or not np.all(aman.dets.vals == proc_aman.dets.vals):
+                self.logger.warning("proc_aman has different detectors than aman. Cutting aman to match")
+                det_list = [det for det in proc_aman.dets.vals if det in aman.dets.vals]
+                aman.restrict('dets', det_list)
+                proc_aman.restrict('dets', det_list)
+            run_calc = False
+            
+        for process in self:
+            self.logger.info(f"Running {process.name}")
+            process.process(aman, proc_aman)
+            if run_calc:
+                process.calc_and_save(aman, proc_aman)
+            if select:
+                process.select(aman, proc_aman)
+                proc_aman.restrict('dets', aman.dets.vals)
+        return proc_aman
