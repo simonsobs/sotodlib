@@ -48,7 +48,7 @@ def _get_groups(obs_id, configs, context):
     else:
         det_info = context.get_det_info(obs_id)
         groups = det_info.subset(keys=[group_by]).distinct()[group_by]
-    return group_by, groups
+    return group_by, list(groups)
 
 def preprocess_tod(
     obs_id, 
@@ -257,7 +257,7 @@ def main(
             if x is None or len(x) == 0:
                 run_list.append( (obs, None) )
             elif len(x) != len(groups):
-                [groups.remove(a['dets:detset']) for a in x]
+                [groups.remove(a[f'dets:{group_by}']) for a in x]
                 run_list.append( (obs, groups) )
 
     logger.info(f"Beginning to run preprocessing on {len(run_list)} observations")
