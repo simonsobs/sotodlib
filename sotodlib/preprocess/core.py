@@ -130,16 +130,29 @@ class _Preprocess(object):
 
 
 class Pipeline(list):
-    """This class is designed to create and run pipelines out of all the
-    different preprocessing modules (classes that inherent from _Preprocess)
+    """This class is designed to create and run pipelines out of a series of
+    different preprocessing modules (classes that inherent from _Preprocess). It
+    inherits list object. It also contains the registration of all possible
+    preprocess modules in Pipeline.PIPELINE
     """
+
     PIPELINE = {}
 
-    def __init__(self, config_dict, logger=None):
+    def __init__(self, modules, logger=None):
+        """
+        Arguments
+        ---------
+        modules: iterable
+            A list or other iterable that contains either instantiated
+            _Preprocess instances or the configuration dictionary used to
+            instantiate a module
+        logger: optional
+            logging.logger instance used by the pipeline to send updates
+        """
         if logger is None:
             logger = logging.getLogger("pipeline")
         self.logger = logger
-        super().__init__( [self._check_item(item) for item in config_dict])
+        super().__init__( [self._check_item(item) for item in modules])
     
     def _check_item(self, item):
         if isinstance(item, _Preprocess):
@@ -169,6 +182,40 @@ class Pipeline(list):
         super().__setitem__(index, self._check_item(item))
     
     def run(self, aman, proc_aman=None, select=True):
+        """
+        The main workhorse function for the pipeline class. This function takes
+        an AxisManager TOD and successively runs the pipeline of preprocessing
+        modules on the AxisManager. The order of operations called by run are::
+
+            for process in pipeline:
+                process.process()
+                process.calc_and_save()
+                    process.save() ## called by process.calc_and_save()
+                process.select()
+
+        Arguments
+        ---------
+        aman: AxisManager
+            A TOD object. Generally expected to be raw, unprocessed data. This
+            axismanager will be edited in place by the process and select
+            functions of each preprocess module
+        proc_aman: AxisManager (Optional)
+            A preprocess axismanager. If this is provided it is assumed that the
+            pipeline has previously been run on this specific TOD and has
+            returned this preprocess axismanager. In this case, calls to
+            ``process.calc_and_save()`` are skipped as the information is
+            expected to be present in this AxisManager.
+        select: boolean (Optional)
+            if True, the aman detector axis is restricted as described in
+            each preprocess module
+
+        Returns
+        -------
+        proc_aman: AxisManager
+            A preprocess axismanager that contains all data products calculated
+            throughout the running of the pipeline
+        
+        """
         if proc_aman is None:
             proc_aman = core.AxisManager( aman.dets, aman.samps)
             run_calc = True
