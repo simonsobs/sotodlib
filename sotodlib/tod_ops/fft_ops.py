@@ -1,9 +1,10 @@
 """FFTs and related operations
 """
 from scipy.signal import welch
-import numpy as np
+from scipy.optimize import minimize
 import pyfftw
-from sotodlib import core
+import numpy as np
+import numdifftools as ndt
 
 import so3g
 
@@ -248,6 +249,11 @@ def calc_psd(
     )
     if merge:
         aman.merge( core.AxisManager(core.OffsetAxis("fsamps", len(freqs))))
+        if overwrite:
+            if "freqs" in aman._fields:
+                aman.move("freqs", None)
+            if "Pxx" in aman._fields:
+                aman.move("Pxx", None)
         aman.wrap("freqs", freqs, [(0,"fsamps")])
         aman.wrap("Pxx", Pxx, [(0,"dets"),(1,"fsamps")])
     return freqs, Pxx
@@ -293,3 +299,113 @@ def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
     
     wn = np.sqrt(wn2)
     return wn
+
+def noise_model(f, p):
+    """
+    Noise model for power spectrum with white noise, and 1/f noise.
+    """
+    fknee, w, alpha = p[0], p[1], p[2]
+    return w*(1 + (fknee/f)**alpha)
+
+def neglnlike(params, x, y):
+    model = noise_model(x, params)
+    output = np.sum(np.log(model) + y/model)
+    if not np.isfinite(output):
+        return 1.0e30
+    return output
+
+def fit_noise_model(aman, signal=None, f=None, pxx=None, psdargs=None,
+                    fwhite=(10,100), lowf=1, merge_fit=False,
+                    f_max = 100, merge_name='noise_fit_stats', 
+                    merge_psd=True):
+    """
+    Fits noise model with white and 1/f noise to the PSD of signal.
+    This uses a MLE method that minimizes a log likelihood. This is
+    better for chi^2 distributed data like the PSD.
+
+    Reference: http://keatonb.github.io/archivers/powerspectrumfits
+
+    Args
+    ----
+    aman : AxisManager
+        Axis manager which has samps axis aligned with signal.
+    signal : nparray
+        Signal sized ndets x nsamps to fit noise model to.
+        Default is None which corresponds to aman.signal.
+    f : nparray
+        Frequency of PSD of signal.
+        Default is None which calculates f, pxx from signal.
+    pxx : nparray
+        PSD sized ndets x len(f) which is fit to with model.
+        Default is None which calculates f, pxx from signal.
+    psdargs : dict
+        Dictionary of optional argument for ``scipy.signal.welch``
+    fwhite : tuple
+        Low and high frequency used to estimate white noise for initial
+        guess passed to ``scipy.signal.curve_fit``.
+    lowf : tuple
+        Frequency below which estimate of 1/f noise index and knee are estimated
+        for initial guess passed to ``scipy.signal.curve_fit``.
+    merge_fit : bool
+        Merges fit and fit statistics into input axis manager.
+    f_max : float
+        Maximum frequency to include in the fitting. This is particularly
+        important for lowpass filtered data such as that post demodulation
+        if the data is not downsampled after lowpass filtering.
+    merge_name : bool
+        If ``merge_fit`` is True then addes into axis manager with merge_name.
+    merge_psd : bool
+        If ``merg_psd`` is True then adds fres and Pxx to the axis manager.
+    Returns
+    -------
+    noise_fit_stats : AxisManager
+        If merge_fit is False then axis manager with fit and fit statistics
+        is returned otherwise nothing is returned and axis manager is wrapped
+        into input aman.
+    """
+    if signal is None:
+        signal = aman.signal
+
+    if f is None or pxx is None:
+        if psdargs is None:
+            f, pxx = calc_psd(aman, signal=signal, timestamps=aman.timestamps,
+                              merge=merge_psd)
+        else:
+            f, pxx = calc_psd(aman, signal=signal, timestamps=aman.timestamps,
+                              merge=merge_psd, **psdargs)
+    eix = np.argmin(np.abs(f-f_max))
+    f = f[1:eix]
+    pxx = pxx[:,1:eix]
+
+    fitout = np.zeros((aman.dets.count, 3))
+    # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
+    covout = np.zeros((aman.dets.count, 3, 3))
+    for i in range(aman.dets.count):
+        p = pxx[i]
+        wnest = np.median(p[((f>fwhite[0]) & (f<fwhite[1]))])
+        pfit = np.polyfit(np.log10(f[f<lowf]), np.log10(p[f<lowf]), 1)
+        fidx = np.argmin(np.abs(10**np.polyval(pfit, np.log10(f)) - wnest))
+        p0 = [f[fidx], wnest, -pfit[0]]
+        res = minimize(neglnlike, p0, args=(f, p), method='Nelder-Mead')
+        try:
+            Hfun = ndt.Hessian(lambda params : neglnlike(params, f, p), full_output=True)
+            hessian_ndt, _ = Hfun(res['x'])
+            # Inverse of the hessian is an estimator of the covariance matrix
+            # sqrt of the diagonals gives you the standard errors.
+            covout[i] = np.linalg.inv(hessian_ndt)
+        except np.linalg.LinAlgError:
+            print(f'Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping.')
+            covout[i] = np.full((3,3), np.nan)
+        fitout[i] = res.x
+
+
+    noise_model_coeffs = ['fknee', 'white_noise', 'alpha']
+    noise_fit_stats = core.AxisManager(aman.dets, core.LabelAxis(
+        name='noise_model_coeffs', vals=np.array(noise_model_coeffs, dtype='<U8')))
+    noise_fit_stats.wrap('fit', fitout, [(0, 'dets'), (1, 'noise_model_coeffs')])
+    noise_fit_stats.wrap('cov', covout, [(0, 'dets'), (1, 'noise_model_coeffs'),
+                                         (2, 'noise_model_coeffs')])
+
+    if merge_fit:
+        aman.wrap(merge_name, noise_fit_stats)
+    return noise_fit_stats

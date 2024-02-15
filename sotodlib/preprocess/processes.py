@@ -144,21 +144,36 @@ class PSDCalc(_Preprocess):
     name = "psd"
     
     def process(self, aman, proc_aman):
-        freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, **self.process_cfgs)
+        if 'signal' in self.process_cfgs:
+            signal = aman[self.process_cfgs['signal']]
+        else:
+            signal = aman['signal']
+
+        freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=signal,
+                                              **self.process_cfgs['psd_cfgs'])
         fft_aman = core.AxisManager(
             aman.dets, 
             core.OffsetAxis("fsamps",len(freqs))
         )
         fft_aman.wrap("freqs", freqs, [(0,"fsamps")])
         fft_aman.wrap("Pxx", Pxx, [(0,"dets"),(1,"fsamps")])
-        aman.wrap("psd", fft_aman)
+        if self.process_cfgs['wrap_name'] is None:
+            aman.wrap("psd", fft_aman)
+        else:
+            aman.wrap(self.process_cfgs['wrap_name'], fft_aman)
 
     def calc_and_save(self, aman, proc_aman):
-        self.save(proc_aman, aman.psd)
-    
+        if self.process_cfgs['wrap_name'] is None:
+            self.save(proc_aman, aman.psd)
+        else:
+            self.save(proc_aman, aman[self.process_cfgs['wrap_name']])
+
     def save(self, proc_aman, fft_aman):
-        if self.save_cfgs:
-            proc_aman.wrap("psd", fft_aman)
+        if not(self.save_cfgs is None):
+            if self.save_cfgs['wrap_name'] is None:
+                proc_aman.wrap("psd", fft_aman)
+            else:
+                proc_aman.wrap(self.save_cfgs['wrap_name'], fft_aman)
 
 class Noise(_Preprocess):
     """Estimate the white noise levels in the data. Assumes the PSD has been
@@ -173,28 +188,52 @@ class Noise(_Preprocess):
     name = "noise"
     
     def calc_and_save(self, aman, proc_aman):
-        if "psd" not in aman:
-            raise ValueError("PSD is not saved in AxisManager")
+        if self.calc_cfgs['signal'] is None:
+            if "psd" not in aman:
+                raise ValueError("PSD is not saved in AxisManager")
+            psd = aman.psd
+        else:
+            if self.calc_cfgs['signal'] not in aman:
+                raise ValueError(f"{self.calc_cfgs['signal']} is not saved in AxisManager")
+            psd = aman[self.calc_cfgs['signal']]
+        
+        if self.calc_cfgs is None:
+            self.calc_cfgs = {}
+            self.calc_cfgs['fit'] = False
+            self.calc_cfgs['signal'] = None 
+        
+        if self.calc_cfgs['fit']:
+            noise = tod_ops.fft_ops.fit_noise_model(aman, pxx=psd.Pxx, 
+                                                    f=psd.freqs, 
+                                                    merge_fit=True,
+                                                    **self.calc_cfgs['noise_args'])
+        else:
+            wn = tod_ops.fft_ops.calc_wn(aman, pxx=psd.Pxx,
+                                         freqs=psd.freqs,
+                                         **self.calc_cfgs['noise_args'])
+            noise = core.AxisManager(aman.dets)
+            noise.wrap("white_noise", wn, [(0,"dets")])
+            if self.calc_cfgs['wrap_name'] is None:
+                aman.wrap("noise", noise)
+            else:
+                aman.wrap(self.calc_cfgs['wrap_name'], noise)
 
-        wn = tod_ops.fft_ops.calc_wn(
-            aman, 
-            pxx=aman.psd.Pxx, 
-            freqs=aman.psd.freqs, 
-            **self.calc_cfgs
-        )
-        noise = core.AxisManager(aman.dets)
-        noise.wrap("white_noise", wn, [(0,"dets")])
-        aman.wrap("noise", noise)
         self.save(proc_aman, noise)
     
     def save(self, proc_aman, noise):
-        if self.save_cfgs:
-            proc_aman.wrap("noise", noise)
+        if not(self.save_cfgs is None):
+            if self.save_cfgs['wrap_name'] is None:
+                proc_aman.wrap("noise", noise)
+            else:
+                proc_aman.wrap(self.save_cfgs['wrap_name'], noise)
 
     def select(self, meta):
         if self.select_cfgs is None:
             return meta
-        keep = meta.preprocess.noise.white_noise <= self.select_cfgs["max_noise"]
+        if self.select_cfgs['name'] is None:
+            keep = meta.preprocess.noise.white_noise <= self.select_cfgs["max_noise"]
+        else:
+            keep = meta.preprocess[self.select_cfgs['name']].white_noise <= self.select_cfgs["max_noise"] 
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
     
