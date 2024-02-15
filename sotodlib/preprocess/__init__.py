@@ -1,2 +1,2 @@
-from .core import _Preprocess, PIPELINE
+from .core import _Preprocess, Pipeline
 from .processes import *
