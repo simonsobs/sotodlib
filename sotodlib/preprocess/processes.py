@@ -53,7 +53,7 @@ class DetBiasFlags(_Preprocess):
             proc_aman.wrap("det_bias_flags", dbc_aman)
 
     def select(self, meta):
-        keep = ~meta.preprocess.det_bias_flags.det_bias_flags
+        keep = ~has_all_cut(meta.preprocess.det_bias_flags.det_bias_flags)
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
 
