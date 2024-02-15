@@ -42,9 +42,9 @@ processing pipeline would look like::
     # Metadata index & archive filenaming
     archive:
         index: 'preprocess_archive.sqlite'
-    policy:
-        type: 'simple'
-        filename: 'preprocess_archive.h5'
+        policy:
+            type: 'simple'
+            filename: 'preprocess_archive.h5'
 
     process_pipe:
         - name : "fft_trim"

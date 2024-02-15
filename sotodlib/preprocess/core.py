@@ -1,5 +1,6 @@
 """Base Class and PIPELINE register for the preprocessing pipeline scripts."""
 import logging
+import numpy as np
 from .. import core
 
 class _Preprocess(object):
