@@ -18,32 +18,31 @@ import sotodlib.io.load_smurf as ls
 from sotodlib.io.load_smurf import Observations
 
 wg_degpercount = 360/52000
-stream_ids = ['ufm_mv19', 'ufm_mv18', 'ufm_mv22', 'ufm_mv29', 'ufm_mv7', 'ufm_mv9', 'ufm_mv15'] # e.g. MF1
 
-def get_det_angle(aman, **kwargs):
+def get_det_angle(aman, wg_ctx, wg_offset, stopped_time):
     """
     Calibrate TODs and get det_angle_raw by using the wire grid.
     Before using this code, your axis manager must have two field implemented by HWP, i.e., demodQ and demodU
 
     Parameters:
     - aman : AxisManager
-    - wg_config : yaml file for the settings to load the wire grid meta data
-        e.g. wg_config = '/so/home/hnakata/scratch/metadata/context/2401_wg_satp1.yaml'
+    - wg_ctx : yaml file for the settings to load the wire grid meta data
+        e.g. wg_ctx = '/so/home/hnakata/scratch/metadata/context/2401/2401_wg_satp1.yaml'
     - wg_offset : the offset angle of wires defined by the hardware of the Grid Loader
     - stopped_time : the stopped time of your target operation
     Return:
     - aman : wraped with the calibration data of the wire grid. Fields are explained in each method.
     """
-    _config = kwargs['wg_config']
-    _offset = kwargs['wg_offset']
-    _stopped_time = kwargs['stopped_time']
+    _config = wg_ctx
+    _offset = wg_offset
+    _stopped_time = stopped_time
     #
     # wrap the house-keeping data of the wire grid
     aman = wg_wrap_hk(aman, _config)
     #
     # restrict AxisManger within the operation range
     idx_wg_inside = _get_operation_range(aman)
-    aman = aman.restrict('samps', (idx_wg_inside[0], idx_wg_inside[-1]), in_place=False)
+    aman = aman.restrict('samps', (idx_wg_inside[0], idx_wg_inside[-1]))
     #
     # wrap the demodQ/demodU related with the steps of the wire grid
     # AxisManager here must have demodQ/demodU by the HWP
@@ -64,13 +63,13 @@ def get_det_angle(aman, **kwargs):
     return aman
 
 # wrap HouseKeeping data
-def wg_wrap_hk(aman, wg_config):
+def wg_wrap_hk(aman, wg_ctx):
     """
     Wrap the house-keeping data about the wire grid operation.
 
     Parameters:
     - aman : AxisManager
-    - wg_config : same as the definition in the get_det_angle
+    - wg_ctx : same as the definition in the get_det_angle
 
     Return:
     - aman : AxisManager
@@ -81,7 +80,7 @@ def wg_wrap_hk(aman, wg_config):
         LSR1 : Status of the limit switch RIGHT 1 of the actuator
         LSR2 : Status of the limit switch RIGHT 2 of the actuator
     """
-    wgctx = Context(wg_config)
+    wgctx = Context(wg_ctx)
     metakeys = wgctx['metakey']
     wgfield = wgctx['wgfield']
     agent_names = wgctx['wg_agent_names']
@@ -90,9 +89,9 @@ def wg_wrap_hk(aman, wg_config):
     #
     wgenc = hk_utils.get_detcosamp_hkaman(aman, alias=['enc_deg'], fields = [wgfield['encoder']], data_dir = metakeys['hk_dir'])
     wglsl1 = hk_utils.get_detcosamp_hkaman(aman, alias=['limitswitchL1'], fields = [wgfield['LSL1']], data_dir = metakeys['hk_dir'])
-    wglsl2 = hk_utils.get_detcosamp_hkaman(aman, alias=['limitswitchL1'], fields = [wgfield['LSL2']], data_dir = metakeys['hk_dir'])
-    wglsr1 = hk_utils.get_detcosamp_hkaman(aman, alias=['limitswitchL1'], fields = [wgfield['LSR1']], data_dir = metakeys['hk_dir'])
-    wglsr2 = hk_utils.get_detcosamp_hkaman(aman, alias=['limitswitchL1'], fields = [wgfield['LSR2']], data_dir = metakeys['hk_dir'])
+    wglsl2 = hk_utils.get_detcosamp_hkaman(aman, alias=['limitswitchL2'], fields = [wgfield['LSL2']], data_dir = metakeys['hk_dir'])
+    wglsr1 = hk_utils.get_detcosamp_hkaman(aman, alias=['limitswitchR1'], fields = [wgfield['LSR1']], data_dir = metakeys['hk_dir'])
+    wglsr2 = hk_utils.get_detcosamp_hkaman(aman, alias=['limitswitchR2'], fields = [wgfield['LSR2']], data_dir = metakeys['hk_dir'])
     #
     wg_ax = core.AxisManager(aman.samps, aman.dets)
     wg_ax.wrap('enc_deg', wgenc[enc][enc][0]*wg_degpercount, [(0,'samps')])
@@ -200,6 +199,10 @@ def wg_wrap_QU(aman, stopped_time, thresholds=None):
         Q, U : Q (and U) signal for steps
         Qerr, Uerr : the standard deviations of Q (and U) signal for steps
     """
+    if hasattr(aman, 'demodQ') == False:
+        print("This AxisManager does not have demodQ/demodU.")
+        print("Please call this method after you have demodulated the signal.")
+        return False
     ts_step, wg_deg = _detect_steps(aman, stopped_time, thresholds)
     ts_instep = []
     step_Q = []
@@ -344,7 +347,7 @@ def wg_get_cfitres(aman):
     cfitval = []
     cfitcov = []
     cfitresvar = []
-    for _i in range(np.shape(aman.det_info)[0]):
+    for _i in range(aman.dets.count):
         obs_data.append(np.array([aman.wg.Q[:, _i], aman.wg.U[:, _i]]))
         obs_std = np.array([aman.wg.Qerr[:, _i], aman.wg.Uerr[:, _i]])
         params_init = _get_initial_param_circle(obs_data[-1])
@@ -378,7 +381,7 @@ def wg_get_lfitres(aman):
     lfitval = []
     lfiterr = []
     lfitchi2 = []
-    for _i in range(np.shape(aman.det_info)[0]):
+    for _i in range(aman.dets.count):
         _ang_demodQU = np.rad2deg(np.arctan2(aman.wg.U[:,_i] - aman.wg.cfitval[_i][1], aman.wg.Q[:,_i] - aman.wg.cfitval[_i][0]))
         yerr_temp = np.sqrt(aman.wg.Qerr[:,_i]**2 + aman.wg.Uerr[:,_i]**2) # this is a temporal value, NOT correct
         c = cost.LeastSquares((aman.wg.enc_ang_deg+90)%180-90, _ang_demodQU%360, yerr_temp, _linear1d)
