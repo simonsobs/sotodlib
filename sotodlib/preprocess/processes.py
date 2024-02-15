@@ -52,9 +52,13 @@ class DetBiasFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("det_bias_flags", dbc_aman)
 
-    def select(self, meta):
-        keep = ~meta.preprocess.det_bias_flags.det_bias_flags
-        meta.restrict("dets", meta.dets.vals[keep])
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~proc_aman.det_bias_flags.det_bias_flags
+        meta.restrict("dets", meta.dets.vals[has_all_cut(keep)])
         return meta
 
 class Trends(_Preprocess):
@@ -83,13 +87,15 @@ class Trends(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("trends", trend_aman)
     
-    def select(self, meta):
+    def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
             return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
         if self.select_cfgs["kind"] == "any":
-            keep = ~has_any_cuts(meta.preprocess.trends.trend_flags)
+            keep = ~has_any_cuts(proc_aman.trends.trend_flags)
         elif self.select_cfgs == "all":
-            keep = ~has_all_cut(meta.preprocess.trends.trend_flags)
+            keep = ~has_all_cut(proc_aman.trends.trend_flags)
         else:
             raise ValueError(f"Entry '{self.select_cfgs['kind']}' not"
                                 "understood. Expect 'any' or 'all'")
@@ -123,18 +129,85 @@ class GlitchDetection(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("glitches", glitch_aman)
  
-    def select(self, meta):
+    def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
             return meta
-        
+        if proc_aman is None:
+            proc_aman = meta.preprocess
         flag = sparse_to_ranges_matrix(
-            meta.preprocess.glitches.glitch_detection > self.select_cfgs["sig_glitch"]
+            proc_aman.glitches.glitch_detection > self.select_cfgs["sig_glitch"]
         )
         n_cut = count_cuts(flag)
         keep = n_cut <= self.select_cfgs["max_n_glitch"]
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
+
+class FixJumps(_Preprocess):
+    name = "fix_jumps"
+
+    def process(self, aman, proc_aman):
+        field = self.process_cfgs['jumps_aman']
+        aman.signal = tod_ops.jumps.jumpfix_subtract_heights(
+            aman.signal,
+            proc_aman[field].jump_flag.mask(),
+            inplace=True,
+            heights=proc_aman[field].jump_heights,
+        )
+
+
+class Jumps(_Preprocess):
+    """Run generic jump finding and fixing algorithm.
     
+    calc_cfgs should have 'function' defined as one of 
+    'find_jumps', 'twopi_jumps' or 'slow_jumps'. Any additional configs to the
+    jump function goes in 'jump_configs'. 
+
+    Saves results in proc_aman under the "jumps" field.
+
+    Data section should define a maximum number of jumps "max_n_jumps".
+
+    .. autofunction:: sotodlib.tod_ops.jumps.find_jumps
+    """
+
+    name = "jumps"
+
+    def calc_and_save(self, aman, proc_aman):
+        function = self.calc_cfgs.get("function", "find_jumps")
+        cfgs = self.calc_cfgs.get('jump_configs', {})
+
+        if function == 'find_jumps':
+            func = tod_ops.jumps.find_jumps
+        elif function == 'twopi_jumps':
+            func = tod_ops.jumps.twopi_jumps
+        elif function == 'slow_jumps':
+            func = tod_ops.jumps.slow_jumps
+        else:
+            raise ValueError("function must be 'find_jumps', 'twopi_jumps' or" 
+                            f"'slow_jumps'. Received {function}")
+
+        jumps, heights = func(aman, merge=False, fix=False, **cfgs)
+        jump_aman = tod_ops.jumps.jumps_aman(aman, jumps, heights)
+        self.save(proc_aman, jump_aman)
+
+    def save(self, proc_aman, jump_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            name = self.save_cfgs.get('jumps_name', 'jumps')
+            proc_aman.wrap(name, jump_aman)
+
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        name = self.save_cfgs.get('jumps_name', 'jumps')
+
+        n_cut = count_cuts(proc_aman[name].jump_flag)
+        keep = n_cut <= self.select_cfgs["max_n_jumps"]
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+
 class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the AxisManager under the
     "psd" field. All process configs goes to `calc_psd`
@@ -227,13 +300,18 @@ class Noise(_Preprocess):
             else:
                 proc_aman.wrap(self.save_cfgs['wrap_name'], noise)
 
-    def select(self, meta):
+    def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
             return meta
+
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+
         if self.select_cfgs['name'] is None:
-            keep = meta.preprocess.noise.white_noise <= self.select_cfgs["max_noise"]
+            keep = proc_aman.noise.white_noise <= self.select_cfgs["max_noise"]
         else:
-            keep = meta.preprocess[self.select_cfgs['name']].white_noise <= self.select_cfgs["max_noise"] 
+            keep = proc_aman[self.select_cfgs['name']].white_noise <= self.select_cfgs["max_noise"] 
+            
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
     
@@ -355,7 +433,9 @@ class GlitchFill(_Preprocess):
         for pcfg in pcfgs:
             args[pcfg] = self.process_cfgs[pcfg]
 
-        tod_ops.gapfill.fill_glitches(aman, signal=signal, glitch_flags=flags, **args)
+        tod_ops.gapfill.fill_glitches(
+            aman, signal=signal, glitch_flags=flags, **args
+        )
 
 
 class FlagTurnarounds(_Preprocess):
@@ -408,19 +488,21 @@ class SubPolyf(_Preprocess):
     def process(self, aman, proc_aman):
         tod_ops.sub_polyf.subscan_polyfilter(aman, **self.process_cfgs)
 
-_Preprocess.register(Trends.name, Trends)
-_Preprocess.register(FFTTrim.name, FFTTrim)
-_Preprocess.register(Detrend.name, Detrend)
-_Preprocess.register(GlitchDetection.name, GlitchDetection)
-_Preprocess.register(PSDCalc.name, PSDCalc)
-_Preprocess.register(Noise.name, Noise)
-_Preprocess.register(Calibrate.name, Calibrate)
-_Preprocess.register(EstimateHWPSS.name, EstimateHWPSS)
-_Preprocess.register(SubtractHWPSS.name, SubtractHWPSS)
-_Preprocess.register(Apodize.name, Apodize)
-_Preprocess.register(Demodulate.name, Demodulate)
-_Preprocess.register(EstimateAzSS.name, EstimateAzSS)
-_Preprocess.register(GlitchFill.name, GlitchFill)
-_Preprocess.register(FlagTurnarounds.name, FlagTurnarounds)
-_Preprocess.register(SubPolyf.name, SubPolyf)
-_Preprocess.register(DetBiasFlags.name, DetBiasFlags)
+_Preprocess.register(Trends)
+_Preprocess.register(FFTTrim)
+_Preprocess.register(Detrend)
+_Preprocess.register(GlitchDetection)
+_Preprocess.register(Jumps)
+_Preprocess.register(FixJumps)
+_Preprocess.register(PSDCalc)
+_Preprocess.register(Noise)
+_Preprocess.register(Calibrate)
+_Preprocess.register(EstimateHWPSS)
+_Preprocess.register(SubtractHWPSS)
+_Preprocess.register(Apodize)
+_Preprocess.register(Demodulate)
+_Preprocess.register(EstimateAzSS)
+_Preprocess.register(GlitchFill)
+_Preprocess.register(FlagTurnarounds)
+_Preprocess.register(SubPolyf)
+_Preprocess.register(DetBiasFlags)
