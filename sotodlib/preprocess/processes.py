@@ -210,11 +210,12 @@ class Jumps(_Preprocess):
 
 class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the AxisManager under the
-    "psd" field. All process configs goes to `calc_psd`
+    "psd" field. Example config dictionary:
 
     {
         "name : "psd"
-        "signal: "signal"
+        "signal: "signal" # optional
+        "wrap": "psd" # optional
         "process": 
             "psd_cfgs": # optional
                 # kwargs to scipy.welch
@@ -227,10 +228,12 @@ class PSDCalc(_Preprocess):
     """
     name = "psd"
     
-    def init(self, step_cfgs):
+    def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.wrap = step_cfgs.get('wrap', 'psd')
-        super().__init__(self, step_configs)
+
+        super().__init__(step_cfgs)
+        
 
     def process(self, aman, proc_aman):
         psd_cfgs = self.process_cfgs.get('psd_cfgs', {})
