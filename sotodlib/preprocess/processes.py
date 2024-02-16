@@ -212,41 +212,44 @@ class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the AxisManager under the
     "psd" field. All process configs goes to `calc_psd`
 
+    {
+        "name : "psd"
+        "signal: "signal"
+        "process": 
+            "psd_cfgs": # optional
+                # kwargs to scipy.welch
+                "nperseg": 1024 
+            "wrap_name": "psd" # optional
+        "calc": True
+        "save": True
+    }
     .. autofunction:: sotodlib.tod_ops.fft_ops.calc_psd
     """
     name = "psd"
     
-    def process(self, aman, proc_aman):
-        if 'signal' in self.process_cfgs:
-            signal = aman[self.process_cfgs['signal']]
-        else:
-            signal = aman['signal']
+    def init(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+        self.wrap = step_cfgs.get('wrap', 'psd')
+        super().__init__(self, step_configs)
 
-        freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=signal,
-                                              **self.process_cfgs['psd_cfgs'])
+    def process(self, aman, proc_aman):
+        psd_cfgs = self.process_cfgs.get('psd_cfgs', {})
+        freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
+                                              **psd_cfgs)
         fft_aman = core.AxisManager(
             aman.dets, 
             core.OffsetAxis("fsamps",len(freqs))
         )
         fft_aman.wrap("freqs", freqs, [(0,"fsamps")])
         fft_aman.wrap("Pxx", Pxx, [(0,"dets"),(1,"fsamps")])
-        if self.process_cfgs['wrap_name'] is None:
-            aman.wrap("psd", fft_aman)
-        else:
-            aman.wrap(self.process_cfgs['wrap_name'], fft_aman)
+        aman.wrap(self.wrap, fft_aman)
 
     def calc_and_save(self, aman, proc_aman):
-        if self.process_cfgs['wrap_name'] is None:
-            self.save(proc_aman, aman.psd)
-        else:
-            self.save(proc_aman, aman[self.process_cfgs['wrap_name']])
+        self.save(proc_aman, aman[self.wrap])
 
     def save(self, proc_aman, fft_aman):
         if not(self.save_cfgs is None):
-            if self.save_cfgs['wrap_name'] is None:
-                proc_aman.wrap("psd", fft_aman)
-            else:
-                proc_aman.wrap(self.save_cfgs['wrap_name'], fft_aman)
+            proc_aman.wrap(self.wrap, fft_aman)
 
 class Noise(_Preprocess):
     """Estimate the white noise levels in the data. Assumes the PSD has been
