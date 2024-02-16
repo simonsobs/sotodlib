@@ -193,7 +193,10 @@ class Jumps(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            name = self.save_cfgs.get('jumps_name', 'jumps')
+            if type(self.save_cfgs) == bool:
+                name = 'jumps'
+            else:
+                name = self.save_cfgs.get('jumps_name', 'jumps')
             proc_aman.wrap(name, jump_aman)
 
     def select(self, meta, proc_aman=None):

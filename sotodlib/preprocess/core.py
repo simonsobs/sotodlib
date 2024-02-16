@@ -229,6 +229,10 @@ class Pipeline(list):
             
         for process in self:
             self.logger.info(f"Running {process.name}")
+            for k in ['save_cfgs', 'calc_cfgs', 'process_cfgs', 'select_cfgs']:
+                cfg = process.__getattribute__(k)
+                if (type(cfg) == dict) and ('signal' in cfg):
+                    process.__getattribute__(k)['signal'] = aman[cfg['signal']]
             process.process(aman, proc_aman)
             if run_calc:
                 process.calc_and_save(aman, proc_aman)
