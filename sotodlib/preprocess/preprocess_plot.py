@@ -5,7 +5,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import time
 
+from sotodlib import hwp
 import sotodlib.core as core
+from sotodlib.core.flagman import has_all_cut
 
 def plot_det_bias_flags(aman, msks, rfrac_range=(0.1, 0.7),
                         psat_range=(0, 15), save_path="./", save_name="bias_cuts.png"):
