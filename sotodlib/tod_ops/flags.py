@@ -16,7 +16,7 @@ from . import fourier_filter
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                       psat_range=(0, 15), merge=True, overwrite=True,
-                      name='det_bias_flags'):
+                      name='det_bias_flags', full_output=False):
     """
     Function for selecting detectors in appropriate bias range.
 
@@ -38,6 +38,8 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         If true, write over flag. If false, don't.
     name : str
         Name of flag to add to aman.flags if merge is True.
+    full_output : bool
+        If true, returns the full output with separated RangesMatrices
 
     Returns
     -------
@@ -79,6 +81,21 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
             aman.flags[name] = mskexp
         else:
             aman.flags.wrap(name, mskexp, [(0, 'dets'), (1, 'samps')])
+
+    if full_output:
+        msks = []
+        ranges = [detcal.bg >= 0,
+                  detcal.r_tes > 0,
+                  detcal.r_frac >= rfrac_range[0],
+                  detcal.r_frac <= rfrac_range[1],
+                  detcal.p_sat*1e12 >= psat_range[0],
+                  detcal.p_sat*1e12 <= psat_range[1]]
+        for range in ranges:
+            msk = ~(np.all([range], axis=0))
+            msks.append(RangesMatrix([Ranges.ones_like(x) if Y
+                                      else Ranges.zeros_like(x) for Y in msk]))
+
+        return mskexp, msks
     
     return mskexp
 
