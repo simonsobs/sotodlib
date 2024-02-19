@@ -27,8 +27,15 @@ class Detrend(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.detrend_tod
     """
     name = "detrend"
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+    
     def process(self, aman, proc_aman):
-        tod_ops.detrend_tod(aman, **self.process_cfgs)
+        tod_ops.detrend_tod(aman[self.signal],
+                            **self.process_cfgs)
 
 class DetBiasFlags(_Preprocess):
     """
@@ -68,16 +75,33 @@ class Trends(_Preprocess):
     Saves results in proc_aman under the "trend" field. 
 
     Data selection can have key "kind" equal to "any" or "all."
+
+     Example config dictionary:
+
+    {
+        name : "trends"
+        signal: "signal" # optional
+        calc:
+          max_trend: 2.5
+          n_pieces: 10
+        save: True
+        select:
+          kind: "any"     
+    }
     
     .. autofunction:: sotodlib.tod_ops.flags.get_trending_flags
     """
     name = "trends"
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
     
     def calc_and_save(self, aman, proc_aman):
-        trend_cut, trend_aman = tod_ops.flags.get_trending_flags(
-            aman, merge=False, full_output=True, 
-            **self.calc_cfgs
-        )
+        _, trend_aman = tod_ops.flags.get_trending_flags(
+            aman, merge=False, full_output=True,
+            signal=aman[self.signal], **self.calc_cfgs)
         aman.wrap("trends", trend_aman)
         self.save(proc_aman, trend_aman)
     
@@ -111,13 +135,32 @@ class GlitchDetection(_Preprocess):
     Data section should define a glitch significant "sig_glitch" and a maximum
     number of glitches "max_n_glitch."
 
+    Example configuration dictionary:
+    {
+     name: "glitches"
+     signal: "hwpss_remove"
+     calc:
+       t_glitch: 0.00001
+       buffer: 10
+       hp_fc: 1
+       n_sig: 10
+     save: True
+     select:
+       max_n_glitch: 10
+    }
+
     .. autofunction:: sotodlib.tod_ops.flags.get_glitch_flags
     """
     name = "glitches"
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
     
     def calc_and_save(self, aman, proc_aman):
         glitch_cut, glitch_aman = tod_ops.flags.get_glitch_flags(
-            aman, merge=False, full_output=True,
+            aman[self.signal], merge=False, full_output=True,
             **self.calc_cfgs
         ) 
         aman.wrap("glitches", glitch_aman)
@@ -143,16 +186,27 @@ class GlitchDetection(_Preprocess):
         return meta
 
 class FixJumps(_Preprocess):
+    """
+    Example config dictionary:
+    {
+     name: "fix_jumps"
+     signal: "signal" # optional
+     process:
+       jumps_aman: "jumps_2pi"
+    }
+    """
     name = "fix_jumps"
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman):
         field = self.process_cfgs['jumps_aman']
-        aman.signal = tod_ops.jumps.jumpfix_subtract_heights(
-            aman.signal,
-            proc_aman[field].jump_flag.mask(),
-            inplace=True,
-            heights=proc_aman[field].jump_heights,
-        )
+        aman[self.signal] = tod_ops.jumps.jumpfix_subtract_heights(
+            aman[self.signal], proc_aman[field].jump_flag.mask(),
+            inplace=True, heights=proc_aman[field].jump_heights)
 
 
 class Jumps(_Preprocess):
@@ -166,10 +220,26 @@ class Jumps(_Preprocess):
 
     Data section should define a maximum number of jumps "max_n_jumps".
 
+    Example config dictionary:
+
+    {
+     name: "jumps"
+     signal: "hwpss_remove"
+     calc:
+       function: "twopi_jumps"
+     save:
+       jumps_name: "jumps_2pi"
+    }
+
     .. autofunction:: sotodlib.tod_ops.jumps.find_jumps
     """
 
     name = "jumps"
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
         function = self.calc_cfgs.get("function", "find_jumps")
@@ -185,7 +255,8 @@ class Jumps(_Preprocess):
             raise ValueError("function must be 'find_jumps', 'twopi_jumps' or" 
                             f"'slow_jumps'. Received {function}")
 
-        jumps, heights = func(aman, merge=False, fix=False, **cfgs)
+        jumps, heights = func(aman, merge=False, fix=False,
+                              signal=aman[self.signal], **cfgs)
         jump_aman = tod_ops.jumps.jumps_aman(aman, jumps, heights)
         self.save(proc_aman, jump_aman)
 
@@ -417,31 +488,35 @@ class EstimateAzSS(_Preprocess):
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
 
+    Example configuration dictionary:
+
+    {
+     name: "glitchfill"
+     signal: "hwpss_remove"
+     flag_aman: "jumps_2pi"
+     flag: "jump_flag"
+     process:
+       nbuf: 10
+       use_pca: False
+       modes: 1
+    }
+
     .. autofunction:: sotodlib.tod_ops.gapfill.fill_glitches
     """
     name = "glitchfill"
 
-    def process(self, aman):
-        pcfgs = np.fromiter(self.process_cfgs.keys(), dtype='U16')
-        if 'glitch_flags' in pcfgs:
-            flags = aman.flags[self.process_cfgs["glitch_flags"]]
-            pcfgs = np.delete(pcfgs, np.where(pcfgs == 'glitch_flags'))
-        else:
-            flags = None
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+        self.flag_aman = step_cfgs.get('flag_aman', 'glitches')
+        self.flag = step_cfgs.get('flag', 'glitch_flags')
 
-        if 'signal' in pcfgs:
-            signal = aman[self.process_cfgs["signal"]]
-            pcfgs = np.delete(pcfgs, np.where(pcfgs == 'signal'))
-        else:
-            signal = None
+        super().__init__(step_cfgs)
 
-        args = {}
-        for pcfg in pcfgs:
-            args[pcfg] = self.process_cfgs[pcfg]
-
+    def process(self, aman, proc_aman):
         tod_ops.gapfill.fill_glitches(
-            aman, signal=signal, glitch_flags=flags, **args
-        )
+            aman, signal=aman[self.signal],
+            glitch_flags=proc_aman[self.flag_aman][self.flag],
+            **self.process_cfgs)
 
 
 class FlagTurnarounds(_Preprocess):
