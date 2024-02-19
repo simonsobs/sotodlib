@@ -438,7 +438,12 @@ class EstimateHWPSS(_Preprocess):
     name = "estimate_hwpss"
 
     def calc_and_save(self, aman, proc_aman):
-        hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
+        if self.calc_cfgs.get('save_plot', False):
+            preprocess_plot.plot_4f_2f_counts(aman, save_path=self.calc_cfgs['save_plot'])
+            hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
+            preprocess_plot.plot_hwpss_fit_status(aman, hwpss_stats, save_path=self.calc_cfgs['save_plot'])
+        else:
+            hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
         self.save(proc_aman, hwpss_stats)
 
     def save(self, proc_aman, hwpss_stats):
