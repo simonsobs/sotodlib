@@ -270,16 +270,17 @@ def _load_book_detset(files, prefix='', load_ancil=True,
             more_data &= times_acc.append(frame['ancil'].times, frame_offset)
             more_data &= ancil_acc.append(frame['ancil'], frame_offset)
 
-        if 'primary' in frame:
+        if 'stream_id' in frame:
             if stream_id is None:
                 stream_id = frame['stream_id']
             assert (stream_id == frame['stream_id'])  # check your data files
 
+        if 'primary' in frame:
             more_data &= primary_acc.append(frame['primary'], frame_offset)
-
             bias_names = _check_bias_names(frame)[:_TES_BIAS_COUNT]
             more_data &= bias_acc.append(frame['tes_biases'], frame_offset)
 
+        if 'signal' in frame:
             # Even if no_signal, we need the det list.
             if this_stream_dets is None:
                 this_stream_dets = _compact_list(frame['signal'].names)
@@ -420,33 +421,35 @@ def _concat_filesets(results, ancil=None, timestamps=None,
                 dets_ofs += len(d)
         aman['signal'] *= SIGNAL_RESCALE
 
-    # Biases
-    all_bias_names = []
-    for v in results.values():
-        all_bias_names.extend(v['bias_names'][:_TES_BIAS_COUNT])
-    aman.merge(core.AxisManager(core.LabelAxis('bias_lines', all_bias_names)))
-    aman.wrap_new('biases', shape=('bias_lines', 'samps'), dtype='int32')
-    for i, v in enumerate(results.values()):
-        aman['biases'][i * _TES_BIAS_COUNT:(i + 1) * _TES_BIAS_COUNT, :] = \
-            v['biases'].finalize()[:_TES_BIAS_COUNT, :]
+    # In sims, the whole primary block may be unpopulated.
+    if any([v['primary'].data is not None for v in results.values()]):
+        # Biases
+        all_bias_names = []
+        for v in results.values():
+            all_bias_names.extend(v['bias_names'][:_TES_BIAS_COUNT])
+        aman.merge(core.AxisManager(core.LabelAxis('bias_lines', all_bias_names)))
+        aman.wrap_new('biases', shape=('bias_lines', 'samps'), dtype='int32')
+        for i, v in enumerate(results.values()):
+            aman['biases'][i * _TES_BIAS_COUNT:(i + 1) * _TES_BIAS_COUNT, :] = \
+                v['biases'].finalize()[:_TES_BIAS_COUNT, :]
 
-    # Primary (and other stuff to group per-stream)
-    aman.wrap('primary', core.AxisManager(aman.samps))
-    aman.wrap('iir_params', core.AxisManager())
-    aman['iir_params'].wrap('per_stream', True)
-    for r in results.values():
-        # Primary.
-        _prim = core.AxisManager(aman.samps)
-        for k, v in r['primary'].finalize().items():
-            _prim.wrap(k, v, [(0, 'samps')])
-        aman['primary'].wrap(r['stream_id'], _prim)
-        # Filter parameters
-        _iir = None
-        if r.get('iir_params') is not None:
-            _iir = core.AxisManager()
-            for k, v in r['iir_params'].items():
-                _iir.wrap(k, v)
-        aman['iir_params'].wrap(r['stream_id'], _iir)
+        # Primary (and other stuff to group per-stream)
+        aman.wrap('primary', core.AxisManager(aman.samps))
+        aman.wrap('iir_params', core.AxisManager())
+        aman['iir_params'].wrap('per_stream', True)
+        for r in results.values():
+            # Primary.
+            _prim = core.AxisManager(aman.samps)
+            for k, v in r['primary'].finalize().items():
+                _prim.wrap(k, v, [(0, 'samps')])
+            aman['primary'].wrap(r['stream_id'], _prim)
+            # Filter parameters
+            _iir = None
+            if r.get('iir_params') is not None:
+                _iir = core.AxisManager()
+                for k, v in r['iir_params'].items():
+                    _iir.wrap(k, v)
+            aman['iir_params'].wrap(r['stream_id'], _iir)
 
     # flags place
     aman.wrap("flags", core.FlagManager.for_tod(aman, "dets", "samps"))
