@@ -77,7 +77,7 @@ def telescope_lookup(telescope: str):
     elif telescope == "lat":
         return {"telescope": "lat", "telescope_flavor": "lat"}
     else:
-        logger.error("unknown telescope type given by bookbinder")
+        logger.error("unknown telescope type given by bookbinder: \"{telescope}\"")
         return {}
 
 
@@ -173,7 +173,7 @@ def main(config: str,
                 continue
             if os.path.exists(os.path.join(dirpath, "M_index.yaml")):
                 _, book_id = os.path.split(dirpath)
-                if book_id in existing and not overwrite:
+                if np.isin(book_id, existing) and not overwrite:
                     continue
                 #Looks like a book folder
                 bookcart.append(dirpath)
@@ -201,6 +201,10 @@ def main(config: str,
             tags = index.pop("tags")
             detsets = index.pop("detsets")
 
+            # Work-around for sims; do not keep.
+            if 'tube_slot' not in index:
+                index['tube_slot'] = obs_id.split('_lat')[1][:2]
+
             if "obsdb_cols" in config_dict:
                 very_clean = {col:index[col] for col in iter(config_dict["obsdb_cols"]) if col in index}
             else:
@@ -215,7 +219,7 @@ def main(config: str,
             #Adding info that should be there for all observations
             #Descriptive string columns
             try:
-                telescope = index["telescope"]
+                telescope = index["telescope"].lower()  # work-around, remove .lower()!
                 flavors = telescope_lookup(telescope)
                 for flav in flavors:
                     bookcartobsdb.add_obs_columns([flav+" str"])
@@ -267,7 +271,10 @@ def main(config: str,
                     very_clean["roll_throw"] = .5 * (bore_enc.max() - bore_enc.min())
                 if very_clean["telescope_flavor"] == "lat":
                     el_enc = stream.ancil["el_enc"]
-                    corot_enc = stream.ancil["corotator_enc"]
+                    try:
+                        corot_enc = stream.ancil["corotator_enc"]
+                    except:
+                        corot_enc = stream.ancil["corotation_enc"]  #work-around, do not keep
                     roll = el_enc - 60. - corot_enc
                     very_clean["roll_center"] = .5 * (roll.max() + roll.min())
                     very_clean["roll_throw"] = .5 * (roll.max() - roll.min())
