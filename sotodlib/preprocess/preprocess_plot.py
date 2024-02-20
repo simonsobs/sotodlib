@@ -116,8 +116,10 @@ def plot_4f_2f_counts(aman, modes=np.arange(1,49), save_path='./', save_name='4f
         
     for i in range(3):
         axs[i, 0].set_ylabel('Counts')
-    
+
+    obs_ts = aman.timestamps[0]
     det = aman.dets.vals[0]
+    save_ts = str(int(time.time()))
     plt.suptitle(f'Obs_timestamp:{obs_ts:.0f}\ndet:{det}\n4f/2f Counts')
     plt.tight_layout()
     plt.savefig(os.path.join(save_path, save_ts+'_'+save_name))
