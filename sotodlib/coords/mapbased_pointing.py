@@ -210,11 +210,15 @@ def map_to_xieta(mT, edge_avoidance=1.0*coords.DEG, edge_check='nan',
     if np.all(np.isnan(mT)):
         xi_det = np.nan
         eta_det = np.nan
+        
     else:
         xi_peak, eta_peak, ra_peak, dec_peak, peak_i, peak_j = detect_peak_xieta(mT)
-        edge_map = get_edgemap(mT, edge_avoidance=edge_avoidance, edge_check=edge_check)
-        edge_valid = not edge_map[peak_i, peak_j]
-
+        if edge_avoidance > 0.:
+            edge_map = get_edgemap(mT, edge_avoidance=edge_avoidance, edge_check=edge_check)
+            edge_valid = not edge_map[peak_i, peak_j]
+        else:
+            edge_valid = True
+        
         if edge_valid:
             dec_flat, ra_flat = mT.posmap()
             dec_flat = dec_flat.flatten()
@@ -232,8 +236,9 @@ def map_to_xieta(mT, edge_avoidance=1.0*coords.DEG, edge_check='nan',
             mask_fit = np.logical_and(~np.isnan(z), r<r_fit_circle)
             _r = r[mask_fit]
             _z = z[mask_fit]
-
+            
             if _r.shape[0] == 0:
+                
                 xi_det = np.nan
                 eta_det = np.nan
             else:
@@ -267,7 +272,7 @@ def get_xieta_from_maps(map_hdf_file,
         xieta_dict = {}
         for di, det in enumerate(tqdm(dets)):
             mT = enmap.read_hdf(ifile[det])
-            mT[mT==0] = np.nan
+            mT[mT==0.] = np.nan
             xi, eta = map_to_xieta(mT, edge_avoidance=edge_avoidance, edge_check=edge_check,
                                    R2_threshold=R2_threshold, r_tune_circle=r_tune_circle, q_tune=q_tune)
             xi0 = ifile[det]['xi0'][...].item()
