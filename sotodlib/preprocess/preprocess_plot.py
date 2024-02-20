@@ -152,16 +152,15 @@ def plot_hwpss_fit_status(aman, hwpss_stats, plot_dets=None, plot_num_dets=3,
         plot_dets_idx = np.where(np.in1d(hwpss_stats.dets.vals, plot_dets))[0]
 
     for i, det_idx in enumerate(plot_dets_idx):
-        # ax[0].plot(hwpss_stats.binned_angle, hwpss_stats.binned_signal[det_idx], 
-        #         alpha=0.5, color='tab:blue', label='binned signal' if i ==0 else None)
         ax[0].errorbar(hwpss_stats.binned_angle, hwpss_stats.binned_signal[det_idx], yerr=hwpss_stats.sigma_bin[det_idx],
-                alpha=0.5, color='tab:blue', label='binned signal' if i ==0 else None)
-        ax[0].plot(aman.hwp_angle[aman.hwp_angle < 3], aman.signal[det_idx][aman.hwp_angle < 3],
-                alpha=0.2, color='tab:blue', label='unbinned signal (angle < 3)' if i ==0 else None)
+                       alpha=0.5, color='tab:blue', fmt='.-', capsize=2, zorder=2, label='binned signal' if i ==0 else None)
+        ax[0].plot(aman.hwp_angle[:2000], aman.signal[det_idx][:2000],
+                   alpha=0.5, color='tab:red', marker='o', markersize=0.5, linestyle='None', zorder=1,
+                   label='unbinned signal (2000 samps)' if i ==0 else None)
 
         modes = [int(mode_name[1:]) for mode_name in list(hwpss_stats.modes.vals[::2])]
         ax[0].plot(hwpss_stats.binned_angle, hwpss_stats.binned_model[det_idx], 
-                alpha=0.5, color='tab:orange', label=f'binned model \n(modes = {modes})' if i ==0 else None)
+                   alpha=0.9, color='tab:orange', zorder=3, label=f'binned model \n(modes = {modes})' if i ==0 else None)
 
     ax[0].legend()
     ax[0].set_xlabel('HWP angle [rad]')
@@ -170,14 +169,15 @@ def plot_hwpss_fit_status(aman, hwpss_stats, plot_dets=None, plot_num_dets=3,
 
     ax[1].hist(hwpss_stats.redchi2s, bins=np.logspace(start=-1, stop=2, num=50))
     ax[1].axvline(x=np.nanmedian(hwpss_stats.redchi2s), linestyle='dashed', color='black',
-                 label=f'median: {np.nanmedian(hwpss_stats.redchi2s):.2f}')
+                  label=f'median: {np.nanmedian(hwpss_stats.redchi2s):.2f}')
     ax[1].set_xscale('log')
     ax[1].set_yscale('log')
     ax[1].set_title(f'reduced chi2s distribution (Ndets={hwpss_stats.dets.count})')
     ax[1].legend()
 
+    obs_ts = aman.timestamps[0]
     det = aman.dets.vals[0]
-    plt.suptitle(f'HWPSS Stats for Obs_timestamp:{obs_ts:.0f}, dT = {np.ptp(tod.timestamps)/60:.1f} min\ndet:{det}\n')
+    plt.suptitle(f'HWPSS Stats for Obs_timestamp:{obs_ts:.0f}, dT = {np.ptp(aman.timestamps)/60:.1f} min\ndet:{det}\n')
     save_ts = str(int(time.time()))
     plt.subplots_adjust(top=0.85, bottom=0.2)
     plt.savefig(os.path.join(save_path, save_ts+'_'+save_name))
