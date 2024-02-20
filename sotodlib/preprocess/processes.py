@@ -295,6 +295,7 @@ class PSDCalc(_Preprocess):
             "calc": True
             "save": True
         }
+
     .. autofunction:: sotodlib.tod_ops.fft_ops.calc_psd
     """
     name = "psd"
