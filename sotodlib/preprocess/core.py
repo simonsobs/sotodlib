@@ -30,6 +30,7 @@ class _Preprocess(object):
         self.calc_cfgs = step_cfgs.get("calc")
         self.save_cfgs = step_cfgs.get("save")
         self.select_cfgs = step_cfgs.get("select")
+        self.plot_cfgs = step_cfgs.get("plot")
     
     def process(self, aman, proc_aman):
         """ This function makes changes to the time ordered data AxisManager.

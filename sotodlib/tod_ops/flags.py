@@ -16,7 +16,7 @@ from . import fourier_filter
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                        psat_range=(0, 15), merge=True, overwrite=True,
-                       name='det_bias_flags', full_output=False, **kwargs):
+                       name='det_bias_flags', full_output=False):
     """
     Function for selecting detectors in appropriate bias range.
 
