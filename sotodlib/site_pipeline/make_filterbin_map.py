@@ -141,18 +141,14 @@ def calibrate_obs_new(obs, dtype_tod=np.float32, det_left_right=False, det_in_ou
                 eta_median = np.median(eta)
             if det_left_right:
                 mask = xi <= xi_median
-                mask_for_rangesmatrix = np.repeat(np.logical_not(mask)[:,None], int(obs.samps.count), axis=1)
-                obs.det_flags.wrap('det_left', so3g.proj.RangesMatrix.from_mask(mask_for_rangesmatrix), [(0, 'dets'), (1, 'samps')])
+                tod.det_flags.wrap_dets('det_left', np.logical_not(mask))
                 mask = xi > xi_median
-                mask_for_rangesmatrix = np.repeat(np.logical_not(mask)[:,None], int(obs.samps.count), axis=1)
-                obs.det_flags.wrap('det_right', so3g.proj.RangesMatrix.from_mask(mask_for_rangesmatrix), [(0, 'dets'), (1, 'samps')])
+                obs.det_flags.wrap_dets('det_right', np.logical_not(mask))
             if det_upper_lower:
                 mask = eta <= eta_median
-                mask_for_rangesmatrix = np.repeat(np.logical_not(mask)[:,None], int(obs.samps.count), axis=1)
-                obs.det_flags.wrap('det_lower', so3g.proj.RangesMatrix.from_mask(mask_for_rangesmatrix), [(0, 'dets'), (1, 'samps')])
+                obs.det_flags.wrap_dets('det_lower', np.logical_not(mask))
                 mask = eta > eta_median
-                mask_for_rangesmatrix = np.repeat(np.logical_not(mask)[:,None], int(obs.samps.count), axis=1)
-                obs.det_flags.wrap('det_upper', so3g.proj.RangesMatrix.from_mask(mask_for_rangesmatrix), [(0, 'dets'), (1, 'samps')])
+                obs.det_flags.wrap_dets('det_upper', np.logical_not(mask))
             if det_in_out:
                 # the bounding box is the center of the detset
                 xi_center = np.min(xi) + 0.5 * (np.max(xi) - np.min(xi))
@@ -160,11 +156,9 @@ def calibrate_obs_new(obs, dtype_tod=np.float32, det_left_right=False, det_in_ou
                 radii = np.sqrt((xi_center-xi)**2 + (eta_center-eta)**2)
                 radius_median = np.median(radii)
                 mask = radii <= radius_median
-                mask_for_rangesmatrix = np.repeat(np.logical_not(mask)[:,None], int(obs.samps.count), axis=1)
-                obs.det_flags.wrap('det_in', so3g.proj.RangesMatrix.from_mask(mask_for_rangesmatrix), [(0, 'dets'), (1, 'samps')])
+                obs.det_flags.wrap_dets('det_in', np.logical_not(mask))
                 mask = radii > radius_median
-                mask_for_rangesmatrix = np.repeat(np.logical_not(mask)[:,None], int(obs.samps.count), axis=1)
-                obs.det_flags.wrap('det_out', so3g.proj.RangesMatrix.from_mask(mask_for_rangesmatrix), [(0, 'dets'), (1, 'samps')])
+                obs.det_flags.wrap_dets('det_out', np.logical_not(mask))
                 
     # this is from Max's notebook
     if obs.signal is not None:
@@ -178,7 +172,7 @@ def calibrate_obs_new(obs, dtype_tod=np.float32, det_left_right=False, det_in_ou
         flags.get_trending_flags(obs, max_trend=2.5, n_pieces=10)
         tdets = has_any_cuts(obs.flags.trends)
         obs.restrict('dets', obs.dets.vals[~tdets])
-        jflags, jfix = jumps.twopi_jumps(obs, signal=obs.hwpss_remove, fix=True, overwrite=True)
+        jflags, _, jfix = jumps.twopi_jumps(obs, signal=obs.hwpss_remove, fix=True, overwrite=True)
         obs.hwpss_remove = jfix
         gfilled = gapfill.fill_glitches(obs, nbuf=10, use_pca=False, modes=1, signal=obs.hwpss_remove, glitch_flags=obs.flags.jumps_2pi)
         obs.hwpss_remove = gfilled
@@ -241,7 +235,7 @@ def calibrate_obs_after_demod(obs, dtype_tod=np.float32):
     obs.move('gap_filled', None)
     obs.move('lpf_hwpss_remove', None)
     
-    hpf = filters.counter_1_over_f(0.1, 2, 1)
+    hpf = filters.counter_1_over_f(0.1, 2)
     hpf_Q = filters.fourier_filter(obs, hpf, signal_name='demodQ')
     hpf_U = filters.fourier_filter(obs, hpf, signal_name='demodU')
     obs.demodQ = hpf_Q
