@@ -76,18 +76,18 @@ class Trends(_Preprocess):
 
     Data selection can have key "kind" equal to "any" or "all."
 
-     Example config dictionary:
+     Example config dictionary::
 
-    {
-        name : "trends"
-        signal: "signal" # optional
-        calc:
-          max_trend: 2.5
-          n_pieces: 10
-        save: True
-        select:
-          kind: "any"     
-    }
+        {
+            name : "trends"
+            signal: "signal" # optional
+            calc:
+                max_trend: 2.5
+                n_pieces: 10
+            save: True
+            select:
+                kind: "any"     
+        }
     
     .. autofunction:: sotodlib.tod_ops.flags.get_trending_flags
     """
@@ -135,19 +135,20 @@ class GlitchDetection(_Preprocess):
     Data section should define a glitch significant "sig_glitch" and a maximum
     number of glitches "max_n_glitch."
 
-    Example configuration dictionary:
-    {
-     name: "glitches"
-     signal: "hwpss_remove"
-     calc:
-       t_glitch: 0.00001
-       buffer: 10
-       hp_fc: 1
-       n_sig: 10
-     save: True
-     select:
-       max_n_glitch: 10
-    }
+    Example configuration dictionary::
+        
+        {
+            name: "glitches"
+            signal: "hwpss_remove"
+            calc:
+                t_glitch: 0.00001
+                buffer: 10
+                hp_fc: 1
+                n_sig: 10
+            save: True
+            select:
+                max_n_glitch: 10
+        }
 
     .. autofunction:: sotodlib.tod_ops.flags.get_glitch_flags
     """
@@ -281,20 +282,19 @@ class Jumps(_Preprocess):
 
 class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the AxisManager under the
-    "psd" field. Example config dictionary:
+    "psd" field. Example config dictionary::
 
-    {
-        "name : "psd"
-        "signal: "signal" # optional
-        "wrap": "psd" # optional
-        "process": 
-            "psd_cfgs": # optional
-                # kwargs to scipy.welch
-                "nperseg": 1024 
-            "wrap_name": "psd" # optional
-        "calc": True
-        "save": True
-    }
+        {
+            "name : "psd"
+            "signal: "signal" # optional
+            "wrap": "psd" # optional
+            "process": 
+                "psd_cfgs": # optional, kwargs to scipy.welch
+                    "nperseg": 1024 
+                "wrap_name": "psd" # optional
+            "calc": True
+            "save": True
+        }
     .. autofunction:: sotodlib.tod_ops.fft_ops.calc_psd
     """
     name = "psd"
