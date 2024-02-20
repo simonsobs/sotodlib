@@ -68,7 +68,10 @@ class P:
     - sight: A CelestialSightLine, representing the boresight pointing
       in celestial coordinates. [samps]
     - fp: G3VectorQuat representing the focal plane offsets of each
-      detector. [dets]
+      detector. When constructing with a tod argument, fp can be
+      automatically populated from tod.focal_plane; note that if hwp
+      is passed as True then the gamma (polarization) angles will be
+      reflected (gamma' = -gamma). [dets]
     - geom: The target map geometry. This is a pixell.enmap.Geometry
       object, with attributes .shape and .wcs; or possibly (if tiled)
       a pixell.tilemap.TileGeometry.
@@ -132,11 +135,11 @@ class P:
         self.interpol = interpol
 
     @classmethod
-    def for_tod(cls, tod, sight=None, fp=None, geom=None, comps='T',
+    def for_tod(cls, tod, sight=None, geom=None, comps='T',
                 rot=None, cuts=None, threads=None, det_weights=None,
                 timestamps=None, focal_plane=None, boresight=None,
                 boresight_equ=None, wcs_kernel=None, weather='typical',
-                site='so', interpol=None):
+                site='so', interpol=None, hwp=False):
         """Set up a Projection Matrix for a TOD.  This will ultimately call
         the main P constructor, but some missing arguments will be
         extracted from tod and computed along the way.
@@ -155,8 +158,13 @@ class P:
         is provided, then get_footprint will be called to determine
         the geom.
 
-        """
+        The per-detector positions and polarization directions are
+        extracted from focal_plane (xi, eta, gamma), or else
+        tod.focal_plane.  If hwp=True, then the rotation angles
+        (gamma) are reflected (gamma' = -gamma) before storing in
+        self.fp.
 
+        """
         if sight is None:
             if boresight_equ is None:
                 if boresight is None:
@@ -180,7 +188,11 @@ class P:
 
         # Set up the detectors in the focalplane
         fp = _valid_arg(focal_plane, 'focal_plane', src=tod)
-        fp = so3g.proj.quat.rotation_xieta(fp.xi, fp.eta, fp.get('gamma'))
+        xi, eta, gamma  = fp.xi, fp.eta, fp.get('gamma')
+        assert (gamma is not None or not hwp)
+        if hwp:
+            gamma = -gamma
+        fp = so3g.proj.quat.rotation_xieta(xi, eta, gamma)
 
         if geom is None and wcs_kernel is not None:
             geom = helpers.get_footprint(tod, wcs_kernel, sight=sight)
