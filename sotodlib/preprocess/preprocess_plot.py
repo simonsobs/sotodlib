@@ -4,13 +4,14 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import time
+from venn import venn
 
 from sotodlib import hwp
 import sotodlib.core as core
 from sotodlib.core.flagman import has_all_cut
 
 def plot_det_bias_flags(aman, msks, rfrac_range=(0.1, 0.7),
-                        psat_range=(0, 15), save_path="./", save_name="bias_cuts.png"):
+                        psat_range=(0, 15), save_path="./", save_name="bias_cuts_venn.png"):
     """
     Function for plotting bias cuts.
 
@@ -30,29 +31,32 @@ def plot_det_bias_flags(aman, msks, rfrac_range=(0.1, 0.7),
     save_name : str
         Filename of plot.
     """
-    save_ts = str(int(time.time()))
-    fig, axs = plt.subplots(1, 6, figsize=(5*6, 5*1))
+    msk_ids = []
+    for msk in msks[:2]:
+        bad_dets = has_all_cut(msk)
+        msk_ids.append(np.where(bad_dets == True)[0])
+
+    for i in range(0, 3, 2):
+        bad_dets1 = has_all_cut(msks[i+2])
+        bad_dets2 = has_all_cut(msks[i+3])
+        booleans = [bad_dets1, bad_dets2]
+        union = np.asarray(list(map(any, zip(*booleans))))
+        msk_ids.append(np.where(union == True)[0])
+
+    msk_dict = {'bg < 0': set(msk_ids[0]),
+                'r_tes <= 0': set(msk_ids[1]),
+                f'r_frac < {rfrac_range[0]} or > {rfrac_range[1]}': set(msk_ids[2]),
+                f'p_sat*1e12 < {psat_range[0]} or > {psat_range[1]}': set(msk_ids[3])}
+
+    venn(msk_dict)
+
     obs_ts = aman.timestamps[0]
     det = aman.dets.vals[0]
-    ranges = ['bg >= 0',
-              'r_tes > 0',
-              f'r_frac >= {rfrac_range[0]}',
-              f'r_frac <= {rfrac_range[1]}',
-              f'p_sat*1e12 >= {psat_range[0]}',
-              f'p_sat*1e12 <= {psat_range[1]}']
-    for i, msk in enumerate(msks):
-        bad_dets = has_all_cut(msk)
-        if len(np.where(bad_dets == True)[0]) >= 40:
-            axs[i].plot(aman.timestamps[::100], aman.signal[bad_dets][::20,::100].T, color = 'C0', alpha = 0.5)
-        else:
-            axs[i].plot(aman.timestamps[::100], aman.signal[bad_dets][:,::100].T, color = 'C0', alpha = 0.5)
-        axs[i].set_title(f'{ranges[i]}')
-        axs[i].set_xlabel('Timestamp')
-    axs[0].set_ylabel('Signal [Readout Radians]')
-    plt.suptitle(f'Obs_timestamp:{obs_ts:.0f}\ndet:{det}\nEvery 100th Sample After Detector Bias Cuts\n')
+    save_ts = str(int(time.time()))
+    plt.title(f"Obs_timestamp:{obs_ts:.0f}\ndet:{det}\nDetectors Cut per Range (Total cut: {len(np.where(all_bad_dets == True)[0])}/{len(aman.dets.vals)})")
     plt.tight_layout()
     plt.savefig(os.path.join(save_path, save_ts + '_' + save_name))
-    plt.close(fig)
+    plt.close()
 
 def plot_4f_2f_counts(aman, modes=np.arange(1,49), save_path='./', save_name='4f_2f_counts.png'):
     """
