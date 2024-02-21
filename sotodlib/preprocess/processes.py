@@ -34,7 +34,7 @@ class Detrend(_Preprocess):
         super().__init__(step_cfgs)
     
     def process(self, aman, proc_aman):
-        tod_ops.detrend_tod(aman[self.signal],
+        tod_ops.detrend_tod(aman, signal_name=self.signal,
                             **self.process_cfgs)
 
 class DetBiasFlags(_Preprocess):
