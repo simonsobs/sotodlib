@@ -13,6 +13,19 @@ import itertools
 
 from . import util
 
+def get_ra_ref(obs, site='so_sat1'):
+    # pass an AxisManager of the observation, and return two ra_ref @ dec=-40 deg.   
+    # 
+    t = [obs.obs_info.start_time, obs.obs_info.start_time, obs.obs_info.stop_time, obs.obs_info.stop_time]
+    az = [(obs.obs_info.az_center-0.5*obs.obs_info.az_throw)*utils.degree, (obs.obs_info.az_center+0.5*obs.obs_info.az_throw)*utils.degree, (obs.obs_info.az_center-0.5*obs.obs_info.az_throw)*utils.degree, (obs.obs_info.az_center+0.5*obs.obs_info.az_throw)*utils.degree]
+    el = [obs.obs_info.el_center*utils.degree, obs.obs_info.el_center*utils.degree, obs.obs_info.el_center*utils.degree, obs.obs_info.el_center*utils.degree]
+    csl = so3g.proj.CelestialSightLine.az_el(t, az, el, site=site, weather='toco')
+    ra, dec = csl.coords().transpose()[:2] / utils.degree
+#    print('ra=', ra)
+#    print('dec=', dec)
+    # we will project to gnomonic projection, since great circles become straight lines
+#    X = (np.cos(dec)*np.sin(ra))
+
 def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
@@ -321,6 +334,7 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False,
         try:
             tod = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, no_signal=no_signal)
             tod = calibrate_obs_new(tod, dtype_tod=dtype_tod)
+            get_ra_ref(tod)
             my_tods.append(tod)
             my_inds.append(ind)
         except RuntimeError: continue
@@ -490,7 +504,6 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
     comm_intra = comm.Split(comm.rank // tasks_per_group)
     comm_inter = comm.Split(comm.rank  % tasks_per_group)
 
-    SITE       = site
     verbose    = verbose - quiet
     shape, wcs = enmap.read_map_geometry(area)
     wcs        = wcsutils.WCS(wcs.to_header())
