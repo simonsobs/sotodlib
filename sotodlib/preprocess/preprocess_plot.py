@@ -156,7 +156,7 @@ def plot_hwpss_fit_status(aman, hwpss_stats, plot_dets=None, plot_num_dets=3,
     for i, det_idx in enumerate(plot_dets_idx):
         ax[0].errorbar(hwpss_stats.binned_angle, hwpss_stats.binned_signal[det_idx], yerr=hwpss_stats.sigma_bin[det_idx],
                        alpha=0.5, color='tab:blue', fmt='.-', capsize=2, zorder=2, label='binned signal' if i ==0 else None)
-        ax[0].plot(aman.hwp_angle[:2000], aman.signal[det_idx][:2000],
+        ax[0].plot(aman.hwp_angle[:2000], aman.signal[det_idx][:2000]-np.median(aman.signal[det_idx][:2000]),
                    alpha=0.5, color='tab:red', marker='o', markersize=0.5, linestyle='None', zorder=1,
                    label='unbinned signal (2000 samps)' if i ==0 else None)
 
