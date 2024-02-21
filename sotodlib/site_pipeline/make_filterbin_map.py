@@ -40,7 +40,6 @@ def get_parser(parser=None):
     parser.add_argument("--verbose", action="count", default=0)
     parser.add_argument("--quiet",   action="count", default=0)
     parser.add_argument("--window",  type=float, default=5.0)
-    parser.add_argument("--cont",    action="store_true")
     parser.add_argument("--dtype_tod",    default=np.float32)
     parser.add_argument("--dtype_map",    default=np.float64)
     parser.add_argument("--atomic-db",    default='atomic_maps.db', help='name of the atomic map database, will be saved where make_filterbin_map is being run')
@@ -141,7 +140,7 @@ def calibrate_obs_new(obs, dtype_tod=np.float32, det_left_right=False, det_in_ou
                 eta_median = np.median(eta)
             if det_left_right:
                 mask = xi <= xi_median
-                tod.det_flags.wrap_dets('det_left', np.logical_not(mask))
+                obs.det_flags.wrap_dets('det_left', np.logical_not(mask))
                 mask = xi > xi_median
                 obs.det_flags.wrap_dets('det_right', np.logical_not(mask))
             if det_upper_lower:
@@ -484,7 +483,7 @@ def handle_empty(prefix, tag, comm, e):
         utils.mkdir(os.path.dirname(prefix))
         with open(prefix + ".empty", "w") as ofile: ofile.write("\n")
     
-def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='TQU', det_in_out=False, det_left_right=False, det_upper_lower=False, ntod=None, tods=None, nset=None, max_dets=None, fixed_time=None, mindur=None, tasks_per_group=1, site='so_sat1', verbose=0, quiet=0, window=5.0, cont=False, dtype_tod=np.float32, dtype_map=np.float64, singlestream=False, atomic_db='atomic_maps.db'):
+def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='TQU', det_in_out=False, det_left_right=False, det_upper_lower=False, ntod=None, tods=None, nset=None, max_dets=None, fixed_time=None, mindur=None, tasks_per_group=1, site='so_sat1', verbose=0, quiet=0, window=5.0, dtype_tod=np.float32, dtype_map=np.float64, singlestream=False, atomic_db='atomic_maps.db'):
     warnings.simplefilter('ignore')
     # Set up our communicators
     comm       = mpi.COMM_WORLD
@@ -530,9 +529,40 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         #if the list 
         split_labels = None
     
+    # we open the data base for checking
+    if os.path.isfile('./'+atomic_db):
+        conn = sqlite3.connect('./'+atomic_db) # open the connector, in reading mode only
+        cursor = conn.cursor()
+        # Now we have obslists and splits ready, we look through the data base to remove the maps we already have from it
+        for key, value in  obslists.items():
+            if split_labels == None:
+                # we want to run only full maps
+                query_ = 'SELECT * from atomic where obs_id="%s" and telescope="%s" and freq_channel="%s" and wafer="%s" and split_label="full"'%(value[0][0], obs_infos[value[0][3]].telescope, key[2], key[1] )
+                res = cursor.execute(query_)
+                matches = res.fetchall()
+                if len(matches)>0:
+                    # this means the map (key,value) is already in the data base, so we have to remove it to not run it again
+                    # it seems that removing the maps from the obskeys is enough.
+                    obskeys.remove(key) 
+            else:
+                # we are asking for splits
+                missing_split = False
+                for split_label in split_labels:
+                    query_ = 'SELECT * from atomic where obs_id="%s" and telescope="%s" and freq_channel="%s" and wafer="%s" and split_label="%s"'%(value[0][0], obs_infos[value[0][3]].telescope, key[2], key[1], split_label )
+                    res = cursor.execute(query_)
+                    matches = res.fetchall()
+                    if len(matches)==0:
+                        # this means one of the requested splits is missing in the data base
+                        missing_split = True
+                        break
+                if missing_split == False:
+                    # this means we have all the splits we requested for the particular obs_id/telescope/freq/wafer
+                    obskeys.remove(key)
+        conn.close() # I close since I only wanted to read
+    
     # Loop over obslists and map them
     for oi in range(comm_inter.rank, len(obskeys), comm_inter.size):
-        pid, detset, band= obskeys[oi]
+        pid, detset, band = obskeys[oi]
         obslist = obslists[obskeys[oi]]
         t       = utils.floor(periods[pid,0])
         t5      = ("%05d" % t)[:5]
@@ -546,7 +576,7 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
             os.path.isfile(prefix + "_full_ivar.fits") and 
             os.path.isfile(prefix + "_full_hits.fits")
         )
-        if cont and meta_done and (maps_done or meta_only): continue
+        #if cont and meta_done and (maps_done or meta_only): continue
         if comm_intra.rank == 0:
             L.info("%s Proc period %4d dset %s:%s @%.0f dur %5.2f h with %2d obs" % (tag, pid, detset, band, t, (periods[pid,1]-periods[pid,0])/3600, len(obslist)))
         try:
@@ -562,11 +592,11 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
             # this is for the tags
             if split_labels is None:
                 # this means the mapmaker was run without any splits requested
-                tags.append( (obs_infos[obslist[0][3]].telescope, band, detset, int(t), 'full', 'full', cwd+'/'+prefix+'_full', obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, 0.0) )
+                tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), 'full', 'full', cwd+'/'+prefix+'_full', obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, 0.0) )
             else:
                 # splits were requested and we loop over them
                 for split_label in split_labels:
-                    tags.append( (obs_infos[obslist[0][3]].telescope, band, detset, int(t), split_label, '', cwd+'/'+prefix+'_%s'%split_label, obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, 0.0) )
+                    tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), split_label, '', cwd+'/'+prefix+'_%s'%split_label, obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, 0.0) )
             
             all_inds  = utils.allgatherv(my_inds,     comm_intra)
             all_costs = utils.allgatherv(my_costs,    comm_intra)
@@ -612,6 +642,7 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         # Check if the table exists, if not create it
         # the tags will be telescope, frequency channel, wafer, ctime, split_label, split_details, prefix_path, elevation, pwv
         cursor.execute("""CREATE TABLE IF NOT EXISTS atomic (
+                          obs_id TEXT,
                           telescope TEXT, 
                           freq_channel TEXT, 
                           wafer TEXT, 
@@ -626,7 +657,7 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         conn.commit()
         
         for tuple_ in tags_total:
-            cursor.execute("INSERT INTO atomic VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", tuple_)
+            cursor.execute("INSERT INTO atomic VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", tuple_)
         conn.commit()
         
         conn.close()
