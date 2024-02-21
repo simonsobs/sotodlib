@@ -151,19 +151,14 @@ class DemodSignalMap(DemodSignal):
                 # we handle cuts here through obs.flags
                 if split_labels == None:
                     # this is the case with no splits
-                    # turnarounds has the size of samples, we need to add the detector axis
-                    #mask_for_turnarounds = np.repeat(obs.flags.turnarounds.mask()[None,:], int(obs.dets.count), axis=0)
-                    #rangesmatrix = so3g.proj.RangesMatrix.from_mask(mask_for_turnarounds) + obs.flags.jumps_2pi + obs.flags.glitches
                     rangesmatrix = obs.flags.jumps_2pi + obs.flags.glitches + obs.flags.turnarounds
-                    pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix)
+                    pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix, hwp=True)
                 else:
                     # this is the case where we are processing a split. We need to figure out what type of split it is (detector, samples), build the RangesMatrix mask and create the pmap.
                     if split_labels[n_split] in ['det_left','det_right','det_in','det_out','det_upper','det_lower']:
                         # then we are in a detector fixed in time split.
-                        #mask_for_turnarounds = np.repeat(obs.flags.turnarounds.mask()[None,:], int(obs.dets.count), axis=0)
-                        #rangesmatrix = so3g.proj.RangesMatrix.from_mask(mask_for_turnarounds) + obs.flags.jumps_2pi + obs.flags.glitches + obs.det_flags[split_labels[n_split]]
                         rangesmatrix = obs.flags.jumps_2pi + obs.flags.glitches + obs.det_flags[split_labels[n_split]] + obs.flags.turnarounds
-                    pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix)
+                    pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix, hwp=True)
             else:
                 pmap_local = pmap
                     
@@ -171,20 +166,16 @@ class DemodSignalMap(DemodSignal):
             obs_rhs = pmap_local.zeros() # this is the final RHS, we will fill it at the end
             
             if self.singlestream==False:
-                #obs_rhs_T = pmap_local.zeros(super_shape=(1),comps='T')
                 obs_rhs_T = pmap_local.to_map(tod=obs, signal=obs.dsT, comps='T', det_weights=2*nmat.ivar)
-                #pmap_local.to_map(dest=obs_rhs_T, signal=Nd[0], comps='T') # this is only the RHS for T
-                # RHS for QU. We save it to dummy maps
-                #obs_rhs_demodQ = pmap_local.to_map(signal=Nd[1], comps='QU') # Do I need to pass tod=obs ?
-                #obs_rhs_demodU = pmap_local.to_map(signal=Nd[2], comps='QU') # Do I need to pass tod=obs ?
                 
                 obs_rhs_demodQ = pmap_local.to_map(tod=obs, signal=obs.demodQ, comps='QU', det_weights=nmat.ivar)
                 obs_rhs_demodU = pmap_local.to_map(tod=obs, signal=obs.demodU, comps='QU', det_weights=nmat.ivar)
-                obs_rhs_demodQU = pmap_local.zeros(super_shape=(2),comps='QU',)
+                obs_rhs_demodQU = pmap_local.zeros(super_shape=(2), comps='QU',)
                 
-                #### In field, you should use instead #### this what inside wrong_definition=False, but I got rid of that
-                obs_rhs_demodQU[0][:] = obs_rhs_demodQ[0] + obs_rhs_demodU[1]
-                obs_rhs_demodQU[1][:] = -obs_rhs_demodQ[1] + obs_rhs_demodU[0]
+                obs_rhs_demodQU[0][:] = obs_rhs_demodQ[0] - obs_rhs_demodU[1]
+                obs_rhs_demodQU[1][:] = obs_rhs_demodQ[1] + obs_rhs_demodU[0]
+                del obs_rhs_demodQ, obs_rhs_demodU
+                
                 # we write into the obs_rhs. 
                 obs_rhs[0] = obs_rhs_T[0]
                 obs_rhs[1] = obs_rhs_demodQU[0]
