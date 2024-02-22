@@ -7,7 +7,7 @@ from sotodlib import tod_ops, coords, mapmaking
 from sotodlib.tod_ops import flags, jumps, gapfill, filters, detrend_tod, apodize, pca
 from sotodlib.hwp import hwp
 from pixell import enmap, utils, fft, bunch, wcsutils, tilemap, colors, memory, mpi
-from scipy import ndimage
+from scipy import ndimage, interpolate
 import sqlite3 
 import itertools
 
@@ -16,15 +16,22 @@ from . import util
 def get_ra_ref(obs, site='so_sat1'):
     # pass an AxisManager of the observation, and return two ra_ref @ dec=-40 deg.   
     # 
-    t = [obs.obs_info.start_time, obs.obs_info.start_time, obs.obs_info.stop_time, obs.obs_info.stop_time]
-    az = [(obs.obs_info.az_center-0.5*obs.obs_info.az_throw)*utils.degree, (obs.obs_info.az_center+0.5*obs.obs_info.az_throw)*utils.degree, (obs.obs_info.az_center-0.5*obs.obs_info.az_throw)*utils.degree, (obs.obs_info.az_center+0.5*obs.obs_info.az_throw)*utils.degree]
-    el = [obs.obs_info.el_center*utils.degree, obs.obs_info.el_center*utils.degree, obs.obs_info.el_center*utils.degree, obs.obs_info.el_center*utils.degree]
-    csl = so3g.proj.CelestialSightLine.az_el(t, az, el, site=site, weather='toco')
-    ra, dec = csl.coords().transpose()[:2] / utils.degree
-#    print('ra=', ra)
-#    print('dec=', dec)
-    # we will project to gnomonic projection, since great circles become straight lines
-#    X = (np.cos(dec)*np.sin(ra))
+    #t = [obs.obs_info.start_time, obs.obs_info.start_time, obs.obs_info.stop_time, obs.obs_info.stop_time]
+    t_start = obs.obs_info.start_time
+    t_stop = obs.obs_info.stop_time
+    az = np.arange((obs.obs_info.az_center-0.5*obs.obs_info.az_throw)*utils.degree, (obs.obs_info.az_center+0.5*obs.obs_info.az_throw)*utils.degree, 0.5*utils.degree)
+    el = obs.obs_info.el_center*utils.degree
+    
+    csl = so3g.proj.CelestialSightLine.az_el(t_start*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
+    ra_, dec_ = csl.coords().transpose()[:2]
+    spline = interpolate.CubicSpline(dec_, ra_, bc_type='not-a-knot')
+    ra_ref_start = spline(-40*utils.degree, nu=0)
+    
+    csl = so3g.proj.CelestialSightLine.az_el(t_stop*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
+    ra_, dec_ = csl.coords().transpose()[:2]
+    spline = interpolate.CubicSpline(dec_, ra_, bc_type='not-a-knot')
+    ra_ref_stop = spline(-40*utils.degree, nu=0)
+    return ra_ref_start, ra_ref_stop
 
 def get_parser(parser=None):
     if parser is None:
@@ -328,17 +335,19 @@ def calibrate_obs(obs, dtype_tod=np.float32):
 def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False, dtype_tod=np.float32, ):
     my_tods = []
     my_inds = []
+    my_ra_ref = []
     if inds is None: inds = list(range(comm.rank, len(obslist), comm.size))
     for ind in inds:
         obs_id, detset, band, obs_ind = obslist[ind]
         try:
             tod = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, no_signal=no_signal)
             tod = calibrate_obs_new(tod, dtype_tod=dtype_tod)
-            get_ra_ref(tod)
+            ra_ref_start, ra_ref_stop = get_ra_ref(tod)
             my_tods.append(tod)
             my_inds.append(ind)
+            my_ra_ref.append((ra_ref_start/utils.degree, ra_ref_stop/utils.degree))
         except RuntimeError: continue
-    return my_tods, my_inds
+    return my_tods, my_inds, my_ra_ref
 
 def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", verbose=0, split_labels=None, time_split_leftright=False, singlestream=False, det_in_out=False, det_left_right=False, det_upper_lower=False):
     #det_split_masks is the dictionary that contains detector masks for each split we want to make. Each key has format freq_wafer_split, e.g. f090_w25_detleft, f150_w26_detupper, f090_w27_detin. We need to figure out how many split we'll make 2 per split mode.
@@ -595,7 +604,7 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         try:
             # 1. read in the metadata and use it to determine which tods are
             #    good and estimate how costly each is
-            my_tods, my_inds = read_tods(context, obslist, comm=comm_intra, no_signal=True, dtype_tod=dtype_tod, )
+            my_tods, my_inds, my_ra_ref = read_tods(context, obslist, comm=comm_intra, no_signal=True, dtype_tod=dtype_tod, )
             # after read_tods the detector flags will be added to the axis manager
             my_costs  = np.array([tod.samps.count*len(mapmaking.find_usable_detectors(tod)) for tod in my_tods])
             # 2. prune tods that have no valid detectors
@@ -605,11 +614,11 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
             # this is for the tags
             if split_labels is None:
                 # this means the mapmaker was run without any splits requested
-                tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), 'full', 'full', cwd+'/'+prefix+'_full', obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, 0.0) )
+                tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), 'full', 'full', cwd+'/'+prefix+'_full', obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref[0][0], my_ra_ref[0][1], 0.0) )
             else:
                 # splits were requested and we loop over them
                 for split_label in split_labels:
-                    tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), split_label, '', cwd+'/'+prefix+'_%s'%split_label, obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, 0.0) )
+                    tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), split_label, '', cwd+'/'+prefix+'_%s'%split_label, obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref[0][0], my_ra_ref[0][1], 0.0) )
             
             all_inds  = utils.allgatherv(my_inds,     comm_intra)
             all_costs = utils.allgatherv(my_costs,    comm_intra)
@@ -665,12 +674,14 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
                           prefix_path TEXT,
                           elevation REAL,
                           azimuth REAL,
+                          RA_ref_start REAL,
+                          RA_ref_stop REAL,
                           pwv REAL
                           )""")
         conn.commit()
         
         for tuple_ in tags_total:
-            cursor.execute("INSERT INTO atomic VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", tuple_)
+            cursor.execute("INSERT INTO atomic VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", tuple_)
         conn.commit()
         
         conn.close()
