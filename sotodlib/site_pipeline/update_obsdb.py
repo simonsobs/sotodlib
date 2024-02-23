@@ -235,7 +235,12 @@ def main(config: str,
             if stream_ids is not None:
                 bookcartobsdb.add_obs_columns(["wafer_count int"])
                 very_clean["wafer_count"] = len(stream_ids)
-
+                bookcartobsdb.add_obs_columns(["ufms str"])
+                very_clean["ufms"] = (",".join(stream_ids)).replace("ufm_","")
+            wafer_slots = index.pop("wafer_slots")
+            if wafer_slots is not None:
+                bookcartobsdb.add_obs_columns(["wafer_slots str"])
+                very_clean["wafer_slots"] = (",".join([sl["wafer_slot"] for sl in wafer_slots]))
             #Time
             try:
                 start = index["start_time"]
