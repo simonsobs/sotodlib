@@ -821,7 +821,7 @@ class AxisManager:
             self._assignments.update(aman._assignments)
         return self
 
-    def save(self, dest, group=None, overwrite=False):
+    def save(self, dest, group=None, overwrite=False, compression=None):
         """Write this AxisManager data to an HDF5 group.  This is an
         experimental feature primarily intended to assist with
         debugging.  The schema is subject to change, and it's possible
@@ -835,6 +835,7 @@ class AxisManager:
             dest).
           overwrite (bool): If True, remove any existing thing at the
             specified address before writing there.
+          compression (str ot None): Compression filter to apply.
 
         Notes:
           If dest is a string, it is taken to be an HDF5 filename and
@@ -868,7 +869,7 @@ class AxisManager:
 
         """
         from .axisman_io import _save_axisman
-        return _save_axisman(self, dest, group=group, overwrite=overwrite)
+        return _save_axisman(self, dest, group=group, overwrite=overwrite, compression=compression)
 
     @classmethod
     def load(cls, src, group=None):

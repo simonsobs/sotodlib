@@ -123,7 +123,7 @@ def _safe_scalars(x):
     # Must be fine then!
     return x
 
-def _save_axisman(axisman, dest, group=None, overwrite=False, compression='gzip'):
+def _save_axisman(axisman, dest, group=None, overwrite=False, compression=None):
     """
     See AxisManager.save.
     """
