@@ -835,7 +835,9 @@ class AxisManager:
             dest).
           overwrite (bool): If True, remove any existing thing at the
             specified address before writing there.
-          compression (str ot None): Compression filter to apply.
+          compression (str or None): Compression filter to apply. E.g.
+            'gzip'. This string is passed directly to HDF5 dataset
+            routines.
 
         Notes:
           If dest is a string, it is taken to be an HDF5 filename and

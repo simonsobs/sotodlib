@@ -237,7 +237,7 @@ def _save_axisman(axisman, dest, group=None, overwrite=False, compression=None):
                 g.create_dataset(k, data=v, compression=compression)
         elif item['encoding'] == 'axisman':
             g = dest.create_group(item['name'])
-            _save_axisman(data, g)
+            _save_axisman(data, g, compression=compression)
         elif item['encoding'] == 'axis':
             pass #
         else:
