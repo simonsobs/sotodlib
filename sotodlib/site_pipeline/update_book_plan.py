@@ -17,7 +17,6 @@ def main(
     min_ctime_timecodes: Optional[float] = None,
     max_ctime_timecodes: Optional[float] = None,
     from_scratch: bool = False,
-    logger = None
     ):
     """
     Update the book plan database with new data from the g3tsmurf database.
@@ -45,7 +44,6 @@ def main(
         The minimum ctime to include in the book plan for timecode (hk, smurf, stray) books, by default None
     max_ctime_timecodes : Optional[float], optional
         The maximum ctime to include in the book planor timecode (hk, smurf, stray) books, by default None
-
     from_scratch : bool, optional
         If True, start to search from beginning of time, by default False
     """
@@ -54,7 +52,6 @@ def main(
     imprinter = Imprinter(
         config, 
         db_args={'connect_args': {'check_same_thread': False}},
-        logger=logger,
     )
     
     # leaving min_ctime and max_ctime as None will go through all available 
