@@ -250,14 +250,16 @@ def jumpfix_subtract_heights(
 
 
 def _make_step(signal: NDArray[np.floating], jumps: NDArray[np.bool_]):
-    ranges = RangesMatrix.from_mask(np.atleast_2d(jumps))
+    jumps = np.atleast_2d(jumps)
+    jumps[:, [0, -1]] = False
+    ranges = RangesMatrix.from_mask(jumps)
     signal_step = np.atleast_2d(signal.copy())
     samps = signal_step.shape[-1]
     for i, det in enumerate(ranges.ranges):
         for r in det.ranges():
             mid = int((r[0] + r[1]) / 2)
             signal_step[i, r[0] : mid] = signal_step[i, max(r[0] - 1, 0)]
-            signal_step[i, mid : r[1]] = signal_step[i, min(r[1] + 1, samps)]
+            signal_step[i, mid : r[1]] = signal_step[i, min(r[1] + 1, samps - 1)]
     return signal_step.reshape(signal.shape)
 
 
