@@ -439,15 +439,16 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
     else:                time_rhs = utils.allreduce     (time_rhs, comm)
     
     if comm.rank == 0: L.info(pre + "Writing F+B map")
-    map = [] ; ivar = [] ; tmap =[]
+    map = [] ; ivar = [] ; tmap =[] ; wmap = []
     for n_split in range(signal_map.Nsplits):
         if signal_map.tiled: 
             map.append( tilemap.map_mul(signal_map.idiv[n_split], signal_map.rhs[n_split]) )
         else: 
             map.append( enmap.map_mul(signal_map.idiv[n_split], signal_map.rhs[n_split]) )
         ivar.append( signal_map.div[n_split] )
+        wmap.append( signal_map.rhs[n_split] )
         with utils.nowarn(): tmap.append( utils.remove_nan(time_rhs[n_split] / ivar[-1][0,0]) )
-    return bunch.Bunch(map=map, ivar=ivar, tmap=tmap, signal=signal_map, t0=t0 )
+    return bunch.Bunch(map=map, ivar=ivar, tmap=tmap, wmap=wmap, signal=signal_map, t0=t0 )
 
 def write_depth1_map(prefix, data, split_labels=None):
     if split_labels==None:
@@ -455,6 +456,7 @@ def write_depth1_map(prefix, data, split_labels=None):
         data.signal.write(prefix, "full_map",  data.map[0])
         data.signal.write(prefix, "full_ivar", data.ivar[0])
         data.signal.write(prefix, "full_hits", data.signal.hits)
+        data.signal.write(prefix, "full_wmap", data.wmap[0])
     else:
         # we have splits
         Nsplits = len(split_labels)
@@ -462,6 +464,7 @@ def write_depth1_map(prefix, data, split_labels=None):
             data.signal.write(prefix, "%s_map"%split_labels[n_split],  data.map[n_split])
             data.signal.write(prefix, "%s_ivar"%split_labels[n_split], data.ivar[n_split])
             data.signal.write(prefix, "%s_hits"%split_labels[n_split], data.signal.hits[n_split])
+            data.signal.write(prefix, "%s_wmap"%split_labels[n_split], data.wmap[n_split])
 
 def write_depth1_info(oname, info):
     utils.mkdir(os.path.dirname(oname))
