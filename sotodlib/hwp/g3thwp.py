@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import os
+import time
 import numpy as np
 import scipy.interpolate
 import h5py
@@ -1074,7 +1075,23 @@ class G3tHWP():
         aman.primary_encoder = primary_encoder
         aman.version = highest_version
 
-        aman.save(output, h5_address, overwrite=True)
+        # save
+        max_trial = 5
+        wait_time = 5
+        for i in range(1, max_trial + 1):
+            try:
+                aman.save(output, h5_address, overwrite=True)
+                logger.info("Saved aman")
+                return
+            except BlockingIOError:
+                logger.warn(f"Cannot save aman because HDF5 is temporary locked, try again in {wait_time} seconds, trial {i}/{max_trial}")
+                time.sleep(wait_time)
+            except Exception as e:
+                logger.error(f"Exception '{e}' thrown while saving aman")
+                print(traceback.format_exc())
+
+        logger.error("Cannot save aman, give up.")
+        return
 
     def _hwp_angle_calculator(
             self,
