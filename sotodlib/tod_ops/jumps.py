@@ -354,7 +354,7 @@ def _filter(
     if gaussian_width > 0:
         x = simg.gaussian_filter1d(x, gaussian_width, axis=-1, output=x).astype(float)
     if tv_weight > 0:
-        channel_axis = 1
+        channel_axis = 0
         if len(x.shape) == 1:
             channel_axis = None
         x = denoise_tv_chambolle(x, tv_weight, channel_axis=channel_axis)
@@ -366,6 +366,7 @@ def twopi_jumps(
     aman,
     signal=...,
     win_size=...,
+    nsigma=...,
     atol=...,
     gaussian_width=...,
     tv_weight=...,
@@ -383,6 +384,7 @@ def twopi_jumps(
     aman,
     signal=...,
     win_size=...,
+    nsigma=...,
     atol=...,
     gaussian_width=...,
     tv_weight=...,
@@ -399,6 +401,7 @@ def twopi_jumps(
     aman: AxisManager,
     signal: Optional[NDArray[np.floating]] = None,
     win_size: int = 20,
+    nsigma: float = 5.0,
     atol: Optional[Union[float, NDArray[np.floating]]] = None,
     gaussian_width: float = 0,
     tv_weight: float = 0,
@@ -424,8 +427,11 @@ def twopi_jumps(
         win_size: Size of window to use when looking for jumps.
                   This should be set to something of order the width of the jumps.
 
+        nsigma: How many multiples of the wight noise level to set to use to compute atol.
+                Only used if atol is None.
+
         atol: How close the jump height needs to be to N*2pi to count.
-              If set to None, then 3 times the WN level of the TOD is used.
+              If set to None, then nsigma times the WN level of the TOD is used.
 
         gaussian_width: Width of gaussian filter.
                         If <= 0, filter is not applied.
@@ -458,7 +464,7 @@ def twopi_jumps(
     if not isinstance(signal, np.ndarray):
         raise TypeError("Signal is not an array")
     if atol is None:
-        atol = 3 * std_est(signal.astype(float))
+        atol = nsigma * std_est(signal.astype(float))
         np.clip(atol, 1e-8, 1e-2)
 
     _signal = _filter(signal, 3, gaussian_width, tv_weight)
@@ -467,19 +473,17 @@ def twopi_jumps(
     if isinstance(atol, int):
         atol = float(atol)
     if isinstance(atol, float):
-        jumps = (np.isclose(0, np.abs(diff_buffed) % (2 * np.pi), atol=atol)) & (
-            (np.abs(diff_buffed) // (2 * np.pi)) >= 1
-        )
-        jumps[:win_size] = False
+        ratio = np.abs(diff_buffed) / (2 * np.pi)
+        jumps = (np.abs(ratio - np.round(ratio, 0)) <= atol) & (ratio >= 0.5)
+        jumps[..., :win_size] = False
     elif isinstance(atol, np.ndarray):
         jumps = np.atleast_2d(np.zeros_like(signal, dtype=bool))
         diff_buffed = np.atleast_2d(diff_buffed)
         if len(atol) != len(jumps):
             raise ValueError(f"Non-scalar atol provided with length {len(atol)}")
         for i, _atol in enumerate(atol):
-            jumps[i] = (
-                np.isclose(0, np.abs(diff_buffed[i]) % (2 * np.pi), atol=_atol)
-            ) & ((np.abs(diff_buffed[i]) // (2 * np.pi)) >= 1)
+            ratio = np.abs(diff_buffed[i]) / (2 * np.pi)
+            jumps[i] = (np.abs(ratio - np.round(ratio, 0)) <= _atol) & (ratio >= 0.5)
         jumps[:, :win_size] = False
         jumps.reshape(signal.shape)
     else:
