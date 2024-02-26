@@ -13,7 +13,7 @@ from typing import Optional
 from sotodlib import core
 from sotodlib.hwp.g3thwp import G3tHWP
 from sotodlib.site_pipeline import util
-default_logger = util.init_logger(__name__, 'make-hwp-solutions: ')
+logger = util.init_logger(__name__, 'make-hwp-solutions: ')
 
 def get_parser(parser=None):
     if parser is None:
@@ -73,10 +73,7 @@ def main(
     max_ctime: Optional[float] = None,
     obs_id: Optional[str] = None,
     load_h5: Optional[bool] = False,
-    logger = None,
  ):
-    if logger is None:
-        logger = default_logger
     logger.info(f"Using context {context} and HWPconfig {HWPconfig}")
 
     configs = yaml.safe_load(open(HWPconfig, "r"))
