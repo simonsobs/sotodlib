@@ -123,7 +123,7 @@ def _safe_scalars(x):
     # Must be fine then!
     return x
 
-def _save_axisman(axisman, dest, group=None, overwrite=False):
+def _save_axisman(axisman, dest, group=None, overwrite=False, compression='gzip'):
     """
     See AxisManager.save.
     """
@@ -214,7 +214,6 @@ def _save_axisman(axisman, dest, group=None, overwrite=False):
         })
     scalars = {}
     units = {}
-    compression = 'gzip'
 
     for item in schema:
         data = axisman[item['name']]
