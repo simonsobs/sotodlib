@@ -937,7 +937,6 @@ class G3tHWP():
         # write solution, metadata loader requires a dets axis
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         aman.wrap_new('timestamps', ('samps', ))[:] = tod.timestamps
-        self._set_empty_axes(aman)
 
         start = int(tod.timestamps[0])-self._margin
         end = int(tod.timestamps[-1])+self._margin
@@ -956,7 +955,7 @@ class G3tHWP():
                 data = self.load_data(start, end)
 
             if 'pid_direction' in data.keys():
-                aman['pid_direction'] = np.nanmedian(data['pid_direction'][1])*2 - 1
+                aman.pid_direction = np.nanmedian(data['pid_direction'][1])*2 - 1
 
             logger.info('Saving raw encoder data')
             self._set_raw_axes(aman, data)
@@ -968,6 +967,7 @@ class G3tHWP():
             print(traceback.format_exc())
 
         solved = {}
+        self._set_empty_axes(aman)
         for suffix in self._suffixes:
             logger.info('Start analyzing encoder'+suffix)
             self._set_empty_axes(aman, suffix)
@@ -1023,10 +1023,7 @@ class G3tHWP():
                     method = self._method_direction + '_direction'
                     if self._method_direction == 'quad':
                         method += suffix
-                    if aman[method] == 0:
-                        logger.warning(f'Rotation direction by {self._method_direction} is not available. Skip.')
-                    else:
-                        solved['angle'+suffix] *= aman[method]
+                    solved['angle'+suffix] *= aman[method]
                 except Exception as e:
                     logger.error(f"Exception '{e}' thrown while correcting rotation direction. Skip.")
                     print(traceback.format_exc())
