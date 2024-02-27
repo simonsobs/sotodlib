@@ -1080,7 +1080,7 @@ class G3tHWP():
         wait_time = 5
         for i in range(1, max_trial + 1):
             try:
-                aman.save(output, h5_address, overwrite=True)
+                aman.save(output, h5_address, overwrite=True, compression='gzip')
                 logger.info("Saved aman")
                 return
             except BlockingIOError:
@@ -1089,6 +1089,7 @@ class G3tHWP():
             except Exception as e:
                 logger.error(f"Exception '{e}' thrown while saving aman")
                 print(traceback.format_exc())
+                break
 
         logger.error("Cannot save aman, give up.")
         return

@@ -389,6 +389,8 @@ class TestAxisManager(unittest.TestCase):
                 aman.save(filename, dataset)
                 # Overwrite
                 aman.save(filename, dataset, overwrite=True)
+                # Compress and Overwrite
+                aman.save(filename, dataset, overwrite=True, compression='gzip')
                 # Refuse to overwrite
                 with self.assertRaises(RuntimeError):
                     aman.save(filename, dataset)
