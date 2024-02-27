@@ -1074,7 +1074,7 @@ class G3tHWP():
         aman.primary_encoder = primary_encoder
         aman.version = highest_version
 
-        aman.save(output, h5_address, overwrite=True)
+        aman.save(output, h5_address, overwrite=True, compression='gzip')
 
     def _hwp_angle_calculator(
             self,
