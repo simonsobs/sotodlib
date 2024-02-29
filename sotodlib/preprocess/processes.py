@@ -188,13 +188,18 @@ class GlitchDetection(_Preprocess):
 
 class FixJumps(_Preprocess):
     """
-    Example config dictionary:
-    {
-     name: "fix_jumps"
-     signal: "signal" # optional
-     process:
-       jumps_aman: "jumps_2pi"
-    }
+    Repairs the jump heights given a set of jump flags and heights.
+
+    Example config dictionary::
+
+        {
+            name: "fix_jumps"
+            signal: "signal" # optional
+            process:
+            jumps_aman: "jumps_2pi"
+        }
+
+    .. autofunction:: sotodlib.tod_ops.jumps.jumpfix_subtract_heights
     """
     name = "fix_jumps"
 
@@ -221,16 +226,16 @@ class Jumps(_Preprocess):
 
     Data section should define a maximum number of jumps "max_n_jumps".
 
-    Example config dictionary:
+    Example config dictionary::
 
-    {
-     name: "jumps"
-     signal: "hwpss_remove"
-     calc:
-       function: "twopi_jumps"
-     save:
-       jumps_name: "jumps_2pi"
-    }
+        {
+            name: "jumps"
+            signal: "hwpss_remove"
+            calc:
+                function: "twopi_jumps"
+            save:
+                jumps_name: "jumps_2pi"
+        }
 
     .. autofunction:: sotodlib.tod_ops.jumps.find_jumps
     """
@@ -489,18 +494,18 @@ class EstimateAzSS(_Preprocess):
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
 
-    Example configuration dictionary:
+    Example configuration dictionary::
 
-    {
-     name: "glitchfill"
-     signal: "hwpss_remove"
-     flag_aman: "jumps_2pi"
-     flag: "jump_flag"
-     process:
-       nbuf: 10
-       use_pca: False
-       modes: 1
-    }
+        {
+            name: "glitchfill"
+            signal: "hwpss_remove"
+            flag_aman: "jumps_2pi"
+            flag: "jump_flag"
+            process:
+                nbuf: 10
+                use_pca: False
+                modes: 1
+        }
 
     .. autofunction:: sotodlib.tod_ops.gapfill.fill_glitches
     """
