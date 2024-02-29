@@ -79,10 +79,16 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     if merge:
         if name in aman.flags and not overwrite:
             raise ValueError(f"Flag name {name} already exists in aman.flags")
-        if name in aman.flags:
-            aman.flags[name] = mskexp
+        if 'flags' in aman:
+            if name in aman.flags:
+                aman.flags[name] = mskexp
+            else:
+                aman.flags.wrap(name, mskexp, [(0, 'dets'), (1, 'samps')])
         else:
-            aman.flags.wrap(name, mskexp, [(0, 'dets'), (1, 'samps')])
+            if 'samps' in aman:
+                aman.wrap(name, mskexp, [(0, 'dets'), (1, 'samps')])
+            else:
+                aman.wrap(name, mskexp, [(0, 'dets')])
     
     return mskexp
 
