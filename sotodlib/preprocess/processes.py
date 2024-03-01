@@ -11,6 +11,60 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
 
 from .core import _Preprocess
 
+def expand_proc_aman(calc_aman, proc_aman, flag_fill_val=False,
+                     flt_fill_val=np.nan, int_fill_val=2**32-1):
+    """
+    Helper function to expand the size of calculated products to match the 
+    precut dets and samps shape.
+    Arguments:
+    ----------
+    calc_aman: AxisManager
+        AxisManager returned from calc step.
+    proc_aman: AxisManager
+        AxisManager passed between processes.
+    fill_value:
+        Value to fill missing indices with.
+    """
+    if (proc_aman.dets.count < proc_aman.fdets.count) or \
+       (proc_aman.samps.count < proc_aman.fsamps.count):
+        _, mdets, fmdets = np.intersect1d(proc_aman.dets.vals,
+                                          proc_aman.fdets.vals,
+                                          return_indices=True)
+        msamps = slice(proc_aman.samps.offset,
+                       proc_aman.samps.offset+proc_aman.samps.count)
+    
+    out_aman = core.AxisManager(proc_aman.fdets, proc_aman.fsamps)
+    for fld in calc_aman._fields:
+        dat = calc_aman[fld]
+        axes = calc_aman.shape_str(fld).split(',')
+        maxes = np.isin(axes, ['dets', 'samps'])
+        axismap = [(i, a) for i, a in enumerate(axes)]
+        faxismap = [(i, 'f'+a) if m else (i, a) for i, [a, m] in enumerate(list(zip(axes, maxes)))]
+        if np.all(~maxes):
+            out_aman.wrap(fld, dat, axismap)
+        else:
+            if np.isin(type(np.hstack(dat)[0]), [so3g.RangesInt32, bool]):
+                fill_value = flag_fill_val
+                dat = dat.mask()
+            if np.isin(type(np.hstack(dat)[0]), [np.int64, np.int32, int]):
+                fill_value = int_fill_val
+            if np.isin(type(np.hstack(dat)[0]), [np.float64, np.float32, float]):
+                fill_value = flt_fill_val
+            shape = tuple([proc_aman[am].count if m else calc_aman[fld].count for am, m in zip(axismap, maxes)])
+            fdat = np.full(shape, fill_value)
+
+            # Need to figure out how to do this slicing.
+            # I think I need to enforce axis ordering to be dets_axis x samps_axis x any other axis
+            # Then this should be reasonably straightforward.
+            fdat[fmdets,msamps] = dat[mdets]
+
+            if isinstance(fill_value, bool):
+                fdat = RangesMatrix.from_mask(fdat)
+                dat = RangesMatrix.from_mask(dat)
+            out_aman.wrap(fld, dat, axismap)
+            out_aman.wrap(fld, fdat, faxismap)
+
+    return
 
 class FFTTrim(_Preprocess):
     """Trim the AxisManager to optimize for faster FFTs later in the pipeline.
@@ -58,7 +112,7 @@ class DetBiasFlags(_Preprocess):
                                        return_indices=True)
             msk[d2,proc_aman.samps.offset:proc_aman.samps.offset+proc_aman.samps.count] = \
                 m.mask()[d1]
-            msk = RangesMatrix(msk)
+            msk = RangesMatrix.from_mask(msk)
         else:
             msk = m
         dbc_aman.wrap('det_bias_flags', m, [(0, 'dets'), (1, 'samps')])
@@ -114,6 +168,9 @@ class Trends(_Preprocess):
         _, trend_aman = tod_ops.flags.get_trending_flags(
             aman, merge=False, full_output=True,
             signal=aman[self.signal], **self.calc_cfgs)
+        taman = core.AxisManager(proc_aman.fdets, proc_aman.fsamps,
+                                 trend_aman.trend_bins)
+        
         aman.wrap("trends", trend_aman)
         self.save(proc_aman, trend_aman)
     
