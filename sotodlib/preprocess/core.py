@@ -218,6 +218,11 @@ class Pipeline(list):
         """
         if proc_aman is None:
             proc_aman = core.AxisManager( aman.dets, aman.samps)
+            fman = core.AxisManager(core.LabelAxis(name='fdets', vals=aman.dets.vals), 
+                                    core.OffsetAxis('fsamps', count=aman.samps.count,
+                                                    offset=aman.samps.offset, 
+                                                    origin_tag=aman.samps.origin_tag))
+            proc_aman.merge(fman)
             run_calc = True
         else:
             if aman.dets.count != proc_aman.dets.count or not np.all(aman.dets.vals == proc_aman.dets.vals):

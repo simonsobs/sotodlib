@@ -3,6 +3,7 @@ import numpy as np
 import sotodlib.core as core
 import sotodlib.tod_ops as tod_ops
 from sotodlib.hwp import hwp
+from so3g.proj import RangesMatrix
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    count_cuts,
@@ -47,10 +48,21 @@ class DetBiasFlags(_Preprocess):
     name = "det_bias_flags"
 
     def calc_and_save(self, aman, proc_aman):
-        msk = tod_ops.flags.get_det_bias_flags(aman, merge=False,
+        m = tod_ops.flags.get_det_bias_flags(aman, merge=False,
                                                **self.calc_cfgs)
-        dbc_aman = core.AxisManager(aman.dets)
-        dbc_aman.wrap('det_bias_flags', msk, [(0, 'dets')])
+        dbc_aman = core.AxisManager(proc_aman.fdets, proc_aman.fsamps)
+        if aman.dets.count < proc_aman.fdets.count:
+            msk = np.full((proc_aman.fdets.count, proc_aman.fsamps.count), False)
+            _, d1, d2 = np.intersect1d(proc_aman.dets.vals,
+                                       proc_aman.fdets.vals,
+                                       return_indices=True)
+            msk[d2,proc_aman.samps.offset:proc_aman.samps.offset+proc_aman.samps.count] = \
+                m.mask()[d1]
+            msk = RangesMatrix(msk)
+        else:
+            msk = m
+        dbc_aman.wrap('det_bias_flags', m, [(0, 'dets'), (1, 'samps')])
+        dbc_aman.wrap('det_bias_flags', msk, [(0, 'fdets'), (1, 'fsamps')])
         self.save(proc_aman, dbc_aman)
     
     def save(self, proc_aman, dbc_aman):
