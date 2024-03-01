@@ -223,9 +223,10 @@ class DemodSignalMap(DemodSignal):
                 self.rhs  = utils.allreduce(self.rhs, self.comm)
                 self.div  = utils.allreduce(self.div, self.comm)
                 self.hits = utils.allreduce(self.hits,self.comm)
-        self.idiv = []
-        for n_split in range(self.Nsplits):
-            self.idiv.append( safe_invert_div(self.div[n_split]) )
+        # We will output the weighted_map, the weights map, the hits map. We don't need to invert any more.
+#        self.idiv = []
+#        for n_split in range(self.Nsplits):
+#            self.idiv.append( safe_invert_div(self.div[n_split]) )
         self.ready = True
 
     @property
