@@ -47,20 +47,20 @@ class DetBiasFlags(_Preprocess):
     """
     name = "det_bias_flags"
 
-    def calc_and_save(self, aman, proc_aman):
-        if self.plot_cfgs.get('path', False):
-            msk, msks = tod_ops.flags.get_det_bias_flags(aman, merge=False, full_output=True,
-                                                         **self.calc_cfgs)
-        else:
+    def calc_and_save(self, aman, proc_aman, plot_dir='./'):
+        if self.plot_cfgs is None:
             msk = tod_ops.flags.get_det_bias_flags(aman, merge=False,
                                                    **self.calc_cfgs)
+        else:
+            msk, msks = tod_ops.flags.get_det_bias_flags(aman, merge=False, full_output=True,
+                                                         **self.calc_cfgs)
         dbc_aman = core.AxisManager(aman.dets)
         dbc_aman.wrap('det_bias_flags', msk, [(0, 'dets')])
         self.save(proc_aman, dbc_aman)
-        if self.plot_cfgs.get('path', False):
+        if self.plot_cfgs:
             from .preprocess_plot import plot_det_bias_flags
-            plot_det_bias_flags(aman, msks, rfrac_range=self.calc_cfgs['rfrac_range'],
-                                psat_range=self.calc_cfgs['psat_range'], save_path=self.plot_cfgs['path'])
+            plot_det_bias_flags(aman, msk, msks, rfrac_range=self.calc_cfgs['rfrac_range'],
+                                psat_range=self.calc_cfgs['psat_range'], save_path=plot_dir)
     
     def save(self, proc_aman, dbc_aman):
         if self.save_cfgs is None:
@@ -438,13 +438,13 @@ class EstimateHWPSS(_Preprocess):
     name = "estimate_hwpss"
 
     def calc_and_save(self, aman, proc_aman):
-        if self.plot_cfgs.get('path', False):
-            from .preprocess_plot import plot_4f_2f_counts, plot_hwpss_fit_status
-            plot_4f_2f_counts(aman, save_path=self.plot_cfgs['path'])
+        if self.plot_cfgs is None:
             hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
-            plot_hwpss_fit_status(aman, hwpss_stats, save_path=self.plot_cfgs['path'])
         else:
+            from .preprocess_plot import plot_4f_2f_counts, plot_hwpss_fit_status
+            plot_4f_2f_counts(aman, save_path=self.plot_dir)
             hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
+            plot_hwpss_fit_status(aman, hwpss_stats, save_path=self.plot_dir)
         self.save(proc_aman, hwpss_stats)
 
     def save(self, proc_aman, hwpss_stats):

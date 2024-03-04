@@ -52,7 +52,7 @@ class _Preprocess(object):
             return
         raise NotImplementedError
         
-    def calc_and_save(self, aman, proc_aman):
+    def calc_and_save(self, aman, proc_aman, plot_dir='./'):
         """ This function calculates data products of some sort off of the time
         ordered data AxisManager.
 
@@ -139,7 +139,7 @@ class Pipeline(list):
 
     PIPELINE = {}
 
-    def __init__(self, modules, logger=None):
+    def __init__(self, modules, plot_dir='./', logger=None):
         """
         Arguments
         ---------
@@ -147,12 +147,15 @@ class Pipeline(list):
             A list or other iterable that contains either instantiated
             _Preprocess instances or the configuration dictionary used to
             instantiate a module
+        plot_dir: str
+            Directory prefix for preprocess plots
         logger: optional
             logging.logger instance used by the pipeline to send updates
         """
         if logger is None:
             logger = logging.getLogger("pipeline")
         self.logger = logger
+        self.plot_dir = plot_dir
         super().__init__( [self._check_item(item) for item in modules])
     
     def _check_item(self, item):
@@ -232,7 +235,7 @@ class Pipeline(list):
             self.logger.info(f"Running {process.name}")
             process.process(aman, proc_aman)
             if run_calc:
-                process.calc_and_save(aman, proc_aman)
+                process.calc_and_save(aman, proc_aman, plot_dir=self.plot_dir)
             if select:
                 process.select(aman, proc_aman)
                 proc_aman.restrict('dets', aman.dets.vals)

@@ -112,7 +112,7 @@ def preprocess_tod(
             scheme=scheme
         )
 
-    pipe = Pipeline(configs["process_pipe"], logger=logger)
+    pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
 
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")

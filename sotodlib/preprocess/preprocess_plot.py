@@ -10,7 +10,7 @@ from sotodlib import hwp
 import sotodlib.core as core
 from sotodlib.core.flagman import has_all_cut
 
-def plot_det_bias_flags(aman, msks, rfrac_range=(0.1, 0.7),
+def plot_det_bias_flags(aman, msk, msks, rfrac_range=(0.1, 0.7),
                         psat_range=(0, 15), save_path="./", save_name="bias_cuts_venn.png"):
     """
     Function for plotting bias cuts.
@@ -19,6 +19,8 @@ def plot_det_bias_flags(aman, msks, rfrac_range=(0.1, 0.7),
     ----------
     aman : AxisManager
         Input axis manager.
+    msk : RangesMatrix
+        Result of flags.get_det_bias_flags
     msks : list of RangesMatrix
         Result of flags.get_det_bias_flags when full_output=True
     rfrac_range : Tuple
@@ -31,6 +33,7 @@ def plot_det_bias_flags(aman, msks, rfrac_range=(0.1, 0.7),
     save_name : str
         Filename of plot.
     """
+    all_bad_dets = has_all_cut(msk)
     msk_ids = []
     for msk in msks[:2]:
         bad_dets = has_all_cut(msk)
