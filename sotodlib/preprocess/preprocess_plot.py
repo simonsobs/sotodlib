@@ -58,7 +58,8 @@ def plot_det_bias_flags(aman, msk, msks, rfrac_range=(0.1, 0.7),
     plt.tight_layout()
     plot_dir = os.path.join(save_path, f'{str(aman.timestamps[0])[:5]}', aman.obs_info.obs_id)
     os.makedirs(plot_dir, exist_ok=True)
-    plt.savefig(os.path.join(plot_dir, save_name))
+    ufm = det.split('_')[2]
+    plt.savefig(os.path.join(plot_dir, ufm+'_'+save_name))
     plt.close()
 
 def plot_4f_2f_counts(aman, modes=np.arange(1,49), save_path='./', save_name='4f_2f_counts.png'):
@@ -130,7 +131,8 @@ def plot_4f_2f_counts(aman, modes=np.arange(1,49), save_path='./', save_name='4f
     plt.tight_layout()
     plot_dir = os.path.join(save_path, f'{str(aman.timestamps[0])[:5]}', aman.obs_info.obs_id)
     os.makedirs(plot_dir, exist_ok=True)
-    plt.savefig(os.path.join(plot_dir, save_name))
+    ufm = det.split('_')[2]
+    plt.savefig(os.path.join(plot_dir, ufm+'_'+save_name))
 
 def plot_hwpss_fit_status(aman, hwpss_stats, plot_dets=None, plot_num_dets=3,
                           save_path='./', save_name='hwpss_stats.png'):
@@ -191,4 +193,5 @@ def plot_hwpss_fit_status(aman, hwpss_stats, plot_dets=None, plot_num_dets=3,
     plt.subplots_adjust(top=0.85, bottom=0.2)
     plot_dir = os.path.join(save_path, f'{str(aman.timestamps[0])[:5]}', aman.obs_info.obs_id)
     os.makedirs(plot_dir, exist_ok=True)
-    plt.savefig(os.path.join(plot_dir, save_name))
+    ufm = det.split('_')[2]
+    plt.savefig(os.path.join(plot_dir, ufm+'_'+save_name))
