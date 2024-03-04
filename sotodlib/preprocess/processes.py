@@ -433,6 +433,9 @@ class EstimateHWPSS(_Preprocess):
 
     def calc_and_save(self, aman, proc_aman):
         _prefilt = (self.signal == 'signal')
+        if not _prefilt:
+            print("WARNING: apply_prefilt defaulting to False because " +
+                  f"{self.signal} != 'signal'.")
         hwpss_stats = hwp.get_hwpss(aman,
                                     signal=aman[self.signal],
                                     apply_prefilt=_prefilt,
