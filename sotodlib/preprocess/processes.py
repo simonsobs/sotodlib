@@ -420,7 +420,16 @@ class Calibrate(_Preprocess):
 class EstimateHWPSS(_Preprocess):
     """
     Builds a HWPSS Template. Calc configs go to ``hwpss_model``.
-    Results of fitting saved if field specified by calc["name"]
+    Results of fitting saved if field specified by calc["name"].
+    Example config dictionary::
+
+        {
+            "name : "estimate_hwpss"
+            "signal: "signal" # optional
+            "calc":
+                "hwpss_stats_name": "hwpss_stats"
+            "save": True
+        }
 
     .. autofunction:: sotodlib.hwp.hwp.get_hwpss
     """
