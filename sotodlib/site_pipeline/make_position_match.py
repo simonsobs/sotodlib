@@ -6,7 +6,6 @@ from typing import List, Union
 import matplotlib.animation as ani
 import matplotlib.pyplot as plt
 import numpy as np
-import sotodlib.io.g3tsmurf_utils as g3u
 import yaml
 from detmap.makemap import MapMaker
 from megham.registration import cpd
@@ -23,6 +22,10 @@ from sotodlib.site_pipeline import util
 logger = util.init_logger(__name__, "make_position_match: ")
 
 valid_bg = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
+
+
+class NoPointing(ValueError):
+    pass
 
 
 def create_db(filename):
@@ -217,7 +220,6 @@ def match_template(
     template,
     priors=None,
     bias_lines=True,
-    reverse=False,
     vis=False,
     **kwargs,
 ):
@@ -244,8 +246,6 @@ def match_template(
                 matching the j'th point in focal_plane.
 
         bias_lines: Include bias lines in matching.
-
-        reverse: Reverse direction of match.
 
         vis: If True generate plots to watch the matching process.
              To save the plot pass in a path to save at instead.
@@ -274,12 +274,8 @@ def match_template(
     if have_gamma:
         dim_groups += [[focal_plane.shape[1]]]
 
-    if reverse:
-        target = focal_plane
-        source = template
-    else:
-        source = focal_plane
-        target = template
+    source = focal_plane
+    target = template
 
     if vis:
         frames = []
@@ -298,8 +294,7 @@ def match_template(
     else:
         *_, transformed, P = cpd.joint_cpd(source, target, dim_groups, **kwargs)
 
-    if not reverse:
-        P = P.T
+    P = P.T
     if not bias_lines:
         transformed = np.column_stack((-2 + np.zeros(len(transformed)), transformed))
 
@@ -457,10 +452,13 @@ def _load_bg(aman, bg_path):
 
 def _update_vis(match_config, msk_str, plot_dir):
     vis = match_config.get("vis", False)
+    if not vis:
+        return match_config
     # If we aren't saving a plot
-    if plot_dir is not None:
+    if plot_dir is None:
         return match_config
     # Otherwise update the save path
+    os.makedirs(plot_dir, exist_ok=True)
     vis = os.path.join(plot_dir, msk_str + ".webp")
     new_config = match_config.copy()
     new_config["vis"] = vis
@@ -504,8 +502,10 @@ def _do_match(
     logger.info("Average matched likelihood = %f", np.nanmedian(P))
 
     P_msk = (P > np.nanmedian(P)) * (np.isfinite(P))
-    aff, sft = af.get_affine(focal_plane[P_msk, 1:].T, mapped_template[P_msk, 1:].T)
-    transformed[:, :ndim] = (aff @ (focal_plane.T[1:]) + sft[..., None]).T
+    aff, sft = af.get_affine_weighted(
+        transformed[P_msk, :ndim].T, mapped_template[P_msk, 1:].T, P[P_msk]
+    )
+    transformed[:, :ndim] = (aff @ (transformed.T[:ndim]) + sft[..., None]).T
 
     return mapped_det_ids, P, transformed, mapped_template
 
@@ -608,12 +608,11 @@ def _load_ctx(config):
     elif len(obs_ids) > 1:
         logger.warning("More than one observation found, using %s", obs_ids[0])
     obs_id = obs_ids[0]
-    dets = {"stream_id": f"ufm_{config['ufm'].lower()}"}.update(
-        config["context"].get("dets", {})
-    )
+    dets = {"stream_id": f"ufm_{config['ufm'].lower()}"}
+    dets.update(config["context"].get("dets", {}))
     aman = ctx.get_meta(obs_id, dets=dets)
     if pointing_name not in aman:
-        raise ValueError("No pointing associated with this observation")
+        raise NoPointing("No pointing associated with this observation")
     if "wafer" not in aman.det_info:
         dm_name = config["context"].get("detmap", "detmap")
         if dm_name in aman:
@@ -703,15 +702,16 @@ def main():
     append = config.get("append", "")
     if append:
         append = "_" + append
-    if obs_id:
-        obs_id = "_" + obs_id
+    obs_id_pad = obs_id.copy()
+    if obs_id_pad:
+        obs_id_pad = "_" + obs_id
     db = None
     if "manifest_db" in config:
         create_db(config["manifest_db"])
         db = metadata.ManifestDb(config["manifest_db"])
     outdir = os.path.abspath(config["outdir"])
     os.makedirs(outdir, exist_ok=True)
-    froot = f"{ufm}{obs_id}{append}"
+    froot = f"{ufm}{obs_id_pad}{append}"
     outpath = os.path.join(outdir, f"{froot}.h5")
     dataset = "focal_plane"
 
@@ -740,39 +740,19 @@ def main():
             "No template provided and unable to generate one for some reason"
         )
 
-    match_config = config.get("matching", {})
-    if match_config is None:
-        match_config = {}
-    vis = match_config.get("vis", False)
-    if isinstance(vis, str):
-        os.makedirs(vis, exist_ok=True)
-    reverse = match_config.get("reverse", False)
-    if reverse:
-        logger.warning(
-            "Matching running in reverse mode. Transform will now be template -> fits."
-        )
-
     # Check smurf band and channel
     have_band = "band" in aman.det_info.smurf
     if have_band:
-        template_n = np.array(template_n)
-        template_msks = [template_n, np.logical_not(template_n)]
         band = aman.det_info.smurf.band
     else:
-        template_msks = [np.ones(len(det_ids), dtype=bool)]
-        band = -1 + np.zeros(aman.dets.counts, dtype=int)
-        logger.error(
-            "Input is missing band information.\n"
-            + "\tWon't be able to load bgmap and north/south split cannot be performed."
-        )
+        band = -1 + np.zeros(aman.dets.count, dtype=int)
+        logger.warning("Input is missing band information.")
     have_ch = "channel" in aman.det_info.smurf
     if have_ch:
         channel = aman.det_info.smurf.channel
     else:
         channel = -1 + np.zeros(aman.dets.counts, dtype=int)
-        logger.error(
-            "Input is missing channel information.\n" + "\tWon't be able to load bgmap."
-        )
+        logger.warning("Input is missing channel information.")
 
     # Even if we didn't include a file, context could have been magic
     have_detmap = "det_id" in aman.det_info
@@ -798,15 +778,17 @@ def main():
         bias_group = aman.det_info.wafer.bg
         msk_bg = np.isin(bias_group, valid_bg)
         logger.info("Getting bias group information from detmap.")
+    elif "det_cal" in aman:
+        have_bgmap = True
+        bias_group = aman.det_cal.bg
+        msk_bg = np.isin(bias_group, valid_bg)
+        logger.info("Getting bias group information from det_cal.")
     else:
         have_bgmap = False
         bias_group = np.nan + np.zeros(aman.dets.count)
         msk_bg = np.ones(aman.dets.count, dtype=bool)
         logger.warning("Running without bias line info. This can effect performance.")
         match_config["bias_lines"] = False
-    if have_bgmap and get_north_is_highband(band, bias_group):
-        template_n = np.logical_not(template_n)
-        template_msks = [template_n, np.logical_not(template_n)]
 
     # Cut outliers
     if config["outliers"].get("use_template", False):
@@ -821,17 +803,11 @@ def main():
         logger.info("Applying transformation from detmap")
         transform_from_detmap(aman, pointing_name, inliers, det_ids, template)
 
-    msks = []
-    msk_strs = []
-    if have_band:
-        north = np.isin(aman.det_info.smurf.band.astype(int), (0, 1, 2, 3))
-        msks += [north * msk_bg * inliers, (~north) * msk_bg * inliers]
-        msk_strs += ["valid_bg-and-north", "valid_bg-and-south"]
-    else:
-        msks += [inliers]
-        msk_strs += ["no_mask"]
+    template_msks = [np.ones(len(det_ids), dtype=bool)]
+    msks = [inliers * msk_bg]
+    msk_strs = ["inliers_bgmsk"]
     # So that the plots will be associated with an obs_id
-    msk_strs = [f"{ufm}{obs_id}{append}-{msk_str}" for msk_str in msk_strs]
+    msk_strs = [f"{ufm}{obs_id_pad}{append}-{msk_str}" for msk_str in msk_strs]
 
     # Prep inputs
     priors = List[Union[None, NDArray[np.floating]]]
@@ -870,6 +846,7 @@ def main():
     _template = template[:, pol_slice]
 
     # Do actual matching
+    match_config = config.get("initial_match", {})
     mapped_det_ids, P, transformed, mapped_template = _do_match(
         det_ids,
         _focal_plane,
@@ -894,18 +871,19 @@ def main():
 
     # Now realign without the outliers
     logger.info("Performing fit with outliers cut")
-    aff, sft = af.get_affine(
-        focal_plane[inliers, 1:3].T, mapped_template[inliers, 1:3].T
+    aff, sft = af.get_affine_weighted(
+        focal_plane[inliers, 1:3].T, mapped_template[inliers, 1:3].T, P[inliers]
     )
     transformed_fp[inliers, :-1] = (
         aff @ (focal_plane[inliers, 1:3].T) + sft[..., None]
     ).T
     msks = [m * inliers for m in msks]
-    msk_strs = [ms + "_inliers" for ms in msk_strs]
+    msk_strs = [ms + "_secondary" for ms in msk_strs]
     for i, (t_msk, msk) in enumerate(zip(template_msks, msks)):
         if priors[i] is None or _priors is None:
             continue
         priors[i] = _priors[np.ix_(t_msk, msk)]
+    match_config = config.get("secondary_match", {})
     _mapped_det_ids, _P, _transformed, _mapped_template = _do_match(
         det_ids,
         _focal_plane,
@@ -922,12 +900,13 @@ def main():
     P[inliers] = _P[inliers]
 
     # BG mismap
+    _mapped_template = mapped_template
     matched_bg[inliers] = np.nan_to_num(_mapped_template[:, 0], nan=-2).astype(int)[
         inliers
     ]
     bg_mismap = bias_group != matched_bg
     if have_bgmap:
-        logger.info("%d bias line mismaps", np.sum(bg_mismap))
+        logger.info("%d bias line mismaps amongst inliers", np.sum(bg_mismap[inliers]))
 
     rset_data = _mk_output(
         aman.dets.vals,
