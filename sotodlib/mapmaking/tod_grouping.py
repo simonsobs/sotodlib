@@ -108,7 +108,11 @@ def build_period_obslists(obs_info, periods, context, nset=None):
     pids       = np.searchsorted(periods[:,0], ctimes_mid)-1
     # 2. Build our lists. Not sure how to do this without looping
     for i, row in enumerate(obs_info):
-        wafer_list = ['ws0','ws1','ws2','ws3','ws4','ws5','ws6']
+        # row.obs_id
+        meta = context.get_meta(row.obs_id)
+        wafer_list = np.unique(meta.det_info.wafer_slot)
+        #print("These are my wafers ", wafer_list)
+        #wafer_list = ['ws0','ws1','ws2','ws3','ws4','ws5','ws6']
         band_list = ['f090', 'f150']
         for detset in wafer_list[0:nset]:
             for band in band_list:
