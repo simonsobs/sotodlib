@@ -426,8 +426,17 @@ class EstimateHWPSS(_Preprocess):
     """
     name = "estimate_hwpss"
 
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
-        hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
+        _prefilt = (self.signal == 'signal')
+        hwpss_stats = hwp.get_hwpss(aman,
+                                    signal=aman[self.signal],
+                                    apply_prefilt=_prefilt,
+                                    **self.calc_cfgs)
         self.save(proc_aman, hwpss_stats)
 
     def save(self, proc_aman, hwpss_stats):
