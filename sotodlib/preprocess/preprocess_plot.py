@@ -3,7 +3,6 @@ import os
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import time
 from venn import venn
 
 from sotodlib import hwp
@@ -55,10 +54,11 @@ def plot_det_bias_flags(aman, msk, msks, rfrac_range=(0.1, 0.7),
 
     obs_ts = aman.timestamps[0]
     det = aman.dets.vals[0]
-    save_ts = str(int(time.time()))
     plt.title(f"Obs_timestamp:{obs_ts:.0f}\ndet:{det}\nDetectors Cut per Range (Total cut: {len(np.where(all_bad_dets == True)[0])}/{len(aman.dets.vals)})")
     plt.tight_layout()
-    plt.savefig(os.path.join(save_path, save_ts + '_' + save_name))
+    plot_dir = os.path.join(save_path, f'{str(aman.timestamps[0])[:5]}', aman.obs_info.obs_id)
+    os.makedirs(plot_dir, exist_ok=True)
+    plt.savefig(os.path.join(plot_dir, save_name))
     plt.close()
 
 def plot_4f_2f_counts(aman, modes=np.arange(1,49), save_path='./', save_name='4f_2f_counts.png'):
@@ -126,10 +126,11 @@ def plot_4f_2f_counts(aman, modes=np.arange(1,49), save_path='./', save_name='4f
 
     obs_ts = aman.timestamps[0]
     det = aman.dets.vals[0]
-    save_ts = str(int(time.time()))
     plt.suptitle(f'Obs_timestamp:{obs_ts:.0f}\ndet:{det}\n4f/2f Counts')
     plt.tight_layout()
-    plt.savefig(os.path.join(save_path, save_ts+'_'+save_name))
+    plot_dir = os.path.join(save_path, f'{str(aman.timestamps[0])[:5]}', aman.obs_info.obs_id)
+    os.makedirs(plot_dir, exist_ok=True)
+    plt.savefig(os.path.join(plot_dir, save_name))
 
 def plot_hwpss_fit_status(aman, hwpss_stats, plot_dets=None, plot_num_dets=3,
                           save_path='./', save_name='hwpss_stats.png'):
@@ -187,6 +188,7 @@ def plot_hwpss_fit_status(aman, hwpss_stats, plot_dets=None, plot_num_dets=3,
     obs_ts = aman.timestamps[0]
     det = aman.dets.vals[0]
     plt.suptitle(f'HWPSS Stats for Obs_timestamp:{obs_ts:.0f}, dT = {np.ptp(aman.timestamps)/60:.1f} min\ndet:{det}\n')
-    save_ts = str(int(time.time()))
     plt.subplots_adjust(top=0.85, bottom=0.2)
-    plt.savefig(os.path.join(save_path, save_ts+'_'+save_name))
+    plot_dir = os.path.join(save_path, f'{str(aman.timestamps[0])[:5]}', aman.obs_info.obs_id)
+    os.makedirs(plot_dir, exist_ok=True)
+    plt.savefig(os.path.join(plot_dir, save_name))
