@@ -13,26 +13,6 @@ import itertools
 
 from . import util
 
-def get_ra_ref(obs, site='so_sat1'):
-    # pass an AxisManager of the observation, and return two ra_ref @ dec=-40 deg.   
-    # 
-    #t = [obs.obs_info.start_time, obs.obs_info.start_time, obs.obs_info.stop_time, obs.obs_info.stop_time]
-    t_start = obs.obs_info.start_time
-    t_stop = obs.obs_info.stop_time
-    az = np.arange((obs.obs_info.az_center-0.5*obs.obs_info.az_throw)*utils.degree, (obs.obs_info.az_center+0.5*obs.obs_info.az_throw)*utils.degree, 0.5*utils.degree)
-    el = obs.obs_info.el_center*utils.degree
-    
-    csl = so3g.proj.CelestialSightLine.az_el(t_start*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
-    ra_, dec_ = csl.coords().transpose()[:2]
-    spline = interpolate.CubicSpline(dec_, ra_, bc_type='not-a-knot')
-    ra_ref_start = spline(-40*utils.degree, nu=0)
-    
-    csl = so3g.proj.CelestialSightLine.az_el(t_stop*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
-    ra_, dec_ = csl.coords().transpose()[:2]
-    spline = interpolate.CubicSpline(dec_, ra_, bc_type='not-a-knot')
-    ra_ref_stop = spline(-40*utils.degree, nu=0)
-    return ra_ref_start, ra_ref_stop
-
 def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
@@ -43,6 +23,7 @@ def get_parser(parser=None):
     parser.add_argument("--mode", type=str, default='per_obs')
     parser.add_argument("--comps",   type=str, default="TQU")
     parser.add_argument("--singlestream", action="store_true")
+    parser.add_argument("--only-hits", action="store_true") # this will work only when we don't request splits, since I want to avoid loading the signal
     
     # detector position splits (fixed in time)
     parser.add_argument("--det-in-out", action="store_true")
@@ -65,6 +46,26 @@ def get_parser(parser=None):
     parser.add_argument("--atomic-db",    default='atomic_maps.db', help='name of the atomic map database, will be saved where make_filterbin_map is being run')
     
     return parser
+
+def get_ra_ref(obs, site='so_sat1'):
+    # pass an AxisManager of the observation, and return two ra_ref @ dec=-40 deg.   
+    # 
+    #t = [obs.obs_info.start_time, obs.obs_info.start_time, obs.obs_info.stop_time, obs.obs_info.stop_time]
+    t_start = obs.obs_info.start_time
+    t_stop = obs.obs_info.stop_time
+    az = np.arange((obs.obs_info.az_center-0.5*obs.obs_info.az_throw)*utils.degree, (obs.obs_info.az_center+0.5*obs.obs_info.az_throw)*utils.degree, 0.5*utils.degree)
+    el = obs.obs_info.el_center*utils.degree
+    
+    csl = so3g.proj.CelestialSightLine.az_el(t_start*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
+    ra_, dec_ = csl.coords().transpose()[:2]
+    spline = interpolate.CubicSpline(dec_, ra_, bc_type='not-a-knot')
+    ra_ref_start = spline(-40*utils.degree, nu=0)
+    
+    csl = so3g.proj.CelestialSightLine.az_el(t_stop*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
+    ra_, dec_ = csl.coords().transpose()[:2]
+    spline = interpolate.CubicSpline(dec_, ra_, bc_type='not-a-knot')
+    ra_ref_stop = spline(-40*utils.degree, nu=0)
+    return ra_ref_start, ra_ref_stop
 
 def tele2equ(coords, ctime, detoffs=[0,0], site="so_sat1"):
     # Broadcast and flatten input arrays
@@ -349,6 +350,29 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False,
         except RuntimeError: continue
     return my_tods, my_inds, my_ra_ref
 
+def write_hits_map(context, obslist, shape, wcs, t0=0, comm=mpi.COMM_WORLD, tag="", verbose=0):
+    L = logging.getLogger(__name__)
+    pre = "" if tag is None else tag + " "
+    
+    hits = enmap.zeros(shape, wcs, dtype=np.float64)
+    
+    for oi in range(len(obslist)):
+        obs_id, detset, band = obslist[oi][:3]
+        name = "%s:%s:%s" % (obs_id, detset, band)
+        # Read in the signal too. This seems to read in all the metadata from scratch,
+        # which is pointless, but shouldn't cost that much time.
+        #obs = context.get_obs(obs_id, dets={"wafer_slot" : [detset], "band":band})
+        obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, no_signal=True)
+        obs = calibrate_obs_new(obs)
+        rot = None
+        pmap_local = coords.pmat.P.for_tod(obs, comps='T', geom=hits.geometry, rot=rot, threads="domdir", weather=mapmaking.unarr(obs.weather), site=mapmaking.unarr(obs.site), hwp=True)
+        obs_hits = pmap_local.to_weights(obs, comps='T', )
+        #print('shape of hits', hits.shape)
+        #print('shape of obs_hits', obs_hits.shape)
+        
+        hits = hits.insert(obs_hits[0,0], op=np.ndarray.__iadd__)
+    return bunch.Bunch(hits=hits)
+
 def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", verbose=0, split_labels=None, time_split_leftright=False, singlestream=False, det_in_out=False, det_left_right=False, det_upper_lower=False):
     #det_split_masks is the dictionary that contains detector masks for each split we want to make. Each key has format freq_wafer_split, e.g. f090_w25_detleft, f150_w26_detupper, f090_w27_detin. We need to figure out how many split we'll make 2 per split mode.
     L = logging.getLogger(__name__)
@@ -515,7 +539,7 @@ def handle_empty(prefix, tag, comm, e):
         utils.mkdir(os.path.dirname(prefix))
         with open(prefix + ".empty", "w") as ofile: ofile.write("\n")
     
-def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='TQU', det_in_out=False, det_left_right=False, det_upper_lower=False, ntod=None, tods=None, nset=None, max_dets=None, fixed_time=None, mindur=None, tasks_per_group=1, site='so_sat1', verbose=0, quiet=0, window=5.0, dtype_tod=np.float32, dtype_map=np.float64, singlestream=False, atomic_db='atomic_maps.db'):
+def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='TQU', det_in_out=False, det_left_right=False, det_upper_lower=False, ntod=None, tods=None, nset=None, max_dets=None, fixed_time=None, mindur=None, tasks_per_group=1, site='so_sat1', verbose=0, quiet=0, window=5.0, dtype_tod=np.float32, dtype_map=np.float64, singlestream=False, atomic_db='atomic_maps.db', only_hits=False):
     warnings.simplefilter('ignore')
     # Set up our communicators
     comm       = mpi.COMM_WORLD
@@ -561,7 +585,7 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         split_labels = None
     
     # we open the data base for checking
-    if os.path.isfile('./'+atomic_db):
+    if os.path.isfile('./'+atomic_db) and only_hits==False:
         conn = sqlite3.connect('./'+atomic_db) # open the connector, in reading mode only
         cursor = conn.cursor()
         # Now we have obslists and splits ready, we look through the data base to remove the maps we already have from it
@@ -621,13 +645,14 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
             my_tods, my_inds, my_costs = [[a[vi] for vi in valid] for a in [my_tods, my_inds, my_costs]]
             
             # this is for the tags
-            if split_labels is None:
-                # this means the mapmaker was run without any splits requested
-                tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), 'full', 'full', cwd+'/'+prefix+'_full', obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref[0][0], my_ra_ref[0][1], 0.0) )
-            else:
-                # splits were requested and we loop over them
-                for split_label in split_labels:
-                    tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), split_label, '', cwd+'/'+prefix+'_%s'%split_label, obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref[0][0], my_ra_ref[0][1], 0.0) )
+            if only_hits==False:
+                if split_labels is None:
+                    # this means the mapmaker was run without any splits requested
+                    tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), 'full', 'full', cwd+'/'+prefix+'_full', obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref[0][0], my_ra_ref[0][1], 0.0) )
+                else:
+                    # splits were requested and we loop over them
+                    for split_label in split_labels:
+                        tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), split_label, '', cwd+'/'+prefix+'_%s'%split_label, obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref[0][0], my_ra_ref[0][1], 0.0) )
             
             all_inds  = utils.allgatherv(my_inds,     comm_intra)
             all_costs = utils.allgatherv(my_costs,    comm_intra)
@@ -654,17 +679,22 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         my_inds   = all_inds[utils.equal_split(all_costs, comm_intra.size)[comm_intra.rank]]
         comm_good = comm_intra.Split(len(my_inds) > 0)
         if len(my_inds) == 0: continue
-        #try:
+        if only_hits==False:
             # 5. make the maps
-        mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds], subshape, subwcs, noise_model, t0=t, comm=comm_good, tag=tag, dtype_map=dtype_map, dtype_tod=dtype_tod, comps=comps, verbose=verbose, split_labels=split_labels, singlestream=singlestream, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower)
-            # 6. write them
-        write_depth1_map(prefix, mapdata, split_labels=split_labels, )
-        #except DataMissing as e:
-        #    handle_empty(prefix, tag, comm_good, e)
+            mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds], subshape, subwcs, noise_model, t0=t, comm=comm_good, tag=tag, dtype_map=dtype_map, dtype_tod=dtype_tod, comps=comps, verbose=verbose, split_labels=split_labels, singlestream=singlestream, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower)
+                # 6. write them
+            write_depth1_map(prefix, mapdata, split_labels=split_labels, )
+            #except DataMissing as e:
+            #    handle_empty(prefix, tag, comm_good, e)
+        else:
+            mapdata = write_hits_map(context, [obslist[ind] for ind in my_inds], subshape, subwcs, t0=t, comm=comm_good, tag=tag, verbose=verbose,)
+            if comm_intra.rank == 0:
+                oname = "%s_%s.%s" % (prefix, "full_hits", 'fits')
+                enmap.write_map(oname, mapdata.hits)
     comm.Barrier()
     # gather the tags for writing into the sqlite database
     tags_total = comm_inter.gather(tags, root=0)
-    if comm_inter.rank == 0:
+    if comm_inter.rank == 0 and only_hits==False:
         tags_total = list(itertools.chain.from_iterable(tags_total)) # this is because tags_total is a list of lists of tuples, and we want a list of tuples
         # Write into the atomic map database.
         conn = sqlite3.connect('./'+atomic_db) # open the conector, if the database exists then it will be opened, otherwise it will be created
