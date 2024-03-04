@@ -333,7 +333,7 @@ def calibrate_obs(obs, dtype_tod=np.float32):
     #obs.focal_plane.gamma += obs.boresight_offset.gamma
     return obs
 
-def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False, dtype_tod=np.float32, ):
+def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False, dtype_tod=np.float32, only_hits=False ):
     my_tods = []
     my_inds = []
     my_ra_ref = []
@@ -343,10 +343,14 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False,
         try:
             tod = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, no_signal=no_signal)
             tod = calibrate_obs_new(tod, dtype_tod=dtype_tod)
-            ra_ref_start, ra_ref_stop = get_ra_ref(tod)
+            if only_hits==False:
+                ra_ref_start, ra_ref_stop = get_ra_ref(tod)
+                my_ra_ref.append((ra_ref_start/utils.degree, ra_ref_stop/utils.degree))
+            else:
+                my_ra_ref.append(None)
             my_tods.append(tod)
             my_inds.append(ind)
-            my_ra_ref.append((ra_ref_start/utils.degree, ra_ref_stop/utils.degree))
+            
         except RuntimeError: continue
     return my_tods, my_inds, my_ra_ref
 
@@ -637,7 +641,7 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         try:
             # 1. read in the metadata and use it to determine which tods are
             #    good and estimate how costly each is
-            my_tods, my_inds, my_ra_ref = read_tods(context, obslist, comm=comm_intra, no_signal=True, dtype_tod=dtype_tod, )
+            my_tods, my_inds, my_ra_ref = read_tods(context, obslist, comm=comm_intra, no_signal=True, dtype_tod=dtype_tod, only_hits=only_hits )
             # after read_tods the detector flags will be added to the axis manager
             my_costs  = np.array([tod.samps.count*len(mapmaking.find_usable_detectors(tod)) for tod in my_tods])
             # 2. prune tods that have no valid detectors
