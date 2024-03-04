@@ -3,6 +3,7 @@ import numpy as np
 import sotodlib.core as core
 import sotodlib.tod_ops as tod_ops
 from sotodlib.hwp import hwp
+import sotodlib.coords.planets as planets
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    count_cuts,
@@ -592,6 +593,25 @@ class SubPolyf(_Preprocess):
     def process(self, aman, proc_aman):
         tod_ops.sub_polyf.subscan_polyfilter(aman, **self.process_cfgs)
 
+class SSO(_Preprocess):
+    """Get SSO footprint and plot on focal plane.
+
+    .. autofunction:: sotodlib.tod_ops.sso.get_sso
+    """
+    name = 'sso'
+
+    def calc_and_save(self, aman, proc_aman, plot_dir='./'):
+        ssos = planets.get_nearby_sources(tod=aman, distance=20)
+        if ssos:
+            for sso in ssos:
+                planet = sso[0]
+                xi_p, eta_p = tod_ops.sso.get_sso(aman, planet, **self.calc_cfgs)
+                if self.plot_cfgs:
+                    from .preprocess_plot import plot_sso_footprint
+                    plot_sso_footprint(aman, planet, xi_p, eta_p, save_path=plot_dir)
+        else:
+            raise ValueError("No sources found within footprint")
+
 _Preprocess.register(Trends)
 _Preprocess.register(FFTTrim)
 _Preprocess.register(Detrend)
@@ -610,3 +630,4 @@ _Preprocess.register(GlitchFill)
 _Preprocess.register(FlagTurnarounds)
 _Preprocess.register(SubPolyf)
 _Preprocess.register(DetBiasFlags)
+_Preprocess.register(SSO)
