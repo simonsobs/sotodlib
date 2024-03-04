@@ -148,6 +148,18 @@ def _mk_plot(plot_dir, froot, nominal, measured, transformed):
         os.makedirs(plot_dir, exist_ok=True)
         plt.savefig(os.path.join(plot_dir, f"{froot}.png"))
         plt.cla()
+    diff = measured - transformed
+    diff = diff[:, np.isfinite(diff[0])]
+    dist = np.linalg.norm(diff, axis=0)
+    bins = int(len(dist) / 20)
+    plt.hist(dist, bins=bins)
+    plt.xlabel("Distance Between Measured and Transformed (rad)")
+    if plot_dir is None:
+        plt.show()
+    else:
+        os.makedirs(plot_dir, exist_ok=True)
+        plt.savefig(os.path.join(plot_dir, f"{froot}_dist.png"))
+        plt.cla()
 
 
 def gamma_fit(src, dst):
@@ -222,9 +234,11 @@ def to_horiz(points, encoders):
 
 def _load_ctx(config):
     ctx = Context(config["context"]["path"])
-    pm_name = config["context"].get("position_match", "position_match")
-    pointing_name = config["context"].get("position_match", "pointing")
-    pol_name = config["context"].get("position_match", "polarization")
+    tod_pm_name = config["context"].get("tod_position_match", "tod_position_match")
+    map_pm_name = config["context"].get("map_position_match", "map_position_match")
+    tod_pointing_name = config["context"].get("tod_pointing", "tod_pointing")
+    map_pointing_name = config["context"].get("map_pointing", "map_pointing")
+    pol_name = config["context"].get("polarization", "polarization")
     query = []
     if "query" in config["context"]:
         query = (ctx.obsdb.query(config["context"]["query"])["obs_id"],)
@@ -239,15 +253,32 @@ def _load_ctx(config):
     have_pol = [False] * len(obs_ids)
     for i, obs_id in enumerate(obs_ids):
         _config["context"]["obs_ids"] = [obs_id]
-        aman, _, pol, *_ = mpm._load_ctx(_config)
-        if pm_name not in aman:
-            raise ValueError(f"No position match in {obs_id}")
-        if "det_info" not in aman or "det_id" not in aman.det_info:
-            raise ValueError(f"No detmap for {obs_id}")
-        amans[i] = aman
-        have_pol[i] = pol
+        for pointing_name, pm_name in [
+            (tod_pointing_name, tod_pm_name),
+            (map_pointing_name, map_pm_name),
+        ]:
+            _config["context"]["position_match"] = pm_name
+            _config["context"]["pointing"] = pointing_name
+            try:
+                aman, _, pol, *_ = mpm._load_ctx(_config)
+            except mpm.NoPointing:
+                logger.warning("No %s in %s", pointing_name, obs_id)
+                continue
+            if pm_name not in aman:
+                raise ValueError(f"No position match in {obs_id}")
+            aman.move(pointing_name, "pointing")
+            aman.move(pm_name, "position_match")
+            if "det_id" in aman.det_info:
+                aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != ""])
+                aman.restrict(
+                    "dets", aman.dets.vals[aman.det_info.det_id != "NO_MATCH"]
+                )
+            if "det_info" not in aman or "det_id" not in aman.det_info:
+                raise ValueError(f"No detmap for {obs_id}")
+            amans[i] = aman
+            have_pol[i] = pol
 
-    return amans, obs_ids, have_pol, pointing_name, pol_name, pm_name
+    return amans, obs_ids, have_pol, "pointing", pol_name, "position_match"
 
 
 def _load_rset(config):
