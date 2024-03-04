@@ -1,5 +1,4 @@
 import os
-import sys
 import argparse as ap
 import h5py
 import numpy as np
@@ -7,16 +6,18 @@ from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 import yaml
 
+from detmap.makemap import MapMaker
 from so3g import proj
-from sotodlib.core import AxisManager, metadata, Context
+from sotodlib.core import metadata, Context
 from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
-from sotodlib.site_pipeline import make_position_match as mpm
 from sotodlib.coords import optics as op
 from sotodlib.coords import affine as af
 
 
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
+
+valid_bg = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
 
 
 def _encs_notclose(az, el, bs):
@@ -232,6 +233,114 @@ def to_horiz(points, encoders):
     return horiz
 
 
+def _get_wafer(ufm):
+    # TODO: Switch to Matthew's code here
+    try:
+        wafer = MapMaker(north_is_highband=False, array_name=ufm, verbose=False)
+    except ValueError:
+        wafer = MapMaker(
+            north_is_highband=False,
+            array_name=ufm,
+            verbose=False,
+            use_solution_as_design=False,
+        )
+    det_x = []
+    det_y = []
+    polang = []
+    det_ids = []
+    template_bg = []
+    is_north = []
+    for det in wafer.grab_metadata():
+        if not det.is_optical:
+            continue
+        det_x.append(det.det_x)
+        det_y.append(det.det_y)
+        polang.append(det.angle_actual_deg)
+        det_ids.append(det.detector_id)
+        template_bg.append(det.bias_line)
+        is_north.append(det.is_north)
+    template_bg = np.array(template_bg)
+    msk = np.isin(template_bg, valid_bg)
+    det_ids = np.array(det_ids)[msk]
+    template_n = np.array(is_north)[msk]
+    template = np.column_stack(
+        (template_bg, np.array(det_x), np.array(det_y), np.array(polang))
+    )[msk]
+
+    return det_ids, template, template_n
+
+
+class NoPointing(ValueError):
+    pass
+
+
+def _get_pointing(wafer, pointing_cfg):
+    xi, eta, gamma = op.get_focal_plane(
+        None, x=wafer[:, 1], y=wafer[:, 2], pol=wafer[:, 3], **pointing_cfg
+    )
+    pointing = wafer.copy()
+    pointing[:, 1] = xi
+    pointing[:, 2] = eta
+    pointing[:, 3] = gamma
+
+    return pointing
+
+
+def _load_template(template_path, ufm):
+    template_rset = read_dataset(template_path, ufm)
+    bg = np.array(template_rset["bg"], dtype=int)
+    msk = np.isin(bg, valid_bg)
+    det_ids = template_rset["dets:det_id"][msk]
+    template = np.column_stack(
+        (
+            bg.astype(float),
+            np.array(template_rset["xi"]),
+            np.array(template_rset["eta"]),
+            np.array(template_rset["gamma"]),
+        )
+    )[msk]
+    template_n = template_rset["is_north"][msk]
+
+    return det_ids, template, template_n
+
+
+def _load_ctx_single(config):
+    ctx = Context(config["context"]["path"])
+    pointing_name = config["context"].get("pointing", "pointing")
+    pol_name = config["context"].get("polarization", "polarization")
+    query = []
+    if "query" in config["context"]:
+        query = (ctx.obsdb.query(config["context"]["query"])["obs_id"],)
+    obs_ids = np.append(config["context"].get("obs_ids", []), query)
+    obs_ids = np.unique(obs_ids)
+    if len(obs_ids) == 0:
+        raise ValueError("No observations provided in configuration")
+    elif len(obs_ids) > 1:
+        logger.warning("More than one observation found, using %s", obs_ids[0])
+    obs_id = obs_ids[0]
+    dets = {"stream_id": f"ufm_{config['ufm'].lower()}"}
+    dets.update(config["context"].get("dets", {}))
+    aman = ctx.get_meta(obs_id, dets=dets)
+    if pointing_name not in aman:
+        raise NoPointing("No pointing associated with this observation")
+    if "wafer" not in aman.det_info:
+        dm_name = config["context"].get("detmap", "detmap")
+        if dm_name in aman:
+            dm_aman = aman[dm_name].copy()
+            aman.det_info.wrap("wafer", dm_aman)
+            if "det_id" not in aman.det_info:
+                aman.det_info.wrap(
+                    "det_id", aman.det_info.wafer.det_id, [(0, aman.dets)]
+                )
+    if "det_id" in aman.det_info:
+        aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != ""])
+        aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != "NO_MATCH"])
+    pol = pol_name in aman
+    if not pol:
+        logger.warning("No polarization data in context")
+    return aman, obs_id, pol, pointing_name, pol_name
+
+
 def _load_ctx(config):
     ctx = Context(config["context"]["path"])
     tod_pm_name = config["context"].get("tod_position_match", "tod_position_match")
@@ -260,8 +369,8 @@ def _load_ctx(config):
             _config["context"]["position_match"] = pm_name
             _config["context"]["pointing"] = pointing_name
             try:
-                aman, _, pol, *_ = mpm._load_ctx(_config)
-            except mpm.NoPointing:
+                aman, _, pol, *_ = _load_ctx_single(_config)
+            except NoPointing:
                 logger.warning("No %s in %s", pointing_name, obs_id)
                 continue
             if pm_name not in aman:
@@ -281,6 +390,53 @@ def _load_ctx(config):
     return amans, obs_ids, have_pol, "pointing", pol_name, "position_match"
 
 
+def _load_rset_single(config):
+    obs_id = config["resultsets"].get("obs_id", "")
+    pointing_rset = read_dataset(*config["resultsets"]["pointing"])
+    pointing_aman = pointing_rset.to_axismanager(axis_key="dets:readout_id")
+    aman = AxisManager(pointing_aman.dets)
+    aman = aman.wrap("pointing", pointing_aman)
+
+    pol = False
+    if "polarization" in config["resultsets"]:
+        polarization_rset = read_dataset(*config["resultsets"]["polarization"])
+        polarization_aman = polarization_rset.to_axismanager(axis_key="dets:readout_id")
+        aman = aman.wrap("polarization", polarization_aman)
+        pol = True
+
+    det_info = AxisManager(aman.dets)
+    if "detmap" in config["resultsets"]:
+        dm_rset = read_dataset(*config["resultsets"]["detmap"])
+        dm_aman = dm_rset.to_axismanager(axis_key="readout_id")
+        det_info.wrap("wafer", dm_aman)
+        det_info.wrap("readout_id", det_info.dets.vals, [(0, det_info.dets)])
+        det_info.wrap("det_id", det_info.wafer.det_id, [(0, det_info.dets)])
+        det_info.restrict("dets", det_info.dets.vals[det_info.det_id != ""])
+        aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != "NO_MATCH"])
+    aman = aman.wrap("det_info", det_info)
+
+    smurf = AxisManager(aman.dets)
+    if "band" in aman.pointing:
+        smurf.wrap("band", np.array(aman.pointing.band, dtype=int), [(0, smurf.dets)])
+    elif "wafer" in det_info and "smurf_band" in det_info.wafer:
+        smurf.wrap(
+            "band", np.array(det_info.wafer.smurf_band, dtype=int), [(0, smurf.dets)]
+        )
+    if "channel" in aman.pointing:
+        smurf.wrap(
+            "channel", np.array(aman.pointing.channel, dtype=int), [(0, smurf.dets)]
+        )
+    elif "wafer" in det_info and "smurf_channel" in det_info.wafer:
+        smurf.wrap(
+            "channel",
+            np.array(det_info.wafer.smurf_channel, dtype=int),
+            [(0, smurf.dets)],
+        )
+    aman.det_info.wrap("smurf", smurf)
+
+    return aman, obs_id, pol, "pointing", "polarization"
+
+
 def _load_rset(config):
     obs = config["resultsets"]
     _config = config.copy()
@@ -290,7 +446,7 @@ def _load_rset(config):
     for i, (obs_id, rsets) in enumerate(obs.items()):
         _config["resultsets"] = rsets
         _config["resultsets"]["obs_id"] = obs_id
-        aman, _, pol, *_ = mpm._load_rset(_config)
+        aman, _, pol, *_ = _load_rset_single(_config)
         if "det_info" not in aman or "det_id" not in aman.det_info:
             raise ValueError(f"No detmap for {obs_id}")
         if "position_match" not in rsets:
@@ -345,7 +501,7 @@ def main():
     if not gen_template:
         template_path = config["template"]
         if os.path.exists(template_path):
-            template_det_ids, template, _ = mpm._load_template(template_path, ufm)
+            template_det_ids, template, _ = _load_template(template_path, ufm)
         else:
             logger.error("Provided template doesn't exist, trying to generate one")
             gen_template = True
@@ -353,8 +509,8 @@ def main():
         logger.info(f"Generating template for {ufm}")
         if "pointing_cfg" not in config:
             raise ValueError("Need pointing_cfg to generate template")
-        template_det_ids, template, _ = mpm._get_wafer(ufm)
-        template = mpm._get_pointing(template, config["pointing_cfg"])
+        template_det_ids, template, _ = _get_wafer(ufm)
+        template = _get_pointing(template, config["pointing_cfg"])
     else:
         raise ValueError(
             "No template provided and unable to generate one for some reason"
