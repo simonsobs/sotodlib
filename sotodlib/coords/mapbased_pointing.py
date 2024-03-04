@@ -17,6 +17,21 @@ import h5py
 from scipy.ndimage import maximum_filter
 
 def get_planet_trajectry(tod, planet, _split=20, return_model=False):
+    """
+    Generate the trajectory of a given planet over a specified time range.
+
+    Parameters:
+        tod : An axis manager
+        planet (str): The name of the planet for which to generate the trajectory.
+        _split (int, optional): Number of points to interpolate the trajectory. Defaults to 20.
+        return_model (bool, optional): If True, returns interpolation functions of az and el. Defaults to False.
+
+    Returns:
+        If return_model is True:
+            tuple: Tuple containing interpolation functions for azimuth and elevation.
+        If return_model is False:
+            array: Array of quaternions representing trajectry of the planet at each timestamp.
+    """
     timestamps_sparse = np.linspace(tod.timestamps[0], tod.timestamps[-1], _split)
     
     planet_az_sparse = np.zeros_like(timestamps_sparse)
@@ -36,6 +51,23 @@ def get_planet_trajectry(tod, planet, _split=20, return_model=False):
         return q_planet
 
 def get_wafer_centered_sight(tod, planet, q_planet=None, q_bs=None, q_wafer=None):
+    """
+    Calculate the sightline vector from the focal plane, centered on the wafer, to a planet.
+
+    Parameters:
+        tod : An axis manager
+        planet (str): The name of the planet to calculate the sightline vector.
+        q_planet (optional): Quaternion representing the trajectry of the planet. 
+            If None, it will be computed using get_planet_trajectory. Defaults to None.
+        q_bs (optional): Quaternion representing the trajectry of the boresight.
+            If None, it will be computed using the current boresight angles from tod. Defaults to None.
+        q_wafer (optional): Quaternion representing the center of wafer to the center of boresight.
+            If None, it will be computed using the median of the focal plane xi and eta from tod.focal_plane. 
+            Defaults to None.
+
+    Returns:
+        Sightline vector for the planet trajectry centered on the center of the wafer.
+    """
     if q_planet is None:
         q_planet = get_planet_trajectry(tod, planet)
     if q_bs is None:
@@ -49,7 +81,7 @@ def get_wafer_centered_sight(tod, planet, q_planet=None, q_bs=None, q_wafer=None
     return sight
 
 def get_wafer_xieta(wafer_slot, xieta_bs_offset=(0., 0.), roll_bs_offset=0.,
-                    optics_config_fn=None, wrap_to_tod=True, tod=None):    
+                    optics_config_fn=None, wrap_to_tod=True, tod=None):
     optics_config = optics.load_ufm_to_fp_config(optics_config_fn)['SAT']
     wafer_x, wafer_y = optics_config[wafer_slot]['dx'], optics_config[wafer_slot]['dy']
     wafer_r = np.sqrt(wafer_x**2 + wafer_y**2)
@@ -210,6 +242,7 @@ def map_to_xieta(mT, edge_avoidance=1.0*coords.DEG, edge_check='nan',
     if np.all(np.isnan(mT)):
         xi_det = np.nan
         eta_det = np.nan
+        R2_det = np.nan
         
     else:
         xi_peak, eta_peak, ra_peak, dec_peak, peak_i, peak_j = detect_peak_xieta(mT)
@@ -238,27 +271,24 @@ def map_to_xieta(mT, edge_avoidance=1.0*coords.DEG, edge_check='nan',
             _z = z[mask_fit]
             
             if _r.shape[0] == 0:
-                
                 xi_det = np.nan
                 eta_det = np.nan
+                R2_det = np.nan
             else:
                 popt, pcov = curve_fit(_gauss1d, _r, _z,
                                        p0=[np.ptp(_z), beam_sigma_init, np.percentile(_z, 1)],
                                        bounds = ((-np.inf, beam_sigma_init/5, -np.inf),
                                                   (np.inf, beam_sigma_init*5, np.inf),),
-                                       max_nfev = 1000000
-                                      )
+                                       max_nfev = 1000000)
                 R2 = 1 - np.sum((_z - _gauss1d(_r, *popt))**2)/np.sum((_z - np.mean(_z))**2) # R2(=coefficient of determination)
-                if R2 >= R2_threshold:
-                    xi_det = -xi_peak
-                    eta_det = eta_peak
-                else:
-                    xi_det = np.nan
-                    eta_det = np.nan
+                xi_det = -xi_peak
+                eta_det = eta_peak
+                R2_det = R2
         else:
             xi_det = np.nan
             eta_det = np.nan
-    return xi_det, eta_det    
+            R2_det = np.nan
+    return xi_det, eta_det, R2_det   
 
 def get_xieta_from_maps(map_hdf_file, 
                         edge_avoidance=1.0*coords.DEG, edge_check='nan',
@@ -273,13 +303,14 @@ def get_xieta_from_maps(map_hdf_file,
         for di, det in enumerate(tqdm(dets)):
             mT = enmap.read_hdf(ifile[det])
             mT[mT==0.] = np.nan
-            xi, eta = map_to_xieta(mT, edge_avoidance=edge_avoidance, edge_check=edge_check,
+            xi, eta, R2 = map_to_xieta(mT, edge_avoidance=edge_avoidance, edge_check=edge_check,
                                    R2_threshold=R2_threshold, r_tune_circle=r_tune_circle, q_tune=q_tune)
+            
             xi0 = ifile[det]['xi0'][...].item()
             eta0 = ifile[det]['eta0'][...].item()
             xi, eta = _add_xieta((xi0, eta0), (xi, eta))
             if force_zero_roll:
-                xieta_dict[det] = {'xi':xi, 'eta':eta}
+                xieta_dict[det] = {'xi':xi, 'eta':eta, 'R2':R2}
             else:
                 xi_bs_offset = ifile[det]['xi_bs_offset'][...].item()
                 eta_bs_offset = ifile[det]['eta_bs_offset'][...].item()
@@ -291,7 +322,7 @@ def get_xieta_from_maps(map_hdf_file,
                 q = q3 * ~q2 * q1
                 xieta = quat.decompose_xieta(q)
                 xi, eta = xieta[0], xieta[1]
-                xieta_dict[det] = {'xi':xi, 'eta':eta}
+                xieta_dict[det] = {'xi':xi, 'eta':eta, 'R2':R2}
     if save:
         if output_dir is None:
             if force_zero_roll:
@@ -301,15 +332,15 @@ def get_xieta_from_maps(map_hdf_file,
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
         if filename is None:
-            filename = 'focalplane_' + os.path.splitext(os.path.basename(map_hdf_file))[0] + '.hdf'
+            filename = 'focal_plane_' + os.path.splitext(os.path.basename(map_hdf_file))[0] + '.hdf'
         output_file = os.path.join(output_dir, filename)
         
-        focalplane = metadata.ResultSet(keys=['dets:readout_id', 'band', 'channel', 'xi', 'eta', 'gamma'])
+        focal_plane = metadata.ResultSet(keys=['dets:readout_id', 'band', 'channel', 'R2', 'xi', 'eta', 'gamma'])
         for det in dets:
             band = int(det.split('_')[-2])
             channel = int(det.split('_')[-1])
-            focalplane.rows.append((det, band, channel, xieta_dict[det]['xi'], xieta_dict[det]['eta'], 0.))
-        write_dataset(focalplane, output_file, 'focalplane', overwrite=True)
+            focal_plane.rows.append((det, band, channel, xieta_dict[det]['R2'], xieta_dict[det]['xi'], xieta_dict[det]['eta'], 0.))
+        write_dataset(focal_plane, output_file, 'focal_plane', overwrite=True)
     return xieta_dict
 
 def _add_xieta(xieta1, xieta2):
@@ -325,38 +356,48 @@ def _add_xieta(xieta1, xieta2):
 
 
 
-def combine_pointings(pointing_result_files, method='mean', save=False, output_dir=None, save_name=None):
+def combine_pointings(pointing_result_files, method='mean', R2_threshold=0.3, 
+                      save=False, output_dir=None, save_name=None):
     combined_dict = {}
     for file in pointing_result_files:
-        rset = read_dataset(file, 'focalplane')
+        rset = read_dataset(file, 'focal_plane')
         for row in rset[:]:
             if row['dets:readout_id'] not in combined_dict.keys():
                 combined_dict[row['dets:readout_id']] = {}
                 combined_dict[row['dets:readout_id']]['band'] = row['band']
                 combined_dict[row['dets:readout_id']]['channel'] = row['channel']
+                
+                combined_dict[row['dets:readout_id']]['R2'] = np.atleast_1d([])
                 combined_dict[row['dets:readout_id']]['xi'] = np.atleast_1d([])
                 combined_dict[row['dets:readout_id']]['eta'] = np.atleast_1d([])
                 combined_dict[row['dets:readout_id']]['gamma'] = np.atleast_1d([])
-
+                
+            combined_dict[row['dets:readout_id']]['R2'] = np.append(combined_dict[row['dets:readout_id']]['R2'], row['R2'])
             combined_dict[row['dets:readout_id']]['xi'] = np.append(combined_dict[row['dets:readout_id']]['xi'], row['xi'])
             combined_dict[row['dets:readout_id']]['eta'] = np.append(combined_dict[row['dets:readout_id']]['eta'], row['eta'])
             combined_dict[row['dets:readout_id']]['gamma'] = np.append(combined_dict[row['dets:readout_id']]['gamma'], row['gamma'])
 
-    focalplane = metadata.ResultSet(keys=['dets:readout_id', 'band', 'channel', 'xi', 'eta', 'gamma'])
+    focal_plane = metadata.ResultSet(keys=['dets:readout_id', 'band', 'channel', 'R2', 'xi', 'eta', 'gamma'])
     for det, val in combined_dict.items():
         band = int(val['band'])
         channel = int(val['channel'])
-        if method == 'mean':
-            xi = np.nanmean(val['xi'])
-            eta = np.nanmean(val['eta'])
-            gamma = np.nanmean(val['gamma'])
-        elif method == 'median':
-            xi = np.nanmedian(val['xi'])
-            eta = np.nanmedian(val['eta'])
-            gamma = np.nanmedian(val['gamma'])
+        
+        mask = val['R2'] > R2_threshold
+        if np.all(~mask):
+                xi, eta, gamma, R2 = np.nan, np.nan, np.nan, np.nan
         else:
-            raise ValueError('Not supported method. Supported methods are `mean` or `median`')
-        focalplane.rows.append((det, band, channel, xi, eta, gamma))
+            if method == 'highest_R2':
+                idx = np.argmax(val['R2'][mask])
+                xi, eta, gamma, R2 = val['xi'][mask][idx], val['eta'][mask][idx], val['gamma'][mask][idx], val['R2'][mask][idx]
+            elif method == 'mean':
+                xi, eta, gamma = np.mean(val['xi'][mask]), np.mean(val['eta'][mask]), np.mean(val['gamma'][mask])
+                R2 = np.nan
+            elif method == 'median':
+                xi, eta, gamma = np.median(val['xi'][mask]), np.median(val['eta'][mask]), np.median(val['gamma'][mask])
+                R2 = np.nan
+            else:
+                raise ValueError('Not supported method. Supported methods are `highest_R2`, `mean` or `median`')
+        focal_plane.rows.append((det, band, channel, R2, xi, eta, gamma))
     if save:
         if output_dir is None:
             output_dir = os.path.join(os.getcwd(), 'combined_pointing_results')
@@ -376,7 +417,7 @@ def combine_pointings(pointing_result_files, method='mean', save=False, output_d
                 wafer_slots = np.append(wafer_slots, ws)
             ctimes = ctimes.astype('int')
             wafer_slots = np.sort(np.unique(wafer_slots.astype('U3')))
-            save_name = f'focalplane_{ctimes.min()}_{ctimes.max()}_' + ''.join(wafer_slots) + '.hdf'
+            save_name = f'focal_plane_{ctimes.min()}_{ctimes.max()}_' + ''.join(wafer_slots) + '.hdf'
             
-        write_dataset(focalplane, os.path.join(output_dir, save_name), 'focalplane', overwrite=True)
-    return focalplane
+        write_dataset(focal_plane, os.path.join(output_dir, save_name), 'focal_plane', overwrite=True)
+    return focal_plane
