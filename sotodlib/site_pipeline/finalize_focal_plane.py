@@ -1,5 +1,4 @@
 import os
-import sys
 import argparse as ap
 import h5py
 import numpy as np
@@ -7,24 +6,18 @@ from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 import yaml
 
+from detmap.makemap import MapMaker
 from so3g import proj
 from sotodlib.core import AxisManager, metadata, Context
 from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
-from sotodlib.site_pipeline import make_position_match as mpm
 from sotodlib.coords import optics as op
 from sotodlib.coords import affine as af
 
 
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
 
-
-def _encs_notclose(az, el, bs):
-    return not (
-        np.isclose(az, az[0], equal_nan=True).all()
-        and np.isclose(el, el[0], equal_nan=True).all()
-        and np.isclose(bs, bs[0], equal_nan=True).all()
-    )
+valid_bg = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
 
 
 def _avg_focalplane(xi, eta, gamma, tot_weight):
@@ -91,7 +84,7 @@ def _mk_fpout(det_id, transformed, measured, measured_gamma):
     )
 
 
-def _mk_tpout(xieta, horiz):
+def _mk_tpout(xieta):
     outdt = [
         ("d_x", np.float32),
         ("d_y", np.float32),
@@ -103,19 +96,18 @@ def _mk_tpout(xieta, horiz):
         ("rot", np.float32),
     ]
     xieta = (*xieta[0], *xieta[1], *xieta[2:])
-    horiz = (*horiz[0], *horiz[1], *horiz[2:])
-    tpout = np.array([xieta, horiz], outdt)
+    tpout = np.array([xieta], outdt)
 
     return tpout
 
 
-def _mk_refout(lever_arm, encoders):
+def _mk_refout(lever_arm):
     outdt = [
         ("x", np.float32),
         ("y", np.float32),
         ("z", np.float32),
     ]
-    refout = np.array([tuple(np.squeeze(lever_arm)), tuple(encoders)], outdt)
+    refout = np.array([tuple(np.squeeze(lever_arm))], outdt)
 
     return refout
 
@@ -191,54 +183,83 @@ def gamma_fit(src, dst):
     return res.x
 
 
-def to_horiz(points, encoders):
-    """
-    Go from xieta coordinates to horizon coordinates.
+def _get_wafer(ufm):
+    # TODO: Switch to Matthew's code here
+    try:
+        wafer = MapMaker(north_is_highband=False, array_name=ufm, verbose=False)
+    except ValueError:
+        wafer = MapMaker(
+            north_is_highband=False,
+            array_name=ufm,
+            verbose=False,
+            use_solution_as_design=False,
+        )
+    det_x = []
+    det_y = []
+    polang = []
+    det_ids = []
+    template_bg = []
+    is_north = []
+    for det in wafer.grab_metadata():
+        if not det.is_optical:
+            continue
+        det_x.append(det.det_x)
+        det_y.append(det.det_y)
+        polang.append(det.angle_actual_deg)
+        det_ids.append(det.detector_id)
+        template_bg.append(det.bias_line)
+        is_north.append(det.is_north)
+    template_bg = np.array(template_bg)
+    msk = np.isin(template_bg, valid_bg)
+    det_ids = np.array(det_ids)[msk]
+    template_n = np.array(is_north)[msk]
+    template = np.column_stack(
+        (template_bg, np.array(det_x), np.array(det_y), np.array(polang))
+    )[msk]
 
-    Arguments:
+    return det_ids, template, template_n
 
-        points: (3, ndet) array of points.
-                Rows should be (xi, eta, gamma).
 
-        encoders: The encoder positions for the LOS.
-                  Should be (az, el, bs).
+class NoPointing(ValueError):
+    pass
 
-    Returns:
 
-        horiz : (3, ndet) array if points.
-                Rows are (az, el, bs).
-    """
-    msk = np.isfinite(points).all(axis=0)
-    good_points = points[:, msk]
-    dets = np.arange(good_points.shape[1])
-    fp = proj.FocalPlane.from_xieta(dets, *good_points)
-    sight = proj.CelestialSightLine.for_horizon([0], *np.atleast_2d(encoders).T)
-    asm = proj.Assembly.attach(sight, fp)
-    output = np.zeros((len(dets), 1, 4))
-    projectionist = proj.Projectionist()
-    projectionist.get_coords(asm, output=output)
+def _get_pointing(wafer, pointing_cfg):
+    xi, eta, gamma = op.get_focal_plane(
+        None, x=wafer[:, 1], y=wafer[:, 2], pol=wafer[:, 3], **pointing_cfg
+    )
+    pointing = wafer.copy()
+    pointing[:, 1] = xi
+    pointing[:, 2] = eta
+    pointing[:, 3] = gamma
 
-    # Get rid of the time axis and transpose
-    output = np.squeeze(output, axis=1).T
-    # Fix sign on az
-    output[0] *= -1
-    # Compute BS (need to check sign and 0 point)
-    bs = np.arctan2(output[3], output[2]) % (2 * np.pi)
+    return pointing
 
-    _horiz = np.vstack((output[:2], bs))
-    horiz = np.zeros((3, len(msk))) + np.nan
-    horiz[:, msk] = _horiz
 
-    return horiz
+def _load_template(template_path, ufm):
+    template_rset = read_dataset(template_path, ufm)
+    bg = np.array(template_rset["bg"], dtype=int)
+    msk = np.isin(bg, valid_bg)
+    det_ids = template_rset["dets:det_id"][msk]
+    template = np.column_stack(
+        (
+            bg.astype(float),
+            np.array(template_rset["xi"]),
+            np.array(template_rset["eta"]),
+            np.array(template_rset["gamma"]),
+        )
+    )[msk]
+    template_n = template_rset["is_north"][msk]
+
+    return det_ids, template, template_n
 
 
 def _load_ctx(config):
     ctx = Context(config["context"]["path"])
-    tod_pm_name = config["context"].get("tod_position_match", "tod_position_match")
-    map_pm_name = config["context"].get("map_position_match", "map_position_match")
     tod_pointing_name = config["context"].get("tod_pointing", "tod_pointing")
     map_pointing_name = config["context"].get("map_pointing", "map_pointing")
     pol_name = config["context"].get("polarization", "polarization")
+    dm_name = config["context"].get("detmap", "detmap")
     query = []
     if "query" in config["context"]:
         query = (ctx.obsdb.query(config["context"]["query"])["obs_id"],)
@@ -249,36 +270,89 @@ def _load_ctx(config):
     _config = config.copy()
     if "query" in _config["context"]:
         del _config["context"]["query"]
-    amans = [None] * len(obs_ids)
-    have_pol = [False] * len(obs_ids)
-    for i, obs_id in enumerate(obs_ids):
-        _config["context"]["obs_ids"] = [obs_id]
-        for pointing_name, pm_name in [
-            (tod_pointing_name, tod_pm_name),
-            (map_pointing_name, map_pm_name),
-        ]:
-            _config["context"]["position_match"] = pm_name
-            _config["context"]["pointing"] = pointing_name
-            try:
-                aman, _, pol, *_ = mpm._load_ctx(_config)
-            except mpm.NoPointing:
-                logger.warning("No %s in %s", pointing_name, obs_id)
-                continue
-            if pm_name not in aman:
-                raise ValueError(f"No position match in {obs_id}")
-            aman.move(pointing_name, "pointing")
-            aman.move(pm_name, "position_match")
-            if "det_id" in aman.det_info:
-                aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != ""])
-                aman.restrict(
-                    "dets", aman.dets.vals[aman.det_info.det_id != "NO_MATCH"]
+    amans = []
+    have_pol = []
+    dets = {"stream_id": f"ufm_{config['ufm'].lower()}"}
+    dets.update(config["context"].get("dets", {}))
+    for obs_id in obs_ids:
+        aman = ctx.get_meta(obs_id, dets=dets)
+        if "wafer" not in aman.det_info and dm_name in aman:
+            dm_aman = aman[dm_name].copy()
+            aman.det_info.wrap("wafer", dm_aman)
+            if "det_id" not in aman.det_info:
+                aman.det_info.wrap(
+                    "det_id", aman.det_info.wafer.det_id, [(0, aman.dets)]
                 )
-            if "det_info" not in aman or "det_id" not in aman.det_info:
-                raise ValueError(f"No detmap for {obs_id}")
-            amans[i] = aman
-            have_pol[i] = pol
+        if "det_id" in aman.det_info:
+            aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != ""])
+            aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != "NO_MATCH"])
+        elif "det_info" not in aman or "det_id" not in aman.det_info:
+            raise ValueError(f"No detmap for {obs_id}")
+        pol = pol_name in aman
+        if not pol:
+            logger.warning("No polarization data in context")
 
-    return amans, obs_ids, have_pol, "pointing", pol_name, "position_match"
+        if tod_pointing_name in aman:
+            _aman = aman.copy()
+            _aman.move(tod_pointing_name, "pointing")
+            aman.append(_aman)
+            have_pol.append(pol)
+        if map_pointing_name in aman:
+            _aman = aman.copy()
+            _aman.move(map_pointing_name, "pointing")
+            aman.append(_aman)
+            have_pol.append(pol)
+        elif tod_pointing_name not in aman:
+            raise ValueError(f"No pointing found in {obs_id}")
+
+    return amans, obs_ids, have_pol, "pointing", pol_name
+
+
+def _load_rset_single(config):
+    obs_id = config["resultsets"].get("obs_id", "")
+    pointing_rset = read_dataset(*config["resultsets"]["pointing"])
+    pointing_aman = pointing_rset.to_axismanager(axis_key="dets:readout_id")
+    aman = AxisManager(pointing_aman.dets)
+    aman = aman.wrap("pointing", pointing_aman)
+
+    pol = False
+    if "polarization" in config["resultsets"]:
+        polarization_rset = read_dataset(*config["resultsets"]["polarization"])
+        polarization_aman = polarization_rset.to_axismanager(axis_key="dets:readout_id")
+        aman = aman.wrap("polarization", polarization_aman)
+        pol = True
+
+    det_info = AxisManager(aman.dets)
+    if "detmap" in config["resultsets"]:
+        dm_rset = read_dataset(*config["resultsets"]["detmap"])
+        dm_aman = dm_rset.to_axismanager(axis_key="readout_id")
+        det_info.wrap("wafer", dm_aman)
+        det_info.wrap("readout_id", det_info.dets.vals, [(0, det_info.dets)])
+        det_info.wrap("det_id", det_info.wafer.det_id, [(0, det_info.dets)])
+        det_info.restrict("dets", det_info.dets.vals[det_info.det_id != ""])
+        aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != "NO_MATCH"])
+    aman = aman.wrap("det_info", det_info)
+
+    smurf = AxisManager(aman.dets)
+    if "band" in aman.pointing:
+        smurf.wrap("band", np.array(aman.pointing.band, dtype=int), [(0, smurf.dets)])
+    elif "wafer" in det_info and "smurf_band" in det_info.wafer:
+        smurf.wrap(
+            "band", np.array(det_info.wafer.smurf_band, dtype=int), [(0, smurf.dets)]
+        )
+    if "channel" in aman.pointing:
+        smurf.wrap(
+            "channel", np.array(aman.pointing.channel, dtype=int), [(0, smurf.dets)]
+        )
+    elif "wafer" in det_info and "smurf_channel" in det_info.wafer:
+        smurf.wrap(
+            "channel",
+            np.array(det_info.wafer.smurf_channel, dtype=int),
+            [(0, smurf.dets)],
+        )
+    aman.det_info.wrap("smurf", smurf)
+
+    return aman, obs_id, pol, "pointing", "polarization"
 
 
 def _load_rset(config):
@@ -290,19 +364,13 @@ def _load_rset(config):
     for i, (obs_id, rsets) in enumerate(obs.items()):
         _config["resultsets"] = rsets
         _config["resultsets"]["obs_id"] = obs_id
-        aman, _, pol, *_ = mpm._load_rset(_config)
+        aman, _, pol, *_ = _load_rset_single(_config)
         if "det_info" not in aman or "det_id" not in aman.det_info:
             raise ValueError(f"No detmap for {obs_id}")
-        if "position_match" not in rsets:
-            raise ValueError(f"No position match in {obs_id}")
-        pm_aman = read_dataset(*rsets["position_match"]).to_axismanager(
-            axis_key="dets:readout_id"
-        )
-        aman.wrap("position_match", pm_aman)
         amans[i] = aman
         have_pol[i] = pol
 
-    return amans, obs_ids, have_pol, "pointing", "polarization", "position_match"
+    return amans, obs_ids, have_pol, "pointing", "polarization"
 
 
 def main():
@@ -318,9 +386,9 @@ def main():
 
     # Load data
     if "context" in config:
-        amans, obs_ids, have_pol, pointing_name, pol_name, pm_name = _load_ctx(config)
+        amans, obs_ids, have_pol, pointing_name, pol_name = _load_ctx(config)
     elif "resultsets" in config:
-        amans, obs_ids, have_pol, pointing_name, pol_name, pm_name = _load_rset(config)
+        amans, obs_ids, have_pol, pointing_name, pol_name = _load_rset(config)
     else:
         raise ValueError("No valid inputs provided")
 
@@ -345,7 +413,7 @@ def main():
     if not gen_template:
         template_path = config["template"]
         if os.path.exists(template_path):
-            template_det_ids, template, _ = mpm._load_template(template_path, ufm)
+            template_det_ids, template, _ = _load_template(template_path, ufm)
         else:
             logger.error("Provided template doesn't exist, trying to generate one")
             gen_template = True
@@ -353,16 +421,12 @@ def main():
         logger.info(f"Generating template for {ufm}")
         if "pointing_cfg" not in config:
             raise ValueError("Need pointing_cfg to generate template")
-        template_det_ids, template, _ = mpm._get_wafer(ufm)
-        template = mpm._get_pointing(template, config["pointing_cfg"])
+        template_det_ids, template, _ = _get_wafer(ufm)
+        template = _get_pointing(template, config["pointing_cfg"])
     else:
         raise ValueError(
             "No template provided and unable to generate one for some reason"
         )
-
-    check_enc = config.get("check_enc", False)
-    encoders = np.nan + np.zeros((3, len(obs_ids)))
-    use_matched = config.get("use_matched", False)
 
     xi = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
     eta = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
@@ -372,14 +436,9 @@ def main():
         logger.info("Working on %s", obs_id)
         if aman is None:
             raise ValueError("AxisManager doesn't exist?")
-        # Cut outliers
-        aman.restrict("dets", aman.dets.vals[~aman[pm_name].pointing_outlier])
 
         # Mapping to template
-        if use_matched:
-            det_ids = aman[pm_name].matched_det_id
-        else:
-            det_ids = aman.det_info.det_id
+        det_ids = aman.det_info.det_id
         _, msk, template_msk = np.intersect1d(
             det_ids, template_det_ids, return_indices=True
         )
@@ -389,36 +448,27 @@ def main():
         srt = np.argsort(det_ids[msk])
         _xi = aman[pointing_name].xi[msk][srt][mapping]
         _eta = aman[pointing_name].eta[msk][srt][mapping]
+
+        # Do an initial alignment and get weights
+        fp = np.vstack((_xi, _eta))
+        aff, sft = af.get_affine(fp, template[template_msk, 0:3].T)
+        aligned = aff @ fp + sft[..., None]
         if pol:
             _gamma = aman[pol_name].polang[msk][mapping]
+            gscale, gsft = gamma_fit(_gamma, template[template_msk, 3])
+            weights = af.gen_weights(
+                np.vstack((aligned, gscale * _gamma + gsft)),
+                template[template_msk, 1:].T,
+            )
         else:
             _gamma = np.nan + np.zeros_like(_xi)
-        weights = aman[pm_name].likelihood[msk][srt][mapping]
+            weights = af.gen_weights(aligned, template[template_msk, 1:3].T)
 
         # Store weighted values
         xi[template_msk, i] = _xi * weights
         eta[template_msk, i] = _eta * weights
         gamma[template_msk, i] = _gamma * weights
         tot_weight[template_msk] += weights
-
-        if not check_enc:
-            continue
-        if (
-            "az" not in aman[pointing_name]
-            or "el" not in aman[pointing_name]
-            or "roll" not in aman[pointing_name]
-        ):
-            raise ValueError("No encoder values included with pointing")
-        az, el, roll = (
-            aman[pointing_name].az,
-            aman[pointing_name].el,
-            aman[pointing_name].roll,
-        )
-        if _encs_notclose(az, el, roll):
-            raise ValueError("Encoder values not close")
-        encoders[0, i] = np.nanmedian(az)
-        encoders[1, i] = np.nanmedian(el)
-        encoders[2, i] = np.nanmedian(roll)
     tot_weight[tot_weight == 0] = np.nan
 
     # Compute the average focal plane while ignoring outliers
@@ -466,68 +516,19 @@ def main():
     if plot:
         _mk_plot(config.get("plot_dir", None), froot, nominal, measured, transformed)
 
-    # Compute nominal encoder vals
-    if check_enc:
-        if _encs_notclose(*encoders):
-            raise ValueError("Not all encoder values are similar")
-        else:
-            encoders = np.nanmedian(encoders, axis=1)
-            if np.isnan(encoders).any():
-                logger.error("Some or all of the encoders are nan")
-                horiz = ((np.nan,) * 3,) * 2 + (np.nan,) * 2
-                horiz_affine = np.nan * np.empty_like(affine)
-            else:
-                # Put nominal and measured into horiz basis and compute transformation.
-                nominal = np.vstack((nominal, template[:, 3]))
-                _measured = np.vstack((measured - lever_arm[..., None], measured_gamma))
-                nominal_horiz = to_horiz(nominal, encoders)
-                measured_horiz = to_horiz(_measured, encoders)
-
-                if have_gamma:
-                    bs_scale, bs_shift = gamma_fit(nominal_horiz[2], measured_horiz[2])
-                else:
-                    bs_scale = 1.0
-                    bs_shift = 0.0
-                nominal_horiz = nominal_horiz[:2]
-                measured_horiz = measured_horiz[:2]
-                # Compute transform, do a few iters to account for centers being off
-                horiz_affine = np.eye(2)
-                horiz_shift = af.weighted_shift(nominal_horiz, measured_horiz, weights)
-                for i in range(config.get("iters", 5)):
-                    horiz_affine, _ = af.get_affine(
-                        nominal, measured_horiz - horiz_shift[..., None], centered=True
-                    )
-                    horiz_shift = af.weighted_shift(
-                        horiz_affine @ nominal, measured_horiz, weights
-                    )
-                horiz_scale, horiz_shear, horiz_rot = op.decompose_affine(horiz_affine)
-                horiz_shear = horiz_shear.item()
-                horiz_rot = op.decompose_rotation(horiz_rot)[-1]
-
-                horiz_shift = (*horiz_shift, bs_shift)
-                horiz_scale = (*horiz_scale, bs_scale)
-                horiz = (horiz_shift, horiz_scale, horiz_shear, horiz_rot)
-                _log_vals(
-                    horiz_shift, horiz_scale, horiz_shear, horiz_rot, ("az", "el", "bs")
-                )
-    else:
-        encoders = np.nan + np.zeros(3)
-        horiz = ((np.nan,) * 3,) * 2 + (np.nan,) * 2
-        horiz_affine = np.nan * np.empty_like(affine)
-
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)
     fpout, fpfullout = _mk_fpout(
         template_det_ids, fp_transformed, measured, measured_gamma
     )
-    tpout = _mk_tpout(xieta, horiz)
-    refout = _mk_refout(lever_arm, encoders)
+    tpout = _mk_tpout(xieta)
+    refout = _mk_refout(lever_arm)
     with h5py.File(outpath, "w") as f:
         write_dataset(fpout, f, "focal_plane", overwrite=True)
         _add_attrs(f["focal_plane"], {"measured_gamma": measured_gamma})
         write_dataset(fpfullout, f, "focal_plane_full", overwrite=True)
         write_dataset(tpout, f, "offsets", overwrite=True)
-        _add_attrs(f["offsets"], {"affine_xieta": affine, "affine_horiz": horiz_affine})
+        _add_attrs(f["offsets"], {"affine_xieta": affine})
         write_dataset(refout, f, "reference", overwrite=True)
 
 
