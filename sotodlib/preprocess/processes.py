@@ -420,14 +420,35 @@ class Calibrate(_Preprocess):
 class EstimateHWPSS(_Preprocess):
     """
     Builds a HWPSS Template. Calc configs go to ``hwpss_model``.
-    Results of fitting saved if field specified by calc["name"]
+    Results of fitting saved if field specified by calc["name"].
+    Example config dictionary::
+
+        {
+            "name : "estimate_hwpss"
+            "signal: "signal" # optional
+            "calc":
+                "hwpss_stats_name": "hwpss_stats"
+            "save": True
+        }
 
     .. autofunction:: sotodlib.hwp.hwp.get_hwpss
     """
     name = "estimate_hwpss"
 
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
-        hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
+        _prefilt = (self.signal == 'signal')
+        if not _prefilt:
+            print("WARNING: apply_prefilt defaulting to False because " +
+                  f"{self.signal} != 'signal'.")
+        hwpss_stats = hwp.get_hwpss(aman,
+                                    signal=aman[self.signal],
+                                    apply_prefilt=_prefilt,
+                                    **self.calc_cfgs)
         self.save(proc_aman, hwpss_stats)
 
     def save(self, proc_aman, hwpss_stats):
