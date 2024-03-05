@@ -76,7 +76,7 @@ class Trends(_Preprocess):
 
     Data selection can have key "kind" equal to "any" or "all."
 
-     Example config dictionary::
+     Example config block::
 
         - name : "trends"
           signal: "signal" # optional
@@ -133,7 +133,7 @@ class GlitchDetection(_Preprocess):
     Data section should define a glitch significant "sig_glitch" and a maximum
     number of glitches "max_n_glitch."
 
-    Example configuration dictionary::
+    Example configuration block::
         
       - name: "glitches"
         signal: "hwpss_remove"
@@ -186,7 +186,7 @@ class FixJumps(_Preprocess):
     """
     Repairs the jump heights given a set of jump flags and heights.
 
-    Example config dictionary::
+    Example config block::
 
       - name: "fix_jumps"
         signal: "signal" # optional
@@ -220,7 +220,7 @@ class Jumps(_Preprocess):
 
     Data section should define a maximum number of jumps "max_n_jumps".
 
-    Example config dictionary::
+    Example config block::
 
       - name: "jumps"
         signal: "hwpss_remove"
@@ -281,7 +281,7 @@ class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the AxisManager under the
     "psd" field.
 
-    Example config dictionary::
+    Example config block::
 
       - "name : "psd"
         "signal: "signal" # optional
@@ -414,7 +414,7 @@ class EstimateHWPSS(_Preprocess):
     Builds a HWPSS Template. Calc configs go to ``hwpss_model``.
     Results of fitting saved if field specified by calc["name"].
 
-    Example config dictionary::
+    Example config block::
 
       - "name : "estimate_hwpss"
         "signal: "signal" # optional
@@ -506,7 +506,7 @@ class EstimateAzSS(_Preprocess):
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
 
-    Example configuration dictionary::
+    Example configuration block::
 
       - name: "glitchfill"
         signal: "hwpss_remove"
