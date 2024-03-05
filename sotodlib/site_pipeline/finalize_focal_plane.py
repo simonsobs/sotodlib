@@ -254,48 +254,12 @@ def _load_template(template_path, ufm):
     return det_ids, template, template_n
 
 
-def _load_ctx_single(config):
-    ctx = Context(config["context"]["path"])
-    pointing_name = config["context"].get("pointing", "pointing")
-    pol_name = config["context"].get("polarization", "polarization")
-    query = []
-    if "query" in config["context"]:
-        query = (ctx.obsdb.query(config["context"]["query"])["obs_id"],)
-    obs_ids = np.append(config["context"].get("obs_ids", []), query)
-    obs_ids = np.unique(obs_ids)
-    if len(obs_ids) == 0:
-        raise ValueError("No observations provided in configuration")
-    elif len(obs_ids) > 1:
-        logger.warning("More than one observation found, using %s", obs_ids[0])
-    obs_id = obs_ids[0]
-    dets = {"stream_id": f"ufm_{config['ufm'].lower()}"}
-    dets.update(config["context"].get("dets", {}))
-    aman = ctx.get_meta(obs_id, dets=dets)
-    if pointing_name not in aman:
-        raise NoPointing("No pointing associated with this observation")
-    if "wafer" not in aman.det_info:
-        dm_name = config["context"].get("detmap", "detmap")
-        if dm_name in aman:
-            dm_aman = aman[dm_name].copy()
-            aman.det_info.wrap("wafer", dm_aman)
-            if "det_id" not in aman.det_info:
-                aman.det_info.wrap(
-                    "det_id", aman.det_info.wafer.det_id, [(0, aman.dets)]
-                )
-    if "det_id" in aman.det_info:
-        aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != ""])
-        aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != "NO_MATCH"])
-    pol = pol_name in aman
-    if not pol:
-        logger.warning("No polarization data in context")
-    return aman, obs_id, pol, pointing_name, pol_name
-
-
 def _load_ctx(config):
     ctx = Context(config["context"]["path"])
     tod_pointing_name = config["context"].get("tod_pointing", "tod_pointing")
     map_pointing_name = config["context"].get("map_pointing", "map_pointing")
     pol_name = config["context"].get("polarization", "polarization")
+    dm_name = config["context"].get("detmap", "detmap")
     query = []
     if "query" in config["context"]:
         query = (ctx.obsdb.query(config["context"]["query"])["obs_id"],)
@@ -306,27 +270,40 @@ def _load_ctx(config):
     _config = config.copy()
     if "query" in _config["context"]:
         del _config["context"]["query"]
-    amans = [None] * len(obs_ids)
-    have_pol = [False] * len(obs_ids)
-    for i, obs_id in enumerate(obs_ids):
-        _config["context"]["obs_ids"] = [obs_id]
-        for pointing_name in (tod_pointing_name, map_pointing_name):
-            _config["context"]["pointing"] = pointing_name
-            try:
-                aman, _, pol, *_ = _load_ctx_single(_config)
-            except NoPointing:
-                logger.warning("No %s in %s", pointing_name, obs_id)
-                continue
-            aman.move(pointing_name, "pointing")
-            if "det_id" in aman.det_info:
-                aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != ""])
-                aman.restrict(
-                    "dets", aman.dets.vals[aman.det_info.det_id != "NO_MATCH"]
+    amans = []
+    have_pol = []
+    dets = {"stream_id": f"ufm_{config['ufm'].lower()}"}
+    dets.update(config["context"].get("dets", {}))
+    for obs_id in obs_ids:
+        aman = ctx.get_meta(obs_id, dets=dets)
+        if "wafer" not in aman.det_info and dm_name in aman:
+            dm_aman = aman[dm_name].copy()
+            aman.det_info.wrap("wafer", dm_aman)
+            if "det_id" not in aman.det_info:
+                aman.det_info.wrap(
+                    "det_id", aman.det_info.wafer.det_id, [(0, aman.dets)]
                 )
-            if "det_info" not in aman or "det_id" not in aman.det_info:
-                raise ValueError(f"No detmap for {obs_id}")
-            amans[i] = aman
-            have_pol[i] = pol
+        if "det_id" in aman.det_info:
+            aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != ""])
+            aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != "NO_MATCH"])
+        elif "det_info" not in aman or "det_id" not in aman.det_info:
+            raise ValueError(f"No detmap for {obs_id}")
+        pol = pol_name in aman
+        if not pol:
+            logger.warning("No polarization data in context")
+
+        if tod_pointing_name in aman:
+            _aman = aman.copy()
+            _aman.move(tod_pointing_name, "pointing")
+            aman.append(_aman)
+            have_pol.append(pol)
+        if map_pointing_name in aman:
+            _aman = aman.copy()
+            _aman.move(map_pointing_name, "pointing")
+            aman.append(_aman)
+            have_pol.append(pol)
+        elif tod_pointing_name not in aman:
+            raise ValueError(f"No pointing found in {obs_id}")
 
     return amans, obs_ids, have_pol, "pointing", pol_name
 
@@ -474,7 +451,7 @@ def main():
 
         # Do an initial alignment and get weights
         fp = np.vstack((_xi, _eta))
-        aff, sft = af.get_affine(fp, template[template_msk, 1:3].T)
+        aff, sft = af.get_affine(fp, template[template_msk, 0:3].T)
         aligned = aff @ fp + sft[..., None]
         if pol:
             _gamma = aman[pol_name].polang[msk][mapping]
