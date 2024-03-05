@@ -2,7 +2,7 @@
 import logging
 import numpy as np
 from .. import core
-from so3g.proj import RangesMatrix
+from so3g.proj import Ranges, RangesMatrix
 
 class _Preprocess(object):
     """The base class for Preprocessing modules which defines the required
@@ -132,75 +132,101 @@ def expand_proc_aman(calc_aman, proc_aman, flag_fill_val=False,
                      flt_fill_val=np.nan, int_fill_val=2**32-1):
     """
     Helper function to expand the size of calculated products to match the 
-    precut dets and samps shape.
+    precut dets and samps shape (call fdets, and fsamps for "full-detectors"
+    and "full-samples").
+
     Arguments:
     ----------
     calc_aman: AxisManager
         AxisManager returned from calc step.
     proc_aman: AxisManager
         AxisManager passed between processes.
-    fill_value:
-        Value to fill missing indices with.
+    flag_fill_val: bool
+        Value to fill missing indices for data that is boolean or 
+        RangesMatrices type.
+    flt_fill_val: float
+        Value to fill missing indices for data that is float type.
+    int_fill_val: float
+        Value to fill missing indices for data that is int type.
+
+    Returns:
+    --------
+    out_aman: AxisManager
+        AxisManager with fdets, fsamps, dets, samps axes in addition
+        to any additional axes. With the signals aligned along dets
+        and samps in calc_aman padded to fdets, fsamps shape.
     """
-    if (proc_aman.dets.count < proc_aman.fdets.count) or \
-       (proc_aman.samps.count < proc_aman.fsamps.count):
-        _, mdets, fmdets = np.intersect1d(proc_aman.dets.vals,
-                                          proc_aman.fdets.vals,
-                                          return_indices=True)
-        fmsamps = slice(proc_aman.samps.offset,
-                        proc_aman.samps.offset+proc_aman.samps.count)
+    assn = calc_aman._assignments
+    out_aman = core.AxisManager(*[proc_aman['f'+x] if x in ['dets','samps'] \
+                                  else calc_aman[x] for x in calc_aman._axes])
     
-    out_aman = core.AxisManager(proc_aman.fdets, proc_aman.fsamps)
-    for fld in calc_aman._fields:
-        dat = calc_aman[fld]
-        dax, sax = None, None
-        axes = calc_aman.shape_str(fld).split(',')
-        maxes = np.isin(axes, ['dets', 'samps'])
-        axismap = [(i, a) for i, a in enumerate(axes)]
-        faxismap = [(i, 'f'+a) if m else (i, a) for i, [a, m] in enumerate(list(zip(axes, maxes)))]
-        if np.all(~maxes):
-            out_aman.wrap(fld, dat, axismap)
-        else:
-            if np.isin(type(np.hstack(dat)[0]), [so3g.RangesInt32, bool]):
-                fill_value = flag_fill_val
-                if isinstance(dat, RangesMatrix):
-                    dat = dat.mask()
-            if np.isin(type(np.hstack(dat)[0]), [np.int64, np.int32, int]):
+    _, _, fmdets = np.intersect1d(proc_aman.dets.vals,
+                                    proc_aman.fdets.vals,
+                                    return_indices=True)
+    fmsamps = slice(proc_aman.samps.offset,
+                    proc_aman.samps.offset+proc_aman.samps.count)
+
+    for fld, axes in zip(assn.keys(), assn.values()):
+        faxes = tuple(['f'+a if a in ['dets', 'samps'] else a for a in axes])
+        if isinstance(calc_aman[fld], core.AxisManager):
+            out_aman.wrap(fld, expand_proc_aman(calc_aman[fld], proc_aman,
+                                                flag_fill_val, flt_fill_val,
+                                                int_fill_val))
+        elif np.isin(type(calc_aman[fld]), [RangesMatrix, Ranges]):
+            fill_value = flag_fill_val
+        elif isinstance(calc_aman[fld], np.ndarray):
+            if isinstance(calc_aman[fld][0], int):
                 fill_value = int_fill_val
-            if np.isin(type(np.hstack(dat)[0]), [np.float64, np.float32, float]):
+            if isinstance(calc_aman[fld][0], float):
                 fill_value = flt_fill_val
+            if isinstance(calc_aman[fld][0], bool):
+                fill_value = flag_fill_val
+        else:
+            raise ValueError('Data type in axis manager not supported '+
+                            'in expand_proc_aman')
+        
+        out_aman.wrap_new('f'+fld, faxes, cls=np.full, fill_value=fill_value)
+        out_aman.wrap(fld, calc_aman[fld], list(enumerate(axes)))
+        d = {'dets': fmdets, 'samps': fmsamps}
+        slices = [d.get(a, slice(None)) for a in axes]
+        if isinstance(calc_aman[fld], RangesMatrix)
+            out_aman['f'+fld][tuple(slices)]=calc_aman[fld].mask()
+            out_aman['f'+fld] = RangesMatrix.from_mask(out_aman[fld])
+        else:
+            out_aman['f'+fld][tuple(slices)]=calc_aman[fld]
+    return out_aman
 
-            shape = tuple([proc_aman[am].count if m else calc_aman[fld].count for am, m in zip(axismap, maxes)])
-            fdat = np.full(shape, fill_value)
+def collape_proc_aman(proc_aman):
+    """
+    Replaces dets, samps axes + fields aligned with them with the data
+    in fdets, fsamps axes. This is intended to go at the end of the
+    pipeline.run function to save to disk data in the full unrestricted
+    dets, samps shape.
+    
+    Arguments:
+    ----------
+    proc_aman: AxisManager
+        Axis manager passed through the preprocess pipeline.
 
-            if ('dets' in axes) and not('samps' in axes):
-                dax = np.where(axes == 'dets')[0]
-                dat = np.moveaxis(dat, dax, 0)
-                fdat = np.moveaxis(fdat, dax, 0) 
-                fdat[fmdets] = dat
-                dat = np.moveaxis(dat, 0, dax)
-                fdat = np.moveaxis(fdat, 0, dax)
-            elif ('samps' in axes) and not('dets' in axes):
-                sax = np.where(axes == 'samps')[0]
-                dat = np.moveaxis(dat, sax, 0)
-                fdat = np.moveaxis(fdat, sax, 0)
-                fdat[fmsamps] = dat
-                dat = np.moveaxis(dat, 0, sax)
-                fdat = np.moveaxis(fdat, 0, sax)
-            else:
-                dax = np.where(axes == 'dets')[0]
-                sax = np.where(axes == 'samps')[0]
-                dat = np.moveaxis(dat, (dax, sax), (0,1))
-                fdat = np.moveaxis(fdat, (dax, sax), (0,1))
-                fdat[fmdets, fmsamps] = dat
-                dat = np.moveaxis(dat, (0,1), dax, sax)
-                fdat = np.moveaxis(fdat, (0,1), (dax, sax))
-            
-            if isinstance(fill_value, bool):
-                fdat = RangesMatrix.from_mask(fdat)
-                dat = RangesMatrix.from_mask(dat)
-            out_aman.wrap(fld, dat, axismap)
-            out_aman.wrap(fld, fdat, faxismap)
+    Returns:
+    --------
+    out_aman: AxisManager
+        proc_aman with dets, samps replaced by fdets, fsamps
+    """
+    assn = proc_aman._assignments
+    dets_samps = core.AxisManager(core.LabelAxis(name='dets', vals=proc_aman.fdets.vals), 
+                                  core.OffsetAxis('samps', count=proc_aman.fsamps.count,
+                                                  offset=proc_aman.fsamps.offset, 
+                                                  origin_tag=proc_aman.fsamps.origin_tag))
+    out_aman = core.AxisManager(*[proc_aman[x] for x in proc_aman._axes \
+                                  if not(x in ['fdets','fsamps','dets','samps'])])
+    out_aman.merge(dets_samps)
+    for fld, axes in zip(assn.keys(), assn.values()):
+        if np.any(np.isin(axes, ['dets', 'samps'])):
+            continue
+        naxes = [a.strip('f') if a in ['fdets', 'fsamps'] else a for a in axes]
+        out_aman.wrap(fld, proc_aman[fld], list(enumerate(naxes)))
+    return out_aman
 
 class Pipeline(list):
     """This class is designed to create and run pipelines out of a series of
@@ -313,4 +339,4 @@ class Pipeline(list):
             if select:
                 process.select(aman, proc_aman)
                 proc_aman.restrict('dets', aman.dets.vals)
-        return proc_aman
+        return collape_proc_aman(proc_aman)
