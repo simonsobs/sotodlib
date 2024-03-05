@@ -196,17 +196,18 @@ def plot_hwpss_fit_status(aman, hwpss_stats, plot_dets=None, plot_num_dets=3,
     ufm = det.split('_')[2]
     plt.savefig(os.path.join(plot_dir, ufm+'_'+save_name))
 
-def plot_sso(aman, sso, xi_p, eta_p, wafer_pointing=None, save_path='./', save_name='sso_footprint.png'):
-    
-    if wafer_pointing is None:
-        wafer_pointing = {'ws0': (-2.5, -0.5),
-                          'ws1': (-2.5, -13),
-                          'ws2': (-13, -7),
-                          'ws3': (-13, 5),
-                          'ws4': (-2.5, 11.5),
-                          'ws5': (8.5, 5),
-                          'ws6': (8.5, -7)}
-        
+def plot_sso_footprint(aman, sso, xi_p, eta_p, wafer_offsets=None, save_path='./', save_name='sso_footprint.png'):
+
+    if wafer_offsets is None:
+        # Default wafer offsets
+        wafer_offsets = {'ws0': (-2.5, -0.5),
+                         'ws1': (-2.5, -13),
+                         'ws2': (-13, -7),
+                         'ws3': (-13, 5),
+                         'ws4': (-2.5, 11.5),
+                         'ws5': (8.5, 5),
+                         'ws6': (8.5, -7)}
+
     # Get default focal plane from sotodlib
     hw = np.load('/so/home/msilvafe/shared_files/sat_hw_positions.npz')
     xi_hw, eta_hw, dets_hw = hw['xi_hw'], hw['eta_hw'], hw['dets_hw']
@@ -217,8 +218,8 @@ def plot_sso(aman, sso, xi_p, eta_p, wafer_pointing=None, save_path='./', save_n
     ax.set_xlabel('$\\xi$ [degrees]')
     ax.set_ylabel('$\\eta$ [degrees]')
     ax.plot(np.degrees(xi_p), np.degrees(eta_p), color='C0', alpha=0.8)
-    for k in wafer_pointing.keys():
-        ax.text(wafer_pointing[k][0], wafer_pointing[k][1], k, fontsize=16)
+    for k in wafer_offsets.keys():
+        ax.text(wafer_offsets[k][0], wafer_offsets[k][1], k, fontsize=16)
 
     plt.suptitle(f'{sso} {aman.obs_info.obs_id}')
     plt.tight_layout()
