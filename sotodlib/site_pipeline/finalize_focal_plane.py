@@ -8,7 +8,7 @@ import yaml
 
 from detmap.makemap import MapMaker
 from so3g import proj
-from sotodlib.core import metadata, Context
+from sotodlib.core import AxisManager, metadata, Context
 from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
 from sotodlib.coords import optics as op
@@ -343,8 +343,6 @@ def _load_ctx_single(config):
 
 def _load_ctx(config):
     ctx = Context(config["context"]["path"])
-    tod_pm_name = config["context"].get("tod_position_match", "tod_position_match")
-    map_pm_name = config["context"].get("map_position_match", "map_position_match")
     tod_pointing_name = config["context"].get("tod_pointing", "tod_pointing")
     map_pointing_name = config["context"].get("map_pointing", "map_pointing")
     pol_name = config["context"].get("polarization", "polarization")
@@ -362,21 +360,14 @@ def _load_ctx(config):
     have_pol = [False] * len(obs_ids)
     for i, obs_id in enumerate(obs_ids):
         _config["context"]["obs_ids"] = [obs_id]
-        for pointing_name, pm_name in [
-            (tod_pointing_name, tod_pm_name),
-            (map_pointing_name, map_pm_name),
-        ]:
-            _config["context"]["position_match"] = pm_name
+        for pointing_name in (tod_pointing_name, map_pointing_name):
             _config["context"]["pointing"] = pointing_name
             try:
                 aman, _, pol, *_ = _load_ctx_single(_config)
             except NoPointing:
                 logger.warning("No %s in %s", pointing_name, obs_id)
                 continue
-            if pm_name not in aman:
-                raise ValueError(f"No position match in {obs_id}")
             aman.move(pointing_name, "pointing")
-            aman.move(pm_name, "position_match")
             if "det_id" in aman.det_info:
                 aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != ""])
                 aman.restrict(
@@ -387,7 +378,7 @@ def _load_ctx(config):
             amans[i] = aman
             have_pol[i] = pol
 
-    return amans, obs_ids, have_pol, "pointing", pol_name, "position_match"
+    return amans, obs_ids, have_pol, "pointing", pol_name
 
 
 def _load_rset_single(config):
@@ -449,16 +440,10 @@ def _load_rset(config):
         aman, _, pol, *_ = _load_rset_single(_config)
         if "det_info" not in aman or "det_id" not in aman.det_info:
             raise ValueError(f"No detmap for {obs_id}")
-        if "position_match" not in rsets:
-            raise ValueError(f"No position match in {obs_id}")
-        pm_aman = read_dataset(*rsets["position_match"]).to_axismanager(
-            axis_key="dets:readout_id"
-        )
-        aman.wrap("position_match", pm_aman)
         amans[i] = aman
         have_pol[i] = pol
 
-    return amans, obs_ids, have_pol, "pointing", "polarization", "position_match"
+    return amans, obs_ids, have_pol, "pointing", "polarization"
 
 
 def main():
@@ -474,9 +459,9 @@ def main():
 
     # Load data
     if "context" in config:
-        amans, obs_ids, have_pol, pointing_name, pol_name, pm_name = _load_ctx(config)
+        amans, obs_ids, have_pol, pointing_name, pol_name = _load_ctx(config)
     elif "resultsets" in config:
-        amans, obs_ids, have_pol, pointing_name, pol_name, pm_name = _load_rset(config)
+        amans, obs_ids, have_pol, pointing_name, pol_name = _load_rset(config)
     else:
         raise ValueError("No valid inputs provided")
 
@@ -518,7 +503,6 @@ def main():
 
     check_enc = config.get("check_enc", False)
     encoders = np.nan + np.zeros((3, len(obs_ids)))
-    use_matched = config.get("use_matched", False)
 
     xi = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
     eta = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
@@ -528,14 +512,9 @@ def main():
         logger.info("Working on %s", obs_id)
         if aman is None:
             raise ValueError("AxisManager doesn't exist?")
-        # Cut outliers
-        aman.restrict("dets", aman.dets.vals[~aman[pm_name].pointing_outlier])
 
         # Mapping to template
-        if use_matched:
-            det_ids = aman[pm_name].matched_det_id
-        else:
-            det_ids = aman.det_info.det_id
+        det_ids = aman.det_info.det_id
         _, msk, template_msk = np.intersect1d(
             det_ids, template_det_ids, return_indices=True
         )
@@ -545,11 +524,21 @@ def main():
         srt = np.argsort(det_ids[msk])
         _xi = aman[pointing_name].xi[msk][srt][mapping]
         _eta = aman[pointing_name].eta[msk][srt][mapping]
+
+        # Do an initial alignment and get weights
+        fp = np.vstack((_xi, _eta))
+        aff, sft = af.get_affine(fp, template[template_msk, 1:3].T)
+        aligned = aff @ fp + sft[..., None]
         if pol:
             _gamma = aman[pol_name].polang[msk][mapping]
+            gscale, gsft = gamma_fit(_gamma, template[template_msk, 3])
+            weights = af.gen_weights(
+                np.vstack((aligned, gscale * _gamma + gsft)),
+                template[template_msk, 1:].T,
+            )
         else:
             _gamma = np.nan + np.zeros_like(_xi)
-        weights = aman[pm_name].likelihood[msk][srt][mapping]
+            weights = af.gen_weights(aligned, template[template_msk, 1:3].T)
 
         # Store weighted values
         xi[template_msk, i] = _xi * weights

@@ -5,6 +5,7 @@ Functions for working with affine transformations.
 import numpy as np
 import scipy.linalg as la
 from scipy.spatial.transform import Rotation as R
+import scipy.spatial.distance as dist
 
 
 def get_affine(src, dst, centered=False):
@@ -171,3 +172,57 @@ def weighted_shift(src, dst, weights):
     shift = np.nansum(wdiff, axis=1) / np.nansum(weights)
 
     return shift
+
+
+def estimate_var(src, dst):
+    """
+    Estimate the variance along each dimension between two point clouds.
+    Useful for something like a gaussian mixture model.
+
+    Arguments:
+
+        src: (ndim, npoints) array of source points.
+
+        dst: (ndim, npoints) array of destination points.
+
+    Returns:
+
+        var: (ndim,) array of variances.
+    """
+    ndim, nsrcpoints = src.shape
+    _, ndstpoints = dst.shape
+    var = np.zeros(ndim)
+    for d in range(ndim):
+        sq_diff = dist.cdist(src[d], dst[d], metric="sqeuclidean")
+        var[d] = np.sum(sq_diff) / (nsrcpoints * ndstpoints)
+
+    return var
+
+
+def gen_weights(src, dst, var=None):
+    """
+    Generate weights between points in two registered point clouds.
+    The weight here is just the liklihood from a gaussian.
+    Note that this is not a GMM, each weight is computed from a single
+    gaussian since we are assuming a known registration.
+
+    Arguments:
+
+        src: (ndim, npoints) array of source points.
+
+        dst: (ndim, npoints) array of destination points.
+
+        var: (ndim,) array of variances.
+             If None then estimate_var is used to compue this.
+
+    Returns:
+
+        weights: (npoints,) array of weights.
+    """
+    if var is None:
+        var = estimate_var(src, dst)
+
+    # Compute nd gaussian for each pair
+    weights = np.prod(np.exp(-0.5 * (src - dst) / var), axis=1)
+
+    return weights
