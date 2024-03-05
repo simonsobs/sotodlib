@@ -101,7 +101,7 @@ autodoc_mock_imports = []
 for missing in ('matplotlib', 'healpy', 'sqlalchemy',
                 'quaternionarray', 'yaml', 'toml', 'sqlite3','tqdm',
                 'skyfield', 'h5py', 'pyfftw', 'scipy',
-                'toast', 'pixell', 'scikit', 'skimage',
+                'toast', 'pixell', 'scikit', 'skimage', 'numdifftools',
                 'traitlets', 'ephem', 'influxdb', 'megham', 'detmap'):
     try:
         foo = import_module(missing)
@@ -228,7 +228,7 @@ epub_exclude_files = ['search.html']
 # -- Options for intersphinx extension ---------------------------------------
 
 # Example configuration for intersphinx: refer to the Python standard library.
-intersphinx_mapping = {'https://docs.python.org/': None}
+intersphinx_mapping = {'python': ('https://docs.python.org/', None)}
 
 # -- Options for todo extension ----------------------------------------------
 

@@ -48,8 +48,9 @@ def load_toast_h5_obs(db, obs_id, dets=None, samples=None, prefix=None,
         components.append(
             load_toast_h5_file(
                 files[0][0], dets=dets, no_signal=no_signal, samples=samples))
-
-    assert(len(components) == 1)
+    if len(components) > 1:
+        msg = "This loader only supports loading detectors from the same wafer"
+        raise RuntimeError(msg)
     return components[0]
 
 def load_toast_h5_file(filename, dets=None, samples=None, no_signal=False,
@@ -142,3 +143,6 @@ def load_toast_h5_file(filename, dets=None, samples=None, no_signal=False,
         aman.restrict('samps', samples)
 
     return aman
+
+
+core.OBSLOADER_REGISTRY['toast3-hdf-dichroic-hack'] = load_toast_h5_obs

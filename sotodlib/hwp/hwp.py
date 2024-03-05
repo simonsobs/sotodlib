@@ -38,6 +38,7 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
         The HWPSS harmonic modes to extract. Default is [1, 2, 3, 4, 6, 8].
     apply_prefilt : bool, optional
         Whether to apply a high-pass filter to signal before extracting HWPSS. Default is `True`.
+        If run through preprocess and `signal` is not `aman.signal` then default to `False`.
     prefilt_cfg : dict, optional
         The configuration of the high-pass filter, in Hz. Only used if `apply_prefilt` is `True`.
         Default is sine2 filter of with cutoff frequency of 1.0 Hz and trans_width of 1.0 Hz.

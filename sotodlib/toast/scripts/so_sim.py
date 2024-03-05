@@ -38,6 +38,7 @@ import toast
 import toast.ops
 
 from toast.mpi import MPI, Comm
+from toast.observation import default_values as defaults
 
 from .. import ops as so_ops
 from .. import workflows as wrk
@@ -50,8 +51,23 @@ pixell.fft.engine = "fftw"
 
 def simulate_data(job, otherargs, runargs, comm):
     log = toast.utils.Logger.get()
+    job_ops = job.operators
 
-    data = wrk.simulate_observing(job, otherargs, runargs, comm)
+    if job_ops.sim_ground.enabled:
+        data = wrk.simulate_observing(job, otherargs, runargs, comm)
+    else:
+        group_size = wrk.reduction_group_size(job, runargs, comm)
+        toast_comm = toast.Comm(world=comm, groupsize=group_size)
+        data = toast.Data(comm=toast_comm)
+        # Load data from all formats
+        wrk.load_data_hdf5(job, otherargs, runargs, data)
+        wrk.load_data_books(job, otherargs, runargs, data)
+        wrk.load_data_context(job, otherargs, runargs, data)
+        wrk.act_responsivity_sign(job, otherargs, runargs, data)
+        wrk.create_az_intervals(job, otherargs, runargs, data)
+        # optionally zero out
+        if otherargs.zero_loaded_data:
+            toast.ops.Reset(detdata=[defaults.signal])
 
     wrk.select_pointing(job, otherargs, runargs, data)
     wrk.simple_noise_models(job, otherargs, runargs, data)
@@ -81,11 +97,6 @@ def simulate_data(job, otherargs, runargs, comm):
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"After simulating data:  {mem}", comm)
 
-    # If the user has not separately specified the output directory,
-    # write it to workflow output directory
-    if job.operators.save_hdf5.volume is None:
-        hdf5_out = os.path.join(otherargs.out_dir, "data")
-        job.operators.save_hdf5.volume = hdf5_out
     wrk.save_data_hdf5(job, otherargs, runargs, data)
 
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
@@ -168,6 +179,13 @@ def main():
         action="store_true",
         help="Map each observation separately.",
     )
+    parser.add_argument(
+        "--zero_loaded_data",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Zero out detector data loaded from disk",
+    )
 
     # The operators and templates we want to configure from the command line
     # or a parameter file.
@@ -175,8 +193,17 @@ def main():
     operators = list()
     templates = list()
 
+    # Loading data from disk is disabled by default
+    wrk.setup_load_data_hdf5(operators)
+    wrk.setup_load_data_books(operators)
+    wrk.setup_load_data_context(operators)
+    wrk.setup_act_responsivity_sign(operators)
+
+    # Simulated observing is enabled by default
     wrk.setup_simulate_observing(parser, operators)
+
     wrk.setup_pointing(operators)
+    wrk.setup_az_intervals(operators)
     wrk.setup_simple_noise_models(operators)
     wrk.setup_simulate_atmosphere_signal(operators)
     wrk.setup_simulate_sky_map_signal(operators)

@@ -17,6 +17,7 @@ The config file could be of the form:
 
     obsdb: dummyobsdb.sqlite
     obsfiledb: dummyobsfiledb.sqlite
+    lat_tube_list_file: path to yaml dict matching tubes and bands
     tolerate_stray_files: True
     skip_bad_books: True
     extra_extra_files:
@@ -73,12 +74,8 @@ def telescope_lookup(telescope: str):
     elif telescope == "satp3":
         return {"telescope": "satp3", "telescope_flavor": "sat",
                 "tube_flavor": "mf", "detector_flavor": "tes"}
-    elif telescope == "lati1":
-        return {"telescope": "lati1", "telescope_flavor": "lat",
-                "tube_flavor": "mf", "detector_flavor": "tes"}
-    elif telescope == "lati6":
-        return {"telescope": "lati6", "telescope_flavor": "lat",
-                "tube_flavor": "mf", "detector_flavor": "tes"}
+    elif telescope == "lat":
+        return {"telescope": "lat", "telescope_flavor": "lat"}
     else:
         logger.error("unknown telescope type given by bookbinder")
         return {}
@@ -128,7 +125,6 @@ def main(config: str,
 
     logger.info("Updating obsdb")
     bookcart = []
-    bookcartobsdb = ObsDb()
 
     if booktype not in ["obs", "oper", "both"]:
         logger.warning("Specified booktype inadapted to update_obsdb")
@@ -143,9 +139,13 @@ def main(config: str,
         base_dir = config_dict["base_dir"]
     except KeyError:
         logger.error("No base directory base_dir specified in config file!")
+
     if "obsdb" in config_dict:
-        if os.path.isfile(config_dict["obsdb"]):
-            bookcartobsdb = ObsDb.from_file(config_dict["obsdb"])
+        bookcartobsdb = ObsDb(map_file=config_dict["obsdb"])
+    else:
+        logger.warning("No obsdb named in the configuration file")
+        bookcartobsdb = ObsDb("obsdb.sqlite")
+        
     if "obsdb_cols" in config_dict:
         col_list = []
         for col, typ in config_dict["obsdb_cols"].items():
@@ -220,9 +220,16 @@ def main(config: str,
                 for flav in flavors:
                     bookcartobsdb.add_obs_columns([flav+" str"])
                     very_clean[flav] = flavors[flav]
+                if telescope == "lat":
+                   lat_tube_list = yaml.safe_load(
+                       open(config_dict["lat_tube_list_file"], "rb")
+                   )
+                   tube_flavor = lat_tube_list[index["tube_slot"]]
+                   bookcartobsdb.add_obs_columns("tube_flavor str")
+                   very_clean["tube_flavor"] = tube_flavor
 
             except KeyError:
-                logger.error("No telescope key in index file")
+                logger.error("No telescope key in index file or error with lat_tube_list")
                 very_clean["telescope_flavor"] = "unknown"
             stream_ids = index.pop("stream_ids")
             if stream_ids is not None:
@@ -277,10 +284,6 @@ def main(config: str,
            
         else:
             bookcart.remove(bookpath)
-    if "obsdb" in config_dict:
-        bookcartobsdb.to_file(config_dict["obsdb"])
-    else:
-        bookcartobsdb.to_file("obsdb_from{}_to{}".format(tback, tnow))
 
 
 def get_parser(parser=None):

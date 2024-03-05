@@ -3,12 +3,12 @@ import numpy as np
 
 def detrend_tod(
     tod,
-    method='linear',
-    axis_name='samps',
-    signal_name='signal',
+    method="linear",
+    axis_name="samps",
+    signal_name="signal",
     in_place=True,
     wrap_name=None,
-    count=10
+    count=10,
 ):
     """Returns detrended data. Detrends data in place by default but pass
     in_place=False if you would like a copied array (such as if you're just
@@ -62,20 +62,21 @@ def detrend_tod(
         axis_reorder[axis_idx], axis_reorder[-1] = -1, axis_idx
         signal = signal.transpose(tuple(axis_reorder))
 
-    if method == 'mean':
-        signal = signal - np.mean(signal, axis=-1)[..., None]
-    elif method == 'median':
-        signal = signal - np.median(signal, axis=-1)[..., None]
-    elif method == 'linear':
+    if method == "mean":
+        signal -= np.mean(signal, axis=-1)[..., None]
+    elif method == "median":
+        signal -= np.median(signal, axis=-1)[..., None]
+    elif method == "linear":
         x = np.linspace(0, 1, n_samps, dtype=dtype_in)
         count = max(1, min(count, signal.shape[-1] // 2))
-        slopes = (signal[..., -count:].mean(axis=-1, dtype=dtype_in) -
-                  signal[..., :count].mean(axis=-1, dtype=dtype_in))
+        slopes = signal[..., -count:].mean(axis=-1, dtype=dtype_in) - signal[
+            ..., :count
+        ].mean(axis=-1, dtype=dtype_in)
 
         # the 2d loop is significantly faster if possible
         if len(signal.shape) == 2:
             for i in range(signal.shape[0]):
-                signal[i, :] -= slopes[i]*x
+                signal[i, :] -= slopes[i] * x
         else:
             signal -= slopes[..., None] * x
         signal -= np.mean(signal, axis=-1)[..., None]
@@ -88,9 +89,7 @@ def detrend_tod(
     assert signal.dtype == dtype_in
 
     if wrap_name is not None:
-        axis_map = [(
-            i, x) for i, x in enumerate(tod._assignments[signal_name])
-        ]
+        axis_map = [(i, x) for i, x in enumerate(tod._assignments[signal_name])]
         tod.wrap(wrap_name, signal, axis_map)
 
     return signal

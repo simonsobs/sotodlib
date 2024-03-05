@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2023 Simons Observatory.
+# Copyright (c) 2018-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import h5py
@@ -16,14 +16,14 @@ import toml
 import traitlets
 
 import toast
-from toast.timing import function_timer
+from toast.timing import function_timer, Timer
 from toast import qarray as qa
 from toast.data import Data
 from toast.traits import (
     trait_docs, Int, Unicode, Unit, Bool, Quantity, Float, Instance
 )
 from toast.ops.operator import Operator
-from toast.utils import Environment, Logger, Timer
+from toast.utils import Environment, Logger
 from toast.observation import default_values as defaults
 from toast.coordinates import azel_to_radec
 

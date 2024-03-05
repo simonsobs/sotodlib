@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2021 Simons Observatory.
+# Copyright (c) 2018-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import h5py
@@ -20,17 +20,11 @@ from scipy.constants import au as AU
 from scipy.interpolate import RectBivariateSpline, splrep, splev
 
 from toast.timing import function_timer
-
 from toast import qarray as qa
-
 from toast.data import Data
-
-from toast.traits import trait_docs, Int, Unicode, Bool, Quantity, Float, Instance
-
+from toast.traits import trait_docs, Int, Unicode, Instance
 from toast.ops.operator import Operator
-
-from toast.utils import Environment, Logger, Timer, unit_conversion
-
+from toast.utils import Logger, unit_conversion
 from toast.observation import default_values as defaults
 
 

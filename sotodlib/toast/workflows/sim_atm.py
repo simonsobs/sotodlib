@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Simulated detector response to the atmosphere.
 """
@@ -49,12 +49,12 @@ def setup_simulate_atmosphere_signal(operators):
             lmin_sigma=0.0001 * u.m,
             lmax_center=1 * u.m,
             lmax_sigma=0.1 * u.m,
-            xstep=5 * u.m,
-            ystep=5 * u.m,
-            zstep=5 * u.m,
+            xstep=4 * u.m,
+            ystep=4 * u.m,
+            zstep=4 * u.m,
             zmax=200 * u.m,
-            gain=6e-5,
-            wind_dist=3000 * u.m,
+            gain=4e-5,
+            wind_dist=1000 * u.m,
             enabled=False,
         )
     )

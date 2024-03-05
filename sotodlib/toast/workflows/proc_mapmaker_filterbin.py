@@ -47,6 +47,7 @@ def mapmaker_filterbin(job, otherargs, runargs, data):
 
     if job_ops.filterbin.enabled:
         job_ops.filterbin.binning = job_ops.binner_final
+        job_ops.filterbin.binning.full_pointing = otherargs.full_pointing
         job_ops.filterbin.det_data = job_ops.sim_noise.det_data
         job_ops.filterbin.output_dir = otherargs.out_dir
         if otherargs.obsmaps:

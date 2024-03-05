@@ -125,12 +125,12 @@ def main():
 
     # Load data
     data = toast.Data(comm=toast_comm)
-    wrk.load_data_books(data)
-    wrk.load_data_hdf5(data)
+    wrk.load_data_books(job, otherargs, runargs, data)
+    wrk.load_data_hdf5(job, otherargs, runargs, data)
 
     # Save data
-    wrk.save_data_books(data)
-    wrk.save_data_hdf5(data)
+    wrk.save_data_books(job, otherargs, runargs, data)
+    wrk.save_data_hdf5(job, otherargs, runargs, data)
 
     # Collect optional timing information
     if otherargs.timing_root is not None:

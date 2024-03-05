@@ -26,17 +26,17 @@ Here's an annotated example of yaml config file:
 .. code-block:: yaml
 
   # path to L2 HK directory
-  data_dir: '/data/prefix/hk/'
+  data_dir: '/so/level2-daq/satp1/hk/'
 
-  # path to L2.5 HK directory
-  output_dir: '/path/to/save/files/'
+  # path to ManifestDb directory
+  output_dir: '/so/metadata/satp1/manifests/hwp_angles/'
 
-  # prefix of field name 
+  # prefix of field name
   # for 1st encoder
-  field_instance: 'observatory.HBA.feeds.HWPEncoder'
+  field_instance: 'satp1.hwp-bbb-e1.feeds.HWPEncoder'
 
-  # for 2nd encoder 
-  field_instance_sub: 'observatory.HBA2.feeds.HWPEncoder'
+  # for 2nd encoder
+  field_instance_sub: 'satp1.hwp-bbb-e2.feeds.HWPEncoder'
 
   # name list of HWP_encoder field variable
   field_list:
@@ -47,14 +47,14 @@ Here's an annotated example of yaml config file:
   - 'irig_synch_pulse_clock_time'
   - 'irig_synch_pulse_clock_counts'
   - 'quad'
-   
+
   # HWP OCS packet size
   packet_size: 120
 
   # IRIG type
   # 0: 1Hz IRIG (default), 1: 10Hz IRIG
   irig_type: 0
-  
+
   # number of slots * 2
   num_edges: 1140
 
@@ -63,7 +63,7 @@ Here's an annotated example of yaml config file:
 
   # Threshoild for outlier data to calculate nominal slit width
   slit_width_lim: 0.1
-  
+
   # Search range of reference slot
   ref_range: 0.1
 
@@ -71,9 +71,8 @@ Here's an annotated example of yaml config file:
   # 0: use measured quad value (default)
   # 1: positive rotation direction, -1: negative rotation direction
   force_quad: 0
- 
 
-Data Loading 
+Data Loading
 ------------
 
 There are two functions to load L2 HK g3 file.
@@ -82,43 +81,43 @@ There are two functions to load L2 HK g3 file.
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 HK data can be loaded by `load_data` function with time range and data file path.
 ::
-   
+
    data = hwp_angle_tool.load_data(start, end, data_dir)
 
 We can also specify start, end and data_dir by config yaml file
 ::
-   
+
    # start and end time for `update_hwp_angle.load_data`
    start: timestamp
    end: timestamp
 
-   # HK data directory for `update_hwp_angle.load_data` 
+   # HK data directory for `update_hwp_angle.load_data`
    data_dir: '/path/to/L2/HK/data/'
 
-If you input both, config file setting will be overwritten. 
+If you input both, config file setting will be overwritten.
 
 As optional, HWP field name instance can be overwritten from config file.
 ::
-   
+
    data = hwp_angle_tool.load_data(start, end, data_dir, instance)
 
 2) Load data with given file name list
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 ::
-   
+
    data = hwp_angle_tool.load_data(file_list)
 
 We can also specify file_list by config yaml file
 ::
-   
-   # input file name for `update_hwp_angle.load_file` 
+
+   # input file name for `update_hwp_angle.load_file`
    file_list: '/mnt/so1/data/ucsd-sat1/hk/16183/1618372860.g3'
 
-If you input both, config file will be overwritten. 
+If you input both, config file will be overwritten.
 
 As optional, HWP field name instance can be overwritten from config file.
 ::
-   
+
    data = hwp_angle_tool.load_file(file_list, instance)
 
 
@@ -193,7 +192,7 @@ Class and function references should be auto-generated here.
 HWPSS
 =====
 .. autofunction:: sotodlib.hwp.hwp.get_hwpss
-	  
+
 .. py:module:: sotodlib.hwp.sim_hwp
 
 .. autofunction:: sotodlib.hwp.sim_hwp.sim_hwpss

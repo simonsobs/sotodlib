@@ -60,6 +60,7 @@ setup_opts["install_requires"] = [
     'pixell',
     'scikit-image',
     'pyfftw',
+    'numdifftools'
 ]
 setup_opts["extras_require"] = {
     "site_pipeline": [
