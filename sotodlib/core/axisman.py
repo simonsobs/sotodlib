@@ -759,14 +759,22 @@ class AxisManager:
             if isinstance(v, AxisManager):
                 dest._fields[k] = v.copy()
                 if axis_name in v._axes:
-                    dest._fields[k].restrict(axis_name, selector)
+                    dest._fields[k].restrict(
+                        axis_name, 
+                        selector, 
+                        ## copies of axes made above
+                        in_place=True 
+                    )
             elif np.isscalar(v) or v is None:
                 dest._fields[k] = v
             else:
                 sslice = [sl if n == axis_name else slice(None)
                           for n in dest._assignments[k]]
                 sslice = dest._broadcast_selector(sslice)
-                dest._fields[k] = v[sslice]
+                if in_place:
+                    dest._fields[k] = v[sslice]
+                else:
+                    dest._fields[k] = v[sslice].copy()
         dest._axes[axis_name] = new_ax
         return dest
 
