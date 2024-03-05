@@ -9,7 +9,7 @@ from sotodlib import hwp
 import sotodlib.core as core
 from sotodlib.core.flagman import has_all_cut
 
-def plot_det_bias_flags(aman, msk, msks, rfrac_range=(0.1, 0.7),
+def plot_det_bias_flags(aman, det_bias_flags, rfrac_range=(0.1, 0.7),
                         psat_range=(0, 15), save_path="./", save_name="bias_cuts_venn.png"):
     """
     Function for plotting bias cuts.
@@ -18,10 +18,8 @@ def plot_det_bias_flags(aman, msk, msks, rfrac_range=(0.1, 0.7),
     ----------
     aman : AxisManager
         Input axis manager.
-    msk : RangesMatrix
-        Result of flags.get_det_bias_flags
-    msks : list of RangesMatrix
-        Result of flags.get_det_bias_flags when full_output=True
+    det_bias_flags : AxisManager
+        Output msk_aman of tod_ops.flags.get_det_bias_flags with full_output=True.
     rfrac_range : Tuple
         Tuple (lower_bound, upper_bound) for rfrac det selection.
     psat_range : Tuple
@@ -32,6 +30,11 @@ def plot_det_bias_flags(aman, msk, msks, rfrac_range=(0.1, 0.7),
     save_name : str
         Filename of plot.
     """
+    msk_names = ['bg', 'r_tes', 'r_frac_gt', 'r_frac_lt', 'p_sat_gt', 'p_sat_lt']
+    msk = det_bias_flags['det_bias_flags']
+    msks = []
+    for name in msk_names:
+        msks.append(det_bias_flags[f'{name}_flags'])
     all_bad_dets = has_all_cut(msk)
     msk_ids = []
     for msk in msks[:2]:
@@ -86,9 +89,9 @@ def plot_4f_2f_counts(aman, modes=np.arange(1,49), save_path='./', save_name='4f
         m = [m90s, m150s]
         hwpss_aman = aman.restrict('dets', aman.dets.vals[m[i]], in_place=False)
         hwpss_aman.restrict('samps',(20*60*200, -100))
-        hwp.hwp.get_hwpss(hwpss_aman, modes=modes)
-        a_4f = np.sqrt(hwpss_aman.hwpss_stats.coeffs[:,6]**2 + hwpss_aman.hwpss_stats.coeffs[:,7]**2)
-        a_2f = np.sqrt(hwpss_aman.hwpss_stats.coeffs[:,2]**2 + hwpss_aman.hwpss_stats.coeffs[:,3]**2)
+        stats = hwp.hwp.get_hwpss(hwpss_aman, modes=modes, merge_stats=False, merge_model=False)
+        a_4f = np.sqrt(stats.coeffs[:,6]**2 + stats.coeffs[:,7]**2)
+        a_2f = np.sqrt(stats.coeffs[:,2]**2 + stats.coeffs[:,3]**2)
         hwpss_ratsatp1[band] = a_4f/a_2f
 
         hist, bins = np.histogram(hwpss_ratsatp1[band], bins=50)
@@ -196,7 +199,27 @@ def plot_hwpss_fit_status(aman, hwpss_stats, plot_dets=None, plot_num_dets=3,
     ufm = det.split('_')[2]
     plt.savefig(os.path.join(plot_dir, ufm+'_'+save_name))
 
-def plot_sso_footprint(aman, sso, xi_p, eta_p, wafer_offsets=None, save_path='./', save_name='sso_footprint.png'):
+def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, save_path='./', save_name='sso_footprint.png'):
+    """
+    Function for plotting SSO footprint.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        Input axis manager.
+    planet_aman : AxisManager
+        Axis manager of results from obs_ops.sources.get_sso for a single planet.
+    sso : str
+        Name of planet.
+    wafer_offsets : dict
+        Dictionary of wafer offsets.
+    save_path : str
+        Path to plot output directory.
+    save_name : str
+        Filename of plot.
+    """
+    xi_p = planet_aman['xi_p']
+    eta_p = planet_aman['eta_p']
 
     if wafer_offsets is None:
         # Default wafer offsets

@@ -49,20 +49,18 @@ class DetBiasFlags(_Preprocess):
     """
     name = "det_bias_flags"
 
-    def calc_and_save(self, aman, proc_aman, plot_dir='./'):
+    def calc_and_save(self, aman, proc_aman):
         if self.plot_cfgs is None:
             msk = tod_ops.flags.get_det_bias_flags(aman, merge=False,
                                                    **self.calc_cfgs)
         else:
-            msk, msks = tod_ops.flags.get_det_bias_flags(aman, merge=False, full_output=True,
+            msk, msk_aman = tod_ops.flags.get_det_bias_flags(aman, merge=False, full_output=True,
                                                          **self.calc_cfgs)
         dbc_aman = core.AxisManager(aman.dets)
         dbc_aman.wrap('det_bias_flags', msk, [(0, 'dets')])
-        self.save(proc_aman, dbc_aman)
         if self.plot_cfgs:
-            from .preprocess_plot import plot_det_bias_flags
-            plot_det_bias_flags(aman, msk, msks, rfrac_range=self.calc_cfgs['rfrac_range'],
-                                psat_range=self.calc_cfgs['psat_range'], save_path=plot_dir)
+            dbc_aman.merge(msk_aman)
+        self.save(proc_aman, dbc_aman)
     
     def save(self, proc_aman, dbc_aman):
         if self.save_cfgs is None:
@@ -78,6 +76,14 @@ class DetBiasFlags(_Preprocess):
         keep = ~proc_aman.det_bias_flags.det_bias_flags
         meta.restrict("dets", meta.dets.vals[has_all_cut(keep)])
         return meta
+    
+    def plot(self, aman, proc_aman, plot_dir):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_det_bias_flags
+            plot_det_bias_flags(aman, proc_aman['det_bias_flags'], rfrac_range=self.calc_cfgs['rfrac_range'],
+                                psat_range=self.calc_cfgs['psat_range'], save_path=plot_dir)
 
 class Trends(_Preprocess):
     """Calculate the trends in the data to look for unlocked detectors. All
@@ -440,13 +446,7 @@ class EstimateHWPSS(_Preprocess):
     name = "estimate_hwpss"
 
     def calc_and_save(self, aman, proc_aman):
-        if self.plot_cfgs is None:
-            hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
-        else:
-            from .preprocess_plot import plot_4f_2f_counts, plot_hwpss_fit_status
-            plot_4f_2f_counts(aman, save_path=self.plot_dir)
-            hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
-            plot_hwpss_fit_status(aman, hwpss_stats, save_path=self.plot_dir)
+        hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
         self.save(proc_aman, hwpss_stats)
 
     def save(self, proc_aman, hwpss_stats):
@@ -454,6 +454,14 @@ class EstimateHWPSS(_Preprocess):
             return
         if self.save_cfgs:
             proc_aman.wrap(self.calc_cfgs["hwpss_stats_name"], hwpss_stats)
+
+    def plot(self, aman, proc_aman, plot_dir):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_4f_2f_counts, plot_hwpss_fit_status
+            plot_4f_2f_counts(aman, save_path=plot_dir)
+            plot_hwpss_fit_status(aman, proc_aman[self.calc_cfgs["hwpss_stats_name"]], save_path=plot_dir)
 
 class SubtractHWPSS(_Preprocess):
     """Subtracts a HWPSS template from signal. 
@@ -602,17 +610,41 @@ class SSOFootprint(_Preprocess):
     """
     name = 'sso_footprint'
 
-    def calc_and_save(self, aman, proc_aman, plot_dir='./'):
+    def calc_and_save(self, aman, proc_aman):
         ssos = planets.get_nearby_sources(tod=aman, distance=self.calc_cfgs.get("distance", 20))
         if ssos:
+            sso_aman = core.AxisManager()
             for sso in ssos:
                 planet = sso[0]
                 xi_p, eta_p = obs_ops.sources.get_sso(aman, planet, nstep=self.calc_cfgs.get("nstep", 100))
-                if self.plot_cfgs:
-                    from .preprocess_plot import plot_sso_footprint
-                    plot_sso_footprint(aman, planet, xi_p, eta_p, wafer_offsets=self.calc_cfgs.get("wafer_offsets", None), save_path=plot_dir)
+                planet_aman = core.AxisManager()
+                planet_aman.wrap("xi_p", xi_p)
+                planet_aman.wrap("eta_p", eta_p)
+                print(planet_aman)
+                sso_aman.wrap(planet, planet_aman)
+            print(sso_aman)
+            self.save(proc_aman, sso_aman)
+            print(proc_aman)
         else:
             raise ValueError("No sources found within footprint")
+        
+    def save(self, proc_aman, sso_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("sso_footprint", sso_aman)
+
+    def plot(self, aman, proc_aman, plot_dir):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_sso_footprint
+            for sso in proc_aman.sso_footprint.keys():
+                if sso == 'dets' or sso == 'samps':
+                    continue
+                planet_aman = proc_aman.sso_footprint[sso]
+                plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=self.calc_cfgs.get("wafer_offsets", None), save_path=plot_dir)
+        
 
 _Preprocess.register(Trends)
 _Preprocess.register(FFTTrim)

@@ -95,7 +95,13 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
             msks.append(RangesMatrix([Ranges.ones_like(x) if Y
                                       else Ranges.zeros_like(x) for Y in msk]))
 
-        return mskexp, msks
+        msk_names = ['bg', 'r_tes', 'r_frac_gt', 'r_frac_lt', 'p_sat_gt', 'p_sat_lt']
+
+        msk_aman = core.AxisManager(aman.dets)
+        for i, msk in enumerate(msks):
+            msk_aman.wrap(f'{msk_names[i]}_flags', msk, [(0, 'dets')])
+
+        return mskexp, msk_aman
     
     return mskexp
 
