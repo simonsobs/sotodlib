@@ -78,16 +78,14 @@ class Trends(_Preprocess):
 
      Example config dictionary::
 
-        {
-            name : "trends"
-            signal: "signal" # optional
-            calc:
-                max_trend: 2.5
-                n_pieces: 10
-            save: True
-            select:
-                kind: "any"     
-        }
+        - name : "trends"
+          signal: "signal" # optional
+          calc:
+            max_trend: 2.5
+            n_pieces: 10
+          save: True
+          select:
+            kind: "any"
     
     .. autofunction:: sotodlib.tod_ops.flags.get_trending_flags
     """
@@ -137,18 +135,16 @@ class GlitchDetection(_Preprocess):
 
     Example configuration dictionary::
         
-        {
-            name: "glitches"
-            signal: "hwpss_remove"
-            calc:
-                t_glitch: 0.00001
-                buffer: 10
-                hp_fc: 1
-                n_sig: 10
-            save: True
-            select:
-                max_n_glitch: 10
-        }
+      - name: "glitches"
+        signal: "hwpss_remove"
+        calc:
+          t_glitch: 0.00001
+          buffer: 10
+          hp_fc: 1
+          n_sig: 10
+        save: True
+        select:
+          max_n_glitch: 10
 
     .. autofunction:: sotodlib.tod_ops.flags.get_glitch_flags
     """
@@ -192,12 +188,10 @@ class FixJumps(_Preprocess):
 
     Example config dictionary::
 
-        {
-            name: "fix_jumps"
-            signal: "signal" # optional
-            process:
-            jumps_aman: "jumps_2pi"
-        }
+      - name: "fix_jumps"
+        signal: "signal" # optional
+        process:
+        jumps_aman: "jumps_2pi"
 
     .. autofunction:: sotodlib.tod_ops.jumps.jumpfix_subtract_heights
     """
@@ -228,14 +222,12 @@ class Jumps(_Preprocess):
 
     Example config dictionary::
 
-        {
-            name: "jumps"
-            signal: "hwpss_remove"
-            calc:
-                function: "twopi_jumps"
-            save:
-                jumps_name: "jumps_2pi"
-        }
+      - name: "jumps"
+        signal: "hwpss_remove"
+        calc:
+          function: "twopi_jumps"
+        save:
+          jumps_name: "jumps_2pi"
 
     .. autofunction:: sotodlib.tod_ops.jumps.find_jumps
     """
@@ -287,19 +279,19 @@ class Jumps(_Preprocess):
 
 class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the AxisManager under the
-    "psd" field. Example config dictionary::
+    "psd" field.
 
-        {
-            "name : "psd"
-            "signal: "signal" # optional
-            "wrap": "psd" # optional
-            "process": 
-                "psd_cfgs": # optional, kwargs to scipy.welch
-                    "nperseg": 1024 
-                "wrap_name": "psd" # optional
-            "calc": True
-            "save": True
-        }
+    Example config dictionary::
+
+      - "name : "psd"
+        "signal: "signal" # optional
+        "wrap": "psd" # optional
+        "process":
+          "psd_cfgs": # optional, kwargs to scipy.welch
+            "nperseg": 1024
+          "wrap_name": "psd" # optional
+        "calc": True
+        "save": True
 
     .. autofunction:: sotodlib.tod_ops.fft_ops.calc_psd
     """
@@ -421,15 +413,14 @@ class EstimateHWPSS(_Preprocess):
     """
     Builds a HWPSS Template. Calc configs go to ``hwpss_model``.
     Results of fitting saved if field specified by calc["name"].
+
     Example config dictionary::
 
-        {
-            "name : "estimate_hwpss"
-            "signal: "signal" # optional
-            "calc":
-                "hwpss_stats_name": "hwpss_stats"
-            "save": True
-        }
+      - "name : "estimate_hwpss"
+        "signal: "signal" # optional
+        "calc":
+          "hwpss_stats_name": "hwpss_stats"
+        "save": True
 
     .. autofunction:: sotodlib.hwp.hwp.get_hwpss
     """
@@ -517,16 +508,14 @@ class GlitchFill(_Preprocess):
 
     Example configuration dictionary::
 
-        {
-            name: "glitchfill"
-            signal: "hwpss_remove"
-            flag_aman: "jumps_2pi"
-            flag: "jump_flag"
-            process:
-                nbuf: 10
-                use_pca: False
-                modes: 1
-        }
+      - name: "glitchfill"
+        signal: "hwpss_remove"
+        flag_aman: "jumps_2pi"
+        flag: "jump_flag"
+        process:
+          nbuf: 10
+          use_pca: False
+          modes: 1
 
     .. autofunction:: sotodlib.tod_ops.gapfill.fill_glitches
     """
