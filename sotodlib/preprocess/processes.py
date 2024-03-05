@@ -409,10 +409,15 @@ class Calibrate(_Preprocess):
     2. to be expanded
     """
     name = "calibrate"
-    
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+
     def process(self, aman, proc_aman):
         if self.process_cfgs["kind"] == "single_value":
-            aman.signal *=  self.process_cfgs["val"]
+            aman[self.signal] *= self.process_cfgs["val"]
         else:
             raise ValueError(f"Entry '{self.process_cfgs['kind']}'"
                               " not understood")
