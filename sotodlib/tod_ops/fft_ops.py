@@ -196,28 +196,34 @@ def calc_psd(
     timestamps=None, 
     max_samples=2**18,
     prefer='center',
+    freq_spacing=None,
     merge=False, 
     overwrite=True, 
     **kwargs
 ):
-    """Calculates the power spectrum density of an input signal using signal.welch()
-    Data defaults to aman.signal and times defaults to aman.timestamps
+    """Calculates the power spectrum density of an input signal using signal.welch().
+    Data defaults to aman.signal and times defaults to aman.timestamps.
+    By default the nperseg will be set to power of 2 closest to the 1/50th of
+    the samples used, this can be overridden by providing nperseg or freq_spacing.
         
     Arguments:
         aman (AxisManager): with (dets, samps) OR (channels, samps)axes.
-        signal (float ndarray): data signal to pass to scipy.signal.welch()
-        timestamps (float ndarray): timestamps associated with the data signal         
-        max_samples (int): maximum samples along sample axis to send to welch
+        signal (float ndarray): data signal to pass to scipy.signal.welch().
+        timestamps (float ndarray): timestamps associated with the data signal.
+        max_samples (int): maximum samples along sample axis to send to welch.
         prefer (str): One of ['left', 'right', 'center'], indicating what
             part of the array we would like to send to welch if cuts are
-            required
-        merge (bool): if true merge results into axismanager
+            required.
+        freq_spacing (float): The approximate desired frequency spacing of the PSD.
+            If None the default nperseg of ~1/50th the signal length is used.
+            If an nperseg is explicitly passed then that will be used.
+        merge (bool): if True merge results into axismanager.
         overwrite (bool): if true will overwrite f, pxx axes.
-        **kwargs: keyword args to be passed to signal.welch()
+        **kwargs: keyword args to be passed to signal.welch().
 
     Returns:
-        freqs: array of frequencies corresponding to PSD calculated from welch
-        Pxx: array of PSD values 
+        freqs: array of frequencies corresponding to PSD calculated from welch.
+        Pxx: array of PSD values.
     """
     if signal is None:
         signal = aman.signal
@@ -240,13 +246,15 @@ def calc_psd(
             raise ValueError(f"Invalid choise prefer='{prefer}'")
         start = offset
         stop = offset + max_samples
-    
+    fs = 1/np.nanmedian(np.diff(timestamps[start:stop]))
+    if "nperseg" not in kwargs:
+        if freq_spacing is not None:
+            nperseg = int(2**(np.around(np.log2(fs/freq_spacing))))
+        else:
+            nperseg = int(2**(np.around(np.log2((stop-start)/50.))))
+        kwargs["nperseg"] = nperseg
             
-    freqs, Pxx = welch( 
-        signal[:,start:stop], 
-        1/np.nanmedian(np.diff(timestamps[start:stop])), 
-        **kwargs
-    )
+    freqs, Pxx = welch(signal[:,start:stop], fs, **kwargs)
     if merge:
         aman.merge( core.AxisManager(core.OffsetAxis("fsamps", len(freqs))))
         if overwrite:
