@@ -421,7 +421,8 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None,
     if root_dir is not None:
         h5_path = os.path.join(root_dir, h5_path)
         idx_path = os.path.join(root_dir, idx_path)
-        failed_obsid_cache = os.path.join(root_dir, failed_obsid_cache)
+        if failed_obsid_cache is not None:
+            failed_obsid_cache = os.path.join(root_dir, failed_obsid_cache)
     h5_relpath = os.path.relpath(h5_path, start=os.path.dirname(idx_path))
 
     if not os.path.exists(idx_path):
