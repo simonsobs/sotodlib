@@ -60,7 +60,7 @@ def load_data_context(job, otherargs, runargs, data):
         if "MOBY2_TOD_STAGING_PATH" in os.environ:
             procdir = os.path.join(
                 os.environ["MOBY2_TOD_STAGING_PATH"],
-                data.comm.world_rank,
+                f"{data.comm.world_rank}",
             )
             os.makedirs(procdir)
             os.environ["MOBY2_TOD_STAGING_PATH"] = procdir
