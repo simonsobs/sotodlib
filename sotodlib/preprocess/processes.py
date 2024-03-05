@@ -49,8 +49,8 @@ class DetBiasFlags(_Preprocess):
     def calc_and_save(self, aman, proc_aman):
         m = tod_ops.flags.get_det_bias_flags(aman, merge=False,
                                                **self.calc_cfgs)
-        calc_aman = core.AxisManager(proc_aman.fdets, proc_aman.fsamps)
-        calc_aman.wrap('det_bias_flags', msk, [(0, 'dets'), (1, 'samps')])
+        calc_aman = core.AxisManager(proc_aman.dets, proc_aman.samps)
+        calc_aman.wrap('det_bias_flags', m, [(0, 'dets'), (1, 'samps')])
         dbc_aman = expand_proc_aman(calc_aman, proc_aman)
         del calc_aman
         self.save(proc_aman, dbc_aman)
@@ -427,8 +427,8 @@ class EstimateHWPSS(_Preprocess):
     Example config block::
 
       - "name : "estimate_hwpss"
-        "signal: "signal" # optional
         "calc":
+          "signal_name": "signal" # optional
           "hwpss_stats_name": "hwpss_stats"
         "save": True
 
@@ -436,20 +436,8 @@ class EstimateHWPSS(_Preprocess):
     """
     name = "estimate_hwpss"
 
-    def __init__(self, step_cfgs):
-        self.signal = step_cfgs.get('signal', 'signal')
-
-        super().__init__(step_cfgs)
-
     def calc_and_save(self, aman, proc_aman):
-        _prefilt = (self.signal == 'signal')
-        if not _prefilt:
-            print("WARNING: apply_prefilt defaulting to False because " +
-                  f"{self.signal} != 'signal'.")
-        calc_aman = hwp.get_hwpss(aman,
-                                    signal=aman[self.signal],
-                                    apply_prefilt=_prefilt,
-                                    **self.calc_cfgs)
+        calc_aman = hwp.get_hwpss(aman, **self.calc_cfgs)
         hwpss_stats = expand_proc_aman(calc_aman, proc_aman)
         self.save(proc_aman, hwpss_stats)
 

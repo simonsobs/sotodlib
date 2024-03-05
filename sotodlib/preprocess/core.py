@@ -157,8 +157,10 @@ def expand_proc_aman(calc_aman, proc_aman, flag_fill_val=False,
         and samps in calc_aman padded to fdets, fsamps shape.
     """
     assn = calc_aman._assignments
-    out_aman = core.AxisManager(*[proc_aman['f'+x] if x in ['dets','samps'] \
-                                  else calc_aman[x] for x in calc_aman._axes])
+    oaxes = [proc_aman['f'+x] if x in ['dets','samps'] \
+                                  else calc_aman[x] for x in calc_aman._axes]
+    oaxes += [proc_aman[x] for x in calc_aman._axes if x in ['dets','samps']]
+    out_aman = core.AxisManager(*oaxes)
     
     _, _, fmdets = np.intersect1d(proc_aman.dets.vals,
                                     proc_aman.fdets.vals,
@@ -189,9 +191,9 @@ def expand_proc_aman(calc_aman, proc_aman, flag_fill_val=False,
         out_aman.wrap(fld, calc_aman[fld], list(enumerate(axes)))
         d = {'dets': fmdets, 'samps': fmsamps}
         slices = [d.get(a, slice(None)) for a in axes]
-        if isinstance(calc_aman[fld], RangesMatrix)
+        if isinstance(calc_aman[fld], RangesMatrix):
             out_aman['f'+fld][tuple(slices)]=calc_aman[fld].mask()
-            out_aman['f'+fld] = RangesMatrix.from_mask(out_aman[fld])
+            out_aman['f'+fld] = RangesMatrix.from_mask(out_aman['f'+fld])
         else:
             out_aman['f'+fld][tuple(slices)]=calc_aman[fld]
     return out_aman
@@ -225,7 +227,7 @@ def collape_proc_aman(proc_aman):
         if np.any(np.isin(axes, ['dets', 'samps'])):
             continue
         naxes = [a.strip('f') if a in ['fdets', 'fsamps'] else a for a in axes]
-        out_aman.wrap(fld, proc_aman[fld], list(enumerate(naxes)))
+        out_aman.wrap(fld[1:], proc_aman[fld], list(enumerate(naxes)))
     return out_aman
 
 class Pipeline(list):
