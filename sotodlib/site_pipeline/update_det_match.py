@@ -72,7 +72,9 @@ class UpdateDetMatchesConfig:
     resonator_set_dir: Optional[str]
         If ``solution_type`` is 'resonator_set', this must be specified and
         contain the path to the resonator-set solutions. This directory must
-        have a res-set npy file for each stream_id that is expected in the matching.
+        have a res-set npy file for each stream_id that is expected in the
+        matching, formatted like ``<resonator_set_dir>/<stream_id>.npy``, which
+        contains the result from ``np.save(fname, match.merged.as_array())``.
     
     Attributes
     -------------
