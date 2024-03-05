@@ -20,14 +20,6 @@ logger = util.init_logger(__name__, "finalize_focal_plane: ")
 valid_bg = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
 
 
-def _encs_notclose(az, el, bs):
-    return not (
-        np.isclose(az, az[0], equal_nan=True).all()
-        and np.isclose(el, el[0], equal_nan=True).all()
-        and np.isclose(bs, bs[0], equal_nan=True).all()
-    )
-
-
 def _avg_focalplane(xi, eta, gamma, tot_weight):
     avg_xi = np.nansum(xi, axis=1) / tot_weight
     avg_eta = np.nansum(eta, axis=1) / tot_weight
@@ -92,7 +84,7 @@ def _mk_fpout(det_id, transformed, measured, measured_gamma):
     )
 
 
-def _mk_tpout(xieta, horiz):
+def _mk_tpout(xieta):
     outdt = [
         ("d_x", np.float32),
         ("d_y", np.float32),
@@ -104,19 +96,18 @@ def _mk_tpout(xieta, horiz):
         ("rot", np.float32),
     ]
     xieta = (*xieta[0], *xieta[1], *xieta[2:])
-    horiz = (*horiz[0], *horiz[1], *horiz[2:])
-    tpout = np.array([xieta, horiz], outdt)
+    tpout = np.array([xieta], outdt)
 
     return tpout
 
 
-def _mk_refout(lever_arm, encoders):
+def _mk_refout(lever_arm):
     outdt = [
         ("x", np.float32),
         ("y", np.float32),
         ("z", np.float32),
     ]
-    refout = np.array([tuple(np.squeeze(lever_arm)), tuple(encoders)], outdt)
+    refout = np.array([tuple(np.squeeze(lever_arm))], outdt)
 
     return refout
 
@@ -190,47 +181,6 @@ def gamma_fit(src, dst):
 
     res = minimize(_gamma_min, (1.0, 0.0), (src, dst))
     return res.x
-
-
-def to_horiz(points, encoders):
-    """
-    Go from xieta coordinates to horizon coordinates.
-
-    Arguments:
-
-        points: (3, ndet) array of points.
-                Rows should be (xi, eta, gamma).
-
-        encoders: The encoder positions for the LOS.
-                  Should be (az, el, bs).
-
-    Returns:
-
-        horiz : (3, ndet) array if points.
-                Rows are (az, el, bs).
-    """
-    msk = np.isfinite(points).all(axis=0)
-    good_points = points[:, msk]
-    dets = np.arange(good_points.shape[1])
-    fp = proj.FocalPlane.from_xieta(dets, *good_points)
-    sight = proj.CelestialSightLine.for_horizon([0], *np.atleast_2d(encoders).T)
-    asm = proj.Assembly.attach(sight, fp)
-    output = np.zeros((len(dets), 1, 4))
-    projectionist = proj.Projectionist()
-    projectionist.get_coords(asm, output=output)
-
-    # Get rid of the time axis and transpose
-    output = np.squeeze(output, axis=1).T
-    # Fix sign on az
-    output[0] *= -1
-    # Compute BS (need to check sign and 0 point)
-    bs = np.arctan2(output[3], output[2]) % (2 * np.pi)
-
-    _horiz = np.vstack((output[:2], bs))
-    horiz = np.zeros((3, len(msk))) + np.nan
-    horiz[:, msk] = _horiz
-
-    return horiz
 
 
 def _get_wafer(ufm):
@@ -501,9 +451,6 @@ def main():
             "No template provided and unable to generate one for some reason"
         )
 
-    check_enc = config.get("check_enc", False)
-    encoders = np.nan + np.zeros((3, len(obs_ids)))
-
     xi = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
     eta = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
     gamma = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
@@ -545,25 +492,6 @@ def main():
         eta[template_msk, i] = _eta * weights
         gamma[template_msk, i] = _gamma * weights
         tot_weight[template_msk] += weights
-
-        if not check_enc:
-            continue
-        if (
-            "az" not in aman[pointing_name]
-            or "el" not in aman[pointing_name]
-            or "roll" not in aman[pointing_name]
-        ):
-            raise ValueError("No encoder values included with pointing")
-        az, el, roll = (
-            aman[pointing_name].az,
-            aman[pointing_name].el,
-            aman[pointing_name].roll,
-        )
-        if _encs_notclose(az, el, roll):
-            raise ValueError("Encoder values not close")
-        encoders[0, i] = np.nanmedian(az)
-        encoders[1, i] = np.nanmedian(el)
-        encoders[2, i] = np.nanmedian(roll)
     tot_weight[tot_weight == 0] = np.nan
 
     # Compute the average focal plane while ignoring outliers
@@ -611,68 +539,19 @@ def main():
     if plot:
         _mk_plot(config.get("plot_dir", None), froot, nominal, measured, transformed)
 
-    # Compute nominal encoder vals
-    if check_enc:
-        if _encs_notclose(*encoders):
-            raise ValueError("Not all encoder values are similar")
-        else:
-            encoders = np.nanmedian(encoders, axis=1)
-            if np.isnan(encoders).any():
-                logger.error("Some or all of the encoders are nan")
-                horiz = ((np.nan,) * 3,) * 2 + (np.nan,) * 2
-                horiz_affine = np.nan * np.empty_like(affine)
-            else:
-                # Put nominal and measured into horiz basis and compute transformation.
-                nominal = np.vstack((nominal, template[:, 3]))
-                _measured = np.vstack((measured - lever_arm[..., None], measured_gamma))
-                nominal_horiz = to_horiz(nominal, encoders)
-                measured_horiz = to_horiz(_measured, encoders)
-
-                if have_gamma:
-                    bs_scale, bs_shift = gamma_fit(nominal_horiz[2], measured_horiz[2])
-                else:
-                    bs_scale = 1.0
-                    bs_shift = 0.0
-                nominal_horiz = nominal_horiz[:2]
-                measured_horiz = measured_horiz[:2]
-                # Compute transform, do a few iters to account for centers being off
-                horiz_affine = np.eye(2)
-                horiz_shift = af.weighted_shift(nominal_horiz, measured_horiz, weights)
-                for i in range(config.get("iters", 5)):
-                    horiz_affine, _ = af.get_affine(
-                        nominal, measured_horiz - horiz_shift[..., None], centered=True
-                    )
-                    horiz_shift = af.weighted_shift(
-                        horiz_affine @ nominal, measured_horiz, weights
-                    )
-                horiz_scale, horiz_shear, horiz_rot = op.decompose_affine(horiz_affine)
-                horiz_shear = horiz_shear.item()
-                horiz_rot = op.decompose_rotation(horiz_rot)[-1]
-
-                horiz_shift = (*horiz_shift, bs_shift)
-                horiz_scale = (*horiz_scale, bs_scale)
-                horiz = (horiz_shift, horiz_scale, horiz_shear, horiz_rot)
-                _log_vals(
-                    horiz_shift, horiz_scale, horiz_shear, horiz_rot, ("az", "el", "bs")
-                )
-    else:
-        encoders = np.nan + np.zeros(3)
-        horiz = ((np.nan,) * 3,) * 2 + (np.nan,) * 2
-        horiz_affine = np.nan * np.empty_like(affine)
-
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)
     fpout, fpfullout = _mk_fpout(
         template_det_ids, fp_transformed, measured, measured_gamma
     )
-    tpout = _mk_tpout(xieta, horiz)
-    refout = _mk_refout(lever_arm, encoders)
+    tpout = _mk_tpout(xieta)
+    refout = _mk_refout(lever_arm)
     with h5py.File(outpath, "w") as f:
         write_dataset(fpout, f, "focal_plane", overwrite=True)
         _add_attrs(f["focal_plane"], {"measured_gamma": measured_gamma})
         write_dataset(fpfullout, f, "focal_plane_full", overwrite=True)
         write_dataset(tpout, f, "offsets", overwrite=True)
-        _add_attrs(f["offsets"], {"affine_xieta": affine, "affine_horiz": horiz_affine})
+        _add_attrs(f["offsets"], {"affine_xieta": affine})
         write_dataset(refout, f, "reference", overwrite=True)
 
 
