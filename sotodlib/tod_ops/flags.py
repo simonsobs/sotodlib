@@ -69,9 +69,12 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                     detcal.p_sat*1e12 >= psat_range[0],
                     detcal.p_sat*1e12 <= psat_range[1]], axis=0))
     # Expand mask to ndets x nsamps RangesMatrix
-    x = Ranges(aman.samps.count)
-    mskexp = RangesMatrix([Ranges.ones_like(x) if Y
-                           else Ranges.zeros_like(x) for Y in msk])
+    if 'samps' in aman:
+        x = Ranges(aman.samps.count)
+        mskexp = RangesMatrix([Ranges.ones_like(x) if Y
+                            else Ranges.zeros_like(x) for Y in msk])
+    else:
+        mskexp = msk
     
     if merge:
         if name in aman.flags and not overwrite:
@@ -80,7 +83,7 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
             aman.flags[name] = mskexp
         else:
             aman.flags.wrap(name, mskexp, [(0, 'dets'), (1, 'samps')])
-    
+            
     return mskexp
 
 def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
