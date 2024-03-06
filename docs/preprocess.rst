@@ -139,11 +139,14 @@ TOD Operations
 .. autoclass:: sotodlib.preprocess.processes.Calibrate
 .. autoclass:: sotodlib.preprocess.processes.Apodize
 .. autoclass:: sotodlib.preprocess.processes.SubPolyf
+.. autoclass:: sotodlib.preprocess.processes.Jumps
+.. autoclass:: sotodlib.preprocess.processes.FixJumps
 
 Flagging and Products
 :::::::::::::::::::::
 .. autoclass:: sotodlib.preprocess.processes.Trends
 .. autoclass:: sotodlib.preprocess.processes.GlitchDetection
+.. autoclass:: sotodlib.preprocess.processes.GlitchFill
 .. autoclass:: sotodlib.preprocess.processes.Noise
 .. autoclass:: sotodlib.preprocess.processes.FlagTurnarounds
 
