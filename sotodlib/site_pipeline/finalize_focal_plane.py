@@ -369,12 +369,14 @@ def _load_rset(config):
 def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
     config_dir = config.get("pipeline_config_dir", os.environ["PIPELINE_CONFIG_DIR"])
     config_path = os.path.join(config_dir, "shared/focalplane/ufm_to_fp.yaml")
+    zemax_path = config.get("zemax_path", None)
 
     pointing_cfg = {
         "telescope": telescope_flavor,
         "tube": tube_slot,
         "slot": wafer_slot,
         "config_path": config_path,
+        "zemax_path": zemax_path,
         "return_fp": False,
     }
     return pointing_cfg
