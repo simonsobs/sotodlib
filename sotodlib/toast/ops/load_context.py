@@ -249,11 +249,12 @@ class LoadContext(Operator):
             msg += " and observations should be specified"
             raise RuntimeError(msg)
         if self.observation_file is not None:
+            olist = None
             if comm.world_rank == 0:
                 olist = list()
                 with open(self.observation_file, "r") as f:
-                    for line in f.readline():
-                        if re.match(r"^#.*", line) is not None:
+                    for line in f:
+                        if re.match(r"^#.*", line) is None:
                             olist.append(line.strip())
             if comm.comm_world is not None:
                 olist = comm.comm_world.bcast(olist, root=0)
