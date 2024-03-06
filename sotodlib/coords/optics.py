@@ -669,7 +669,7 @@ def gen_template(wafer_info, ufm, **pointing_cfg):
 
         is_optical: (ndet) mask that is True for all optical dets.
     """
-    wafer = read_dataset(wafer_file, ufm)
+    wafer = read_dataset(wafer_info, ufm)
     template_det_ids = wafer["dets:det_id"]
     det_x = wafer["dets:wafer.x"]
     det_y = wafer["dets:wafer.y"]
