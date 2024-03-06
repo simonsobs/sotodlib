@@ -186,19 +186,22 @@ def expand_proc_aman(calc_aman, proc_aman, flag_fill_val=False,
         else:
             raise ValueError('Data type in axis manager not supported '+
                             'in expand_proc_aman')
-        
-        out_aman.wrap_new('f'+fld, faxes, cls=np.full, fill_value=fill_value)
-        out_aman.wrap(fld, calc_aman[fld], list(enumerate(axes)))
-        d = {'dets': fmdets, 'samps': fmsamps}
-        slices = [d.get(a, slice(None)) for a in axes]
-        if isinstance(calc_aman[fld], RangesMatrix):
-            out_aman['f'+fld][tuple(slices)]=calc_aman[fld].mask()
-            out_aman['f'+fld] = RangesMatrix.from_mask(out_aman['f'+fld])
+
+        if np.any(np.isin(axes, ['dets', 'samps'])):
+            out_aman.wrap_new('f'+fld, faxes, cls=np.full, fill_value=fill_value)
+            out_aman.wrap(fld, calc_aman[fld], list(enumerate(axes)))
+            d = {'dets': fmdets, 'samps': fmsamps}
+            slices = [d.get(a, slice(None)) for a in axes]
+            if isinstance(calc_aman[fld], RangesMatrix):
+                out_aman['f'+fld][tuple(slices)]=calc_aman[fld].mask()
+                out_aman['f'+fld] = RangesMatrix.from_mask(out_aman['f'+fld])
+            else:
+                out_aman['f'+fld][tuple(slices)]=calc_aman[fld]
         else:
-            out_aman['f'+fld][tuple(slices)]=calc_aman[fld]
+            out_aman.wrap(fld, calc_aman[fld], list(enumerate(axes)))
     return out_aman
 
-def collape_proc_aman(proc_aman):
+def collapse_proc_aman(proc_aman):
     """
     Replaces dets, samps axes + fields aligned with them with the data
     in fdets, fsamps axes. This is intended to go at the end of the
@@ -224,10 +227,19 @@ def collape_proc_aman(proc_aman):
                                   if not(x in ['fdets','fsamps','dets','samps'])])
     out_aman.merge(dets_samps)
     for fld, axes in zip(assn.keys(), assn.values()):
-        if np.any(np.isin(axes, ['dets', 'samps'])):
-            continue
-        naxes = [a.strip('f') if a in ['fdets', 'fsamps'] else a for a in axes]
-        out_aman.wrap(fld[1:], proc_aman[fld], list(enumerate(naxes)))
+        assn2 = proc_aman[fld]._assignments
+        fld_aman = core.AxisManager(*[proc_aman[x] for x in proc_aman[fld]._axes \
+                                if not(x in ['fdets','fsamps','dets','samps'])])
+        fld_aman.merge(dets_samps)
+        for fld2, axes2 in zip(assn2.keys(), assn2.values()):
+            if np.any(np.isin(axes2, ['dets', 'samps'])):
+                continue
+            if np.any(np.isin(axes2, ['fdets', 'fsamps'])):
+                naxes = [a.strip('f') if a in ['fdets', 'fsamps'] else a for a in axes2]
+                fld_aman.wrap(fld2[1:], proc_aman[fld][fld2], list(enumerate(naxes)))
+            else:
+                fld_aman.wrap(fld2, proc_aman[fld][fld2], list(enumerate(axes2)))
+        out_aman.wrap(fld, fld_aman)
     return out_aman
 
 class Pipeline(list):
@@ -341,4 +353,4 @@ class Pipeline(list):
             if select:
                 process.select(aman, proc_aman)
                 proc_aman.restrict('dets', aman.dets.vals)
-        return collape_proc_aman(proc_aman)
+        return collapse_proc_aman(proc_aman)
