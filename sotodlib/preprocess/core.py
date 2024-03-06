@@ -184,8 +184,8 @@ def expand_proc_aman(calc_aman, proc_aman, flag_fill_val=False,
             if isinstance(calc_aman[fld][0], bool):
                 fill_value = flag_fill_val
         else:
-            raise ValueError('Data type in axis manager not supported '+
-                            'in expand_proc_aman')
+            raise ValueError(f"Data type {type(calc_aman[fld])} in axis manager"
+                            " not supported in expand_proc_aman")
 
         if np.any(np.isin(axes, ['dets', 'samps'])):
             out_aman.wrap_new('f'+fld, faxes, cls=np.full, fill_value=fill_value)
