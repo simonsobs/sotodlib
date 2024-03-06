@@ -77,13 +77,17 @@ class DetBiasFlags(_Preprocess):
         meta.restrict("dets", meta.dets.vals[has_all_cut(keep)])
         return meta
     
-    def plot(self, aman, proc_aman, plot_dir):
+    def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
             return
         if self.plot_cfgs:
             from .preprocess_plot import plot_det_bias_flags
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
             plot_det_bias_flags(aman, proc_aman['det_bias_flags'], rfrac_range=self.calc_cfgs['rfrac_range'],
-                                psat_range=self.calc_cfgs['psat_range'], save_path=plot_dir)
+                                psat_range=self.calc_cfgs['psat_range'], filename=filename.replace('{name}', f'{ufm}_bias_cuts_venn'))
 
 class Trends(_Preprocess):
     """Calculate the trends in the data to look for unlocked detectors. All
@@ -455,13 +459,17 @@ class EstimateHWPSS(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap(self.calc_cfgs["hwpss_stats_name"], hwpss_stats)
 
-    def plot(self, aman, proc_aman, plot_dir):
+    def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
             return
         if self.plot_cfgs:
             from .preprocess_plot import plot_4f_2f_counts, plot_hwpss_fit_status
-            plot_4f_2f_counts(aman, save_path=plot_dir)
-            plot_hwpss_fit_status(aman, proc_aman[self.calc_cfgs["hwpss_stats_name"]], save_path=plot_dir)
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            plot_4f_2f_counts(aman, filename=filename.replace('{name}', f'{ufm}_4f_2f_counts'))
+            plot_hwpss_fit_status(aman, proc_aman[self.calc_cfgs["hwpss_stats_name"]], filename=filename.replace('{name}', f'{ufm}_hwpss_stats'))
 
 class SubtractHWPSS(_Preprocess):
     """Subtracts a HWPSS template from signal. 
@@ -620,11 +628,8 @@ class SSOFootprint(_Preprocess):
                 planet_aman = core.AxisManager()
                 planet_aman.wrap("xi_p", xi_p)
                 planet_aman.wrap("eta_p", eta_p)
-                print(planet_aman)
                 sso_aman.wrap(planet, planet_aman)
-            print(sso_aman)
             self.save(proc_aman, sso_aman)
-            print(proc_aman)
         else:
             raise ValueError("No sources found within footprint")
         
@@ -639,11 +644,13 @@ class SSOFootprint(_Preprocess):
             return
         if self.plot_cfgs:
             from .preprocess_plot import plot_sso_footprint
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
             for sso in proc_aman.sso_footprint.keys():
                 if sso == 'dets' or sso == 'samps':
                     continue
                 planet_aman = proc_aman.sso_footprint[sso]
-                plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=self.calc_cfgs.get("wafer_offsets", None), save_path=plot_dir)
+                plot_sso_footprint(aman, planet_aman, sso, filename=filename.replace('{name}', f'{sso}_sso_footprint'), **self.plot_cfgs)
         
 
 _Preprocess.register(Trends)

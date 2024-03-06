@@ -10,7 +10,7 @@ import sotodlib.core as core
 from sotodlib.core.flagman import has_all_cut
 
 def plot_det_bias_flags(aman, det_bias_flags, rfrac_range=(0.1, 0.7),
-                        psat_range=(0, 15), save_path="./", save_name="bias_cuts_venn.png"):
+                        psat_range=(0, 15), filename="./bias_cuts_venn.png"):
     """
     Function for plotting bias cuts.
 
@@ -25,10 +25,8 @@ def plot_det_bias_flags(aman, det_bias_flags, rfrac_range=(0.1, 0.7),
     psat_range : Tuple
         Tuple (lower_bound, upper_bound) for P_SAT from IV analysis.
         P_SAT in the IV analysis is the bias power at 90% Rn in pW.
-    save_path : str
-        Path to plot output directory.
-    save_name : str
-        Filename of plot.
+    filename : str
+        Full filename with direct path to plot output directory.
     """
     msk_names = ['bg', 'r_tes', 'r_frac_gt', 'r_frac_lt', 'p_sat_gt', 'p_sat_lt']
     msk = det_bias_flags['det_bias_flags']
@@ -59,13 +57,11 @@ def plot_det_bias_flags(aman, det_bias_flags, rfrac_range=(0.1, 0.7),
     det = aman.dets.vals[0]
     plt.title(f"Obs_timestamp:{obs_ts:.0f}\ndet:{det}\nDetectors Cut per Range (Total cut: {len(np.where(all_bad_dets == True)[0])}/{len(aman.dets.vals)})")
     plt.tight_layout()
-    plot_dir = os.path.join(save_path, f'{str(aman.timestamps[0])[:5]}', aman.obs_info.obs_id)
-    os.makedirs(plot_dir, exist_ok=True)
-    ufm = det.split('_')[2]
-    plt.savefig(os.path.join(plot_dir, ufm+'_'+save_name))
-    plt.close()
+    head_tail = os.path.split(filename)
+    os.makedirs(head_tail[0], exist_ok=True)
+    plt.savefig(filename)
 
-def plot_4f_2f_counts(aman, modes=np.arange(1,49), save_path='./', save_name='4f_2f_counts.png'):
+def plot_4f_2f_counts(aman, modes=np.arange(1,49), filename='./4f_2f_counts.png'):
     """
     Function for plotting 4f/2f counts for each bandpass.
 
@@ -75,10 +71,8 @@ def plot_4f_2f_counts(aman, modes=np.arange(1,49), save_path='./', save_name='4f
         Input axis manager.
     modes : list of int
         The HWPSS harmonic modes to extract.
-    save_path : str
-        Path to plot output directory.
-    save_name : str
-        Filename of plot.
+    filename : str
+        Full filename with direct path to plot output directory.
     """
     hwpss_ratsatp1 = {}
     fig, axs = plt.subplots(3, 2, figsize=(15, 15))
@@ -132,13 +126,12 @@ def plot_4f_2f_counts(aman, modes=np.arange(1,49), save_path='./', save_name='4f
     det = aman.dets.vals[0]
     plt.suptitle(f'Obs_timestamp:{obs_ts:.0f}\ndet:{det}\n4f/2f Counts')
     plt.tight_layout()
-    plot_dir = os.path.join(save_path, f'{str(aman.timestamps[0])[:5]}', aman.obs_info.obs_id)
-    os.makedirs(plot_dir, exist_ok=True)
-    ufm = det.split('_')[2]
-    plt.savefig(os.path.join(plot_dir, ufm+'_'+save_name))
+    head_tail = os.path.split(filename)
+    os.makedirs(head_tail[0], exist_ok=True)
+    plt.savefig(filename)
 
 def plot_hwpss_fit_status(aman, hwpss_stats, plot_dets=None, plot_num_dets=3,
-                          save_path='./', save_name='hwpss_stats.png'):
+                          filename='./hwpss_stats.png'):
     """
     Function for plotting HWPSS fit status.
 
@@ -152,10 +145,8 @@ def plot_hwpss_fit_status(aman, hwpss_stats, plot_dets=None, plot_num_dets=3,
         List of dets to plot
     plot_num_dets : list
         Number of dets to plot.
-    save_path : str
-        Path to plot output directory.
-    save_name : str
-        Filename of plot.
+    filename : str
+        Full filename with direct path to plot output directory.
     """
     fig, ax = plt.subplots(1, 2, figsize=(15, 5))
     
@@ -194,12 +185,11 @@ def plot_hwpss_fit_status(aman, hwpss_stats, plot_dets=None, plot_num_dets=3,
     det = aman.dets.vals[0]
     plt.suptitle(f'HWPSS Stats for Obs_timestamp:{obs_ts:.0f}, dT = {np.ptp(aman.timestamps)/60:.1f} min\ndet:{det}\n')
     plt.subplots_adjust(top=0.85, bottom=0.2)
-    plot_dir = os.path.join(save_path, f'{str(aman.timestamps[0])[:5]}', aman.obs_info.obs_id)
-    os.makedirs(plot_dir, exist_ok=True)
-    ufm = det.split('_')[2]
-    plt.savefig(os.path.join(plot_dir, ufm+'_'+save_name))
+    head_tail = os.path.split(filename)
+    os.makedirs(head_tail[0], exist_ok=True)
+    plt.savefig(filename)
 
-def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, save_path='./', save_name='sso_footprint.png'):
+def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, filename='./sso_footprint.png'):
     """
     Function for plotting SSO footprint.
 
@@ -213,10 +203,8 @@ def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, save_path='./
         Name of planet.
     wafer_offsets : dict
         Dictionary of wafer offsets.
-    save_path : str
-        Path to plot output directory.
-    save_name : str
-        Filename of plot.
+    filename : str
+        Full filename with direct path to plot output directory.
     """
     xi_p = planet_aman['xi_p']
     eta_p = planet_aman['eta_p']
@@ -246,6 +234,6 @@ def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, save_path='./
 
     plt.suptitle(f'{sso} {aman.obs_info.obs_id}')
     plt.tight_layout()
-    plot_dir = os.path.join(save_path, f'{str(aman.timestamps[0])[:5]}', aman.obs_info.obs_id)
-    os.makedirs(plot_dir, exist_ok=True)
-    plt.savefig(os.path.join(plot_dir, sso+'_'+save_name))
+    head_tail = os.path.split(filename)
+    os.makedirs(head_tail[0], exist_ok=True)
+    plt.savefig(filename)
