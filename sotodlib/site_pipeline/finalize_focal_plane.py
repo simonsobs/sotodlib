@@ -6,8 +6,6 @@ from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 import yaml
 
-from detmap.makemap import MapMaker
-from so3g import proj
 from sotodlib.core import AxisManager, metadata, Context
 from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
@@ -16,8 +14,6 @@ from sotodlib.coords import affine as af
 
 
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
-
-valid_bg = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
 
 
 def _avg_focalplane(xi, eta, gamma, tot_weight):
@@ -183,66 +179,11 @@ def gamma_fit(src, dst):
     return res.x
 
 
-def _get_wafer(ufm):
-    # TODO: Switch to Matthew's code here
-    try:
-        wafer = MapMaker(north_is_highband=False, array_name=ufm, verbose=False)
-    except ValueError:
-        wafer = MapMaker(
-            north_is_highband=False,
-            array_name=ufm,
-            verbose=False,
-            use_solution_as_design=False,
-        )
-    det_x = []
-    det_y = []
-    polang = []
-    det_ids = []
-    template_bg = []
-    is_north = []
-    for det in wafer.grab_metadata():
-        if not det.is_optical:
-            continue
-        det_x.append(det.det_x)
-        det_y.append(det.det_y)
-        polang.append(det.angle_actual_deg)
-        det_ids.append(det.detector_id)
-        template_bg.append(det.bias_line)
-        is_north.append(det.is_north)
-    template_bg = np.array(template_bg)
-    msk = np.isin(template_bg, valid_bg)
-    det_ids = np.array(det_ids)[msk]
-    template_n = np.array(is_north)[msk]
-    template = np.column_stack(
-        (template_bg, np.array(det_x), np.array(det_y), np.array(polang))
-    )[msk]
-
-    return det_ids, template, template_n
-
-
-class NoPointing(ValueError):
-    pass
-
-
-def _get_pointing(wafer, pointing_cfg):
-    xi, eta, gamma = op.get_focal_plane(
-        None, x=wafer[:, 1], y=wafer[:, 2], pol=wafer[:, 3], **pointing_cfg
-    )
-    pointing = wafer.copy()
-    pointing[:, 1] = xi
-    pointing[:, 2] = eta
-    pointing[:, 3] = gamma
-
-    return pointing
-
-
 def _load_template(template_path, ufm):
     template_rset = read_dataset(template_path, ufm)
-    bg = np.array(template_rset["bg"], dtype=int)
     det_ids = template_rset["dets:det_id"]
     template = np.column_stack(
         (
-            bg.astype(float),
             np.array(template_rset["xi"]),
             np.array(template_rset["eta"]),
             np.array(template_rset["gamma"]),
@@ -250,7 +191,7 @@ def _load_template(template_path, ufm):
     )
     template_optical = template_rset["is_optical"]
 
-    return det_ids, template, template_optical
+    return np.array(det_ids), template, np.array(template_optical)
 
 
 def _load_ctx(config):
@@ -402,11 +343,10 @@ def main():
     outpath = os.path.abspath(outpath)
 
     # If a template is provided load it, otherwise generate one
-    (
-        template_det_ids,
-        template,
-    ) = [], np.empty(
-        (0, 0)
+    (template_det_ids, template, is_optical) = (
+        np.empty(0, dtype=str),
+        np.empty((0, 0)),
+        np.empty(0, dtype=bool),
     )  # Just to make pyright shut up
     gen_template = "template" not in config
     if not gen_template:
@@ -420,9 +360,11 @@ def main():
         logger.info(f"Generating template for {ufm}")
         if "pointing_cfg" not in config:
             raise ValueError("Need pointing_cfg to generate template")
-        # TODO: this is sorta broken and needs to be replaced
-        template_det_ids, template, is_optical = _get_wafer(ufm)
-        template = _get_pointing(template, config["pointing_cfg"])
+        if "wafer_info" not in config:
+            raise ValueError("Need wafer_info to generate template")
+        template_det_ids, template, is_optical = op.gen_template(
+            config["wafer_info"], config["ufm"], **config["pointing_cfg"]
+        )
     else:
         raise ValueError(
             "No template provided and unable to generate one for some reason"
@@ -456,18 +398,18 @@ def main():
 
         # Do an initial alignment and get weights
         fp = np.vstack((_xi, _eta))
-        aff, sft = af.get_affine(fp, template[template_msk, 1:3].T)
+        aff, sft = af.get_affine(fp, template[template_msk, :2].T)
         aligned = aff @ fp + sft[..., None]
         if pol:
             _gamma = aman[pol_name].polang[msk][mapping]
-            gscale, gsft = gamma_fit(_gamma, template[template_msk, 3])
+            gscale, gsft = gamma_fit(_gamma, template[template_msk, 2])
             weights = af.gen_weights(
                 np.vstack((aligned, gscale * _gamma + gsft)),
-                template[template_msk, 1:].T,
+                template[template_msk].T,
             )
         else:
             _gamma = np.nan + np.zeros_like(_xi)
-            weights = af.gen_weights(aligned, template[template_msk, 1:3].T)
+            weights = af.gen_weights(aligned, template[template_msk, :2].T)
 
         # ~2 sigma cut
         weights[weights < 0.95] = 0
@@ -488,11 +430,11 @@ def main():
     )
 
     # Compute transformation between the two nominal and measured pointing
-    fp_transformed = template[:, 1:].copy()
+    fp_transformed = template.copy()
     have_gamma = np.sum(np.isfinite(measured_gamma).astype(int)) > 10
     if have_gamma:
-        gamma_scale, gamma_shift = gamma_fit(template[:, 3], measured_gamma)
-        fp_transformed[:, 2] = template[:, 3] * gamma_scale + gamma_shift
+        gamma_scale, gamma_shift = gamma_fit(template[:, 2], measured_gamma)
+        fp_transformed[:, 2] = template[:, 2] * gamma_scale + gamma_shift
     else:
         logger.warning(
             "No polarization data availible, gammas will be filled with the nominal values."
@@ -500,7 +442,7 @@ def main():
         gamma_scale = 1.0
         gamma_shift = 0.0
 
-    nominal = template[:, 1:3].T.copy()
+    nominal = template[:, :2].T.copy()
     # Do an initial alignment without weights
     affine_0, shift_0 = af.get_affine(nominal, measured)
     init_align = affine_0 @ nominal + shift_0[..., None]

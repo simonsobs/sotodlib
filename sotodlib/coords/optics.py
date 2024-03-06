@@ -645,3 +645,44 @@ def get_focal_plane(
     if return_fp:
         return xi, eta, gamma, x_fp, y_fp, pol_fp
     return xi, eta, gamma
+
+
+def gen_template(wafer_info, ufm, **pointing_cfg):
+    """
+    Generate a pointing template from a wafer info ResultSet.
+
+    Arguments:
+
+        wafer_info: Either the path to a wafer_info ResultSet
+                    or an open h5py File object.
+
+        ufm: The UFM to generate the template for (ie: Mv5).
+
+        **pointing_cfg: Arguments to pass to get_focal_plane,
+                        should be arguments from rot onwards.
+
+    Returns:
+
+        template_det_ids: The detector ids of the detectors in the template.
+
+        template: (ndet, 3) array of (xi, eta, gamma) for all dets in template.
+
+        is_optical: (ndet) mask that is True for all optical dets.
+    """
+    wafer = read_dataset(wafer_file, ufm)
+    template_det_ids = wafer["dets:det_id"]
+    det_x = wafer["dets:wafer.x"]
+    det_y = wafer["dets:wafer.y"]
+    det_pol = wafer["dets:wafer.angle"]
+    det_type = wafer["dets:wafer.type"]
+    is_optical = det_type == "OPTC"
+
+    xi, eta, gamma = get_focal_plane(
+        None, x=det_x, y=det_y, pol=det_pol, **pointing_cfg
+    )
+    template = np.column_stack((xi, eta, gamma))
+
+    # Dark dets should not be allowed to have pointing
+    template[~is_optical] = np.nan
+
+    return template_det_ids, template, is_optical
