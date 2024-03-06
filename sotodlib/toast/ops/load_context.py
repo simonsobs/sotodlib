@@ -253,7 +253,8 @@ class LoadContext(Operator):
                 olist = list()
                 with open(self.observation_file, "r") as f:
                     for line in f.readline():
-                        olist.append(line.strip())
+                        if re.match(r"^#.*", line) is not None:
+                            olist.append(line.strip())
             if comm.comm_world is not None:
                 olist = comm.comm_world.bcast(olist, root=0)
             self.observations = olist
