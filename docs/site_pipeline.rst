@@ -450,7 +450,7 @@ the preprocessing steps applied to them.
 preprocess-obs
 --------------
 This script is set up to run a preprocessing pipeline using the preprocess
-module. See details in :ref:`See details here<Example TOD Pipeline Configuration File>` for how to
+module. See details in :ref:`See details here<preprocess-module>` for how to
 build an obs preprocessing pipeline.
 
 This module is similar to ``preprocess_tod`` but removes grouping by detset so
