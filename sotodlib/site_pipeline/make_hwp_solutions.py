@@ -106,9 +106,7 @@ def main(
     # policy = util.ArchivePolicy.from_params(config['archive']['policy'])
     # dest_file, dest_dataset = policy.get_dest(obs_id)
     # Use 'output_dir' argument for now
-    h5_filename = 'hwp_angle.h5'
     man_db_filename = os.path.join(output_dir, 'hwp_angle.sqlite')
-    output_filename = os.path.join(output_dir, h5_filename)
 
     if os.path.exists(man_db_filename):
         logger.info(f"Mapping {man_db_filename} for the "
@@ -154,6 +152,10 @@ def main(
 
     # write solutions
     for obs in run_list:
+        # split h5 file by first 4 digits of unixtime
+        h5_filename = 'hwp_angle_{}.h5'.format(obs["obs_id"].split('_')[1][:4])
+        output_filename = os.path.join(output_dir, h5_filename)
+
         h5_address = obs["obs_id"]
         logger.info(f"Calculating Angles for {h5_address}")
         ctx = core.Context(context)
