@@ -115,6 +115,7 @@ def _add_attrs(dset, attrs):
 
 def _mk_plot(plot_dir, froot, nominal, measured, transformed):
     plt.style.use("tableau-colorblind10")
+    # Plot pointing
     plt.scatter(
         nominal[0], nominal[1], alpha=0.4, color="blue", label="nominal", marker="P"
     )
@@ -136,9 +137,10 @@ def _mk_plot(plot_dir, froot, nominal, measured, transformed):
         os.makedirs(plot_dir, exist_ok=True)
         plt.savefig(os.path.join(plot_dir, f"{froot}.png"))
         plt.cla()
+
+    # Historgram of differences
     diff = measured - transformed
-    diff = diff[:, np.isfinite(diff[0])]
-    dist = np.linalg.norm(diff, axis=0)
+    dist = np.linalg.norm(diff[:2, np.isfinite(diff[0])], axis=0)
     bins = int(len(dist) / 20)
     plt.hist(dist[dist < np.percentile(dist, 97)], bins=bins)
     plt.xlabel("Distance Between Measured and Transformed (rad)")
@@ -147,7 +149,40 @@ def _mk_plot(plot_dir, froot, nominal, measured, transformed):
     else:
         os.makedirs(plot_dir, exist_ok=True)
         plt.savefig(os.path.join(plot_dir, f"{froot}_dist.png"))
-        plt.cla()
+        plt.clf()
+
+    # tricontourf of residuals, subplots for xi, eta, gamma
+    fig, axs = plt.subplots(1, 3, figsize=(9, 3), sharey=True)
+    flat_diff = np.abs(diff.ravel())
+    max_diff = np.percentile(flat_diff[np.isfinite(flat_diff)], 99)
+    im = None
+    for i, name in enumerate(("xi", "eta", "gamma")):
+        isfinite = np.isfinite(diff[i])
+        axs[i].set_title(name)
+        axs[i].set_xlim(np.nanmin(nominal[0]), np.nanmax(nominal[0]))
+        axs[i].set_ylim(np.nanmin(nominal[1]), np.nanmax(nominal[1]))
+        axs[i].set_aspect("equal")
+        if np.sum(isfinite) == 0:
+            continue
+        im = axs[i].tricontourf(
+            transformed[0, isfinite],
+            transformed[1, isfinite],
+            diff[i, isfinite],
+            levels=20,
+            vmin=-1 * max_diff,
+            vmax=max_diff,
+        )
+    if im is not None:
+        fig.colorbar(im, ax=axs.ravel().tolist())
+    axs[0].set_ylabel("Eta (rad)")
+    axs[1].set_xlabel("Xi (rad)")
+    fig.suptitle("Residuals from Fit")
+    if plot_dir is None:
+        plt.show()
+    else:
+        os.makedirs(plot_dir, exist_ok=True)
+        plt.savefig(os.path.join(plot_dir, f"{froot}_res.png"), bbox_inches="tight")
+        plt.clf()
 
 
 def gamma_fit(src, dst):
@@ -467,7 +502,13 @@ def main():
 
     plot = config.get("plot", False)
     if plot:
-        _mk_plot(config.get("plot_dir", None), froot, nominal, measured, transformed)
+        _mk_plot(
+            config.get("plot_dir", None),
+            froot,
+            nominal,
+            np.vstack((measured, measured_gamma)),
+            fp_transformed.T,
+        )
 
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)
