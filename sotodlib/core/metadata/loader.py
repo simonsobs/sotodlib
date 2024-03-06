@@ -309,7 +309,10 @@ class SuperLoader:
         # Check that we got results, then combine them in to single ResultSet.
         logger.debug(f'Concatenating {len(results)} results: {results}')
         assert(len(results) > 0)
-        result = results[0].concatenate(results)
+        if len(results) == 1:
+            result = results[0]
+        else:
+            result = results[0].concatenate(results)
         return result
 
     def load(self, spec_list, request, det_info=None, free_tags=[],
