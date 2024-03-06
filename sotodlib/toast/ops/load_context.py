@@ -34,7 +34,7 @@ class LoadContext(Operator):
     session".
 
     Given a context, load one or more observations.  If specified, the context
-    should exist on all processes in the group.  The `readout_ids`, `detsets`, 
+    should exist on all processes in the group.  The `readout_ids`, `detsets`,
     and `bands` traits are used to select subsets of detectors.  Alternatively
     the context file can be specified, in which case this is passed to the
     context constructor.
@@ -71,6 +71,12 @@ class LoadContext(Operator):
         None,
         allow_none=True,
         help="Regular expression match to apply to observation IDs",
+    )
+
+    observation_file = Unicode(
+        None,
+        allow_none=True,
+        help="Text file containing observation IDs to load",
     )
 
     observations = List(list(), help="List of observation IDs to load")
@@ -233,14 +239,24 @@ class LoadContext(Operator):
 
         # One global process queries the observation metadata and computes
         # the observation distribution among process groups.
-
-        if self.observation_regex is not None and len(self.observations) > 0:
-            msg = "Only one of observation_regex or list of obs should be specified"
+        obs_check = (
+            (self.observation_regex is not None) +
+            (len(self.observations) > 0) +
+            (self.observation_file is not None)
+        )
+        if obs_check != 1:
+            msg = "Exactly one of observation_regex, observation_file"
+            msg += " and observations should be specified"
             raise RuntimeError(msg)
-
-        if self.observation_regex is None and len(self.observations) == 0:
-            msg = "Must specify either observation_regex or the list of obs"
-            raise RuntimeError(msg)
+        if self.observation_file is not None:
+            if comm.world_rank == 0:
+                olist = list()
+                with open(self.observation_file, "r") as f:
+                    for line in f.readline():
+                        olist.append(line.strip())
+            if comm.comm_world is not None:
+                olist = comm.comm_world.bcast(olist, root=0)
+            self.observations = olist
 
         obs_props = None
         if comm.world_rank == 0:
