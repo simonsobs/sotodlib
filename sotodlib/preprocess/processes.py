@@ -639,7 +639,7 @@ class SSOFootprint(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("sso_footprint", sso_aman)
 
-    def plot(self, aman, proc_aman, plot_dir):
+    def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
             return
         if self.plot_cfgs:
