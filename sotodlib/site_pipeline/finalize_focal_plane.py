@@ -6,8 +6,6 @@ from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 import yaml
 
-from detmap.makemap import MapMaker
-from so3g import proj
 from sotodlib.core import AxisManager, metadata, Context
 from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
@@ -16,8 +14,6 @@ from sotodlib.coords import affine as af
 
 
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
-
-valid_bg = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
 
 
 def _avg_focalplane(xi, eta, gamma, tot_weight):
@@ -119,6 +115,7 @@ def _add_attrs(dset, attrs):
 
 def _mk_plot(plot_dir, froot, nominal, measured, transformed):
     plt.style.use("tableau-colorblind10")
+    # Plot pointing
     plt.scatter(
         nominal[0], nominal[1], alpha=0.4, color="blue", label="nominal", marker="P"
     )
@@ -140,18 +137,52 @@ def _mk_plot(plot_dir, froot, nominal, measured, transformed):
         os.makedirs(plot_dir, exist_ok=True)
         plt.savefig(os.path.join(plot_dir, f"{froot}.png"))
         plt.cla()
+
+    # Historgram of differences
     diff = measured - transformed
-    diff = diff[:, np.isfinite(diff[0])]
-    dist = np.linalg.norm(diff, axis=0)
+    dist = np.linalg.norm(diff[:2, np.isfinite(diff[0])], axis=0)
     bins = int(len(dist) / 20)
-    plt.hist(dist, bins=bins)
+    plt.hist(dist[dist < np.percentile(dist, 97)], bins=bins)
     plt.xlabel("Distance Between Measured and Transformed (rad)")
     if plot_dir is None:
         plt.show()
     else:
         os.makedirs(plot_dir, exist_ok=True)
         plt.savefig(os.path.join(plot_dir, f"{froot}_dist.png"))
-        plt.cla()
+        plt.clf()
+
+    # tricontourf of residuals, subplots for xi, eta, gamma
+    fig, axs = plt.subplots(1, 3, figsize=(9, 3), sharey=True)
+    flat_diff = np.abs(diff.ravel())
+    max_diff = np.percentile(flat_diff[np.isfinite(flat_diff)], 99)
+    im = None
+    for i, name in enumerate(("xi", "eta", "gamma")):
+        isfinite = np.isfinite(diff[i])
+        axs[i].set_title(name)
+        axs[i].set_xlim(np.nanmin(nominal[0]), np.nanmax(nominal[0]))
+        axs[i].set_ylim(np.nanmin(nominal[1]), np.nanmax(nominal[1]))
+        axs[i].set_aspect("equal")
+        if np.sum(isfinite) == 0:
+            continue
+        im = axs[i].tricontourf(
+            transformed[0, isfinite],
+            transformed[1, isfinite],
+            diff[i, isfinite],
+            levels=20,
+            vmin=-1 * max_diff,
+            vmax=max_diff,
+        )
+    if im is not None:
+        fig.colorbar(im, ax=axs.ravel().tolist())
+    axs[0].set_ylabel("Eta (rad)")
+    axs[1].set_xlabel("Xi (rad)")
+    fig.suptitle("Residuals from Fit")
+    if plot_dir is None:
+        plt.show()
+    else:
+        os.makedirs(plot_dir, exist_ok=True)
+        plt.savefig(os.path.join(plot_dir, f"{froot}_res.png"), bbox_inches="tight")
+        plt.clf()
 
 
 def gamma_fit(src, dst):
@@ -183,75 +214,19 @@ def gamma_fit(src, dst):
     return res.x
 
 
-def _get_wafer(ufm):
-    # TODO: Switch to Matthew's code here
-    try:
-        wafer = MapMaker(north_is_highband=False, array_name=ufm, verbose=False)
-    except ValueError:
-        wafer = MapMaker(
-            north_is_highband=False,
-            array_name=ufm,
-            verbose=False,
-            use_solution_as_design=False,
-        )
-    det_x = []
-    det_y = []
-    polang = []
-    det_ids = []
-    template_bg = []
-    is_north = []
-    for det in wafer.grab_metadata():
-        if not det.is_optical:
-            continue
-        det_x.append(det.det_x)
-        det_y.append(det.det_y)
-        polang.append(det.angle_actual_deg)
-        det_ids.append(det.detector_id)
-        template_bg.append(det.bias_line)
-        is_north.append(det.is_north)
-    template_bg = np.array(template_bg)
-    msk = np.isin(template_bg, valid_bg)
-    det_ids = np.array(det_ids)[msk]
-    template_n = np.array(is_north)[msk]
-    template = np.column_stack(
-        (template_bg, np.array(det_x), np.array(det_y), np.array(polang))
-    )[msk]
-
-    return det_ids, template, template_n
-
-
-class NoPointing(ValueError):
-    pass
-
-
-def _get_pointing(wafer, pointing_cfg):
-    xi, eta, gamma = op.get_focal_plane(
-        None, x=wafer[:, 1], y=wafer[:, 2], pol=wafer[:, 3], **pointing_cfg
-    )
-    pointing = wafer.copy()
-    pointing[:, 1] = xi
-    pointing[:, 2] = eta
-    pointing[:, 3] = gamma
-
-    return pointing
-
-
 def _load_template(template_path, ufm):
     template_rset = read_dataset(template_path, ufm)
-    bg = np.array(template_rset["bg"], dtype=int)
-    msk = np.isin(bg, valid_bg)
-    det_ids = template_rset["dets:det_id"][msk]
+    det_ids = template_rset["dets:det_id"]
     template = np.column_stack(
         (
-            bg.astype(float),
             np.array(template_rset["xi"]),
             np.array(template_rset["eta"]),
             np.array(template_rset["gamma"]),
         )
-    )[msk]
-    template_n = template_rset["is_north"][msk]
+    )
+    template_optical = template_rset["is_optical"]
 
-    return det_ids, template, template_n
+    return np.array(det_ids), template, np.array(template_optical)
 
 
 def _load_ctx(config):
@@ -295,17 +270,26 @@ def _load_ctx(config):
         if tod_pointing_name in aman:
             _aman = aman.copy()
             _aman.move(tod_pointing_name, "pointing")
-            aman.append(_aman)
+            amans.append(_aman)
             have_pol.append(pol)
         if map_pointing_name in aman:
             _aman = aman.copy()
             _aman.move(map_pointing_name, "pointing")
-            aman.append(_aman)
+            amans.append(_aman)
             have_pol.append(pol)
         elif tod_pointing_name not in aman:
             raise ValueError(f"No pointing found in {obs_id}")
 
-    return amans, obs_ids, have_pol, "pointing", pol_name
+    return (
+        amans,
+        obs_ids,
+        have_pol,
+        "pointing",
+        pol_name,
+        amans[0].obs_info.telescope_flavor,
+        amans[0].obs_info.tube_slot,
+        amans[0].det_info.wafer_slot[0],
+    )
 
 
 def _load_rset_single(config):
@@ -370,7 +354,32 @@ def _load_rset(config):
         amans[i] = aman
         have_pol[i] = pol
 
-    return amans, obs_ids, have_pol, "pointing", "polarization"
+    return (
+        amans,
+        obs_ids,
+        have_pol,
+        "pointing",
+        "polarization",
+        config["telescope_flavor"],
+        config["tube_slot"],
+        config["wafer_slot"],
+    )
+
+
+def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
+    config_dir = config.get("pipeline_config_dir", os.environ["PIPELINE_CONFIG_DIR"])
+    config_path = os.path.join(config_dir, "shared/focalplane/ufm_to_fp.yaml")
+    zemax_path = config.get("zemax_path", None)
+
+    pointing_cfg = {
+        "telescope": telescope_flavor,
+        "tube": tube_slot,
+        "slot": wafer_slot,
+        "config_path": config_path,
+        "zemax_path": zemax_path,
+        "return_fp": False,
+    }
+    return pointing_cfg
 
 
 def main():
@@ -386,11 +395,18 @@ def main():
 
     # Load data
     if "context" in config:
-        amans, obs_ids, have_pol, pointing_name, pol_name = _load_ctx(config)
+        amans, obs_ids, have_pol, pointing_name, pol_name, tel, ot, ws = _load_ctx(
+            config
+        )
     elif "resultsets" in config:
-        amans, obs_ids, have_pol, pointing_name, pol_name = _load_rset(config)
+        amans, obs_ids, have_pol, pointing_name, pol_name, tel, ot, ws = _load_rset(
+            config
+        )
     else:
         raise ValueError("No valid inputs provided")
+
+    # Generate pointing config
+    pointing_cfg = _mk_pointing_config(tel, ot, ws, config)
 
     # Build output path
     ufm = config["ufm"]
@@ -399,46 +415,56 @@ def main():
         append = "_" + config["append"]
     os.makedirs(config["outdir"], exist_ok=True)
     froot = f"{ufm}{append}"
-    outpath = os.path.join(config["outdir"], f"{froot}.h5")
+    subdir = config.get("subdir", None)
+    if subdir is None:
+        subdir = "combined"
+        if len(obs_ids) == 1:
+            subdir = obs_ids[0]
+    outpath = os.path.join(config["outdir"], subdir, f"{froot}.h5")
     outpath = os.path.abspath(outpath)
 
     # If a template is provided load it, otherwise generate one
-    (
-        template_det_ids,
-        template,
-    ) = [], np.empty(
-        (0, 0)
+    (template_det_ids, template, is_optical) = (
+        np.empty(0, dtype=str),
+        np.empty((0, 0)),
+        np.empty(0, dtype=bool),
     )  # Just to make pyright shut up
     gen_template = "template" not in config
     if not gen_template:
         template_path = config["template"]
         if os.path.exists(template_path):
-            template_det_ids, template, _ = _load_template(template_path, ufm)
+            template_det_ids, template, is_optical = _load_template(template_path, ufm)
         else:
             logger.error("Provided template doesn't exist, trying to generate one")
             gen_template = True
     elif gen_template:
         logger.info(f"Generating template for {ufm}")
-        if "pointing_cfg" not in config:
-            raise ValueError("Need pointing_cfg to generate template")
-        template_det_ids, template, _ = _get_wafer(ufm)
-        template = _get_pointing(template, config["pointing_cfg"])
+        if "wafer_info" not in config:
+            raise ValueError("Need wafer_info to generate template")
+        template_det_ids, template, is_optical = op.gen_template(
+            config["wafer_info"], config["ufm"], **pointing_cfg
+        )
     else:
         raise ValueError(
             "No template provided and unable to generate one for some reason"
         )
+    optical_det_ids = template_det_ids[is_optical]
 
-    xi = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
-    eta = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
-    gamma = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
+    xi = np.nan + np.zeros((len(template_det_ids), len(amans)))
+    eta = np.nan + np.zeros((len(template_det_ids), len(amans)))
+    gamma = np.nan + np.zeros((len(template_det_ids), len(amans)))
     tot_weight = np.zeros(len(template_det_ids))
     for i, (aman, obs_id, pol) in enumerate(zip(amans, obs_ids, have_pol)):
         logger.info("Working on %s", obs_id)
         if aman is None:
             raise ValueError("AxisManager doesn't exist?")
 
-        # Mapping to template
         det_ids = aman.det_info.det_id
+        # Restrict to optical dets
+        optical = np.isin(det_ids, optical_det_ids)
+        aman.restrict("dets", aman.dets.vals[optical])
+        det_ids = det_ids[optical]
+        # Mapping to template
         _, msk, template_msk = np.intersect1d(
             det_ids, template_det_ids, return_indices=True
         )
@@ -451,18 +477,21 @@ def main():
 
         # Do an initial alignment and get weights
         fp = np.vstack((_xi, _eta))
-        aff, sft = af.get_affine(fp, template[template_msk, 0:3].T)
+        aff, sft = af.get_affine(fp, template[template_msk, :2].T)
         aligned = aff @ fp + sft[..., None]
         if pol:
             _gamma = aman[pol_name].polang[msk][mapping]
-            gscale, gsft = gamma_fit(_gamma, template[template_msk, 3])
+            gscale, gsft = gamma_fit(_gamma, template[template_msk, 2])
             weights = af.gen_weights(
                 np.vstack((aligned, gscale * _gamma + gsft)),
-                template[template_msk, 1:].T,
+                template[template_msk].T,
             )
         else:
             _gamma = np.nan + np.zeros_like(_xi)
-            weights = af.gen_weights(aligned, template[template_msk, 1:3].T)
+            weights = af.gen_weights(aligned, template[template_msk, :2].T)
+
+        # ~2 sigma cut
+        weights[weights < 0.95] = 0
 
         # Store weighted values
         xi[template_msk, i] = _xi * weights
@@ -475,16 +504,14 @@ def main():
     measured, measured_gamma, weights = _avg_focalplane(xi, eta, gamma, tot_weight)
 
     # Compute the lever arm
-    lever_arm = np.array(
-        op.get_focal_plane(None, x=0, y=0, pol=0, **config["coord_transform"])
-    )
+    lever_arm = np.array(op.get_focal_plane(None, x=0, y=0, pol=0, **pointing_cfg))
 
     # Compute transformation between the two nominal and measured pointing
-    fp_transformed = template[:, 1:].copy()
+    fp_transformed = template.copy()
     have_gamma = np.sum(np.isfinite(measured_gamma).astype(int)) > 10
     if have_gamma:
-        gamma_scale, gamma_shift = gamma_fit(template[:, 3], measured_gamma)
-        fp_transformed[:, 2] = template[:, 3] * gamma_scale + gamma_shift
+        gamma_scale, gamma_shift = gamma_fit(template[:, 2], measured_gamma)
+        fp_transformed[:, 2] = template[:, 2] * gamma_scale + gamma_shift
     else:
         logger.warning(
             "No polarization data availible, gammas will be filled with the nominal values."
@@ -492,7 +519,7 @@ def main():
         gamma_scale = 1.0
         gamma_shift = 0.0
 
-    nominal = template[:, 1:3].T.copy()
+    nominal = template[:, :2].T.copy()
     # Do an initial alignment without weights
     affine_0, shift_0 = af.get_affine(nominal, measured)
     init_align = affine_0 @ nominal + shift_0[..., None]
@@ -507,14 +534,26 @@ def main():
     transformed = affine @ nominal + shift[..., None]
     fp_transformed[:, :2] = transformed.T
 
+    rms = np.sqrt(np.nanmean((measured - transformed) ** 2))
+    logger.info("RMS after transformation is %f", rms)
+
     shift = (*shift, gamma_shift)
     scale = (*scale, gamma_scale)
     xieta = (shift, scale, shear, rot)
     _log_vals(shift, scale, shear, rot, ("xi", "eta", "gamma"))
 
-    plot = config.get("plot", False)
-    if plot:
-        _mk_plot(config.get("plot_dir", None), froot, nominal, measured, transformed)
+    if config.get("plot", False):
+        plot_dir = config.get("plot_dir", None)
+        if plot_dir is not None:
+            plot_dir = os.path.join(plot_dir, subdir)
+            plot_dir = os.path.abspath(plot_dir)
+        _mk_plot(
+            plot_dir,
+            froot,
+            nominal,
+            np.vstack((measured, measured_gamma)),
+            fp_transformed.T,
+        )
 
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)

@@ -10,6 +10,7 @@ import numpy as np
 from scipy.interpolate import interp1d, bisplrep, bisplev
 from scipy.spatial.transform import Rotation as R
 from sotodlib import core
+from sotodlib.io.metadata import read_dataset
 from so3g.proj import quat
 import yaml
 
@@ -152,16 +153,16 @@ def load_ufm_to_fp_config(config_path):
 
 
 @lru_cache(maxsize=None)
-def get_ufm_to_fp_pars(telescope, slot, config_path):
+def get_ufm_to_fp_pars(telescope_flavor, wafer_slot, config_path):
     """
     Get (and cache) the parameters to transform from UFM to focal plane coordinates
     for a specific slot of a given telescope's focal plane.
 
     Arguments:
 
-        telescope: The telescope, should be LAT or SAT.
+        telescope_flavor: The telescope, should be LAT or SAT.
 
-        slot: The UFM slot to get parameters for.
+        wafer_slot: The wafer slot to get parameters for.
 
         config_path: Path to the yaml with the parameters.
 
@@ -170,7 +171,7 @@ def get_ufm_to_fp_pars(telescope, slot, config_path):
         transform_pars: Dict of transformation parameters that can be passed to ufm_to_fp.
     """
     config = load_ufm_to_fp_config(config_path)
-    return config[telescope][slot]
+    return config[telescope_flavor][wafer_slot]
 
 
 def ufm_to_fp(aman, x=None, y=None, pol=None, theta=0, dx=0, dy=0):
@@ -339,7 +340,7 @@ def LAT_optics(zemax_path):
 
 
 @lru_cache(maxsize=None)
-def LATR_optics(zemax_path, tube):
+def LATR_optics(zemax_path, tube_slot):
     """
     Compute mapping from LAT secondary to sky.
 
@@ -347,7 +348,7 @@ def LATR_optics(zemax_path, tube):
 
         zemax_path: Path to LATR optics data from zemax.
 
-        tube: Either the tube name as a string or the tube number as an int.
+        tube_slot: Either the tube name as a string or the tube number as an int.
 
     Returns:
 
@@ -362,20 +363,22 @@ def LATR_optics(zemax_path, tube):
         logger.error("LATR key missing from dictionary")
         raise e
 
-    if isinstance(tube, str):
-        tube_name = tube
+    if isinstance(tube_slot, str):
+        tube_name = tube_slot
         try:
-            tube_num = LAT_TUBES[tube]
+            tube_num = LAT_TUBES[tube_slot]
         except Exception as e:
             logger.error("Invalid tube name")
             raise e
-    elif isinstance(tube, int):
-        tube_num = tube
+    elif isinstance(tube_slot, int):
+        tube_num = tube_slot
         try:
             tube_name = list(LAT_TUBES.keys())[tube_num]
         except Exception as e:
             logger.error("Invalid tube number")
             raise e
+    else:
+        raise ValueError("Invalid tube_slot")
 
     logger.info("Working on LAT tube " + tube_name)
     gi = np.where(LATR[tube_num]["mask"] != 0)
@@ -393,7 +396,7 @@ def LATR_optics(zemax_path, tube):
     return array2secx, array2secy
 
 
-def LAT_focal_plane(aman, zemax_path, x=None, y=None, pol=None, rot=0, tube="c"):
+def LAT_focal_plane(aman, zemax_path, x=None, y=None, pol=None, roll=0, tube_slot="c1"):
     """
     Compute focal plane for a wafer in the LAT.
 
@@ -410,9 +413,9 @@ def LAT_focal_plane(aman, zemax_path, x=None, y=None, pol=None, rot=0, tube="c")
 
         pol: Detector polarization angle, if provided will override positions loaded from aman.
 
-        rot: Rotation about the line of site = elev - 60 - corotator.
+        roll: Rotation about the line of site = elev - 60 - corotator.
 
-        tube: Either the tube name as a string or the tube number as an int.
+        tube_slot: Either the tube name as a string or the tube number as an int.
 
     Returns:
 
@@ -433,13 +436,13 @@ def LAT_focal_plane(aman, zemax_path, x=None, y=None, pol=None, rot=0, tube="c")
         pol = aman.focal_plane.pol_fp
 
     sec2elev, sec2xel = LAT_optics(zemax_path)
-    array2secx, array2secy = LATR_optics(zemax_path, tube)
+    array2secx, array2secy = LATR_optics(zemax_path, tube_slot)
 
-    xi, eta = LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot)
+    xi, eta = LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, roll)
 
     pol_x, pol_y = gen_pol_endpoints(x, y, pol)
     pol_xi, pol_eta = LAT_pix2sky(
-        pol_x, pol_y, sec2elev, sec2xel, array2secx, array2secy, rot
+        pol_x, pol_y, sec2elev, sec2xel, array2secx, array2secy, roll
     )
     gamma = get_gamma(pol_xi, pol_eta)
 
@@ -474,7 +477,7 @@ def sat_to_sky(x, theta):
     return interp1d(x, theta, fill_value="extrapolate")
 
 
-def SAT_focal_plane(aman, x=None, y=None, pol=None, rot=0, mapping_data=None):
+def SAT_focal_plane(aman, x=None, y=None, pol=None, roll=0, mapping_data=None):
     """
     Compute focal plane for a wafer in the SAT.
 
@@ -489,7 +492,7 @@ def SAT_focal_plane(aman, x=None, y=None, pol=None, rot=0, mapping_data=None):
 
         pol: Detector polarization angle, if provided will override positions loaded from aman.
 
-        rot: Rotation about the line of site =  -boresight.
+        roll: Rotation about the line of site = -1*boresight.
 
         mapping_data: Tuple of (x, theta) that can be interpolated to map the focal plane to the sky.
                       Leave as None to use the default mapping.
@@ -530,8 +533,8 @@ def SAT_focal_plane(aman, x=None, y=None, pol=None, rot=0, mapping_data=None):
     _xi, _eta, _ = quat.decompose_xieta(
         quat.euler(1, np.deg2rad(90)) * quat.rotation_lonlat(minus_lon, lat)
     )
-    xi = _xi * np.cos(np.deg2rad(rot)) - _eta * np.sin(np.deg2rad(rot))
-    eta = _eta * np.cos(np.deg2rad(rot)) + _xi * np.sin(np.deg2rad(rot))
+    xi = _xi * np.cos(np.deg2rad(roll)) - _eta * np.sin(np.deg2rad(roll))
+    eta = _eta * np.cos(np.deg2rad(roll)) + _xi * np.sin(np.deg2rad(roll))
 
     pol_x, pol_y = gen_pol_endpoints(x, y, pol)
     pol_minus_lon = np.sign(pol_x) * fp_to_sky(np.abs(pol_x))
@@ -539,8 +542,8 @@ def SAT_focal_plane(aman, x=None, y=None, pol=None, rot=0, mapping_data=None):
     _xi, _eta, _ = quat.decompose_xieta(
         quat.euler(1, np.deg2rad(90)) * quat.rotation_lonlat(pol_minus_lon, pol_lat)
     )
-    pol_xi = _xi * np.cos(np.deg2rad(rot)) - _eta * np.sin(np.deg2rad(rot))
-    pol_eta = _eta * np.cos(np.deg2rad(rot)) + _xi * np.sin(np.deg2rad(rot))
+    pol_xi = _xi * np.cos(np.deg2rad(roll)) - _eta * np.sin(np.deg2rad(roll))
+    pol_eta = _eta * np.cos(np.deg2rad(roll)) + _xi * np.sin(np.deg2rad(roll))
     gamma = get_gamma(pol_xi, pol_eta)
 
     if aman is not None:
@@ -561,10 +564,10 @@ def get_focal_plane(
     x=None,
     y=None,
     pol=None,
-    rot=0,
-    telescope="LAT",
-    tube="c1",
-    slot="ws0",
+    roll=0,
+    telescope_flavor=None,
+    tube_slot=None,
+    wafer_slot="ws0",
     config_path=None,
     zemax_path=None,
     mapping_data=None,
@@ -584,16 +587,19 @@ def get_focal_plane(
 
         pol: Detector polarization angle, if provided will override positions loaded from aman.
 
-        rot: Rotation about the line of sight.
-             For the LAT this is elev - 60 - corotator.
-             For the SAT this is -1*boresight.
+        roll: Rotation about the line of sight.
+              For the LAT this is elev - 60 - corotator.
+              For the SAT this is -1*boresight.
 
-        telescope: What the telescope flavor is ('LAT' or 'SAT')
+        telescope_flavor: What the telescope flavor is ('LAT' or 'SAT').
+                          Note that this is case insenstive.
+                          If None and aman contains obs_info, will be extracted from there.
 
-        tube: Which optics tube of the telescope to use.
-              Only used by the LAT.
+        tube_slot: Which optics tube of the telescope to use.
+                   Only used by the LAT.
+                   If None and aman contains obs_info, will be extracted from there.
 
-        slot: Which wafer slot to use.
+        wafer_slot: Which wafer slot to use.
 
         config_path: Path to the ufm_to_fp config file.
 
@@ -626,22 +632,71 @@ def get_focal_plane(
         pol_fp: Pol angle on focal plane.
                 Only returned if return_fp is True.
     """
-    if telescope not in ["LAT", "SAT"]:
+    if aman is not None and "obs_info" in aman:
+        if telescope_flavor is None:
+            telescope_flavor = aman.obs_info.telescope_flavor
+        if tube_slot is None:
+            tube_slot = aman.obs_info.tube_slot
+    if telescope_flavor is None or tube_slot is None:
+        raise ValueError("Telescope or tube is None and unable to extract from aman")
+    telescope_flavor = telescope_flavor.upper()
+    if telescope_flavor not in ["LAT", "SAT"]:
         raise ValueError("Telescope should be LAT or SAT")
 
-    ufm_to_fp_pars = get_ufm_to_fp_pars(telescope, slot, config_path)
+    ufm_to_fp_pars = get_ufm_to_fp_pars(telescope_flavor, wafer_slot, config_path)
     x_fp, y_fp, pol_fp = ufm_to_fp(aman, x=x, y=y, pol=pol, **ufm_to_fp_pars)
-    if telescope == "LAT":
+    if telescope_flavor == "LAT":
         if zemax_path is None:
             raise ValueError("Must provide zemax_path for LAT")
         xi, eta, gamma = LAT_focal_plane(
-            aman, zemax_path, x=x_fp, y=y_fp, pol=pol_fp, rot=rot, tube=tube
+            aman, zemax_path, x=x_fp, y=y_fp, pol=pol_fp, roll=roll, tube_slot=tube_slot
         )
     else:
         xi, eta, gamma = SAT_focal_plane(
-            aman, x=x_fp, y=y_fp, pol=pol_fp, rot=rot, mapping_data=mapping_data
+            aman, x=x_fp, y=y_fp, pol=pol_fp, roll=roll, mapping_data=mapping_data
         )
 
     if return_fp:
         return xi, eta, gamma, x_fp, y_fp, pol_fp
     return xi, eta, gamma
+
+
+def gen_template(wafer_info, ufm, **pointing_cfg):
+    """
+    Generate a pointing template from a wafer info ResultSet.
+
+    Arguments:
+
+        wafer_info: Either the path to a wafer_info ResultSet
+                    or an open h5py File object.
+
+        ufm: The UFM to generate the template for (ie: Mv5).
+
+        **pointing_cfg: Arguments to pass to get_focal_plane,
+                        should be arguments from rot onwards.
+
+    Returns:
+
+        template_det_ids: The detector ids of the detectors in the template.
+
+        template: (ndet, 3) array of (xi, eta, gamma) for all dets in template.
+
+        is_optical: (ndet) mask that is True for all optical dets.
+    """
+    wafer = read_dataset(wafer_info, ufm)
+    template_det_ids = wafer["dets:det_id"]
+    det_x = wafer["dets:wafer.x"]
+    det_y = wafer["dets:wafer.y"]
+    det_pol = wafer["dets:wafer.angle"]
+    det_type = wafer["dets:wafer.type"]
+    is_optical = det_type == "OPTC"
+
+    xi, eta, gamma = get_focal_plane(
+        None, x=det_x, y=det_y, pol=det_pol, **pointing_cfg
+    )
+    template = np.column_stack((xi, eta, gamma))
+
+    # Dark dets should not be allowed to have pointing
+    template[~is_optical] = np.nan
+
+    return template_det_ids, template, is_optical

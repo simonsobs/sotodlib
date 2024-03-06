@@ -189,12 +189,13 @@ def estimate_var(src, dst):
 
         var: (ndim,) array of variances.
     """
-    ndim, nsrcpoints = src.shape
-    _, ndstpoints = dst.shape
+    msk = np.isfinite(src).all(axis=0) * np.isfinite(dst).all(axis=0)
+    norm = np.sum(msk) ** 2
+    ndim, _ = src.shape
     var = np.zeros(ndim)
     for d in range(ndim):
-        sq_diff = dist.cdist(src[d], dst[d], metric="sqeuclidean")
-        var[d] = np.sum(sq_diff) / (nsrcpoints * ndstpoints)
+        sq_diff = dist.cdist(src[d, msk, None], dst[d, msk, None], metric="sqeuclidean")
+        var[d] = np.sum(sq_diff) / (norm)
 
     return var
 
@@ -223,6 +224,6 @@ def gen_weights(src, dst, var=None):
         var = estimate_var(src, dst)
 
     # Compute nd gaussian for each pair
-    weights = np.prod(np.exp(-0.5 * (src - dst) / var), axis=1)
+    weights = np.prod(np.exp(-0.5 * (src - dst) ** 2 / var[..., None]), axis=0)
 
     return weights
