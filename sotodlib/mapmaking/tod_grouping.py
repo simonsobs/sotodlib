@@ -114,7 +114,7 @@ def build_period_obslists(obs_info, periods, context, nset=None):
         #print("These are my wafers ", wafer_list)
         #wafer_list = ['ws0','ws1','ws2','ws3','ws4','ws5','ws6']
         band_list = ['f090', 'f150']
-        for detset in wafer_list[0:nset]:
+        for detset in wafer_list[:nset]:
             for band in band_list:
                 key = (pids[i], detset, band)
                 if key not in obslists: obslists[key] = []
