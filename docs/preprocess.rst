@@ -14,7 +14,8 @@ and the ``Pipeline`` object. The ``_Preprocess`` modules each define how a TOD
 operation is run on an AxisManager TOD and the ``Pipeline`` object is used to
 define the order of the operations and then run them. The
 ``site-pipeline.preprocess_tod`` script is used to run and save Pipelines on
-lists of obserations.
+lists of obserations, grouped by detset. The ``site-pipeline.preprocess_obs``
+script is used for observation-level preprocessing.
 
 
 
@@ -50,7 +51,13 @@ configuration files and specific manifest databases.
 
 .. autofunction:: sotodlib.site_pipeline.preprocess_tod.load_preprocess_tod
 
-Example Pipeline Configuration File
+.. autofunction:: sotodlib.site_pipeline.preprocess_obs.preprocess_obs
+
+.. autofunction:: sotodlib.site_pipeline.preprocess_obs.load_preprocess_det_select
+
+.. autofunction:: sotodlib.site_pipeline.preprocess_obs.load_preprocess_obs
+
+Example TOD Pipeline Configuration File
 -----------------------------------
 
 Suppose we want to run a simple pipeline that runs the glitch calculator and
@@ -59,6 +66,9 @@ processing pipeline would look like::
 
     # Context for the data
     context_file: 'context.yaml'
+
+    # Plot directory prefix
+    plot_dir: './plots'
 
     # How to subdivide observations
     subobs:
@@ -125,7 +135,43 @@ This pipeline can be run through the functions saved in ``site_pipeline``. Each
 entry in "process_pipe" key will be used to generate a Preprocess module based
 on the name it is registered to. These entries will then be run in order through
 the processing pipe. The ``process`` function is always run before the
-``calc_and_save`` function for each module.
+``calc_and_save`` function for each module. The ``plot`` function can be run after
+``calc_and_save`` when ``plot: True`` for a module that supports it. Current modules
+with plotting: ``DetBiasFlags``, ``EstimateHWPSS``, ``SSOFootprint``.
+
+Example TOD Pipeline Configuration File
+-----------------------------------
+
+Suppose we want to run an observation-level pipeline that creates a SSO footprint.
+A configuration file for the processing pipeline would look like::
+
+    # Context for the data
+    context_file: 'context.yaml'
+
+    # Plot directory prefix
+    plot_dir: './plots'
+
+    # Metadata index & archive filenaming
+    archive:
+        index: 'preprocess_archive.sqlite'
+        policy:
+            type: 'simple'
+            filename: 'preprocess_archive.h5'
+
+    process_pipe:
+        - name: "sso_footprint"
+          calc:
+            distance: 20
+            nstep: 100
+          save: True
+          plot:
+            wafer_offsets: {'ws0': [-2.5, -0.5],
+                            'ws1': [-2.5, -13],
+                            'ws2': [-13, -7],
+                            'ws3': [-13, 5],
+                            'ws4': [-2.5, 11.5],
+                            'ws5': [8.5, 5],
+                            'ws6': [8.5, -7]}
 
 Processing Modules
 ------------------
@@ -156,3 +202,6 @@ HWP Related
 .. autoclass:: sotodlib.preprocess.processes.SubtractHWPSS
 .. autoclass:: sotodlib.preprocess.processes.Demodulate
 
+Obs Operations
+::::::::::::::
+.. autoclass:: sotodlib.preprocess.processes.SSOFootprint
