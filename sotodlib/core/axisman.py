@@ -514,14 +514,14 @@ class AxisManager:
                     if np.any([np.isscalar(i[k]) for i in items]):
                         if not np.all([np.isscalar(i[k]) for i in items]):
                             raise ValueError(err_msg)
-                        if not np.all( [i[k]==items[0][k] for i in items]):
+                        if not np.all([np.array_equal(i[k], items[0][k], equal_nan=True) for i in items]):
                             raise ValueError(err_msg)
                         output.wrap(k, items[0][k], axis_map)
                         continue
                         
                     elif not np.all([i[k].shape==items[0][k].shape for i in items]):
                         raise ValueError(err_msg)
-                    elif not np.all([i[k]==items[0][k] for i in items]):
+                    elif not np.all([np.array_equal(i[k], items[0][k], equal_nan=True) for i in items]):
                         raise ValueError(err_msg)
                         
                     output.wrap(k, items[0][k].copy(), axis_map)
