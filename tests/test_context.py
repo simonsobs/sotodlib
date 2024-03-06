@@ -312,6 +312,29 @@ class ContextTest(unittest.TestCase):
             item = metadata.loader.load_metadata(tod, spec, unpack=True)
             assert(item is not None)
 
+    def test_300_clean_concat(self):
+        """Test we can dodge concat failures."""
+        dataset_sim = DatasetSim()
+        obs_id = dataset_sim.obss['obs_id'][1]
+
+        ctx = dataset_sim.get_context(with_inconcatable=True)
+        m_entry = ctx['metadata'][0]
+        orig_unpack = m_entry['unpack']
+
+        # The discrepant fields should cause this to fail.
+        with self.assertRaises(ValueError):
+            tod = ctx.get_meta(obs_id)
+
+        m_entry['drop_fields'] = ['discrepant_s', 'discrepant_v']
+        tod = ctx.get_meta(obs_id)
+
+        m_entry['drop_fields'] = ['discrepant_*']
+        tod = ctx.get_meta(obs_id)
+
+        m_entry['drop_fields'] = 'discrepant_*'
+        tod = ctx.get_meta(obs_id)
+
+
 class DatasetSim:
     """Provide in-RAM Context objects and tod/metadata loader functions
     for Context behavior testing.
@@ -350,7 +373,9 @@ class DatasetSim:
     def get_context(self, with_detdb=True, with_metadata=True,
                     with_bad_metadata=False, with_incomplete_det_info=False,
                     with_dependent_metadata=False,
-                    with_incomplete_metadata=False, on_missing='trim'):
+                    with_incomplete_metadata=False,
+                    with_inconcatable=False,
+                    on_missing='trim'):
         """Args:
           with_detdb: if False, no detdb is included.
           with_metadata: if False, no metadata are included.
@@ -545,6 +570,25 @@ class DatasetSim:
                 'label': 'othercal',
             })
 
+        if with_inconcatable:
+            _scheme = metadata.ManifestScheme() \
+                      .add_exact_match('obs:obs_id') \
+                      .add_exact_match('dets:detset') \
+                      .add_data_field('loader')
+            inconcat_db = metadata.ManifestDb(scheme=_scheme)
+            for detset in ['neard', 'fard']:
+                inconcat_db.add_entry(
+                    {'obs:obs_id': 'obs_number_12',
+                     'dets:detset': detset,
+                     'loader': 'unittest_loader'},
+                     'inconcat_metadata.h5'
+                )
+            ctx['metadata'].insert(0, {
+                'db': inconcat_db,
+                'unpack': ['inconcat&per_det'],
+                'label': 'inconcat',
+            })
+
         return ctx
 
 
@@ -669,6 +713,24 @@ class DatasetSim:
                                'dets:readout_id': row['readout_id'],
                                'othercal':40})
             return rs
+
+        elif filename == 'inconcat_metadata.h5':
+            ds = self.dets.subset(rows=self.dets['detset'] == kw['dets:detset'])
+            output = core.AxisManager(
+                core.LabelAxis('dets', ds['readout_id']),
+                core.OffsetAxis('samps', self.sample_count))
+            # These are ok ...
+            output.wrap_new('per_det', ('dets',), dtype=int)[:] = \
+                np.arange(len(ds))
+            output.wrap_new('duplicated', (100,))[:] = 100.
+            # But put a nan in there ...
+            output['duplicated'][10] = np.nan
+            output.wrap('same_nan', np.nan)
+            # And these are not concatenable ...
+            discrepancy = int(kw['dets:detset'] == 'neard')
+            output.wrap('discrepant_s', discrepancy)
+            output.wrap_new('discrepant_v', (100,))[:] = discrepancy
+            return output
 
         raise ValueError(f'metadata request for "{filename}"')
 

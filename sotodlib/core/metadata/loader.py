@@ -1,6 +1,7 @@
 from sotodlib import core
 
 import collections
+import fnmatch
 import logging
 import os
 import numpy as np
@@ -273,6 +274,12 @@ class SuperLoader:
                 mi2.merge(a)
 
             elif isinstance(mi1, core.AxisManager):
+                # For AxisManager, allow user to drop some items before proceeding.
+                for pattern in spec.drop_fields:
+                    to_drop = fnmatch.filter(mi1._fields.keys(), pattern)
+                    for k in to_drop:
+                        mi1.move(k, None)
+
                 # For AxisManager results, the dets axis *must*
                 # reconcile 1-to-1 with some field in det_info, and
                 # that may be used to toss things out based on
@@ -821,6 +828,11 @@ class MetadataSpec:
         Instructions for how to populate the destination AxisManager
         with fields found in this metadata item.  See notes below.
 
+    ``drop_fields`` (list of str)
+        List of fields (which may contain wildcard character ``*``) to
+        drop prior to merging.  Only processed for AxisManager
+        metadata.
+
     The following dict keys are deprecated, but are processed for
     backwards compatibility.
 
@@ -859,12 +871,13 @@ class MetadataSpec:
     loader = None
     on_missing = 'trim'
     unpack = None
+    drop_fields = []
 
     @classmethod
     def from_dict(cls, spec):
         self = cls()
         # canonical ...
-        for k in ['db', 'label', 'unpack', 'det_info', 'loader', 'on_missing']:
+        for k in ['db', 'label', 'unpack', 'det_info', 'loader', 'on_missing', 'drop_fields']:
             if k in spec:
                 setattr(self, k, spec[k])
         # "name" used to be unpacking instructions.
@@ -887,6 +900,12 @@ class MetadataSpec:
             self.unpack = ['&']
         elif isinstance(self.unpack, str):
             self.unpack = [self.unpack]
+        # Make sure drop_fields is a list.
+        if self.drop_fields is None:
+            self.drop_fields = []
+        elif isinstance(self.drop_fields, str):
+            self.drop_fields = [self.drop_fields]
+
         return self
 
 
