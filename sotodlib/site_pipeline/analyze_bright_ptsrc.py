@@ -10,16 +10,19 @@ from sotodlib.io.metadata import write_dataset, read_dataset
 from sotodlib.tod_ops.filters import high_pass_sine2, low_pass_sine2, fourier_filter
 
 from astropy import units as u
+from copy import deepcopy
 import numpy as np
 import scipy.signal
 import time
 import ephem
 import os
-from scipy.optimize import curve_fit
+from tqdm.auto import tqdm
+from scipy.optimize import curve_fit, minimize
 from datetime import datetime
 import argparse as ap
 import yaml
 from sotodlib.site_pipeline import util
+from dataclasses import dataclass
 import matplotlib
 matplotlib.use('agg')
 
@@ -505,6 +508,180 @@ def plot_tods(readout_id, xi_main, eta_main, data_main, data_sim_main,
                     kwargs['obs_id'] +
                     '.png'), bbox_inches='tight')
     plt.close()
+
+
+@dataclass
+class QuickFitResult:
+    """
+    results for pointing_quickfit function
+
+    Args
+    ----
+    xi: float
+        fitted detector xi relative to boresight center
+    eta: float
+        fitted detector eta relative to boresight center
+    amp: float
+        Amplitude used in the fit
+    fwhm: float
+        gaussian FHWM used in the fit.
+    fit_aman: AxisManager
+        AxisManager containing xi and eta of source relative to boresight center,
+        fitted signal, and model.
+    """
+    xi: float
+    eta: float
+    amp: float
+    fwhm: float
+    fit_aman: core.AxisManager
+
+def pointing_quickfit(
+        am_full, chan_idx, downsample_factor=20, bandpass_range=(0.01, 1.8),
+        fwhm=np.deg2rad(0.5), max_rad=None
+    ):
+    """
+    Fits pointing for a bright source such as the moon for a single detector.
+
+    Args
+    -----
+    am_full: AxisManager
+        AxisManager containing unfiltered detector signal. This won't be modified.
+    chan_idx: int
+        Channel index in the axis manager to fit
+    downsample_factor: int
+        If set, the signal and model will be downsampled by this factor when fitting.
+    bandpass_range: tuple[float, float]
+        Low and high cutoff frequencies for bandpass. If either are None, will not apply
+        the corresponding highpass/lowpass.
+    fwhm: float
+        Full width half max of the beam to use for the model. This should be roughly the beam
+        size of the telescope.
+    max_rad: float
+        Only data where the angular distance between the src and the estimated det location
+        is less than ``max_rad`` will be used in the fit. If None, will use 5 *
+        fwhm.
+
+    Returns
+    --------
+        result: QuickFitResult
+            Result object containing fitted xi and eta, along with amp and fwhm
+            used in the fit.
+    """
+
+    if max_rad is None:
+        max_rad = 5 * fwhm
+
+    am = am_full.restrict('dets', [am_full.dets.vals[chan_idx]], in_place=False)
+
+    def filter_tod(am, signal_name='signal'):
+        filt_kw = dict(
+            detrend='linear', resize='zero_pad', axis_name='samps',
+            signal_name=signal_name, time_name='timestamps'
+        )
+        if bandpass_range[0] is not None:
+            highpass = high_pass_sine2(cutoff=bandpass_range[0])
+            am[signal_name] = fourier_filter(am, highpass, **filt_kw)
+        if bandpass_range[1] is not None:
+            lowpass = low_pass_sine2(cutoff=bandpass_range[1])
+            am[signal_name] = fourier_filter(am, lowpass, **filt_kw)
+        return am
+
+    filter_tod(am)
+    sl = slice(None, None, downsample_factor)
+
+    ts = am.timestamps[sl]
+    az = am.boresight.az[sl]
+    el = am.boresight.el[sl]
+    sig = am.signal[0, sl]
+
+    xieta_src_rel_fp, xieta_det_rel_fp_est = get_xieta_src_centered(ts, az, el, sig, 'moon', 5)
+    xieta_src_rel_det = xieta_src_rel_fp - xieta_det_rel_fp_est[:, None]
+
+    m = np.sqrt(xieta_src_rel_det[0] ** 2 + xieta_src_rel_det[1] ** 2) < max_rad
+    amp = np.ptp(sig[m]) * 3
+
+    model_tod = gaussian2d(
+        xieta_src_rel_det[0, m], xieta_src_rel_det[1, m], amp, 0, 0, fwhm, fwhm, 0
+    )
+    fit_am = core.AxisManager().wrap('timestamps', ts[m], [(0, core.IndexAxis('samps'))])
+    fit_am.wrap('signal', np.array([sig[m]]), [(0, deepcopy(am.dets)), (1, 'samps')])
+    fit_am.wrap('model', np.array([model_tod]), [(0, 'dets'), (1, 'samps')])
+
+    def fit_func(xi0, eta0):
+        fit_am.model[0] = gaussian2d(
+            xieta_src_rel_det[0, m], xieta_src_rel_det[1, m], amp, xi0, eta0, fwhm, fwhm, 0
+        )
+        filter_tod(fit_am, signal_name='model')
+        return np.sum((fit_am.signal[0] - fit_am.model[0])**2)
+
+    res = minimize(lambda x: fit_func(*x), [0, 0])
+
+    xi_det_rel_fp = xieta_det_rel_fp_est[0] + res.x[0]
+    eta_det_rel_fp = xieta_det_rel_fp_est[1] + res.x[1]
+
+    fit_am.model[0] = gaussian2d(
+        xieta_src_rel_det[0, m], xieta_src_rel_det[1, m], amp, res.x[0], res.x[1], fwhm, fwhm, 0
+    )
+    fit_am.wrap('xi', xieta_src_rel_fp[0, m])
+    fit_am.wrap('eta', xieta_src_rel_fp[1, m])
+
+    result = QuickFitResult(
+        xi=xi_det_rel_fp,
+        eta=eta_det_rel_fp,
+        amp=amp,
+        fwhm=fwhm,
+        fit_aman=fit_am
+    )
+    return result
+
+def plot_quickfit_res(result: QuickFitResult, eta_scale=50):
+    """
+    Makes cool pseudo-3d source plot
+    """
+    fig, ax = plt.subplots()
+    fit = result.fit_aman
+    ax.plot(fit.xi, fit.signal[0] + fit.eta* eta_scale, label='Signal')
+    ax.plot(fit.xi, fit.model[0] + fit.eta * eta_scale, label='Model', alpha=0.8)
+    ax.legend()
+    ax.set_xlabel("Xi (rad, relative to boresight)")
+    ax.set_ylabel("Amplitude + scale * eta")
+    return fig, ax
+
+
+def quickfit_and_save_pointing(output_path, am, chan_idxs, show_pb=False, h5_address='fit_results'):
+    """
+    Run pointing_quickfit for a list of dets and save results to a ResultSet
+
+    Args
+    -----
+    output_path: str
+        Path to h5 file to save results
+    am: AxisManager
+        Axis manager with unfiltered TODs
+    chan_idxs: list
+        List of channel indexes of the axis manager to fit pointing
+    show_pb: bool
+        If True, enable tqdm progress bar
+    h5_address: str
+        Address in the h5 to save result set to.
+    """
+    dtype = [
+        ('readout_id', '<U40'),
+        ('xi', 'f8'),
+        ('eta', 'f8'),
+    ]
+    res_arr = np.array([], dtype=dtype)
+    rset= core.metadata.ResultSet.from_friend(res_arr)
+    for i in tqdm(chan_idxs, disable=(not show_pb)):
+        try:
+            result = pointing_quickfit(am, i)
+        except Exception:
+            continue
+        rset.append(
+            {'readout_id': am.det_info.readout_id[i], 'xi': result.xi, 'eta': result.eta}
+        )
+        write_dataset(rset, output_path, h5_address, overwrite=True)
+    return rset
 
 
 def main(
