@@ -280,7 +280,16 @@ def _load_ctx(config):
         elif tod_pointing_name not in aman:
             raise ValueError(f"No pointing found in {obs_id}")
 
-    return amans, obs_ids, have_pol, "pointing", pol_name
+    return (
+        amans,
+        obs_ids,
+        have_pol,
+        "pointing",
+        pol_name,
+        amans[0].obs_info.telescope_flavor,
+        amans[0].obs_info.tube_slot,
+        amans[0].det_info.wafer_slot[0],
+    )
 
 
 def _load_rset_single(config):
@@ -345,7 +354,30 @@ def _load_rset(config):
         amans[i] = aman
         have_pol[i] = pol
 
-    return amans, obs_ids, have_pol, "pointing", "polarization"
+    return (
+        amans,
+        obs_ids,
+        have_pol,
+        "pointing",
+        "polarization",
+        config["telescope_flavor"],
+        config["tube_slot"],
+        config["wafer_slot"],
+    )
+
+
+def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
+    config_dir = config.get("pipeline_config_dir", os.environ["PIPELINE_CONFIG_DIR"])
+    config_path = os.path.join(config_dir, "shared/focalplane/ufm_to_fp.yaml")
+
+    pointing_cfg = {
+        "telescope": telescope_flavor,
+        "tube": tube_slot,
+        "slot": wafer_slot,
+        "config_path": config_path,
+        "return_fp": False,
+    }
+    return pointing_cfg
 
 
 def main():
@@ -361,11 +393,18 @@ def main():
 
     # Load data
     if "context" in config:
-        amans, obs_ids, have_pol, pointing_name, pol_name = _load_ctx(config)
+        amans, obs_ids, have_pol, pointing_name, pol_name, tel, ot, ws = _load_ctx(
+            config
+        )
     elif "resultsets" in config:
-        amans, obs_ids, have_pol, pointing_name, pol_name = _load_rset(config)
+        amans, obs_ids, have_pol, pointing_name, pol_name, tel, ot, ws = _load_rset(
+            config
+        )
     else:
         raise ValueError("No valid inputs provided")
+
+    # Generate pointing config
+    pointing_cfg = _mk_pointing_config(tel, ot, ws, config)
 
     # Build output path
     ufm = config["ufm"]
@@ -374,7 +413,12 @@ def main():
         append = "_" + config["append"]
     os.makedirs(config["outdir"], exist_ok=True)
     froot = f"{ufm}{append}"
-    outpath = os.path.join(config["outdir"], f"{froot}.h5")
+    subdir = config.get("subdir", None)
+    if subdir is None:
+        subdir = "combined"
+        if len(obs_ids) == 1:
+            subdir = obs_ids[0]
+    outpath = os.path.join(config["outdir"], subdir, f"{froot}.h5")
     outpath = os.path.abspath(outpath)
 
     # If a template is provided load it, otherwise generate one
@@ -393,12 +437,10 @@ def main():
             gen_template = True
     elif gen_template:
         logger.info(f"Generating template for {ufm}")
-        if "pointing_cfg" not in config:
-            raise ValueError("Need pointing_cfg to generate template")
         if "wafer_info" not in config:
             raise ValueError("Need wafer_info to generate template")
         template_det_ids, template, is_optical = op.gen_template(
-            config["wafer_info"], config["ufm"], **config["pointing_cfg"]
+            config["wafer_info"], config["ufm"], **pointing_cfg
         )
     else:
         raise ValueError(
@@ -406,9 +448,9 @@ def main():
         )
     optical_det_ids = template_det_ids[is_optical]
 
-    xi = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
-    eta = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
-    gamma = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
+    xi = np.nan + np.zeros((len(template_det_ids), len(amans)))
+    eta = np.nan + np.zeros((len(template_det_ids), len(amans)))
+    gamma = np.nan + np.zeros((len(template_det_ids), len(amans)))
     tot_weight = np.zeros(len(template_det_ids))
     for i, (aman, obs_id, pol) in enumerate(zip(amans, obs_ids, have_pol)):
         logger.info("Working on %s", obs_id)
@@ -460,9 +502,7 @@ def main():
     measured, measured_gamma, weights = _avg_focalplane(xi, eta, gamma, tot_weight)
 
     # Compute the lever arm
-    lever_arm = np.array(
-        op.get_focal_plane(None, x=0, y=0, pol=0, **config["coord_transform"])
-    )
+    lever_arm = np.array(op.get_focal_plane(None, x=0, y=0, pol=0, **pointing_cfg))
 
     # Compute transformation between the two nominal and measured pointing
     fp_transformed = template.copy()
@@ -500,10 +540,13 @@ def main():
     xieta = (shift, scale, shear, rot)
     _log_vals(shift, scale, shear, rot, ("xi", "eta", "gamma"))
 
-    plot = config.get("plot", False)
-    if plot:
+    if config.get("plot", False):
+        plot_dir = config.get("plot_dir", None)
+        if plot_dir is not None:
+            plot_dir = os.path.join(plot_dir, subdir)
+            plot_dir = os.path.abspath(plot_dir)
         _mk_plot(
-            config.get("plot_dir", None),
+            plot_dir,
             froot,
             nominal,
             np.vstack((measured, measured_gamma)),
