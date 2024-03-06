@@ -144,7 +144,7 @@ def _mk_plot(plot_dir, froot, nominal, measured, transformed):
     diff = diff[:, np.isfinite(diff[0])]
     dist = np.linalg.norm(diff, axis=0)
     bins = int(len(dist) / 20)
-    plt.hist(dist, bins=bins)
+    plt.hist(dist[dist < np.percentile(dist, 97)], bins=bins)
     plt.xlabel("Distance Between Measured and Transformed (rad)")
     if plot_dir is None:
         plt.show()
@@ -239,8 +239,7 @@ def _get_pointing(wafer, pointing_cfg):
 def _load_template(template_path, ufm):
     template_rset = read_dataset(template_path, ufm)
     bg = np.array(template_rset["bg"], dtype=int)
-    msk = np.isin(bg, valid_bg)
-    det_ids = template_rset["dets:det_id"][msk]
+    det_ids = template_rset["dets:det_id"]
     template = np.column_stack(
         (
             bg.astype(float),
@@ -248,10 +247,10 @@ def _load_template(template_path, ufm):
             np.array(template_rset["eta"]),
             np.array(template_rset["gamma"]),
         )
-    )[msk]
-    template_n = template_rset["is_north"][msk]
+    )
+    template_optical = template_rset["is_optical"]
 
-    return det_ids, template, template_n
+    return det_ids, template, template_optical
 
 
 def _load_ctx(config):
@@ -295,12 +294,12 @@ def _load_ctx(config):
         if tod_pointing_name in aman:
             _aman = aman.copy()
             _aman.move(tod_pointing_name, "pointing")
-            aman.append(_aman)
+            amans.append(_aman)
             have_pol.append(pol)
         if map_pointing_name in aman:
             _aman = aman.copy()
             _aman.move(map_pointing_name, "pointing")
-            aman.append(_aman)
+            amans.append(_aman)
             have_pol.append(pol)
         elif tod_pointing_name not in aman:
             raise ValueError(f"No pointing found in {obs_id}")
@@ -413,7 +412,7 @@ def main():
     if not gen_template:
         template_path = config["template"]
         if os.path.exists(template_path):
-            template_det_ids, template, _ = _load_template(template_path, ufm)
+            template_det_ids, template, is_optical = _load_template(template_path, ufm)
         else:
             logger.error("Provided template doesn't exist, trying to generate one")
             gen_template = True
@@ -421,12 +420,14 @@ def main():
         logger.info(f"Generating template for {ufm}")
         if "pointing_cfg" not in config:
             raise ValueError("Need pointing_cfg to generate template")
-        template_det_ids, template, _ = _get_wafer(ufm)
+        # TODO: this is sorta broken and needs to be replaced
+        template_det_ids, template, is_optical = _get_wafer(ufm)
         template = _get_pointing(template, config["pointing_cfg"])
     else:
         raise ValueError(
             "No template provided and unable to generate one for some reason"
         )
+    optical_det_ids = template_det_ids[is_optical]
 
     xi = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
     eta = np.nan + np.zeros((len(template_det_ids), len(obs_ids)))
@@ -437,8 +438,12 @@ def main():
         if aman is None:
             raise ValueError("AxisManager doesn't exist?")
 
-        # Mapping to template
         det_ids = aman.det_info.det_id
+        # Restrict to optical dets
+        optical = np.isin(det_ids, optical_det_ids)
+        aman.restrict("dets", aman.dets.vals[optical])
+        det_ids = det_ids[optical]
+        # Mapping to template
         _, msk, template_msk = np.intersect1d(
             det_ids, template_det_ids, return_indices=True
         )
@@ -451,7 +456,7 @@ def main():
 
         # Do an initial alignment and get weights
         fp = np.vstack((_xi, _eta))
-        aff, sft = af.get_affine(fp, template[template_msk, 0:3].T)
+        aff, sft = af.get_affine(fp, template[template_msk, 1:3].T)
         aligned = aff @ fp + sft[..., None]
         if pol:
             _gamma = aman[pol_name].polang[msk][mapping]
@@ -463,6 +468,9 @@ def main():
         else:
             _gamma = np.nan + np.zeros_like(_xi)
             weights = af.gen_weights(aligned, template[template_msk, 1:3].T)
+
+        # ~2 sigma cut
+        weights[weights < 0.95] = 0
 
         # Store weighted values
         xi[template_msk, i] = _xi * weights
@@ -506,6 +514,9 @@ def main():
     rot = af.decompose_rotation(rot)[-1]
     transformed = affine @ nominal + shift[..., None]
     fp_transformed[:, :2] = transformed.T
+
+    rms = np.sqrt(np.nanmean((measured - transformed) ** 2))
+    logger.info("RMS after transformation is %f", rms)
 
     shift = (*shift, gamma_shift)
     scale = (*scale, gamma_scale)
