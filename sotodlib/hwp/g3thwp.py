@@ -956,7 +956,11 @@ class G3tHWP():
                 data = self.load_data(start, end)
 
             if 'pid_direction' in data.keys():
-                aman['pid_direction'] = np.nanmedian(data['pid_direction'][1])*2 - 1
+                pid_direction = np.nanmedian(data['pid_direction'][1])*2 - 1
+                if pid_direction in [1, -1]:
+                    aman['pid_direction'] = pid_direction
+                else:
+                    aman['pid_direction'] = 0
 
             logger.info('Saving raw encoder data')
             self._set_raw_axes(aman, data)
