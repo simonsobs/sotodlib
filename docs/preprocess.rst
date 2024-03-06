@@ -58,7 +58,7 @@ configuration files and specific manifest databases.
 .. autofunction:: sotodlib.site_pipeline.preprocess_obs.load_preprocess_obs
 
 Example TOD Pipeline Configuration File
------------------------------------
+---------------------------------------
 
 Suppose we want to run a simple pipeline that runs the glitch calculator and
 estimates the white noise levels of the data. A configuration file for the
@@ -140,7 +140,7 @@ the processing pipe. The ``process`` function is always run before the
 with plotting: ``DetBiasFlags``, ``EstimateHWPSS``, ``SSOFootprint``.
 
 Example TOD Pipeline Configuration File
------------------------------------
+---------------------------------------
 
 Suppose we want to run an observation-level pipeline that creates a SSO footprint.
 A configuration file for the processing pipeline would look like::
