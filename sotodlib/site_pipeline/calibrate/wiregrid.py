@@ -1,5 +1,3 @@
-#!/usr/bin/python3
-
 # import modules
 # python standard
 import os
@@ -168,7 +166,6 @@ def _detect_steps(aman, stopped_time=10, thresholds=None):
     for _i in range(len(step_start)):
         ang_av.append(np.average(aman.wg.enc_deg[step_start[_i]:step_stop[_i+1]]))
         ang_std.append(np.std(aman.wg.enc_deg[step_start[_i]:step_stop[_i+1]]))
-        pass
     ts_step_start = aman.timestamps[step_start]
     ts_step_stop = aman.timestamps[step_stop]
     ang_av = np.array(ang_av)
@@ -218,7 +215,6 @@ def wg_wrap_QU(aman, stopped_time, thresholds=None):
         step_U.append(np.average(aman.demodU, axis=1, weights=instep))
         step_Qerr.append(np.std(aman.demodQ[:, instep == True], axis=1))
         step_Uerr.append(np.std(aman.demodU[:, instep == True], axis=1))
-        pass
     ts_instep = np.array(ts_instep)
     step_Q = np.array(step_Q)
     step_U = np.array(step_U)
@@ -357,7 +353,6 @@ def wg_get_cfitres(aman):
             np.array([fit_results[-1].beta[0], fit_results[-1].beta[1], np.sqrt(fit_results[-1].beta[2])]))
         cfitcov.append(fit_results[-1].cov_beta)
         cfitresvar.append(fit_results[-1].res_var)
-        pass
     aman.wg.wrap('cfitval', np.array(cfitval), [(0, 'dets')])
     aman.wg.wrap('cfitcov', np.array(cfitcov), [(0, 'dets')])
     aman.wg.wrap('cfitresvar', np.array(cfitresvar), [(0, 'dets')])
@@ -392,16 +387,7 @@ def wg_get_lfitres(aman):
         lfitval.append([m.values[0], m.values[1]%360])
         lfiterr.append([m.errors[0], m.errors[1]])
         lfitchi2.append(m.fmin.reduced_chi2)
-        pass
     aman.wg.wrap('lfitval', np.array(lfitval), [(0, 'dets')])
     aman.wg.wrap('lfiterr', np.array(lfiterr), [(0, 'dets')])
     aman.wg.wrap('lfitchi2', np.array(lfitchi2), [(0, 'dets')])
     return aman
-
-def main():
-    print("This is the module for the calibration using the Sparse Wire Grid.\n \
-        Please excute from sotodlib.wiregrid.calibrate import get_det_angle ")
-    pass
-
-if __name__=='__main__':
-    main()
