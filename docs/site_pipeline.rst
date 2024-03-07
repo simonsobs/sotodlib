@@ -280,6 +280,7 @@ match. To disable this, you can run a config file like the following:
 Below is a more complex config used for SATp1 matching:
 
 .. code-block:: yaml
+
   results_path: /so/metadata/satp1/manifests/det_match/satp1_det_match_240220m
   context_path: /so/metadata/satp1/contexts/smurf_detcal.yaml
   show_pb: False
