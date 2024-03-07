@@ -1,17 +1,17 @@
-import os
 import argparse as ap
-import h5py
-import numpy as np
-from scipy.optimize import minimize
-import matplotlib.pyplot as plt
-import yaml
+import os
 
-from sotodlib.core import AxisManager, metadata, Context
+import h5py
+import matplotlib.pyplot as plt
+import numpy as np
+import yaml
+from scipy.cluster import vq
+from scipy.optimize import minimize
+from sotodlib.coords import affine as af
+from sotodlib.coords import optics as op
+from sotodlib.core import AxisManager, Context, metadata
 from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
-from sotodlib.coords import optics as op
-from sotodlib.coords import affine as af
-
 
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
 
@@ -307,15 +307,15 @@ def _load_rset_single(config):
         pol = True
 
     det_info = AxisManager(aman.dets)
-    if "detmap" in config["resultsets"]:
-        dm_rset = read_dataset(*config["resultsets"]["detmap"])
-        dm_aman = dm_rset.to_axismanager(axis_key="readout_id")
-        det_info.wrap("wafer", dm_aman)
-        det_info.wrap("readout_id", det_info.dets.vals, [(0, det_info.dets)])
-        det_info.wrap("det_id", det_info.wafer.det_id, [(0, det_info.dets)])
-        det_info.restrict("dets", det_info.dets.vals[det_info.det_id != ""])
-        aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != "NO_MATCH"])
+    dm_rset = read_dataset(*config["resultsets"]["detmap"])
+    dm_aman = dm_rset.to_axismanager(axis_key="readout_id")
+    det_info.wrap("wafer", dm_aman)
+    det_info.wrap("readout_id", det_info.dets.vals, [(0, det_info.dets)])
+    det_info.wrap("det_id", det_info.wafer.det_id, [(0, det_info.dets)])
+    det_info.restrict("dets", det_info.dets.vals[det_info.det_id != ""])
+    det_info.det_id = np.char.strip(det_info.det_id)  # Needed for some old results
     aman = aman.wrap("det_info", det_info)
+    aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != "NO_MATCH"])
 
     smurf = AxisManager(aman.dets)
     if "band" in aman.pointing:
@@ -372,14 +372,49 @@ def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
     zemax_path = config.get("zemax_path", None)
 
     pointing_cfg = {
-        "telescope": telescope_flavor,
-        "tube": tube_slot,
-        "slot": wafer_slot,
+        "telescope_flavor": telescope_flavor,
+        "tube_slot": tube_slot,
+        "wafer_slot": wafer_slot,
         "config_path": config_path,
         "zemax_path": zemax_path,
         "return_fp": False,
     }
     return pointing_cfg
+
+
+def _restrict_inliers(aman, template):
+    focal_plane = np.column_stack((aman.pointing.xi, aman.pointing.eta))
+    inliers = np.ones(len(focal_plane), dtype=bool)
+
+    cent = np.nanmedian(template[:, :2], axis=0)
+    rad_thresh = 1.05 * np.nanmax(np.linalg.norm(template[:, :2] - cent, axis=1))
+
+    # Use kmeans to kill any ghosts
+    fp_white = vq.whiten(focal_plane[inliers])
+    codebook, _ = vq.kmeans(fp_white, 2)
+    codes, _ = vq.vq(fp_white, codebook)
+
+    c0 = codes == 0
+    c1 = codes == 1
+    m0 = np.median(focal_plane[inliers][c0], axis=0)
+    m1 = np.median(focal_plane[inliers][c1], axis=0)
+    dist = np.linalg.norm(m0 - m1)
+
+    # If centroids are too far from each other use the bigger one
+    if dist < rad_thresh:
+        cluster = c0 + c1
+    elif np.sum(c0) >= np.sum(c1):
+        cluster = c0
+    else:
+        cluster = c1
+
+    # Flag anything too far away from the center
+    cent = np.median(focal_plane[inliers][cluster], axis=0)
+    r = np.linalg.norm(focal_plane[inliers] - cent, axis=1)
+    inliers[inliers] *= cluster * (r <= rad_thresh)
+
+    # Now restrict the AxisManager
+    return aman.restrict("dets", aman.dets.vals[inliers])
 
 
 def main():
@@ -413,7 +448,6 @@ def main():
     append = ""
     if "append" in config:
         append = "_" + config["append"]
-    os.makedirs(config["outdir"], exist_ok=True)
     froot = f"{ufm}{append}"
     subdir = config.get("subdir", None)
     if subdir is None:
@@ -422,6 +456,7 @@ def main():
             subdir = obs_ids[0]
     outpath = os.path.join(config["outdir"], subdir, f"{froot}.h5")
     outpath = os.path.abspath(outpath)
+    os.makedirs(os.path.dirname(outpath), exist_ok=True)
 
     # If a template is provided load it, otherwise generate one
     (template_det_ids, template, is_optical) = (
@@ -449,6 +484,7 @@ def main():
             "No template provided and unable to generate one for some reason"
         )
     optical_det_ids = template_det_ids[is_optical]
+    template_spacing = af.get_spacing(template[is_optical, :2].T)
 
     xi = np.nan + np.zeros((len(template_det_ids), len(amans)))
     eta = np.nan + np.zeros((len(template_det_ids), len(amans)))
@@ -459,12 +495,15 @@ def main():
         if aman is None:
             raise ValueError("AxisManager doesn't exist?")
 
-        det_ids = aman.det_info.det_id
         # Restrict to optical dets
-        optical = np.isin(det_ids, optical_det_ids)
+        optical = np.isin(aman.det_info.det_id, optical_det_ids)
         aman.restrict("dets", aman.dets.vals[optical])
-        det_ids = det_ids[optical]
+
+        # Do some outlier cuts
+        _restrict_inliers(aman, template)
+
         # Mapping to template
+        det_ids = aman.det_info.det_id
         _, msk, template_msk = np.intersect1d(
             det_ids, template_det_ids, return_indices=True
         )
@@ -474,11 +513,21 @@ def main():
         srt = np.argsort(det_ids[msk])
         _xi = aman[pointing_name].xi[msk][srt][mapping]
         _eta = aman[pointing_name].eta[msk][srt][mapping]
-
-        # Do an initial alignment and get weights
         fp = np.vstack((_xi, _eta))
+
+        # Kill dets that are really far from their matched det
+        # TODO: If we include an initial rotation of the template this could just be a function of template spacing
+        dist = np.linalg.norm(fp - template[template_msk, :2].T, axis=0)
+        med_dist = np.nanmedian(dist)
+        fp[:, dist > med_dist + 5 * np.nanstd(dist)] = np.nan
+        logger.info("Median distance to matched det is %f", med_dist)
+        ratio = med_dist / template_spacing
+        logger.info("Median distance to matched det is %f the template spacing", ratio)
+
+        # Try an initial alignment and get weights
         aff, sft = af.get_affine(fp, template[template_msk, :2].T)
         aligned = aff @ fp + sft[..., None]
+        aligned = fp
         if pol:
             _gamma = aman[pol_name].polang[msk][mapping]
             gscale, gsft = gamma_fit(_gamma, template[template_msk, 2])
@@ -494,8 +543,8 @@ def main():
         weights[weights < 0.95] = 0
 
         # Store weighted values
-        xi[template_msk, i] = _xi * weights
-        eta[template_msk, i] = _eta * weights
+        xi[template_msk, i] = fp[0] * weights
+        eta[template_msk, i] = fp[1] * weights
         gamma[template_msk, i] = _gamma * weights
         tot_weight[template_msk] += weights
     tot_weight[tot_weight == 0] = np.nan
@@ -547,6 +596,7 @@ def main():
         if plot_dir is not None:
             plot_dir = os.path.join(plot_dir, subdir)
             plot_dir = os.path.abspath(plot_dir)
+            os.makedirs(plot_dir, exist_ok=True)
         _mk_plot(
             plot_dir,
             froot,
