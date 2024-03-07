@@ -8,7 +8,7 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    count_cuts,
                                     sparse_to_ranges_matrix)
 
-from .core import _Preprocess, expand_proc_aman
+from .core import _Preprocess
 
 
 class FFTTrim(_Preprocess):
@@ -51,9 +51,7 @@ class DetBiasFlags(_Preprocess):
                                                **self.calc_cfgs)
         calc_aman = core.AxisManager(proc_aman.dets, proc_aman.samps)
         calc_aman.wrap('det_bias_flags', m, [(0, 'dets'), (1, 'samps')])
-        dbc_aman = expand_proc_aman(calc_aman, proc_aman)
-        del calc_aman
-        self.save(proc_aman, dbc_aman)
+        self.save(proc_aman, calc_aman)
     
     def save(self, proc_aman, dbc_aman):
         if self.save_cfgs is None:
@@ -99,11 +97,9 @@ class Trends(_Preprocess):
         super().__init__(step_cfgs)
     
     def calc_and_save(self, aman, proc_aman):
-        _, calc_aman = tod_ops.flags.get_trending_flags(
+        _, trend_aman = tod_ops.flags.get_trending_flags(
             aman, merge=False, full_output=True,
             signal=aman[self.signal], **self.calc_cfgs)
-        trend_aman = expand_proc_aman(calc_aman, proc_aman)
-        del calc_aman
         aman.wrap("trends", trend_aman)
         self.save(proc_aman, trend_aman)
     
@@ -160,11 +156,10 @@ class GlitchDetection(_Preprocess):
         super().__init__(step_cfgs)
     
     def calc_and_save(self, aman, proc_aman):
-        _, calc_aman = tod_ops.flags.get_glitch_flags(
+        _, glitch_aman = tod_ops.flags.get_glitch_flags(
             aman[self.signal], merge=False, full_output=True,
             **self.calc_cfgs
         ) 
-        glitch_aman = expand_proc_aman(calc_aman, proc_aman)
         aman.wrap("glitches", glitch_aman)
         self.save(proc_aman, glitch_aman)
     
@@ -260,9 +255,7 @@ class Jumps(_Preprocess):
 
         jumps, heights = func(aman, merge=False, fix=False,
                               signal=aman[self.signal], **cfgs)
-        calc_aman = tod_ops.jumps.jumps_aman(aman, jumps, heights)
-        jump_aman = expand_proc_aman(calc_aman, proc_aman)
-        del calc_aman
+        jump_aman = tod_ops.jumps.jumps_aman(aman, jumps, heights)
         self.save(proc_aman, jump_aman)
 
     def save(self, proc_aman, jump_aman):
@@ -315,14 +308,12 @@ class PSDCalc(_Preprocess):
         psd_cfgs = self.process_cfgs.get('psd_cfgs', {})
         freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
                                               **psd_cfgs)
-        calc_aman = core.AxisManager(
+        fft_aman = core.AxisManager(
             aman.dets, 
             core.OffsetAxis("nusamps",len(freqs))
         )
-        calc_aman.wrap("freqs", freqs, [(0,"nusamps")])
-        calc_aman.wrap("Pxx", Pxx, [(0,"dets"), (1,"nusamps")])
-        fft_aman = expand_proc_aman(calc_aman, proc_aman)
-        del calc_aman
+        fft_aman.wrap("freqs", freqs, [(0,"nusamps")])
+        fft_aman.wrap("Pxx", Pxx, [(0,"dets"), (1,"nusamps")])
         aman.wrap(self.wrap, fft_aman)
 
     def calc_and_save(self, aman, proc_aman):
@@ -374,9 +365,7 @@ class Noise(_Preprocess):
                 aman.wrap("noise", calc_aman)
             else:
                 aman.wrap(self.calc_cfgs['wrap_name'], calc_aman)
-        noise = expand_proc_aman(calc_aman, proc_aman)
-        del calc_aman
-        self.save(proc_aman, noise)
+        self.save(proc_aman, calc_aman)
     
     def save(self, proc_aman, noise):
         if not(self.save_cfgs is None):
@@ -437,8 +426,7 @@ class EstimateHWPSS(_Preprocess):
     name = "estimate_hwpss"
 
     def calc_and_save(self, aman, proc_aman):
-        calc_aman = hwp.get_hwpss(aman, **self.calc_cfgs)
-        hwpss_stats = expand_proc_aman(calc_aman, proc_aman)
+        hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
         self.save(proc_aman, hwpss_stats)
 
     def save(self, proc_aman, hwpss_stats):
@@ -494,9 +482,7 @@ class EstimateAzSS(_Preprocess):
 
     def calc_and_save(self, aman, proc_aman):
         calc_aman, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
-        azss_stats = expand_proc_aman(calc_aman, proc_aman)
-        del calc_aman
-        self.save(proc_aman, azss_stats)
+        self.save(proc_aman, calc_aman)
     
     def save(self, proc_aman, azss_stats):
         if self.save_cfgs is None:
@@ -565,9 +551,7 @@ class FlagTurnarounds(_Preprocess):
             calc_aman = core.AxisManager(aman.dets, aman.samps)
             calc_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
 
-        turn_aman = expand_proc_aman(calc_aman, proc_aman)
-        del calc_aman
-        self.save(proc_aman, turn_aman)
+        self.save(proc_aman, calc_aman)
 
     def save(self, proc_aman, turn_aman):
         if self.save_cfgs is None:

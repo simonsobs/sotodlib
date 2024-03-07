@@ -3,6 +3,7 @@ import logging
 import numpy as np
 from .. import core
 from so3g.proj import Ranges, RangesMatrix
+from scipy.sparse import csr_array
 
 class _Preprocess(object):
     """The base class for Preprocessing modules which defines the required
@@ -128,119 +129,123 @@ class _Preprocess(object):
                 f"Preprocess Module of name {name} is already Registered"
             )
 
-def expand_proc_aman(calc_aman, proc_aman, flag_fill_val=False,
-                     flt_fill_val=np.nan, int_fill_val=2**32-1):
-    """
-    Helper function to expand the size of calculated products to match the 
-    precut dets and samps shape (call fdets, and fsamps for "full-detectors"
-    and "full-samples").
+def _zeros_cls( item ):
+    """return a callable zeros class that exactly matches type item for use 
+    with wrap_new"""
+    if isinstance( item, np.ndarray):
+        return lambda shape: np.zeros( shape, dtype = item.dtype)
+    elif isinstance( item, RangesMatrix):
+        return RangesMatrix.zeros
+    elif isinstance( item, Ranges ):
+        def temp(shape):
+            assert len(shape) == 1
+            return Ranges( shape[0] )
+        return temp
+    elif isinstance( item, csr_array):
+        return lambda shape: csr_array(tuple(shape), dtype=item.dtype)
+    else:
+        raise ValueError(f"Cannot find zero type for {type(item)}")
 
-    Arguments:
-    ----------
-    calc_aman: AxisManager
-        AxisManager returned from calc step.
-    proc_aman: AxisManager
-        AxisManager passed between processes.
-    flag_fill_val: bool
-        Value to fill missing indices for data that is boolean or 
-        RangesMatrices type.
-    flt_fill_val: float
-        Value to fill missing indices for data that is float type.
-    int_fill_val: float
-        Value to fill missing indices for data that is int type.
+def _ranges_matrix_match( o, n, oidx, nidx):
+    """align RangesMatrix n entries to RangesMatrix o"""
+    assert len(oidx)==len(nidx)
+    if len(oidx) > 2:
+        raise NotImplemented
+    for i, x in zip( oidx[0], nidx[0]):
+        o.ranges[i] = _ranges_match( 
+            o.ranges[i], n.ranges[x],
+            [oidx[1]], [nidx[1]]
+        )
+    return o.copy()
 
-    Returns:
-    --------
-    out_aman: AxisManager
-        AxisManager with fdets, fsamps, dets, samps axes in addition
-        to any additional axes. With the signals aligned along dets
-        and samps in calc_aman padded to fdets, fsamps shape.
-    """
-    assn = calc_aman._assignments
-    oaxes = [proc_aman['f'+x] if x in ['dets','samps'] \
-                                  else calc_aman[x] for x in calc_aman._axes]
-    oaxes += [proc_aman[x] for x in calc_aman._axes if x in ['dets','samps']]
-    out_aman = core.AxisManager(*oaxes)
-    
-    _, _, fmdets = np.intersect1d(proc_aman.dets.vals,
-                                    proc_aman.fdets.vals,
-                                    return_indices=True)
-    fmsamps = slice(proc_aman.samps.offset,
-                    proc_aman.samps.offset+proc_aman.samps.count)
+def _ranges_match( o, n, oidx, nidx):
+    """align Ranges n to Ranges o"""
+    assert len(oidx)==len(nidx)
+    assert len(oidx)==1
+    omsk = o.mask()
+    nmsk = n.mask()
+    omsk[oidx[0]] = nmsk[nidx[0]]
+    return Ranges.from_mask(omsk)
 
-    for fld, axes in zip(assn.keys(), assn.values()):
-        faxes = tuple(['f'+a if a in ['dets', 'samps'] else a for a in axes])
-        if isinstance(calc_aman[fld], core.AxisManager):
-            out_aman.wrap(fld, expand_proc_aman(calc_aman[fld], proc_aman,
-                                                flag_fill_val, flt_fill_val,
-                                                int_fill_val))
-        elif np.isin(type(calc_aman[fld]), [RangesMatrix, Ranges]):
-            fill_value = flag_fill_val
-        elif isinstance(calc_aman[fld], np.ndarray):
-            if isinstance(calc_aman[fld][0], int):
-                fill_value = int_fill_val
-            if isinstance(calc_aman[fld][0], float):
-                fill_value = flt_fill_val
-            if isinstance(calc_aman[fld][0], bool):
-                fill_value = flag_fill_val
+def _expand(new, full, wrap_valid=True):
+    """new will become a top level axismanager in full once it is matched to
+    size"""
+    if 'dets' in new._axes:
+        _, fs_dets, ns_dets = full.dets.intersection(
+            new.dets, 
+            return_slices=True
+        )
+    if 'samps' in new._axes:
+        _, fs_samps, ns_samps = full.samps.intersection(
+            new.samps, 
+            return_slices=True
+        )
+    else:
+        fs_samps = slice(None)
+
+    out = full.copy(axes_only=True)
+    for a in new._axes:
+        if a not in out:
+            out.add_axis( new[a] )
+    for k, v in new._fields.items():
+        if isinstance(v, core.AxisManager):
+            out.wrap( k, _expand( v, full) )
         else:
-            raise ValueError(f"Data type {type(calc_aman[fld])} in axis manager"
-                            " not supported in expand_proc_aman")
-
-        if np.any(np.isin(axes, ['dets', 'samps'])):
-            out_aman.wrap_new('f'+fld, faxes, cls=np.full, fill_value=fill_value)
-            out_aman.wrap(fld, calc_aman[fld], list(enumerate(axes)))
-            d = {'dets': fmdets, 'samps': fmsamps}
-            slices = [d.get(a, slice(None)) for a in axes]
-            if isinstance(calc_aman[fld], RangesMatrix):
-                out_aman['f'+fld][tuple(slices)]=calc_aman[fld].mask()
-                out_aman['f'+fld] = RangesMatrix.from_mask(out_aman['f'+fld])
+            out.wrap_new( k, new._assignments[k], cls=_zeros_cls(v))
+            oidx=[]; nidx=[]
+            for a in new._assignments[k]:
+                if a == 'dets':
+                    oidx.append(fs_dets)
+                    nidx.append(ns_dets)
+                elif a == 'samps':
+                    oidx.append(fs_samps)
+                    nidx.append(ns_samps)
+                else:
+                    oidx.append(slice(None))
+                    nidx.append(slice(None))
+            oidx = tuple(oidx)
+            nidx = tuple(nidx)
+            if isinstance(out[k], RangesMatrix):
+                assert new._assignments[k][-1] == 'samps'
+                out[k] = _ranges_matrix_match( out[k], v, oidx, nidx)
+            elif isinstance(out[k], Ranges):
+                assert new._assignments[k][0] == 'samps'
+                out[k] = _ranges_match( out[k], v, oidx, nidx)
             else:
-                out_aman['f'+fld][tuple(slices)]=calc_aman[fld]
-        else:
-            out_aman.wrap(fld, calc_aman[fld], list(enumerate(axes)))
-    return out_aman
+                out[k][oidx] = v[nidx]
+    if wrap_valid:
+        x = Ranges( full.samps.count )
+        m = x.mask()
+        m[fs_samps] = True
+        v = Ranges.from_mask(m)
 
-def collapse_proc_aman(proc_aman):
-    """
-    Replaces dets, samps axes + fields aligned with them with the data
-    in fdets, fsamps axes. This is intended to go at the end of the
-    pipeline.run function to save to disk data in the full unrestricted
-    dets, samps shape.
-    
-    Arguments:
+        valid = RangesMatrix( 
+            [v if i in fs_dets else x for i in range(full.dets.count)]
+        )
+        out.wrap('valid',valid,[(0,'dets'),(1,'samps')])
+    return out
+
+def update_full_aman(proc_aman, full, wrap_valid):
+    """Copy new fields from proc_aman[dets,samps] over to 
+    full[full-dets,full-samps] after correct re-sizing and indexing.
+
+    Arguments
     ----------
     proc_aman: AxisManager
-        Axis manager passed through the preprocess pipeline.
-
-    Returns:
-    --------
-    out_aman: AxisManager
-        proc_aman with dets, samps replaced by fdets, fsamps
+        A preprocess AxisManager from a pipeline run. The dets,samps axes in 
+        proc_aman is assumed to be a subset of the dets,samps axes in full
+    full: AxisManager
+        A full shape AxisManager that begins the pipeline as the original shape
+        of the TOD AxisManager
     """
-    assn = proc_aman._assignments
-    dets_samps = core.AxisManager(core.LabelAxis(name='dets', vals=proc_aman.fdets.vals), 
-                                  core.OffsetAxis('samps', count=proc_aman.fsamps.count,
-                                                  offset=proc_aman.fsamps.offset, 
-                                                  origin_tag=proc_aman.fsamps.origin_tag))
-    out_aman = core.AxisManager(*[proc_aman[x] for x in proc_aman._axes \
-                                  if not(x in ['fdets','fsamps','dets','samps'])])
-    out_aman.merge(dets_samps)
-    for fld, axes in zip(assn.keys(), assn.values()):
-        assn2 = proc_aman[fld]._assignments
-        fld_aman = core.AxisManager(*[proc_aman[x] for x in proc_aman[fld]._axes \
-                                if not(x in ['fdets','fsamps','dets','samps'])])
-        fld_aman.merge(dets_samps)
-        for fld2, axes2 in zip(assn2.keys(), assn2.values()):
-            if np.any(np.isin(axes2, ['dets', 'samps'])):
-                continue
-            if np.any(np.isin(axes2, ['fdets', 'fsamps'])):
-                naxes = [a.strip('f') if a in ['fdets', 'fsamps'] else a for a in axes2]
-                fld_aman.wrap(fld2[1:], proc_aman[fld][fld2], list(enumerate(naxes)))
-            else:
-                fld_aman.wrap(fld2, proc_aman[fld][fld2], list(enumerate(axes2)))
-        out_aman.wrap(fld, fld_aman)
-    return out_aman
+    for fld in proc_aman._fields:
+        if fld not in full._fields:
+            assert isinstance(proc_aman[fld], core.AxisManager)
+            full.wrap( 
+                fld,
+                _expand( proc_aman[fld], full, wrap_valid=wrap_valid)
+            )
+
 
 class Pipeline(list):
     """This class is designed to create and run pipelines out of a series of
@@ -251,7 +256,7 @@ class Pipeline(list):
 
     PIPELINE = {}
 
-    def __init__(self, modules, logger=None):
+    def __init__(self, modules, logger=None, wrap_valid=True):
         """
         Arguments
         ---------
@@ -265,6 +270,7 @@ class Pipeline(list):
         if logger is None:
             logger = logging.getLogger("pipeline")
         self.logger = logger
+        self.wrap_valid = wrap_valid
         super().__init__( [self._check_item(item) for item in modules])
     
     def _check_item(self, item):
@@ -320,7 +326,8 @@ class Pipeline(list):
             expected to be present in this AxisManager.
         select: boolean (Optional)
             if True, the aman detector axis is restricted as described in
-            each preprocess module
+            each preprocess module. Most pipelines are developed with 
+            select=True. Running select=False may produce unstable behavior
 
         Returns
         -------
@@ -331,11 +338,7 @@ class Pipeline(list):
         """
         if proc_aman is None:
             proc_aman = core.AxisManager( aman.dets, aman.samps)
-            fman = core.AxisManager(core.LabelAxis(name='fdets', vals=aman.dets.vals), 
-                                    core.OffsetAxis('fsamps', count=aman.samps.count,
-                                                    offset=aman.samps.offset, 
-                                                    origin_tag=aman.samps.origin_tag))
-            proc_aman.merge(fman)
+            full = core.AxisManager( aman.dets, aman.samps)
             run_calc = True
         else:
             if aman.dets.count != proc_aman.dets.count or not np.all(aman.dets.vals == proc_aman.dets.vals):
@@ -343,14 +346,25 @@ class Pipeline(list):
                 det_list = [det for det in proc_aman.dets.vals if det in aman.dets.vals]
                 aman.restrict('dets', det_list)
                 proc_aman.restrict('dets', det_list)
+            full = proc_aman.copy()
             run_calc = False
-            
+        
+        success = 'end'
         for process in self:
             self.logger.info(f"Running {process.name}")
             process.process(aman, proc_aman)
             if run_calc:
                 process.calc_and_save(aman, proc_aman)
+                update_full_aman( proc_aman, full, self.wrap_valid)
+            
             if select:
                 process.select(aman, proc_aman)
                 proc_aman.restrict('dets', aman.dets.vals)
-        return collapse_proc_aman(proc_aman)
+            self.logger.debug(f"{proc_aman.dets.count} detectors remaining")
+            
+            if aman.dets.count == 0:
+                success = process.name
+                break
+            
+        return full, success
+        
