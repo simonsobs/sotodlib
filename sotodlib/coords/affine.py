@@ -227,3 +227,22 @@ def gen_weights(src, dst, var=None):
     weights = np.prod(np.exp(-0.5 * (src - dst) ** 2 / var[..., None]), axis=0)
 
     return weights
+
+
+def get_spacing(points):
+    """
+    Approximate the spacing of a (mostly) regular point cloud.
+
+    Arguments:
+
+        points: (ndim, npoints) array of points
+
+    Returns:
+
+        spacing: The approximate spacing between points
+    """
+    edm = dist.squareform(dist.pdist(points.T))
+    edm[edm == 0] = np.nan
+    nearest_dists = np.nanmin(edm, axis=0)
+
+    return np.median(nearest_dists)
