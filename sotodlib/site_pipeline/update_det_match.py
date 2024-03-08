@@ -399,19 +399,21 @@ def make_parser():
     parser.add_argument('--all', action='store_true', help='run all detsets')
     return parser
 
-if __name__ == '__main__':
-    parser = make_parser()
-    args = parser.parse_args()
-
-    with open(args.config, 'r') as f:
+def main(config_file: str, all: bool=False):
+    with open(config_file, 'r') as f:
         cfg = UpdateDetMatchesConfig(**yaml.safe_load(f))
 
     runner = Runner(cfg)
 
-    if args.all:
+    if all:
         update_manifests_all(runner)
         while runner.run_next_match():
             update_manifests_all(runner)
     else:
         runner.run_next_match()
         update_manifests_all(runner)
+
+if __name__ == '__main__':
+    parser = make_parser()
+    args = parser.parse_args()
+    main(args.config, all=args.all)
