@@ -220,12 +220,9 @@ def main(
     overwrite=False,
     min_ctime=None,
     max_ctime=None,
-    logger=None,
  ):
     configs, context = _get_preprocess_context(configs)
-    if logger is None: 
-        logger = sp_util.init_logger("preprocess")
-    globals()['logger'] = logger
+    logger = sp_util.init_logger("preprocess")
 
     if obs_id is not None:
         tot_query = f"obs_id=='{obs_id}'"

@@ -5,6 +5,9 @@ from typing import Optional
 
 from sotodlib.io.imprinter import Imprinter
 from sotodlib.site_pipeline.monitor import Monitor
+from sotodlib.site_pipeline.util import init_logger
+
+logger = init_logger(__name__, "update_book_plan: ")
 
 def main(
     config: str,
@@ -17,7 +20,6 @@ def main(
     min_ctime_timecodes: Optional[float] = None,
     max_ctime_timecodes: Optional[float] = None,
     from_scratch: bool = False,
-    logger = None
     ):
     """
     Update the book plan database with new data from the g3tsmurf database.
@@ -45,16 +47,16 @@ def main(
         The minimum ctime to include in the book plan for timecode (hk, smurf, stray) books, by default None
     max_ctime_timecodes : Optional[float], optional
         The maximum ctime to include in the book planor timecode (hk, smurf, stray) books, by default None
-
     from_scratch : bool, optional
         If True, start to search from beginning of time, by default False
     """
     if stream_ids is not None:
         stream_ids = stream_ids.split(",")
+
     imprinter = Imprinter(
         config, 
         db_args={'connect_args': {'check_same_thread': False}},
-        logger=logger,
+        logger=logger
     )
     
     # leaving min_ctime and max_ctime as None will go through all available 
@@ -102,13 +104,13 @@ def main(
 
     monitor = None
     if "monitor" in imprinter.config:
-        imprinter.logger.info("Will send monitor information to Influx")
+        logger.info("Will send monitor information to Influx")
         try:
             monitor = Monitor.from_configs(
                 imprinter.config["monitor"]["connect_configs"]
             )
         except Exception as e:
-            imprinter.logger.error(f"Monitor connectioned failed {e}")
+            logger.error(f"Monitor connectioned failed {e}")
             monitor = None
 
     if monitor is not None:

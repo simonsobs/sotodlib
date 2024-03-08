@@ -25,6 +25,8 @@ matplotlib.use('agg')
 
 opj = os.path.join
 
+logger = util.init_logger(__name__)
+
 
 def get_xieta_src_centered(ctime, az, el, data, sso_name, threshold):
     """Create a planet centered coordinate system for single detector data
@@ -521,7 +523,6 @@ def main(
     representative_dets,
     test_mode=False,
     plot_results=False,
-    logger=None,
 ):
     """
     Initiate an MPI environment and fit a simulation in the time domain
@@ -539,8 +540,6 @@ def main(
 
     kwargs['img_dir'] = img_dir
 
-    if logger is None:
-        logger = util.init_logger(__name__)
     t1 = time.time()
 
     comm = MPI.COMM_WORLD
