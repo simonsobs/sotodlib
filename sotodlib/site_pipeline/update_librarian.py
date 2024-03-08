@@ -5,7 +5,7 @@ from typing import Optional
 from sotodlib.io.imprinter import Imprinter, BOUND, UPLOADED
 
 
-def main( config: str, logger=None):
+def main(config: str):
     """
     Update the book plan database with new data from the g3tsmurf database.
 
@@ -18,7 +18,6 @@ def main( config: str, logger=None):
     imprinter = Imprinter(
         config, 
         db_args={'connect_args': {'check_same_thread': False}},
-        logger=logger,
     )
 
     session = imprinter.get_session()

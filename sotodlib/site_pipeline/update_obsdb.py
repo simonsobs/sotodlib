@@ -85,8 +85,7 @@ def main(config: str,
         recency: float = None, 
         booktype: Optional[str] = "both",
         verbosity: Optional[int] = 2,
-        overwrite: Optional[bool] = False,
-        logger=None):
+        overwrite: Optional[bool] = False):
 
     """
     Create or update an obsdb for observation or operations data.
@@ -104,16 +103,7 @@ def main(config: str,
         Output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug
     overwrite : bool
         if False, do not re-check existing entries
-    logger : logging
-        When to output the print statements
-
-
     """
-
-    if logger is None:
-        logger = globals()['logger']
-    else:
-        globals()['logger'] = logger
     if verbosity == 0:
         logger.setLevel(logging.ERROR)
     elif verbosity == 1:
@@ -187,7 +177,7 @@ def main(config: str,
                 #obsfiledb creation
                 checkbook(
                     bookpath, config, add=True, 
-                    overwrite=True, logger=logger
+                    overwrite=True
                 )
             except Exception as e:
                 if config_dict["skip_bad_books"]:
