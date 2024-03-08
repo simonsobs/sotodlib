@@ -5,23 +5,9 @@ import argparse
 
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
-from sotodlib.preprocess import _Preprocess, PIPELINE, processes
+from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
 logger = sp_util.init_logger("preprocess")
-
-def _build_pipe_from_configs(configs):
-    pipe = []
-    for process in configs["process_pipe"]:
-        name = process.get("name")
-        if name is None:
-            raise ValueError(f"Every process step must have a 'name' key")
-        cls = PIPELINE.get(name)
-        if cls is None:
-            logger.warning(f"'{name}' not registered as a pipeline element,"
-                            "ignoring")
-            continue
-        pipe.append(cls(process))
-    return pipe
 
 def _get_preprocess_context(configs, context=None):
     if type(configs) == str:
@@ -62,9 +48,15 @@ def _get_groups(obs_id, configs, context):
     else:
         det_info = context.get_det_info(obs_id)
         groups = det_info.subset(keys=[group_by]).distinct()[group_by]
-    return group_by, groups
+    return group_by, list(groups)
 
-def preprocess_tod(obs_id, configs, overwrite=False, logger=None):
+def preprocess_tod(
+    obs_id, 
+    configs, 
+    group_list=None, 
+    overwrite=False, 
+    logger=None
+):
     """Meant to be run as part of a batched script, this function calls the
     preprocessing pipeline a specific Observation ID and saves the results in
     the ManifestDb specified in the configs.   
@@ -75,6 +67,10 @@ def preprocess_tod(obs_id, configs, overwrite=False, logger=None):
         obs_id or obs entry that is passed to context.get_obs
     configs: string or dictionary
         config file or loaded config directory
+    group_list: None or list
+        list of groups to run if you only want to run a partial update
+    overwrite: bool
+        if True, overwrite existing entries in ManifestDb
     logger: logging instance
         the logger to print to
     """
@@ -88,6 +84,18 @@ def preprocess_tod(obs_id, configs, overwrite=False, logger=None):
     context = core.Context(configs["context_file"])
     group_by, groups = _get_groups(obs_id, configs, context)
 
+    all_groups = groups.copy()
+    if group_list is not None:
+        for g in all_groups:
+            if g not in group_list:
+                groups.remove(g)
+
+        if len(groups) == 0:
+            logger.warning(f"group_list:{group_list} contains no overlap with "
+                           f"groups in observation: {obs_id}:{all_groups}. "
+                           f"No analysis to run.")
+            return
+ 
     if os.path.exists(configs['archive']['index']):
         logger.info(f"Mapping {configs['archive']['index']} for the "
                     "archive index.")
@@ -97,20 +105,20 @@ def preprocess_tod(obs_id, configs, overwrite=False, logger=None):
                      "archive index.")
         scheme = core.metadata.ManifestScheme()
         scheme.add_exact_match('obs:obs_id')
-        scheme.add_data_field('dets:' + group_by)
+        scheme.add_exact_match('dets:' + group_by)
         scheme.add_data_field('dataset')
         db = core.metadata.ManifestDb(
             configs['archive']['index'],
             scheme=scheme
         )
 
-    pipe = _build_pipe_from_configs(configs)
+    pipe = Pipeline(configs["process_pipe"], logger=logger)
 
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
 
         aman = context.get_obs(obs_id, dets={group_by:group})
-        aman, proc_aman = run_preprocess(aman, pipe, logger=logger)
+        proc_aman = pipe.run(aman)
 
         policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
         dest_file, dest_dataset = policy.get_dest(obs_id)
@@ -118,48 +126,17 @@ def preprocess_tod(obs_id, configs, overwrite=False, logger=None):
             dest_dataset += '_' + group
         else:
             dest_dataset += "_" + group_by + "_" + str(group)
+        logger.info(f"Saving data to {dest_file}:{dest_dataset}")
         proc_aman.save(dest_file, dest_dataset, overwrite=overwrite)
 
-        logger.info("Saving to database")
         # Update the index.
         db_data = {'obs:obs_id': obs_id,
                    'dataset': dest_dataset}
         db_data['dets:'+group_by] = group
         
-        if db.match(db_data) is None:
+        logger.info(f"Saving to database under {db_data}")
+        if len(db.inspect(db_data)) == 0:
             db.add_entry(db_data, dest_file)
-
-def run_preprocess(aman, pipe=None, configs=None, logger=None):
-    """Run preprocessing on any loaded AxisManager. Broken out so
-    the pipeline can be easily run without databases.
-
-    Arguments
-    ---------
-    aman: AxisManager
-        loaded AxisManager
-    pipe: list
-        pipeline list as built by _build_pipe_from_configs 
-    configs: string or dict 
-        a preprocessing config file or loaded config dictionary
-    """
-    if logger is None: 
-        logger = sp_util.init_logger("preprocess")
-    
-    if pipe is None:
-        if configs is None:
-            raise ValueError("Either pipe or configs must be specified")
-        pipe = _build_pipe_from_configs(configs)
-
-    proc_aman = core.AxisManager( aman.dets, aman.samps)
-
-    for process in pipe:
-        logger.info(f"Processing {process.name}")
-
-        process.process(aman, proc_aman) ## make changes to aman
-        process.calc_and_save(aman, proc_aman) ## calculate data products
-    logger.info("Finished Processing")
-
-    return aman, proc_aman
 
 def load_preprocess_det_select(obs_id, configs, context=None):
     """ Loads the metadata information for the Observation and runs through any
@@ -175,7 +152,7 @@ def load_preprocess_det_select(obs_id, configs, context=None):
     """
     configs, context = _get_preprocess_context(configs, context)
     
-    pipe = _build_pipe_from_configs(configs)
+    pipe = Pipeline(configs["process_pipe"], logger=logger)
     meta = context.get_meta(obs_id)
 
     for process in pipe:
@@ -201,11 +178,9 @@ def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml", context=None 
     configs, context = _get_preprocess_context(configs, context)
     meta = load_preprocess_det_select(obs_id, configs=configs, context=context)
     
-    pipe = _build_pipe_from_configs(configs)
+    pipe = Pipeline(configs["process_pipe"], logger=logger)
     aman = context.get_obs(meta)
-    for process in pipe:
-        logger.info(f"Processing {process.name}")
-        process.process(aman, aman.preprocess)
+    pipe.run(aman, aman.preprocess)
     return aman
 
 
@@ -271,21 +246,25 @@ def main(
         logger.warning(f"No observations returned from query: {query}")
     run_list = []
 
-    if not os.path.exists(configs['archive']['index']):
+    if overwrite or not os.path.exists(configs['archive']['index']):
         #run on all if database doesn't exist
-        run_list = obs_list
+        run_list = [ (o,None) for o in obs_list]
     else:
         db = core.metadata.ManifestDb(configs['archive']['index'])
         for obs in obs_list:
-            x = db.match({'obs:obs_id': obs["obs_id"]}, multi=True)
+            x = db.inspect({'obs:obs_id': obs["obs_id"]})
             group_by, groups = _get_groups(obs["obs_id"], configs, context)
-            if overwrite or (x is None or len(x) != len(groups)):
-                run_list.append(obs)
+            if x is None or len(x) == 0:
+                run_list.append( (obs, None) )
+            elif len(x) != len(groups):
+                [groups.remove(a[f'dets:{group_by}']) for a in x]
+                run_list.append( (obs, groups) )
 
     logger.info(f"Beginning to run preprocessing on {len(run_list)} observations")
-    for obs in run_list:
+    for obs, groups in run_list:
         logger.info(f"Processing obs_id: {obs_id}")
-        preprocess_tod(obs["obs_id"], configs, overwrite=overwrite,logger=logger)
+        preprocess_tod(obs["obs_id"], configs, overwrite=overwrite,
+                       group_list=groups, logger=logger)
             
 
 if __name__ == '__main__':

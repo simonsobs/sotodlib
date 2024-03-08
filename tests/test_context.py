@@ -53,10 +53,12 @@ class ContextTest(unittest.TestCase):
         return name
 
     def test_000_smoke(self):
+        """Test basic instantiation of Context and basic DBs from files."""
         ctx_file = self._write_context(MINIMAL_CONTEXT)
         ctx = Context(ctx_file)
+        metadata.cli.main(args=['context', ctx_file])
+        del ctx, ctx_file
 
-    def test_001_dbs(self):
         # Does context populate obsdb, detdb, obsfiledb from file?
         for key, cls in [
                 ('obsdb', metadata.ObsDb),
@@ -70,7 +72,8 @@ class ContextTest(unittest.TestCase):
             cd[key] = name
             ctx_file = self._write_context(cd)
             ctx = Context(ctx_file)
-            self.assertIsInstance(getattr(ctx, key), cls)
+            self.assertIsInstance(getattr(ctx, key), cls,
+                                  msg=f"Instantiating '{key}'")
             metadata.cli.main(args=['context', ctx_file])
 
     def test_010_cli(self):
@@ -171,6 +174,77 @@ class ContextTest(unittest.TestCase):
             ctx.get_meta(obs_id)
         ctx.get_meta(obs_id, ignore_missing=True)
 
+        # Check det_info with acceptable partial coverage.
+        ctx = dataset_sim.get_context(with_incomplete_det_info='trim')
+        meta = ctx.get_meta(obs_id)
+        self.assertTrue('newcal' in meta.det_info)
+        self.assertLess(meta.dets.count, 8)
+
+        ctx = dataset_sim.get_context(with_incomplete_det_info='skip')
+        meta = ctx.get_meta(obs_id)
+        self.assertFalse('newcal' in meta.det_info)
+        self.assertEqual(meta.dets.count, 8)
+
+        ctx = dataset_sim.get_context(with_incomplete_det_info='trim',
+                                      with_dependent_metadata='trim')
+        meta = ctx.get_meta(obs_id)
+        self.assertTrue('depends' in meta)
+
+        # ... but skip should fail if dependent metadata requires what
+        # it is providing.
+        for dep in ['fail', 'skip', 'trim']:
+            # arguably this could be asked to not raise, for dep =
+            # skip or trim.
+            ctx = dataset_sim.get_context(with_incomplete_det_info='skip',
+                                          with_dependent_metadata=dep)
+            with self.assertRaises(metadata.loader.IncompleteDetInfoError):
+                ctx.get_meta(obs_id)
+
+        # Check det_info with unacceptable partial coverage.
+        ctx = dataset_sim.get_context(with_incomplete_det_info='fail')
+        with self.assertRaises(metadata.loader.IncompleteMetadataError):
+            ctx.get_meta(obs_id)
+
+        # Manual overrides.
+        meta = ctx.get_meta(obs_id, on_missing={'newcal': 'trim'})
+        self.assertTrue('newcal' in meta.det_info)
+        self.assertLess(meta.dets.count, 8)
+
+        meta = ctx.get_meta(obs_id, on_missing={'newcal': 'skip'})
+        self.assertFalse('newcal' in meta.det_info)
+        self.assertEqual(meta.dets.count, 8)
+
+        # Check metadata with acceptable partial coverage.
+        ctx = dataset_sim.get_context(with_incomplete_metadata='trim')
+        meta = ctx.get_meta(obs_id)
+        self.assertTrue('othercal' in meta)
+        self.assertLess(meta.dets.count, 8)
+
+        dataset_sim = DatasetSim()
+        obs_id = dataset_sim.obss['obs_id'][1]
+
+        ctx = dataset_sim.get_context(with_incomplete_metadata='skip')
+        meta = ctx.get_meta(obs_id)
+        self.assertEqual(meta.dets.count, 8)
+        self.assertFalse('othercal' in meta)
+
+        # Check metadata with unacceptable partial coverage.
+        ctx = dataset_sim.get_context(with_incomplete_metadata='fail')
+        with self.assertRaises(metadata.loader.IncompleteMetadataError):
+            ctx.get_meta(obs_id)
+
+        # Manual overrides.
+        meta = ctx.get_meta(obs_id, on_missing={'othercal': 'trim'})
+        self.assertTrue('othercal' in meta)
+        self.assertLess(meta.dets.count, 8)
+
+        meta = ctx.get_meta(obs_id, on_missing={'othercal': 'skip'})
+        self.assertEqual(meta.dets.count, 8)
+        self.assertFalse('othercal' in meta)
+
+        # Nothing wrong with good old obs 13 though
+        ctx.get_meta('obs_number_13')
+
     def test_110_more_loads(self):
         dataset_sim = DatasetSim()
         n_det, n_samp = dataset_sim.det_count, dataset_sim.sample_count
@@ -189,6 +263,10 @@ class ContextTest(unittest.TestCase):
         # Check if NO_MATCH det_id seemed to broadcast propertly ...
         self.assertEqual(list(tod.det_info['det_param'] == -1),
                          list(dataset_sim.dets['det_id'] == 'NO_MATCH'))
+        for di, ds, AB1, AB2 in zip(tod.det_info.det_id, tod.det_info.detset,
+                                    tod.XY, tod.focal_plane2.AB):
+            self.assertEqual(AB1, len(ds) * (di == 'NO_MATCH'))
+            self.assertEqual(AB2, len(ds) * (di == 'NO_MATCH'))
 
         tod = ctx.get_obs(obs_id + ':f090')
         self.assertEqual(tod.signal.shape, (n_det // 2, n_samp))
@@ -221,6 +299,18 @@ class ContextTest(unittest.TestCase):
         tod = ctx.get_obs(obs_id, dets=det_info)
         self.assertEqual(tod.signal.shape, (n_det // 2, n_samp))
 
+    def test_200_load_metadata(self):
+        """Test the simple metadata load wrapper."""
+        dataset_sim = DatasetSim()
+        obs_id = dataset_sim.obss['obs_id'][1]
+
+        ctx = dataset_sim.get_context()
+        tod = ctx.get_meta(obs_id)
+        for spec in ctx['metadata']:
+            item = metadata.loader.load_metadata(tod, spec)
+            assert(item is not None)
+            item = metadata.loader.load_metadata(tod, spec, unpack=True)
+            assert(item is not None)
 
 class DatasetSim:
     """Provide in-RAM Context objects and tod/metadata loader functions
@@ -258,7 +348,20 @@ class DatasetSim:
         metadata.SuperLoader.register_metadata('unittest_loader', _TestML)
 
     def get_context(self, with_detdb=True, with_metadata=True,
-                    with_bad_metadata=False):
+                    with_bad_metadata=False, with_incomplete_det_info=False,
+                    with_dependent_metadata=False,
+                    with_incomplete_metadata=False, on_missing='trim'):
+        """Args:
+          with_detdb: if False, no detdb is included.
+          with_metadata: if False, no metadata are included.
+          with_bad_metadata: if True, an entry that refers to a
+            non-existant sqlite database is included.
+          with_incomplete_det_info: if True, include det_info entries
+            that are missing some dets, or a complete detset.
+          with_incomplete_metadata: if True, include entries that are
+            missing some dets, or a complete detset.
+
+        """
         detdb = metadata.DetDb()
         detdb.create_table('base', ['readout_id string',
                                     'pol_code string',
@@ -296,40 +399,47 @@ class DatasetSim:
         if not with_metadata:
             return ctx
 
-        # metadata: bands.h5
-        _scheme = metadata.ManifestScheme() \
-                  .add_data_field('loader') \
-                  .add_range_match('obs:timestamp')
-        bands_db = metadata.ManifestDb(scheme=_scheme)
-        bands_db.add_entry(
-            {'obs:timestamp': [0, 2e9], 'loader': 'unittest_loader'},
-            'bands.h5')
+        class _ManifestDb(metadata.ManifestDb):
+            def __init__(self, filename='unnamed', **kwargs):
+                super().__init__(**kwargs)
+                self._filename = filename
+            def __repr__(self):
+                return f'ManifestDb[{self._filename}]'
 
-        # metadata: det_id.h5
-        _scheme = metadata.ManifestScheme() \
-                  .add_data_field('loader') \
-                  .add_range_match('obs:timestamp')
-        det_id_db = metadata.ManifestDb(scheme=_scheme)
-        det_id_db.add_entry(
-            {'obs:timestamp': [0, 2e9], 'loader': 'unittest_loader'},
-            'det_id.h5')
+        def _db_single_dataset(filename):
+            # Many dbs map all obs to a single file, based on
+            # timestamp I guess.
+            scheme = metadata.ManifestScheme() \
+                             .add_data_field('loader') \
+                             .add_range_match('obs:timestamp')
+            db = _ManifestDb(scheme=scheme, filename=filename)
+            db.add_entry(
+                {'obs:timestamp': [0, 2e9], 'loader': 'unittest_loader'},
+                filename)
+            return db
 
-        # metadata: det_param.h5
-        _scheme = metadata.ManifestScheme() \
-                  .add_data_field('loader') \
-                  .add_range_match('obs:timestamp')
-        det_par_db = metadata.ManifestDb(scheme=_scheme)
-        det_par_db.add_entry(
-            {'obs:timestamp': [0, 2e9], 'loader': 'unittest_loader'},
-            'det_param.h5')
+        def _db_multi_dataset(filename, detsets=['neard', 'fard']):
+            # ... while others are to a single file but by detset, using dataset=detset data arg.
+            scheme = metadata.ManifestScheme() \
+                      .add_data_field('dataset') \
+                      .add_exact_match('dets:detset') \
+                      .add_data_field('loader')
+            db = _ManifestDb(scheme=scheme, filename=filename)
+            for detset in detsets:
+                db.add_entry(
+                    {'loader': 'unittest_loader',
+                     'dataset': detset,
+                     'dets:detset': detset,
+                     }, filename)
+            return db
 
-        # metadata: abscals.h5
+        # metadata: abscal.h5
         _scheme = metadata.ManifestScheme() \
                   .add_range_match('obs:timestamp') \
                   .add_data_field('loader') \
                   .add_data_field('dataset') \
                   .add_data_field('dets:band')
-        abscal_db = metadata.ManifestDb(scheme=_scheme)
+        abscal_db = _ManifestDb(scheme=_scheme, filename='abscal.h5')
         for band in ['f090', 'f150']:
             abscal_db.add_entry(
                 {'obs:timestamp': [0, 2e9],
@@ -345,7 +455,7 @@ class DatasetSim:
                   .add_data_field('loader') \
                   .add_data_field('frame_index', 'int') \
                   .add_data_field('dets:band')
-        flags_db = metadata.ManifestDb(scheme=_scheme)
+        flags_db = _ManifestDb(scheme=_scheme, filename='some_flags.g3')
         for frame, band in enumerate(['f090', 'f150', 'f220']):
             flags_db.add_entry(
                 {'obs:timestamp': [0, 2e9],
@@ -354,69 +464,34 @@ class DatasetSim:
                  'dets:band': band
                  }, 'some_flags.g3')
 
-        # metadata: some_detset_info.h5
-        ## This matches purely based on dets:* properties.
-        _scheme = metadata.ManifestScheme() \
-                  .add_data_field('dataset') \
-                  .add_exact_match('dets:detset') \
-                  .add_data_field('loader')
-        info_db = metadata.ManifestDb(scheme=_scheme)
-        for detset in ['neard', 'fard']:
-            info_db.add_entry(
-                {'loader': 'unittest_loader',
-                 'dataset': detset,
-                 'dets:detset': detset,
-                 }, 'some_detset_info.h5')
-
-        # metadata: detinfo_multimatch.h5
-        _scheme = metadata.ManifestScheme() \
-                  .add_data_field('dataset') \
-                  .add_exact_match('dets:detset') \
-                  .add_data_field('loader')
-        detinfo_db1 = metadata.ManifestDb(scheme=_scheme)
-        for detset in ['neard', 'fard']:
-            detinfo_db1.add_entry(
-                {'loader': 'unittest_loader',
-                 'dataset': detset,
-                 'dets:detset': detset,
-                 }, 'detinfo_multimatch.h5')
-
-        # metadata: detinfo_nomatch.h5
-        _scheme = metadata.ManifestScheme() \
-                  .add_data_field('dataset') \
-                  .add_exact_match('dets:detset') \
-                  .add_data_field('loader')
-        detinfo_db2 = metadata.ManifestDb(scheme=_scheme)
-        for detset in ['neard', 'fard']:
-            detinfo_db2.add_entry(
-                {'loader': 'unittest_loader',
-                 'dataset': detset,
-                 'dets:detset': detset,
-                 }, 'detinfo_nomatch.h5')
-
         # metadata into context.
         ctx['metadata'] = [
-            {'db': bands_db,
-             'det_info': True,
-            },
-            {'db': det_id_db,
-             'det_info': True,
-            },
+            {'db': _db_single_dataset('bands.h5'),
+             'det_info': True},
+            {'db': _db_single_dataset('det_id.h5'),
+             'det_info': True},
             {'db': abscal_db,
-             'name': 'cal&abscal'},
+             'name': 'cal&abscal',
+             'on_missing': on_missing},
             {'db': flags_db,
-             'name': 'flags&'},
-            {'db': info_db,
-             'name': 'focal_plane'},
-            {'db': det_par_db,
-             'det_info': True,
-            },
-            {'db': detinfo_db1,
-             'det_info': True,
-            },
-            {'db': detinfo_db2,
-             'det_info': True,
-            },
+             'name': 'flags&',
+             'on_missing': on_missing},
+            {'db': _db_multi_dataset('some_detset_info.h5'),
+             'name': 'focal_plane',
+             'on_missing': on_missing},
+            {'db': _db_multi_dataset('more_detset_info.h5'),
+             'label': 'focal_plane2',
+             'unpack': [
+                 'focal_plane2',
+                 'XY&AB',
+                 ],
+             'on_missing': on_missing},
+            {'db': _db_single_dataset('det_param.h5'),
+             'det_info': True},
+            {'db': _db_multi_dataset('detinfo_multimatch.h5'),
+             'det_info': True},
+            {'db': _db_multi_dataset('detinfo_nomatch.h5'),
+             'det_info': True},
         ]
 
         if with_bad_metadata:
@@ -426,7 +501,52 @@ class DatasetSim:
                 'name': 'important_info&',
             })
 
+        if with_incomplete_det_info:
+            # det_info -- incomplete dataset; for key obs only a few
+            ## dets will have field defined.
+            ctx['metadata'].insert(0, {
+                'db': _db_single_dataset('incomplete_det_info.h5'),
+                'det_info': True,
+                'on_missing': with_incomplete_det_info,
+                'label': 'newcal',
+            })
+
+            if with_dependent_metadata:
+                # metadata -- loads in association with det_info
+                # fields defined through incomplete_det_info.
+                ctx['metadata'].insert(1, {
+                    'db': _db_single_dataset('dependent_metadata.h5'),
+                    'on_missing': with_dependent_metadata,
+                    'name': 'depends',
+                })
+
+        if with_incomplete_metadata:
+            # metadata: incomplete_metadata.h5
+            ## This is an incomplete dataset.
+            _scheme = metadata.ManifestScheme() \
+                      .add_exact_match('obs:obs_id') \
+                      .add_data_field('loader')
+            bad_meta_db = metadata.ManifestDb(scheme=_scheme)
+            bad_meta_db.add_entry(
+                {'obs:obs_id': 'obs_number_12', 'loader': 'unittest_loader'},
+                 'incomplete_metadata.h5'
+            )
+            bad_meta_db.add_entry(
+                {'obs:obs_id': 'obs_number_13', 'loader': 'unittest_loader'},
+                 'incomplete_metadata.h5'
+            )
+            # This entry has incomplete metadata, which will cause a
+            # failure, a trim, or omission of the product depending on
+            # the value of with_incomplete_metadata.
+            ctx['metadata'].insert(0, {
+                'db': bad_meta_db,
+                'name': 'othercal',
+                'on_missing': with_incomplete_metadata,
+                'label': 'othercal',
+            })
+
         return ctx
+
 
     def metadata_loader(self, kw):
         # For Superloader.
@@ -487,6 +607,17 @@ class DatasetSim:
                 rs.append({'dets:readout_id': row['readout_id'],
                            'x': 100., 'y': 102.})
             return rs
+        elif filename == 'more_detset_info.h5':
+            # Here, match against det_id and makes sure there's only
+            # one NO_MATCH entry _per detset_.  AB will be 0 unless
+            # NO_MATCH, in which case it's the len of the detset name.
+            rs = metadata.ResultSet(['dets:det_id', 'AB'])
+            for row in self.dets.subset(rows=self.dets['detset'] == kw['dets:detset']):
+                rs.append({'dets:det_id': row['det_id'],
+                           'AB': len(kw['dets:detset']) * (row['det_id'] == 'NO_MATCH')})
+            while sum(rs['dets:det_id'] == 'NO_MATCH') > 1:
+                rs.rows.pop(list(rs['dets:det_id']).index('NO_MATCH'))
+            return rs
         elif filename == 'detinfo_multimatch.h5':
             # This is to test whether det_info fields (bp_code) can be
             # populated based on matching against multiple other
@@ -510,8 +641,36 @@ class DatasetSim:
                 rs.append({'dets:det_id': row['det_id'],
                            'dets:farness': farness})
             return rs
-        else:
-            raise ValueError(f'metadata request for "{filename}"')
+        elif filename == 'incomplete_det_info.h5':
+            rs = metadata.ResultSet(['dets:readout_id', 'dets:newcal'])
+            for row in self.dets.subset(rows=[0,1,2]):
+                rs.append({'dets:readout_id': row['readout_id'],
+                           'dets:newcal':20})
+            return rs
+        elif filename == 'dependent_metadata.h5':
+            rs = metadata.ResultSet(['dets:newcal', 'newcal_number'])
+            rs.append({'dets:newcal': 20,
+                       'newcal_number': 'twenty'})
+            return rs
+        elif filename == 'incomplete_metadata.h5':
+            rs = metadata.ResultSet([
+                'obs:obs_id',
+                'dets:readout_id',
+                'othercal'
+            ])
+            if kw['obs:obs_id']=='obs_number_12':
+                for row in self.dets.subset(rows=[0,1,2]):
+                    rs.append({'obs:obs_id': 'obs_number_12',
+                               'dets:readout_id': row['readout_id'],
+                               'othercal':40})
+            elif kw['obs:obs_id'] =='obs_number_13':
+                for row in self.dets:
+                    rs.append({'obs:obs_id': 'obs_number_13',
+                               'dets:readout_id': row['readout_id'],
+                               'othercal':40})
+            return rs
+
+        raise ValueError(f'metadata request for "{filename}"')
 
     def tod_loader(self, obsfiledb, obs_id, dets=None, prefix=None,
                    samples=None, no_signal=None,

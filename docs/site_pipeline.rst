@@ -227,6 +227,73 @@ entries mater.
           det_info: true
           multi: true
 
+update_det_match
+------------------
+
+The ``update_det_match`` script will run the ``det_match`` module on any new
+detsets with available calibration metadata. It loads smurf and resonator
+information from the AxisManager metadata, and matches resonators against a
+solution file in the site-pipeline-configs.
+
+To run, this script requires a config file described below. If run without the
+``--all`` flag, it will only run one detset at a time.  If run with the
+``--all`` flag, will continue running until all detsets have been mantched.
+
+.. argparse::
+   :module: sotodlib.site_pipeline.update_det_match
+   :func: make_parser
+
+Generated results
+```````````````````
+This generates the following data in the specified ``results`` directory:
+
+ - A match file, with the path ``<results_path>/matches/<detset>.h5`` is written
+   for every detset.
+ - The file ``<results_path>/assignment.sqlite`` is a manifestdb, that contains
+   the mapping from readout-id to detector-id. This is compatible with
+   the ``det_info_wafer`` and ``focal_plane`` metadata.
+ - The ``<results_path>/det_match.sqlite`` file, that contains the
+   ``det_match.Resonator`` data from the match for each resonator.
+
+Configuration
+`````````````````
+This script takes in a config yaml file, which corresponds directly to the
+``UpdateDetMatchesConfig`` class (see docs below).
+
+For example, this can run simply with the config file:
+
+.. code-block:: yaml
+
+  results_path: /path/to/results
+  context_path: /path/to/context.yaml
+
+Note that by default, this will run a scan of frequency offsets between the
+solution and the resonator metadata to find the freq-offset with the best
+match. To disable this, you can run a config file like the following:
+
+.. code-block:: yaml
+
+  results_path: /path/to/results
+  context_path: /path/to/context.yaml
+  freq_offset_range_args: None
+
+Below is a more complex config used for SATp1 matching:
+
+.. code-block:: yaml
+
+  results_path: /so/metadata/satp1/manifests/det_match/satp1_det_match_240220m
+  context_path: /so/metadata/satp1/contexts/smurf_detcal.yaml
+  show_pb: False
+  freq_offset_range_args: NULL
+  apply_solution_pointing: False
+  solution_type: resonator_set
+  resonator_set_dir: /so/metadata/satp1/ancillary/detmatch_solutions/satp1_detmatch_solutions_240219r1
+  match_pars:
+    freq_width: 0.2
+
+Below is the full docs of the configuration class.
+
+.. autoclass:: sotodlib.site_pipeline.update_det_match.UpdateDetMatchesConfig
 
 analyze-bright-ptsrc
 --------------------
@@ -615,7 +682,7 @@ Here's an annotated example:
     cal_keys: ['abscal', 'relcal']
     pointing_keys: ['boresight_offset']
 
-  # Mapmaking parameters
+  # mapmaking parameters
   mapmaking:
     force_source: Uranus
     res:

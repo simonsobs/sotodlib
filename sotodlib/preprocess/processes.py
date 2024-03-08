@@ -27,8 +27,15 @@ class Detrend(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.detrend_tod
     """
     name = "detrend"
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+    
     def process(self, aman, proc_aman):
-        tod_ops.detrend_tod(aman, **self.process_cfgs)
+        tod_ops.detrend_tod(aman, signal_name=self.signal,
+                            **self.process_cfgs)
 
 class DetBiasFlags(_Preprocess):
     """
@@ -52,9 +59,13 @@ class DetBiasFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("det_bias_flags", dbc_aman)
 
-    def select(self, meta):
-        keep = ~meta.preprocess.det_bias_flags.det_bias_flags
-        meta.restrict("dets", meta.dets.vals[keep])
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~proc_aman.det_bias_flags.det_bias_flags
+        meta.restrict("dets", meta.dets.vals[has_all_cut(keep)])
         return meta
 
 class Trends(_Preprocess):
@@ -64,16 +75,31 @@ class Trends(_Preprocess):
     Saves results in proc_aman under the "trend" field. 
 
     Data selection can have key "kind" equal to "any" or "all."
+
+     Example config block::
+
+        - name : "trends"
+          signal: "signal" # optional
+          calc:
+            max_trend: 2.5
+            n_pieces: 10
+          save: True
+          select:
+            kind: "any"
     
     .. autofunction:: sotodlib.tod_ops.flags.get_trending_flags
     """
     name = "trends"
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
     
     def calc_and_save(self, aman, proc_aman):
-        trend_cut, trend_aman = tod_ops.flags.get_trending_flags(
-            aman, merge=False, full_output=True, 
-            **self.calc_cfgs
-        )
+        _, trend_aman = tod_ops.flags.get_trending_flags(
+            aman, merge=False, full_output=True,
+            signal=aman[self.signal], **self.calc_cfgs)
         aman.wrap("trends", trend_aman)
         self.save(proc_aman, trend_aman)
     
@@ -83,13 +109,15 @@ class Trends(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("trends", trend_aman)
     
-    def select(self, meta):
+    def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
             return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
         if self.select_cfgs["kind"] == "any":
-            keep = ~has_any_cuts(meta.preprocess.trends.trend_flags)
+            keep = ~has_any_cuts(proc_aman.trends.trend_flags)
         elif self.select_cfgs == "all":
-            keep = ~has_all_cut(meta.preprocess.trends.trend_flags)
+            keep = ~has_all_cut(proc_aman.trends.trend_flags)
         else:
             raise ValueError(f"Entry '{self.select_cfgs['kind']}' not"
                                 "understood. Expect 'any' or 'all'")
@@ -105,13 +133,31 @@ class GlitchDetection(_Preprocess):
     Data section should define a glitch significant "sig_glitch" and a maximum
     number of glitches "max_n_glitch."
 
+    Example configuration block::
+        
+      - name: "glitches"
+        signal: "hwpss_remove"
+        calc:
+          t_glitch: 0.00001
+          buffer: 10
+          hp_fc: 1
+          n_sig: 10
+        save: True
+        select:
+          max_n_glitch: 10
+
     .. autofunction:: sotodlib.tod_ops.flags.get_glitch_flags
     """
     name = "glitches"
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
     
     def calc_and_save(self, aman, proc_aman):
         glitch_cut, glitch_aman = tod_ops.flags.get_glitch_flags(
-            aman, merge=False, full_output=True,
+            aman[self.signal], merge=False, full_output=True,
             **self.calc_cfgs
         ) 
         aman.wrap("glitches", glitch_aman)
@@ -123,42 +169,159 @@ class GlitchDetection(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("glitches", glitch_aman)
  
-    def select(self, meta):
+    def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
             return meta
-        
+        if proc_aman is None:
+            proc_aman = meta.preprocess
         flag = sparse_to_ranges_matrix(
-            meta.preprocess.glitches.glitch_detection > self.select_cfgs["sig_glitch"]
+            proc_aman.glitches.glitch_detection > self.select_cfgs["sig_glitch"]
         )
         n_cut = count_cuts(flag)
         keep = n_cut <= self.select_cfgs["max_n_glitch"]
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
+
+class FixJumps(_Preprocess):
+    """
+    Repairs the jump heights given a set of jump flags and heights.
+
+    Example config block::
+
+      - name: "fix_jumps"
+        signal: "signal" # optional
+        process:
+        jumps_aman: "jumps_2pi"
+
+    .. autofunction:: sotodlib.tod_ops.jumps.jumpfix_subtract_heights
+    """
+    name = "fix_jumps"
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman):
+        field = self.process_cfgs['jumps_aman']
+        aman[self.signal] = tod_ops.jumps.jumpfix_subtract_heights(
+            aman[self.signal], proc_aman[field].jump_flag.mask(),
+            inplace=True, heights=proc_aman[field].jump_heights)
+
+
+class Jumps(_Preprocess):
+    """Run generic jump finding and fixing algorithm.
     
+    calc_cfgs should have 'function' defined as one of 
+    'find_jumps', 'twopi_jumps' or 'slow_jumps'. Any additional configs to the
+    jump function goes in 'jump_configs'. 
+
+    Saves results in proc_aman under the "jumps" field.
+
+    Data section should define a maximum number of jumps "max_n_jumps".
+
+    Example config block::
+
+      - name: "jumps"
+        signal: "hwpss_remove"
+        calc:
+          function: "twopi_jumps"
+        save:
+          jumps_name: "jumps_2pi"
+
+    .. autofunction:: sotodlib.tod_ops.jumps.find_jumps
+    """
+
+    name = "jumps"
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        function = self.calc_cfgs.get("function", "find_jumps")
+        cfgs = self.calc_cfgs.get('jump_configs', {})
+
+        if function == 'find_jumps':
+            func = tod_ops.jumps.find_jumps
+        elif function == 'twopi_jumps':
+            func = tod_ops.jumps.twopi_jumps
+        elif function == 'slow_jumps':
+            func = tod_ops.jumps.slow_jumps
+        else:
+            raise ValueError("function must be 'find_jumps', 'twopi_jumps' or" 
+                            f"'slow_jumps'. Received {function}")
+
+        jumps, heights = func(aman, merge=False, fix=False,
+                              signal=aman[self.signal], **cfgs)
+        jump_aman = tod_ops.jumps.jumps_aman(aman, jumps, heights)
+        self.save(proc_aman, jump_aman)
+
+    def save(self, proc_aman, jump_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            name = self.save_cfgs.get('jumps_name', 'jumps')
+            proc_aman.wrap(name, jump_aman)
+
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        name = self.save_cfgs.get('jumps_name', 'jumps')
+
+        n_cut = count_cuts(proc_aman[name].jump_flag)
+        keep = n_cut <= self.select_cfgs["max_n_jumps"]
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+
 class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the AxisManager under the
-    "psd" field. All process configs goes to `calc_psd`
+    "psd" field.
+
+    Example config block::
+
+      - "name : "psd"
+        "signal: "signal" # optional
+        "wrap": "psd" # optional
+        "process":
+          "psd_cfgs": # optional, kwargs to scipy.welch
+            "nperseg": 1024
+          "wrap_name": "psd" # optional
+        "calc": True
+        "save": True
 
     .. autofunction:: sotodlib.tod_ops.fft_ops.calc_psd
     """
     name = "psd"
     
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+        self.wrap = step_cfgs.get('wrap', 'psd')
+
+        super().__init__(step_cfgs)
+        
+
     def process(self, aman, proc_aman):
-        freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, **self.process_cfgs)
+        psd_cfgs = self.process_cfgs.get('psd_cfgs', {})
+        freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
+                                              **psd_cfgs)
         fft_aman = core.AxisManager(
             aman.dets, 
             core.OffsetAxis("fsamps",len(freqs))
         )
         fft_aman.wrap("freqs", freqs, [(0,"fsamps")])
         fft_aman.wrap("Pxx", Pxx, [(0,"dets"),(1,"fsamps")])
-        aman.wrap("psd", fft_aman)
+        aman.wrap(self.wrap, fft_aman)
 
     def calc_and_save(self, aman, proc_aman):
-        self.save(proc_aman, aman.psd)
-    
+        self.save(proc_aman, aman[self.wrap])
+
     def save(self, proc_aman, fft_aman):
-        if self.save_cfgs:
-            proc_aman.wrap("psd", fft_aman)
+        if not(self.save_cfgs is None):
+            proc_aman.wrap(self.wrap, fft_aman)
 
 class Noise(_Preprocess):
     """Estimate the white noise levels in the data. Assumes the PSD has been
@@ -173,28 +336,57 @@ class Noise(_Preprocess):
     name = "noise"
     
     def calc_and_save(self, aman, proc_aman):
-        if "psd" not in aman:
-            raise ValueError("PSD is not saved in AxisManager")
+        if self.calc_cfgs['signal'] is None:
+            if "psd" not in aman:
+                raise ValueError("PSD is not saved in AxisManager")
+            psd = aman.psd
+        else:
+            if self.calc_cfgs['signal'] not in aman:
+                raise ValueError(f"{self.calc_cfgs['signal']} is not saved in AxisManager")
+            psd = aman[self.calc_cfgs['signal']]
+        
+        if self.calc_cfgs is None:
+            self.calc_cfgs = {}
+            self.calc_cfgs['fit'] = False
+            self.calc_cfgs['signal'] = None 
+        
+        if self.calc_cfgs['fit']:
+            noise = tod_ops.fft_ops.fit_noise_model(aman, pxx=psd.Pxx, 
+                                                    f=psd.freqs, 
+                                                    merge_fit=True,
+                                                    **self.calc_cfgs['noise_args'])
+        else:
+            wn = tod_ops.fft_ops.calc_wn(aman, pxx=psd.Pxx,
+                                         freqs=psd.freqs,
+                                         **self.calc_cfgs['noise_args'])
+            noise = core.AxisManager(aman.dets)
+            noise.wrap("white_noise", wn, [(0,"dets")])
+            if self.calc_cfgs['wrap_name'] is None:
+                aman.wrap("noise", noise)
+            else:
+                aman.wrap(self.calc_cfgs['wrap_name'], noise)
 
-        wn = tod_ops.fft_ops.calc_wn(
-            aman, 
-            pxx=aman.psd.Pxx, 
-            freqs=aman.psd.freqs, 
-            **self.calc_cfgs
-        )
-        noise = core.AxisManager(aman.dets)
-        noise.wrap("white_noise", wn, [(0,"dets")])
-        aman.wrap("noise", noise)
         self.save(proc_aman, noise)
     
     def save(self, proc_aman, noise):
-        if self.save_cfgs:
-            proc_aman.wrap("noise", noise)
+        if not(self.save_cfgs is None):
+            if self.save_cfgs['wrap_name'] is None:
+                proc_aman.wrap("noise", noise)
+            else:
+                proc_aman.wrap(self.save_cfgs['wrap_name'], noise)
 
-    def select(self, meta):
+    def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
             return meta
-        keep = meta.preprocess.noise.white_noise <= self.select_cfgs["max_noise"]
+
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+
+        if self.select_cfgs['name'] is None:
+            keep = proc_aman.noise.white_noise <= self.select_cfgs["max_noise"]
+        else:
+            keep = proc_aman[self.select_cfgs['name']].white_noise <= self.select_cfgs["max_noise"] 
+            
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
     
@@ -220,14 +412,34 @@ class Calibrate(_Preprocess):
 class EstimateHWPSS(_Preprocess):
     """
     Builds a HWPSS Template. Calc configs go to ``hwpss_model``.
-    Results of fitting saved if field specified by calc["name"]
+    Results of fitting saved if field specified by calc["name"].
+
+    Example config block::
+
+      - "name : "estimate_hwpss"
+        "signal: "signal" # optional
+        "calc":
+          "hwpss_stats_name": "hwpss_stats"
+        "save": True
 
     .. autofunction:: sotodlib.hwp.hwp.get_hwpss
     """
     name = "estimate_hwpss"
 
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
-        hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
+        _prefilt = (self.signal == 'signal')
+        if not _prefilt:
+            print("WARNING: apply_prefilt defaulting to False because " +
+                  f"{self.signal} != 'signal'.")
+        hwpss_stats = hwp.get_hwpss(aman,
+                                    signal=aman[self.signal],
+                                    apply_prefilt=_prefilt,
+                                    **self.calc_cfgs)
         self.save(proc_aman, hwpss_stats)
 
     def save(self, proc_aman, hwpss_stats):
@@ -294,29 +506,33 @@ class EstimateAzSS(_Preprocess):
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
 
+    Example configuration block::
+
+      - name: "glitchfill"
+        signal: "hwpss_remove"
+        flag_aman: "jumps_2pi"
+        flag: "jump_flag"
+        process:
+          nbuf: 10
+          use_pca: False
+          modes: 1
+
     .. autofunction:: sotodlib.tod_ops.gapfill.fill_glitches
     """
     name = "glitchfill"
 
-    def process(self, aman):
-        pcfgs = np.fromiter(self.process_cfgs.keys(), dtype='U16')
-        if 'glitch_flags' in pcfgs:
-            flags = aman.flags[self.process_cfgs["glitch_flags"]]
-            pcfgs = np.delete(pcfgs, np.where(pcfgs == 'glitch_flags'))
-        else:
-            flags = None
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+        self.flag_aman = step_cfgs.get('flag_aman', 'glitches')
+        self.flag = step_cfgs.get('flag', 'glitch_flags')
 
-        if 'signal' in pcfgs:
-            signal = aman[self.process_cfgs["signal"]]
-            pcfgs = np.delete(pcfgs, np.where(pcfgs == 'signal'))
-        else:
-            signal = None
+        super().__init__(step_cfgs)
 
-        args = {}
-        for pcfg in pcfgs:
-            args[pcfg] = self.process_cfgs[pcfg]
-
-        tod_ops.gapfill.fill_glitches(aman, signal=signal, glitch_flags=flags, **args)
+    def process(self, aman, proc_aman):
+        tod_ops.gapfill.fill_glitches(
+            aman, signal=aman[self.signal],
+            glitch_flags=proc_aman[self.flag_aman][self.flag],
+            **self.process_cfgs)
 
 
 class FlagTurnarounds(_Preprocess):
@@ -369,19 +585,21 @@ class SubPolyf(_Preprocess):
     def process(self, aman, proc_aman):
         tod_ops.sub_polyf.subscan_polyfilter(aman, **self.process_cfgs)
 
-_Preprocess.register(Trends.name, Trends)
-_Preprocess.register(FFTTrim.name, FFTTrim)
-_Preprocess.register(Detrend.name, Detrend)
-_Preprocess.register(GlitchDetection.name, GlitchDetection)
-_Preprocess.register(PSDCalc.name, PSDCalc)
-_Preprocess.register(Noise.name, Noise)
-_Preprocess.register(Calibrate.name, Calibrate)
-_Preprocess.register(EstimateHWPSS.name, EstimateHWPSS)
-_Preprocess.register(SubtractHWPSS.name, SubtractHWPSS)
-_Preprocess.register(Apodize.name, Apodize)
-_Preprocess.register(Demodulate.name, Demodulate)
-_Preprocess.register(EstimateAzSS.name, EstimateAzSS)
-_Preprocess.register(GlitchFill.name, GlitchFill)
-_Preprocess.register(FlagTurnarounds.name, FlagTurnarounds)
-_Preprocess.register(SubPolyf.name, SubPolyf)
-_Preprocess.register(DetBiasFlags.name, DetBiasFlags)
+_Preprocess.register(Trends)
+_Preprocess.register(FFTTrim)
+_Preprocess.register(Detrend)
+_Preprocess.register(GlitchDetection)
+_Preprocess.register(Jumps)
+_Preprocess.register(FixJumps)
+_Preprocess.register(PSDCalc)
+_Preprocess.register(Noise)
+_Preprocess.register(Calibrate)
+_Preprocess.register(EstimateHWPSS)
+_Preprocess.register(SubtractHWPSS)
+_Preprocess.register(Apodize)
+_Preprocess.register(Demodulate)
+_Preprocess.register(EstimateAzSS)
+_Preprocess.register(GlitchFill)
+_Preprocess.register(FlagTurnarounds)
+_Preprocess.register(SubPolyf)
+_Preprocess.register(DetBiasFlags)

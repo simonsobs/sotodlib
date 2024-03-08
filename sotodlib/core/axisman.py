@@ -759,14 +759,22 @@ class AxisManager:
             if isinstance(v, AxisManager):
                 dest._fields[k] = v.copy()
                 if axis_name in v._axes:
-                    dest._fields[k].restrict(axis_name, selector)
+                    dest._fields[k].restrict(
+                        axis_name, 
+                        selector, 
+                        ## copies of axes made above
+                        in_place=True 
+                    )
             elif np.isscalar(v) or v is None:
                 dest._fields[k] = v
             else:
                 sslice = [sl if n == axis_name else slice(None)
                           for n in dest._assignments[k]]
                 sslice = dest._broadcast_selector(sslice)
-                dest._fields[k] = v[sslice]
+                if in_place:
+                    dest._fields[k] = v[sslice]
+                else:
+                    dest._fields[k] = v[sslice].copy()
         dest._axes[axis_name] = new_ax
         return dest
 
@@ -821,7 +829,7 @@ class AxisManager:
             self._assignments.update(aman._assignments)
         return self
 
-    def save(self, dest, group=None, overwrite=False):
+    def save(self, dest, group=None, overwrite=False, compression=None):
         """Write this AxisManager data to an HDF5 group.  This is an
         experimental feature primarily intended to assist with
         debugging.  The schema is subject to change, and it's possible
@@ -835,6 +843,9 @@ class AxisManager:
             dest).
           overwrite (bool): If True, remove any existing thing at the
             specified address before writing there.
+          compression (str or None): Compression filter to apply. E.g.
+            'gzip'. This string is passed directly to HDF5 dataset
+            routines.
 
         Notes:
           If dest is a string, it is taken to be an HDF5 filename and
@@ -868,7 +879,7 @@ class AxisManager:
 
         """
         from .axisman_io import _save_axisman
-        return _save_axisman(self, dest, group=group, overwrite=overwrite)
+        return _save_axisman(self, dest, group=group, overwrite=overwrite, compression=compression)
 
     @classmethod
     def load(cls, src, group=None):
