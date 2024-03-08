@@ -331,50 +331,70 @@ class Noise(_Preprocess):
     Saves the results into the "noise" field of proc_aman. 
 
     Can run data selection of a "max_noise" value. 
-    
-    .. autofunction:: sotodlib.tod_ops.fft_ops.calc_wn
+
+    Example config block::
+
+     - name: "noise"
+       calc:
+         low_f: 5
+         high_f: 10
+       save: True
+       select:
+         max_noise: 2000
+
+    If ``fit: True`` this operation will run
+    :func:`sotodlib.tod_ops.fft_ops.fit_noise_model`, else it will run
+    :func:`sotodlib.tod_ops.fft_ops.calc_wn`.
+
     """
     name = "noise"
-    
+
+    def __init__(self, step_cfgs):
+        self.psd = step_cfgs.get('psd', 'psd')
+        self.fit = step_cfgs.get('fit', False)
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
-        if self.calc_cfgs['signal'] is None:
-            if "psd" not in aman:
-                raise ValueError("PSD is not saved in AxisManager")
-            psd = aman.psd
-        else:
-            if self.calc_cfgs['signal'] not in aman:
-                raise ValueError(f"{self.calc_cfgs['signal']} is not saved in AxisManager")
-            psd = aman[self.calc_cfgs['signal']]
+        if self.psd not in aman:
+            raise ValueError("PSD is not saved in AxisManager")
+        psd = aman[self.psd]
         
         if self.calc_cfgs is None:
             self.calc_cfgs = {}
-            self.calc_cfgs['fit'] = False
-            self.calc_cfgs['signal'] = None 
         
-        if self.calc_cfgs['fit']:
+        if self.fit:
             noise = tod_ops.fft_ops.fit_noise_model(aman, pxx=psd.Pxx, 
                                                     f=psd.freqs, 
                                                     merge_fit=True,
-                                                    **self.calc_cfgs['noise_args'])
+                                                    **self.calc_cfgs)
         else:
             wn = tod_ops.fft_ops.calc_wn(aman, pxx=psd.Pxx,
                                          freqs=psd.freqs,
-                                         **self.calc_cfgs['noise_args'])
+                                         **self.calc_cfgs)
             noise = core.AxisManager(aman.dets)
             noise.wrap("white_noise", wn, [(0,"dets")])
-            if self.calc_cfgs['wrap_name'] is None:
-                aman.wrap("noise", noise)
-            else:
-                aman.wrap(self.calc_cfgs['wrap_name'], noise)
+
+        if self.calc_cfgs.get('wrap_name') is None:
+            aman.wrap("noise", noise)
+        else:
+            aman.wrap(self.calc_cfgs['wrap_name'], noise)
 
         self.save(proc_aman, noise)
     
     def save(self, proc_aman, noise):
-        if not(self.save_cfgs is None):
-            if self.save_cfgs['wrap_name'] is None:
+        if self.save_cfgs is None:
+            return
+
+        if isinstance(self.save_cfgs, bool):
+            if self.save_cfgs:
                 proc_aman.wrap("noise", noise)
-            else:
-                proc_aman.wrap(self.save_cfgs['wrap_name'], noise)
+                return
+
+        if self.save_cfgs.get('wrap_name') is None:
+            proc_aman.wrap("noise", noise)
+        else:
+            proc_aman.wrap(self.save_cfgs['wrap_name'], noise)
 
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
@@ -383,7 +403,7 @@ class Noise(_Preprocess):
         if proc_aman is None:
             proc_aman = meta.preprocess
 
-        if self.select_cfgs['name'] is None:
+        if self.select_cfgs.get('name') is None:
             keep = proc_aman.noise.white_noise <= self.select_cfgs["max_noise"]
         else:
             keep = proc_aman[self.select_cfgs['name']].white_noise <= self.select_cfgs["max_noise"] 
