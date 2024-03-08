@@ -1,4 +1,5 @@
 import numpy as np
+from operator import attrgetter
 
 import sotodlib.core as core
 import sotodlib.tod_ops as tod_ops
@@ -398,13 +399,38 @@ class Calibrate(_Preprocess):
     1. "single_value" : multiplies entire signal by the single value
     process["val"]
 
-    2. to be expanded
+    2. "array" : takes the dot product of the array with the entire signal. The
+    array is specified by ``process["cal_array"]``, which must exist in
+    ``aman``. The array can be nested within additional ``AxisManager``
+    objects, for instance ``det_cal.phase_to_pW``.
+
+    Example config block(s)::
+
+      - name: "calibrate"
+        process:
+          kind: "single_value"
+          # phase_to_pA: 9e6/(2*np.pi)
+          val: 1432394.4878270582
+      - name: "calibrate"
+        process:
+          kind: "array"
+          cal_array: "cal.array"
+
     """
     name = "calibrate"
-    
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+
     def process(self, aman, proc_aman):
         if self.process_cfgs["kind"] == "single_value":
-            aman.signal *=  self.process_cfgs["val"]
+            aman[self.signal] *= self.process_cfgs["val"]
+        elif self.process_cfgs["kind"] == "array":
+            field = self.process_cfgs["cal_array"]
+            _f = attrgetter(field)
+            aman[self.signal] = np.multiply(aman[self.signal].T, _f(aman)).T
         else:
             raise ValueError(f"Entry '{self.process_cfgs['kind']}'"
                               " not understood")
