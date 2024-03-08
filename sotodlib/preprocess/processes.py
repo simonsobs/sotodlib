@@ -370,10 +370,11 @@ class Noise(_Preprocess):
                                          **self.calc_cfgs)
             noise = core.AxisManager(aman.dets)
             noise.wrap("white_noise", wn, [(0,"dets")])
-            if self.calc_cfgs.get('wrap_name') is None:
-                aman.wrap("noise", noise)
-            else:
-                aman.wrap(self.calc_cfgs['wrap_name'], noise)
+
+        if self.calc_cfgs.get('wrap_name') is None:
+            aman.wrap("noise", noise)
+        else:
+            aman.wrap(self.calc_cfgs['wrap_name'], noise)
 
         self.save(proc_aman, noise)
     
