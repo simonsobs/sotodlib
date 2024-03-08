@@ -341,7 +341,10 @@ class Noise(_Preprocess):
        select:
          max_noise: 2000
 
-    .. autofunction:: sotodlib.tod_ops.fft_ops.calc_wn
+    If ``fit: True`` this operation will run
+    :func:`sotodlib.tod_ops.fft_ops.fit_noise_model`, else it will run
+    :func:`sotodlib.tod_ops.fft_ops.calc_wn`.
+
     """
     name = "noise"
 
