@@ -484,6 +484,7 @@ def main():
             "No template provided and unable to generate one for some reason"
         )
     optical_det_ids = template_det_ids[is_optical]
+    template_spacing = af.get_spacing(template[is_optical, :2].T)
 
     xi = np.nan + np.zeros((len(template_det_ids), len(amans)))
     eta = np.nan + np.zeros((len(template_det_ids), len(amans)))
@@ -512,11 +513,21 @@ def main():
         srt = np.argsort(det_ids[msk])
         _xi = aman[pointing_name].xi[msk][srt][mapping]
         _eta = aman[pointing_name].eta[msk][srt][mapping]
-
-        # Do an initial alignment and get weights
         fp = np.vstack((_xi, _eta))
+
+        # Kill dets that are really far from their matched det
+        # TODO: If we include an initial rotation of the template this could just be a function of template spacing
+        dist = np.linalg.norm(fp - template[template_msk, :2].T, axis=0)
+        med_dist = np.nanmedian(dist)
+        fp[:, dist > med_dist + 5 * np.nanstd(dist)] = np.nan
+        logger.info("Median distance to matched det is %f", med_dist)
+        ratio = med_dist / template_spacing
+        logger.info("Median distance to matched det is %f the template spacing", ratio)
+
+        # Try an initial alignment and get weights
         aff, sft = af.get_affine(fp, template[template_msk, :2].T)
         aligned = aff @ fp + sft[..., None]
+        aligned = fp
         if pol:
             _gamma = aman[pol_name].polang[msk][mapping]
             gscale, gsft = gamma_fit(_gamma, template[template_msk, 2])
@@ -532,8 +543,8 @@ def main():
         weights[weights < 0.95] = 0
 
         # Store weighted values
-        xi[template_msk, i] = _xi * weights
-        eta[template_msk, i] = _eta * weights
+        xi[template_msk, i] = fp[0] * weights
+        eta[template_msk, i] = fp[1] * weights
         gamma[template_msk, i] = _gamma * weights
         tot_weight[template_msk] += weights
     tot_weight[tot_weight == 0] = np.nan
