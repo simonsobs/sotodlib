@@ -141,3 +141,26 @@ def make_map(tod,
              'weighted_map': mTQU_weighted,
              'weight': wTQU}
     return output
+
+def from_map(tod, signal_map, P=None, wcs_kernel=None,
+             res=0.1 * coords.DEG,
+            cuts=None, flip_gamma=True,
+            wrap=False):
+    if P is None:
+        if wcs_kernel is None:
+            wcs_kernel = coords.get_wcs_kernel('car', 0, 0, res)
+        P = coords.P.for_tod(
+            tod=tod, wcs_kernel=wcs_kernel, cuts=cuts, comps='QU', hwp=flip_gamma)
+    
+    Tmap, Qmap, Umap = signal_map
+    dsT_sim = P.from_map(Tmap, comps='T')
+    demodQ_sim = P.from_map(enmap.enmap([Qmap, Umap]), comps='QU')
+    demodU_sim = P.from_map(enmap.enmap([Umap, -Qmap]), comps='QU')
+    
+    if wrap:
+        tod.wrap('dsT', dsT_sim, [(0, 'dets'), (1, 'samps')])
+        tod.wrap('demodQ', demodQ_sim, [(0, 'dets'), (1, 'samps')])
+        tod.wrap('demodU', demodU_sim, [(0, 'dets'), (1, 'samps')])
+        
+    return dsT_sim, demodQ_sim, demodU_sim
+    
