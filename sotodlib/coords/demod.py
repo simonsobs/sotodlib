@@ -147,7 +147,7 @@ def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=
     Generate simulated TOD with HWP from a given signal map.
 
     Args:
-        tod : an xisManager object
+        tod : an axisManager object
         signal_map: pixell.enmap.ndmap containing (Tmap, Qmap, Umap) representing the signal.
         cuts (RangesMatrix, optional): Cuts to apply to the data. Default is None.
         flip_gamma (bool, optional): Whether to flip detector coordinate. If you use the HWP, keep it `True`. Default is True.
