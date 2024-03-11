@@ -23,7 +23,7 @@ SAMPLE_FREQ_HZ = 100.
 def get_tod(sig_type='trendy', ndets=3, nsamps=1000):
     tod = core.AxisManager(
         core.LabelAxis('dets', ['det%i' % i for i in range(ndets)]),
-        core.IndexAxis('samps', nsamps)
+        core.OffsetAxis('samps', nsamps)
     )
     tod.wrap_new('signal', ('dets', 'samps'), dtype='float32')
     tod.wrap_new('timestamps', ('samps',))[:] = (

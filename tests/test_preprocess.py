@@ -72,7 +72,8 @@ class TestExpand(unittest.TestCase):
         aman.restrict( 'samps', (300,None))
         proc_aman.restrict( 'samps', (300,None))
         out = _expand( proc_aman, full)
-        assert_array_equal( out.flag1[3].ranges()[0] , [0,500] )
+        assert_array_equal( proc_aman.flag1[0].ranges()[0] , [0,500] )
+        assert_array_equal( out.flag1[3].ranges()[0] , [300,800] )
 
         ## test with a wrapped axis manager
         dummy = core.AxisManager(
@@ -85,7 +86,7 @@ class TestExpand(unittest.TestCase):
         
         ## check value mask
         self.assertTrue( len(out.valid[0].ranges()) == 0 )
-        assert_array_equal( out.valid[3].ranges(), [300,1000] )
+        assert_array_equal( out.valid[3].ranges()[0], [300,1000] )
 
         ## test with extra axis
         pain = core.AxisManager(
@@ -93,6 +94,10 @@ class TestExpand(unittest.TestCase):
         )
         pain.wrap_new('wammy', ('ouch', 'dets', 'samps'))
         proc_aman.wrap('pain', pain)
+        out = _expand( proc_aman, full)
+
+        ## test with no detectors
+        proc_aman.restrict('dets', [])
         out = _expand( proc_aman, full)
 
 
