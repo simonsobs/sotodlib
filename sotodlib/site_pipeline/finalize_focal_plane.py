@@ -146,13 +146,15 @@ def _mk_tpout(xieta):
     return tpout
 
 
-def _mk_refout(lever_arm):
+def _mk_refout(center, center_transformed):
     outdt = [
         ("x", np.float32),
         ("y", np.float32),
         ("z", np.float32),
     ]
-    refout = np.array([tuple(np.squeeze(lever_arm))], outdt)
+    refout = np.array(
+        [tuple(np.squeeze(center)), tuple(np.squeeze(center_transformed))], outdt
+    )
 
     return refout
 
@@ -579,12 +581,8 @@ def main():
         focal_plane.full_fp, focal_plane.tot_weight, focal_plane.n_aman
     )
 
-    # Compute the lever arm
-    lever_arm = np.array(op.get_focal_plane(None, x=0, y=0, pol=0, **pointing_cfg))
-
     # Compute transformation between the two nominal and measured pointing
     have_gamma = np.sum(np.isfinite(focal_plane.avg_fp[2]).astype(int)) > 10
-    print(have_gamma)
     if have_gamma:
         gamma_scale, gamma_shift = gamma_fit(
             focal_plane.template.fp[2], focal_plane.avg_fp[2]
@@ -623,6 +621,12 @@ def main():
     xieta = (shift, scale, shear, rot)
     _log_vals(shift, scale, shear, rot, ("xi", "eta", "gamma"))
 
+    # Compute the center of the arrayql
+    center = np.array(op.get_focal_plane(None, x=0, y=0, pol=0, **pointing_cfg))
+    center_transformed = np.empty_like(center)
+    center_transformed[:2] = affine @ center[:2] + np.array(shift)[:-1][..., None]
+    center_transformed[2] = scale[-1] * center[2] + shift[-1]
+
     if config.get("plot", False):
         plot_dir = config.get("plot_dir", None)
         if plot_dir is not None:
@@ -643,7 +647,7 @@ def main():
         focal_plane.template.det_ids, focal_plane.avg_fp, focal_plane.transformed
     )
     tpout = _mk_tpout(xieta)
-    refout = _mk_refout(lever_arm)
+    refout = _mk_refout(center, center_transformed)
     with h5py.File(outpath, "w") as f:
         write_dataset(fpout, f, "focal_plane", overwrite=True)
         _add_attrs(f["focal_plane"], {"measured_gamma": have_gamma})
