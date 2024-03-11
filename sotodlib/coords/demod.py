@@ -143,9 +143,7 @@ def make_map(tod,
     return output
 
 def from_map(tod, signal_map, P=None, wcs_kernel=None,
-             res=0.1 * coords.DEG,
-            cuts=None, flip_gamma=True,
-            wrap=False):
+             res=0.1 * coords.DEG, cuts=None, flip_gamma=True, wrap=False, pre_demod=False):
     if P is None:
         if wcs_kernel is None:
             wcs_kernel = coords.get_wcs_kernel('car', 0, 0, res)
@@ -157,10 +155,16 @@ def from_map(tod, signal_map, P=None, wcs_kernel=None,
     demodQ_sim = P.from_map(enmap.enmap([Qmap, Umap]), comps='QU')
     demodU_sim = P.from_map(enmap.enmap([Umap, -Qmap]), comps='QU')
     
-    if wrap:
-        tod.wrap('dsT', dsT_sim, [(0, 'dets'), (1, 'samps')])
-        tod.wrap('demodQ', demodQ_sim, [(0, 'dets'), (1, 'samps')])
-        tod.wrap('demodU', demodU_sim, [(0, 'dets'), (1, 'samps')])
-        
-    return dsT_sim, demodQ_sim, demodU_sim
+    if pre_demod is False:
+        if wrap:
+            tod.wrap('dsT', dsT_sim, [(0, 'dets'), (1, 'samps')])
+            tod.wrap('demodQ', demodQ_sim, [(0, 'dets'), (1, 'samps')])
+            tod.wrap('demodU', demodU_sim, [(0, 'dets'), (1, 'samps')])
+        return dsT_sim, demodQ_sim, demodU_sim
+    else:
+        assert 'hwp_angle' in tod._fields
+        signal_sim = dsT_sim + demodQ_sim*np.cos(4*tod.hwp_angle) + demodU_sim*np.sin(4*tod.hwp_angle)
+        if wrap:
+            tod.wrap('signal', signal_sim, [(0, 'dets'), (1, 'samps')])
+        return signal_sim
     
