@@ -1391,7 +1391,11 @@ class G3tHWP():
             self._rising_edge = np.array([])
 
     def _process_counter_overflow_glitch(self):
-        """ Treat glitches due to 32 bit internal counter overflow """
+        """
+        Treat glitches due to 32 bit internal counter overflow
+        We suspect that this is a glitch caused by the very occasional failure of the encoder counter overflow correction
+        due to latency or other problems on the pc running the encoder agent.
+        """
         idx = np.where((np.diff(self._encd_clk)>=2**32-1) & (np.diff(self._encd_clk)<2**32+1e6))[0] + 1
         if len(idx) > 0:
             logger.warning(f'{len(idx)} counter overflow glitches are found, perform correction.')
