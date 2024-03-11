@@ -1,4 +1,5 @@
 import numpy as np
+from operator import attrgetter
 
 import sotodlib.core as core
 import sotodlib.tod_ops as tod_ops
@@ -330,49 +331,69 @@ class Noise(_Preprocess):
     Saves the results into the "noise" field of proc_aman. 
 
     Can run data selection of a "max_noise" value. 
-    
-    .. autofunction:: sotodlib.tod_ops.fft_ops.calc_wn
+
+    Example config block::
+
+     - name: "noise"
+       calc:
+         low_f: 5
+         high_f: 10
+       save: True
+       select:
+         max_noise: 2000
+
+    If ``fit: True`` this operation will run
+    :func:`sotodlib.tod_ops.fft_ops.fit_noise_model`, else it will run
+    :func:`sotodlib.tod_ops.fft_ops.calc_wn`.
+
     """
     name = "noise"
-    
+
+    def __init__(self, step_cfgs):
+        self.psd = step_cfgs.get('psd', 'psd')
+        self.fit = step_cfgs.get('fit', False)
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
-        if self.calc_cfgs['signal'] is None:
-            if "psd" not in aman:
-                raise ValueError("PSD is not saved in AxisManager")
-            psd = aman.psd
-        else:
-            if self.calc_cfgs['signal'] not in aman:
-                raise ValueError(f"{self.calc_cfgs['signal']} is not saved in AxisManager")
-            psd = aman[self.calc_cfgs['signal']]
+        if self.psd not in aman:
+            raise ValueError("PSD is not saved in AxisManager")
+        psd = aman[self.psd]
         
         if self.calc_cfgs is None:
             self.calc_cfgs = {}
-            self.calc_cfgs['fit'] = False
-            self.calc_cfgs['signal'] = None 
         
-        if self.calc_cfgs['fit']:
+        if self.fit:
             calc_aman = tod_ops.fft_ops.fit_noise_model(aman, pxx=psd.Pxx, 
                                                         f=psd.freqs, 
                                                         merge_fit=True,
-                                                        **self.calc_cfgs['noise_args'])
+                                                        **self.calc_cfgs)
         else:
             wn = tod_ops.fft_ops.calc_wn(aman, pxx=psd.Pxx,
                                          freqs=psd.freqs,
-                                         **self.calc_cfgs['noise_args'])
+                                         **self.calc_cfgs)
             calc_aman = core.AxisManager(aman.dets)
             calc_aman.wrap("white_noise", wn, [(0,"dets")])
-            if self.calc_cfgs['wrap_name'] is None:
-                aman.wrap("noise", calc_aman)
-            else:
-                aman.wrap(self.calc_cfgs['wrap_name'], calc_aman)
+
+        if self.calc_cfgs.get('wrap_name') is None:
+            aman.wrap("noise", calc_aman)
+        else:
+            aman.wrap(self.calc_cfgs['wrap_name'], calc_aman)
         self.save(proc_aman, calc_aman)
     
     def save(self, proc_aman, noise):
-        if not(self.save_cfgs is None):
-            if self.save_cfgs['wrap_name'] is None:
+        if self.save_cfgs is None:
+            return
+
+        if isinstance(self.save_cfgs, bool):
+            if self.save_cfgs:
                 proc_aman.wrap("noise", noise)
-            else:
-                proc_aman.wrap(self.save_cfgs['wrap_name'], noise)
+                return
+
+        if self.save_cfgs.get('wrap_name') is None:
+            proc_aman.wrap("noise", noise)
+        else:
+            proc_aman.wrap(self.save_cfgs['wrap_name'], noise)
 
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
@@ -381,7 +402,7 @@ class Noise(_Preprocess):
         if proc_aman is None:
             proc_aman = meta.preprocess
 
-        if self.select_cfgs['name'] is None:
+        if self.select_cfgs.get('name') is None:
             keep = proc_aman.noise.white_noise <= self.select_cfgs["max_noise"]
         else:
             keep = proc_aman[self.select_cfgs['name']].white_noise <= self.select_cfgs["max_noise"] 
@@ -397,13 +418,38 @@ class Calibrate(_Preprocess):
     1. "single_value" : multiplies entire signal by the single value
     process["val"]
 
-    2. to be expanded
+    2. "array" : takes the dot product of the array with the entire signal. The
+    array is specified by ``process["cal_array"]``, which must exist in
+    ``aman``. The array can be nested within additional ``AxisManager``
+    objects, for instance ``det_cal.phase_to_pW``.
+
+    Example config block(s)::
+
+      - name: "calibrate"
+        process:
+          kind: "single_value"
+          # phase_to_pA: 9e6/(2*np.pi)
+          val: 1432394.4878270582
+      - name: "calibrate"
+        process:
+          kind: "array"
+          cal_array: "cal.array"
+
     """
     name = "calibrate"
-    
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+
     def process(self, aman, proc_aman):
         if self.process_cfgs["kind"] == "single_value":
-            aman.signal *=  self.process_cfgs["val"]
+            aman[self.signal] *= self.process_cfgs["val"]
+        elif self.process_cfgs["kind"] == "array":
+            field = self.process_cfgs["cal_array"]
+            _f = attrgetter(field)
+            aman[self.signal] = np.multiply(aman[self.signal].T, _f(aman)).T
         else:
             raise ValueError(f"Entry '{self.process_cfgs['kind']}'"
                               " not understood")

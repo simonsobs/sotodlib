@@ -13,12 +13,12 @@ from sqlalchemy import not_, or_, and_
 from typing import Optional
 
 from sotodlib.site_pipeline.monitor import Monitor
-from sotodlib.io.load_smurf import G3tSmurf, Observations, logger as default_logger
+from sotodlib.io.load_smurf import G3tSmurf, Observations, logger
 
 
 def main(config: Optional[str] = None, update_delay: float = 2, 
          from_scratch: bool = False, verbosity: int = 2,
-         index_via_actions: bool=False, logger=None):
+         index_via_actions: bool=False):
     """
     Arguments
     ---------
@@ -31,19 +31,14 @@ def main(config: Optional[str] = None, update_delay: float = 2,
         overrides update_delay
     verbosity: int
         0-3, higher numbers = more printouts
-    logger: logging.logger
-        allows passing another longer to execution functions
     index_via_actions: bool
         if True, will look through action folders to create observations, this
         will be necessary for data older than Oct 2022 but creates concurancy 
         issues on systems (like the site) running automatic deletion of level 2 
         data.
     """
-
     show_pb = True if verbosity > 1 else False
 
-    if logger is None:
-        logger = default_logger
     if verbosity == 0:
         logger.setLevel(logging.ERROR)
     elif verbosity == 1:
