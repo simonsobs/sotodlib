@@ -142,7 +142,24 @@ def make_map(tod,
              'weight': wTQU}
     return output
 
-def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, pre_demod=False):
+def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=False):
+    """
+    Generate simulated TOD with HWP from a given signal map.
+
+    Args:
+        tod : an xisManager object
+        signal_map: pixell.enmap.ndmap containing (Tmap, Qmap, Umap) representing the signal.
+        cuts (RangesMatrix, optional): Cuts to apply to the data. Default is None.
+        flip_gamma (bool, optional): Whether to flip detector coordinate. If you use the HWP, keep it `True`. Default is True.
+        wrap (bool, optional): Whether to wrap the simulated data. Default is False.
+        modulated (bool, optional): If True, return modulated signal. If False, return the demodulated signal 
+        (`dsT`, `demodQ`, and `demodU`). Default is False. 
+
+    Returns:
+        `modulate==False`: A tuple containing the TOD (np.array) of dsT, demodQ and demodU.
+        `modulate==True` : The modulated TOD (np.array)
+        
+    """
     Tmap, Qmap, Umap = signal_map
     
     P = coords.P.for_tod(tod=tod, geom=signal_map.geometry, cuts=cuts, 
@@ -151,7 +168,7 @@ def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, pre_demod=
     demodQ_sim = P.from_map(enmap.enmap([Qmap, Umap]), comps='QU')
     demodU_sim = P.from_map(enmap.enmap([Umap, -Qmap]), comps='QU')
     
-    if pre_demod is False:
+    if modulated is False:
         if wrap:
             tod.wrap('dsT', dsT_sim, [(0, 'dets'), (1, 'samps')])
             tod.wrap('demodQ', demodQ_sim, [(0, 'dets'), (1, 'samps')])
