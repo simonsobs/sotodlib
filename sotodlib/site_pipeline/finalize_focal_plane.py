@@ -1,12 +1,16 @@
 import argparse as ap
 import os
+from dataclasses import InitVar, dataclass, field
+from typing import Dict
 
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import yaml
+from numpy.typing import NDArray
 from scipy.cluster import vq
 from scipy.optimize import minimize
+from scipy.spatial import transform
 from sotodlib.coords import affine as af
 from sotodlib.coords import optics as op
 from sotodlib.core import AxisManager, Context, metadata
@@ -16,20 +20,80 @@ from sotodlib.site_pipeline import util
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
 
 
-def _avg_focalplane(xi, eta, gamma, tot_weight):
-    avg_xi = np.nansum(xi, axis=1) / tot_weight
-    avg_eta = np.nansum(eta, axis=1) / tot_weight
-    focal_plane = np.vstack((avg_xi, avg_eta))
+@dataclass
+class Template:
+    det_ids: NDArray[np.str_]  # (ndet,)
+    fp: NDArray[np.floating]  # (ndim, ndet)
+    optical: NDArray[np.bool_]  # (ndet,)
+    pointing_cfg: InitVar[Dict]
+    center: NDArray[np.floating] = field(init=False)  # (ndim, 1)
+    spacing: NDArray[np.floating] = field(init=False)  # (ndim,)
 
-    if np.any(np.isfinite(gamma)):
-        avg_gamma = np.nansum(gamma, axis=1) / tot_weight
-    else:
-        avg_gamma = np.nan + np.zeros_like(avg_xi)
+    def __post_init__(self, pointing_cfg):
+        self.center = np.array(
+            op.get_focal_plane(None, x=0, y=0, pol=0, **pointing_cfg)
+        )
+        xieta_spacing = af.get_spacing(self.fp[:2, self.optical])
+        # For gamma rather than the spacing in real space we want the difference between bins
+        # This is a rough estimate but good enough for us
+        gamma_spacing = np.percentile(np.diff(np.sort(self.fp[2])), 99.9)
+        self.spacing = np.array([xieta_spacing, xieta_spacing, gamma_spacing])
 
-    n_obs = np.sum(np.isfinite(xi).astype(int), axis=1)
+
+@dataclass
+class FocalPlane:
+    template: Template
+    n_aman: int
+    full_fp: NDArray[np.floating] = field(init=False)  # (ndim, ndet, n_aman)
+    tot_weight: NDArray[np.floating] = field(init=False)  # (ndet,)
+    avg_fp: NDArray[np.floating] = field(init=False)  # (ndim, ndet)
+    weights: NDArray[np.floating] = field(init=False)  # (ndet,)
+    transformed: NDArray[np.floating] = field(init=False)  # (ndim, ndet)
+    centers_transformed: NDArray[np.floating] = field(init=False)  # (ndim, 1)
+
+    def __post_init__(self):
+        self.full_fp = np.nan + np.empty(self.template.fp.shape + (self.n_aman,))
+        self.tot_weight = np.zeros(len(self.template.det_ids))
+        self.avg_fp = np.nan + np.empty_like(self.template.fp)
+        self.weight = np.zeros(len(self.template.det_ids))
+        self.transformed = self.template.fp.copy()
+        self.center_transformed = self.template.center.copy()
+
+    def map_to_template(self, aman):
+        _, msk, template_msk = np.intersect1d(
+            aman.det_info.det_id, self.template.det_ids, return_indices=True
+        )
+        if len(msk) != aman.dets.count:
+            logger.warning("There are matched dets not found in the template")
+        mapping = np.argsort(np.argsort(self.template.det_ids[template_msk]))
+        srt = np.argsort(aman.det_info.det_id[msk])
+        xi = aman.pointing.xi[msk][srt][mapping]
+        eta = aman.pointing.eta[msk][srt][mapping]
+        if "polarization" in aman:
+            # name of field just a placeholder for now
+            gamma = aman.polarization.polang[msk][srt][mapping]
+        elif "gamma" in aman.pointing:
+            gamma = aman.pointing.gamma[msk][srt][mapping]
+        else:
+            gamma = np.nan + np.empty(len(xi))
+        fp = np.vstack((xi, eta, gamma))
+        return fp, template_msk
+
+    def add_fp(self, i, fp, weights, template_msk):
+        self.full_fp[:, template_msk, i] = fp * weights
+        self.tot_weight[template_msk] += weights
+
+
+def _avg_focalplane(full_fp, tot_weight, n_obs):
+    tot_weight[tot_weight == 0] = np.nan
+    avg_fp = np.nansum(full_fp, axis=-1) / tot_weight
     avg_weight = tot_weight / n_obs
 
-    return focal_plane, avg_gamma, avg_weight
+    # nansum all all nans is 0, addressing that case here
+    all_nan = ~np.any(np.isfinite(full_fp).reshape((len(full_fp), -1)), axis=1)
+    avg_fp[all_nan] = np.nan
+
+    return avg_fp, avg_weight
 
 
 def _log_vals(shift, scale, shear, rot, axis):
@@ -51,14 +115,14 @@ def _log_vals(shift, scale, shear, rot, axis):
     logger.info("Rotation of the %s-%s plane is %f radians", axis[0], axis[1], rot)
 
 
-def _mk_fpout(det_id, transformed, measured, measured_gamma):
+def _mk_fpout(det_id, transformed, measured):
     outdt = [
         ("dets:det_id", det_id.dtype),
         ("xi", np.float32),
         ("eta", np.float32),
         ("gamma", np.float32),
     ]
-    fpout = np.fromiter(zip(det_id, *transformed.T), dtype=outdt, count=len(det_id))
+    fpout = np.fromiter(zip(det_id, *transformed), dtype=outdt, count=len(det_id))
 
     outdt_full = [
         ("dets:det_id", det_id.dtype),
@@ -70,7 +134,7 @@ def _mk_fpout(det_id, transformed, measured, measured_gamma):
         ("gamma_m", np.float32),
     ]
     fpfullout = np.fromiter(
-        zip(det_id, *transformed.T, *measured, measured_gamma),
+        zip(det_id, *transformed, *measured),
         dtype=outdt_full,
         count=len(det_id),
     )
@@ -97,13 +161,15 @@ def _mk_tpout(xieta):
     return tpout
 
 
-def _mk_refout(lever_arm):
+def _mk_refout(center, center_transformed):
     outdt = [
         ("x", np.float32),
         ("y", np.float32),
         ("z", np.float32),
     ]
-    refout = np.array([tuple(np.squeeze(lever_arm))], outdt)
+    refout = np.array(
+        [tuple(np.squeeze(center)), tuple(np.squeeze(center_transformed))], outdt
+    )
 
     return refout
 
@@ -203,8 +269,8 @@ def gamma_fit(src, dst):
        shift: Shift applied to scale*src
     """
 
-    def _gamma_min(scale, shift, gamma):
-        src, dst = gamma
+    def _gamma_min(pars, src, dst):
+        scale, shift = pars
         transformed = np.sin(src * scale + shift)
         diff = np.sin(dst) - transformed
 
@@ -214,7 +280,7 @@ def gamma_fit(src, dst):
     return res.x
 
 
-def _load_template(template_path, ufm):
+def _load_template(template_path, ufm, pointing_cfg):
     template_rset = read_dataset(template_path, ufm)
     det_ids = template_rset["dets:det_id"]
     template = np.column_stack(
@@ -226,7 +292,9 @@ def _load_template(template_path, ufm):
     )
     template_optical = template_rset["is_optical"]
 
-    return np.array(det_ids), template, np.array(template_optical)
+    return Template(
+        np.array(det_ids), template.T, np.array(template_optical), pointing_cfg
+    )
 
 
 def _load_ctx(config):
@@ -246,7 +314,6 @@ def _load_ctx(config):
     if "query" in _config["context"]:
         del _config["context"]["query"]
     amans = []
-    have_pol = []
     dets = {"stream_id": f"ufm_{config['ufm'].lower()}"}
     dets.update(config["context"].get("dets", {}))
     for obs_id in obs_ids:
@@ -264,28 +331,25 @@ def _load_ctx(config):
         elif "det_info" not in aman or "det_id" not in aman.det_info:
             raise ValueError(f"No detmap for {obs_id}")
         pol = pol_name in aman
-        if not pol:
+        if pol:
+            aman.move(pol_name, "polarization")
+        else:
             logger.warning("No polarization data in context")
 
         if tod_pointing_name in aman:
             _aman = aman.copy()
             _aman.move(tod_pointing_name, "pointing")
             amans.append(_aman)
-            have_pol.append(pol)
         if map_pointing_name in aman:
             _aman = aman.copy()
             _aman.move(map_pointing_name, "pointing")
             amans.append(_aman)
-            have_pol.append(pol)
         elif tod_pointing_name not in aman:
             raise ValueError(f"No pointing found in {obs_id}")
 
     return (
         amans,
         obs_ids,
-        have_pol,
-        "pointing",
-        pol_name,
         amans[0].obs_info.telescope_flavor,
         amans[0].obs_info.tube_slot,
         amans[0].det_info.wafer_slot[0],
@@ -299,12 +363,10 @@ def _load_rset_single(config):
     aman = AxisManager(pointing_aman.dets)
     aman = aman.wrap("pointing", pointing_aman)
 
-    pol = False
     if "polarization" in config["resultsets"]:
         polarization_rset = read_dataset(*config["resultsets"]["polarization"])
         polarization_aman = polarization_rset.to_axismanager(axis_key="dets:readout_id")
         aman = aman.wrap("polarization", polarization_aman)
-        pol = True
 
     det_info = AxisManager(aman.dets)
     dm_rset = read_dataset(*config["resultsets"]["detmap"])
@@ -336,7 +398,7 @@ def _load_rset_single(config):
         )
     aman.det_info.wrap("smurf", smurf)
 
-    return aman, obs_id, pol, "pointing", "polarization"
+    return aman, obs_id
 
 
 def _load_rset(config):
@@ -344,22 +406,17 @@ def _load_rset(config):
     _config = config.copy()
     obs_ids = np.array(list(obs.keys()))
     amans = [None] * len(obs_ids)
-    have_pol = [False] * len(obs_ids)
     for i, (obs_id, rsets) in enumerate(obs.items()):
         _config["resultsets"] = rsets
         _config["resultsets"]["obs_id"] = obs_id
-        aman, _, pol, *_ = _load_rset_single(_config)
+        aman, _ = _load_rset_single(_config)
         if "det_info" not in aman or "det_id" not in aman.det_info:
             raise ValueError(f"No detmap for {obs_id}")
         amans[i] = aman
-        have_pol[i] = pol
 
     return (
         amans,
         obs_ids,
-        have_pol,
-        "pointing",
-        "polarization",
         config["telescope_flavor"],
         config["tube_slot"],
         config["wafer_slot"],
@@ -382,22 +439,28 @@ def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
     return pointing_cfg
 
 
-def _restrict_inliers(aman, template):
-    focal_plane = np.column_stack((aman.pointing.xi, aman.pointing.eta))
-    inliers = np.ones(len(focal_plane), dtype=bool)
+def _restrict_inliers(aman, focal_plane):
+    # TODO: Use gamma as well
+    # Map to template
+    fp, template_msk = focal_plane.map_to_template(aman)
+    fp = fp[:2].T
+    inliers = np.ones(len(fp), dtype=bool)
 
-    cent = np.nanmedian(template[:, :2], axis=0)
-    rad_thresh = 1.05 * np.nanmax(np.linalg.norm(template[:, :2] - cent, axis=1))
+    rad_thresh = 1.05 * np.nanmax(
+        np.linalg.norm(
+            focal_plane.template.fp[:2] - focal_plane.template.center[:2], axis=0
+        )
+    )
 
     # Use kmeans to kill any ghosts
-    fp_white = vq.whiten(focal_plane[inliers])
+    fp_white = vq.whiten(fp[inliers])
     codebook, _ = vq.kmeans(fp_white, 2)
     codes, _ = vq.vq(fp_white, codebook)
 
     c0 = codes == 0
     c1 = codes == 1
-    m0 = np.median(focal_plane[inliers][c0], axis=0)
-    m1 = np.median(focal_plane[inliers][c1], axis=0)
+    m0 = np.median(fp[inliers][c0], axis=0)
+    m1 = np.median(fp[inliers][c1], axis=0)
     dist = np.linalg.norm(m0 - m1)
 
     # If centroids are too far from each other use the bigger one
@@ -409,12 +472,20 @@ def _restrict_inliers(aman, template):
         cluster = c1
 
     # Flag anything too far away from the center
-    cent = np.median(focal_plane[inliers][cluster], axis=0)
-    r = np.linalg.norm(focal_plane[inliers] - cent, axis=1)
+    cent = np.median(fp[inliers][cluster], axis=0)
+    r = np.linalg.norm(fp[inliers] - cent, axis=1)
     inliers[inliers] *= cluster * (r <= rad_thresh)
 
+    # Now kill dets that seem too far from their match
+    fp[~inliers] = np.nan
+    likelihood = af.gen_weights(fp.T, focal_plane.template.fp[:2, template_msk])
+    inliers *= likelihood > 0.95  # ~2 sigma cut
+
     # Now restrict the AxisManager
-    return aman.restrict("dets", aman.dets.vals[inliers])
+    inlier_det_ids = focal_plane.template.det_ids[template_msk][inliers]
+    return aman.restrict(
+        "dets", aman.dets.vals[np.isin(aman.det_info.det_id, inlier_det_ids)]
+    )
 
 
 def main():
@@ -430,13 +501,9 @@ def main():
 
     # Load data
     if "context" in config:
-        amans, obs_ids, have_pol, pointing_name, pol_name, tel, ot, ws = _load_ctx(
-            config
-        )
+        amans, obs_ids, tel, ot, ws = _load_ctx(config)
     elif "resultsets" in config:
-        amans, obs_ids, have_pol, pointing_name, pol_name, tel, ot, ws = _load_rset(
-            config
-        )
+        amans, obs_ids, tel, ot, ws = _load_rset(config)
     else:
         raise ValueError("No valid inputs provided")
 
@@ -459,108 +526,83 @@ def main():
     os.makedirs(os.path.dirname(outpath), exist_ok=True)
 
     # If a template is provided load it, otherwise generate one
-    (template_det_ids, template, is_optical) = (
-        np.empty(0, dtype=str),
-        np.empty((0, 0)),
-        np.empty(0, dtype=bool),
-    )  # Just to make pyright shut up
     gen_template = "template" not in config
-    if not gen_template:
-        template_path = config["template"]
-        if os.path.exists(template_path):
-            template_det_ids, template, is_optical = _load_template(template_path, ufm)
-        else:
-            logger.error("Provided template doesn't exist, trying to generate one")
-            gen_template = True
-    elif gen_template:
+    template_path = config.get("template", "nominal.h5")
+    have_template = os.path.exists(template_path)
+    if not gen_template and not have_template:
+        logger.error("Provided template doesn't exist, trying to generate one")
+        gen_template = True
+    if gen_template:
         logger.info(f"Generating template for {ufm}")
         if "wafer_info" not in config:
             raise ValueError("Need wafer_info to generate template")
         template_det_ids, template, is_optical = op.gen_template(
             config["wafer_info"], config["ufm"], **pointing_cfg
         )
+        template = Template(template_det_ids, template.T, is_optical, pointing_cfg)
+    elif have_template:
+        logger.info("Loading template from %s", template_path)
+        template = _load_template(template_path, ufm, pointing_cfg)
     else:
         raise ValueError(
             "No template provided and unable to generate one for some reason"
         )
-    optical_det_ids = template_det_ids[is_optical]
-    template_spacing = af.get_spacing(template[is_optical, :2].T)
 
-    xi = np.nan + np.zeros((len(template_det_ids), len(amans)))
-    eta = np.nan + np.zeros((len(template_det_ids), len(amans)))
-    gamma = np.nan + np.zeros((len(template_det_ids), len(amans)))
-    tot_weight = np.zeros(len(template_det_ids))
-    for i, (aman, obs_id, pol) in enumerate(zip(amans, obs_ids, have_pol)):
+    focal_plane = FocalPlane(template, len(amans))
+    for i, (aman, obs_id) in enumerate(zip(amans, obs_ids)):
         logger.info("Working on %s", obs_id)
         if aman is None:
             raise ValueError("AxisManager doesn't exist?")
 
         # Restrict to optical dets
-        optical = np.isin(aman.det_info.det_id, optical_det_ids)
+        optical = np.isin(
+            aman.det_info.det_id, focal_plane.template.det_ids[template.optical]
+        )
         aman.restrict("dets", aman.dets.vals[optical])
 
         # Do some outlier cuts
-        _restrict_inliers(aman, template)
+        _restrict_inliers(aman, focal_plane)
 
         # Mapping to template
-        det_ids = aman.det_info.det_id
-        _, msk, template_msk = np.intersect1d(
-            det_ids, template_det_ids, return_indices=True
-        )
-        if len(msk) != aman.dets.count:
-            logger.warning("There are matched dets not found in the template")
-        mapping = np.argsort(np.argsort(template_det_ids[template_msk]))
-        srt = np.argsort(det_ids[msk])
-        _xi = aman[pointing_name].xi[msk][srt][mapping]
-        _eta = aman[pointing_name].eta[msk][srt][mapping]
-        fp = np.vstack((_xi, _eta))
-
-        # Kill dets that are really far from their matched det
-        # TODO: If we include an initial rotation of the template this could just be a function of template spacing
-        dist = np.linalg.norm(fp - template[template_msk, :2].T, axis=0)
-        med_dist = np.nanmedian(dist)
-        fp[:, dist > med_dist + 5 * np.nanstd(dist)] = np.nan
-        logger.info("Median distance to matched det is %f", med_dist)
-        ratio = med_dist / template_spacing
-        logger.info("Median distance to matched det is %f the template spacing", ratio)
+        fp, template_msk = focal_plane.map_to_template(aman)
 
         # Try an initial alignment and get weights
-        aff, sft = af.get_affine(fp, template[template_msk, :2].T)
-        aligned = aff @ fp + sft[..., None]
-        aligned = fp
-        if pol:
-            _gamma = aman[pol_name].polang[msk][mapping]
-            gscale, gsft = gamma_fit(_gamma, template[template_msk, 2])
+        aff, sft = af.get_affine(fp[:2], focal_plane.template.fp[:2, template_msk])
+        aligned = aff @ fp[:2] + sft[..., None]
+        if np.any(np.isfinite(fp[2])):
+            gscale, gsft = gamma_fit(fp[2], focal_plane.template.fp[2, template_msk])
             weights = af.gen_weights(
-                np.vstack((aligned, gscale * _gamma + gsft)),
-                template[template_msk].T,
+                np.vstack((aligned, gscale * fp[2] + gsft)),
+                focal_plane.template.fp[:, template_msk],
+                focal_plane.template.spacing.ravel() / 10,
             )
         else:
-            _gamma = np.nan + np.zeros_like(_xi)
-            weights = af.gen_weights(aligned, template[template_msk, :2].T)
-
-        # ~2 sigma cut
-        weights[weights < 0.95] = 0
+            weights = af.gen_weights(
+                aligned,
+                focal_plane.template.fp[:2, template_msk],
+                focal_plane.template.spacing[:2].ravel() / 10,
+            )
 
         # Store weighted values
-        xi[template_msk, i] = fp[0] * weights
-        eta[template_msk, i] = fp[1] * weights
-        gamma[template_msk, i] = _gamma * weights
-        tot_weight[template_msk] += weights
-    tot_weight[tot_weight == 0] = np.nan
+        focal_plane.add_fp(i, fp, weights, template_msk)
 
-    # Compute the average focal plane while ignoring outliers
-    measured, measured_gamma, weights = _avg_focalplane(xi, eta, gamma, tot_weight)
-
-    # Compute the lever arm
-    lever_arm = np.array(op.get_focal_plane(None, x=0, y=0, pol=0, **pointing_cfg))
+    # Compute the average focal plane with weights
+    focal_plane.avg_fp, focal_plane.weights = _avg_focalplane(
+        focal_plane.full_fp, focal_plane.tot_weight, focal_plane.n_aman
+    )
 
     # Compute transformation between the two nominal and measured pointing
-    fp_transformed = template.copy()
-    have_gamma = np.sum(np.isfinite(measured_gamma).astype(int)) > 10
+    have_gamma = np.sum(np.isfinite(focal_plane.avg_fp[2]).astype(int)) > 10
     if have_gamma:
-        gamma_scale, gamma_shift = gamma_fit(template[:, 2], measured_gamma)
-        fp_transformed[:, 2] = template[:, 2] * gamma_scale + gamma_shift
+        gamma_scale, gamma_shift = gamma_fit(
+            focal_plane.template.fp[2], focal_plane.avg_fp[2]
+        )
+        focal_plane.transformed[2] = (
+            focal_plane.template.fp[2] * gamma_scale + gamma_shift
+        )
+        focal_plane.center_transformed[2] = (
+            gamma_scale * focal_plane.template.center[2] + gamma_shift
+        )
     else:
         logger.warning(
             "No polarization data availible, gammas will be filled with the nominal values."
@@ -568,22 +610,26 @@ def main():
         gamma_scale = 1.0
         gamma_shift = 0.0
 
-    nominal = template[:, :2].T.copy()
+    nominal = focal_plane.template.fp[:2].copy()
     # Do an initial alignment without weights
-    affine_0, shift_0 = af.get_affine(nominal, measured)
+    affine_0, shift_0 = af.get_affine(nominal, focal_plane.avg_fp[:2])
     init_align = affine_0 @ nominal + shift_0[..., None]
     # Now compute the actual transform
-    affine, shift = af.get_affine_weighted(init_align, measured, weights)
+    affine, shift = af.get_affine_weighted(
+        init_align, focal_plane.avg_fp[:2], focal_plane.weights
+    )
     affine = affine @ affine_0
     shift += (affine @ shift_0[..., None])[:, 0]
 
     scale, shear, rot = af.decompose_affine(affine)
     shear = shear.item()
     rot = af.decompose_rotation(rot)[-1]
-    transformed = affine @ nominal + shift[..., None]
-    fp_transformed[:, :2] = transformed.T
+    focal_plane.transformed[:2] = affine @ nominal + shift[..., None]
+    focal_plane.center_transformed[:2] = (
+        affine @ focal_plane.template.center[:2] + shift[..., None]
+    )
 
-    rms = np.sqrt(np.nanmean((measured - transformed) ** 2))
+    rms = np.sqrt(np.nanmean((focal_plane.avg_fp - focal_plane.transformed) ** 2))
     logger.info("RMS after transformation is %f", rms)
 
     shift = (*shift, gamma_shift)
@@ -600,21 +646,21 @@ def main():
         _mk_plot(
             plot_dir,
             froot,
-            nominal,
-            np.vstack((measured, measured_gamma)),
-            fp_transformed.T,
+            focal_plane.template.fp,
+            focal_plane.avg_fp,
+            focal_plane.transformed,
         )
 
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)
     fpout, fpfullout = _mk_fpout(
-        template_det_ids, fp_transformed, measured, measured_gamma
+        focal_plane.template.det_ids, focal_plane.transformed, focal_plane.avg_fp
     )
     tpout = _mk_tpout(xieta)
-    refout = _mk_refout(lever_arm)
+    refout = _mk_refout(focal_plane.template.center, focal_plane.center_transformed)
     with h5py.File(outpath, "w") as f:
         write_dataset(fpout, f, "focal_plane", overwrite=True)
-        _add_attrs(f["focal_plane"], {"measured_gamma": measured_gamma})
+        _add_attrs(f["focal_plane"], {"measured_gamma": have_gamma})
         write_dataset(fpfullout, f, "focal_plane_full", overwrite=True)
         write_dataset(tpout, f, "offsets", overwrite=True)
         _add_attrs(f["offsets"], {"affine_xieta": affine})
