@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Template regression mapmaking.
 """
@@ -163,7 +163,7 @@ def mapmaker(job, otherargs, runargs, data):
 
         # See if user wants separate detector maps
         if hasattr(otherargs, "detmaps") and otherargs.detmaps:
-            my_dets = data.all_local_detectors()
+            my_dets = data.all_local_detectors(flagmask=defaults.det_mask_invalid)
             if data.comm.comm_world is None:
                 all_dets = my_dets
             else:
