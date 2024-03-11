@@ -689,7 +689,7 @@ def gen_template(wafer_info, ufm, **pointing_cfg):
     det_y = wafer["dets:wafer.y"]
     det_pol = wafer["dets:wafer.angle"]
     det_type = wafer["dets:wafer.type"]
-    is_optical = det_type == "OPTC"
+    is_optical = np.array(det_type) == "OPTC"
 
     xi, eta, gamma = get_focal_plane(
         None, x=det_x, y=det_y, pol=det_pol, **pointing_cfg
@@ -699,4 +699,4 @@ def gen_template(wafer_info, ufm, **pointing_cfg):
     # Dark dets should not be allowed to have pointing
     template[~is_optical] = np.nan
 
-    return template_det_ids, template, is_optical
+    return np.array(template_det_ids), template, is_optical
