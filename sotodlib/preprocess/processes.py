@@ -521,7 +521,6 @@ class GlitchFill(_Preprocess):
             glitch_flags=proc_aman[self.flag_aman][self.flag],
             **self.process_cfgs)
 
-
 class FlagTurnarounds(_Preprocess):
     """From the Azimuth encoder data, flag turnarounds, left-going, and right-going.
         All process configs go to ``get_turnaround_flags``. If the ``method`` key
