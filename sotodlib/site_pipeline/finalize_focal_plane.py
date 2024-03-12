@@ -1,7 +1,7 @@
 import argparse as ap
 import os
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import InitVar, dataclass, field
+from typing import Dict
 
 import h5py
 import matplotlib.pyplot as plt
@@ -25,6 +25,19 @@ class Template:
     det_ids: NDArray[np.str_]  # (ndet,)
     fp: NDArray[np.floating]  # (ndim, ndet)
     optical: NDArray[np.bool_]  # (ndet,)
+    pointing_cfg: InitVar[Dict]
+    center: NDArray[np.floating] = field(init=False)  # (ndim, 1)
+    spacing: NDArray[np.floating] = field(init=False)  # (ndim,)
+
+    def __post_init__(self, pointing_cfg):
+        self.center = np.array(
+            op.get_focal_plane(None, x=0, y=0, pol=0, **pointing_cfg)
+        )
+        xieta_spacing = af.get_spacing(self.fp[:2, self.optical])
+        # For gamma rather than the spacing in real space we want the difference between bins
+        # This is a rough estimate but good enough for us
+        gamma_spacing = np.percentile(np.diff(np.sort(self.fp[2])), 99.9)
+        self.spacing = np.array([xieta_spacing, xieta_spacing, gamma_spacing])
 
 
 @dataclass
@@ -33,9 +46,10 @@ class FocalPlane:
     n_aman: int
     full_fp: NDArray[np.floating] = field(init=False)  # (ndim, ndet, n_aman)
     tot_weight: NDArray[np.floating] = field(init=False)  # (ndet,)
-    avg_fp: NDArray[np.floating] = field(init=False)  # (ndim, ndet,)
+    avg_fp: NDArray[np.floating] = field(init=False)  # (ndim, ndet)
     weights: NDArray[np.floating] = field(init=False)  # (ndet,)
-    transformed: NDArray[np.floating] = field(init=False)  # (ndim, ndet,)
+    transformed: NDArray[np.floating] = field(init=False)  # (ndim, ndet)
+    centers_transformed: NDArray[np.floating] = field(init=False)  # (ndim, 1)
 
     def __post_init__(self):
         self.full_fp = np.nan + np.empty(self.template.fp.shape + (self.n_aman,))
@@ -43,6 +57,7 @@ class FocalPlane:
         self.avg_fp = np.nan + np.empty_like(self.template.fp)
         self.weight = np.zeros(len(self.template.det_ids))
         self.transformed = self.template.fp.copy()
+        self.center_transformed = self.template.center.copy()
 
     def map_to_template(self, aman):
         _, msk, template_msk = np.intersect1d(
@@ -265,7 +280,7 @@ def gamma_fit(src, dst):
     return res.x
 
 
-def _load_template(template_path, ufm):
+def _load_template(template_path, ufm, pointing_cfg):
     template_rset = read_dataset(template_path, ufm)
     det_ids = template_rset["dets:det_id"]
     template = np.column_stack(
@@ -277,7 +292,9 @@ def _load_template(template_path, ufm):
     )
     template_optical = template_rset["is_optical"]
 
-    return Template(np.array(det_ids), template.T, np.array(template_optical))
+    return Template(
+        np.array(det_ids), template.T, np.array(template_optical), pointing_cfg
+    )
 
 
 def _load_ctx(config):
@@ -426,10 +443,8 @@ def _restrict_inliers(aman, template):
     focal_plane = np.column_stack((aman.pointing.xi, aman.pointing.eta))
     inliers = np.ones(len(focal_plane), dtype=bool)
 
-    # TODO: should just use the projected (0, 0) here
-    cent = np.nanmedian(template.fp[:2], axis=1)
     rad_thresh = 1.05 * np.nanmax(
-        np.linalg.norm(template.fp[:2] - cent[..., None], axis=0)
+        np.linalg.norm(template.fp[:2] - template.center[:2], axis=0)
     )
 
     # Use kmeans to kill any ghosts
@@ -498,30 +513,27 @@ def main():
     os.makedirs(os.path.dirname(outpath), exist_ok=True)
 
     # If a template is provided load it, otherwise generate one
-    template = Template(
-        np.empty(0, dtype=str), np.empty((0, 0)), np.empty(0, dtype=bool)
-    )  # Just to make pyright shut up
     gen_template = "template" not in config
-    if not gen_template:
-        template_path = config["template"]
-        if os.path.exists(template_path):
-            template = _load_template(template_path, ufm)
-        else:
-            logger.error("Provided template doesn't exist, trying to generate one")
-            gen_template = True
-    elif gen_template:
+    template_path = config.get("template", "nominal.h5")
+    have_template = os.path.exists(template_path)
+    if not gen_template and not have_template:
+        logger.error("Provided template doesn't exist, trying to generate one")
+        gen_template = True
+    if gen_template:
         logger.info(f"Generating template for {ufm}")
         if "wafer_info" not in config:
             raise ValueError("Need wafer_info to generate template")
         template_det_ids, template, is_optical = op.gen_template(
             config["wafer_info"], config["ufm"], **pointing_cfg
         )
-        template = Template(template_det_ids, template.T, is_optical)
+        template = Template(template_det_ids, template.T, is_optical, pointing_cfg)
+    elif have_template:
+        logger.info("Loading template from %s", template_path)
+        template = _load_template(template_path, ufm, pointing_cfg)
     else:
         raise ValueError(
             "No template provided and unable to generate one for some reason"
         )
-    template_spacing = af.get_spacing(template.fp[:2, template.optical])
 
     focal_plane = FocalPlane(template, len(amans))
     for i, (aman, obs_id) in enumerate(zip(amans, obs_ids)):
@@ -549,7 +561,7 @@ def main():
         med_dist = np.nanmedian(dist)
         fp[:, dist > med_dist + 5 * np.nanstd(dist)] = np.nan
         logger.info("Median distance to matched det is %f", med_dist)
-        ratio = med_dist / template_spacing
+        ratio = med_dist / focal_plane.template.spacing[0]
         logger.info("Median distance to matched det is %f the template spacing", ratio)
 
         # Try an initial alignment and get weights
@@ -590,6 +602,9 @@ def main():
         focal_plane.transformed[2] = (
             focal_plane.template.fp[2] * gamma_scale + gamma_shift
         )
+        focal_plane.center_transformed[2] = (
+            gamma_scale * focal_plane.template.center[2] + gamma_shift
+        )
     else:
         logger.warning(
             "No polarization data availible, gammas will be filled with the nominal values."
@@ -612,6 +627,9 @@ def main():
     shear = shear.item()
     rot = af.decompose_rotation(rot)[-1]
     focal_plane.transformed[:2] = affine @ nominal + shift[..., None]
+    focal_plane.center_transformed[:2] = (
+        affine @ focal_plane.template.center[:2] + shift[..., None]
+    )
 
     rms = np.sqrt(np.nanmean((focal_plane.avg_fp - focal_plane.transformed) ** 2))
     logger.info("RMS after transformation is %f", rms)
@@ -620,12 +638,6 @@ def main():
     scale = (*scale, gamma_scale)
     xieta = (shift, scale, shear, rot)
     _log_vals(shift, scale, shear, rot, ("xi", "eta", "gamma"))
-
-    # Compute the center of the arrayql
-    center = np.array(op.get_focal_plane(None, x=0, y=0, pol=0, **pointing_cfg))
-    center_transformed = np.empty_like(center)
-    center_transformed[:2] = affine @ center[:2] + np.array(shift)[:-1][..., None]
-    center_transformed[2] = scale[-1] * center[2] + shift[-1]
 
     if config.get("plot", False):
         plot_dir = config.get("plot_dir", None)
@@ -644,10 +656,10 @@ def main():
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)
     fpout, fpfullout = _mk_fpout(
-        focal_plane.template.det_ids, focal_plane.avg_fp, focal_plane.transformed
+        focal_plane.template.det_ids, focal_plane.transformed, focal_plane.avg_fp
     )
     tpout = _mk_tpout(xieta)
-    refout = _mk_refout(center, center_transformed)
+    refout = _mk_refout(focal_plane.template.center, focal_plane.center_transformed)
     with h5py.File(outpath, "w") as f:
         write_dataset(fpout, f, "focal_plane", overwrite=True)
         _add_attrs(f["focal_plane"], {"measured_gamma": have_gamma})
