@@ -439,23 +439,28 @@ def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
     return pointing_cfg
 
 
-def _restrict_inliers(aman, template):
-    focal_plane = np.column_stack((aman.pointing.xi, aman.pointing.eta))
-    inliers = np.ones(len(focal_plane), dtype=bool)
+def _restrict_inliers(aman, focal_plane):
+    # TODO: Use gamma as well
+    # Map to template
+    fp, template_msk = focal_plane.map_to_template(aman)
+    fp = fp[:2].T
+    inliers = np.ones(len(fp), dtype=bool)
 
     rad_thresh = 1.05 * np.nanmax(
-        np.linalg.norm(template.fp[:2] - template.center[:2], axis=0)
+        np.linalg.norm(
+            focal_plane.template.fp[:2] - focal_plane.template.center[:2], axis=0
+        )
     )
 
     # Use kmeans to kill any ghosts
-    fp_white = vq.whiten(focal_plane[inliers])
+    fp_white = vq.whiten(fp[inliers])
     codebook, _ = vq.kmeans(fp_white, 2)
     codes, _ = vq.vq(fp_white, codebook)
 
     c0 = codes == 0
     c1 = codes == 1
-    m0 = np.median(focal_plane[inliers][c0], axis=0)
-    m1 = np.median(focal_plane[inliers][c1], axis=0)
+    m0 = np.median(fp[inliers][c0], axis=0)
+    m1 = np.median(fp[inliers][c1], axis=0)
     dist = np.linalg.norm(m0 - m1)
 
     # If centroids are too far from each other use the bigger one
@@ -467,12 +472,20 @@ def _restrict_inliers(aman, template):
         cluster = c1
 
     # Flag anything too far away from the center
-    cent = np.median(focal_plane[inliers][cluster], axis=0)
-    r = np.linalg.norm(focal_plane[inliers] - cent, axis=1)
+    cent = np.median(fp[inliers][cluster], axis=0)
+    r = np.linalg.norm(fp[inliers] - cent, axis=1)
     inliers[inliers] *= cluster * (r <= rad_thresh)
 
+    # Now kill dets that seem too far from their match
+    fp[~inliers] = np.nan
+    likelihood = af.gen_weights(fp.T, focal_plane.template.fp[:2, template_msk])
+    inliers *= likelihood > 0.95  # ~2 sigma cut
+
     # Now restrict the AxisManager
-    return aman.restrict("dets", aman.dets.vals[inliers])
+    inlier_det_ids = focal_plane.template.det_ids[template_msk][inliers]
+    return aman.restrict(
+        "dets", aman.dets.vals[np.isin(aman.det_info.det_id, inlier_det_ids)]
+    )
 
 
 def main():
@@ -548,42 +561,27 @@ def main():
         aman.restrict("dets", aman.dets.vals[optical])
 
         # Do some outlier cuts
-        _restrict_inliers(aman, focal_plane.template)
+        _restrict_inliers(aman, focal_plane)
 
         # Mapping to template
         fp, template_msk = focal_plane.map_to_template(aman)
 
-        # Kill dets that are really far from their matched det
-        # TODO: If we include an initial rotation of the template this could just be a function of template spacing
-        dist = np.linalg.norm(
-            fp[:2] - focal_plane.template.fp[:2, template_msk], axis=0
-        )
-        med_dist = np.nanmedian(dist)
-        fp[:, dist > med_dist + 5 * np.nanstd(dist)] = np.nan
-        logger.info("Median distance to matched det is %f", med_dist)
-        ratio = med_dist / focal_plane.template.spacing[0]
-        logger.info("Median distance to matched det is %f the template spacing", ratio)
-
         # Try an initial alignment and get weights
         aff, sft = af.get_affine(fp[:2], focal_plane.template.fp[:2, template_msk])
         aligned = aff @ fp[:2] + sft[..., None]
-        aligned_dist = np.nanmedian(
-            np.linalg.norm(aligned - focal_plane.template.fp[:2, template_msk], axis=0)
-        )
-        # Sometimes this initial align fails due to crap data
-        if aligned_dist > med_dist:
-            aligned = fp[:2]
         if np.any(np.isfinite(fp[2])):
             gscale, gsft = gamma_fit(fp[2], focal_plane.template.fp[2, template_msk])
             weights = af.gen_weights(
                 np.vstack((aligned, gscale * fp[2] + gsft)),
                 focal_plane.template.fp[:, template_msk],
+                focal_plane.template.spacing.ravel() / 10,
             )
         else:
-            weights = af.gen_weights(aligned, focal_plane.template.fp[:2, template_msk])
-
-        # ~2 sigma cut
-        weights[weights < 0.95] = 0
+            weights = af.gen_weights(
+                aligned,
+                focal_plane.template.fp[:2, template_msk],
+                focal_plane.template.spacing[:2].ravel() / 10,
+            )
 
         # Store weighted values
         focal_plane.add_fp(i, fp, weights, template_msk)
