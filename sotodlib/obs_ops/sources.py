@@ -7,6 +7,25 @@ from so3g.proj import coords, quat
 import sotodlib.coords.planets as planets
 
 def get_sso(aman, sso, nstep=100):
+    """
+    Function for getting xi, eta position of given sso.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        Input axis manager.
+    sso : str
+        Name of input sso.
+    nstep : int
+        Number of steps to downsample the TOD.
+
+    Returns
+    -------
+    xi : array
+        Array of xi positions.
+    eta : array
+        Array of eta positions.
+    """
 
     az = aman.boresight.az
     el = aman.boresight.el
@@ -16,7 +35,7 @@ def get_sso(aman, sso, nstep=100):
     q_bore = csl.Q
 
     ras, decs = [], []
-    for d1_idx, d1_unix in enumerate(ctime[::nstep]):
+    for d1_unix in ctime[::nstep]:
         
         planet = planets.SlowSource.for_named_source(sso, d1_unix*1.)
         ra0, dec0 = planet.pos(d1_unix)

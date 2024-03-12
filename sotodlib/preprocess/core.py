@@ -1,4 +1,5 @@
 """Base Class and PIPELINE register for the preprocessing pipeline scripts."""
+import os
 import logging
 import numpy as np
 from .. import core
@@ -132,7 +133,8 @@ class _Preprocess(object):
             pipeline.
         filename : str
             Filename should be a concatenation of the global ``plot_dir``
-            config with a name with step number and placeholder {name}.
+            config with a name with process step number and placeholder {name}
+            as shown in Pipeline.run().
         """
         if self.plot_cfgs is None:
             return
@@ -258,7 +260,7 @@ class Pipeline(list):
             process.process(aman, proc_aman)
             if run_calc:
                 process.calc_and_save(aman, proc_aman)
-                process.plot(aman, proc_aman, filename=self.plot_dir+f'/{{ctime}}/{{obsid}}/{step+1}_{{name}}.png')
+                process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{{ctime}}/{{obsid}}', f'{step+1}_{{name}}.png'))
             if select:
                 process.select(aman, proc_aman)
                 proc_aman.restrict('dets', aman.dets.vals)

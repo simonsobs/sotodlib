@@ -632,12 +632,14 @@ class SSOFootprint(_Preprocess):
         ssos = planets.get_nearby_sources(tod=aman, distance=self.calc_cfgs.get("distance", 20))
         if ssos:
             sso_aman = core.AxisManager()
+            nstep = self.calc_cfgs.get("nstep", 100)
+            onsamp = (aman.samps.count+nstep-1)//nstep
             for sso in ssos:
                 planet = sso[0]
-                xi_p, eta_p = obs_ops.sources.get_sso(aman, planet, nstep=self.calc_cfgs.get("nstep", 100))
-                planet_aman = core.AxisManager()
-                planet_aman.wrap("xi_p", xi_p)
-                planet_aman.wrap("eta_p", eta_p)
+                xi_p, eta_p = obs_ops.sources.get_sso(aman, planet, nstep=nstep)
+                planet_aman = core.AxisManager(core.OffsetAxis("samps", onsamp))
+                planet_aman.wrap("xi_p", xi_p, [(0, "samps")])
+                planet_aman.wrap("eta_p", eta_p, [(0, "samps")])
                 sso_aman.wrap(planet, planet_aman)
             self.save(proc_aman, sso_aman)
         else:
@@ -656,9 +658,7 @@ class SSOFootprint(_Preprocess):
             from .preprocess_plot import plot_sso_footprint
             filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
             filename = filename.replace('{obsid}', aman.obs_info.obs_id)
-            for sso in proc_aman.sso_footprint.keys():
-                if sso == 'dets' or sso == 'samps':
-                    continue
+            for sso in proc_aman.sso_footprint._assignments.keys():
                 planet_aman = proc_aman.sso_footprint[sso]
                 plot_sso_footprint(aman, planet_aman, sso, filename=filename.replace('{name}', f'{sso}_sso_footprint'), **self.plot_cfgs)
         

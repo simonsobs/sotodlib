@@ -53,9 +53,8 @@ def plot_det_bias_flags(aman, det_bias_flags, rfrac_range=(0.1, 0.7),
 
     venn(msk_dict)
 
-    obs_ts = aman.timestamps[0]
-    det = aman.dets.vals[0]
-    plt.title(f"Obs_timestamp:{obs_ts:.0f}\ndet:{det}\nDetectors Cut per Range (Total cut: {len(np.where(all_bad_dets == True)[0])}/{len(aman.dets.vals)})")
+    plt.title(f"{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min
+              \nDetectors Cut per Range (Total cut: {len(np.where(all_bad_dets == True)[0])}/{len(aman.dets.vals)})")
     plt.tight_layout()
     head_tail = os.path.split(filename)
     os.makedirs(head_tail[0], exist_ok=True)
@@ -78,11 +77,10 @@ def plot_4f_2f_counts(aman, modes=np.arange(1,49), filename='./4f_2f_counts.png'
     fig, axs = plt.subplots(3, 2, figsize=(15, 15))
     for i, band in enumerate(['f090', 'f150']):
         hwpss_ratsatp1[band] = {}
-        m90s = ((aman.det_cal.bg == 0) | (aman.det_cal.bg == 1) | (aman.det_cal.bg == 4) | (aman.det_cal.bg == 5) | (aman.det_cal.bg == 8) | (aman.det_cal.bg == 9))
-        m150s = ((aman.det_cal.bg == 2) | (aman.det_cal.bg == 3) | (aman.det_cal.bg == 6) | (aman.det_cal.bg == 7) | (aman.det_cal.bg == 10) | (aman.det_cal.bg == 11))
+        m90s = (np.isin(aman.det_cal.bg, [0,1,4,5,8,9]))
+        m150s = (np.isin(aman.det_cal.bg, [2,3,6,7,10,11]))
         m = [m90s, m150s]
         hwpss_aman = aman.restrict('dets', aman.dets.vals[m[i]], in_place=False)
-        hwpss_aman.restrict('samps',(20*60*200, -100))
         stats = hwp.hwp.get_hwpss(hwpss_aman, modes=modes, merge_stats=False, merge_model=False)
         a_4f = np.sqrt(stats.coeffs[:,6]**2 + stats.coeffs[:,7]**2)
         a_2f = np.sqrt(stats.coeffs[:,2]**2 + stats.coeffs[:,3]**2)
@@ -122,9 +120,7 @@ def plot_4f_2f_counts(aman, modes=np.arange(1,49), filename='./4f_2f_counts.png'
     for i in range(3):
         axs[i, 0].set_ylabel('Counts')
 
-    obs_ts = aman.timestamps[0]
-    det = aman.dets.vals[0]
-    plt.suptitle(f'Obs_timestamp:{obs_ts:.0f}\ndet:{det}\n4f/2f Counts')
+    plt.suptitle(f'{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min\n4f/2f Counts')
     plt.tight_layout()
     head_tail = os.path.split(filename)
     os.makedirs(head_tail[0], exist_ok=True)
@@ -181,15 +177,13 @@ def plot_hwpss_fit_status(aman, hwpss_stats, plot_dets=None, plot_num_dets=3,
     ax[1].set_title(f'reduced chi2s distribution (Ndets={hwpss_stats.dets.count})')
     ax[1].legend()
 
-    obs_ts = aman.timestamps[0]
-    det = aman.dets.vals[0]
-    plt.suptitle(f'HWPSS Stats for Obs_timestamp:{obs_ts:.0f}, dT = {np.ptp(aman.timestamps)/60:.1f} min\ndet:{det}\n')
+    plt.suptitle(f'{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min\nHWPSS Stats\n')
     plt.subplots_adjust(top=0.85, bottom=0.2)
     head_tail = os.path.split(filename)
     os.makedirs(head_tail[0], exist_ok=True)
     plt.savefig(filename)
 
-def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, filename='./sso_footprint.png'):
+def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, focal_plane=None, filename='./sso_footprint.png'):
     """
     Function for plotting SSO footprint.
 
@@ -203,6 +197,15 @@ def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, filename='./s
         Name of planet.
     wafer_offsets : dict
         Dictionary of wafer offsets.
+        Ex: wafer_offsets = {'ws0': (-2.5, -0.5),
+                             'ws1': (-2.5, -13),
+                             'ws2': (-13, -7),
+                             'ws3': (-13, 5),
+                             'ws4': (-2.5, 11.5),
+                             'ws5': (8.5, 5),
+                             'ws6': (8.5, -7)}
+    focal_plane : str
+        Path to focal plane file.
     filename : str
         Full filename with direct path to plot output directory.
     """
@@ -219,8 +222,11 @@ def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, filename='./s
                          'ws5': (8.5, 5),
                          'ws6': (8.5, -7)}
 
-    # Get default focal plane from sotodlib
-    hw = np.load('/so/home/msilvafe/shared_files/sat_hw_positions.npz')
+    if focal_plane is None:
+        # Get default focal plane from sotodlib
+        hw = np.load('/so/home/msilvafe/shared_files/sat_hw_positions.npz')
+    else:
+        hw = np.load(focal_plane)
     xi_hw, eta_hw, dets_hw = hw['xi_hw'], hw['eta_hw'], hw['dets_hw']
     
     fig, ax = plt.subplots(1, 1, figsize=(6.4, 4.8))
@@ -232,7 +238,7 @@ def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, filename='./s
     for k in wafer_offsets.keys():
         ax.text(wafer_offsets[k][0], wafer_offsets[k][1], k, fontsize=16)
 
-    plt.suptitle(f'{sso} {aman.obs_info.obs_id}')
+    plt.suptitle(f'{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min\n{sso}')
     plt.tight_layout()
     head_tail = os.path.split(filename)
     os.makedirs(head_tail[0], exist_ok=True)
