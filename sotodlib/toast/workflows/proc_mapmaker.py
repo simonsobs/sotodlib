@@ -6,6 +6,7 @@
 import numpy as np
 from astropy import units as u
 import toast
+from toast.mpi import flatten
 import toast.ops
 from toast.observation import default_values as defaults
 
@@ -167,7 +168,6 @@ def mapmaker(job, otherargs, runargs, data):
             if data.comm.comm_world is None:
                 all_dets = my_dets
             else:
-                from matplotlib.cbook import flatten
                 all_dets = data.comm.comm_world.allgather(my_dets)
                 all_dets = sorted(set(flatten(all_dets)))
         else:
