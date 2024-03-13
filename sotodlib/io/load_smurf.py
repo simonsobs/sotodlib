@@ -960,7 +960,14 @@ class G3tSmurf:
                 max_early=max_early,
             )
 
-    def update_observation_files(self, obs, session, max_early=5, force=False):
+    def update_observation_files(
+        self, 
+        obs, 
+        session, 
+        max_early=5, 
+        force=False, 
+        force_stop=False,
+    ):
         """Update existing observation. A separate function to make it easier
         to deal with partial data transfers. See add_new_observation for args
 
@@ -973,6 +980,11 @@ class G3tSmurf:
         force : bool
             If true, will recalculate file/tune information even if observation
             appears complete
+        force_stop: bool
+            If true, will force the end of the observation to be set to the end
+            of the current file list. Useful for completing observations where
+            computer systems crashed/restarted during the observations so no end
+            frames were written.
         """
 
         if not force and obs.stop is not None:
@@ -1076,7 +1088,7 @@ class G3tSmurf:
                 if not obs_ended:
                     obs_ended = _file_has_end_frames(f.name)
 
-        if obs_ended:
+        if obs_ended or force_stop:
             logger.debug(f"Found that {obs.obs_id} has ended.")
             obs.n_samples = obs_samps
             obs.duration = flist[-1].stop.timestamp() - flist[0].start.timestamp()
