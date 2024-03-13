@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Data I/O operations.
 """
@@ -61,8 +61,9 @@ def load_data_context(job, otherargs, runargs, data):
             procdir = os.path.join(
                 os.environ["MOBY2_TOD_STAGING_PATH"],
                 f"{data.comm.world_rank}",
+                f"{os.getpid()}",
             )
-            os.makedirs(procdir)
+            os.makedirs(procdir, exist_ok=True)
             os.environ["MOBY2_TOD_STAGING_PATH"] = procdir
         job_ops.load_context.apply(data)
 
