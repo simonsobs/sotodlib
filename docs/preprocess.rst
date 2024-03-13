@@ -172,6 +172,7 @@ A configuration file for the processing pipeline would look like::
                             'ws4': [-2.5, 11.5],
                             'ws5': [8.5, 5],
                             'ws6': [8.5, -7]}
+            focal_plane: '/so/home/msilvafe/shared_files/sat_hw_positions.npz'
 
 Processing Modules
 ------------------

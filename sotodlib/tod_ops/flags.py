@@ -43,13 +43,14 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
 
     Returns
     -------
-    mask : RangesMatrix
-        RangesMatrix shaped N_dets x N_samps that is True is the detector
-        is flagged to be cut and false if it should be kept based on 
-        the rfrac, and psat ranges. To create a boolean mask from
-        the RangesMatrix that can be used for aman.restrict() use
-        ``keep = ~has_all_cut(mask)`` and then restrict with 
-        ``aman.restrict('dets', aman.dets.vals[keep])``.
+    msk_aman : AxisManager
+        AxisManager containing RangesMatrix shaped N_dets x N_samps
+        that is True if the detector is flagged to be cut and false
+        if it should be kept based on the rfrac, and psat ranges. 
+        To create a boolean mask from the RangesMatrix that can be
+        used for aman.restrict() use ``keep = ~has_all_cut(mask)``
+        and then restrict with ``aman.restrict('dets', aman.dets.vals[keep])``.
+        If full_output is True, this will contain multiple RangesMatrices.
     """
     if detcal is None:
         if 'det_cal' not in aman:
@@ -85,6 +86,9 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         else:
             aman.flags.wrap(name, mskexp, [(0, 'dets'), (1, 'samps')])
 
+    msk_aman = core.AxisManager(aman.dets)
+    msk_aman.wrap(name, mskexp, [(0, 'dets')])
+
     if full_output:
         msks = []
         ranges = [detcal.bg >= 0,
@@ -100,13 +104,10 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
 
         msk_names = ['bg', 'r_tes', 'r_frac_gt', 'r_frac_lt', 'p_sat_gt', 'p_sat_lt']
 
-        msk_aman = core.AxisManager(aman.dets)
         for i, msk in enumerate(msks):
             msk_aman.wrap(f'{msk_names[i]}_flags', msk, [(0, 'dets')])
-
-        return mskexp, msk_aman
     
-    return mskexp
+    return msk_aman
 
 def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
                          merge=True, merge_lr=True, overwrite=True, 

@@ -50,16 +50,8 @@ class DetBiasFlags(_Preprocess):
     name = "det_bias_flags"
 
     def calc_and_save(self, aman, proc_aman):
-        if self.plot_cfgs is None:
-            msk = tod_ops.flags.get_det_bias_flags(aman, merge=False,
-                                                   **self.calc_cfgs)
-        else:
-            msk, msk_aman = tod_ops.flags.get_det_bias_flags(aman, merge=False, full_output=True,
-                                                         **self.calc_cfgs)
-        dbc_aman = core.AxisManager(aman.dets)
-        dbc_aman.wrap('det_bias_flags', msk, [(0, 'dets')])
-        if self.plot_cfgs:
-            dbc_aman.merge(msk_aman)
+        dbc_aman = tod_ops.flags.get_det_bias_flags(aman, merge=False, full_output=True,
+                                                    **self.calc_cfgs)
         self.save(proc_aman, dbc_aman)
     
     def save(self, proc_aman, dbc_aman):

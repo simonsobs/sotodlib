@@ -260,7 +260,7 @@ class Pipeline(list):
             process.process(aman, proc_aman)
             if run_calc:
                 process.calc_and_save(aman, proc_aman)
-                process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{{ctime}}/{{obsid}}', f'{step+1}_{{name}}.png'))
+                process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
             if select:
                 process.select(aman, proc_aman)
                 proc_aman.restrict('dets', aman.dets.vals)

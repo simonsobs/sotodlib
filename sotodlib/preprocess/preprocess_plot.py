@@ -53,8 +53,7 @@ def plot_det_bias_flags(aman, det_bias_flags, rfrac_range=(0.1, 0.7),
 
     venn(msk_dict)
 
-    plt.title(f"{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min
-              \nDetectors Cut per Range (Total cut: {len(np.where(all_bad_dets == True)[0])}/{len(aman.dets.vals)})")
+    plt.title(f"{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min\nDetectors Cut per Range (Total cut: {len(np.where(all_bad_dets == True)[0])}/{len(aman.dets.vals)})")
     plt.tight_layout()
     head_tail = os.path.split(filename)
     os.makedirs(head_tail[0], exist_ok=True)
