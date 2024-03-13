@@ -42,7 +42,7 @@ import logging
 from sotodlib.site_pipeline import util
 from typing import Optional
 
-logger = util.init_logger(__name__, 'update-obsdb: ')
+logger = util.init_logger('update_obsdb', 'update-obsdb: ')
 
 def check_meta_type(bookpath: str):
     metapath = os.path.join(bookpath, "M_index.yaml")

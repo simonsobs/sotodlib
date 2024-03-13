@@ -13,7 +13,8 @@ from typing import Optional
 from sotodlib import core
 from sotodlib.hwp.g3thwp import G3tHWP
 from sotodlib.site_pipeline import util
-logger = util.init_logger(__name__, 'make-hwp-solutions: ')
+
+logger = util.init_logger('make_hwp_solutions', 'make-hwp-solutions: ')
 
 def get_parser(parser=None):
     if parser is None:
