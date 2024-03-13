@@ -299,6 +299,14 @@ class ContextTest(unittest.TestCase):
         tod = ctx.get_obs(obs_id, dets=det_info)
         self.assertEqual(tod.signal.shape, (n_det // 2, n_samp))
 
+    def test_120_load_fields(self):
+        dataset_sim = DatasetSim()
+        obs_id = dataset_sim.obss['obs_id'][1]
+        ctx = dataset_sim.get_context(with_axisman_ondisk=True)
+        tod = ctx.get_obs(obs_id)
+        self.assertCountEqual(tod.ondisk._fields.keys(), ['disk1', 'subaman'])
+        self.assertCountEqual(tod.ondisk.subaman._fields.keys(), ['disk2'])
+
     def test_200_load_metadata(self):
         """Test the simple metadata load wrapper."""
         dataset_sim = DatasetSim()
@@ -375,6 +383,7 @@ class DatasetSim:
                     with_dependent_metadata=False,
                     with_incomplete_metadata=False,
                     with_inconcatable=False,
+                    with_axisman_ondisk=False,
                     on_missing='trim'):
         """Args:
           with_detdb: if False, no detdb is included.
@@ -588,6 +597,34 @@ class DatasetSim:
                 'unpack': ['inconcat&per_det'],
                 'label': 'inconcat',
             })
+
+        if with_axisman_ondisk:
+            # Note this uses standard HDF5 loader, not our in-RAM loader.
+            _scheme = metadata.ManifestScheme() \
+                .add_exact_match('obs:obs_id') \
+                .add_data_field('dataset')
+            ondisk_db = metadata.ManifestDb(scheme=_scheme)
+            ondisk_db._tempdir = tempfile.TemporaryDirectory()
+            filename = os.path.join(ondisk_db._tempdir.name,
+                                    'ondisk_metadata.h5')
+            ondisk_db.add_entry(
+                {'obs:obs_id': 'obs_number_12',
+                 'dataset': 'xyz'},
+                filename)
+            ctx['metadata'].insert(0, {
+                'db': ondisk_db,
+                'unpack': 'ondisk',
+                'load_fields': ['disk1', 'subaman.disk2', 'subaman.disk3'],
+            })
+            # Write the result.
+            output = core.AxisManager(
+                core.LabelAxis('dets', self.dets['readout_id']),
+                core.OffsetAxis('samps', self.sample_count, 0))
+            output.wrap('subaman', core.AxisManager(output.dets))
+            for i in [1, 2]:
+                output.wrap_new(f'disk{i}', shape=('samps',))
+                output['subaman'].wrap_new(f'disk{i}', shape=('dets',))
+            output.save(filename, 'xyz')
 
         return ctx
 

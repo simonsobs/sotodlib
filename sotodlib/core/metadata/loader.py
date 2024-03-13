@@ -252,7 +252,10 @@ class SuperLoader:
                     f'No metadata loader registered under name "{loader}"')
 
             loader_object = loader_class()  # pass obs info?
-            mi1 = loader_object.from_loadspec(index_line)
+            loader_kwargs = {}
+            if spec.load_fields is not None:
+                loader_kwargs['load_fields'] = spec.load_fields
+            mi1 = loader_object.from_loadspec(index_line, **loader_kwargs)
 
             # Restrict returned values according to the specs in index_line.
 
@@ -274,7 +277,9 @@ class SuperLoader:
                 mi2.merge(a)
 
             elif isinstance(mi1, core.AxisManager):
-                # For AxisManager, allow user to drop some items before proceeding.
+                # For AxisManager, allow user to drop some items
+                # before proceeding.  This only catches fields at root
+                # level of the AxisManager.
                 for pattern in spec.drop_fields:
                     to_drop = fnmatch.filter(mi1._fields.keys(), pattern)
                     for k in to_drop:
@@ -831,10 +836,16 @@ class MetadataSpec:
         Instructions for how to populate the destination AxisManager
         with fields found in this metadata item.  See notes below.
 
+    ``load_fields`` (list of str)
+        List of fields (which may include child AxisManagers, or
+        fields within using "." for addressing), to load.  Only
+        processed for AxisManager metadata.
+
     ``drop_fields`` (list of str)
         List of fields (which may contain wildcard character ``*``) to
         drop prior to merging.  Only processed for AxisManager
-        metadata.
+        metadata.  (The dropping is applied after any restrictions on
+        the loading using only_fields).
 
     The following dict keys are deprecated, but are processed for
     backwards compatibility.
@@ -874,13 +885,15 @@ class MetadataSpec:
     loader = None
     on_missing = 'trim'
     unpack = None
+    load_fields = None
     drop_fields = []
 
     @classmethod
     def from_dict(cls, spec):
         self = cls()
         # canonical ...
-        for k in ['db', 'label', 'unpack', 'det_info', 'loader', 'on_missing', 'drop_fields']:
+        for k in ['db', 'label', 'unpack', 'det_info', 'loader',
+                  'on_missing', 'load_fields', 'drop_fields']:
             if k in spec:
                 setattr(self, k, spec[k])
         # "name" used to be unpacking instructions.
@@ -993,7 +1006,7 @@ class LoaderInterface:
         #self.detdb = detdb
         #self.obsdb = obsdb
 
-    def from_loadspec(self, load_params):
+    def from_loadspec(self, load_params, **kwargs):
         """Retrieve a metadata result.
 
         Arguments:
@@ -1005,7 +1018,7 @@ class LoaderInterface:
         """
         raise NotImplementedError
 
-    def batch_from_loadspec(self, load_params):
+    def batch_from_loadspec(self, load_params, **kwargs):
         """Retrieves a batch of metadata results.  load_params should be a
         list of valid index data specifications.  Returns a list of
         objects, corresponding to the elements of load_params.
@@ -1014,7 +1027,7 @@ class LoaderInterface:
         repeatedly; but subclasses are free to do something more optimized.
 
         """
-        return [self.from_loadspec(p) for p in load_params]
+        return [self.from_loadspec(p, **kwargs) for p in load_params]
 
 
 def load_metadata(tod, spec, unpack=False):
