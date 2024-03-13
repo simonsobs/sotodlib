@@ -1,7 +1,7 @@
 import argparse as ap
 import os
 from dataclasses import InitVar, dataclass, field
-from typing import Dict
+from typing import Dict, List, Optional
 
 import h5py
 import matplotlib.pyplot as plt
@@ -18,6 +18,36 @@ from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
 
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
+
+
+def _add_attrs(dset, attrs):
+    for k, v in attrs.items():
+        dset.attrs[k] = v
+
+
+@dataclass
+class Transform:
+    shift: NDArray[np.floating]  # (ndim,)
+    xieta_affine: InitVar[NDArray[np.floating]]  # (ndim-1, ndim-1)
+    gamma_scale: InitVar[float]
+    affine: NDArray[np.floating] = field(init=False)  # (ndim, ndim)
+    scale: NDArray[np.floating] = field(init=False)  # (ndim,)
+    shear: float = field(init=False)
+    rot: float = field(init=False)
+
+    def __post_init__(self, xieta_affine, gamma_scale):
+        scale, shear, rot = af.decompose_affine(xieta_affine)
+        self.scale = np.array((*scale, gamma_scale))
+        self.shear = shear.item()
+        self.rot = af.decompose_rotation(rot)[-1]
+
+        self.affine = np.eye(len(xieta_affine))
+        self.affine[: len(xieta_affine), : len(xieta_affine)] = xieta_affine
+        self.affine[-1, -1] = gamma_scale
+
+    @classmethod
+    def identity(cls):
+        return Transform(np.zeros(3), np.eye(2), 0)
 
 
 @dataclass
@@ -49,7 +79,11 @@ class FocalPlane:
     avg_fp: NDArray[np.floating] = field(init=False)  # (ndim, ndet)
     weights: NDArray[np.floating] = field(init=False)  # (ndet,)
     transformed: NDArray[np.floating] = field(init=False)  # (ndim, ndet)
-    centers_transformed: NDArray[np.floating] = field(init=False)  # (ndim, 1)
+    center_transformed: NDArray[np.floating] = field(init=False)  # (ndim, 1)
+    have_gamma: bool = field(init=False, default=False)
+    n_point: NDArray[np.int_] = field(init=False)
+    n_gamma: NDArray[np.int_] = field(init=False)
+    transform: Transform = field(init=False, default_factory=Transform.identity)
 
     def __post_init__(self):
         self.full_fp = np.nan + np.empty(self.template.fp.shape + (self.n_aman,))
@@ -58,6 +92,8 @@ class FocalPlane:
         self.weight = np.zeros(len(self.template.det_ids))
         self.transformed = self.template.fp.copy()
         self.center_transformed = self.template.center.copy()
+        self.n_point = np.zeros_like(self.template.det_ids, dtype=int)
+        self.n_gamma = np.zeros_like(self.template.det_ids, dtype=int)
 
     def map_to_template(self, aman):
         _, msk, template_msk = np.intersect1d(
@@ -83,8 +119,76 @@ class FocalPlane:
         self.full_fp[:, template_msk, i] = fp * weights
         self.tot_weight[template_msk] += weights
 
+    def save(self, f, group):
+        ndets = len(self.template.det_ids)
+        outdt = [
+            ("dets:det_id", self.template.det_ids.dtype),
+            ("xi", np.float32),
+            ("eta", np.float32),
+            ("gamma", np.float32),
+        ]
+        fpout = np.fromiter(
+            zip(self.template.det_ids, *self.transformed), dtype=outdt, count=ndets
+        )
+        write_dataset(metadata.ResultSet.from_friend(fpout), f, f"{group}/focal_plane")
+        _add_attrs(f[f"{group}/focal_plane"], {"measured_gamma": self.have_gamma})
 
-def _avg_focalplane(full_fp, tot_weight, n_obs):
+        outdt_full = [
+            ("dets:det_id", self.template.det_ids.dtype),
+            ("xi_t", np.float32),
+            ("eta_t", np.float32),
+            ("gamma_t", np.float32),
+            ("xi_m", np.float32),
+            ("eta_m", np.float32),
+            ("gamma_m", np.float32),
+            ("weights", np.float32),
+            ("n_point", np.int8),
+            ("n_gamma", np.int8),
+        ]
+        fpfullout = np.fromiter(
+            zip(
+                self.template.det_ids,
+                *self.transformed,
+                *self.avg_fp,
+                self.weights,
+                self.n_point,
+                self.n_gamma,
+            ),
+            dtype=outdt_full,
+            count=ndets,
+        )
+        write_dataset(
+            metadata.ResultSet.from_friend(fpfullout),
+            f,
+            f"{group}/focal_plane_full",
+            overwrite=True,
+        )
+
+        f.create_group(f"{group}/transform")
+        _add_attrs(
+            f[f"{group}/transform"],
+            {
+                "shift": self.transform.shift,
+                "scale": self.transform.scale,
+                "shear": self.transform.shear,
+                "rot": self.transform.rot,
+                "affine": self.transform.affine,
+            },
+        )
+        _add_attrs(
+            f[f"{group}"],
+            {
+                "fit_centers": self.center_transformed,
+                "template_centers": self.template.center,
+            },
+        )
+
+
+def _avg_focalplane(full_fp, tot_weight):
+    # Figure out how many good pointings we have for each det
+    msk = np.isfinite(full_fp)
+    n_obs = np.sum(np.any(msk, axis=0), axis=-1)
+    n_point, _, n_gamma = tuple(np.sum(msk, axis=-1))
     tot_weight[tot_weight == 0] = np.nan
     avg_fp = np.nansum(full_fp, axis=-1) / tot_weight
     avg_weight = tot_weight / n_obs
@@ -93,90 +197,26 @@ def _avg_focalplane(full_fp, tot_weight, n_obs):
     all_nan = ~np.any(np.isfinite(full_fp).reshape((len(full_fp), -1)), axis=1)
     avg_fp[all_nan] = np.nan
 
-    return avg_fp, avg_weight
+    return avg_fp, avg_weight, n_point, n_gamma
 
 
 def _log_vals(shift, scale, shear, rot, axis):
     deg2rad = np.pi / 180.0
     rad2deg = 180.0 / np.pi
     for ax, s in zip(axis, shift):
-        logger.info("Shift along %s axis is %f", ax, s)
+        logger.info("\tShift along %s axis is %f", ax, s)
     for ax, s in zip(axis, scale):
-        logger.info("Scale along %s axis is %f", ax, s)
+        logger.info("\tScale along %s axis is %f", ax, s)
         if np.isclose(s, deg2rad):
             logger.warning(
-                "Scale factor for %s looks like a degrees to radians conversion", ax
+                "\tScale factor for %s looks like a degrees to radians conversion", ax
             )
         elif np.isclose(s, rad2deg):
             logger.warning(
-                "Scale factor for %s looks like a radians to degrees conversion", ax
+                "\tScale factor for %s looks like a radians to degrees conversion", ax
             )
-    logger.info("Shear param is %f", shear)
-    logger.info("Rotation of the %s-%s plane is %f radians", axis[0], axis[1], rot)
-
-
-def _mk_fpout(det_id, transformed, measured):
-    outdt = [
-        ("dets:det_id", det_id.dtype),
-        ("xi", np.float32),
-        ("eta", np.float32),
-        ("gamma", np.float32),
-    ]
-    fpout = np.fromiter(zip(det_id, *transformed), dtype=outdt, count=len(det_id))
-
-    outdt_full = [
-        ("dets:det_id", det_id.dtype),
-        ("xi_t", np.float32),
-        ("eta_t", np.float32),
-        ("gamma_t", np.float32),
-        ("xi_m", np.float32),
-        ("eta_m", np.float32),
-        ("gamma_m", np.float32),
-    ]
-    fpfullout = np.fromiter(
-        zip(det_id, *transformed, *measured),
-        dtype=outdt_full,
-        count=len(det_id),
-    )
-
-    return metadata.ResultSet.from_friend(fpout), metadata.ResultSet.from_friend(
-        fpfullout
-    )
-
-
-def _mk_tpout(xieta):
-    outdt = [
-        ("d_x", np.float32),
-        ("d_y", np.float32),
-        ("d_z", np.float32),
-        ("s_x", np.float32),
-        ("s_y", np.float32),
-        ("s_z", np.float32),
-        ("shear", np.float32),
-        ("rot", np.float32),
-    ]
-    xieta = (*xieta[0], *xieta[1], *xieta[2:])
-    tpout = np.array([xieta], outdt)
-
-    return tpout
-
-
-def _mk_refout(center, center_transformed):
-    outdt = [
-        ("x", np.float32),
-        ("y", np.float32),
-        ("z", np.float32),
-    ]
-    refout = np.array(
-        [tuple(np.squeeze(center)), tuple(np.squeeze(center_transformed))], outdt
-    )
-
-    return refout
-
-
-def _add_attrs(dset, attrs):
-    for k, v in attrs.items():
-        dset.attrs[k] = v
+    logger.info("\tShear param is %f", shear)
+    logger.info("\tRotation of the %s-%s plane is %f radians", axis[0], axis[1], rot)
 
 
 def _mk_plot(plot_dir, froot, nominal, measured, transformed):
@@ -314,8 +354,7 @@ def _load_ctx(config):
     if "query" in _config["context"]:
         del _config["context"]["query"]
     amans = []
-    dets = {"stream_id": f"ufm_{config['ufm'].lower()}"}
-    dets.update(config["context"].get("dets", {}))
+    dets = config["context"].get("dets", {})
     for obs_id in obs_ids:
         aman = ctx.get_meta(obs_id, dets=dets)
         if "wafer" not in aman.det_info and dm_name in aman:
@@ -346,14 +385,9 @@ def _load_ctx(config):
             amans.append(_aman)
         elif tod_pointing_name not in aman:
             raise ValueError(f"No pointing found in {obs_id}")
+    stream_ids = np.unique(np.concatenate([aman.det_info.stream_id for aman in amans]))
 
-    return (
-        amans,
-        obs_ids,
-        amans[0].obs_info.telescope_flavor,
-        amans[0].obs_info.tube_slot,
-        amans[0].det_info.wafer_slot[0],
-    )
+    return amans, obs_ids, stream_ids
 
 
 def _load_rset_single(config):
@@ -374,10 +408,25 @@ def _load_rset_single(config):
     det_info.wrap("wafer", dm_aman)
     det_info.wrap("readout_id", det_info.dets.vals, [(0, det_info.dets)])
     det_info.wrap("det_id", det_info.wafer.det_id, [(0, det_info.dets)])
+    det_info.wrap(
+        "stream_id",
+        np.array([config["stream_id"].lower()] * det_info.dets.count),
+        [(0, det_info.dets)],
+    )
+    det_info.wrap(
+        "wafer_slot",
+        np.array([config["wafer_slot"].lower()] * det_info.dets.count),
+        [(0, det_info.dets)],
+    )
     det_info.restrict("dets", det_info.dets.vals[det_info.det_id != ""])
     det_info.det_id = np.char.strip(det_info.det_id)  # Needed for some old results
     aman = aman.wrap("det_info", det_info)
     aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != "NO_MATCH"])
+
+    obs_info = AxisManager()
+    obs_info.wrap("telescope_flavor", config["telescope_flavor"].lower())
+    obs_info.wrap("tube_slot", config["tube_slot"].lower())
+    aman.wrap("obs_info", obs_info)
 
     smurf = AxisManager(aman.dets)
     if "band" in aman.pointing:
@@ -402,10 +451,13 @@ def _load_rset_single(config):
 
 
 def _load_rset(config):
+    stream_id = config["stream_id"]
     obs = config["resultsets"]
     _config = config.copy()
     obs_ids = np.array(list(obs.keys()))
-    amans = [None] * len(obs_ids)
+    amans: List[Optional[AxisManager]] = [None] * len(obs_ids)
+    obs_info = AxisManager()
+    obs_info.wrap("stream_id", stream_id)
     for i, (obs_id, rsets) in enumerate(obs.items()):
         _config["resultsets"] = rsets
         _config["resultsets"]["obs_id"] = obs_id
@@ -417,9 +469,9 @@ def _load_rset(config):
     return (
         amans,
         obs_ids,
-        config["telescope_flavor"],
-        config["tube_slot"],
-        config["wafer_slot"],
+        [
+            stream_id,
+        ],
     )
 
 
@@ -501,21 +553,17 @@ def main():
 
     # Load data
     if "context" in config:
-        amans, obs_ids, tel, ot, ws = _load_ctx(config)
+        amans, obs_ids, stream_ids = _load_ctx(config)
     elif "resultsets" in config:
-        amans, obs_ids, tel, ot, ws = _load_rset(config)
+        amans, obs_ids, stream_ids = _load_rset(config)
     else:
         raise ValueError("No valid inputs provided")
 
-    # Generate pointing config
-    pointing_cfg = _mk_pointing_config(tel, ot, ws, config)
-
     # Build output path
-    ufm = config["ufm"]
     append = ""
     if "append" in config:
         append = "_" + config["append"]
-    froot = f"{ufm}{append}"
+    froot = f"focal_plane{append}"
     subdir = config.get("subdir", None)
     if subdir is None:
         subdir = "combined"
@@ -525,146 +573,181 @@ def main():
     outpath = os.path.abspath(outpath)
     os.makedirs(os.path.dirname(outpath), exist_ok=True)
 
-    # If a template is provided load it, otherwise generate one
     gen_template = "template" not in config
     template_path = config.get("template", "nominal.h5")
     have_template = os.path.exists(template_path)
     if not gen_template and not have_template:
         logger.error("Provided template doesn't exist, trying to generate one")
         gen_template = True
-    if gen_template:
-        logger.info(f"Generating template for {ufm}")
-        if "wafer_info" not in config:
-            raise ValueError("Need wafer_info to generate template")
-        template_det_ids, template, is_optical = op.gen_template(
-            config["wafer_info"], config["ufm"], **pointing_cfg
+    focal_planes = {}
+    for stream_id in stream_ids:
+        logger.info("Working on %s", stream_id)
+
+        # Limit ourselves to amans with this stream_id and restrict
+        amans_restrict = [
+            aman.copy().restrict(
+                "dets", aman.dets.vals[aman.det_info.stream_id == stream_id]
+            )
+            for aman in amans
+            if aman is not None and stream_id in aman.det_info.stream_id
+        ]
+        if len(amans_restrict) == 0:
+            logger.error(
+                "\tSomehow no AxisManagers with stream_id %s, skipping", stream_id
+            )
+            continue
+
+        # Figure out where this UFM is installed and make pointing config
+        tel = np.unique([aman.obs_info.telescope_flavor for aman in amans_restrict])
+        ot = np.unique([aman.obs_info.tube_slot for aman in amans_restrict])
+        ws = np.unique(
+            np.concatenate([aman.det_info.wafer_slot for aman in amans_restrict])
         )
-        template = Template(template_det_ids, template.T, is_optical, pointing_cfg)
-    elif have_template:
-        logger.info("Loading template from %s", template_path)
-        template = _load_template(template_path, ufm, pointing_cfg)
-    else:
-        raise ValueError(
-            "No template provided and unable to generate one for some reason"
-        )
+        if len(tel) > 1:
+            raise ValueError(f"Multiple telescope flavors found for {stream_id}")
+        if len(ot) > 1:
+            raise ValueError(f"Multible tube slots found for {stream_id}")
+        if len(ws) > 1:
+            raise ValueError(f"Multiple wafer slots for {stream_id}")
+        tel, ot, ws = tel[0], ot[0], ws[0]
+        logger.info("\t%s is in %s %s %s", stream_id, tel, ot, ws)
+        pointing_cfg = _mk_pointing_config(tel, ot, ws, config)
 
-    focal_plane = FocalPlane(template, len(amans))
-    for i, (aman, obs_id) in enumerate(zip(amans, obs_ids)):
-        logger.info("Working on %s", obs_id)
-        if aman is None:
-            raise ValueError("AxisManager doesn't exist?")
+        # If a template is provided load it, otherwise generate one
+        if gen_template:
+            logger.info(f"\tGenerating template for {stream_id}")
+            if "wafer_info" not in config:
+                raise ValueError("Need wafer_info to generate template")
+            template_det_ids, template, is_optical = op.gen_template(
+                config["wafer_info"], stream_id, **pointing_cfg
+            )
+            template = Template(template_det_ids, template.T, is_optical, pointing_cfg)
+        elif have_template:
+            logger.info("\tLoading template from %s", template_path)
+            template = _load_template(template_path, stream_id, pointing_cfg)
+        else:
+            raise ValueError(
+                "No template provided and unable to generate one for some reason"
+            )
 
-        # Restrict to optical dets
-        optical = np.isin(
-            aman.det_info.det_id, focal_plane.template.det_ids[template.optical]
-        )
-        aman.restrict("dets", aman.dets.vals[optical])
+        focal_plane = FocalPlane(template, len(amans))
+        for i, (aman, obs_id) in enumerate(zip(amans_restrict, obs_ids)):
+            logger.info("\tWorking on %s", obs_id)
+            if aman.dets.count == 0:
+                logger.info("\t\tNo dets found, skipping")
+                continue
 
-        # Do some outlier cuts
-        _restrict_inliers(aman, focal_plane)
+            # Restrict to optical dets
+            optical = np.isin(
+                aman.det_info.det_id, focal_plane.template.det_ids[template.optical]
+            )
+            aman.restrict("dets", aman.dets.vals[optical])
+            if aman.dets.count == 0:
+                logger.info("\t\tNo optical dets, skipping", stream_id)
+                continue
 
-        # Mapping to template
-        fp, template_msk = focal_plane.map_to_template(aman)
+            # Do some outlier cuts
+            _restrict_inliers(aman, focal_plane)
 
-        # Try an initial alignment and get weights
-        aff, sft = af.get_affine(fp[:2], focal_plane.template.fp[:2, template_msk])
-        aligned = aff @ fp[:2] + sft[..., None]
-        if np.any(np.isfinite(fp[2])):
-            gscale, gsft = gamma_fit(fp[2], focal_plane.template.fp[2, template_msk])
-            weights = af.gen_weights(
-                np.vstack((aligned, gscale * fp[2] + gsft)),
-                focal_plane.template.fp[:, template_msk],
-                focal_plane.template.spacing.ravel() / 10,
+            # Mapping to template
+            fp, template_msk = focal_plane.map_to_template(aman)
+
+            # Try an initial alignment and get weights
+            aff, sft = af.get_affine(fp[:2], focal_plane.template.fp[:2, template_msk])
+            aligned = aff @ fp[:2] + sft[..., None]
+            if np.any(np.isfinite(fp[2])):
+                gscale, gsft = gamma_fit(
+                    fp[2], focal_plane.template.fp[2, template_msk]
+                )
+                weights = af.gen_weights(
+                    np.vstack((aligned, gscale * fp[2] + gsft)),
+                    focal_plane.template.fp[:, template_msk],
+                    focal_plane.template.spacing.ravel() / 10,
+                )
+            else:
+                weights = af.gen_weights(
+                    aligned,
+                    focal_plane.template.fp[:2, template_msk],
+                    focal_plane.template.spacing[:2].ravel() / 10,
+                )
+
+            # Store weighted values
+            focal_plane.add_fp(i, fp, weights, template_msk)
+
+        # Compute the average focal plane with weights
+        (
+            focal_plane.avg_fp,
+            focal_plane.weights,
+            focal_plane.n_point,
+            focal_plane.n_gamma,
+        ) = _avg_focalplane(focal_plane.full_fp, focal_plane.tot_weight)
+
+        # Compute transformation between the two nominal and measured pointing
+        focal_plane.have_gamma = np.sum(focal_plane.n_gamma) > 0
+        if focal_plane.have_gamma:
+            gamma_scale, gamma_shift = gamma_fit(
+                focal_plane.template.fp[2], focal_plane.avg_fp[2]
+            )
+            focal_plane.transformed[2] = (
+                focal_plane.template.fp[2] * gamma_scale + gamma_shift
+            )
+            focal_plane.center_transformed[2] = (
+                gamma_scale * focal_plane.template.center[2] + gamma_shift
             )
         else:
-            weights = af.gen_weights(
-                aligned,
-                focal_plane.template.fp[:2, template_msk],
-                focal_plane.template.spacing[:2].ravel() / 10,
+            logger.warning(
+                "\tNo polarization data availible, gammas will be filled with the nominal values."
             )
+            gamma_scale = 1.0
+            gamma_shift = 0.0
 
-        # Store weighted values
-        focal_plane.add_fp(i, fp, weights, template_msk)
-
-    # Compute the average focal plane with weights
-    focal_plane.avg_fp, focal_plane.weights = _avg_focalplane(
-        focal_plane.full_fp, focal_plane.tot_weight, focal_plane.n_aman
-    )
-
-    # Compute transformation between the two nominal and measured pointing
-    have_gamma = np.sum(np.isfinite(focal_plane.avg_fp[2]).astype(int)) > 10
-    if have_gamma:
-        gamma_scale, gamma_shift = gamma_fit(
-            focal_plane.template.fp[2], focal_plane.avg_fp[2]
+        affine, shift = af.get_affine_two_stage(
+            focal_plane.template.fp[:2], focal_plane.avg_fp[:2], focal_plane.weights
         )
-        focal_plane.transformed[2] = (
-            focal_plane.template.fp[2] * gamma_scale + gamma_shift
+
+        focal_plane.transformed[:2] = (
+            affine @ focal_plane.template.fp[:2] + shift[..., None]
         )
-        focal_plane.center_transformed[2] = (
-            gamma_scale * focal_plane.template.center[2] + gamma_shift
+        focal_plane.center_transformed[:2] = (
+            affine @ focal_plane.template.center[:2] + shift[..., None]
         )
-    else:
-        logger.warning(
-            "No polarization data availible, gammas will be filled with the nominal values."
+
+        rms = np.sqrt(np.nanmean((focal_plane.avg_fp - focal_plane.transformed) ** 2))
+        logger.info("\tRMS after transformation is %f", rms)
+
+        shift = np.array((*shift, gamma_shift))
+        focal_plane.transform = Transform(shift, affine, gamma_scale)
+        _log_vals(
+            focal_plane.transform.shift,
+            focal_plane.transform.scale,
+            focal_plane.transform.shear,
+            focal_plane.transform.rot,
+            ("xi", "eta", "gamma"),
         )
-        gamma_scale = 1.0
-        gamma_shift = 0.0
 
-    nominal = focal_plane.template.fp[:2].copy()
-    # Do an initial alignment without weights
-    affine_0, shift_0 = af.get_affine(nominal, focal_plane.avg_fp[:2])
-    init_align = affine_0 @ nominal + shift_0[..., None]
-    # Now compute the actual transform
-    affine, shift = af.get_affine_weighted(
-        init_align, focal_plane.avg_fp[:2], focal_plane.weights
-    )
-    affine = affine @ affine_0
-    shift += (affine @ shift_0[..., None])[:, 0]
+        if config.get("plot", False):
+            plot_dir = config.get("plot_dir", None)
+            proot = f"{stream_id}{append}"
+            if plot_dir is not None:
+                plot_dir = os.path.join(plot_dir, subdir)
+                plot_dir = os.path.abspath(plot_dir)
+                os.makedirs(plot_dir, exist_ok=True)
+            _mk_plot(
+                plot_dir,
+                proot,
+                focal_plane.template.fp,
+                focal_plane.avg_fp,
+                focal_plane.transformed,
+            )
+        focal_planes[stream_id] = focal_plane
 
-    scale, shear, rot = af.decompose_affine(affine)
-    shear = shear.item()
-    rot = af.decompose_rotation(rot)[-1]
-    focal_plane.transformed[:2] = affine @ nominal + shift[..., None]
-    focal_plane.center_transformed[:2] = (
-        affine @ focal_plane.template.center[:2] + shift[..., None]
-    )
-
-    rms = np.sqrt(np.nanmean((focal_plane.avg_fp - focal_plane.transformed) ** 2))
-    logger.info("RMS after transformation is %f", rms)
-
-    shift = (*shift, gamma_shift)
-    scale = (*scale, gamma_scale)
-    xieta = (shift, scale, shear, rot)
-    _log_vals(shift, scale, shear, rot, ("xi", "eta", "gamma"))
-
-    if config.get("plot", False):
-        plot_dir = config.get("plot_dir", None)
-        if plot_dir is not None:
-            plot_dir = os.path.join(plot_dir, subdir)
-            plot_dir = os.path.abspath(plot_dir)
-            os.makedirs(plot_dir, exist_ok=True)
-        _mk_plot(
-            plot_dir,
-            froot,
-            focal_plane.template.fp,
-            focal_plane.avg_fp,
-            focal_plane.transformed,
-        )
+    # TODO: Some sort of CM fit
 
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)
-    fpout, fpfullout = _mk_fpout(
-        focal_plane.template.det_ids, focal_plane.transformed, focal_plane.avg_fp
-    )
-    tpout = _mk_tpout(xieta)
-    refout = _mk_refout(focal_plane.template.center, focal_plane.center_transformed)
     with h5py.File(outpath, "w") as f:
-        write_dataset(fpout, f, "focal_plane", overwrite=True)
-        _add_attrs(f["focal_plane"], {"measured_gamma": have_gamma})
-        write_dataset(fpfullout, f, "focal_plane_full", overwrite=True)
-        write_dataset(tpout, f, "offsets", overwrite=True)
-        _add_attrs(f["offsets"], {"affine_xieta": affine})
-        write_dataset(refout, f, "reference", overwrite=True)
+        for stream_id, focal_plane in focal_planes.items():
+            focal_plane.save(f, stream_id)
 
 
 if __name__ == "__main__":
