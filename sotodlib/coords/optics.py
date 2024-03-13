@@ -661,7 +661,7 @@ def get_focal_plane(
     return xi, eta, gamma
 
 
-def gen_template(wafer_info, ufm, **pointing_cfg):
+def gen_template(wafer_info, stream_id, **pointing_cfg):
     """
     Generate a pointing template from a wafer info ResultSet.
 
@@ -670,7 +670,7 @@ def gen_template(wafer_info, ufm, **pointing_cfg):
         wafer_info: Either the path to a wafer_info ResultSet
                     or an open h5py File object.
 
-        ufm: The UFM to generate the template for (ie: Mv5).
+        stream_id : The UFM to generate the template for (ie: ufm_mv5).
 
         **pointing_cfg: Arguments to pass to get_focal_plane,
                         should be arguments from rot onwards.
@@ -683,6 +683,7 @@ def gen_template(wafer_info, ufm, **pointing_cfg):
 
         is_optical: (ndet) mask that is True for all optical dets.
     """
+    ufm = stream_id.split("_")[-1].title()
     wafer = read_dataset(wafer_info, ufm)
     template_det_ids = wafer["dets:det_id"]
     det_x = wafer["dets:wafer.x"]
