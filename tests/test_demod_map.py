@@ -1,6 +1,7 @@
 from sotodlib import core, hwp, coords
 import so3g
 import numpy as np
+from pixell import enmap
 
 import unittest
 
