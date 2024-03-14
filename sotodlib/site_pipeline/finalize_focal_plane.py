@@ -1,7 +1,7 @@
 import argparse as ap
 import os
 from dataclasses import InitVar, dataclass, field
-from typing import Dict
+from typing import Dict, List, Optional
 
 import h5py
 import matplotlib.pyplot as plt
@@ -18,6 +18,11 @@ from sotodlib.io.metadata import read_dataset, write_dataset
 from sotodlib.site_pipeline import util
 
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
+
+
+def _add_attrs(dset, attrs):
+    for k, v in attrs.items():
+        dset.attrs[k] = v
 
 
 @dataclass
@@ -49,7 +54,7 @@ class FocalPlane:
     avg_fp: NDArray[np.floating] = field(init=False)  # (ndim, ndet)
     weights: NDArray[np.floating] = field(init=False)  # (ndet,)
     transformed: NDArray[np.floating] = field(init=False)  # (ndim, ndet)
-    centers_transformed: NDArray[np.floating] = field(init=False)  # (ndim, 1)
+    center_transformed: NDArray[np.floating] = field(init=False)  # (ndim, 1)
     affine: NDArray[np.floating] = np.eye(2)  # (ndim-1, ndim-1)
     shift: NDArray[np.floating] = np.zeros(3)  # (ndim,)
     scale: NDArray[np.floating] = np.ones(3)  # (ndim,)
@@ -89,6 +94,60 @@ class FocalPlane:
         self.full_fp[:, template_msk, i] = fp * weights
         self.tot_weight[template_msk] += weights
 
+    def save(self, f, group):
+        ndets = len(self.template.det_ids)
+        outdt = [
+            ("dets:det_id", self.template.det_ids.dtype),
+            ("xi", np.float32),
+            ("eta", np.float32),
+            ("gamma", np.float32),
+        ]
+        fpout = np.fromiter(
+            zip(self.template.det_ids, *self.transformed), dtype=outdt, count=ndets
+        )
+        write_dataset(metadata.ResultSet.from_friend(fpout), f, f"{group}/focal_plane")
+        _add_attrs(f[f"{group}/focal_plane"], {"measured_gamma": self.have_gamma})
+
+        outdt_full = [
+            ("dets:det_id", self.template.det_ids.dtype),
+            ("xi_t", np.float32),
+            ("eta_t", np.float32),
+            ("gamma_t", np.float32),
+            ("xi_m", np.float32),
+            ("eta_m", np.float32),
+            ("gamma_m", np.float32),
+        ]
+        fpfullout = np.fromiter(
+            zip(self.template.det_ids, *self.transformed, *self.avg_fp),
+            dtype=outdt_full,
+            count=ndets,
+        )
+        write_dataset(
+            metadata.ResultSet.from_friend(fpfullout),
+            f,
+            f"{group}/focal_plane_full",
+            overwrite=True,
+        )
+
+        f.create_group(f"{group}/transform")
+        _add_attrs(
+            f[f"{group}/transform"],
+            {
+                "shift": self.shift,
+                "scale": self.scale,
+                "shear": self.shear,
+                "rot": self.rot,
+                "affine": self.affine,
+            },
+        )
+        _add_attrs(
+            f[f"{group}"],
+            {
+                "fit_centers": self.center_transformed,
+                "template_centers": self.template.center,
+            },
+        )
+
 
 def _avg_focalplane(full_fp, tot_weight, n_obs):
     tot_weight[tot_weight == 0] = np.nan
@@ -119,70 +178,6 @@ def _log_vals(shift, scale, shear, rot, axis):
             )
     logger.info("\tShear param is %f", shear)
     logger.info("\tRotation of the %s-%s plane is %f radians", axis[0], axis[1], rot)
-
-
-def _mk_fpout(det_id, transformed, measured):
-    outdt = [
-        ("dets:det_id", det_id.dtype),
-        ("xi", np.float32),
-        ("eta", np.float32),
-        ("gamma", np.float32),
-    ]
-    fpout = np.fromiter(zip(det_id, *transformed), dtype=outdt, count=len(det_id))
-
-    outdt_full = [
-        ("dets:det_id", det_id.dtype),
-        ("xi_t", np.float32),
-        ("eta_t", np.float32),
-        ("gamma_t", np.float32),
-        ("xi_m", np.float32),
-        ("eta_m", np.float32),
-        ("gamma_m", np.float32),
-    ]
-    fpfullout = np.fromiter(
-        zip(det_id, *transformed, *measured),
-        dtype=outdt_full,
-        count=len(det_id),
-    )
-
-    return metadata.ResultSet.from_friend(fpout), metadata.ResultSet.from_friend(
-        fpfullout
-    )
-
-
-def _mk_tpout(shift, scale, shear, rot):
-    outdt = [
-        ("d_x", np.float32),
-        ("d_y", np.float32),
-        ("d_z", np.float32),
-        ("s_x", np.float32),
-        ("s_y", np.float32),
-        ("s_z", np.float32),
-        ("shear", np.float32),
-        ("rot", np.float32),
-    ]
-    xieta = (*shift, *scale, shear, rot)
-    tpout = np.array([xieta], outdt)
-
-    return tpout
-
-
-def _mk_refout(center, center_transformed):
-    outdt = [
-        ("x", np.float32),
-        ("y", np.float32),
-        ("z", np.float32),
-    ]
-    refout = np.array(
-        [tuple(np.squeeze(center)), tuple(np.squeeze(center_transformed))], outdt
-    )
-
-    return refout
-
-
-def _add_attrs(dset, attrs):
-    for k, v in attrs.items():
-        dset.attrs[k] = v
 
 
 def _mk_plot(plot_dir, froot, nominal, measured, transformed):
@@ -320,9 +315,7 @@ def _load_ctx(config):
     if "query" in _config["context"]:
         del _config["context"]["query"]
     amans = []
-    # dets = {"stream_id": f"ufm_{config['ufm'].lower()}"}
-    dets = {}
-    dets.update(config["context"].get("dets", {}))
+    dets = config["context"].get("dets", {})
     for obs_id in obs_ids:
         aman = ctx.get_meta(obs_id, dets=dets)
         if "wafer" not in aman.det_info and dm_name in aman:
@@ -354,26 +347,8 @@ def _load_ctx(config):
         elif tod_pointing_name not in aman:
             raise ValueError(f"No pointing found in {obs_id}")
     stream_ids = np.unique(np.concatenate([aman.det_info.stream_id for aman in amans]))
-    # TODO: Pretty sure there is a cleaner way of doing this...
-    wafer_slot = {}
-    for sid in stream_ids:
-        for aman in amans:
-            if sid not in aman.det_info.stream_id:
-                continue
-            idx = np.where(aman.det_info.stream_id == sid)[0][0]
-            wafer_slot[sid] = aman.det_info.wafer_slot[idx]
-            break
 
-    return (
-        amans,
-        obs_ids,
-        stream_ids,
-        amans[0].obs_info.telescope_flavor,
-        amans[
-            0
-        ].obs_info.tube_slot,  # TODO: Need to figure out if we will have LAT results with multiple OTs
-        wafer_slot,
-    )
+    return amans, obs_ids, stream_ids
 
 
 def _load_rset_single(config):
@@ -396,13 +371,23 @@ def _load_rset_single(config):
     det_info.wrap("det_id", det_info.wafer.det_id, [(0, det_info.dets)])
     det_info.wrap(
         "stream_id",
-        np.array([config["stream_id"]] * det_info.dets.count),
+        np.array([config["stream_id"].lower()] * det_info.dets.count),
+        [(0, det_info.dets)],
+    )
+    det_info.wrap(
+        "wafer_slot",
+        np.array([config["wafer_slot"].lower()] * det_info.dets.count),
         [(0, det_info.dets)],
     )
     det_info.restrict("dets", det_info.dets.vals[det_info.det_id != ""])
     det_info.det_id = np.char.strip(det_info.det_id)  # Needed for some old results
     aman = aman.wrap("det_info", det_info)
     aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != "NO_MATCH"])
+
+    obs_info = AxisManager()
+    obs_info.wrap("telescope_flavor", config["telescope_flavor"].lower())
+    obs_info.wrap("tube_slot", config["tube_slot"].lower())
+    aman.wrap("obs_info", obs_info)
 
     smurf = AxisManager(aman.dets)
     if "band" in aman.pointing:
@@ -431,7 +416,7 @@ def _load_rset(config):
     obs = config["resultsets"]
     _config = config.copy()
     obs_ids = np.array(list(obs.keys()))
-    amans = [None] * len(obs_ids)
+    amans: List[Optional[AxisManager]] = [None] * len(obs_ids)
     obs_info = AxisManager()
     obs_info.wrap("stream_id", stream_id)
     for i, (obs_id, rsets) in enumerate(obs.items()):
@@ -448,9 +433,6 @@ def _load_rset(config):
         [
             stream_id,
         ],
-        config["telescope_flavor"],
-        config["tube_slot"],
-        {stream_id: config["wafer_slot"]},
     )
 
 
@@ -532,9 +514,9 @@ def main():
 
     # Load data
     if "context" in config:
-        amans, obs_ids, stream_ids, tel, ot, ws = _load_ctx(config)
+        amans, obs_ids, stream_ids = _load_ctx(config)
     elif "resultsets" in config:
-        amans, obs_ids, stream_ids, tel, ot, ws = _load_rset(config)
+        amans, obs_ids, stream_ids = _load_rset(config)
     else:
         raise ValueError("No valid inputs provided")
 
@@ -561,8 +543,36 @@ def main():
     focal_planes = {}
     for stream_id in stream_ids:
         logger.info("Working on %s", stream_id)
-        # Generate pointing config
-        pointing_cfg = _mk_pointing_config(tel, ot, ws[stream_id], config)
+
+        # Limit ourselves to amans with this stream_id and restrict
+        amans_restrict = [
+            aman.copy().restrict(
+                "dets", aman.dets.vals[aman.det_info.stream_id == stream_id]
+            )
+            for aman in amans
+            if aman is not None and stream_id in aman.det_info.stream_id
+        ]
+        if len(amans_restrict) == 0:
+            logger.error(
+                "\tSomehow no AxisManagers with stream_id %s, skipping", stream_id
+            )
+            continue
+
+        # Figure out where this UFM is installed and make pointing config
+        tel = np.unique([aman.obs_info.telescope_flavor for aman in amans_restrict])
+        ot = np.unique([aman.obs_info.tube_slot for aman in amans_restrict])
+        ws = np.unique(
+            np.concatenate([aman.det_info.wafer_slot for aman in amans_restrict])
+        )
+        if len(tel) > 1:
+            raise ValueError(f"Multiple telescope flavors found for {stream_id}")
+        if len(ot) > 1:
+            raise ValueError(f"Multible tube slots found for {stream_id}")
+        if len(ws) > 1:
+            raise ValueError(f"Multiple wafer slots for {stream_id}")
+        tel, ot, ws = tel[0], ot[0], ws[0]
+        logger.info("\t%s is in %s %s %s", stream_id, tel, ot, ws)
+        pointing_cfg = _mk_pointing_config(tel, ot, ws, config)
 
         # If a template is provided load it, otherwise generate one
         if gen_template:
@@ -582,16 +592,10 @@ def main():
             )
 
         focal_plane = FocalPlane(template, len(amans))
-        for i, (_aman, obs_id) in enumerate(zip(amans, obs_ids)):
+        for i, (aman, obs_id) in enumerate(zip(amans_restrict, obs_ids)):
             logger.info("\tWorking on %s", obs_id)
-            if _aman is None:
-                raise ValueError("AxisManager doesn't exist?")
-            # Restrict to our stream_id
-            aman = _aman.copy().restrict(
-                "dets", _aman.dets.vals[_aman.det_info.stream_id == stream_id]
-            )
             if aman.dets.count == 0:
-                logger.info("\t\tNo dets with stream_id %s found, skipping", stream_id)
+                logger.info("\t\tNo dets found, skipping")
                 continue
 
             # Restrict to optical dets
@@ -714,26 +718,7 @@ def main():
     logger.info("Saving data to %s", outpath)
     with h5py.File(outpath, "w") as f:
         for stream_id, focal_plane in focal_planes.items():
-            fpout, fpfullout = _mk_fpout(
-                focal_plane.template.det_ids,
-                focal_plane.transformed,
-                focal_plane.avg_fp,
-            )
-            tpout = _mk_tpout(
-                focal_plane.shift, focal_plane.scale, focal_plane.shear, focal_plane.rot
-            )
-            refout = _mk_refout(
-                focal_plane.template.center, focal_plane.center_transformed
-            )
-            write_dataset(fpout, f, f"{stream_id}/focal_plane", overwrite=True)
-            _add_attrs(
-                f[f"{stream_id}/focal_plane"],
-                {"measured_gamma": focal_plane.have_gamma},
-            )
-            write_dataset(fpfullout, f, f"{stream_id}/focal_plane_full", overwrite=True)
-            write_dataset(tpout, f, f"{stream_id}/offsets", overwrite=True)
-            _add_attrs(f[f"{stream_id}/offsets"], {f"affine_xieta": focal_plane.affine})
-            write_dataset(refout, f, f"{stream_id}/reference", overwrite=True)
+            focal_plane.save(f, stream_id)
 
 
 if __name__ == "__main__":
