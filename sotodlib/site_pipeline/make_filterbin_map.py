@@ -28,6 +28,7 @@ defaults = {"query": "1",
             "det_in_out": False,
             "det_left_right":False,
             "det_upper_lower":False,
+            "scan_left_right":False,
             "tasks_per_group":1,
             "window":0.0, # not implemented yet
             "dtype_tod": np.float32,
@@ -58,7 +59,7 @@ def get_parser(parser=None):
     parser.add_argument("--det-upper-lower", action="store_true")
     
     # time samples splits
-    
+    parser.add_argument("--scan-left-right", action="store_true")
     
     parser.add_argument("--ntod",    type=int, )
     parser.add_argument("--tods",    type=str, )
@@ -409,8 +410,7 @@ def write_hits_map(context, obslist, shape, wcs, t0=0, comm=mpi.COMM_WORLD, tag=
         hits = hits.insert(obs_hits[0,0], op=np.ndarray.__iadd__)
     return bunch.Bunch(hits=hits)
 
-def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", verbose=0, split_labels=None, time_split_leftright=False, singlestream=False, det_in_out=False, det_left_right=False, det_upper_lower=False, site='so_sat1'):
-    #det_split_masks is the dictionary that contains detector masks for each split we want to make. Each key has format freq_wafer_split, e.g. f090_w25_detleft, f150_w26_detupper, f090_w27_detin. We need to figure out how many split we'll make 2 per split mode.
+def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", verbose=0, split_labels=None, singlestream=False, det_in_out=False, det_left_right=False, det_upper_lower=False, site='so_sat1'):
     L = logging.getLogger(__name__)
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
@@ -631,6 +631,9 @@ def main(config_file=None, defaults=defaults, **args):
     if args['det_upper_lower']:
         split_labels.append('det_upper')
         split_labels.append('det_lower')
+    if args['scan_left_right']:
+        split_labels.append('scan_left')
+        split_labels.append('scan_right')
     if not split_labels:
         #if the list 
         split_labels = None
