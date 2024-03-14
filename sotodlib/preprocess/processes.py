@@ -137,8 +137,8 @@ class GlitchDetection(_Preprocess):
     Example configuration block::
         
       - name: "glitches"
-        signal: "hwpss_remove"
         calc:
+          signal_name: "hwpss_remove"
           t_glitch: 0.00001
           buffer: 10
           hp_fc: 1
@@ -146,20 +146,15 @@ class GlitchDetection(_Preprocess):
         save: True
         select:
           max_n_glitch: 10
+          sig_glitch: 10
 
     .. autofunction:: sotodlib.tod_ops.flags.get_glitch_flags
     """
     name = "glitches"
 
-    def __init__(self, step_cfgs):
-        self.signal = step_cfgs.get('signal', 'signal')
-
-        super().__init__(step_cfgs)
-    
     def calc_and_save(self, aman, proc_aman):
-        _, glitch_aman = tod_ops.flags.get_glitch_flags(
-            aman[self.signal], merge=False, full_output=True,
-            **self.calc_cfgs
+        _, glitch_aman = tod_ops.flags.get_glitch_flags(aman,
+            merge=False, full_output=True, **self.calc_cfgs
         ) 
         aman.wrap("glitches", glitch_aman)
         self.save(proc_aman, glitch_aman)
