@@ -46,6 +46,7 @@ class DetBiasFlags(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_det_bias_flags
     """
     name = "det_bias_flags"
+    _influx_field = "det_bias_flags_frac"
 
     def calc_and_save(self, aman, proc_aman):
         m = tod_ops.flags.get_det_bias_flags(aman, merge=False,
@@ -68,6 +69,43 @@ class DetBiasFlags(_Preprocess):
         keep = ~proc_aman.det_bias_flags.det_bias_flags
         meta.restrict("dets", meta.dets.vals[has_all_cut(keep)])
         return meta
+
+    @classmethod
+    def gen_metric(cls, meta, proc_aman):
+        """ Generate a QA metric from the output of this process.
+
+        Arguments
+        ---------
+        meta : AxisManager
+            The full metadata container.
+        proc_aman : AxisManager
+            The metadata containing just the output of this process.
+
+        Returns
+        -------
+        line : dict
+            InfluxDB line entry elements to be fed to
+            `site_pipeline.monitor.Monitor.record`
+        """
+        # For now just compute the fraction of samples that were flagged
+        # (I think in practice this will be 1 or 0...)
+        # TODO: come up with a more useful metric
+        frac_flagged = np.array([
+            np.dot(r.ranges(), [-1, 1]).sum() / meta.obs_info.n_samples
+            for r in proc_aman.det_bias_flags.det_bias_flags
+        ])
+        obs_time = [meta.obs_info.timestamp] * frac_flagged.size
+        # extract these tags for the metric
+        tag_keys = ["detset", "readout_id", "stream_id", "wafer_slot", "tel_tube", "det_id", "bandpass"]
+        tags = [{k: meta.det_info[k][d] for k in tag_keys if k in meta.det_info} for d in range(meta.dets.count)]
+        tags[0]["telescope"] = meta.obs_info.telescope
+        return {
+            "field": cls._influx_field,
+            "values": frac_flagged,
+            "timestamps": obs_time,
+            "tags": tags,
+        }
+
 
 class Trends(_Preprocess):
     """Calculate the trends in the data to look for unlocked detectors. All
