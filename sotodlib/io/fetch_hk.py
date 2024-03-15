@@ -48,7 +48,7 @@ def fetch_hk(start, stop, data_dir, fields=None):
                                             data = [[t.time / g3core.G3Units.s for t in v.times], v[k]]
                                             hk_data.setdefault(field, ([], []))
                                             hk_data[field] = (
-                                                np.concatenate([all_data[field][0], data[0]]),
-                                                np.concatenate([all_data[field][1], data[1]])
+                                                np.concatenate([hk_data[field][0], data[0]]),
+                                                np.concatenate([hk_data[field][1], data[1]])
                                             )
     return hk_data
