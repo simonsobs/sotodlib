@@ -90,6 +90,40 @@ def get_affine_weighted(src, dst, weights):
     return affine, shift
 
 
+def get_affine_two_stage(src, dst, weights):
+    """
+    Get affine transformation between two point clouds with a two stage solver.
+    This first uses get_affine to do an intitial alignment and
+    then uses get_affine_weighted to compute a correction on top of that.
+
+    Transformation is dst = affine@src + shift
+
+    Arguments:
+
+        src: (ndim, npoints) array of source points.
+
+        dst: (ndim, npoints) array of destination points.
+
+        weights: (npoint,) array of weights.
+
+    Returns:
+
+        affine: The transformation matrix.
+
+        shift: Shift to apply after transformation.
+    """
+    # Do an initial alignment without weights
+    affine_0, shift_0 = get_affine(src, dst)
+    init_align = affine_0 @ src + shift_0[..., None]
+    # Now compute the actual transform
+    affine, shift = get_affine_weighted(init_align, dst, weights)
+    # Compose the transforms
+    affine = affine @ affine_0
+    shift += (affine @ shift_0[..., None])[:, 0]
+
+    return affine, shift
+
+
 def decompose_affine(affine):
     """
     Decompose an affine transformation into its components.

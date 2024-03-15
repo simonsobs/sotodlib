@@ -26,6 +26,31 @@ def _add_attrs(dset, attrs):
 
 
 @dataclass
+class Transform:
+    shift: NDArray[np.floating]  # (ndim,)
+    xieta_affine: InitVar[NDArray[np.floating]]  # (ndim-1, ndim-1)
+    gamma_scale: InitVar[float]
+    affine: NDArray[np.floating] = field(init=False)  # (ndim, ndim)
+    scale: NDArray[np.floating] = field(init=False)  # (ndim,)
+    shear: float = field(init=False)
+    rot: float = field(init=False)
+
+    def __post_init__(self, xieta_affine, gamma_scale):
+        scale, shear, rot = af.decompose_affine(xieta_affine)
+        self.scale = np.array((*scale, gamma_scale))
+        self.shear = shear.item()
+        self.rot = af.decompose_rotation(rot)[-1]
+
+        self.affine = np.eye(len(xieta_affine))
+        self.affine[: len(xieta_affine), : len(xieta_affine)] = xieta_affine
+        self.affine[-1, -1] = gamma_scale
+
+    @classmethod
+    def identity(cls):
+        return Transform(np.zeros(3), np.eye(2), 0)
+
+
+@dataclass
 class Template:
     det_ids: NDArray[np.str_]  # (ndet,)
     fp: NDArray[np.floating]  # (ndim, ndet)
@@ -55,12 +80,8 @@ class FocalPlane:
     weights: NDArray[np.floating] = field(init=False)  # (ndet,)
     transformed: NDArray[np.floating] = field(init=False)  # (ndim, ndet)
     center_transformed: NDArray[np.floating] = field(init=False)  # (ndim, 1)
-    affine: NDArray[np.floating] = np.eye(2)  # (ndim-1, ndim-1)
-    shift: NDArray[np.floating] = np.zeros(3)  # (ndim,)
-    scale: NDArray[np.floating] = np.ones(3)  # (ndim,)
-    shear: float = 0.0
-    rot: float = 0.0
-    have_gamma = False
+    have_gamma: bool = field(init=False, default=False)
+    transform: Transform = field(init=False, default_factory=Transform.identity)
 
     def __post_init__(self):
         self.full_fp = np.nan + np.empty(self.template.fp.shape + (self.n_aman,))
@@ -133,11 +154,11 @@ class FocalPlane:
         _add_attrs(
             f[f"{group}/transform"],
             {
-                "shift": self.shift,
-                "scale": self.scale,
-                "shear": self.shear,
-                "rot": self.rot,
-                "affine": self.affine,
+                "shift": self.transform.shift,
+                "scale": self.transform.scale,
+                "shear": self.transform.shear,
+                "rot": self.transform.rot,
+                "affine": self.transform.affine,
             },
         )
         _add_attrs(
@@ -661,21 +682,13 @@ def main():
             gamma_scale = 1.0
             gamma_shift = 0.0
 
-        nominal = focal_plane.template.fp[:2].copy()
-        # Do an initial alignment without weights
-        affine_0, shift_0 = af.get_affine(nominal, focal_plane.avg_fp[:2])
-        init_align = affine_0 @ nominal + shift_0[..., None]
-        # Now compute the actual transform
-        affine, shift = af.get_affine_weighted(
-            init_align, focal_plane.avg_fp[:2], focal_plane.weights
+        affine, shift = af.get_affine_two_stage(
+            focal_plane.template.fp[:2], focal_plane.avg_fp[:2], focal_plane.weights
         )
-        affine = affine @ affine_0
-        shift += (affine @ shift_0[..., None])[:, 0]
 
-        scale, shear, rot = af.decompose_affine(affine)
-        shear = shear.item()
-        rot = af.decompose_rotation(rot)[-1]
-        focal_plane.transformed[:2] = affine @ nominal + shift[..., None]
+        focal_plane.transformed[:2] = (
+            affine @ focal_plane.template.fp[:2] + shift[..., None]
+        )
         focal_plane.center_transformed[:2] = (
             affine @ focal_plane.template.center[:2] + shift[..., None]
         )
@@ -683,16 +696,13 @@ def main():
         rms = np.sqrt(np.nanmean((focal_plane.avg_fp - focal_plane.transformed) ** 2))
         logger.info("\tRMS after transformation is %f", rms)
 
-        focal_plane.affine = affine
-        focal_plane.shift = np.array((*shift, gamma_shift))
-        focal_plane.scale = np.array((*scale, gamma_scale))
-        focal_plane.shear = shear
-        focal_plane.rot = rot
+        shift = np.array((*shift, gamma_shift))
+        focal_plane.transform = Transform(shift, affine, gamma_scale)
         _log_vals(
-            focal_plane.shift,
-            focal_plane.scale,
-            focal_plane.shear,
-            focal_plane.rot,
+            focal_plane.transform.shift,
+            focal_plane.transform.scale,
+            focal_plane.transform.shear,
+            focal_plane.transform.rot,
             ("xi", "eta", "gamma"),
         )
 
