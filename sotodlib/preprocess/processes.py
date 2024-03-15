@@ -301,9 +301,8 @@ class PSDCalc(_Preprocess):
         
 
     def process(self, aman, proc_aman):
-        psd_cfgs = self.process_cfgs.get('psd_cfgs', {})
         freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
-                                              **psd_cfgs)
+                                              **self.process_cfgs)
         fft_aman = core.AxisManager(
             aman.dets, 
             core.OffsetAxis("nusamps",len(freqs))
@@ -370,10 +369,6 @@ class Noise(_Preprocess):
             calc_aman = core.AxisManager(aman.dets)
             calc_aman.wrap("white_noise", wn, [(0,"dets")])
 
-        if self.calc_cfgs.get('wrap_name') is None:
-            aman.wrap("noise", calc_aman)
-        else:
-            aman.wrap(self.calc_cfgs['wrap_name'], calc_aman)
         self.save(proc_aman, calc_aman)
     
     def save(self, proc_aman, noise):
@@ -385,7 +380,7 @@ class Noise(_Preprocess):
                 proc_aman.wrap("noise", noise)
                 return
 
-        if self.save_cfgs.get('wrap_name') is None:
+        if self.save_cfgs['wrap_name'] is None:
             proc_aman.wrap("noise", noise)
         else:
             proc_aman.wrap(self.save_cfgs['wrap_name'], noise)
@@ -397,11 +392,13 @@ class Noise(_Preprocess):
         if proc_aman is None:
             proc_aman = meta.preprocess
 
-        if self.select_cfgs.get('name') is None:
-            keep = proc_aman.noise.white_noise <= self.select_cfgs["max_noise"]
+        self.select_cfgs['name'] = self.select_cfgs.get('name','noise')
+
+        if self.fit:
+            keep = proc_aman[self.select_cfgs['name']].fit[:,1] <= self.select_cfgs["max_noise"]
         else:
-            keep = proc_aman[self.select_cfgs['name']].white_noise <= self.select_cfgs["max_noise"] 
-            
+            keep = proc_aman[self.select_cfgs['name']].white_noise <= self.select_cfgs["max_noise"]
+
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
     
