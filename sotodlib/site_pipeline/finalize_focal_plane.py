@@ -81,6 +81,8 @@ class FocalPlane:
     transformed: NDArray[np.floating] = field(init=False)  # (ndim, ndet)
     center_transformed: NDArray[np.floating] = field(init=False)  # (ndim, 1)
     have_gamma: bool = field(init=False, default=False)
+    n_point: NDArray[np.int_] = field(init=False)
+    n_gamma: NDArray[np.int_] = field(init=False)
     transform: Transform = field(init=False, default_factory=Transform.identity)
 
     def __post_init__(self):
@@ -90,6 +92,8 @@ class FocalPlane:
         self.weight = np.zeros(len(self.template.det_ids))
         self.transformed = self.template.fp.copy()
         self.center_transformed = self.template.center.copy()
+        self.n_point = np.zeros_like(self.template.det_ids, dtype=int)
+        self.n_gamma = np.zeros_like(self.template.det_ids, dtype=int)
 
     def map_to_template(self, aman):
         _, msk, template_msk = np.intersect1d(
@@ -137,9 +141,19 @@ class FocalPlane:
             ("xi_m", np.float32),
             ("eta_m", np.float32),
             ("gamma_m", np.float32),
+            ("weights", np.float32),
+            ("n_point", np.int8),
+            ("n_gamma", np.int8),
         ]
         fpfullout = np.fromiter(
-            zip(self.template.det_ids, *self.transformed, *self.avg_fp),
+            zip(
+                self.template.det_ids,
+                *self.transformed,
+                *self.avg_fp,
+                self.weights,
+                self.n_point,
+                self.n_gamma,
+            ),
             dtype=outdt_full,
             count=ndets,
         )
@@ -170,7 +184,11 @@ class FocalPlane:
         )
 
 
-def _avg_focalplane(full_fp, tot_weight, n_obs):
+def _avg_focalplane(full_fp, tot_weight):
+    # Figure out how many good pointings we have for each det
+    msk = np.isfinite(full_fp)
+    n_obs = np.sum(np.any(msk, axis=0), axis=-1)
+    n_point, _, n_gamma = tuple(np.sum(msk, axis=-1))
     tot_weight[tot_weight == 0] = np.nan
     avg_fp = np.nansum(full_fp, axis=-1) / tot_weight
     avg_weight = tot_weight / n_obs
@@ -179,7 +197,7 @@ def _avg_focalplane(full_fp, tot_weight, n_obs):
     all_nan = ~np.any(np.isfinite(full_fp).reshape((len(full_fp), -1)), axis=1)
     avg_fp[all_nan] = np.nan
 
-    return avg_fp, avg_weight
+    return avg_fp, avg_weight, n_point, n_gamma
 
 
 def _log_vals(shift, scale, shear, rot, axis):
@@ -657,14 +675,15 @@ def main():
             focal_plane.add_fp(i, fp, weights, template_msk)
 
         # Compute the average focal plane with weights
-        focal_plane.avg_fp, focal_plane.weights = _avg_focalplane(
-            focal_plane.full_fp, focal_plane.tot_weight, focal_plane.n_aman
-        )
+        (
+            focal_plane.avg_fp,
+            focal_plane.weights,
+            focal_plane.n_point,
+            focal_plane.n_gamma,
+        ) = _avg_focalplane(focal_plane.full_fp, focal_plane.tot_weight)
 
         # Compute transformation between the two nominal and measured pointing
-        focal_plane.have_gamma = (
-            np.sum(np.isfinite(focal_plane.avg_fp[2]).astype(int)) > 10
-        )
+        focal_plane.have_gamma = np.sum(focal_plane.n_gamma) > 0
         if focal_plane.have_gamma:
             gamma_scale, gamma_shift = gamma_fit(
                 focal_plane.template.fp[2], focal_plane.avg_fp[2]
