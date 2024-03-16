@@ -69,6 +69,7 @@ def main(
         max_ctime = max_ctime.timestamp()
 
     # obs and oper books
+    logger.info("Registering obs/oper Books")
     imprinter.update_bookdb_from_g3tsmurf(
         min_ctime=min_ctime, max_ctime=max_ctime,
         ignore_singles=False,
@@ -92,16 +93,19 @@ def main(
         max_ctime_timecodes = max_ctime_timecodes.timestamp()
 
     # hk books
+    logger.info("Registering any HK Books")
     imprinter.register_hk_books(
         min_ctime=min_ctime_timecodes, 
         max_ctime=max_ctime_timecodes,
     )
     # smurf and stray books
+    logger.info("Registering any timecode Books")
     imprinter.register_timecode_books(
         min_ctime=min_ctime_timecodes, 
         max_ctime=max_ctime_timecodes,
     )
 
+    logger.info("Sending Updates to monitor")
     monitor = None
     if "monitor" in imprinter.config:
         logger.info("Will send monitor information to Influx")

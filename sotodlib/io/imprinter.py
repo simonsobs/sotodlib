@@ -54,7 +54,6 @@ class BookExistsError(Exception):
 
     pass
 
-
 class BookBoundError(Exception):
     """Exception raised when a book is already bound"""
 
@@ -63,7 +62,6 @@ class BookBoundError(Exception):
 
 class NoFilesError(Exception):
     """Exception raised when no files are found in the book"""
-
     pass
 
 
@@ -754,7 +752,6 @@ class Imprinter:
                 ancil_drop_duplicates=ancil_drop_duplicates,
             )
             book.path = op.abspath(binder.outdir)
-
             binder.bind(pbar=pbar)
 
             # write M_book file
@@ -779,6 +776,7 @@ class Imprinter:
                 tc = self.tube_configs[book.tel_tube]
             else:
                 tc = {}
+            
             mfile = os.path.join(binder.outdir, "M_index.yaml")
             with open(mfile, "w") as f:
                 yaml.dump(
