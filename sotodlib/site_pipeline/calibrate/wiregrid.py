@@ -22,21 +22,25 @@ def get_det_angle(aman, wg_ctx, wg_offset, stopped_time):
     Calibrate TODs and get det_angle_raw by using the wire grid.
     Before using this code, your axis manager must have two field implemented by HWP, i.e., demodQ and demodU
 
-    Parameters
-    ----------
-    aman : AxisManager
-    wg_ctx :str
-        yaml file for the settings to load the wire grid meta data
-        e.g. wg_ctx = '/so/home/hnakata/scratch/metadata/context/2401/2401_wg_satp1.yaml'
-    wg_offset : float
-        the offset angle of wires defined by the hardware of the Grid Loader
-    stopped_time : int
-        the stopped time of your target operation
+    Arguments:
 
-    Return
-    ------
-    aman : AxisManger
-        wraped with the calibration data of the wire grid. Fields are explained in each method.
+        aman : AxisManager
+
+        wg_ctx :str
+            yaml file for the settings to load the wire grid meta data
+            e.g. wg_ctx = '/so/home/hnakata/scratch/metadata/context/2401/2401_wg_satp1.yaml'
+
+        wg_offset : float
+            the offset angle of wires defined by the hardware of the Grid Loader
+
+        stopped_time : int
+            the stopped time of your target operation
+
+    Returns:
+
+        aman : AxisManger
+            wraped with the calibration data of the wire grid. Fields are explained in each method.
+
     """
     _config = wg_ctx
     _offset = wg_offset
@@ -72,21 +76,23 @@ def wg_wrap_hk(aman, wg_ctx):
     """
     Wrap the house-keeping data about the wire grid operation.
 
-    Parameters
-    ----------
-    aman : AxisManager
-    wg_ctx : str
-        same as the definition in the get_det_angle
+    Arguments:
 
-    Return
-    ------
-    aman : AxisManager
-        This includes fields, which are related with the wire grid hardware.
-        enc_deg : Encoder counts in degree of the rotation
-        LSL1 : Status of the limit switch LEFT 1 of the actuator
-        LSL2 : Status of the limit switch LEFT 2 of the actuator
-        LSR1 : Status of the limit switch RIGHT 1 of the actuator
-        LSR2 : Status of the limit switch RIGHT 2 of the actuator
+        aman : AxisManager
+
+        wg_ctx : str
+            same as the definition in the get_det_angle
+
+    Returns:
+
+        aman : AxisManager
+            This includes fields, which are related with the wire grid hardware.
+            enc_deg : Encoder counts in degree of the rotation
+            LSL1 : Status of the limit switch LEFT 1 of the actuator
+            LSL2 : Status of the limit switch LEFT 2 of the actuator
+            LSR1 : Status of the limit switch RIGHT 1 of the actuator
+            LSR2 : Status of the limit switch RIGHT 2 of the actuator
+
     """
     wgctx = Context(wg_ctx)
     metakeys = wgctx['metakey']
@@ -122,14 +128,15 @@ def _detect_action(count, flag=0):
     """
     Detect the rotation of the grid.
 
-    Parameters
-    ----------
-    count : encoder actual counts
-    flag : flag to choose moving or static
+    Arguments:
 
-    Return
-    ------
-    counts in the same status related with the flag
+        count : encoder actual counts
+
+        flag : flag to choose moving or static
+
+    Returns:
+
+        count: counts in the same status related with the flag
     """
     if flag == 0:
         vecbool = count[1:]-count[:-1] != 0  # moving
@@ -151,20 +158,24 @@ def _detect_steps(aman, stopped_time=10, thresholds=None):
     """
     Detect all steps of the stepwise operation
 
-    Parameters
-    ----------
-    aman : AxisManager
-    stopped_time : int
-        the stopped time of your target operation
-    threshold : tupel
-        the thresholds on the encoder counts.
-        the first element is the upper bound for the static state,
-        and the second element is the lower bound for the difference of the first
+    Arguments:
 
-    Return
-    ------
-    (ts_step_start, ts_step_stop) : time stamps of the start/stop for each step
-    (ang_av, ang_std) : average angles and its standard deviations for each step
+        aman : AxisManager
+
+        stopped_time : int
+            the stopped time of your target operation
+
+        threshold : tupel
+            the thresholds on the encoder counts.
+            the first element is the upper bound for the static state,
+            and the second element is the lower bound for the difference of the first
+
+    Returns:
+
+        (ts_step_start, ts_step_stop) : time stamps of the start/stop for each step
+
+        (ang_av, ang_std) : average angles and its standard deviations for each step
+
     """
     if thresholds is None:
         thresholds = (5, 300) # upper bound of the static, lower bound of its diff
@@ -194,27 +205,36 @@ def wg_wrap_QU(aman, stopped_time, thresholds=None):
     """
     Wrap QU signal by the wire grid.
 
-    Parameters
-    ----------
-    aman : AxisManager
-    stopped_time : int
-        the stopped time of your target operation
-    threshold : tuple
-        the thresholds on the encoder counts.
-        the first element is the upper bound for the static state,
-        and the second element is the lower bound for the difference of the first
+    Artuments:
 
-    Return
-    ------
-    aman : AxisManger
-        This includes the characterics of the wire grid operation and the Q/U signal
-        related with it.
-        flag_step_start : the start time stamps for the steps
-        flag_step_stop : the stop time stamps for the steps
-        enc_ang_deg : encouder counts in degreee for each step
-        enc_ang_std : the standard deviations of the encoder counts for steps
-        Q, U : Q (and U) signal for steps
-        Qerr, Uerr : the standard deviations of Q (and U) signal for steps
+        aman : AxisManager
+
+        stopped_time : int
+            the stopped time of your target operation
+
+        threshold : tuple
+            the thresholds on the encoder counts.
+            the first element is the upper bound for the static state,
+            and the second element is the lower bound for the difference of the first
+
+    Returns:
+
+        aman : AxisManger
+            This includes the characterics of the wire grid operation and the Q/U signal
+            related with it.
+
+            flag_step_start : the start time stamps for the steps
+
+            flag_step_stop : the stop time stamps for the steps
+
+            enc_ang_deg : encouder counts in degreee for each step
+
+            enc_ang_std : the standard deviations of the encoder counts for steps
+
+            Q, U : Q (and U) signal for steps
+
+            Qerr, Uerr : the standard deviations of Q (and U) signal for steps
+
     """
     if hasattr(aman, 'demodQ') == False:
         print("This AxisManager does not have demodQ/demodU.")
@@ -256,13 +276,14 @@ def _get_initial_param_circle(x):
     """
     Get the initial parameters as inputs of the circle fitting in Q-U plane
 
-    Paramter
-    --------
-    x : assuming ndarray of Q and U signal with 16 steps in nominal, np.array([Q(16), U(16)])
+    Artuments:
 
-    Return
-    ------
-    params : the initial paramters for the circle fit
+        x : assuming ndarray of Q and U signal with 16 steps in nominal, np.array([Q(16), U(16)])
+
+    Returns:
+
+        params : the initial paramters for the circle fit
+
     """
     if len(np.shape(x)) == 2:
         A = np.average(x[0])
@@ -283,14 +304,16 @@ def _circle_resid(params, x):
     """
     Fit funciton
 
-    Parameter
-    ---------
-    params : the input parameters
-    x : data set
+    Arguments:
 
-    Return
-    ------
-    residual between the data point and the function under the input paramters
+        params : the input parameters
+
+        x : data set
+
+    Returns:
+
+        residual :  between the data point and the function under the input paramters
+
     """
     # (x-A)^2 + (y-B)^2 - C = 0
     if len(np.shape(x)) == 2:
@@ -313,16 +336,20 @@ def _comp_plane_fit(obs_data, std_data, fitfunc, param0):
     """
     Fit the data with a circle in a complex plane
 
-    Parameters
-    ----------
-    obs_data : ndarray of Q and U signal with 16 steps in nominal, np.array([Q(16), U(16)])
-    std_data : ndarray of the standard deviations of Q and U, np.array([Qerr(16), Uerr(16)])
-    fitfunc : a function used for this fitting, basically assumed the function of _circle_resid
-    param0 : the initial paramer set
+    Arguments:
 
-    Return
-    ------
-    fit result determined by the implicit fitting of scipy.odr
+        obs_data : ndarray of Q and U signal with 16 steps in nominal, np.array([Q(16), U(16)])
+
+        std_data : ndarray of the standard deviations of Q and U, np.array([Qerr(16), Uerr(16)])
+
+        fitfunc : a function used for this fitting, basically assumed the function of _circle_resid
+
+        param0 : the initial paramer set
+
+    Returns:
+
+        fit result : determined by the implicit fitting of scipy.odr
+
     """
     if len(np.shape(obs_data)) == 2:
         mdr = odr.Model(fitfunc, implicit=True)
@@ -353,17 +380,20 @@ def wg_get_cfitres(aman):
     """
     Get the results by the circle fitting about the responce against the wires in Q+iU plane
 
-    Parameters
-    ----------
-    aman : AxisManager
+    Arguments:
 
-    Return
-    ------
-    aman : AxisManager
-        This includes fit results for all the inpput detectors
-        cfitval : Estimated parameter values by fitting
-        cfitcov : covariance matrix of the estimated parameters
-        cfitresvar : Residual variance
+        aman : AxisManager
+
+    Returns
+
+        aman : AxisManager
+            This includes fit results for all the inpput detectors
+            cfitval : Estimated parameter values by fitting
+
+            cfitcov : covariance matrix of the estimated parameters
+
+            cfitresvar : Residual variance
+
     """
     obs_data = []
     obs_std = []
@@ -391,17 +421,21 @@ def wg_get_lfitres(aman):
     Get the results by the linear fitting, which is comparing the reference counts of the wire grid
     and the angle of the respose in Q+iU plane
 
-    Parameters
-    ----------
-    aman : AxisManager
+    Arguments:
 
-    Return
-    ------
-    aman : AxisManager
-        This includes fit results for all the inpput detectors
-        lfitval : Estimated parameter values by fitting
-        lfitcov : covariance matrix of the estimated parameters
-        lfitresvar : Residual variance
+        aman : AxisManager
+
+    Returns:
+
+        aman : AxisManager
+            This includes fit results for all the inpput detectors
+
+            lfitval : Estimated parameter values by fitting
+
+            lfitcov : covariance matrix of the estimated parameters
+
+            lfitresvar : Residual variance
+
     """
     lfitval = []
     lfiterr = []
