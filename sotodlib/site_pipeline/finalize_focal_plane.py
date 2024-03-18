@@ -42,6 +42,10 @@ class Transform:
         self.affine[-1, -1] = gamma_scale
         self.decompose()
 
+    @classmethod
+    def identity(cls):
+        return Transform(np.zeros(3), np.eye(2), 0)
+
     def decompose(self):
         xieta_affine = self.affine[:2, :2]
         gamma_scale = self.affine[-1, -1]
@@ -50,9 +54,19 @@ class Transform:
         self.shear = shear.item()
         self.rot = af.decompose_rotation(rot)[-1]
 
-    @classmethod
-    def identity(cls):
-        return Transform(np.zeros(3), np.eye(2), 0)
+    def save(self, f, path, append=""):
+        if path not in f:
+            f.create_group(path)
+        _add_attrs(
+            f[path],
+            {
+                f"shift{append}": self.shift,
+                f"scale{append}": self.scale,
+                f"shear{append}": self.shear,
+                f"rot{append}": self.rot,
+                f"affine{append}": self.affine,
+            },
+        )
 
 
 @dataclass
@@ -137,7 +151,12 @@ class FocalPlane:
         fpout = np.fromiter(
             zip(self.template.det_ids, *self.transformed), dtype=outdt, count=ndets
         )
-        write_dataset(metadata.ResultSet.from_friend(fpout), f, f"{group}/focal_plane", overwrite=True)
+        write_dataset(
+            metadata.ResultSet.from_friend(fpout),
+            f,
+            f"{group}/focal_plane",
+            overwrite=True,
+        )
         _add_attrs(f[f"{group}/focal_plane"], {"measured_gamma": self.have_gamma})
 
         outdt_full = [
@@ -171,22 +190,8 @@ class FocalPlane:
             overwrite=True,
         )
 
-        f.create_group(f"{group}/transform")
-        _add_attrs(
-            f[f"{group}/transform"],
-            {
-                "shift": self.transform.shift,
-                "scale": self.transform.scale,
-                "shear": self.transform.shear,
-                "rot": self.transform.rot,
-                "affine": self.transform.affine,
-                "shift_nocm": self.transform_nocm.shift,
-                "scale_nocm": self.transform_nocm.scale,
-                "shear_nocm": self.transform_nocm.shear,
-                "rot_nocm": self.transform_nocm.rot,
-                "affine_nocm": self.transform_nocm.affine,
-            },
-        )
+        self.transform.save(f, f"{group}/transform")
+        self.transform_nocm.save(f, f"{group}/transform", "_nocm")
         _add_attrs(
             f[f"{group}"],
             {
@@ -241,17 +246,7 @@ class OpticsTube:
             f[self.name],
             {"center": self.center, "center_transformed": self.center_transformed},
         )
-        f.create_group(f"{self.name}/transform")
-        _add_attrs(
-            f[f"{self.name}/transform"],
-            {
-                "shift": self.transform.shift,
-                "scale": self.transform.scale,
-                "shear": self.transform.shear,
-                "rot": self.transform.rot,
-                "affine": self.transform.affine,
-            },
-        )
+        self.transform.save(f, f"{self.name}/transform")
         for focal_plane in self.focal_planes:
             focal_plane.save(f, f"{self.name}/{focal_plane.stream_id}")
 
