@@ -1,7 +1,175 @@
 import numpy as np
 import logging
+from scipy.special import eval_legendre
 from . import flags
 logger = logging.getLogger(__name__)
+
+def _mask_data(_data, mask):
+    data = np.ma.masked_array(_data,mask=mask)
+    return data
+
+def subscan_legendre_filter(aman, degree, signal=None, exclude_turnarounds=False, mask=None, in_place=True):
+    """
+    Apply legendre filtering to subscan segments in a data array.
+    This function applies legendre poly-filtering to subscan segments within signal for each detector.
+    Subscan segments are defined based on the presence of flags such as 'left_scan' and 'right_scan'. Polynomial filtering
+    is used to remove low-degree polynomial trends within each subscan segment.
+
+    Arguments
+    ---------
+    aman : AxisManager
+    degree : int
+        The degree of the polynomial to be removed.
+    signal : array-like, optional
+        The TOD signal to use. If not provided, `aman.signal` will be used.
+    exclude_turnarounds : bool
+        Optional. If True, turnarounds are excluded from subscan identification. Default is False.
+    mask : str or RangesMatrix
+        Optional. A mask used to select specific data points for filtering. Default is None.
+        If None, no mask is applied. If the mask is given in str, ``aman.flags['mask']`` is used as mask.
+        Arbitrary mask can be specified in the style of RangesMatrix.
+    in_place: bool
+        Optional. If True, `aman.signal` is overwritten with the processed signal.
+
+    Returns
+    -------
+    signal : array-like
+        The processed signal.
+    """
+
+    if signal is None:
+        signal = aman.signal
+
+    if not(in_place):
+        signal = signal.copy()
+
+    time = np.copy(aman["timestamps"])
+        
+    if exclude_turnarounds:
+        if ("left_scan" not in aman.flags) or ("turnarounds" not in aman.flags):
+            logger.warning('aman does not have left/right scan or turnarounds flag. `sotodlib.flags.get_turnaround_flags` will be ran with default parameters')
+            _ = flags.get_turnaround_flags(aman)
+        valid_scan = np.logical_and(np.logical_or(aman.flags["left_scan"].mask(), aman.flags["right_scan"].mask()),
+                                    ~aman.flags["turnarounds"].mask())
+        subscan_indices = _get_subscan_range_index(valid_scan)
+    else:
+        if ("left_scan" not in aman.flags):
+            logger.warning('aman does not have left/right scan. `sotodlib.flags.get_turnaround_flags` will be ran with default parameters')
+            _ = flags.get_turnaround_flags(aman)
+        subscan_indices_l = _get_subscan_range_index(aman.flags["left_scan"].mask())
+        subscan_indices_r = _get_subscan_range_index(aman.flags["right_scan"].mask())
+        subscan_indices = np.vstack([subscan_indices_l, subscan_indices_r])
+        subscan_indices= subscan_indices[np.argsort(subscan_indices[:, 0])]
+    
+    if mask is None:
+        mask_array = np.zeros(aman.samps.count, dtype=bool)
+    elif type(mask) is str:
+        mask_array = aman.flags[mask].mask()
+    else:
+        mask_array = mask.mask()
+    is_matrix = len(mask_array.shape) > 1
+
+    ### Normalization constant of legendre function 
+    norm_vector = np.arange(degree)
+    norm_vector = 2./(2.*norm_vector+1)
+
+    for subscan in subscan_indices:
+
+        # Get each subscan to be filtered & subtract mean
+        tod_mat = signal[:,subscan[0]:subscan[1]+1]
+        means = np.mean(tod_mat,axis=1)[:,np.newaxis]
+        tod_mat -= means
+        
+        # Scale time range into [-1,1]
+        x = np.linspace(-1, 1, tod_mat.shape[1])
+        dx = np.mean(np.diff(x))
+        sub_time = time[subscan[0]:subscan[1]+1]
+
+        # Generate legendre functions of each degree and store them in an array
+        arr_legendre = []
+        for deg in range(degree) :
+            each_legendre = eval_legendre(deg, x)
+            arr_legendre.append(each_legendre)
+        arr_legendre = np.array(arr_legendre)
+
+        # flag to know if the result is matrix formation
+        flag_matrix = False
+        
+        # Modify normalization factor if mask is defined
+        if mask is None :
+            pass
+        else : 
+            # if mask is matrix like, normalization factor should be determined det by det
+            if is_matrix :
+                # Is maksed range overlapped in this subscan?
+                if np.sum((mask_array[:,subscan[0]:subscan[1]+1]).astype(np.int32)) > 0 :
+                    flag_matrix = True
+                    integral = ((arr_legendre*arr_legendre)[:,np.newaxis,:]*dx*(~mask_array[np.newaxis,:,subscan[0]:subscan[1]+1]).astype(np.int32))
+                    norm_vector = np.sum(integral,axis=2)
+
+                    x = np.linspace(-1, 1, tod_mat.shape[1])
+                    dx = np.mean(np.diff(x))
+                    arr_legendre = []
+                    for deg in range(degree) :
+                        each_legendre = eval_legendre(deg, x)
+                        arr_legendre.append(np.tile(each_legendre,(tod_mat.shape[0],1)))
+                    arr_legendre = np.array(arr_legendre)
+                # If mask does not affect this range, just go through.
+                else : 
+                    pass 
+            # If mask is array like, common normalization factor is available to all the detector.
+            else :
+                if np.sum((mask_array[subscan[0]:subscan[1]+1]).astype(np.int32)) > 0 :
+                    part = mask_array[subscan[0]:subscan[1]+1]
+                    masked_region = np.where(part)[0]
+                    integral = (arr_legendre*arr_legendre*dx)
+                    integral[:,~masked_region] = 0.
+                    norm_vector = np.sum(integral,axis=1)
+                    mask_array = np.zeros(subscan[1]+1-subscan[0])
+                    mask_array[masked_region] = 1.
+
+                    flag = np.ones(subscan[1]+1-subscan[0],dtype=np.int32)
+                    flag[masked_region] = 0
+                    tod_mat[:,flag]=0.
+                    x = np.linspace(-1, 1, tod_mat.shape[1])
+                    dx = np.mean(np.diff(x))
+                    
+                    arr_legendre = []
+                    for deg in range(degree) :
+                        each_legendre = eval_legendre(deg, x)
+                        arr_legendre.append(each_legendre)
+                    arr_legendre = np.array(arr_legendre)
+                    
+                else :
+                    pass
+
+        # Make model to be subtracted
+        if flag_matrix : 
+            coeffs = np.array([np.sum(arr_legendre[deg,:,:]*tod_mat,axis=1) for deg in range(degree) ])
+            _model = (coeffs[:,:,np.newaxis]*arr_legendre)/norm_vector[:,:,np.newaxis]*dx
+            model = np.zeros_like(arr_legendre[0])
+            for deg in range(degree) :
+                model += _model[deg]
+        else  :
+            coeffs = np.dot(arr_legendre, tod_mat.T)
+            model = np.dot((coeffs/norm_vector).T,arr_legendre)*dx
+        
+        # We subtracted the mean at the start of script. This should be corrected.
+        model += means
+        tod_mat += means
+        
+        signal[:,subscan[0]:subscan[1]+1] = tod_mat
+    
+        if flag_matrix : 
+            signal[:,subscan[0]:subscan[1]+1] -= model
+        else : 
+            signal[:,subscan[0]:subscan[1]+1] -= model
+            
+    if in_place:
+        aman.signal = signal
+        
+    return signal
+
 
 def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mask=None, in_place=True):
     """
