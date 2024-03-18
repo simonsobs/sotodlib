@@ -7,6 +7,7 @@ LAT code adapted from code provided by Simon Dicker.
 import logging
 from functools import lru_cache, partial
 import numpy as np
+from numpy.core.numeric import isscalar
 from scipy.interpolate import interp1d, bisplrep, bisplev
 from scipy.spatial.transform import Rotation as R
 from sotodlib import core
@@ -445,6 +446,8 @@ def LAT_focal_plane(aman, zemax_path, x=None, y=None, pol=None, roll=0, tube_slo
         pol_x, pol_y, sec2elev, sec2xel, array2secx, array2secy, roll
     )
     gamma = get_gamma(pol_xi, pol_eta)
+    if np.isscalar(xi):
+        gamma = gamma[0]
 
     if aman is not None:
         focal_plane = core.AxisManager(aman.dets)
@@ -545,6 +548,8 @@ def SAT_focal_plane(aman, x=None, y=None, pol=None, roll=0, mapping_data=None):
     pol_xi = _xi * np.cos(np.deg2rad(roll)) - _eta * np.sin(np.deg2rad(roll))
     pol_eta = _eta * np.cos(np.deg2rad(roll)) + _xi * np.sin(np.deg2rad(roll))
     gamma = get_gamma(pol_xi, pol_eta)
+    if np.isscalar(xi):
+        gamma = gamma[0]
 
     if aman is not None:
         focal_plane = core.AxisManager(aman.dets)
