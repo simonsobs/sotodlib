@@ -1,6 +1,6 @@
-import numpy as np
 import so3g
 from spt3g import core as g3core
+
 
 def fetch_hk(path, fields=None):
     """
@@ -18,7 +18,7 @@ def fetch_hk(path, fields=None):
         {
             field[i] : (time[i], data[i])
         }
-        
+
         Same output format as `load_range`. Masked to only have data from
         start and stop of .g3 file provided in path argument.
 
