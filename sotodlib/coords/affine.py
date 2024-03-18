@@ -29,7 +29,7 @@ def get_affine(src, dst, centered=False):
         shift: Shift to apply after transformation.
     """
     msk = np.isfinite(src).all(axis=0) * np.isfinite(dst).all(axis=0)
-    if np.sum(msk) < 7:
+    if np.sum(msk) < len(src):
         raise ValueError("Not enough finite points to compute transformation")
 
     src_c, dst_c = src, dst
