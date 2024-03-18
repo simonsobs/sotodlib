@@ -37,6 +37,9 @@ def fetch_hk(path, fields=None):
                     for k in v.keys():
                         field = '.'.join([frame['address'], k])
 
+                        if 'daq-registry' in field:
+                            continue
+
                         if fields is None or field in fields:
                             key = field.split('.')[-1]
                             if k == key:
