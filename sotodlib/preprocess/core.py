@@ -1,6 +1,7 @@
 """Base Class and PIPELINE register for the preprocessing pipeline scripts."""
-
-PIPELINE = {}
+import logging
+import numpy as np
+from .. import core
 
 class _Preprocess(object):
     """The base class for Preprocessing modules which defines the required
@@ -29,7 +30,7 @@ class _Preprocess(object):
         self.calc_cfgs = step_cfgs.get("calc")
         self.save_cfgs = step_cfgs.get("save")
         self.select_cfgs = step_cfgs.get("select")
-    
+
     def process(self, aman, proc_aman):
         """ This function makes changes to the time ordered data AxisManager.
         Ex: calibrating or detrending the timestreams. This function will use
@@ -89,7 +90,7 @@ class _Preprocess(object):
             return
         raise NotImplementedError
         
-    def select(self, meta):
+    def select(self, meta, proc_aman=None):
         """ This function runs any desired data selection of the preprocessing
         pipeline results. Assumes the pipeline has already been run and that the
         resulting proc_aman is now saved under the ``preprocess`` key in the
@@ -113,13 +114,143 @@ class _Preprocess(object):
         if self.select_cfgs is None:
             return meta
         raise NotImplementedError
-    
+
+    @classmethod
+    def gen_metric(cls, meta, proc_aman):
+        """ Generate a QA metric from the output of this process.
+
+        Arguments
+        ---------
+        meta : AxisManager
+            Metadata related to the specific observation
+        proc_aman : AxisManager
+            The output of the preprocessing pipeline.
+
+        Returns
+        -------
+        line : dict
+            InfluxDB line entry elements to be fed to
+            `site_pipeline.monitor.Monitor.record`
+        """
+        raise NotImplementedError
+
     @staticmethod
-    def register(name, process_class):
+    def register(process_class):
         """Registers a new modules with the PIPELINE"""
+        name = process_class.name
 
-        if PIPELINE.get(name) is None:
-            PIPELINE[name] = process_class
+        if Pipeline.PIPELINE.get(name) is None:
+            Pipeline.PIPELINE[name] = process_class
+        else:
+            raise ValueError(
+                f"Preprocess Module of name {name} is already Registered"
+            )
 
 
+class Pipeline(list):
+    """This class is designed to create and run pipelines out of a series of
+    different preprocessing modules (classes that inherent from _Preprocess). It
+    inherits list object. It also contains the registration of all possible
+    preprocess modules in Pipeline.PIPELINE
+    """
 
+    PIPELINE = {}
+
+    def __init__(self, modules, logger=None):
+        """
+        Arguments
+        ---------
+        modules: iterable
+            A list or other iterable that contains either instantiated
+            _Preprocess instances or the configuration dictionary used to
+            instantiate a module
+        logger: optional
+            logging.logger instance used by the pipeline to send updates
+        """
+        if logger is None:
+            logger = logging.getLogger("pipeline")
+        self.logger = logger
+        super().__init__( [self._check_item(item) for item in modules])
+    
+    def _check_item(self, item):
+        if isinstance(item, _Preprocess):
+            return item
+        elif isinstance(item, dict):
+            name = item.get("name")
+            if name is None:
+                raise ValueError(f"Processes made from dictionary must have a 'name' key")
+            cls = self.PIPELINE.get(name)
+            if cls is None:
+                raise ValueError(f"'{name}' not registered as a pipeline element")
+            return cls(item)
+        else:
+            raise ValueError(f"Unknown type created a pipeline element")
+    
+    # make pipeline have all the list pieces
+    def append(self, item):
+        super().append( self._check_item(item) )
+    def insert(self, index, item):
+        super().insert(index, self._check_item(item))
+    def extend(self, index, other):
+        if isinstance(other, type(self)):
+            super().extend(other)
+        else:
+            super().extend( [self._check_item(item) for item in other])
+    def __setitem__(self, index, item):
+        super().__setitem__(index, self._check_item(item))
+    
+    def run(self, aman, proc_aman=None, select=True):
+        """
+        The main workhorse function for the pipeline class. This function takes
+        an AxisManager TOD and successively runs the pipeline of preprocessing
+        modules on the AxisManager. The order of operations called by run are::
+
+            for process in pipeline:
+                process.process()
+                process.calc_and_save()
+                    process.save() ## called by process.calc_and_save()
+                process.select()
+
+        Arguments
+        ---------
+        aman: AxisManager
+            A TOD object. Generally expected to be raw, unprocessed data. This
+            axismanager will be edited in place by the process and select
+            functions of each preprocess module
+        proc_aman: AxisManager (Optional)
+            A preprocess axismanager. If this is provided it is assumed that the
+            pipeline has previously been run on this specific TOD and has
+            returned this preprocess axismanager. In this case, calls to
+            ``process.calc_and_save()`` are skipped as the information is
+            expected to be present in this AxisManager.
+        select: boolean (Optional)
+            if True, the aman detector axis is restricted as described in
+            each preprocess module
+
+        Returns
+        -------
+        proc_aman: AxisManager
+            A preprocess axismanager that contains all data products calculated
+            throughout the running of the pipeline
+        
+        """
+        if proc_aman is None:
+            proc_aman = core.AxisManager( aman.dets, aman.samps)
+            run_calc = True
+        else:
+            if aman.dets.count != proc_aman.dets.count or not np.all(aman.dets.vals == proc_aman.dets.vals):
+                self.logger.warning("proc_aman has different detectors than aman. Cutting aman to match")
+                det_list = [det for det in proc_aman.dets.vals if det in aman.dets.vals]
+                aman.restrict('dets', det_list)
+                proc_aman.restrict('dets', det_list)
+            run_calc = False
+            
+        for process in self:
+            self.logger.info(f"Running {process.name}")
+            process.process(aman, proc_aman)
+            if run_calc:
+                process.calc_and_save(aman, proc_aman)
+            if select:
+                process.select(aman, proc_aman)
+                proc_aman.restrict('dets', aman.dets.vals)
+        return proc_aman

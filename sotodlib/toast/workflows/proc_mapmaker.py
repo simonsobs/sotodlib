@@ -41,6 +41,24 @@ def setup_mapmaker(operators, templates):
             enabled=False,
         )
     )
+    # Uncomment after toast PR #736 is merged.
+    # templates.append(
+    #     toast.templates.Hwpss(
+    #         name="hwpss",
+    #         hwp_angle=defaults.hwp_angle,
+    #         harmonics=5,
+    #         enabled=False,
+    #     )
+    # )
+    templates.append(
+        toast.templates.Fourier2D(
+            name="fourier2d",
+            correlation_length=5.0 * u.second,
+            correlation_amplitude=10.0,
+            order=1,
+            fit_subharmonics=False,
+        )
+    )
     operators.append(toast.ops.BinMap(name="binner", pixel_dist="pix_dist"))
     operators.append(
         toast.ops.BinMap(
@@ -94,7 +112,11 @@ def mapmaker(job, otherargs, runargs, data):
         # Noise model.  If noise estimation is not enabled, and no existing noise model
         # is found, then create a fake noise model with uniform weighting.
         noise_model = None
-        if job_ops.demodulate.enabled and job_ops.demod_noise_estim.enabled:
+        if (
+                job_ops.demodulate.enabled
+                and job_ops.demod_noise_estim.enabled
+                and job_ops.demod_noise_estim_fit.enabled
+            ):
             # We will use the noise estimate made after demodulation
             log.info_rank("  Using demodulated noise model", comm=data.comm.comm_world)
             noise_model = job_ops.demod_noise_estim_fit.out_model
