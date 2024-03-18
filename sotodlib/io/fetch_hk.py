@@ -3,6 +3,26 @@ import so3g
 from spt3g import core as g3core
 
 def fetch_hk(path, fields=None):
+    """
+    Fetches housekeeping (HK) data from a given path.
+
+    Args:
+        path (str): Path to the HK .g3 data file.
+        fields (list, optional): List of specific fields. If None, fetches
+                                 all fields. Default is None.
+
+    Returns:
+
+        Dictionary with structure::
+
+        {
+            field[i] : (time[i], data[i])
+        }
+        
+        Same output format as `load_range`. Masked to only have data from
+        start and stop of .g3 file provided in path argument.
+
+    """
     hk_data = {}
     reader = so3g.G3IndexedReader(path)
 
