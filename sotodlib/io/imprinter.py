@@ -572,6 +572,33 @@ class Imprinter:
                 session.add(stray_book)
                 session.commit()
 
+    def get_book_path(self, book):
+        with open(self.g3tsmurf_config, "r") as f:
+            g3tsmurf_cfg = yaml.safe_load(f)
+        lvl2_data_root = g3tsmurf_cfg["data_prefix"]
+
+        if book.type in ["obs", "oper"]:
+            session_id = book.bid.split("_")[1]
+            first5 = session_id[:5]
+            odir = op.join(self.output_root, book.tel_tube, book.type, first5)
+            return os.path.join(odir, book.bid)
+        elif book.type in ["hk", "smurf"]:
+            # get source directory for hk book
+            root = op.join(lvl2_data_root, book.type)
+            first5 = book.bid.split("_")[1]
+            assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
+            odir = op.join(self.output_root, book.tel_tube, book.type)
+            return os.path.join(odir, book.bid)
+        elif book.type in ["stray"]:
+            first5 = book.bid.split("_")[1]
+            assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
+            odir = op.join(self.output_root, book.tel_tube, book.type)
+            return os.path.join(odir, book.bid)
+        else:
+            raise NotImplementedError(
+                f"book type {book.type} not implemented"
+            )
+
     def _get_binder_for_book(self, 
         book, 
         pbar=False, 
@@ -584,12 +611,7 @@ class Imprinter:
         lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if book.type in ["obs", "oper"]:
-            session_id = book.bid.split("_")[1]
-            first5 = session_id[:5]
-            odir = op.join(self.output_root, book.tel_tube, book.type, first5)
-            if not op.exists(odir):
-                os.makedirs(odir)
-            book_path = os.path.join(odir, book.bid)
+            book_path = self.get_book_path(book)
 
             # after sanity checks, now we proceed to bind the book.
             # get files associated with this book, in the form of
@@ -1393,7 +1415,7 @@ class Imprinter:
         out = {}
         # load all obs and associated files
         for obs_id, files in self.get_files_for_book(book).items():
-            self.logger.info(f"Retrieving readout_ids for {obs_id}...")
+            self.logger.debug(f"Retrieving readout_ids for {obs_id}...")
             status = SmurfStatus.from_file(files[0])
             ch_info = get_channel_info(status, archive=SMURF)
             if "readout_id" not in ch_info:
