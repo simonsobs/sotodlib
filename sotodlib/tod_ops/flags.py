@@ -62,16 +62,19 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     if overwrite and name in aman.flags:
         aman.flags.move(name, None)
     
-    msk = np.all([detcal.bg >= 0,
-                  detcal.r_tes > 0,
-                  detcal.r_frac >= rfrac_range[0],
-                  detcal.r_frac <= rfrac_range[1],
-                  detcal.p_sat*1e12 >= psat_range[0],
-                  detcal.p_sat*1e12 <= psat_range[1]], axis=0)
+    msk = ~(np.all([detcal.bg >= 0,
+                    detcal.r_tes > 0,
+                    detcal.r_frac >= rfrac_range[0],
+                    detcal.r_frac <= rfrac_range[1],
+                    detcal.p_sat*1e12 >= psat_range[0],
+                    detcal.p_sat*1e12 <= psat_range[1]], axis=0))
     # Expand mask to ndets x nsamps RangesMatrix
-    x = Ranges(aman.samps.count)
-    mskexp = RangesMatrix([Ranges.ones_like(x) if Y
-                           else Ranges.zeros_like(x) for Y in msk])
+    if 'samps' in aman:
+        x = Ranges(aman.samps.count)
+        mskexp = RangesMatrix([Ranges.ones_like(x) if Y
+                            else Ranges.zeros_like(x) for Y in msk])
+    else:
+        mskexp = msk
     
     if merge:
         if name in aman.flags and not overwrite:
@@ -80,7 +83,7 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
             aman.flags[name] = mskexp
         else:
             aman.flags.wrap(name, mskexp, [(0, 'dets'), (1, 'samps')])
-    
+            
     return mskexp
 
 def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
@@ -266,7 +269,8 @@ def get_glitch_flags(aman,
                      merge=True,
                      overwrite=False,
                      name="glitches",
-                     full_output=False):
+                     full_output=False,
+                     edge_guard=2000):
     """
     Find glitches with fourier filtering. Translation from moby2 as starting point
 
@@ -294,6 +298,9 @@ def get_glitch_flags(aman,
         If true, write over flag. If false, raise ValueError if name already exists in AxisManager
     full_output : bool
         If true, return sparse matrix with the significance of the detected glitches
+    edge_guard : int
+        Number of samples at the beginning and end of the tod to exclude from
+        the returned glitch RangesMatrix. Defaults to 2000 samples (10 sec).
 
     Returns
     -------
@@ -317,6 +324,8 @@ def get_glitch_flags(aman,
     iqr_range = 0.741 * stats.iqr(fvec[:,::ds], axis=1)
     # get flags
     msk = fvec > iqr_range[:, None] * n_sig
+    msk[:,:edge_guard] = False
+    msk[:,-edge_guard:] = False
     flag = RangesMatrix([Ranges.from_bitmask(m) for m in msk])
     flag.buffer(buffer)
 

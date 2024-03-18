@@ -4,27 +4,15 @@
 import re
 
 import numpy as np
-
 import traitlets
-
-import numpy as np
-
 from astropy import units as u
-
 import healpy as hp
 
 from toast.timing import function_timer, Timer
-
 from toast import qarray as qa
-
-from toast.data import Data
-
-from toast.traits import trait_docs, Int, Unicode, Bool, Quantity, Float, Instance
-
+from toast.traits import trait_docs, Int, Unicode, Bool
 from toast.ops.operator import Operator
-
-from toast.utils import Environment, Logger
-
+from toast.utils import Logger
 from toast.observation import default_values as defaults
 
 from ...core.hardware import LAT_COROTATOR_OFFSET

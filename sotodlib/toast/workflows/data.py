@@ -1,8 +1,9 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Data I/O operations.
 """
 
+import os
 import numpy as np
 from astropy import units as u
 import toast
@@ -22,12 +23,12 @@ def setup_load_data_context(operators):
         None
 
     """
-    raise NotImplementedError("LoadContext operator not yet merged.")
-    # operators.append(
-    #     so_ops.LoadContext(
-    #         name="load_context",
-    #     )
-    # )
+    operators.append(
+        so_ops.LoadContext(
+            name="load_context",
+            enabled=False,
+        )
+    )
     return
 
 
@@ -45,12 +46,25 @@ def load_data_context(job, otherargs, runargs, data):
         None
 
     """
-    raise NotImplementedError("LoadContext operator not yet merged.")
     # Configured operators for this job
     job_ops = job.operators
 
     # Load it
     if job_ops.load_context.enabled:
+        # Special handling of ACT data.  In this case, the user may have
+        # set the MOBY2_TOD_STAGING_PATH environment variable to force the
+        # data loader to make a copy into ramdisk for opening.  This will
+        # break parallel access, since each process tries to create (and
+        # then delete) the same file.  Here we append the process rank to
+        # the staging directory
+        if "MOBY2_TOD_STAGING_PATH" in os.environ:
+            procdir = os.path.join(
+                os.environ["MOBY2_TOD_STAGING_PATH"],
+                f"{data.comm.world_rank}",
+                f"{os.getpid()}",
+            )
+            os.makedirs(procdir, exist_ok=True)
+            os.environ["MOBY2_TOD_STAGING_PATH"] = procdir
         job_ops.load_context.apply(data)
 
 
@@ -154,8 +168,11 @@ def save_data_hdf5(job, otherargs, runargs, data):
     # Configured operators for this job
     job_ops = job.operators
 
-    # Load it
+    # Dump it
     if job_ops.save_hdf5.enabled:
+        if hasattr(otherargs, "out_dir"):
+            hdf5_out = os.path.join(otherargs.out_dir, "data")
+            job_ops.save_hdf5.volume = hdf5_out
         job_ops.save_hdf5.apply(data)
 
 

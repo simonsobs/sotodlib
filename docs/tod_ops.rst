@@ -170,6 +170,10 @@ sum of mean subtracted data (which may be filtered) and looking for peaks in the
 output. Taking the cumulative sum is functionally the same as convolving with
 an unit step, so it is acting as a matched filter.
 
+This jumpfinder supports recursion, this is a feature intended to find smaller jumps
+hiding between larger jumps that skew peak finding statistics.
+The recursive calls to the jumpfinder are not fully vectorized, so using it can hurt performance.
+
 .. automodule:: sotodlib.tod_ops.jumps
    :members:
 
@@ -206,4 +210,12 @@ tod_ops.flags
 Module containing functions for generating flags for cuts and tod masking.
 
 .. automodule:: sotodlib.tod_ops.flags
+   :members:
+
+tod_ops.fft_ops
+===============
+
+Module containing functions for FFTs and related operations.
+
+.. automodule:: sotodlib.tod_ops.fft_ops
    :members:

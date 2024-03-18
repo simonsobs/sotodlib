@@ -339,6 +339,19 @@ class TestAxisManager(unittest.TestCase):
             self.assertIn('rebel_child', aout, msg=msg)
             self.assertEqual(aout['rebel_child'].shape, (3,), msg=msg)
 
+    def test_403_restrict_slices(self):
+        # Test in_place is false for slices of arrays
+        dets = ['det0', 'det1', 'det2']
+        n, ofs = 1000, 0
+        aman = core.AxisManager(
+                core.LabelAxis('dets', dets),
+                core.OffsetAxis('samps', n, ofs)
+        )
+        aman.wrap_new('test', ('dets','samps'))
+        rman = aman.restrict('samps', (0,500), in_place=False)
+        rman.test += 5
+        self.assertNotEqual( aman.test[0,0], rman.test[0,0])
+
     def test_410_merge(self):
         dets = ['det0', 'det1', 'det2']
         n, ofs = 1000, 0
@@ -389,6 +402,8 @@ class TestAxisManager(unittest.TestCase):
                 aman.save(filename, dataset)
                 # Overwrite
                 aman.save(filename, dataset, overwrite=True)
+                # Compress and Overwrite
+                aman.save(filename, dataset, overwrite=True, compression='gzip')
                 # Refuse to overwrite
                 with self.assertRaises(RuntimeError):
                     aman.save(filename, dataset)

@@ -16,7 +16,7 @@ from unittest import TestCase
 # Import so3g before any other packages that import spt3g
 import so3g
 
-from ._helpers import create_outdir, simulation_test_multitube
+from ._helpers import create_outdir, simulation_test_multitube, close_data_and_comm
 
 
 try:
@@ -153,3 +153,6 @@ class ToastBooksTest(TestCase):
             if ob != orig:
                 print(f"-------- Proc {data.comm.world_rank} ---------\n{orig}\n{ob}")
                 self.assertTrue(False)
+
+        close_data_and_comm(new_data)
+        close_data_and_comm(data)

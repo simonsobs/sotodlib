@@ -1,5 +1,5 @@
 import warnings
-from dataclasses import dataclass, fields, asdict
+from dataclasses import dataclass, fields, asdict, field
 from typing import List, Optional, Tuple, Iterator
 from copy import deepcopy
 import h5py
@@ -56,6 +56,61 @@ def get_north_is_highband(bands, bgs):
 
 
 @dataclass
+class PointingConfig:
+    """
+    Helper class for getting pointing info from an optics model.
+
+    Args
+    -----
+    fp_file: str
+        Path to focal-plane file that is used by the optics module.
+    wafer_slot: str
+        Wafer slot of the UFM. For example: "ws0"
+    tel_type: str
+        Tel type for the optics model. Either "SAT" or "LAT"
+    zemax_path: str
+        If running for a "LAT" tel_type, the path to the zemax file must be specified.
+    """
+    fp_file: str
+    wafer_slot: str
+    tel_type: str
+    zemax_path: Optional[str] = None
+
+    dx: float = field(init=False)
+    dy: float = field(init=False)
+    theta: float = field(init=False)
+    fp_pars: dict = field(init=False)
+
+    def __post_init__(self):
+        if self.tel_type == 'LAT' and (self.zemax_path is None):
+            return ValueError("zemax path must be set for 'LAT' tel_type")
+        
+        if self.tel_type not in ['SAT', 'LAT']:
+            raise ValueError("tel_typ ")
+        
+        self.fp_pars = optics.get_ufm_to_fp_pars(
+            self.tel_type, self.wafer_slot, self.fp_file
+        )
+        self.dx = self.fp_pars['dx']
+        self.dy = self.fp_pars['dy']
+        self.theta = np.deg2rad(self.fp_pars['theta'])
+    
+    def get_pointing(self, x, y, pol=0):
+        xp = x * np.cos(self.theta) - y * np.sin(self.theta) + self.dx
+        yp = x * np.sin(self.theta) + y * np.cos(self.theta) + self.dy
+
+        if self.tel_type.upper() == 'SAT':
+            xi, eta, gamma = optics.SAT_focal_plane(
+                None, x=xp, y=yp, pol=pol
+            )
+        elif self.tel_type.upper() == 'LAT':
+            xi, eta, gamma = optics.LAT_focal_plane(
+                None, zemax_path, x=xp, y=yp, pol=pol,
+            )
+        return xi, eta, gamma
+
+
+@dataclass
 class Resonator:
     """
     Data structure to hold any resonator information.
@@ -88,7 +143,7 @@ class Resonator:
     det_angle_raw_deg: float = np.nan
     det_angle_actual_deg: float = np.nan
     det_type: str = ''
-    det_id: str = ''
+    det_id: str = 'NO_MATCH'
     is_optical: int = 1
     mux_bondpad: int = 0
     mux_subband: str = ''
@@ -100,7 +155,7 @@ class Resonator:
     match_idx: int = -1
  
 
-def apply_design_properties(smurf_res, design_res, in_place=False):
+def apply_design_properties(smurf_res, design_res, in_place=False, apply_pointing=True):
     """
     Combines two resonators into one, taking smurf-properties such as res-idx,
     smurf-band, and smurf-channel one, and design properties such as det
@@ -127,6 +182,8 @@ def apply_design_properties(smurf_res, design_res, in_place=False):
         'mux_bondpad', 'mux_subband', 'mux_band', 'mux_channel',
         'mux_layout_pos'
     ]
+    if apply_pointing:
+        design_props += ['xi', 'eta', 'gamma']
 
     for prop in design_props:
         setattr(r, prop, getattr(design_res, prop))
@@ -155,12 +212,38 @@ class ResSet:
         return len(self.resonances)
 
     @classmethod
-    def from_array(cls, arr):
+    def from_array(cls, arr, name=None, ignore_extra_fields=True):
+        """
+        Creates a ResSet from a numpy structured array (resulting from
+        ``as_array`` method). 
+
+        Args
+        -----
+        arr: np.ndarray
+            Structured ResSet array
+        name: str
+            Name for the res-set
+        ignore_extra_fields: bool
+            If True, this will ignore any fields from the array that are not in
+            the Resonator dataclass. This may happen if loading an older saved array,
+            where the resonator fields are not the same.
+        """
         resonators = []
         names = arr.dtype.names
+        field_names = [f.name for f in fields(Resonator)]
         for a in arr:
-            resonators.append(Resonator(**dict(zip(names, a))))
-        return cls(resonators)
+            # Remove any fields that are not in the Resonator class if
+            # ignore_extra_fields is True.
+            kw = dict(zip(names, a))
+            for name in names:
+                if name in field_names:
+                    continue
+                if ignore_extra_fields:
+                    del kw[name]
+                else:
+                    raise ValueError(f"Field '{name}' not in Resonator class.")
+            resonators.append(Resonator(**kw))
+        return cls(resonators, name=name)
 
 
     def as_array(self):
@@ -180,7 +263,7 @@ class ResSet:
         return np.array(data, dtype=dtype)
 
     @classmethod
-    def from_aman(cls, aman, stream_id, det_cal=None):
+    def from_aman(cls, aman, stream_id, det_cal=None, name=None):
         """
         Load a resonator set from a Context object based on an obs_id
 
@@ -219,7 +302,7 @@ class ResSet:
             )
             resonators.append(res)
 
-        return cls(resonators)
+        return cls(resonators, name=name)
 
     @classmethod
     def from_tunefile(cls, tunefile, name=None, north_is_highband=True,
@@ -271,6 +354,64 @@ class ResSet:
         return rs
 
     @classmethod
+    def from_wafer_info_file(cls, wafer_info_file, array_name, name=None,
+                             pt_cfg: Optional[PointingConfig]=None):
+        """
+        Initialize a ResSet from a wafer info file. This is a file that contains
+        detector design information.
+
+        Args
+        -----
+        wafer_info_file: str
+            Path to wafer info file
+        array_name: str
+            Array name, which is the key in the wafer-info-file. For example:
+            "mv7".
+        name: str
+            Name to assign to the ResSet
+        pt_cfg: PointingConfig
+            If set, this will be used to get pointing info based on the optics
+            model. If not set, pointing info will not be included in the ResSet.
+        """
+
+        with h5py.File(wafer_info_file) as f:
+            wafer_array = np.array(f[array_name])
+
+        resonators = []
+        idx = 0
+        for r in wafer_array:
+            is_north = r['dets:wafer.coax'] == b'N'
+            res = Resonator(
+                idx=idx,
+                det_id=r['dets:det_id'].decode(),
+                mux_bondpad=r['dets:wafer.bond_pad'],
+                mux_band=r['dets:wafer.mux_band'],
+                mux_channel=r['dets:wafer.mux_channel'],
+                mux_subband=r['dets:wafer.mux_subband'],
+                mux_layout_pos=r['dets:wafer.mux_position'],
+                res_freq=r['dets:wafer.design_freq_mhz'],
+                bg=r['dets:wafer.bias_line'],
+                det_pol=r['dets:wafer.pol'],
+                det_bandpass=r['dets:wafer.bandpass'],
+                det_row=r['dets:wafer.det_row'],
+                det_col=r['dets:wafer.det_col'],
+                det_rhomb=r['dets:wafer.rhombus'],
+                det_type=r['dets:wafer.type'],
+                det_x=r['dets:wafer.x'],
+                det_y=r['dets:wafer.y'],
+                det_angle_actual_deg=r['dets:wafer.angle'],
+                is_north=is_north
+            )
+
+            if pt_cfg is not None:
+                res.xi, res.eta, res.gamma = pt_cfg.get_pointing(res.det_x, res.det_y)
+
+            resonators.append(res)
+            idx += 1
+
+        return cls(resonators, name=name)
+        
+    @classmethod
     def from_solutions(cls, sol_file, north_is_highband=True, name=None, 
                        fp_pars=None, platform='SAT', zemax_path=None):
         """
@@ -298,7 +439,7 @@ class ResSet:
         resonances = []
 
         if fp_pars is not None:
-            theta = -np.deg2rad(fp_pars['theta'])
+            theta = np.deg2rad(fp_pars['theta'])
             dx, dy = fp_pars['dx'], fp_pars['dy']
 
         with open(sol_file, 'r') as f:
@@ -308,7 +449,8 @@ class ResSet:
 
             #Helper needed for when sol file has saved ints as floats
             def _int(val, null_val=None): 
-                if val == 'null' and null_val is not None:
+                is_null = (val == 'null' or val == '')
+                if is_null and null_val is not None:
                     return null_val
                 return int(float(val))
 
@@ -330,8 +472,8 @@ class ResSet:
                     det_type=d['det_type'], det_id=d['detector_id'].strip(),
                     mux_band=_int(d['mux_band']), mux_channel=_int(d['mux_channel']),
                     mux_subband=d['mux_subband'], mux_bondpad=d['bond_pad'],
-                    det_angle_raw_deg=d['angle_raw_deg'],
-                    det_angle_actual_deg=d['angle_actual_deg'],
+                    det_angle_raw_deg=float(d['angle_raw_deg']),
+                    det_angle_actual_deg=float(d['angle_actual_deg']),
                     mux_layout_pos=_int(d['mux_layout_position']),
                     det_bandpass=d['bandpass'], det_pol=d['pol'],
                     is_optical=is_optical,
@@ -447,7 +589,7 @@ class MatchParams:
     dist_width: float =0.01
     unmatched_good_res_pen: float = 10.
     good_res_qi_thresh: float = 100e3
-    force_src_pointing: bool = True
+    force_src_pointing: bool = False
     assigned_bg_unmatched_pen: float = 100000
     unassigned_bg_unmatched_pen: float = 10000
     assigned_bg_mismatch_pen: float = 100000
@@ -458,6 +600,7 @@ class MatchParams:
 class MatchingStats:
     unmatched_src: int = 0
     unmatched_dst: int = 0
+    unmatched_src_with_pointing: int = 0
     matched_chans: int = 0
     mismatched_bg: int = 0
     freq_diff_avg: float = 0.0
@@ -484,6 +627,9 @@ class Match:
         match_pars (MatchParams):
             MatchParams object used in the matching algorithm. This
             can be used to tune the cost-function and matching.
+        apply_dst_pointing (bool):
+            If True, the ``merged`` res-set will take its pointing information
+            from ``dst`` instead of ``src``.
     
     Attributes:
         src (ResSet):
@@ -508,7 +654,8 @@ class Match:
             A MatchingStats object containing some statistics about the
             matching.
     """
-    def __init__(self, src: ResSet, dst: ResSet, match_pars: Optional[MatchParams]=None):
+    def __init__(self, src: ResSet, dst: ResSet, match_pars: Optional[MatchParams]=None,
+                 apply_dst_pointing=True):
         self.src = src
         self.dst = dst
 
@@ -516,7 +663,9 @@ class Match:
             self.match_pars = MatchParams()
         else:
             self.match_pars = match_pars
+        self.apply_dst_pointing = apply_dst_pointing
 
+        self.matching_cost = np.nan
         self.matching, self.merged = self._match()
         self.stats = self.get_stats()
 
@@ -551,6 +700,9 @@ class Match:
         m = ~np.isnan(dd)
         mat[m] += np.exp((np.abs(dd[m] / self.match_pars.dist_width)) ** 2)
 
+        # Any remaining nans should be set to info so matrix is still solvable
+        mat[np.isnan(mat)] = np.inf
+
         return mat
 
     def _get_unassigned_costs(self, rs, force_if_pointing=True):
@@ -573,6 +725,7 @@ class Match:
             arr[m] = np.inf
 
         return arr
+
 
     def _match(self):
         nside = max(len(self.src), len(self.dst)) + self.match_pars.unassigned_slots
@@ -597,6 +750,7 @@ class Match:
             mat_full[len(self.src):, len(self.dst):] = 0
 
         self.matching = np.array(linear_sum_assignment(mat_full))
+        self.matching_cost = mat_full[self.matching[0], self.matching[1]].sum()
 
         for r1, r2 in self.get_match_iter(include_unmatched=True):
             if r1 is None:
@@ -614,9 +768,11 @@ class Match:
         resonances = []
         for r1 in self.src:
             if r1.matched:
-                # print(r1.match_idx)
                 r2 = self.dst[r1.match_idx]
-                r = apply_design_properties(r1, r2, in_place=False)
+                r = apply_design_properties(
+                    r1, r2, in_place=False,
+                    apply_pointing=self.apply_dst_pointing
+                )
             else:
                 r = deepcopy(r1)
             resonances.append(r)
@@ -658,13 +814,18 @@ class Match:
         Gets stats associated with current matching.
         """
         stats = MatchingStats()
-        nchans_with_pointing = 0
         src_arr = self.src.as_array()
         dst_arr = self.dst.as_array()
 
         stats.unmatched_src = np.sum(~src_arr['matched'].astype(bool))
         stats.unmatched_dst = np.sum(~dst_arr['matched'].astype(bool))
 
+        has_pt = ~np.isnan(src_arr['xi'])
+        stats.unmatched_src_with_pointing = np.sum(
+            (~src_arr['matched'].astype(bool)) & has_pt
+        )
+
+        dangs = []
         for r1, r2 in self.get_match_iter(include_unmatched=False):
             stats.matched_chans += 1
             if r1.bg != r2.bg:
@@ -673,23 +834,19 @@ class Match:
             stats.freq_err_avg += np.abs(
                 r1.res_freq - r2.res_freq - self.match_pars.freq_offset_mhz
             )
-            if not np.isnan(r1.xi):
-                pointing_err = np.sqrt(
-                    (r1.xi - r2.xi)**2 + (r1.eta - r2.eta)**2 
-                )
-                nchans_with_pointing += 1
-                stats.pointing_err_avg += pointing_err
+            dangs.append(
+                np.sqrt((r1.xi - r2.xi)**2 + (r1.eta - r2.eta)**2)
+            )
+
+        stats.pointing_err_avg = np.nan
+        if (~np.isnan(dangs)).any():
+            stats.pointing_err_avg = np.nanmean(dangs)
+
         stats.freq_diff_avg /= stats.matched_chans
         stats.freq_diff_avg = float(stats.freq_diff_avg)
 
         stats.freq_err_avg /= stats.matched_chans
         stats.freq_err_avg = float(stats.freq_err_avg)
-
-        if nchans_with_pointing != 0:
-            stats.pointing_err_avg /= nchans_with_pointing
-            stats.pointing_err_avg = float(np.rad2deg(stats.pointing_err_avg))
-        else:
-            stats.pointing_err_avg = np.nan
 
         return stats
 
@@ -700,8 +857,10 @@ class Match:
             fout.create_group('meta/match_pars')
             for k, v in asdict(self.match_pars).items():
                 fout['meta/match_pars'][k] = v
-            fout['meta/src_name'] = self.src.name
-            fout['meta/dst_name'] = self.dst.name
+            if self.src.name is not None:
+                fout['meta/src_name'] = self.src.name
+            if self.dst.name is not None:
+                fout['meta/dst_name'] = self.dst.name
 
             write_dataset(
                 metadata.ResultSet.from_friend(self.src.as_array()), fout, 'src')
@@ -711,6 +870,25 @@ class Match:
             write_dataset(
                 metadata.ResultSet.from_friend(self.merged.as_array()), fout, 'merged')
 
+    @classmethod
+    def load(cls, path):
+        """
+        Loads a match from a h5 file (resulting from ``save`` method)
+        """
+        with h5py.File(path) as f:
+            src = ResSet.from_array(np.array(f['src']))
+            if 'meta/src_name' in f:
+                src.name = f['meta/src_name'][()].decode()
+            dst = ResSet.from_array(np.array(f['dst']))
+            if 'meta/dst_name' in f:
+                dst.name = f['meta/dst_name'][()].decode()
+            match_pars = {}
+            for k in f['meta/match_pars'].keys():
+                match_pars[k] = f['meta/match_pars'][k][()]
+            match_pars = MatchParams(**match_pars)
+        match = cls(src, dst, match_pars=match_pars)
+        return match
+    
 
 def plot_match_freqs(m: Match, is_north=True, show_offset=False, xlim=None):
     """

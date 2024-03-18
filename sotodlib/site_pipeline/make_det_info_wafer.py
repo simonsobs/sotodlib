@@ -5,7 +5,6 @@ import logging
 import numpy as np
 from argparse import ArgumentParser
 
-from detmap.makemap import MapMaker
 import sotodlib
 from sotodlib import core
 from sotodlib.io.metadata import write_dataset

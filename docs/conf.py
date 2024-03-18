@@ -101,7 +101,7 @@ autodoc_mock_imports = []
 for missing in ('matplotlib', 'healpy', 'sqlalchemy',
                 'quaternionarray', 'yaml', 'toml', 'sqlite3','tqdm',
                 'skyfield', 'h5py', 'pyfftw', 'scipy',
-                'toast', 'pixell', 'scikit', 'skimage',
+                'toast', 'pixell', 'scikit', 'skimage', 'numdifftools',
                 'traitlets', 'ephem', 'influxdb', 'pycpd', 'detmap'):
     try:
         foo = import_module(missing)
@@ -122,7 +122,6 @@ for missing in autodoc_mock_imports:
 try:
     import sphinx_rtd_theme
     html_theme = 'sphinx_rtd_theme'
-    html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 except ImportError:
     html_theme = 'alabaster'
 
@@ -228,7 +227,7 @@ epub_exclude_files = ['search.html']
 # -- Options for intersphinx extension ---------------------------------------
 
 # Example configuration for intersphinx: refer to the Python standard library.
-intersphinx_mapping = {'https://docs.python.org/': None}
+intersphinx_mapping = {'python': ('https://docs.python.org/', None)}
 
 # -- Options for todo extension ----------------------------------------------
 
