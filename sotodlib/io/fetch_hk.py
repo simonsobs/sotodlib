@@ -22,8 +22,7 @@ def fetch_hk(path, fields=None):
                             if k == key:
                                 data = [[t.time / g3core.G3Units.s for t in v.times], v[k]]
                                 hk_data.setdefault(field, ([], []))
-                                hk_data[field] = (
-                                    np.concatenate([hk_data[field][0], data[0]]),
-                                    np.concatenate([hk_data[field][1], data[1]])
-                                )
+                                hk_data[field][0].extend(data[0])
+                                hk_data[field][1].extend(data[1])
+
     return hk_data
