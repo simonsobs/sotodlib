@@ -181,7 +181,7 @@ def main(ctx_file, obs_id, wafer_slot, sso_name, result_dir,
     return
 
 def get_parser():
-    parser = argparse.ArgumentParser(description="Description of the script.")
+    parser = argparse.ArgumentParser(description="Get updated result of pointings with tod-based results")
     parser.add_argument("ctx_file", type=str, help="Path to the context file.")
     parser.add_argument("obs_id", type=str, help="Observation ID.")
     parser.add_argument("wafer_slot", type=int, help="Wafer slot number.")
