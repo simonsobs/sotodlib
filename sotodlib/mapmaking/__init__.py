@@ -4,3 +4,4 @@ from .noise_model import *
 from .pointing_matrix import *
 from .bench import *
 from .log import *
+from .tod_grouping import *
