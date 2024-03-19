@@ -118,7 +118,9 @@ def preprocess_tod(
         logger.info(f"Beginning run for {obs_id}:{group}")
 
         aman = context.get_obs(obs_id, dets={group_by:group})
-        proc_aman = pipe.run(aman)
+        proc_aman, success = pipe.run(aman)
+        if success != 'end':
+            continue
 
         policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
         dest_file, dest_dataset = policy.get_dest(obs_id)
@@ -152,12 +154,12 @@ def load_preprocess_det_select(obs_id, configs, context=None):
     """
     configs, context = _get_preprocess_context(configs, context)
     
-    pipe = Pipeline(configs["process_pipe"], logger=logger)
     meta = context.get_meta(obs_id)
-
-    for process in pipe:
-        logger.info(f"Selecting On {process.name}")
-        process.select(meta)
+    proc_aman = meta["preprocess"]
+    assn = [a for a in proc_aman._assignments][-1]
+    logger.info(f"Cutting on the last process: {assn}")
+    keep = core.flagman.has_all_cut(proc_aman[assn].valid)
+    meta.restrict('dets', meta.dets.vals[keep])
     return meta
 
 def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml", context=None ):
@@ -177,11 +179,15 @@ def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml", context=None 
 
     configs, context = _get_preprocess_context(configs, context)
     meta = load_preprocess_det_select(obs_id, configs=configs, context=context)
-    
-    pipe = Pipeline(configs["process_pipe"], logger=logger)
-    aman = context.get_obs(meta)
-    pipe.run(aman, aman.preprocess)
-    return aman
+
+    if meta.dets.count == 0:
+        logger.info(f"No detectors left after cuts in obs {obs_id}")
+        return None
+    else:
+        pipe = Pipeline(configs["process_pipe"], logger=logger)
+        aman = context.get_obs(meta)
+        pipe.run(aman, aman.preprocess)
+        return aman
 
 
 def get_parser(parser=None):

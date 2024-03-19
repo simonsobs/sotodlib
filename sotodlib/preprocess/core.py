@@ -374,7 +374,7 @@ class Pipeline(list):
             if run_calc:
                 process.calc_and_save(aman, proc_aman)
                 update_full_aman( proc_aman, full, self.wrap_valid)
-            
+                
             if select:
                 process.select(aman, proc_aman)
                 proc_aman.restrict('dets', aman.dets.vals)
@@ -383,6 +383,6 @@ class Pipeline(list):
             if aman.dets.count == 0:
                 success = process.name
                 break
-            
+        
         return full, success
         
