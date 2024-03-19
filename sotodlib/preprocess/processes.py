@@ -518,12 +518,21 @@ class SubtractHWPSS(_Preprocess):
     """
     name = "subtract_hwpss"
 
+    def __init__(self, step_cfgs):
+        self.hwpss_stats = step_cfgs.get('hwpss_stats', 'hwpss_stats')
+
+        super().__init__(step_cfgs)
+
     def process(self, aman, proc_aman):
-        hwp.subtract_hwpss(
-            aman,
-            hwpss_template = aman[self.process_cfgs["hwpss_extract"]],
-            subtract_name = self.process_cfgs["subtract_name"]
-        )
+        if not(proc_aman[self.hwpss_stats] is None):
+            modes = [int(m[1:]) for m in proc_aman[self.hwpss_stats].modes.vals[::2]]
+            template = hwp.harms_func(aman.hwp_angle, modes,
+                                  proc_aman[self.hwpss_stats].coeffs)
+            hwp.subtract_hwpss(
+                aman,
+                hwpss_template = template,
+                subtract_name = self.process_cfgs["subtract_name"]
+                )
 
 class Apodize(_Preprocess):
     """Apodize the edges of a signal. All process configs go to `apodize_cosine`
