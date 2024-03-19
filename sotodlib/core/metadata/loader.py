@@ -535,8 +535,6 @@ class SuperLoader:
             # Unpack it.
             try:
                 dest = unpack_item(spec.unpack, item, dest=dest)
-                #unpacker = _Unpacker.from_spec(spec, target=item)
-                #dest = unpacker.unpack(item, dest=dest)
             except Exception as e:
                 reraise(_spec, e)
 
@@ -836,16 +834,18 @@ class MetadataSpec:
         Instructions for how to populate the destination AxisManager
         with fields found in this metadata item.  See notes below.
 
-    ``load_fields`` (list of str)
-        List of fields (which may include child AxisManagers, or
-        fields within using "." for addressing), to load.  Only
-        processed for AxisManager metadata.
+    ``load_fields`` (list of str or None)
+        List of fields to load.  This may include entire child
+        AxisManagers, or fields within them using "." for hierarchical
+        addressing.  This is only for AxisManager metadata.  Default
+        is None, which meaning to load all fields.  Wildcards are not
+        supported.
 
     ``drop_fields`` (list of str)
         List of fields (which may contain wildcard character ``*``) to
         drop prior to merging.  Only processed for AxisManager
         metadata.  (The dropping is applied after any restrictions on
-        the loading using only_fields).
+        the loading using load_fields).
 
     The following dict keys are deprecated, but are processed for
     backwards compatibility.
@@ -854,6 +854,9 @@ class MetadataSpec:
         (Deprecated.)  This has been renamed as "unpack", and will be
         copied into that attribute if unpack is not otherwise set.
 
+
+    Notes
+    -----
 
     In the ``unpack`` list, each must be in one of 4 possible forms,
     shown below, to the left of the ``:``.  The resulting assignment
@@ -876,6 +879,77 @@ class MetadataSpec:
     The fourth form causes the entire item to be merged into the
     target at dest_name.  This can operate alongside any number of
     individual field extractions.
+
+    Examples
+    --------
+
+    Here is an example ``context.yaml`` metadata list, showing some
+    common formations::
+
+      metadata:
+        # assignment
+        - label: assignment
+          db: '{metadata_dir}/det_match/satp1_det_match_240220m/assignment.sqlite'
+          det_info: true
+          on_missing: fail
+        # focal_plane
+        - label: focal_plane
+          db: '{manifestdir}/focal_plane/satp1_focal_plane_240308r1/db.sqlite'
+          unpack: focal_plane
+          on_missing: trim
+        # hwp_angles
+        - label: hwp_angles
+          db: '{manifestdir}/hwp_angles/satp1_hwp_angles_240301m/hwp_angle.sqlite'
+          load_fields:
+          - hwp_angle_enc1
+          - hwp_flags
+          unpack:
+          - 'hwp_angle&hwp_angle_enc1'
+          - '&hwp_flags'
+          on_missing: drop
+        # starcam
+        - label: starcam
+          db: '{manifestdir}/starcam_solutions/starcam_solutions_240401m/db.sqlite'
+          drop_fields: 'image_data_*'
+          unpack: starcam
+          on_missing: drop
+
+    Note that all entries have ``label`` and ``db`` elements.  The
+    ``label`` is unique (this is not required however).  The paths for
+    ``db`` all include ``{manifestdir}``.  This will be replaced by
+    the value assigned to ``manifestdir`` in the ``tags`` section of
+    the context.yaml file.  Referring to particular entries, by label:
+
+    1. The "assignment" entry declares itself as "det_info: true".
+       Thus, it does not have an "unpack" key.  The data will unpack
+       as a simple table and be merged into the observation's
+       "det_info".  Because "on_missing: fail", it is an error if this
+       product can not be fully reconciled against an observation
+       without dropping detectors.
+    2. The "focal_plane" entry specifies "unpack: focal_plane", which
+       means that the entire loaded metadata will be placed into a
+       child AxisManager called "focal_plane".  However "on_missing:
+       trim" means that the focal_plane result does not need to be
+       defined for all detectors.  If any are missing, then all data
+       for those dets will be dropped from the loaded observation.
+    3. The "hwp_angles" entry has a "load_fields" key, which will
+       restrict what data are actually pulled in from the product on
+       disk.  This is used in cases where the on-disk product has a
+       lot of data in it that is not needed.  Specifying that only a
+       small subset of the data are needed can greatly increase
+       metadata construction time.  The value for "unpack" is now a
+       list, identifying that the loaded "hwp_flags" data can be
+       placed directly into "hwp_flags", while "hwp_angle_enc1" should
+       be renamed to simply "hwp_angle".  The use of "on_missing:
+       drop" means that if this product is not available for this
+       observation, it is ok to simply continue on without it.
+    4. The "starcam" entry uses "drop_fields" to discard certain
+       fields from the loaded data, prior to merging it into the
+       observation metadata AxisManager.  In practice this doesn't
+       save much in terms of i/o cost; it's better to use
+       "load_fields" to explicitly include the list of things you care
+       about.  The drop_fields option is aimed at deleting fields from buggy
+       data because they fail to concatenate properly after load.
 
     """
 
@@ -916,7 +990,10 @@ class MetadataSpec:
             self.unpack = ['&']
         elif isinstance(self.unpack, str):
             self.unpack = [self.unpack]
-        # Make sure drop_fields is a list.
+        # Promote load_fields string to a list (but leave None alone).
+        if isinstance(self.load_fields, str):
+            self.load_fields = [self.load_fields]
+        # Make sure drop_fields is a (possibly empty) list.
         if self.drop_fields is None:
             self.drop_fields = []
         elif isinstance(self.drop_fields, str):
