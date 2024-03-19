@@ -140,7 +140,7 @@ class FocalPlane:
         self.full_fp[:, template_msk, i] = fp * weights
         self.tot_weight[template_msk] += weights
 
-    def save(self, f, group):
+    def save(self, f, db_info, group):
         ndets = len(self.template.det_ids)
         outdt = [
             ("dets:det_id", self.template.det_ids.dtype),
@@ -158,6 +158,9 @@ class FocalPlane:
             overwrite=True,
         )
         _add_attrs(f[f"{group}/focal_plane"], {"measured_gamma": self.have_gamma})
+        entry = {"dets:stream_id": self.stream_id, "dataset": f"group/focal_plane"}
+        entry.update(db_info[1])
+        db_info[0].add_entry(entry, filename=os.path.basename(f.filename), replace=True)
 
         outdt_full = [
             ("dets:det_id", self.template.det_ids.dtype),
@@ -240,7 +243,7 @@ class OpticsTube:
         self.center = np.array((xi, eta, gamma)).reshape((3, 1))
         self.center_transformed = self.center.copy()
 
-    def save(self, f):
+    def save(self, f, db_info):
         f.create_group(self.name)
         _add_attrs(
             f[self.name],
@@ -248,7 +251,26 @@ class OpticsTube:
         )
         self.transform.save(f, f"{self.name}/transform")
         for focal_plane in self.focal_planes:
-            focal_plane.save(f, f"{self.name}/{focal_plane.stream_id}")
+            focal_plane.save(f, db_info, f"{self.name}/{focal_plane.stream_id}")
+
+
+def _create_db(filename, per_obs, obs_id):
+    base = {}
+    if per_obs:
+        base = {"obs:obs_id": obs_id}
+    if os.path.isfile(filename):
+        return metadata.ManifestDb(filename), base
+    if not os.path.isdir(os.path.dirname(filename)):
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+    scheme = metadata.ManifestScheme()
+    scheme.add_exact_match("dets:stream_id")
+    if per_obs:
+        scheme.add_exact_match("obs:obs_id")
+    scheme.add_data_field("dataset")
+
+    metadata.ManifestDb(scheme=scheme).to_file(filename)
+    return metadata.ManifestDb(filename), base
 
 
 def _avg_focalplane(full_fp, tot_weight):
@@ -627,16 +649,16 @@ def main():
         raise ValueError("No valid inputs provided")
 
     # Build output path
-    append = ""
-    if "append" in config:
-        append = "_" + config["append"]
-    froot = f"focal_plane{append}"
-    subdir = config.get("subdir", None)
-    if subdir is None:
-        subdir = "combined"
-        if len(obs_ids) == 1:
-            subdir = obs_ids[0]
+    append = config.get("append", "")
+    per_obs = config.get("per_obs", False)
+    froot = f"focal_plane{bool(append)*'_'}{append}{per_obs*('_'+obs_ids[0])}"
+    dbroot = f"db{bool(append)*'_'}{append}"
+    subdir = config.get("subdir", "")
+    subdir = subdir + (subdir == "") * (
+        per_obs * "per_obs" + (not per_obs) * "combined"
+    )
     outpath = os.path.join(config["outdir"], subdir, f"{froot}.h5")
+    dbpath = os.path.join(config["outdir"], subdir, f"{dbroot}.sqlite")
     outpath = os.path.abspath(outpath)
     os.makedirs(os.path.dirname(outpath), exist_ok=True)
 
@@ -798,7 +820,7 @@ def main():
             plot_dir = config.get("plot_dir", None)
             proot = f"{stream_id}{append}"
             if plot_dir is not None:
-                plot_dir = os.path.join(plot_dir, subdir)
+                plot_dir = os.path.join(plot_dir, subdir, per_obs * obs_ids[0])
                 plot_dir = os.path.abspath(plot_dir)
                 os.makedirs(plot_dir, exist_ok=True)
             _mk_plot(
@@ -903,6 +925,8 @@ def main():
 
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)
+    logger.info("Writing to databse at %s", dbpath)
+    db, base = _create_db(dbpath, per_obs=per_obs, obs_id=obs_ids[0])
     with h5py.File(outpath, "w") as f:
         _add_attrs(f["/"], {"center": origin, "center_transformed": recv_center})
         f.create_group("transform")
@@ -917,7 +941,7 @@ def main():
             },
         )
         for ot in ots.values():
-            ot.save(f)
+            ot.save(f, (db, base))
 
 
 if __name__ == "__main__":
