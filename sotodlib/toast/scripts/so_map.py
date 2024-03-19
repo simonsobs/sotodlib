@@ -112,6 +112,12 @@ def load_data(job, otherargs, runargs, data):
     wrk.load_data_context(job, otherargs, runargs, data)
     wrk.act_responsivity_sign(job, otherargs, runargs, data)
 
+    if len(data.obs) == 0:
+        raise RuntimeError(
+            "No data loaded. You need to specify inputs in "
+            "HDF5, books or context"
+        )
+
     job_ops.mem_count.prefix = "After Data Load"
     job_ops.mem_count.apply(data)
 
@@ -155,6 +161,13 @@ def main():
         default=False,
         action="store_true",
         help="Map each observation separately.",
+    )
+    parser.add_argument(
+        "--detmaps",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Map each detector separately.",
     )
 
     # The operators and templates we want to configure from the command line
