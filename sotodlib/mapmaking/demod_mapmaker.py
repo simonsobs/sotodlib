@@ -145,8 +145,7 @@ class DemodSignalMap(DemodSignal):
             if pmap is None:
                 # Build the local geometry and pointing matrix for this observation
                 if self.recenter:
-                    rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter,
-                        ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
+                    rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter, ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
                 else: rot = None
                 # we handle cuts here through obs.flags
                 if split_labels == None:
