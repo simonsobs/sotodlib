@@ -377,7 +377,7 @@ def _mk_plot(plot_dir, froot, nominal, measured, transformed):
     else:
         os.makedirs(plot_dir, exist_ok=True)
         plt.savefig(os.path.join(plot_dir, f"{froot}_res.png"), bbox_inches="tight")
-        plt.clf()
+        plt.close()
 
 
 def gamma_fit(src, dst):
@@ -662,6 +662,7 @@ def main():
     outpath = os.path.abspath(outpath)
     os.makedirs(os.path.dirname(outpath), exist_ok=True)
 
+    weight_factor = config.get("weight_factor", 1000)
     gen_template = "template" not in config
     template_path = config.get("template", "nominal.h5")
     have_template = os.path.exists(template_path)
@@ -753,13 +754,13 @@ def main():
                 weights = af.gen_weights(
                     np.vstack((aligned, gscale * fp[2] + gsft)),
                     focal_plane.template.fp[:, template_msk],
-                    focal_plane.template.spacing.ravel() / 10,
+                    focal_plane.template.spacing.ravel() / weight_factor,
                 )
             else:
                 weights = af.gen_weights(
                     aligned,
                     focal_plane.template.fp[:2, template_msk],
-                    focal_plane.template.spacing[:2].ravel() / 10,
+                    focal_plane.template.spacing[:2].ravel() / weight_factor,
                 )
 
             # Store weighted values
@@ -792,9 +793,13 @@ def main():
             gamma_scale = 1.0
             gamma_shift = 0.0
 
-        affine, shift = af.get_affine_two_stage(
-            focal_plane.template.fp[:2], focal_plane.avg_fp[:2], focal_plane.weights
-        )
+        try:
+            affine, shift = af.get_affine_two_stage(
+                focal_plane.template.fp[:2], focal_plane.avg_fp[:2], focal_plane.weights
+            )
+        except ValueError as e:
+            logger.error("\t%s", e)
+            continue
 
         focal_plane.transformed[:2] = (
             affine @ focal_plane.template.fp[:2] + shift[..., None]
@@ -925,7 +930,7 @@ def main():
 
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)
-    logger.info("Writing to databse at %s", dbpath)
+    logger.info("Writing to database at %s", dbpath)
     db, base = _create_db(dbpath, per_obs=per_obs, obs_id=obs_ids[0])
     with h5py.File(outpath, "w") as f:
         _add_attrs(f["/"], {"center": origin, "center_transformed": recv_center})
