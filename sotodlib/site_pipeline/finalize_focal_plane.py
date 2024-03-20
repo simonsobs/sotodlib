@@ -158,7 +158,7 @@ class FocalPlane:
             overwrite=True,
         )
         _add_attrs(f[f"{group}/focal_plane"], {"measured_gamma": self.have_gamma})
-        entry = {"dets:stream_id": self.stream_id, "dataset": f"group/focal_plane"}
+        entry = {"dets:stream_id": self.stream_id, "dataset": f"{group}/focal_plane"}
         entry.update(db_info[1])
         db_info[0].add_entry(entry, filename=os.path.basename(f.filename), replace=True)
 
@@ -333,10 +333,10 @@ def _mk_plot(plot_dir, froot, nominal, measured, transformed):
         plt.savefig(os.path.join(plot_dir, f"{froot}.png"))
         plt.cla()
 
-    # Historgram of differences
+    # Histogram of differences
     diff = measured - transformed
     dist = np.linalg.norm(diff[:2, np.isfinite(diff[0])], axis=0)
-    bins = int(len(dist) / 20)
+    bins = max(int(len(dist) / 20), 10)
     plt.hist(dist[dist < np.percentile(dist, 97)], bins=bins)
     plt.xlabel("Distance Between Measured and Transformed (rad)")
     if plot_dir is None:
@@ -354,8 +354,8 @@ def _mk_plot(plot_dir, froot, nominal, measured, transformed):
     for i, name in enumerate(("xi", "eta", "gamma")):
         isfinite = np.isfinite(diff[i])
         axs[i].set_title(name)
-        axs[i].set_xlim(np.nanmin(nominal[0]), np.nanmax(nominal[0]))
-        axs[i].set_ylim(np.nanmin(nominal[1]), np.nanmax(nominal[1]))
+        axs[i].set_xlim(np.nanmin(transformed[0]), np.nanmax(transformed[0]))
+        axs[i].set_ylim(np.nanmin(transformed[1]), np.nanmax(transformed[1]))
         axs[i].set_aspect("equal")
         if np.sum(isfinite) == 0:
             continue
@@ -377,7 +377,7 @@ def _mk_plot(plot_dir, froot, nominal, measured, transformed):
     else:
         os.makedirs(plot_dir, exist_ok=True)
         plt.savefig(os.path.join(plot_dir, f"{froot}_res.png"), bbox_inches="tight")
-        plt.clf()
+        plt.close()
 
 
 def gamma_fit(src, dst):
@@ -446,6 +446,8 @@ def _load_ctx(config):
     dets = config["context"].get("dets", {})
     for obs_id in obs_ids:
         aman = ctx.get_meta(obs_id, dets=dets)
+        if "det_info" not in aman:
+            raise ValueError(f"No det_info in {obs_id}")
         if "wafer" not in aman.det_info and dm_name in aman:
             dm_aman = aman[dm_name].copy()
             aman.det_info.wrap("wafer", dm_aman)
@@ -454,9 +456,8 @@ def _load_ctx(config):
                     "det_id", aman.det_info.wafer.det_id, [(0, aman.dets)]
                 )
         if "det_id" in aman.det_info:
-            aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != ""])
-            aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != "NO_MATCH"])
-        elif "det_info" not in aman or "det_id" not in aman.det_info:
+            aman.restrict("dets", ~np.isin(aman.det_info.det_id, ["", "NO_MATCH"]))
+        else:
             raise ValueError(f"No detmap for {obs_id}")
         pol = pol_name in aman
         if pol:
@@ -662,6 +663,7 @@ def main():
     outpath = os.path.abspath(outpath)
     os.makedirs(os.path.dirname(outpath), exist_ok=True)
 
+    weight_factor = config.get("weight_factor", 1000)
     gen_template = "template" not in config
     template_path = config.get("template", "nominal.h5")
     have_template = os.path.exists(template_path)
@@ -744,7 +746,13 @@ def main():
             fp, template_msk = focal_plane.map_to_template(aman)
 
             # Try an initial alignment and get weights
-            aff, sft = af.get_affine(fp[:2], focal_plane.template.fp[:2, template_msk])
+            try:
+                aff, sft = af.get_affine(
+                    fp[:2], focal_plane.template.fp[:2, template_msk]
+                )
+            except ValueError as e:
+                logger.error("\t\t%s", e)
+                continue
             aligned = aff @ fp[:2] + sft[..., None]
             if np.any(np.isfinite(fp[2])):
                 gscale, gsft = gamma_fit(
@@ -753,13 +761,13 @@ def main():
                 weights = af.gen_weights(
                     np.vstack((aligned, gscale * fp[2] + gsft)),
                     focal_plane.template.fp[:, template_msk],
-                    focal_plane.template.spacing.ravel() / 10,
+                    focal_plane.template.spacing.ravel() / weight_factor,
                 )
             else:
                 weights = af.gen_weights(
                     aligned,
                     focal_plane.template.fp[:2, template_msk],
-                    focal_plane.template.spacing[:2].ravel() / 10,
+                    focal_plane.template.spacing[:2].ravel() / weight_factor,
                 )
 
             # Store weighted values
@@ -792,9 +800,13 @@ def main():
             gamma_scale = 1.0
             gamma_shift = 0.0
 
-        affine, shift = af.get_affine_two_stage(
-            focal_plane.template.fp[:2], focal_plane.avg_fp[:2], focal_plane.weights
-        )
+        try:
+            affine, shift = af.get_affine_two_stage(
+                focal_plane.template.fp[:2], focal_plane.avg_fp[:2], focal_plane.weights
+            )
+        except ValueError as e:
+            logger.error("\t%s", e)
+            continue
 
         focal_plane.transformed[:2] = (
             affine @ focal_plane.template.fp[:2] + shift[..., None]
@@ -925,7 +937,7 @@ def main():
 
     # Make final outputs and save
     logger.info("Saving data to %s", outpath)
-    logger.info("Writing to databse at %s", dbpath)
+    logger.info("Writing to database at %s", dbpath)
     db, base = _create_db(dbpath, per_obs=per_obs, obs_id=obs_ids[0])
     with h5py.File(outpath, "w") as f:
         _add_attrs(f["/"], {"center": origin, "center_transformed": recv_center})

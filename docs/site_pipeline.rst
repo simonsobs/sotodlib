@@ -310,16 +310,24 @@ finalize-focal-plane
 --------------------
 
 This element produces a finalized focal plane for a given array.
-It consumes the output of ``make-position-match`` and ``analyze-bright-ptsrc``
+It consumes the output of pointing fits (ie from ``analyze-bright-ptsrc``)
 with a detector map to combine results across multiple tuning epochs.
-It works by averaging the provided ``analyze-bright-ptsrc`` results using 
-the likelihoods produced by ``make-position-match`` as weights to produce a final focal plane.
+It works by averaging the provided ``analyze-bright-ptsrc`` results using weights,
+determined by how well each fit matches the nominal template, to produce a final focal plane.
 An affine transformation that lines up the template focal plane computed with physical optics
 is then computed to create a "noise-free" focal plane.
 
-This element can also be run in a mode where a transformation in horizon coordinates is also computed.
-In order to do this ``analyze-bright-ptsrc`` must contain columns with encoder data and all measurements
-should be taken at similas encoder values.
+This element also computes the receiver and optics tube "common mode" transformation.
+The optics tube common mode is how all of the arrays in one optics tube move together,
+and the receiver common mode is how all of the optics tubes move together.
+In the case of the SATs where there is only one tube, the optics tube common mode
+is always taken to be the identity.
+Given the smaller number of data points, these common modes are simple rigid transforms
+(shift and rotation) rather than a full affine transform.
+
+``finalize_focal_plane`` can optionally be run in a "per obs" mode where no averaging is done,
+in this case the output database is indexed by ``obs_id``.
+
 
 .. automodule:: sotodlib.site_pipeline.finalize_focal_plane
    :members:
@@ -333,8 +341,7 @@ Here's an annotated example:
 
 .. code-block:: yaml
 
-  ufm: "Mv29"
-  # There are two options to get the data into make_position_match
+  # There are two options to get the data in
   # One is to pass in ResultSets like so:
   resultsets:
     obs_1: # obs_id associated with this data
@@ -351,41 +358,45 @@ Here's an annotated example:
         - "PATH/TO/DETMAP.h5"
         - "merged"
     obs_2: ...
+  # When using results sets you also need to pass in additional metadata like
+  stream_id: "ufm_mv29"
+  wafer_slot: "ws0"
+  telescope_flavor: "SAT"
+  tube_slot: "st1"
+  # Note that in the ResultSets case only single wafer fits are supported
+
   # You can also load the data in with context like so
   context:
     path: PATH/TO/CONTEXT
-    pointing: "pointing" # The name of the pointing metadata field
+    # There are two pointing fields in case we have both a tod and map fit for one obs_id
+    # This may change down the line
+    map_pointing: "map_pointing" # The name of the map based pointing metadata field
+    tod_pointing: "tod_pointing" # The name of the TOD based pointing metadata field
     polarization: "polarization" # The name of the polarization metadata field (optional)
-    position_match: "position_match" # The name of the position_match metadata field
     # There are two ways to specitfy the observation, obs_id and query
     # Both can be provided 
     obs_id: [obs_1, obs_2] # Pass in the obs_id directly
-    query: QUERSY # Pass in a query
+    query: QUERY # Pass in a query
     # You can pass in detector restrictions here as well
     dets: {} # Should be a dict you would pass to the dets areg of ctx.get_meta
   
+  per_obs: False # Set to true if you want to run in per obs mode
+  weight_factor: 1000 # Weights are computed with sigma=template_spacing/weight_factor.
+                      # This is an advanced feature and should be used with caution.
+
   # There are a few ways to pass in a template as well
   template: "PATH/TO/TEMPLATE.h5" # As a h5 file with a ResultSet named the same as the UFM
   gen_template: False # Or by setting this true to generate the template on the fly
-  # If you are generating the template you need to provide information for this
-  # Below is an example, but see optics.get_focal_plane for all arguments
-  coord_transform:
-    telescope: "LAT"
-    tube: "c1"
-    slot: 0
-    rot: 0
-    config_path: "PATH/TO/ufm_to_fp.yaml"
-    zemax_path: "PATH/TO/ID9_checked_trace_data.npz"
 
-  # Configuration options
-  use_matched: False # Set to True to use the mapping from make_position_match
+  # You also will need to provide some information for using the optics code
+  pipeline_config_dir : "PATH/TO/PIPELINE/CONFIGS" # If not provided the sysvar $PIPELINE_CONFIG_DIR is used
+  zemax_path: "PATH/TO/ID9_checked_trace_data.npz" # Only needed for the LAT
   
   # Plotting info
   plot: True # Set to output plot
   plot_dir: "./plots" # Where to save plots
   
   # Output info
-  ufm: "Uv8"
   outdir: "."
   append: "test" # Will have a "_" before it.
   
@@ -394,22 +405,45 @@ Output file format
 ``````````````````
 
 The results of ``finalize_focal_plane`` are stored in an HDF5 file containing
-three datasets. The datasets are made using the ``ResultSet`` class and can be
+multiple datasets. The datasets are made using the ``ResultSet`` class and can be
 loaded back as such but metadata stored as attributes require ``h5py``.
 
-The first dataset is called ``focal_plane`` and contains three columns:
+The datasets and attributes are organized by tube and array as seem below:
+
+.. code-block:: text
+
+   focal_plane.h5
+   - (attr) center # The nominal center of the receive on sky
+   - (attr) center_transformed # The center with the common mode transform applied
+   - (group) transform # The receiver common mode
+   - (group) tube1 # The first tube (ie st1, oti1, etc.)
+     - (attr) center # The nominal center of the tube on sky
+     - (attr) center_transformed # The center with the common mode transform applied
+     - (group) transform # The tube common mode
+     - (group) ufm_1 # The first ufm for thi tube (ie ufm_mv29) 
+       - (attr) template_centers # The nominal center for this array
+       - (attr) fit_centers # The fit center for this array
+       - (group) transform # The transform for the ufm, includes parameters with and without the common mode
+       - (dataset) focal_plane # The focal_plane with just fit positions
+         - (attr) measured_gamma # If gamma was actually measured
+       - (dataset) focal_plane_full # Also includes avg positions, weights, and counts
+     - (group) ufm_2
+       ...
+     ...
+
+
+The ``focal_plane`` dataset contains four columns:
 
 - ``dets:det_id``: The detector id
 - ``xi``: The transformed template xi in radians
 - ``eta``: The transformed template eta in radians
 - ``gamma``: The transformed template gamma in radians.
 
-If a given detector has no good pointing information provided then the three
-pointing columns will be ``nan`` for it. If no polarization angles are provided
-them ``gamma`` will be populated with the nominal values from physical optics.
+If no polarization angles are provided them ``gamma`` will be populated
+with the nominal values from physical optics.
 There is an attribute called ``measured_gamma`` that will be ``False`` in this case.
 
-The second dataset is called ``focal_plane_full`` and contains seven columns: 
+The ``focal_plane_full`` dataset contains nine columns: 
 
 - ``dets:det_id``: The detector id
 - ``xi_t``: The transformed template xi in radians
@@ -418,9 +452,12 @@ The second dataset is called ``focal_plane_full`` and contains seven columns:
 - ``xi_m``: The measured xi in radians
 - ``eta_m``: The measured eta in radians
 - ``gamma_m``: The measured gamma in radians.
+- ``weights``: The average weights of the measurements for this det.
+- ``n_point``: The number of pointing fits used for the det.
+- ``n_gamma``: The number of gamma fits used for this det.
 
-The third dataset is called ``offsets`` and contains the information to transform from
-the nominal pointing to the measured pointing.
+All the attributes having to do with the centers of things are ``(1,3)`` arrays
+in the form ``((xi), (eta), (gamma))`` in radians.
 
 This transformation for ``xi`` and ``eta`` is an affine transformation defined as
 :math:`m = An + t`, where:
@@ -432,40 +469,35 @@ This transformation for ``xi`` and ``eta`` is an affine transformation defined a
 
 ``A`` is then decomposed into a rotation of the ``xi-eta`` plane, a shear parameter,
 and a scale along each axis.
+This decomposition is done assuming the order as ``A = rotation*shear*scale``.
 
 For gamma the transformation is also technically affine, but since it is in just
 one dimension it can be described by a single shift and scale.
 
-All of these parameters are stored in a ``ResultSet`` with two rows.
-The first row is in the ``xi-eta-gamma`` basis and the second in ``az-el-bs``.
-Its columns are:
+All of these results are stored as attributes in the ``transform`` groups.
+These nominally are:
 
-- ``d_x``: The shift along the measured ``xi``/``az`` axis.
-- ``d_y``: The shift along the measured ``eta``/``el`` axis.
-- ``d_z``: The shift along the measured ``gamma``/``bs`` axis.
-- ``s_x``: The scale along the measured ``xi``/``az`` axis.
-- ``s_y``: The scale along the measured ``eta``/``el`` axis.
-- ``s_z``: The scale along the measured ``gamma``/``bs`` axis.
-- ``shear``: The shear parameter of the ``xi-eta``/``az-el`` plane.
-- ``rot``: The rotation of the ``xi-eta``/``az-el`` plane in radians.
+- ``affine``: The full affine matrix
+- ``shift``: The shift in ``(xi, eta, gamma)`` in radians
+- ``scale``: The scale along ``(xi, eta, gamma)`` in radians
+- ``rot``: The rotation of the ``xi-eta`` plane
+- ``shear``: The shear of the ``xi-eta`` plane
 
-This dataset also has the attributes ``affine_xieta`` and ``affine_horiz`` which contains the
-affine transformation matrices which are decomposed to produce some of values in the ``ResultSet``.
-These matrices are ``A`` in the equation :math: `m = An + t` that is described above.
+The ``transform`` group for the arrays also include these attributes with
+whe common mode removed, the names have ``_nocm`` appended (ie ``rot_nocm``).
 
-The forth dataset is called ``reference`` and contains useful reference points. 
+Since the common mode transformations are fit as affine transforms ``scale`` will
+always be ``(1, 1, 1)`` and ``shear`` will be ``0``.
 
-This dataset is stored as a ``ResultSet`` with two rows,
-The first row is the nominal ``xi-eta-gamma`` coordinates of the center of the array mapped onto the sky,
-the origin of this coordinate system is the telescope boresite.
-The second row is the ``az-el-bs`` of the telescope's nominal boresite for the
-measurements that feed into this code.
-Its columns are:
 
-- ``x``: The nominal ``xi`` of the center of the array or the ``az`` of the telescope.
-- ``y``: The nominal ``eta`` of the center of the array or the ``el`` of the telescope.
-- ``z``: The nominal ``gamma`` of the center of the array (computed with a polarization angle of 0)
-  or the nominal ``bs`` of the telescope.
+``finalize_focal_plane`` will also output a ``ManifestDb`` as a file called ``db.sqlite``
+in the output directory.
+By default this will be indexed by ``stream_id`` and will point to the ``focal_plane`` dataset.
+If you are running in ``per_obs`` mode then it will also be indexed by ``obs_id`` and will point
+to results associated with data observation.
+Be warned that in this case there will only be entries for observations with pointing fits,
+so design your context accordingly.
+
 
 preprocess-tod
 --------------
@@ -494,121 +526,6 @@ that the entire observation is loaded, without signal.
    :module: sotodlib.site_pipeline.preprocess_obs
    :func: get_parser
 
-make-position-match
--------------------
-
-This matches measured pointing and polarization angles against a template,
-producing a detector map, transformed pointing vales, and other information derived
-from the matching process that is useful for other elements (see :ref:`Output file format<mpm_output>`).
-It operates on a single set of measured detector positions and angles at a time.
-Note that the mapping made by this element is not intended to be the final detector map,
-it is a preliminary mapping using only spatial data that is a a natural byproduct of the matching process. 
-
-.. automodule:: sotodlib.site_pipeline.make_position_match
-   :members:
-   :undoc-members:
-
-
-Config file format
-``````````````````
-
-Here's an annotated example:
-
-.. code-block:: yaml
-
-  ufm: "Mv29"
-
-  # Data Sources
-
-  # There are two options to get the data into make_position_match
-  # One is to pass in ResultSets like so:
-  resultsets:
-    # There are 3 possible ResultSets you can pass
-    # pointing is mandatory
-    pointing:
-      - "PATH/TO/FITS.h5" # The path to the ResultSet
-      - "focalplane" # The name of the ResultSet in the h5 file
-    # polarization and detmap are optional
-    polarization :
-      - "PATH/TO/FITS.h5"
-      - "polarization"
-    detmap:
-      - "PATH/TO/DETMAP.h5"
-      - "merged"
-  # You can also load the data in with context like so
-  context:
-    path: PATH/TO/CONTEXT
-    pointing: "pointing" # The name of the pointing metadata field
-    polarization: "polarization" # The name of the polarization metadata field (optional)
-    # There are two ways to specitfy the observation, obs_id and query
-    # If both are provided the obs_id will be used
-    # If the query has mutiple results the first will be used
-    obs_id: OBS_ID # Pass in the obs_id directly
-    query: QUERSY # Pass in a query
-    # You can pass in detector restrictions here as well
-    dets: {} # Should be a dict you would pass to the dets areg of ctx.get_meta
-  # There are a few ways to pass in a template as well
-  template: "PATH/TO/TEMPLATE.h5" # As a h5 file with a ResultSet named the same as the UFM
-  gen_template: False # Or by setting this true to generate the template on the fly
-  bias_map: "PATH/TO/bg_map.npy" # Optional but reccomended
-
-  # Options for outlier flagging, threshholds in rad
-  outliers:
-    use_template: True # If True reference things to the center of the template
-    radial_thresh: .15 # Radial threshhold from the center considered to be inliers
-    pixel_dist: .05 # Distance between a measurement and its template counterpart post transformation to flat at
-
-  # Options for applying priors from detmap
-  # Don't include to have no priors
-  priors:
-    val: 1 # Value at the peak of the prior
-    method: "gaussian" # Type of prior, valid options are flat and gaussian
-    width: 1 # Width of prior in units of basis
-    basis: "res_freq" # Which detmap column to prior along
-  
-  # Additional kwargs to pass to the matching function
-  # See the docstring of match_template for options
-  cpd_args:
-      vis: False
-
-  # Plotting options
-  plot: True # Set to output plot
-  plot_dir: "./plots" # Where to save plots
-  # Note that plot_dir is also used by vis in match_template
-
-  outdir: "."
-  # Optional string to be appended to output filename.
-  # Will have a "_" before it.
-  append: "test" 
-  # ManifestDb to store things in 
-  manifest_db: "file.sqlite"
-
-.. _mpm_output:
-
-Ouput file format
-`````````````````
-
-The results of ``make_position_match`` are stored in an HDF5 file containing
-a single ``ResultSet`` class and can be loaded back as such.
-
-The dataset is called ``focal_plane`` and has columns:
-
-- ``dets:readout_id``, the readout id.
-- ``matched_det_id``, the detector id as matched by this element.
-- ``band``, the SMuRF band.
-- ``channel``, the SMuRF channel.
-- ``likelihood``, the likelihood of the match for each detector.
-  This can be used as a metric for the quality if the fit pointing of each detector
-- ``xi``, xi of each detector transformed to match the template. Nominally in radians. 
-- ``eta``, eta of each detector transformed to match the template. Nominally in radians. 
-- ``gamma``, gamma of each detector transformed to match the template. Nominally in radians. 
-  If no polarization data was provided this will be nan.
-- ``pointing_outlier``, boolean flag that shows which detectors look like outliers based on its pointing.
-- ``matched_bg``, what the bias group of the detectors match in the template is.
-- ``bg_mismap``, boolean flag that is True for detector where matched_bg disagrees with the input bgmap.
-
-If a ManifestDb path was provided in the confit then the ResultSet can be found with it,
-the ManifestDb is indexed by `obs_id`.
 
 make-source-flags
 -----------------
