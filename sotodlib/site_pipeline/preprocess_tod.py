@@ -153,13 +153,11 @@ def load_preprocess_det_select(obs_id, configs, context=None):
         config file or loaded config directory
     """
     configs, context = _get_preprocess_context(configs, context)
+    pipe = Pipeline(configs["process_pipe"], logger=logger)
     
     meta = context.get_meta(obs_id)
-    proc_aman = meta["preprocess"]
-    assn = [a for a in proc_aman._assignments][-1]
-    logger.info(f"Cutting on the last process: {assn}")
-    keep = core.flagman.has_all_cut(proc_aman[assn].valid)
-    meta.restrict('dets', meta.dets.vals[keep])
+    logger.info(f"Cutting on the last process: {pipe[-1].name}")
+    pipe[-1].select(meta)
     return meta
 
 def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml", context=None ):
