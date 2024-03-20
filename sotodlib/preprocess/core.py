@@ -202,7 +202,11 @@ def _expand(new, full, wrap_valid=True):
     else:
         fs_samps = slice(None)
 
-    out = full.copy(axes_only=True)
+    out = core.AxisManager()
+    for k, v in full._axes.items():
+        if k in list(new._axes.keys())+['dets','samps']:
+            out._axes[k] = v 
+
     for a in new._axes:
         if a not in out:
             out.add_axis( new[a] )
