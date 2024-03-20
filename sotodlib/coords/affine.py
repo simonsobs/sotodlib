@@ -4,6 +4,7 @@ Functions for working with affine transformations.
 
 import numpy as np
 import scipy.linalg as la
+from scipy.spatial import transform
 from scipy.spatial.transform import Rotation as R
 import scipy.spatial.distance as dist
 
@@ -120,6 +121,9 @@ def get_affine_two_stage(src, dst, weights):
     # Compose the transforms
     affine = affine @ affine_0
     shift += (affine @ shift_0[..., None])[:, 0]
+    # Now one last shift correction
+    transformed = affine @ src + shift[..., None]
+    shift += weighted_shift(transformed, dst, weights)
 
     return affine, shift
 
