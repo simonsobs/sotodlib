@@ -235,33 +235,33 @@ def ufm_to_fp(aman, x=None, y=None, pol=None, theta=0, dx=0, dy=0):
     return x_fp, y_fp, pol_fp
 
 
-def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo=30.0):
+def LAT_pix2sky(x, y, sec2xi, sec2eta, array2secx, array2secy, rot=0, opt2cryo=30.0):
     """
     Routine to map pixels from arrays to sky.
 
     Arguments:
 
-        x: X position on focal plane (currently zemax coord)
+        x: X position on focal plane (currently zemax coord).
 
-        y: Y position on focal plane (currently zemax coord)
+        y: Y position on focal plane (currently zemax coord).
 
-        sec2elev: Function that maps positions on secondary to on sky elevation
+        sec2xi: Function that maps positions on secondary to on sky xi. 
 
-        sex2xel: Function that maps positions on secondary to on sky xel.
+        sex2eta: Function that maps positions on secondary to on sky eta.
 
         array2secx: Function that maps positions on tube's focal plane to x position on secondary.
 
         array2secy: Function that maps positions on tube's focal plane to y position on secondary.
 
-        rot: Rotation about the line of site = elev - 60 - corotator.
+        rot: Rotation about the line of site = xi - 60 - corotator.
 
         opt2cryo: The rotation to get from cryostat coordinates to zemax coordinates (TBD, prob 30 deg).
 
     Returns:
 
-        elev: The on sky elevation in radians.
+        xi: The on sky elevation in radians.
 
-        xel: The on sky xel in radians.
+        eta: The on sky eta in radians.
     """
     d2r = np.pi / 180.0
     # TBD - put in check for MASK - values outside circle should not be allowed
@@ -277,10 +277,10 @@ def LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, rot=0, opt2cryo
     xrot = xs * np.cos(d2r * rot) - ys * np.sin(d2r * rot)
     yrot = ys * np.cos(d2r * rot) + xs * np.sin(d2r * rot)
     # note these are around the telescope boresight
-    elev = sec2elev(xrot, yrot)
-    xel = sec2xel(xrot, yrot)
+    xi = sec2xi(xrot, yrot)
+    eta = sec2eta(xrot, yrot)
 
-    return np.deg2rad(elev), np.deg2rad(xel)
+    return np.deg2rad(xi), np.deg2rad(eta)
 
 
 @lru_cache(maxsize=None)
@@ -315,9 +315,9 @@ def LAT_optics(zemax_path):
 
     Returns:
 
-        sec2elev: Function that maps positions on secondary to on sky elevation
+        sec2xi: Function that maps positions on secondary to on sky elevation
 
-        sex2xel: Function that maps positions on secondary to on sky xel.
+        sex2eta: Function that maps positions on secondary to on sky eta.
     """
     zemax_dat = load_zemax(zemax_path)
     try:
@@ -329,15 +329,15 @@ def LAT_optics(zemax_path):
     gi = np.where(LAT["mask"] != 0.0)
     x = LAT["x"][gi].ravel()
     y = LAT["y"][gi].ravel()
-    elev = LAT["elev"][gi].ravel()
-    xel = LAT["xel"][gi].ravel()
+    xi = LAT["elev"][gi].ravel()
+    eta = LAT["eta"][gi].ravel()
 
-    s2e = bisplrep(x, y, elev, kx=3, ky=3)
-    sec2elev = partial(_interp_func, spline=s2e)
-    s2x = bisplrep(x, y, xel, kx=3, ky=3)
-    sec2xel = partial(_interp_func, spline=s2x)
+    s2e = bisplrep(x, y, xi, kx=3, ky=3)
+    sec2xi = partial(_interp_func, spline=s2e)
+    s2x = bisplrep(x, y, eta, kx=3, ky=3)
+    sec2eta = partial(_interp_func, spline=s2x)
 
-    return sec2elev, sec2xel
+    return sec2xi, sec2eta
 
 
 @lru_cache(maxsize=None)
@@ -420,10 +420,10 @@ def LAT_focal_plane(aman, zemax_path, x=None, y=None, pol=None, roll=0, tube_slo
 
     Returns:
 
-        xi: Detector elev on sky from physical optics in radians.
+        xi: Detector xi on sky from physical optics in radians.
             If aman is provided then will be wrapped as aman.focal_plane.xi.
 
-        eta: Detector xel on sky from physical optics in radians.
+        eta: Detector eta on sky from physical optics in radians.
              If aman is provided then will be wrapped as aman.focal_plane.eta.
 
         gamma: Detector gamma on sky from physical optics in radians.
@@ -436,14 +436,14 @@ def LAT_focal_plane(aman, zemax_path, x=None, y=None, pol=None, roll=0, tube_slo
     if pol is None:
         pol = aman.focal_plane.pol_fp
 
-    sec2elev, sec2xel = LAT_optics(zemax_path)
+    sec2xi, sec2eta = LAT_optics(zemax_path)
     array2secx, array2secy = LATR_optics(zemax_path, tube_slot)
 
-    xi, eta = LAT_pix2sky(x, y, sec2elev, sec2xel, array2secx, array2secy, roll)
+    xi, eta = LAT_pix2sky(x, y, sec2xi, sec2eta, array2secx, array2secy, roll)
 
     pol_x, pol_y = gen_pol_endpoints(x, y, pol)
     pol_xi, pol_eta = LAT_pix2sky(
-        pol_x, pol_y, sec2elev, sec2xel, array2secx, array2secy, roll
+        pol_x, pol_y, sec2xi, sec2eta, array2secx, array2secy, roll
     )
     gamma = get_gamma(pol_xi, pol_eta)
     if np.isscalar(xi):
@@ -502,10 +502,10 @@ def SAT_focal_plane(aman, x=None, y=None, pol=None, roll=0, mapping_data=None):
 
     Returns:
 
-        xi: Detector elev on sky from physical optics in radians.
+        xi: Detector xi on sky from physical optics in radians.
             If aman is provided then will be wrapped as aman.focal_plane.xi.
 
-        eta: Detector xel on sky from physical optics in radians.
+        eta: Detector eta on sky from physical optics in radians.
              If aman is provided then will be wrapped as aman.focal_plane.eta.
 
         gamma: Detector gamma on sky from physical optics in radians.
@@ -619,10 +619,10 @@ def get_focal_plane(
 
     Returns:
 
-        xi: Detector elev on sky from physical optics in radians.
+        xi: Detector xi on sky from physical optics in radians.
             If aman is provided then will be wrapped as aman.focal_plane.xi.
 
-        eta: Detector xel on sky from physical optics in radians.
+        eta: Detector eta on sky from physical optics in radians.
              If aman is provided then will be wrapped as aman.focal_plane.eta.
 
         gamma: Detector gamma on sky from physical optics in radians.

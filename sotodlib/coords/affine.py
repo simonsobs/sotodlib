@@ -192,7 +192,7 @@ def decompose_rotation(rotation):
 def weighted_shift(src, dst, weights):
     """
     Compute a weighted shift between two point clouds.
-    Can be applied at dst = src + weights[..., None]
+    Can be applied at dst = src + shift[..., None]
 
     Arguments:
 
