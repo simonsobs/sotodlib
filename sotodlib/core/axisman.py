@@ -28,6 +28,9 @@ class AxisInterface:
 
     def copy(self):
         raise NotImplementedError
+    
+    def rename(self, name):
+        self.name = name
 
     def resolve(self, src, axis_index=None):
         """Perform a check or promote-and-check of this Axis against a data
@@ -344,6 +347,10 @@ class AxisManager:
             self._fields[new_name] = self._fields.pop(name)
             self._assignments[new_name] = self._assignments.pop(name)
         return self
+    
+    def add_axis(self, a):
+        assert isinstance( a, AxisInterface)
+        self._axes[a.name] = a.copy()
 
     def __contains__(self, name):
         return name in self._fields or name in self._axes
