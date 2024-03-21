@@ -92,13 +92,15 @@ def get_ra_ref(obs, site='so_sat1'):
     
     csl = so3g.proj.CelestialSightLine.az_el(t_start*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
     ra_, dec_ = csl.coords().transpose()[:2]
-    spline = interpolate.CubicSpline(dec_, ra_, bc_type='not-a-knot')
-    ra_ref_start = spline(-40*utils.degree, nu=0)
+    #spline = interpolate.CubicSpline(dec_, ra_, bc_type='not-a-knot')
+    ra_ref_start = np.interp(-40*utils.degree, dec_, ra_)
+    #ra_ref_start = spline(-40*utils.degree, nu=0)
     
     csl = so3g.proj.CelestialSightLine.az_el(t_stop*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
     ra_, dec_ = csl.coords().transpose()[:2]
-    spline = interpolate.CubicSpline(dec_, ra_, bc_type='not-a-knot')
-    ra_ref_stop = spline(-40*utils.degree, nu=0)
+    #spline = interpolate.CubicSpline(dec_, ra_, bc_type='not-a-knot')
+    #ra_ref_stop = spline(-40*utils.degree, nu=0)
+    ra_ref_stop = np.interp(-40*utils.degree, dec_, ra_)
     return ra_ref_start, ra_ref_stop
 
 def tele2equ(coords, ctime, detoffs=[0,0], site="so_sat1"):
