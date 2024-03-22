@@ -435,6 +435,8 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         # which is pointless, but shouldn't cost that much time.
         obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, )
         
+        #obs.hwp_angle = np.mod(-1*np.unwrap(obs.hwp_solution.hwp_angle_ver3_1) + np.deg2rad(1.66-360*255/1440-90), 2*np.pi)
+        
         obs = calibrate_obs_new(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower, site=site)
         
         # demodulate
