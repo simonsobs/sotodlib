@@ -468,7 +468,7 @@ def get_detcosamp_hkaman(det_aman, config=None, alias=None, fields=None, data_di
             return amans
 
 
-def fetch_hk(path, fields=None):
+def quick_load_hk(path, fields=None):
     """
     Fetches housekeeping (HK) data from a given path.
 
