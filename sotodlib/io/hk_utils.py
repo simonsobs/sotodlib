@@ -3,8 +3,10 @@ import yaml
 import itertools
 import logging
 
+import so3g
 from so3g.hk import load_range
 from sotodlib import core
+from spt3g import core as g3core
 
 from scipy.interpolate import interp1d
 
@@ -507,11 +509,9 @@ def quick_load_hk(path, fields=None):
                             continue
 
                         if fields is None or field in fields:
-                            key = field.split('.')[-1]
-                            if k == key:
-                                data = [[t.time / g3core.G3Units.s for t in v.times], v[k]]
-                                hk_data.setdefault(field, ([], []))
-                                hk_data[field][0].extend(data[0])
-                                hk_data[field][1].extend(data[1])
+                            data = [[t.time / g3core.G3Units.s for t in v.times], v[k]]
+                            hk_data.setdefault(field, ([], []))
+                            hk_data[field][0].extend(data[0])
+                            hk_data[field][1].extend(data[1])
 
     return hk_data
