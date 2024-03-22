@@ -492,6 +492,7 @@ def quick_load_hk(path, fields=None):
 
     """
     hk_data = {}
+    times_unc = {}  # unconverted times 
     reader = so3g.G3IndexedReader(path)
 
     while True:
@@ -507,13 +508,16 @@ def quick_load_hk(path, fields=None):
 
                         if 'daq-registry' in field:
                             continue
-
+                        
                         if fields is None or field in fields:
-                            data = [[t.time / g3core.G3Units.s for t in v.times], v[k]]
+                            times = v.times
+                            times_unc.setdefault(field, []).extend(times)
+
+                            data = v[k]
                             hk_data.setdefault(field, ([], []))
-                            hk_data[field][0].extend(data[0])
-                            hk_data[field][1].extend(data[1])
+                            hk_data[field][1].extend(data)
     
-    hk_data = {field: (np.array(times), np.array(data)) for field, (times, data) in hk_data.items()}
-    
+    for field, times in times_unc.items():
+        hk_data[field] = (np.array([t.time / g3core.G3Units.s for t in times]), np.array(hk_data[field][1]))
+
     return hk_data
