@@ -470,7 +470,7 @@ def get_detcosamp_hkaman(det_aman, config=None, alias=None, fields=None, data_di
 
 def quick_load_hk(path, fields=None):
     """
-    Fetches housekeeping (HK) data from a given path.
+    Rapidly loads housekeeping (HK) data from a given path using .g3 frames.
 
     Args:
         path (str): Path to the HK .g3 data file.
