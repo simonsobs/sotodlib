@@ -231,7 +231,7 @@ def calibrate_obs_new(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=
         obs.hwpss_remove = jfix
         gfilled = gapfill.fill_glitches(obs, nbuf=10, use_pca=False, modes=1, signal=obs.hwpss_remove, glitch_flags=obs.flags.jumps_2pi)
         obs.hwpss_remove = gfilled
-        gflags = flags.get_glitch_flags(obs, t_glitch=1e-5, buffer=10, signal='hwpss_remove', hp_fc=1, n_sig=10, overwrite=True)
+        gflags = flags.get_glitch_flags(obs, t_glitch=1e-5, buffer=10, signal_name='hwpss_remove', hp_fc=1, n_sig=10, overwrite=True)
         #gdets = has_any_cuts(obs.flags.glitches)
         gstats = obs.flags.glitches.get_stats()
         obs.restrict('dets', obs.dets.vals[np.asarray(gstats['intervals']) < 10])
