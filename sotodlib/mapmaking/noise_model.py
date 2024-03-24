@@ -230,6 +230,57 @@ class NmatDetvecs(Nmat):
                 window=data.window, nwin=data.nwin, downweight=data.downweight,
                 bins=data.bins, D=data.D, V=data.V, iD=data.iD, iV=data.iV, s=data.s, ivar=data.ivar)
 
+class NmatWhite(Nmat):
+    # This is a noise model for a bin map, with weights per det being the variance across time samples
+    def __init__(self, window=2, ivar=None, nwin=None):
+        self.ivar  = ivar
+        self.window     = window
+        self.nwin       = nwin
+        self.ready = ivar is not None
+    def build(self, tod, srate, **kwargs):
+        #ndet, nsamps = tod.shape
+        nwin  = utils.nint(self.window*srate)
+        ivar = 1.0/np.var(tod, 1)
+        return NmatWhite(ivar=ivar, window=self.window, nwin=nwin)
+    def apply(self, tod, inplace=True):
+        if not inplace: tod = np.array(tod)
+        apply_window(tod, self.nwin)
+        tod *= self.ivar[:,None]
+        apply_window(tod, self.nwin)
+        return tod
+    def white(self, tod, inplace=True):
+        if not inplace: tod = np.array(tod)
+        apply_window(tod, self.nwin)
+        tod *= self.ivar[:,None]
+        apply_window(tod, self.nwin)
+        return tod
+    def write(self, fname):
+        bunch.write(fname, bunch.Bunch(type="NmatWhite"))
+    @staticmethod
+    def from_bunch(data): 
+        return NmatWhite(ivar=data.ivar, window=window, nwin=nwin)
+
+class NmatUnit(Nmat):
+    # This is a noise model that does nothing, equivalent to multiply by a noise matrix = 1
+    def __init__(self, ivar=None):
+        self.ivar  = ivar
+        self.ready = ivar is not None
+    def build(self, tod, **kwargs):
+        ndet, nsamps = tod.shape
+        ivar = np.ones(ndet)
+        return NmatUnit(ivar=ivar)
+    def apply(self, tod):
+        # the tod is returned intact
+        return tod
+    def white(self, tod):
+        # the tod is returned intact
+        return tod
+    def write(self, fname):
+        bunch.write(fname, bunch.Bunch(type="NmatUnit"))
+    @staticmethod
+    def from_bunch(data): 
+        return NmatUnit(ivar=data.ivar)
+
 def write_nmat(fname, nmat):
     nmat.write(fname)
 
