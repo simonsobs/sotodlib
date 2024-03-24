@@ -180,6 +180,8 @@ def calibrate_obs_new(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=
     obs.wrap("weather", np.full(1, "toco"))
     obs.wrap("site",    np.full(1, site))
     obs.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape[:2]),[(0, 'dets'), (1, 'samps')])
+    # Restrict non optical detectors, which have nans in their focal plane coordinates and will crash the mapmaking operation.
+    obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
     
     if obs.signal is not None:
         # this will happen in the read_tod call, where we will add the detector flags
