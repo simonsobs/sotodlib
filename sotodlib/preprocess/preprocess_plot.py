@@ -222,8 +222,8 @@ def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, focal_plane=N
                          'ws6': (8.5, -7)}
 
     if focal_plane is None:
-        # Get default focal plane from sotodlib
-        hw = np.load('/so/home/msilvafe/shared_files/sat_hw_positions.npz')
+        print('No focal plane file given.')
+        return False
     else:
         hw = np.load(focal_plane)
     xi_hw, eta_hw, dets_hw = hw['xi_hw'], hw['eta_hw'], hw['dets_hw']

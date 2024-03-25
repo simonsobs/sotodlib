@@ -13,10 +13,10 @@ class _Preprocess(object):
     controlled by a specific key in a configuration dictionary passed to the
     module on creation.
 
-    The configuration dictionary has 5 special keys: ``name``, ``process``,
-    ``calc``, ``save``, and ``select``. ``name`` is the name used to register 
-    the module with the PIPELINE registry. The other four keys are matched to 
-    functions in the module, if the key is not present then that function will 
+    The configuration dictionary has 6 special keys: ``name``, ``process``,
+    ``calc``, ``save``, ``select``, and ``plot``. ``name`` is the name used to
+    register the module with the PIPELINE registry. The other four keys are matched
+    to functions in the module, if the key is not present then that function will 
     be skipped when the preprocessing pipeline is run.
 
     There are two special AxisManagers expected to be part of the preprocessing

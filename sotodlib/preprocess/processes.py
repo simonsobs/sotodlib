@@ -629,9 +629,12 @@ class SSOFootprint(_Preprocess):
             for sso in ssos:
                 planet = sso[0]
                 xi_p, eta_p = obs_ops.sources.get_sso(aman, planet, nstep=nstep)
-                planet_aman = core.AxisManager(core.OffsetAxis("samps", onsamp))
-                planet_aman.wrap("xi_p", xi_p, [(0, "samps")])
-                planet_aman.wrap("eta_p", eta_p, [(0, "samps")])
+                planet_aman = core.AxisManager(core.OffsetAxis('ds_samps', count=onsamp,
+                                                               offset=aman.samps.offset,
+                                                               origin_tag=aman.samps.origin_tag))
+                # planet_aman = core.AxisManager(core.OffsetAxis("samps", onsamp))
+                planet_aman.wrap("xi_p", xi_p, [(0, "ds_samps")])
+                planet_aman.wrap("eta_p", eta_p, [(0, "ds_samps")])
                 sso_aman.wrap(planet, planet_aman)
             self.save(proc_aman, sso_aman)
         else:

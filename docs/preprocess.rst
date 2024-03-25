@@ -14,8 +14,12 @@ and the ``Pipeline`` object. The ``_Preprocess`` modules each define how a TOD
 operation is run on an AxisManager TOD and the ``Pipeline`` object is used to
 define the order of the operations and then run them. The
 ``site-pipeline.preprocess_tod`` script is used to run and save Pipelines on
-lists of obserations, grouped by detset. The ``site-pipeline.preprocess_obs``
-script is used for observation-level preprocessing.
+lists of observations, grouped by detset. The ``site-pipeline.preprocess_obs``
+script is used for observation-level preprocessing. This module is similar to
+``site-pipeline.preprocess_tod`` but removes grouping by detset so that the
+entire observation is loaded, without signal. For example, pipeline steps such
+as ``DetBiasFlags`` requires tod-level data including signal, whereas
+``SSOFootprint`` does not and uses observation-level data.
 
 
 
@@ -136,10 +140,9 @@ entry in "process_pipe" key will be used to generate a Preprocess module based
 on the name it is registered to. These entries will then be run in order through
 the processing pipe. The ``process`` function is always run before the
 ``calc_and_save`` function for each module. The ``plot`` function can be run after
-``calc_and_save`` when ``plot: True`` for a module that supports it. Current modules
-with plotting: ``DetBiasFlags``, ``EstimateHWPSS``, ``SSOFootprint``.
+``calc_and_save`` when ``plot: True`` for a module that supports it.
 
-Example TOD Pipeline Configuration File
+Example Obs Pipeline Configuration File
 ---------------------------------------
 
 Suppose we want to run an observation-level pipeline that creates a SSO footprint.
@@ -172,7 +175,7 @@ A configuration file for the processing pipeline would look like::
                             'ws4': [-2.5, 11.5],
                             'ws5': [8.5, 5],
                             'ws6': [8.5, -7]}
-            focal_plane: '/so/home/msilvafe/shared_files/sat_hw_positions.npz'
+            focal_plane: 'focal_plane_positions.npz'
 
 Processing Modules
 ------------------

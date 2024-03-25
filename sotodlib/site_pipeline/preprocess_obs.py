@@ -103,28 +103,6 @@ def preprocess_obs(
     if len(db.inspect(db_data)) == 0:
         db.add_entry(db_data, dest_file)
 
-def load_preprocess_det_select(obs_id, configs, context=None):
-    """ Loads the metadata information for the Observation and runs through any
-    data selection specified by the Preprocessing Pipeline.
-
-    Arguments
-    ----------
-    obs_id: multiple
-        passed to `context.get_obs` to load AxisManager, see Notes for 
-        `context.get_obs`
-    configs: string or dictionary
-        config file or loaded config directory
-    """
-    configs, context = _get_preprocess_context(configs, context)
-    
-    pipe = Pipeline(configs["process_pipe"], logger=logger)
-    meta = context.get_meta(obs_id)
-
-    for process in pipe:
-        logger.info(f"Selecting On {process.name}")
-        process.select(meta)
-    return meta
-
 def load_preprocess_obs(obs_id, configs="preprocess_obs_configs.yaml", context=None ):
     """ Loads the saved information from the preprocessing pipeline and runs the
     processing section of the pipeline. 
