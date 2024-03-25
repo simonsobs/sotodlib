@@ -75,8 +75,12 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         x = Ranges(aman.samps.count)
         mskexp = RangesMatrix([Ranges.ones_like(x) if Y
                             else Ranges.zeros_like(x) for Y in msk])
+        msk_aman = core.AxisManager(aman.dets, aman.samps)
+        msk_aman.wrap(name, mskexp, [(0, 'dets'), (1, 'samps')])
     else:
         mskexp = msk
+        msk_aman = core.AxisManager(aman.dets)
+        msk_aman.wrap(name, mskexp, [(0, 'dets')])
     
     if merge:
         if name in aman.flags and not overwrite:
@@ -85,9 +89,6 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
             aman.flags[name] = mskexp
         else:
             aman.flags.wrap(name, mskexp, [(0, 'dets'), (1, 'samps')])
-
-    msk_aman = core.AxisManager(aman.dets)
-    msk_aman.wrap(name, mskexp, [(0, 'dets')])
 
     if full_output:
         msks = []
@@ -105,7 +106,10 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         msk_names = ['bg', 'r_tes', 'r_frac_gt', 'r_frac_lt', 'p_sat_gt', 'p_sat_lt']
 
         for i, msk in enumerate(msks):
-            msk_aman.wrap(f'{msk_names[i]}_flags', msk, [(0, 'dets')])
+            if 'samps' in aman:
+                msk_aman.wrap(f'{msk_names[i]}_flags', msk, [(0, 'dets'), (1, 'samps')])
+            else:
+                msk_aman.wrap(f'{msk_names[i]}_flags', msk, [(0, 'dets')])
     
     return msk_aman
 
