@@ -57,8 +57,6 @@ configuration files and specific manifest databases.
 
 .. autofunction:: sotodlib.site_pipeline.preprocess_obs.preprocess_obs
 
-.. autofunction:: sotodlib.site_pipeline.preprocess_obs.load_preprocess_det_select
-
 .. autofunction:: sotodlib.site_pipeline.preprocess_obs.load_preprocess_obs
 
 Example TOD Pipeline Configuration File
