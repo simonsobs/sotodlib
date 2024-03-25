@@ -51,19 +51,15 @@ VALID_OBSTYPES = ["obs", "oper", "smurf", "hk", "stray", "misc"]
 
 class BookExistsError(Exception):
     """Exception raised when a book already exists in the database"""
-
     pass
 
 class BookBoundError(Exception):
     """Exception raised when a book is already bound"""
-
     pass
-
 
 class NoFilesError(Exception):
     """Exception raised when no files are found in the book"""
     pass
-
 
 ###################
 # database schema #
@@ -150,7 +146,7 @@ def loop_over_tubes(method):
 
 
 class Imprinter:
-    def __init__(self, im_config=None, db_args={}, logger=None):
+    def __init__(self, im_config=None, db_args={}, logger=None, make_db=False):
         """Imprinter manages the book database.
         
         Imprinter at the site is set up to be one per level 2 daq node with a
@@ -259,11 +255,20 @@ class Imprinter:
                 else:
                     self.tubes[tube]['slots'].append(slot['stream_id'])
                                         
-
-        # check whether db_path directory exists
-        if not op.exists(op.dirname(self.db_path)):
-            # to create the database, we first make sure that the folder exists
-            os.makedirs(op.abspath(op.dirname(self.db_path)), exist_ok=True)
+        # raise error if database does not exist
+        if not op.exists(self.db_path):
+            if not make_db:
+                raise ValueError(
+                    f"Imprinter database path {self.db_path} does not exist "
+                    "pass make_db=True to make database"
+                )
+            else:
+                # check whether db_path directory exists
+                if not op.exists(op.dirname(self.db_path)):
+                    # we first make sure that the folder exists
+                    os.makedirs(
+                        op.abspath(op.dirname(self.db_path)), exist_ok=True
+                    )
         self.engine = db.create_engine(f"sqlite:///{self.db_path}", **db_args)
 
         # create all tables or (do nothing if tables exist)
@@ -1116,7 +1121,8 @@ class Imprinter:
         ignore_singles=False,
         stream_ids=None,
         force_single_stream=False,
-        return_obsset=False
+        return_obsset=False,
+        incomplete_timeouts = (3,6),
     ):
         """Update bdb with new observations from g3tsmurf db.
 
@@ -1140,6 +1146,9 @@ class Imprinter:
         return_obsset: boolean
             if True, return the list of observation sets instead of registering
             books. Useful as a debugging tool
+        incomplete_timeouts: tuple
+            hours for raising a (warning, error) if incomplete observations are
+            found in the g3tsmurf database
         """
         if not self.build_det:
             return
@@ -1184,7 +1193,13 @@ class Imprinter:
         # bookbind any observations overlapping the incomplete ones.
         if q_incomplete.count() > 0:
             new_ctime = min([obs.timestamp for obs in q_incomplete.all()])
-            if max_ctime - new_ctime > 3600*3:
+            if max_ctime - new_ctime > 3600*incomplete_timeouts[1]:
+                raise ValueError(
+                    f"Found {q_incomplete.count()} incomplete observations. "
+                    f"New max ctime would be {new_ctime}. More than "
+                    f"{incomplete_timeouts[1]} in the past."
+                )
+            elif max_ctime - new_ctime > 3600*incomplete_timeouts[0]:
                 level = self.logger.warning
             else:
                 level = self.logger.debug
