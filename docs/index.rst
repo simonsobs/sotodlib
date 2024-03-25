@@ -26,6 +26,7 @@ Welcome to SOTODLib's documentation!
    site_pipeline.rst
    reference.rst
    dev.rst
+   metrics.rst
 
 Indices and tables
 ==================

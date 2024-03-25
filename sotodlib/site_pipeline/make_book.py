@@ -5,12 +5,12 @@ import argparse
 from sotodlib.io.imprinter import Imprinter
 
 
-def main(config: str, logger=None):
+def main(config: str):
     """Make books based on imprinter db
     
     Parameters
     ----------
-    im_config : str
+    config : str
         path to imprinter configuration file
     """
     imprinter = Imprinter(config, db_args={'connect_args': {'check_same_thread': False}})

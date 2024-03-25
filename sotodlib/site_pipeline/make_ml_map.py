@@ -4,7 +4,7 @@ from sotodlib.core import Context, AxisManager, IndexAxis
 from sotodlib import mapmaking
 from sotodlib.io import metadata   # PerDetectorHdf5 work-around
 from sotodlib import tod_ops
-from sotodlib.tod_ops import filters
+from sotodlib.site_pipeline import util
 from pixell import enmap, utils, fft, bunch, wcsutils, mpi
 import yaml
 
@@ -31,11 +31,11 @@ defaults = {"query": "1",
             "tiled": 1,
             "wafer": None,
            }
-    
+
 def get_parser(parser=None):
     if parser is None:
         parser = ArgumentParser()
-    parser.add_argument("--config-file", type=str, default=None, 
+    parser.add_argument("--config-file", type=str, default=None,
                      help="Path to mapmaker config.yaml file")
 
     parser.add_argument("--query", type=str)
@@ -72,15 +72,15 @@ def _get_config(config_file):
 
 
 def main(config_file=None, defaults=defaults, **args):
-    
+
     cfg = dict(defaults)
-    
+
     # Update the default dict with values provided from a config.yaml file
     if config_file is not None:
         cfg_from_file = _get_config(config_file)
         cfg.update({k: v for k, v in cfg_from_file.items() if v is not None})
     else:
-        print("No config file provided, assuming default values") 
+        print("No config file provided, assuming default values")
 
     # Merge flags from config file and defaults with any passed through CLI
     cfg.update({k: v for k, v in args.items() if v is not None})
@@ -143,7 +143,7 @@ def main(config_file=None, defaults=defaults, **args):
         map_to_inject = enmap.read_map(args['inject']).astype(dtype_map)
 
     if   args['nmat'] == "uncorr": noise_model = mapmaking.NmatUncorr()
-    elif args['nmat'] == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, 
+    elif args['nmat'] == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1,
             downweight=[1e-4, 0.25, 0.50], window=args['window'])
     else: raise ValueError("Unrecognized noise model '%s'" % args['nmat'])
 
@@ -168,11 +168,11 @@ def main(config_file=None, defaults=defaults, **args):
             L.debug("Processing %s" % (name))
 
             # Cut out detector wafers we're not interested in, if args.wafer is specified
-            if args['wafer'] is not None: 
+            if args['wafer'] is not None:
                 wafer_list = args['wafer']
                 dets_dict = {'dets:wafer_slot':wafer_list}
-            else: dets_dict ={} 
-            
+            else: dets_dict ={}
+
             dets_dict['band'] = args['freq']
             # Get the resolved list of detectors, to keep it below args.max_dets.
             meta = context.get_meta(obs_id=obs_id, dets=dets_dict)
@@ -227,10 +227,10 @@ def main(config_file=None, defaults=defaults, **args):
                 fsig  = fft.rfft(obs.signal)
                 freq  = fft.rfftfreq(obs.samps.count, 1/srate)
                 # iir filter
-                iir_filter  = filters.iir_filter()(freq, obs)
+                iir_filter  = tod_ops.filters.iir_filter()(freq, obs)
                 fsig       /= iir_filter
                 gain       /= iir_filter[0].real # keep track of total gain for our record
-                fsig       /= filters.timeconst_filter(None)(freq, obs)
+                fsig       /= tod_ops.filters.timeconst_filter(None)(freq, obs)
                 fft.irfft(fsig, obs.signal, normalize=True)
                 del fsig
 
