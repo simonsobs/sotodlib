@@ -518,13 +518,14 @@ class QuickFitResult:
     Args
     ----
     xi: float
-        fitted detector xi relative to boresight center
+        fitted detector xi [rad] relative to boresight center
     eta: float
-        fitted detector eta relative to boresight center
+        fitted detector eta [rad] relative to boresight center
     amp: float
-        Amplitude used in the fit
+        Amplitude used in the fit. This will be in the same units as
+        ``am.signal``, which is generally detector phase.
     fwhm: float
-        gaussian FHWM used in the fit.
+        gaussian FHWM [rad] used in the fit.
     fit_aman: AxisManager
         AxisManager containing xi and eta of source relative to boresight center,
         fitted signal, and model.
@@ -551,13 +552,13 @@ def pointing_quickfit(
     downsample_factor: int
         If set, the signal and model will be downsampled by this factor when fitting.
     bandpass_range: tuple[float, float]
-        Low and high cutoff frequencies for bandpass. If either are None, will not apply
+        Low and high cutoff frequencies [Hz, Hz] for bandpass. If either are None, will not apply
         the corresponding highpass/lowpass.
     fwhm: float
-        Full width half max of the beam to use for the model. This should be roughly the beam
+        Full width half max [radians] of the beam to use for the model. This should be roughly the beam
         size of the telescope.
     max_rad: float
-        Only data where the angular distance between the src and the estimated det location
+        Only data where the angular distance [radians] between the src and the estimated det location
         is less than ``max_rad`` will be used in the fit. If None, will use 5 *
         fwhm.
 
