@@ -14,6 +14,7 @@ from typing import Optional
 
 from sotodlib.site_pipeline.monitor import Monitor
 from sotodlib.io.load_smurf import G3tSmurf, Observations, logger
+from sotodlib.io.datapkg_utils import load_configs
 
 
 def main(config: Optional[str] = None, update_delay: float = 2, 
@@ -48,7 +49,7 @@ def main(config: Optional[str] = None, update_delay: float = 2,
     elif verbosity == 3:
         logger.setLevel(logging.DEBUG)
 
-    cfgs = yaml.safe_load( open(config, "r"))
+    cfgs = load_configs( config )
     SMURF = G3tSmurf.from_configs(cfgs)
 
     if from_scratch:

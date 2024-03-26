@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 from .. import core
 from . import load as io_load
+from .datapkg_utils import load_configs
 from .g3thk_db import G3tHk, HKFiles, HKAgents, HKFields
 from .g3thk_utils import pysmurf_monitor_control_list
 
@@ -188,10 +189,16 @@ class G3tSmurf:
         self.db_path = db_path
         self.hk_db_path = hk_db_path
         self.finalize = finalize
-        self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo, **db_args)
-        Session.configure(bind=self.engine)
-        self.Session = sessionmaker(bind=self.engine)
-        Base.metadata.create_all(self.engine)
+        try:
+            self.engine = db.create_engine(
+                f"sqlite:///{db_path}", echo=echo, **db_args
+            )
+            Session.configure(bind=self.engine)
+            self.Session = sessionmaker(bind=self.engine)
+            Base.metadata.create_all(self.engine)
+        except db.exc.OperationalError as e:
+            logger.error(f"Unable to connect to database file {db_path}")
+            raise e
 
         # Defines frame_types
         self._create_frame_types()
@@ -257,8 +264,9 @@ class G3tSmurf:
         -----
         configs - dictionary containing `data_prefix` and `g3tsmurf_db` keys
         """
-        if type(configs) == str:
-            configs = yaml.safe_load(open(configs, "r"))
+        if isinstance(configs, str):
+            configs = load_configs(configs)
+
         return cls(
             os.path.join(configs["data_prefix"], "timestreams"),
             configs["g3tsmurf_db"],

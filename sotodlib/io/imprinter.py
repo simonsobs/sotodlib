@@ -27,6 +27,7 @@ from .load_smurf import (
     SupRsyncType,
     Files,
 )
+from .datapkg_utils import load_configs
 from .check_book import BookScanner
 from .g3thk_db import G3tHk, HKFiles
 from ..site_pipeline.util import init_logger
@@ -218,8 +219,7 @@ class Imprinter:
         """
 
         # load config file and parameters
-        with open(im_config, "r") as f:
-            self.config = yaml.safe_load(f)
+        self.config = load_configs(im_config)
 
         self.db_path = self.config.get("db_path")
         self.daq_node = self.config.get("daq_node")
@@ -425,8 +425,7 @@ class Imprinter:
         if not self.build_hk:
             return
         
-        with open(self.g3tsmurf_config, "r") as f:
-            g3tsmurf_cfg = yaml.safe_load(f)
+        g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
         lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if min_ctime is None:
@@ -578,8 +577,7 @@ class Imprinter:
                 session.commit()
 
     def get_book_path(self, book):
-        with open(self.g3tsmurf_config, "r") as f:
-            g3tsmurf_cfg = yaml.safe_load(f)
+        g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
         lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if book.type in ["obs", "oper"]:
@@ -611,8 +609,7 @@ class Imprinter:
         ancil_drop_duplicates=False,
     ):
         """get the appropriate bookbinder for the book based on its type"""
-        with open(self.g3tsmurf_config, "r") as f:
-            g3tsmurf_cfg = yaml.safe_load(f)
+        g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
         lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if book.type in ["obs", "oper"]:
@@ -1749,8 +1746,7 @@ def create_g3tsmurf_session(config):
 
     """
     # create database connection
-    with open(config, "r") as f:
-        config = yaml.safe_load(f)
+    config = load_configs(config)
     config["db_args"] = {"connect_args": {"check_same_thread": False}}
     SMURF = G3tSmurf.from_configs(config)
     session = SMURF.Session()
