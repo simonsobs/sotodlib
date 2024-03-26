@@ -29,6 +29,8 @@ import os
 import re
 import yaml
 
+from toast.timing import function_timer
+
 import sotodlib
 from sotodlib import core
 from .check_book import _compact_list  # just a list with a limited repr
@@ -45,6 +47,7 @@ SIGNAL_RESCALE = np.pi / 2**15
 DEG = np.pi / 180
 
 
+@function_timer
 def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
                   no_signal=None,
                   **kwargs):
@@ -88,7 +91,7 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
 
     file_map = db.get_files(obs_id)
     one_group = list(file_map.values())[0]  # [('file0', 0, 1000), ('file1', 1000, 2000), ...]
-    
+
     # Figure out how many samples we're loading.
     sample_range = one_group[0][1], one_group[-1][2]
     if samples is None:
@@ -141,6 +144,7 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
                             get_frame_det_info=False)
 
 
+@function_timer
 def load_book_file(filename, dets=None, samples=None, no_signal=False):
     """Load one or more g3 files (from an obs/oper book) and return the
     contents as an AxisManager.
@@ -220,7 +224,7 @@ def load_smurf_npy_data(ctx, obs_id, substr):
     res = np.load(fpath, allow_pickle=True).item()
     return res
 
-
+@function_timer
 def _load_book_detset(files, prefix='', load_ancil=True,
                       dets=None, samples=None, no_signal=False,
                       signal_buffer=None):
@@ -348,7 +352,7 @@ def _load_book_detset(files, prefix='', load_ancil=True,
         'timestamps': times_acc,
     }
 
-
+@function_timer
 def _concat_filesets(results, ancil=None, timestamps=None,
                      sample0=0, obs_id=None, dets=None,
                      no_signal=False, signal_buffer=None,

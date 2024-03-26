@@ -20,5 +20,6 @@ from .save_books import SaveBooks
 from .load_books import LoadBooks
 from .sim_readout import SimReadout
 from .sim_mumux_crosstalk import SimMuMUXCrosstalk
+from .splits import Splits
 from .mumux_crosstalk_util import detmap_available, pos_to_chi
 from .load_context import LoadContext

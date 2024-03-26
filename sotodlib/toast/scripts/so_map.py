@@ -65,7 +65,6 @@ def reduce_data(job, otherargs, runargs, data):
 
     wrk.flag_noise_outliers(job, otherargs, runargs, data)
     wrk.filter_hwpss(job, otherargs, runargs, data)
-    wrk.noise_estimation(job, otherargs, runargs, data)
 
     data = wrk.demodulate(job, otherargs, runargs, data)
 
@@ -82,6 +81,8 @@ def reduce_data(job, otherargs, runargs, data):
     wrk.filter_poly1d(job, otherargs, runargs, data)
     wrk.filter_poly2d(job, otherargs, runargs, data)
     wrk.filter_common_mode(job, otherargs, runargs, data)
+
+    wrk.noise_estimation(job, otherargs, runargs, data)
 
     wrk.mapmaker(job, otherargs, runargs, data)
     wrk.mapmaker_filterbin(job, otherargs, runargs, data)

@@ -60,7 +60,7 @@ def sqlite_from_file(filename, fmt=None, force_new_db=True):
         if filename.endswith('.gz'):
             fmt = 'gz'
     if fmt == 'sqlite':
-        db0 = sqlite3.connect(f'file:{filename}?mode=ro', uri=True)
+        db0 = sqlite3.connect(f'file:{filename}?mode=ro&nolock=1', uri=True)
         if not force_new_db:
             return db0
         data = ' '.join(db0.iterdump())

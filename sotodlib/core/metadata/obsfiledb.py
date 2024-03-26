@@ -86,7 +86,7 @@ class ObsFileDb:
                 if map_file == ':memory:':
                     raise ValueError('Cannot honor request for readonly db '
                                      'mapped to :memory:.')
-                map_file, uri = 'file:%s?mode=ro' % map_file, True
+                map_file, uri = 'file:%s?mode=ro&nolock=1' % map_file, True
 
             self.conn = sqlite3.connect(map_file, uri=uri)
 

@@ -5,6 +5,8 @@ import importlib
 import logging
 import numpy as np
 
+from toast.timing import function_timer
+
 from . import metadata
 from .axisman import AxisManager, OffsetAxis, AxisInterface
 
@@ -169,6 +171,7 @@ class Context(odict):
             self.loader \
                 = metadata.SuperLoader(self, obsdb=self.obsdb)
 
+    @function_timer
     def get_obs(self,
                 obs_id=None,
                 dets=None,
@@ -331,6 +334,7 @@ class Context(odict):
             aman.merge(meta)
         return aman
 
+    @function_timer
     def get_meta(self,
                  obs_id=None,
                  dets=None,

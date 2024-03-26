@@ -434,7 +434,7 @@ class ManifestDb:
           ManifestDb.
 
         """
-        conn = sqlite3.connect('file:%s?mode=ro' % filename, uri=True)
+        conn = sqlite3.connect('file:%s?mode=ro&nolock=1' % filename, uri=True)
         return cls(conn)
 
     def _get_file_id(self, filename, create=False):
