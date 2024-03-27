@@ -661,9 +661,6 @@ def find_jumps(
 
         signal: Signal to jumpfind on. If None than aman.signal is used.
 
-        max_iters: Maximum iterations of the jumpfind -> median sub -> jumpfind loop.
-                   This is prefered over increasing depth in general.
-
         min_sigma: Number of standard deviations to count as a jump, note that
                    the standard deviation here is computed by std_est and is
                    the white noise standard deviation, so it doesn't include
@@ -706,48 +703,36 @@ def find_jumps(
     if not isinstance(signal, np.ndarray):
         raise TypeError("Signal is not an array")
 
-    if len(signal.shape) > 2:
+    orig_shape = signal.shape
+    if len(orig_shape) > 2:
         raise ValueError("Jumpfinder only works on 1D or 2D data")
 
     if min_size is None and min_sigma is not None:
         min_size = min_sigma * std_est(signal, ds=win_size, axis=-1)
     if min_size is None:
         raise ValueError("min_size is somehow still None")
-    if np.ndim(min_size) > 1:  # type: ignore
+    if isinstance(min_size, np.ndarray) and np.ndim(min_size) > 1:  # type: ignore
         raise ValueError("min_size must be 1d or a scalar")
-    elif np.ndim(min_size) == 1:  # type: ignore
-        min_size = np.array(min_size)
+    elif isinstance(min_size, (float, int)):
+        min_size = float(min_size) * np.ones(len(signal))
 
     _signal = _filter(signal, **filter_pars)
     if max_iters > 1:
         _signal = signal.copy()
+    _signal = np.atleast_2d(_signal)
     # Median subtract, if we don't do this then when we cumsum we get floats
     # that are too big and lack the precicion to find jumps well
     _signal -= np.median(_signal, axis=-1)[..., None]
 
-    jumps = np.zeros(signal.shape, dtype=bool)
-    msk = np.ones(len(jumps), dtype=bool)
-    for _ in range(max_iters):
-        if isinstance(min_size, np.ndarray):
-            _min_size = min_size[msk]
-        else:
-            _min_size = min_size * np.ones(np.sum(msk))
-        sig = _signal[msk]
-        nfuture = min(len(sig), NFUTURE)
-        slices = [slice(i * nfuture, (i + 1) * nfuture) for i in range(nfuture)]
-        slices[-1] = slice(slices[-1].start, len(sig))
-        with concurrent.futures.ThreadPoolExecutor() as e:
-            jump_futures = [
-                e.submit(_jumpfinder, sig[s], _min_size[s], win_size, nsigma)
-                for s in slices
-            ]
-        _jumps = np.vstack([j.result() for j in jump_futures])
-        if np.sum(_jumps) == 0:
-            break
-
-        jumps[msk] += _jumps
-        _signal[msk] = jumpfix_subtract_heights(_signal[msk], _jumps)
-        msk = np.any(jumps, axis=-1)
+    nfuture = min(len(_signal), NFUTURE)
+    slices = [slice(i * nfuture, (i + 1) * nfuture) for i in range(nfuture)]
+    slices[-1] = slice(slices[-1].start, len(_signal))
+    with concurrent.futures.ThreadPoolExecutor() as e:
+        jump_futures = [
+            e.submit(_jumpfinder, _signal[s], min_size[s], win_size, nsigma)
+            for s in slices
+        ]
+    jumps = np.vstack([j.result() for j in jump_futures]).reshape(orig_shape)
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
     jumps = jump_ranges.mask()
