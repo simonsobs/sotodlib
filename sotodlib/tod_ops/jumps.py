@@ -19,7 +19,10 @@ NTHREADS = int(os.environ.get("OMP_NUM_THREADS", -1))
 
 
 def std_est(
-    x: NDArray[np.floating], axis: int = -1, method: str = "median_unbiased"
+    x: NDArray[np.floating],
+    ds: int = 1,
+    axis: int = -1,
+    method: str = "median_unbiased",
 ) -> NDArray[np.floating]:
     """
     Estimate white noise standard deviation of data.
@@ -29,6 +32,8 @@ def std_est(
 
         x: Data to compute standard deviation of.
 
+        ds: Downsample factor to use, does a naive slicing.
+
         axis: The axis to compute along.
 
         method: The method to pass to np.quantile.
@@ -37,9 +42,17 @@ def std_est(
 
         stdev: The estimated white noise standard deviation of x.
     """
+    if ds > 2 * x.shape[axis]:
+        ds = 1
+    sl = [slice(None)] * len(x.shape)
+    if ds > 1:
+        sl[axis] = slice(None, None, ds)
     # Find ~1 sigma limits of differenced data
     lims = np.quantile(
-        np.diff(x, axis=axis), np.array([0.159, 0.841]), axis=axis, method=method
+        np.diff(x, axis=axis)[tuple(sl)],
+        np.array([0.159, 0.841]),
+        axis=axis,
+        method=method,
     )
     # Convert to standard deviation
     return (lims[1] - lims[0]) / 8**0.5
@@ -91,7 +104,7 @@ def _jumpfinder(
 
     # If std is basically 0 no need to check for jumps
     std = np.std(x, axis=-1)
-    std_msk = np.isclose(std, 0.0) + np.isclose(std_est(x, axis=-1), std)
+    std_msk = np.isclose(std, 0.0) + np.isclose(std_est(x, ds=win_size, axis=-1), std)
 
     msk = ~(size_msk + std_msk)
     if not np.any(msk):
@@ -107,9 +120,10 @@ def _jumpfinder(
     # Doing the simple thing and looking for things much larger than the median
     peaks = (
         sg_x_step
-        > (np.median(sg_x_step, axis=-1) + nsigma * std_est(sg_x_step, axis=-1))[
-            ..., None
-        ]
+        > (
+            np.median(sg_x_step, axis=-1)
+            + nsigma * std_est(sg_x_step, ds=win_size, axis=-1)
+        )[..., None]
     )
     if not np.any(peaks):
         return jumps.reshape(orig_shape)
@@ -433,7 +447,7 @@ def twopi_jumps(
     if not isinstance(signal, np.ndarray):
         raise TypeError("Signal is not an array")
     if atol is None:
-        atol = nsigma * std_est(signal.astype(float))
+        atol = nsigma * std_est(signal.astype(float), ds=win_size)
         np.clip(atol, 1e-8, 1e-2)
 
     _signal = _filter(signal, **filter_pars)
@@ -705,7 +719,7 @@ def find_jumps(
         raise ValueError("Jumpfinder only works on 1D or 2D data")
 
     if min_size is None and min_sigma is not None:
-        min_size = min_sigma * std_est(signal, axis=-1)
+        min_size = min_sigma * std_est(signal, ds=win_size, axis=-1)
     if np.ndim(min_size) > 1:  # type: ignore
         raise ValueError("min_size must be 1d or a scalar")
     elif np.ndim(min_size) == 1:  # type: ignore
