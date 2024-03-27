@@ -60,7 +60,7 @@ def plot_glitch_stats(
     ax[0].axvline(medsamps, color="C1", ls=":", lw=2, label=f"Median: {medsamps:.2f}%")
     meansamps = np.mean(frac_samp_glitches)
     ax[0].axvline(meansamps, color="C2", ls=":", lw=2, label=f"Mean: {meansamps:.2f}%")
-    modesamps = stats.mode(frac_samp_glitches)
+    modesamps = stats.mode(frac_samp_glitches, keepdims=True)
     ax[0].axvline(
         modesamps[0][0],
         color="C3",
@@ -100,7 +100,7 @@ def plot_glitch_stats(
     ax[1].axvline(
         meanints, color="C2", ls=":", lw=2, label=f"Mean: {meanints:.2f} intervals"
     )
-    modeints = stats.mode(interval_glitches)
+    modeints = stats.mode(interval_glitches, keepdims=True)
     ax[1].axvline(
         modeints[0][0],
         color="C3",

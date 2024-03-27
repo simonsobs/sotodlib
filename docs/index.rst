@@ -18,6 +18,7 @@ Welcome to SOTODLib's documentation!
    g3tsmurf.rst
    hwp.rst
    tod_ops.rst
+   obs_ops.rst
    coords.rst
    toast.rst
    preprocess.rst

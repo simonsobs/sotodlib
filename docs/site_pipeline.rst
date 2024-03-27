@@ -461,6 +461,19 @@ the preprocessing steps applied to them.
    :module: sotodlib.site_pipeline.preprocess_tod
    :func: get_parser
 
+preprocess-obs
+--------------
+This script is set up to run a preprocessing pipeline using the preprocess
+module. See details in :ref:`See details here<preprocess-module>` for how to
+build an obs preprocessing pipeline.
+
+This module is similar to ``preprocess_tod`` but removes grouping by detset so
+that the entire observation is loaded, without signal.
+
+.. argparse::
+   :module: sotodlib.site_pipeline.preprocess_obs
+   :func: get_parser
+
 make-position-match
 -------------------
 
