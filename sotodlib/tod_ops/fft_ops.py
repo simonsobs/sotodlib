@@ -208,11 +208,11 @@ def calc_psd(
     signal=None,
     timestamps=None,
     max_samples=2**18,
-    prefer="center",
+    prefer='center',
     freq_spacing=None,
-    merge=False,
-    overwrite=True,
-    **kwargs,
+    merge=False, 
+    overwrite=True, 
+    **kwargs
 ):
     """Calculates the power spectrum density of an input signal using signal.welch().
     Data defaults to aman.signal and times defaults to aman.timestamps.
