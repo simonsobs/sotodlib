@@ -11,7 +11,7 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    count_cuts,
                                     sparse_to_ranges_matrix)
 
-from .core import _Preprocess
+from .core import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 
 
@@ -41,7 +41,7 @@ class Detrend(_Preprocess):
         tod_ops.detrend_tod(aman, signal_name=self.signal,
                             **self.process_cfgs)
 
-class DetBiasFlags(_Preprocess):
+class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
     """
     Derive poorly biased detectors from IV and Bias Step data. Save results
     in proc_aman under the "det_bias_cuts" field. 
@@ -83,44 +83,8 @@ class DetBiasFlags(_Preprocess):
             plot_det_bias_flags(aman, proc_aman['det_bias_flags'], rfrac_range=self.calc_cfgs['rfrac_range'],
                                 psat_range=self.calc_cfgs['psat_range'], filename=filename.replace('{name}', f'{ufm}_bias_cuts_venn'))
 
-    @classmethod
-    def gen_metric(cls, meta, proc_aman):
-        """ Generate a QA metric from the output of this process.
 
-        Arguments
-        ---------
-        meta : AxisManager
-            The full metadata container.
-        proc_aman : AxisManager
-            The metadata containing just the output of this process.
-
-        Returns
-        -------
-        line : dict
-            InfluxDB line entry elements to be fed to
-            `site_pipeline.monitor.Monitor.record`
-        """
-        # For now just compute the fraction of samples that were flagged
-        # (I think in practice this will be 1 or 0...)
-        # TODO: come up with a more useful metric
-        frac_flagged = np.array([
-            np.dot(r.ranges(), [-1, 1]).sum() / meta.obs_info.n_samples
-            for r in proc_aman.det_bias_flags.det_bias_flags
-        ])
-        obs_time = [meta.obs_info.timestamp] * frac_flagged.size
-        # extract these tags for the metric
-        tag_keys = ["detset", "readout_id", "stream_id", "wafer_slot", "tel_tube", "det_id", "bandpass"]
-        tags = [{k: meta.det_info[k][d] for k in tag_keys if k in meta.det_info} for d in range(meta.dets.count)]
-        tags[0]["telescope"] = meta.obs_info.telescope
-        return {
-            "field": cls._influx_field,
-            "values": frac_flagged,
-            "timestamps": obs_time,
-            "tags": tags,
-        }
-
-
-class Trends(_Preprocess):
+class Trends(_FracFlaggedMixIn, _Preprocess):
     """Calculate the trends in the data to look for unlocked detectors. All
     calculation configs go to `get_trending_flags`.
 
@@ -142,6 +106,7 @@ class Trends(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_trending_flags
     """
     name = "trends"
+    _influx_field = "trend_flags_frac"
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
@@ -176,7 +141,8 @@ class Trends(_Preprocess):
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
 
-class GlitchDetection(_Preprocess):
+
+class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     """Run glitch detection algorithm to find glitches. All calculation configs
     go to `get_glitch_flags` 
 
@@ -202,6 +168,7 @@ class GlitchDetection(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_glitch_flags
     """
     name = "glitches"
+    _influx_field = "glitch_flags_frac"
 
     def calc_and_save(self, aman, proc_aman):
         _, glitch_aman = tod_ops.flags.get_glitch_flags(aman,
@@ -231,6 +198,7 @@ class GlitchDetection(_Preprocess):
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
 
+
 class FixJumps(_Preprocess):
     """
     Repairs the jump heights given a set of jump flags and heights.
@@ -258,7 +226,7 @@ class FixJumps(_Preprocess):
             inplace=True, heights=proc_aman[field].jump_heights)
 
 
-class Jumps(_Preprocess):
+class Jumps(_FracFlaggedMixIn, _Preprocess):
     """Run generic jump finding and fixing algorithm.
     
     calc_cfgs should have 'function' defined as one of 
@@ -282,6 +250,7 @@ class Jumps(_Preprocess):
     """
 
     name = "jumps"
+    _influx_field = "jump_flags_frac"
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
