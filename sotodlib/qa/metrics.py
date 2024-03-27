@@ -4,6 +4,22 @@ import numpy as np
 from ..core import metadata
 
 
+def _has_tag(root, keys):
+    keys = keys.split(".")
+    for key in keys:
+        if key in root:
+            root = root[key]
+        else:
+            return False
+    return True
+
+def _get_tag(root, keys, i):
+    keys = keys.split(".")
+    for key in keys:
+        root = root[key]
+    return root[i]
+
+
 class QAMetric(object):
     """ Base class for quality assurance metrics to be recorded in Influx,
     derived from processed metadata files.
@@ -113,12 +129,14 @@ class PreprocessQA(QAMetric):
     """
 
     _influx_meas = "preprocesstod"
+    _process_args = {}
 
-    def __init__(self, context, monitor, process_name, **kwargs):
+    def __init__(self, context, monitor, process_name, process_args={}, **kwargs):
         """ In addition to the context and monitor, pass the name of the
         preprocess process to record. It should have a `gen_metric` method
         implemented and `_influx_field` attribute.
         """
+        self._process_args = process_args
         super().__init__(context, monitor, **kwargs)
 
         from sotodlib.preprocess import Pipeline
@@ -131,7 +149,7 @@ class PreprocessQA(QAMetric):
         self._influx_field = self._pipe_proc._influx_field
 
     def _process(self, meta):
-        return self._pipe_proc.gen_metric(meta, meta.preprocess)
+        return self._pipe_proc.gen_metric(meta, meta.preprocess, **self._process_args)
 
     def _get_available_obs(self):
         # find preprocess manifest file
