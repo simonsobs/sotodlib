@@ -31,7 +31,7 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
     bin_signal : bool, optional
         Whether to bin the TOD signal into HWP angle bins before extracting HWPSS. Default is `True`.
     bins : int, optional
-        The number of HWP angle bins to use if `bin_signal` is `True`. Default is 3600.
+        The number of HWP angle bins to use if `bin_signal` is `True`. Default is 360.
     lin_reg : bool, optional
         Whether to use linear regression to extract HWPSS from the binned signal. If `False`, curve-fitting will be used instead.
         Default is `True`.
