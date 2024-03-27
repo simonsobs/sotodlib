@@ -15,7 +15,7 @@ from sotodlib.core import AxisManager
 
 from ..flag_utils import _merge
 
-NTHREADS = int(os.environ.get("OMP_NUM_THREADS", -1))
+NFUTURE = int(os.environ.get("NUM_FUTURES", min(32, int(os.cpu_count() or 0) + 4)))
 
 
 def std_est(
@@ -226,10 +226,8 @@ def jumpfix_subtract_heights(
         heights = heights.toarray()
     heights = cast(NDArray[np.floating], heights)
 
-    nthread = NTHREADS
-    if nthread <= 0:
-        nthread = len(x_fixed)
-    slices = [slice(i * nthread, (i + 1) * nthread) for i in range(nthread)]
+    nfuture = min(len(x_fixed), NFUTURE)
+    slices = [slice(i * nfuture, (i + 1) * nfuture) for i in range(nfuture)]
     slices[-1] = slice(slices[-1].start, len(x_fixed))
     with concurrent.futures.ThreadPoolExecutor() as e:
         _ = [
@@ -258,15 +256,9 @@ def _diff_buffed(
     signal: NDArray[np.floating],
     jumps: Optional[NDArray[np.bool_]],
     win_size: int,
-    medfilt: bool,
     make_step: bool,
 ) -> NDArray[np.floating]:
     win_size = int(win_size)
-    if medfilt:
-        _size = win_size - 1 + (win_size % 2)
-        size = np.ones(len(signal.shape), dtype=int)
-        size[-1] = _size
-        signal = simg.median_filter(signal, size)
     pad = np.zeros((len(signal.shape), 2), dtype=int)
     half_win = int(win_size / 2)
     pad[-1, :] = half_win
@@ -283,7 +275,6 @@ def estimate_heights(
     jumps: NDArray[np.bool_],
     win_size: int = 20,
     twopi: bool = False,
-    medfilt: bool = False,
     make_step: bool = False,
     diff_buffed: Optional[NDArray[np.floating]] = None,
 ) -> NDArray:
@@ -312,7 +303,7 @@ def estimate_heights(
         heights: Array of jump heights.
     """
     if diff_buffed is None:
-        diff_buffed = _diff_buffed(signal, jumps, win_size, medfilt, make_step)
+        diff_buffed = _diff_buffed(signal, jumps, win_size, make_step)
 
     jumps = np.atleast_2d(jumps)
     diff_buffed = np.atleast_2d(diff_buffed)
@@ -720,6 +711,8 @@ def find_jumps(
 
     if min_size is None and min_sigma is not None:
         min_size = min_sigma * std_est(signal, ds=win_size, axis=-1)
+    if min_size is None:
+        raise ValueError("min_size is somehow still None")
     if np.ndim(min_size) > 1:  # type: ignore
         raise ValueError("min_size must be 1d or a scalar")
     elif np.ndim(min_size) == 1:  # type: ignore
@@ -738,23 +731,27 @@ def find_jumps(
         if isinstance(min_size, np.ndarray):
             _min_size = min_size[msk]
         else:
-            _min_size = min_size
-        _jumps = _jumpfinder(
-            _signal[msk],
-            min_size=_min_size,
-            win_size=win_size,
-            nsigma=nsigma,
-        )
+            _min_size = min_size * np.ones(np.sum(msk))
+        sig = _signal[msk]
+        nfuture = min(len(sig), NFUTURE)
+        slices = [slice(i * nfuture, (i + 1) * nfuture) for i in range(nfuture)]
+        slices[-1] = slice(slices[-1].start, len(sig))
+        with concurrent.futures.ThreadPoolExecutor() as e:
+            jump_futures = [
+                e.submit(_jumpfinder, sig[s], _min_size[s], win_size, nsigma)
+                for s in slices
+            ]
+        _jumps = np.vstack([j.result() for j in jump_futures])
         if np.sum(_jumps) == 0:
             break
 
         jumps[msk] += _jumps
-        _signal[msk] = jumpfix_subtract_heights(_signal[msk], _jumps, True)
+        _signal[msk] = jumpfix_subtract_heights(_signal[msk], _jumps)
         msk = np.any(jumps, axis=-1)
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
     jumps = jump_ranges.mask()
-    heights = estimate_heights(signal, jumps, win_size=win_size, medfilt=True)
+    heights = estimate_heights(signal, jumps, win_size=win_size)
 
     if merge:
         _merge(aman, jump_ranges, name, overwrite)
