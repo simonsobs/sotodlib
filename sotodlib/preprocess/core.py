@@ -390,3 +390,48 @@ class Pipeline(list):
         
         return full, success
         
+
+class _FracFlaggedMixIn(object):
+
+    # key to access the flags dataset
+    # either a tuple: (name, flags_key)
+    # or a string: flags_key, in which case the name will be taken from the class attribute
+    _flags_key = None
+
+    @classmethod
+    def gen_metric(cls, meta, proc_aman):
+        """ Generate a QA metric from the output of this process.
+
+        Arguments
+        ---------
+        meta : AxisManager
+            The full metadata container.
+        proc_aman : AxisManager
+            The metadata containing just the output of this process.
+
+        Returns
+        -------
+        line : dict
+            InfluxDB line entry elements to be fed to
+            `site_pipeline.monitor.Monitor.record`
+        """
+        if isinstance(cls._flags_key, tuple):
+            key1, key2 = cls._flags_key
+        else:
+            key1, key2 = cls.name, cls._flags_key
+        # Compute the fraction of samples that were flagged
+        frac_flagged = np.array([
+            np.dot(r.ranges(), [-1, 1]).sum() / meta.obs_info.n_samples
+            for r in proc_aman[key1][key2]
+        ])
+        obs_time = [meta.obs_info.timestamp] * frac_flagged.size
+        # extract these tags for the metric
+        tag_keys = ["detset", "readout_id", "stream_id", "wafer_slot", "tel_tube", "det_id", "bandpass"]
+        tags = [{k: meta.det_info[k][d] for k in tag_keys if k in meta.det_info} for d in range(meta.dets.count)]
+        tags[0]["telescope"] = meta.obs_info.telescope
+        return {
+            "field": cls._influx_field,
+            "values": frac_flagged,
+            "timestamps": obs_time,
+            "tags": tags,
+        }
