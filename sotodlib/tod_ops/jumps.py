@@ -1,4 +1,5 @@
 import concurrent.futures
+import os
 from typing import Literal, Optional, Tuple, Union, cast, overload
 
 import numpy as np
@@ -13,6 +14,8 @@ from so3g.proj import Ranges, RangesMatrix
 from sotodlib.core import AxisManager
 
 from ..flag_utils import _merge
+
+NTHREADS = int(os.environ.get("OMP_NUM_THREADS", -1))
 
 
 def std_est(
@@ -47,8 +50,6 @@ def _jumpfinder(
     min_size: Optional[Union[float, NDArray[np.floating]]] = None,
     win_size: int = 20,
     nsigma: float = 25,
-    max_depth: int = 1,
-    depth: int = 0,
 ) -> NDArray[np.bool_]:
     """
     Recursive edge detection based jumpfinder.
@@ -66,11 +67,6 @@ def _jumpfinder(
         win_size: Size of window used by SG filter when peak finding.
 
         nsigma: Number of sigma above the mean for something to be a peak.
-
-        max_depth: The maximum recursion depth.
-                   Set negative for infite depth and 0 for no recursion.
-
-        depth: The current recursion depth.
 
     Returns:
 
@@ -158,33 +154,6 @@ def _jumpfinder(
 
     jumps[np.flatnonzero(msk)[jump_rows], jump_cols] = True
 
-    # If no jumps found return
-    if not np.any(jumps):
-        return jumps.reshape(orig_shape)
-
-    # If at max_depth then return
-    if depth == max_depth:
-        return jumps.reshape(orig_shape)
-
-    # Recursively check for jumps between jumps
-    # We lose the benefits of vectorization here, so high depths are slow.
-    for row in range(len(x)):
-        row_msk = jump_rows == row
-        if not np.any(row_msk):
-            continue
-        _jumps = jump_cols[row_msk]
-        _jumps = np.insert(jumps, 0, 0)
-        _jumps = np.append(_jumps, len(x))
-        for i in range(len(_jumps) - 1):
-            sub_jumps = _jumpfinder(
-                x[row, (_jumps[i]) : (_jumps[i + 1])],
-                min_size,
-                win_size,
-                nsigma,
-                max_depth,
-                depth + 1,
-            )
-            jumps[row, (_jumps[i]) : (_jumps[i + 1])] += sub_jumps
     return jumps.reshape(orig_shape)
 
 
@@ -220,11 +189,12 @@ def jumpfix_subtract_heights(
                  If inplace is True this is just a reference to x.
     """
 
-    def _fix_det(i, jump_range, heights, x_fixed):
-        for start, end in jump_range.ranges():
-            _heights = heights[i, start:end]
-            height = _heights[np.argmax(np.abs(_heights))]
-            x_fixed[i, int((start + end) / 2)] -= height
+    def _fix(i, jump_ranges, heights, x_fixed):
+        for j, jump_range in enumerate(jump_ranges):
+            for start, end in jump_range.ranges():
+                _heights = heights[i + j, start:end]
+                height = _heights[np.argmax(np.abs(_heights))]
+                x_fixed[i + j, int((start + end) / 2)] -= height
 
     x_fixed = x
     if not inplace:
@@ -232,9 +202,9 @@ def jumpfix_subtract_heights(
     orig_shape = x.shape
     x_fixed = np.atleast_2d(x_fixed)
     if isinstance(jumps, np.ndarray):
-        jumps = RangesMatrix(np.atleast_2d(jumps))
+        jumps = RangesMatrix.from_mask(np.atleast_2d(jumps))
     elif isinstance(jumps, Ranges):
-        jumps = RangesMatrix(np.atleast_2d(jumps.mask()))
+        jumps = RangesMatrix.from_mask(np.atleast_2d(jumps.mask()))
 
     if heights is None:
         heights = estimate_heights(x_fixed, jumps.mask(), **kwargs)
@@ -242,10 +212,15 @@ def jumpfix_subtract_heights(
         heights = heights.toarray()
     heights = cast(NDArray[np.floating], heights)
 
+    nthread = NTHREADS
+    if nthread <= 0:
+        nthread = len(x_fixed)
+    slices = [slice(i * nthread, (i + 1) * nthread) for i in range(nthread)]
+    slices[-1] = slice(slices[-1].start, len(x_fixed))
     with concurrent.futures.ThreadPoolExecutor() as e:
         _ = [
-            e.submit(_fix_det, i, jump_range, heights, x_fixed)
-            for i, jump_range in enumerate(jumps.ranges)
+            e.submit(_fix, i, jumps.ranges[s], heights[s], x_fixed[s])
+            for i, s in enumerate(slices)
         ]
 
     return x_fixed.reshape(orig_shape)
@@ -625,7 +600,6 @@ def find_jumps(
     min_size=...,
     win_size=...,
     nsigma=...,
-    max_depth=...,
     fix: Literal[False] = False,
     inplace=...,
     merge=...,
@@ -645,7 +619,6 @@ def find_jumps(
     min_size=...,
     win_size=...,
     nsigma=...,
-    max_depth=...,
     fix: Literal[True] = True,
     inplace=...,
     merge=...,
@@ -664,7 +637,6 @@ def find_jumps(
     min_size: Optional[Union[float, NDArray[np.floating]]] = None,
     win_size: int = 20,
     nsigma: float = 25,
-    max_depth: int = 1,
     fix: bool = False,
     inplace: bool = False,
     merge: bool = True,
@@ -702,9 +674,6 @@ def find_jumps(
                   Also used for height estimation, should be of order jump width.
 
         nsigma: Number of sigma above the mean for something to be a peak.
-
-        max_depth: The maximum recursion depth.
-                   Set negative for infite depth and 0 for no recursion.
 
         fix: Set to True to fix.
 
@@ -761,7 +730,6 @@ def find_jumps(
             min_size=_min_size,
             win_size=win_size,
             nsigma=nsigma,
-            max_depth=max_depth,
         )
         if np.sum(_jumps) == 0:
             break
@@ -769,8 +737,6 @@ def find_jumps(
         jumps[msk] += _jumps
         _signal[msk] = jumpfix_subtract_heights(_signal[msk], _jumps, True)
         msk = np.any(jumps, axis=-1)
-
-    # TODO: include heights in output
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
     jumps = jump_ranges.mask()
@@ -781,7 +747,7 @@ def find_jumps(
 
     if fix:
         fixed = jumpfix_subtract_heights(
-            signal, jumps, inplace=inplace, heights=heights
+            signal, jump_ranges, inplace=inplace, heights=heights
         )
         return jump_ranges, csr_array(heights), fixed
     return jump_ranges, csr_array(heights)
