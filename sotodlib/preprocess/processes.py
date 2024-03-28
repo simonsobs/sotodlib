@@ -657,6 +657,40 @@ class SubPolyf(_Preprocess):
     def process(self, aman, proc_aman):
         tod_ops.sub_polyf.subscan_polyfilter(aman, **self.process_cfgs)
 
+class FourierFilter(_Preprocess):
+    """
+    Applies a fourier filter (defined in fft_ops) to the data.
+
+    Example config file entry::
+
+      - name: "fourier_filter"
+        process:
+          filt_function: "low_pass_sine2"
+          trim_samps: 2000
+          filter_params:
+            cutoff: 1
+            width: 0.1
+
+    """
+    name = 'fourier_filter'
+    def __init__(self, step_cfgs):
+        self.signal_name = step_cfgs.get('signal_name', 'signal')
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman):
+        _f = getattr(tod_ops.filters,
+                self.process_cfgs.get('filt_function','high_pass_butter4'))
+        filt = _f(**self.process_cfgs.get('filter_params'))
+        aman[self.signal_name] = tod_ops.filters.fourier_filter(aman, filt,
+                                        signal_name=self.signal_name)
+        if self.process_cfgs.get("trim_samps"):
+            trim = self.process_cfgs["trim_samps"]
+            aman.restrict('samps',(trim, -trim))
+            proc_aman.restrict('samps', (trim, -trim))
+
+
+_Preprocess.register(FourierFilter)
 _Preprocess.register(Trends)
 _Preprocess.register(FFTTrim)
 _Preprocess.register(Detrend)
