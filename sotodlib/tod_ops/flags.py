@@ -1,3 +1,4 @@
+from functools import partial
 import numpy as np
 import scipy.stats as stats
 from scipy.signal import find_peaks
@@ -9,6 +10,7 @@ except ImportError:
     from scipy.sparse import csr_matrix as csr_array
 
 from so3g.proj import Ranges, RangesMatrix
+from pixell.utils import block_expand, block_reduce
 
 from .. import core
 from . import filters
@@ -461,3 +463,132 @@ def get_trending_flags(aman,
         return cut, trends
 
     return cut
+
+
+def get_br_flags(aman, block_size, operation, thresh=None, nsigma=5, high_low=0, signal=None, timestamps=None, merge=True, overwrite=True, name=None, full_output=False):
+    """
+    Flag samples by block reducing an operation along the samps axis.
+    
+    Parameters
+    ----------
+    aman : AxisManager
+        The tod
+    block_size: int
+        The size of blocks to reduce.
+        The output RangesMatrix will be buffered by half this.
+    operation: function
+        The function to compute the block reduce with, see block_reduce docs for details.
+    thresh: Optional[tuple(float, float)]
+        Threshold to flag at.
+        If provided should be a tuple of the upper and lower bounds to flag at.
+    nsigma: float
+        Number of standard deviations to set the thresholds at, only used if thresh is None.
+        Sets both the upper and lower bounds.
+    high_low: int
+        If 0 flag using both the high and low thresholds.
+        If 1 flag high only.
+        If 2 flag low only.
+        Any other number is the same as passing in 0.
+    signal : array
+        (Optional). Signal to use to generate flags, if None default is aman.signal.
+    timestamps : array
+        (Optional). Timestamps to use to generate flags, default is aman.timestamps.
+    merge : bool
+        If true, merges the generated flag into aman.
+    overwrite : bool
+        If true, write over flag. If false, don't.
+    name : Optional[str]
+        Name of flag to add to aman.flags if merge is True.
+        If None then operation.__name__ is used.
+    full_output : bool
+        If true, returns calculated values from operation. 
+
+    Returns
+    -------
+    cut : RangesMatrix
+        RangesMatrix of flagged blocks.
+    full_aman : AxisManager
+        If full_output is true, values calculated by the block reduce.
+        Values will be in full_aman.{name}_values.
+    """
+    if name is None:
+        name = operation.__name__
+    if 'flags' not in aman:
+        overwrite = False
+        merge = False
+    if overwrite and name in aman.flags:
+        aman.flags.move(name, None)
+
+    if signal is None:
+        signal = aman.signal
+    signal = np.atleast_2d(signal)
+    if timestamps is None:
+        timestamps = aman.timestamps
+    assert len(timestamps) == signal.shape[1]
+
+    br = block_reduce(signal, block_size, op=operation, inclusive=True)
+    bflag = np.zeros_like(br, bool)
+
+    if thresh is None:
+        br_mean = np.mean(br)
+        br_thresh = nsigma*np.std(br)
+        thresh = (br_mean - br_thresh, br_mean + br_thresh)
+    thresh_low, thresh_high = thresh
+    
+    high_low = (high_low <= 2)*(high_low > 0)*high_low
+    high_low += (high_low == 0)*3
+    if high_low&1:
+        bflag += br > thresh_high
+    if high_low&2:
+        bflag += br < thresh_low
+
+    flag = block_expand(bflag, block_size, signal.shape[-1], inclusive=True).astype(bool)
+    cut = RangesMatrix.from_mask(flag).buffer(int(block_size/2))
+
+    if merge:
+        if name in aman.flags and not overwrite:
+            raise ValueError("Flag name {} already exists in aman.flags".format(name))
+        if name in aman.flags:
+            aman.flags[name] = cut
+        else:
+            aman.flags.wrap(name, cut)
+
+    if full_output:
+        full = block_expand(br, block_size, signal.shape[-1], inclusive=True)
+        full_aman = core.AxisManager(
+            aman.dets,
+            core.OffsetAxis("samps", len(timestamps)),
+        )
+        full_aman.wrap(f"{name}_values", full, [(0, "dets"), (1, "samps")])
+        return cut, full_aman 
+
+    return cut
+
+
+def get_moment_flags(aman, block_size, moment, center=None, thresh=None, nsigma=5, high_low=0, signal=None, timestamps=None, merge=True, overwrite=True, name=None, full_output=False):
+    """
+    Wrapper around `get_br_flags` for flagging based on the nth central moment.
+    Only the variables that differ from `get_br_flags` are listed below.
+    
+    Parameters
+    ----------
+    moment : int
+        The order of the moment to use. Should be >= 1
+    center : Option[float]
+        The point about which moments are taken.
+        If None, the mean is used.
+    name : Optional[str]
+        Name of flag to add to aman.flags if merge is True.
+        If None then the name of the moment is used (mean, variance, skew, ...) up to the 5th moment
+        and moment_{moment} is used beyond that.
+    """
+    if moment < 1:
+        raise ValueError("Invalid moment provided, should be >= 1")
+    moment_names = ["mean", "variance", "skew", "kurtosis", "noltosis"]
+    if name is None:
+        if moment > len(moment_names):
+            name = f"moment_{moment}"
+        else:
+            name = moment_names[moment - 1]
+
+    return get_br_flags(aman, block_size, partial(stats.moment, moment=moment, center=center), thresh=thresh, nsigma=nsigma, high_low=high_low, signal=signal, timestamps=timestamps, merge=merge, overwrite=overwrite, name=name, full_output=full_output)
