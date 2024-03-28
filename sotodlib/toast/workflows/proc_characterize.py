@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Timestream processing filters.
 """
@@ -194,3 +194,42 @@ def crosslinking_map(job, otherargs, runargs, data):
         job_ops.crosslinking.output_dir = otherargs.out_dir
         job_ops.crosslinking.save_pointing = otherargs.full_pointing
         job_ops.crosslinking.apply(data)
+
+
+def setup_diff_noise(operators):
+    """Add commandline args and operators for signal difference noise estimation.
+
+    Args:
+        operators (list):  The list of operators to extend.
+
+    Returns:
+        None
+
+    """
+    operators.append(
+        toast.ops.SignalDiffNoiseModel(
+            name="signal_diff_noise_estim", enabled=False
+        )
+    )
+
+
+@workflow_timer
+def diff_noise(job, otherargs, runargs, data):
+    """Estimate a simple white noise model for every detector using
+    sample differences
+
+    Args:
+        job (namespace):  The configured operators and templates for this job.
+        otherargs (namespace):  Other commandline arguments.
+        runargs (namespace):  Job related runtime parameters.
+        data (Data):  The data container.
+
+    Returns:
+        None
+
+    """
+    # Configured operators for this job
+    job_ops = job.operators
+
+    if job_ops.signal_diff_noise_estim.enabled:
+        job_ops.signal_diff_noise_estim.apply(data)

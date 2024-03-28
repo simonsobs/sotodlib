@@ -89,6 +89,7 @@ class SOSite(GroundSite):
         lat=SITES["so"].lat * u.degree,
         lon=SITES["so"].lon * u.degree,
         alt=SITES["so"].elev * u.meter,
+        weather="atacama",
         **kwargs,
     ):
         super().__init__(

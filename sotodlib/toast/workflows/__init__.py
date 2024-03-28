@@ -61,6 +61,8 @@ from .proc_characterize import (
     cadence_map,
     setup_crosslinking_map,
     crosslinking_map,
+    setup_diff_noise,
+    diff_noise,
 )
 from .sim_observe import setup_simulate_observing, simulate_observing
 from .sim_noise_model import setup_simple_noise_models, simple_noise_models

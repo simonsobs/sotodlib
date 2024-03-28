@@ -65,9 +65,44 @@ def simulate_data(job, otherargs, runargs, comm):
         wrk.load_data_context(job, otherargs, runargs, data)
         wrk.act_responsivity_sign(job, otherargs, runargs, data)
         wrk.create_az_intervals(job, otherargs, runargs, data)
+        # Optionally derive simple noise estimates
+        wrk.diff_noise(job, otherargs, runargs, data)
         # optionally zero out
         if otherargs.zero_loaded_data:
-            toast.ops.Reset(detdata=[defaults.det_data])
+            toast.ops.Reset(detdata=[defaults.det_data]).apply(data)
+        # Append a weather object to each of the observations
+        for ob in data.obs:
+            comm = data.comm.comm_group
+            site = ob.telescope.site
+            times = ob.shared["times"]
+            tmin = times[0]
+            tmax = times[-1]
+            if comm is not None:
+                tmin = comm.allreduce(tmin, MPI.MIN)
+                tmax = comm.allreduce(tmax, MPI.MAX)
+            from datetime import datetime, timezone
+            mid_time = datetime.fromtimestamp((tmin + tmax) / 2, timezone.utc)
+            weather = toast.weather.SimWeather(
+                time=mid_time,
+                name="atacama",
+                site_uid=site.uid,
+                realization=otherargs.realization,
+                max_pwv=job_ops.sim_ground.max_pwv,
+                median_weather=job_ops.sim_ground.median_weather,
+            )
+            site.weather = weather
+        # Append bandpass object to the focalplanes
+        for ob in data.obs:
+            if ob.telescope.focalplane.bandpass is None:
+                bandcenters = {}
+                bandwidths = {}
+                for det in ob.telescope.focalplane.detectors:
+                    band = ob.telescope.focalplane[det]["det_info_band"]
+                    freq = int(band[1:])
+                    bandcenters[det] = freq * u.GHz
+                    bandwidths[det] = freq * 0.1 * u.GHz
+                bp = toast.instrument.Bandpass(bandcenters, bandwidths)
+                ob.telescope.focalplane.bandpass = bp
 
     wrk.select_pointing(job, otherargs, runargs, data)
     wrk.simple_noise_models(job, otherargs, runargs, data)
@@ -205,6 +240,7 @@ def main():
     wrk.setup_pointing(operators)
     wrk.setup_az_intervals(operators)
     wrk.setup_simple_noise_models(operators)
+    wrk.setup_diff_noise(operators)
     wrk.setup_simulate_atmosphere_signal(operators)
     wrk.setup_simulate_sky_map_signal(operators)
     wrk.setup_simulate_conviqt_signal(operators)
