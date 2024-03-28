@@ -277,7 +277,7 @@ def estimate_heights(
     twopi: bool = False,
     make_step: bool = False,
     diff_buffed: Optional[NDArray[np.floating]] = None,
-) -> NDArray:
+) -> NDArray[np.floating]:
     """
     Simple jump estimation routine.
 
@@ -312,7 +312,7 @@ def estimate_heights(
     if twopi:
         diff_buffed = np.round(diff_buffed / (2 * np.pi)) * 2 * np.pi
 
-    heights = np.zeros_like(jumps)
+    heights = np.zeros_like(jumps, dtype=float)
     heights[jumps] = diff_buffed[jumps]
 
     return heights
