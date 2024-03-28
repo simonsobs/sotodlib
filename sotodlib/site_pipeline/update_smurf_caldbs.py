@@ -34,7 +34,7 @@ import traceback
 import os
 import argparse
 import yaml
-from dataclasses import dataclass, astuple
+from dataclasses import dataclass, astuple, fields
 import numpy as np
 from tqdm.auto import tqdm
 import logging
@@ -81,6 +81,9 @@ def smurf_detset_info(config: Union[str, dict],
         h5_path = os.path.join(root_dir, h5_path)
         idx_path = os.path.join(root_dir, idx_path)
     h5_relpath = os.path.relpath(h5_path, start=os.path.dirname(idx_path))
+
+    config['g3tsmurf'] = os.path.expandvars(config['g3tsmurf'])
+    config['imprinter'] = os.path.expandvars(config['imprinter'])
 
     SMURF = G3tSmurf.from_configs(config['g3tsmurf'])
     session = SMURF.Session()
@@ -151,20 +154,6 @@ def smurf_detset_info(config: Union[str, dict],
             db.add_entry(db_data, filename=path)
 
 
-# Dtype for calibration set
-cal_dtype = [
-    ('dets:readout_id', '<U40'),
-    ('r_tes', float),
-    ('r_frac', float),
-    ('p_bias', float),
-    ('s_i', float),
-    ('phase_to_pW', float),
-    ('bg', int),
-    ('polarity', int),
-    ('r_n', float),
-    ('p_sat', float),
-]
-
 @dataclass
 class CalInfo:
     """
@@ -188,6 +177,10 @@ class CalInfo:
     phase_to_pW: float
         Phase to power conversion factor [pW/rad] computed using s_i,
         pA_per_phi0, and detector polarity
+    v_bias: float
+        Commanded bias voltage [V] on the bias line of the detector for the observation
+    tau_eff: float
+        Effective thermal time constant [sec] of the detector, measured from bias steps
     bg: int
         Bias group of the detector. Taken from IV curve data, which contains
         bgmap data taken immediately prior to IV. This will be -1 if the
@@ -203,7 +196,6 @@ class CalInfo:
         This is defined  as the electrical bias power at which the TES
         resistance is 90% of the normal resistance.
     """
-    # Fields must be ordered like cal_dtype!
     readout_id: str = ''
 
     # From bias steps
@@ -212,12 +204,27 @@ class CalInfo:
     p_bias: float = np.nan  # J
     s_i: float = np.nan     # 1/V
     phase_to_pW: float = np.nan  # pW/rad
+    v_bias: float = np.nan  # V
+    tau_eff: float = np.nan  # sec
 
     # From IV
     bg: int = -1
     polarity: int = 1
     r_n: float = np.nan  
     p_sat: float = np.nan   # J
+
+    @classmethod
+    def dtype(cls):
+        """Returns ResultSet dtype for an item based on this class"""
+        dtype = []
+        for field in fields(cls):
+            if field.name == 'readout_id':
+                dt = ('dets:readout_id', '<U40')
+            else:
+                dt = (field.name, field.type)
+            dtype.append(dt)
+        return dtype
+
 
 class MissingSmurfInfo(Exception):
     pass
@@ -228,7 +235,10 @@ def get_cal_resset(ctx: core.Context, obs_id):
     data for each detset in the observation, and uses that to compute CalInfo
     for each detector in the observation
     """
-    am = ctx.get_obs(obs_id, samples=(0, 1), ignore_missing=True, no_signal=True)
+    am = ctx.get_obs(
+            obs_id, samples=(0, 1), ignore_missing=True, no_signal=True,
+            on_missing={'det_cal': 'skip'}
+    )
     cals = [CalInfo(rid) for rid in am.det_info.readout_id]
     if 'smurf' not in am.det_info:
         raise MissingSmurfInfo(f"Missing smurf info for {obs_id}")
@@ -329,10 +339,13 @@ def get_cal_resset(ctx: core.Context, obs_id):
         cal.r_frac = bsa['Rfrac'][ridx]
         cal.p_bias = bsa['Pj'][ridx]
         cal.s_i = bsa['Si'][ridx]
+        cal.tau_eff = bsa['tau_eff'][ridx]
+        if bg != -1:
+            cal.v_bias = bsa['Vbias'][bg]
         cal.phase_to_pW = pA_per_phi0 / (2*np.pi) / cal.s_i * cal.polarity
 
     rset = core.metadata.ResultSet.from_friend(np.array(
-        [astuple(c) for c in cals], dtype=cal_dtype
+        [astuple(c) for c in cals], dtype=CalInfo.dtype()
     ))
     return rset
 
@@ -370,7 +383,8 @@ def get_failed_obsids(cache_path):
 
 def update_det_caldb(ctx, idx_path, detset_idx, h5_path,
                      show_pb=False, format_exc=False, overwrite=False,
-                     failed_obsid_cache=None, root_dir=None, write_relpath=True):
+                     failed_obsid_cache=None, root_dir=None, write_relpath=True,
+                     run_single=False):
     """
     Updates the detector caldb with new observations. This will find calibration
     data for all observations that have detset data and are not in the
@@ -402,6 +416,8 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path,
     write_relpath: bool
         If true, when adding entries to the manifestdb, will use the h5 path relative
         to the idx_path.
+    run_single: bool
+        If true, will stop after writing a single entry to the det-cal db
     """
     if root_dir is not None:
         h5_path = os.path.join(root_dir, h5_path)
@@ -422,7 +438,6 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path,
     obsids_with_detsets = get_obs_with_detsets(ctx, detset_idx)
     failed_obsids = get_failed_obsids(failed_obsid_cache)
     obsids_with_obs = set(ctx.obsdb.query("type=='obs'")['obs_id']) - failed_obsids
-
 
     remaining_obsids = obsids_with_detsets.intersection(obsids_with_obs)
     if not overwrite: 
@@ -458,6 +473,9 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path,
             'dataset': obs_id,
         }, filename=path, replace=overwrite)
 
+        if run_single:
+            break
+
 
 def run_update_det_caldb(config_path, overwrite=False):
     with open(config_path, 'r') as f:
@@ -481,6 +499,7 @@ def run_update_det_caldb(config_path, overwrite=False):
         failed_obsid_cache=config['archive']['det_cal'].get('failed_obsid_cache'),
         root_dir=config['archive']['det_cal'].get('root_dir'),
         write_relpath=config['archive']['det_cal'].get('write_relpath', True),
+        run_single=config['archive']['det_cal'].get('run_single', False)
     )
 
 
