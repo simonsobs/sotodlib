@@ -65,11 +65,7 @@ def _jumpfinder(
     nsigma: float = 25,
 ) -> NDArray[np.bool_]:
     """
-    Recursive edge detection based jumpfinder.
-
-    Note that the jumpfinder is very sensitive to changes in parameters
-    and the parameters are not independant of each other,
-    so it may take some playing around to get it to work properly.
+    Matched filter jump finder.
 
     Arguments:
 
@@ -291,8 +287,6 @@ def estimate_heights(
 
         twopi: If True, heights will be rounded to the nearest 2*pi
 
-        medfilt: If True, a median filter of size ~win_size will be applied.
-
         make_step: If True jump ranges will be turned into clean step functions.
 
         diff_buffed: Difference between signal and a signal shifted by win_size.
@@ -442,7 +436,7 @@ def twopi_jumps(
         np.clip(atol, 1e-8, 1e-2)
 
     _signal = _filter(signal, **filter_pars)
-    diff_buffed = _diff_buffed(_signal, None, win_size, False, False)
+    diff_buffed = _diff_buffed(_signal, None, win_size, False)
 
     if isinstance(atol, int):
         atol = float(atol)
@@ -564,6 +558,8 @@ def slow_jumps(
                if signal is 1D Ranges in returned instead.
                Buffered to win_size.
 
+        heights: csr_array of jump heights.
+
         fixed: signal with jump fixed. Only returned if fix is set.
     """
     if signal is None:
@@ -577,13 +573,13 @@ def slow_jumps(
     bptp = block_reduce(_signal, win_size, op=np.ptp, inclusive=True)
 
     if not abs_thresh:
-        thresh = np.quantile(bptp.ravel(), thresh)
+        thresh = float(np.quantile(bptp.ravel(), thresh))
     bptp = block_expand(bptp, win_size, _signal.shape[-1], inclusive=True)
     jumps = bptp > thresh
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
     heights = estimate_heights(
-        _signal, jump_ranges.mask(), win_size=win_size, medfilt=False, make_step=True
+        _signal, jump_ranges.mask(), win_size=win_size, make_step=True
     )
 
     if merge:
@@ -652,7 +648,7 @@ def find_jumps(
     Tuple[RangesMatrix, csr_array], Tuple[RangesMatrix, csr_array, NDArray[np.floating]]
 ]:
     """
-    Find jumps in aman.signal_name.
+    Find jumps in aman.signal_name with a matched filter for edge detection.
     Expects aman.signal_name to be 1D of 2D.
 
     Arguments:
@@ -695,6 +691,8 @@ def find_jumps(
                if signal is 1D Ranges in returned instead.
                There is some uncertainty on order of a few samples.
                Jumps within a few samples of each other may not be distinguished.
+
+        heights: csr_array of jump heights.
 
         fixed: signal with jump fixed. Only returned if fix is set.
     """
