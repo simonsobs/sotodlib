@@ -260,9 +260,11 @@ class LabelAxis(AxisInterface):
         return super().resolve(src, axis_index)
 
     def restriction(self, selector):
-        # Selector should be list of vals.  Returns new axis and the
+        # Selector should be list of vals or a mask. Returns new axis and the
         # indices into self.vals that project out the elements.
-        _vals, i0, i1 = get_coindices(selector, self.vals)
+        if self.vals is not None and isinstance(selector, np.ndarray) and selector.dtype == bool:
+            selector = self.vals[selector]
+        _, i0, i1 = get_coindices(selector, self.vals)
         assert len(i0) == len(selector)  # not a strict subset!
         return LabelAxis(self.name, selector), i1
 
