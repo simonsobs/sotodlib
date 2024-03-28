@@ -8,7 +8,7 @@ from toast.data import Data
 from toast.observation import default_values as defaults
 from toast.ops.operator import Operator
 from toast.timing import function_timer, Timer
-from toast.traits import Int, Unicode, trait_docs
+from toast.traits import Bool, Int, Unicode, trait_docs
 from toast.utils import Environment, Logger, unit_conversion
 
 from .mumux_crosstalk_util import detmap_available, pos_to_chi
@@ -29,6 +29,7 @@ P_OPT = {
     "LAT_f230" : 7.50,
     "LAT_f290" : 12.48,
 }
+
 # Optical power due to standard atmosphere
 P_ATM = {
     "SAT_f030" : 0.059685257,
@@ -44,6 +45,7 @@ P_ATM = {
     "LAT_f230" : 3.359030038,
     "LAT_f290" : 6.284548710,
 }
+
 # Optical effiency between the detector and the atmosphere
 ETA_ATM = {
     "SAT_f030" : 0.160,
@@ -59,6 +61,7 @@ ETA_ATM = {
     "LAT_f230" : 0.252,
     "LAT_f290" : 0.305,
 }
+
 # Saturation power [pW]
 P_SAT = {
     "SAT_f030" : 1.08,
@@ -126,19 +129,13 @@ class SimMuMUXCrosstalk(Operator):
 
     realization = Int(0, help="Realization ID")
 
+    random_Phi0 = Bool(
+        True,
+        help="Draw new phase offsets for every observation and realization",
+    )
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-
-    def _get_chi(self, det_target, det_source):
-        """ Return the crosstalk strength parameter for a pair of detectors
-        """
-        # FIXME: implement _get_chi()
-        # We probably want to draw a table of chi somewhere
-        if det_target == det_source:
-            chi = 0
-        else:
-            chi = 1e-3
-        return chi
 
     def _temperature_to_squid_phase(
             self, input_signal, Phi0, dPhi0dT
@@ -161,8 +158,11 @@ class SimMuMUXCrosstalk(Operator):
         Phi0 = {}
         for det in detectors:
             # randomize Phi0 in a reproducible manner
-            counter1 = obs.session.uid
-            counter2 = self.realization
+            if self.random_Phi0:
+                counter1 = obs.session.uid
+                counter2 = self.realization
+            else:
+                counter1, counter2 = 0, 0
             key1 = focalplane[det]["uid"]
             key2 = 234561
 
