@@ -17,7 +17,7 @@ defaults = {"query": "1",
             "ntod": None,
             "tods": None,
             "nset": None,
-            "wafer": None, # not implemented yet
+            "wafer": None,
             "center_at": None,
             "site": 'so_sat1',
             "max_dets": None, # not implemented yet
@@ -65,6 +65,7 @@ def get_parser(parser=None):
     parser.add_argument("--ntod",    type=int, )
     parser.add_argument("--tods",    type=str, )
     parser.add_argument("--nset",    type=int, )
+    parser.add_argument("--wafer",   type=str, help="Detector set to map with")
     parser.add_argument("--max-dets",type=int, )
     parser.add_argument("--fixed_ftime", type=int, )
     parser.add_argument("--mindur", type=int, )
@@ -223,6 +224,7 @@ def calibrate_obs_new(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=
         flags.get_det_bias_flags(obs, rfrac_range=(0.05, 0.9), psat_range=(0, 20))
         bad_dets = has_all_cut(obs.flags.det_bias_flags)
         obs.restrict('dets', obs.dets.vals[~bad_dets])
+        if obs.dets.count<=1: return obs # check if I cut all the detectors after the det bias flags
         detrend_tod(obs, method='median')
         hwp.get_hwpss(obs)
         hwp.subtract_hwpss(obs)
@@ -247,6 +249,8 @@ def calibrate_obs_new(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=
             sigfilt = filters.fourier_filter(obs, filt, signal_name='hwpss_remove')
             obs.wrap('lpf_hwpss_remove', sigfilt, [(0,'dets'),(1,'samps')])
             obs.restrict('samps',(10*200, -10*200))
+            # check if we have enough detectors
+            if obs.dets.count<=1: return obs
             pca_out = pca.get_pca(obs,signal=obs.lpf_hwpss_remove)
             pca_signal = pca.get_pca_model(obs, pca_out, signal=obs.lpf_hwpss_remove)
             median = np.median(pca_signal.weights[:,0])
@@ -437,9 +441,16 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         # which is pointless, but shouldn't cost that much time.
         obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, )
         
-        #obs.hwp_angle = np.mod(-1*np.unwrap(obs.hwp_solution.hwp_angle_ver3_1) + np.deg2rad(1.66-360*255/1440-90), 2*np.pi)
+        """
+        if obs.hwp_solution.primary_encoder == 1:
+            obs.hwp_angle = np.mod(-1*np.unwrap(obs.hwp_solution.hwp_angle_ver3_1) + np.deg2rad(1.66-360*255/1440-90), 2*np.pi)
+        elif obs.hwp_solution.primary_encoder == 2:
+            obs.hwp_angle = np.mod(-1*np.unwrap(obs.hwp_solution.hwp_angle_ver3_2) + np.deg2rad(1.66-360*255/1440+90), 2*np.pi)
+        """
         
         obs = calibrate_obs_new(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower, site=site)
+        # here we check if we have enough dets to keep going, otherwise we continue
+        if obs.dets.count <= 1: continue
         
         # demodulate
         if singlestream == False:
@@ -572,7 +583,7 @@ class LogInfoFilter(logging.Filter):
         record.memmax= memory.max()/1024.**3
         return record
 
-def handle_empty(prefix, tag, comm, e):
+def handle_empty(prefix, tag, comm, e, L):
     # This happens if we ended up with no valid tods for some reason
     if comm.rank == 0:
         L.info("%s Skipped: %s" % (tag, str(e)))
@@ -625,7 +636,7 @@ def main(config_file=None, defaults=defaults, **args):
     L.addHandler(ch)
 
     context = Context(args['context'])
-    obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode=args['mode'], nset=args['nset'], ntod=args['ntod'], tods=args['tods'], fixed_time=args['fixed_time'], mindur=args['mindur'])
+    obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode=args['mode'], nset=args['nset'], wafer=args['wafer'], ntod=args['ntod'], tods=args['tods'], fixed_time=args['fixed_time'], mindur=args['mindur'])
     tags = []
     cwd = os.getcwd()
     
@@ -739,7 +750,7 @@ def main(config_file=None, defaults=defaults, **args):
             #    write_depth1_info(prefix + "_info.hdf", d1info)
         except DataMissing as e:
             # This happens if we ended up with no valid tods for some reason
-            handle_empty(prefix, tag, comm_intra, e)
+            handle_empty(prefix, tag, comm_intra, e, L)
             continue
         # 4. redistribute the valid tasks. Tasks with nothing to do don't continue
         # past here.
@@ -747,12 +758,15 @@ def main(config_file=None, defaults=defaults, **args):
         comm_good = comm_intra.Split(len(my_inds) > 0)
         if len(my_inds) == 0: continue
         if not args['only_hits']:
-            # 5. make the maps
-            mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds], subshape, subwcs, noise_model, t0=t, comm=comm_good, tag=tag, recenter=recenter, dtype_map=args['dtype_map'], dtype_tod=args['dtype_tod'], comps=args['comps'], verbose=args['verbose'], split_labels=split_labels, singlestream=args['singlestream'], det_in_out=args['det_in_out'], det_left_right=args['det_left_right'], det_upper_lower=args['det_upper_lower'], site=args['site'])
+            try:
+                # 5. make the maps
+                mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds], subshape, subwcs, noise_model, t0=t, comm=comm_good, tag=tag, recenter=recenter, dtype_map=args['dtype_map'], dtype_tod=args['dtype_tod'], comps=args['comps'], verbose=args['verbose'], split_labels=split_labels, singlestream=args['singlestream'], det_in_out=args['det_in_out'], det_left_right=args['det_left_right'], det_upper_lower=args['det_upper_lower'], site=args['site'])
                 # 6. write them
-            write_depth1_map(prefix, mapdata, split_labels=split_labels, )
-            #except DataMissing as e:
-            #    handle_empty(prefix, tag, comm_good, e)
+                write_depth1_map(prefix, mapdata, split_labels=split_labels, )
+            except DataMissing as e:
+                # This will happen if we decide to abort a map while we are doing the preprocessing.
+                handle_empty(prefix, tag, comm_good, e, L)
+                continue
         else:
             mapdata = write_hits_map(context, [obslist[ind] for ind in my_inds], subshape, subwcs, t0=t, comm=comm_good, tag=tag, verbose=args['verbose'],)
             if comm_intra.rank == 0:
