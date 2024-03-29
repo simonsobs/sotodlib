@@ -45,6 +45,11 @@ class HkConfig:
     echo_db: bool = False
     aliases: Dict[str, str] = field(default_factory=dict)
 
+    @classmethod
+    def from_yaml(cls, path):
+        with open(path, 'r') as f:
+            return cls(**yaml.safe_load(f))
+
 
 class HkFile(Base):
     """
@@ -151,10 +156,9 @@ class HkDb:
     cfg : Union[HKConfig, str]
         Configuration object or path to configuration file
     """
-    def __init__(self, cfg: Union[HKConfig, str]):
+    def __init__(self, cfg: Union[HkConfig, str]):
         if isinstance(cfg, str):
-            with open(cfg, 'r') as f:
-                cfg = HkConfig(**yaml.safe_load(f))
+            cfg = HkConfig.from_yaml(cfg)
         self.cfg = cfg
 
         self.engine = db.create_engine(f"sqlite:///{cfg.hk_db}", echo=cfg.echo_db)
@@ -360,4 +364,3 @@ def load_hk(load_spec: LoadSpec, show_pb=False):
         result[k][1] = np.hstack(result[k][1])
 
     return HkResult(result, aliases=load_spec.cfg.aliases)
-    
