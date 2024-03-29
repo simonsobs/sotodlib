@@ -1,3 +1,4 @@
+from functools import partial
 import numpy as np
 import scipy.stats as stats
 from scipy.signal import find_peaks
@@ -9,15 +10,22 @@ except ImportError:
     from scipy.sparse import csr_matrix as csr_array
 
 from so3g.proj import Ranges, RangesMatrix
+from pixell.utils import block_expand, block_reduce
 
 from .. import core
 from . import filters
 from . import fourier_filter
 
 
-def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
-                      psat_range=(0, 15), merge=True, overwrite=True,
-                      name='det_bias_flags'):
+def get_det_bias_flags(
+    aman,
+    detcal=None,
+    rfrac_range=(0.1, 0.7),
+    psat_range=(0, 15),
+    merge=True,
+    overwrite=True,
+    name="det_bias_flags",
+):
     """
     Function for selecting detectors in appropriate bias range.
 
@@ -44,52 +52,74 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     -------
     mask : RangesMatrix
         RangesMatrix shaped N_dets x N_samps that is True is the detector
-        is flagged to be cut and false if it should be kept based on 
+        is flagged to be cut and false if it should be kept based on
         the rfrac, and psat ranges. To create a boolean mask from
         the RangesMatrix that can be used for aman.restrict() use
-        ``keep = ~has_all_cut(mask)`` and then restrict with 
+        ``keep = ~has_all_cut(mask)`` and then restrict with
         ``aman.restrict('dets', aman.dets.vals[keep])``.
     """
     if detcal is None:
-        if 'det_cal' not in aman:
-            raise ValueError("AxisManager missing required 'det_cal' field " 
-                             "with detector calibration information")
+        if "det_cal" not in aman:
+            raise ValueError(
+                "AxisManager missing required 'det_cal' field "
+                "with detector calibration information"
+            )
         detcal = aman.det_cal
 
-    if 'flags' not in aman:
+    if "flags" not in aman:
         overwrite = False
         merge = False
     if overwrite and name in aman.flags:
         aman.flags.move(name, None)
-    
-    msk = ~(np.all([detcal.bg >= 0,
-                    detcal.r_tes > 0,
-                    detcal.r_frac >= rfrac_range[0],
-                    detcal.r_frac <= rfrac_range[1],
-                    detcal.p_sat*1e12 >= psat_range[0],
-                    detcal.p_sat*1e12 <= psat_range[1]], axis=0))
+
+    msk = ~(
+        np.all(
+            [
+                detcal.bg >= 0,
+                detcal.r_tes > 0,
+                detcal.r_frac >= rfrac_range[0],
+                detcal.r_frac <= rfrac_range[1],
+                detcal.p_sat * 1e12 >= psat_range[0],
+                detcal.p_sat * 1e12 <= psat_range[1],
+            ],
+            axis=0,
+        )
+    )
     # Expand mask to ndets x nsamps RangesMatrix
-    if 'samps' in aman:
+    if "samps" in aman:
         x = Ranges(aman.samps.count)
-        mskexp = RangesMatrix([Ranges.ones_like(x) if Y
-                            else Ranges.zeros_like(x) for Y in msk])
+        mskexp = RangesMatrix(
+            [Ranges.ones_like(x) if Y else Ranges.zeros_like(x) for Y in msk]
+        )
     else:
         mskexp = msk
-    
+
     if merge:
         if name in aman.flags and not overwrite:
             raise ValueError(f"Flag name {name} already exists in aman.flags")
         if name in aman.flags:
             aman.flags[name] = mskexp
         else:
-            aman.flags.wrap(name, mskexp, [(0, 'dets'), (1, 'samps')])
-            
+            aman.flags.wrap(name, mskexp, [(0, "dets"), (1, "samps")])
+
     return mskexp
 
-def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
-                         merge=True, merge_lr=True, overwrite=True, 
-                         t_buffer=2., kernel_size=400, peak_threshold=0.1, rel_distance_peaks=0.3,
-                         truncate=False, qlim=1):
+
+def get_turnaround_flags(
+    aman,
+    az=None,
+    method="scanspeed",
+    name="turnarounds",
+    merge=True,
+    merge_lr=True,
+    overwrite=True,
+    t_buffer=2.0,
+    kernel_size=400,
+    peak_threshold=0.1,
+    rel_distance_peaks=0.3,
+    truncate=False,
+    qlim=1,
+):
     """
     Compute turnaround flags for a dataset.
 
@@ -129,118 +159,159 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
     Ranges : RangesMatrix
         The turnaround flags as a Ranges object.
     """
-    if az is None : 
+    if az is None:
         az = aman.boresight.az
-        
-    if method not in ['az', 'scanspeed']:
-        raise ValueError('Unsupported method. Supported methods are `az` or `scanspeed`')
-    
+
+    if method not in ["az", "scanspeed"]:
+        raise ValueError(
+            "Unsupported method. Supported methods are `az` or `scanspeed`"
+        )
+
     # `az` method: flag turnarounds based on azimuth threshold specifled by qlim
-    elif method=='az':
+    elif method == "az":
         lo, hi = np.percentile(az, [qlim, 100 - qlim])
         m = np.logical_or(az < lo, az > hi)
         ta_flag = Ranges.from_bitmask(m)
-    
+
     # `scanspeed` method: flag turnarounds based on scanspeed.
-    elif method=='scanspeed':
+    elif method == "scanspeed":
         daz = np.diff(az)
-        daz = np.append(daz,daz[-1])
-        approx_daz = np.median(daz[daz>np.percentile(daz, 95)])
-        
+        daz = np.append(daz, daz[-1])
+        approx_daz = np.median(daz[daz > np.percentile(daz, 95)])
+
         # derive approximate number of samples in one_scan period
         approx_samps_onescan = int(np.ptp(az) / approx_daz)
         # update approx_samps_onescan with detrending
         x = np.linspace(0, 1, az.shape[0])
         slope = az[-approx_samps_onescan:].mean() - az[:approx_samps_onescan].mean()
-        approx_samps_onescan = int(np.ptp(az - slope*x) / approx_daz)
+        approx_samps_onescan = int(np.ptp(az - slope * x) / approx_daz)
 
         # Make a step-function like matched filter. Kernel is normarized to make peak height ~1
         kernel = np.ones(kernel_size) / approx_daz / kernel_size
-        kernel[kernel_size//2:] *= -1
+        kernel[kernel_size // 2 :] *= -1
 
         # convolve signal with the kernel
-        pad_init = np.ones(kernel_size//2) * daz[0]
-        pad_last = np.ones(kernel_size//2) * daz[-1]
-        matched = np.convolve(np.hstack([pad_init, daz, pad_last]), kernel, mode='same')
-        matched = matched[kernel_size//2:-kernel_size//2]
+        pad_init = np.ones(kernel_size // 2) * daz[0]
+        pad_last = np.ones(kernel_size // 2) * daz[-1]
+        matched = np.convolve(np.hstack([pad_init, daz, pad_last]), kernel, mode="same")
+        matched = matched[kernel_size // 2 : -kernel_size // 2]
 
         # find peaks in matched daz
-        peaks, _ = find_peaks(np.abs(matched), height=peak_threshold, distance=rel_distance_peaks*approx_samps_onescan)
+        peaks, _ = find_peaks(
+            np.abs(matched),
+            height=peak_threshold,
+            distance=rel_distance_peaks * approx_samps_onescan,
+        )
         is_pos = matched[peaks] > 0
 
         # update approx_samps_onescan
         approx_samps_onescan = int(np.mean(np.diff(peaks)))
-        
+
         # flags turnarounds, left/right scans
         _ta_flag = np.zeros(aman.samps.count, dtype=bool)
         _left_flag = np.zeros(aman.samps.count, dtype=bool)
         _right_flag = np.zeros(aman.samps.count, dtype=bool)
-        
+
         dt = np.mean(np.diff(aman.timestamps))
-        nbuffer_half = int(t_buffer/dt//2)
-        
-        for ip,p in enumerate(peaks[:-1]):
-            _ta_flag[p-nbuffer_half:p+nbuffer_half] = True
-            if is_pos[ip]: 
-                _right_flag[peaks[ip]:peaks[ip+1]] = True
+        nbuffer_half = int(t_buffer / dt // 2)
+
+        for ip, p in enumerate(peaks[:-1]):
+            _ta_flag[p - nbuffer_half : p + nbuffer_half] = True
+            if is_pos[ip]:
+                _right_flag[peaks[ip] : peaks[ip + 1]] = True
             else:
-                _left_flag[peaks[ip]:peaks[ip+1]] = True
-        _ta_flag[peaks[-1]-nbuffer_half:peaks[-1]+nbuffer_half] = True
-        
+                _left_flag[peaks[ip] : peaks[ip + 1]] = True
+        _ta_flag[peaks[-1] - nbuffer_half : peaks[-1] + nbuffer_half] = True
+
         # Check the initial/last part. If the daz is the same as the other scaning part,
         # the part is regarded as left or right scan. If not, flagged as `_truncate_flag`, which
         # will be truncated if `truncate` is True, or flagged as `turnarounds` if `truncate` is False.
         _truncate_flag = np.zeros(aman.samps.count, dtype=bool)
         daz_right = daz[_right_flag & ~_ta_flag]
-        daz_right_mean, daz_right_std, daz_right_samps = daz_right.mean(), daz_right.std(), daz_right.shape[0]
+        daz_right_mean, daz_right_std, daz_right_samps = (
+            daz_right.mean(),
+            daz_right.std(),
+            daz_right.shape[0],
+        )
         daz_left = daz[_left_flag & ~_ta_flag]
-        daz_left_mean, daz_left_std, daz_left_samps = daz_left.mean(), daz_left.std(), daz_left.shape[0]
-        
-        part_slices_ta_masked = [slice(None, np.where(_ta_flag)[0][0]), slice(np.where(_ta_flag)[0][-1], None)]
+        daz_left_mean, daz_left_std, daz_left_samps = (
+            daz_left.mean(),
+            daz_left.std(),
+            daz_left.shape[0],
+        )
+
+        part_slices_ta_masked = [
+            slice(None, np.where(_ta_flag)[0][0]),
+            slice(np.where(_ta_flag)[0][-1], None),
+        ]
         part_slices_ta_unmasked = [slice(None, peaks[0]), slice(peaks[-1], None)]
-        
-        for part_slice_ta_masked, part_slice_ta_unmasked in zip(part_slices_ta_masked, part_slices_ta_unmasked):
+
+        for part_slice_ta_masked, part_slice_ta_unmasked in zip(
+            part_slices_ta_masked, part_slices_ta_unmasked
+        ):
             daz_part = daz[part_slice_ta_masked]
-            daz_part_mean, daz_part_std, daz_part_samps = daz_part.mean(), daz_part.std(), daz_part.shape[0]
-            if np.isclose(daz_part_mean, daz_right_mean, rtol=0, atol=3*daz_right_std/np.sqrt(daz_right_samps)) and \
-                np.isclose(daz_part_std, daz_right_std, rtol=1, atol=0):
+            daz_part_mean, daz_part_std, daz_part_samps = (
+                daz_part.mean(),
+                daz_part.std(),
+                daz_part.shape[0],
+            )
+            if np.isclose(
+                daz_part_mean,
+                daz_right_mean,
+                rtol=0,
+                atol=3 * daz_right_std / np.sqrt(daz_right_samps),
+            ) and np.isclose(daz_part_std, daz_right_std, rtol=1, atol=0):
                 _right_flag[part_slice_ta_unmasked] = True
-            elif np.isclose(daz_part_mean, daz_left_mean, rtol=0, atol=3*daz_right_std/np.sqrt(daz_left_samps)) and \
-                np.isclose(daz_part_std, daz_left_std, rtol=1, atol=0):
+            elif np.isclose(
+                daz_part_mean,
+                daz_left_mean,
+                rtol=0,
+                atol=3 * daz_right_std / np.sqrt(daz_left_samps),
+            ) and np.isclose(daz_part_std, daz_left_std, rtol=1, atol=0):
                 _left_flag[part_slice_ta_unmasked] = True
             else:
                 _truncate_flag[part_slice_ta_unmasked] = True
-        
+
         # Check if flagging works
-        check_sum = _left_flag.astype(int) + _right_flag.astype(int) + _truncate_flag.astype(int)
+        check_sum = (
+            _left_flag.astype(int)
+            + _right_flag.astype(int)
+            + _truncate_flag.astype(int)
+        )
         check_sum = np.all(np.ones(aman.samps.count, dtype=int) == check_sum)
         if not check_sum:
-            raise ValueError('Check sum failed. There are samples not allocated any of left, right, or truncate.')
-        
+            raise ValueError(
+                "Check sum failed. There are samples not allocated any of left, right, or truncate."
+            )
+
         # merge left/right mask
         left_flag = Ranges.from_bitmask(_left_flag)
         right_flag = Ranges.from_bitmask(_right_flag)
         if merge_lr:
-            if ("left_scan" in aman.flags or "right_scan" in aman.flags ) and not overwrite:
-                raise ValueError("Flag name left/right_flag already exists in aman.flags.")
-            else : 
+            if (
+                "left_scan" in aman.flags or "right_scan" in aman.flags
+            ) and not overwrite:
+                raise ValueError(
+                    "Flag name left/right_flag already exists in aman.flags."
+                )
+            else:
                 if "left_scan" in aman.flags:
                     aman.flags["left_scan"] = left_flag
-                else :
+                else:
                     aman.flags.wrap("left_scan", left_flag)
                 if "right_scan" in aman.flags:
                     aman.flags["right_scan"] = right_flag
-                else :
+                else:
                     aman.flags.wrap("right_scan", right_flag)
 
         # truncate unstable scan before the first turnaround or after the last turnaround
         if truncate:
             valid_slice = slice(*np.where(~_truncate_flag)[0][[0, -1]])
-            aman.restrict('samps', valid_slice)
+            aman.restrict("samps", valid_slice)
             ta_flag = Ranges.from_bitmask(_ta_flag[valid_slice])
         else:
             ta_flag = Ranges.from_bitmask(np.logical_or(_ta_flag, _truncate_flag))
-    
+
     # merge turnaround flags
     if merge:
         if name in aman.flags and not overwrite:
@@ -249,28 +320,31 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
             aman.flags[name] = ta_flag
         else:
             print(ta_flag)
-            aman.flags.wrap(name, ta_flag)   
-    if method == 'az':
+            aman.flags.wrap(name, ta_flag)
+    if method == "az":
         ta_exp = RangesMatrix([ta_flag for i in range(aman.dets.count)])
         return ta_exp
-    if method == 'scanspeed':
+    if method == "scanspeed":
         ta_exp = RangesMatrix([ta_flag for i in range(aman.dets.count)])
         left_exp = RangesMatrix([left_flag for i in range(aman.dets.count)])
         right_exp = RangesMatrix([right_flag for i in range(aman.dets.count)])
         return ta_exp, left_exp, right_exp
-    
-def get_glitch_flags(aman,
-                     t_glitch=0.002,
-                     hp_fc=0.5,
-                     n_sig=10,
-                     buffer=200,
-                     detrend=None,
-                     signal_name=None,
-                     merge=True,
-                     overwrite=False,
-                     name="glitches",
-                     full_output=False,
-                     edge_guard=2000):
+
+
+def get_glitch_flags(
+    aman,
+    t_glitch=0.002,
+    hp_fc=0.5,
+    n_sig=10,
+    buffer=200,
+    detrend=None,
+    signal_name=None,
+    merge=True,
+    overwrite=False,
+    name="glitches",
+    full_output=False,
+    edge_guard=2000,
+):
     """
     Find glitches with fourier filtering. Translation from moby2 as starting point
 
@@ -311,21 +385,23 @@ def get_glitch_flags(aman,
     if signal_name is None:
         signal_name = "signal"
     # f-space filtering
-    filt = filters.high_pass_sine2(cutoff=hp_fc) * filters.gaussian_filter(t_sigma=t_glitch)
+    filt = filters.high_pass_sine2(cutoff=hp_fc) * filters.gaussian_filter(
+        t_sigma=t_glitch
+    )
     fvec = fourier_filter(
         aman, filt, detrend=detrend, signal_name=signal_name, resize="zero_pad"
     )
     # get the threshods based on n_sig x nlev = n_sig x iqu x 0.741
     fvec = np.abs(fvec)
     if fvec.shape[1] > 50000:
-        ds = int(fvec.shape[1]/20000)
-    else: 
+        ds = int(fvec.shape[1] / 20000)
+    else:
         ds = 1
-    iqr_range = 0.741 * stats.iqr(fvec[:,::ds], axis=1)
+    iqr_range = 0.741 * stats.iqr(fvec[:, ::ds], axis=1)
     # get flags
     msk = fvec > iqr_range[:, None] * n_sig
-    msk[:,:edge_guard] = False
-    msk[:,-edge_guard:] = False
+    msk[:, :edge_guard] = False
+    msk[:, -edge_guard:] = False
     flag = RangesMatrix([Ranges.from_bitmask(m) for m in msk])
     flag.buffer(buffer)
 
@@ -359,18 +435,20 @@ def get_glitch_flags(aman,
     return flag
 
 
-def get_trending_flags(aman,
-                       max_trend=1.2,
-                       n_pieces=1,
-                       max_samples=500,
-                       signal=None,
-                       timestamps=None,
-                       merge=True,
-                       overwrite=True,
-                       name="trends",
-                       full_output=False):
+def get_trending_flags(
+    aman,
+    max_trend=1.2,
+    n_pieces=1,
+    max_samples=500,
+    signal=None,
+    timestamps=None,
+    merge=True,
+    overwrite=True,
+    name="trends",
+    full_output=False,
+):
     """
-    Flag Detectors with trends larger than max_trend. 
+    Flag Detectors with trends larger than max_trend.
     This function can be used to find unlocked detectors.
     Note that this is a rough cut and unflagged detectors can still have poor tracking.
 
@@ -404,7 +482,7 @@ def get_trending_flags(aman,
     trends : AxisManager
         If full_output is true, calculated slopes and the sample edges where they were calculated.
     """
-    if 'flags' not in aman:
+    if "flags" not in aman:
         overwrite = False
         merge = False
     if overwrite and name in aman.flags:
@@ -461,3 +539,174 @@ def get_trending_flags(aman,
         return cut, trends
 
     return cut
+
+
+def get_br_flags(
+    aman,
+    block_size,
+    operation,
+    thresh=None,
+    nsigma=5,
+    high_low=0,
+    signal=None,
+    timestamps=None,
+    merge=True,
+    overwrite=True,
+    name=None,
+    full_output=False,
+):
+    """
+    Flag samples by block reducing an operation along the samps axis.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        The tod
+    block_size: int
+        The size of blocks to reduce.
+        The output RangesMatrix will be buffered by half this.
+    operation: function
+        The function to compute the block reduce with, see block_reduce docs for details.
+    thresh: Optional[tuple(float, float)]
+        Threshold to flag at.
+        If provided should be a tuple of the upper and lower bounds to flag at.
+    nsigma: float
+        Number of standard deviations to set the thresholds at, only used if thresh is None.
+        Sets both the upper and lower bounds.
+    high_low: int
+        If 0 flag using both the high and low thresholds.
+        If 1 flag high only.
+        If 2 flag low only.
+        Any other number is the same as passing in 0.
+    signal : array
+        (Optional). Signal to use to generate flags, if None default is aman.signal.
+    timestamps : array
+        (Optional). Timestamps to use to generate flags, default is aman.timestamps.
+    merge : bool
+        If true, merges the generated flag into aman.
+    overwrite : bool
+        If true, write over flag. If false, don't.
+    name : Optional[str]
+        Name of flag to add to aman.flags if merge is True.
+        If None then operation.__name__ is used.
+    full_output : bool
+        If true, returns calculated values from operation.
+
+    Returns
+    -------
+    cut : RangesMatrix
+        RangesMatrix of flagged blocks.
+    full_aman : AxisManager
+        If full_output is true, values calculated by the block reduce.
+        Values will be in full_aman.{name}_values.
+    """
+    if name is None:
+        name = operation.__name__
+    if "flags" not in aman:
+        overwrite = False
+        merge = False
+    if overwrite and name in aman.flags:
+        aman.flags.move(name, None)
+
+    if signal is None:
+        signal = aman.signal
+    signal = np.atleast_2d(signal)
+    if timestamps is None:
+        timestamps = aman.timestamps
+    assert len(timestamps) == signal.shape[1]
+
+    br = block_reduce(signal, block_size, op=operation, inclusive=True)
+    bflag = np.zeros_like(br, bool)
+
+    if thresh is None:
+        br_mean = np.mean(br)
+        br_thresh = nsigma * np.std(br)
+        thresh = (br_mean - br_thresh, br_mean + br_thresh)
+    thresh_low, thresh_high = thresh
+
+    high_low = (high_low <= 2) * (high_low > 0) * high_low
+    high_low += (high_low == 0) * 3
+    if high_low & 1:
+        bflag += br > thresh_high
+    if high_low & 2:
+        bflag += br < thresh_low
+
+    flag = block_expand(bflag, block_size, signal.shape[-1], inclusive=True).astype(
+        bool
+    )
+    cut = RangesMatrix.from_mask(flag).buffer(int(block_size / 2))
+
+    if merge:
+        if name in aman.flags and not overwrite:
+            raise ValueError("Flag name {} already exists in aman.flags".format(name))
+        if name in aman.flags:
+            aman.flags[name] = cut
+        else:
+            aman.flags.wrap(name, cut)
+
+    if full_output:
+        full = block_expand(br, block_size, signal.shape[-1], inclusive=True)
+        full_aman = core.AxisManager(
+            aman.dets,
+            core.OffsetAxis("samps", len(timestamps)),
+        )
+        full_aman.wrap(f"{name}_values", full, [(0, "dets"), (1, "samps")])
+        return cut, full_aman
+
+    return cut
+
+
+def get_moment_flags(
+    aman,
+    block_size,
+    moment,
+    center=None,
+    thresh=None,
+    nsigma=5,
+    high_low=0,
+    signal=None,
+    timestamps=None,
+    merge=True,
+    overwrite=True,
+    name=None,
+    full_output=False,
+):
+    """
+    Wrapper around `get_br_flags` for flagging based on the nth central moment.
+    Only the variables that differ from `get_br_flags` are listed below.
+
+    Parameters
+    ----------
+    moment : int
+        The order of the moment to use. Should be >= 1
+    center : Option[float]
+        The point about which moments are taken.
+        If None, the mean is used.
+    name : Optional[str]
+        Name of flag to add to aman.flags if merge is True.
+        If None then the name of the moment is used (mean, variance, skew, ...) up to the 5th moment
+        and moment_{moment} is used beyond that.
+    """
+    if moment < 1:
+        raise ValueError("Invalid moment provided, should be >= 1")
+    moment_names = ["mean", "variance", "skew", "kurtosis", "noltosis"]
+    if name is None:
+        if moment > len(moment_names):
+            name = f"moment_{moment}"
+        else:
+            name = moment_names[moment - 1]
+
+    return get_br_flags(
+        aman,
+        block_size,
+        partial(stats.moment, moment=moment, center=center),
+        thresh=thresh,
+        nsigma=nsigma,
+        high_low=high_low,
+        signal=signal,
+        timestamps=timestamps,
+        merge=merge,
+        overwrite=overwrite,
+        name=name,
+        full_output=full_output,
+    )
