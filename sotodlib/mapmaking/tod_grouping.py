@@ -97,7 +97,7 @@ def split_periods(periods, maxdur):
     t2     = np.minimum(periods[group,0]+(sub+1)*maxdur, periods[group,1])
     return np.array([t1,t2]).T
 
-def build_period_obslists(obs_info, periods, context, nset=None):
+def build_period_obslists(obs_info, periods, context, nset=None, wafer=None):
     """For each period for each detset-band, make a list of (id,detset,band)
     for the ids that fall inside that period. Returns a dictionary
     that maps (pid,deset,band) to those lists. pid is here the index into
@@ -108,11 +108,11 @@ def build_period_obslists(obs_info, periods, context, nset=None):
     pids       = np.searchsorted(periods[:,0], ctimes_mid)-1
     # 2. Build our lists. Not sure how to do this without looping
     for i, row in enumerate(obs_info):
-        # row.obs_id
-        meta = context.get_meta(row.obs_id)
-        wafer_list = np.unique(meta.det_info.wafer_slot)
-        #print("These are my wafers ", wafer_list)
-        #wafer_list = ['ws0','ws1','ws2','ws3','ws4','ws5','ws6']
+        if wafer is not None:
+            wafer_list = [wafer]
+        else:
+            meta = context.get_meta(row.obs_id)
+            wafer_list = np.unique(meta.det_info.wafer_slot)
         band_list = ['f090', 'f150']
         for detset in wafer_list[:nset]:
             for band in band_list:
@@ -121,7 +121,7 @@ def build_period_obslists(obs_info, periods, context, nset=None):
                 obslists[key].append((row.obs_id, detset, band, i))
     return obslists
 
-def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, fixed_time=None, mindur=None, ):
+def build_obslists(context, query, mode=None, nset=None, wafer=None, ntod=None, tods=None, fixed_time=None, mindur=None, ):
     """ 
     Return an obslists dictionary (described in build_period_obslists), along with all ancillary data necessary for the mapmaker
     
@@ -184,6 +184,6 @@ def build_obslists(context, query, mode=None, nset=None, ntod=None, tods=None, f
         sys.exit(1)
     
     # We will make one map per period-detset-band
-    obslists = build_period_obslists(obs_infos, periods, context, nset=nset)
+    obslists = build_period_obslists(obs_infos, periods, context, nset=nset, wafer=wafer)
     obskeys  = sorted(obslists.keys())
     return obslists, obskeys, periods, obs_infos
