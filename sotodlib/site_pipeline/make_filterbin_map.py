@@ -220,7 +220,6 @@ def calibrate_obs_new(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=
                 
     # this is from Max's notebook
     if obs.signal is not None:
-        flags.get_turnaround_flags(obs)
         flags.get_det_bias_flags(obs, rfrac_range=(0.05, 0.9), psat_range=(0, 20))
         bad_dets = has_all_cut(obs.flags.det_bias_flags)
         obs.restrict('dets', obs.dets.vals[~bad_dets])
@@ -231,6 +230,7 @@ def calibrate_obs_new(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=
         flags.get_trending_flags(obs, max_trend=2.5, n_pieces=10)
         tdets = has_any_cuts(obs.flags.trends)
         obs.restrict('dets', obs.dets.vals[~tdets])
+        if obs.dets.count<=1: return obs # check if I cut all the detectors after the trending flags
         jflags, _, jfix = jumps.twopi_jumps(obs, signal=obs.hwpss_remove, fix=True, overwrite=True)
         obs.hwpss_remove = jfix
         gfilled = gapfill.fill_glitches(obs, nbuf=10, use_pca=False, modes=1, signal=obs.hwpss_remove, glitch_flags=obs.flags.jumps_2pi)
@@ -255,6 +255,8 @@ def calibrate_obs_new(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=
             pca_signal = pca.get_pca_model(obs, pca_out, signal=obs.lpf_hwpss_remove)
             median = np.median(pca_signal.weights[:,0])
             obs.signal = np.divide(obs.signal.T, pca_signal.weights[:,0]/median).T
+        
+        flags.get_turnaround_flags(obs)
         apodize.apodize_cosine(obs, apodize_samps=800)  
     return obs
 
