@@ -20,9 +20,11 @@ from ._helpers import mpi_multi
 
 SAMPLE_FREQ_HZ = 100.
 
-def get_tod(sig_type='trendy'):
-    tod = core.AxisManager(core.LabelAxis('dets', ['a', 'b', 'c']),
-                           core.IndexAxis('samps', 1000))
+def get_tod(sig_type='trendy', ndets=3, nsamps=1000):
+    tod = core.AxisManager(
+        core.LabelAxis('dets', ['det%i' % i for i in range(ndets)]),
+        core.OffsetAxis('samps', nsamps)
+    )
     tod.wrap_new('signal', ('dets', 'samps'), dtype='float32')
     tod.wrap_new('timestamps', ('samps',))[:] = (
         np.arange(tod.samps.count) / SAMPLE_FREQ_HZ)

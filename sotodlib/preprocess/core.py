@@ -2,6 +2,8 @@
 import logging
 import numpy as np
 from .. import core
+from so3g.proj import Ranges, RangesMatrix
+from scipy.sparse import csr_array
 
 class _Preprocess(object):
     """The base class for Preprocessing modules which defines the required
@@ -30,7 +32,7 @@ class _Preprocess(object):
         self.calc_cfgs = step_cfgs.get("calc")
         self.save_cfgs = step_cfgs.get("save")
         self.select_cfgs = step_cfgs.get("select")
-    
+
     def process(self, aman, proc_aman):
         """ This function makes changes to the time ordered data AxisManager.
         Ex: calibrating or detrending the timestreams. This function will use
@@ -114,7 +116,26 @@ class _Preprocess(object):
         if self.select_cfgs is None:
             return meta
         raise NotImplementedError
-    
+
+    @classmethod
+    def gen_metric(cls, meta, proc_aman):
+        """ Generate a QA metric from the output of this process.
+
+        Arguments
+        ---------
+        meta : AxisManager
+            Metadata related to the specific observation
+        proc_aman : AxisManager
+            The output of the preprocessing pipeline.
+
+        Returns
+        -------
+        line : dict
+            InfluxDB line entry elements to be fed to
+            `site_pipeline.monitor.Monitor.record`
+        """
+        raise NotImplementedError
+
     @staticmethod
     def register(process_class):
         """Registers a new modules with the PIPELINE"""
@@ -127,7 +148,126 @@ class _Preprocess(object):
                 f"Preprocess Module of name {name} is already Registered"
             )
 
+def _zeros_cls( item ):
+    """return a callable zeros class that exactly matches type item for use 
+    with wrap_new"""
+    if isinstance( item, np.ndarray):
+        return lambda shape: np.zeros( shape, dtype = item.dtype)
+    elif isinstance( item, RangesMatrix):
+        return RangesMatrix.zeros
+    elif isinstance( item, Ranges ):
+        def temp(shape):
+            assert len(shape) == 1
+            return Ranges( shape[0] )
+        return temp
+    elif isinstance( item, csr_array):
+        return lambda shape: csr_array(tuple(shape), dtype=item.dtype)
+    else:
+        raise ValueError(f"Cannot find zero type for {type(item)}")
 
+def _ranges_matrix_match( o, n, oidx, nidx):
+    """align RangesMatrix n entries to RangesMatrix o"""
+    assert len(oidx)==len(nidx)
+    if len(oidx) > 2:
+        raise NotImplemented
+    for i, x in zip( oidx[0], nidx[0]):
+        o.ranges[i] = _ranges_match( 
+            o.ranges[i], n.ranges[x],
+            [oidx[1]], [nidx[1]]
+        )
+    return o.copy()
+
+def _ranges_match( o, n, oidx, nidx):
+    """align Ranges n to Ranges o"""
+    assert len(oidx)==len(nidx)
+    assert len(oidx)==1
+    omsk = o.mask()
+    nmsk = n.mask()
+    omsk[oidx[0]] = nmsk[nidx[0]]
+    return Ranges.from_mask(omsk)
+
+def _expand(new, full, wrap_valid=True):
+    """new will become a top level axismanager in full once it is matched to
+    size"""
+    if 'dets' in new._axes:
+        _, fs_dets, ns_dets = full.dets.intersection(
+            new.dets, 
+            return_slices=True
+        )
+    if 'samps' in new._axes:
+        _, fs_samps, ns_samps = full.samps.intersection(
+            new.samps, 
+            return_slices=True
+        )
+    else:
+        fs_samps = slice(None)
+
+    out = core.AxisManager()
+    for k, v in full._axes.items():
+        if k in list(new._axes.keys())+['dets','samps']:
+            out._axes[k] = v 
+
+    for a in new._axes:
+        if a not in out:
+            out.add_axis( new[a] )
+    for k, v in new._fields.items():
+        if isinstance(v, core.AxisManager):
+            out.wrap( k, _expand( v, full) )
+        else:
+            out.wrap_new( k, new._assignments[k], cls=_zeros_cls(v))
+            oidx=[]; nidx=[]
+            for a in new._assignments[k]:
+                if a == 'dets':
+                    oidx.append(fs_dets)
+                    nidx.append(ns_dets)
+                elif a == 'samps':
+                    oidx.append(fs_samps)
+                    nidx.append(ns_samps)
+                else:
+                    oidx.append(slice(None))
+                    nidx.append(slice(None))
+            oidx = tuple(oidx)
+            nidx = tuple(nidx)
+            if isinstance(out[k], RangesMatrix):
+                assert new._assignments[k][-1] == 'samps'
+                out[k] = _ranges_matrix_match( out[k], v, oidx, nidx)
+            elif isinstance(out[k], Ranges):
+                assert new._assignments[k][0] == 'samps'
+                out[k] = _ranges_match( out[k], v, oidx, nidx)
+            else:
+                out[k][oidx] = v[nidx]
+    if wrap_valid:
+        x = Ranges( full.samps.count )
+        m = x.mask()
+        m[fs_samps] = True
+        v = Ranges.from_mask(m)
+
+        valid = RangesMatrix( 
+            [v if i in fs_dets else x for i in range(full.dets.count)]
+        )
+        out.wrap('valid',valid,[(0,'dets'),(1,'samps')])
+    return out
+
+def update_full_aman(proc_aman, full, wrap_valid):
+    """Copy new fields from proc_aman[dets,samps] over to 
+    full[full-dets,full-samps] after correct re-sizing and indexing.
+
+    Arguments
+    ----------
+    proc_aman: AxisManager
+        A preprocess AxisManager from a pipeline run. The dets,samps axes in 
+        proc_aman is assumed to be a subset of the dets,samps axes in full
+    full: AxisManager
+        A full shape AxisManager that begins the pipeline as the original shape
+        of the TOD AxisManager
+    """
+    for fld in proc_aman._fields:
+        if fld not in full._fields:
+            assert isinstance(proc_aman[fld], core.AxisManager)
+            full.wrap( 
+                fld,
+                _expand( proc_aman[fld], full, wrap_valid=wrap_valid)
+            )
 
 class Pipeline(list):
     """This class is designed to create and run pipelines out of a series of
@@ -138,7 +278,7 @@ class Pipeline(list):
 
     PIPELINE = {}
 
-    def __init__(self, modules, logger=None):
+    def __init__(self, modules, logger=None, wrap_valid=True):
         """
         Arguments
         ---------
@@ -152,6 +292,7 @@ class Pipeline(list):
         if logger is None:
             logger = logging.getLogger("pipeline")
         self.logger = logger
+        self.wrap_valid = wrap_valid
         super().__init__( [self._check_item(item) for item in modules])
     
     def _check_item(self, item):
@@ -207,7 +348,8 @@ class Pipeline(list):
             expected to be present in this AxisManager.
         select: boolean (Optional)
             if True, the aman detector axis is restricted as described in
-            each preprocess module
+            each preprocess module. Most pipelines are developed with 
+            select=True. Running select=False may produce unstable behavior
 
         Returns
         -------
@@ -218,6 +360,7 @@ class Pipeline(list):
         """
         if proc_aman is None:
             proc_aman = core.AxisManager( aman.dets, aman.samps)
+            full = core.AxisManager( aman.dets, aman.samps)
             run_calc = True
         else:
             if aman.dets.count != proc_aman.dets.count or not np.all(aman.dets.vals == proc_aman.dets.vals):
@@ -225,14 +368,25 @@ class Pipeline(list):
                 det_list = [det for det in proc_aman.dets.vals if det in aman.dets.vals]
                 aman.restrict('dets', det_list)
                 proc_aman.restrict('dets', det_list)
+            full = proc_aman.copy()
             run_calc = False
-            
+        
+        success = 'end'
         for process in self:
             self.logger.info(f"Running {process.name}")
             process.process(aman, proc_aman)
             if run_calc:
                 process.calc_and_save(aman, proc_aman)
+                update_full_aman( proc_aman, full, self.wrap_valid)
+                
             if select:
                 process.select(aman, proc_aman)
                 proc_aman.restrict('dets', aman.dets.vals)
-        return proc_aman
+            self.logger.debug(f"{proc_aman.dets.count} detectors remaining")
+            
+            if aman.dets.count == 0:
+                success = process.name
+                break
+        
+        return full, success
+        

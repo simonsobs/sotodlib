@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Data I/O operations.
 """
@@ -51,6 +51,20 @@ def load_data_context(job, otherargs, runargs, data):
 
     # Load it
     if job_ops.load_context.enabled:
+        # Special handling of ACT data.  In this case, the user may have
+        # set the MOBY2_TOD_STAGING_PATH environment variable to force the
+        # data loader to make a copy into ramdisk for opening.  This will
+        # break parallel access, since each process tries to create (and
+        # then delete) the same file.  Here we append the process rank to
+        # the staging directory
+        if "MOBY2_TOD_STAGING_PATH" in os.environ:
+            procdir = os.path.join(
+                os.environ["MOBY2_TOD_STAGING_PATH"],
+                f"{data.comm.world_rank}",
+                f"{os.getpid()}",
+            )
+            os.makedirs(procdir, exist_ok=True)
+            os.environ["MOBY2_TOD_STAGING_PATH"] = procdir
         job_ops.load_context.apply(data)
 
 

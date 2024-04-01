@@ -265,7 +265,7 @@ def get_glitch_flags(aman,
                      n_sig=10,
                      buffer=200,
                      detrend=None,
-                     signal=None,
+                     signal_name=None,
                      merge=True,
                      overwrite=False,
                      name="glitches",
@@ -288,7 +288,7 @@ def get_glitch_flags(aman,
         Amount to buffer flags around found location
     detrend : str
         Detrend method to pass to fourier_filter
-    signal : str
+    signal_name : str
         Field name in aman to detect glitches on if None, defaults to ``signal``
     merge : bool)
         If true, add to ``aman.flags``
@@ -308,12 +308,12 @@ def get_glitch_flags(aman,
         RangesMatrix object containing glitch mask.
     """
 
-    if signal is None:
-        signal = "signal"
+    if signal_name is None:
+        signal_name = "signal"
     # f-space filtering
     filt = filters.high_pass_sine2(cutoff=hp_fc) * filters.gaussian_filter(t_sigma=t_glitch)
     fvec = fourier_filter(
-        aman, filt, detrend=detrend, signal_name=signal, resize="zero_pad"
+        aman, filt, detrend=detrend, signal_name=signal_name, resize="zero_pad"
     )
     # get the threshods based on n_sig x nlev = n_sig x iqu x 0.741
     fvec = np.abs(fvec)

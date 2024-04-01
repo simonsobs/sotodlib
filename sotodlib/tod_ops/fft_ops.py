@@ -269,14 +269,14 @@ def calc_psd(
 
     freqs, Pxx = welch(signal[:, start:stop], fs, **kwargs)
     if merge:
-        aman.merge(core.AxisManager(core.OffsetAxis("fsamps", len(freqs))))
+        aman.merge( core.AxisManager(core.OffsetAxis("nusamps", len(freqs))))
         if overwrite:
             if "freqs" in aman._fields:
                 aman.move("freqs", None)
             if "Pxx" in aman._fields:
                 aman.move("Pxx", None)
-        aman.wrap("freqs", freqs, [(0, "fsamps")])
-        aman.wrap("Pxx", Pxx, [(0, "dets"), (1, "fsamps")])
+        aman.wrap("freqs", freqs, [(0,"nusamps")])
+        aman.wrap("Pxx", Pxx, [(0,"dets"),(1,"nusamps")])
     return freqs, Pxx
 
 

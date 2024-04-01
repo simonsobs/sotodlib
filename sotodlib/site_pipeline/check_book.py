@@ -104,9 +104,8 @@ def get_parser(parser=None):
     return parser
 
 
-def main(book_dir, config=None, add=None, overwrite=None, logger=None):
-    if logger is None:
-        logger = util.init_logger(__name__, 'check_book: ')
+def main(book_dir, config=None, add=None, overwrite=None):
+    logger = util.init_logger(__name__, 'check_book: ')
 
     logger.info(f'Examining {book_dir}')
 

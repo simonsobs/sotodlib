@@ -211,3 +211,11 @@ Module containing functions for generating flags for cuts and tod masking.
 
 .. automodule:: sotodlib.tod_ops.flags
    :members:
+
+tod_ops.fft_ops
+===============
+
+Module containing functions for FFTs and related operations.
+
+.. automodule:: sotodlib.tod_ops.fft_ops
+   :members:

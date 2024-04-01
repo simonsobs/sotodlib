@@ -11,15 +11,13 @@ import argparse
 import logging
 from sqlalchemy import not_, or_, and_, desc
 
-from sotodlib.io.g3thk_db import G3tHk, HKFiles, logger as default_logger
+from sotodlib.io.g3thk_db import G3tHk, HKFiles, logger
 
 
-def main(config=None, from_scratch=False, verbosity=2, logger=None):
+def main(config=None, from_scratch=False, verbosity=2):
 
     show_pb = True if verbosity > 1 else False
 
-    if logger is None:
-        logger = default_logger
     if verbosity == 0:
         logger.setLevel(logging.ERROR)
     elif verbosity == 1:

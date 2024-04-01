@@ -41,6 +41,24 @@ def setup_mapmaker(operators, templates):
             enabled=False,
         )
     )
+    # Uncomment after toast PR #736 is merged.
+    # templates.append(
+    #     toast.templates.Hwpss(
+    #         name="hwpss",
+    #         hwp_angle=defaults.hwp_angle,
+    #         harmonics=5,
+    #         enabled=False,
+    #     )
+    # )
+    templates.append(
+        toast.templates.Fourier2D(
+            name="fourier2d",
+            correlation_length=5.0 * u.second,
+            correlation_amplitude=10.0,
+            order=1,
+            fit_subharmonics=False,
+        )
+    )
     operators.append(toast.ops.BinMap(name="binner", pixel_dist="pix_dist"))
     operators.append(
         toast.ops.BinMap(

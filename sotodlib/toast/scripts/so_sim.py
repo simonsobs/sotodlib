@@ -67,7 +67,7 @@ def simulate_data(job, otherargs, runargs, comm):
         wrk.create_az_intervals(job, otherargs, runargs, data)
         # optionally zero out
         if otherargs.zero_loaded_data:
-            toast.ops.Reset(detdata=[defaults.signal])
+            toast.ops.Reset(detdata=[defaults.det_data])
 
     wrk.select_pointing(job, otherargs, runargs, data)
     wrk.simple_noise_models(job, otherargs, runargs, data)
