@@ -21,29 +21,27 @@ Session = sessionmaker()
 @dataclass
 class HkConfig:
     """
-    Configuration object for loading and indexing HK.
-
-    Args
-    -----
-    hk_root : str
-        Root directory of hk files
-    hk_db : str
-        Path to hk index database
-    echo_db : bool
-        Whether to echo database operations
-    aliases : Dict[str, str]
-        Aliases for hk fields. In this dict, the key is the alias name, and the
-        value is the field descriptor, in the format of ``agent.feed.field``.
-        For example::
-
-            {
-                'fp_temp': 'cryo-ls372-lsa21yc.temperatures.Channel_02_T',
-            }
+    Configuration object for indexing and loading from an HK archive.
     """
     hk_root: str
+    "Root directory for the HK archive"
+
     hk_db: str
+    "Path to the hk index database"
+
     echo_db: bool = False
+    "Whether database operations should be echoed"
+
     aliases: Dict[str, str] = field(default_factory=dict)
+    """
+    Aliases for hk fields. In this dict, the key is the alias name, and the
+    value is the field descriptor, in the format of ``agent.feed.field``.
+    For example::
+
+        {
+            'fp_temp': 'cryo-ls372-lsa21yc.temperatures.Channel_02_T',
+        }
+    """
 
     @classmethod
     def from_yaml(cls, path):
@@ -273,26 +271,23 @@ class Field:
 class LoadSpec:
     """
     HK loading specification
-
-    Args
-    -----
-    cfg : HkConfig
-        HkConfig object
-    fields : List[str]
-        List of field specifications to load. This can either be a field
-        descriptor, of the format ``agent.feed.field``, or an alias defined in
-        the config. Field descriptors can contain wildcards, for instance
-        ``agent.*.*`` will load all fields belonging to the specified agent.
-        ``agent.feed.*`` and ``agent.*.field`` will also work as expected.
-    start : float 
-        Starting time of data to load
-    end : float
-        Ending time of data to load
     """
     cfg: HkConfig
+
     fields: List[str]
+    """
+    List of field specifications to load. This can either be a field
+    descriptor, of the format ``agent.feed.field``, or an alias defined in
+    the config. Field descriptors can contain wildcards, for instance
+    ``agent.*.*`` will load all fields belonging to the specified agent.
+    ``agent.feed.*`` and ``agent.*.field`` will also work as expected.
+    """
+
     start: float
+    "Start time to load"
+
     end: float
+    "End time to load"
 
     def __post_init__(self):
         fs = []
