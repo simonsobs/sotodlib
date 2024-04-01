@@ -114,9 +114,9 @@ annotated example.
   # A list of metadata products that should be loaded along with the
   # TOD.  Each entry in the list points to a metadata database (an
   # sqlite file) and specifies the name under which that information
-  # should be associated in the loaded data structure.  In some
-  # cases a "loader" name is also given, but usually this is
-  # specified in the database.
+  # should be associated (unpacked) in the loaded data structure.
+  # The entries here are all fairly simple -- see documentation for
+  # more complex examples.
   metadata:
     - db: "{metadata_lib}/cuts_s17_c11_200327_cuts.sqlite"
       unpack: "glitch_flags&flags"
