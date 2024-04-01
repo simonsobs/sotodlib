@@ -384,5 +384,6 @@ def load_hk(load_spec: LoadSpec, show_pb=False):
     for k in result:
         result[k][0] = np.hstack(result[k][0])
         result[k][1] = np.hstack(result[k][1])
+        result[k] = np.array(result[k])
 
     return HkResult(result, aliases=load_spec.cfg.aliases)
