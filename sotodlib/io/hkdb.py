@@ -101,9 +101,18 @@ class HkFrame(Base):
     end_time = db.Column(db.Float)
 
 
-def get_items_from_file(hk_path) -> Tuple[HkFile, List[HkFrame]]:
+def get_items_from_file(hk_path, return_on_fail=True) -> Tuple[HkFile, List[HkFrame]]:
     """
     Returns HkFile and HkFrame objects corresponding to a given hk file.
+
+    Args
+    --------
+    hk_path : str
+        Path of hk file to read
+    return_on_fail : bool
+        If True, if there is a runtime error while reading the g3 file (usually
+        caused by a forced shutdown), the function will still return parsed
+        frames.
 
     Returns
     ---------
@@ -119,7 +128,14 @@ def get_items_from_file(hk_path) -> Tuple[HkFile, List[HkFrame]]:
     file_start, file_end = 1<<32, 0
     while True:
         byte_offset = reader.Tell()
-        frame = reader.Process(None)
+        try:
+            frame = reader.Process(None)
+        except RuntimeError:
+            print(f"Error processing file {hkfile} byte offset: {byte_offset}")
+            if return_on_fail:
+                break
+            else:
+                raise
         if not frame:
             break
         else:
@@ -167,7 +183,7 @@ class HkDb:
         Base.metadata.create_all(self.engine)
 
 
-def index_files(paths, db: HkDb):
+def index_files(paths, hkdb: HkDb, session=None):
     """
     Indexes a group of files, adding items to the database.
 
@@ -179,14 +195,21 @@ def index_files(paths, db: HkDb):
         Database object to use
     """
     paths = np.atleast_1d(paths)
+    if session is None:
+        session = hkdb.Session()
+
     items =[]
+    hk_root = hkdb.cfg.hk_root
     for p in paths:
-        hk_file, hk_frames = get_items_from_file(p)
+        hk_file, hk_frames = get_items_from_file(os.path.join(hkdb.cfg.hk_root, p))
         items.append(hk_file)
         items.extend(hk_frames)
-
-    with db.Session.begin() as sess:
-        sess.add_all(items)
+    try:
+        session.add_all(items)
+        session.commit()
+    except:
+        session.rollback()
+        raise
 
 
 def get_all_hk_files(cfg: HkConfig):
@@ -206,20 +229,19 @@ def index_all(cfg: Union[HkConfig, str], show_pb=True, files_per_batch=1):
     Indexes all files in the specified root directory.
     """
     hkdb = HkDb(cfg)
-    all_files = get_all_hk_files()
+    all_files = get_all_hk_files(cfg)
 
-    with hkdb.Session.begin() as sess:
-        archived_paths = [path for path, in sess.query(HkFile.path).all()]
-        remaining_files = sorted(list(set(all_files) - set(archived_paths)))
-    
+    session = hkdb.Session()
+    archived_paths = [path for path, in session.query(HkFile.path).all()]
+    remaining_files = sorted(list(set(all_files) - set(archived_paths)))
+
     for i in trange(0, len(remaining_files), files_per_batch, disable=(not show_pb)):
-        index_files(remaining_files[i:i+files_per_batch], hkdb)
+        index_files(remaining_files[i:i+files_per_batch], hkdb, session=session)
 
 
 #####################
 # HK Loading stuff
 #####################
-
 @dataclass
 class Field:
     agent: str
@@ -328,7 +350,7 @@ def load_hk(load_spec: LoadSpec, show_pb=False):
             if frame.file.path not in file_spec:
                 file_spec[frame.file.path] = []
             file_spec[frame.file.path].append(frame.byte_offset)
-        
+
     result = {}  # {field: [timestamps, data]}
     def get_result_field(agent, feed, field_name):
         f = Field(agent, feed, field_name)
