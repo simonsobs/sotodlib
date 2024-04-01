@@ -693,10 +693,11 @@ class FourierFilter(_Preprocess):
             aman.restrict('samps',(trim, -trim))
             proc_aman.restrict('samps', (trim, -trim))
 
-def PCARelCal(_Preprocess):
+class PCARelCal(_Preprocess):
     """
     Estimate the relcal factor from the atmosphere using PCA.
     """
+    name = 'pca_relcal'
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
 
