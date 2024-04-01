@@ -12,8 +12,8 @@ The databases implemented store the following information:
   agent instance-id, and the byte-offset of the frame in the file.
 
 To index and load housekeeping information, you will need to create a
-``HkConfig`` object, documented in the API section below. For example, the following yaml file can
-be loaded in directly ``HkConfig.from_yaml``:
+``HkConfig`` object, documented in the API section below. For example, the
+following yaml file can be loaded in directly with ``HkConfig.from_yaml``:
 
 .. code-block:: yaml
 
@@ -47,11 +47,11 @@ For example, the code below will load the focal-plane temp for the last week:
     )   
     result = hkdb.load_hk(lspec, show_pb=True)
 
-The result object will be an HkResult object, where ``result.data`` contains
-the mapping from field-id to tuple where the first element is t, 
-where the first entry are the timestamps, and the second entry are the data
-values.  If any of the requested fields have an alias defined in the ``cfg``
-object, that alias will be set as an attribute in the HkResult object:
+The result object will be an HkResult object, where ``result.data`` contains the
+mapping from field-id to a numpy array of shape (2, nsamp), where the first
+entry are the timestamps, and the second entry are the data values.  If any of
+the requested fields have an alias defined in the ``cfg`` object, that alias
+will be set as an attribute in the HkResult object:
 
 .. code-block:: python
 
