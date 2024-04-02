@@ -508,8 +508,10 @@ def downsample_obs(obs, down):
         bore.wrap(key, getattr(obs.boresight, key)[::down], [(0, "samps")])
     res.wrap("boresight", bore)
     res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp), [(0,"dets"),(1,"samps")])
-    # The cuts
-    for key in ["glitch_flags", "source_flags"]:
+    # The cuts. glitch_flags is mandatory, but source_flags is optional
+    cut_keys = ["glitch_flags"]
+    if "source_flags" in obs: cut_keys.append(source_flags)
+    for key in cut_keys:
         res.wrap(key, downsample_cut(getattr(obs, key), down), [(0,"dets"),(1,"samps")])
     # Not sure how to deal with flags. Some sort of or-binning operation? But it
     # doesn't matter anyway
