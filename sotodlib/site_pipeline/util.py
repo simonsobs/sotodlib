@@ -251,20 +251,23 @@ def init_logger(name, announce=''):
 
     """
     logger = logging.getLogger(name)
+
+    # add handler only if it doesn't exist
+    if len(logger.handlers) == 0:
+        ch = logging.StreamHandler(sys.stdout)
+        formatter = _ReltimeFormatter('%(asctime)s: %(message)s (%(levelname)s)')
+
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
+        i, r = formatter.start_time // 1, formatter.start_time % 1
+        text = (time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(i))
+              + (',%03d' % (r*1000)))
+        logger.info(f'{announce}Log timestamps are relative to {text}')
+
     logger.propagate = False
     logger.setLevel(logging.DEBUG)
 
-    ch = logging.StreamHandler(sys.stdout)
-    formatter = _ReltimeFormatter('%(asctime)s: %(message)s (%(levelname)s)')
-
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
-
-    i, r = formatter.start_time // 1, formatter.start_time % 1
-    text = (time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(i))
-            + (',%03d' % (r*1000)))
-    logger.info(f'{announce}Log timestamps are relative to {text}')
 
     return logger
 

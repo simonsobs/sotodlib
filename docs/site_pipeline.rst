@@ -277,6 +277,20 @@ match. To disable this, you can run a config file like the following:
   context_path: /path/to/context.yaml
   freq_offset_range_args: None
 
+Below is a more complex config used for SATp1 matching:
+
+.. code-block:: yaml
+
+  results_path: /so/metadata/satp1/manifests/det_match/satp1_det_match_240220m
+  context_path: /so/metadata/satp1/contexts/smurf_detcal.yaml
+  show_pb: False
+  freq_offset_range_args: NULL
+  apply_solution_pointing: False
+  solution_type: resonator_set
+  resonator_set_dir: /so/metadata/satp1/ancillary/detmatch_solutions/satp1_detmatch_solutions_240219r1
+  match_pars:
+    freq_width: 0.2
+
 Below is the full docs of the configuration class.
 
 .. autoclass:: sotodlib.site_pipeline.update_det_match.UpdateDetMatchesConfig
@@ -445,6 +459,19 @@ the preprocessing steps applied to them.
 
 .. argparse::
    :module: sotodlib.site_pipeline.preprocess_tod
+   :func: get_parser
+
+preprocess-obs
+--------------
+This script is set up to run a preprocessing pipeline using the preprocess
+module. See details in :ref:`See details here<preprocess-module>` for how to
+build an obs preprocessing pipeline.
+
+This module is similar to ``preprocess_tod`` but removes grouping by detset so
+that the entire observation is loaded, without signal.
+
+.. argparse::
+   :module: sotodlib.site_pipeline.preprocess_obs
    :func: get_parser
 
 make-position-match

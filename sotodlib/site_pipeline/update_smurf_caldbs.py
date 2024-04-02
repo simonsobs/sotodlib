@@ -52,30 +52,25 @@ import sotodlib.site_pipeline.util as sp_util
 DEFAULT_RTM_BIT_TO_VOLT = 10 / 2**19
 DEFAULT_pA_per_phi0 = 9e6
 
-default_logger = logging.getLogger('smurf_caldbs')
-if not default_logger.hasHandlers():
+logger = logging.getLogger('smurf_caldbs')
+if not logger.hasHandlers():
     sp_util.init_logger('smurf_caldbs')
 
 
 
 def main(config: Union[str, dict], 
         overwrite:Optional[bool]=False,
-        skip_detset=False, skip_detcal=False, logger=None):
+        skip_detset=False, skip_detcal=False):
     if not skip_detset:
-        smurf_detset_info(config, overwrite, logger)
+        smurf_detset_info(config, overwrite)
     if not skip_detcal:
-        run_update_det_caldb(config, logger=logger, overwrite=overwrite)
+        run_update_det_caldb(config, overwrite=overwrite)
 
 def smurf_detset_info(config: Union[str, dict], 
-        overwrite:Optional[bool]=False,
-        logger=None):
+        overwrite:Optional[bool]=False):
     """Write out the updates for the manifest database with information about
     the readout ids present inside each detset.
     """
-
-    if logger is None:
-        logger = default_logger
-
     if type(config) == str:
         config = yaml.safe_load(open(config, 'r'))
 
@@ -227,15 +222,12 @@ class CalInfo:
 class MissingSmurfInfo(Exception):
     pass
 
-def get_cal_resset(ctx: core.Context, obs_id, logger=None):
+def get_cal_resset(ctx: core.Context, obs_id):
     """
     Returns calibration ResultSet for a given ObsId. This pulls IV and bias step
     data for each detset in the observation, and uses that to compute CalInfo
     for each detector in the observation
     """
-    if logger is None:
-        logger=default_logger
-
     am = ctx.get_obs(obs_id, samples=(0, 1), ignore_missing=True, no_signal=True)
     cals = [CalInfo(rid) for rid in am.det_info.readout_id]
     if 'smurf' not in am.det_info:
@@ -356,7 +348,6 @@ def get_obs_with_detsets(ctx, detset_idx):
 
 
 def add_to_failed_cache(obs_id, cache_path, msg):
-    logger = default_logger
     logger.info(f"Adding {obs_id} to failed obsid cache with msg: {msg}")
     if os.path.exists(cache_path):
         with open(cache_path, 'r') as f:
@@ -377,7 +368,7 @@ def get_failed_obsids(cache_path):
         cache = yaml.safe_load(f)
     return set(cache.keys())
 
-def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None, 
+def update_det_caldb(ctx, idx_path, detset_idx, h5_path,
                      show_pb=False, format_exc=False, overwrite=False,
                      failed_obsid_cache=None, root_dir=None, write_relpath=True):
     """
@@ -395,8 +386,6 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None,
         Path to detset manifestdb
     h5_path: str
         Path to h5 file to write results set.
-    logger: logging.Logger
-        Logger to use. If not set will use default.
     show_pb: bool
         If True, will show progress bar and time remaining
     format_exc: bool
@@ -414,14 +403,11 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None,
         If true, when adding entries to the manifestdb, will use the h5 path relative
         to the idx_path.
     """
-
-    if logger is None:
-        logger = default_logger
-
     if root_dir is not None:
         h5_path = os.path.join(root_dir, h5_path)
         idx_path = os.path.join(root_dir, idx_path)
-        failed_obsid_cache = os.path.join(root_dir, failed_obsid_cache)
+        if failed_obsid_cache is not None:
+            failed_obsid_cache = os.path.join(root_dir, failed_obsid_cache)
     h5_relpath = os.path.relpath(h5_path, start=os.path.dirname(idx_path))
 
     if not os.path.exists(idx_path):
@@ -473,7 +459,7 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None,
         }, filename=path, replace=overwrite)
 
 
-def run_update_det_caldb(config_path, logger=None, overwrite=False):
+def run_update_det_caldb(config_path, overwrite=False):
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
 
@@ -490,7 +476,6 @@ def run_update_det_caldb(config_path, logger=None, overwrite=False):
         detset_idx,
         config['archive']['det_cal']['h5file'],
         show_pb=config['archive']['det_cal'].get('show_pb', False),
-        logger=logger,
         format_exc=format_exc,
         overwrite=overwrite,
         failed_obsid_cache=config['archive']['det_cal'].get('failed_obsid_cache'),

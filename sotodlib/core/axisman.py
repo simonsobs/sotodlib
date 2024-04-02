@@ -28,6 +28,9 @@ class AxisInterface:
 
     def copy(self):
         raise NotImplementedError
+    
+    def rename(self, name):
+        self.name = name
 
     def resolve(self, src, axis_index=None):
         """Perform a check or promote-and-check of this Axis against a data
@@ -257,9 +260,11 @@ class LabelAxis(AxisInterface):
         return super().resolve(src, axis_index)
 
     def restriction(self, selector):
-        # Selector should be list of vals.  Returns new axis and the
+        # Selector should be list of vals or a mask. Returns new axis and the
         # indices into self.vals that project out the elements.
-        _vals, i0, i1 = get_coindices(selector, self.vals)
+        if self.vals is not None and isinstance(selector, np.ndarray) and selector.dtype == bool:
+            selector = self.vals[selector]
+        _, i0, i1 = get_coindices(selector, self.vals)
         assert len(i0) == len(selector)  # not a strict subset!
         return LabelAxis(self.name, selector), i1
 
@@ -344,6 +349,10 @@ class AxisManager:
             self._fields[new_name] = self._fields.pop(name)
             self._assignments[new_name] = self._assignments.pop(name)
         return self
+    
+    def add_axis(self, a):
+        assert isinstance( a, AxisInterface)
+        self._axes[a.name] = a.copy()
 
     def __contains__(self, name):
         return name in self._fields or name in self._axes
@@ -514,14 +523,14 @@ class AxisManager:
                     if np.any([np.isscalar(i[k]) for i in items]):
                         if not np.all([np.isscalar(i[k]) for i in items]):
                             raise ValueError(err_msg)
-                        if not np.all( [i[k]==items[0][k] for i in items]):
+                        if not np.all([np.array_equal(i[k], items[0][k], equal_nan=True) for i in items]):
                             raise ValueError(err_msg)
                         output.wrap(k, items[0][k], axis_map)
                         continue
                         
                     elif not np.all([i[k].shape==items[0][k].shape for i in items]):
                         raise ValueError(err_msg)
-                    elif not np.all([i[k]==items[0][k] for i in items]):
+                    elif not np.all([np.array_equal(i[k], items[0][k], equal_nan=True) for i in items]):
                         raise ValueError(err_msg)
                         
                     output.wrap(k, items[0][k].copy(), axis_map)
@@ -759,14 +768,22 @@ class AxisManager:
             if isinstance(v, AxisManager):
                 dest._fields[k] = v.copy()
                 if axis_name in v._axes:
-                    dest._fields[k].restrict(axis_name, selector)
+                    dest._fields[k].restrict(
+                        axis_name, 
+                        selector, 
+                        ## copies of axes made above
+                        in_place=True 
+                    )
             elif np.isscalar(v) or v is None:
                 dest._fields[k] = v
             else:
                 sslice = [sl if n == axis_name else slice(None)
                           for n in dest._assignments[k]]
                 sslice = dest._broadcast_selector(sslice)
-                dest._fields[k] = v[sslice]
+                if in_place:
+                    dest._fields[k] = v[sslice]
+                else:
+                    dest._fields[k] = v[sslice].copy()
         dest._axes[axis_name] = new_ax
         return dest
 
@@ -821,7 +838,7 @@ class AxisManager:
             self._assignments.update(aman._assignments)
         return self
 
-    def save(self, dest, group=None, overwrite=False):
+    def save(self, dest, group=None, overwrite=False, compression=None):
         """Write this AxisManager data to an HDF5 group.  This is an
         experimental feature primarily intended to assist with
         debugging.  The schema is subject to change, and it's possible
@@ -835,6 +852,9 @@ class AxisManager:
             dest).
           overwrite (bool): If True, remove any existing thing at the
             specified address before writing there.
+          compression (str or None): Compression filter to apply. E.g.
+            'gzip'. This string is passed directly to HDF5 dataset
+            routines.
 
         Notes:
           If dest is a string, it is taken to be an HDF5 filename and
@@ -868,10 +888,10 @@ class AxisManager:
 
         """
         from .axisman_io import _save_axisman
-        return _save_axisman(self, dest, group=group, overwrite=overwrite)
+        return _save_axisman(self, dest, group=group, overwrite=overwrite, compression=compression)
 
     @classmethod
-    def load(cls, src, group=None):
+    def load(cls, src, group=None, fields=None):
         """Load a saved AxisManager from an HDF5 file and return it.  See docs
         for save() function.
 
@@ -882,9 +902,19 @@ class AxisManager:
 
           with h5py.File('test.h5', 'r') as h:
             axisman = AxisManager.load(h, 'x/y/z')
+
+        If the fields argument is specified, it must be a list of
+        strings indicating what subfields of the stored AxisManager
+        should be extracted.  For nested entries, connect fields with
+        ".".  For example ``fields=['subaman.field1',
+        'subaman.field2']``.  When fields is specified, _all_ axes
+        from the AxisManager are included in the result, even if not
+        directly referenced by the requested fields; this behavior is
+        subject to change.
+
         """
         from .axisman_io import _load_axisman
-        return _load_axisman(src, group, cls)
+        return _load_axisman(src, group, cls, fields=fields)
 
 
 def simplify_slice(sslice, shape):

@@ -63,6 +63,18 @@ class UpdateDetMatchesConfig:
     write_relpath: bool
         If True, will use the relative path to the h5 file (relative to the db
         path) when writing to the manifestdb
+    solution_type: str
+        Type of solutions to use. Must be one of ['kaiwen_handmade',
+        'resonator_set'].  If 'kaiwen_handmade', will use the handmade solutions
+        from Kaiwen pulled from the wafer_map file in the site-pipeline-configs.
+        If `resonator_set`, must also specify the ``resonator_set_dir`` to pull
+        solutions from.
+    resonator_set_dir: Optional[str]
+        If ``solution_type`` is 'resonator_set', this must be specified and
+        contain the path to the resonator-set solutions. This directory must
+        have a res-set npy file for each stream_id that is expected in the
+        matching, formatted like ``<resonator_set_dir>/<stream_id>.npy``, which
+        contains the result from ``np.save(fname, match.merged.as_array())``.
     
     Attributes
     -------------
@@ -81,6 +93,8 @@ class UpdateDetMatchesConfig:
     show_pb: bool = False
     apply_solution_pointing: bool = True
     write_relpath: bool = True
+    solution_type: str = 'kaiwen_handmade'
+    resonator_set_dir: Optional[str] = None
 
     def __post_init__(self):
         if self.site_pipeline_root is None:
@@ -100,6 +114,15 @@ class UpdateDetMatchesConfig:
 
         if not os.path.exists(self.results_path):
             raise FileNotFoundError(f"Results dir does not exist: {self.results_path}")
+        
+        allowed_solution_types = ['kaiwen_handmade', 'resonator_set']
+        if self.solution_type not in allowed_solution_types:
+            raise ValueError(
+                f"Solution type ({self.solution_type}) must be a member of: {allowed_solution_types}")
+        
+        if self.solution_type == 'resonator_set':
+            if self.resonator_set_dir is None:
+                raise ValueError("Must specify resonator_set_dir for solution_type='resonator_set'")
 
 
 class Runner:
@@ -142,6 +165,28 @@ class Runner:
         run_match(self, remaining_detsets[0])
         return True
 
+def load_solution_set(runner: Runner, stream_id: str, wafer_slot=None):
+    cfg = runner.cfg
+    if cfg.solution_type == 'kaiwen_handmade':
+        sol_file = os.path.join(
+            os.path.dirname(runner.cfg.wafer_map_path),
+            runner.wafer_map[stream_id]['solution']
+        )
+        teltype = runner.wafer_map[stream_id]['tel_type']
+        if wafer_slot is None:  # Pull from detmapping cfg
+            wafer_slot = runner.wafer_map[stream_id]['wafer_slot']
+        fp_pars = optics.get_ufm_to_fp_pars(teltype, wafer_slot, runner.ufm_to_fp_file)
+        rs = det_match.ResSet.from_solutions(sol_file, fp_pars=fp_pars, platform=teltype)
+        rs.name = 'sol'
+        return rs
+
+    elif cfg.solution_type == 'resonator_set':
+        sol_file = os.path.join(cfg.resonator_set_dir, f"{stream_id}.npy")
+        rs_arr = np.load(sol_file)
+        rs = det_match.ResSet.from_array(rs_arr)
+        rs.name = 'sol'
+        return rs
+
 def add_to_failed_cache(cache_file, detset, msg):
     if os.path.exists(cache_file):
         with open(cache_file, 'r') as f:
@@ -164,19 +209,11 @@ def get_failed_detsets(cache_file):
 
 def run_match_aman(runner: Runner, aman, detset, wafer_slot=None):
     stream_id = aman.det_info.stream_id[aman.det_info.detset == detset][0]
-    sol_file = os.path.join(
-        os.path.dirname(runner.cfg.wafer_map_path),
-        runner.wafer_map[stream_id]['solution']
-    )
 
     rs0 = det_match.ResSet.from_aman(aman, stream_id)
     rs0.name = 'meas'
 
-    teltype = runner.wafer_map[stream_id]['tel_type']
-    if wafer_slot is None:  # Pull from detmapping cfg
-        wafer_slot = runner.wafer_map[stream_id]['wafer_slot']
-    fp_pars = optics.get_ufm_to_fp_pars(teltype, wafer_slot, runner.ufm_to_fp_file)
-    rs1 = det_match.ResSet.from_solutions(sol_file, fp_pars=fp_pars, platform=teltype)
+    rs1 = load_solution_set(runner, stream_id, wafer_slot=wafer_slot)
     rs1.name = 'sol'
 
     match_pars = det_match.MatchParams(**runner.cfg.match_pars)
@@ -362,19 +399,21 @@ def make_parser():
     parser.add_argument('--all', action='store_true', help='run all detsets')
     return parser
 
-if __name__ == '__main__':
-    parser = make_parser()
-    args = parser.parse_args()
-
-    with open(args.config, 'r') as f:
+def main(config_file: str, all: bool=False):
+    with open(config_file, 'r') as f:
         cfg = UpdateDetMatchesConfig(**yaml.safe_load(f))
 
     runner = Runner(cfg)
 
-    if args.all:
+    if all:
         update_manifests_all(runner)
         while runner.run_next_match():
             update_manifests_all(runner)
     else:
         runner.run_next_match()
         update_manifests_all(runner)
+
+if __name__ == '__main__':
+    parser = make_parser()
+    args = parser.parse_args()
+    main(args.config, all=args.all)

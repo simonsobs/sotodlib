@@ -339,6 +339,19 @@ class TestAxisManager(unittest.TestCase):
             self.assertIn('rebel_child', aout, msg=msg)
             self.assertEqual(aout['rebel_child'].shape, (3,), msg=msg)
 
+    def test_403_restrict_slices(self):
+        # Test in_place is false for slices of arrays
+        dets = ['det0', 'det1', 'det2']
+        n, ofs = 1000, 0
+        aman = core.AxisManager(
+                core.LabelAxis('dets', dets),
+                core.OffsetAxis('samps', n, ofs)
+        )
+        aman.wrap_new('test', ('dets','samps'))
+        rman = aman.restrict('samps', (0,500), in_place=False)
+        rman.test += 5
+        self.assertNotEqual( aman.test[0,0], rman.test[0,0])
+
     def test_410_merge(self):
         dets = ['det0', 'det1', 'det2']
         n, ofs = 1000, 0
@@ -381,6 +394,11 @@ class TestAxisManager(unittest.TestCase):
         aman.wrap('quantity', np.ones(5) << u.m)
         aman.wrap('quantity2', (np.ones(1) << u.m)[0])
 
+        aman.wrap('subaman', core.AxisManager(
+            aman.dets, core.LabelAxis('bands', ['f090', 'f150'])))
+        aman['subaman'].wrap_new('subtest1', shape=[('dets', 'bands')])
+        aman['subaman'].wrap_new('subtest2', shape=(100,))
+
         # Make sure the saving / clobbering / readback logic works
         # equally for simple group name, root group, None->root group.
         for dataset in ['path/to/my_axisman', '/', None]:
@@ -389,6 +407,8 @@ class TestAxisManager(unittest.TestCase):
                 aman.save(filename, dataset)
                 # Overwrite
                 aman.save(filename, dataset, overwrite=True)
+                # Compress and Overwrite
+                aman.save(filename, dataset, overwrite=True, compression='gzip')
                 # Refuse to overwrite
                 with self.assertRaises(RuntimeError):
                     aman.save(filename, dataset)
@@ -403,6 +423,24 @@ class TestAxisManager(unittest.TestCase):
                     self.assertEqual(aman[k].shape, aman2[k].shape)
                 else:
                     self.assertEqual(aman[k], aman2[k])  # scalar
+
+        # Test field subset load
+        with tempfile.TemporaryDirectory() as tempdir:
+            filename = os.path.join(tempdir, 'test.h5')
+            aman.save(filename, dataset)
+            aman2 = aman.load(filename, dataset, fields=['test1', 'flags'])
+            aman3 = aman.load(filename, dataset, fields=['test1', 'subaman'])
+            aman4 = aman.load(filename, dataset, fields=['test1', 'subaman.subtest1'])
+        for target, keys, subkeys in [
+                (aman2, ['test1', 'flags'], None),
+                (aman3, ['test1', 'subaman'], ['subtest1', 'subtest2']),
+                (aman4, ['test1', 'subaman'], ['subtest1']),
+        ]:
+            self.assertCountEqual(target._fields.keys(),
+                                  keys)
+            if subkeys:
+                self.assertCountEqual(target['subaman']._fields.keys(),
+                                      subkeys)
 
     def test_900_everything(self):
         tod = core.AxisManager(

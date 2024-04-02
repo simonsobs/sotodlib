@@ -1469,6 +1469,8 @@ class Imprinter:
                 meta_files["bias_steps"] = basename
             elif f.endswith("take_noise.npy"):
                 meta_files["noise"] = basename
+            elif f.endswith("bias_wave_analysis.npy"):
+                meta_files["bias_wave"] = basename
 
         return files, meta_files
 
