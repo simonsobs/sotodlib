@@ -189,6 +189,12 @@ class G3tSmurf:
         self.db_path = db_path
         self.hk_db_path = hk_db_path
         self.finalize = finalize
+
+        if os.path.exists(self.db_path):
+            new_db = False
+        else:
+            new_db = True
+        
         try:
             self.engine = db.create_engine(
                 f"sqlite:///{db_path}", echo=echo, **db_args
@@ -201,8 +207,8 @@ class G3tSmurf:
             raise e
 
         # Defines frame_types
-        self._create_frame_types()
-        self._start_finalization()
+        if new_db:
+            self._create_frame_types()
 
     def _create_frame_types(self):
         session = self.Session()
@@ -213,7 +219,7 @@ class G3tSmurf:
                 session.add(ft)
             session.commit()
 
-    def _start_finalization(self):
+    def _start_finalization(self, session):
         """Initialize finalization rows if they are not in the database yet"""
         session = self.Session()
         row = session.query(Finalize).filter(Finalize.agent == "G3tSMURF").one_or_none()
@@ -476,6 +482,7 @@ class G3tSmurf:
         min_ctime=None,
         max_ctime=None,
         show_pb=True,
+        session=None,
     ):
         """
         Adds all files from an archive to the File and Frame sqlite tables.
@@ -497,7 +504,10 @@ class G3tSmurf:
         show_pb: bool
             If true, will show progress bar for file indexing
         """
-        session = self.Session()
+        new_session = False
+        if session is None:
+            session = self.Session()
+            new_session=True
         indexed_files = [f[0] for f in session.query(Files.name).all()]
 
         files = []
@@ -544,7 +554,9 @@ class G3tSmurf:
                 if stop_at_error:
                     raise e
                 logger.warning(f"Failed on file {f}:\n{e}")
-        session.close()
+
+        if new_session:
+            session.close()
 
     def delete_file(self, db_file, session=None, dry_run=False, my_logger=None):
         """WARNING: Deletes data from the file system
@@ -1358,6 +1370,9 @@ class G3tSmurf:
 
         if session is None:
             session = self.Session()
+        # look for new rows to add to table
+        self._start_finalization(session)
+
         HK = G3tHk(
             os.path.join(os.path.split(self.archive_path)[0], "hk"),
             self.hk_db_path,
@@ -1609,7 +1624,8 @@ class G3tSmurf:
                     )
 
     def index_metadata(
-        self, min_ctime=16000 * 1e5, max_ctime=None, stop_at_error=False
+        self, min_ctime=16000 * 1e5, max_ctime=None, stop_at_error=False,
+        session=None,
     ):
         """Adds all channel assignments, tunes, and observations in archive to
         database. Adding relevant entries to Files as well.
@@ -1628,8 +1644,10 @@ class G3tSmurf:
             raise ValueError(
                 "Archiver needs meta_path attribute to index channel assignments"
             )
-
-        session = self.Session()
+        new_session = False
+        if session is None:
+            session = self.Session()
+            new_session = True
         logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
 
         logger.debug("Indexing Channel Assignments")
@@ -1646,11 +1664,12 @@ class G3tSmurf:
             max_ctime=max_ctime,
             stop_at_error=stop_at_error,
         )
-
-        session.close()
+        if new_session:
+            session.close()
 
     def index_action_observations(
-        self, min_ctime=16000 * 1e5, max_ctime=None, stop_at_error=False
+        self, min_ctime=16000 * 1e5, max_ctime=None, stop_at_error=False,
+        session=None,
     ):
         """Looks through Action folders to build Observations not built off of
         tags in add_file. This function is a hold-over from when tags were not
@@ -1665,8 +1684,9 @@ class G3tSmurf:
         stop_at_error: bool
            If True, will stop if there is an error indexing a file.
         """
-
-        session = self.Session()
+        new_session = False
+        if session is None:
+            session = self.Session()
         logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
 
         logger.debug("Indexing Observations")
@@ -1676,7 +1696,8 @@ class G3tSmurf:
             max_ctime=max_ctime,
             stop_at_error=stop_at_error,
         )
-        session.close()
+        if new_session:
+            session.close()
 
     def lookup_file(self, filename, fail_ok=False):
         """Lookup a file's observations details in database. Meant to look
