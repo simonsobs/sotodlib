@@ -4,7 +4,6 @@ from scipy.special import eval_legendre
 from . import flags
 logger = logging.getLogger(__name__)
 
-
 def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mask=None, method="legendre", in_place=True):
     """
     Apply polynomial filtering to subscan segments in a data array.
@@ -43,23 +42,23 @@ def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mas
 
     if not(in_place):
         signal = signal.copy()
-        
+
     if exclude_turnarounds:
         if ("left_scan" not in aman.flags) or ("turnarounds" not in aman.flags):
             logger.warning('aman does not have left/right scan or turnarounds flag. `sotodlib.flags.get_turnaround_flags` will be ran with default parameters')
-            _ = flags.get_turnaround_flags(aman)
+            _ = flags.get_turnaround_flags(aman,truncate=True)
         valid_scan = np.logical_and(np.logical_or(aman.flags["left_scan"].mask(), aman.flags["right_scan"].mask()),
                                     ~aman.flags["turnarounds"].mask())
         subscan_indices = _get_subscan_range_index(valid_scan)
     else:
         if ("left_scan" not in aman.flags):
             logger.warning('aman does not have left/right scan. `sotodlib.flags.get_turnaround_flags` will be ran with default parameters')
-            _ = flags.get_turnaround_flags(aman)
+            _ = flags.get_turnaround_flags(aman,truncate=True)
         subscan_indices_l = _get_subscan_range_index(aman.flags["left_scan"].mask())
         subscan_indices_r = _get_subscan_range_index(aman.flags["right_scan"].mask())
         subscan_indices = np.vstack([subscan_indices_l, subscan_indices_r])
         subscan_indices= subscan_indices[np.argsort(subscan_indices[:, 0])]
-    
+
     if mask is None:
         mask_array = np.zeros(aman.samps.count, dtype=bool)
     elif type(mask) is str:
@@ -67,10 +66,12 @@ def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mas
     else:
         mask_array = mask.mask()
     is_matrix = len(mask_array.shape) > 1
-   
-    if method not in ["polyfit","legendre"] : 
+
+
+    if method not in ["polyfit","legendre"] :
         raise ValueError("Only polyfit and legendre are acceptable.")
 
+        
     elif method == "polyfit":
         t = aman.timestamps - aman.timestamps[0]
         for i_det in range(aman.dets.count):
@@ -92,24 +93,26 @@ def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mas
 
                     signal[i_det,start:end+1] -= np.polyval(pars, t[start:end+1]-t_mean)
 
+                    
     elif method == "legendre":
 
         ### we calculate model in for loop, so we need additional +1 .
-        degree_corr = degree + 1 
+        degree_corr = degree + 1
 
-        ### Normalization constant of legendre function 
-        norm_vector = np.arange(degree_corr)
-        norm_vector = 2./(2.*norm_vector+1)
-    
+
         time = np.copy(aman["timestamps"])
 
         for subscan in subscan_indices:
 
+            ### Normalization constant of legendre function 
+            norm_vector = np.arange(degree_corr)
+            norm_vector = 2./(2.*norm_vector+1)
+            
             # Get each subscan to be filtered & subtract mean
             tod_mat = signal[:,subscan[0]:subscan[1]+1]
             means = np.mean(tod_mat,axis=1)[:,np.newaxis]
             tod_mat -= means
-            
+
             # Scale time range into [-1,1]
             x = np.linspace(-1, 1, tod_mat.shape[1])
             dx = np.mean(np.diff(x))
@@ -124,80 +127,56 @@ def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mas
 
             # flag to know if the result is matrix formation
             flag_matrix = False
-            
-            # Modify normalization factor if mask is defined
+
+            # Modify TODs if mask is defined
             if mask is None :
                 pass
-            else : 
-                # if mask is matrix like, normalization factor should be determined det by det
+            else :
+                # if mask is matrix like, we should interpolate TOD det by det.
                 if is_matrix :
-                    # Is maksed range overlapped in this subscan?
+                    # Is maksed range overlapped with this subscan?
                     if np.sum((mask_array[:,subscan[0]:subscan[1]+1]).astype(np.int32)) > 0 :
-                        flag_matrix = True
-                        integral = ((arr_legendre*arr_legendre)[:,np.newaxis,:]*dx*(~mask_array[np.newaxis,:,subscan[0]:subscan[1]+1]).astype(np.int32))
-                        norm_vector = np.sum(integral,axis=2)
-
-                        x = np.linspace(-1, 1, tod_mat.shape[1])
-                        dx = np.mean(np.diff(x))
-                        arr_legendre = []
-                        for deg in range(degree_corr) :
-                            each_legendre = eval_legendre(deg, x)
-                            arr_legendre.append(np.tile(each_legendre,(tod_mat.shape[0],1)))
-                        arr_legendre = np.array(arr_legendre)
+                        
+                        msk_indx = mask_array[:,subscan[0]:subscan[1]+1]
+                        
+                        for idet in range(tod_mat.shape[0]) : 
+                            n_intep =  np.sum((mask_array[idet,subscan[0]:subscan[1]+1]).astype(np.int32))
+                            if n_intep > 0:
+                                if n_intep == tod_mat.shape[1] : continue
+                                interped = np.interp(np.flatnonzero(msk_indx[idet]),np.flatnonzero(~msk_indx[idet]), tod_mat[idet][~msk_indx[idet]])
+                                tod_mat[idet,msk_indx[idet]] = interped
+                            
                     # If mask does not affect this range, just go through.
-                    else : 
-                        pass 
-                # If mask is array like, common normalization factor is available to all the detector.
-                else :
-                    if np.sum((mask_array[subscan[0]:subscan[1]+1]).astype(np.int32)) > 0 :
-                        part = mask_array[subscan[0]:subscan[1]+1]
-                        masked_region = np.where(part)[0]
-                        integral = (arr_legendre*arr_legendre*dx)
-                        integral[:,~masked_region] = 0.
-                        norm_vector = np.sum(integral,axis=1)
-                        mask_array = np.zeros(subscan[1]+1-subscan[0])
-                        mask_array[masked_region] = 1.
-
-                        flag = np.ones(subscan[1]+1-subscan[0],dtype=np.int32)
-                        flag[masked_region] = 0
-                        tod_mat[:,flag]=0.
-                        x = np.linspace(-1, 1, tod_mat.shape[1])
-                        dx = np.mean(np.diff(x))
-                        
-                        arr_legendre = []
-                        for deg in range(degree_corr) :
-                            each_legendre = eval_legendre(deg, x)
-                            arr_legendre.append(each_legendre)
-                        arr_legendre = np.array(arr_legendre)
-                        
                     else :
                         pass
-
-            # Make model to be subtracted
-            if flag_matrix : 
-                coeffs = np.array([np.sum(arr_legendre[deg,:,:]*tod_mat,axis=1) for deg in range(degree_corr) ])
-                _model = (coeffs[:,:,np.newaxis]*arr_legendre)/norm_vector[:,:,np.newaxis]*dx
-                model = np.zeros_like(arr_legendre[0])
-                for deg in range(degree_corr) :
-                    model += _model[deg]
-            else  :
-                coeffs = np.dot(arr_legendre, tod_mat.T)
-                model = np.dot((coeffs/norm_vector[:, np.newaxis]).T,arr_legendre)*dx
+                # If mask is array like, same ranges of each det will be interpolated.
+                else :
+                    n_intep =  np.sum((mask_array[subscan[0]:subscan[1]+1]).astype(np.int32))
+                    if n_intep > 0 :
+                        
+                        if n_intep == tod_mat.shape[1] : continue
+                        msk_indx = mask_array[subscan[0]:subscan[1]+1]
+                        
+                        for idet in range(tod_mat.shape[0]) : 
+                            interped = np.interp(np.flatnonzero(msk_indx),np.flatnonzero(~msk_indx), tod_mat[idet][~msk_indx])
+                            tod_mat[idet,msk_indx] = interped
+                    else :
+                        pass
             
-            # We subtracted the mean at the start of script. This should be corrected.
+            # Make model to be subtracted
+            coeffs = np.dot(arr_legendre, tod_mat.T)
+            model = np.dot((coeffs/norm_vector[:, np.newaxis]).T,arr_legendre)*dx
+
+            # We subtracted the mean at the start of this script. This should be corrected.
             model += means
             tod_mat += means
-            
+
             signal[:,subscan[0]:subscan[1]+1] = tod_mat
-        
-            if flag_matrix : 
-                signal[:,subscan[0]:subscan[1]+1] -= model
-            else : 
-                signal[:,subscan[0]:subscan[1]+1] -= model
+            signal[:,subscan[0]:subscan[1]+1] -= model
 
     if in_place:
         aman.signal = signal
-        
+
     return signal
                 
 def _get_subscan_range_index(scan_flag,_min=0):
