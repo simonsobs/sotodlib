@@ -276,5 +276,14 @@ class JumpfindTest(unittest.TestCase):
         heights = heights[heights.nonzero()].ravel()
         self.assertTrue(np.all(np.abs(np.array([10, -13, -8]) - np.round(heights)) < 3))
 
+
+class FFTTest(unittest.TestCase):
+    def test_psd(self):
+        tod = get_tod("white")
+        f, Pxx = tod_ops.fft_ops.calc_psd(tod, nperseg=256)
+        self.assertEqual(len(f), 129) # nperseg/2 + 1
+        f, Pxx = tod_ops.fft_ops.calc_psd(tod, freq_spacing=.1)
+        self.assertEqual(np.round(np.median(np.diff(f)), 1), .1)
+
 if __name__ == '__main__':
     unittest.main()
