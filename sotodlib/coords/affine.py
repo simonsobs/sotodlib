@@ -86,7 +86,7 @@ def get_affine_weighted(src, dst, weights):
         np.vstack((wsrc, np.ones(wsrc.shape[-1]))).T, wdst.T, check_finite=False
     )
     shift = x[-1] + init_shift
-    affine = x[:-1]
+    affine = x[:-1].T
 
     return affine, shift
 

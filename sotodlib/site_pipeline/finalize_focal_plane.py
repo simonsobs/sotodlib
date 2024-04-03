@@ -863,7 +863,8 @@ def main():
                 ],
                 axis=0,
             )
-        rot, sft = get_rigid(centers[:2], centers_transformed[:2], row_basis=False)
+        rot, sft = get_rigid(centers[:2].T, centers_transformed[:2].T)
+        rot = rot.T
         gamma_shift = np.mean(centers_transformed[2] - centers[2])
         ot.transform = Transform(np.array((*sft.ravel(), gamma_shift)), rot, 1.0)
         ot.center_transformed = (
@@ -898,7 +899,8 @@ def main():
                 ],
                 axis=0,
             )
-        rot, sft = get_rigid(centers[:2], centers_transformed[:2], row_basis=False)
+        rot, sft = get_rigid(centers[:2].T, centers_transformed[:2].T)
+        rot = rot.T
         gamma_shift = np.mean(centers_transformed[2] - centers[2])
         recv_transform = Transform(np.array((*sft.ravel(), gamma_shift)), rot, 1.0)
     recv_center = recv_transform.affine @ origin + recv_transform.shift[..., None]
