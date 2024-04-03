@@ -189,7 +189,7 @@ class P:
         # Set up the detectors in the focalplane
         fp = _valid_arg(focal_plane, 'focal_plane', src=tod)
         xi, eta, gamma  = fp.xi, fp.eta, fp.get('gamma')
-        if not np.all(~np.isnan([xi, eta, gamma])):
+        if np.any(np.isnan(np.array([xi, eta, gamma]))):
             raise ValueError('np.nan is included in focal_plane')
         
         assert (gamma is not None or not hwp)
