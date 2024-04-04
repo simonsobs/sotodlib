@@ -235,6 +235,16 @@ def main(config: str,
                 very_clean["duration"] = end - start
             except KeyError:
                 logger.error("Incomplete timing information for obs_id {obs_id}")
+            
+            #SAT HWP
+            if very_clean["telescope_flavor"] == "sat":
+                try:
+                    very_clean["hwp_freq_mean"] = index["hwp_freq_mean"]
+                    very_clean["hwp_freq_stdev"] = index["hwp_freq_stdev"]
+                    bookcartobsdb.add_obs_columns(["hwp_freq_mean float", 
+                                                   "hwp_freq_stdev float"])
+                except KeyError:
+                    logger.error(f"No HWP frequency info for obs_id {obs_id}")
 
             #Scanning motion
             stream_file = os.path.join(bookpath,"*{}*.g3".format(stream_ids[0]))
