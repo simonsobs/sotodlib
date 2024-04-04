@@ -18,6 +18,7 @@ Welcome to SOTODLib's documentation!
    g3tsmurf.rst
    hwp.rst
    tod_ops.rst
+   obs_ops.rst
    coords.rst
    toast.rst
    preprocess.rst
@@ -25,6 +26,7 @@ Welcome to SOTODLib's documentation!
    site_pipeline.rst
    reference.rst
    dev.rst
+   metrics.rst
 
 Indices and tables
 ==================

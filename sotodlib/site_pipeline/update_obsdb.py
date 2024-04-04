@@ -43,7 +43,7 @@ import logging
 from sotodlib.site_pipeline import util
 from typing import Optional
 
-logger = util.init_logger(__name__, 'update-obsdb: ')
+logger = util.init_logger('update_obsdb', 'update-obsdb: ')
 
 def check_meta_type(bookpath: str):
     metapath = os.path.join(bookpath, "M_index.yaml")
@@ -87,8 +87,8 @@ def main(config: str,
         booktype: Optional[str] = "both",
         verbosity: Optional[int] = 2,
         overwrite: Optional[bool] = False,
-        update_cols: Optional[bool] = False,
-        logger=None):
+        update_cols: Optional[bool] = False):
+
 
     """
     Create or update an obsdb for observation or operations data.
@@ -109,16 +109,7 @@ def main(config: str,
     update_cols : bool
         If True, update obsdb entries for obs_ids in obsfiledb with new columns
         instead of searching from books from base directories in the config file.
-    logger : logging
-        When to output the print statements
-
-
     """
-
-    if logger is None:
-        logger = globals()['logger']
-    else:
-        globals()['logger'] = logger
     if verbosity == 0:
         logger.setLevel(logging.ERROR)
     elif verbosity == 1:
@@ -229,6 +220,7 @@ def main(config: str,
                     else:
                         raise e
 
+
             index = yaml.safe_load(open(os.path.join(bookpath, "M_index.yaml"), "rb"))
             obs_id = index.pop("book_id")
             tags = index.pop("tags")
@@ -283,6 +275,16 @@ def main(config: str,
                 very_clean["duration"] = end - start
             except KeyError:
                 logger.error("Incomplete timing information for obs_id {obs_id}")
+            
+            #SAT HWP
+            if very_clean["telescope_flavor"] == "sat":
+                try:
+                    very_clean["hwp_freq_mean"] = index["hwp_freq_mean"]
+                    very_clean["hwp_freq_stdev"] = index["hwp_freq_stdev"]
+                    bookcartobsdb.add_obs_columns(["hwp_freq_mean float", 
+                                                   "hwp_freq_stdev float"])
+                except KeyError:
+                    logger.error(f"No HWP frequency info for obs_id {obs_id}")
 
             #Scanning motion
             stream_file = os.path.join(bookpath,"*{}*.g3".format(stream_ids[0]))

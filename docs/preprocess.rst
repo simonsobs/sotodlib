@@ -9,12 +9,22 @@ Preprocess
 
 The preprocess module defines a standardized interface for TOD processing
 operations so that they can be easily implemented in automatic data analysis
-scripts. These are used to build sotodlib / AxisManager based pipelines that can
-be run through the preprocess_tod related site-pipeline scripts. 
+scripts. The core of the system is in two parts, the ``_Preprocess`` modules
+and the ``Pipeline`` object. The ``_Preprocess`` modules each define how a TOD
+operation is run on an AxisManager TOD and the ``Pipeline`` object is used to
+define the order of the operations and then run them. The
+``site-pipeline.preprocess_tod`` script is used to run and save Pipelines on
+lists of observations, grouped by detset. The ``site-pipeline.preprocess_obs``
+script is used for observation-level preprocessing. This module is similar to
+``site-pipeline.preprocess_tod`` but removes grouping by detset so that the
+entire observation is loaded, without signal. For example, pipeline steps such
+as ``DetBiasFlags`` requires tod-level data including signal, whereas
+``SSOFootprint`` does not and uses observation-level data.
 
 
-Preprocessing Pipeline
-----------------------
+
+Preprocessing Pipelines
+------------------------
 
 A preprocessing pipeline is series of modules, each inheriting from
 ``_Preprocess``, that are defined through a configuration file and intended to be
@@ -23,9 +33,34 @@ run successively on an AxisManager containing time ordered data.
 .. autoclass:: sotodlib.preprocess.core._Preprocess
     :members:
 
+The preprocessing pipeline is defined in the ``Pipeline`` class. This class
+inherits from list so that you can easily find and interact with the various
+pipeline elements. Note that splicing a pipeline will return a list of process
+modules that can be used to make a new pipeline.
 
-Example Pipeline
-----------------
+.. autoclass:: sotodlib.preprocess.core.Pipeline
+    :members:
+
+
+
+Processing Scripts
+------------------
+These scripts are designed to be the ones that interact with specific
+configuration files and specific manifest databases.
+
+
+.. autofunction:: sotodlib.site_pipeline.preprocess_tod.preprocess_tod
+
+.. autofunction:: sotodlib.site_pipeline.preprocess_tod.load_preprocess_det_select
+
+.. autofunction:: sotodlib.site_pipeline.preprocess_tod.load_preprocess_tod
+
+.. autofunction:: sotodlib.site_pipeline.preprocess_obs.preprocess_obs
+
+.. autofunction:: sotodlib.site_pipeline.preprocess_obs.load_preprocess_obs
+
+Example TOD Pipeline Configuration File
+---------------------------------------
 
 Suppose we want to run a simple pipeline that runs the glitch calculator and
 estimates the white noise levels of the data. A configuration file for the
@@ -33,6 +68,9 @@ processing pipeline would look like::
 
     # Context for the data
     context_file: 'context.yaml'
+
+    # Plot directory prefix
+    plot_dir: './plots'
 
     # How to subdivide observations
     subobs:
@@ -42,9 +80,9 @@ processing pipeline would look like::
     # Metadata index & archive filenaming
     archive:
         index: 'preprocess_archive.sqlite'
-    policy:
-        type: 'simple'
-        filename: 'preprocess_archive.h5'
+        policy:
+            type: 'simple'
+            filename: 'preprocess_archive.h5'
 
     process_pipe:
         - name : "fft_trim"
@@ -99,18 +137,43 @@ This pipeline can be run through the functions saved in ``site_pipeline``. Each
 entry in "process_pipe" key will be used to generate a Preprocess module based
 on the name it is registered to. These entries will then be run in order through
 the processing pipe. The ``process`` function is always run before the
-``calc_and_save`` function for each module.
+``calc_and_save`` function for each module. The ``plot`` function can be run after
+``calc_and_save`` when ``plot: True`` for a module that supports it.
 
-Processing Functions
---------------------
+Example Obs Pipeline Configuration File
+---------------------------------------
 
-.. autofunction:: sotodlib.site_pipeline.preprocess_tod.preprocess_tod
+Suppose we want to run an observation-level pipeline that creates a SSO footprint.
+A configuration file for the processing pipeline would look like::
 
-.. autofunction:: sotodlib.site_pipeline.preprocess_tod.run_preprocess
+    # Context for the data
+    context_file: 'context.yaml'
 
-.. autofunction:: sotodlib.site_pipeline.preprocess_tod.load_preprocess_det_select
+    # Plot directory prefix
+    plot_dir: './plots'
 
-.. autofunction:: sotodlib.site_pipeline.preprocess_tod.load_preprocess_tod
+    # Metadata index & archive filenaming
+    archive:
+        index: 'preprocess_archive.sqlite'
+        policy:
+            type: 'simple'
+            filename: 'preprocess_archive.h5'
+
+    process_pipe:
+        - name: "sso_footprint"
+          calc:
+            distance: 20
+            nstep: 100
+          save: True
+          plot:
+            wafer_offsets: {'ws0': [-2.5, -0.5],
+                            'ws1': [-2.5, -13],
+                            'ws2': [-13, -7],
+                            'ws3': [-13, 5],
+                            'ws4': [-2.5, 11.5],
+                            'ws5': [8.5, 5],
+                            'ws6': [8.5, -7]}
+            focal_plane: 'focal_plane_positions.npz'
 
 Processing Modules
 ------------------
@@ -124,11 +187,14 @@ TOD Operations
 .. autoclass:: sotodlib.preprocess.processes.Calibrate
 .. autoclass:: sotodlib.preprocess.processes.Apodize
 .. autoclass:: sotodlib.preprocess.processes.SubPolyf
+.. autoclass:: sotodlib.preprocess.processes.Jumps
+.. autoclass:: sotodlib.preprocess.processes.FixJumps
 
 Flagging and Products
 :::::::::::::::::::::
 .. autoclass:: sotodlib.preprocess.processes.Trends
 .. autoclass:: sotodlib.preprocess.processes.GlitchDetection
+.. autoclass:: sotodlib.preprocess.processes.GlitchFill
 .. autoclass:: sotodlib.preprocess.processes.Noise
 .. autoclass:: sotodlib.preprocess.processes.FlagTurnarounds
 
@@ -138,3 +204,6 @@ HWP Related
 .. autoclass:: sotodlib.preprocess.processes.SubtractHWPSS
 .. autoclass:: sotodlib.preprocess.processes.Demodulate
 
+Obs Operations
+::::::::::::::
+.. autoclass:: sotodlib.preprocess.processes.SSOFootprint

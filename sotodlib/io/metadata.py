@@ -89,22 +89,25 @@ class DefaultHdfLoader(LoaderInterface):
     """Determine the type of H5 saved data and pass off the loading to the
     correct class.
     """
-    def from_loadspec(self, load_params):
+    def from_loadspec(self, load_params, **kwargs):
         with h5py.File(load_params['filename'], mode='r') as fin:
             # look for AxisManager save signature
             if '_axisman' in fin[ load_params['dataset'] ].attrs.keys():
                 newload = AxisManagerHdfLoader()
-                return newload.from_loadspec(load_params)
+                return newload.from_loadspec(load_params, **kwargs)
             else:
                 newload = ResultSetHdfLoader()
-                return newload.from_loadspec(load_params)
+                return newload.from_loadspec(load_params, **kwargs)
 
 class AxisManagerHdfLoader(LoaderInterface):
-    def from_loadspec(self, load_params):
+    def from_loadspec(self, load_params, **kwargs):
         """ Generate an AxisManager from the load_params dictionary.
         """
+        _kwargs = {k1: kwargs[k2] for k1, k2 in [('fields', 'load_fields')]
+                   if k2 in kwargs}
         aman = AxisManager.load(load_params['filename'],
-                                load_params['dataset'])
+                                load_params['dataset'],
+                                **_kwargs)
         return aman
 
 
@@ -142,7 +145,7 @@ class ResultSetHdfLoader(LoaderInterface):
             rs.append({k: data[k][i] for k in rs.keys})
         return rs
 
-    def from_loadspec(self, load_params):
+    def from_loadspec(self, load_params, **kwargs):
         """Retrieve a metadata result from an HDF5 file.
 
         Arguments:
@@ -161,9 +164,9 @@ class ResultSetHdfLoader(LoaderInterface):
         Note that this just calls batch_from_loadspec.
 
         """
-        return self.batch_from_loadspec([load_params])[0]
+        return self.batch_from_loadspec([load_params], **kwargs)[0]
 
-    def batch_from_loadspec(self, load_params):
+    def batch_from_loadspec(self, load_params, **kwargs):
         """Retrieves a batch of metadata results.  load_params should be a
         list of valid index data specifications.  Returns a list of
         objects, corresponding to the elements of load_params.
