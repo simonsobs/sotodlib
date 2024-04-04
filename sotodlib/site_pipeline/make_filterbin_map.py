@@ -442,14 +442,12 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         # Read in the signal too. This seems to read in all the metadata from scratch,
         # which is pointless, but shouldn't cost that much time.
         obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, )
-        
         """
         if obs.hwp_solution.primary_encoder == 1:
             obs.hwp_angle = np.mod(-1*np.unwrap(obs.hwp_solution.hwp_angle_ver3_1) + np.deg2rad(1.66-360*255/1440-90), 2*np.pi)
         elif obs.hwp_solution.primary_encoder == 2:
             obs.hwp_angle = np.mod(-1*np.unwrap(obs.hwp_solution.hwp_angle_ver3_2) + np.deg2rad(1.66-360*255/1440+90), 2*np.pi)
         """
-        
         obs = calibrate_obs_new(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower, site=site)
         # here we check if we have enough dets to keep going, otherwise we continue
         if obs.dets.count <= 1: continue
@@ -459,14 +457,6 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
             hwp.demod_tod(obs)
             obs = calibrate_obs_after_demod(obs, dtype_tod=dtype_tod)
         
-        # filter 
-        #if singlestream:
-        #    obs.signal = filters.fourier_filter(obs, filters.high_pass_sine2(0.5))
-        #else:
-        #    obs.dsT    = filters.fourier_filter(obs, filters.high_pass_sine2(0.3), signal_name='dsT')
-        #    obs.demodQ = filters.fourier_filter(obs, filters.high_pass_sine2(0.3), signal_name='demodQ')
-        #    obs.demodU = filters.fourier_filter(obs, filters.high_pass_sine2(0.3), signal_name='demodU')
-                
         if obs.dets.count == 0: continue
         
         # And add it to the mapmaker
@@ -476,34 +466,6 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         else:
             # this is the case of having splits. We need to pass the split_labels at least. If we have detector splits fixed in time, then we pass the masks in det_split_masks. Otherwise, det_split_masks will be None
             mapmaker.add_obs(name, obs, split_labels=split_labels)
-        
-        if split_labels==None:
-            # Case of no splits 
-            # Also build the RHS for the per-pixel timestamp. First
-            # make a white noise weighted timestamp per sample timestream
-            Nt  = np.zeros_like(obs.signal, dtype=dtype_tod)
-            Nt += obs.timestamps - t0
-            Nt *= mapmaker.data[-1].nmat.ivar[:,None] # this is the data in the mapmaker object, which is simply a list 
-            # Bin into pixels
-            pmap = signal_map.data[(name,0)].pmap
-            obs_time_rhs = pmap.zeros()
-            pmap.to_map(dest=obs_time_rhs, signal=Nt,)
-            # Accumulate into output array
-            time_rhs[0] = time_rhs[0].insert(obs_time_rhs, op=np.ndarray.__iadd__)
-        else:
-            for n_split in range(Nsplits):
-                # Also build the RHS for the per-pixel timestamp. First
-                # make a white noise weighted timestamp per sample timestream
-                Nt  = np.zeros_like(obs.signal, dtype=dtype_tod)
-                Nt += obs.timestamps - t0
-                Nt *= mapmaker.data[-1].nmat.ivar[:,None] # this is the data in the mapmaker object, which is simply a list 
-                # Bin into pixels
-                pmap = signal_map.data[(name,n_split)].pmap
-                obs_time_rhs = pmap.zeros()
-                pmap.to_map(dest=obs_time_rhs, signal=Nt,)
-                # Accumulate into output array
-                time_rhs[n_split] = time_rhs[n_split].insert(obs_time_rhs, op=np.ndarray.__iadd__)
-        del obs, pmap, Nt, obs_time_rhs
         nobs_kept += 1
         L.info('Done with tod %s:%s:%s'%(obs_id,detset,band))
     
@@ -511,10 +473,6 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
     if nobs_kept == 0: raise DataMissing("All data cut")
     for signal in signals:
         signal.prepare()
-    # mapmaker doesn't know about time_rhs, so handle it manually
-    if signal_map.tiled: time_rhs = tilemap.redistribute(time_rhs, comm)
-    else:                time_rhs = utils.allreduce     (time_rhs, comm)
-    
     if comm.rank == 0: L.info(pre + "Writing F+B outputs")
     #map = [] ; ivar = [] ; tmap =[] ; 
     wmap = []
