@@ -150,7 +150,7 @@ class DemodSignalMap(DemodSignal):
                 # we handle cuts here through obs.flags
                 if split_labels == None:
                     # this is the case with no splits
-                    rangesmatrix = obs.flags.jumps_2pi + obs.flags.glitches + obs.flags.turnarounds
+                    rangesmatrix = obs.flags.glitch_flags
                     pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix, hwp=True)
                 else:
                     # this is the case where we are processing a split. We need to figure out what type of split it is (detector, samples), build the RangesMatrix mask and create the pmap.
