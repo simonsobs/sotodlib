@@ -176,6 +176,80 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
     if return_pixboxes: return shape, wcs, pixboxes
     else: return shape, wcs
 
+def calibrate_obs_with_preprocessing(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=False, det_in_out=False, det_upper_lower=False):
+    obs.wrap("weather", np.full(1, "toco"))
+    obs.wrap("site",    np.full(1, site))
+    obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])    
+    # Since now I have flags already calculated, I can union them into a "glitch_flags" flags, which will be used to discard overcut detectors and calculate the cost for MPI.
+    bad_dets = has_all_cut(obs.preprocess.det_bias_flags.det_bias_flags)
+    obs.restrict('dets', obs.dets.vals[~bad_dets])
+    tdets = has_any_cuts(obs.preprocess.trends.trend_flags)
+    obs.restrict('dets', obs.dets.vals[~tdets])
+    gstats = obs.preprocess.glitches.glitch_flags.get_stats()
+    obs.restrict('dets', obs.dets.vals[np.asarray(gstats['intervals']) < 10])
+    # Union of flags into glitch_flags.
+    obs.flags.wrap('glitch_flags', obs.preprocess.turnaround_flags.turnarounds + obs.preprocess.jumps_2pi.jump_flag + obs.preprocess.glitches.glitch_flags, )
+    
+    good_dets = mapmaking.find_usable_detectors(obs)
+    obs.restrict("dets", good_dets)
+    
+    if obs.signal is not None and len(good_dets)>0:
+        # Adding detector splits if we asked for them
+        if det_left_right or det_in_out or det_upper_lower:
+            # we add a flagmanager for the detector flags
+            obs.wrap('det_flags', FlagManager.for_tod(obs))
+            if det_left_right or det_in_out:
+                xi = obs.focal_plane.xi
+                # sort xi 
+                xi_median = np.median(xi)    
+            if det_upper_lower or det_in_out:
+                eta = obs.focal_plane.eta
+                # sort eta
+                eta_median = np.median(eta)
+            if det_left_right:
+                mask = xi <= xi_median
+                obs.det_flags.wrap_dets('det_left', np.logical_not(mask))
+                mask = xi > xi_median
+                obs.det_flags.wrap_dets('det_right', np.logical_not(mask))
+            if det_upper_lower:
+                mask = eta <= eta_median
+                obs.det_flags.wrap_dets('det_lower', np.logical_not(mask))
+                mask = eta > eta_median
+                obs.det_flags.wrap_dets('det_upper', np.logical_not(mask))
+            if det_in_out:
+                # the bounding box is the center of the detset
+                xi_center = np.min(xi) + 0.5 * (np.max(xi) - np.min(xi))
+                eta_center = np.min(eta) + 0.5 * (np.max(eta) - np.min(eta))
+                radii = np.sqrt((xi_center-xi)**2 + (eta_center-eta)**2)
+                radius_median = np.median(radii)
+                mask = radii <= radius_median
+                obs.det_flags.wrap_dets('det_in', np.logical_not(mask))
+                mask = radii > radius_median
+                obs.det_flags.wrap_dets('det_out', np.logical_not(mask))
+        
+        # preprocessing
+        detrend_tod(obs, method='median')
+        hwp.get_hwpss(obs)
+        hwp.subtract_hwpss(obs)
+        jflags, _, jfix = jumps.twopi_jumps(obs, signal=obs.hwpss_remove, fix=True, overwrite=True)
+        obs.hwpss_remove = jfix
+        gfilled = gapfill.fill_glitches(obs, nbuf=10, use_pca=False, modes=1, signal=obs.hwpss_remove, glitch_flags=obs.preprocess.jumps_2pi.jump_flag)
+        obs.hwpss_remove=gfilled    
+        detrend_tod(obs, method='median', signal_name='hwpss_remove')
+        obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
+        obs.hwpss_remove = np.multiply(obs.hwpss_remove.T, obs.det_cal.phase_to_pW).T
+        # PCA relcal
+        filt = filters.low_pass_sine2(1, width=0.1)
+        sigfilt = filters.fourier_filter(obs, filt, signal_name='hwpss_remove')
+        obs.wrap('lpf_hwpss_remove', sigfilt, [(0,'dets'),(1,'samps')])
+        obs.restrict('samps',(10*200, -10*200))
+        if obs.dets.count<=1: return obs # check if we have enough detectors
+        pca_out = pca.get_pca(obs,signal=obs.lpf_hwpss_remove)
+        pca_signal = pca.get_pca_model(obs, pca_out, signal=obs.lpf_hwpss_remove)
+        median = np.median(pca_signal.weights[:,0])
+        obs.signal = np.divide(obs.signal.T, pca_signal.weights[:,0]/median).T
+        apodize.apodize_cosine(obs)
+    return obs
 
 def calibrate_obs_new(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=False, det_in_out=False, det_upper_lower=False):
     obs.wrap("weather", np.full(1, "toco"))
@@ -255,12 +329,12 @@ def calibrate_obs_new(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=
             pca_signal = pca.get_pca_model(obs, pca_out, signal=obs.lpf_hwpss_remove)
             median = np.median(pca_signal.weights[:,0])
             obs.signal = np.divide(obs.signal.T, pca_signal.weights[:,0]/median).T
-        
-        flags.get_turnaround_flags(obs)
-        apodize.apodize_cosine(obs, apodize_samps=800)  
+        apodize.apodize_cosine(obs, apodize_samps=800)
     return obs
 
 def calibrate_obs_after_demod(obs, dtype_tod=np.float32):
+    obs.restrict('samps',(30*200, -30*200))
+    
     # project out T
     filt = filters.low_pass_sine2(0.5, width=0.1)
     T_lpf = filters.fourier_filter(obs, filt, signal_name='dsT')
@@ -385,7 +459,7 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False,
         obs_id, detset, band, obs_ind = obslist[ind]
         try:
             tod = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, no_signal=no_signal)
-            tod = calibrate_obs_new(tod, dtype_tod=dtype_tod, site=site)
+            tod = calibrate_obs_with_preprocessing(tod, dtype_tod=dtype_tod, site=site)
             if only_hits==False:
                 ra_ref_start, ra_ref_stop = get_ra_ref(tod)
                 my_ra_ref.append((ra_ref_start/utils.degree, ra_ref_stop/utils.degree))
@@ -412,9 +486,6 @@ def write_hits_map(context, obslist, shape, wcs, t0=0, comm=mpi.COMM_WORLD, tag=
         rot = None
         pmap_local = coords.pmat.P.for_tod(obs, comps='T', geom=hits.geometry, rot=rot, threads="domdir", weather=mapmaking.unarr(obs.weather), site=mapmaking.unarr(obs.site), hwp=True)
         obs_hits = pmap_local.to_weights(obs, comps='T', )
-        #print('shape of hits', hits.shape)
-        #print('shape of obs_hits', obs_hits.shape)
-        
         hits = hits.insert(obs_hits[0,0], op=np.ndarray.__iadd__)
     return bunch.Bunch(hits=hits)
 
@@ -433,7 +504,6 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
     signals    = [signal_map]
     mapmaker   = mapmaking.DemodMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0, singlestream=singlestream)
     if comm.rank == 0: L.info(pre + "Building RHS")
-    time_rhs   = signal_map.rhs*0 # this has an extra axis now for different splits, because signal_map.rhs does
     # And feed it with our observations
     nobs_kept  = 0
     for oi in range(len(obslist)):
@@ -448,15 +518,13 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         elif obs.hwp_solution.primary_encoder == 2:
             obs.hwp_angle = np.mod(-1*np.unwrap(obs.hwp_solution.hwp_angle_ver3_2) + np.deg2rad(1.66-360*255/1440+90), 2*np.pi)
         """
-        obs = calibrate_obs_new(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower, site=site)
+        obs = calibrate_obs_with_preprocessing(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower, site=site)
         # here we check if we have enough dets to keep going, otherwise we continue
         if obs.dets.count <= 1: continue
-        
         # demodulate
         if singlestream == False:
             hwp.demod_tod(obs)
-            obs = calibrate_obs_after_demod(obs, dtype_tod=dtype_tod)
-        
+            obs = calibrate_obs_after_demod(obs, dtype_tod=dtype_tod)        
         if obs.dets.count == 0: continue
         
         # And add it to the mapmaker
@@ -474,26 +542,16 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
     for signal in signals:
         signal.prepare()
     if comm.rank == 0: L.info(pre + "Writing F+B outputs")
-    #map = [] ; ivar = [] ; tmap =[] ; 
     wmap = []
     weights = []
     for n_split in range(signal_map.Nsplits):
-        #if signal_map.tiled: 
-            #map.append( tilemap.map_mul(signal_map.idiv[n_split], signal_map.rhs[n_split]) )
-        #else: 
-            #map.append( enmap.map_mul(signal_map.idiv[n_split], signal_map.rhs[n_split]) )
-        #ivar.append( signal_map.div[n_split] )
         wmap.append( signal_map.rhs[n_split] )
         weights.append(signal_map.div[n_split])
-        #with utils.nowarn(): tmap.append( utils.remove_nan(time_rhs[n_split] / ivar[-1][0,0]) )
-    #return bunch.Bunch(map=map, ivar=ivar, tmap=tmap, wmap=wmap, signal=signal_map, t0=t0 )
     return bunch.Bunch(wmap=wmap, weights=weights, signal=signal_map, t0=t0 )
 
 def write_depth1_map(prefix, data, split_labels=None):
     if split_labels==None:
         # we have no splits, so we save index 0 of the lists
-        #data.signal.write(prefix, "full_map",  data.map[0])
-        #data.signal.write(prefix, "full_ivar", data.ivar[0])
         data.signal.write(prefix, "full_wmap", data.wmap[0])
         data.signal.write(prefix, "full_weights", data.weights[0])
         data.signal.write(prefix, "full_hits", data.signal.hits)
@@ -501,8 +559,6 @@ def write_depth1_map(prefix, data, split_labels=None):
         # we have splits
         Nsplits = len(split_labels)
         for n_split in range(Nsplits):
-            #data.signal.write(prefix, "%s_map"%split_labels[n_split],  data.map[n_split])
-            #data.signal.write(prefix, "%s_ivar"%split_labels[n_split], data.ivar[n_split])
             data.signal.write(prefix, "%s_wmap"%split_labels[n_split], data.wmap[n_split])
             data.signal.write(prefix, "%s_weights"%split_labels[n_split], data.weights[n_split])
             data.signal.write(prefix, "%s_hits"%split_labels[n_split], data.signal.hits[n_split])
