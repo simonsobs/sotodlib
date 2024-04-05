@@ -721,7 +721,7 @@ class PCARelCal(_Preprocess):
                                                   vals=bands))
         rc_aman.wrap('relcal', relcal, [(0,'dets')])
         rc_aman.wrap('medians', [med0, med1], [(0, 'bandpass')])
-        self.save(proc_aman, calc_aman)
+        self.save(proc_aman, rc_aman)
 
     def process(self, aman, proc_aman):
         aman.signal = np.multiply(aman.signal.T,
