@@ -376,9 +376,7 @@ def load_hk(load_spec: LoadSpec, show_pb=False):
                     field[1].append(np.array(data))
             pb.update()
     pb.close()
-    for k in result:
-        result[k][0] = np.hstack(result[k][0])
-        result[k][1] = np.hstack(result[k][1])
-        result[k] = np.array(result[k])
+    for k, d in result.items():
+        result[k] = np.array([np.hstack(d[0]), np.hstack(d[1])])
 
     return HkResult(result, aliases=load_spec.cfg.aliases)
