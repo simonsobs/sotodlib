@@ -252,7 +252,18 @@ def _save_axisman(axisman, dest, group=None, overwrite=False, compression=None):
     if file_to_close:
         file_to_close.close()
 
-def _load_axisman(src, group=None, cls=None):
+def _get_subfields(fields, prefix):
+    if fields is None:
+        return None
+    subfields = []
+    for f in fields:
+        if f.startswith(prefix + '.'):
+            subfields.append(f[len(prefix)+1:])
+    if len(subfields) == 0:
+        return None
+    return subfields
+
+def _load_axisman(src, group=None, cls=None, fields=None):
     """
     See AxisManager.load.
     """
@@ -292,6 +303,9 @@ def _load_axisman(src, group=None, cls=None):
                 axes.append((IndexAxis(*item['args'])))
     axisman = cls(*axes)
     for item in schema:
+        subfields = _get_subfields(fields, item['name'])
+        if (fields is not None) and (item['name'] not in fields) and subfields is None:
+            continue
         assign = [(i, a) for i, a in enumerate(item.get('axes', [])) if a is not None]
         if item['encoding'] == 'axis':
             pass
@@ -304,7 +318,7 @@ def _load_axisman(src, group=None, cls=None):
         elif item['encoding'] == 'scalar_quantity':
             axisman.wrap(item['name'], scalars[item['name']] << u.Unit(units[item['name']]), assign)
         elif item['encoding'] == 'axisman':
-            x = _load_axisman(src[item['name']])
+            x = _load_axisman(src[item['name']], fields=subfields)
             if item['subclass'] == 'FlagManager':
                 x = FlagManager.promote(x, *item['special_axes'])
             axisman.wrap(item['name'], x)

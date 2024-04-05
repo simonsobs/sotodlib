@@ -7,7 +7,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
+def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
               lin_reg=True, modes=[1, 2, 3, 4, 6, 8], apply_prefilt=True,
               prefilt_cfg=None, prefilt_detrend='linear', flags=None,
               merge_stats=True, hwpss_stats_name='hwpss_stats',
@@ -23,14 +23,15 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
     ----------
     aman : AxisManager object
         The TOD to extract HWPSS from.
-    signal : array-like, optional
-        The TOD signal to use. If not provided, `aman.signal` will be used.
+    signal_name : str
+        The field name in the axis manager to use for the TOD signal.
+        If not provided, ``signal`` will be used.
     hwp_angle : array-like, optional
         The HWP angle for each sample in `aman`. If not provided, `aman.hwp_angle` will be used.
     bin_signal : bool, optional
         Whether to bin the TOD signal into HWP angle bins before extracting HWPSS. Default is `True`.
     bins : int, optional
-        The number of HWP angle bins to use if `bin_signal` is `True`. Default is 3600.
+        The number of HWP angle bins to use if `bin_signal` is `True`. Default is 360.
     lin_reg : bool, optional
         Whether to use linear regression to extract HWPSS from the binned signal. If `False`, curve-fitting will be used instead.
         Default is `True`.
@@ -81,23 +82,23 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
 
             - **sigma_tod** (n_dets) : estimate of the standard deviation of the signal using function ``estimate_sigma_tod``
     """
+    if prefilt_cfg is None:
+        prefilt_cfg = {'type': 'sine2', 'cutoff': 1.0, 'trans_width': 1.0}
 
-    if signal is None:
+    prefilt = filters.get_hpf(prefilt_cfg)
+
+    if signal_name is None:
         if apply_prefilt:
-            if prefilt_cfg is None:
-                prefilt_cfg = {'type': 'sine2', 'cutoff': 1.0, 'trans_width': 1.0}
-            prefilt = filters.get_hpf(prefilt_cfg)
             signal = np.array(tod_ops.fourier_filter(
                 aman, prefilt, detrend=prefilt_detrend, signal_name='signal'))
         else:
             signal = aman.signal
     else:
         if apply_prefilt:
-            raise ValueError('filters module does not support'+
-                    ' passing an axis other than aman.signal, you must'+
-                    ' run with apply_prefilt=False, signal=<your signal>'+
-                    ' apply_prefilt=True, signal=None, or apply_prefilt'+
-                    '=False, signal=None.')
+            signal = np.array(tod_ops.fourier_filter(
+                aman, prefilt, detrend=prefilt_detrend, signal_name=signal_name))
+        else:
+            signal = aman[signal_name]
 
     if hwp_angle is None:
         hwp_angle = aman.hwp_angle

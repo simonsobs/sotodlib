@@ -12,12 +12,11 @@ from so3g.proj import Ranges, RangesMatrix
 
 from .. import core
 from . import filters
-from . import fourier_filter
-
+from . import fourier_filter 
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
-                      psat_range=(0, 15), merge=True, overwrite=True,
-                      name='det_bias_flags'):
+                       psat_range=(0, 15), merge=True, overwrite=True,
+                       name='det_bias_flags', full_output=False):
     """
     Function for selecting detectors in appropriate bias range.
 
@@ -39,16 +38,19 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         If true, write over flag. If false, don't.
     name : str
         Name of flag to add to aman.flags if merge is True.
+    full_output : bool
+        If true, returns the full output with separated RangesMatrices
 
     Returns
     -------
-    mask : RangesMatrix
-        RangesMatrix shaped N_dets x N_samps that is True is the detector
-        is flagged to be cut and false if it should be kept based on 
-        the rfrac, and psat ranges. To create a boolean mask from
-        the RangesMatrix that can be used for aman.restrict() use
-        ``keep = ~has_all_cut(mask)`` and then restrict with 
-        ``aman.restrict('dets', aman.dets.vals[keep])``.
+    msk_aman : AxisManager
+        AxisManager containing RangesMatrix shaped N_dets x N_samps
+        that is True if the detector is flagged to be cut and false
+        if it should be kept based on the rfrac, and psat ranges. 
+        To create a boolean mask from the RangesMatrix that can be
+        used for aman.restrict() use ``keep = ~has_all_cut(mask)``
+        and then restrict with ``aman.restrict('dets', aman.dets.vals[keep])``.
+        If full_output is True, this will contain multiple RangesMatrices.
     """
     if detcal is None:
         if 'det_cal' not in aman:
@@ -73,8 +75,12 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         x = Ranges(aman.samps.count)
         mskexp = RangesMatrix([Ranges.ones_like(x) if Y
                             else Ranges.zeros_like(x) for Y in msk])
+        msk_aman = core.AxisManager(aman.dets, aman.samps)
+        msk_aman.wrap(name, mskexp, [(0, 'dets'), (1, 'samps')])
     else:
         mskexp = msk
+        msk_aman = core.AxisManager(aman.dets)
+        msk_aman.wrap(name, mskexp, [(0, 'dets')])
     
     if merge:
         if name in aman.flags and not overwrite:
@@ -83,8 +89,29 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
             aman.flags[name] = mskexp
         else:
             aman.flags.wrap(name, mskexp, [(0, 'dets'), (1, 'samps')])
-            
-    return mskexp
+
+    if full_output:
+        msks = []
+        ranges = [detcal.bg >= 0,
+                  detcal.r_tes > 0,
+                  detcal.r_frac >= rfrac_range[0],
+                  detcal.r_frac <= rfrac_range[1],
+                  detcal.p_sat*1e12 >= psat_range[0],
+                  detcal.p_sat*1e12 <= psat_range[1]]
+        for range in ranges:
+            msk = ~(np.all([range], axis=0))
+            msks.append(RangesMatrix([Ranges.ones_like(x) if Y
+                                      else Ranges.zeros_like(x) for Y in msk]))
+
+        msk_names = ['bg', 'r_tes', 'r_frac_gt', 'r_frac_lt', 'p_sat_gt', 'p_sat_lt']
+
+        for i, msk in enumerate(msks):
+            if 'samps' in aman:
+                msk_aman.wrap(f'{msk_names[i]}_flags', msk, [(0, 'dets'), (1, 'samps')])
+            else:
+                msk_aman.wrap(f'{msk_names[i]}_flags', msk, [(0, 'dets')])
+    
+    return msk_aman
 
 def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
                          merge=True, merge_lr=True, overwrite=True, 
@@ -265,7 +292,7 @@ def get_glitch_flags(aman,
                      n_sig=10,
                      buffer=200,
                      detrend=None,
-                     signal=None,
+                     signal_name=None,
                      merge=True,
                      overwrite=False,
                      name="glitches",
@@ -288,7 +315,7 @@ def get_glitch_flags(aman,
         Amount to buffer flags around found location
     detrend : str
         Detrend method to pass to fourier_filter
-    signal : str
+    signal_name : str
         Field name in aman to detect glitches on if None, defaults to ``signal``
     merge : bool)
         If true, add to ``aman.flags``
@@ -308,12 +335,12 @@ def get_glitch_flags(aman,
         RangesMatrix object containing glitch mask.
     """
 
-    if signal is None:
-        signal = "signal"
+    if signal_name is None:
+        signal_name = "signal"
     # f-space filtering
     filt = filters.high_pass_sine2(cutoff=hp_fc) * filters.gaussian_filter(t_sigma=t_glitch)
     fvec = fourier_filter(
-        aman, filt, detrend=detrend, signal_name=signal, resize="zero_pad"
+        aman, filt, detrend=detrend, signal_name=signal_name, resize="zero_pad"
     )
     # get the threshods based on n_sig x nlev = n_sig x iqu x 0.741
     fvec = np.abs(fvec)

@@ -20,9 +20,11 @@ from ._helpers import mpi_multi
 
 SAMPLE_FREQ_HZ = 100.
 
-def get_tod(sig_type='trendy'):
-    tod = core.AxisManager(core.LabelAxis('dets', ['a', 'b', 'c']),
-                           core.IndexAxis('samps', 1000))
+def get_tod(sig_type='trendy', ndets=3, nsamps=1000):
+    tod = core.AxisManager(
+        core.LabelAxis('dets', ['det%i' % i for i in range(ndets)]),
+        core.OffsetAxis('samps', nsamps)
+    )
     tod.wrap_new('signal', ('dets', 'samps'), dtype='float32')
     tod.wrap_new('timestamps', ('samps',))[:] = (
         np.arange(tod.samps.count) / SAMPLE_FREQ_HZ)
@@ -264,16 +266,24 @@ class JumpfindTest(unittest.TestCase):
         self.assertTrue(np.all(np.abs(jumps_nf - jumps_gauss) == 0))
 
         # Check that they agree with the input
-        print(jumps_nf)
         self.assertEqual(len(jump_locs), len(jumps_nf))
         self.assertTrue(np.all(np.abs(jumps_nf - jump_locs) == 0))
 
         # Check height
         jumps_msk = np.zeros_like(sig_jumps, dtype=bool)
         jumps_msk[jumps_nf] = True
-        heights = tod_ops.jumps.estimate_heights(sig_jumps, jumps_msk, medfilt=True)
+        heights = tod_ops.jumps.estimate_heights(sig_jumps, jumps_msk)
         heights = heights[heights.nonzero()].ravel()
         self.assertTrue(np.all(np.abs(np.array([10, -13, -8]) - np.round(heights)) < 3))
+
+
+class FFTTest(unittest.TestCase):
+    def test_psd(self):
+        tod = get_tod("white")
+        f, Pxx = tod_ops.fft_ops.calc_psd(tod, nperseg=256)
+        self.assertEqual(len(f), 129) # nperseg/2 + 1
+        f, Pxx = tod_ops.fft_ops.calc_psd(tod, freq_spacing=.1)
+        self.assertEqual(np.round(np.median(np.diff(f)), 1), .1)
 
 if __name__ == '__main__':
     unittest.main()
