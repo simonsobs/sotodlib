@@ -394,6 +394,11 @@ class TestAxisManager(unittest.TestCase):
         aman.wrap('quantity', np.ones(5) << u.m)
         aman.wrap('quantity2', (np.ones(1) << u.m)[0])
 
+        aman.wrap('subaman', core.AxisManager(
+            aman.dets, core.LabelAxis('bands', ['f090', 'f150'])))
+        aman['subaman'].wrap_new('subtest1', shape=[('dets', 'bands')])
+        aman['subaman'].wrap_new('subtest2', shape=(100,))
+
         # Make sure the saving / clobbering / readback logic works
         # equally for simple group name, root group, None->root group.
         for dataset in ['path/to/my_axisman', '/', None]:
@@ -418,6 +423,24 @@ class TestAxisManager(unittest.TestCase):
                     self.assertEqual(aman[k].shape, aman2[k].shape)
                 else:
                     self.assertEqual(aman[k], aman2[k])  # scalar
+
+        # Test field subset load
+        with tempfile.TemporaryDirectory() as tempdir:
+            filename = os.path.join(tempdir, 'test.h5')
+            aman.save(filename, dataset)
+            aman2 = aman.load(filename, dataset, fields=['test1', 'flags'])
+            aman3 = aman.load(filename, dataset, fields=['test1', 'subaman'])
+            aman4 = aman.load(filename, dataset, fields=['test1', 'subaman.subtest1'])
+        for target, keys, subkeys in [
+                (aman2, ['test1', 'flags'], None),
+                (aman3, ['test1', 'subaman'], ['subtest1', 'subtest2']),
+                (aman4, ['test1', 'subaman'], ['subtest1']),
+        ]:
+            self.assertCountEqual(target._fields.keys(),
+                                  keys)
+            if subkeys:
+                self.assertCountEqual(target['subaman']._fields.keys(),
+                                      subkeys)
 
     def test_900_everything(self):
         tod = core.AxisManager(

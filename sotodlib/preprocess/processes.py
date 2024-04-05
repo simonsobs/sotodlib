@@ -3,13 +3,16 @@ from operator import attrgetter
 
 import sotodlib.core as core
 import sotodlib.tod_ops as tod_ops
+import sotodlib.obs_ops as obs_ops
 from sotodlib.hwp import hwp
+import sotodlib.coords.planets as planets
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    count_cuts,
                                     sparse_to_ranges_matrix)
 
 from .core import _Preprocess
+from .. import flag_utils
 
 
 class FFTTrim(_Preprocess):
@@ -49,10 +52,8 @@ class DetBiasFlags(_Preprocess):
     _influx_field = "det_bias_flags_frac"
 
     def calc_and_save(self, aman, proc_aman):
-        msk = tod_ops.flags.get_det_bias_flags(aman, merge=False,
-                                               **self.calc_cfgs)
-        dbc_aman = core.AxisManager(aman.dets)
-        dbc_aman.wrap('det_bias_flags', msk, [(0, 'dets')])
+        dbc_aman = tod_ops.flags.get_det_bias_flags(aman, merge=False, full_output=True,
+                                                    **self.calc_cfgs)
         self.save(proc_aman, dbc_aman)
     
     def save(self, proc_aman, dbc_aman):
@@ -69,6 +70,18 @@ class DetBiasFlags(_Preprocess):
         keep = ~proc_aman.det_bias_flags.det_bias_flags
         meta.restrict("dets", meta.dets.vals[has_all_cut(keep)])
         return meta
+    
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_det_bias_flags
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            plot_det_bias_flags(aman, proc_aman['det_bias_flags'], rfrac_range=self.calc_cfgs['rfrac_range'],
+                                psat_range=self.calc_cfgs['psat_range'], filename=filename.replace('{name}', f'{ufm}_bias_cuts_venn'))
 
     @classmethod
     def gen_metric(cls, meta, proc_aman):
@@ -175,8 +188,8 @@ class GlitchDetection(_Preprocess):
     Example configuration block::
         
       - name: "glitches"
-        signal: "hwpss_remove"
         calc:
+          signal_name: "hwpss_remove"
           t_glitch: 0.00001
           buffer: 10
           hp_fc: 1
@@ -184,23 +197,20 @@ class GlitchDetection(_Preprocess):
         save: True
         select:
           max_n_glitch: 10
+          sig_glitch: 10
 
     .. autofunction:: sotodlib.tod_ops.flags.get_glitch_flags
     """
     name = "glitches"
 
-    def __init__(self, step_cfgs):
-        self.signal = step_cfgs.get('signal', 'signal')
-
-        super().__init__(step_cfgs)
-    
     def calc_and_save(self, aman, proc_aman):
-        glitch_cut, glitch_aman = tod_ops.flags.get_glitch_flags(
-            aman[self.signal], merge=False, full_output=True,
-            **self.calc_cfgs
+        _, glitch_aman = tod_ops.flags.get_glitch_flags(aman,
+            merge=False, full_output=True, **self.calc_cfgs
         ) 
         aman.wrap("glitches", glitch_aman)
         self.save(proc_aman, glitch_aman)
+        if self.calc_cfgs.get('save_plot', False):
+            flag_utils.plot_glitch_stats(aman, save_path=self.calc_cfgs['save_plot'])
     
     def save(self, proc_aman, glitch_aman):
         if self.save_cfgs is None:
@@ -344,15 +354,14 @@ class PSDCalc(_Preprocess):
         
 
     def process(self, aman, proc_aman):
-        psd_cfgs = self.process_cfgs.get('psd_cfgs', {})
         freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
-                                              **psd_cfgs)
+                                              **self.process_cfgs)
         fft_aman = core.AxisManager(
             aman.dets, 
-            core.OffsetAxis("fsamps",len(freqs))
+            core.OffsetAxis("nusamps",len(freqs))
         )
-        fft_aman.wrap("freqs", freqs, [(0,"fsamps")])
-        fft_aman.wrap("Pxx", Pxx, [(0,"dets"),(1,"fsamps")])
+        fft_aman.wrap("freqs", freqs, [(0,"nusamps")])
+        fft_aman.wrap("Pxx", Pxx, [(0,"dets"), (1,"nusamps")])
         aman.wrap(self.wrap, fft_aman)
 
     def calc_and_save(self, aman, proc_aman):
@@ -402,23 +411,18 @@ class Noise(_Preprocess):
             self.calc_cfgs = {}
         
         if self.fit:
-            noise = tod_ops.fft_ops.fit_noise_model(aman, pxx=psd.Pxx, 
-                                                    f=psd.freqs, 
-                                                    merge_fit=True,
-                                                    **self.calc_cfgs)
+            calc_aman = tod_ops.fft_ops.fit_noise_model(aman, pxx=psd.Pxx, 
+                                                        f=psd.freqs, 
+                                                        merge_fit=True,
+                                                        **self.calc_cfgs)
         else:
             wn = tod_ops.fft_ops.calc_wn(aman, pxx=psd.Pxx,
                                          freqs=psd.freqs,
                                          **self.calc_cfgs)
-            noise = core.AxisManager(aman.dets)
-            noise.wrap("white_noise", wn, [(0,"dets")])
+            calc_aman = core.AxisManager(aman.dets)
+            calc_aman.wrap("white_noise", wn, [(0,"dets")])
 
-        if self.calc_cfgs.get('wrap_name') is None:
-            aman.wrap("noise", noise)
-        else:
-            aman.wrap(self.calc_cfgs['wrap_name'], noise)
-
-        self.save(proc_aman, noise)
+        self.save(proc_aman, calc_aman)
     
     def save(self, proc_aman, noise):
         if self.save_cfgs is None:
@@ -429,7 +433,7 @@ class Noise(_Preprocess):
                 proc_aman.wrap("noise", noise)
                 return
 
-        if self.save_cfgs.get('wrap_name') is None:
+        if self.save_cfgs['wrap_name'] is None:
             proc_aman.wrap("noise", noise)
         else:
             proc_aman.wrap(self.save_cfgs['wrap_name'], noise)
@@ -441,11 +445,13 @@ class Noise(_Preprocess):
         if proc_aman is None:
             proc_aman = meta.preprocess
 
-        if self.select_cfgs.get('name') is None:
-            keep = proc_aman.noise.white_noise <= self.select_cfgs["max_noise"]
+        self.select_cfgs['name'] = self.select_cfgs.get('name','noise')
+
+        if self.fit:
+            keep = proc_aman[self.select_cfgs['name']].fit[:,1] <= self.select_cfgs["max_noise"]
         else:
-            keep = proc_aman[self.select_cfgs['name']].white_noise <= self.select_cfgs["max_noise"] 
-            
+            keep = proc_aman[self.select_cfgs['name']].white_noise <= self.select_cfgs["max_noise"]
+
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
     
@@ -501,8 +507,8 @@ class EstimateHWPSS(_Preprocess):
     Example config block::
 
       - "name : "estimate_hwpss"
-        "signal: "signal" # optional
         "calc":
+          "signal_name": "signal" # optional
           "hwpss_stats_name": "hwpss_stats"
         "save": True
 
@@ -510,20 +516,8 @@ class EstimateHWPSS(_Preprocess):
     """
     name = "estimate_hwpss"
 
-    def __init__(self, step_cfgs):
-        self.signal = step_cfgs.get('signal', 'signal')
-
-        super().__init__(step_cfgs)
-
     def calc_and_save(self, aman, proc_aman):
-        _prefilt = (self.signal == 'signal')
-        if not _prefilt:
-            print("WARNING: apply_prefilt defaulting to False because " +
-                  f"{self.signal} != 'signal'.")
-        hwpss_stats = hwp.get_hwpss(aman,
-                                    signal=aman[self.signal],
-                                    apply_prefilt=_prefilt,
-                                    **self.calc_cfgs)
+        hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
         self.save(proc_aman, hwpss_stats)
 
     def save(self, proc_aman, hwpss_stats):
@@ -532,6 +526,18 @@ class EstimateHWPSS(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap(self.calc_cfgs["hwpss_stats_name"], hwpss_stats)
 
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_4f_2f_counts, plot_hwpss_fit_status
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            plot_4f_2f_counts(aman, filename=filename.replace('{name}', f'{ufm}_4f_2f_counts'))
+            plot_hwpss_fit_status(aman, proc_aman[self.calc_cfgs["hwpss_stats_name"]], filename=filename.replace('{name}', f'{ufm}_hwpss_stats'))
+
 class SubtractHWPSS(_Preprocess):
     """Subtracts a HWPSS template from signal. 
 
@@ -539,12 +545,21 @@ class SubtractHWPSS(_Preprocess):
     """
     name = "subtract_hwpss"
 
+    def __init__(self, step_cfgs):
+        self.hwpss_stats = step_cfgs.get('hwpss_stats', 'hwpss_stats')
+
+        super().__init__(step_cfgs)
+
     def process(self, aman, proc_aman):
-        hwp.subtract_hwpss(
-            aman,
-            hwpss_template = aman[self.process_cfgs["hwpss_extract"]],
-            subtract_name = self.process_cfgs["subtract_name"]
-        )
+        if not(proc_aman[self.hwpss_stats] is None):
+            modes = [int(m[1:]) for m in proc_aman[self.hwpss_stats].modes.vals[::2]]
+            template = hwp.harms_func(aman.hwp_angle, modes,
+                                  proc_aman[self.hwpss_stats].coeffs)
+            hwp.subtract_hwpss(
+                aman,
+                hwpss_template = template,
+                subtract_name = self.process_cfgs["subtract_name"]
+                )
 
 class Apodize(_Preprocess):
     """Apodize the edges of a signal. All process configs go to `apodize_cosine`
@@ -578,8 +593,8 @@ class EstimateAzSS(_Preprocess):
     name = "estimate_azss"
 
     def calc_and_save(self, aman, proc_aman):
-        azss_stats, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
-        self.save(proc_aman, azss_stats)
+        calc_aman, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+        self.save(proc_aman, calc_aman)
     
     def save(self, proc_aman, azss_stats):
         if self.save_cfgs is None:
@@ -618,7 +633,6 @@ class GlitchFill(_Preprocess):
             glitch_flags=proc_aman[self.flag_aman][self.flag],
             **self.process_cfgs)
 
-
 class FlagTurnarounds(_Preprocess):
     """From the Azimuth encoder data, flag turnarounds, left-going, and right-going.
         All process configs go to ``get_turnaround_flags``. If the ``method`` key
@@ -638,16 +652,17 @@ class FlagTurnarounds(_Preprocess):
 
         if self.calc_cfgs['method'] == 'scanspeed':
             ta, left, right = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
-            turn_aman = core.AxisManager(aman.dets, aman.samps)
-            turn_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
-            turn_aman.wrap('left_scan', left, [(0, 'dets'), (1, 'samps')])
-            turn_aman.wrap('right_scan', right, [(0, 'dets'), (1, 'samps')])
-            self.save(proc_aman, turn_aman)
+            calc_aman = core.AxisManager(aman.dets, aman.samps)
+            calc_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
+            calc_aman.wrap('left_scan', left, [(0, 'dets'), (1, 'samps')])
+            calc_aman.wrap('right_scan', right, [(0, 'dets'), (1, 'samps')])
+            
         if self.calc_cfgs['method'] == 'az':
             ta = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
-            turn_aman = core.AxisManager(aman.dets, aman.samps)
-            turn_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
-            self.save(proc_aman, turn_aman)
+            calc_aman = core.AxisManager(aman.dets, aman.samps)
+            calc_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
+
+        self.save(proc_aman, calc_aman)
 
     def save(self, proc_aman, turn_aman):
         if self.save_cfgs is None:
@@ -669,6 +684,52 @@ class SubPolyf(_Preprocess):
     def process(self, aman, proc_aman):
         tod_ops.sub_polyf.subscan_polyfilter(aman, **self.process_cfgs)
 
+class SSOFootprint(_Preprocess):
+    """Find nearby sources within a given distance and get SSO footprint and plot
+    each source on the focal plane.
+
+    .. autofunction:: sotodlib.obs_ops.sources.get_sso
+    """
+    name = 'sso_footprint'
+
+    def calc_and_save(self, aman, proc_aman):
+        ssos = planets.get_nearby_sources(tod=aman, distance=self.calc_cfgs.get("distance", 20))
+        if ssos:
+            sso_aman = core.AxisManager()
+            nstep = self.calc_cfgs.get("nstep", 100)
+            onsamp = (aman.samps.count+nstep-1)//nstep
+            for sso in ssos:
+                planet = sso[0]
+                xi_p, eta_p = obs_ops.sources.get_sso(aman, planet, nstep=nstep)
+                planet_aman = core.AxisManager(core.OffsetAxis('ds_samps', count=onsamp,
+                                                               offset=aman.samps.offset,
+                                                               origin_tag=aman.samps.origin_tag))
+                # planet_aman = core.AxisManager(core.OffsetAxis("samps", onsamp))
+                planet_aman.wrap("xi_p", xi_p, [(0, "ds_samps")])
+                planet_aman.wrap("eta_p", eta_p, [(0, "ds_samps")])
+                sso_aman.wrap(planet, planet_aman)
+            self.save(proc_aman, sso_aman)
+        else:
+            raise ValueError("No sources found within footprint")
+        
+    def save(self, proc_aman, sso_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("sso_footprint", sso_aman)
+
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_sso_footprint
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            for sso in proc_aman.sso_footprint._assignments.keys():
+                planet_aman = proc_aman.sso_footprint[sso]
+                plot_sso_footprint(aman, planet_aman, sso, filename=filename.replace('{name}', f'{sso}_sso_footprint'), **self.plot_cfgs)
+        
+
 _Preprocess.register(Trends)
 _Preprocess.register(FFTTrim)
 _Preprocess.register(Detrend)
@@ -687,3 +748,4 @@ _Preprocess.register(GlitchFill)
 _Preprocess.register(FlagTurnarounds)
 _Preprocess.register(SubPolyf)
 _Preprocess.register(DetBiasFlags)
+_Preprocess.register(SSOFootprint)

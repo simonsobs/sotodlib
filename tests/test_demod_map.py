@@ -1,6 +1,7 @@
 from sotodlib import core, hwp, coords
 import so3g
 import numpy as np
+from pixell import enmap
 
 import unittest
 
@@ -128,5 +129,53 @@ class DemodMapmakingTest(unittest.TestCase):
         s = m0[1] != 0
         means = [m[s].mean() for m in m0]
         print(means)
+        assert(abs(means[1] - Q_stream) < TOL)
+        assert(abs(means[2] - U_stream) < TOL)
+        
+    def test_from_map_demodulated(self):
+        """Test the coords.demod.from_map function of demodulated signal.
+
+        """
+        tod = quick_tod(10, 10000)
+        TOL = 0.0001
+        
+        shape, wcs = enmap.fullsky_geometry(res=0.5*coords.DEG)
+        signal_map = enmap.zeros((3, *shape), wcs)
+        T_stream, Q_stream, U_stream = 1., 0.25, 0.01
+        signal_map[0] += T_stream
+        signal_map[1] += Q_stream
+        signal_map[2] += U_stream
+        _ = coords.demod.from_map(tod, signal_map, modulated=False, wrap=True)
+        
+        results = coords.demod.make_map(tod)
+        m0 = results['map']
+        s = m0[1] != 0
+        means = [m[s].mean() for m in m0]
+        assert(abs(means[1] - Q_stream) < TOL)
+        assert(abs(means[2] - U_stream) < TOL)
+        
+    def test_from_map_modulated(self):
+        """Test the coords.demod.from_map function of modulated signal.
+
+        """
+        tod = quick_tod(10, 10000)
+        tod.move('signal', None)
+        TOL = .01
+
+        shape, wcs = enmap.fullsky_geometry(res=0.5*coords.DEG)
+        signal_map = enmap.zeros((3, *shape), wcs)
+        
+        T_stream, Q_stream, U_stream = 1., 0.25, 0.01
+        signal_map[0] += T_stream
+        signal_map[1] += Q_stream
+        signal_map[2] += U_stream
+
+        _ = coords.demod.from_map(tod, signal_map, modulated=True, wrap=True)
+        hwp.demod_tod(tod)
+        results = coords.demod.make_map(tod)
+
+        m0 = results['map']
+        s = m0[1] != 0.
+        means = [m[s].mean() for m in m0]
         assert(abs(means[1] - Q_stream) < TOL)
         assert(abs(means[2] - U_stream) < TOL)
