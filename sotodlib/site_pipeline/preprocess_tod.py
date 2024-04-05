@@ -3,6 +3,7 @@ import yaml
 import numpy as np
 import argparse
 import traceback
+from typing import Optional
 
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
