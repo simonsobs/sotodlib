@@ -1,0 +1,11 @@
+Name,Description
+``telescope``,"(str) Telescope name; one of LAT, SATP{1-6}."
+``tube_name``,(str) Optics tube identifier.
+``wafer_slot``,(int) Index within optics tube where each wafer is installed.
+``stream_id``,(str) The stream_id associated with the each wafer.
+``det_x``,"(float, mm) x coordinate of detector’s mechanical position and orientation in the full optics tube."
+``det_y``,"(float, mm) y coordinate of … ."
+``det_angle``,"(float, deg) polarization angle of … . "
+``xi``,"(float, radians) xi coordinate of the detectors approximate position and orientation, as projected on sky, relative to the boresight, in the xi-eta coordinate system.  This assumes standard boresight rotation; i.e. perfect co-rotation for the LAT, and zero-corotation for a SAT."
+``eta``,"(float, radians) eta coordinate of … ."
+``gamma``,"(float, radians) gamma angle of … ."

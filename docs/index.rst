@@ -24,6 +24,7 @@ Welcome to SOTODLib's documentation!
    preprocess.rst
    det_match.rst
    site_pipeline.rst
+   standard_info.rst
    reference.rst
    dev.rst
    metrics.rst
