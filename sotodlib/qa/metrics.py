@@ -102,8 +102,6 @@ class QAMetric(object):
             raise Exception(f"Metadata does not correspond to obs_id {obs_id}.")
         line = self._process(meta)
         log_tags = {"observation": obs_id}  # used to identify this entry
-        for t in line["tags"]:  # make sure this is also recorded in metric itself
-            t.update(log_tags)
         self.monitor.record(**line, log=self._influx_log, measurement=self._influx_meas, log_tags=log_tags)
         self.monitor.write()
 
