@@ -263,7 +263,7 @@ def log_fit_func(x, sigma, fk, alpha):
 def calibrate_obs_tomoki(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=False, det_in_out=False, det_upper_lower=False):
     obs.wrap("weather", np.full(1, "toco"))
     obs.wrap("site",    np.full(1, site))
-    obs.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape[:2]),[(0, 'dets'), (1, 'samps')])
+    obs.flags.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape[:2]),[(0, 'dets'), (1, 'samps')])
     # Restrict non optical detectors, which have nans in their focal plane coordinates and will crash the mapmaking operation.
     obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
     
@@ -306,6 +306,8 @@ def calibrate_obs_tomoki(obs, dtype_tod=np.float32, site='so_sat1', det_left_rig
         flags.get_turnaround_flags(obs, t_buffer=0.1, truncate=True)
         obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
         freq, Pxx = fft_ops.calc_psd(obs, nperseg=nperseg, merge=True)
+        #print('First psd, number of nusamps', obs.nusamps.count)
+        #print('First psd, shape of P',Pxx.shape)
         wn = fft_ops.calc_wn(obs)
         obs.wrap('wn', wn, [(0, 'dets')])
         
@@ -333,6 +335,8 @@ def calibrate_obs_tomoki(obs, dtype_tod=np.float32, site='so_sat1', det_left_rig
         obs.move('signal', None)
         obs.move('hwpss_remove', 'signal')
         freq, Pxx = fft_ops.calc_psd(obs, nperseg=nperseg, merge=False)
+        #print('Second psd, number of nusamps', obs.nusamps.count)
+        #print('Second psd, shape of P',Pxx.shape)
         obs.Pxx = Pxx
         
         detrend_tod(obs, method='median')
@@ -359,8 +363,10 @@ def calibrate_obs_tomoki(obs, dtype_tod=np.float32, site='so_sat1', det_left_rig
         detrend_tod(obs, signal_name='dsT', method='linear')
         detrend_tod(obs, signal_name='demodQ', method='linear')
         detrend_tod(obs, signal_name='demodU', method='linear')
-        freq, Pxx_demodQ = fft_ops.calc_psd(obs, signal=obs.demodQ, nperseg=nperseg, merge=False)
-        freq, Pxx_demodU = fft_ops.calc_psd(obs, signal=obs.demodU, nperseg=nperseg, merge=False)
+        freq, Pxx_demodQ = fft_ops.calc_psd(obs, signal=obs.demodQ, nperseg=nperseg, merge=True)
+        freq, Pxx_demodU = fft_ops.calc_psd(obs, signal=obs.demodU, nperseg=nperseg, merge=True)
+        #print('Third psd, number of nusamps', obs.nusamps.count)
+        #print('Third psd, shape of P',Pxx_demodQ.shape)
         obs.wrap('Pxx_demodQ', Pxx_demodQ, [(0, 'dets'), (1, 'nusamps')])
         obs.wrap('Pxx_demodU', Pxx_demodU, [(0, 'dets'), (1, 'nusamps')])
         
@@ -488,7 +494,7 @@ def calibrate_obs_tomoki(obs, dtype_tod=np.float32, site='so_sat1', det_left_rig
         glitches_Q = flags.get_glitch_flags(obs, signal_name='demodQ', merge=True, name='glitches_Q')
         glitches_U = flags.get_glitch_flags(obs, signal_name='demodU', merge=True, name='glitches_U')
         obs.flags.reduce(flags=['glitches_T', 'glitches_Q', 'glitches_U'], method='union', wrap=True, new_flag='glitches', remove_reduced=True)
-        
+        obs.flags.move('glitch_flags', None)
         obs.flags.reduce(flags=['turnarounds', 'bad_subscan', 'glitches'], method='union', wrap=True, new_flag='glitch_flags', remove_reduced=True)
     return obs
 
