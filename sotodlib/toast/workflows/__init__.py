@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Simons Observatory workflow functions.
 
@@ -23,6 +23,8 @@ from .pointing import setup_pointing, select_pointing
 from .proc_act import setup_act_responsivity_sign, act_responsivity_sign
 from .proc_demodulation import setup_demodulate, demodulate
 from .proc_filters import (
+    setup_readout_filter,
+    apply_readout_filter,
     setup_deconvolve_detector_timeconstant,
     deconvolve_detector_timeconstant,
     setup_filter_hwpss,

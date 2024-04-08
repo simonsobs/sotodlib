@@ -63,6 +63,7 @@ def reduce_data(job, otherargs, runargs, data):
     wrk.simple_noise_models(job, otherargs, runargs, data)
     wrk.create_az_intervals(job, otherargs, runargs, data)
 
+    wrk.apply_readout_filter(job, otherargs, runargs, data)
     wrk.flag_noise_outliers(job, otherargs, runargs, data)
     wrk.filter_hwpss(job, otherargs, runargs, data)
     wrk.noise_estimation(job, otherargs, runargs, data)
@@ -173,6 +174,7 @@ def main():
     wrk.setup_simple_noise_models(operators)
     wrk.setup_flag_noise_outliers(operators)
 
+    wrk.setup_readout_filter(operators)
     wrk.setup_filter_hwpss(operators)
     wrk.setup_demodulate(operators)
     wrk.setup_noise_estimation(operators)
