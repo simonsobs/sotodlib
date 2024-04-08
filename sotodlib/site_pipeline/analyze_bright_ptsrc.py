@@ -34,7 +34,6 @@ logger = util.init_logger(__name__)
 def find_source(
         tod,
         sso_name,
-        max_amp=100,
         beamsize=30,
         height=0.1,
         distance=10000,
@@ -67,7 +66,7 @@ def find_source(
         r, _ = scipy.signal.find_peaks(data, height=height, distance=distance)
         sorted_r = np.argsort(data[r])[::-1]
         # to avoid high amplitude spikes
-        if len(r) < npeaks or np.nanmax(data) > max_amp:
+        if len(r) < npeaks or np.nanmax(data) > 100 * height:
             continue
 
         peak_idxs = r[sorted_r[:npeaks]]
@@ -90,7 +89,7 @@ def find_source(
                     ::-1]):
                 # Turn to source-centred coordinates
                 all_coords = get_xieta_src_centered(
-                    ctime, az, el, data, sso_name=sso_name, threshold=height)
+                    ctime, az, el, data, sso_name=sso_name, threshold=height, distance=distance)
                 [xi, eta], [xi_det, eta_det] = all_coords
                 # Attempt an estimation of the width to determine if we
                 # are seeing a point source crossing or random spikes
@@ -145,6 +144,7 @@ def get_xieta_src_centered(
         data,
         sso_name,
         threshold,
+        distance,
         prior_pos=None):
     """Create a planet centered coordinate system for single detector data
 
@@ -165,7 +165,8 @@ def get_xieta_src_centered(
     q_bore = csl.Q
 
     # Signal strength criterion - a chance to flag detectors
-    peaks, _ = scipy.signal.find_peaks(data, height=threshold)
+    peaks, _ = scipy.signal.find_peaks(
+        data, height=threshold, distance=distance)
     if not list(peaks):
         return
 
@@ -341,6 +342,7 @@ def fit_params(
         band,
         sso_name,
         threshold_src,
+        distance,
         init_params,
         fit_pointing=False,
         fit_beam=False,
@@ -383,7 +385,7 @@ def fit_params(
         prior_pos = None
 
     coord_transforms = get_xieta_src_centered(
-        ctime, az, el, data, sso_name, threshold_src, prior_pos=prior_pos)
+        ctime, az, el, data, sso_name, threshold_src, distance, prior_pos=prior_pos)
 
     if coord_transforms is None:
         return failed_params
@@ -863,6 +865,7 @@ def main(
     tube,
     ufm,
     max_samps,
+    scan_rate,
     config_file_path,
     outdir,
     highpass,
@@ -870,6 +873,7 @@ def main(
     lowpass,
     cutoff_low,
     threshold_src,
+    distance,
     do_abs_cal,
     fit_pointing,
     fit_beam,
@@ -911,12 +915,22 @@ def main(
 
     stream_id = f'ufm_{ufm}'
     meta = ctx.get_meta(obs_id)
-    meta.restrict(
-        'dets',
-        meta.dets.vals[meta.det_info.stream_id == stream_id]
-    )
 
-    n_samps = meta.obs_info.n_samples
+    if 'stream_id' in meta.det_info:
+        meta.restrict(
+            'dets',
+            meta.dets.vals[meta.det_info.stream_id == stream_id]
+        )
+
+    if 'n_samps' in meta.obs_info:
+        n_samps = meta.obs_info.n_samples
+    else:
+        d1 = datetime.fromtimestamp(meta.obs_info.start_time)
+        d2 = datetime.fromtimestamp(meta.obs_info.stop_time)
+        # If we are looking at simulation we need info on the scan
+        # rate to estimate total number of samples from metadata
+        n_samps = (d2 - d1).seconds * scan_rate
+
     n_chunks = n_samps // max_samps
 
     for i in range(n_chunks - 1):
@@ -956,11 +970,17 @@ def main(
         tod.signal[tod.signal < 0] = 0
 
         # Choose one band and calibrate to pW
-        tod.restrict('dets', tod.dets.vals[tod.det_match.det_bandpass == band])
-        tod.signal = np.multiply(tod.signal.T, tod.det_cal.phase_to_pW).T
+        if 'det_match' in tod and 'det_cal' in tod:
+            tod.restrict('dets',
+                         tod.dets.vals[tod.det_match.det_bandpass == band])
+            tod.signal = np.multiply(tod.signal.T, tod.det_cal.phase_to_pW).T
 
         # Find detectors with source
-        dets_w_src = find_source(tod, sso_name=sso_name, height=threshold_src)
+        dets_w_src = find_source(
+            tod,
+            sso_name=sso_name,
+            height=threshold_src,
+            distance=distance)
         rd_ids = tod.dets.vals[dets_w_src]
         logger.warning(f'got good dets')
 
@@ -986,7 +1006,7 @@ def main(
             rd_id = rd_ids[_i]
             params = fit_params(rd_id, tod.signal[rd_idx, :],
                                 ctime, az, el, band,
-                                sso_name, threshold_src, init_params,
+                                sso_name, threshold_src, distance, init_params,
                                 fit_pointing, fit_beam, prior_pointing,
                                 representative_dets, **kwargs)
             snr = float(params[-1])
@@ -1138,6 +1158,16 @@ def get_parser(parser=None):
     )
 
     parser.add_argument(
+        "--scan_rate",
+        action="store",
+        dest="scan_rate",
+        required=False,
+        default=200,
+        help="Scan rate, required for simulations",
+        type=int,
+    )
+
+    parser.add_argument(
         "--config_file_path",
         action="store",
         dest="config_file_path",
@@ -1197,6 +1227,15 @@ def get_parser(parser=None):
         action="store",
         dest="threshold_src",
         default=10,
+        help="The max amplitude required for the peak finding",
+        type=float,
+    )
+
+    parser.add_argument(
+        "--distance",
+        action="store",
+        dest="distance",
+        default=50000,
         help="The max amplitude required for the peak finding",
         type=float,
     )
