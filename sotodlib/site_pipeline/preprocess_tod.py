@@ -2,6 +2,8 @@ import os
 import yaml
 import numpy as np
 import argparse
+import traceback
+from typing import Optional
 
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
@@ -218,12 +220,12 @@ def get_parser(parser=None):
     return parser
 
 def main(
-    configs, 
-    query=None, 
-    obs_id=None, 
-    overwrite=False,
-    min_ctime=None,
-    max_ctime=None,
+        configs: str,
+        query: Optional[str] = None, 
+        obs_id: Optional[str] = None, 
+        overwrite: bool = False,
+        min_ctime: Optional[int] = None,
+        max_ctime: Optional[int] = None,
  ):
     configs, context = _get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess")
@@ -264,8 +266,14 @@ def main(
     logger.info(f"Beginning to run preprocessing on {len(run_list)} observations")
     for obs, groups in run_list:
         logger.info(f"Processing obs_id: {obs_id}")
-        preprocess_tod(obs["obs_id"], configs, overwrite=overwrite,
-                       group_list=groups, logger=logger)
+        try:
+            preprocess_tod(obs["obs_id"], configs, overwrite=overwrite,
+                           group_list=groups, logger=logger)
+        except Exception as e:
+            logger.info(f"{type(e)}: {e}")
+            logger.info(''.join(traceback.format_tb(e.__traceback__)))
+            logger.info(f'Skiping obs:{obs["obs_id"]} and moving to the next')
+            continue
             
 
 if __name__ == '__main__':
