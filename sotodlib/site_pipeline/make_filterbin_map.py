@@ -266,6 +266,7 @@ def calibrate_obs_tomoki(obs, dtype_tod=np.float32, site='so_sat1', det_left_rig
     obs.flags.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape[:2]),[(0, 'dets'), (1, 'samps')])
     # Restrict non optical detectors, which have nans in their focal plane coordinates and will crash the mapmaking operation.
     obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
+    obs.restrict('dets', obs.dets.vals[(0.2<obs.det_cal.r_frac)&(obs.det_cal.r_frac<0.8)])
     
     if obs.signal is not None:
         if det_left_right or det_in_out or det_upper_lower:
@@ -363,10 +364,8 @@ def calibrate_obs_tomoki(obs, dtype_tod=np.float32, site='so_sat1', det_left_rig
         detrend_tod(obs, signal_name='dsT', method='linear')
         detrend_tod(obs, signal_name='demodQ', method='linear')
         detrend_tod(obs, signal_name='demodU', method='linear')
-        freq, Pxx_demodQ = fft_ops.calc_psd(obs, signal=obs.demodQ, nperseg=nperseg, merge=True)
-        freq, Pxx_demodU = fft_ops.calc_psd(obs, signal=obs.demodU, nperseg=nperseg, merge=True)
-        #print('Third psd, number of nusamps', obs.nusamps.count)
-        #print('Third psd, shape of P',Pxx_demodQ.shape)
+        freq, Pxx_demodQ = fft_ops.calc_psd(obs, signal=obs.demodQ, nperseg=nperseg, merge=False)
+        freq, Pxx_demodU = fft_ops.calc_psd(obs, signal=obs.demodU, nperseg=nperseg, merge=False)
         obs.wrap('Pxx_demodQ', Pxx_demodQ, [(0, 'dets'), (1, 'nusamps')])
         obs.wrap('Pxx_demodU', Pxx_demodU, [(0, 'dets'), (1, 'nusamps')])
         
@@ -761,10 +760,10 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         # Read in the signal too. This seems to read in all the metadata from scratch,
         # which is pointless, but shouldn't cost that much time.
         obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, )
-        
         obs = calibrate_obs_tomoki(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower, site=site)
+        
         if obs.dets.count <= 1: continue
-        print(name,' has %i detectors'%obs.dets.count)
+        #print(name,' has %i detectors'%obs.dets.count)
         
         """
         if obs.hwp_solution.primary_encoder == 1:
