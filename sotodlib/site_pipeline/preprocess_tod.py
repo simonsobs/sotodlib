@@ -1,5 +1,6 @@
 import os
 import yaml
+import time
 import numpy as np
 import argparse
 import traceback
@@ -217,6 +218,10 @@ def get_parser(parser=None):
         '--max-ctime',
         help="Maximum timestamp for the beginning of an observation list",
     )
+    parser.add_argument(
+        '--update-delay',
+        help="Time in the past to start observation list."
+    )
     return parser
 
 def main(
@@ -226,9 +231,14 @@ def main(
         overwrite: bool = False,
         min_ctime: Optional[int] = None,
         max_ctime: Optional[int] = None,
+        update_delay: Optional[int] = None,
  ):
     configs, context = _get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess")
+    if (min_ctime is None) and (update_delay is not None):
+        # If min_ctime is provided it will use that..
+        # Otherwise it will use update_delay to set min_ctime.
+        min_ctime = int(time.time()) + update_delay
 
     if obs_id is not None:
         tot_query = f"obs_id=='{obs_id}'"
