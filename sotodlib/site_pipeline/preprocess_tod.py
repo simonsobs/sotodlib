@@ -220,7 +220,8 @@ def get_parser(parser=None):
     )
     parser.add_argument(
         '--update-delay',
-        help="Time in the past to start observation list."
+        help="Time in the past to start observation list.",
+        type=int
     )
     return parser
 
