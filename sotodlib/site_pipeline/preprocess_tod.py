@@ -220,7 +220,7 @@ def get_parser(parser=None):
     )
     parser.add_argument(
         '--update-delay',
-        help="Time in the past to start observation list.",
+        help="Number of days (unit is days) in the past to start observation list.",
         type=int
     )
     return parser
@@ -239,7 +239,7 @@ def main(
     if (min_ctime is None) and (update_delay is not None):
         # If min_ctime is provided it will use that..
         # Otherwise it will use update_delay to set min_ctime.
-        min_ctime = int(time.time()) + update_delay
+        min_ctime = int(time.time()) - update_delay*86400
 
     if obs_id is not None:
         tot_query = f"obs_id=='{obs_id}'"
