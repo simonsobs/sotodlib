@@ -42,16 +42,19 @@ def _get_preprocess_context(configs, context=None):
     return configs, context
 
 def _get_groups(obs_id, configs, context):
-    group_by = configs['subobs'].get('use', 'detset')
-    if group_by.startswith('dets:'):
-        group_by = group_by.split(':',1)[1]
+    group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
+    for i, gb in enumerate(group_by):
+        if gb.startswith('dets:'):
+            group_by[i] = gb.split(':',1)[1]
 
-    if group_by == 'detset':
-        groups = context.obsfiledb.get_detsets(obs_id)
-    else:
-        det_info = context.get_det_info(obs_id)
-        groups = det_info.subset(keys=[group_by]).distinct()[group_by]
-    return group_by, list(groups)
+        if (gb == 'detset') and (len(group_by) == 1):
+            groups = context.obsfiledb.get_detsets(obs_id)
+            return group_by, [[g] for g in groups]
+        
+    det_info = context.get_det_info(obs_id)
+    rs = det_info.subset(keys=group_by).distinct()
+    groups = [[b for a,b in r.items()] for r in rs]
+    return group_by, groups
 
 def preprocess_tod(
     obs_id, 
@@ -108,7 +111,8 @@ def preprocess_tod(
                      "archive index.")
         scheme = core.metadata.ManifestScheme()
         scheme.add_exact_match('obs:obs_id')
-        scheme.add_exact_match('dets:' + group_by)
+        for gb in group_by:
+            scheme.add_exact_match('dets:' + gb)
         scheme.add_data_field('dataset')
         db = core.metadata.ManifestDb(
             configs['archive']['index'],
@@ -120,24 +124,25 @@ def preprocess_tod(
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
 
-        aman = context.get_obs(obs_id, dets={group_by:group})
+        aman = context.get_obs(obs_id, dets={gb:g for gb, g in zip(group_by, group)})
         proc_aman, success = pipe.run(aman)
         if success != 'end':
             continue
 
         policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
         dest_file, dest_dataset = policy.get_dest(obs_id)
-        if group_by == 'detset':
-            dest_dataset += '_' + group
-        else:
-            dest_dataset += "_" + group_by + "_" + str(group)
+        for gb, g in zip(group_by, group):
+            if gb == 'detset':
+                dest_dataset += "_" + g
+            dest_dataset += "_" + gb + "_" + str(g)
         logger.info(f"Saving data to {dest_file}:{dest_dataset}")
         proc_aman.save(dest_file, dest_dataset, overwrite=overwrite)
 
         # Update the index.
         db_data = {'obs:obs_id': obs_id,
                    'dataset': dest_dataset}
-        db_data['dets:'+group_by] = group
+        for gb, g in zip(group_by, group):
+            db_data['dets:'+gb] = g
         
         logger.info(f"Saving to database under {db_data}")
         if len(db.inspect(db_data)) == 0:
