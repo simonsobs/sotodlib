@@ -134,7 +134,8 @@ def preprocess_tod(
         for gb, g in zip(group_by, group):
             if gb == 'detset':
                 dest_dataset += "_" + g
-            dest_dataset += "_" + gb + "_" + str(g)
+            else:
+                dest_dataset += "_" + gb + "_" + str(g)
         logger.info(f"Saving data to {dest_file}:{dest_dataset}")
         proc_aman.save(dest_file, dest_dataset, overwrite=overwrite)
 
