@@ -277,7 +277,7 @@ def main(
             if x is None or len(x) == 0:
                 run_list.append( (obs, None) )
             elif len(x) != len(groups):
-                [groups.remove(a[f'dets:{group_by}']) for a in x]
+                [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
                 run_list.append( (obs, groups) )
 
     logger.info(f"Beginning to run preprocessing on {len(run_list)} observations")
