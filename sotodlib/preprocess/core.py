@@ -401,7 +401,7 @@ class Pipeline(list):
         
         success = 'end'
         for step, process in enumerate(self):
-            self.logger.info(f"Running {process.name}")
+            self.logger.debug(f"Running {process.name}")
             process.process(aman, proc_aman)
             if run_calc:
                 process.calc_and_save(aman, proc_aman)
