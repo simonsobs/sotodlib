@@ -13,7 +13,7 @@ from typing import Union, Tuple, List, Optional, Dict
 import so3g
 from spt3g import core as spt3g_core
 from tqdm.auto import tqdm, trange
-from pprint import pprint
+import time
 
 Base = declarative_base()
 Session = sessionmaker()
@@ -31,6 +31,12 @@ class HkConfig:
 
     echo_db: bool = False
     "Whether database operations should be echoed"
+
+    file_idx_lookback_time: Optional[float] = None
+    "Time [sec] to look back when scanning for new files to index"
+
+    show_index_pb: bool = True
+    "If true, shows progress bar when indexing"
 
     aliases: Dict[str, str] = field(default_factory=dict)
     """
@@ -60,13 +66,22 @@ class HkFile(Base):
     start_time: float
         Starting ctime of the file
     end_time: float
-        Ending ctime of the fil
+        Ending ctime of the file
+    size: int
+        Size of file in bytes
+    mod_time: float
+        Modification time of file
+    index_status: float
+        Index status of file. Can be "unindexed", "indexed", or "failed"
     """
     __tablename__ = 'hk_files'
     id = db.Column(db.Integer, primary_key=True)
     path = db.Column(db.String, nullable=False, unique=True)
     start_time = db.Column(db.Float)
     end_time = db.Column(db.Float)
+    size = db.Column(db.Float)
+    mod_time = db.Column(db.Float)
+    index_status = db.Column(db.String)
 
 
 class HkFrame(Base):
@@ -99,68 +114,6 @@ class HkFrame(Base):
     end_time = db.Column(db.Float)
 
 
-def get_items_from_file(hk_path, return_on_fail=True) -> Tuple[HkFile, List[HkFrame]]:
-    """
-    Returns HkFile and HkFrame objects corresponding to a given hk file.
-
-    Args
-    --------
-    hk_path : str
-        Path of hk file to read
-    return_on_fail : bool
-        If True, if there is a runtime error while reading the g3 file (usually
-        caused by a forced shutdown), the function will still return parsed
-        frames.
-
-    Returns
-    ---------
-    hk_file : HkFile
-        HkFile object corresponding to the file
-    frames : List[HkFrame]
-        List of all HkFrames in the file
-    """
-    hkfile = HkFile(path=hk_path)
-    frames = []
-    reader = so3g.G3IndexedReader(hk_path)
-
-    file_start, file_end = 1<<32, 0
-    while True:
-        byte_offset = reader.Tell()
-        try:
-            frame = reader.Process(None)
-        except RuntimeError:
-            print(f"Error processing file {hkfile} byte offset: {byte_offset}")
-            if return_on_fail:
-                break
-            else:
-                raise
-        if not frame:
-            break
-        else:
-            frame = frame[0]
-        
-        if frame['hkagg_type'] != so3g.HKFrameType.data:
-            continue
-
-        # Process frame
-        addr = frame['address']
-        _, agent, _, feed = addr.split('.')
-        start_time, stop_time = 1<<32, 0
-        for block in frame['blocks']:
-            ts = np.array(block.times) / spt3g_core.G3Units.s
-            start_time = min(start_time, ts[0])
-            stop_time = max(stop_time, ts[-1])
-        file_start = min(file_start, start_time)
-        file_end = max(file_end, stop_time)
-        frames.append(HkFrame(
-            agent=agent, feed=feed, byte_offset=byte_offset,
-            start_time=start_time, end_time=stop_time, file=hkfile
-        ))
-
-    hkfile.start_time = file_start
-    hkfile.end_time = file_end
-    return hkfile, frames
-
 class HkDb:
     """
     Helper class for createing database sessions
@@ -181,60 +134,132 @@ class HkDb:
         Base.metadata.create_all(self.engine)
 
 
-def index_files(paths, hkdb: HkDb, session=None):
+def update_file_index(hkcfg: HkConfig, session=None):
+    """Updates HkFiles database with new files on disk"""
+    if session is None:
+        hkdb = HkDb(hkcfg)
+        session = hkdb.Session()
+    
+    if hkcfg.file_idx_lookback_time is not None:
+        min_ctime = time.time() - hkcfg.file_idx_lookback_time
+    else:
+        min_ctime = 0
+    
+    all_files = []
+    for subdir in os.listdir(hkcfg.hk_root):
+        sdir = os.path.join(hkcfg.hk_root, subdir)
+        if min_ctime > os.path.getmtime(sdir):
+            continue
+        all_files.extend([
+            os.path.join(sdir, f) 
+            for f in os.listdir(sdir)
+            if f.endswith('.g3')
+        ])
+
+    existing_files = [path for path, in session.query(HkFile.path).all()]
+    new_files = sorted(list(set(all_files) - set(existing_files)))
+
+    files = []
+    print(f"Adding {len(new_files)} new files to index...")
+    for path in new_files:
+        files.append(HkFile(
+            path=path,
+            size=os.path.getsize(path),
+            mod_time=os.path.getmtime(path),
+            index_status='unindexed'
+        ))
+    
+    session.add_all(files)
+    session.commit()
+
+def get_frames_from_file(file: HkFile, return_on_fail=True) -> List[HkFrame]:
     """
-    Indexes a group of files, adding items to the database.
+    Returns HkFile and HkFrame objects corresponding to a given hk file.
 
     Args
-    -----
-    paths : Union[str, List[str]]
-        Path or paths to files to index
-    db : HkDb
-        Database object to use
+    --------
+    file : HkFile
+        HkFile object corresponding to the file
+    return_on_fail : bool
+        If True, if there is a runtime error while reading the g3 file (usually
+        caused by a forced shutdown), the function will still return parsed
+        frames.
+
+    Returns
+    ---------
+    frames : List[HkFrame]
+        List of all HkFrames in the file
     """
-    paths = np.atleast_1d(paths)
+    frames = []
+    reader = so3g.G3IndexedReader(file.path)
+
+    while True:
+        byte_offset = reader.Tell()
+        try:
+            frame = reader.Process(None)
+        except RuntimeError:
+            print(f"Error processing file {file.path} byte offset: {byte_offset}")
+            if return_on_fail:
+                break
+            else:
+                raise
+        if not frame:
+            break
+        else:
+            frame = frame[0]
+        
+        if frame['hkagg_type'] != so3g.HKFrameType.data:
+            continue
+
+        # Process frame
+        addr = frame['address']
+        _, agent, _, feed = addr.split('.')
+        start_time, stop_time = 1<<32, 0
+        for block in frame['blocks']:
+            ts = np.array(block.times) / spt3g_core.G3Units.s
+            start_time = min(start_time, ts[0])
+            stop_time = max(stop_time, ts[-1])
+        frames.append(HkFrame(
+            agent=agent, feed=feed, byte_offset=byte_offset,
+            start_time=start_time, end_time=stop_time, file=file
+        ))
+
+    return frames
+
+
+def update_frame_index(hkcfg: HkConfig, session=None):
+    """Updates HkFrames database with frames from unindexed files"""
     if session is None:
+        hkdb = HkDb(hkcfg)
         session = hkdb.Session()
-
-    items =[]
-    hk_root = hkdb.cfg.hk_root
-    for p in paths:
-        hk_file, hk_frames = get_items_from_file(os.path.join(hkdb.cfg.hk_root, p))
-        items.append(hk_file)
-        items.extend(hk_frames)
-    try:
-        session.add_all(items)
-        session.commit()
-    except:
-        session.rollback()
-        raise
-
-
-def get_all_hk_files(cfg: HkConfig):
-    """
-    Gets list of all hk files in specified root directory
-    """
-    hk_files = []
-    for root, _, files in os.walk(cfg.hk_root):
-        for file in files:
-            if file.endswith('.g3'):
-                hk_files.append(os.path.join(root, file))
-    return hk_files
+    
+    files = session.query(HkFile).filter(HkFile.index_status == 'unindexed').all()
+    for file in tqdm(files, disable=(not hkcfg.show_index_pb)):
+        frames = get_frames_from_file(file)
+        file_start, file_end = 1<<32, 0
+        for f in frames:
+            file_start = min(file_start, f.start_time)
+            file_end = max(file_end, f.end_time)
+        file.start_time = file_start
+        file.end_time = file_end
+        file.index_status ='indexed'
+        try:
+            session.add_all(frames)
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            file.index_status = 'failed'
+            session.commit()
 
 
-def index_all(cfg: Union[HkConfig, str], show_pb=True, files_per_batch=1):
-    """
-    Indexes all files in the specified root directory.
-    """
+def update_index_all(cfg: Union[HkConfig, str]):
+    """Updates all HK index databases"""
+    if isinstance(cfg, str):
+        cfg = HkConfig.from_yaml(cfg)
     hkdb = HkDb(cfg)
-    all_files = get_all_hk_files(cfg)
-
     session = hkdb.Session()
-    archived_paths = [path for path, in session.query(HkFile.path).all()]
-    remaining_files = sorted(list(set(all_files) - set(archived_paths)))
-
-    for i in trange(0, len(remaining_files), files_per_batch, disable=(not show_pb)):
-        index_files(remaining_files[i:i+files_per_batch], hkdb, session=session)
+    update_file_index(cfg, session=session)
+    update_frame_index(cfg, session=session)
 
 
 #####################
@@ -318,6 +343,16 @@ class HkResult:
         for alias, key in aliases.items():
             if key in self.data:
                 setattr(self, alias, self.data[key])
+
+    def save(self, path):
+        np.savez(path, aliases=np.array(self._aliases), **self.data)
+
+    @classmethod
+    def load(cls, path):
+        d = np.load(path, allow_pickle=True)
+        aliases = d['aliases'].item()
+        data = {k: d[k] for k in d.files if k != 'aliases'}
+        return cls(data, aliases=aliases)
 
 
 def load_hk(load_spec: LoadSpec, show_pb=False):
