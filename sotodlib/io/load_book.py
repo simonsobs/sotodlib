@@ -376,7 +376,7 @@ def _concat_filesets(results, ancil=None, timestamps=None,
 
     if ancil is not None:
         # Handle ancillary fields, a.k.a. boresight pointing /
-        # rotation / corotation.
+        # rotation / corotator.
         aman.wrap('ancil', core.AxisManager(aman.samps))
 
         # Put all fields into 'ancil'.
@@ -393,9 +393,9 @@ def _concat_filesets(results, ancil=None, timestamps=None,
 
             roll = None
             if 'boresight_enc' in _a:
-                roll = _a['boresight_enc']
-            elif 'corotation_enc' in _a:
-                roll = _a['el_enc'] - 60 - _a['corotation_enc']
+                roll = -1*_a['boresight_enc']
+            elif 'corotator_enc' in _a:
+                roll = _a['el_enc'] - 60 - _a['corotator_enc']
             if roll is None:
                 _b.wrap('roll', None)
             else:
