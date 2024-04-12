@@ -21,6 +21,7 @@ defaults = {"query": "1",
             "tods": None,
             "nset": None,
             "wafer": None,
+            "freq": None,
             "center_at": None,
             "site": 'so_sat1',
             "max_dets": None, # not implemented yet
@@ -69,6 +70,7 @@ def get_parser(parser=None):
     parser.add_argument("--tods",    type=str, )
     parser.add_argument("--nset",    type=int, )
     parser.add_argument("--wafer",   type=str, help="Detector set to map with")
+    parser.add_argument("--freq",    type=str, help="Frequency band to map with")
     parser.add_argument("--max-dets",type=int, )
     parser.add_argument("--fixed_ftime", type=int, )
     parser.add_argument("--mindur", type=int, )
@@ -307,8 +309,6 @@ def calibrate_obs_tomoki(obs, dtype_tod=np.float32, site='so_sat1', det_left_rig
         flags.get_turnaround_flags(obs, t_buffer=0.1, truncate=True)
         obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
         freq, Pxx = fft_ops.calc_psd(obs, nperseg=nperseg, merge=True)
-        #print('First psd, number of nusamps', obs.nusamps.count)
-        #print('First psd, shape of P',Pxx.shape)
         wn = fft_ops.calc_wn(obs)
         obs.wrap('wn', wn, [(0, 'dets')])
         
@@ -336,8 +336,6 @@ def calibrate_obs_tomoki(obs, dtype_tod=np.float32, site='so_sat1', det_left_rig
         obs.move('signal', None)
         obs.move('hwpss_remove', 'signal')
         freq, Pxx = fft_ops.calc_psd(obs, nperseg=nperseg, merge=False)
-        #print('Second psd, number of nusamps', obs.nusamps.count)
-        #print('Second psd, shape of P',Pxx.shape)
         obs.Pxx = Pxx
         
         detrend_tod(obs, method='median')
@@ -364,8 +362,8 @@ def calibrate_obs_tomoki(obs, dtype_tod=np.float32, site='so_sat1', det_left_rig
         detrend_tod(obs, signal_name='dsT', method='linear')
         detrend_tod(obs, signal_name='demodQ', method='linear')
         detrend_tod(obs, signal_name='demodU', method='linear')
-        freq, Pxx_demodQ = fft_ops.calc_psd(obs, signal=obs.demodQ, nperseg=nperseg, merge=False)
-        freq, Pxx_demodU = fft_ops.calc_psd(obs, signal=obs.demodU, nperseg=nperseg, merge=False)
+        freq, Pxx_demodQ = fft_ops.calc_psd(obs, signal=obs.demodQ, nperseg=nperseg, merge=True)
+        freq, Pxx_demodU = fft_ops.calc_psd(obs, signal=obs.demodU, nperseg=nperseg, merge=True)
         obs.wrap('Pxx_demodQ', Pxx_demodQ, [(0, 'dets'), (1, 'nusamps')])
         obs.wrap('Pxx_demodU', Pxx_demodU, [(0, 'dets'), (1, 'nusamps')])
         
@@ -907,7 +905,7 @@ def main(config_file=None, defaults=defaults, **args):
     L.addHandler(ch)
 
     context = Context(args['context'])
-    obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode=args['mode'], nset=args['nset'], wafer=args['wafer'], ntod=args['ntod'], tods=args['tods'], fixed_time=args['fixed_time'], mindur=args['mindur'])
+    obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode=args['mode'], nset=args['nset'], wafer=args['wafer'], freq=args['freq'], ntod=args['ntod'], tods=args['tods'], fixed_time=args['fixed_time'], mindur=args['mindur'])
     tags = []
     cwd = os.getcwd()
     
