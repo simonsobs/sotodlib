@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Template regression mapmaking.
 """
@@ -7,6 +7,7 @@ import numpy as np
 from astropy import units as u
 import toast
 import toast.ops
+from toast.intervals import IntervalList
 from toast.observation import default_values as defaults
 
 from .. import ops as so_ops
@@ -161,7 +162,7 @@ def mapmaker(job, otherargs, runargs, data):
         if job_tmpls.baselines.enabled:
             job_tmpls.noise_model = noise_model
 
-        if otherargs.obsmaps:
+        if otherargs.obsmaps or otherargs.intervalmaps:
             # Map each observation separately
             timer_obs = toast.timing.Timer()
             timer_obs.start()
@@ -178,14 +179,36 @@ def mapmaker(job, otherargs, runargs, data):
                 obs_data = data.select(obs_uid=obs.uid)
                 # Replace comm_world with the group communicator
                 obs_data._comm = new_comm
-                job_ops.mapmaker.name = f"{orig_name}_{obs.name}"
-                job_ops.mapmaker.reset_pix_dist = True
-                job_ops.mapmaker.apply(obs_data)
-                log.info_rank(
-                    f"{group} : Mapped {obs.name} in",
-                    comm=new_comm.comm_world,
-                    timer=timer_obs,
-                )
+                binner = job_ops.mapmaker.binning
+                view = binner.pixel_pointing.view
+                if otherargs.intervalmaps and view is not None:
+                    ob = obs_data.obs[0]
+                    times = ob.shared[defaults.times].data
+                    views = ob.intervals[view]
+                    for iview, view in enumerate(views):
+                        # Add a view for this specific interval
+                        single_view = f"{view}-{iview}"
+                        ob.intervals[single_view] = IntervalList(
+                            times, timespans=[(view.start, view.stop)]
+                        )
+                        binner.pixel_pointing.view = single_view
+                        job_ops.mapmaker.name = f"{orig_name}_{obs.name}-{iview}"
+                        job_ops.mapmaker.reset_pix_dist = True
+                        job_ops.mapmaker.apply(obs_data)
+                        log.info_rank(
+                            f"{group} : Mapped {obs.name}-{iview} / {len(views)} in",
+                            comm=new_comm.comm_world,
+                            timer=timer_obs,
+                        )
+                else:
+                    job_ops.mapmaker.name = f"{orig_name}_{obs.name}"
+                    job_ops.mapmaker.reset_pix_dist = True
+                    job_ops.mapmaker.apply(obs_data)
+                    log.info_rank(
+                        f"{group} : Mapped {obs.name} in",
+                        comm=new_comm.comm_world,
+                        timer=timer_obs,
+                    )
             log.info_rank(
                 f"{group} : Done mapping {len(data.obs)} observations.",
                 comm=new_comm.comm_world,

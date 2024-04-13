@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2019-2023 Simons Observatory.
+# Copyright (c) 2019-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 """
@@ -183,6 +183,13 @@ def main():
         default=False,
         action="store_true",
         help="Map each observation separately.",
+    )
+    parser.add_argument(
+        "--intervalmaps",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Map each interval separately.",
     )
     parser.add_argument(
         "--zero_loaded_data",
