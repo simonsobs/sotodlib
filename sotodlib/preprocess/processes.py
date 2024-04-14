@@ -3,13 +3,16 @@ from operator import attrgetter
 
 import sotodlib.core as core
 import sotodlib.tod_ops as tod_ops
+import sotodlib.obs_ops as obs_ops
 from sotodlib.hwp import hwp
+import sotodlib.coords.planets as planets
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    count_cuts,
                                     sparse_to_ranges_matrix)
 
 from .core import _Preprocess
+from .. import flag_utils
 
 
 class FFTTrim(_Preprocess):
@@ -49,11 +52,9 @@ class DetBiasFlags(_Preprocess):
     _influx_field = "det_bias_flags_frac"
 
     def calc_and_save(self, aman, proc_aman):
-        m = tod_ops.flags.get_det_bias_flags(aman, merge=False,
-                                               **self.calc_cfgs)
-        calc_aman = core.AxisManager(proc_aman.dets, proc_aman.samps)
-        calc_aman.wrap('det_bias_flags', m, [(0, 'dets'), (1, 'samps')])
-        self.save(proc_aman, calc_aman)
+        dbc_aman = tod_ops.flags.get_det_bias_flags(aman, merge=False, full_output=True,
+                                                    **self.calc_cfgs)
+        self.save(proc_aman, dbc_aman)
     
     def save(self, proc_aman, dbc_aman):
         if self.save_cfgs is None:
@@ -69,6 +70,18 @@ class DetBiasFlags(_Preprocess):
         keep = ~proc_aman.det_bias_flags.det_bias_flags
         meta.restrict("dets", meta.dets.vals[has_all_cut(keep)])
         return meta
+    
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_det_bias_flags
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            plot_det_bias_flags(aman, proc_aman['det_bias_flags'], rfrac_range=self.calc_cfgs['rfrac_range'],
+                                psat_range=self.calc_cfgs['psat_range'], filename=filename.replace('{name}', f'{ufm}_bias_cuts_venn'))
 
     @classmethod
     def gen_metric(cls, meta, proc_aman):
@@ -196,6 +209,8 @@ class GlitchDetection(_Preprocess):
         ) 
         aman.wrap("glitches", glitch_aman)
         self.save(proc_aman, glitch_aman)
+        if self.calc_cfgs.get('save_plot', False):
+            flag_utils.plot_glitch_stats(aman, save_path=self.calc_cfgs['save_plot'])
     
     def save(self, proc_aman, glitch_aman):
         if self.save_cfgs is None:
@@ -511,6 +526,18 @@ class EstimateHWPSS(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap(self.calc_cfgs["hwpss_stats_name"], hwpss_stats)
 
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_4f_2f_counts, plot_hwpss_fit_status
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            plot_4f_2f_counts(aman, filename=filename.replace('{name}', f'{ufm}_4f_2f_counts'))
+            plot_hwpss_fit_status(aman, proc_aman[self.calc_cfgs["hwpss_stats_name"]], filename=filename.replace('{name}', f'{ufm}_hwpss_stats'))
+
 class SubtractHWPSS(_Preprocess):
     """Subtracts a HWPSS template from signal. 
 
@@ -657,6 +684,52 @@ class SubPolyf(_Preprocess):
     def process(self, aman, proc_aman):
         tod_ops.sub_polyf.subscan_polyfilter(aman, **self.process_cfgs)
 
+class SSOFootprint(_Preprocess):
+    """Find nearby sources within a given distance and get SSO footprint and plot
+    each source on the focal plane.
+
+    .. autofunction:: sotodlib.obs_ops.sources.get_sso
+    """
+    name = 'sso_footprint'
+
+    def calc_and_save(self, aman, proc_aman):
+        ssos = planets.get_nearby_sources(tod=aman, distance=self.calc_cfgs.get("distance", 20))
+        if ssos:
+            sso_aman = core.AxisManager()
+            nstep = self.calc_cfgs.get("nstep", 100)
+            onsamp = (aman.samps.count+nstep-1)//nstep
+            for sso in ssos:
+                planet = sso[0]
+                xi_p, eta_p = obs_ops.sources.get_sso(aman, planet, nstep=nstep)
+                planet_aman = core.AxisManager(core.OffsetAxis('ds_samps', count=onsamp,
+                                                               offset=aman.samps.offset,
+                                                               origin_tag=aman.samps.origin_tag))
+                # planet_aman = core.AxisManager(core.OffsetAxis("samps", onsamp))
+                planet_aman.wrap("xi_p", xi_p, [(0, "ds_samps")])
+                planet_aman.wrap("eta_p", eta_p, [(0, "ds_samps")])
+                sso_aman.wrap(planet, planet_aman)
+            self.save(proc_aman, sso_aman)
+        else:
+            raise ValueError("No sources found within footprint")
+        
+    def save(self, proc_aman, sso_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("sso_footprint", sso_aman)
+
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_sso_footprint
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            for sso in proc_aman.sso_footprint._assignments.keys():
+                planet_aman = proc_aman.sso_footprint[sso]
+                plot_sso_footprint(aman, planet_aman, sso, filename=filename.replace('{name}', f'{sso}_sso_footprint'), **self.plot_cfgs)
+        
+
 class FourierFilter(_Preprocess):
     """
     Applies a fourier filter (defined in fft_ops) to the data.
@@ -754,3 +827,4 @@ _Preprocess.register(GlitchFill)
 _Preprocess.register(FlagTurnarounds)
 _Preprocess.register(SubPolyf)
 _Preprocess.register(DetBiasFlags)
+_Preprocess.register(SSOFootprint)
