@@ -192,5 +192,8 @@ def simulate_mumux_crosstalk(job, otherargs, runargs, data):
     # Configured operators for this job
     job_ops = job.operators
 
+    if otherargs.realization is not None:
+        job_ops.sim_mumux_crosstalk.realization = otherargs.realization
+
     if job_ops.sim_mumux_crosstalk.enabled:
         job_ops.sim_mumux_crosstalk.apply(data)
