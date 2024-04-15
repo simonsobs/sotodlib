@@ -805,11 +805,9 @@ class G3tHWP():
         result = (interp > 0.999)
         return result
 
-    def write_solution_h5(self, tod, output=None, h5_address=None, load_h5=True):
+    def set_data(self, tod, load_h5=True):
         """
-        Output HWP angle, flags, metadata as AxisManager format
-        The results are stored in HDF5 files. Since HWP angle solution HDF5 files are large,
-        we automatically split into the new output files.
+        Output HWP hk data as AxisManager format. The results are stored in HDF5 files.
         We save the copy of raw hwp encoder hk data into HDF5 file, to save time for
         re-calculating the hwp angle solutions.
 
@@ -817,11 +815,81 @@ class G3tHWP():
         ----
         tod: AxisManager
 
-        output: str or None
-            output path + file name, overwrite config file
-
         load_h5:
             If true, try to load raw encoder data from hdf5 file
+
+        Notes
+        -----
+        Output file format
+
+        - Raw output
+            x is a number different for each data and each observation
+
+            - raw_rising_edge_count_1/2: int (2, x)
+
+            - raw_irig_time_1/2: float (2, x)
+
+            - raw_counter_1/2: float (2, x)
+
+            - raw_counter_index_1/2: int (2, x)
+
+            - raw_irig_synch_pulse_clock_time_1/2: float (2, x)
+
+            - raw_irig_synch_pulse_clock_counts_1/2: int (2, x)
+
+            - raw_quad_1/2: bool (2, x)
+
+            - raw_pid_direction: bool (2, x)
+        """
+
+        if len(tod.timestamps) == 0:
+            logger.warning('Input data is empty.')
+            return
+
+        aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
+        start = int(tod.timestamps[0])-self._margin
+        end = int(tod.timestamps[-1])+self._margin
+
+        self.data = {}
+        try:
+            if load_h5:
+                logger.info('Loading raw encoder data from h5')
+                try:
+                    self.data = self._load_raw_axes(aman, output, h5_address)
+                except Exception as e:
+                    logger.error(f"Exception '{e}' thrown while loading HWP data from h5. Attempt to load from hk.")
+                    self.data = self.load_data(start, end)
+
+            else:
+                self.data = self.load_data(start, end)
+
+            if 'pid_direction' in self.data.keys():
+                pid_direction = np.nanmedian(self.data['pid_direction'][1])*2 - 1
+                if pid_direction in [1, -1]:
+                    aman['pid_direction'] = pid_direction
+                else:
+                    aman['pid_direction'] = 0
+
+        except Exception as e:
+            logger.error(
+                f"Exception '{e}' thrown while loading HWP data. The specified encoder field is missing.")
+            self._write_solution_h5_logger = 'HWP data too short'
+            print(traceback.format_exc())
+
+        finally:
+            self._set_raw_axes(aman, self.data)
+
+        return aman
+
+    def make_solution(self, tod):
+        """
+        Output HWP angle, flags, metadata as AxisManager format
+        The results are stored in HDF5 files. Since HWP angle solution HDF5 files are large,
+        we automatically split into the new output files.
+
+        Args
+        ----
+        tod: AxisManager
 
         Notes
         -----
@@ -905,79 +973,20 @@ class G3tHWP():
             - scan_direction: int
                 Estimation by scan synchronous modulation of rotation speed.
 
-        - Raw output
-            x is a number different for each data and each observation
-
-            - raw_rising_edge_count_1/2: int (2, x)
-
-            - raw_irig_time_1/2: float (2, x)
-
-            - raw_counter_1/2: float (2, x)
-
-            - raw_counter_index_1/2: int (2, x)
-
-            - raw_irig_synch_pulse_clock_time_1/2: float (2, x)
-
-            - raw_irig_synch_pulse_clock_counts_1/2: int (2, x)
-
-            - raw_quad_1/2: bool (2, x)
-
-            - raw_pid_direction: bool (2, x)
 
         """
-        if self._output is None and output is None:
-            logger.warning('Output file not specified')
-            return
-        if output is not None:
-            self._output = output
-
-        if len(tod.timestamps) == 0:
-            logger.warning('Input data is empty.')
-            return
 
         # write solution, metadata loader requires a dets axis
         aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
         aman.wrap_new('timestamps', ('samps', ))[:] = tod.timestamps
         self._set_empty_axes(aman)
 
-        start = int(tod.timestamps[0])-self._margin
-        end = int(tod.timestamps[-1])+self._margin
-
-        data = {}
-        try:
-            if load_h5:
-                logger.info('Loading raw encoder data from h5')
-                try:
-                    data = self._load_raw_axes(aman, output, h5_address)
-                except Exception as e:
-                    logger.error(f"Exception '{e}' thrown while loading HWP data from h5. Attempt to load from hk.")
-                    data = self.load_data(start, end)
-
-            else:
-                data = self.load_data(start, end)
-
-            if 'pid_direction' in data.keys():
-                pid_direction = np.nanmedian(data['pid_direction'][1])*2 - 1
-                if pid_direction in [1, -1]:
-                    aman['pid_direction'] = pid_direction
-                else:
-                    aman['pid_direction'] = 0
-
-            logger.info('Saving raw encoder data')
-            self._set_raw_axes(aman, data)
-
-        except Exception as e:
-            logger.error(
-                f"Exception '{e}' thrown while loading HWP data. The specified encoder field is missing.")
-            self._write_solution_h5_logger = 'HWP data too short'
-            print(traceback.format_exc())
-
         solved = {}
         for suffix in self._suffixes:
             logger.info('Start analyzing encoder'+suffix)
             self._set_empty_axes(aman, suffix)
             # load data
-            if not 'counter' + suffix in data.keys():
+            if not 'counter' + suffix in self.data.keys():
                 logger.warning('No HWP data in the specified timestamps.')
                 self._write_solution_h5_logger = 'No HWP data'
                 continue
@@ -985,7 +994,7 @@ class G3tHWP():
             # version 1
             # calculate HWP angle
             try:
-                solved = solved | self.analyze(data, mod2pi=False, suffix=suffix)
+                solved = solved | self.analyze(self.data, mod2pi=False, suffix=suffix)
             except Exception as e:
                 logger.error(
                     f"Exception '{e}' thrown while calculating HWP angle. Angle calculation failed.")
@@ -1079,24 +1088,8 @@ class G3tHWP():
         aman.primary_encoder = primary_encoder
         aman.version = highest_version
 
-        # save
-        max_trial = 5
-        wait_time = 5
-        for i in range(1, max_trial + 1):
-            try:
-                aman.save(output, h5_address, overwrite=True, compression='gzip')
-                logger.info("Saved aman")
-                return
-            except BlockingIOError:
-                logger.warn(f"Cannot save aman because HDF5 is temporary locked, try again in {wait_time} seconds, trial {i}/{max_trial}")
-                time.sleep(wait_time)
-            except Exception as e:
-                logger.error(f"Exception '{e}' thrown while saving aman")
-                print(traceback.format_exc())
-                break
+        return aman
 
-        logger.error("Cannot save aman, give up.")
-        return
 
     def _hwp_angle_calculator(
             self,
