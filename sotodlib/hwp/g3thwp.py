@@ -751,7 +751,9 @@ class G3tHWP():
             aman.wrap('primary_encoder', 0)
             aman.wrap('version', 1)
             aman.wrap('pid_direction', 0)
+            aman.wrap('offcenter_direction', 0)
             aman.wrap_new('offcenter', shape=(2,), dtype=np.float64)
+            aman.wrap('sotodlib_version', sotodlib.__version__)
         else:
             aman.wrap_new('hwp_angle_ver1'+suffix,
                           shape=('samps', ), dtype=np.float64)
@@ -851,13 +853,6 @@ class G3tHWP():
 
             else:
                 self.data = self.load_data(start, end)
-
-            if 'pid_direction' in self.data.keys():
-                pid_direction = np.nanmedian(self.data['pid_direction'][1])*2 - 1
-                if pid_direction in [1, -1]:
-                    aman['pid_direction'] = pid_direction
-                else:
-                    aman['pid_direction'] = 0
 
         except Exception as e:
             logger.error(
@@ -970,6 +965,13 @@ class G3tHWP():
         aman.wrap_new('timestamps', ('samps', ))[:] = tod.timestamps
         self._set_empty_axes(aman)
 
+        if 'pid_direction' in self.data.keys():
+            pid_direction = np.nanmedian(self.data['pid_direction'][1])*2 - 1
+            if pid_direction in [1, -1]:
+                aman['pid_direction'] = pid_direction
+            else:
+                aman['pid_direction'] = 0
+
         solved = {}
         for suffix in self._suffixes:
             logger.info('Start analyzing encoder'+suffix)
@@ -1043,6 +1045,7 @@ class G3tHWP():
                         solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
                     aman['version'+suffix] = 3
                 aman['offcenter'] = np.array([np.average(solved['offcentering']), np.std(solved['offcentering'])])
+                aman.offcenter_direction = np.sign(aman['offcenter'][0])
             except Exception as e:
                 logger.error(
                     f"Exception '{e}' thrown while the off-centering correction.")

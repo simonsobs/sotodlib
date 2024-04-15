@@ -34,12 +34,11 @@ def apply_hwp_angle_model(tod, band='f090', hwp_solution_attr='hwp_solution', hw
     # check available sign estimation methods
     available_signs = []
 
-    _sign = getattr(hwp, 'pid_direction')
-    if _sign != 0:
-        available_signs.append(_sign*sign_matrix[telescope]['pid'])
-    _sign = np.sign(getattr(hwp, 'offcenter')[0])
-    if _sign != 0:
-        available_signs.append(_sign*sign_matrix[telescope]['offcenter'])
+    methods = ['pid', 'offcenter']
+    for method in methods:
+        _sign = getattr(hwp, method + '_direction')
+        if _sign != 0:
+            available_signs.append(_sign*sign_matrix[telescope][method])
 
     # check agreements of available estimation methods
     if len(available_signs) == 0:
