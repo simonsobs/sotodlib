@@ -267,11 +267,13 @@ def _load_book_detset(files, prefix='', load_ancil=True,
         signal_acc = Accumulator2d(
             samples=samples,
             insert_at=signal_buffer,
-            keys_to_keep=dets)
+            keys_to_keep=dets,
+            calibrate=SIGNAL_RESCALE)
     else:
         signal_acc = Accumulator2d(
             samples=samples,
-            keys_to_keep=dets)
+            keys_to_keep=dets,
+            calibrate=SIGNAL_RESCALE)
 
     # Sniff out a smurf status frame.
     smurf_proc = load_smurf.SmurfStatus._get_frame_processor()
@@ -435,7 +437,6 @@ def _concat_filesets(results, ancil=None, timestamps=None,
                 d = v['signal'].finalize()
                 aman['signal'][dets_ofs:dets_ofs + len(d)] = d
                 dets_ofs += len(d)
-        aman['signal'] *= SIGNAL_RESCALE
 
     # In sims, the whole primary block may be unpopulated.
     if any([v['primary'].data is not None for v in results.values()]):
@@ -711,7 +712,8 @@ class Accumulator2d(Accumulator):
     2-d array (preserving first axis labels).
 
     """
-    def __init__(self, *args, insert_at=None, keys_to_keep=None, **kwargs):
+    def __init__(self, *args, insert_at=None, keys_to_keep=None,
+                 calibrate=None, **kwargs):
         super().__init__(*args, **kwargs)
         # An optional destination buffer for the data.
         self.insert_at = insert_at
@@ -720,11 +722,19 @@ class Accumulator2d(Accumulator):
         self.extract_at_idx = None
         if self.insert_at is not None and self.samples[1] is None:
             self.samples[1] = self.insert_at.shape[-1] + self.samples[0]
+        self.calibrate = calibrate
 
     def _sample_count(self, _data):
         return len(_data.times)
 
     def _extract(self, data, src_slice, dest_slice):
+
+        if self.calibrate is not None:
+            # This is a low cost operation if you do it before
+            # decompression.  (Also do it before you use data.dtype,
+            # in "first frame stuff".)
+            data.calibrate(np.array([self.calibrate] * len(data.names)))
+
         # First frame stuff ...
         if self.data is None:
             if self.insert_at is not None:
@@ -742,9 +752,31 @@ class Accumulator2d(Accumulator):
                 # Set shape, if we know it.
                 if self.samples[1] is not None:
                     self.shape = (len(self.keys), self.samples[1] - self.samples[0])
-                    self.data = np.empty(self.shape, data.data.dtype)
+                    self.data = np.empty(self.shape, data.dtype)
                 else:
                     self.data = []
+
+        # G3SuperTimestream.extract() is available from so3g v0.1.13
+        # (April 2024).  The previous handling (below this block) can
+        # be removed in a few months.
+        if hasattr(data, 'extract'):
+            if self.insert_at is not None:
+                data.extract(self.insert_at[:, dest_slice],
+                             self.insert_at_idx,
+                             self.extract_at_idx,
+                             src_slice.start, src_slice.stop)
+            elif self.shape is not None:
+                data.extract(self.data[:, dest_slice], None, self.extract_at_idx,
+                             src_slice.start, src_slice.stop)
+            else:
+                _sh = [len(data.names), len(data.times)]
+                if self.extract_at_idx is not None:
+                    _sh[0] = len(self.extract_at_idx)
+                _dest = np.empty(_sh, dtype=data.dtype)
+                data.extract(_dest, None, self.extract_at_idx,
+                             src_slice.start, src_slice.stop)
+                self.data.append(_dest)
+            return
 
         # Store data from this frame.
         if self.insert_at is not None:
