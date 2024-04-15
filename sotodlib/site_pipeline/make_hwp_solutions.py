@@ -8,6 +8,7 @@ import os
 import argparse
 import logging
 import yaml
+import traceback
 from typing import Optional
 
 from sotodlib import core
@@ -63,6 +64,56 @@ def get_parser(parser=None):
     )
     return parser
 
+def make_db(db_filename):
+    """
+    Make sqlite database
+    Get file + dataset from policy.
+    policy = util.ArchivePolicy.from_params(config['archive']['policy'])
+    dest_file, dest_dataset = policy.get_dest(obs_id)
+    Use 'output_dir' argument for now
+    """
+
+    if os.path.exists(db_filename):
+        logger.info(f"Mapping {db_filename} for the "
+                    "archive index.")
+        db = core.metadata.ManifestDb(db_filename)
+    else:
+        logger.info(f"Creating {db_filename} for the "
+                     "archive index.")
+        scheme = core.metadata.ManifestScheme()
+        scheme.add_exact_match('obs:obs_id')
+        scheme.add_data_field('dataset')
+        db = core.metadata.ManifestDb(
+            db_filename,
+            scheme=scheme
+        )
+    return db
+
+def save(aman, db, h5_filename, obs_id, overwrite, compression):
+    """
+    Save HDF5 file and add entry to sqlite database
+    """
+    max_trial = 5
+    wait_time = 5
+    for i in range(1, max_trial + 1):
+        try:
+            aman.save(h5_filename, obs_id, overwrite, compression)
+            logger.info("Saved aman")
+            db.add_entry(
+                {'obs:obs_id': obs_id, 'dataset': obs_id}, filename=h5_filename, replace=overwrite,
+            )
+            logger.info("Added entry to db")
+            return
+        except BlockingIOError:
+            logger.warn(f"Cannot save aman because HDF5 is temporary locked, try again in {wait_time} seconds, trial {i}/{max_trial}")
+            time.sleep(wait_time)
+        except Exception as e:
+            logger.error(f"Exception '{e}' thrown while saving aman")
+            print(traceback.format_exc())
+            break
+
+    logger.error("Cannot save aman, give up.")
+
 def main(
     context: str,
     HWPconfig: str,
@@ -100,26 +151,8 @@ def main(
 
     ctx = core.Context(context)
 
-    # Get file + dataset from policy.
-    # policy = util.ArchivePolicy.from_params(config['archive']['policy'])
-    # dest_file, dest_dataset = policy.get_dest(obs_id)
-    # Use 'output_dir' argument for now
-    man_db_filename = os.path.join(output_dir, 'hwp_angle.sqlite')
-
-    if os.path.exists(man_db_filename):
-        logger.info(f"Mapping {man_db_filename} for the "
-                    "archive index.")
-        man_db = core.metadata.ManifestDb(man_db_filename)
-    else:
-        logger.info(f"Creating {man_db_filename} for the "
-                     "archive index.")
-        scheme = core.metadata.ManifestScheme()
-        scheme.add_exact_match('obs:obs_id')
-        scheme.add_data_field('dataset')
-        man_db = core.metadata.ManifestDb(
-            man_db_filename,
-            scheme=scheme
-        )
+    db_encoder = make_db(os.path.join(output_dir, 'hwp_encoder.sqlite'))
+    db_solution = make_db(os.path.join(output_dir, 'hwp_angle.sqlite'))
 
     # load observation data
     if obs_id is not None:
@@ -127,9 +160,9 @@ def main(
     else:
         tot_query = "and "
         if min_ctime is not None:
-            tot_query += f"timestamp>={min_ctime} and "
+            tot_query += f"start_time>={min_ctime} and "
         if max_ctime is not None:
-            tot_query += f"timestamp<={max_ctime} and "
+            tot_query += f"start_time<={max_ctime} and "
         if query is not None:
             tot_query += query + " and "
         tot_query = tot_query[4:-4]
@@ -142,7 +175,7 @@ def main(
     if len(obs_list) == 0:
         logger.warning(f"No observations returned from query: {query}")
     run_list = []
-    completed = man_db.get_entries(['dataset'])['dataset']
+    completed = db_solution.get_entries(['dataset'])['dataset']
 
     for obs in obs_list:
         if overwrite or not obs['obs_id'] in completed:
@@ -150,29 +183,24 @@ def main(
 
     # write solutions
     for obs in run_list:
-        # split h5 file by first 4 digits of unixtime
-        h5_filename = 'hwp_angle_{}.h5'.format(obs["obs_id"].split('_')[1][:4])
-        output_filename = os.path.join(output_dir, h5_filename)
-
-        h5_address = obs["obs_id"]
-        logger.info(f"Calculating Angles for {h5_address}")
+        obs_id = obs["obs_id"]
+        logger.info(f"Calculating Angles for {obs_id}")
         ctx = core.Context(context)
         tod = ctx.get_obs(obs, no_signal=True)
 
         # make angle solutions
         g3thwp = G3tHWP(HWPconfig)
-        g3thwp.write_solution_h5(
-            tod,
-            output=output_filename,
-            h5_address=h5_address,
-            load_h5=load_h5,
-        )
+        aman_encoder = g3thwp.set_data(tod, load_h5=load_h5)
+        aman_solution = g3thwp.make_solution(tod)
         del g3thwp
 
-        # Add an entry to the database
-        man_db.add_entry(
-            {'obs:obs_id': obs["obs_id"], 'dataset': h5_address}, filename=h5_filename, replace=overwrite,
-        )
+        # split h5 file by first 5 digits of unixtime
+        unix = obs_id.split('_')[1][:5]
+        logger.info(f"Saving hwp_encoder")
+        save(aman_encoder, db_encoder, os.path.join(output_dir, f'hwp_encoder_{unix}.h5'), obs_id, overwrite, 'gzip')
+        logger.info(f"Saving hwp_angle")
+        save(aman_solution, db_solution, os.path.join(output_dir, f'hwp_angle_{unix}.h5'), obs_id, overwrite, 'gzip')
+
     return
 
 if __name__ == '__main__':
