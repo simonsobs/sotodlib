@@ -67,24 +67,37 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         no_signal = False  # from here, assume no_signal in [True, False]
 
     # Regardless of what dets have been asked for (maybe none), get
-    # the list of detsets implicated in this observation.
+    # the list of detsets implicated in this observation.  Make sure
+    # this list is ordered by detset or the signal might not be
+    # ordered properly (checked later).
     c = db.conn.execute('select distinct DS.name, DS.det from detsets DS '
                         'join files on DS.name=files.detset '
-                        'where obs_id=?', (obs_id,))
-    pairs = [tuple(r) for r in c.fetchall()]
+                        'where obs_id=? '
+                        'order by DS.name',
+                        (obs_id,))
+    all_pairs = [tuple(r) for r in c.fetchall()]
 
     # Now filter to only the dets requested.
     if dets is None:
-        pairs_req = pairs
+        pairs_req = all_pairs
     else:
-        pairs_req = [p for p in pairs if p[1] in dets]
-        # Use sets for this...
+        pairs_req = [p for p in all_pairs if p[1] in dets]
         dets_req = [p[1] for p in pairs_req]
         unmatched = [d for d in dets if d not in dets_req]
         if len(unmatched):
             raise RuntimeError("User requested invalid dets (e.g. %s) "
                                "for obs_id=%s" % (unmatched[0], obs_id))
-    detsets_req = set(p[0] for p in pairs_req)
+        del dets_req, unmatched
+    del all_pairs, dets
+
+    # Make sure "pairs" is sorted, at _least_ at the level of grouping
+    # detsets together; then make sure the detsets are processed in
+    # that order.
+    detsets_req = sorted(set([p[0] for p in pairs_req]))
+    dets_req = []
+    for _ds in detsets_req:
+        dets_req.extend([p[1] for p in pairs_req if p[0] == _ds])
+    del pairs_req
 
     file_map = db.get_files(obs_id)
     one_group = list(file_map.values())[0]  # [('file0', 0, 1000), ('file1', 1000, 2000), ...]
@@ -104,12 +117,11 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
     samples[1] = min(max(samples), sample_range[1])
 
     file_map = db.get_files(obs_id)
-    dets_to_keep = [p[1] for p in pairs_req]
 
     # Consider pre-allocating the signal buffer.
     signal_buffer = None
     if samples[1] is not None and not no_signal:
-        signal_buffer = np.empty((len(dets_to_keep), samples[1] - samples[0]),
+        signal_buffer = np.empty((len(dets_req), samples[1] - samples[0]),
                                  dtype='float32')
 
     ancil = None
@@ -120,7 +132,7 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         files = file_map[detset]
         results[detset] = _load_book_detset(
             files, prefix=prefix, load_ancil=(ancil is None),
-            samples=samples, dets=dets_to_keep, no_signal=no_signal,
+            samples=samples, dets=dets_req, no_signal=no_signal,
             signal_buffer=signal_buffer)
         if ancil is None:
             ancil = results[detset]['ancil']
@@ -135,11 +147,15 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         ancil = _res['ancil']
         timestamps = _res['timestamps']
 
-    return _concat_filesets(results, ancil, timestamps,
-                            sample0=samples[0], obs_id=obs_id,
-                            signal_buffer=signal_buffer,
-                            get_frame_det_info=False)
-
+    obs = _concat_filesets(results, ancil, timestamps,
+                           sample0=samples[0], obs_id=obs_id,
+                           signal_buffer=signal_buffer,
+                           get_frame_det_info=False)
+    if signal_buffer is not None:
+        # Make sure that, whatever happened during concatenation, the
+        # dets are still ordered as was assumed by signal_buffer.
+        assert(np.all(obs.dets.vals == dets_req))
+    return obs
 
 def load_book_file(filename, dets=None, samples=None, no_signal=False):
     """Load one or more g3 files (from an obs/oper book) and return the
