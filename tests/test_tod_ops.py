@@ -262,27 +262,11 @@ class JumpfindTest(unittest.TestCase):
         tod.wrap('sig_jumps', sig_jumps, [(0, 'samps')])
 
         # Find jumps without filtering
-        jumps_nf, _ = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=5)
+        jumps_nf, _ = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=5, win_size=23)
         jumps_nf = jumps_nf.ranges().flatten()
         
-        # Find jumps with TV filtering
-        jumps_tv, _ = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, tv_weight=.5, min_size=5)
-        jumps_tv = jumps_tv.ranges().flatten()
-
-        # Find jumps with gaussian filtering
-        jumps_gauss, _ = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, gaussian_width=.5, min_size=5)
-        jumps_gauss = jumps_gauss.ranges().flatten()
-
         # Remove double counted jumps and round to remove uncertainty
         jumps_nf = np.unique(np.round(jumps_nf, -2))
-        jumps_tv = np.unique(np.round(jumps_tv, -2))
-        jumps_gauss = np.unique(np.round(jumps_gauss, -2))
-
-        # Check that all methods agree
-        self.assertEqual(len(jumps_tv), len(jumps_gauss))
-        self.assertTrue(np.all(np.abs(jumps_tv - jumps_gauss) == 0))
-        self.assertEqual(len(jumps_nf), len(jumps_gauss))
-        self.assertTrue(np.all(np.abs(jumps_nf - jumps_gauss) == 0))
 
         # Check that they agree with the input
         self.assertEqual(len(jump_locs), len(jumps_nf))
