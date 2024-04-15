@@ -91,17 +91,6 @@ class G3tHWP():
         self._encoder_disk_radius = self.configs.get(
             'encoder_disk_radius', 346.25)
 
-        # Method to determine the rotation direction
-        self._method_direction = self.configs.get('method_direction', 'quad')
-        assert self._method_direction in ['offcenter', 'pid', 'quad', 'scan', 'template']
-
-        # Forced direction value
-        # 0: use direction value using specified method (default)
-        # 1: positive rotation direction
-        # -1: negative rotation direction
-        self._force_direction = int(self.configs.get('force_direction', 0))
-        assert self._force_direction in [0, 1, -1], "force_direction must be 0, 1 or -1"
-
         # Output path + filename
         self._output = self.configs.get('output', None)
 
@@ -1027,24 +1016,6 @@ class G3tHWP():
             filled_flag = scipy.interpolate.interp1d(
                 solved['fast_time'+suffix], filled_flag, kind='linear', bounds_error=False)(tod.timestamps)
             aman['filled_flag'+suffix] = filled_flag.astype(bool)
-
-            if self._force_direction != 0:
-                logger.info('Correct rotation direction by force method')
-                solved['angle'+suffix] *= self._force_direction
-            else:
-                logger.info(f'Correct rotation direction by {self._method_direction} method')
-                try:
-                    method = self._method_direction + '_direction'
-                    if self._method_direction == 'quad':
-                        method += suffix
-                    if aman[method] == 0:
-                        logger.warning(f'Rotation direction by {self._method_direction} is not available. Skip.')
-                    else:
-                        solved['angle'+suffix] *= aman[method]
-                except Exception as e:
-                    logger.error(f"Exception '{e}' thrown while correcting rotation direction. Skip.")
-                    print(traceback.format_exc())
-
             aman['hwp_angle_ver1'+suffix] = np.mod(scipy.interpolate.interp1d(
                 solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
 
