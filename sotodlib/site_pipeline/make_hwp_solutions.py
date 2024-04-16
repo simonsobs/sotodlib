@@ -188,18 +188,27 @@ def main(
         ctx = core.Context(context)
         tod = ctx.get_obs(obs, no_signal=True)
 
-        # make angle solutions
-        g3thwp = G3tHWP(HWPconfig)
-        aman_encoder = g3thwp.set_data(tod, load_h5=load_h5)
-        aman_solution = g3thwp.make_solution(tod)
-        del g3thwp
-
         # split h5 file by first 5 digits of unixtime
         unix = obs_id.split('_')[1][:5]
+        h5_encoder = os.path.join(output_dir, f'hwp_encoder_{unix}.h5')
+        h5_solution = os.path.join(output_dir, f'hwp_angle_{unix}.h5')
+
+        # make angle solutions
+        g3thwp = G3tHWP(HWPconfig)
+
+        if load_h5:
+            aman_encoder = g3thwp.set_data(tod, h5_filename = h5_encoder)
+        else:
+            aman_encoder = g3thwp.set_data(tod)
         logger.info(f"Saving hwp_encoder")
-        save(aman_encoder, db_encoder, os.path.join(output_dir, f'hwp_encoder_{unix}.h5'), obs_id, overwrite, 'gzip')
+        save(aman_encoder, db_encoder, h5_encoder, obs_id, overwrite, 'gzip')
+        del aman_encoder
+
+        aman_solution = g3thwp.make_solution(tod)
         logger.info(f"Saving hwp_angle")
-        save(aman_solution, db_solution, os.path.join(output_dir, f'hwp_angle_{unix}.h5'), obs_id, overwrite, 'gzip')
+        save(aman_solution, db_solution, h5_solution, obs_id, overwrite, 'gzip')
+        del aman_solution
+        del g3thwp
 
     return
 

@@ -796,7 +796,7 @@ class G3tHWP():
         result = (interp > 0.999)
         return result
 
-    def set_data(self, tod, load_h5=True):
+    def set_data(self, tod, h5_filename=None):
         """
         Output HWP hk data as AxisManager format. The results are stored in HDF5 files.
         We save the copy of raw hwp encoder hk data into HDF5 file, to save time for
@@ -806,8 +806,8 @@ class G3tHWP():
         ----
         tod: AxisManager
 
-        load_h5:
-            If true, try to load raw encoder data from hdf5 file
+        h5_filename:
+            If this is not None, try to load raw encoder data from hdf5 file
 
         Notes
         -----
@@ -843,10 +843,11 @@ class G3tHWP():
 
         self.data = {}
         try:
-            if load_h5:
+            if h5_filename is not None:
                 logger.info('Loading raw encoder data from h5')
                 try:
-                    self.data = self._load_raw_axes(aman, output, h5_address)
+                    obs_id = tod.obs_info['obs_id']
+                    self.data = self._load_raw_axes(aman, h5_filename, obs_id)
                 except Exception as e:
                     logger.error(f"Exception '{e}' thrown while loading HWP data from h5. Attempt to load from hk.")
                     self.data = self.load_data(start, end)
