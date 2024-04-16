@@ -17,6 +17,7 @@ from sotodlib.io.imprinter import Imprinter
 import sotodlib.site_pipeline.util as sp_util
 from multiprocessing import Pool, Lock
 import threading
+from sotodlib.site_pipeline.translate_tes_parameters import translate_tes_params
 
 # stolen  from pysmurf, max bias volt / num_bits
 DEFAULT_RTM_BIT_TO_VOLT = 10 / 2**19
@@ -34,8 +35,8 @@ class DetCalCfg:
     context_path: str
     "Path to the context file to use"
 
-    detset_index: str
-    "Path to index file containing smurf detsets"
+    apply_cal_correction: bool = True
+    "If True, apply the RP calibration correction to the data"
 
     interm_data_dir: str = 'interm_data'
     "Directory to store per-observation results before adding to h5file"
@@ -52,8 +53,6 @@ class DetCalCfg:
             raise ValueError(f"Root dir does not exist: {self.root_dir}")
 
         self.context_path = os.path.expandvars(self.context_path)
-        self.detset_index = os.path.expandvars(self.detset_index)
-        # self.context = core.Context(self.context_path)
 
         def parse_path(path):
             p = os.path.expandvars(path)
@@ -183,6 +182,12 @@ def get_cal_resset(cfg: DetCalCfg, obs_id):
                 pA_per_phi0 = ivas[dset]['meta']['pA_per_phi0']
         else:
             logger.debug("missing bias step data for %s", dset)
+    
+    if cfg.apply_cal_correction:
+        for dset in bias_step_obsids:
+            iva2, bsa2 = translate_tes_params(ivas[dset], bsas[dset])
+            ivas[dset] = iva2
+            bsas[dset] = bsa2
 
     if rtm_bit_to_volt is None:
         rtm_bit_to_volt = DEFAULT_RTM_BIT_TO_VOLT
