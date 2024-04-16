@@ -180,26 +180,37 @@ def mapmaker(job, otherargs, runargs, data):
                 # Replace comm_world with the group communicator
                 obs_data._comm = new_comm
                 binner = job_ops.mapmaker.binning
-                view = binner.pixel_pointing.view
-                if otherargs.intervalmaps and view is not None:
+                orig_view = binner.pixel_pointing.view
+                if otherargs.intervalmaps and orig_view is not None:
                     ob = obs_data.obs[0]
                     times = ob.shared[defaults.times].data
-                    views = ob.intervals[view]
+                    views = ob.intervals[orig_view]
                     for iview, view in enumerate(views):
                         # Add a view for this specific interval
-                        single_view = f"{view}-{iview}"
+                        single_view = f"{orig_view}-{iview}"
                         ob.intervals[single_view] = IntervalList(
                             times, timespans=[(view.start, view.stop)]
                         )
                         binner.pixel_pointing.view = single_view
                         job_ops.mapmaker.name = f"{orig_name}_{obs.name}-{iview}"
                         job_ops.mapmaker.reset_pix_dist = True
-                        job_ops.mapmaker.apply(obs_data)
-                        log.info_rank(
-                            f"{group} : Mapped {obs.name}-{iview} / {len(views)} in",
-                            comm=new_comm.comm_world,
-                            timer=timer_obs,
+                        try:
+                            job_ops.mapmaker.apply(obs_data)
+                            log.info_rank(
+                                f"{group} : Mapped "
+                                f"{obs.name}-{iview} / {len(views)} in",
+                                comm=new_comm.comm_world,
+                                timer=timer_obs,
+                            )
+                        except Exception as e:
+                            log.info_rank(
+                                f"{group} : Failed to map "
+                                f"{obs.name}-{iview} / {len(views)} (e) in",
+                                comm=new_comm.comm_world,
+                                timer=timer_obs,
                         )
+
+                    binner.pixel_pointing.view = orig_view
                 else:
                     job_ops.mapmaker.name = f"{orig_name}_{obs.name}"
                     job_ops.mapmaker.reset_pix_dist = True
