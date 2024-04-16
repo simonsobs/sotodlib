@@ -70,6 +70,6 @@ def apply_hwp_angle_model(tod, band='f090', hwp_solution_attr='hwp_solution', hw
 
     # apply correction
     tod.hwp_angle = np.mod(
-        sign*np.unwrap(tod.hwp_angle) + np.deg2rad(offset), 2*np.pi)
+        sign*tod.hwp_angle + np.deg2rad(offset), 2*np.pi)
 
     return tod
