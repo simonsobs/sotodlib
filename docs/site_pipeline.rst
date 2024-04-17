@@ -97,16 +97,17 @@ Module documentation
    :members:
    :undoc-members:
 
-update-smurf-caldbs
+update-det-cal
 -----------------------
-This update script is used to add detset and calibration metadata to manifest
-dbs
+This script is used to update the detector calibration metadata manifest dbs.
 
-Module Docs
+Configuration Options
 `````````````````````````
-.. automodule:: sotodlib.site_pipeline.update_smurf_caldbs
-   :no-members:
-  
+.. autoclass:: sotodlib.site_pipeline.update_det_cal.DetCalCfg
+  :members:
+
+Calibration Info
+`````````````````````
 The calibration info described below is used to populate the calibration db.
 For more information on how calibration info is computed in sodetlib, checkout
 the following docs and source code:
@@ -116,6 +117,16 @@ the following docs and source code:
 - `sodetlib source code <https://github.com/simonsobs/sodetlib>`_
 
 .. autoclass:: sotodlib.site_pipeline.update_smurf_caldbs.CalInfo
+   :no-members:
+
+update-smurf-caldbs
+-----------------------
+This update script is used to add detset and calibration metadata to manifest
+dbs
+
+Module Docs
+`````````````````````````
+.. automodule:: sotodlib.site_pipeline.update_smurf_caldbs
    :no-members:
 
 Command line arguments
