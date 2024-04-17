@@ -107,9 +107,9 @@ class FocalPlane:
     transform_nocm: Transform = field(init=False, default_factory=Transform.identity)
 
     def __post_init__(self, n_aman):
-        self.full_fp = np.nan + np.empty(self.template.fp.shape + (n_aman,))
+        self.full_fp = np.full(self.template.fp.shape + (n_aman,), np.nan)
         self.tot_weight = np.zeros(len(self.template.det_ids))
-        self.avg_fp = np.nan + np.empty_like(self.template.fp)
+        self.avg_fp = np.full_like(self.template.fp, np.nan)
         self.weight = np.zeros(len(self.template.det_ids))
         self.transformed = self.template.fp.copy()
         self.center_transformed = self.template.center.copy()
@@ -132,7 +132,7 @@ class FocalPlane:
         elif "gamma" in aman.pointing:
             gamma = aman.pointing.gamma[msk][srt][mapping]
         else:
-            gamma = np.nan + np.empty(len(xi))
+            gamma = np.full(len(xi), np.nan)
         fp = np.vstack((xi, eta, gamma))
         return fp, template_msk
 
