@@ -91,7 +91,9 @@ def preprocess_obs(
     logger.info(f"Beginning run for {obs_id}")
 
     aman = context.get_obs(obs_id, no_signal=True)
-    proc_aman = pipe.run(aman)
+    proc_aman, success = pipe.run(aman)
+    if success != 'end':
+        return
 
     policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
     dest_file, dest_dataset = policy.get_dest(obs_id)
