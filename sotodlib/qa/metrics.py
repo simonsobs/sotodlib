@@ -160,6 +160,86 @@ class PreprocessQA(QAMetric):
         return [o[0] for o in man_db.get_entries(["\"obs:obs_id\""]).asarray()]
 
 
+# inherit from PreprocessQA to reuse available_obs method
+class PreprocessValidDets(PreprocessQA):
+    """A metric for the number of detectors deemed valid at the end of the preprocesstod
+    processing. For each wafer slot and bandpass, the number of detectors for which the
+    fraction of samples that were valid is greater than a configurable threshold is recorded.
+
+    The config entry supports a `process_args` block where the following options can be
+    specified:
+
+    tags : list
+        Keys into `metadata.det_info` to record as tags with the Influx line.
+        Added to the default list ["wafer_slot", "tel_tube", "wafer.bandpass"].
+    thresh : float
+        The threshold for the fraction of valid samples above which a detector is
+        deemed good (default 0.75)
+    process_name : str
+        The process from which to read the valid dataset. (default 'glitches')
+
+    """
+
+    _influx_meas = "preprocesstod"
+    _influx_field = "num_valid_dets"
+
+    def __init__(
+        self,
+        *args,
+        process_args={},
+        **kwargs
+    ):
+        # bypass the PreprocessQA __init__
+        super(PreprocessQA, self).__init__(*args, **kwargs)
+        # extract parameters
+        self._tags = process_args.get("tags", [])
+        self._thresh = process_args.get("thresh", 0.75)
+        self._key = process_args.get("process_name", "glitches")
+
+    def _process(self, meta):
+
+        # add specified tags
+        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
+        tag_keys += [t for t in self._tags if t not in tag_keys]
+
+        # record one metric per wafer slot, per bandpass
+        # extract these tags for the metric
+        tags = []
+        vals = []
+        for bp in np.unique(meta.det_info.wafer.bandpass):
+            for ws in np.unique(meta.det_info.wafer_slot):
+                subset = np.where(
+                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
+                )[0]
+
+                # Compute the number of samples that are valid
+                frac_valid = np.array([
+                    np.dot(r.ranges(), [-1, 1]).sum() / len(subset)
+                    for r in meta.preprocess[self._key].valid[subset]
+                ])
+
+                # Count detectors with fraction valid above threshold
+                n_good = (frac_valid > self._thresh).sum()
+
+                # get the tags for this wafer (all detectors in this subset share these)
+                tags_i = {
+                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                }
+                tags_i["telescope"] = meta.obs_info.telescope
+
+                # add tags and values to respective lists in order
+                vals.append(n_good)
+                tags.append(tags_i)
+
+        obs_time = [meta.obs_info.timestamp] * len(vals)
+        return {
+            "field": self._influx_field,
+            "values": vals,
+            "timestamps": obs_time,
+            "tags": tags,
+        }
+
+
 class HWPSolQA(QAMetric):
     """ Base class for metrics derived from HWP angle solutions. Subclasses should
     implement the `_process` method. Some quantities are derived twice, once for each
