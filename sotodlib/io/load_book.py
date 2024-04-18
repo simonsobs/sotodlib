@@ -67,24 +67,37 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         no_signal = False  # from here, assume no_signal in [True, False]
 
     # Regardless of what dets have been asked for (maybe none), get
-    # the list of detsets implicated in this observation.
+    # the list of detsets implicated in this observation.  Make sure
+    # this list is ordered by detset or the signal might not be
+    # ordered properly (checked later).
     c = db.conn.execute('select distinct DS.name, DS.det from detsets DS '
                         'join files on DS.name=files.detset '
-                        'where obs_id=?', (obs_id,))
-    pairs = [tuple(r) for r in c.fetchall()]
+                        'where obs_id=? '
+                        'order by DS.name',
+                        (obs_id,))
+    all_pairs = [tuple(r) for r in c.fetchall()]
 
     # Now filter to only the dets requested.
     if dets is None:
-        pairs_req = pairs
+        pairs_req = all_pairs
     else:
-        pairs_req = [p for p in pairs if p[1] in dets]
-        # Use sets for this...
+        pairs_req = [p for p in all_pairs if p[1] in dets]
         dets_req = [p[1] for p in pairs_req]
         unmatched = [d for d in dets if d not in dets_req]
         if len(unmatched):
             raise RuntimeError("User requested invalid dets (e.g. %s) "
                                "for obs_id=%s" % (unmatched[0], obs_id))
-    detsets_req = set(p[0] for p in pairs_req)
+        del dets_req, unmatched
+    del all_pairs, dets
+
+    # Make sure "pairs" is sorted, at _least_ at the level of grouping
+    # detsets together; then make sure the detsets are processed in
+    # that order.
+    detsets_req = sorted(set([p[0] for p in pairs_req]))
+    dets_req = []
+    for _ds in detsets_req:
+        dets_req.extend([p[1] for p in pairs_req if p[0] == _ds])
+    del pairs_req
 
     file_map = db.get_files(obs_id)
     one_group = list(file_map.values())[0]  # [('file0', 0, 1000), ('file1', 1000, 2000), ...]
@@ -104,12 +117,11 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
     samples[1] = min(max(samples), sample_range[1])
 
     file_map = db.get_files(obs_id)
-    dets_to_keep = [p[1] for p in pairs_req]
 
     # Consider pre-allocating the signal buffer.
     signal_buffer = None
     if samples[1] is not None and not no_signal:
-        signal_buffer = np.empty((len(dets_to_keep), samples[1] - samples[0]),
+        signal_buffer = np.empty((len(dets_req), samples[1] - samples[0]),
                                  dtype='float32')
 
     ancil = None
@@ -120,7 +132,7 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         files = file_map[detset]
         results[detset] = _load_book_detset(
             files, prefix=prefix, load_ancil=(ancil is None),
-            samples=samples, dets=dets_to_keep, no_signal=no_signal,
+            samples=samples, dets=dets_req, no_signal=no_signal,
             signal_buffer=signal_buffer)
         if ancil is None:
             ancil = results[detset]['ancil']
@@ -135,11 +147,15 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         ancil = _res['ancil']
         timestamps = _res['timestamps']
 
-    return _concat_filesets(results, ancil, timestamps,
-                            sample0=samples[0], obs_id=obs_id,
-                            signal_buffer=signal_buffer,
-                            get_frame_det_info=False)
-
+    obs = _concat_filesets(results, ancil, timestamps,
+                           sample0=samples[0], obs_id=obs_id,
+                           signal_buffer=signal_buffer,
+                           get_frame_det_info=False)
+    if signal_buffer is not None:
+        # Make sure that, whatever happened during concatenation, the
+        # dets are still ordered as was assumed by signal_buffer.
+        assert(np.all(obs.dets.vals == dets_req))
+    return obs
 
 def load_book_file(filename, dets=None, samples=None, no_signal=False):
     """Load one or more g3 files (from an obs/oper book) and return the
@@ -251,11 +267,13 @@ def _load_book_detset(files, prefix='', load_ancil=True,
         signal_acc = Accumulator2d(
             samples=samples,
             insert_at=signal_buffer,
-            keys_to_keep=dets)
+            keys_to_keep=dets,
+            calibrate=SIGNAL_RESCALE)
     else:
         signal_acc = Accumulator2d(
             samples=samples,
-            keys_to_keep=dets)
+            keys_to_keep=dets,
+            calibrate=SIGNAL_RESCALE)
 
     # Sniff out a smurf status frame.
     smurf_proc = load_smurf.SmurfStatus._get_frame_processor()
@@ -419,7 +437,6 @@ def _concat_filesets(results, ancil=None, timestamps=None,
                 d = v['signal'].finalize()
                 aman['signal'][dets_ofs:dets_ofs + len(d)] = d
                 dets_ofs += len(d)
-        aman['signal'] *= SIGNAL_RESCALE
 
     # In sims, the whole primary block may be unpopulated.
     if any([v['primary'].data is not None for v in results.values()]):
@@ -695,7 +712,8 @@ class Accumulator2d(Accumulator):
     2-d array (preserving first axis labels).
 
     """
-    def __init__(self, *args, insert_at=None, keys_to_keep=None, **kwargs):
+    def __init__(self, *args, insert_at=None, keys_to_keep=None,
+                 calibrate=None, **kwargs):
         super().__init__(*args, **kwargs)
         # An optional destination buffer for the data.
         self.insert_at = insert_at
@@ -704,11 +722,19 @@ class Accumulator2d(Accumulator):
         self.extract_at_idx = None
         if self.insert_at is not None and self.samples[1] is None:
             self.samples[1] = self.insert_at.shape[-1] + self.samples[0]
+        self.calibrate = calibrate
 
     def _sample_count(self, _data):
         return len(_data.times)
 
     def _extract(self, data, src_slice, dest_slice):
+
+        if self.calibrate is not None:
+            # This is a low cost operation if you do it before
+            # decompression.  (Also do it before you use data.dtype,
+            # in "first frame stuff".)
+            data.calibrate(np.array([self.calibrate] * len(data.names)))
+
         # First frame stuff ...
         if self.data is None:
             if self.insert_at is not None:
@@ -726,9 +752,31 @@ class Accumulator2d(Accumulator):
                 # Set shape, if we know it.
                 if self.samples[1] is not None:
                     self.shape = (len(self.keys), self.samples[1] - self.samples[0])
-                    self.data = np.empty(self.shape, data.data.dtype)
+                    self.data = np.empty(self.shape, data.dtype)
                 else:
                     self.data = []
+
+        # G3SuperTimestream.extract() is available from so3g v0.1.13
+        # (April 2024).  The previous handling (below this block) can
+        # be removed in a few months.
+        if hasattr(data, 'extract'):
+            if self.insert_at is not None:
+                data.extract(self.insert_at[:, dest_slice],
+                             self.insert_at_idx,
+                             self.extract_at_idx,
+                             src_slice.start, src_slice.stop)
+            elif self.shape is not None:
+                data.extract(self.data[:, dest_slice], None, self.extract_at_idx,
+                             src_slice.start, src_slice.stop)
+            else:
+                _sh = [len(data.names), len(data.times)]
+                if self.extract_at_idx is not None:
+                    _sh[0] = len(self.extract_at_idx)
+                _dest = np.empty(_sh, dtype=data.dtype)
+                data.extract(_dest, None, self.extract_at_idx,
+                             src_slice.start, src_slice.stop)
+                self.data.append(_dest)
+            return
 
         # Store data from this frame.
         if self.insert_at is not None:
