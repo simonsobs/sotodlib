@@ -194,7 +194,7 @@ def correct_hwp(obs, bandpass='f090'):
                 obs.hwp_angle = np.mod(obs.hwp_angle + np.deg2rad(-1.66+49.1-90), 2*np.pi)
             elif bandpass == 'f150':
                 obs.hwp_angle = np.mod(obs.hwp_angle + np.deg2rad(-1.66+49.4-90), 2*np.pi)
-        else obs.hwp_solution.primary_encoder == 2:
+        elif obs.hwp_solution.primary_encoder == 2:
             if bandpass == 'f090':
                 obs.hwp_angle = np.mod(obs.hwp_angle + np.deg2rad(-1.66+49.1+90), 2*np.pi)
             elif bandpass == 'f150':
@@ -205,7 +205,7 @@ def correct_hwp(obs, bandpass='f090'):
                 obs.hwp_angle = np.mod(-1*obs.hwp_angle + np.deg2rad(-1.66-2.29+90), 2*np.pi)
             elif bandpass == 'f150':
                 obs.hwp_angle = np.mod(-1*obs.hwp_angle + np.deg2rad(-1.66-1.99+90), 2*np.pi)
-        else obs.hwp_solution.primary_encoder == 2:
+        elif obs.hwp_solution.primary_encoder == 2:
             if bandpass == 'f090':
                 obs.hwp_angle = np.mod(-1*obs.hwp_angle + np.deg2rad(-1.66-2.29-90), 2*np.pi)
             elif bandpass == 'f150':
