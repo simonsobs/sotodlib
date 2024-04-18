@@ -181,6 +181,37 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
     if return_pixboxes: return shape, wcs, pixboxes
     else: return shape, wcs
 
+# from Tomoki: https://docs.google.com/presentation/d/1_6b19UxTKsYiSnixXi6u2Y6B83Sv2eLxDNJhAnVNong/edit#slide=id.g26e92ae9d46_0_23 slide 3
+def correct_hwp(obs, bandpass='f090'):
+    telescope = obs.obs_info.telescope
+    if int(obs.hwp_solution.pid_direction) == 0:
+        sag_sign = int(np.sign(obs.hwp_solution.offcenter[0]))
+        pid_sign = -1 * sag_sign
+        obs.hwp_angle *= pid_sign
+    if telescope == 'satp1':
+        if obs.hwp_solution.primary_encoder == 1:
+            if bandpass == 'f090':
+                obs.hwp_angle = np.mod(obs.hwp_angle + np.deg2rad(-1.66+49.1-90), 2*np.pi)
+            elif bandpass == 'f150':
+                obs.hwp_angle = np.mod(obs.hwp_angle + np.deg2rad(-1.66+49.4-90), 2*np.pi)
+        else obs.hwp_solution.primary_encoder == 2:
+            if bandpass == 'f090':
+                obs.hwp_angle = np.mod(obs.hwp_angle + np.deg2rad(-1.66+49.1+90), 2*np.pi)
+            elif bandpass == 'f150':
+                obs.hwp_angle = np.mod(obs.hwp_angle + np.deg2rad(-1.66+49.4+90), 2*np.pi)
+    elif telescope == 'satp3':
+        if obs.hwp_solution.primary_encoder == 1:
+            if bandpass == 'f090':
+                obs.hwp_angle = np.mod(-1*obs.hwp_angle + np.deg2rad(-1.66-2.29+90), 2*np.pi)
+            elif bandpass == 'f150':
+                obs.hwp_angle = np.mod(-1*obs.hwp_angle + np.deg2rad(-1.66-1.99+90), 2*np.pi)
+        else obs.hwp_solution.primary_encoder == 2:
+            if bandpass == 'f090':
+                obs.hwp_angle = np.mod(-1*obs.hwp_angle + np.deg2rad(-1.66-2.29-90), 2*np.pi)
+            elif bandpass == 'f150':
+                obs.hwp_angle = np.mod(-1*obs.hwp_angle + np.deg2rad(-1.66-1.99-90), 2*np.pi)
+    return;
+    
 def calibrate_obs_with_preprocessing(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=False, det_in_out=False, det_upper_lower=False):
     obs.wrap("weather", np.full(1, "toco"))
     obs.wrap("site",    np.full(1, site))
@@ -311,17 +342,7 @@ def calibrate_obs_tomoki(obs, dtype_tod=np.float32, site='so_sat1', det_left_rig
         freq, Pxx = fft_ops.calc_psd(obs, nperseg=nperseg, merge=True)
         wn = fft_ops.calc_wn(obs)
         obs.wrap('wn', wn, [(0, 'dets')])
-        
-        if obs.hwp_solution.primary_encoder == 1:
-            obs.hwp_angle = np.mod(np.unwrap(obs.hwp_angle) + np.deg2rad(1.66-2.29+90), 2*np.pi)
-        elif obs.hwp_solution.primary_encoder == 2:
-            obs.hwp_angle = np.mod(np.unwrap(obs.hwp_angle) + np.deg2rad(1.66-2.29-90), 2*np.pi)
-        
-        #if obs.hwp_solution.primary_encoder == 1:
-        #    obs.hwp_angle = np.mod(-1*np.unwrap(obs.hwp_solution.hwp_angle_ver3_1) + np.deg2rad(1.66-360*255/1440-90), 2*np.pi)
-        #elif obs.hwp_solution.primary_encoder == 2:
-        #    obs.hwp_angle = np.mod(-1*np.unwrap(obs.hwp_solution.hwp_angle_ver3_2) + np.deg2rad(1.66-360*255/1440+90), 2*np.pi)
-            
+                    
         obs.restrict('dets', obs.dets.vals[(20<obs.wn*1e6)&(obs.wn*1e6<40)])
         print(f'dets: {obs.dets.count}')
         
@@ -759,16 +780,11 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         # which is pointless, but shouldn't cost that much time.
         obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, )
         obs = calibrate_obs_tomoki(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower, site=site)
+        correct_hwp(obs, bandpass=band)
         
         if obs.dets.count <= 1: continue
-        #print(name,' has %i detectors'%obs.dets.count)
         
         """
-        if obs.hwp_solution.primary_encoder == 1:
-            obs.hwp_angle = np.mod(-1*np.unwrap(obs.hwp_solution.hwp_angle_ver3_1) + np.deg2rad(1.66-360*255/1440-90), 2*np.pi)
-        elif obs.hwp_solution.primary_encoder == 2:
-            obs.hwp_angle = np.mod(-1*np.unwrap(obs.hwp_solution.hwp_angle_ver3_2) + np.deg2rad(1.66-360*255/1440+90), 2*np.pi)
-        
         obs = calibrate_obs_with_preprocessing(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower, site=site)
         # here we check if we have enough dets to keep going, otherwise we continue
         if obs.dets.count <= 1: continue
@@ -1011,12 +1027,6 @@ def main(config_file=None, defaults=defaults, **args):
                 profile = None
                 subshape = shape
                 subwcs = wcs
-            # 3. Write out the depth1 metadata
-            #d1info = bunch.Bunch(profile=profile, pid=pid, detset=detset.encode(), band=band.encode(),
-            #        period=periods[pid], ids=np.char.encode([obslist[ind][0] for ind in all_inds]),
-            #        box=enmap.corners(subshape, subwcs), t=t)
-            #if comm_intra.rank == 0:
-            #    write_depth1_info(prefix + "_info.hdf", d1info)
         except DataMissing as e:
             # This happens if we ended up with no valid tods for some reason
             handle_empty(prefix, tag, comm_intra, e, L)
