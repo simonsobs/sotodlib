@@ -186,7 +186,7 @@ def main(
         obs_id = obs["obs_id"]
         logger.info(f"Calculating Angles for {obs_id}")
         ctx = core.Context(context)
-        tod = ctx.get_obs(obs, no_signal=True)
+        tod = ctx.get_obs(obs, dets=[])
 
         # split h5 file by first 5 digits of unixtime
         unix = obs_id.split('_')[1][:5]
