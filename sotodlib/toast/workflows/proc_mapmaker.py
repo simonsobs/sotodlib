@@ -112,50 +112,60 @@ def mapmaker(job, otherargs, runargs, data):
         )
         # Noise model.  If noise estimation is not enabled, and no existing noise model
         # is found, then create a fake noise model with uniform weighting.
-        noise_model = None
-        if (
-                job_ops.demodulate.enabled
-                and job_ops.demod_noise_estim.enabled
-                and job_ops.demod_noise_estim_fit.enabled
-            ):
-            # We will use the noise estimate made after demodulation
-            log.info_rank("  Using demodulated noise model", comm=data.comm.comm_world)
-            noise_model = job_ops.demod_noise_estim_fit.out_model
-        elif job_ops.noise_estim.enabled and job_ops.noise_estim_fit.enabled:
-            # We have a noise estimate
-            log.info_rank("  Using estimated noise model", comm=data.comm.comm_world)
-            noise_model = job_ops.noise_estim_fit.out_model
+        if job_ops.binner_final.enabled and job_ops.binner_final.noise_model is not defaults.noise_model:
+            noise_model = job_ops.binner_final.noise_model
+        elif job_ops.binner.noise_model is not defaults.noise_model:
+            noise_model = job_ops.binner.noise_model
         else:
-            have_noise = True
-            for ob in data.obs:
-                if "noise_model" not in ob:
-                    have_noise = False
-            if have_noise:
+            # User has not overridden the noise model
+            noise_model = None
+            if (
+                    job_ops.demodulate.enabled
+                    and job_ops.demod_noise_estim.enabled
+                    and job_ops.demod_noise_estim_fit.enabled
+                ):
+                # We will use the noise estimate made after demodulation
                 log.info_rank(
-                    "  Using noise model from data files", comm=data.comm.comm_world
+                    "  Using demodulated noise model", comm=data.comm.comm_world
                 )
-                noise_model = "noise_model"
+                noise_model = job_ops.demod_noise_estim_fit.out_model
+            elif job_ops.noise_estim.enabled and job_ops.noise_estim_fit.enabled:
+                # We have a noise estimate
+                log.info_rank(
+                    "  Using estimated noise model", comm=data.comm.comm_world
+                )
+                noise_model = job_ops.noise_estim_fit.out_model
             else:
+                have_noise = True
                 for ob in data.obs:
-                    (estrate, _, _, _, _) = toast.utils.rate_from_times(
-                        ob.shared[defaults.times].data
+                    if "noise_model" not in ob:
+                        have_noise = False
+                if have_noise:
+                    log.info_rank(
+                        "  Using noise model from data files", comm=data.comm.comm_world
                     )
-                    ob["fake_noise"] = toast.noise_sim.AnalyticNoise(
-                        detectors=ob.all_detectors,
-                        rate={x: estrate * u.Hz for x in ob.all_detectors},
-                        fmin={x: 1.0e-5 * u.Hz for x in ob.all_detectors},
-                        fknee={x: 0.0 * u.Hz for x in ob.all_detectors},
-                        alpha={x: 1.0 for x in ob.all_detectors},
-                        NET={
-                            x: 1.0 * u.K * np.sqrt(1.0 * u.second)
-                            for x in ob.all_detectors
-                        },
+                    noise_model = "noise_model"
+                else:
+                    for ob in data.obs:
+                        (estrate, _, _, _, _) = toast.utils.rate_from_times(
+                            ob.shared[defaults.times].data
+                        )
+                        ob["fake_noise"] = toast.noise_sim.AnalyticNoise(
+                            detectors=ob.all_detectors,
+                            rate={x: estrate * u.Hz for x in ob.all_detectors},
+                            fmin={x: 1.0e-5 * u.Hz for x in ob.all_detectors},
+                            fknee={x: 0.0 * u.Hz for x in ob.all_detectors},
+                            alpha={x: 1.0 for x in ob.all_detectors},
+                            NET={
+                                x: 1.0 * u.K * np.sqrt(1.0 * u.second)
+                                for x in ob.all_detectors
+                            },
+                        )
+                    log.info_rank(
+                        "  Using fake noise model with uniform weighting",
+                        comm=data.comm.comm_world,
                     )
-                log.info_rank(
-                    "  Using fake noise model with uniform weighting",
-                    comm=data.comm.comm_world,
-                )
-                noise_model = "fake_noise"
+                    noise_model = "fake_noise"
         job_ops.binner.noise_model = noise_model
         job_ops.binner_final.noise_model = noise_model
 
@@ -208,8 +218,7 @@ def mapmaker(job, otherargs, runargs, data):
                                 f"{obs.name}-{iview} / {len(views)} (e) in",
                                 comm=new_comm.comm_world,
                                 timer=timer_obs,
-                        )
-
+                            )
                     binner.pixel_pointing.view = orig_view
                 else:
                     job_ops.mapmaker.name = f"{orig_name}_{obs.name}"

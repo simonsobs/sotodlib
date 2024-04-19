@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Timestream flagging operations.
 """
@@ -10,6 +10,40 @@ import toast.ops
 
 from .. import ops as so_ops
 from .job import workflow_timer
+
+
+def setup_simple_deglitch(operators):
+    """Add commandline args and operators for glitch flagging.
+
+    Args:
+        operators (list):  The list of operators to extend.
+
+    Returns:
+        None
+
+    """
+    operators.append(toast.ops.SimpleDeglitch(name="simple_deglitch", enabled=False))
+
+
+@workflow_timer
+def simple_deglitch(job, otherargs, runargs, data):
+    """Apply simple deglitching
+
+    Args:
+        job (namespace):  The configured operators and templates for this job.
+        otherargs (namespace):  Other commandline arguments.
+        runargs (namespace):  Job related runtime parameters.
+        data (Data):  The data container.
+
+    Returns:
+        None
+
+    """
+    # Configured operators for this job
+    job_ops = job.operators
+
+    if job_ops.simple_deglitch.enabled:
+        job_ops.simple_deglitch.apply(data)
 
 
 def setup_flag_sso(operators):
