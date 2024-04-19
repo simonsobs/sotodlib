@@ -67,7 +67,7 @@ ELEMENTS = {
     'preprocess-tod': preprocess_tod,
     'update-g3tsmurf-db': update_g3tsmurf_db,
     'update-obsdb': update_obsdb,
-    'make_level3_hk': make_level3_hk,
+    'make-level3-hk': make_level3_hk,
 }
 
 CLI_NAME = 'so-site-pipeline'
