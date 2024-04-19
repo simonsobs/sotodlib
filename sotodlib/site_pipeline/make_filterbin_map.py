@@ -725,8 +725,8 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False,
         obs_id, detset, band, obs_ind = obslist[ind]
         try:
             tod = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, no_signal=no_signal)
-            #tod = calibrate_obs_with_preprocessing(tod, dtype_tod=dtype_tod, site=site)
-            tod = calibrate_obs_tomoki(tod, dtype_tod=dtype_tod, site=site)
+            tod = calibrate_obs_with_preprocessing(tod, dtype_tod=dtype_tod, site=site)
+            #tod = calibrate_obs_tomoki(tod, dtype_tod=dtype_tod, site=site)
             if only_hits==False:
                 ra_ref_start, ra_ref_stop = get_ra_ref(tod)
                 my_ra_ref.append((ra_ref_start/utils.degree, ra_ref_stop/utils.degree))
@@ -779,12 +779,10 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         # Read in the signal too. This seems to read in all the metadata from scratch,
         # which is pointless, but shouldn't cost that much time.
         obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, )
-        obs = calibrate_obs_tomoki(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower, site=site)
         correct_hwp(obs, bandpass=band)
-        
+        #obs = calibrate_obs_tomoki(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower, site=site)
         if obs.dets.count <= 1: continue
         
-        """
         obs = calibrate_obs_with_preprocessing(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower, site=site)
         # here we check if we have enough dets to keep going, otherwise we continue
         if obs.dets.count <= 1: continue
@@ -792,7 +790,6 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         if singlestream == False:
             hwp.demod_tod(obs)
             obs = calibrate_obs_after_demod(obs, dtype_tod=dtype_tod)        
-        """
         if obs.dets.count == 0: continue
         
         # And add it to the mapmaker
