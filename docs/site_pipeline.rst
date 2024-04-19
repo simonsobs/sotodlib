@@ -707,6 +707,7 @@ Command line arguments
     :prog: make-level3-hk
     
 The example of config file is shown below::
+
     query_text: 'type == "obs"'
     min_ctime: 1704200000
     max_ctime: 1705000000
