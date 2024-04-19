@@ -693,6 +693,35 @@ Command line arguments
     :prog: make_hwp_solutions
 
 
+make-level3-hk
+------------------
+
+This element generates house-keeping data with timestamp co-sampled
+with detector timestamps.
+
+Command line arguments
+``````````````````````
+.. argparse::
+    :module: sotodlib.site_pipeline.make_level3_hk
+    :func: get_parser
+    :prog: make-level3-hk
+    
+The example of config file is shown below::
+    query_text: 'type == "obs"'
+    min_ctime: 1704200000
+    max_ctime: 1705000000
+    query_tags: ['wiregrid=1']
+    input_dir: '/global/cfs/cdirs/sobs/untracked/data/satp3/hk/'
+    output_dir: '/global/u2/t/ttera/site_analysis/code_dev/hk2meta/wiregrid'
+    fields: 
+        ['satp3.wg-encoder.feeds.wgencoder_rough.reference_degree',
+        'satp3.wg-encoder.feeds.wgencoder_rough.rotation_speed',]
+    output_prefix: 'wiregrid'
+    aliases:
+        ['rough_degree',
+        'rough_speed']
+    
+    
 make-ml-map
 -----------
 
