@@ -29,7 +29,7 @@ def _get_preprocess_context(configs, context=None):
         context["metadata"] = []
 
     for key in context.get("metadata"):
-        if key.get("name") == "preprocess":
+        if key.get("unpack") == "preprocess":
             found=True
             break
     if not found:
