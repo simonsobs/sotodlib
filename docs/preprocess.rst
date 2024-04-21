@@ -140,6 +140,50 @@ the processing pipe. The ``process`` function is always run before the
 ``calc_and_save`` function for each module. The ``plot`` function can be run after
 ``calc_and_save`` when ``plot: True`` for a module that supports it.
 
+Example Planet TOD Pipeline Configuration File
+----------------------------------------------
+Similar to a regular TOD pipeline, if we want to run one for planet observations,
+we must first flag sources in the signal and gapfill them. An example configuration
+file with the first two steps in the processing pipeline would look like::
+
+    # Context for the data
+    context_file: 'context.yaml'
+
+    # Plot directory prefix
+    plot_dir: './plots'
+
+    # How to subdivide observations
+    subobs:
+        use: detset
+        label: detset
+
+    # Metadata index & archive filenaming
+    archive:
+        index: 'preprocess_archive.sqlite'
+        policy:
+            type: 'simple'
+            filename: 'preprocess_archive.h5'
+
+    process_pipe:
+        - name: "source_flags"
+        calc:
+          mask: {'shape': 'circle',
+                'xyr': [0, 0, 1.]}
+          center_on: 'jupiter'
+          res: 20 # np.radians(20/60)
+          max_pix: 4.0e+6
+        save: True
+        select:
+          kind: "all"
+
+      - name: "glitchfill"
+        flag_aman: "sources"
+        flag: "source_flags"
+        process:
+          nbuf: 10
+          use_pca: True
+          modes: 3
+
 Example Obs Pipeline Configuration File
 ---------------------------------------
 
@@ -197,6 +241,7 @@ Flagging and Products
 .. autoclass:: sotodlib.preprocess.processes.GlitchFill
 .. autoclass:: sotodlib.preprocess.processes.Noise
 .. autoclass:: sotodlib.preprocess.processes.FlagTurnarounds
+.. autoclass:: sotodlib.preprocess.processes.SourceFlags
 
 HWP Related
 :::::::::::
