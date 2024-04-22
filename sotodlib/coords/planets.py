@@ -1,9 +1,11 @@
+import os
+import re
 import datetime
 import logging
-import re
-import time
 
 import numpy as np
+
+from ast import literal_eval
 from scipy.optimize import fmin
 
 from astropy import units
@@ -20,7 +22,7 @@ logger = logging.getLogger(__name__)
 # Files that we might want to download and cache using
 # astropy.utils.data
 RESOURCE_URLS = {
-    'de421.bsp': 'ftp://ssd.jpl.nasa.gov/pub/eph/planets/bsp/de421.bsp',
+    "de421.bsp": "ftp://ssd.jpl.nasa.gov/pub/eph/planets/bsp/de421.bsp",
 }
 
 
@@ -41,8 +43,9 @@ class SlowSource:
 
     """
 
-    def __init__(self, timestamp, ra, dec, v_ra=0., v_dec=0.,
-                 precision=.0001 * coords.DEG):
+    def __init__(
+        self, timestamp, ra, dec, v_ra=0.0, v_dec=0.0, precision=0.0001 * coords.DEG
+    ):
         self.timestamp = timestamp
         self.ra = ra
         self.dec = dec
@@ -58,7 +61,13 @@ class SlowSource:
         dt = 3600
         ra0, dec0, distance = get_source_pos(name, timestamp)
         ra1, dec1, distance = get_source_pos(name, timestamp + dt)
-        return cls(timestamp, ra0, dec0, ((ra1-ra0+180) % 360 - 180)/dt, (dec1-dec0)/dt)
+        return cls(
+            timestamp,
+            ra0,
+            dec0,
+            ((ra1 - ra0 + 180) % 360 - 180) / dt,
+            (dec1 - dec0) / dt,
+        )
 
     def pos(self, timestamps):
         """Get the (approximate) source position at the times given by the
@@ -101,7 +110,8 @@ def get_scan_q(tod, planet, refq=None):
 
     def scan_q_model(t, az, el, planet):
         csl = so3g.proj.CelestialSightLine.az_el(
-            t, az, el, weather='typical', site='so')
+            t, az, el, weather="typical", site="so"
+        )
         ra0, dec0 = planet.pos(t)
         return csl.Q, ~so3g.proj.quat.rotation_lonlat(ra0, dec0) * csl.Q
 
@@ -115,20 +125,24 @@ def get_scan_q(tod, planet, refq=None):
     X = fmin(distance, p0, disp=0, full_output=1)
     p, fopt, n_iter, n_calls, warnflag = X
     if warnflag != 0:
-        logger.warning('Source-scan solver failed to converge or otherwise '
-                       f'complained!  warnflag={warnflag}')
-    q, qnet = scan_q_model(t+p[0], az+p[1], el, planet)
+        logger.warning(
+            "Source-scan solver failed to converge or otherwise "
+            f"complained!  warnflag={warnflag}"
+        )
+    q, qnet = scan_q_model(t + p[0], az + p[1], el, planet)
     psi = so3g.proj.quat.decompose_xieta(qnet)[2][0]
-    ra, dec = planet.pos(t+p[0])
+    ra, dec = planet.pos(t + p[0])
     rot = ~so3g.proj.quat.rotation_lonlat(ra, dec, psi)
-    return {'rot': rot,
-            'timestamp': t+p[0],
-            'az': az+p[1],
-            'el': el,
-            'ra': ra,
-            'dec': dec,
-            'psi': psi,
-            'planet': planet}
+    return {
+        "rot": rot,
+        "timestamp": t + p[0],
+        "az": az + p[1],
+        "el": el,
+        "ra": ra,
+        "dec": dec,
+        "psi": psi,
+        "planet": planet,
+    }
 
 
 def get_scan_P(tod, planet, refq=None, res=None, size=None, **kw):
@@ -138,26 +152,26 @@ def get_scan_P(tod, planet, refq=None, res=None, size=None, **kw):
     Returns a Projection Matrix and the output from get_scan_q.
 
     """
-    logger.debug(f'get_scan_P: init for {planet}')
+    logger.debug(f"get_scan_P: init for {planet}")
 
     if res is None:
         res = 0.01 * coords.DEG
     X = get_scan_q(tod, planet)
-    rot = so3g.proj.quat.rotation_lonlat(0, 0) * X['rot']
-    wcs_kernel = coords.get_wcs_kernel('tan', 0., 0., res=res)
+    rot = so3g.proj.quat.rotation_lonlat(0, 0) * X["rot"]
+    wcs_kernel = coords.get_wcs_kernel("tan", 0.0, 0.0, res=res)
 
-    logger.debug(f'get_scan_P: getting projection matrix for {wcs_kernel}.')
+    logger.debug(f"get_scan_P: getting projection matrix for {wcs_kernel}.")
     P = coords.P.for_tod(tod, rot=rot, wcs_kernel=wcs_kernel, **kw)
     if size is not None:
         # Trim to a local square
-        mz = P.zeros(comps='T').submap([[-size/2, size/2], [size/2, -size/2]])
+        mz = P.zeros(comps="T").submap([[-size / 2, size / 2], [size / 2, -size / 2]])
         P.geom = enmap.Geometry(shape=mz.shape, wcs=mz.wcs)
     return P, X
 
 
-def filter_for_sources(tod=None, signal=None, source_flags=None,
-                       n_modes=10, low_pass=None,
-                       wrap=None):
+def filter_for_sources(
+    tod=None, signal=None, source_flags=None, n_modes=10, low_pass=None, wrap=None
+):
     """Mask and gap-fill the signal at samples flagged by source_flags.
     Then PCA the resulting time ordered data.  Restore the flagged
     signal, remove the strongest modes from PCA.
@@ -201,18 +215,18 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
             filt = tod_ops.filters.low_pass_butter4(low_pass)
 
         n_det, n = signal.shape
-        a, b, t_1, t_2 = tod_ops.fft_ops.build_rfft_object(n_det, n, 'BOTH')
+        a, b, t_1, t_2 = tod_ops.fft_ops.build_rfft_object(n_det, n, "BOTH")
         a[:] = signal_pca
         t_1()
         times = tod.timestamps
-        delta_t = (times[-1]-times[0])/(tod.samps.count - 1)
+        delta_t = (times[-1] - times[0]) / (tod.samps.count - 1)
         freqs = np.fft.rfftfreq(n, delta_t)
         filt.apply(freqs, tod, target=b)
         signal_pca = t_2()
         del a, b
 
     # Measure TOD means (after gap fill, low pass, etc).
-    if isinstance(n_modes, str) and n_modes == 'all':
+    if isinstance(n_modes, str) and n_modes == "all":
         # Don't overthink that.
         signal -= signal_pca
 
@@ -225,25 +239,25 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         signal -= levels[:, None]
 
         # Get PCA model and discard the source vectors.
-        pca = tod_ops.pca.get_pca_model(
-            tod, signal=signal_pca, n_modes=n_modes)
+        pca = tod_ops.pca.get_pca_model(tod, signal=signal_pca, n_modes=n_modes)
         del signal_pca
 
         # Remove the PCA model.
         tod_ops.pca.add_model(tod, pca, -1, signal=signal)
 
     if wrap:
-        tod.wrap(wrap, signal, [(0, 'dets'), (1, 'samps')])
+        tod.wrap(wrap, signal, [(0, "dets"), (1, "samps")])
     return signal
 
-def _get_astrometric(source_name, timestamp, site='_default'):
+
+def _get_astrometric(source_name, timestamp, site="_default"):
     """
-    Derive skyfield's Astrometric object of a celestial source at a 
+    Derive skyfield's Astrometric object of a celestial source at a
     specific timestamp and observing site, which is used to derive
     radec/azel in get_source_pos/get_source_azel.
-    
+
     Note that it will download a 16M ephemeris file on first use.
-    
+
     Args:
       source_name: Planet name; in capitalized format, e.g. "Jupiter",
         or fixed source specification.
@@ -255,13 +269,24 @@ def _get_astrometric(source_name, timestamp, site='_default'):
       astrometric: skyfield's astrometric object
     """
     # Get the ephemeris -- this will trigger a 16M download on first use.
-    de_url = RESOURCE_URLS['de421.bsp']
-    de_filename = au_data.download_file(de_url, cache=True)
+
+    resource_paths = literal_eval(os.environ["SOTODLIB_RESOURCES"])
+
+    de_url = resource_paths["de421.bsp"]
+    if de_url.startswith("ftp://"):
+        de_filename = au_data.download_file(de_url, cache=True)
+    elif de_url.startwith("file://"):
+        de_filename = de_url[7:]
+    else:
+        raise RuntimeError(
+            "'de421.bsp' path not a POSIX or FTP path. Use 'file://' for a "
+            + "POSIX path of 'ftp://' to download the file from an FTP server"
+        )
 
     planets = jpllib.SpiceKernel(de_filename)
     for k in [
-            source_name,
-            source_name + ' barycenter',
+        source_name,
+        source_name + " barycenter",
     ]:
         try:
             target = planets[k]
@@ -270,8 +295,9 @@ def _get_astrometric(source_name, timestamp, site='_default'):
             pass
     else:
         options = list(planets.names().values())
-        raise ValueError(f'Failed to find a match for "{source_name}" in '
-                         f'ephemeris: {options}')
+        raise ValueError(
+            f'Failed to find a match for "{source_name}" in ' f"ephemeris: {options}"
+        )
 
     if isinstance(site, str):
         site = so3g.proj.SITES[site]
@@ -280,17 +306,18 @@ def _get_astrometric(source_name, timestamp, site='_default'):
 
     timescale = skyfield_api.load.timescale()
     sf_timestamp = timescale.from_datetime(
-        datetime.datetime.fromtimestamp(timestamp, tz=skyfield_api.utc))
+        datetime.datetime.fromtimestamp(timestamp, tz=skyfield_api.utc)
+    )
     astrometric = observatory.at(sf_timestamp).observe(target)
     return astrometric
-    
-    
-def get_source_pos(source_name, timestamp, site='_default'):
+
+
+def get_source_pos(source_name, timestamp, site="_default"):
     """Get the equatorial coordinates of a planet (or fixed-position
     source, see note) at some time.  Returns the apparent position,
     accounting for geographical position on earth, but assuming no
     atmospheric refraction.
-    
+
     Args:
       source_name: Planet name; in capitalized format, e.g. "Jupiter",
         or fixed source specification.
@@ -313,29 +340,27 @@ def get_source_pos(source_name, timestamp, site='_default'):
 
     """
     # Check against fixed-position template...
-    m = re.match(
-        r'J(?P<ra_deg>\d+(\.\d*)?)(?P<dec_deg>[+-]\d+(\.\d*)?)', source_name)
+    m = re.match(r"J(?P<ra_deg>\d+(\.\d*)?)(?P<dec_deg>[+-]\d+(\.\d*)?)", source_name)
     if m:
-        ra, dec = float(m['ra_deg']) * \
-            coords.DEG, float(m['dec_deg']) * coords.DEG
-        return ra, dec, float('inf')
-    
+        ra, dec = float(m["ra_deg"]) * coords.DEG, float(m["dec_deg"]) * coords.DEG
+        return ra, dec, float("inf")
+
     # Derive from skyfield astrometric object
     amet0 = _get_astrometric(source_name, timestamp, site)
     ra, dec, distance = amet0.radec()
     return ra.to(units.rad).value, dec.to(units.rad).value, distance.to(units.au).value
 
 
-def get_source_azel(source_name, timestamp, site='_default'):
+def get_source_azel(source_name, timestamp, site="_default"):
     """
-    Get the apparent azimuth and elevation of a celestial source at a 
+    Get the apparent azimuth and elevation of a celestial source at a
     specific timestamp and observing site. Returns the apparent position,
     accounting for geographical position on earth, but assuming no
     atmospheric refraction.
 
     Args:
         source_name: Planet name; in capitalized format, e.g. "Jupiter"
-        timestamp (float): The Unix timestamp representing the time for 
+        timestamp (float): The Unix timestamp representing the time for
           which to calculate azimuth and elevation.
         site (str or so3g.proj.EarthlySite): if this is a string, the
         site will be looked up in so3g.proj.SITES dict.
@@ -350,7 +375,7 @@ def get_source_azel(source_name, timestamp, site='_default'):
     return az.to(units.rad).value, el.to(units.rad).value, distance.to(units.au).value
 
 
-def get_nearby_sources(tod=None, source_list=None, distance=1.):
+def get_nearby_sources(tod=None, source_list=None, distance=1.0):
     """Identify solar system objects (especially "planets") that might be
     within a TOD's scan footprint.
 
@@ -373,33 +398,32 @@ def get_nearby_sources(tod=None, source_list=None, distance=1.):
 
     """
     # Make a full sky map with not very many pixels.
-    shape, wcs = enmap.fullsky_geometry(res=2 * coords.DEG, proj='car')
+    shape, wcs = enmap.fullsky_geometry(res=2 * coords.DEG, proj="car")
 
     # Sight line
     sight = so3g.proj.CelestialSightLine.az_el(
-        tod.timestamps, tod.boresight.az, tod.boresight.el,
-        site='so', weather='typical')
+        tod.timestamps, tod.boresight.az, tod.boresight.el, site="so", weather="typical"
+    )
 
     # One central detector
     xieta0, R, _ = coords.helpers.get_focal_plane_cover(tod, 0)
-    fp = so3g.proj.FocalPlane.from_xieta(['x'], [xieta0[0]], [xieta0[1]], [0])
+    fp = so3g.proj.FocalPlane.from_xieta(["x"], [xieta0[0]], [xieta0[1]], [0])
 
     asm = so3g.proj.Assembly.attach(sight, fp)
     p = so3g.proj.Projectionist.for_geom(shape, wcs)
-    w = p.to_map(np.zeros((1, len(tod.timestamps)),
-                 'float32')+1, asm, comps='T')
+    w = p.to_map(np.zeros((1, len(tod.timestamps)), "float32") + 1, asm, comps="T")
     w = enmap.enmap(w, wcs=wcs)
 
     if source_list is None:
         source_list = [
-            'mercury',
-            'venus',
-            'mars',
-            'jupiter',
-            'saturn',
-            'uranus',
-            'neptune',
-            ('tau_a', 83.6331, 22.0145),
+            "mercury",
+            "venus",
+            "mars",
+            "jupiter",
+            "saturn",
+            "uranus",
+            "neptune",
+            ("tau_a", 83.6331, 22.0145),
         ]
 
     positions = []
@@ -407,23 +431,29 @@ def get_nearby_sources(tod=None, source_list=None, distance=1.):
         t = tod.timestamps[0]
         if isinstance(source_name, (list, tuple)):
             source_name, ra, dec = source_name
-            sl = coords.planets.SlowSource(t, float(ra) * coords.DEG,
-                                           float(dec) * coords.DEG)
+            sl = coords.planets.SlowSource(
+                t, float(ra) * coords.DEG, float(dec) * coords.DEG
+            )
         else:
             sl = coords.planets.SlowSource.for_named_source(source_name, t)
         x = w.distance_from([[sl.dec], [sl.ra]])
         md = x[w[0] != 0].min()
-        logger.debug(('Source {:12} is at ({:8.4f},{:8.4f}); '
-                      'that is {:5.2f} degrees off footprint.').format(
-                          source_name, sl.ra / coords.DEG,
-                          sl.dec / coords.DEG, md/coords.DEG))
+        logger.debug(
+            (
+                "Source {:12} is at ({:8.4f},{:8.4f}); "
+                "that is {:5.2f} degrees off footprint."
+            ).format(
+                source_name, sl.ra / coords.DEG, sl.dec / coords.DEG, md / coords.DEG
+            )
+        )
         if md < (R * 1.1 + distance * coords.DEG):
             positions.append((source_name, sl))
     return positions
 
 
-def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
-                         center_on=None, res=None, max_pix=4e6):
+def compute_source_flags(
+    tod=None, P=None, mask=None, wrap=None, center_on=None, res=None, max_pix=4e6
+):
     """Process masking instructions and create RangesMatrix that flags
     samples in the TOD that are within the masked region.  This
     masking makes use of a map with the footprint encoded in P, so
@@ -461,53 +491,53 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
 
     """
     if P is None:
-        logger.info('Getting Projection Matrix ...')
-        P, X = get_scan_P(tod, center_on, res=res, comps='T')
+        logger.info("Getting Projection Matrix ...")
+        P, X = get_scan_P(tod, center_on, res=res, comps="T")
         shape, wcs = tuple(P.geom)
         if shape[0] * shape[1] > max_pix:
-            raise ValueError(f'Mask map too large: {shape}')
+            raise ValueError(f"Mask map too large: {shape}")
 
     if isinstance(mask, str):
         # Assume it's a filename, and file is simple columns of (x, y,
         # radius) in deg.  (Deprecated!)
-        mask = [{'xyr': list(map(float, line.split()))}
-                for line in open(mask)]
+        mask = [{"xyr": list(map(float, line.split()))} for line in open(mask)]
 
     mask_map = P.zeros()
     _add_to_mask(mask, mask_map)
     a = P.from_map(mask_map)
     source_flags = so3g.proj.RangesMatrix(
-        [so3g.proj.Ranges.from_mask(r != 0) for r in a])
+        [so3g.proj.Ranges.from_mask(r != 0) for r in a]
+    )
 
     if wrap:
-        assert(tod is not None, "Pass in a tod to 'wrap' the output.")
-        tod.flags.wrap(wrap, source_flags, [(0, 'dets'), (1, 'samps')])
+        assert (tod is not None, "Pass in a tod to 'wrap' the output.")
+        tod.flags.wrap(wrap, source_flags, [(0, "dets"), (1, "samps")])
     return source_flags
 
 
 def _add_to_mask(req, mask_map):
     # Helper for compute_source_flags.
     if req is None:
-        raise ValueError(f'Requested mask is None.  For no mask, pass [].')
+        raise ValueError(f"Requested mask is None.  For no mask, pass [].")
     if isinstance(req, (list, tuple)):
         for _r in req:
             # Also, maybe test this somehow?
             _add_to_mask(_r, mask_map)
     elif isinstance(req, dict):
-        shape = req.get('shape', 'circle')
-        if shape == 'circle':
-            x, y, r = req['xyr']
-            d = enmap.distance_from(mask_map.shape, mask_map.wcs,
-                                    [[y * coords.DEG], [x * coords.DEG]])
-            mask_map += 1. * (d < r * coords.DEG)
+        shape = req.get("shape", "circle")
+        if shape == "circle":
+            x, y, r = req["xyr"]
+            d = enmap.distance_from(
+                mask_map.shape, mask_map.wcs, [[y * coords.DEG], [x * coords.DEG]]
+            )
+            mask_map += 1.0 * (d < r * coords.DEG)
         else:
             raise ValueError(f'Unknown shape="{shape}" in mask request.')
     else:
-        raise ValueError(f'Weird mask request: {req}')
+        raise ValueError(f"Weird mask request: {req}")
 
 
-def load_detector_splits(tod=None, filename=None, dataset=None,
-                         source=None, wrap=None):
+def load_detector_splits(tod=None, filename=None, dataset=None, source=None, wrap=None):
     """Convert a partition of detectors into a dict of disjoint
     RangesMatrix objects; such an object can be passed to make_map()
     to efficiently make detector-split maps.
@@ -549,15 +579,14 @@ def load_detector_splits(tod=None, filename=None, dataset=None,
 
     if source is None:
         if dataset is None:
-            filename, dataset = filename.split(':')
+            filename, dataset = filename.split(":")
         source = metadata.read_dataset(filename, dataset)
     if isinstance(source, np.ndarray):
         source, _s = core.AxisManager(tod.dets), source
-        source.wrap('group', _s)
+        source.wrap("group", _s)
     elif isinstance(source, metadata.ResultSet):
         di = core.metadata.loader.unconvert_det_info(tod.det_info)
-        source = core.metadata.loader.broadcast_resultset(
-            source, di, axis_key='name')
+        source = core.metadata.loader.broadcast_resultset(source, di, axis_key="name")
     else:
         source = source.copy()  # is this an AxisManager?
     source.restrict_axes([tod.dets])
@@ -565,17 +594,16 @@ def load_detector_splits(tod=None, filename=None, dataset=None,
         tod.wrap(wrap, source)
     yes = so3g.proj.RangesMatrix.zeros(tod.signal.shape[1])
     flags = {}
-    for group in source['group']:
+    for group in source["group"]:
         if group in flags:
             continue
         flags[group] = so3g.proj.RangesMatrix.ones((tod.signal.shape))
-        for i in (source['group'] == group).nonzero()[0]:
+        for i in (source["group"] == group).nonzero()[0]:
             flags[group].ranges[i] = yes
     return flags
 
 
-def get_det_weights(tod, signal=None, wrap=None,
-                    outlier_clip=None):
+def get_det_weights(tod, signal=None, wrap=None, outlier_clip=None):
     """Compute detector weights, based on variance of signal.  If
     outlier_clip is set, it is used to trim outliers.  See code for
     details, but think of it as the number of stdev away from the mean
@@ -590,12 +618,13 @@ def get_det_weights(tod, signal=None, wrap=None,
     det_weights = np.zeros(signal.shape[:-1])
     sigmas = signal.std(axis=-1)
     ok = sigmas != 0
-    det_weights[ok] = sigmas[ok]**-2
+    det_weights[ok] = sigmas[ok] ** -2
     if outlier_clip:
-        qs = np.quantile(det_weights[ok], [.16, .84])  # "1 sigma" lims
-        q0, dq = qs.mean(), np.diff(qs)[0]/2
-        ok *= ((q0 - outlier_clip * dq < det_weights) *
-               (det_weights < q0 + outlier_clip * dq))
+        qs = np.quantile(det_weights[ok], [0.16, 0.84])  # "1 sigma" lims
+        q0, dq = qs.mean(), np.diff(qs)[0] / 2
+        ok *= (q0 - outlier_clip * dq < det_weights) * (
+            det_weights < q0 + outlier_clip * dq
+        )
     return det_weights * ok
 
 
@@ -616,22 +645,35 @@ def write_det_weights(tod, filename, dataset, det_weights=None):
 
     """
     from sotodlib.io import metadata
+
     if det_weights is None:
         det_weights = tod.det_weights
-    rs = core.metadata.ResultSet(['dets:name', 'det_weights'])
+    rs = core.metadata.ResultSet(["dets:name", "det_weights"])
     rs.rows.extend(list(zip(tod.dets.vals, det_weights)))
     metadata.write_dataset(rs, filename, dataset, overwrite=True)
     return rs
 
 
-def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
-             res=0.01*coords.DEG, size=None, wcs_kernel=None, comps='TQU',
-             signal=None,
-             det_weights=None,
-             filename=None, source_flags=None, cuts=None,
-             data_splits=None,
-             low_pass=None, n_modes=10,
-             eigentol=1e-3, info={}):
+def make_map(
+    tod,
+    center_on=None,
+    scan_coords=True,
+    thread_algo=False,
+    res=0.01 * coords.DEG,
+    size=None,
+    wcs_kernel=None,
+    comps="TQU",
+    signal=None,
+    det_weights=None,
+    filename=None,
+    source_flags=None,
+    cuts=None,
+    data_splits=None,
+    low_pass=None,
+    n_modes=10,
+    eigentol=1e-3,
+    info={},
+):
     """Make a compact source map from the TOD.  Specify filename to write
     things to disk; this should be a format string, for example
     '{obs_id}_{map}.fits', where 'map' will be given values of
@@ -639,104 +681,123 @@ def make_map(tod, center_on=None, scan_coords=True, thread_algo=False,
     case) must be passed through info.
 
     """
-    assert (center_on is not None)  # Pass in the source name, e.g. 'uranus'
+    assert center_on is not None  # Pass in the source name, e.g. 'uranus'
 
     # Test the map format string...
     if filename is not None:
         try:
-            filename.format(map='binned', **info)
+            filename.format(map="binned", **info)
         except:
-            raise ValueError('Failed to process filename format "%s" with info=%s' %
-                             (filename, info))
+            raise ValueError(
+                'Failed to process filename format "%s" with info=%s' % (filename, info)
+            )
 
     class MmTimer(coords.Timer):
         PRINT_FUNC = logger.info
-        FMT = 'make_map: {msg}: {elapsed:.3f} seconds'
+        FMT = "make_map: {msg}: {elapsed:.3f} seconds"
 
     if signal is None:
         signal = tod.signal
 
-    if thread_algo == 'none':
+    if thread_algo == "none":
         thread_algo = False
 
-    with MmTimer('setup thread_algo=%s' % thread_algo):
+    with MmTimer("setup thread_algo=%s" % thread_algo):
         if scan_coords:
-            P, X = coords.planets.get_scan_P(tod, center_on, res=res, size=size,
-                                             comps=comps, cuts=cuts,
-                                             threads=thread_algo)
+            P, X = coords.planets.get_scan_P(
+                tod,
+                center_on,
+                res=res,
+                size=size,
+                comps=comps,
+                cuts=cuts,
+                threads=thread_algo,
+            )
         else:
             planet = coords.planets.SlowSource.for_named_source(
-                center_on, tod.timestamps[0])
+                center_on, tod.timestamps[0]
+            )
             ra0, dec0 = planet.pos(tod.timestamps.mean())
-            wcsk = coords.get_wcs_kernel('tan', ra0, dec0, res=res)
-            P = coords.P.for_tod(tod, comps=comps,
-                                 cuts=cuts,
-                                 threads=thread_algo,
-                                 wcs_kernel=wcsk)
-    with MmTimer('get_proj_threads'):
+            wcsk = coords.get_wcs_kernel("tan", ra0, dec0, res=res)
+            P = coords.P.for_tod(
+                tod, comps=comps, cuts=cuts, threads=thread_algo, wcs_kernel=wcsk
+            )
+    with MmTimer("get_proj_threads"):
         P._get_proj_threads()
 
-    with MmTimer('filter for sources'):
-        filter_for_sources(tod, signal=signal, source_flags=source_flags,
-                           low_pass=low_pass, n_modes=n_modes)
+    with MmTimer("filter for sources"):
+        filter_for_sources(
+            tod,
+            signal=signal,
+            source_flags=source_flags,
+            low_pass=low_pass,
+            n_modes=n_modes,
+        )
 
     if det_weights is None:
-        det_weights = get_det_weights(tod, signal=signal, outlier_clip=2.)
+        det_weights = get_det_weights(tod, signal=signal, outlier_clip=2.0)
 
     if data_splits is not None:
         # Clear P's internal cuts as we'll be modifying those to pass
         # in directly.
         base_cuts, P.cuts = P.cuts, None
-        output = {
-            'P': P,
-            'det_weights': det_weights,
-            'splits': {}
-        }
+        output = {"P": P, "det_weights": det_weights, "splits": {}}
 
         # Write out _map and _weights for each group.
         for group_label, group_cuts in data_splits.items():
             logger.info(f'Mapping split "{group_label}"')
             if base_cuts is not None:
                 group_cuts = group_cuts + base_cuts
-            with MmTimer('getting weights'):
+            with MmTimer("getting weights"):
                 w = P.to_weights(cuts=group_cuts, det_weights=det_weights)
-            with MmTimer('getting map and applying inverse weights'):
+            with MmTimer("getting map and applying inverse weights"):
                 m = P.remove_weights(
-                    tod=tod, signal=signal, weights_map=w, cuts=group_cuts,
-                    det_weights=det_weights, eigentol=eigentol)
-            output['splits'][group_label] = {
-                'binned': None,
-                'weights': w.astype('float32'),
-                'solved': m.astype('float32'),
+                    tod=tod,
+                    signal=signal,
+                    weights_map=w,
+                    cuts=group_cuts,
+                    det_weights=det_weights,
+                    eigentol=eigentol,
+                )
+            output["splits"][group_label] = {
+                "binned": None,
+                "weights": w.astype("float32"),
+                "solved": m.astype("float32"),
             }
             if filename is not None:
-                m.astype('float32').write(
-                    filename.format(map=f'{group_label}_map', **info))
-                w.astype('float32').write(
-                    filename.format(map=f'{group_label}_weights', **info))
+                m.astype("float32").write(
+                    filename.format(map=f"{group_label}_map", **info)
+                )
+                w.astype("float32").write(
+                    filename.format(map=f"{group_label}_weights", **info)
+                )
         return output
 
-    with MmTimer('project signal and weight maps'):
+    with MmTimer("project signal and weight maps"):
         map1 = P.to_map(tod, signal=signal, det_weights=det_weights)
         wmap1 = P.to_weights(det_weights=det_weights)
 
-    with MmTimer('compute and apply inverse weights map'):
+    with MmTimer("compute and apply inverse weights map"):
         iwmap1 = P.to_inverse_weights(weights_map=wmap1, eigentol=eigentol)
         map1b = P.remove_weights(map1, inverse_weights_map=iwmap1)
 
     if filename is not None:
-        with MmTimer('Write out'):
-            map1b.write(filename.format(map='solved', **info))
-            if filename.format(map='x', **info) != filename.format(map='y', **info):
-                map1.write(filename.format(map='binned', **info))
-                wmap1.write(filename.format(map='weights', **info))
-                write_det_weights(tod, filename.format(map='detweights', **info).
-                                  replace('.fits', '.h5'), 'detweights',
-                                  det_weights=det_weights)
+        with MmTimer("Write out"):
+            map1b.write(filename.format(map="solved", **info))
+            if filename.format(map="x", **info) != filename.format(map="y", **info):
+                map1.write(filename.format(map="binned", **info))
+                wmap1.write(filename.format(map="weights", **info))
+                write_det_weights(
+                    tod,
+                    filename.format(map="detweights", **info).replace(".fits", ".h5"),
+                    "detweights",
+                    det_weights=det_weights,
+                )
 
-    return {'binned': map1,
-            'weights': wmap1,
-            'solved': map1b,
-            'P': P,
-            'det_weights': det_weights,
-            }
+    return {
+        "binned": map1,
+        "weights": wmap1,
+        "solved": map1b,
+        "P": P,
+        "det_weights": det_weights,
+    }
