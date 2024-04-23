@@ -1,5 +1,6 @@
 import os
 import unittest
+import pytest
 import json
 from datetime import datetime
 
@@ -13,9 +14,8 @@ class TestPlanets(unittest.TestCase):
     def test_get_astrometric(self):
 
         timestamp = datetime.now().timestamp()
-        self.assertRaises(
-            RuntimeError, _get_astrometric(source_name="Jupiter", timestamp=timestamp)
-        )
+        with pytest.raises(RuntimeError):
+            _get_astrometric(source_name="Jupiter", timestamp=timestamp)
 
         os.environ["SOTODLIB_RESOURCES"] = json.dumps(
             {"de421.bsp": "ftp://ssd.jpl.nasa.gov/pub/eph/planets/bsp/de421.bsp"}
@@ -25,11 +25,14 @@ class TestPlanets(unittest.TestCase):
 
         self.assertEqual(t.target, 5)
 
+        # Returns a path to the downloaded data.
         astropy_data = au_data.download_file(
             "ftp://ssd.jpl.nasa.gov/pub/eph/planets/bsp/de421.bsp", cache=True
         )
 
-        os.environ["SOTODLIB_RESOURCES"] = json.dumps({"de421.bsp": astropy_data})
+        os.environ["SOTODLIB_RESOURCES"] = json.dumps(
+            {"de421.bsp": "file://" + astropy_data}
+        )
 
         t = _get_astrometric(source_name="Jupiter", timestamp=timestamp)
 
