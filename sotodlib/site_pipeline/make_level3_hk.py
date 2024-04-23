@@ -144,6 +144,8 @@ def main(context: str,
             meta = ctx.get_meta(obs_id)
             aman = ctx.get_obs(obs_id, dets=[])
             
+            
+            
             _hkman = hk_utils.get_detcosamp_hkaman(aman, 
                                       fields = hk2meta_config['fields'],
                                       data_dir = hk2meta_config['input_dir'])
@@ -159,9 +161,15 @@ def main(context: str,
             hkman = core.AxisManager(meta.dets, aman.samps)
             hkman.wrap('timestamps', aman.timestamps, [(0, 'samps')])
 
-            data_field = hk2meta_config['fields'][0].split('.')[1]
-            for _ai, _alias in enumerate(hk2meta_config['aliases']):
-                hkman.wrap(_alias, _hkman[data_field][data_field][_ai], [(0, 'samps')])
+            full_fields = hk2meta_config['fields']
+            aliases = hk2meta_config['aliases']
+            data_fields = [full_field.split('.')[1] for full_field in full_fields]
+            num_different_field = 0
+            for i, (full_field, data_field, alias) in enumerate(zip(full_fields, data_fields, aliases)):    
+                if i > 0:
+                    num_different_field += int(data_fields[i-1] != data_field)
+                i_in_same_field = i - num_different_field
+                hkman.wrap(alias, _hkman[data_field][data_field][i_in_same_field], [(0, 'samps')])
             
             h5_filename = f"{output_prefix}_{obs_id.split('_')[1][:4]}.h5"
             output_filename = os.path.join(output_dir, h5_filename)
