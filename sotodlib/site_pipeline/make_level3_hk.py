@@ -19,7 +19,7 @@ def get_parser(parser=None):
         'config',
         help="configuration yaml file.")
     parser.add_argument(
-        '-o', '--output-dir', action='store', default=None, type=str,
+        '-o', '--output_dir', action='store', default=None, type=str,
         help='output data directory, overwrite config output_dir')
     parser.add_argument(
         '--verbose', default=2, type=int,
@@ -31,26 +31,24 @@ def get_parser(parser=None):
         action='store_true',
     )
     parser.add_argument(
-        '--query-text',
+        '--query_text', type=str,
         help="Query text",
-        type=str
     )
     parser.add_argument(
-        '--query-tags',
+        '--query_tags', nargs="*", type=str,
         help="Query tags",
-        type=str
     )
     parser.add_argument(
-        '--min-ctime',
+        '--min_ctime', type=int,
         help="Minimum timestamp for the beginning of an observation list",
     )
     parser.add_argument(
-        '--max-ctime',
+        '--max_ctime', type=int,
         help="Maximum timestamp for the beginning of an observation list",
     )
     parser.add_argument(
-        '--obs-id',
-        help="obs-id of particular observation if we want to run on just one",
+        '--obs_id', type=str,
+        help="obs_id of particular observation if we want to run on just one",
     )
     return parser
     
@@ -58,7 +56,7 @@ def main(context: str,
         config: str,
         output_dir: Optional[str] = None,
         verbose: Optional[int] = 2,
-        overwrite: Optional[bool] = True,
+        overwrite: Optional[bool] = False,
         query_text: Optional[str] = None,
         query_tags: Optional[list] = None,
         min_ctime: Optional[float] = None,
@@ -75,12 +73,14 @@ def main(context: str,
     elif verbose == 3:
         logger.setLevel(logging.DEBUG)
     
+    logger.info(f'min_ctime: {min_ctime}')
     # load context
     ctx = core.Context(context)
     
     # load configuration file
     with open(config) as f:
-        hk2meta_config = yaml.safe_load(f)    
+        hk2meta_config = yaml.safe_load(f)
+    
     if output_dir is None:
         if 'output_dir' in hk2meta_config.keys():
             output_dir = hk2meta_config['output_dir']
@@ -125,7 +125,7 @@ def main(context: str,
     else:
         tot_query = "and "
         if query_text is not None:
-            tot_query += f"{query_text} and"
+            tot_query += f"{query_text} and "
         if min_ctime is not None:
             tot_query += f"timestamp>={min_ctime} and "
         if max_ctime is not None:
@@ -133,17 +133,30 @@ def main(context: str,
         tot_query = tot_query[4:-4]
         if tot_query == "":
             tot_query = "1"
-    obs_list= ctx.obsdb.query(query_text, query_tags)
+    
+    logger.info(f'tot_query: {tot_query}')
+    obs_list= ctx.obsdb.query(tot_query, query_tags)
     
     # make obs_id
     for obs in obs_list:
         obs_id = obs['obs_id']
         try:
+            meta = ctx.get_meta(obs_id)
             aman = ctx.get_obs(obs_id, dets=[])
+            
             _hkman = hk_utils.get_detcosamp_hkaman(aman, 
                                       fields = hk2meta_config['fields'],
                                       data_dir = hk2meta_config['input_dir'])
-            hkman = core.AxisManager(aman.samps)
+            
+            dt_samp_hk = hk2meta_config['dt_samp_hk']
+            start = float(aman.timestamps[0] - 3*dt_samp_hk)
+            stop = float(aman.timestamps[-1] + 3*dt_samp_hk)
+            _data = hk_utils.sort_hkdata(start=start, stop=stop, fields=hk2meta_config['fields'],
+                                         data_dir=hk2meta_config['input_dir'], alias=None)
+            _hkman = hk_utils.make_hkaman(grouped_data=_data, alias_exists=False,
+                                          det_cosampled=True, det_aman=aman)
+            
+            hkman = core.AxisManager(meta.dets, aman.samps)
             hkman.wrap('timestamps', aman.timestamps, [(0, 'samps')])
 
             data_field = hk2meta_config['fields'][0].split('.')[1]
@@ -155,7 +168,8 @@ def main(context: str,
             hkman.save(dest=output_filename, group=obs_id, overwrite=overwrite, compression='gzip')
             man_db.add_entry({'obs:obs_id': obs_id, 'dataset': obs_id}, 
                      filename=output_filename, replace=overwrite)
-        
+            logger.info(f"saved: {obs_id}")
+            
         except Exception as e:
             logger.error(f"Exception '{e}' thrown while processing {obs_id}")
             continue
