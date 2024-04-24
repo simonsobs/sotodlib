@@ -166,7 +166,7 @@ def get_parser(parser=None):
     )
     parser.add_argument(
         '--tags',
-        help="Observation tags. Ex: --tags='jupiter=1'",
+        help="Observation tags. Ex: --tags 'jupiter' 'setting'",
         nargs='*',
         type=str
     )
