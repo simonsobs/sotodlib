@@ -696,7 +696,7 @@ Command line arguments
 make-cosamp-hk
 ------------------
 
-This element generates house-keeping data with timestamp co-sampled
+This element generates house-keeping data with timestamps co-sampled
 with detector timestamps.
 
 Command line arguments
@@ -706,7 +706,7 @@ Command line arguments
     :func: get_parser
     :prog: make-cosamp-hk
     
-The example of config file for wiregrid is shown below.
+An example config for wiregrid is shown below.
 With the config file, ``wiregrid.sqlite`` and ``wiregrid_XXXX.h5``, 
 where XXXX is substituted with the first four digits of timestamps, 
 are generated on ``/path/to/manifests/wiregrid``.::
@@ -715,7 +715,7 @@ are generated on ``/path/to/manifests/wiregrid``.::
     min_ctime: 1700000000
     max_ctime: null
     query_tags: ['wiregrid=1']
-    input_dir: '/path/to/level2/satpX/hk'
+    input_dir: '/path/to/level2/hk'
     output_dir: '/path/to/manifests/wiregrid'
     fields: 
             ['satpX.wg-encoder.feeds.wgencoder_full.reference_count',
