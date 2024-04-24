@@ -63,6 +63,30 @@ def main(context: str,
         max_ctime: Optional[float] = None,
         obs_id: Optional[str] = None,
         ):
+    """
+    Args:
+        context: str
+            File path to the context file.
+        config: str
+            Path to the configuration file containing processing parameters.
+        output_dir: str or None
+            Directory where the processed data will be saved. \
+            If not provided, it is extracted from the configuration file.
+        verbose: str
+            Verbosity level for logging. Default is 2 (INFO).
+        overwrite: bool
+            Whether to overwrite existing output files. Default is False.
+        query_text: str or None
+            Text-based query to filter observations. If not provided, it is extracted from the configuration file.
+        query_tags: list or None
+            Tags used for further filtering observations. If not provided, it is extracted from the configuration file.
+        min_ctime: float or None
+            Minimum timestamp of observations to be queried. If not provided, it is extracted from the configuration file.
+        max_ctime: float or None
+            Maximum timestamp of observations to be queried. If not provided, it is extracted from the configuration file.
+        obs_id: str or None
+            Specific observation obs_id to process. If provided, overrides other filtering parameters.
+    """
     # Set verbose
     if verbose == 0:
         logger.setLevel(logging.ERROR)
