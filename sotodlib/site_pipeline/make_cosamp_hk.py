@@ -7,7 +7,7 @@ from typing import Optional
 from sotodlib import core
 from sotodlib.io import hk_utils
 from sotodlib.site_pipeline import util
-logger = util.init_logger('hk2meta', 'hk2meta: ')
+logger = util.init_logger('make_cosamp_hk', 'make_cosamp_hk: ')
 
 def get_parser(parser=None):
     if parser is None:
@@ -137,7 +137,7 @@ def main(context: str,
     logger.info(f'tot_query: {tot_query}')
     obs_list= ctx.obsdb.query(tot_query, query_tags)
     
-    # make obs_id
+    # output cosampled data for each obs_id
     for obs in obs_list:
         obs_id = obs['obs_id']
         try:
