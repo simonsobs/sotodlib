@@ -162,6 +162,8 @@ A configuration file for the processing pipeline would look like::
     process_pipe:
         - name: "sso_footprint"
           calc:
+            # If you want to search for nearby sources, exclude source_list
+            source_list: ['jupiter']
             distance: 20
             nstep: 100
           save: True

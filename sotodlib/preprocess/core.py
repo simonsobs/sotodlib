@@ -219,6 +219,8 @@ def _expand(new, full, wrap_valid=True):
             new.dets, 
             return_slices=True
         )
+    else:
+        fs_dets = range(full.dets.count)
     if 'samps' in new._axes:
         _, fs_samps, ns_samps = full.samps.intersection(
             new.samps, 
