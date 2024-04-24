@@ -167,7 +167,7 @@ def get_parser(parser=None):
     parser.add_argument(
         '--tags',
         help="Observation tags. Ex: --tags='jupiter=1'",
-        nargs='+',
+        nargs='*',
         type=str
     )
     return parser
@@ -203,6 +203,11 @@ def main(
         if tot_query=="":
             tot_query="1"
     
+    for i, tag in enumerate(tags):
+        tags[i] = tags[i].lower()
+        if '=' not in tags[i]:
+            tags[i] += '=1'
+
     obs_list = context.obsdb.query(tot_query, tags=tags)
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
