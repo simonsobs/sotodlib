@@ -693,7 +693,7 @@ Command line arguments
     :prog: make_hwp_solutions
 
 
-make-level3-hk
+make-cosamp-hk
 ------------------
 
 This element generates house-keeping data with timestamp co-sampled
@@ -702,26 +702,37 @@ with detector timestamps.
 Command line arguments
 ``````````````````````
 .. argparse::
-    :module: sotodlib.site_pipeline.make_level3_hk
+    :module: sotodlib.site_pipeline.make_cosamp_hk
     :func: get_parser
-    :prog: make-level3-hk
+    :prog: make-cosamp-hk
     
-The example of config file is shown below::
+The example of config file for wiregrid is shown below.
+With the config file, ``wiregrid.sqlite`` and ``wiregrid_XXXX.h5``, 
+where XXXX is substituted with the first four digits of timestamps, 
+are generated on ``/path/to/manifests/wiregrid``.::
 
     query_text: 'type == "obs"'
-    min_ctime: 1704200000
-    max_ctime: 1705000000
+    min_ctime: 1700000000
+    max_ctime: null
     query_tags: ['wiregrid=1']
-    input_dir: '/global/cfs/cdirs/sobs/untracked/data/satp3/hk/'
-    output_dir: '/global/u2/t/ttera/site_analysis/code_dev/hk2meta/wiregrid'
+    input_dir: '/path/to/level2/satpX/hk'
+    output_dir: '/path/to/manifests/wiregrid'
     fields: 
-        ['satp3.wg-encoder.feeds.wgencoder_rough.reference_degree',
-        'satp3.wg-encoder.feeds.wgencoder_rough.rotation_speed',]
+            ['satpX.wg-encoder.feeds.wgencoder_full.reference_count',
+             'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSL1',
+             'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSL2',
+             'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSR1',
+             'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSR2',]
+    dt_samp_hk: 2
+    aliases: 
+        ['encoder',
+         'LS1',
+         'LS2',
+         'LSR1',
+         'LSR2']
     output_prefix: 'wiregrid'
-    aliases:
-        ['rough_degree',
-        'rough_speed']
-    
+
+
     
 make-ml-map
 -----------
