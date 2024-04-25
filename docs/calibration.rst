@@ -8,4 +8,4 @@ Test comments.
 
 A first try.
 
-.. autofunction:: sotodlib.site_pipeline.calibration.wiregrid.get_det_angle
+.. autofunction:: sotodlib.site_pipeline.calibration.wiregrid.get_cal_gamma

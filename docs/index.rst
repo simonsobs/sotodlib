@@ -23,6 +23,7 @@ Welcome to SOTODLib's documentation!
    preprocess.rst
    det_match.rst
    site_pipeline.rst
+   calibration.rst
    reference.rst
    dev.rst
 
