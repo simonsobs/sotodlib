@@ -693,24 +693,27 @@ class SSOFootprint(_Preprocess):
     name = 'sso_footprint'
 
     def calc_and_save(self, aman, proc_aman):
-        ssos = planets.get_nearby_sources(tod=aman, distance=self.calc_cfgs.get("distance", 20))
-        if ssos:
-            sso_aman = core.AxisManager()
-            nstep = self.calc_cfgs.get("nstep", 100)
-            onsamp = (aman.samps.count+nstep-1)//nstep
-            for sso in ssos:
-                planet = sso[0]
-                xi_p, eta_p = obs_ops.sources.get_sso(aman, planet, nstep=nstep)
-                planet_aman = core.AxisManager(core.OffsetAxis('ds_samps', count=onsamp,
-                                                               offset=aman.samps.offset,
-                                                               origin_tag=aman.samps.origin_tag))
-                # planet_aman = core.AxisManager(core.OffsetAxis("samps", onsamp))
-                planet_aman.wrap("xi_p", xi_p, [(0, "ds_samps")])
-                planet_aman.wrap("eta_p", eta_p, [(0, "ds_samps")])
-                sso_aman.wrap(planet, planet_aman)
-            self.save(proc_aman, sso_aman)
+        if self.calc_cfgs.get("source_list", None):
+            ssos = self.calc_cfgs["source_list"]
         else:
-            raise ValueError("No sources found within footprint")
+            ssos = planets.get_nearby_sources(tod=aman, distance=self.calc_cfgs.get("distance", 20))
+            if not ssos:
+                raise ValueError("No sources found within footprint")
+            ssos = [i[0] for i in ssos]
+        sso_aman = core.AxisManager()
+        nstep = self.calc_cfgs.get("nstep", 100)
+        onsamp = (aman.samps.count+nstep-1)//nstep
+        for sso in ssos:
+            planet = sso
+            xi_p, eta_p = obs_ops.sources.get_sso(aman, planet, nstep=nstep)
+            planet_aman = core.AxisManager(core.OffsetAxis('ds_samps', count=onsamp,
+                                                            offset=aman.samps.offset,
+                                                            origin_tag=aman.samps.origin_tag))
+            # planet_aman = core.AxisManager(core.OffsetAxis("samps", onsamp))
+            planet_aman.wrap("xi_p", xi_p, [(0, "ds_samps")])
+            planet_aman.wrap("eta_p", eta_p, [(0, "ds_samps")])
+            sso_aman.wrap(planet, planet_aman)
+        self.save(proc_aman, sso_aman)
         
     def save(self, proc_aman, sso_aman):
         if self.save_cfgs is None:
