@@ -374,10 +374,6 @@ def get_focal_plane_cover(tod=None, count=0, focal_plane=None,
         eta = focal_plane.eta
     else:
         xi, eta = xieta[:2]
-    nans = ~np.isnan([xi, eta])
-    nans = np.logical_and(nans[0], nans[1])
-    xi = xi[nans]
-    eta = eta[nans]
     qs = so3g.proj.quat.rotation_xieta(xi, eta)
 
     # Starting guess for center
