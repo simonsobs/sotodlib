@@ -157,9 +157,9 @@ class DemodSignalMap(DemodSignal):
                         # then we are in a detector fixed in time split.
                         rangesmatrix = obs.flags.glitch_flags + obs.det_flags[split_labels[n_split]]
                     elif split_labels[n_split] == 'scan_left':
-                        rangesmatrix = rangesmatrix = obs.flags.glitch_flags + obs.flags.left_scan
+                        rangesmatrix = obs.flags.glitch_flags + obs.flags.left_scan
                     elif split_labels[n_split] == 'scan_right':
-                        rangesmatrix = rangesmatrix = obs.flags.glitch_flags + obs.flags.right_scan
+                        rangesmatrix = obs.flags.glitch_flags + obs.flags.right_scan
                     pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix, hwp=True)
             else:
                 pmap_local = pmap
