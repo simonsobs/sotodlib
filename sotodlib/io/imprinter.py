@@ -101,7 +101,7 @@ class Books(Base):
     created_at: time when book was created
     updated_at: time when book was updated
     timing: bool, whether timing system is on
-    path: str, location of book directory
+    path: str, location of book directory relative to output_root of imprinter
     lvl2_deleted: bool, if level 2 data has been purged yet
     """
 
@@ -389,6 +389,8 @@ class Imprinter:
             ),  # not worth having a extra table
             timing=timing_on,
         )
+        book.path = self.get_book_path(book)
+
         self.logger.info(f"registering {bid}")
         # add book to database
         session.add(book)
@@ -576,6 +578,13 @@ class Imprinter:
                 session.add(stray_book)
                 session.commit()
 
+    def get_book_abs_path(self, book):
+        if book.path is None:
+            book_path = self.get_book_path(book)
+        else:
+            book_path = book.path
+        return os.path.join(self.output_root, book_path)
+
     def get_book_path(self, book):
         g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
         lvl2_data_root = g3tsmurf_cfg["data_prefix"]
@@ -583,19 +592,19 @@ class Imprinter:
         if book.type in ["obs", "oper"]:
             session_id = book.bid.split("_")[1]
             first5 = session_id[:5]
-            odir = op.join(self.output_root, book.tel_tube, book.type, first5)
+            odir = op.join(book.tel_tube, book.type, first5)
             return os.path.join(odir, book.bid)
         elif book.type in ["hk", "smurf"]:
             # get source directory for hk book
             root = op.join(lvl2_data_root, book.type)
             first5 = book.bid.split("_")[1]
             assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
-            odir = op.join(self.output_root, book.tel_tube, book.type)
+            odir = op.join(book.tel_tube, book.type)
             return os.path.join(odir, book.bid)
         elif book.type in ["stray"]:
             first5 = book.bid.split("_")[1]
             assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
-            odir = op.join(self.output_root, book.tel_tube, book.type)
+            odir = op.join(book.tel_tube, book.type)
             return os.path.join(odir, book.bid)
         else:
             raise NotImplementedError(
@@ -613,7 +622,7 @@ class Imprinter:
         lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if book.type in ["obs", "oper"]:
-            book_path = self.get_book_path(book)
+            book_path = self.get_book_abs_path(book)
 
             # after sanity checks, now we proceed to bind the book.
             # get files associated with this book, in the form of
@@ -775,7 +784,6 @@ class Imprinter:
                 ignore_tags=ignore_tags,
                 ancil_drop_duplicates=ancil_drop_duplicates,
             )
-            book.path = op.abspath(binder.outdir)
             binder.bind(pbar=pbar)
 
             # write M_book file
@@ -813,7 +821,9 @@ class Imprinter:
             if book.type in ['obs', 'oper']:
                 # check that detectors books were written out correctly
                 self.logger.info("Checking Book {}".format(book.bid))
-                check = BookScanner(book.path, config=check_configs)
+                check = BookScanner(
+                    self.get_book_abs_path(book), config=check_configs
+                )
                 check.go()
 
             # not sure if this is the best place to update
@@ -1470,7 +1480,9 @@ class Imprinter:
         if book.type != "oper":
             raise TypeError("Book must have type 'oper'")
 
-        session, arc = self.get_g3tsmurf_session(book.tel_tube, return_archive=True)
+        session, arc = self.get_g3tsmurf_session(
+            book.tel_tube, return_archive=True
+        )
 
         obs_ids = [o.obs_id for o in book.obs]
         obs = (
@@ -1552,12 +1564,11 @@ class Imprinter:
             self.librarian = LibrarianClient.from_info(conn)
         
         assert book.status == BOUND, "cannot upload unbound books"
-        dest_path = op.relpath(book.path, self.output_root)
         self.logger.info(f"Uploading book {book.bid} to librarian")
         try:     
             self.librarian.upload(
-                Path(book.path), 
-                Path(dest_path), 
+                Path( self.get_book_abs_path(book) ), 
+                Path( book.path ), 
             )
             book.status = UPLOADED
             session.commit()
@@ -1624,10 +1635,11 @@ class Imprinter:
 
         """
         # remove all files within the book
+        book_path = self.get_book_abs_path(book)
         try:
-            shutil.rmtree(book.path)
+            shutil.rmtree( book_path )
         except Exception as e:
-            self.logger.warning(f"Failed to remove {book.path}: {e}")
+            self.logger.warning(f"Failed to remove {book_path}: {e}")
             self.logger.error(traceback.format_exc())
 
 
