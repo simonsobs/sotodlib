@@ -77,6 +77,13 @@ class ManifestScheme:
     def __init__(self):
         self.cols = []
 
+    def new_db(self, **kwargs):
+        """Use this scheme to instantiate a ManifestDb, and return it.  Aall
+        kwargs are passed to ManifestDb constructor.
+
+        """
+        return ManifestDb(scheme=self, **kwargs)
+
     # Methods for constructing table.
 
     def add_exact_match(self, name, dtype=DEFAULT_DTYPE):
