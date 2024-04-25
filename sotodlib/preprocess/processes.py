@@ -732,47 +732,38 @@ class SSOFootprint(_Preprocess):
                 planet_aman = proc_aman.sso_footprint[sso]
                 plot_sso_footprint(aman, planet_aman, sso, filename=filename.replace('{name}', f'{sso}_sso_footprint'), **self.plot_cfgs)
 
-class SourceFlags(_Preprocess):
-    """Calculate the source flags as well as dark detectors in the data.
-    All calculation configs go to `compute_source_flags`.
+class DarkDets(_Preprocess):
+    """Find dark detectors in the data.
 
-    Saves results in proc_aman under the "source_flags" field. 
+    Saves results in proc_aman under the "dark_dets" field. 
 
-    Data selection can have key "kind" equal to "any" or "all."
+    Data selection should have key "kind" equal to "all."
 
      Example config block::
 
-        - name : "source_flags"
+        - name : "dark_dets"
           signal: "signal" # optional
-          calc:
-            mask: {'shape': 'circle',
-                   'xyr': (0, 0, 1.)}
-            center_on: 'jupiter'
-            res: 0.005817764173314432 # np.radians(20/60)
-            max_pix: 4e6
+          calc: True
           save: True
           select:
-            kind: "any"
+            kind: "all"
     
-    .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
+    .. autofunction:: sotodlib.tod_ops.flags.get_dark_dets
     """
-    name = "source_flags"
-    
+    name = "dark_dets"
+
     def calc_and_save(self, aman, proc_aman):
-        source_flags, mskdarks = tod_ops.flags.get_source_flags(aman, merge=False, **self.calc_cfgs)
+        mskdarks = tod_ops.flags.get_dark_dets(aman, merge=False)
         
         dark_aman = core.AxisManager(aman.dets, aman.samps)
         dark_aman.wrap('darks', mskdarks, [(0, 'dets'), (1, 'samps')])
-        proc_aman.wrap('darks', dark_aman)
-        source_aman = core.AxisManager(aman.dets, aman.samps)
-        source_aman.wrap('source_flags', source_flags, [(0, 'dets'), (1, 'samps')])
-        self.save(proc_aman, source_aman)
+        self.save(proc_aman, dark_aman)
     
-    def save(self, proc_aman, source_aman):
+    def save(self, proc_aman, dark_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("sources", source_aman)
+            proc_aman.wrap("darks", dark_aman)
     
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
@@ -786,6 +777,41 @@ class SourceFlags(_Preprocess):
                                 "understood. Expect 'all'")
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
+
+class SourceFlags(_Preprocess):
+    """Calculate the source flags in the data.
+    All calculation configs go to `get_source_flags`.
+
+    Saves results in proc_aman under the "source_flags" field. 
+
+     Example config block::
+
+        - name : "source_flags"
+          signal: "signal" # optional
+          calc:
+            mask: {'shape': 'circle',
+                   'xyr': (0, 0, 1.)}
+            center_on: 'jupiter'
+            res: 0.005817764173314432 # np.radians(20/60)
+            max_pix: 4e6
+          save: True
+    
+    .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
+    """
+    name = "source_flags"
+    
+    def calc_and_save(self, aman, proc_aman):
+        source_flags = tod_ops.flags.get_source_flags(aman, merge=False, **self.calc_cfgs)
+
+        source_aman = core.AxisManager(aman.dets, aman.samps)
+        source_aman.wrap('source_flags', source_flags, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, source_aman)
+    
+    def save(self, proc_aman, source_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("sources", source_aman)
         
 
 _Preprocess.register(Trends)
@@ -807,4 +833,5 @@ _Preprocess.register(FlagTurnarounds)
 _Preprocess.register(SubPolyf)
 _Preprocess.register(DetBiasFlags)
 _Preprocess.register(SSOFootprint)
+_Preprocess.register(DarkDets)
 _Preprocess.register(SourceFlags)

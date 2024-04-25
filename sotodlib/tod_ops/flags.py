@@ -489,19 +489,11 @@ def get_trending_flags(aman,
 
     return cut
 
-def get_source_flags(aman, merge=True, overwrite=True, dark_flags_name='darks', source_flags_name='source_flags',
-                     mask=None, center_on=None, res=None, max_pix=None):
+def get_dark_dets(aman, merge=True, overwrite=True, dark_flags_name='darks'):
     darks = np.array(aman.det_info.wafer.type != 'OPTC')
     x = Ranges(aman.samps.count)
     mskdarks = RangesMatrix([Ranges.ones_like(x) if Y
                                 else Ranges.zeros_like(x) for Y in darks])
-    if merge:
-        wrap = source_flags_name
-    else:
-        wrap = None
-    if res:
-        res = np.radians(res/60)
-    source_flags = coords.planets.compute_source_flags(tod=aman, wrap=wrap, mask=mask, center_on=center_on, res=res, max_pix=max_pix)
     
     if merge:
         if dark_flags_name in aman.flags and not overwrite:
@@ -511,6 +503,19 @@ def get_source_flags(aman, merge=True, overwrite=True, dark_flags_name='darks', 
         else:
             aman.flags.wrap(dark_flags_name, mskdarks, [(0, 'dets'), (1, 'samps')])
 
+    return mskdarks
+
+def get_source_flags(aman, merge=True, overwrite=True, source_flags_name='source_flags',
+                     mask=None, center_on=None, res=None, max_pix=None):
+    if merge:
+        wrap = source_flags_name
+    else:
+        wrap = None
+    if res:
+        res = np.radians(res/60)
+    source_flags = coords.planets.compute_source_flags(tod=aman, wrap=wrap, mask=mask, center_on=center_on, res=res, max_pix=max_pix)
+    
+    if merge:
         if source_flags_name in aman.flags and not overwrite:
             raise ValueError(f"Flag name {source_flags_name} already exists in aman.flags")
         if source_flags_name in aman.flags:
@@ -518,4 +523,4 @@ def get_source_flags(aman, merge=True, overwrite=True, dark_flags_name='darks', 
         else:
             aman.flags.wrap(source_flags_name, source_flags, [(0, 'dets'), (1, 'samps')])
 
-    return source_flags, mskdarks
+    return source_flags
