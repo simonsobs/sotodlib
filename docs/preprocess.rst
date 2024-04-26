@@ -165,24 +165,27 @@ file with the first two steps in the processing pipeline would look like::
             filename: 'preprocess_archive.h5'
 
     process_pipe:
-        - name: "source_flags"
-        calc:
-          mask: {'shape': 'circle',
-                'xyr': [0, 0, 1.]}
-          center_on: 'jupiter'
-          res: 20 # np.radians(20/60)
-          max_pix: 4.0e+6
-        save: True
-        select:
-          kind: "all"
+        - name : "dark_dets"
+          calc: True
+          save: True
+          select: True
 
-      - name: "glitchfill"
-        flag_aman: "sources"
-        flag: "source_flags"
-        process:
-          nbuf: 10
-          use_pca: True
-          modes: 3
+        - name: "source_flags"
+          calc:
+            mask: {'shape': 'circle',
+                  'xyr': [0, 0, 1.]}
+            center_on: 'jupiter'
+            res: 20 # np.radians(20/60)
+            max_pix: 4.0e+6
+          save: True
+
+        - name: "glitchfill"
+          flag_aman: "sources"
+          flag: "source_flags"
+          process:
+            nbuf: 10
+            use_pca: True
+            modes: 3
 
 Example Obs Pipeline Configuration File
 ---------------------------------------
@@ -243,6 +246,7 @@ Flagging and Products
 .. autoclass:: sotodlib.preprocess.processes.GlitchFill
 .. autoclass:: sotodlib.preprocess.processes.Noise
 .. autoclass:: sotodlib.preprocess.processes.FlagTurnarounds
+.. autoclass:: sotodlib.preprocess.processes.DarkDets
 .. autoclass:: sotodlib.preprocess.processes.SourceFlags
 
 HWP Related
