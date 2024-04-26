@@ -796,8 +796,7 @@ class DarkDets(_Preprocess):
           signal: "signal" # optional
           calc: True
           save: True
-          select:
-            kind: "all"
+          select: True
     
     .. autofunction:: sotodlib.tod_ops.flags.get_dark_dets
     """
@@ -821,11 +820,7 @@ class DarkDets(_Preprocess):
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        if self.select_cfgs["kind"] == "all":
-            keep = ~has_all_cut(proc_aman.darks.darks)
-        else:
-            raise ValueError(f"Entry '{self.select_cfgs['kind']}' not"
-                                "understood. Expect 'all'")
+        keep = ~has_all_cut(proc_aman.darks.darks)
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
 
