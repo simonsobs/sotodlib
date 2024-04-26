@@ -19,7 +19,7 @@ from sotodlib.io.datapkg_utils import load_configs
 
 def main(config: Optional[str] = None, update_delay: float = 2, 
          from_scratch: bool = False, verbosity: int = 2,
-         index_via_actions: bool=False, use_monitor=False):
+         index_via_actions: bool=False, use_monitor:bool=False):
     """
     Arguments
     ---------

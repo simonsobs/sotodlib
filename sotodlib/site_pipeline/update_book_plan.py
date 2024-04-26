@@ -20,7 +20,7 @@ def main(
     min_ctime_timecodes: Optional[float] = None,
     max_ctime_timecodes: Optional[float] = None,
     from_scratch: bool = False,
-    use_monitor=False,
+    use_monitor: bool = False,
     ):
     """
     Update the book plan database with new data from the g3tsmurf database.
