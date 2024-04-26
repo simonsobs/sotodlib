@@ -39,7 +39,7 @@ def _get_preprocess_context(configs, context=None):
         context["metadata"].append( 
             {
                 "db" : configs["archive"]["index"],
-                "name" : "preprocess"
+                "unpack" : "preprocess"
             }
         )
     return configs, context
@@ -357,6 +357,7 @@ def main(
         outputs = [r.get() for r in async_out]
         db = _get_preprocess_db(configs, group_by)
         dest_file = configs['archive']['policy']['filename']
+        all_files = []
         for err, output in outputs:
             if err is None:
                 for db_data, src_file in output:
@@ -368,11 +369,14 @@ def main(
                                     f_src.copy(f_src[f'{dts}/{member}'], f_dest,f'{dts}/{member}')
                     logger.info(f"Saving to database under {db_data}")
                     if len(db.inspect(db_data)) == 0:
-                        db.add_entry(db_data, configs['archive']['index'])
+                        db.add_entry(db_data, dest_file)
+                    all_files.append(src_file)
             else:
                 f = open(errlog, 'a')
                 f.write(f'{time.time()}, {err}, {output[0]}\n{output[1]}')
                 f.close()
+        for tempfile in np.unique(all_files):
+            os.remove(tempfile)
 
 if __name__ == '__main__':
     sp_util.main_launcher(main, get_parser)
