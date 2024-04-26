@@ -191,7 +191,8 @@ class P:
         xi, eta, gamma  = fp.xi, fp.eta, fp.get('gamma')
         if np.any(np.isnan(np.array([xi, eta]))):
             raise ValueError('np.nan is included in xi or eta')
-        
+        if gamma is not None and np.any(np.isnan(gamma)):
+            raise ValueError('np.nan is included in gamma')
         assert (gamma is not None or not hwp)
         if hwp:
             gamma = -gamma
