@@ -195,7 +195,8 @@ def _detect_steps(tod, stopped_time=10, thresholds=None):
 # Wrap the QU response during the operation of the Grid Loader
 def wrap_QUcal(tod, stopped_time, thresholds=None):
     """
-    Wrap QU signal by the wire grid.
+    Wrap QU signal by the wire grid. This method is based on the demodulation by HWP.
+    Users have to apply some HWP process before calling this.
 
     Parameters
     ----------
@@ -390,6 +391,7 @@ def get_cal_gamma(tod, wrap_aman=False):
     """
     Calibrate detectors' polarization response angle by wire grid.
 
+
     Parameters
     ----------
         tod : AxisManager
@@ -398,8 +400,9 @@ def get_cal_gamma(tod, wrap_aman=False):
     Returns
     -------
         (det_angle, det_angle_err) : polarization response angle of detectors in radian, which has the shape of (dets, wire's step)
+        (bg_amp, bg_theta) : The amplitude and the direction of the background polarization not about the wires' signal.
         tod : AxisManager
-            which has calibrated angles. Only returned this by wrap_aman==True
+            which has calibrated angles(tod.wg.gamma_cal). Only returned this by wrap_aman==True
 
     """
     _cal_data = tod.wg.cal_data
