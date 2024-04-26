@@ -122,6 +122,8 @@ class ContextTest(unittest.TestCase):
             self.assertEqual(meta.dets.count, count, msg=f"{selection}")
             self.assertTrue('cal' in meta)
             self.assertTrue('flags' in meta)
+            self.assertTrue('freeform' in meta)
+            self.assertTrue('samps_only' in meta)
 
         # And tolerance of the detsets argument ...
         for selection, count in [
@@ -133,6 +135,8 @@ class ContextTest(unittest.TestCase):
             self.assertEqual(meta.dets.count, count, msg=f"{selection}")
             self.assertTrue('cal' in meta)
             self.assertTrue('flags' in meta)
+            self.assertTrue('freeform' in meta)
+            self.assertTrue('samps_only' in meta)
 
         # And without detdb nor metadata
         ctx = dataset_sim.get_context(with_detdb=False)
@@ -520,6 +524,12 @@ class DatasetSim:
                  'XY&AB',
                  ],
              'on_missing': on_missing},
+            {'db': _db_single_dataset('freeform_info.h5'),
+             'label': 'freeform',
+             'unpack': 'freeform'},
+            {'db': _db_single_dataset('samps_only.h5'),
+             'label': 'samps_only',
+             'unpack': 'samps_only'},
             {'db': _db_single_dataset('det_param.h5'),
              'det_info': True},
             {'db': _db_multi_dataset('detinfo_multimatch.h5'),
@@ -681,6 +691,17 @@ class DatasetSim:
                 # f220; the det_info preprocessing should prevent this
                 # from ever getting requested.
                 raise RuntimeError('metadata system asked for f220 data')
+            return output
+        elif filename == 'freeform_info.h5':
+            output = core.AxisManager()
+            output.wrap('number1', 1.)
+            output.wrap('numbers', np.array([1,2,3]))
+            return output
+        elif filename == 'samps_only.h5':
+            output = core.AxisManager(
+                core.OffsetAxis('samps', self.sample_count, 0))
+            output.wrap_new('encoder_something', shape=('samps', ))[:] = \
+                np.arange(self.sample_count)
             return output
         elif filename == 'some_detset_info.h5':
             rs = metadata.ResultSet(['dets:readout_id', 'x', 'y'])

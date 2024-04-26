@@ -11,7 +11,7 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    count_cuts,
                                     sparse_to_ranges_matrix)
 
-from .core import _Preprocess
+from .core import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 
 
@@ -41,7 +41,7 @@ class Detrend(_Preprocess):
         tod_ops.detrend_tod(aman, signal_name=self.signal,
                             **self.process_cfgs)
 
-class DetBiasFlags(_Preprocess):
+class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
     """
     Derive poorly biased detectors from IV and Bias Step data. Save results
     in proc_aman under the "det_bias_cuts" field. 
@@ -83,44 +83,8 @@ class DetBiasFlags(_Preprocess):
             plot_det_bias_flags(aman, proc_aman['det_bias_flags'], rfrac_range=self.calc_cfgs['rfrac_range'],
                                 psat_range=self.calc_cfgs['psat_range'], filename=filename.replace('{name}', f'{ufm}_bias_cuts_venn'))
 
-    @classmethod
-    def gen_metric(cls, meta, proc_aman):
-        """ Generate a QA metric from the output of this process.
 
-        Arguments
-        ---------
-        meta : AxisManager
-            The full metadata container.
-        proc_aman : AxisManager
-            The metadata containing just the output of this process.
-
-        Returns
-        -------
-        line : dict
-            InfluxDB line entry elements to be fed to
-            `site_pipeline.monitor.Monitor.record`
-        """
-        # For now just compute the fraction of samples that were flagged
-        # (I think in practice this will be 1 or 0...)
-        # TODO: come up with a more useful metric
-        frac_flagged = np.array([
-            np.dot(r.ranges(), [-1, 1]).sum() / meta.obs_info.n_samples
-            for r in proc_aman.det_bias_flags.det_bias_flags
-        ])
-        obs_time = [meta.obs_info.timestamp] * frac_flagged.size
-        # extract these tags for the metric
-        tag_keys = ["detset", "readout_id", "stream_id", "wafer_slot", "tel_tube", "det_id", "bandpass"]
-        tags = [{k: meta.det_info[k][d] for k in tag_keys if k in meta.det_info} for d in range(meta.dets.count)]
-        tags[0]["telescope"] = meta.obs_info.telescope
-        return {
-            "field": cls._influx_field,
-            "values": frac_flagged,
-            "timestamps": obs_time,
-            "tags": tags,
-        }
-
-
-class Trends(_Preprocess):
+class Trends(_FracFlaggedMixIn, _Preprocess):
     """Calculate the trends in the data to look for unlocked detectors. All
     calculation configs go to `get_trending_flags`.
 
@@ -142,6 +106,7 @@ class Trends(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_trending_flags
     """
     name = "trends"
+    _influx_field = "trend_flags_frac"
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
@@ -176,7 +141,8 @@ class Trends(_Preprocess):
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
 
-class GlitchDetection(_Preprocess):
+
+class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     """Run glitch detection algorithm to find glitches. All calculation configs
     go to `get_glitch_flags` 
 
@@ -202,6 +168,7 @@ class GlitchDetection(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_glitch_flags
     """
     name = "glitches"
+    _influx_field = "glitch_flags_frac"
 
     def calc_and_save(self, aman, proc_aman):
         _, glitch_aman = tod_ops.flags.get_glitch_flags(aman,
@@ -231,6 +198,7 @@ class GlitchDetection(_Preprocess):
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
 
+
 class FixJumps(_Preprocess):
     """
     Repairs the jump heights given a set of jump flags and heights.
@@ -258,7 +226,7 @@ class FixJumps(_Preprocess):
             inplace=True, heights=proc_aman[field].jump_heights)
 
 
-class Jumps(_Preprocess):
+class Jumps(_FracFlaggedMixIn, _Preprocess):
     """Run generic jump finding and fixing algorithm.
     
     calc_cfgs should have 'function' defined as one of 
@@ -282,6 +250,7 @@ class Jumps(_Preprocess):
     """
 
     name = "jumps"
+    _influx_field = "jump_flags_frac"
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
@@ -515,6 +484,8 @@ class EstimateHWPSS(_Preprocess):
     .. autofunction:: sotodlib.hwp.hwp.get_hwpss
     """
     name = "estimate_hwpss"
+    _influx_field = "hwpss_coeffs"
+    _influx_percentiles = [0, 50, 75, 90, 95, 100]
 
     def calc_and_save(self, aman, proc_aman):
         hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
@@ -537,6 +508,86 @@ class EstimateHWPSS(_Preprocess):
             ufm = det.split('_')[2]
             plot_4f_2f_counts(aman, filename=filename.replace('{name}', f'{ufm}_4f_2f_counts'))
             plot_hwpss_fit_status(aman, proc_aman[self.calc_cfgs["hwpss_stats_name"]], filename=filename.replace('{name}', f'{ufm}_hwpss_stats'))
+
+    @classmethod
+    def gen_metric(cls, meta, proc_aman):
+        """ Generate a QA metric for the coefficients of the HWPSS fit.
+        Coefficient percentiles and mean are recorded for every mode and detset.
+
+        Arguments
+        ---------
+        meta : AxisManager
+            The full metadata container.
+        proc_aman : AxisManager
+            The metadata containing just the output of this process.
+
+        Returns
+        -------
+        line : dict
+            InfluxDB line entry elements to be fed to
+            `site_pipeline.monitor.Monitor.record`
+        """
+        # record one metric per wafer_slot per bandpass
+        # extract these tags for the metric
+        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
+        tags = []
+        vals = []
+        from ..qa.metrics import _get_tag, _has_tag
+        import re
+        for bp in np.unique(meta.det_info.wafer.bandpass):
+            for ws in np.unique(meta.det_info.wafer_slot):
+                subset = np.where(
+                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
+                )[0]
+
+                # get the coefficients for every detector
+                coeff = proc_aman.hwpss_stats.coeffs[subset]
+                # mask those that were not set
+                nonzero = np.any(coeff != 0.0, axis=1)
+
+                # calculate amplitude of each mode
+                mode_labels = list(proc_aman.hwpss_stats.modes.vals)
+                num_re = re.compile("^[SC](\d+)$")
+                nums = sorted(list(set([num_re.match(l).group(1) for l in mode_labels])))
+                coeff_amp = np.zeros((coeff.shape[0], len(nums)), coeff.dtype)
+                amp_labels = []
+                for i, n in enumerate(nums):
+                    c_ind = mode_labels.index(f"C{n}")
+                    s_ind = mode_labels.index(f"S{n}")
+                    coeff_amp[:, i] = np.sqrt(coeff[:, c_ind]**2 + coeff[:, s_ind]**2)
+                    amp_labels.append(f"A{n}")
+
+                # record percentiles over detectors and fraction of samples flagged
+                perc = np.percentile(coeff_amp[nonzero], cls._influx_percentiles, axis=0)
+                mean = coeff_amp[nonzero].mean(axis=0)
+
+                tags_base = {
+                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                }
+                tags_base["telescope"] = meta.obs_info.telescope
+
+                # loop over percentiles and coefficient labels
+                for pi, p in enumerate(cls._influx_percentiles):
+                    for l in amp_labels:
+                        t_new = tags_base.copy()
+                        t_new.update({"mode": l, "det_stat": f"percentile_{p}"})
+                        tags.append(t_new)
+                    vals += list(perc[pi])
+
+                # finally also record the mean
+                for l in amp_labels:
+                    t_new = tags_base.copy()
+                    t_new.update({"mode": l, "det_stat": "mean"})
+                    tags.append(t_new)
+                vals += list(mean)
+
+        obs_time = [meta.obs_info.timestamp] * len(tags)
+        return {
+            "field": cls._influx_field,
+            "values": vals,
+            "timestamps": obs_time,
+            "tags": tags,
+        }
 
 class SubtractHWPSS(_Preprocess):
     """Subtracts a HWPSS template from signal. 
