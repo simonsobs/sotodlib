@@ -60,7 +60,8 @@ def main(
     imprinter = Imprinter(
         config, 
         db_args={'connect_args': {'check_same_thread': False}},
-        logger=logger
+        logger=logger,
+        make_db=from_scratch,
     )
     
     # leaving min_ctime and max_ctime as None will go through all available 
