@@ -22,7 +22,7 @@ wg_counts2rad = 2*np.pi/52000
 logger = util.init_logger('wiregrid', 'wiregrid: ')
 
 # Wrap house-keeping data
-def _wrap_wg_hk(tod, telescope=None):
+def _wrap_wg_hk(tod, telescope=None, hk_dir=None):
     """
     Wrap the house-keeping data about the wire grid operation.
 
@@ -36,7 +36,7 @@ def _wrap_wg_hk(tod, telescope=None):
     -------
         tod : AxisManager
             This includes fields, which are related with the wire grid hardware.
-            enc_rad : wires' direction read by encoder in radian
+            enc_rad_raw : wires' direction read by encoder in radian (raw data from the encoder)
             LSL1 : ON/OFF status of the limit switch LEFT 1 (outside) of the actuator
             LSL2 : ON/OFF status of the limit switch LEFT 2 (inside) of the actuator
             LSR1 : ON/OFF status of the limit switch RIGHT 1 (outside) of the actuator
@@ -45,19 +45,19 @@ def _wrap_wg_hk(tod, telescope=None):
     """
     if telescope is None:
         try:
-            _telescope = tod.obs_info.telescope
+            telescope = tod.obs_info.telescope
         except:
             print("Cannot load the telescope info. Please assign your target telescope")
             logger.info("Telescope assignment was failed in site_pipeline.calibrate.wiregrid._wrap_wg_hk")
     #
     alias_dict = {
-        'enc_rad': _telescope + '.wg-encoder.feeds.wgencoder_full.reference_count',
-        'limitswitchL1': _telescope + '.wg-actuator.feeds.wgactuator.limitswitch_LSL1',
-        'limitswitchL2': _telescope + '.wg-actuator.feeds.wgactuator.limitswitch_LSL2',
-        'limitswitchR1': _telescope + '.wg-actuator.feeds.wgactuator.limitswitch_LSR1',
-        'limitswitchR2': _telescope + '.wg-actuator.feeds.wgactuator.limitswitch_LSR2',
+        'enc_rad_raw': telescope + '.wg-encoder.feeds.wgencoder_full.reference_count',
+        'limitswitchL1': telescope + '.wg-actuator.feeds.wgactuator.limitswitch_LSL1',
+        'limitswitchL2': telescope + '.wg-actuator.feeds.wgactuator.limitswitch_LSL2',
+        'limitswitchR1': telescope + '.wg-actuator.feeds.wgactuator.limitswitch_LSR1',
+        'limitswitchR2': telescope + '.wg-actuator.feeds.wgactuator.limitswitch_LSR2',
         }
-    hk_dir = '/so/level2-daq/' + _telescope + '/hk'
+    if hk_dir is None: hk_dir = '/so/level2-daq/' + telescope + '/hk'
     #
     _gl_aman = hk_utils.get_detcosamp_hkaman(tod,
                                      alias = [_i for _i in alias_dict.keys()],
@@ -65,15 +65,13 @@ def _wrap_wg_hk(tod, telescope=None):
                                      data_dir = hk_dir)
     _gl_data = {}
     for _i in alias_dict.keys():
-        if _i == 'enc_rad':
+        if _i == 'enc_rad_raw':
             _gl_data[_i] = _gl_aman['wg-encoder']['wg-encoder'][0]
-            pass
         else:
             _gl_data[_i] = _gl_aman.restrict('hklabels_wg-actuator', [_i], in_place=False)['wg-actuator']['wg-actuator'][0]
-            pass
     #
     _ax_wg = core.AxisManager(tod.samps, tod.dets)
-    _ax_wg.wrap('enc_rad', _gl_data['enc_rad'] * wg_counts2rad, [(0,'samps')])
+    _ax_wg.wrap('enc_rad_raw', _gl_data['enc_rad_raw'] * wg_counts2rad, [(0,'samps')])
     _ax_wg.wrap('LSL1', _gl_data['limitswitchL1'], [(0,'samps')])
     _ax_wg.wrap('LSL2', _gl_data['limitswitchL2'], [(0,'samps')])
     _ax_wg.wrap('LSR1', _gl_data['limitswitchR1'], [(0,'samps')])
@@ -106,7 +104,7 @@ def correct_wg_angle(tod, telescope=None):
     """
     if telescope is None:
         try:
-            _telescope = tod.obs_info.telescope
+            telescope = tod.obs_info.telescope
         except:
             print("Cannot load the telescope info. Please assign your target telescope")
             logger.info("Telescope assignment was failed in site_pipeline.calibrate.wiregrid.correct_wg_angle")
@@ -116,7 +114,8 @@ def correct_wg_angle(tod, telescope=None):
     if telescope == 'satp1': wg_offset = np.deg2rad(12.13)
     if telescope == 'satp2': wg_offset = np.deg2rad(9.473)
     if telescope == 'satp3': wg_offset = np.deg2rad(11.21)
-    tod.wg.enc_rad = -  tod.wg.enc_rad + wg_offset
+    tod.wg.wrap_new('enc_rad', dtype='float32', shape=('samps'))
+    tod.wg.enc_rad = -  tod.wg.enc_rad_raw + wg_offset
     return (tod, idx_wg_inside)
 
 # Detect the motion of the wire grid
@@ -138,7 +137,6 @@ def _detect_action(count, flag=0):
     """
     if flag == 0:
         vecbool = count[1:]-count[:-1] != 0  # moving
-        pass
     else:
         vecbool = count[1:]-count[:-1] == 0  # static
     lvec = len(vecbool)
@@ -174,7 +172,6 @@ def _detect_steps(tod, stopped_time=10, thresholds=None):
     """
     if thresholds is None:
         thresholds = (10, 300) # upper bound of the static, lower bound of its diff
-        pass
     cdiff0 = np.where(_detect_action(tod.wg.enc_rad/wg_counts2rad) < thresholds[0], 1, 0)
     cdiff1 = np.where(_detect_action(cdiff0, flag=1) > thresholds[1], 0, 1)
     cdiff2 = cdiff1[1:] - cdiff1[:-1]
@@ -188,7 +185,6 @@ def _detect_steps(tod, stopped_time=10, thresholds=None):
     for _i in range(len(step_start)):
         angle_mean.append(np.average(tod.wg.enc_rad[step_start[_i]:step_end[_i+1]]))
         angle_std.append(np.std(tod.wg.enc_rad[step_start[_i]:step_end[_i+1]]))
-        pass
     ts_step_start = tod.timestamps[step_start]
     ts_step_end = tod.timestamps[step_end]
     angle_mean = np.array(angle_mean)
@@ -243,7 +239,6 @@ def wrap_QUcal(tod, stopped_time, thresholds=None):
         step_U.append(np.average(tod.demodU, axis=1, weights=instep))
         step_Qerr.append(np.std(tod.demodQ[:, instep == True], axis=1))
         step_Uerr.append(np.std(tod.demodU[:, instep == True], axis=1))
-        pass
     ts_instep = np.array(ts_instep)
     step_Q = np.array(step_Q)
     step_U = np.array(step_U)
@@ -380,7 +375,6 @@ def fit_with_circle(tod):
             np.array([_fit_results[-1].beta[0], _fit_results[-1].beta[1], np.sqrt(_fit_results[-1].beta[2])]))
         _cfitcov.append(_fit_results[-1].cov_beta)
         _cfitresvar.append(_fit_results[-1].res_var)
-        pass
     if 'cfit_result' in dir(tod.wg): tod.wg.move('cfit_result', None)
     _fit_ax = core.AxisManager(tod.dets)
     _fit_ax.wrap('cx0', np.array(_cfitval)[:,0], [(0, 'dets')])
@@ -421,14 +415,19 @@ def get_cal_gamma(tod, wrap_aman=False):
         _det_angle_err.append(np.sqrt(_cal_data.Uerr.T[:,_i]**2 + _cal_data.Qerr.T[:,_i]**2))
     _det_angle = np.array(_det_angle).T
     _det_angle_err = np.array(_det_angle_err).T
+    _bg_theta = 0.5*np.arctan2(_cfit_result.cy0, _cfit_result.cx0)%np.pi - np.nanmean(_det_angle%np.pi, axis=1)
+    _bg_amp = np.sqrt(_cfit_result.cx0**2 + _cfit_result.cy0**2)
     if wrap_aman:
         if 'gamma_cal' in dir(tod): tod.move('gamma_cal', None)
         _gamma_ax = core.AxisManager(tod.dets)
         _gamma_ax.wrap('gamma_raw', _det_angle, [(0, 'dets')])
         _gamma_ax.wrap('gamma_raw_err', _det_angle_err, [(0, 'dets')])
-        _gamma_ax.wrap('gamma_mean', np.nanmean(_det_angle%np.pi, axis=1), [([0, 'dets'])])
-        _gamma_ax.wrap('gamma_err', np.nanmean(_det_angle_err, axis=1)/np.sqrt(np.shape(_det_angle_err)[1]), [([0, 'dets'])])
+        _gamma_ax.wrap('gamma', np.nanmean(_det_angle%np.pi, axis=1), [(0, 'dets')])
+        _gamma_ax.wrap('gamma_err', np.nanmean(_det_angle_err, axis=1)/np.sqrt(np.shape(_det_angle_err)[1]), [(0, 'dets')])
+        _gamma_ax.wrap('background_pol_rad', _bg_theta, [(0, 'dets')])
+        _gamma_ax.wrap('background_pol_relative_amp', _bg_amp, [(0, 'dets')])
+        _gamma_ax.wrap('theta_det_instr', np.nanmean(_det_angle%np.pi, axis=1), [(0, 'dets')]) # instumental angle of dets
         tod.wrap('gamma_cal', _gamma_ax)
         return tod
     else:
-        return (_det_angle, _det_angle_err)
+        return (_det_angle, _det_angle_err), (_bg_amp, _bg_theta)
