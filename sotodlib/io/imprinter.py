@@ -1204,7 +1204,7 @@ class Imprinter:
                 raise ValueError(
                     f"Found {q_incomplete.count()} incomplete observations. "
                     f"New max ctime would be {new_ctime}. More than "
-                    f"{incomplete_timeouts[1]} in the past."
+                    f"{incomplete_timeouts[1]} hours in the past."
                 )
             elif max_ctime - new_ctime > 3600*incomplete_timeouts[0]:
                 level = self.logger.warning
