@@ -19,7 +19,7 @@ from sotodlib.io.datapkg_utils import load_configs
 
 def main(config: Optional[str] = None, update_delay: float = 2, 
          from_scratch: bool = False, verbosity: int = 2,
-         index_via_actions: bool=False):
+         index_via_actions: bool=False, use_monitor=False):
     """
     Arguments
     ---------
@@ -37,6 +37,9 @@ def main(config: Optional[str] = None, update_delay: float = 2,
         will be necessary for data older than Oct 2022 but creates concurancy 
         issues on systems (like the site) running automatic deletion of level 2 
         data.
+    use_monitor : bool
+        if True, will send monitor information to influx, set to false by
+        default so we can use identical config files for development
     """
     show_pb = True if verbosity > 1 else False
 
@@ -59,7 +62,7 @@ def main(config: Optional[str] = None, update_delay: float = 2,
         min_time = dt.datetime.now() - dt.timedelta(days=update_delay)
 
     monitor = None
-    if "monitor" in cfgs:
+    if use_monitor and "monitor" in cfgs:
         logger.info("Will send monitor information to Influx")
         try:
             monitor = Monitor.from_configs(cfgs["monitor"]["connect_configs"])
@@ -175,6 +178,8 @@ def get_parser(parser=None):
     parser.add_argument("--verbosity", help="increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug",
                         default=2, type=int)
     parser.add_argument('--index-via-actions', help="Look through action folders to create observations",
+                        action="store_true")
+    parser.add_argument('--use-monitor', help="Send updates to influx",
                         action="store_true")
     return parser
 
