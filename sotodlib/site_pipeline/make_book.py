@@ -5,29 +5,6 @@ import datetime as dt
 from typing import Optional
 from sotodlib.io.imprinter import Imprinter
 
-def make_lock(fname):
-    if os.path.exists(fname):
-        raise ValueError(f"Tried to make lockfile {fname} which already"
-                          " exists")
-    with open(fname, 'w') as f:
-        print(f"writing lock file {fname}")
-        f.write(str(dt.datetime.now().timestamp()))
-
-def check_lock(fname, timeout):
-    if not os.path.exists(fname):
-        return True
-    with open(fname, 'r') as f:
-        t = float(f.readline())
-    if dt.datetime.now().timestamp() > t + timeout*3600:
-        raise ValueError(f"lockfile {fname} is over {timeout} hours old")
-    return False
-
-def remove_lock(fname):
-    if not os.path.exists(fname):
-        raise ValueError(f"lockfile {fname} does not exist at removal?")
-    print(f"removing lock file {fname}")
-    os.remove(fname)
-
 def main(config: str):
     """Make books based on imprinter db
     
@@ -40,17 +17,6 @@ def main(config: str):
         config, 
         db_args={'connect_args': {'check_same_thread': False}}
     )
-    # lockname will be unique even if two imprinter configs are in 
-    # the same folder
-    b,f = os.path.split(config)
-    l = ".make_book." + f.replace(".yaml", ".lock")
-    lockname = os.path.join(b,l)
-
-    if not check_lock(lockname, 6):
-        imprinter.logger.warning("Not running make_book because of lockfile")
-        return
-    make_lock(lockname)
-
 
     # get unbound books
     unbound_books = imprinter.get_unbound_books()
@@ -80,8 +46,6 @@ def main(config: str):
             print(traceback.format_exc())
             # it has failed twice, ideally we want people to look at it now
             # do something here
-
-    remove_lock(lockname)
 
 
 def get_parser(parser=None):
