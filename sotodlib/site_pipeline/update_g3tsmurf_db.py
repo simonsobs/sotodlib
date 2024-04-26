@@ -52,14 +52,16 @@ def main(config: Optional[str] = None, update_delay: float = 2,
     elif verbosity == 3:
         logger.setLevel(logging.DEBUG)
 
-    cfgs = load_configs( config )
-    SMURF = G3tSmurf.from_configs(cfgs)
-
     if from_scratch:
         logger.info("Building Database from Scratch, May take awhile")
         min_time = dt.datetime.utcfromtimestamp(int(1.6e9))
+        make_db = True
     else:
         min_time = dt.datetime.now() - dt.timedelta(days=update_delay)
+        make_db = False
+
+    cfgs = load_configs( config )
+    SMURF = G3tSmurf.from_configs(cfgs, make_db=make_db)
 
     monitor = None
     if use_monitor and "monitor" in cfgs:

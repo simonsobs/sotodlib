@@ -161,6 +161,7 @@ class G3tSmurf:
         db_args={},
         finalize={},
         hk_db_path=None,
+        make_db=False,
     ):
         """
         Class to manage a smurf data archive.
@@ -181,6 +182,11 @@ class G3tSmurf:
                 Additional arguments to pass to sqlalchemy.create_engine
             finalize: dict, optional
                 Arguments required for fast tracking of data file transfers
+            hk_db_path: str
+                Path the HK database for finalization tracking
+            make_db: bool
+                if True and db_path does not exist it will make a new database.
+                otherwise will throw and error if database path does not exist
         """
         if db_path is None:
             db_path = os.path.join(archive_path, "frames.db")
@@ -192,8 +198,12 @@ class G3tSmurf:
 
         if os.path.exists(self.db_path):
             new_db = False
-        else:
+        elif make_db:
             new_db = True
+        else:
+            raise ValueError(
+                f"Path {self.db_path} does not exist and make_db is False"
+            )
         
         try:
             self.engine = db.create_engine(
@@ -242,7 +252,7 @@ class G3tSmurf:
                 session.commit()
 
     @classmethod
-    def from_configs(cls, configs):
+    def from_configs(cls, configs, **kwargs):
         """
         Create a G3tSmurf instance from a configs dictionary or yaml file
         example configuration file will all relevant entries::
@@ -280,6 +290,7 @@ class G3tSmurf:
             db_args=configs.get("db_args", {}),
             finalize=configs.get("finalization", {}),
             hk_db_path=configs.get("g3thk_db"),
+            **kwargs
         )
 
     @staticmethod
