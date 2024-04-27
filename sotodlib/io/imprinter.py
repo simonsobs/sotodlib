@@ -456,6 +456,7 @@ class Imprinter:
                 stop=dt.datetime.utcfromtimestamp((int(ctime) + 1) * 1e5),
                 tel_tube=self.daq_node,  
             )
+            book.path = self.get_book_path(book)
             session.add(book)
             session.commit()
 
@@ -538,6 +539,7 @@ class Imprinter:
                     start=book_start,
                     stop=book_stop,
                 )
+                smurf_book.path = self.get_book_path(smurf_book)
                 session.add(smurf_book)
                 session.commit()
 
@@ -572,6 +574,7 @@ class Imprinter:
                 start=book_start,
                 stop=book_stop,
             )
+            stray_book.path = self.get_book_path(stray_book)
             flist = self.get_files_for_book(stray_book)
             if len(flist) > 0:
                 self.logger.info(f"registering {book_id}")
