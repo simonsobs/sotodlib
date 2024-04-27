@@ -66,7 +66,7 @@ def set_book_rebind(imprint, book):
     imprint: Imprinter instance
     book: str or Book 
     """
-    book_dir = imprint.get_book_path(book)
+    book_dir = imprint.get_book_abs_path(book)
 
     if op.exists(book_dir):
         print(f"Removing all files from {book_dir}")
