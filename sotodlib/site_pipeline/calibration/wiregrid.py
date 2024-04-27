@@ -87,7 +87,7 @@ def _get_operation_range(tod):
     return idx_wg_inside
 
 # Correct wires' direction for each telescope
-def correct_wg_angle(tod, telescope=None):
+def correct_wg_angle(tod, telescope=None, restrict=True):
     """
     Correct offset of wires' direction by the mechanical design and hardware testing. This function is still under construction.
 
@@ -96,6 +96,8 @@ def correct_wg_angle(tod, telescope=None):
         tod : AxisManager
         telescope : telescope type, e.g. satp1, satp3, etc.
             this parameter will basically be filled by the obs_info wrapped in the axismanager.
+        restrict : bool (default, True)
+            this parameter restricts the sample of the axismanger by the operation range of the wire grid.
 
     Returns
     -------
@@ -110,6 +112,7 @@ def correct_wg_angle(tod, telescope=None):
             logger.info("Telescope assignment was failed in site_pipeline.calibrate.wiregrid.correct_wg_angle")
     tod = _wrap_wg_hk(tod)
     idx_wg_inside = _get_operation_range(tod)
+    if restrict: tod.restrict('samps', (idx_wg_inside[0], idx_wg_inside[-1]), in_place=True)
     #
     if telescope == 'satp1': wg_offset = np.deg2rad(12.13)
     if telescope == 'satp2': wg_offset = np.deg2rad(9.473)
