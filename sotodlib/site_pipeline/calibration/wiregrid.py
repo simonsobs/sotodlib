@@ -182,7 +182,7 @@ def _detect_steps(tod, stopped_time=10, thresholds=None):
     angle_std = []
     step_size = np.ceil(stopped_time/np.average(np.diff(tod.timestamps))).astype(int)
     step_end = np.append(step_end, step_end[-1]+step_size)
-    for _i in range(len(step_start)):
+    for _i, _ in enumerate(step_start):
         angle_mean.append(np.average(tod.wg.enc_rad[step_start[_i]:step_end[_i+1]]))
         angle_std.append(np.std(tod.wg.enc_rad[step_start[_i]:step_end[_i+1]]))
     ts_step_start = tod.timestamps[step_start]
@@ -193,7 +193,7 @@ def _detect_steps(tod, stopped_time=10, thresholds=None):
     return (ts_step_start, ts_step_end), (angle_mean, angle_std)
 
 # Wrap the QU response during the operation of the Grid Loader
-def wrap_QUcal(tod, stopped_time, thresholds=None):
+def wrap_qu_cal(tod, stopped_time, thresholds=None):
     """
     Wrap QU signal by the wire grid. This method is based on the demodulation by HWP.
     Users have to apply some HWP process before calling this.
@@ -221,7 +221,7 @@ def wrap_QUcal(tod, stopped_time, thresholds=None):
             wg.Qerr, wg.Uerr : the standard deviations of Q (and U) signal
 
     """
-    if hasattr(tod, 'demodQ') == False:
+    if hasattr(tod, 'demodQ') is False:
         print("This AxisManager does not have demodQ/demodU. Please call this method after you have demodulated the signal.")
         logger.info("Attribution check of demod signal was failed in site_pipeline.calibrate.wiregrid.wrap_QUcal")
         return False
@@ -231,7 +231,7 @@ def wrap_QUcal(tod, stopped_time, thresholds=None):
     step_U = []
     step_Qerr = []
     step_Uerr = []
-    for _i in range(len(wg_rad[0])):
+    for _i, _ in enumerate(wg_rad[0]):
         instep = np.where(ts_step[0][_i] < tod.timestamps, True, False)
         instep = np.where(tod.timestamps < ts_step[1][_i+1], instep, False)
         #
@@ -327,15 +327,6 @@ def _comp_plane_fit(obs_data, std_data, fitfunc, param0):
         myodr = odr.ODR(mydata, mdr, beta0=param0)
         myoutput = myodr.run()
         return myoutput
-    elif len(np.shape(obs_data)) == 3:
-        alloutput = []
-        for i in range(np.shape(obs_data)[1]):
-            mdr = odr.Model(fitfunc, implicit=True)
-            mydata = odr.RealData(obs_data[:, i, :], y=1, sx=std_data[:, i, :])
-            myodr = odr.ODR(mydata, mdr, beta0=param0[:, i])
-            myoutput = myodr.run()
-            alloutput.append(myoutput)
-        return alloutput
     else:
         print("This input vector is not valid shape.")
         return False
