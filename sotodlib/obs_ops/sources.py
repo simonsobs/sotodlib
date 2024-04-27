@@ -35,9 +35,15 @@ def get_sso(aman, sso, nstep=100):
     q_bore = csl.Q
 
     ras, decs = [], []
+    point_sources = {'tau_a': (83.6331, 22.0145)}
     for d1_unix in ctime[::nstep]:
-        
-        planet = planets.SlowSource.for_named_source(sso, d1_unix*1.)
+        if sso in point_sources:
+            ra = point_sources[sso][0]
+            dec = point_sources[sso][0]
+            planet = planets.SlowSource(d1_unix*1., float(ra) * coords.DEG,
+                                        float(dec) * coords.DEG)
+        else:
+            planet = planets.SlowSource.for_named_source(sso, d1_unix*1.)
         ra0, dec0 = planet.pos(d1_unix)
         ras.append(ra0)
         decs.append(dec0)
