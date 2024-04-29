@@ -784,6 +784,85 @@ class SSOFootprint(_Preprocess):
                 plot_sso_footprint(aman, planet_aman, sso, filename=filename.replace('{name}', f'{sso}_sso_footprint'), **self.plot_cfgs)
         
 
+class FourierFilter(_Preprocess):
+    """
+    Applies a fourier filter (defined in fft_ops) to the data.
+
+    Example config file entry::
+
+      - name: "fourier_filter"
+        process:
+          signal_name: "signal"
+          wrap_name: "lpf_sig"
+          filt_function: "low_pass_sine2"
+          trim_samps: 2000
+          filter_params:
+            cutoff: 1
+            width: 0.1
+
+    """
+    name = 'fourier_filter'
+    def __init__(self, step_cfgs):
+        self.signal_name = step_cfgs.get('signal_name', 'signal')
+        # By default signal is overwritted by the filtered signal
+        self.wrap_name = step_cfgs.get('wrap_name', 'signal')
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman):
+        _f = getattr(tod_ops.filters,
+                self.process_cfgs.get('filt_function','high_pass_butter4'))
+        filt = _f(**self.process_cfgs.get('filter_params'))
+        aman[self.wrap_name] = tod_ops.filters.fourier_filter(aman, filt,
+                                        signal_name=self.signal_name)
+        if self.process_cfgs.get("trim_samps"):
+            trim = self.process_cfgs["trim_samps"]
+            aman.restrict('samps',(trim, -trim))
+            proc_aman.restrict('samps', (trim, -trim))
+
+class PCARelCal(_Preprocess):
+    """
+    Estimate the relcal factor from the atmosphere using PCA.
+    """
+    name = 'pca_relcal'
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        pca_out = tod_ops.pca.get_pca(aman,signal=aman[self.signal])
+        pca_signal = tod_ops.pca.get_pca_model(aman, pca_out,
+                                       signal=aman[self.signal])
+        bands = np.unique(aman.det_info.wafer.bandpass)
+        bands = [bands != 'NC']
+        m0 = aman.det_info.wafer.bandpass == bands[0]
+        med0 = np.median(pca_signal.weights[m0,0])
+        med1 = np.median(pca_signal.weights[~m0,0])
+        relcal0 = np.zeros(aman.dets.count)
+        relcal[m0] = med0/pca_signal.weights[m0,0]
+        relcal[~m0] = med1/pca_signal.weights[~m0,0]
+
+        rc_aman = core.AxisManager(aman.dets, 
+                                   core.LabelAxis(name='bandpass',
+                                                  vals=bands))
+        rc_aman.wrap('relcal', relcal, [(0,'dets')])
+        rc_aman.wrap('medians', [med0, med1], [(0, 'bandpass')])
+        self.save(proc_aman, rc_aman)
+
+    def process(self, aman, proc_aman):
+        aman.signal = np.multiply(aman.signal.T,
+                                  proc_aman[self.name].relcal).T
+
+    def save(self, proc_aman, rc_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(self.name, rc_aman)
+
+
+_Preprocess.register(PCARelCal)
+_Preprocess.register(FourierFilter)
 _Preprocess.register(Trends)
 _Preprocess.register(FFTTrim)
 _Preprocess.register(Detrend)
