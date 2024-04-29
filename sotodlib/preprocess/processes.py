@@ -1,14 +1,18 @@
 import numpy as np
+from operator import attrgetter
 
 import sotodlib.core as core
 import sotodlib.tod_ops as tod_ops
+import sotodlib.obs_ops as obs_ops
 from sotodlib.hwp import hwp
+import sotodlib.coords.planets as planets
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    count_cuts,
                                     sparse_to_ranges_matrix)
 
-from .core import _Preprocess
+from .core import _Preprocess, _FracFlaggedMixIn
+from .. import flag_utils
 
 
 class FFTTrim(_Preprocess):
@@ -37,7 +41,7 @@ class Detrend(_Preprocess):
         tod_ops.detrend_tod(aman, signal_name=self.signal,
                             **self.process_cfgs)
 
-class DetBiasFlags(_Preprocess):
+class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
     """
     Derive poorly biased detectors from IV and Bias Step data. Save results
     in proc_aman under the "det_bias_cuts" field. 
@@ -45,12 +49,11 @@ class DetBiasFlags(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_det_bias_flags
     """
     name = "det_bias_flags"
+    _influx_field = "det_bias_flags_frac"
 
     def calc_and_save(self, aman, proc_aman):
-        msk = tod_ops.flags.get_det_bias_flags(aman, merge=False,
-                                               **self.calc_cfgs)
-        dbc_aman = core.AxisManager(aman.dets)
-        dbc_aman.wrap('det_bias_flags', msk, [(0, 'dets')])
+        dbc_aman = tod_ops.flags.get_det_bias_flags(aman, merge=False, full_output=True,
+                                                    **self.calc_cfgs)
         self.save(proc_aman, dbc_aman)
     
     def save(self, proc_aman, dbc_aman):
@@ -67,8 +70,21 @@ class DetBiasFlags(_Preprocess):
         keep = ~proc_aman.det_bias_flags.det_bias_flags
         meta.restrict("dets", meta.dets.vals[has_all_cut(keep)])
         return meta
+    
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_det_bias_flags
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            plot_det_bias_flags(aman, proc_aman['det_bias_flags'], rfrac_range=self.calc_cfgs['rfrac_range'],
+                                psat_range=self.calc_cfgs['psat_range'], filename=filename.replace('{name}', f'{ufm}_bias_cuts_venn'))
 
-class Trends(_Preprocess):
+
+class Trends(_FracFlaggedMixIn, _Preprocess):
     """Calculate the trends in the data to look for unlocked detectors. All
     calculation configs go to `get_trending_flags`.
 
@@ -90,6 +106,7 @@ class Trends(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_trending_flags
     """
     name = "trends"
+    _influx_field = "trend_flags_frac"
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
@@ -124,7 +141,8 @@ class Trends(_Preprocess):
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
 
-class GlitchDetection(_Preprocess):
+
+class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     """Run glitch detection algorithm to find glitches. All calculation configs
     go to `get_glitch_flags` 
 
@@ -136,8 +154,8 @@ class GlitchDetection(_Preprocess):
     Example configuration block::
         
       - name: "glitches"
-        signal: "hwpss_remove"
         calc:
+          signal_name: "hwpss_remove"
           t_glitch: 0.00001
           buffer: 10
           hp_fc: 1
@@ -145,23 +163,21 @@ class GlitchDetection(_Preprocess):
         save: True
         select:
           max_n_glitch: 10
+          sig_glitch: 10
 
     .. autofunction:: sotodlib.tod_ops.flags.get_glitch_flags
     """
     name = "glitches"
+    _influx_field = "glitch_flags_frac"
 
-    def __init__(self, step_cfgs):
-        self.signal = step_cfgs.get('signal', 'signal')
-
-        super().__init__(step_cfgs)
-    
     def calc_and_save(self, aman, proc_aman):
-        glitch_cut, glitch_aman = tod_ops.flags.get_glitch_flags(
-            aman[self.signal], merge=False, full_output=True,
-            **self.calc_cfgs
+        _, glitch_aman = tod_ops.flags.get_glitch_flags(aman,
+            merge=False, full_output=True, **self.calc_cfgs
         ) 
         aman.wrap("glitches", glitch_aman)
         self.save(proc_aman, glitch_aman)
+        if self.calc_cfgs.get('save_plot', False):
+            flag_utils.plot_glitch_stats(aman, save_path=self.calc_cfgs['save_plot'])
     
     def save(self, proc_aman, glitch_aman):
         if self.save_cfgs is None:
@@ -181,6 +197,7 @@ class GlitchDetection(_Preprocess):
         keep = n_cut <= self.select_cfgs["max_n_glitch"]
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
+
 
 class FixJumps(_Preprocess):
     """
@@ -209,7 +226,7 @@ class FixJumps(_Preprocess):
             inplace=True, heights=proc_aman[field].jump_heights)
 
 
-class Jumps(_Preprocess):
+class Jumps(_FracFlaggedMixIn, _Preprocess):
     """Run generic jump finding and fixing algorithm.
     
     calc_cfgs should have 'function' defined as one of 
@@ -233,6 +250,7 @@ class Jumps(_Preprocess):
     """
 
     name = "jumps"
+    _influx_field = "jump_flags_frac"
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
@@ -305,15 +323,14 @@ class PSDCalc(_Preprocess):
         
 
     def process(self, aman, proc_aman):
-        psd_cfgs = self.process_cfgs.get('psd_cfgs', {})
         freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
-                                              **psd_cfgs)
+                                              **self.process_cfgs)
         fft_aman = core.AxisManager(
             aman.dets, 
-            core.OffsetAxis("fsamps",len(freqs))
+            core.OffsetAxis("nusamps",len(freqs))
         )
-        fft_aman.wrap("freqs", freqs, [(0,"fsamps")])
-        fft_aman.wrap("Pxx", Pxx, [(0,"dets"),(1,"fsamps")])
+        fft_aman.wrap("freqs", freqs, [(0,"nusamps")])
+        fft_aman.wrap("Pxx", Pxx, [(0,"dets"), (1,"nusamps")])
         aman.wrap(self.wrap, fft_aman)
 
     def calc_and_save(self, aman, proc_aman):
@@ -330,50 +347,65 @@ class Noise(_Preprocess):
     Saves the results into the "noise" field of proc_aman. 
 
     Can run data selection of a "max_noise" value. 
-    
-    .. autofunction:: sotodlib.tod_ops.fft_ops.calc_wn
+
+    Example config block::
+
+     - name: "noise"
+       calc:
+         low_f: 5
+         high_f: 10
+       save: True
+       select:
+         max_noise: 2000
+
+    If ``fit: True`` this operation will run
+    :func:`sotodlib.tod_ops.fft_ops.fit_noise_model`, else it will run
+    :func:`sotodlib.tod_ops.fft_ops.calc_wn`.
+
     """
     name = "noise"
-    
+
+    def __init__(self, step_cfgs):
+        self.psd = step_cfgs.get('psd', 'psd')
+        self.fit = step_cfgs.get('fit', False)
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
-        if self.calc_cfgs['signal'] is None:
-            if "psd" not in aman:
-                raise ValueError("PSD is not saved in AxisManager")
-            psd = aman.psd
-        else:
-            if self.calc_cfgs['signal'] not in aman:
-                raise ValueError(f"{self.calc_cfgs['signal']} is not saved in AxisManager")
-            psd = aman[self.calc_cfgs['signal']]
+        if self.psd not in aman:
+            raise ValueError("PSD is not saved in AxisManager")
+        psd = aman[self.psd]
         
         if self.calc_cfgs is None:
             self.calc_cfgs = {}
-            self.calc_cfgs['fit'] = False
-            self.calc_cfgs['signal'] = None 
         
-        if self.calc_cfgs['fit']:
-            noise = tod_ops.fft_ops.fit_noise_model(aman, pxx=psd.Pxx, 
-                                                    f=psd.freqs, 
-                                                    merge_fit=True,
-                                                    **self.calc_cfgs['noise_args'])
+        if self.fit:
+            calc_aman = tod_ops.fft_ops.fit_noise_model(aman, pxx=psd.Pxx, 
+                                                        f=psd.freqs, 
+                                                        merge_fit=True,
+                                                        **self.calc_cfgs)
         else:
             wn = tod_ops.fft_ops.calc_wn(aman, pxx=psd.Pxx,
                                          freqs=psd.freqs,
-                                         **self.calc_cfgs['noise_args'])
-            noise = core.AxisManager(aman.dets)
-            noise.wrap("white_noise", wn, [(0,"dets")])
-            if self.calc_cfgs['wrap_name'] is None:
-                aman.wrap("noise", noise)
-            else:
-                aman.wrap(self.calc_cfgs['wrap_name'], noise)
+                                         **self.calc_cfgs)
+            calc_aman = core.AxisManager(aman.dets)
+            calc_aman.wrap("white_noise", wn, [(0,"dets")])
 
-        self.save(proc_aman, noise)
+        self.save(proc_aman, calc_aman)
     
     def save(self, proc_aman, noise):
-        if not(self.save_cfgs is None):
-            if self.save_cfgs['wrap_name'] is None:
+        if self.save_cfgs is None:
+            return
+
+        if isinstance(self.save_cfgs, bool):
+            if self.save_cfgs:
                 proc_aman.wrap("noise", noise)
-            else:
-                proc_aman.wrap(self.save_cfgs['wrap_name'], noise)
+                return
+
+        if self.save_cfgs['wrap_name'] is None:
+            proc_aman.wrap("noise", noise)
+        else:
+            proc_aman.wrap(self.save_cfgs['wrap_name'], noise)
 
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
@@ -382,11 +414,13 @@ class Noise(_Preprocess):
         if proc_aman is None:
             proc_aman = meta.preprocess
 
-        if self.select_cfgs['name'] is None:
-            keep = proc_aman.noise.white_noise <= self.select_cfgs["max_noise"]
+        self.select_cfgs['name'] = self.select_cfgs.get('name','noise')
+
+        if self.fit:
+            keep = proc_aman[self.select_cfgs['name']].fit[:,1] <= self.select_cfgs["max_noise"]
         else:
-            keep = proc_aman[self.select_cfgs['name']].white_noise <= self.select_cfgs["max_noise"] 
-            
+            keep = proc_aman[self.select_cfgs['name']].white_noise <= self.select_cfgs["max_noise"]
+
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
     
@@ -398,13 +432,38 @@ class Calibrate(_Preprocess):
     1. "single_value" : multiplies entire signal by the single value
     process["val"]
 
-    2. to be expanded
+    2. "array" : takes the dot product of the array with the entire signal. The
+    array is specified by ``process["cal_array"]``, which must exist in
+    ``aman``. The array can be nested within additional ``AxisManager``
+    objects, for instance ``det_cal.phase_to_pW``.
+
+    Example config block(s)::
+
+      - name: "calibrate"
+        process:
+          kind: "single_value"
+          # phase_to_pA: 9e6/(2*np.pi)
+          val: 1432394.4878270582
+      - name: "calibrate"
+        process:
+          kind: "array"
+          cal_array: "cal.array"
+
     """
     name = "calibrate"
-    
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+
     def process(self, aman, proc_aman):
         if self.process_cfgs["kind"] == "single_value":
-            aman.signal *=  self.process_cfgs["val"]
+            aman[self.signal] *= self.process_cfgs["val"]
+        elif self.process_cfgs["kind"] == "array":
+            field = self.process_cfgs["cal_array"]
+            _f = attrgetter(field)
+            aman[self.signal] = np.multiply(aman[self.signal].T, _f(aman)).T
         else:
             raise ValueError(f"Entry '{self.process_cfgs['kind']}'"
                               " not understood")
@@ -417,29 +476,19 @@ class EstimateHWPSS(_Preprocess):
     Example config block::
 
       - "name : "estimate_hwpss"
-        "signal: "signal" # optional
         "calc":
+          "signal_name": "signal" # optional
           "hwpss_stats_name": "hwpss_stats"
         "save": True
 
     .. autofunction:: sotodlib.hwp.hwp.get_hwpss
     """
     name = "estimate_hwpss"
-
-    def __init__(self, step_cfgs):
-        self.signal = step_cfgs.get('signal', 'signal')
-
-        super().__init__(step_cfgs)
+    _influx_field = "hwpss_coeffs"
+    _influx_percentiles = [0, 50, 75, 90, 95, 100]
 
     def calc_and_save(self, aman, proc_aman):
-        _prefilt = (self.signal == 'signal')
-        if not _prefilt:
-            print("WARNING: apply_prefilt defaulting to False because " +
-                  f"{self.signal} != 'signal'.")
-        hwpss_stats = hwp.get_hwpss(aman,
-                                    signal=aman[self.signal],
-                                    apply_prefilt=_prefilt,
-                                    **self.calc_cfgs)
+        hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
         self.save(proc_aman, hwpss_stats)
 
     def save(self, proc_aman, hwpss_stats):
@@ -448,6 +497,98 @@ class EstimateHWPSS(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap(self.calc_cfgs["hwpss_stats_name"], hwpss_stats)
 
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_4f_2f_counts, plot_hwpss_fit_status
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            plot_4f_2f_counts(aman, filename=filename.replace('{name}', f'{ufm}_4f_2f_counts'))
+            plot_hwpss_fit_status(aman, proc_aman[self.calc_cfgs["hwpss_stats_name"]], filename=filename.replace('{name}', f'{ufm}_hwpss_stats'))
+
+    @classmethod
+    def gen_metric(cls, meta, proc_aman):
+        """ Generate a QA metric for the coefficients of the HWPSS fit.
+        Coefficient percentiles and mean are recorded for every mode and detset.
+
+        Arguments
+        ---------
+        meta : AxisManager
+            The full metadata container.
+        proc_aman : AxisManager
+            The metadata containing just the output of this process.
+
+        Returns
+        -------
+        line : dict
+            InfluxDB line entry elements to be fed to
+            `site_pipeline.monitor.Monitor.record`
+        """
+        # record one metric per wafer_slot per bandpass
+        # extract these tags for the metric
+        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
+        tags = []
+        vals = []
+        from ..qa.metrics import _get_tag, _has_tag
+        import re
+        for bp in np.unique(meta.det_info.wafer.bandpass):
+            for ws in np.unique(meta.det_info.wafer_slot):
+                subset = np.where(
+                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
+                )[0]
+
+                # get the coefficients for every detector
+                coeff = proc_aman.hwpss_stats.coeffs[subset]
+                # mask those that were not set
+                nonzero = np.any(coeff != 0.0, axis=1)
+
+                # calculate amplitude of each mode
+                mode_labels = list(proc_aman.hwpss_stats.modes.vals)
+                num_re = re.compile("^[SC](\d+)$")
+                nums = sorted(list(set([num_re.match(l).group(1) for l in mode_labels])))
+                coeff_amp = np.zeros((coeff.shape[0], len(nums)), coeff.dtype)
+                amp_labels = []
+                for i, n in enumerate(nums):
+                    c_ind = mode_labels.index(f"C{n}")
+                    s_ind = mode_labels.index(f"S{n}")
+                    coeff_amp[:, i] = np.sqrt(coeff[:, c_ind]**2 + coeff[:, s_ind]**2)
+                    amp_labels.append(f"A{n}")
+
+                # record percentiles over detectors and fraction of samples flagged
+                perc = np.percentile(coeff_amp[nonzero], cls._influx_percentiles, axis=0)
+                mean = coeff_amp[nonzero].mean(axis=0)
+
+                tags_base = {
+                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                }
+                tags_base["telescope"] = meta.obs_info.telescope
+
+                # loop over percentiles and coefficient labels
+                for pi, p in enumerate(cls._influx_percentiles):
+                    for l in amp_labels:
+                        t_new = tags_base.copy()
+                        t_new.update({"mode": l, "det_stat": f"percentile_{p}"})
+                        tags.append(t_new)
+                    vals += list(perc[pi])
+
+                # finally also record the mean
+                for l in amp_labels:
+                    t_new = tags_base.copy()
+                    t_new.update({"mode": l, "det_stat": "mean"})
+                    tags.append(t_new)
+                vals += list(mean)
+
+        obs_time = [meta.obs_info.timestamp] * len(tags)
+        return {
+            "field": cls._influx_field,
+            "values": vals,
+            "timestamps": obs_time,
+            "tags": tags,
+        }
+
 class SubtractHWPSS(_Preprocess):
     """Subtracts a HWPSS template from signal. 
 
@@ -455,12 +596,21 @@ class SubtractHWPSS(_Preprocess):
     """
     name = "subtract_hwpss"
 
+    def __init__(self, step_cfgs):
+        self.hwpss_stats = step_cfgs.get('hwpss_stats', 'hwpss_stats')
+
+        super().__init__(step_cfgs)
+
     def process(self, aman, proc_aman):
-        hwp.subtract_hwpss(
-            aman,
-            hwpss_template = aman[self.process_cfgs["hwpss_extract"]],
-            subtract_name = self.process_cfgs["subtract_name"]
-        )
+        if not(proc_aman[self.hwpss_stats] is None):
+            modes = [int(m[1:]) for m in proc_aman[self.hwpss_stats].modes.vals[::2]]
+            template = hwp.harms_func(aman.hwp_angle, modes,
+                                  proc_aman[self.hwpss_stats].coeffs)
+            hwp.subtract_hwpss(
+                aman,
+                hwpss_template = template,
+                subtract_name = self.process_cfgs["subtract_name"]
+                )
 
 class Apodize(_Preprocess):
     """Apodize the edges of a signal. All process configs go to `apodize_cosine`
@@ -494,8 +644,8 @@ class EstimateAzSS(_Preprocess):
     name = "estimate_azss"
 
     def calc_and_save(self, aman, proc_aman):
-        azss_stats, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
-        self.save(proc_aman, azss_stats)
+        calc_aman, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+        self.save(proc_aman, calc_aman)
     
     def save(self, proc_aman, azss_stats):
         if self.save_cfgs is None:
@@ -534,7 +684,6 @@ class GlitchFill(_Preprocess):
             glitch_flags=proc_aman[self.flag_aman][self.flag],
             **self.process_cfgs)
 
-
 class FlagTurnarounds(_Preprocess):
     """From the Azimuth encoder data, flag turnarounds, left-going, and right-going.
         All process configs go to ``get_turnaround_flags``. If the ``method`` key
@@ -554,16 +703,17 @@ class FlagTurnarounds(_Preprocess):
 
         if self.calc_cfgs['method'] == 'scanspeed':
             ta, left, right = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
-            turn_aman = core.AxisManager(aman.dets, aman.samps)
-            turn_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
-            turn_aman.wrap('left_scan', left, [(0, 'dets'), (1, 'samps')])
-            turn_aman.wrap('right_scan', right, [(0, 'dets'), (1, 'samps')])
-            self.save(proc_aman, turn_aman)
+            calc_aman = core.AxisManager(aman.dets, aman.samps)
+            calc_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
+            calc_aman.wrap('left_scan', left, [(0, 'dets'), (1, 'samps')])
+            calc_aman.wrap('right_scan', right, [(0, 'dets'), (1, 'samps')])
+            
         if self.calc_cfgs['method'] == 'az':
             ta = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
-            turn_aman = core.AxisManager(aman.dets, aman.samps)
-            turn_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
-            self.save(proc_aman, turn_aman)
+            calc_aman = core.AxisManager(aman.dets, aman.samps)
+            calc_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
+
+        self.save(proc_aman, calc_aman)
 
     def save(self, proc_aman, turn_aman):
         if self.save_cfgs is None:
@@ -585,6 +735,55 @@ class SubPolyf(_Preprocess):
     def process(self, aman, proc_aman):
         tod_ops.sub_polyf.subscan_polyfilter(aman, **self.process_cfgs)
 
+class SSOFootprint(_Preprocess):
+    """Find nearby sources within a given distance and get SSO footprint and plot
+    each source on the focal plane.
+
+    .. autofunction:: sotodlib.obs_ops.sources.get_sso
+    """
+    name = 'sso_footprint'
+
+    def calc_and_save(self, aman, proc_aman):
+        if self.calc_cfgs.get("source_list", None):
+            ssos = self.calc_cfgs["source_list"]
+        else:
+            ssos = planets.get_nearby_sources(tod=aman, distance=self.calc_cfgs.get("distance", 20))
+            if not ssos:
+                raise ValueError("No sources found within footprint")
+            ssos = [i[0] for i in ssos]
+        sso_aman = core.AxisManager()
+        nstep = self.calc_cfgs.get("nstep", 100)
+        onsamp = (aman.samps.count+nstep-1)//nstep
+        for sso in ssos:
+            planet = sso
+            xi_p, eta_p = obs_ops.sources.get_sso(aman, planet, nstep=nstep)
+            planet_aman = core.AxisManager(core.OffsetAxis('ds_samps', count=onsamp,
+                                                            offset=aman.samps.offset,
+                                                            origin_tag=aman.samps.origin_tag))
+            # planet_aman = core.AxisManager(core.OffsetAxis("samps", onsamp))
+            planet_aman.wrap("xi_p", xi_p, [(0, "ds_samps")])
+            planet_aman.wrap("eta_p", eta_p, [(0, "ds_samps")])
+            sso_aman.wrap(planet, planet_aman)
+        self.save(proc_aman, sso_aman)
+        
+    def save(self, proc_aman, sso_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("sso_footprint", sso_aman)
+
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_sso_footprint
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            for sso in proc_aman.sso_footprint._assignments.keys():
+                planet_aman = proc_aman.sso_footprint[sso]
+                plot_sso_footprint(aman, planet_aman, sso, filename=filename.replace('{name}', f'{sso}_sso_footprint'), **self.plot_cfgs)
+        
+
 _Preprocess.register(Trends)
 _Preprocess.register(FFTTrim)
 _Preprocess.register(Detrend)
@@ -603,3 +802,4 @@ _Preprocess.register(GlitchFill)
 _Preprocess.register(FlagTurnarounds)
 _Preprocess.register(SubPolyf)
 _Preprocess.register(DetBiasFlags)
+_Preprocess.register(SSOFootprint)

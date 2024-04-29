@@ -34,7 +34,7 @@ import traceback
 import os
 import argparse
 import yaml
-from dataclasses import dataclass, astuple
+from dataclasses import dataclass, astuple, fields
 import numpy as np
 from tqdm.auto import tqdm
 import logging
@@ -52,30 +52,25 @@ import sotodlib.site_pipeline.util as sp_util
 DEFAULT_RTM_BIT_TO_VOLT = 10 / 2**19
 DEFAULT_pA_per_phi0 = 9e6
 
-default_logger = logging.getLogger('smurf_caldbs')
-if not default_logger.hasHandlers():
+logger = logging.getLogger('smurf_caldbs')
+if not logger.hasHandlers():
     sp_util.init_logger('smurf_caldbs')
 
 
 
 def main(config: Union[str, dict], 
         overwrite:Optional[bool]=False,
-        skip_detset=False, skip_detcal=False, logger=None):
+        skip_detset=False, skip_detcal=False):
     if not skip_detset:
-        smurf_detset_info(config, overwrite, logger)
+        smurf_detset_info(config, overwrite)
     if not skip_detcal:
-        run_update_det_caldb(config, logger=logger, overwrite=overwrite)
+        run_update_det_caldb(config, overwrite=overwrite)
 
 def smurf_detset_info(config: Union[str, dict], 
-        overwrite:Optional[bool]=False,
-        logger=None):
+        overwrite:Optional[bool]=False):
     """Write out the updates for the manifest database with information about
     the readout ids present inside each detset.
     """
-
-    if logger is None:
-        logger = default_logger
-
     if type(config) == str:
         config = yaml.safe_load(open(config, 'r'))
 
@@ -86,6 +81,9 @@ def smurf_detset_info(config: Union[str, dict],
         h5_path = os.path.join(root_dir, h5_path)
         idx_path = os.path.join(root_dir, idx_path)
     h5_relpath = os.path.relpath(h5_path, start=os.path.dirname(idx_path))
+
+    config['g3tsmurf'] = os.path.expandvars(config['g3tsmurf'])
+    config['imprinter'] = os.path.expandvars(config['imprinter'])
 
     SMURF = G3tSmurf.from_configs(config['g3tsmurf'])
     session = SMURF.Session()
@@ -156,20 +154,6 @@ def smurf_detset_info(config: Union[str, dict],
             db.add_entry(db_data, filename=path)
 
 
-# Dtype for calibration set
-cal_dtype = [
-    ('dets:readout_id', '<U40'),
-    ('r_tes', float),
-    ('r_frac', float),
-    ('p_bias', float),
-    ('s_i', float),
-    ('phase_to_pW', float),
-    ('bg', int),
-    ('polarity', int),
-    ('r_n', float),
-    ('p_sat', float),
-]
-
 @dataclass
 class CalInfo:
     """
@@ -193,6 +177,10 @@ class CalInfo:
     phase_to_pW: float
         Phase to power conversion factor [pW/rad] computed using s_i,
         pA_per_phi0, and detector polarity
+    v_bias: float
+        Commanded bias voltage [V] on the bias line of the detector for the observation
+    tau_eff: float
+        Effective thermal time constant [sec] of the detector, measured from bias steps
     bg: int
         Bias group of the detector. Taken from IV curve data, which contains
         bgmap data taken immediately prior to IV. This will be -1 if the
@@ -208,7 +196,6 @@ class CalInfo:
         This is defined  as the electrical bias power at which the TES
         resistance is 90% of the normal resistance.
     """
-    # Fields must be ordered like cal_dtype!
     readout_id: str = ''
 
     # From bias steps
@@ -217,6 +204,8 @@ class CalInfo:
     p_bias: float = np.nan  # J
     s_i: float = np.nan     # 1/V
     phase_to_pW: float = np.nan  # pW/rad
+    v_bias: float = np.nan  # V
+    tau_eff: float = np.nan  # sec
 
     # From IV
     bg: int = -1
@@ -224,22 +213,43 @@ class CalInfo:
     r_n: float = np.nan  
     p_sat: float = np.nan   # J
 
-class MissingSmurfInfo(Exception):
-    pass
+    @classmethod
+    def dtype(cls):
+        """Returns ResultSet dtype for an item based on this class"""
+        dtype = []
+        for field in fields(cls):
+            if field.name == 'readout_id':
+                dt = ('dets:readout_id', '<U40')
+            else:
+                dt = (field.name, field.type)
+            dtype.append(dt)
+        return dtype
 
-def get_cal_resset(ctx: core.Context, obs_id, logger=None):
+
+@dataclass
+class CalResult:
+    success: bool = False
+    fail_msg: str = ''
+    resset: Optional[core.metadata.ResultSet] = None
+
+
+def get_cal_resset(ctx: core.Context, obs_id) -> CalResult:
     """
     Returns calibration ResultSet for a given ObsId. This pulls IV and bias step
     data for each detset in the observation, and uses that to compute CalInfo
     for each detector in the observation
     """
-    if logger is None:
-        logger=default_logger
-
-    am = ctx.get_obs(obs_id, samples=(0, 1), ignore_missing=True, no_signal=True)
+    am = ctx.get_obs(
+            obs_id, samples=(0, 1), ignore_missing=True, no_signal=True,
+            on_missing={'det_cal': 'skip'}
+    )
     cals = [CalInfo(rid) for rid in am.det_info.readout_id]
+
+    if len(cals) == 0:
+        return CalResult(success=False, fail_msg="No detectors present in observation.")
+
     if 'smurf' not in am.det_info:
-        raise MissingSmurfInfo(f"Missing smurf info for {obs_id}")
+        return CalResult(success=False, fail_msg="Missing smurf info for observation")
 
     iv_obsids = get_cal_obsids(ctx, obs_id, 'iv')
 
@@ -337,12 +347,15 @@ def get_cal_resset(ctx: core.Context, obs_id, logger=None):
         cal.r_frac = bsa['Rfrac'][ridx]
         cal.p_bias = bsa['Pj'][ridx]
         cal.s_i = bsa['Si'][ridx]
+        cal.tau_eff = bsa['tau_eff'][ridx]
+        if bg != -1:
+            cal.v_bias = bsa['Vbias'][bg]
         cal.phase_to_pW = pA_per_phi0 / (2*np.pi) / cal.s_i * cal.polarity
 
     rset = core.metadata.ResultSet.from_friend(np.array(
-        [astuple(c) for c in cals], dtype=cal_dtype
+        [astuple(c) for c in cals], dtype=CalInfo.dtype()
     ))
-    return rset
+    return CalResult(success=True, resset=rset)
 
 
 def get_obs_with_detsets(ctx, detset_idx):
@@ -356,7 +369,6 @@ def get_obs_with_detsets(ctx, detset_idx):
 
 
 def add_to_failed_cache(obs_id, cache_path, msg):
-    logger = default_logger
     logger.info(f"Adding {obs_id} to failed obsid cache with msg: {msg}")
     if os.path.exists(cache_path):
         with open(cache_path, 'r') as f:
@@ -377,9 +389,10 @@ def get_failed_obsids(cache_path):
         cache = yaml.safe_load(f)
     return set(cache.keys())
 
-def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None, 
+def update_det_caldb(ctx, idx_path, detset_idx, h5_path,
                      show_pb=False, format_exc=False, overwrite=False,
-                     failed_obsid_cache=None, root_dir=None, write_relpath=True):
+                     failed_obsid_cache=None, root_dir=None, write_relpath=True,
+                     run_single=False):
     """
     Updates the detector caldb with new observations. This will find calibration
     data for all observations that have detset data and are not in the
@@ -395,8 +408,6 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None,
         Path to detset manifestdb
     h5_path: str
         Path to h5 file to write results set.
-    logger: logging.Logger
-        Logger to use. If not set will use default.
     show_pb: bool
         If True, will show progress bar and time remaining
     format_exc: bool
@@ -413,11 +424,9 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None,
     write_relpath: bool
         If true, when adding entries to the manifestdb, will use the h5 path relative
         to the idx_path.
+    run_single: bool
+        If true, will stop after writing a single entry to the det-cal db
     """
-
-    if logger is None:
-        logger = default_logger
-
     if root_dir is not None:
         h5_path = os.path.join(root_dir, h5_path)
         idx_path = os.path.join(root_dir, idx_path)
@@ -438,7 +447,6 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None,
     failed_obsids = get_failed_obsids(failed_obsid_cache)
     obsids_with_obs = set(ctx.obsdb.query("type=='obs'")['obs_id']) - failed_obsids
 
-
     remaining_obsids = obsids_with_detsets.intersection(obsids_with_obs)
     if not overwrite: 
         existing_obsids = set(db.get_entries(['dataset'])['dataset'])
@@ -449,32 +457,32 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path, logger=None,
                               key=(lambda s: s.split('_')[1]))
 
     logger.info("%d datasets to add", len(remaining_obsids))
-    # failed_obsid_cache = config['archive']['det_cal'].get('failed_obsid_cache')
     for obs_id in tqdm(remaining_obsids, disable=(not show_pb)):
         try:
-            rset = get_cal_resset(ctx, obs_id)
-        except MissingSmurfInfo:
-            logger.error("Missing smurf info for %s", obs_id)
-            if failed_obsid_cache is not None:
-                add_to_failed_cache(obs_id, failed_obsid_cache, 'MISSING_SMURF_INFO')
-            continue
+            result = get_cal_resset(ctx, obs_id)
+            if result.success:
+                logger.info("Writing metadata for %s", obs_id)
+                write_dataset(result.resset, h5_path, obs_id, overwrite=overwrite)
+                path = h5_relpath if write_relpath else h5_path
+                db.add_entry({
+                    'obs:obs_id': obs_id,
+                    'dataset': obs_id,
+                }, filename=path, replace=overwrite)
+            else:
+                logger.error("Failed on %s: %s", obs_id, result.fail_msg)
+                if failed_obsid_cache is not None:
+                    add_to_failed_cache(obs_id, failed_obsid_cache, result.fail_msg)
+
         except Exception as e:
             logger.error("Failed on %s: %s", obs_id, e)
             if format_exc:
                 logger.error(traceback.format_exc())
-            continue
 
-        logger.info("Writing metadata for %s", obs_id)
-        write_dataset(rset, h5_path, obs_id, overwrite=overwrite)
-
-        path = h5_relpath if write_relpath else h5_path
-        db.add_entry({
-            'obs:obs_id': obs_id,
-            'dataset': obs_id,
-        }, filename=path, replace=overwrite)
+        if run_single:
+            break
 
 
-def run_update_det_caldb(config_path, logger=None, overwrite=False):
+def run_update_det_caldb(config_path, overwrite=False):
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
 
@@ -491,12 +499,12 @@ def run_update_det_caldb(config_path, logger=None, overwrite=False):
         detset_idx,
         config['archive']['det_cal']['h5file'],
         show_pb=config['archive']['det_cal'].get('show_pb', False),
-        logger=logger,
         format_exc=format_exc,
         overwrite=overwrite,
         failed_obsid_cache=config['archive']['det_cal'].get('failed_obsid_cache'),
         root_dir=config['archive']['det_cal'].get('root_dir'),
         write_relpath=config['archive']['det_cal'].get('write_relpath', True),
+        run_single=config['archive']['det_cal'].get('run_single', False)
     )
 
 

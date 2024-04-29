@@ -18,13 +18,16 @@ Welcome to SOTODLib's documentation!
    g3tsmurf.rst
    hwp.rst
    tod_ops.rst
+   obs_ops.rst
    coords.rst
    toast.rst
    preprocess.rst
    det_match.rst
    site_pipeline.rst
+   calibration.rst
    reference.rst
    dev.rst
+   metrics.rst
 
 Indices and tables
 ==================

@@ -102,7 +102,7 @@ for missing in ('matplotlib', 'healpy', 'sqlalchemy',
                 'quaternionarray', 'yaml', 'toml', 'sqlite3','tqdm',
                 'skyfield', 'h5py', 'pyfftw', 'scipy',
                 'toast', 'pixell', 'scikit', 'skimage', 'numdifftools',
-                'traitlets', 'ephem', 'influxdb', 'pycpd', 'detmap'):
+                'traitlets', 'ephem', 'influxdb', 'megham', 'detmap'):
     try:
         foo = import_module(missing)
     except ImportError:
@@ -122,7 +122,6 @@ for missing in autodoc_mock_imports:
 try:
     import sphinx_rtd_theme
     html_theme = 'sphinx_rtd_theme'
-    html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 except ImportError:
     html_theme = 'alabaster'
 
