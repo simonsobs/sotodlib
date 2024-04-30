@@ -4,7 +4,7 @@ from scipy.special import eval_legendre
 from . import flags
 logger = logging.getLogger(__name__)
 
-def subscan_polyfilter(aman, degree, signal_name="siganl", exclude_turnarounds=False, 
+def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=False, 
                        mask=None, exclusive=True, method="legendre", in_place=True):
     """
     Apply polynomial filtering to subscan segments in a data array.
