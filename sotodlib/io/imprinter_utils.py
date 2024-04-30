@@ -57,7 +57,7 @@ def set_book_wont_bind(imprint, book, message=None, session=None):
         book.message = message
     session.commit()
 
-def set_book_rebind(imprint, book):
+def set_book_rebind(imprint, book, update_level2=False):
     """ Delete any existing staged files for a book as 
     set it's status to UNBOUND
 
@@ -65,6 +65,8 @@ def set_book_rebind(imprint, book):
     -----------
     imprint: Imprinter instance
     book: str or Book 
+    update_level2: bool
+        if true, update all the level 2 observation entries for the book. This is sometimes the reason books fail to bind
     """
     book_dir = imprint.get_book_abs_path(book)
 
@@ -76,6 +78,12 @@ def set_book_rebind(imprint, book):
 
     book.status = UNBOUND
     imprint.get_session().commit()
+
+    if update_level2:
+        g3session, SMURF = imprint.get_g3tsmurf_session(return_archive=True)
+        obs_dict = imprint.get_g3tsmurf_obs_for_book(book)
+        for _, obs in obs_dict.items():
+            SMURF.update_observation_files(obs, g3session, force=True)
 
 def find_overlaps(imprint, obs_id, min_ctime, max_ctime):
     """ helper function for when a level 2 observation could span multiple
@@ -127,9 +135,9 @@ def block_fix_duplicate_timestamps(imprint):
         )
         imprint.bind_book(book, ancil_drop_duplicates=True)
 
-def block_set_rebind(imprint):
+def block_set_rebind(imprint, update_level2=False):
     """Run through and set all books with files errors to be rebound"""
-    
+
     failed_books = imprint.get_failed_books()
     
     fix_list = []
@@ -141,7 +149,7 @@ def block_set_rebind(imprint):
     )
     for book in fix_list:
         imprint.logger.info(f"Setting book {book.bid} for rebinding")
-        set_book_rebind(imprint, book)    
+        set_book_rebind(imprint, book, update_level2=update_level2)    
 
 def get_timecode_final(imprint, time_code, type='all'):
     """Check if all required entries in the g3tsmurf database are present for
