@@ -122,8 +122,6 @@ def update_xieta(tod, sso_name='moon', ds_factor=10, fwhm = 1.*coords.DEG,
             xi_src, eta_src, _ = quat.decompose_xieta(q_total)
             xieta_src = np.array([xi_src, eta_src])
             xieta_src = xieta_src[:, mask_di]
-
-
             
             sig = sig_ds[di][mask_di]
             amp = np.ptp(sig)

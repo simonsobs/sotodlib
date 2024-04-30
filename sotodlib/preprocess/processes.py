@@ -782,7 +782,11 @@ class SSOFootprint(_Preprocess):
             for sso in proc_aman.sso_footprint._assignments.keys():
                 planet_aman = proc_aman.sso_footprint[sso]
                 plot_sso_footprint(aman, planet_aman, sso, filename=filename.replace('{name}', f'{sso}_sso_footprint'), **self.plot_cfgs)
-        
+
+class ComputeSourceFlags(_Preprocess):
+    name = 'compute_source_flags'
+    def process(self, aman, proc_aman):
+        planets.compute_source_flags(aman, **self.process_cfgs)
 
 class FourierFilter(_Preprocess):
     """
@@ -882,3 +886,4 @@ _Preprocess.register(FlagTurnarounds)
 _Preprocess.register(SubPolyf)
 _Preprocess.register(DetBiasFlags)
 _Preprocess.register(SSOFootprint)
+_Preprocess.register(ComputeSourceFlags)
