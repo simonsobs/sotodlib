@@ -107,6 +107,41 @@ def find_overlaps(imprint, obs_id, min_ctime, max_ctime):
 
     return rsets
 
+def block_fix_duplicate_timestamps(imprint):
+    """Run through and fix all the books with duplicated ancillary timestamps"""
+
+    failed_books = imprint.get_failed_books()
+    fix_list = []
+    for book in failed_books:
+        if "duplicate timestamps" in book.message:
+            fix_list.append(book)
+    imprint.logger.info(
+        f"Found {len(fix_list)} books with duplicate HK data to fix"
+    )
+
+    for book in fix_list:
+        imprint.logger.info(f"Setting book {book.bid} for rebinding")
+        set_book_rebind(imprint, book)
+        imprint.logger.info(
+            f"Binding book {book.bid} dropping duplicate HK data"
+        )
+        imprint.bind_book(book, ancil_drop_duplicates=True)
+
+def block_set_rebind(imprint):
+    """Run through and set all books with files errors to be rebound"""
+    
+    failed_books = imprint.get_failed_books()
+    
+    fix_list = []
+    for book in failed_books:
+        if "Delete to retry bookbinding" in book.message:
+            fix_list.append(book)
+    imprint.logger.info(
+        f"Found {len(fix_list)} books with files to be removed"
+    )
+    for book in fix_list:
+        imprint.logger.info(f"Setting book {book.bid} for rebinding")
+        set_book_rebind(imprint, book)    
 
 def get_timecode_final(imprint, time_code, type='all'):
     """Check if all required entries in the g3tsmurf database are present for
