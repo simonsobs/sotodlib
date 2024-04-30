@@ -83,7 +83,7 @@ def swap_archive(config, fpath):
     tc['archive']['policy']['filename'] = os.path.join(os.path.dirname(tc['archive']['policy']['filename']), fpath)
     dname = os.path.dirname(tc['archive']['policy']['filename'])
     if not(os.path.exists(dname)):
-        os.mkdir(dname)
+        os.makedirs(dname)
     return tc
 
 def preprocess_tod(obs_id, 
@@ -108,6 +108,9 @@ def preprocess_tod(obs_id,
         if True, overwrite existing entries in ManifestDb
     logger: logging instance
         the logger to print to
+    run_parallel: Bool
+        If true preprocess_tod is called in a parallel process which returns
+        dB info and errors and does no sqlite writing inside the function.
     """
     error = None
     outputs = []
@@ -277,8 +280,8 @@ def get_parser(parser=None):
         default=10
     )
     parser.add_argument(
-        '--nthreads',
-        help="Number of parallel threads to run on.",
+        '--nproc',
+        help="Number of parallel processes to run on.",
         type=int,
         default=4
     )
@@ -342,6 +345,15 @@ def main(
     # Setup multiprocessing pool.
     pool = multiprocessing.Pool(processes=nthreads) 
 
+    # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
+    # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
+    # whenever the file size exceeds 10 GB.
+    nfile = 0
+    dest_file = os.path.splitext(configs['archive']['policy']['filename'])[0]+'_'+str(nfile).zfill(3)+'.h5'
+    while os.path.getsize(dest_file) < 10e9:
+        nfile += 1
+        dest_file = os.path.splitext(dest_file)[0]+str(nfile).zfill(3)+'.h5'
+
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
     for i in range(len(run_list)//write_block + 1):
         prun_list = run_list[i*write_block:(i+1)*write_block]
@@ -356,25 +368,29 @@ def main(
                                               'run_parallel': True}) for pr in prun_list]
         outputs = [r.get() for r in async_out]
         db = _get_preprocess_db(configs, group_by)
-        dest_file = configs['archive']['policy']['filename']
         all_files = []
-        for err, output in outputs:
-            if err is None:
-                for db_data, src_file in output:
-                    with h5py.File(dest_file,'w') as f_dest, h5py.File(src_file,'r') as f_src:
-                        for dts in f_src.keys():
-                            f_src.copy(f_src[f'{dts}'], f_dest, f'{dts}')
-                            for member in f_src[dts]:
-                                if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
-                                    f_src.copy(f_src[f'{dts}/{member}'], f_dest,f'{dts}/{member}')
-                    logger.info(f"Saving to database under {db_data}")
-                    if len(db.inspect(db_data)) == 0:
-                        db.add_entry(db_data, dest_file)
-                    all_files.append(src_file)
-            else:
-                f = open(errlog, 'a')
-                f.write(f'{time.time()}, {err}, {output[0]}\n{output[1]}')
-                f.close()
+        if os.path.getsize(dest_file) >= 10e9:
+            nfile += 1
+            dest_file = os.path.splitext(dest_file)[0]+'_'+str(nfile).zfill(3)+'.h5'
+
+        with h5py.File(dest_file,'w') as f_dest:
+            for err, output in outputs:
+                if err is None:
+                    for db_data, src_file in output:
+                        with h5py.File(src_file,'r') as f_src:
+                            for dts in f_src.keys():
+                                f_src.copy(f_src[f'{dts}'], f_dest, f'{dts}')
+                                for member in f_src[dts]:
+                                    if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
+                                        f_src.copy(f_src[f'{dts}/{member}'], f_dest,f'{dts}/{member}')
+                        logger.info(f"Saving to database under {db_data}")
+                        if len(db.inspect(db_data)) == 0:
+                            db.add_entry(db_data, dest_file)
+                        all_files.append(src_file)
+                else:
+                    f = open(errlog, 'a')
+                    f.write(f'{time.time()}, {err}, {output[0]}\n{output[1]}')
+                    f.close()
         for tempfile in np.unique(all_files):
             os.remove(tempfile)
 
