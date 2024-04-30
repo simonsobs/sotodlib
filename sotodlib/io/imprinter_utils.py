@@ -82,7 +82,13 @@ def find_overlaps(imprint, obs_id, min_ctime, max_ctime):
     books. Creates a list of ObsSets with that obs_id, prints info to screen and
     returns the list. imprinter then has a function
     imprinter.register_book(obsset, commit=True) that can be used to register
-    the desired observation
+    the desired observation. Example usage::
+
+        rsets = utils.find_overlaps(
+            imprint, 'obs_ufm_mv9_1714406208', <- obs id from error message
+            min_ctime, max_ctime
+        )
+        imprint.register_book( rsets[0], commit=True)
 
     obs_id: level 2 obs_id that overlaps multiple observations
     """
