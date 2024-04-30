@@ -62,6 +62,11 @@ class NoFilesError(Exception):
     """Exception raised when no files are found in the book"""
     pass
 
+class OverlapObsError(Exception):
+    """Exception raised when we find observations that could be registered to
+    multiple books"""
+    pass
+
 ###################
 # database schema #
 ###################
@@ -1335,6 +1340,16 @@ class Imprinter:
         # into the same book.
         if return_obsset:
             return output
+
+        # look for repeat obs_ids
+        obs_ids = []
+        [obs_ids.extend( o.obs_ids) for o in output]
+        if np.any([obs_ids.count(o) != 1 for o in obs_ids]):
+            repeats = np.where( [obs_ids.count(o) != 1 for o in obs_ids])[0]
+            raise OverlapObsError(f"Found repeated level 2 obs_ids in book "
+                    f"list. {np.unique([obs_ids[x] for x in repeats])} overlap "
+                    "multiple observations. Need to choose which books to put " 
+                    "them in.")
 
         # register books in the book database (bdb)
         for oset in output:
