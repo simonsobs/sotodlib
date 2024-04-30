@@ -21,7 +21,8 @@ def subscan_polyfilter(aman, degree, signal_name="siganl", exclude_turnarounds=F
     exclude_turnarounds : bool
         Optional. If True, turnarounds are excluded from subscan identification. Default is False.
     mask : str or RangesMatrix
-        Optional. A mask used to select specific data points for filtering. Default is None.
+        Optional. A mask used to select specific data points for filtering. 
+        Note that masked region is excluded from fitting. Default is None.
         If None, no mask is applied. If the mask is given in str, ``aman.flags['mask']`` is used as mask.
         Arbitrary mask can be specified in the style of RangesMatrix.
     method : str
