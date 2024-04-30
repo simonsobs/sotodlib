@@ -4,7 +4,7 @@ from scipy.special import eval_legendre
 from . import flags
 logger = logging.getLogger(__name__)
 
-def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mask=None, method="legendre", in_place=True):
+def subscan_polyfilter(aman, degree, signal_name="siganl", exclude_turnarounds=False, mask=None, method="legendre", in_place=True):
     """
     Apply polynomial filtering to subscan segments in a data array.
     This function applies polynomial filtering to subscan segments within signal for each detector.
@@ -16,8 +16,8 @@ def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mas
     aman : AxisManager
     degree : int
         The degree of the polynomial to be removed.
-    signal : array-like, optional
-        The TOD signal to use. If not provided, `aman.signal` will be used.
+    signal_name : string, optional
+        The name of TOD signal to use. If not provided, `aman.signal` will be used.
     exclude_turnarounds : bool
         Optional. If True, turnarounds are excluded from subscan identification. Default is False.
     mask : str or RangesMatrix
@@ -37,11 +37,7 @@ def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mas
     signal : array-like
         The processed signal.
     """
-    if signal is None:
-        signal = aman.signal
 
-    if not(in_place):
-        signal = signal.copy()
 
     if exclude_turnarounds:
         if ("left_scan" not in aman.flags) or ("turnarounds" not in aman.flags):
@@ -59,6 +55,11 @@ def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mas
         subscan_indices = np.vstack([subscan_indices_l, subscan_indices_r])
         subscan_indices= subscan_indices[np.argsort(subscan_indices[:, 0])]
 
+    signal = aman[signal_name]
+
+    if not(in_place):
+        signal = signal.copy()
+
     if mask is None:
         mask_array = np.zeros(aman.samps.count, dtype=bool)
     elif type(mask) is str:
@@ -67,11 +68,9 @@ def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mas
         mask_array = mask.mask()
     is_matrix = len(mask_array.shape) > 1
 
-
     if method not in ["polyfit","legendre"] :
         raise ValueError("Only polyfit and legendre are acceptable.")
 
-        
     elif method == "polyfit":
         t = aman.timestamps - aman.timestamps[0]
         for i_det in range(aman.dets.count):
@@ -93,12 +92,10 @@ def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mas
 
                     signal[i_det,start:end+1] -= np.polyval(pars, t[start:end+1]-t_mean)
 
-                    
     elif method == "legendre":
 
         ### we calculate model in for loop, so we need additional +1 .
         degree_corr = degree + 1
-
 
         time = np.copy(aman["timestamps"])
 
@@ -175,7 +172,7 @@ def subscan_polyfilter(aman, degree, signal=None, exclude_turnarounds=False, mas
             signal[:,subscan[0]:subscan[1]+1] -= model
 
     if in_place:
-        aman.signal = signal
+        aman[signal_name] = signal
 
     return signal
                 
