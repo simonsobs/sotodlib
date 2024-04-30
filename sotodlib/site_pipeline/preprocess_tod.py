@@ -350,7 +350,7 @@ def main(
     # whenever the file size exceeds 10 GB.
     nfile = 0
     dest_file = os.path.splitext(configs['archive']['policy']['filename'])[0]+'_'+str(nfile).zfill(3)+'.h5'
-    while os.path.getsize(dest_file) < 10e9:
+    while os.path.getsize(dest_file) > 10e9:
         nfile += 1
         dest_file = os.path.splitext(dest_file)[0]+str(nfile).zfill(3)+'.h5'
 
