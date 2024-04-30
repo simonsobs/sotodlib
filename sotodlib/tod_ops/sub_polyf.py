@@ -4,7 +4,8 @@ from scipy.special import eval_legendre
 from . import flags
 logger = logging.getLogger(__name__)
 
-def subscan_polyfilter(aman, degree, signal_name="siganl", exclude_turnarounds=False, mask=None, method="legendre", in_place=True):
+def subscan_polyfilter(aman, degree, signal_name="siganl", exclude_turnarounds=False, 
+                       mask=None, exclusive=True, method="legendre", in_place=True):
     """
     Apply polynomial filtering to subscan segments in a data array.
     This function applies polynomial filtering to subscan segments within signal for each detector.
@@ -22,9 +23,11 @@ def subscan_polyfilter(aman, degree, signal_name="siganl", exclude_turnarounds=F
         Optional. If True, turnarounds are excluded from subscan identification. Default is False.
     mask : str or RangesMatrix
         Optional. A mask used to select specific data points for filtering. 
-        Note that masked region is excluded from fitting. Default is None.
         If None, no mask is applied. If the mask is given in str, ``aman.flags['mask']`` is used as mask.
         Arbitrary mask can be specified in the style of RangesMatrix.
+    exclusive :
+        Optional. If True, the mask is used to exclude data from fitting. If False, the mask is used to include data for fitting.
+        Default is True.
     method : str
         Optioal. Method to model the baseline of TOD.
         In `legendre` method, baseline model is constructed using orthonormality of Legendre function.
@@ -67,6 +70,9 @@ def subscan_polyfilter(aman, degree, signal_name="siganl", exclude_turnarounds=F
         mask_array = aman.flags[mask].mask()
     else:
         mask_array = mask.mask()
+    if exclusive is False:
+        mask_array = ~mask_array
+        
     is_matrix = len(mask_array.shape) > 1
 
     if method not in ["polyfit","legendre"] :
