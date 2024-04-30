@@ -7,95 +7,103 @@ from sotodlib import core
 from sotodlib import coords
 from sotodlib import tod_ops
 from sotodlib.tod_ops.filters import high_pass_sine2, low_pass_sine2, fourier_filter
-from sotodlib.coords import mapbased_pointing as mbp
+from sotodlib.coords import map_based_pointing as mbp
 from sotodlib.site_pipeline import update_pointing as up
 from sotodlib.io.metadata import write_dataset
 
 from sotodlib.site_pipeline import util
-logger = util.init_logger(__name__, 'make_mapbased_pointing: ')
-
-def filter_tod(tod, cutoff_high=0.01, cutoff_low=1.8):
-    if cutoff_low is not None:
-        tod.signal = fourier_filter(tod, filt_function=low_pass_sine2(cutoff=cutoff_low),)
-    if cutoff_high is not None:
-        tod.signal = fourier_filter(tod, filt_function=high_pass_sine2(cutoff=cutoff_high),)
-    return
-
-def tod_process(tod):
-    tod_ops.detrend_tod(tod)
-    tod_ops.apodize_cosine(tod, apodize_samps=2000)
-    filter_tod(tod)
-    tod.restrict('samps', (tod.samps.offset+2000, tod.samps.offset+tod.samps.count-2000))
-    return
+from sotodlib.preprocess import Pipeline
+logger = util.init_logger(__name__, 'make_map_based_pointing: ')
     
-def main(ctx_file, obs_id, wafer_slot,
-         sso_name, optics_config_fn,
-         map_dir, mapbased_result_dir, todbased_result_dir,
-         tune_by_tod=True, R2_threshold=0.3, restrict_dets=False):
+def main(configs, obs_id, wafer_slot, 
+         sso_name=None, optics_config_fn=None,
+         single_det_maps_dir=None, map_based_result_dir=None, tod_based_result_dir=None,
+         tune_by_tod=None, restrict_dets_for_debug=False):
     
-    ctx = core.Context(ctx_file)
-    meta = ctx.get_meta(obs_id)
-    meta.restrict('dets', meta.dets.vals[meta.det_info.wafer_slot == wafer_slot])
-    if restrict_dets:
-        meta.restrict('dets', meta.dets.vals[:100])
+    if type(configs) == str:
+        configs = yaml.safe_load(open(configs, "r"))
+        
+    # Derive parameters from config file
+    if optics_config_fn is None:
+        optics_config_fn = configs.get('optics_config_fn')
+    if single_det_maps_dir is None:
+        single_det_maps_dir = configs.get('single_det_maps_dir')
+    if map_based_result_dir is None:
+        map_based_result_dir = configs.get('map_based_result_dir')
+    if tod_based_result_dir is None:
+        tod_based_result_dir = configs.get('tod_based_result_dir')
+    
+    res_deg = configs.get('res_deg')
+    edge_avoidance_deg = configs.get('edge_avoidance_deg')
+    tune_by_tod = configs.get('tune_by_tod')
+    R2_threshold = configs.get('R2_threshold')
+    ds_factor = configs.get('ds_factor')
+    
+    
+    ctx = core.Context(configs.get('context_file'))
+    # If sso_name is not specified, get sso name from observation tags
+    obs_tags = ctx.obsdb.get(obs_id, tags=True)['tags']
+    if sso_name is None:
+        if 'moon' in obs_tags:
+            sso_name = 'moon'
+        elif 'jupiter' in obs_tags:
+            sso_name = 'jupiter'
+        else:
+            raise ValueError('sso_name is not specified')
+    
+    # Load data
     logger.info('loading data')
+    meta = ctx.get_meta(obs_id, dets={'wafer_slot': wafer_slot})
+    if restrict_dets_for_debug is not False:
+        meta.restrict('dets', meta.dets.vals[:restrict_dets_for_debug])
     tod = ctx.get_obs(meta)
+    
+    # tod processing
     logger.info('tod processing')
-    tod_process(tod)
+    pipe = Pipeline(configs["process_pipe"], logger=logger)
+    proc_aman, success = pipe.run(tod)
     
-    if not os.path.exists(map_dir):
-        logger.info(f'Make a directory: f{map_dir}')
-        os.makedirs(map_dir)
+    # make single detecctor maps
+    logger.info(f'Making single detector maps')    
+    os.makedirs(single_det_maps_dir, exist_ok=True)
+    map_hdf = os.path.join(single_det_maps_dir, f'{obs_id}_{wafer_slot}.hdf')
+    mbp.make_wafer_centered_maps(tod, sso_name, optics_config_fn, map_hdf=map_hdf, res=res_deg*coords.DEG)
     
-    logger.info(f'Making single detector maps')
-    map_hdf = os.path.join(map_dir, f'{obs_id}_{wafer_slot}.hdf')
-    mbp.make_wafer_centered_maps(tod, sso_name, optics_config_fn, map_hdf=map_hdf,)
-    
+    # reconstruct pointing from single detector maps
     logger.info(f'Making map-based pointing results')
     result_filename = f'focal_plane_{obs_id}_{wafer_slot}.hdf'
-    focal_plane_rset_mapbased = mbp.get_xieta_from_maps(map_hdf, 
-                                                        save=True,
-                                                        output_dir=mapbased_result_dir,
+    focal_plane_rset_map_based = mbp.get_xieta_from_maps(map_hdf, save=True,
+                                                        output_dir=map_based_result_dir,
                                                         filename=result_filename,
                                                         force_zero_roll=False,
-                                                        edge_avoidance=1.0*coords.DEG)
+                                                        edge_avoidance = edge_avoidance_deg*coords.DEG)
     
     if tune_by_tod:
         focal_plane = core.AxisManager(tod.dets)
-        focal_plane.wrap('xi', focal_plane_rset_mapbased['xi'], [(0, 'dets')])
-        focal_plane.wrap('eta', focal_plane_rset_mapbased['eta'], [(0, 'dets')])
-        focal_plane.wrap('gamma', focal_plane_rset_mapbased['gamma'], [(0, 'dets')])
-        is_low_R2 = focal_plane_rset_mapbased['R2'] < R2_threshold
+        focal_plane.wrap('xi', focal_plane_rset_map_based['xi'], [(0, 'dets')])
+        focal_plane.wrap('eta', focal_plane_rset_map_based['eta'], [(0, 'dets')])
+        focal_plane.wrap('gamma', focal_plane_rset_map_based['gamma'], [(0, 'dets')])
+        is_low_R2 = focal_plane_rset_map_based['R2'] < R2_threshold
         focal_plane.xi[is_low_R2] = np.nan
         focal_plane.eta[is_low_R2] = np.nan
         
         tod.focal_plane = focal_plane
         tod.flags.move(sso_name, None)
         logger.info(f'Making tod-based pointing results')
-        focal_plane_rset_todbased = up.update_xieta(tod, sso_name, ds_factor=10,
-                                                    save=True, 
-                                                    result_dir=todbased_result_dir, 
-                                                    filename=result_filename)
+        focal_plane_rset_tod_based = up.update_xieta(tod, sso_name, ds_factor=ds_factor, save=True, 
+                                                    result_dir=tod_based_result_dir, filename=result_filename)
     return
-
-
 
 def get_parser():
     parser = argparse.ArgumentParser(description="Process TOD data and update pointing")
-    parser.add_argument("ctx_file", type=str, help="Path to the context file")
-    parser.add_argument("obs_id", type=str, help="Observation ID")
+    parser.add_argument("configs", type=str, help="Path to the configuration file")
+    parser.add_argument("obs_id", type=int, help="Observation ID")
     parser.add_argument("wafer_slot", type=int, help="Wafer slot number")
-    parser.add_argument("sso_name", type=str, help="Name of Solar System Object (SSO)")
-    parser.add_argument("optics_config_fn", type=str, help="Path to optics configuration file")
-    parser.add_argument("map_dir", type=str, help="Directory to save map data")
-    parser.add_argument("mapbased_result_dir", type=str, help="Directory to save map-based result")
-    parser.add_argument("todbased_result_dir", type=str, help="Directory to save TOD-based result")
-    parser.add_argument("--tune_by_tod", action="store_true", help="Whether to tune by TOD data")
-    parser.add_argument("--R2_threshold", type=float, default=0.3,
-                        help="Threshold for R2 value. If R2 of map-domain result is lower than the threshold,\
-                        the tod-fitting for that detector is skipped.")
-    parser.add_argument("--restrict_dets", action="store_true",
-                        help="If specified, number of detectors are restricted to 100")
+    parser.add_argument("--sso_name", type=str, default=None, help="Name of solar system object (e.g., 'moon', 'jupiter')")
+    parser.add_argument("--optics_config_fn", type=str, default=None, help="Path to optics configuration file")
+    parser.add_argument("--single_det_maps_dir", type=str, default=None, help="Directory to save single detector maps")
+    parser.add_argument("--map_based_result_dir", type=str, default=None, help="Directory to save map-based pointing results")
+    parser.add_argument("--tod_based_result_dir", type=str, default=None, help="Directory to save TOD-based pointing results")
     return parser
 
 if __name__ == '__main__':
