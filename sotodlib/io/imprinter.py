@@ -1223,15 +1223,26 @@ class Imprinter:
                 f"updating max ctime to {new_ctime}"
             )
             max_ctime = new_ctime
+
+        min_start = dt.datetime.utcfromtimestamp(min_ctime)
         max_stop = dt.datetime.utcfromtimestamp(max_ctime)
 
-        # find all complete observations that start within the time range
+        # find observations in time range that are already in books
+        already_registered = [ x[0] for x in
+            self.get_session().query(Observations.obs_id).join(Books).filter(
+            Books.start >= min_start-dt.timedelta(hours=3),
+            Books.stop <= max_stop+dt.timedelta(hours=3),
+        ).all()]
+
+        # find all complete observations that start within the time range and
+        # are not already in books
         obs_q = session.query(G3tObservations).filter(
             G3tObservations.timestamp >= min_ctime,
             G3tObservations.timestamp < max_ctime,
             stream_filt,
             G3tObservations.stop < max_stop,
             not_(G3tObservations.stop == None),
+            G3tObservations.obs_id.notin_(already_registered),
         )
         self.logger.debug(
             f"Found {obs_q.count()} level 2 observations to consider"
