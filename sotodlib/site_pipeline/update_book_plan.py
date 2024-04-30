@@ -20,6 +20,7 @@ def main(
     min_ctime_timecodes: Optional[float] = None,
     max_ctime_timecodes: Optional[float] = None,
     from_scratch: bool = False,
+    use_monitor: bool = False,
     ):
     """
     Update the book plan database with new data from the g3tsmurf database.
@@ -49,6 +50,9 @@ def main(
         The maximum ctime to include in the book planor timecode (hk, smurf, stray) books, by default None
     from_scratch : bool, optional
         If True, start to search from beginning of time, by default False
+    use_monitor : bool
+        if True, will send monitor information to influx, set to false by
+        default so we can use identical config files for development
     """
     if stream_ids is not None:
         stream_ids = stream_ids.split(",")
@@ -56,7 +60,8 @@ def main(
     imprinter = Imprinter(
         config, 
         db_args={'connect_args': {'check_same_thread': False}},
-        logger=logger
+        logger=logger,
+        make_db=from_scratch,
     )
     
     # leaving min_ctime and max_ctime as None will go through all available 
@@ -69,6 +74,7 @@ def main(
         max_ctime = max_ctime.timestamp()
 
     # obs and oper books
+    logger.info("Registering obs/oper Books")
     imprinter.update_bookdb_from_g3tsmurf(
         min_ctime=min_ctime, max_ctime=max_ctime,
         ignore_singles=False,
@@ -92,18 +98,20 @@ def main(
         max_ctime_timecodes = max_ctime_timecodes.timestamp()
 
     # hk books
+    logger.info("Registering any HK Books")
     imprinter.register_hk_books(
         min_ctime=min_ctime_timecodes, 
         max_ctime=max_ctime_timecodes,
     )
     # smurf and stray books
+    logger.info("Registering any timecode Books")
     imprinter.register_timecode_books(
         min_ctime=min_ctime_timecodes, 
         max_ctime=max_ctime_timecodes,
     )
 
     monitor = None
-    if "monitor" in imprinter.config:
+    if use_monitor and "monitor" in imprinter.config:
         logger.info("Will send monitor information to Influx")
         try:
             monitor = Monitor.from_configs(
@@ -114,6 +122,7 @@ def main(
             monitor = None
 
     if monitor is not None:
+        logger.info("Sending Updates to monitor")
         record_book_counts(monitor, imprinter)
     
 
@@ -196,7 +205,8 @@ def get_parser(parser=None):
               "for timecode books",
         default=7
     )
-
+    parser.add_argument('--use-monitor', help="Send updates to influx",
+                        action="store_true")
     return parser
 
 

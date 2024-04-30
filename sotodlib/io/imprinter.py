@@ -27,6 +27,7 @@ from .load_smurf import (
     SupRsyncType,
     Files,
 )
+from .datapkg_utils import load_configs
 from .check_book import BookScanner
 from .g3thk_db import G3tHk, HKFiles
 from ..site_pipeline.util import init_logger
@@ -51,21 +52,15 @@ VALID_OBSTYPES = ["obs", "oper", "smurf", "hk", "stray", "misc"]
 
 class BookExistsError(Exception):
     """Exception raised when a book already exists in the database"""
-
     pass
-
 
 class BookBoundError(Exception):
     """Exception raised when a book is already bound"""
-
     pass
-
 
 class NoFilesError(Exception):
     """Exception raised when no files are found in the book"""
-
     pass
-
 
 ###################
 # database schema #
@@ -106,7 +101,7 @@ class Books(Base):
     created_at: time when book was created
     updated_at: time when book was updated
     timing: bool, whether timing system is on
-    path: str, location of book directory
+    path: str, location of book directory relative to output_root of imprinter
     lvl2_deleted: bool, if level 2 data has been purged yet
     """
 
@@ -152,7 +147,7 @@ def loop_over_tubes(method):
 
 
 class Imprinter:
-    def __init__(self, im_config=None, db_args={}, logger=None):
+    def __init__(self, im_config=None, db_args={}, logger=None, make_db=False):
         """Imprinter manages the book database.
         
         Imprinter at the site is set up to be one per level 2 daq node with a
@@ -224,8 +219,7 @@ class Imprinter:
         """
 
         # load config file and parameters
-        with open(im_config, "r") as f:
-            self.config = yaml.safe_load(f)
+        self.config = load_configs(im_config)
 
         self.db_path = self.config.get("db_path")
         self.daq_node = self.config.get("daq_node")
@@ -261,11 +255,20 @@ class Imprinter:
                 else:
                     self.tubes[tube]['slots'].append(slot['stream_id'])
                                         
-
-        # check whether db_path directory exists
-        if not op.exists(op.dirname(self.db_path)):
-            # to create the database, we first make sure that the folder exists
-            os.makedirs(op.abspath(op.dirname(self.db_path)), exist_ok=True)
+        # raise error if database does not exist
+        if not op.exists(self.db_path):
+            if not make_db:
+                raise ValueError(
+                    f"Imprinter database path {self.db_path} does not exist "
+                    "pass make_db=True to make database"
+                )
+            else:
+                # check whether db_path directory exists
+                if not op.exists(op.dirname(self.db_path)):
+                    # we first make sure that the folder exists
+                    os.makedirs(
+                        op.abspath(op.dirname(self.db_path)), exist_ok=True
+                    )
         self.engine = db.create_engine(f"sqlite:///{self.db_path}", **db_args)
 
         # create all tables or (do nothing if tables exist)
@@ -386,6 +389,8 @@ class Imprinter:
             ),  # not worth having a extra table
             timing=timing_on,
         )
+        book.path = self.get_book_path(book)
+
         self.logger.info(f"registering {bid}")
         # add book to database
         session.add(book)
@@ -422,8 +427,7 @@ class Imprinter:
         if not self.build_hk:
             return
         
-        with open(self.g3tsmurf_config, "r") as f:
-            g3tsmurf_cfg = yaml.safe_load(f)
+        g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
         lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if min_ctime is None:
@@ -452,6 +456,7 @@ class Imprinter:
                 stop=dt.datetime.utcfromtimestamp((int(ctime) + 1) * 1e5),
                 tel_tube=self.daq_node,  
             )
+            book.path = self.get_book_path(book)
             session.add(book)
             session.commit()
 
@@ -534,6 +539,7 @@ class Imprinter:
                     start=book_start,
                     stop=book_stop,
                 )
+                smurf_book.path = self.get_book_path(smurf_book)
                 session.add(smurf_book)
                 session.commit()
 
@@ -568,11 +574,45 @@ class Imprinter:
                 start=book_start,
                 stop=book_stop,
             )
+            stray_book.path = self.get_book_path(stray_book)
             flist = self.get_files_for_book(stray_book)
             if len(flist) > 0:
                 self.logger.info(f"registering {book_id}")
                 session.add(stray_book)
                 session.commit()
+
+    def get_book_abs_path(self, book):
+        if book.path is None:
+            book_path = self.get_book_path(book)
+        else:
+            book_path = book.path
+        return os.path.join(self.output_root, book_path)
+
+    def get_book_path(self, book):
+        g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
+        lvl2_data_root = g3tsmurf_cfg["data_prefix"]
+
+        if book.type in ["obs", "oper"]:
+            session_id = book.bid.split("_")[1]
+            first5 = session_id[:5]
+            odir = op.join(book.tel_tube, book.type, first5)
+            return os.path.join(odir, book.bid)
+        elif book.type in ["hk", "smurf"]:
+            # get source directory for hk book
+            root = op.join(lvl2_data_root, book.type)
+            first5 = book.bid.split("_")[1]
+            assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
+            odir = op.join(book.tel_tube, book.type)
+            return os.path.join(odir, book.bid)
+        elif book.type in ["stray"]:
+            first5 = book.bid.split("_")[1]
+            assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
+            odir = op.join(book.tel_tube, book.type)
+            return os.path.join(odir, book.bid)
+        else:
+            raise NotImplementedError(
+                f"book type {book.type} not implemented"
+            )
 
     def _get_binder_for_book(self, 
         book, 
@@ -581,17 +621,11 @@ class Imprinter:
         ancil_drop_duplicates=False,
     ):
         """get the appropriate bookbinder for the book based on its type"""
-        with open(self.g3tsmurf_config, "r") as f:
-            g3tsmurf_cfg = yaml.safe_load(f)
+        g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
         lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if book.type in ["obs", "oper"]:
-            session_id = book.bid.split("_")[1]
-            first5 = session_id[:5]
-            odir = op.join(self.output_root, book.tel_tube, book.type, first5)
-            if not op.exists(odir):
-                os.makedirs(odir)
-            book_path = os.path.join(odir, book.bid)
+            book_path = self.get_book_abs_path(book)
 
             # after sanity checks, now we proceed to bind the book.
             # get files associated with this book, in the form of
@@ -753,8 +787,6 @@ class Imprinter:
                 ignore_tags=ignore_tags,
                 ancil_drop_duplicates=ancil_drop_duplicates,
             )
-            book.path = op.abspath(binder.outdir)
-
             binder.bind(pbar=pbar)
 
             # write M_book file
@@ -779,6 +811,7 @@ class Imprinter:
                 tc = self.tube_configs[book.tel_tube]
             else:
                 tc = {}
+            
             mfile = os.path.join(binder.outdir, "M_index.yaml")
             with open(mfile, "w") as f:
                 yaml.dump(
@@ -791,7 +824,9 @@ class Imprinter:
             if book.type in ['obs', 'oper']:
                 # check that detectors books were written out correctly
                 self.logger.info("Checking Book {}".format(book.bid))
-                check = BookScanner(book.path, config=check_configs)
+                check = BookScanner(
+                    self.get_book_abs_path(book), config=check_configs
+                )
                 check.go()
 
             # not sure if this is the best place to update
@@ -1096,7 +1131,8 @@ class Imprinter:
         ignore_singles=False,
         stream_ids=None,
         force_single_stream=False,
-        return_obsset=False
+        return_obsset=False,
+        incomplete_timeouts = (3,6),
     ):
         """Update bdb with new observations from g3tsmurf db.
 
@@ -1120,6 +1156,9 @@ class Imprinter:
         return_obsset: boolean
             if True, return the list of observation sets instead of registering
             books. Useful as a debugging tool
+        incomplete_timeouts: tuple
+            hours for raising a (warning, error) if incomplete observations are
+            found in the g3tsmurf database
         """
         if not self.build_det:
             return
@@ -1164,7 +1203,13 @@ class Imprinter:
         # bookbind any observations overlapping the incomplete ones.
         if q_incomplete.count() > 0:
             new_ctime = min([obs.timestamp for obs in q_incomplete.all()])
-            if max_ctime - new_ctime > 3600*3:
+            if max_ctime - new_ctime > 3600*incomplete_timeouts[1]:
+                raise ValueError(
+                    f"Found {q_incomplete.count()} incomplete observations. "
+                    f"New max ctime would be {new_ctime}. More than "
+                    f"{incomplete_timeouts[1]} hours in the past."
+                )
+            elif max_ctime - new_ctime > 3600*incomplete_timeouts[0]:
                 level = self.logger.warning
             else:
                 level = self.logger.debug
@@ -1395,7 +1440,7 @@ class Imprinter:
         out = {}
         # load all obs and associated files
         for obs_id, files in self.get_files_for_book(book).items():
-            self.logger.info(f"Retrieving readout_ids for {obs_id}...")
+            self.logger.debug(f"Retrieving readout_ids for {obs_id}...")
             status = SmurfStatus.from_file(files[0])
             ch_info = get_channel_info(status, archive=SMURF)
             if "readout_id" not in ch_info:
@@ -1438,7 +1483,9 @@ class Imprinter:
         if book.type != "oper":
             raise TypeError("Book must have type 'oper'")
 
-        session, arc = self.get_g3tsmurf_session(book.tel_tube, return_archive=True)
+        session, arc = self.get_g3tsmurf_session(
+            book.tel_tube, return_archive=True
+        )
 
         obs_ids = [o.obs_id for o in book.obs]
         obs = (
@@ -1520,12 +1567,11 @@ class Imprinter:
             self.librarian = LibrarianClient.from_info(conn)
         
         assert book.status == BOUND, "cannot upload unbound books"
-        dest_path = op.relpath(book.path, self.output_root)
         self.logger.info(f"Uploading book {book.bid} to librarian")
         try:     
             self.librarian.upload(
-                Path(book.path), 
-                Path(dest_path), 
+                Path( self.get_book_abs_path(book) ), 
+                Path( book.path ), 
             )
             book.status = UPLOADED
             session.commit()
@@ -1592,10 +1638,11 @@ class Imprinter:
 
         """
         # remove all files within the book
+        book_path = self.get_book_abs_path(book)
         try:
-            shutil.rmtree(book.path)
+            shutil.rmtree( book_path )
         except Exception as e:
-            self.logger.warning(f"Failed to remove {book.path}: {e}")
+            self.logger.warning(f"Failed to remove {book_path}: {e}")
             self.logger.error(traceback.format_exc())
 
 
@@ -1714,8 +1761,7 @@ def create_g3tsmurf_session(config):
 
     """
     # create database connection
-    with open(config, "r") as f:
-        config = yaml.safe_load(f)
+    config = load_configs(config)
     config["db_args"] = {"connect_args": {"check_same_thread": False}}
     SMURF = G3tSmurf.from_configs(config)
     session = SMURF.Session()
