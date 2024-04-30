@@ -66,22 +66,14 @@ def set_book_rebind(imprint, book):
     imprint: Imprinter instance
     book: str or Book 
     """
-    try:
-        # find appropriate binder for the book type
-        binder = imprint._get_binder_for_book(
-            book, 
-            ignore_tags=False,
-        )
-    except:
-         # if binder making failed there's no files
-        binder = None
-    if binder is not None:
-        book_dir = op.abspath(binder.outdir)
-        del binder
-        time.sleep(1)
-        if op.exists(book_dir):
-            print(f"Removing all files from {book_dir}")
-            shutil.rmtree(book_dir)
+    book_dir = imprint.get_book_abs_path(book)
+
+    if op.exists(book_dir):
+        print(f"Removing all files from {book_dir}")
+        shutil.rmtree(book_dir)
+    else: 
+        print(f"Found no files in {book_dir} to remove")
+
     book.status = UNBOUND
     imprint.get_session().commit()
 
