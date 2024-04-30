@@ -37,9 +37,8 @@ class SlowSource:
 
     """
 
-    def __init__(
-        self, timestamp, ra, dec, v_ra=0.0, v_dec=0.0, precision=0.0001 * coords.DEG
-    ):
+    def __init__(self, timestamp, ra, dec, v_ra=0., v_dec=0.,
+                 precision=.0001 * coords.DEG):
         self.timestamp = timestamp
         self.ra = ra
         self.dec = dec
@@ -55,13 +54,7 @@ class SlowSource:
         dt = 3600
         ra0, dec0, distance = get_source_pos(name, timestamp)
         ra1, dec1, distance = get_source_pos(name, timestamp + dt)
-        return cls(
-            timestamp,
-            ra0,
-            dec0,
-            ((ra1 - ra0 + 180) % 360 - 180) / dt,
-            (dec1 - dec0) / dt,
-        )
+        return cls(timestamp, ra0, dec0, ((ra1-ra0+180) % 360 - 180)/dt, (dec1-dec0)/dt)
 
     def pos(self, timestamps):
         """Get the (approximate) source position at the times given by the
@@ -104,8 +97,7 @@ def get_scan_q(tod, planet, refq=None):
 
     def scan_q_model(t, az, el, planet):
         csl = so3g.proj.CelestialSightLine.az_el(
-            t, az, el, weather="typical", site="so"
-        )
+            t, az, el, weather='typical', site='so')
         ra0, dec0 = planet.pos(t)
         return csl.Q, ~so3g.proj.quat.rotation_lonlat(ra0, dec0) * csl.Q
 
@@ -119,24 +111,20 @@ def get_scan_q(tod, planet, refq=None):
     X = fmin(distance, p0, disp=0, full_output=1)
     p, fopt, n_iter, n_calls, warnflag = X
     if warnflag != 0:
-        logger.warning(
-            "Source-scan solver failed to converge or otherwise "
-            f"complained!  warnflag={warnflag}"
-        )
-    q, qnet = scan_q_model(t + p[0], az + p[1], el, planet)
+        logger.warning('Source-scan solver failed to converge or otherwise '
+                       f'complained!  warnflag={warnflag}')
+    q, qnet = scan_q_model(t+p[0], az+p[1], el, planet)
     psi = so3g.proj.quat.decompose_xieta(qnet)[2][0]
-    ra, dec = planet.pos(t + p[0])
+    ra, dec = planet.pos(t+p[0])
     rot = ~so3g.proj.quat.rotation_lonlat(ra, dec, psi)
-    return {
-        "rot": rot,
-        "timestamp": t + p[0],
-        "az": az + p[1],
-        "el": el,
-        "ra": ra,
-        "dec": dec,
-        "psi": psi,
-        "planet": planet,
-    }
+    return {'rot': rot,
+            'timestamp': t+p[0],
+            'az': az+p[1],
+            'el': el,
+            'ra': ra,
+            'dec': dec,
+            'psi': psi,
+            'planet': planet}
 
 
 def get_scan_P(tod, planet, refq=None, res=None, size=None, **kw):
@@ -146,26 +134,26 @@ def get_scan_P(tod, planet, refq=None, res=None, size=None, **kw):
     Returns a Projection Matrix and the output from get_scan_q.
 
     """
-    logger.debug(f"get_scan_P: init for {planet}")
+    logger.debug(f'get_scan_P: init for {planet}')
 
     if res is None:
         res = 0.01 * coords.DEG
     X = get_scan_q(tod, planet)
-    rot = so3g.proj.quat.rotation_lonlat(0, 0) * X["rot"]
-    wcs_kernel = coords.get_wcs_kernel("tan", 0.0, 0.0, res=res)
+    rot = so3g.proj.quat.rotation_lonlat(0, 0) * X['rot']
+    wcs_kernel = coords.get_wcs_kernel('tan', 0., 0., res=res)
 
-    logger.debug(f"get_scan_P: getting projection matrix for {wcs_kernel}.")
+    logger.debug(f'get_scan_P: getting projection matrix for {wcs_kernel}.')
     P = coords.P.for_tod(tod, rot=rot, wcs_kernel=wcs_kernel, **kw)
     if size is not None:
         # Trim to a local square
-        mz = P.zeros(comps="T").submap([[-size / 2, size / 2], [size / 2, -size / 2]])
+        mz = P.zeros(comps='T').submap([[-size/2, size/2], [size/2, -size/2]])
         P.geom = enmap.Geometry(shape=mz.shape, wcs=mz.wcs)
     return P, X
 
 
-def filter_for_sources(
-    tod=None, signal=None, source_flags=None, n_modes=10, low_pass=None, wrap=None
-):
+def filter_for_sources(tod=None, signal=None, source_flags=None,
+                       n_modes=10, low_pass=None,
+                       wrap=None):
     """Mask and gap-fill the signal at samples flagged by source_flags.
     Then PCA the resulting time ordered data.  Restore the flagged
     signal, remove the strongest modes from PCA.
@@ -209,18 +197,18 @@ def filter_for_sources(
             filt = tod_ops.filters.low_pass_butter4(low_pass)
 
         n_det, n = signal.shape
-        a, b, t_1, t_2 = tod_ops.fft_ops.build_rfft_object(n_det, n, "BOTH")
+        a, b, t_1, t_2 = tod_ops.fft_ops.build_rfft_object(n_det, n, 'BOTH')
         a[:] = signal_pca
         t_1()
         times = tod.timestamps
-        delta_t = (times[-1] - times[0]) / (tod.samps.count - 1)
+        delta_t = (times[-1]-times[0])/(tod.samps.count - 1)
         freqs = np.fft.rfftfreq(n, delta_t)
         filt.apply(freqs, tod, target=b)
         signal_pca = t_2()
         del a, b
 
     # Measure TOD means (after gap fill, low pass, etc).
-    if isinstance(n_modes, str) and n_modes == "all":
+    if isinstance(n_modes, str) and n_modes == 'all':
         # Don't overthink that.
         signal -= signal_pca
 
@@ -233,16 +221,16 @@ def filter_for_sources(
         signal -= levels[:, None]
 
         # Get PCA model and discard the source vectors.
-        pca = tod_ops.pca.get_pca_model(tod, signal=signal_pca, n_modes=n_modes)
+        pca = tod_ops.pca.get_pca_model(
+            tod, signal=signal_pca, n_modes=n_modes)
         del signal_pca
 
         # Remove the PCA model.
         tod_ops.pca.add_model(tod, pca, -1, signal=signal)
 
     if wrap:
-        tod.wrap(wrap, signal, [(0, "dets"), (1, "samps")])
+        tod.wrap(wrap, signal, [(0, 'dets'), (1, 'samps')])
     return signal
-
 
 def _get_astrometric(source_name, timestamp, site="_default"):
     """
