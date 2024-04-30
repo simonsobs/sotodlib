@@ -1,7 +1,10 @@
 import os
 import yaml
+import time
 import numpy as np
 import argparse
+import traceback
+from typing import Optional
 
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
@@ -26,7 +29,7 @@ def _get_preprocess_context(configs, context=None):
         context["metadata"] = []
 
     for key in context.get("metadata"):
-        if key.get("name") == "preprocess":
+        if key.get("unpack") == "preprocess":
             found=True
             break
     if not found:
@@ -39,16 +42,19 @@ def _get_preprocess_context(configs, context=None):
     return configs, context
 
 def _get_groups(obs_id, configs, context):
-    group_by = configs['subobs'].get('use', 'detset')
-    if group_by.startswith('dets:'):
-        group_by = group_by.split(':',1)[1]
+    group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
+    for i, gb in enumerate(group_by):
+        if gb.startswith('dets:'):
+            group_by[i] = gb.split(':',1)[1]
 
-    if group_by == 'detset':
-        groups = context.obsfiledb.get_detsets(obs_id)
-    else:
-        det_info = context.get_det_info(obs_id)
-        groups = det_info.subset(keys=[group_by]).distinct()[group_by]
-    return group_by, list(groups)
+        if (gb == 'detset') and (len(group_by) == 1):
+            groups = context.obsfiledb.get_detsets(obs_id)
+            return group_by, [[g] for g in groups]
+        
+    det_info = context.get_det_info(obs_id)
+    rs = det_info.subset(keys=group_by).distinct()
+    groups = [[b for a,b in r.items()] for r in rs]
+    return group_by, groups
 
 def preprocess_tod(
     obs_id, 
@@ -105,7 +111,8 @@ def preprocess_tod(
                      "archive index.")
         scheme = core.metadata.ManifestScheme()
         scheme.add_exact_match('obs:obs_id')
-        scheme.add_exact_match('dets:' + group_by)
+        for gb in group_by:
+            scheme.add_exact_match('dets:' + gb)
         scheme.add_data_field('dataset')
         db = core.metadata.ManifestDb(
             configs['archive']['index'],
@@ -117,30 +124,33 @@ def preprocess_tod(
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
 
-        aman = context.get_obs(obs_id, dets={group_by:group})
+        aman = context.get_obs(obs_id, dets={gb:g for gb, g in zip(group_by, group)})
         proc_aman, success = pipe.run(aman)
         if success != 'end':
             continue
 
         policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
         dest_file, dest_dataset = policy.get_dest(obs_id)
-        if group_by == 'detset':
-            dest_dataset += '_' + group
-        else:
-            dest_dataset += "_" + group_by + "_" + str(group)
+        for gb, g in zip(group_by, group):
+            if gb == 'detset':
+                dest_dataset += "_" + g
+            else:
+                dest_dataset += "_" + gb + "_" + str(g)
         logger.info(f"Saving data to {dest_file}:{dest_dataset}")
         proc_aman.save(dest_file, dest_dataset, overwrite=overwrite)
 
         # Update the index.
         db_data = {'obs:obs_id': obs_id,
                    'dataset': dest_dataset}
-        db_data['dets:'+group_by] = group
+        for gb, g in zip(group_by, group):
+            db_data['dets:'+gb] = g
         
         logger.info(f"Saving to database under {db_data}")
         if len(db.inspect(db_data)) == 0:
             db.add_entry(db_data, dest_file)
 
-def load_preprocess_det_select(obs_id, configs, context=None):
+def load_preprocess_det_select(obs_id, configs, context=None,
+                               dets=None, meta=None):
     """ Loads the metadata information for the Observation and runs through any
     data selection specified by the Preprocessing Pipeline.
 
@@ -151,16 +161,22 @@ def load_preprocess_det_select(obs_id, configs, context=None):
         `context.get_obs`
     configs: string or dictionary
         config file or loaded config directory
+    dets: dict
+        dets to restrict on from info in det_info. See context.get_meta.
+    meta: AxisManager
+        Contains supporting metadata to use for loading.
+        Can be pre-restricted in any way. See context.get_meta.
     """
     configs, context = _get_preprocess_context(configs, context)
     pipe = Pipeline(configs["process_pipe"], logger=logger)
     
-    meta = context.get_meta(obs_id)
+    meta = context.get_meta(obs_id, dets=dets, meta=meta)
     logger.info(f"Cutting on the last process: {pipe[-1].name}")
     pipe[-1].select(meta)
     return meta
 
-def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml", context=None ):
+def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml",
+                        context=None, dets=None, meta=None):
     """ Loads the saved information from the preprocessing pipeline and runs the
     processing section of the pipeline. 
 
@@ -173,10 +189,15 @@ def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml", context=None 
         `context.get_obs`
     configs: string or dictionary
         config file or loaded config directory
+    dets: dict
+        dets to restrict on from info in det_info. See context.get_meta.
+    meta: AxisManager
+        Contains supporting metadata to use for loading.
+        Can be pre-restricted in any way. See context.get_meta.
     """
 
     configs, context = _get_preprocess_context(configs, context)
-    meta = load_preprocess_det_select(obs_id, configs=configs, context=context)
+    meta = load_preprocess_det_select(obs_id, configs=configs, context=context, dets=dets, meta=meta)
 
     if meta.dets.count == 0:
         logger.info(f"No detectors left after cuts in obs {obs_id}")
@@ -215,18 +236,28 @@ def get_parser(parser=None):
         '--max-ctime',
         help="Maximum timestamp for the beginning of an observation list",
     )
+    parser.add_argument(
+        '--update-delay',
+        help="Number of days (unit is days) in the past to start observation list.",
+        type=int
+    )
     return parser
 
 def main(
-    configs, 
-    query=None, 
-    obs_id=None, 
-    overwrite=False,
-    min_ctime=None,
-    max_ctime=None,
+        configs: str,
+        query: Optional[str] = None, 
+        obs_id: Optional[str] = None, 
+        overwrite: bool = False,
+        min_ctime: Optional[int] = None,
+        max_ctime: Optional[int] = None,
+        update_delay: Optional[int] = None,
  ):
     configs, context = _get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess")
+    if (min_ctime is None) and (update_delay is not None):
+        # If min_ctime is provided it will use that..
+        # Otherwise it will use update_delay to set min_ctime.
+        min_ctime = int(time.time()) - update_delay*86400
 
     if obs_id is not None:
         tot_query = f"obs_id=='{obs_id}'"
@@ -258,14 +289,20 @@ def main(
             if x is None or len(x) == 0:
                 run_list.append( (obs, None) )
             elif len(x) != len(groups):
-                [groups.remove(a[f'dets:{group_by}']) for a in x]
+                [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
                 run_list.append( (obs, groups) )
 
     logger.info(f"Beginning to run preprocessing on {len(run_list)} observations")
     for obs, groups in run_list:
         logger.info(f"Processing obs_id: {obs_id}")
-        preprocess_tod(obs["obs_id"], configs, overwrite=overwrite,
-                       group_list=groups, logger=logger)
+        try:
+            preprocess_tod(obs["obs_id"], configs, overwrite=overwrite,
+                           group_list=groups, logger=logger)
+        except Exception as e:
+            logger.info(f"{type(e)}: {e}")
+            logger.info(''.join(traceback.format_tb(e.__traceback__)))
+            logger.info(f'Skiping obs:{obs["obs_id"]} and moving to the next')
+            continue
             
 
 if __name__ == '__main__':

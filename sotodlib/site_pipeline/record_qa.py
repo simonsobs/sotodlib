@@ -46,9 +46,20 @@ def main(config):
         logger.info(f"Recording metrics for obs_id {oid} ({i}/{n})...")
         # load metadata once
         meta = context.get_meta(oid, ignore_missing=True)
+        # check that obsdb info is available
+        if len(meta.obs_info.keys()) < 2:
+            logger.warning("This observation is missing obs_info. Skipping.")
+            i += 1
+            continue
         for m, m_obs in zip(metrics, obs_id):
             if oid in m_obs:
-                m.process_and_record(oid, meta)
+                try:
+                    m.process_and_record(oid, meta)
+                except Exception:
+                    logger.error(
+                        f"Processing metric {m._influx_meas}.{m._influx_field} failed.",
+                        exc_info=True
+                    )
         i += 1
 
 
