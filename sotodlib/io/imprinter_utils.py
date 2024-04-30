@@ -77,7 +77,31 @@ def set_book_rebind(imprint, book):
     book.status = UNBOUND
     imprint.get_session().commit()
 
-    
+def find_overlaps(imprint, obs_id, min_ctime, max_ctime):
+    """ helper function for when a level 2 observation could span multiple
+    books. Creates a list of ObsSets with that obs_id, prints info to screen and
+    returns the list. imprinter then has a function
+    imprinter.register_book(obsset, commit=True) that can be used to register
+    the desired observation
+
+    obs_id: level 2 obs_id that overlaps multiple observations
+    """
+    obsset = imprint.update_bookdb_from_g3tsmurf(
+        min_ctime=min_ctime, max_ctime=max_ctime,
+        return_obsset=True,
+    )
+    rsets = []
+    for o in obsset:
+        if obs_id in o.obs_ids:
+            rsets.append(o)
+    for i,r in enumerate(rsets):
+        print(f"-----ObsSet {i}----------")
+        for o in r:
+            print("\t", o)
+
+    return rsets
+
+
 def get_timecode_final(imprint, time_code, type='all'):
     """Check if all required entries in the g3tsmurf database are present for
     smurf or stray book regisitration.
