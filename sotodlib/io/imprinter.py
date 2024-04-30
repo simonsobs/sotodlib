@@ -1570,7 +1570,7 @@ class Imprinter:
         )
         return {o.obs_id: o for o in obs}
 
-    def upload_book_to_librarian(self, book, session=None):
+    def upload_book_to_librarian(self, book, session=None, raise_on_error=True):
         """Upload bound book to the librarian
 
         Parameters
@@ -1578,6 +1578,8 @@ class Imprinter:
         book: Book object
         session: imprinter sqlalchemy session
             session that made book
+        raise_on_error: bool
+            raise an error if the librarian throws an error on the upload
         """
 
         if session is None:
@@ -1593,6 +1595,7 @@ class Imprinter:
             self.librarian = LibrarianClient.from_info(conn)
         
         assert book.status == BOUND, "cannot upload unbound books"
+
         self.logger.info(f"Uploading book {book.bid} to librarian")
         try:     
             self.librarian.upload(
@@ -1605,7 +1608,12 @@ class Imprinter:
             self.logger.error(
                 f"Failed to upload book {book.bid}."
             )
-            raise e
+            if raise_on_error:
+                raise e
+            else:
+                return False, e
+        return True, None
+            
 
     def delete_level2_files(self, book, dry_run=True):
         """Delete level 2 data from already bound books
