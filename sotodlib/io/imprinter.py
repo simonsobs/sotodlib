@@ -1242,7 +1242,7 @@ class Imprinter:
             stream_filt,
             G3tObservations.stop < max_stop,
             not_(G3tObservations.stop == None),
-            G3tObservations.obs_id.notin_(already_registered),
+            G3tObservations.obs_id.not_in(already_registered),
         )
         self.logger.debug(
             f"Found {obs_q.count()} level 2 observations to consider"
