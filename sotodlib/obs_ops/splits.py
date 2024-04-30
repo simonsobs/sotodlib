@@ -53,9 +53,10 @@ def det_splits_relative(aman, det_left_right=False, det_upper_lower=False, det_i
         mask = radii > radius_median
         fm.wrap_dets('det_out', np.logical_not(mask))
 
-    if wrap is not None and wrap is not False:
+    if not(wrap):
         if wrap == True:
             aman.wrap('det_flags', fm)
         else:
             aman.wrap(wrap, fm)
-    return aman, fm
+    return fm
+
