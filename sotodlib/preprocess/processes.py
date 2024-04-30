@@ -783,6 +783,11 @@ class SSOFootprint(_Preprocess):
                 planet_aman = proc_aman.sso_footprint[sso]
                 plot_sso_footprint(aman, planet_aman, sso, filename=filename.replace('{name}', f'{sso}_sso_footprint'), **self.plot_cfgs)
 
+class ReduceFlags(_Preprocess):
+    name = 'reduce_flags'
+    def process(self, aman, proc_aman):
+        aman.flags.reduce(**self.process_cfgs)
+        
 class ComputeSourceFlags(_Preprocess):
     name = 'compute_source_flags'
     def process(self, aman, proc_aman):
@@ -887,3 +892,4 @@ _Preprocess.register(SubPolyf)
 _Preprocess.register(DetBiasFlags)
 _Preprocess.register(SSOFootprint)
 _Preprocess.register(ComputeSourceFlags)
+_Preprocess.register(ReduceFlags)
