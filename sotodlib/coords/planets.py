@@ -1,9 +1,11 @@
+import os
+import re
 import datetime
 import logging
-import re
-import time
 
 import numpy as np
+
+from ast import literal_eval
 from scipy.optimize import fmin
 
 from astropy import units
@@ -16,12 +18,6 @@ from pixell import enmap
 from .. import core, tod_ops, coords
 
 logger = logging.getLogger(__name__)
-
-# Files that we might want to download and cache using
-# astropy.utils.data
-RESOURCE_URLS = {
-    'de421.bsp': 'ftp://ssd.jpl.nasa.gov/pub/eph/planets/bsp/de421.bsp',
-}
 
 
 class SlowSource:
@@ -241,9 +237,9 @@ def _get_astrometric(source_name, timestamp, site='_default'):
     Derive skyfield's Astrometric object of a celestial source at a 
     specific timestamp and observing site, which is used to derive
     radec/azel in get_source_pos/get_source_azel.
-    
+
     Note that it will download a 16M ephemeris file on first use.
-    
+
     Args:
       source_name: Planet name; in capitalized format, e.g. "Jupiter",
         or fixed source specification.
@@ -255,8 +251,21 @@ def _get_astrometric(source_name, timestamp, site='_default'):
       astrometric: skyfield's astrometric object
     """
     # Get the ephemeris -- this will trigger a 16M download on first use.
-    de_url = RESOURCE_URLS['de421.bsp']
-    de_filename = au_data.download_file(de_url, cache=True)
+    resource_paths = literal_eval(os.environ.get("SOTODLIB_RESOURCES", "{}"))
+
+    de_url = resource_paths.get("de421.bsp", "")
+    logger.debug("Using {de_url} for planet astropy util data.")
+    if de_url.startswith("ftp://"):
+        de_filename = au_data.download_file(de_url, cache=True)
+    elif de_url.startswith("file://"):
+        de_filename = de_url[7:]
+    else:
+        raise RuntimeError(
+            "'de421.bsp' path not a POSIX or FTP path. Please set environment"
+            + " variable SOTODLIB_RESOURCES as a JSON. Include 'de421.bsp' as "
+            + "the key and use 'file://' for a POSIX path or "
+            + "'ftp://' to download the file from an FTP server"
+        )
 
     planets = jpllib.SpiceKernel(de_filename)
     for k in [
@@ -283,14 +292,14 @@ def _get_astrometric(source_name, timestamp, site='_default'):
         datetime.datetime.fromtimestamp(timestamp, tz=skyfield_api.utc))
     astrometric = observatory.at(sf_timestamp).observe(target)
     return astrometric
-    
-    
-def get_source_pos(source_name, timestamp, site='_default'):
+
+
+def get_source_pos(source_name, timestamp, site="_default"):
     """Get the equatorial coordinates of a planet (or fixed-position
     source, see note) at some time.  Returns the apparent position,
     accounting for geographical position on earth, but assuming no
     atmospheric refraction.
-    
+
     Args:
       source_name: Planet name; in capitalized format, e.g. "Jupiter",
         or fixed source specification.
@@ -319,7 +328,7 @@ def get_source_pos(source_name, timestamp, site='_default'):
         ra, dec = float(m['ra_deg']) * \
             coords.DEG, float(m['dec_deg']) * coords.DEG
         return ra, dec, float('inf')
-    
+
     # Derive from skyfield astrometric object
     amet0 = _get_astrometric(source_name, timestamp, site)
     ra, dec, distance = amet0.radec()
@@ -328,14 +337,14 @@ def get_source_pos(source_name, timestamp, site='_default'):
 
 def get_source_azel(source_name, timestamp, site='_default'):
     """
-    Get the apparent azimuth and elevation of a celestial source at a 
+    Get the apparent azimuth and elevation of a celestial source at a
     specific timestamp and observing site. Returns the apparent position,
     accounting for geographical position on earth, but assuming no
     atmospheric refraction.
 
     Args:
         source_name: Planet name; in capitalized format, e.g. "Jupiter"
-        timestamp (float): The Unix timestamp representing the time for 
+        timestamp (float): The Unix timestamp representing the time for
           which to calculate azimuth and elevation.
         site (str or so3g.proj.EarthlySite): if this is a string, the
         site will be looked up in so3g.proj.SITES dict.
