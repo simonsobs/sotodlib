@@ -986,7 +986,7 @@ class G3tHWP():
             # version 1
             # calculate HWP angle
             try:
-                solved = solved | self.analyze(self.data, mod2pi=False, suffix=suffix)
+                solved.update(self.analyze(self.data, mod2pi=False, suffix=suffix))
             except Exception as e:
                 logger.error(
                     f"Exception '{e}' thrown while calculating HWP angle. Angle calculation failed.")
