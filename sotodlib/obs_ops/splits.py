@@ -51,14 +51,14 @@ def det_splits_relative(aman, det_left_right=False, det_upper_lower=False, det_i
         mask = radii > radius_median
         fm.wrap_dets('det_out', np.logical_not(mask))
 
-    if not(wrap):
-        if wrap == True:
-            if 'det_flags' in aman._fields:
-                aman.move('det_flags', None)
-            aman.wrap('det_flags', fm)
-        else:
-            if wrap in aman._fields:
-                aman.move(wrap, None)
-            aman.wrap(wrap, fm)
+    
+    if wrap == True:
+        if 'det_flags' in aman._fields:
+            aman.move('det_flags', None)
+        aman.wrap('det_flags', fm)
+    elif isinstance(wrap, str):
+        if wrap in aman._fields:
+            aman.move(wrap, None)
+        aman.wrap(wrap, fm)
     return fm
 
