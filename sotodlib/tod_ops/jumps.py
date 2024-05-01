@@ -204,7 +204,7 @@ def jumpfix_subtract_heights(
             for start, end in jump_range.ranges():
                 _heights = heights[i + j, start:end]
                 height = _heights[np.argmax(np.abs(_heights))]
-                x_fixed[i + j, int((start + end) / 2)] -= height
+                x_fixed[i + j, int((start + end) / 2):] -= height
 
     x_fixed = x
     if not inplace:
