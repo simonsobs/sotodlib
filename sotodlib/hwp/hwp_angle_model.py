@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def apply_hwp_angle_model(tod, band='f090', hwp_solution_attr='hwp_solution', hwp_angle_model_attr='hwp_angle_model'):
+def apply_hwp_angle_model(tod, hwp_solution_attr='hwp_solution', hwp_angle_model_attr='hwp_angle_model'):
     """
     Updates and returns the tod AxisManager after applying hwp angle model parameters.
     hwp_angle_model correct the sign and offset of hwp_angle.
@@ -60,13 +60,13 @@ def apply_hwp_angle_model(tod, band='f090', hwp_solution_attr='hwp_solution', hw
     # offset of the optical axis of the achromatic hwp
     # this needs to be calibrated optically, this will be loaded from hwp_angle_model
     ahwp_offset = {
-        'satp1': {'f090': 49.1, 'f150': 49.4},
-        'satp3': {'f090': -2.29, 'f150': -1.99},
+        'satp1': 49.1,
+        'satp3': -2.29,
     }
 
     offset = encoder_offset + \
         encoder_assembly_offset[telescope][hwp.primary_encoder] + \
-        ahwp_offset[telescope][band]
+        ahwp_offset[telescope]
 
     # apply correction
     tod.hwp_angle = np.mod(
