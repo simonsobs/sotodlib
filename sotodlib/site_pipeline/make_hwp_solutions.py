@@ -5,6 +5,7 @@ This script will run:
 2. New versions of the metadata can be created as the analysis evolves.
 """
 import os
+import time
 import argparse
 import logging
 import yaml
@@ -200,12 +201,12 @@ def main(
             aman_encoder = g3thwp.set_data(tod, h5_filename = h5_encoder)
         else:
             aman_encoder = g3thwp.set_data(tod)
-        logger.info(f"Saving hwp_encoder")
+        logger.info("Saving hwp_encoder")
         save(aman_encoder, db_encoder, h5_encoder, obs_id, overwrite, 'gzip')
         del aman_encoder
 
         aman_solution = g3thwp.make_solution(tod)
-        logger.info(f"Saving hwp_angle")
+        logger.info("Saving hwp_angle")
         save(aman_solution, db_solution, h5_solution, obs_id, overwrite, 'gzip')
         del aman_solution
         del g3thwp
