@@ -22,8 +22,3 @@ Module containing functions for making splits of the data
 
 .. automodule:: sotodlib.obs_ops.splits
     :members:
-
-Reference
----------
-
-.. autofunction:: sotodlib.obs_ops.splits.det_splits_relative

@@ -20,8 +20,6 @@ def det_splits_relative(aman, det_left_right=False, det_upper_lower=False, det_i
 
     Returns
     -------
-    aman : AxisManager
-        Updated aman with the new flags
     fm: FlagManager with the requested flags
     """
 
@@ -55,10 +53,12 @@ def det_splits_relative(aman, det_left_right=False, det_upper_lower=False, det_i
 
     if not(wrap):
         if wrap == True:
-            aman.move('det_flags', None)
+            if 'det_flags' in aman._fields:
+                aman.move('det_flags', None)
             aman.wrap('det_flags', fm)
         else:
-            aman.move(wrap, None)
+            if wrap in aman._fields:
+                aman.move(wrap, None)
             aman.wrap(wrap, fm)
     return fm
 
