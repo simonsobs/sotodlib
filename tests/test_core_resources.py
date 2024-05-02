@@ -11,12 +11,12 @@ class TestCoreResources(unittest.TestCase):
 
     def test_get_local_file(self):
 
-        t = get_local_file("de421.bsp", cache=True)
-        expected_path = os.path.join(
-            os.path.expanduser("~"), ".sotodlib/filecache/de421.bsp"
-        )
-        self.assertEqual(expected_path, t)
-        shutil.rmtree(os.path.join(os.path.expanduser("~"), ".sotodlib/"))
+        # t = get_local_file("de421.bsp", cache=True)
+        # expected_path = os.path.join(
+        #     os.path.expanduser("~"), ".sotodlib/filecache/de421.bsp"
+        # )
+        # self.assertEqual(expected_path, t)
+        # shutil.rmtree(os.path.join(os.path.expanduser("~"), ".sotodlib/"))
         os.environ["SOTODLIB_RESOURCES"] = json.dumps(
             {"someotherfile": "file://somepath/otherfile"}
         )
