@@ -33,8 +33,12 @@ def main(configs, obs_id, wafer_slot,
     if tod_based_result_dir is None:
         tod_based_result_dir = configs.get('tod_based_result_dir')
     
-    res_deg = configs.get('res_deg')
-    edge_avoidance_deg = configs.get('edge_avoidance_deg')
+    xieta_bs_offset = configs.get('xieta_bs_offset', [0., 0.])
+    wafer_mask_deg = configs.get('wafer_mask_deg', 8.)
+    res_deg = configs.get('res_deg', 0.3)
+    edge_avoidance_deg = configs.get('edge_avoidance_deg', 0.3)
+    save_force_zero_roll = configs.get('save_force_zero_roll', True)
+    
     tune_by_tod = configs.get('tune_by_tod')
     R2_threshold = configs.get('R2_threshold')
     ds_factor = configs.get('ds_factor')
@@ -67,12 +71,14 @@ def main(configs, obs_id, wafer_slot,
     logger.info(f'Making single detector maps')    
     os.makedirs(single_det_maps_dir, exist_ok=True)
     map_hdf = os.path.join(single_det_maps_dir, f'{obs_id}_{wafer_slot}.hdf')
-    mbp.make_wafer_centered_maps(tod, sso_name, optics_config_fn, map_hdf=map_hdf, res=res_deg*coords.DEG)
+    mbp.make_wafer_centered_maps(tod, sso_name, optics_config_fn, map_hdf=map_hdf, 
+                                 xieta_bs_offset=xieta_bs_offset,
+                                 wafer_mask_deg=wafer_mask_deg, res_deg=res_deg)
     
     # reconstruct pointing from single detector maps
-    logger.info(f'Making map-based pointing results')
+    logger.info(f'Saving map-based pointing results')
     result_filename = f'focal_plane_{obs_id}_{wafer_slot}.hdf'
-    focal_plane_rset_map_based = mbp.get_xieta_from_maps(map_hdf, save=True,
+    fp_rset_map_based = mbp.get_xieta_from_maps(map_hdf, save=True,
                                                         output_dir=map_based_result_dir,
                                                         filename=result_filename,
                                                         force_zero_roll=False,
@@ -80,18 +86,27 @@ def main(configs, obs_id, wafer_slot,
     
     if tune_by_tod:
         focal_plane = core.AxisManager(tod.dets)
-        focal_plane.wrap('xi', focal_plane_rset_map_based['xi'], [(0, 'dets')])
-        focal_plane.wrap('eta', focal_plane_rset_map_based['eta'], [(0, 'dets')])
-        focal_plane.wrap('gamma', focal_plane_rset_map_based['gamma'], [(0, 'dets')])
-        is_low_R2 = focal_plane_rset_map_based['R2'] < R2_threshold
+        focal_plane.wrap('xi', fp_rset_map_based['xi'], [(0, 'dets')])
+        focal_plane.wrap('eta', fp_rset_map_based['eta'], [(0, 'dets')])
+        focal_plane.wrap('gamma', fp_rset_map_based['gamma'], [(0, 'dets')])
+        is_low_R2 = fp_rset_map_based['R2'] < R2_threshold
         focal_plane.xi[is_low_R2] = np.nan
         focal_plane.eta[is_low_R2] = np.nan
         
         tod.focal_plane = focal_plane
         tod.flags.move(sso_name, None)
         logger.info(f'Making tod-based pointing results')
-        focal_plane_rset_tod_based = up.update_xieta(tod, sso_name, ds_factor=ds_factor, save=True, 
-                                                    result_dir=tod_based_result_dir, filename=result_filename)
+        fp_rset_tod_based = up.update_xieta(tod, sso_name, ds_factor=ds_factor, save=True, 
+                                            result_dir=tod_based_result_dir, filename=result_filename)
+        
+    if save_force_zero_roll:
+        logger.info(f'Saving map-based pointing results (force-zero-roll)')
+        output_dir = map_based_result_dir + '_force_zero_roll'
+        fp_rset_map_based_force_zero_roll = mbp.get_xieta_from_maps(map_hdf, save=True,
+                                                            output_dir=output_dir,
+                                                            filename=result_filename,
+                                                            force_zero_roll=True,
+                                                            edge_avoidance = edge_avoidance_deg*coords.DEG)            
     return
 
 def get_parser():

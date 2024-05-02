@@ -108,8 +108,7 @@ def get_wafer_xieta(wafer_slot, optics_config_fn, xieta_bs_offset=(0., 0.),
     lon = fp_to_sky(wafer_r)
     
     q1 = quat.rotation_iso(lon, 0)
-    
-    q2 = quat.rotation_iso(0, 0, np.pi/2 - wafer_theta - roll_bs_offset)
+    q2 = quat.rotation_iso(0, 0, np.pi/2 - wafer_theta + roll_bs_offset)
     q3 = quat.rotation_xieta(xieta_bs_offset[0], xieta_bs_offset[1])
     q = q3 * q2 * q1
     
@@ -124,36 +123,39 @@ def get_wafer_xieta(wafer_slot, optics_config_fn, xieta_bs_offset=(0., 0.),
         focal_plane.wrap('eta', np.ones(tod.dets.count, dtype='float32') * eta_wafer, [(0, 'dets')])
         focal_plane.wrap('gamma', np.zeros(tod.dets.count, dtype='float32'), [(0, 'dets')])
         tod.wrap('focal_plane', focal_plane)
+        
+        # set boresight roll to zero
+        tod.boresight.wrap('roll_original', tod.boresight.roll, [(0, 'samps')])
         tod.boresight.roll *= 0.
+        
     return xi_wafer, eta_wafer
 
 
-def make_wafer_centered_maps(tod, planet, optics_config_fn, map_hdf, 
+def make_wafer_centered_maps(tod, sso_name, optics_config_fn, map_hdf, 
                            xieta_bs_offset=(0., 0.), roll_bs_offset=None,
-                           signal='signal', wcs_kernel=None, res=0.3*coords.DEG, cuts=None,):
+                           signal='signal', wafer_mask_deg=8., res_deg=0.3, cuts=None,):
     """
     Generate boresight-centered maps from Time-Ordered Data (TOD) for each individual detector.
 
     Parameters:
         tod : an axismanager object
-        planet (str): Name of the planet for which the trajectory is calculated.
+        sso_name (str): Name of the planet for which the trajectory is calculated.
         optics_config_fn (str): File name containing the optics configuration.
         map_hdf (str): Path to the HDF5 file where the maps will be saved.
         xieta_bs_offset (tuple): Offset in xieta coordinates for the boresight, default is (0., 0.).
         roll_bs_offset (float): Offset in roll angle for the boresight, default is None.
         signal (str): Name of the signal to be used, default is 'signal'.
         wcs_kernel (ndarray): WCS kernel for mapping, default is None.
-        res (float): Resolution of the map in degrees, default is 0.3 degrees.
+        res_deg (float): Resolution of the map in degrees, default is 0.3 degrees.
         cuts (tuple): Cuts to be applied to the map, default is None.
 
     Returns:
         None
     """
     
-    if wcs_kernel is None:
-        wcs_kernel = coords.get_wcs_kernel('car', 0, 0, res)
+
     
-    q_planet = get_planet_trajectry(tod, planet)
+    q_planet = get_planet_trajectry(tod, sso_name)
     q_bs = quat.rotation_lonlat(tod.boresight.az, tod.boresight.el)
     
     if roll_bs_offset is None:
@@ -170,25 +172,26 @@ def make_wafer_centered_maps(tod, planet, optics_config_fn, map_hdf,
                     optics_config_fn=optics_config_fn,
                     wrap_to_tod=True)
     
-    coords.planets.compute_source_flags(tod, center_on=planet, max_pix=100000000,
-                                wrap=planet, mask={'shape':'circle', 'xyr':[0,0,8]})
+    coords.planets.compute_source_flags(tod, center_on=sso_name, max_pix=100000000,
+                                wrap='source', mask={'shape':'circle', 'xyr':[0., 0., wafer_mask_deg]})
+    
+    
     
     q_wafer = quat.rotation_xieta(xi_wafer, eta_wafer)
-    sight = get_wafer_centered_sight(tod, planet, q_planet, q_bs, q_wafer)
-    
-
-        
+    sight = get_wafer_centered_sight(tod, sso_name, q_planet, q_bs, q_wafer)
     xi0 = tod.focal_plane.xi[0]
     eta0 = tod.focal_plane.eta[0]
-    xi_bs_offset, eta_bs_offset = xieta_bs_offset
-    
+    xi_bs_offset, eta_bs_offset = xieta_bs_offset    
     tod.focal_plane.xi *= 0.
     tod.focal_plane.eta *= 0.
     tod.boresight.roll *= 0.
     
+    
+    box = np.deg2rad([[-wafer_mask_deg, -wafer_mask_deg], [wafer_mask_deg, wafer_mask_deg]])
+    geom = enmap.geometry(pos=box, res=res_deg*coords.DEG)
     if cuts is None:
-        cuts = ~tod.flags[planet]
-    P = coords.P.for_tod(tod=tod, wcs_kernel=wcs_kernel, comps='T', cuts=cuts, sight=sight, threads=False)
+        cuts = ~tod.flags['source']
+    P = coords.P.for_tod(tod=tod, geom=geom, comps='T', cuts=cuts, sight=sight, threads=False)
     for di, det in enumerate(tqdm(tod.dets.vals)):
         det_weights = np.zeros(tod.dets.count, dtype='float32')
         det_weights[di] = 1.
@@ -337,8 +340,8 @@ def map_to_xieta(mT, edge_avoidance=1.0*coords.DEG, edge_check='nan',
     - beam_sigma_init (float, optional): Initial guess for the sigma parameter of the Gaussian beam, specified in radians. Defaults to 0.5 degree.
 
     Returns:
-    - xi_det (float): ξ coordinate of the detected peak.
-    - eta_det (float): η coordinate of the detected peak.
+    - xi_det (float): xi coordinate of the detected peak.
+    - eta_det (float): eta coordinate of the detected peak.
     - R2_det (float): Coefficient of determination (R^2) indicating the goodness of fit of the data around the peak.
                       If no valid peak is detected or if fitting fails, returns NaN.
     """
@@ -432,7 +435,7 @@ def get_xieta_from_maps(map_hdf_file,
                 
                 q1 = quat.rotation_xieta(xi, eta)
                 q2 = quat.rotation_xieta(xi_bs_offset, eta_bs_offset)
-                q3 = quat.rotation_iso(0, 0, roll_bs_offset)
+                q3 = quat.rotation_iso(0, 0, -roll_bs_offset) #
                 q = q3 * ~q2 * q1
                 xieta = quat.decompose_xieta(q)
                 xi, eta = xieta[0], xieta[1]
