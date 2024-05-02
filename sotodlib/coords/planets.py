@@ -1,11 +1,9 @@
-import os
 import re
 import datetime
 import logging
 
 import numpy as np
 
-from ast import literal_eval
 from scipy.optimize import fmin
 
 from astropy import units
