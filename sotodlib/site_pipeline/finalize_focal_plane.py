@@ -637,11 +637,14 @@ def main():
     parser.add_argument(
         "--per_obs", "-p", action="store_true", help="Run in per observation mode"
     )
+    parser.add_argument("--include_cm", "-i", action='store_true', help="Include the common mode in the final detector positions")
     args = parser.parse_args()
 
     # Open config file
     with open(args.config_path, "r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
+    per_obs = config.get("per_obs", args.per_obs)
+    include_cm = config.get("include_cm", args.include_cm)
 
     # Load data
     if "context" in config:
@@ -653,7 +656,6 @@ def main():
 
     # Build output path
     append = config.get("append", "")
-    per_obs = config.get("per_obs", args.per_obs)
     froot = f"focal_plane{bool(append)*'_'}{append}{per_obs*('_'+obs_ids[0])}"
     dbroot = f"db{bool(append)*'_'}{append}"
     subdir = config.get("subdir", "")
@@ -961,13 +963,17 @@ def main():
                     - (fp.transform.affine @ (full_cm.shift)[..., None])[:, 0]
                 )
                 fp.transform_nocm.decompose()
+                # Remove the common mode if desired 
+                if not include_cm:
+                    fp.transformed = fp.transform_nocm.affine @ fp.template.fp + fp.transform_nocm.shift[..., None]
+
 
         # Make final outputs and save
         logger.info("Saving data to %s", outpath)
         logger.info("Writing to database at %s", dbpath)
         db, base = _create_db(dbpath, per_obs=per_obs, obs_id=obs_ids[0])
         with h5py.File(outpath, "w") as f:
-            _add_attrs(f["/"], {"center": origin, "center_transformed": recv_center})
+            _add_attrs(f["/"], {"center": origin, "center_transformed": recv_center, "include_cm": include_cm})
             f.create_group("transform")
             _add_attrs(
                 f["transform"],
