@@ -296,7 +296,7 @@ def main(
         max_ctime: Optional[int] = None,
         update_delay: Optional[int] = None,
         write_block: Optional[int] = 10,
-        nthreads: Optional[int] = 4
+        nproc: Optional[int] = 4
  ):
     configs, context = _get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess")
@@ -343,13 +343,15 @@ def main(
                 run_list.append( (obs, groups) )
 
     # Setup multiprocessing pool.
-    pool = multiprocessing.Pool(processes=nthreads) 
+    pool = multiprocessing.Pool(processes=nproc) 
 
     # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
     # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
     # whenever the file size exceeds 10 GB.
     nfile = 0
     dest_file = os.path.splitext(configs['archive']['policy']['filename'])[0]+'_'+str(nfile).zfill(3)+'.h5'
+    if not(os.path.exists(dest_file)):
+            os.makedirs(dest_file)
     while os.path.getsize(dest_file) > 10e9:
         nfile += 1
         dest_file = os.path.splitext(dest_file)[0]+str(nfile).zfill(3)+'.h5'
@@ -369,6 +371,8 @@ def main(
         outputs = [r.get() for r in async_out]
         db = _get_preprocess_db(configs, group_by)
         all_files = []
+        if not(os.path.exists(dest_file)):
+            os.makedirs(dest_file)
         if os.path.getsize(dest_file) >= 10e9:
             nfile += 1
             dest_file = os.path.splitext(dest_file)[0]+'_'+str(nfile).zfill(3)+'.h5'
