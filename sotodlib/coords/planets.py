@@ -250,22 +250,8 @@ def _get_astrometric(source_name, timestamp, site="_default"):
     Returns:
       astrometric: skyfield's astrometric object
     """
-    # Get the ephemeris -- this will trigger a 16M download on first use.
-    resource_paths = literal_eval(os.environ.get("SOTODLIB_RESOURCES", "{}"))
-
-    de_url = resource_paths.get("de421.bsp", "")
-    logger.debug("Using {de_url} for planet astropy util data.")
-    if de_url.startswith("ftp://"):
-        de_filename = au_data.download_file(de_url, cache=True)
-    elif de_url.startswith("file://"):
-        de_filename = de_url[7:]
-    else:
-        raise RuntimeError(
-            "'de421.bsp' path not a POSIX or FTP path. Please set environment"
-            + " variable SOTODLIB_RESOURCES as a JSON. Include 'de421.bsp' as "
-            + "the key and use 'file://' for a POSIX path or "
-            + "'ftp://' to download the file from an FTP server"
-        )
+    # Get the ephemeris
+    de_filename = core.get_local_file("de421.bsp")
 
     planets = jpllib.SpiceKernel(de_filename)
     for k in [
