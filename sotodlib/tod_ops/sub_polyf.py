@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 import logging
 from scipy.special import eval_legendre
@@ -113,7 +114,8 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
             norm_vector = 2./(2.*norm_vector+1)
             
             # Get each subscan to be filtered & subtract mean
-            tod_mat = signal[:,subscan[0]:subscan[1]+1]
+            tod_mat = copy.deepcopy(signal[:,subscan[0]:subscan[1]+1])
+            tod_mat_org = copy.deepcopy(tod_mat)
             means = np.mean(tod_mat,axis=1)[:,np.newaxis]
             tod_mat -= means
 
@@ -175,7 +177,7 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
             model += means
             tod_mat += means
 
-            signal[:,subscan[0]:subscan[1]+1] = tod_mat
+            signal[:,subscan[0]:subscan[1]+1] = tod_mat_org
             signal[:,subscan[0]:subscan[1]+1] -= model
 
     if in_place:
