@@ -314,6 +314,10 @@ class LoadSpec:
     end: float
     "End time to load"
 
+    downsample_factor: int = 1
+    "Downsample factor for data"
+
+
     def __post_init__(self):
         fs = []
         for f in self.fields:
@@ -391,6 +395,7 @@ def load_hk(load_spec: LoadSpec, show_pb=False):
             if field.matches(f):
                 result[key] = [[], []]
         return None
+    ds_factor = load_spec.downsample_factor
 
     nframes = np.sum([len(offsets) for offsets in file_spec.values()])
     pb = tqdm(total=nframes, disable=(not show_pb))
@@ -402,13 +407,13 @@ def load_hk(load_spec: LoadSpec, show_pb=False):
             addr = frame['address']
             _, agent, _, feed = addr.split('.')
             for block in frame['blocks']:
-                ts = np.array(block.times) / spt3g_core.G3Units.s
+                ts = np.array(block.times)[::ds_factor] / spt3g_core.G3Units.s
                 for field_name, data in block.items():
                     field = get_result_field(agent, feed, field_name)
                     if field is None:
                         continue
                     field[0].append(ts)
-                    field[1].append(np.array(data))
+                    field[1].append(np.array(data)[::ds_factor])
             pb.update()
     pb.close()
     for k, d in result.items():
