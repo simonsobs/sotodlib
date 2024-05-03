@@ -1024,14 +1024,20 @@ def get_hk_files(hkdir, start, stop, tbuff=10*60):
         files.extend([os.path.join(subpath, f) for f in os.listdir(subpath)])
 
     files = np.array(sorted(files))
-    file_times = np.array([int(os.path.basename(f).split('.')[0]) for f in files])
+    file_times = np.array(
+        [int(os.path.basename(f).split('.')[0]) for f in files]
+    )
 
     m = (start-tbuff <= file_times) & (file_times < stop+tbuff)
     if not np.any(m):
-        return []
-
+        check = np.where( file_times <= start )
+        if len(check) < 1:
+            raise ValueError("Cannot find HK files we need")
+        fidxs = [check[0][-1]]
+    else:
+        fidxs = np.where(m)[0]
     # Add files before and after for good measure
-    fidxs = np.where(m)[0]
+    
     i0, i1 = fidxs[0], fidxs[-1]
     if i0 > 0:
         m[i0 - 1] = 1
