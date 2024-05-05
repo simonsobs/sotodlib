@@ -344,12 +344,11 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=
     obs.wrap("weather", np.full(1, "toco"))
     obs.wrap("site",    np.full(1, site))
     # Restrict non optical detectors, which have nans in their focal plane coordinates and will crash the mapmaking operation.
-    obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
     # Union of flags into glitch_flags.
     #obs.flags.wrap('glitch_flags', obs.preprocess.turnaround_flags.turnarounds + obs.preprocess.jumps_2pi.jump_flag + obs.preprocess.glitches.glitch_flags, )
     obs.flags.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape[:2]),[(0, 'dets'), (1, 'samps')]) # This is a glitch_flags full of 0s when we don't have the preprocess data base
-    good_dets = mapmaking.find_usable_detectors(obs)
-    if obs.signal is not None and len(good_dets)>0:
+    if obs.signal is not None:
+        obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
         # this will happen in the read_tod call, where we will add the detector flags
         if det_left_right or det_in_out or det_upper_lower:
             # we add a flagmanager for the detector flags
@@ -713,27 +712,11 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, dtype_tod=np.flo
         obs_id, detset, band, obs_ind = obslist[ind]
         try:
             tod = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, no_signal=True)
-            #tod = calibrate_obs_with_preprocessing(tod, dtype_tod=dtype_tod, site=site)
-            tod = calibrate_obs_otf(tod, dtype_tod=dtype_tod, site=site)
-            #tod = calibrate_obs_tomoki(tod, dtype_tod=dtype_tod, site=site)
-            if only_hits==False:
-                ra_ref_start, ra_ref_stop = get_ra_ref(tod)
-                my_ra_ref.append((ra_ref_start/utils.degree, ra_ref_stop/utils.degree))
-            else:
-                my_ra_ref.append(None)
-            my_tods.append(tod)
-            my_inds.append(ind)
-        except RuntimeError: continue
-    return my_tods, my_inds, my_ra_ref
-
-def read_tods_second(context, obslist, inds=None, dtype_tod=np.float32, only_hits=False, site='so_sat1'):
-    my_tods = []
-    my_inds = []
-    my_ra_ref = []
-    for ind in range(len(obslist)):
-        obs_id, detset, band, obs_ind = obslist[ind]
-        try:
-            tod = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, no_signal=True)
+            to_remove = []
+            for field in tod._fields:
+                if field!='obs_info' and field!='flags' and field!='signal' and field!='focal_plane' and field!='timestamps' and field!='boresight': to_remove.append(field)
+            for field in to_remove:
+                tod.move(field, None)
             #tod = calibrate_obs_with_preprocessing(tod, dtype_tod=dtype_tod, site=site)
             tod = calibrate_obs_otf(tod, dtype_tod=dtype_tod, site=site)
             #tod = calibrate_obs_tomoki(tod, dtype_tod=dtype_tod, site=site)
@@ -990,11 +973,17 @@ def main(config_file=None, defaults=defaults, **args):
     my_tods_2, my_inds_2, my_costs = [[a[vi] for vi in valid] for a in [my_tods, my_inds, my_costs]]
     all_inds     = utils.allgatherv(my_inds_2, comm)
     all_costs    = utils.allgatherv(my_costs, comm)
+    all_tods_2   = comm.allgather(my_tods_2)
+    all_ra_ref   = comm.allgather(my_ra_ref)
+    all_tods_flatten = [x for xs in all_tods_2 for x in xs]
+    all_ra_ref_flatten = [x for xs in all_ra_ref for x in xs]
     mask_weights = utils.equal_split(all_costs, comm.size)[comm.rank]
     my_inds_2    = all_inds[mask_weights]
-    del obslist, my_tods, my_inds, my_ra_ref, my_tods_2, my_costs, valid, all_inds, all_costs, mask_weights
+    my_tods      = [all_tods_flatten[idx] for idx in mask_weights]
+    my_ra_ref    = [all_ra_ref_flatten[idx] for idx in mask_weights]
+    del obslist, my_inds, my_costs, valid, my_tods_2, all_inds, all_costs, all_tods_2, all_tods_flatten, all_ra_ref, all_ra_ref_flatten, mask_weights
 
-    for oi in my_inds_2:
+    for idx,oi in enumerate(my_inds_2):
         pid, detset, band = obskeys[oi]
         obslist = obslists[obskeys[oi]]
         t       = utils.floor(periods[pid,0])
@@ -1013,25 +1002,25 @@ def main(config_file=None, defaults=defaults, **args):
         try:
             # 1. read in the metadata and use it to determine which tods are
             #    good and estimate how costly each is
-            my_tods, my_inds, my_ra_ref = read_tods_second(context, obslist, dtype_tod=args['dtype_tod'], only_hits=args['only_hits'] )
-
+            #my_tods, my_inds, my_ra_ref = read_tods_second(context, obslist, dtype_tod=args['dtype_tod'], only_hits=args['only_hits'] )
+            my_tods_atomic = [my_tods[idx]] ; my_ra_ref_atomic = [my_ra_ref[idx]]
             # this is for the tags
             if not args['only_hits']:
                 if split_labels is None:
                     # this means the mapmaker was run without any splits requested
-                    tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), 'full', 'full', cwd+'/'+prefix+'_full', obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref[0][0], my_ra_ref[0][1], 0.0) )
+                    tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), 'full', 'full', cwd+'/'+prefix+'_full', obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref_atomic[0][0], my_ra_ref_atomic[0][1], 0.0) )
                 else:
                     # splits were requested and we loop over them
                     for split_label in split_labels:
-                        tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), split_label, '', cwd+'/'+prefix+'_%s'%split_label, obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref[0][0], my_ra_ref[0][1], 0.0) )
+                        tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), split_label, '', cwd+'/'+prefix+'_%s'%split_label, obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref_atomic[0][0], my_ra_ref_atomic[0][1], 0.0) )
 
             # 2. estimate the scan profile and footprint. The scan profile can be done
             #    with a single task, but that task might not be the first one, so just
             #    make it mpi-aware like the footprint stuff
             my_infos = [obs_infos[obslist[0][3]]]
             if recenter is None:
-                profile  = find_scan_profile(context, my_tods, my_infos, comm=comm_intra)
-                subshape, subwcs = find_footprint(context, my_tods, wcs, comm=comm_intra)
+                profile  = find_scan_profile(context, my_tods_atomic, my_infos, comm=comm_intra)
+                subshape, subwcs = find_footprint(context, my_tods_atomic, wcs, comm=comm_intra)
             else:
                 profile = None
                 subshape = shape
