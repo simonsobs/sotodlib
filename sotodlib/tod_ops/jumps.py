@@ -62,6 +62,7 @@ def _jumpfinder(
     x: NDArray[np.floating],
     min_size: Optional[Union[float, NDArray[np.floating]]] = None,
     win_size: int = 20,
+    exact: bool = False,
 ) -> NDArray[np.bool_]:
     """
     Matched filter jump finder.
@@ -73,6 +74,9 @@ def _jumpfinder(
         min_size: The smallest jump size counted as a jump.
 
         win_size: Size of window used when peak finding.
+
+        exact: Flag only the jump locations if True.
+               If False flag the whole window (cheaper).
 
     Returns:
 
@@ -104,24 +108,24 @@ def _jumpfinder(
         return jumps.reshape(orig_shape)
 
     # Take cumulative sum, this is equivalent to convolving with a step
+    x_step = np.zeros_like(x)
     win_size += win_size % 2  # Odd win size adds a wierd phasing issue
     half_win = int(win_size / 2)
     x_br = block_mean_filter(x[msk], win_size)
-    x_step = np.abs(np.cumsum(x[msk] - x_br, axis=-1))
+    x_step[msk] = np.abs(np.cumsum(x[msk] - x_br, axis=-1))
 
     # If the jump is at a multiple of win_size we will miss it so also do a shifted filter
     x_br_shift = block_mean_filter(x[msk, half_win:], win_size)
-    x_step[:, half_win:] = np.maximum(
-        x_step[:, half_win:],
+    x_step[msk, half_win:] = np.maximum(
+        x_step[msk, half_win:],
         np.abs(np.cumsum(x[msk, half_win:] - x_br_shift, axis=-1)),
     )  # TODO: Is there something better than using the max for this?
 
     # Because of the shift the closest to a window edge we can be in win_size/4
     # In this case the slope of the shorter segment is ~3*height/4
     # So the peaks should be at least (3*win_size*min_size)/16
-    # Using a denominator of 20 to be conservative
     if isinstance(min_size, np.ndarray):
-        _min_size = (3 * win_size * min_size[msk] / 16)[..., None]
+        _min_size = (3 * win_size * min_size / 16)[..., None]
     else:
         _min_size = 3 * win_size * min_size / 16
     x_step[x_step < _min_size] = 0
@@ -134,17 +138,23 @@ def _jumpfinder(
     if n_labels == 0:
         return jumps.reshape(orig_shape)
     peaks = simg.find_objects(labels)
-    label_idx = [
-        l + 1 for l, (_, peak) in enumerate(peaks) if peak.stop - peak.start > half_win
-    ]
-    peak_idx = np.array(simg.maximum_position(x_step, labels, label_idx))
-    jump_rows = peak_idx[:, 0]
-    jump_cols = peak_idx[:, 1]
-    jumps[np.flatnonzero(msk)[jump_rows], jump_cols] = True
 
-    # Get peaks, since be took the abs we just meed maxima
-    # jump_rows, jump_cols = sig.argrelmax(x_step, axis=-1, order=win_size)
-    # jumps[np.flatnonzero(msk)[jump_rows], jump_cols] = True
+    if exact:
+        label_idx = [
+            l + 1
+            for l, (_, peak) in enumerate(peaks)
+            if peak.stop - peak.start > half_win
+        ]
+        peak_idx = np.array(simg.maximum_position(x_step, labels, label_idx))
+        jump_rows = [peak_idx[:, 0]]
+        jump_cols = peak_idx[:, 1]
+        jumps[jump_rows, jump_cols] = True
+    else:
+        peaks = [
+            (rows, cols) for rows, cols in peaks if cols.stop - cols.start > half_win
+        ]
+        for jump_rows, jump_cols in peaks:
+            jumps[jump_rows, jump_cols] = True
 
     return jumps.reshape(orig_shape)
 
@@ -582,6 +592,7 @@ def find_jumps(
     min_sigma=...,
     min_size=...,
     win_size=...,
+    exact=...,
     fix: Literal[False] = False,
     inplace=...,
     merge=...,
@@ -600,6 +611,7 @@ def find_jumps(
     min_sigma=...,
     min_size=...,
     win_size=...,
+    exact=...,
     fix: Literal[True] = True,
     inplace=...,
     merge=...,
@@ -617,6 +629,7 @@ def find_jumps(
     min_sigma: Optional[float] = None,
     min_size: Optional[Union[float, NDArray[np.floating]]] = None,
     win_size: int = 20,
+    exact: bool = False,
     fix: bool = False,
     inplace: bool = False,
     merge: bool = True,
@@ -649,6 +662,9 @@ def find_jumps(
 
         win_size: Size of window used when peak finding.
                   Also used for height estimation, should be of order jump width.
+
+        exact: If True search for the exact jump location and buffer.
+               If False flag the whole window (cheaper).
 
         fix: Set to True to fix.
 
@@ -704,11 +720,14 @@ def find_jumps(
     slices[-1] = slice(slices[-1].start, len(_signal))
     with concurrent.futures.ThreadPoolExecutor() as e:
         jump_futures = [
-            e.submit(_jumpfinder, _signal[s], min_size[s], win_size) for s in slices
+            e.submit(_jumpfinder, _signal[s], min_size[s], win_size, exact)
+            for s in slices
         ]
     jumps = np.vstack([j.result() for j in jump_futures]).reshape(orig_shape)
 
-    jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
+    jump_ranges = RangesMatrix.from_mask(jumps)
+    if exact:
+        jump_ranges = jump_ranges.buffer(int(win_size / 2))
     jumps = jump_ranges.mask()
     heights = estimate_heights(signal, jumps, win_size=win_size)
 
