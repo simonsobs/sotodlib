@@ -124,10 +124,12 @@ def _jumpfinder(
     # Because of the shift the closest to a window edge we can be in win_size/4
     # In this case the slope of the shorter segment is ~3*height/4
     # So the peaks should be at least (3*win_size*min_size)/16
+    # We want to include peaks of that size so we use a denominator of 32
+    # Note that after this filtering we are left with at least win_size/4 width
     if isinstance(min_size, np.ndarray):
-        _min_size = (3 * win_size * min_size / 16)[..., None]
+        _min_size = (3 * win_size * min_size / 32)[..., None]
     else:
-        _min_size = 3 * win_size * min_size / 16
+        _min_size = 3 * win_size * min_size / 32
     x_step[x_step < _min_size] = 0
 
     # We may have some noise that show up as spurious peaks
@@ -151,7 +153,9 @@ def _jumpfinder(
         jumps[jump_rows, jump_cols] = True
     else:
         peaks = [
-            (rows, cols) for rows, cols in peaks if cols.stop - cols.start > half_win
+            (rows, cols)
+            for rows, cols in peaks
+            if cols.stop - cols.start >= half_win / 2
         ]
         for jump_rows, jump_cols in peaks:
             jumps[jump_rows, jump_cols] = True
