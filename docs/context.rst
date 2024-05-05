@@ -414,10 +414,87 @@ syntax::
         unpack: 'special&my_special_vector'
 
 
+Example 3
+---------
+
+In this example we store a calibration table, with a separate number
+for each passband value.
+
+.. code-block:: python
+
+    from sotodlib import core
+    import sotodlib.io.metadata as io_meta
+
+    # This cal result has one number per wafer x passband.
+    data = [
+        ('ws0', 'f090', 1.02),
+        ('ws1', 'f090', 1.00),
+        ('ws2', 'f090', 1.08),
+        ('ws0', 'f150', 0.95),
+        ('ws1', 'f150', 0.98),
+        ('ws2', 'f150', 0.96),
+        ('ws0', 'NC',   1.00),
+        ('ws1', 'NC',   1.00),
+        ('ws2', 'NC',   1.00),
+    ]
+
+    # Write to HDF5
+    rs = core.metadata.ResultSet(
+	keys=['dets:wafer_slot', 'dets:bandpass', 'cal'])
+    rs.rows = data
+    io_meta.write_dataset(rs, 'db.h5', 'bandpass_cal')
+
+    # Record in ManifestDb.
+    db = core.metadata.ManifestScheme(). \
+        add_data_field('dataset'). \
+        new_db()
+    db.add_entry({'dataset': 'bandpass_cal'}, filename='db.h5')
+    db.to_file('db.sqlite')
+
+
+Example 4
+---------
+
+This example uses an AxisManager to store a generic data structure
+that is not tied to specific detectors (and also does not refer to the
+"samps" axis).  It also uses ``obs:timestamp`` to index the results.
+
+.. code-block:: python
+
+    from sotodlib import core
+
+    # Model data (t0, t1, scale, offset)
+    data = [
+        (1700000000., 1800000000., 1.00, 4.50),
+        (1800000000., 1900000000., 0.98, 4.42),
+    ]
+
+    # Get a new database ready
+    db = core.metadata.ManifestScheme(). \
+        add_range_match('obs:timestamp'). \
+        add_data_field('dataset'). \
+        new_db()
+
+    # Store each dataset to HDF5 and add record to ManifestDb.
+    filename = 'db.h5'
+    for dset, (t0, t1, scale, offset) in enumerate(data):
+        group = f'encoder_model_{dset}'
+        output = core.AxisManager()
+        output.wrap('model_version', 'v1')
+        output.wrap('scale', scale)
+        output.wrap('offset', offset)
+        output.save(filename, group=group)
+	db.add_entry({'obs:timestamp': (t0, t1), 'dataset': group},
+	             filename=filename)
+
+    # Save db.
+    db.to_file('db.sqlite')
+
+
 Tips
 ----
 
-If this is example is almost, but not quite, what you need, consider the
+If these examples are almost, but not quite, what you need, consider the
 following:
 
 - You can use multiple HDF5 files in your Metadata Archive -- the

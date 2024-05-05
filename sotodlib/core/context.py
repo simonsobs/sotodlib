@@ -6,6 +6,7 @@ import logging
 import numpy as np
 
 from . import metadata
+from .util import tag_substr
 from .axisman import AxisManager, OffsetAxis, AxisInterface
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ class Context(odict):
         self['tags'] = self._get_warn_missing('tags', {})
 
         # Perform recursive substitution on strings defined in tags.
-        self._subst(self)
+        tag_substr(self, self['tags'])
 
         # Load basic databases.
         self.reload(load_list)
@@ -102,27 +103,6 @@ class Context(odict):
             return
         logger.info('Calling hook for %s: %s' % (hook_key, hook_func))
         hook_func(self, *args, **kwargs)
-
-    def _subst(self, dest, max_recursion=20):
-        # Do string substitution of all our tags into dest (in-place
-        # if dest is a dict).
-        assert(max_recursion > 0)  # Too deep this dictionary.
-        if isinstance(dest, str):
-            # Keep subbing until it doesn't change any more...
-            new = dest.format(**self['tags'])
-            while dest != new:
-                dest = new
-                new = dest.format(**self['tags'])
-            return dest
-        if isinstance(dest, list):
-            return [self._subst(x) for x in dest]
-        if isinstance(dest, tuple):
-            return (self._subst(x) for x in dest)
-        if isinstance(dest, dict):
-            for k, v in dest.items():
-                dest[k] = self._subst(v, max_recursion-1)
-            return dest
-        return dest
 
     def _get_warn_missing(self, k, default=None):
         if not k in self:
