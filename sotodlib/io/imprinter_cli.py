@@ -44,12 +44,21 @@ def main(
             raise ValueError(f"Output root {output_root} does not exist")
         imprint.docker_output_root = imprint.output_root
         imprint.output_root = output_root
+        print(
+            f"Imprinter output root changed from {imprint.docker_output_root}"
+            f"to {imprint.output_root}"
+        )
     else:
         imprint.docker_output_root = None
     if g3_config is not None:
         if not os.path.exists(g3_config):
             raise ValueError(f"G3tSmurf config file {g3_config} does not exist")
+        print(
+            f"Imprinter g3tsmurf config changed from {imprint.g3tsmurf_config}"
+            f"to {g3_config}"
+        )
         imprint.g3tsmurf_config = g3_config
+
 
     if action == 'failed':
         check_failed_books(imprint)

@@ -4,6 +4,22 @@ import numpy as np
 from ..core import metadata
 
 
+def _has_tag(root, keys):
+    keys = keys.split(".")
+    for key in keys:
+        if key in root:
+            root = root[key]
+        else:
+            return False
+    return True
+
+def _get_tag(root, keys, i):
+    keys = keys.split(".")
+    for key in keys:
+        root = root[key]
+    return root[i]
+
+
 class QAMetric(object):
     """ Base class for quality assurance metrics to be recorded in Influx,
     derived from processed metadata files.
@@ -86,8 +102,6 @@ class QAMetric(object):
             raise Exception(f"Metadata does not correspond to obs_id {obs_id}.")
         line = self._process(meta)
         log_tags = {"observation": obs_id}  # used to identify this entry
-        for t in line["tags"]:  # make sure this is also recorded in metric itself
-            t.update(log_tags)
         self.monitor.record(**line, log=self._influx_log, measurement=self._influx_meas, log_tags=log_tags)
         self.monitor.write()
 
@@ -113,12 +127,14 @@ class PreprocessQA(QAMetric):
     """
 
     _influx_meas = "preprocesstod"
+    _process_args = {}
 
-    def __init__(self, context, monitor, process_name, **kwargs):
+    def __init__(self, context, monitor, process_name, process_args={}, **kwargs):
         """ In addition to the context and monitor, pass the name of the
         preprocess process to record. It should have a `gen_metric` method
         implemented and `_influx_field` attribute.
         """
+        self._process_args = process_args
         super().__init__(context, monitor, **kwargs)
 
         from sotodlib.preprocess import Pipeline
@@ -131,17 +147,97 @@ class PreprocessQA(QAMetric):
         self._influx_field = self._pipe_proc._influx_field
 
     def _process(self, meta):
-        return self._pipe_proc.gen_metric(meta, meta.preprocess)
+        return self._pipe_proc.gen_metric(meta, meta.preprocess, **self._process_args)
 
     def _get_available_obs(self):
         # find preprocess manifest file
-        man_file = [p["db"] for p in self.context["metadata"] if p.get("name", "") == "preprocess"]
+        man_file = [p["db"] for p in self.context["metadata"] if p.get("label", "") == "preprocess"]
         if len(man_file) == 0:
             raise Exception(f"No preprocess metadata block in context {self.context.filename}.")
 
         # load manifest and read available observations
         man_db = metadata.ManifestDb.from_file(man_file[0])
         return [o[0] for o in man_db.get_entries(["\"obs:obs_id\""]).asarray()]
+
+
+# inherit from PreprocessQA to reuse available_obs method
+class PreprocessValidDets(PreprocessQA):
+    """A metric for the number of detectors deemed valid at the end of the preprocesstod
+    processing. For each wafer slot and bandpass, the number of detectors for which the
+    fraction of samples that were valid is greater than a configurable threshold is recorded.
+
+    The config entry supports a `process_args` block where the following options can be
+    specified:
+
+    tags : list
+        Keys into `metadata.det_info` to record as tags with the Influx line.
+        Added to the default list ["wafer_slot", "tel_tube", "wafer.bandpass"].
+    thresh : float
+        The threshold for the fraction of valid samples above which a detector is
+        deemed good (default 0.75)
+    process_name : str
+        The process from which to read the valid dataset. (default 'glitches')
+
+    """
+
+    _influx_meas = "preprocesstod"
+    _influx_field = "num_valid_dets"
+
+    def __init__(
+        self,
+        *args,
+        process_args={},
+        **kwargs
+    ):
+        # bypass the PreprocessQA __init__
+        super(PreprocessQA, self).__init__(*args, **kwargs)
+        # extract parameters
+        self._tags = process_args.get("tags", [])
+        self._thresh = process_args.get("thresh", 0.75)
+        self._key = process_args.get("process_name", "glitches")
+
+    def _process(self, meta):
+
+        # add specified tags
+        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
+        tag_keys += [t for t in self._tags if t not in tag_keys]
+
+        # record one metric per wafer slot, per bandpass
+        # extract these tags for the metric
+        tags = []
+        vals = []
+        for bp in np.unique(meta.det_info.wafer.bandpass):
+            for ws in np.unique(meta.det_info.wafer_slot):
+                subset = np.where(
+                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
+                )[0]
+
+                # Compute the number of samples that are valid
+                frac_valid = np.array([
+                    np.dot(r.ranges(), [-1, 1]).sum() / len(subset)
+                    for r in meta.preprocess[self._key].valid[subset]
+                ])
+
+                # Count detectors with fraction valid above threshold
+                n_good = (frac_valid > self._thresh).sum()
+
+                # get the tags for this wafer (all detectors in this subset share these)
+                tags_i = {
+                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                }
+                tags_i["telescope"] = meta.obs_info.telescope
+
+                # add tags and values to respective lists in order
+                vals.append(n_good)
+                tags.append(tags_i)
+
+        obs_time = [meta.obs_info.timestamp] * len(vals)
+        return {
+            "field": self._influx_field,
+            "values": vals,
+            "timestamps": obs_time,
+            "tags": tags,
+        }
 
 
 class HWPSolQA(QAMetric):
@@ -169,7 +265,7 @@ class HWPSolQA(QAMetric):
 
     def _get_available_obs(self):
         # find preprocess manifest file
-        man_file = [p["db"] for p in self.context["metadata"] if p.get("name", "") == "hwp_solution"]
+        man_file = [p["db"] for p in self.context["metadata"] if p.get("label", "") == "hwp_solution"]
         if len(man_file) == 0:
             raise Exception(f"No hwp_solution metadata block in context {self.context.filename}.")
 
