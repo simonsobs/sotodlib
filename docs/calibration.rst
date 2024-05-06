@@ -60,6 +60,15 @@ Finally, the AxisManager has the field of ``gamma_cal`` that has:
  - ``'background_pol_rad'``: the direction of the center offset
  - ``'theta_det_instr'``: estimated instrumental polarization response direction
 
+Background
+----------
+
+Wire grid calibration is based on the model
+
+.. math::
+
+    \mathrm{d} = \mathrm{I}_{\mathrm{in}} + \left[A_{\mathrm{wire}}e^{2i\theta_\mathrm{wire}} + A_{\mathrm{background}}e^{2i\theta_\mathrm{bg}} +\mathcal{O}(\varepsilon) \left(\mathrm{CMB, sky}\right)\right]\exp i\left[-4\theta_{\mathrm{HWP}} + 2\theta_{\mathrm{det}}\right] + c.c.
+
 .. automodule:: sotodlib.site_pipeline.calibration.wiregrid
     :members:
     :undoc-members:
