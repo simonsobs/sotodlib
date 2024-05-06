@@ -54,8 +54,7 @@ Finally, the AxisManager has the field of ``gamma_cal`` that has:
 
  - ``'gamma'``: gamma, theta_det by the wire grid calibration
  - ``'gamma_err'``: statistical errors on gamma
- - ``'wires_relative_power'``: input power of the wire grid itself,
-    that is, input QU minus the center offset
+ - ``'wires_relative_power'``: input power of the wire grid itself, that is, input QU minus the center offset
  - ``'background_pol_relative_power'``: center offset in the QU plane
  - ``'background_pol_rad'``: the direction of the center offset
  - ``'theta_det_instr'``: estimated instrumental polarization response direction
@@ -69,31 +68,40 @@ Wire grid calibration is based on the model
 
     \mathrm{d} = \mathrm{I}_{\mathrm{in}} + \left[A_{\mathrm{wire}}\ e^{2i\theta_\mathrm{wire}} + A_{\mathrm{background}}\ e^{2i\theta_\mathrm{bg}} +\mathcal{O}(\varepsilon) \left(\mathrm{CMB, sky}\right)\right]\exp i\left[-4\theta_{\mathrm{HWP}} + 2\theta_{\mathrm{det}}\right] + c.c.
 
-In this representation, :math:`d` is a time-ordered measurements consists of
-the Intensity of the input power,:math:`I_\mathrm{in}` and the polarization terms of
+In this representation, :math:`\mathrm{d` is a time-ordered measurements consists of
+the Intensity of the input power, :math:`\mathrm{I}_\mathrm{in}` and the polarization terms of
 some static background :math:`A_\mathrm{background}`, wires power :math:`A_\mathrm{wire}`,
 sky signal, and tiny amount of CMB.
 
-The static background polarization and the wire signal have polarization angle dependencies respectively,
-:math:`2\theta_\mathrm{wire}`, and :math:`2\theta_\mathrm{background}`.
-The demodulation by the HWP and the projection of the polarization response direction of each detector are
-multiplied as the overall factor.
+The static background polarization and the wire signal have polarization angle dependencies,
+:math:`2\theta_\mathrm{wire}`, and :math:`2\theta_\mathrm{background}`, respectively.
+The demodulation by the HWP and the projection by the detector polarization response directions
+are multiplied as the overall factor in the polarization term.
 
-Unwrapping the charateristic of HWP from the TOD (demodulation) gives static background polarization and
-signal polarized in wires' direction independently
+Unwrapping the charateristic of HWP from the TOD (Demodulation) gives the static background
+polarization and the polarized signal by wires independently
 
 .. math::
 
     \mathcal{F}_{\mathrm{BP}}\left[\mathrm{d}\right] \times \exp(4i\theta_{\mathrm{HWP}}) & \simeq A_{\mathrm{background}}\ e^{2i\theta_{\mathrm{bg}}+2i\theta_\mathrm{det}} + A_{\mathrm{wire}}\ e^{2i\theta_{\mathrm{wire}}+2i\theta_\mathrm{det}} \\
     & = (Q_\mathrm{offset} + iU_\mathrm{offset}) + (Q_\mathrm{wire} + iU_\mathrm{wire})
 
-Finally, one can get the calibrated polarization response directions by removing the direction of wires from the input polarization
+The calibrated polarization response directions, ``'gamma'``, can be obtained by removing
+the direction of wires from the input polarization
 
 .. math::
 
-    \Phi & \equiv \arctan\frac{U_{\mathrm{cal}} - U_\mathrm{offset}}{Q_{\mathrm{cal}} - Q_\mathrm{offset}} = 2\theta_{\mathrm{det}}+2\theta_{\mathrm{wire}} \\
+    \Phi & \equiv \arctan\frac{U_{\mathrm{wire}} - U_\mathrm{offset}}{Q_{\mathrm{wire}} - Q_\mathrm{offset}} = 2\theta_{\mathrm{det}}+2\theta_{\mathrm{wire}} \\
     \theta_{\mathrm{det}} & = \frac{1}{2}\left[\Phi-2\theta_{\mathrm{wire}}\right]
 
+This module gives the result of calibration as fields like:
+
+ - ``'gamma'``: :math:`\theta_\mathrm{det}`,
+ - ``'gamma_err'``: :math:`\sigma (\theta_\mathrm{det})`,
+ - ``'wires_relative_power'``: :math:`\arctan({U_{\mathrm{wire}} - U_\mathrm{offset}} / {Q_{\mathrm{wire}} - Q_\mathrm{offset}})`,
+ - ``'background_pol_relative_power'``: :math:`\sqrt{Q_\mathrm{offset}**2 + U_\mathrm{offset}**2}`,
+ - ``'background_pol_rad'``: :math:`\arctan(U_\mathrm{offset} / Q_\mathrm{offset})`,
+ - ``'theta_det_instr'``: :math:`0.5\pi - \theta_\mathrm{det}`
 
 .. automodule:: sotodlib.site_pipeline.calibration.wiregrid
     :members:
