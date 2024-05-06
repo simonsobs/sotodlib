@@ -117,7 +117,7 @@ def correct_wg_angle(tod, telescope=None, restrict=True):
     if telescope == 'satp1': wg_offset = np.deg2rad(12.13)
     if telescope == 'satp2': wg_offset = np.deg2rad(9.473)
     if telescope == 'satp3': wg_offset = np.deg2rad(11.21)
-    tod.wg.wrap_new('enc_rad', dtype='float32', shape=('samps'))
+    tod.wg.wrap_new('enc_rad', dtype='float32', shape=('dets', 'samps'))
     tod.wg.enc_rad = -  tod.wg.enc_rad_raw + wg_offset
     return (tod, idx_wg_inside)
 
