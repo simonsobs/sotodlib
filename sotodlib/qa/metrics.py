@@ -151,7 +151,7 @@ class PreprocessQA(QAMetric):
 
     def _get_available_obs(self):
         # find preprocess manifest file
-        man_file = [p["db"] for p in self.context["metadata"] if p.get("name", "") == "preprocess"]
+        man_file = [p["db"] for p in self.context["metadata"] if p.get("label", "") == "preprocess"]
         if len(man_file) == 0:
             raise Exception(f"No preprocess metadata block in context {self.context.filename}.")
 
@@ -265,7 +265,7 @@ class HWPSolQA(QAMetric):
 
     def _get_available_obs(self):
         # find preprocess manifest file
-        man_file = [p["db"] for p in self.context["metadata"] if p.get("name", "") == "hwp_solution"]
+        man_file = [p["db"] for p in self.context["metadata"] if p.get("label", "") == "hwp_solution"]
         if len(man_file) == 0:
             raise Exception(f"No hwp_solution metadata block in context {self.context.filename}.")
 
