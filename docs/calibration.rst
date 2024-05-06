@@ -67,7 +67,27 @@ Wire grid calibration is based on the model
 
 .. math::
 
-    \mathrm{d} = \mathrm{I}_{\mathrm{in}} + \left[A_{\mathrm{wire}}e^{2i\theta_\mathrm{wire}} + A_{\mathrm{background}}e^{2i\theta_\mathrm{bg}} +\mathcal{O}(\varepsilon) \left(\mathrm{CMB, sky}\right)\right]\exp i\left[-4\theta_{\mathrm{HWP}} + 2\theta_{\mathrm{det}}\right] + c.c.
+    \mathrm{d} = \mathrm{I}_{\mathrm{in}} + \left[A_{\mathrm{wire}}\ e^{2i\theta_\mathrm{wire}} + A_{\mathrm{background}}\ e^{2i\theta_\mathrm{bg}} +\mathcal{O}(\varepsilon) \left(\mathrm{CMB, sky}\right)\right]\exp i\left[-4\theta_{\mathrm{HWP}} + 2\theta_{\mathrm{det}}\right] + c.c.
+
+In this representation, :math:`d` is a time-ordered measurements consists of
+the Intensity of the input power,:math:`I_\mathrm{in}` and the polarization terms of
+some static background :math:`A_\mathrm{background}`, wires power :math:`A_\mathrm{wire}`,
+sky signal, and tiny amount of CMB.
+
+The static background polarization and the wire signal have polarization angle dependencies respectively,
+:math:`2\theta_\mathrm{wire}`, and :math:`2\theta_\mathrm{background}`.
+The demodulation by the HWP and the projection of the polarization response direction of each detector are
+multiplied as the overall factor.
+
+Unwrapping the charateristic of HWP from the TOD (demodulation) gives static background polarization and
+signal polarized in wires' direction independently::
+
+.. math::
+
+    \mathrm{d}_{\mathrm{demod},\ \mathrm{Ref._{FP}}}
+    \equiv \mathcal{F}_{\mathrm{BP}}\left[\mathrm{d_\mathrm{raw}}\right] \times \exp(4i\theta_{\mathrm{HWP}})
+    \simeq A_{\mathrm{background}}\ e^{2i\theta_{\mathrm{bg}}+2i\theta_\mathrm{det}} + A_{\mathrm{wire}}\ e^{2i\theta_{\mathrm{wire}}+2i\theta_\mathrm{det}}
+    = (Q_\mathrm{offset} + iU_\mathrm{offset}) + (Q_\mathrm{wire} + iU_\mathrm{wire})
 
 .. automodule:: sotodlib.site_pipeline.calibration.wiregrid
     :members:
