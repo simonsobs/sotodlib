@@ -98,7 +98,7 @@ This module gives the result of calibration as fields like:
 
  - ``'gamma'``: :math:`\theta_\mathrm{det}` the calibrated angle by the wire grid,
  - ``'gamma_err'``: :math:`\sigma (\theta_\mathrm{det})` the statistical error of the calibration,
- - ``'wires_relative_power'``: :math:`\arctan([({U_{\mathrm{wire}} - U_\mathrm{offset}}) / ({Q_{\mathrm{wire}} - Q_\mathrm{offset})])`,
+ - ``'wires_relative_power'``: :math:`\arctan([(U_{\mathrm{wire}} - U_\mathrm{offset}) / (Q_{\mathrm{wire}} - Q_\mathrm{offset})])`,
  - ``'background_pol_relative_power'``: :math:`\sqrt{Q_\mathrm{offset}^2 + U_\mathrm{offset}^2}`
  - ``'background_pol_rad'``: :math:`\arctan(U_\mathrm{offset} / Q_\mathrm{offset})` in radian,
  - ``'theta_det_instr'``: :math:`0.5\pi - \theta_\mathrm{det}`
