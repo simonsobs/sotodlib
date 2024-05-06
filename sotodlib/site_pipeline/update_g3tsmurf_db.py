@@ -110,7 +110,7 @@ def main(config: Optional[str] = None, update_delay: float = 2,
                 session, 
                 force=True,
             )
-        if not obs.timing:
+        if (obs.stop is not None) and (not obs.timing):
             raise_list.append( obs.obs_id)
 
         if monitor is not None:
