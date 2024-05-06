@@ -175,7 +175,7 @@ steps::
           calc:
             mask: {'shape': 'circle',
                   'xyr': [0, 0, 1.]}
-            center_on: 'jupiter'
+            center_on: 'jupiter' # set to 'planet' for variable according to planet tag of each obs (must use --planet-obs argument of site-pipeline script)
             res: 20 # np.radians(20/60)
             max_pix: 4.0e+6
           save: True
