@@ -84,10 +84,8 @@ signal polarized in wires' direction independently::
 
 .. math::
 
-    \mathrm{d}_{\mathrm{demod},\ \mathrm{Ref._{FP}}}
-    \equiv \mathcal{F}_{\mathrm{BP}}\left[\mathrm{d_\mathrm{raw}}\right] \times \exp(4i\theta_{\mathrm{HWP}})
-    \simeq A_{\mathrm{background}}\ e^{2i\theta_{\mathrm{bg}}+2i\theta_\mathrm{det}} + A_{\mathrm{wire}}\ e^{2i\theta_{\mathrm{wire}}+2i\theta_\mathrm{det}}
-    = (Q_\mathrm{offset} + iU_\mathrm{offset}) + (Q_\mathrm{wire} + iU_\mathrm{wire})
+    \mathcal{F}_{\mathrm{BP}}\left[\mathrm{d}\right] \times \exp(4i\theta_{\mathrm{HWP}}) & \simeq A_{\mathrm{background}}\ e^{2i\theta_{\mathrm{bg}}+2i\theta_\mathrm{det}} + A_{\mathrm{wire}}\ e^{2i\theta_{\mathrm{wire}}+2i\theta_\mathrm{det}} \\
+    & = (Q_\mathrm{offset} + iU_\mathrm{offset}) + (Q_\mathrm{wire} + iU_\mathrm{wire})
 
 .. automodule:: sotodlib.site_pipeline.calibration.wiregrid
     :members:
