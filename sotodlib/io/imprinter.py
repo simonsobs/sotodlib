@@ -27,7 +27,7 @@ from .load_smurf import (
     SupRsyncType,
     Files,
 )
-from .datapkg_utils import load_configs
+from .datapkg_utils import load_configs, get_imprinter_config
 from .check_book import BookScanner
 from .g3thk_db import G3tHk, HKFiles
 from ..site_pipeline.util import init_logger
@@ -60,6 +60,10 @@ class BookBoundError(Exception):
 
 class NoFilesError(Exception):
     """Exception raised when no files are found in the book"""
+    pass
+
+class MissingReadoutIDError(Exception):
+    """Exception raised when we find books with observations with missing readout IDs"""
     pass
 
 class OverlapObsError(Exception):
@@ -285,7 +289,10 @@ class Imprinter:
         self.hk_archive = None
         self.librarian = None
 
-        
+    @classmethod
+    def for_platform(cls, platform, *args, **kwargs):
+        config = get_imprinter_config(platform)
+        return cls( config, *args, **kwargs)
 
     def get_session(self):
         """Get a new session or return the existing one
@@ -912,7 +919,9 @@ class Imprinter:
 
         """
         if session is None: session = self.get_session()
-        return session.query(Books).filter(Books.status == status).all()
+        return session.query(Books).filter(
+            Books.status == status
+        ).order_by(Books.start).all()
     
     def get_level2_deleteable_books(
             self, session=None, cleanup_delay=None, max_time=None
@@ -1475,12 +1484,12 @@ class Imprinter:
             status = SmurfStatus.from_file(files[0])
             ch_info = get_channel_info(status, archive=SMURF)
             if "readout_id" not in ch_info:
-                raise ValueError(
+                raise MissingReadoutIDError(
                     f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing"
                 )
             checks = ["NONE" in rid for rid in ch_info.readout_id]
             if np.all(checks):
-                raise ValueError(
+                raise MissingReadoutIDError(
                     f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing"
                 )
             if np.any(checks):
