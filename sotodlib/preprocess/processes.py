@@ -788,8 +788,6 @@ class DarkDets(_Preprocess):
 
     Saves results in proc_aman under the "dark_dets" field. 
 
-    Data selection should have key "kind" equal to "all."
-
      Example config block::
 
         - name : "dark_dets"

@@ -144,7 +144,8 @@ Example Planet TOD Pipeline Configuration File
 ----------------------------------------------
 Similar to a regular TOD pipeline, if we want to run one for planet observations,
 we must first flag sources in the signal and gapfill them. An example configuration
-file with the first two steps in the processing pipeline would look like::
+file should be equivalent to non-planet data processing after a few extra first
+steps::
 
     # Context for the data
     context_file: 'context.yaml'
@@ -154,8 +155,8 @@ file with the first two steps in the processing pipeline would look like::
 
     # How to subdivide observations
     subobs:
-        use: detset
-        label: detset
+        use: wafer_slot
+        label: wafer_slot
 
     # Metadata index & archive filenaming
     archive:

@@ -43,7 +43,10 @@ def get_sso(aman, sso, nstep=100):
             planet = planets.SlowSource(d1_unix*1., float(ra) * coords.DEG,
                                         float(dec) * coords.DEG)
         else:
-            planet = planets.SlowSource.for_named_source(sso, d1_unix*1.)
+            try:
+                planet = planets.SlowSource.for_named_source(sso, d1_unix*1.)
+            except ValueError:
+                break
         ra0, dec0 = planet.pos(d1_unix)
         ras.append(ra0)
         decs.append(dec0)
