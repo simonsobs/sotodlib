@@ -52,11 +52,11 @@ One can get calibration results by calling these functions.
 
 Finally, the AxisManager has the field of ``gamma_cal`` that has:
 
- - ``'gamma'``: gamma, theta_det by the wire grid calibration
- - ``'gamma_err'``: statistical errors on gamma
- - ``'wires_relative_power'``: input power of the wire grid itself, that is, input QU minus the center offset
- - ``'background_pol_relative_power'``: center offset in the QU plane
- - ``'background_pol_rad'``: the direction of the center offset
+ - ``'gamma'``: gamma, theta_det by the wire grid calibration,
+ - ``'gamma_err'``: statistical errors on gamma,
+ - ``'wires_relative_power'``: input power of the wire grid itself, that is, input QU minus the center offset,
+ - ``'background_pol_relative_power'``: center offset in the QU plane, pseudo or background polarization,
+ - ``'background_pol_rad'``: the direction of the center offset,
  - ``'theta_det_instr'``: estimated instrumental polarization response direction
 
 Background
@@ -96,11 +96,11 @@ the direction of wires from the input polarization
 
 This module gives the result of calibration as fields like:
 
- - ``'gamma'``: :math:`\theta_\mathrm{det}`,
- - ``'gamma_err'``: :math:`\sigma (\theta_\mathrm{det})`,
- - ``'wires_relative_power'``: :math:`\arctan({U_{\mathrm{wire}} - U_\mathrm{offset}} / {Q_{\mathrm{wire}} - Q_\mathrm{offset}})`,
- - ``'background_pol_relative_power'``: :math:`\sqrt{Q_\mathrm{offset}**2 + U_\mathrm{offset}**2}`,
- - ``'background_pol_rad'``: :math:`\arctan(U_\mathrm{offset} / Q_\mathrm{offset})`,
+ - ``'gamma'``: :math:`\theta_\mathrm{det}` the calibrated angle by the wire grid,
+ - ``'gamma_err'``: :math:`\sigma (\theta_\mathrm{det})` the statistical error of the calibration,
+ - ``'wires_relative_power'``: :math:`\arctan([({U_{\mathrm{wire}} - U_\mathrm{offset}}) / ({Q_{\mathrm{wire}} - Q_\mathrm{offset})])`,
+ - ``'background_pol_relative_power'``: :math:`\sqrt{Q_\mathrm{offset}^2 + U_\mathrm{offset}^2}`
+ - ``'background_pol_rad'``: :math:`\arctan(U_\mathrm{offset} / Q_\mathrm{offset})` in radian,
  - ``'theta_det_instr'``: :math:`0.5\pi - \theta_\mathrm{det}`
 
 .. automodule:: sotodlib.site_pipeline.calibration.wiregrid
