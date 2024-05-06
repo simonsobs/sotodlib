@@ -135,25 +135,6 @@ def tele2equ(coords, ctime, detoffs=[0,0], site="so_sat1"):
     res    = res.reshape(dshape[1:]+coords.shape[1:]+(4,))
     return res
 
-def find_scan_profile(context, my_tods, my_infos, comm=mpi.COMM_WORLD, npoint=100):
-    # Pre-allocate empty profile since other tasks need a receive buffer
-    profile = np.zeros([2,npoint])
-    # Who has the first valid tod?
-    first   = np.where(comm.allgather([len(my_tods)]))[0][0]
-    if comm.rank == first:
-        tod, info = my_tods[0], my_infos[0]
-        # Find our array's central pointing offset. 
-        fp   = tod.focal_plane
-        xi0  = np.mean(utils.minmax(fp.xi))
-        eta0 = np.mean(utils.minmax(fp.eta))
-        # Build a boresight corresponding to a single az sweep at constant time
-        # CARLOS: change throw with span for now
-        azs  = info.az_center + np.linspace(-info.az_throw/2, info.az_throw/2, npoint)
-        els  = np.full(npoint, info.el_center)
-        profile[:] = tele2equ(np.array([azs, els])*utils.degree, info.timestamp, detoffs=[xi0, eta0]).T[1::-1] # dec,ra
-    comm.Bcast(profile, root=first)
-    return profile
-
 class DataMissing(Exception): pass
 
 def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=False, pad=1):
@@ -941,17 +922,32 @@ def main(config_file=None, defaults=defaults, **args):
     my_costs     = np.array([tod.samps.count*len(mapmaking.find_usable_detectors(tod)) for tod in my_tods])
     valid        = np.where(my_costs>0)[0]
     my_tods_2, my_inds_2, my_costs = [[a[vi] for vi in valid] for a in [my_tods, my_inds, my_costs]]
-    all_inds     = utils.allgatherv(my_inds_2, comm)
-    all_costs    = utils.allgatherv(my_costs, comm)
-    all_tods_2   = comm.allgather(my_tods_2)
-    all_ra_ref   = comm.allgather(my_ra_ref)
-    all_tods_flatten = [x for xs in all_tods_2 for x in xs]
-    all_ra_ref_flatten = [x for xs in all_ra_ref for x in xs]
+    # we will do the profile and footprint here, and then allgather the subshapes and subwcs. This way we don't have to communicate the massive arrays such as timestamps
+    subshapes = [] ; subwcses = []
+    for idx,oi in enumerate(my_inds_2):
+        pid, detset, band = obskeys[oi]
+        obslist = obslists[obskeys[oi]]
+        my_tods_atomic = [my_tods_2[idx]] ; my_infos = [obs_infos[obslist[0][3]]]
+        if recenter is None:
+            subshape, subwcs = find_footprint(context, my_tods_atomic, wcs, comm=comm_intra)
+            subshapes.append(subshape) ; subwcses.append(subwcs)
+        else:
+            subshape = shape; subwcs = wcs
+            subshapes.append(subshape) ; subwcses.append(subwcs)
+    all_inds              = utils.allgatherv(my_inds_2, comm)
+    all_costs             = utils.allgatherv(my_costs, comm)
+    all_ra_ref            = comm.allgather(my_ra_ref)
+    all_subshapes         = comm.allgather(subshapes)
+    all_subwcses          = comm.allgather(subwcses)
+    all_ra_ref_flatten    = [x for xs in all_ra_ref for x in xs]
+    all_subshapes_flatten = [x for xs in all_subshapes for x in xs]
+    all_subwcses_flatten  = [x for xs in all_subwcses for x in xs]
     mask_weights = utils.equal_split(all_costs, comm.size)[comm.rank]
     my_inds_2    = all_inds[mask_weights]
-    my_tods      = [all_tods_flatten[idx] for idx in mask_weights]
     my_ra_ref    = [all_ra_ref_flatten[idx] for idx in mask_weights]
-    del obslist, my_inds, my_costs, valid, my_tods_2, all_inds, all_costs, all_tods_2, all_tods_flatten, all_ra_ref, all_ra_ref_flatten, mask_weights
+    my_subshapes = [all_subshapes_flatten[idx] for idx in mask_weights]
+    my_subwcses  = [all_subwcses_flatten[idx] for idx in mask_weights]
+    del obslist, my_inds, my_tods, my_costs, valid, all_inds, all_costs, all_ra_ref, all_ra_ref_flatten, mask_weights, all_subshapes_flatten, all_subwcses_flatten, my_tods_2
 
     for idx,oi in enumerate(my_inds_2):
         pid, detset, band = obskeys[oi]
@@ -960,6 +956,9 @@ def main(config_file=None, defaults=defaults, **args):
         t5      = ("%05d" % t)[:5]
         prefix  = "%s/%s/atomic_%010d_%s_%s" % (args['odir'], t5, t, detset, band)
         
+        subshape = my_subshapes[idx]
+        subwcs   = my_subwcses[idx]
+
         tag     = "%5d/%d" % (oi+1, len(obskeys))
         utils.mkdir(os.path.dirname(prefix))
         meta_done = os.path.isfile(prefix + "_full_info.hdf")
@@ -969,36 +968,17 @@ def main(config_file=None, defaults=defaults, **args):
             os.path.isfile(prefix + "_full_hits.fits")
         )
         L.info("%s Proc period %4d dset %s:%s @%.0f dur %5.2f h with %2d obs" % (tag, pid, detset, band, t, (periods[pid,1]-periods[pid,0])/3600, len(obslist)))
-        try:
-            # 1. read in the metadata and use it to determine which tods are
-            #    good and estimate how costly each is
-            #my_tods, my_inds, my_ra_ref = read_tods_second(context, obslist, dtype_tod=args['dtype_tod'], only_hits=args['only_hits'] )
-            my_tods_atomic = [my_tods[idx]] ; my_ra_ref_atomic = [my_ra_ref[idx]]
-            # this is for the tags
-            if not args['only_hits']:
-                if split_labels is None:
-                    # this means the mapmaker was run without any splits requested
-                    tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), 'full', 'full', cwd+'/'+prefix+'_full', obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref_atomic[0][0], my_ra_ref_atomic[0][1], 0.0) )
-                else:
-                    # splits were requested and we loop over them
-                    for split_label in split_labels:
-                        tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), split_label, '', cwd+'/'+prefix+'_%s'%split_label, obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref_atomic[0][0], my_ra_ref_atomic[0][1], 0.0) )
 
-            # 2. estimate the scan profile and footprint. The scan profile can be done
-            #    with a single task, but that task might not be the first one, so just
-            #    make it mpi-aware like the footprint stuff
-            my_infos = [obs_infos[obslist[0][3]]]
-            if recenter is None:
-                profile  = find_scan_profile(context, my_tods_atomic, my_infos, comm=comm_intra)
-                subshape, subwcs = find_footprint(context, my_tods_atomic, wcs, comm=comm_intra)
+        my_ra_ref_atomic = [my_ra_ref[idx]]
+        # this is for the tags
+        if not args['only_hits']:
+            if split_labels is None:
+                # this means the mapmaker was run without any splits requested
+                tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), 'full', 'full', cwd+'/'+prefix+'_full', obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref_atomic[0][0], my_ra_ref_atomic[0][1], 0.0) )
             else:
-                profile = None
-                subshape = shape
-                subwcs = wcs
-        except DataMissing as e:
-            # This happens if we ended up with no valid tods for some reason
-            handle_empty(prefix, tag, comm_intra, e, L)
-            continue
+                # splits were requested and we loop over them
+                for split_label in split_labels:
+                    tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), split_label, '', cwd+'/'+prefix+'_%s'%split_label, obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref_atomic[0][0], my_ra_ref_atomic[0][1], 0.0) )
 
         if not args['only_hits']:
             try:
