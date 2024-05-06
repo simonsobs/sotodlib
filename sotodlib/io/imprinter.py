@@ -621,9 +621,9 @@ class Imprinter:
 
     def _get_binder_for_book(self, 
         book, 
-        pbar=False, 
         ignore_tags=False,
         ancil_drop_duplicates=False,
+        allow_bad_timing=False
     ):
         """get the appropriate bookbinder for the book based on its type"""
         g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
@@ -644,6 +644,7 @@ class Imprinter:
                 book, obsdb, filedb, lvl2_data_root, readout_ids, book_path,
                 ignore_tags=ignore_tags,
                 ancil_drop_duplicates=ancil_drop_duplicates,
+                allow_bad_timing=allow_bad_timing,
             )
             return bookbinder
 
@@ -743,6 +744,7 @@ class Imprinter:
         pbar=False,
         ignore_tags=False,
         ancil_drop_duplicates=False,
+        allow_bad_timing=False,
         check_configs={}
     ):
         """Bind book using bookbinder
@@ -764,6 +766,8 @@ class Imprinter:
         ancil_drop_duplicates: if true, will drop duplicate data from ancilary  
             files. added to deal with an ocs aggregator error. Only ever 
             expected to be turned on by hand.
+        allow_bad_timing: if true, will bind books even if the timing is low 
+            precision
         check_configs: dict
             additional non-default configurations to send to check book
         """
@@ -791,6 +795,7 @@ class Imprinter:
                 book, 
                 ignore_tags=ignore_tags,
                 ancil_drop_duplicates=ancil_drop_duplicates,
+                allow_bad_timing=allow_bad_timing,
             )
             binder.bind(pbar=pbar)
 
