@@ -82,6 +82,7 @@ def set_book_rebind(imprint, book, update_level2=False):
     if update_level2:
         g3session, SMURF = imprint.get_g3tsmurf_session(return_archive=True)
         obs_dict = imprint.get_g3tsmurf_obs_for_book(book)
+        print(f"Updating level 2 observations")
         for _, obs in obs_dict.items():
             SMURF.update_observation_files(obs, g3session, force=True)
 
