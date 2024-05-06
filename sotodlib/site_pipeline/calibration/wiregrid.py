@@ -386,7 +386,7 @@ def fit_with_circle(tod):
     return tod
 ### Circle fitting fucntions to here ###
 
-def get_cal_gamma(tod, wrap_aman=False):
+def get_cal_gamma(tod, wrap_aman=False, remove_cal_data=False):
     """
     Calibrate detectors' polarization response angle by wire grid.
 
@@ -395,6 +395,7 @@ def get_cal_gamma(tod, wrap_aman=False):
     ----------
         tod : AxisManager
         wrap_aman : (default) False
+        remove_cal_data : (defalut) False
 
     Returns
     -------
@@ -417,18 +418,21 @@ def get_cal_gamma(tod, wrap_aman=False):
         _det_angle_err.append(np.sqrt(_cal_data.Uerr.T[:,_i]**2 + _cal_data.Qerr.T[:,_i]**2))
     _det_angle = np.array(_det_angle).T
     _det_angle_err = np.array(_det_angle_err).T
+    _cal_amp = _cfit_result.cr
     _bg_theta = 0.5*np.arctan2(_cfit_result.cy0, _cfit_result.cx0)%np.pi - np.nanmean(_det_angle%np.pi, axis=1)
     _bg_amp = np.sqrt(_cfit_result.cx0**2 + _cfit_result.cy0**2)
+    if remove_cal_data: tod.move('wg', None)
     if wrap_aman:
         if 'gamma_cal' in dir(tod): tod.move('gamma_cal', None)
         _gamma_ax = core.AxisManager(tod.dets)
         _gamma_ax.wrap('gamma_raw', _det_angle, [(0, 'dets')])
         _gamma_ax.wrap('gamma_raw_err', _det_angle_err, [(0, 'dets')])
+        _gamma_ax.wrap('wires_relative_power', _cal_amp, [(0, 'dets')])
         _gamma_ax.wrap('gamma', np.nanmean(_det_angle%np.pi, axis=1), [(0, 'dets')])
         _gamma_ax.wrap('gamma_err', np.nanmean(_det_angle_err, axis=1)/np.sqrt(np.shape(_det_angle_err)[1]), [(0, 'dets')])
         _gamma_ax.wrap('background_pol_rad', _bg_theta, [(0, 'dets')])
-        _gamma_ax.wrap('background_pol_relative_amp', _bg_amp, [(0, 'dets')])
-        _gamma_ax.wrap('theta_det_instr', np.nanmean(_det_angle%np.pi, axis=1), [(0, 'dets')]) # instumental angle of dets
+        _gamma_ax.wrap('background_pol_relative_power', _bg_amp, [(0, 'dets')])
+        _gamma_ax.wrap('theta_det_instr', 0.5*np.pi - np.nanmean(_det_angle%np.pi, axis=1), [(0, 'dets')]) # instumental angle of dets
         tod.wrap('gamma_cal', _gamma_ax)
         return tod
     else:
