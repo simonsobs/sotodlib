@@ -78,7 +78,7 @@ class BookbinderTest(unittest.TestCase):
 
         in_ts, in_data = load_data(l2_files, data_name='data')
 
-        ts, mask = bb.fill_time_gaps(in_ts, allow_bad_timing=True)
+        ts, mask = bb.fill_time_gaps(in_ts)
         frame_idxs = np.zeros_like(ts, dtype=np.int32)
         file_idxs = np.zeros_like(np.unique(frame_idxs), dtype=np.int32)
 
