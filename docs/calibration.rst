@@ -80,10 +80,20 @@ The demodulation by the HWP and the projection of the polarization response dire
 multiplied as the overall factor.
 
 Unwrapping the charateristic of HWP from the TOD (demodulation) gives static background polarization and
-signal polarized in wires' direction independently::
+signal polarized in wires' direction independently
+
+.. math::
 
     \mathcal{F}_{\mathrm{BP}}\left[\mathrm{d}\right] \times \exp(4i\theta_{\mathrm{HWP}}) & \simeq A_{\mathrm{background}}\ e^{2i\theta_{\mathrm{bg}}+2i\theta_\mathrm{det}} + A_{\mathrm{wire}}\ e^{2i\theta_{\mathrm{wire}}+2i\theta_\mathrm{det}} \\
     & = (Q_\mathrm{offset} + iU_\mathrm{offset}) + (Q_\mathrm{wire} + iU_\mathrm{wire})
+
+Finally, one can get the calibrated polarization response directions by removing the direction of wires from the input polarization
+
+.. math::
+
+    \Phi & \equiv \arctan\frac{U_{\mathrm{cal}} - U_\mathrm{offset}}{Q_{\mathrm{cal}} - Q_\mathrm{offset}} = 2\theta_{\mathrm{det}}+2\theta_{\mathrm{wire}} \\
+    \theta_{\mathrm{det}} & = \frac{1}{2}\left[\Phi-2\theta_{\mathrm{wire}}\right]
+
 
 .. automodule:: sotodlib.site_pipeline.calibration.wiregrid
     :members:
