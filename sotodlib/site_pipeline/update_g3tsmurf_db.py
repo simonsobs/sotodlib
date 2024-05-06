@@ -102,6 +102,7 @@ def main(config: Optional[str] = None, update_delay: float = 2,
         )
     ).all()
 
+    raise_list = []
     for obs in new_obs:
         if obs.stop is None or len(obs.tunesets)==0:
             SMURF.update_observation_files(
@@ -109,7 +110,9 @@ def main(config: Optional[str] = None, update_delay: float = 2,
                 session, 
                 force=True,
             )
-        
+        if not obs.timing:
+            raise_list.append( obs.obs_id)
+
         if monitor is not None:
             if obs.stop is not None:
                 try:
@@ -121,6 +124,10 @@ def main(config: Optional[str] = None, update_delay: float = 2,
                     logger.error(
                         f"Monitor Update failed for {obs.obs_id} with {e}"
                     )
+    if len(raise_list) > 0:
+        raise ValueError(
+            f"Found {len(raise_list)} observations with bad timing. obs_ids " f"are {raise_list}"
+        )
 
 def _obs_tags(obs, cfgs):
     
