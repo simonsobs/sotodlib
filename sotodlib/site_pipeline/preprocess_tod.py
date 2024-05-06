@@ -241,6 +241,12 @@ def get_parser(parser=None):
         help="Number of days (unit is days) in the past to start observation list.",
         type=int
     )
+    parser.add_argument(
+        '--tags',
+        help="Observation tags. Ex: --tags 'jupiter' 'setting'",
+        nargs='*',
+        type=str
+    )
     return parser
 
 def main(
@@ -251,6 +257,7 @@ def main(
         min_ctime: Optional[int] = None,
         max_ctime: Optional[int] = None,
         update_delay: Optional[int] = None,
+        tags: Optional[str] = None,
  ):
     configs, context = _get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess")
@@ -272,8 +279,13 @@ def main(
         tot_query = tot_query[4:-4]
         if tot_query=="":
             tot_query="1"
+
+    for i, tag in enumerate(tags):
+        tags[i] = tags[i].lower()
+        if '=' not in tags[i]:
+            tags[i] += '=1'
     
-    obs_list = context.obsdb.query(tot_query)
+    obs_list = context.obsdb.query(tot_query, tags=tags)
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
     run_list = []
