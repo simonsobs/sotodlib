@@ -16,7 +16,7 @@ from sotodlib.preprocess import Pipeline
 logger = util.init_logger(__name__, 'make_map_based_pointing: ')
     
 def main(configs, obs_id, wafer_slot, 
-         sso_name=None, optics_config_fn=None,
+         sso_name=None, 
          single_det_maps_dir=None, map_based_result_dir=None, tod_based_result_dir=None,
          tune_by_tod=None, restrict_dets_for_debug=False):
     
@@ -24,35 +24,42 @@ def main(configs, obs_id, wafer_slot,
         configs = yaml.safe_load(open(configs, "r"))
         
     # Derive parameters from config file
-    if optics_config_fn is None:
-        optics_config_fn = configs.get('optics_config_fn')
+    ctx = core.Context(configs.get('context_file'))
     if single_det_maps_dir is None:
         single_det_maps_dir = configs.get('single_det_maps_dir')
     if map_based_result_dir is None:
         map_based_result_dir = configs.get('map_based_result_dir')
     if tod_based_result_dir is None:
         tod_based_result_dir = configs.get('tod_based_result_dir')
-    
+    optics_config_fn = configs.get('optics_config_fn')
     xieta_bs_offset = configs.get('xieta_bs_offset', [0., 0.])
     wafer_mask_deg = configs.get('wafer_mask_deg', 8.)
     res_deg = configs.get('res_deg', 0.3)
     edge_avoidance_deg = configs.get('edge_avoidance_deg', 0.3)
+    save_normal_roll = configs.get('save_normal_roll', True)
     save_force_zero_roll = configs.get('save_force_zero_roll', True)
     
+    # parameters for tod tuning
     tune_by_tod = configs.get('tune_by_tod')
-    R2_threshold = configs.get('R2_threshold')
-    ds_factor = configs.get('ds_factor')
+    if tune_by_tod:
+        tod_ds_factor = configs.get('tod_ds_factor')
+        tod_mask_deg = configs.get('tod_mask_deg')
+        tod_fit_func_name = configs.get('tod_fit_func_name')
+        tod_max_non_linear_order = configs.get('tod_max_non_linear_order')
+        tod_fwhm_init_deg = configs.get('tod_fwhm_init_deg')
+        tod_error_estimation_method = configs.get('tod_error_estimation_method')
+        tod_flag_name_rms_calc = configs.get('tod_flag_name_rms_calc')
+        tod_flag_rms_calc_exclusive = configs.get('tod_flag_rms_calc_exclusive')
     
     
-    ctx = core.Context(configs.get('context_file'))
     # If sso_name is not specified, get sso name from observation tags
     obs_tags = ctx.obsdb.get(obs_id, tags=True)['tags']
     if sso_name is None:
-        if 'moon' in obs_tags:
-            sso_name = 'moon'
-        elif 'jupiter' in obs_tags:
-            sso_name = 'jupiter'
-        else:
+        known_source_names = ['moon', 'jupiter']
+        for _source_name in known_source_names:
+            if _source_name in obs_tags:
+                sso_name = _source_name
+        if _source_name is None:
             raise ValueError('sso_name is not specified')
     
     # Load data
@@ -76,49 +83,83 @@ def main(configs, obs_id, wafer_slot,
                                  wafer_mask_deg=wafer_mask_deg, res_deg=res_deg)
     
     # reconstruct pointing from single detector maps
-    logger.info(f'Saving map-based pointing results')
-    result_filename = f'focal_plane_{obs_id}_{wafer_slot}.hdf'
-    fp_rset_map_based = mbp.get_xieta_from_maps(map_hdf, save=True,
-                                                        output_dir=map_based_result_dir,
-                                                        filename=result_filename,
-                                                        force_zero_roll=False,
-                                                        edge_avoidance = edge_avoidance_deg*coords.DEG)
-    
-    if tune_by_tod:
-        focal_plane = core.AxisManager(tod.dets)
-        focal_plane.wrap('xi', fp_rset_map_based['xi'], [(0, 'dets')])
-        focal_plane.wrap('eta', fp_rset_map_based['eta'], [(0, 'dets')])
-        focal_plane.wrap('gamma', fp_rset_map_based['gamma'], [(0, 'dets')])
-        is_low_R2 = fp_rset_map_based['R2'] < R2_threshold
-        focal_plane.xi[is_low_R2] = np.nan
-        focal_plane.eta[is_low_R2] = np.nan
-        
-        tod.focal_plane = focal_plane
-        tod.flags.move(sso_name, None)
-        logger.info(f'Making tod-based pointing results')
-        fp_rset_tod_based = up.update_xieta(tod, sso_name, ds_factor=ds_factor, save=True, 
-                                            result_dir=tod_based_result_dir, filename=result_filename)
+    if save_normal_roll:
+        logger.info(f'Saving map-based pointing results')
+        result_filename = f'focal_plane_{obs_id}_{wafer_slot}.hdf'
+        fp_rset_map_based = mbp.get_xieta_from_maps(map_hdf, save=True,
+                                                            output_dir=map_based_result_dir,
+                                                            filename=result_filename,
+                                                            force_zero_roll=False,
+                                                            edge_avoidance = edge_avoidance_deg*coords.DEG)
+
+        if tune_by_tod:
+            logger.info(f'Making tod-based pointing results')
+            up.wrap_fp_rset(tod, fp_rset_map_based)
+            fp_rset_tod_based = up.update_xieta( tod,
+                                                 sso_name=sso_name,
+                                                 fp_hdf_file=None,
+                                                 force_zero_roll=False,
+                                                 pipe=None,
+                                                 ds_factor=tod_ds_factor,
+                                                 mask_deg=tod_mask_deg,
+                                                 fit_func_name = tod_fit_func_name,
+                                                 max_non_linear_order = tod_max_non_linear_order,
+                                                 fwhm_init_deg = tod_fwhm_init_deg,
+                                                 error_estimation_method=tod_error_estimation_method,
+                                                 flag_name_rms_calc = tod_flag_name_rms_calc,
+                                                 flag_rms_calc_exclusive = tod_flag_rms_calc_exclusive, 
+                                                 )
+            os.makedirs(tod_based_result_dir, exist_ok=True)
+            write_dataset(fp_rset_tod_based, 
+                          filename=os.path.join(tod_based_result_dir, f'focal_plane_{obs_id}_{wafer_slot}.hdf'),
+                          address='focal_plane',
+                          overwrite=True)
         
     if save_force_zero_roll:
         logger.info(f'Saving map-based pointing results (force-zero-roll)')
-        output_dir = map_based_result_dir + '_force_zero_roll'
+        map_based_result_dir_force_zero_roll = map_based_result_dir + '_force_zero_roll'
         fp_rset_map_based_force_zero_roll = mbp.get_xieta_from_maps(map_hdf, save=True,
-                                                            output_dir=output_dir,
+                                                            output_dir=map_based_result_dir_force_zero_roll,
                                                             filename=result_filename,
                                                             force_zero_roll=True,
-                                                            edge_avoidance = edge_avoidance_deg*coords.DEG)            
+                                                            edge_avoidance = edge_avoidance_deg*coords.DEG)
+        if tune_by_tod:
+            logger.info(f'Making tod-based pointing results (force-zero-roll)')
+            up.wrap_fp_rset(tod, fp_rset_map_based_force_zero_roll)
+            tod_based_result_dir_force_zero_roll = tod_based_result_dir + '_force_zero_roll'
+            fp_rset_tod_based_force_zero_roll = up.update_xieta( tod,
+                                                 sso_name=sso_name,
+                                                 fp_hdf_file=None,
+                                                 force_zero_roll=False,
+                                                 pipe=None,
+                                                 ds_factor=tod_ds_factor,
+                                                 mask_deg=tod_mask_deg,
+                                                 fit_func_name = tod_fit_func_name,
+                                                 max_non_linear_order = tod_max_non_linear_order,
+                                                 fwhm_init_deg = tod_fwhm_init_deg,
+                                                 error_estimation_method=tod_error_estimation_method,
+                                                 flag_name_rms_calc = tod_flag_name_rms_calc,
+                                                 flag_rms_calc_exclusive = tod_flag_rms_calc_exclusive, 
+                                                 )
+            os.makedirs(tod_based_result_dir_force_zero_roll, exist_ok=True)
+            write_dataset(fp_rset_tod_based_force_zero_roll, 
+                          filename=os.path.join(tod_based_result_dir_force_zero_roll, f'focal_plane_{obs_id}_{wafer_slot}.hdf'),
+                          address='focal_plane',
+                          overwrite=True)
+            
+        
     return
 
 def get_parser():
     parser = argparse.ArgumentParser(description="Process TOD data and update pointing")
     parser.add_argument("configs", type=str, help="Path to the configuration file")
-    parser.add_argument("obs_id", type=int, help="Observation ID")
-    parser.add_argument("wafer_slot", type=int, help="Wafer slot number")
+    parser.add_argument("obs_id", type=str, help="Observation id")
+    parser.add_argument("wafer_slot", type=str, help="Wafer slot")
     parser.add_argument("--sso_name", type=str, default=None, help="Name of solar system object (e.g., 'moon', 'jupiter')")
-    parser.add_argument("--optics_config_fn", type=str, default=None, help="Path to optics configuration file")
     parser.add_argument("--single_det_maps_dir", type=str, default=None, help="Directory to save single detector maps")
     parser.add_argument("--map_based_result_dir", type=str, default=None, help="Directory to save map-based pointing results")
     parser.add_argument("--tod_based_result_dir", type=str, default=None, help="Directory to save TOD-based pointing results")
+    parser.add_argument("--restrict_dets_for_debug", type=int, default=False)
     return parser
 
 if __name__ == '__main__':
