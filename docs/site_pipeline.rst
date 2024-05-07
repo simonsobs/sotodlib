@@ -697,7 +697,7 @@ make-cosamp-hk
 ------------------
 
 This element generates house-keeping data with timestamps co-sampled
-with detector timestamps.
+with detector timestamps. 
 
 Command line arguments
 ``````````````````````
@@ -709,8 +709,11 @@ Command line arguments
 An example config for wiregrid is shown below.
 With the config file, ``wiregrid.sqlite`` and ``wiregrid_XXXX.h5``, 
 where XXXX is substituted with the first four digits of timestamps, 
-are generated on ``/path/to/manifests/wiregrid``.::
+are generated on ``/path/to/manifests/wiregrid``. ``context_file``, 
+``input_dir``, ``output_dir``, ``fields``, ``aliases``, and ``output_prefix``
+are required::
 
+    context_file: '/path/to/context.yaml'
     query_text: 'type == "obs"'
     min_ctime: 1700000000
     max_ctime: null
@@ -723,7 +726,6 @@ are generated on ``/path/to/manifests/wiregrid``.::
              'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSL2',
              'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSR1',
              'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSR2',]
-    dt_samp_hk: 2
     aliases: 
         ['encoder',
          'LS1',
