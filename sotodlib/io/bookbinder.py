@@ -23,6 +23,10 @@ class TimingSystemOff(Exception):
     """Exception raised when we try to bind books where the timing system is found to be off and the books have imprecise timing counters"""
     pass
 
+class NoScanFrames(Exception):
+    """Exception raised when we try and bind a book but the SMuRF file contains not Scan frames (so no detector data)"""
+    pass
+
 def setup_logger(logfile=None):
     """
     This setups up a logger for bookbinder. If a logfile is passed, it will
@@ -372,6 +376,8 @@ class SmurfStreamProcessor:
             self.nframes += 1
             frame_idx += 1
 
+        if len(ts) == 0:
+            raise NoScanFrames(f"{self.obs_id} has no detector data")
         self.times = np.hstack(ts)
         self.smurf_frame_counters = np.hstack(smurf_frame_counters)
         self.frame_idxs = np.hstack(frame_idxs)
