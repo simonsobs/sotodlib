@@ -487,6 +487,8 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None,
             iir_params = 'iir_params'
         if isinstance(iir_params, str):
             iir_params = tod[iir_params]
+        if isinstance(iir_params, core.AxisManager):
+            iir_params = iir_params[list(iir_params._fields)[1]]
         try:
             a = iir_params['a']
             b = iir_params['b']
