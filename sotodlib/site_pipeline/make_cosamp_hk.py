@@ -1,5 +1,6 @@
 import os
 import yaml
+import time
 import argparse
 import logging
 from typing import Optional
@@ -63,6 +64,7 @@ def main(config: str,
         min_ctime: Optional[float] = None,
         max_ctime: Optional[float] = None,
         obs_id: Optional[str] = None,
+        update_delay: Optional[str] = None,
         ):
     """
     Args:
@@ -85,6 +87,8 @@ def main(config: str,
             Maximum timestamp of observations to be queried. If not provided, it is extracted from the configuration file.
         obs_id: str or None
             Specific observation obs_id to process. If provided, overrides other filtering parameters.
+        update_delay: str or None
+            Number of days (unit is days) in the past to start observation list.
     """
     # Set verbose
     if verbose == 0:
@@ -96,6 +100,10 @@ def main(config: str,
     elif verbose == 3:
         logger.setLevel(logging.DEBUG)
     
+    if (min_ctime is None) and (update_delay is not None):
+        # If min_ctime is provided it will use that..
+        # Otherwise it will use update_delay to set min_ctime.
+        min_ctime = int(time.time()) - update_delay*86400
     logger.info(f'min_ctime: {min_ctime}')
     # load context
     context_file = hk2meta_config['context_file']
