@@ -2,26 +2,21 @@ import os
 import numpy as np
 import yaml
 import h5py
-import matplotlib.pyplot as plt
+import argparse
 from tqdm import tqdm
 import scipy
 from scipy.optimize import curve_fit
 from sotodlib.core import metadata
 from sotodlib.io.metadata import read_dataset, write_dataset
-
+from sotodlib.coords import map_based_pointing as mbp
 from sotodlib import core
 from sotodlib import coords
 from sotodlib import tod_ops
 import so3g
 from so3g.proj import quat
 import sotodlib.coords.planets as planets
-
-from sotodlib.tod_ops import pca
-from so3g.proj import Ranges, RangesMatrix
-from pixell import enmap, enplot
-from sotodlib.tod_ops.filters import high_pass_sine2, low_pass_sine2, fourier_filter
-
 from sotodlib.site_pipeline import util
+from sotodlib.preprocess import Pipeline
 logger = util.init_logger(__name__, 'update_pointing: ')
 
 def gaussian2d_nonlin(xieta, xi0, eta0, fwhm_xi, fwhm_eta, phi, a, nonlin_coeffs):
@@ -109,9 +104,7 @@ def update_xieta(tod,
         Name of the Solar System Object (SSO).
     - fp_hdf_file (str or None): 
         Path to the HDF file containing focal plane information. Default is None.
-        If None, tod.focal_plane is used for focal plane information.
-    - save_dir (str or None):
-        Directory where the updated data will be saved. Required if save is True.
+        If None, tod.focal_plane is used for focal plane information.    
     - force_zero_roll (bool): 
         Flag indicating whether to force the roll to be zero. Default is False.
         If True, input and output focal plane information assumes force_zero_roll condition.
@@ -229,8 +222,8 @@ def update_xieta(tod,
             if fit_func_name == 'gaussian2d_nonlin':
                 p0 = np.array([0., 0., fwhm_init_deg*coords.DEG, fwhm_init_deg*coords.DEG, 0., ptp_val])
                 bounds = np.array(
-                    [[-np.inf, -np.inf, 0.1*fwhm_init_deg*coords.DEG, 0.1*fwhm_init_deg*coords.DEG, -np.pi, 0.1*ptp_val],
-                     [np.inf, np.inf, 10*fwhm_init_deg*coords.DEG, 10*fwhm_init_deg*coords.DEG, np.pi, 10*ptp_val]]
+                    [[-np.inf, -np.inf, fwhm_init_deg*coords.DEG/5., fwhm_init_deg*coords.DEG/5., -np.pi, 0.1*ptp_val],
+                     [np.inf, np.inf, fwhm_init_deg*coords.DEG*5, fwhm_init_deg*coords.DEG*5, np.pi, 10*ptp_val]]
                               )
                 if max_non_linear_order >= 2:
                     p0 = np.append(p0, np.zeros(max_non_linear_order-1))
@@ -277,15 +270,28 @@ def update_xieta(tod,
 
     return focal_plane
 
-def main(configs, obs_id, wafer_slot, sso_name=None,
-         fp_hdf_file=None, save_dir=None, restrict_dets_for_debug=False):
+def main_one_wafer(configs, obs_id, wafer_slot, 
+                   sso_name=None, fp_hdf_file=None, fp_hdf_dir=None,
+                   save_dir=None, restrict_dets_for_debug=False):
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
     
     # Derive parameters from config file
     ctx = core.Context(configs.get('context_file'))
+    
+    # get prior
     if fp_hdf_file is None:
         fp_hdf_file = configs.get('fp_hdf_file', None)
+    if fp_hdf_dir is None:
+        fp_hdf_dir = configs.get('fp_hdf_dir', None)
+    if fp_hdf_file is None:
+        if fp_hdf_dir is None:
+            pass
+        else:
+            fp_hdf_file = os.path.join(fp_hdf_dir, f'focal_plane_{obs_id}_{wafer_slot}.hdf')
+            if not os.path.exists(fp_hdf_file):
+                fp_hdf_file = None
+
     if save_dir is None:
         save_dir = configs.get('save_dir', None)
     
@@ -313,8 +319,8 @@ def main(configs, obs_id, wafer_slot, sso_name=None,
     max_non_linear_order = configs.get('max_non_linear_order')
     fwhm_init_deg = configs.get('fwhm_init_deg')
     error_estimation_method = configs.get('error_estimation_method')
-    flag_name_rms_calc = configls.get('flag_name_rms_calc')
-    flag_rms_calc_exclusive = configls.get('flag_rms_calc_exclusive')
+    flag_name_rms_calc = configs.get('flag_name_rms_calc')
+    flag_rms_calc_exclusive = configs.get('flag_rms_calc_exclusive')
     
      
     # Load data
@@ -348,14 +354,61 @@ def main(configs, obs_id, wafer_slot, sso_name=None,
         
     return
 
+def main(configs, obs_id, wafer_slots=None,
+        sso_name=None, fp_hdf_file=None, fp_hdf_dir=None, save_dir=None,
+        hit_time_threshold=1200, hit_circle_r_deg=7.0,
+        restrict_dets_for_debug=False):
+    logger.info('get wafer_slots which hit the source because wafer_slots are not specified')    
+    if wafer_slots is None:
+        if type(configs) == str:
+            configs = yaml.safe_load(open(configs, "r"))
+        
+        ctx = core.Context(configs.get('context_file'))
+        optics_config_fn = configs.get('optics_config_fn')
+        
+        obs_tags = ctx.obsdb.get(obs_id, tags=True)['tags']
+        if sso_name is None:
+            known_source_names = ['moon', 'jupiter']
+            for _source_name in known_source_names:
+                if _source_name in obs_tags:
+                    sso_name = _source_name
+            if _source_name is None:
+                raise ValueError('sso_name is not specified')
+        
+        wafer_slots = []
+        tod = ctx.get_obs(obs_id, dets=[])
+        for ws in [f'ws{i}' for i in range(7)]:
+            hit_time = mbp.get_rough_hit_time(tod, wafer_slot=ws, sso_name=sso_name, circle_r_deg=hit_circle_r_deg,
+                                              optics_config_fn=optics_config_fn)
+            logger.info(f'hit_time for {ws} is {hit_time:.1f} [sec]')
+            if hit_time > hit_time_threshold:
+                wafer_slots.append(ws)        
+    assert np.all(np.array(wafer_slots, dtype='U2') == 'ws')
+    
+    logger.info(f'wafer_slots which pointing calculated: {wafer_slots}')
+    for wafer_slot in wafer_slots:
+        main_one_wafer(configs,
+                       obs_id,
+                       wafer_slot,
+                       sso_name=sso_name,
+                       fp_hdf_file=fp_hdf_file, 
+                       fp_hdf_dir=fp_hdf_dir,
+                       save_dir=save_dir,
+                       restrict_dets_for_debug=restrict_dets_for_debug)
+    return
+    
+    
 def get_parser():
     parser = argparse.ArgumentParser(description="Get updated result of pointings with tod-based results")
-    parser.add_argument("ctx_file", type=str, help="Path to the context file.")
+    parser.add_argument("configs", type=str, help="Path to the configuration file")
     parser.add_argument("obs_id", type=str, help="Observation ID.")
-    parser.add_argument("wafer_slot", type=int, help="Wafer slot number.")
-    parser.add_argument("sso_name", type=str,  default=None, help="Name of the Solar System Object (SSO).")
-    parser.add_argument("save_dir", type=str, help="Directory to save the result.")
-    parser.add_argument("restrict_dets_for_debug", action="store_true", help="Flag to restrict the number of detectors.")
+    parser.add_argument("--wafer_slots", nargs='*', default=None, help="Wafer slots to be processed")    
+    parser.add_argument("--sso_name", type=str,  default=None, help="Name of the Solar System Object (SSO).")
+    parser.add_argument("--fp_hdf_file", type=str, default=None, help="File path to the focal_plane hdf file used as a prior")
+    parser.add_argument("--fp_hdf_dir", type=str, default=None, 
+                        help="Directory path where focal_plane hdf file of each observation are stored. Used only fp_hdf_file is not specified.")
+    parser.add_argument("--save_dir", type=str, help="Directory to save the result.")
+    parser.add_argument("--restrict_dets_for_debug", type=int, help="Flag to restrict the number of detectors.")
     return parser
 
 if __name__ == '__main__':

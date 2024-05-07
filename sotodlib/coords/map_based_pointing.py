@@ -50,7 +50,7 @@ def get_planet_trajectry(tod, planet, _split=20, return_model=False):
         q_planet = quat.rotation_lonlat(planet_az, planet_el)
         return q_planet
 
-def get_wafer_centered_sight(tod, planet, q_planet=None, q_bs=None, q_wafer=None):
+def get_wafer_centered_sight(tod=None, planet=None, q_planet=None, q_bs=None, q_wafer=None):
     """
     Calculate the sightline vector from the focal plane, centered on the wafer, to a planet.
 
@@ -131,6 +131,34 @@ def get_wafer_xieta(wafer_slot, optics_config_fn, xieta_bs_offset=(0., 0.),
     return xi_wafer, eta_wafer
 
 
+def get_rough_hit_time(tod, wafer_slot, sso_name, circle_r_deg=7.,optics_config_fn=None):
+    """
+    Estimate the rough hit time for a axismanager, wafer_slot, and sso_name.
+
+    Parameters:
+        tod : An AxisManager object
+        wafer_slot (str): Identifier for the wafer slot.
+        sso_name (str): Name of the Solar System Object (e.g., 'moon', 'jupiter').
+        circle_r_deg (float, optional): Radius in degrees defining the circular region around the wafer center. 
+                                        Defaults to 7 degrees.
+
+    Returns:
+        float: Estimated rough hit time within the circular region around the wafer center.
+    """
+    q_bs = quat.rotation_lonlat(tod.boresight.az, tod.boresight.el)
+    q_planet = get_planet_trajectry(tod, sso_name)
+    xi_wafer, eta_wafer = get_wafer_xieta(wafer_slot, optics_config_fn=optics_config_fn, 
+                                            roll_bs_offset=np.median(tod.boresight.roll), wrap_to_tod=False)
+    q_wafer = quat.rotation_xieta(xi_wafer, eta_wafer)
+    
+    q_wafer_centered = get_wafer_centered_sight(q_planet=q_planet, q_bs=q_bs, q_wafer=q_wafer)
+    x_to_z = ~quat.rotation_lonlat(0, 0)
+    xi_wafer_centered, eta_wafer_centered, _ = quat.decompose_xieta(x_to_z * q_wafer_centered)
+    r_wafer_centered = np.sqrt(xi_wafer_centered**2 + eta_wafer_centered**2)
+    hit_time = (tod.timestamps[-1] - tod.timestamps[0]) * np.mean(np.rad2deg(r_wafer_centered) < circle_r_deg)
+    return hit_time
+
+
 def make_wafer_centered_maps(tod, sso_name, optics_config_fn, map_hdf, 
                            xieta_bs_offset=(0., 0.), roll_bs_offset=None,
                            signal='signal', wafer_mask_deg=8., res_deg=0.3, cuts=None,):
@@ -151,10 +179,7 @@ def make_wafer_centered_maps(tod, sso_name, optics_config_fn, map_hdf,
 
     Returns:
         None
-    """
-    
-
-    
+    """    
     q_planet = get_planet_trajectry(tod, sso_name)
     q_bs = quat.rotation_lonlat(tod.boresight.az, tod.boresight.el)
     
