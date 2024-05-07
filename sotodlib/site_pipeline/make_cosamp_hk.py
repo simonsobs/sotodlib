@@ -11,10 +11,7 @@ logger = util.init_logger('make_cosamp_hk', 'make_cosamp_hk: ')
 
 def get_parser(parser=None):
     if parser is None:
-        parser = argparse.ArgumentParser()
-    parser.add_argument(
-        'context',
-        help="Path to context yaml file")
+        parser = argparse.ArgumentParser()    
     parser.add_argument(
         'config',
         help="configuration yaml file.")
@@ -50,10 +47,14 @@ def get_parser(parser=None):
         '--obs_id', type=str,
         help="obs_id of particular observation if we want to run on just one",
     )
+    parser.add_argument(
+        '--update-delay',
+        help="Number of days (unit is days) in the past to start observation list.",
+        type=int
+    )
     return parser
     
-def main(context: str,
-        config: str,
+def main(config: str,
         output_dir: Optional[str] = None,
         verbose: Optional[int] = 2,
         overwrite: Optional[bool] = False,
@@ -65,8 +66,6 @@ def main(context: str,
         ):
     """
     Args:
-        context: str
-            File path to the context file.
         config: str
             Path to the configuration file containing processing parameters.
         output_dir: str or None
@@ -99,7 +98,8 @@ def main(context: str,
     
     logger.info(f'min_ctime: {min_ctime}')
     # load context
-    ctx = core.Context(context)
+    context_file = hk2meta_config['context_file']
+    ctx = core.Context(context_file)
     
     # load configuration file
     with open(config) as f:
@@ -167,16 +167,13 @@ def main(context: str,
         try:
             meta = ctx.get_meta(obs_id)
             aman = ctx.get_obs(obs_id, dets=[])
-            
-            
-            
             _hkman = hk_utils.get_detcosamp_hkaman(aman, 
                                       fields = hk2meta_config['fields'],
                                       data_dir = hk2meta_config['input_dir'])
             
-            dt_samp_hk = hk2meta_config['dt_samp_hk']
-            start = float(aman.timestamps[0] - 3*dt_samp_hk)
-            stop = float(aman.timestamps[-1] + 3*dt_samp_hk)
+            dt_buffer = 60
+            start = float(aman.timestamps[0] - dt_buffer)
+            stop = float(aman.timestamps[-1] + dt_buffer)
             _data = hk_utils.sort_hkdata(start=start, stop=stop, fields=hk2meta_config['fields'],
                                          data_dir=hk2meta_config['input_dir'], alias=None)
             _hkman = hk_utils.make_hkaman(grouped_data=_data, alias_exists=False,
@@ -189,7 +186,7 @@ def main(context: str,
             aliases = hk2meta_config['aliases']
             data_fields = [full_field.split('.')[1] for full_field in full_fields]
             num_different_field = 0
-            for i, (full_field, data_field, alias) in enumerate(zip(full_fields, data_fields, aliases)):    
+            for i, (data_field, alias) in enumerate(zip(data_fields, aliases)):
                 if i > 0:
                     num_different_field += int(data_fields[i-1] != data_field)
                 i_in_same_field = i - num_different_field
@@ -197,7 +194,7 @@ def main(context: str,
             
             h5_filename = f"{output_prefix}_{obs_id.split('_')[1][:4]}.h5"
             output_filename = os.path.join(output_dir, h5_filename)
-            hkman.save(dest=output_filename, group=obs_id, overwrite=overwrite, compression='gzip')
+            hkman.save(dest=output_filename, group=obs_id, overwrite=overwrite)
             man_db.add_entry({'obs:obs_id': obs_id, 'dataset': obs_id}, 
                      filename=output_filename, replace=overwrite)
             logger.info(f"saved: {obs_id}")
@@ -207,6 +204,5 @@ def main(context: str,
             continue
 
 if __name__ == '__main__':
-    parser = get_parser(parser=None)
-    args = parser.parse_args()
-    main(**vars(args))
+    util.main_launcher(main, get_parser)
+    
