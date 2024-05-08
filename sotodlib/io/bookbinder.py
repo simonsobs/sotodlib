@@ -27,6 +27,10 @@ class NoScanFrames(Exception):
     """Exception raised when we try and bind a book but the SMuRF file contains not Scan frames (so no detector data)"""
     pass
 
+class DuplicateAncillaryData(Exception):
+    """Exception raised when we find the HK data has copies of the same timestamps"""
+    pass
+
 def setup_logger(logfile=None):
     """
     This setups up a logger for bookbinder. If a logfile is passed, it will
@@ -106,8 +110,10 @@ class HKBlock:
             clean_times, idxs = np.unique(self.times, return_index=True)
             if len(self.times) != len(clean_times):
                 if not drop_duplicates:
-                    raise ValueError(f"HK data from block {self.name} has" 
-                                    " duplicate timestamps")
+                    raise DuplicateAncillaryData(
+                        f"HK data from block {self.name} has" 
+                        " duplicate timestamps"
+                    )
                 self.times = self.times[idxs]
             assert (np.all(np.diff(self.times)>0), f"Times from {self.name} are"
                             " not increasing")
