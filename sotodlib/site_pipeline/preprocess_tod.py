@@ -241,6 +241,17 @@ def get_parser(parser=None):
         help="Number of days (unit is days) in the past to start observation list.",
         type=int
     )
+    parser.add_argument(
+        '--tags',
+        help="Observation tags. Ex: --tags 'jupiter' 'setting'",
+        nargs='*',
+        type=str
+    )
+    parser.add_argument(
+        '--planet-obs',
+        help="If true, takes all planet tags as logical OR and adjusts related configs",
+        action='store_true',
+    )
     return parser
 
 def main(
@@ -251,6 +262,8 @@ def main(
         min_ctime: Optional[int] = None,
         max_ctime: Optional[int] = None,
         update_delay: Optional[int] = None,
+        tags: Optional[str] = None,
+        planet_obs: bool = False,
  ):
     configs, context = _get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess")
@@ -272,8 +285,18 @@ def main(
         tot_query = tot_query[4:-4]
         if tot_query=="":
             tot_query="1"
-    
-    obs_list = context.obsdb.query(tot_query)
+
+    for i, tag in enumerate(tags):
+        tags[i] = tags[i].lower()
+        if '=' not in tags[i]:
+            tags[i] += '=1'
+
+    if planet_obs:
+        obs_list = []
+        for tag in tags:
+            obs_list.extend(context.obsdb.query(tot_query, tags=[tag]))
+    else:
+        obs_list = context.obsdb.query(tot_query, tags=tags)
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
     run_list = []
@@ -296,6 +319,11 @@ def main(
     for obs, groups in run_list:
         logger.info(f"Processing obs_id: {obs_id}")
         try:
+            if planet_obs:
+                planet = context.obsdb.get(obs['obs_id'], tags=True)['tags'][0]
+                for process in configs['process_pipe']:
+                    if process['name'] == 'source_flags':
+                        process['calc']['center_on'] = planet
             preprocess_tod(obs["obs_id"], configs, overwrite=overwrite,
                            group_list=groups, logger=logger)
         except Exception as e:
