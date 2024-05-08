@@ -17,7 +17,9 @@ from sotodlib.io import hk_utils
 from sotodlib.site_pipeline import util
 
 wg_counts2rad = 2*np.pi/52000
-#wg_degpercount = 360/52000
+wg_offset_satp1 = np.deg2rad(12.13) # SAT1, MF1
+wg_offset_satp2 = np.deg2rad(9.473) # SAT2, UHF
+wg_offset_satp3 = np.deg2rad(11.21) # TSAT, MF2
 
 logger = util.init_logger('wiregrid', 'wiregrid: ')
 
@@ -114,9 +116,14 @@ def correct_wg_angle(tod, telescope=None, restrict=True):
     idx_wg_inside = _get_operation_range(tod)
     if restrict: tod.restrict('samps', (idx_wg_inside[0], idx_wg_inside[-1]), in_place=True)
     #
-    if telescope == 'satp1': wg_offset = np.deg2rad(12.13)
-    if telescope == 'satp2': wg_offset = np.deg2rad(9.473)
-    if telescope == 'satp3': wg_offset = np.deg2rad(11.21)
+    if telescope == 'satp1':
+        wg_offset = wg_offset_satp1
+    elif telescope == 'satp2':
+        wg_offset = wg_offset_satp2
+    elif telescope == 'satp3':
+        wg_offset = wg_offset_satp3
+    else:
+        logger.warning(f"No matched telescope name of {telescope} for wire grid offset value, wg_offset")
     tod.wg.wrap_new('enc_rad', dtype='float32', shape=('dets', 'samps'))
     tod.wg.enc_rad = -  tod.wg.enc_rad_raw + wg_offset
     return (tod, idx_wg_inside)
