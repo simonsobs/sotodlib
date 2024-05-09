@@ -8,15 +8,18 @@ import numpy as np
 
 import sqlalchemy as db
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship, backref
-from typing import Union, Tuple, List, Optional, Dict
+from sqlalchemy.orm import sessionmaker, relationship
+from typing import Union, List, Optional, Dict
 import so3g
 from spt3g import core as spt3g_core
-from tqdm.auto import tqdm, trange
+from tqdm.auto import tqdm
 import time
+from sotodlib.site_pipeline.util import init_logger
 
 Base = declarative_base()
 Session = sessionmaker()
+
+log = init_logger('hkdb')
 
 @dataclass
 class HkConfig:
@@ -26,11 +29,14 @@ class HkConfig:
     hk_root: str
     "Root directory for the HK archive"
 
-    hk_db: str
-    "Path to the hk index database"
+    db_file: Optional[str] = None
+    "Path to the hk index database if the database is an sqlite file. Either this or db_url must be set"
 
     echo_db: bool = False
     "Whether database operations should be echoed"
+
+    db_url: Optional[Union[str, db.URL]] = None
+    "URL used for db engine. Either this or db_file must be set"
 
     file_idx_lookback_time: Optional[float] = None
     "Time [sec] to look back when scanning for new files to index"
@@ -47,11 +53,25 @@ class HkConfig:
         {
             'fp_temp': 'cryo-ls372-lsa21yc.temperatures.Channel_02_T',
         }
+
+    These aliases are only used on load, and do not effect how data is stored in the hkdb.
+    Aliases should be valid python identifiers, since they will be set as attributes in
+    the HkResult object.
     """
+    def __post_init__(self):
+        if self.db_file is None and self.db_url is None:
+            raise ValueError("Either db_file or db_url must be set")
+        if self.db_file is not None and self.db_url is not None:
+            raise ValueError("Only one of db_file or db_url must be set")
+        if self.db_file is not None:
+            self.db_url = f"sqlite:///{self.db_file}"
 
     @classmethod
     def from_yaml(cls, path):
         with open(path, 'r') as f:
+            data = yaml.safe_load(f)
+            if isinstance(data.get('db_url'), dict):
+                data['db_url'] = db.URL(**data['db_url'])
             return cls(**yaml.safe_load(f))
 
 
@@ -128,7 +148,7 @@ class HkDb:
             cfg = HkConfig.from_yaml(cfg)
         self.cfg = cfg
 
-        self.engine = db.create_engine(f"sqlite:///{cfg.hk_db}", echo=cfg.echo_db)
+        self.engine = db.create_engine(cfg.db_url, echo=cfg.echo_db)
         Session.configure(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine)
         Base.metadata.create_all(self.engine)
@@ -139,19 +159,19 @@ def update_file_index(hkcfg: HkConfig, session=None):
     if session is None:
         hkdb = HkDb(hkcfg)
         session = hkdb.Session()
-    
+
     if hkcfg.file_idx_lookback_time is not None:
         min_ctime = time.time() - hkcfg.file_idx_lookback_time
     else:
         min_ctime = 0
-    
+
     all_files = []
     for subdir in os.listdir(hkcfg.hk_root):
         sdir = os.path.join(hkcfg.hk_root, subdir)
         if min_ctime > os.path.getmtime(sdir):
             continue
         all_files.extend([
-            os.path.join(sdir, f) 
+            os.path.join(sdir, f)
             for f in os.listdir(sdir)
             if f.endswith('.g3')
         ])
@@ -160,7 +180,7 @@ def update_file_index(hkcfg: HkConfig, session=None):
     new_files = sorted(list(set(all_files) - set(existing_files)))
 
     files = []
-    print(f"Adding {len(new_files)} new files to index...")
+    log.info(f"Adding {len(new_files)} new files to index...")
     for path in new_files:
         files.append(HkFile(
             path=path,
@@ -168,7 +188,7 @@ def update_file_index(hkcfg: HkConfig, session=None):
             mod_time=os.path.getmtime(path),
             index_status='unindexed'
         ))
-    
+
     session.add_all(files)
     session.commit()
 
@@ -198,7 +218,7 @@ def get_frames_from_file(file: HkFile, return_on_fail=True) -> List[HkFrame]:
         try:
             frame = reader.Process(None)
         except RuntimeError:
-            print(f"Error processing file {file.path} byte offset: {byte_offset}")
+            log.error(f"Error processing file {file.path} byte offset: {byte_offset}")
             if return_on_fail:
                 break
             else:
@@ -207,7 +227,7 @@ def get_frames_from_file(file: HkFile, return_on_fail=True) -> List[HkFrame]:
             break
         else:
             frame = frame[0]
-        
+
         if frame['hkagg_type'] != so3g.HKFrameType.data:
             continue
 
@@ -232,7 +252,7 @@ def update_frame_index(hkcfg: HkConfig, session=None):
     if session is None:
         hkdb = HkDb(hkcfg)
         session = hkdb.Session()
-    
+
     files = session.query(HkFile).filter(HkFile.index_status == 'unindexed').all()
     for file in tqdm(files, disable=(not hkcfg.show_index_pb)):
         frames = get_frames_from_file(file)
@@ -273,7 +293,7 @@ class Field:
 
     def __str__(self):
         return f"{self.agent}.{self.feed}.{self.field}"
-    
+
     def matches(self, other):
         if self.agent != other.agent:
             return False
@@ -282,7 +302,7 @@ class Field:
         if self.field != other.field and self.field != '*' and other.field != '*':
             return False
         return True
-    
+
     @classmethod
     def from_str(cls, s):
         try:
@@ -359,7 +379,7 @@ class HkResult:
         return cls(data, aliases=aliases)
 
 
-def load_hk(load_spec: LoadSpec, show_pb=False):
+def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False):
     """
     Loads hk data
 
@@ -370,6 +390,9 @@ def load_hk(load_spec: LoadSpec, show_pb=False):
     show_pb: bool
         If true, will show a progressbar :)
     """
+    if isinstance(load_spec, dict):
+        load_spec = LoadSpec(**load_spec)
+
     hkdb = HkDb(load_spec.cfg)
     agent_set = list(set(f.agent for f in load_spec.fields))
 

@@ -25,8 +25,11 @@ following yaml file can be loaded in directly with ``HkConfig.from_yaml``:
 In addition to the hk-root and database paths, an "alias" dictionary can
 be defined here, to provide a mapping from a human-readable name to the
 field-id of the housekeeping data, where field-ids are always
-of the form ``<agent-instance>.<feed>.<field>``.
-Aliases defined here can be used to more easily load and access these fields.
+of the form ``<agent-instance>.<feed>.<field>``.  These aliases are only used
+for data loading, do not effect how the index data is stored in the database.
+This means aliases can also be added or modified, either in the config file or
+programmatically to the HkConfig object, to assist with data loading after that
+hk data has already been indexed.
 
 Loading Data
 ---------------
@@ -44,7 +47,7 @@ For example, the code below will load the focal-plane temp for the last week:
     lspec = hkdb.LoadSpec(
         cfg=cfg, start=t0, end=t1,
         fields=['fp_temp'],
-    )   
+    )
     result = hkdb.load_hk(lspec, show_pb=True)
 
 The result object will be an HkResult object, where ``result.data`` contains the
@@ -80,12 +83,12 @@ For example, you can run:
     lspec = hkdb.LoadSpec(
         cfg=cfg, start=t0, end=t1,
         fields=['cryo-ls372-lsa21yc.*.*'],
-    )   
+    )
     result = hkdb.load_hk(lspec, show_pb=True)
     print(result.data.keys())
 
-    >> dict_keys(['cryo-ls372-lsa21yc.temperatures.Channel_02_R', 
-                  'cryo-ls372-lsa21yc.temperatures.Channel_02_T', 
+    >> dict_keys(['cryo-ls372-lsa21yc.temperatures.Channel_02_R',
+                  'cryo-ls372-lsa21yc.temperatures.Channel_02_T',
                   'cryo-ls372-lsa21yc.temperatures.sample_heater_out'])
 
     # Note that the fp_temp alias will still be found, and assigned to the
