@@ -124,8 +124,7 @@ def correct_wg_angle(tod, telescope=None, restrict=True):
         wg_offset = wg_offset_satp3
     else:
         logger.warning(f"No matched telescope name of {telescope} for wire grid offset value, wg_offset")
-    tod.wg.wrap_new('enc_rad', dtype='float32', shape=('dets', 'samps'))
-    tod.wg.enc_rad = -  tod.wg.enc_rad_raw + wg_offset
+    tod.wg.wrap('enc_rad', -tod.wg.enc_rad_raw + wg_offset, [(0, 'samps')])
     return (tod, idx_wg_inside)
 
 # Detect the motion of the wire grid
@@ -270,7 +269,6 @@ def wrap_qu_cal(tod, stopped_time, thresholds=None):
     tod.wg.wrap('cal_data', _QUcal_ax)
     return tod
 
-
 ### Circle fitting fucntions from here ###
 def _get_initial_param_circle(x):
     """
@@ -285,9 +283,9 @@ def _get_initial_param_circle(x):
         params : the initial paramters for the circle fit
     """
     if len(np.shape(x)) == 2:
-        A = np.average(x[0])
-        B = np.average(x[1])
-        C = np.average(x[0]**2+x[1]**2)
+        A = np.nanmean(x[0])
+        B = np.nanmean(x[1])
+        C = np.nanmean(x[0]**2+x[1]**2)
         params = np.array([A, B, C])
         return params
     else:
@@ -430,11 +428,11 @@ def get_cal_gamma(tod, wrap_aman=False, remove_cal_data=False):
         _gamma_ax.wrap('gamma_raw', _det_angle, [(0, 'dets')])
         _gamma_ax.wrap('gamma_raw_err', _det_angle_err, [(0, 'dets')])
         _gamma_ax.wrap('wires_relative_power', _cal_amp, [(0, 'dets')])
-        _gamma_ax.wrap('gamma', np.nanmean(_det_angle%np.pi, axis=1), [(0, 'dets')])
+        _gamma_ax.wrap('gamma', np.nanmean(np.unwrap(_det_angle, period=np.pi), axis=1), [(0, 'dets')])
         _gamma_ax.wrap('gamma_err', np.nanmean(_det_angle_err, axis=1)/np.sqrt(np.shape(_det_angle_err)[1]), [(0, 'dets')])
         _gamma_ax.wrap('background_pol_rad', _bg_theta, [(0, 'dets')])
         _gamma_ax.wrap('background_pol_relative_power', _bg_amp, [(0, 'dets')])
-        _gamma_ax.wrap('theta_det_instr', 0.5*np.pi - np.nanmean(_det_angle%np.pi, axis=1), [(0, 'dets')]) # instumental angle of dets
+        _gamma_ax.wrap('theta_det_instr', 0.5*np.pi - np.nanmean(np.unwrap(_det_angle, period=np.pi), axis=1), [(0, 'dets')]) # instumental angle of dets
         tod.wrap('gamma_cal', _gamma_ax)
         return tod
     else:
