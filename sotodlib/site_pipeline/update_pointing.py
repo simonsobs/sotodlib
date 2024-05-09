@@ -3,8 +3,10 @@ import numpy as np
 import yaml
 import h5py
 import argparse
+import time
+import glob
 from tqdm import tqdm
-import scipy
+
 from scipy.optimize import curve_fit
 from sotodlib.core import metadata
 from sotodlib.io.metadata import read_dataset, write_dataset
@@ -19,6 +21,17 @@ from sotodlib.site_pipeline import util
 from sotodlib.preprocess import Pipeline
 logger = util.init_logger(__name__, 'update_pointing: ')
 
+def _get_sso_names_from_tags(ctx, obs_id, candidate_names=['moon', 'jupiter']):
+    obs_tags = ctx.obsdb.get(obs_id, tags=True)['tags']
+    sso_names = []
+    for _name in candidate_names:
+        if _name in obs_tags:
+            sso_names.append(_name)
+    if len(sso_names) == 0:
+        raise NameError('Could not find sso_name from observation tags')
+    else:
+        return sso_names
+    
 def gaussian2d_nonlin(xieta, xi0, eta0, fwhm_xi, fwhm_eta, phi, a, nonlin_coeffs):
     """ An Gaussian beam model with non-linear response
     Args
@@ -80,20 +93,19 @@ def wrap_fp_from_hdf(tod, fp_hdf_file, data_set='focal_plane'):
     
     
 def update_xieta(tod, 
-                 sso_name='moon',
+                 sso_name=None,
                  fp_hdf_file=None,
-                 save_dir=None,
-                 pipe=None,
                  force_zero_roll=False,
+                 pipe=None,
                  ds_factor=10, 
                  mask_deg=3,
                  fit_func_name = 'gaussian2d_nonlin',
                  max_non_linear_order = 1,
                  fwhm_init_deg = 0.5,
-                 error_estimation_method='force_one_redchi2', # rms_from_data
+                 error_estimation_method='force_one_redchi2',
                  flag_name_rms_calc = 'source',
                  flag_rms_calc_exclusive = True, 
-                 save=True, ):
+                 ):
     """
     Update xieta parameters for each detector by TOD fitting of a point source observation.
 
@@ -123,7 +135,7 @@ def update_xieta(tod,
     - fwhm_init_deg (float):
         Initial guess for full width at half maximum in degrees. Default is 0.5.
     - error_estimation_method (str):
-        Method for error estimation. Default is 'rms_from_data'. 'rms_from_data' and 'force_one_redchi2' are supported. 
+        Method for error estimation. Default is 'force_one_redchi2'.  'force_one_redchi2' and 'rms_from_data' are supported. 
         If 'rms_from_data', errorbar of each data point is set by root-mean-square of the data points flaged by 'flag_name_rms_calc', 
         and errorbar of xi,eta is set from the fit covariance matrix. If 'force_one_redchi2', the errorbar of (xi,eta) is equivalent the case 
         if the error bar of each data point is set as the reduced chi-square is equal to unity.
@@ -131,8 +143,6 @@ def update_xieta(tod,
         Name of the flag used for RMS calculation. Default is 'source'.
     - flag_rms_calc_exclusive (bool):
         Flag indicating whether the RMS calculation is exclusive to the flag. Default is True.
-    - save (bool):
-        Flag indicating whether to save the updated focal plane data. Default is True.
 
     Returns:
     - focal_plane (ResultSet): ResultSet containing updated xieta parameters for each detector.
@@ -270,9 +280,8 @@ def update_xieta(tod,
 
     return focal_plane
 
-def main_one_wafer(configs, obs_id, wafer_slot, 
-                   sso_name=None, fp_hdf_file=None, fp_hdf_dir=None,
-                   save_dir=None, restrict_dets_for_debug=False):
+def main_one_wafer(configs, obs_id, wafer_slot, sso_name=None, 
+                   restrict_dets_for_debug=False):
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
     
@@ -280,47 +289,45 @@ def main_one_wafer(configs, obs_id, wafer_slot,
     ctx = core.Context(configs.get('context_file'))
     
     # get prior
+    fp_hdf_file = configs.get('fp_hdf_file', None)
+    fp_hdf_dir = configs.get('fp_hdf_dir', None)
     if fp_hdf_file is None:
-        fp_hdf_file = configs.get('fp_hdf_file', None)
-    if fp_hdf_dir is None:
-        fp_hdf_dir = configs.get('fp_hdf_dir', None)
-    if fp_hdf_file is None:
-        if fp_hdf_dir is None:
-            pass
-        else:
+        if fp_hdf_dir is not None:
             fp_hdf_file = os.path.join(fp_hdf_dir, f'focal_plane_{obs_id}_{wafer_slot}.hdf')
             if not os.path.exists(fp_hdf_file):
                 fp_hdf_file = None
-
-    if save_dir is None:
-        save_dir = configs.get('save_dir', None)
+    
+    result_dir = configs.get('result_dir')
+    force_zero_roll = configs.get('force_zero_roll', True)
+    if force_zero_roll:
+        result_dir = result_dir + '_force_zero_roll'
     
     # get sso_name if it is not specified
-    obs_tags = ctx.obsdb.get(obs_id, tags=True)['tags']
     if sso_name is None:
-        known_source_names = ['moon', 'jupiter']
-        for _source_name in known_source_names:
-            if _source_name in obs_tags:
-                sso_name = _source_name
-        if _source_name is None:
-            raise ValueError('sso_name is not specified')
+        logger.info('deriving sso_name from observation tag')
+        obs_tags = ctx.obsdb.get(obs_id, tags=True)['tags']
+        sso_names = _get_sso_names_from_tags(ctx, obs_id)
+        sso_name = sso_names[0]
+        if len(sso_names) >= 2:
+            logger.info(f'sso_names of {sso_names} are found from observation tags.' + 
+                        f'Processing only {sso_name}')
     
     # construct pipeline from configs
-    pipe = Pipeline(configs["process_pipe"])
+    pipe = Pipeline(configs["process_pipe"], logger=logger)
     for pipe_component in pipe:
         if pipe_component.name == 'compute_source_flags':
             pipe_component.process_cfgs['center_on'] = sso_name
     
     # Other parameters
     force_zero_roll = configs.get('force_zero_roll')
-    ds_factor = configs.get('ds_factor')
-    mask_deg = configs.get('mask_deg')
-    fit_func_name = configs.get('fit_func_name')
-    max_non_linear_order = configs.get('max_non_linear_order')
-    fwhm_init_deg = configs.get('fwhm_init_deg')
-    error_estimation_method = configs.get('error_estimation_method')
-    flag_name_rms_calc = configs.get('flag_name_rms_calc')
-    flag_rms_calc_exclusive = configs.get('flag_rms_calc_exclusive')
+    ds_factor = configs.get('ds_factor', 20)
+    mask_deg = configs.get('mask_deg', 3.0)
+    fit_func_name = configs.get('fit_func_name', 'gaussian2d_nonlin')
+    max_non_linear_order = configs.get('max_non_linear_order', 2)
+    fwhm_init_deg = configs.get('fwhm_init_deg', 0.5)
+    error_estimation_method = configs.get('error_estimation_method', 'force_one_redchi2')
+    flag_name_rms_calc = configs.get('flag_name_rms_calc', 'source')
+    flag_rms_calc_exclusive = configs.get('flag_rms_calc_exclusive', True)
     
      
     # Load data
@@ -346,69 +353,180 @@ def main_one_wafer(configs, obs_id, wafer_slot,
                                      flag_rms_calc_exclusive = flag_rms_calc_exclusive, 
                                      )
     
-    os.makedirs(save_dir, exist_ok=True)
+    os.makedirs(result_dir, exist_ok=True)
     write_dataset(focal_plane_rset, 
-                  filename=os.path.join(save_dir, f'focal_plane_{obs_id}_{wafer_slot}.hdf'),
+                  filename=os.path.join(result_dir, f'focal_plane_{obs_id}_{wafer_slot}.hdf'),
                   address='focal_plane',
                   overwrite=True)
         
     return
 
-def main(configs, obs_id, wafer_slots=None,
-        sso_name=None, fp_hdf_file=None, fp_hdf_dir=None, save_dir=None,
-        hit_time_threshold=1200, hit_circle_r_deg=7.0,
-        restrict_dets_for_debug=False):
-    logger.info('get wafer_slots which hit the source because wafer_slots are not specified')    
-    if wafer_slots is None:
-        if type(configs) == str:
-            configs = yaml.safe_load(open(configs, "r"))
-        
-        ctx = core.Context(configs.get('context_file'))
-        optics_config_fn = configs.get('optics_config_fn')
-        
-        obs_tags = ctx.obsdb.get(obs_id, tags=True)['tags']
-        if sso_name is None:
-            known_source_names = ['moon', 'jupiter']
-            for _source_name in known_source_names:
-                if _source_name in obs_tags:
-                    sso_name = _source_name
-            if _source_name is None:
-                raise ValueError('sso_name is not specified')
-        
-        wafer_slots = []
-        tod = ctx.get_obs(obs_id, dets=[])
-        for ws in [f'ws{i}' for i in range(7)]:
-            hit_time = mbp.get_rough_hit_time(tod, wafer_slot=ws, sso_name=sso_name, circle_r_deg=hit_circle_r_deg,
-                                              optics_config_fn=optics_config_fn)
-            logger.info(f'hit_time for {ws} is {hit_time:.1f} [sec]')
-            if hit_time > hit_time_threshold:
-                wafer_slots.append(ws)        
-    assert np.all(np.array(wafer_slots, dtype='U2') == 'ws')
+def main_one_wafer_dummy(configs, obs_id, wafer_slot, restrict_dets_for_debug=False):
+    if type(configs) == str:
+        configs = yaml.safe_load(open(configs, "r"))
+    ctx = core.Context(configs.get('context_file'))
+    result_dir = configs.get('result_dir')
+    force_zero_roll = configs.get('force_zero_roll', True)
+    if force_zero_roll:
+        result_dir = result_dir + '_force_zero_roll'
     
-    logger.info(f'wafer_slots which pointing calculated: {wafer_slots}')
-    for wafer_slot in wafer_slots:
-        main_one_wafer(configs,
-                       obs_id,
-                       wafer_slot,
+    meta = ctx.get_meta(obs_id, dets={'wafer_slot': wafer_slot})
+    if restrict_dets_for_debug is not False:
+        meta.restrict('dets', meta.dets.vals[:restrict_dets_for_debug])
+    result_filename = f'focal_plane_{obs_id}_{wafer_slot}.hdf'
+    
+    fp_rset_dummy = metadata.ResultSet(keys=['dets:readout_id', 'xi', 'eta', 'gamma', 
+                                             'xi_err', 'eta_err', 'R2', 'redchi2'])
+    for det in meta.dets.vals:
+        fp_rset_dummy.rows.append((det, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan))
+        
+    os.makedirs(result_dir, exist_ok=True)
+    write_dataset(fp_rset_dummy, 
+                  filename=os.path.join(result_dir, result_filename),
+                  address='focal_plane',
+                  overwrite=True)
+    return
+
+def combine_pointings(pointing_result_files):
+    combined_dict = {}
+    for file in pointing_result_files:
+        rset = read_dataset(file, 'focal_plane')
+        for row in rset[:]:
+            if row['dets:readout_id'] not in combined_dict.keys():
+                combined_dict[row['dets:readout_id']] = {}
+                combined_dict[row['dets:readout_id']]['xi'] = row['xi']
+                combined_dict[row['dets:readout_id']]['eta'] = row['eta']
+                combined_dict[row['dets:readout_id']]['gamma'] = row['gamma']
+                combined_dict[row['dets:readout_id']]['xi_err'] = row['xi_err']
+                combined_dict[row['dets:readout_id']]['eta_err'] = row['eta_err']
+                combined_dict[row['dets:readout_id']]['R2'] = row['R2']
+                combined_dict[row['dets:readout_id']]['redchi2'] = row['redchi2']
+
+    focal_plane = metadata.ResultSet(keys=['dets:readout_id', 'xi', 'eta', 'gamma', 'xi_err', 'eta_err', 'R2', 'redchi2'])
+    
+    for det, val in combined_dict.items():
+        focal_plane.rows.append((det, val['xi'], val['eta'], val['gamma'], val['xi_err'], val['eta_err'], val['R2'], val['redchi2']))
+    return focal_plane
+
+def main_one_obs(configs, obs_id, sso_name=None,
+                restrict_dets_for_debug=False):
+    if type(configs) == str:
+        configs = yaml.safe_load(open(configs, "r"))
+    ctx = core.Context(configs.get('context_file'))
+    result_dir = configs.get('result_dir')
+    force_zero_roll = configs.get('force_zero_roll', True)
+    if force_zero_roll:
+        result_dir = result_dir + '_force_zero_roll'
+    optics_config_fn = configs.get('optics_config_fn')
+    
+    hit_time_threshold = configs.get('hit_time_threshold', 600)
+    hit_circle_r_deg = configs.get('hit_circle_r_deg', 7.0)
+    
+    if sso_name is None:
+        logger.info('deriving sso_name from observation tag')
+        obs_tags = ctx.obsdb.get(obs_id, tags=True)['tags']
+        sso_names = _get_sso_names_from_tags(ctx, obs_id)
+        sso_name = sso_names[0]
+        if len(sso_names) >= 2:
+            logger.info(f'sso_names of {sso_names} are found from observation tags.' + 
+                        f'Processing only {sso_name}')
+    
+    tod = ctx.get_obs(obs_id, dets=[])
+    streamed_wafer_slots = ['ws{}'.format(index) for index, bit in enumerate(obs_id.split('_')[-1]) if bit == '1']
+    processed_wafer_slots = []
+    skipped_wafer_slots = []
+    for ws in streamed_wafer_slots:
+        hit_time = mbp.get_rough_hit_time(tod, wafer_slot=ws, sso_name=sso_name, circle_r_deg=hit_circle_r_deg,
+                                         optics_config_fn=optics_config_fn)
+        logger.info(f'hit_time for {ws} is {hit_time:.1f} [sec]')
+        if hit_time > hit_time_threshold:
+            processed_wafer_slots.append(ws)
+        else:
+            skipped_wafer_slots.append(ws)
+    
+    logger.info(f'wafer_slots which pointing calculated: {processed_wafer_slots}')
+    for wafer_slot in processed_wafer_slots:
+        logger.info(f'Processing {obs_id}, {wafer_slot}')
+        main_one_wafer(configs=configs,
+                       obs_id=obs_id,
+                       wafer_slot=wafer_slot,
                        sso_name=sso_name,
-                       fp_hdf_file=fp_hdf_file, 
-                       fp_hdf_dir=fp_hdf_dir,
-                       save_dir=save_dir,
                        restrict_dets_for_debug=restrict_dets_for_debug)
+    
+    logger.info(f'create dummy hdf for non-hitting wafer: {skipped_wafer_slots}')
+    for wafer_slot in skipped_wafer_slots:
+        main_one_wafer_dummy(configs=configs,
+                       obs_id=obs_id,
+                       wafer_slot=wafer_slot,
+                       restrict_dets_for_debug=restrict_dets_for_debug)
+    
+    logger.info('making combined result')
+    pointing_result_files = glob.glob(os.path.join(result_dir, f'focal_plane_{obs_id}_ws[0-6].hdf'))
+    fp_rset_full = combine_pointings(pointing_result_files)
+    fp_rset_full_file = os.path.join(os.path.join(result_dir, f'focal_plane_{obs_id}_all.hdf'))
+    write_dataset(fp_rset_full, filename=fp_rset_full_file,
+                  address='focal_plane', overwrite=True)
+        
+def main(configs, min_ctime=None, max_ctime=None, update_delay=None,
+         obs_id=None, wafer_slot=None, sso_name=None, restrict_dets_for_debug=False):
+    if (min_ctime is None) and (update_delay is not None):
+        # If min_ctime is provided it will use that..
+        # Otherwise it will use update_delay to set min_ctime.
+        min_ctime = int(time.time()) - update_delay*86400
+        
+    if type(configs) == str:
+        configs = yaml.safe_load(open(configs, "r"))
+    ctx = core.Context(configs.get('context_file'))
+    
+    if obs_id is None:
+        query_text = configs.get('query_text', None)
+        query_tags = configs.get('query_tags', None)
+        tot_query = "and "
+        if query_text is not None:
+            tot_query += f"{query_text} and "
+        if min_ctime is not None:
+            tot_query += f"timestamp>={min_ctime} and "
+        if max_ctime is not None:
+            tot_query += f"timestamp<={max_ctime} and "
+        tot_query = tot_query[4:-4]
+        if tot_query == "":
+            tot_query = "1"
+            
+        logger.info(f'tot_query: {tot_query}')
+        obs_list= ctx.obsdb.query(tot_query, query_tags)
+
+        for obs in obs_list:
+            obs_id = obs['obs_id']
+            logger.info(f'Processing {obs_id}')
+            main_one_obs(configs=configs, obs_id=obs_id,
+                        restrict_dets_for_debug=restrict_dets_for_debug)
+    
+    elif obs_id is not None:
+        if wafer_slot is None:
+            main_one_obs(configs=configs, obs_id=obs_id, sso_name=sso_name,
+                         restrict_dets_for_debug=restrict_dets_for_debug)
+        else:
+            main_one_wafer(configs=configs, obs_id=obs_id, wafer_slot=wafer_slot, sso_name=sso_name, 
+                           restrict_dets_for_debug=restrict_dets_for_debug)  
     return
     
     
 def get_parser():
     parser = argparse.ArgumentParser(description="Get updated result of pointings with tod-based results")
     parser.add_argument("configs", type=str, help="Path to the configuration file")
-    parser.add_argument("obs_id", type=str, help="Observation ID.")
-    parser.add_argument("--wafer_slots", nargs='*', default=None, help="Wafer slots to be processed")    
-    parser.add_argument("--sso_name", type=str,  default=None, help="Name of the Solar System Object (SSO).")
-    parser.add_argument("--fp_hdf_file", type=str, default=None, help="File path to the focal_plane hdf file used as a prior")
-    parser.add_argument("--fp_hdf_dir", type=str, default=None, 
-                        help="Directory path where focal_plane hdf file of each observation are stored. Used only fp_hdf_file is not specified.")
-    parser.add_argument("--save_dir", type=str, help="Directory to save the result.")
-    parser.add_argument("--restrict_dets_for_debug", type=int, help="Flag to restrict the number of detectors.")
+    parser.add_argument('--min_ctime', type=int, help="Minimum timestamp for the beginning of an observation list")
+    parser.add_argument('--max_ctime', type=int, help="Maximum timestamp for the beginning of an observation list")
+    parser.add_argument('--update-delay', type=int, help="Number of days (unit is days) in the past to start observation list.")                         
+    parser.add_argument("--obs_id", type=str, 
+                        help="Specific observation obs_id to process. If provided, overrides other filtering parameters.")
+                         
+    parser.add_argument("--wafer_slot", type=str, default=None, 
+                        help="Wafer slot to be processed (e.g., 'ws0', 'ws3'). Valid only when obs_id is specified.")
+                         
+    parser.add_argument("--sso_name", type=str, default=None,
+                        help="Name of solar system object (e.g., 'moon', 'jupiter'). If not specified, get sso_name from observation tags. "\
+                       + "Valid only when obs_id is specified")                     
+    parser.add_argument("--restrict_dets_for_debug", type=int, default=False)
     return parser
 
 if __name__ == '__main__':

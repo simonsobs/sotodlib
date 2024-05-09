@@ -477,12 +477,10 @@ def get_xieta_from_maps(map_hdf_file,
             filename = 'focal_plane_' + os.path.splitext(os.path.basename(map_hdf_file))[0] + '.hdf'
         output_file = os.path.join(output_dir, filename)
         
-        focal_plane = metadata.ResultSet(keys=['dets:readout_id', 'band', 'channel', 'R2', 'xi', 'eta', 'gamma'])
+        focal_plane = metadata.ResultSet(keys=['dets:readout_id', 'xi', 'eta', 'gamma', 'R2'])
         for det in dets:
-            band = int(det.split('_')[-2])
-            channel = int(det.split('_')[-1])
-            focal_plane.rows.append((det, band, channel, xieta_dict[det]['R2'],
-                                     xieta_dict[det]['xi'], xieta_dict[det]['eta'], 0.))
+            focal_plane.rows.append((det, xieta_dict[det]['xi'], xieta_dict[det]['eta'], 0., 
+                                     xieta_dict[det]['R2']))
         write_dataset(focal_plane, output_file, 'focal_plane', overwrite=True)
     return focal_plane
 
