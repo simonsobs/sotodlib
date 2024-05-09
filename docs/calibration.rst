@@ -4,7 +4,7 @@
 calibration
 ===========
 
-General description about the calibration pipeline scripts here.
+General description of the analysis scripts used to analyze datasets from our calibration hardware.
 
 
 Command line interface
@@ -59,6 +59,8 @@ Finally, the AxisManager has the field of ``gamma_cal`` that has:
  - ``'background_pol_rad'``: the direction of the center offset,
  - ``'theta_det_instr'``: estimated instrumental polarization response direction
 
+.. _wiregrid-background:
+
 Background
 ----------
 
@@ -68,7 +70,7 @@ Wire grid calibration is based on the model
 
     \mathrm{d} = \mathrm{I}_{\mathrm{in}} + \left[A_{\mathrm{wire}}\ e^{2i\theta_\mathrm{wire}} + A_{\mathrm{background}}\ e^{2i\theta_\mathrm{bg}} +\mathcal{O}(\varepsilon) \left(\mathrm{CMB, sky}\right)\right]\exp i\left[-4\theta_{\mathrm{HWP}} + 2\theta_{\mathrm{det}}\right] + c.c.
 
-In this representation, :math:`\mathrm{d` is a time-ordered measurements consists of
+In this representation, :math:`\mathrm{d}` is a time-ordered measurements which consists of
 the Intensity of the input power, :math:`\mathrm{I}_\mathrm{in}` and the polarization terms of
 some static background :math:`A_\mathrm{background}`, wires power :math:`A_\mathrm{wire}`,
 sky signal, and tiny amount of CMB.

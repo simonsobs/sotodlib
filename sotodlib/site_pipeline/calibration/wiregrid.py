@@ -104,7 +104,11 @@ def correct_wg_angle(tod, telescope=None, restrict=True):
     Returns
     -------
         (tod, idx_wg_inside) : Tuple
-            tod is an AxisManager, and idx_wg_inside is the flags that indicates the opration range of the wire grid.
+            ``tod`` is an ``AxisManager``, and ``idx_wg_inside`` is the flags that indicates the opration range of the wire grid. ``tod`` has a new field wrapped into it called ``wg`` which is a
+            sub-AxisManager that includes the following fields:
+
+                - ``enc_rad_raw`` : Raw encoder rotation angle.
+                - ``LS<X><Y>`` : Limit switch ``<X>`` = L-Left or R-Right ``<Y>`` = 1 or 2 value.
     """
     if telescope is None:
         try:
@@ -204,30 +208,32 @@ def _detect_steps(tod, stopped_time=10, thresholds=None):
 # Wrap the QU response during the operation of the Grid Loader
 def wrap_qu_cal(tod, stopped_time, thresholds=None):
     """
-    Wrap QU signal by the wire grid. This method is based on the demodulation by HWP.
-    Users have to apply some HWP process before calling this.
+    Wrap demodulated QU mean and standard deviation signal for each wire grid
+    angle step. This method requires the data to be demodulated by the HWP 
+    angles so users must apply HWP demodulation processing before calling this.
 
     Parameters
     ----------
         tod : AxisManager
         stopped_time : int
-            the stopped time of your target operation
+            The stopped time of your target operation.
         threshold : tuple
-            the thresholds on the encoder counts.
-            the first element is the upper bound for the static state,
-            and the second element is the lower bound for the difference of the first
+            The thresholds on the encoder counts. The first element is the
+            upper bound for the static state, and the second element is the
+            lower bound for the difference of the first.
 
     Returns
     -------
         tod : AxisManger
-            This includes the characterics of the wire grid operation and the Q/U signal
-            related with it.
-            wg.flag_step_start : the start time stamps for the steps
-            wg.flag_step_stop : the stop time stamps for the steps
-            wg.theta_wire_rad : wires' direction in radian for each step
-            wg.theta_wire_std : the standard deviations of theta_wire for each step
-            wg.Q, wg.U : Q (and U) signal by wires
-            wg.Qerr, wg.Uerr : the standard deviations of Q (and U) signal
+            This includes the characteristics of the wire grid operation and the Q/U signal
+            related with it wrapped into the ``tod.wg`` sub axis manager field:
+
+                - ``wg.flag_step_start`` : The start time stamps for the steps.
+                - ``wg.flag_step_stop`` : The stop time stamps for the steps.
+                - ``wg.theta_wire_rad`` : Wires' direction in radian for each step.
+                - ``wg.theta_wire_std`` : The standard deviations of theta_wire for each step.
+                - ``wg.Q``, ``wg.U`` : Q (and U) signal by wires.
+                - ``wg.Qerr``, ``wg.Uerr`` : The standard deviations of Q (and U) signal.
 
     """
     if hasattr(tod, 'demodQ') is False:
@@ -341,7 +347,8 @@ def _comp_plane_fit(obs_data, std_data, fitfunc, param0):
 
 def fit_with_circle(tod):
     """
-    Get the results by the circle fitting about the responce against the wires in Q+iU plane
+    Get the results from fitting a circle to the response against to a stepwise
+    rotation of the wiregrid in the Q+iU plane.
 
     Parameters
     ----------
@@ -350,12 +357,15 @@ def fit_with_circle(tod):
     Returns
     -------
         tod : AxisManager
-            This includes fit results for all the inpput detectors
-            cx0 : Estimated x-offset value
-            cy0 : Estimated y-offset value
-            cr : Estimated radius vaule
-            covariance : covariance matrix of the estimated parameters
-            residual_var : Residual variance
+            Wraps a new sub-AxisManager into ``tod.wg`` called ``cfit_result``
+            which includes fit results for all the input detectors. The fields
+            wrapped are:
+
+                - ``cx0`` : Estimated x-offset value.
+                - ``cy0`` : Estimated y-offset value.
+                - ``cr`` : Estimated radius value.
+                - ``covariance`` : Covariance matrix of the estimated parameters.
+                - ``residual_var`` : Residual variance.
 
     """
     _cal_data = tod.wg.cal_data
@@ -394,15 +404,25 @@ def get_cal_gamma(tod, wrap_aman=False, remove_cal_data=False):
     Parameters
     ----------
         tod : AxisManager
+            Input AxisManager with the ``wg`` sub-AxisManager already wrapped in.
         wrap_aman : (default) False
-        remove_cal_data : (defalut) False
+            Wrap results into input AxisManager into field ``gamma_cal``.
+        remove_cal_data : (default) False
+            Delete ``wg`` sub-AxisManager after using it.
 
     Returns
     -------
-        (det_angle, det_angle_err) : polarization response angle of detectors in radian, which has the shape of (dets, wire's step)
-        (bg_amp, bg_theta) : The amplitude and the direction of the background polarization not about the wires' signal.
-        tod : AxisManager
-            which has calibrated angles(tod.wg.gamma_cal). Only returned this by wrap_aman==True
+        If ``wrap_aman`` is False two tuples are returned:
+
+
+            - ``(det_angle, det_angle_err)`` : polarization response angle of detectors in radian, which has the shape of (dets, wire's step)
+            - ``(bg_amp, bg_theta)`` : The amplitude and the direction of the background polarization not about the wires' signal.
+
+
+        If ``wrap_aman`` is True then the input AxisManager is returned with a sub-AxisManager wrapped into the ``gamma_cal`` field with fields described in :ref:`wiregrid-background` plus the following fields:
+
+            - ``gamma_raw`` : Same as ``det_angle`` described above.
+            - ``gamma_raw_err`` : Same as ``det_angle_err`` described above.
 
     """
     _cal_data = tod.wg.cal_data
