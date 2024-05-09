@@ -283,9 +283,9 @@ def _get_initial_param_circle(x):
         params : the initial paramters for the circle fit
     """
     if len(np.shape(x)) == 2:
-        A = np.average(x[0])
-        B = np.average(x[1])
-        C = np.average(x[0]**2+x[1]**2)
+        A = np.nanmean(x[0])
+        B = np.nanmean(x[1])
+        C = np.nanmean(x[0]**2+x[1]**2)
         params = np.array([A, B, C])
         return params
     else:
