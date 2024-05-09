@@ -203,7 +203,7 @@ def _detect_steps(tod, stopped_time=10, thresholds=None):
     return (ts_step_start, ts_step_end), (angle_mean, angle_std)
 
 # Wrap the QU response during the operation of the Grid Loader
-def wrap_QUcal(tod, stopped_time, thresholds=None):
+def wrap_qu_cal(tod, stopped_time, thresholds=None):
     """
     Wrap QU signal by the wire grid. This method is based on the demodulation by HWP.
     Users have to apply some HWP process before calling this.
@@ -231,7 +231,7 @@ def wrap_QUcal(tod, stopped_time, thresholds=None):
             wg.Qerr, wg.Uerr : the standard deviations of Q (and U) signal
 
     """
-    if hasattr(tod, 'demodQ') == False:
+    if hasattr(tod, 'demodQ') is False:
         print("This AxisManager does not have demodQ/demodU. Please call this method after you have demodulated the signal.")
         logger.info("Attribution check of demod signal was failed in site_pipeline.calibrate.wiregrid.wrap_QUcal")
         return False
@@ -241,7 +241,7 @@ def wrap_QUcal(tod, stopped_time, thresholds=None):
     step_U = []
     step_Qerr = []
     step_Uerr = []
-    for _i in range(len(wg_rad[0])):
+    for _i, _ in enumerate(wg_rad[0]):
         instep = np.where(ts_step[0][_i] < tod.timestamps, True, False)
         instep = np.where(tod.timestamps < ts_step[1][_i+1], instep, False)
         #
