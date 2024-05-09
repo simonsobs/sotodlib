@@ -27,6 +27,10 @@ class NoScanFrames(Exception):
     """Exception raised when we try and bind a book but the SMuRF file contains not Scan frames (so no detector data)"""
     pass
 
+class NoMountData(Exception):
+    """Exception raised when we cannot find mount data"""
+    pass
+
 class DuplicateAncillaryData(Exception):
     """Exception raised when we find the HK data has copies of the same timestamps"""
     pass
@@ -185,7 +189,17 @@ class AncilProcessor:
             block.finalize(drop_duplicates=self.drop_duplicates)
         self.preprocessed = True
 
-    
+        if 'ACU_broadcast' not in self.blocks:
+            raise NoMountData(
+                f"Did not find ACU data in {self.files}",
+            )
+        block = self.blocks['ACU_broadcast']
+        if ('Corrected_Azimuth' not in block.data or 
+            'Corrected_Elevation' not in block.data):
+            raise NoMountData(
+                f"Did not find azimuth or elevation data in {self.files}",
+            )
+        
     def bind(self, outdir, times, frame_idxs, file_idxs):
         """
         Binds ancillary data.
@@ -211,6 +225,17 @@ class AncilProcessor:
         az, el, boresight, corotation = None, None, None, None
         block = self.blocks['ACU_broadcast']
         if 'Corrected_Azimuth' in block.data:
+            m = np.all([block.times >= times[0], block.times<=times[-1]],axis=0)
+            if not any(m):
+                raise NoMountData(
+                    f"Found no mount data overlapping with detector data"
+                )
+            if np.max(np.diff( block.times[m])) / np.max(np.diff(times)) > 100:
+                raise NoMountData(
+                    f"Max ACU data spacing {np.max(np.diff( block.times[m]))}s" f" more than 100x detector data spacing of "
+                    f"{np.max(np.diff(times))}s. Interpolation may be "
+                    "questionable."
+                )
             az = np.interp(times, block.times, block.data['Corrected_Azimuth'])
             el = np.interp(times, block.times, block.data['Corrected_Elevation'])
         if 'Corrected_Boresight' in block.data:
@@ -226,7 +251,7 @@ class AncilProcessor:
                 block.times, 
                 block.data['Corotator_current_position']
             )
-
+        
         anc_frame_data = []
         for oframe_idx in np.unique(frame_idxs):
             # Update file writer if starting a new output file
@@ -647,7 +672,7 @@ class BookBinder:
         self.data_root = data_root
         self.hk_root = os.path.join(data_root, 'hk')
         self.meta_root = os.path.join(data_root, 'smurf')
-        self.hkfiles = get_hk_files(os.path.join(data_root, 'hk'), 
+        self.hkfiles = get_hk_files(self.hk_root, 
                                     book.start.timestamp(),
                                     book.stop.timestamp())
         self.obsdb = obsdb
@@ -1076,6 +1101,7 @@ def get_hk_files(hkdir, start, stop, tbuff=10*60):
         if len(check) < 1:
             raise ValueError("Cannot find HK files we need")
         fidxs = [check[0][-1]]
+        m[fidxs] = 1
     else:
         fidxs = np.where(m)[0]
     # Add files before and after for good measure
