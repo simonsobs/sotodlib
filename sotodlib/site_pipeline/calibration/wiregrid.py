@@ -91,7 +91,8 @@ def _get_operation_range(tod):
 # Correct wires' direction for each telescope
 def correct_wg_angle(tod, telescope=None, restrict=True):
     """
-    Correct offset of wires' direction by the mechanical design and hardware testing. This function is still under construction.
+    Correct offset of the wires' direction informed by the mechanical design 
+    and hardware testing. This function is still under construction.
 
     Parameters
     ----------
@@ -225,8 +226,9 @@ def wrap_qu_cal(tod, stopped_time, thresholds=None):
     Returns
     -------
         tod : AxisManger
-            This includes the characteristics of the wire grid operation and the Q/U signal
-            related with it wrapped into the ``tod.wg`` sub axis manager field:
+            This includes the characteristics of the step-wise wiregrid rotation
+            and the detectors' Q/U signal related with it. This information is wrapped 
+            into the ``tod.wg`` sub-AxisManager fields:
 
                 - ``wg.flag_step_start`` : The start time stamps for the steps.
                 - ``wg.flag_step_stop`` : The stop time stamps for the steps.
@@ -347,8 +349,8 @@ def _comp_plane_fit(obs_data, std_data, fitfunc, param0):
 
 def fit_with_circle(tod):
     """
-    Get the results from fitting a circle to the response against to a stepwise
-    rotation of the wiregrid in the Q+iU plane.
+    Get the results from fitting a circle to the detectors' response to a
+    stepwise rotation of the wiregrid in the Q+iU plane.
 
     Parameters
     ----------

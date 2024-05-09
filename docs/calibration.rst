@@ -70,10 +70,10 @@ Wire grid calibration is based on the model
 
     \mathrm{d} = \mathrm{I}_{\mathrm{in}} + \left[A_{\mathrm{wire}}\ e^{2i\theta_\mathrm{wire}} + A_{\mathrm{background}}\ e^{2i\theta_\mathrm{bg}} +\mathcal{O}(\varepsilon) \left(\mathrm{CMB, sky}\right)\right]\exp i\left[-4\theta_{\mathrm{HWP}} + 2\theta_{\mathrm{det}}\right] + c.c.
 
-In this representation, :math:`\mathrm{d}` is a time-ordered measurements which consists of
-the Intensity of the input power, :math:`\mathrm{I}_\mathrm{in}` and the polarization terms of
+In this representation, :math:`\mathrm{d}` is a time-ordered measurement which consists of
+the intensity of the input power, :math:`\mathrm{I}_\mathrm{in}` and the polarization terms of
 some static background :math:`A_\mathrm{background}`, wires power :math:`A_\mathrm{wire}`,
-sky signal, and tiny amount of CMB.
+sky signal, and a tiny amount of CMB.
 
 The static background polarization and the wire signal have polarization angle dependencies,
 :math:`2\theta_\mathrm{wire}`, and :math:`2\theta_\mathrm{background}`, respectively.
