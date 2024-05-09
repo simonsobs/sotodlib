@@ -124,8 +124,7 @@ def correct_wg_angle(tod, telescope=None, restrict=True):
         wg_offset = wg_offset_satp3
     else:
         logger.warning(f"No matched telescope name of {telescope} for wire grid offset value, wg_offset")
-    tod.wg.wrap_new('enc_rad', dtype='float32', shape=('dets', 'samps'))
-    tod.wg.enc_rad = -  tod.wg.enc_rad_raw + wg_offset
+    tod.wg.wrap('enc_rad', -tod.wg.enc_rad_raw + wg_offset, [(0, 'samps')])
     return (tod, idx_wg_inside)
 
 # Detect the motion of the wire grid
