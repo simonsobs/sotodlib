@@ -25,39 +25,43 @@ log = init_logger('hkdb')
 class HkConfig:
     """
     Configuration object for indexing and loading from an HK archive.
+
+    Attributes
+    ------------
+    hk_root: str
+        Root directory for the HK archive
+    db_file: Optional[str]
+        Path to the hk index database if the database is an sqlite file. Either
+        this or db_url must be set
+    db_url: Optional[Union[str, db.URL]]
+        URL used for db engine. Either this or db_file must be set
+    echo_db: bool
+        Whether database operations should be echoed
+    file_idx_lookback_time: Optional[float]
+        Time [sec] to look back when scanning for new files to index
+    show_index_pb: bool
+        If true, shows progress bar when indexing
+    aliases: Dict[str, str]
+        Aliases for hk fields. In this dict, the key is the alias name, and the
+        value is the field descriptor, in the format of ``agent.feed.field``.
+        For example::
+
+            {
+                'fp_temp': 'cryo-ls372-lsa21yc.temperatures.Channel_02_T',
+            }
+
+        These aliases are only used on load, and do not effect how data is stored in the hkdb.
+        Aliases should be valid python identifiers, since they will be set as attributes in
+        the HkResult object.
     """
     hk_root: str
-    "Root directory for the HK archive"
-
     db_file: Optional[str] = None
-    "Path to the hk index database if the database is an sqlite file. Either this or db_url must be set"
-
-    echo_db: bool = False
-    "Whether database operations should be echoed"
-
     db_url: Optional[Union[str, db.URL]] = None
-    "URL used for db engine. Either this or db_file must be set"
-
+    echo_db: bool = False
     file_idx_lookback_time: Optional[float] = None
-    "Time [sec] to look back when scanning for new files to index"
-
     show_index_pb: bool = True
-    "If true, shows progress bar when indexing"
-
     aliases: Dict[str, str] = field(default_factory=dict)
-    """
-    Aliases for hk fields. In this dict, the key is the alias name, and the
-    value is the field descriptor, in the format of ``agent.feed.field``.
-    For example::
 
-        {
-            'fp_temp': 'cryo-ls372-lsa21yc.temperatures.Channel_02_T',
-        }
-
-    These aliases are only used on load, and do not effect how data is stored in the hkdb.
-    Aliases should be valid python identifiers, since they will be set as attributes in
-    the HkResult object.
-    """
     def __post_init__(self):
         if self.db_file is None and self.db_url is None:
             raise ValueError("Either db_file or db_url must be set")
@@ -316,27 +320,29 @@ class Field:
 class LoadSpec:
     """
     HK loading specification
+
+    Args
+    -----
+    cfg: HkConfig
+        Configuration object
+    fields: List[str]
+        List of field specifications to load. This can either be a field
+        descriptor, of the format ``agent.feed.field``, or an alias defined in
+        the config. Field descriptors can contain wildcards, for instance
+        ``agent.*.*`` will load all fields belonging to the specified agent.
+        ``agent.feed.*`` and ``agent.*.field`` will also work as expected.
+    start: float
+        Start time to load
+    end: float
+        End time to load
+    downsample_factor: int
+        Downsample factor for data
     """
     cfg: HkConfig
-
     fields: List[str]
-    """
-    List of field specifications to load. This can either be a field
-    descriptor, of the format ``agent.feed.field``, or an alias defined in
-    the config. Field descriptors can contain wildcards, for instance
-    ``agent.*.*`` will load all fields belonging to the specified agent.
-    ``agent.feed.*`` and ``agent.*.field`` will also work as expected.
-    """
-
     start: float
-    "Start time to load"
-
     end: float
-    "End time to load"
-
     downsample_factor: int = 1
-    "Downsample factor for data"
-
 
     def __post_init__(self):
         fs = []
