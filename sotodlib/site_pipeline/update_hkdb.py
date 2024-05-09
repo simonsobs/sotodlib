@@ -1,7 +1,7 @@
 """
 Script for calling hkdb update function with a configuration file
 """
-from sotodlib.io import hkdb 
+from sotodlib.io import hkdb
 
 def main(cfg_file: str):
     """Updates hkdb index databases"""
