@@ -11,7 +11,7 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    count_cuts,
                                     sparse_to_ranges_matrix)
 
-from .core import _Preprocess, _FracFlaggedMixIn
+from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 
 
