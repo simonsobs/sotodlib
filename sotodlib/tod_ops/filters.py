@@ -494,8 +494,9 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None,
             iir_params = tod[iir_params]
         if 'a' not in list(iir_params._fields.keys()):
             # Check iir_param's uniformity
-            for _field, sub_iir_params in iir_params._fields.items():
-                if isinstance(sub_iir_params, core.AxisManager) and 'a' in list(sub_iir_params._fields.keys()):
+            for _field, _sub_iir_params in iir_params._fields.items():
+                if isinstance(_sub_iir_params, core.AxisManager) and 'a' in list(_sub_iir_params._fields.keys()):
+                    sub_iir_params = _sub_iir_params
                     if i == 0:
                         _a, _b, _fscale = sub_iir_params['a'], sub_iir_params['b'], sub_iir_params['fscale']
                     else:
