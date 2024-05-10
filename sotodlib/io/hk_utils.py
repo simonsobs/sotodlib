@@ -196,7 +196,7 @@ def _hk_amans(group, alias_exists=False, hk_cosampled=False):
     
     # for cosampled hk data
     else:
-        aliases = [group[field][2] if alias_exists else field for field in group]
+        aliases = [group[field][2] if alias_exists and len(group[field]) > 2 else field for field in group]
         key = list(group.keys())[0]
         time = group[key][0]
         data = {}
@@ -244,7 +244,7 @@ def _hkdet_amans(group, det_aman, alias_exists=False):
     """
     device_names = []
     data_interp = {}
-    aliases = [group[f][2] if alias_exists else f for f in group]
+    aliases = [group[field][2] if alias_exists and len(group[field]) > 2 else field for field in group]
     amans = []
     for field, value in group.items():
         device_name = field.split('.')[0]
@@ -302,7 +302,7 @@ def make_hkaman(grouped_data, alias_exists=False, det_cosampled=False, det_aman=
     ams = []
     devices = []
     for group in grouped_data:
-        aliases = [group[field][2] if alias_exists else field for field in group]
+        aliases = [group[field][2] if alias_exists and len(group[field]) > 2 else field for field in group]
         # only want HK data, checking for cases where HK data is cosampled
         if det_cosampled is False:
             try:
