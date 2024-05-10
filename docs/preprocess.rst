@@ -1,4 +1,4 @@
-.. py:module:: sotodlib.preprocess.core
+.. py:module:: sotodlib.preprocess.pcore
 
 .. _preprocess-module:
 
