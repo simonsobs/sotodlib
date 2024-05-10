@@ -147,7 +147,7 @@ def preprocess_tod(
         
         logger.info(f"Saving to database under {db_data}")
         if len(db.inspect(db_data)) == 0:
-            h5_path = os.path.relpath(h5_path,
+            h5_path = os.path.relpath(dest_file,
                     start=os.path.dirname(configs['archive']['index']))
             db.add_entry(db_data, h5_path)
 
