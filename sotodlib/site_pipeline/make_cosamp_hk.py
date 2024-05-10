@@ -100,41 +100,46 @@ def main(config: str,
     elif verbose == 3:
         logger.setLevel(logging.DEBUG)
     
-    if (min_ctime is None) and (update_delay is not None):
-        # If min_ctime is provided it will use that..
-        # Otherwise it will use update_delay to set min_ctime.
-        min_ctime = int(time.time()) - update_delay*86400
-    logger.info(f'min_ctime: {min_ctime}')
-    # load context
-    context_file = hk2meta_config['context_file']
-    ctx = core.Context(context_file)
+
     
     # load configuration file
-    with open(config) as f:
-        hk2meta_config = yaml.safe_load(f)
+    if type(config) == str:
+        with open(config) as f:
+            config = yaml.safe_load(f)
+    
+    # load context
+    context_file = config['context_file']
+    ctx = core.Context(context_file)
     
     if output_dir is None:
-        if 'output_dir' in hk2meta_config.keys():
-            output_dir = hk2meta_config['output_dir']
+        if 'output_dir' in config.keys():
+            output_dir = config['output_dir']
         else:
             raise ValueError('output_dir is not specified.')
     if query_text is None:
-        if 'query_text' in hk2meta_config.keys():
-            query_text = hk2meta_config['query_text']
+        if 'query_text' in config.keys():
+            query_text = config['query_text']
     if query_tags is None:
-        if 'query_tags' in hk2meta_config.keys():
-            query_tags = hk2meta_config['query_tags']
+        if 'query_tags' in config.keys():
+            query_tags = config['query_tags']
     if min_ctime is None:
-        if 'min_ctime' in hk2meta_config.keys():
-            min_ctime = hk2meta_config['min_ctime']
+        if 'min_ctime' in config.keys():
+            min_ctime = config['min_ctime']
     if max_ctime is None:
-        if 'max_ctime' in hk2meta_config.keys():
-            max_ctime = hk2meta_config['max_ctime']
+        if 'max_ctime' in config.keys():
+            max_ctime = config['max_ctime']
+    if update_delay is None:
+        if 'update_delay' in config.keys():
+            update_delay = config['update_delay']
+    
+    if (min_ctime is None) and (update_delay is not None):
+        min_ctime = int(time.time()) - update_delay*86400
+    logger.info(f'min_ctime: {min_ctime}')
     
     # Load metadata sqlite
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    output_prefix = hk2meta_config['output_prefix']
+    output_prefix = config['output_prefix']
     man_db_filename = os.path.join(output_dir, f'{output_prefix}.sqlite')
     if os.path.exists(man_db_filename):
         logger.info(f"Mapping {man_db_filename} for the \
@@ -176,22 +181,22 @@ def main(config: str,
             meta = ctx.get_meta(obs_id)
             aman = ctx.get_obs(obs_id, dets=[])
             _hkman = hk_utils.get_detcosamp_hkaman(aman, 
-                                      fields = hk2meta_config['fields'],
-                                      data_dir = hk2meta_config['input_dir'])
+                                      fields = config['fields'],
+                                      data_dir = config['input_dir'])
             
             dt_buffer = 60
             start = float(aman.timestamps[0] - dt_buffer)
             stop = float(aman.timestamps[-1] + dt_buffer)
-            _data = hk_utils.sort_hkdata(start=start, stop=stop, fields=hk2meta_config['fields'],
-                                         data_dir=hk2meta_config['input_dir'], alias=None)
+            _data = hk_utils.sort_hkdata(start=start, stop=stop, fields=config['fields'],
+                                         data_dir=config['input_dir'], alias=None)
             _hkman = hk_utils.make_hkaman(grouped_data=_data, alias_exists=False,
                                           det_cosampled=True, det_aman=aman)
             
             hkman = core.AxisManager(meta.dets, aman.samps)
             hkman.wrap('timestamps', aman.timestamps, [(0, 'samps')])
 
-            full_fields = hk2meta_config['fields']
-            aliases = hk2meta_config['aliases']
+            full_fields = config['fields']
+            aliases = config['aliases']
             data_fields = [full_field.split('.')[1] for full_field in full_fields]
             num_different_field = 0
             for i, (data_field, alias) in enumerate(zip(data_fields, aliases)):
