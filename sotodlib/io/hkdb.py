@@ -75,8 +75,13 @@ class HkConfig:
         with open(path, 'r') as f:
             data = yaml.safe_load(f)
             if isinstance(data.get('db_url'), dict):
-                data['db_url'] = db.URL(**data['db_url'])
-            return cls(**yaml.safe_load(f))
+                url_dict = data['db_url']
+                for k, v in url_dict.items():
+                    url_dict[k] = os.path.expandvars(v)
+                data['db_url'] = db.URL.create(**url_dict)
+            elif isinstance(str):
+                data['db_url'] = os.path.expandvars(data['db_url'])
+            return cls(**data)
 
 
 class HkFile(Base):
