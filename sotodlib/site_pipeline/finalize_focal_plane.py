@@ -1,8 +1,7 @@
 import argparse as ap
 import os
 from copy import deepcopy
-from dataclasses import InitVar, dataclass, field
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import h5py
 import matplotlib.pyplot as plt
@@ -10,248 +9,21 @@ import megham.transform as mt
 import megham.utils as mu
 import numpy as np
 import yaml
-from numpy.typing import NDArray
 from scipy.cluster import vq
 from scipy.optimize import minimize
 from sotodlib.coords import optics as op
+from sotodlib.coords.fp_containers import (
+    FocalPlane,
+    OpticsTube,
+    Receiver,
+    Template,
+    Transform,
+)
 from sotodlib.core import AxisManager, Context, metadata
-from sotodlib.io.metadata import read_dataset, write_dataset
+from sotodlib.io.metadata import read_dataset
 from sotodlib.site_pipeline import util
 
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
-
-
-def _add_attrs(dset, attrs):
-    for k, v in attrs.items():
-        dset.attrs[k] = v
-
-
-@dataclass
-class Transform:
-    shift: NDArray[np.floating]  # (ndim,)
-    xieta_affine: InitVar[NDArray[np.floating]]  # (ndim-1, ndim-1)
-    gamma_scale: InitVar[float]
-    affine: NDArray[np.floating] = field(init=False)  # (ndim, ndim)
-    scale: NDArray[np.floating] = field(init=False)  # (ndim,)
-    shear: float = field(init=False)
-    rot: float = field(init=False)
-
-    def __post_init__(self, xieta_affine, gamma_scale):
-        self.affine = np.eye(len(xieta_affine) + 1)
-        self.affine[: len(xieta_affine), : len(xieta_affine)] = xieta_affine
-        self.affine[-1, -1] = gamma_scale
-        self.decompose()
-
-    @classmethod
-    def identity(cls):
-        return Transform(np.zeros(3), np.eye(2), 0)
-
-    def decompose(self):
-        xieta_affine = self.affine[:2, :2]
-        gamma_scale = self.affine[-1, -1]
-        scale, shear, rot = mt.decompose_affine(xieta_affine)
-        self.scale = np.array((*scale, gamma_scale))
-        self.shear = shear.item()
-        self.rot = mt.decompose_rotation(rot)[-1]
-
-    def save(self, f, path, append=""):
-        if path not in f:
-            f.create_group(path)
-        _add_attrs(
-            f[path],
-            {
-                f"shift{append}": self.shift,
-                f"scale{append}": self.scale,
-                f"shear{append}": self.shear,
-                f"rot{append}": self.rot,
-                f"affine{append}": self.affine,
-            },
-        )
-
-
-@dataclass
-class Template:
-    det_ids: NDArray[np.str_]  # (ndet,)
-    fp: NDArray[np.floating]  # (ndet, ndim)
-    optical: NDArray[np.bool_]  # (ndet,)
-    pointing_cfg: InitVar[Dict]
-    center: NDArray[np.floating] = field(init=False)  # (1, ndim)
-    spacing: NDArray[np.floating] = field(init=False)  # (ndim,)
-
-    def __post_init__(self, pointing_cfg):
-        self.center = np.array(
-            op.get_focal_plane(None, x=0, y=0, pol=0, **pointing_cfg)
-        ).T
-        xieta_spacing = mu.estimate_spacing(self.fp[self.optical, :2])
-        # For gamma rather than the spacing in real space we want the difference between bins
-        # This is a rough estimate but good enough for us
-        gamma_spacing = np.percentile(np.diff(np.sort(self.fp[2])), 99.9)
-        self.spacing = np.array([xieta_spacing, xieta_spacing, gamma_spacing])
-
-
-@dataclass
-class FocalPlane:
-    template: Template
-    stream_id: str
-    n_aman: InitVar[int]
-    full_fp: NDArray[np.floating] = field(init=False)  # (ndet, ndim, n_aman)
-    tot_weight: NDArray[np.floating] = field(init=False)  # (ndet,)
-    avg_fp: NDArray[np.floating] = field(init=False)  # (ndim, ndet)
-    weights: NDArray[np.floating] = field(init=False)  # (ndet,)
-    transformed: NDArray[np.floating] = field(init=False)  # (ndet, ndim)
-    center_transformed: NDArray[np.floating] = field(init=False)  # (1, ndim)
-    have_gamma: bool = field(init=False, default=False)
-    n_point: NDArray[np.int_] = field(init=False)
-    n_gamma: NDArray[np.int_] = field(init=False)
-    transform: Transform = field(init=False, default_factory=Transform.identity)
-    transform_nocm: Transform = field(init=False, default_factory=Transform.identity)
-
-    def __post_init__(self, n_aman):
-        self.full_fp = np.full(self.template.fp.shape + (n_aman,), np.nan)
-        self.tot_weight = np.zeros(len(self.template.det_ids))
-        self.avg_fp = np.full_like(self.template.fp, np.nan)
-        self.weight = np.zeros(len(self.template.det_ids))
-        self.transformed = self.template.fp.copy()
-        self.center_transformed = self.template.center.copy()
-        self.n_point = np.zeros_like(self.template.det_ids, dtype=int)
-        self.n_gamma = np.zeros_like(self.template.det_ids, dtype=int)
-
-    def map_to_template(self, aman):
-        _, msk, template_msk = np.intersect1d(
-            aman.det_info.det_id, self.template.det_ids, return_indices=True
-        )
-        if len(msk) != aman.dets.count:
-            logger.warning("There are matched dets not found in the template")
-        mapping = np.argsort(np.argsort(self.template.det_ids[template_msk]))
-        srt = np.argsort(aman.det_info.det_id[msk])
-        xi = aman.pointing.xi[msk][srt][mapping]
-        eta = aman.pointing.eta[msk][srt][mapping]
-        if "polarization" in aman:
-            # name of field just a placeholder for now
-            gamma = aman.polarization.polang[msk][srt][mapping]
-        elif "gamma" in aman.pointing:
-            gamma = aman.pointing.gamma[msk][srt][mapping]
-        else:
-            gamma = np.full(len(xi), np.nan)
-        fp = np.column_stack((xi, eta, gamma))
-        return fp, template_msk
-
-    def add_fp(self, i, fp, weights, template_msk):
-        self.full_fp[template_msk, :, i] = fp * weights[..., None]
-        self.tot_weight[template_msk] += weights
-
-    def save(self, f, db_info, group):
-        ndets = len(self.template.det_ids)
-        outdt = [
-            ("dets:det_id", self.template.det_ids.dtype),
-            ("xi", np.float32),
-            ("eta", np.float32),
-            ("gamma", np.float32),
-        ]
-        fpout = np.fromiter(
-            zip(self.template.det_ids, *(self.transformed.T)), dtype=outdt, count=ndets
-        )
-        write_dataset(
-            metadata.ResultSet.from_friend(fpout),
-            f,
-            f"{group}/focal_plane",
-            overwrite=True,
-        )
-        _add_attrs(f[f"{group}/focal_plane"], {"measured_gamma": self.have_gamma})
-        entry = {"dets:stream_id": self.stream_id, "dataset": f"{group}/focal_plane"}
-        entry.update(db_info[1])
-        db_info[0].add_entry(entry, filename=os.path.basename(f.filename), replace=True)
-
-        outdt_full = [
-            ("dets:det_id", self.template.det_ids.dtype),
-            ("xi_t", np.float32),
-            ("eta_t", np.float32),
-            ("gamma_t", np.float32),
-            ("xi_m", np.float32),
-            ("eta_m", np.float32),
-            ("gamma_m", np.float32),
-            ("weights", np.float32),
-            ("n_point", np.int8),
-            ("n_gamma", np.int8),
-        ]
-        fpfullout = np.fromiter(
-            zip(
-                self.template.det_ids,
-                *(self.transformed.T),
-                *(self.avg_fp.T),
-                self.weights,
-                self.n_point,
-                self.n_gamma,
-            ),
-            dtype=outdt_full,
-            count=ndets,
-        )
-        write_dataset(
-            metadata.ResultSet.from_friend(fpfullout),
-            f,
-            f"{group}/focal_plane_full",
-            overwrite=True,
-        )
-
-        self.transform.save(f, f"{group}/transform")
-        self.transform_nocm.save(f, f"{group}/transform", "_nocm")
-        _add_attrs(
-            f[f"{group}"],
-            {
-                "fit_centers": self.center_transformed,
-                "template_centers": self.template.center,
-            },
-        )
-
-
-@dataclass
-class OpticsTube:
-    pointing_cfg: InitVar[Dict]
-    name: str = field(init=False)
-    focal_planes: List[FocalPlane] = field(init=False, default_factory=list)
-    center: NDArray[np.floating] = field(init=False)
-    center_transformed: NDArray[np.floating] = field(init=False)
-    transform: Transform = field(init=False, default_factory=Transform.identity)
-
-    def __post_init__(self, pointing_cfg):
-        self.name = pointing_cfg["tube_slot"]
-        telescope_flavor = pointing_cfg["telescope_flavor"].upper()
-        if telescope_flavor not in ["LAT", "SAT"]:
-            raise ValueError("Telescope should be LAT or SAT")
-
-        if telescope_flavor == "LAT":
-            if pointing_cfg["zemax_path"] is None:
-                raise ValueError("Must provide zemax_path for LAT")
-            xi, eta, gamma = op.LAT_focal_plane(
-                None,
-                pointing_cfg["zemax_path"],
-                x=0,
-                y=0,
-                pol=0,
-                roll=pointing_cfg.get("roll", 0),
-                tube_slot=self.name,
-            )
-        else:
-            xi, eta, gamma = op.SAT_focal_plane(
-                None,
-                x=0,
-                y=0,
-                pol=0,
-                roll=pointing_cfg.get("roll", 0),
-                mapping_data=pointing_cfg.get("mapping_data", None),
-            )
-        self.center = np.array((xi, eta, gamma)).reshape((1, 3))
-        self.center_transformed = self.center.copy()
-
-    def save(self, f, db_info):
-        f.create_group(self.name)
-        _add_attrs(
-            f[self.name],
-            {"center": self.center, "center_transformed": self.center_transformed},
-        )
-        self.transform.save(f, f"{self.name}/transform")
-        for focal_plane in self.focal_planes:
-            focal_plane.save(f, db_info, f"{self.name}/{focal_plane.stream_id}")
 
 
 def _create_db(filename, per_obs, obs_id):
@@ -591,7 +363,7 @@ def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
 def _restrict_inliers(aman, focal_plane):
     # TODO: Use gamma as well
     # Map to template
-    fp, template_msk = focal_plane.map_to_template(aman)
+    fp, template_msk = focal_plane.map_by_det_id(aman)
     fp = fp[:, :2]
     inliers = np.ones(len(fp), dtype=bool)
 
@@ -735,7 +507,7 @@ def main():
             logger.info("\t%s is in %s %s %s", stream_id, tel, ot, ws)
             pointing_cfg = _mk_pointing_config(tel, ot, ws, config)
             if ot not in ots.keys():
-                ots[ot] = OpticsTube(pointing_cfg)
+                ots[ot] = OpticsTube.from_pointing_cfg(pointing_cfg)
 
             # If a template is provided load it, otherwise generate one
             if gen_template:
@@ -756,7 +528,7 @@ def main():
                     "No template provided and unable to generate one for some reason"
                 )
 
-            focal_plane = FocalPlane(template, stream_id, len(amans))
+            focal_plane = FocalPlane.empty(template, stream_id, len(amans))
             for i, (aman, obs_id) in enumerate(zip(amans_restrict, obs_ids)):
                 logger.info("\tWorking on %s", obs_id)
                 if aman.dets.count == 0:
@@ -776,7 +548,7 @@ def main():
                 _restrict_inliers(aman, focal_plane)
 
                 # Mapping to template
-                fp, template_msk = focal_plane.map_to_template(aman)
+                fp, template_msk = focal_plane.map_by_det_id(aman)
 
                 # Try an initial alignment and get weights
                 try:
@@ -791,7 +563,7 @@ def main():
                     gscale, gsft = gamma_fit(
                         fp[:, 2], focal_plane.template.fp[template_msk, 2]
                     )
-                    weights = af.gen_weights(
+                    weights = mu.gen_weights(
                         np.column_stack((aligned, gscale * fp[:, 2] + gsft)),
                         focal_plane.template.fp[template_msk],
                         focal_plane.template.spacing.ravel() / weight_factor,
@@ -858,7 +630,7 @@ def main():
             logger.info("\tRMS after transformation is %f", rms)
 
             shift = np.array((*shift, gamma_shift))
-            focal_plane.transform = Transform(shift, affine, gamma_scale)
+            focal_plane.transform = Transform.from_split(shift, affine, gamma_scale)
             _log_vals(
                 focal_plane.transform.shift,
                 focal_plane.transform.scale,
@@ -906,26 +678,27 @@ def main():
                 )
             rot, sft = mt.get_rigid(centers[:, :2], centers_transformed[:, :2])
             gamma_shift = np.mean(centers_transformed[:, 2] - centers[:, 2])
-            ot.transform = Transform(np.array((*sft.ravel(), gamma_shift)), rot, 1.0)
+            ot.transform_fullcm = Transform.from_split(
+                np.array((*sft.ravel(), gamma_shift)), rot, 1.0
+            )
             ot.center_transformed = mt.apply_transform(
-                ot.center, ot.transform.affine, ot.transform.shift
+                ot.center, ot.transform_fullcm.affine, ot.transform_fullcm.shift
             )
             _log_vals(
-                ot.transform.shift,
-                ot.transform.scale,
-                ot.transform.shear,
-                ot.transform.rot,
+                ot.transform_fullcm.shift,
+                ot.transform_fullcm.scale,
+                ot.transform_fullcm.shear,
+                ot.transform_fullcm.rot,
                 ("xi", "eta", "gamma"),
             )
 
         # Full receiver common mode
         logger.info("Fitting receiver common mode")
-        origin = np.zeros((1, 3))
         if len(ots) == 1:
             logger.info(
                 "\tOnly one OT found, receiver common mode will be from this tube"
             )
-            recv_transform = deepcopy(tuple(ots.values())[0].transform)
+            recv_transform = deepcopy(tuple(ots.values())[0].transform_fullcm)
         else:
             centers = np.vstack([ot.center for ot in ots.values()])
             centers_transformed = np.vstack(
@@ -935,7 +708,9 @@ def main():
                 logger.info(
                     "\tNot enough OTs to fit receiver common mode, transform will be approximated"
                 )
-                centers = np.vstack([np.roll(np.arange(3), i) for i in range(3)])
+                centers = np.vstack(
+                    [np.roll(np.arange(3, dtype=float), i) for i in range(3)]
+                )
                 centers_transformed = np.mean(
                     [
                         mt.apply_transform(
@@ -947,9 +722,11 @@ def main():
                 )
             rot, sft = mt.get_rigid(centers[:, :2], centers_transformed[:, :2])
             gamma_shift = np.mean(centers_transformed[:, 2] - centers[:, 2])
-            recv_transform = Transform(np.array((*sft.ravel(), gamma_shift)), rot, 1.0)
-        recv_center = mt.apply_transform(
-            origin, recv_transform.affine, recv_transform.shift
+            recv_transform = Transform.from_split(
+                np.array((*sft.ravel(), gamma_shift)), rot, 1.0
+            )
+        receiver = Receiver(
+            list(ots.values()), transform=recv_transform, include_cm=include_cm
         )
         _log_vals(
             recv_transform.shift,
@@ -961,14 +738,11 @@ def main():
 
         # Now compute correction only transform for each ufm
         # Transforms are composed as ufm(ot(rx(focal_plane)))
-        for ot in ots.values():
-            # The full CM will end being the OT CM from above
-            full_cm = deepcopy(ot.transform)
-
+        for ot in receiver.optics_tubes:
             # Now remove the receiver CM from the OT
             ot.transform.affine, ot.transform.shift = mt.decompose_transform(
-                ot.transform.affine,
-                ot.transform.shift,
+                ot.transform_fullcm.affine,
+                ot.transform_fullcm.shift,
                 recv_transform.affine,
                 recv_transform.shift,
             )
@@ -982,12 +756,12 @@ def main():
                 ) = mt.decompose_transform(
                     fp.transform.affine,
                     fp.transform.shift,
-                    full_cm.affine,
-                    full_cm.shift,
+                    ot.transform_fullcm.affine,
+                    ot.transform_fullcm.shift,
                 )
                 fp.transform_nocm.decompose()
                 # Remove the common mode if desired
-                if not include_cm:
+                if not include_cm and fp.template is not None:
                     fp.transformed = mt.apply_transform(
                         fp.template.fp,
                         fp.transform_nocm.affine,
@@ -999,27 +773,7 @@ def main():
         logger.info("Writing to database at %s", dbpath)
         db, base = _create_db(dbpath, per_obs=per_obs, obs_id=obs_ids[0])
         with h5py.File(outpath, "w") as f:
-            _add_attrs(
-                f["/"],
-                {
-                    "center": origin,
-                    "center_transformed": recv_center,
-                    "include_cm": include_cm,
-                },
-            )
-            f.create_group("transform")
-            _add_attrs(
-                f["transform"],
-                {
-                    "shift": recv_transform.shift,
-                    "scale": recv_transform.scale,
-                    "shear": recv_transform.shear,
-                    "rot": recv_transform.rot,
-                    "affine": recv_transform.affine,
-                },
-            )
-            for ot in ots.values():
-                ot.save(f, (db, base))
+            receiver.save(f, (db, base))
 
 
 if __name__ == "__main__":
