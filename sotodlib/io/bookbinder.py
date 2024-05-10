@@ -230,11 +230,10 @@ class AncilProcessor:
                 raise NoMountData(
                     f"Found no mount data overlapping with detector data"
                 )
-            if np.max(np.diff( block.times[m])) / np.max(np.diff(times)) > 100:
+            if np.max(np.diff( block.times[m])) > 10:
                 raise NoMountData(
                     f"Max ACU data spacing {np.max(np.diff( block.times[m]))}s" 
-                    f" more than 100x detector data spacing of "
-                    f"{np.max(np.diff(times))}s. Interpolation may be "
+                    f" is higher than 10s. Interpolation may be "
                     "questionable."
                 )
             az = np.interp(times, block.times, block.data['Corrected_Azimuth'])
