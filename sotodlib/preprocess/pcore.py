@@ -190,6 +190,29 @@ def _zeros_cls( item ):
     else:
         raise ValueError(f"Cannot find zero type for {type(item)}")
 
+def _reform_csr_array(arr, oidx, nidx, shape):
+    # Support function for _expand, to efficiently embed a csr_array
+    # in an expanded frame.  Assumptions are that arr is 2d, with
+    # shape (dets, samps).  So oidx and nidx each contain (array of
+    # idx, slice).
+    row_map = {n: o for n, o in zip(nidx[0], oidx[0])}
+    col_shift = oidx[1].start - nidx[1].start
+
+    # For coo array you have:
+    #    r, c, v = arr.row, arr.col, arr.data
+    # and the equivalent for csr is:
+    #    r = np.repeat(np.arange(arr.shape[0]), np.diff(arr.indptr))
+    #    c = arr.indices
+    #    v = arr.data
+    # So the expression for r1, here, is equivalent to
+    #    r = np.repeat(np.arange(arr.shape[0]), np.diff(arr.indptr))
+    #    r1 = [row_map[_r] for _r in r]
+    r1 = np.repeat([row_map[_r] for _r in range(arr.shape[0])],
+                   np.diff(arr.indptr))
+    c1 = arr.indices + col_shift
+    v = arr.data
+    return csr_array((v, (r1, c1)), shape=shape, dtype=arr.dtype)
+
 def _ranges_matrix_match( o, n, oidx, nidx):
     """align RangesMatrix n entries to RangesMatrix o"""
     assert len(oidx)==len(nidx)
@@ -261,6 +284,9 @@ def _expand(new, full, wrap_valid=True):
             elif isinstance(out[k], Ranges):
                 assert new._assignments[k][0] == 'samps'
                 out[k] = _ranges_match( out[k], v, oidx, nidx)
+            elif isinstance(out[k], csr_array):
+                assert tuple(new._assignments[k]) == ('dets', 'samps')
+                out[k] = _reform_csr_array(v, oidx, nidx, out[k].shape)
             else:
                 out[k][oidx] = v[nidx]
     if wrap_valid:
