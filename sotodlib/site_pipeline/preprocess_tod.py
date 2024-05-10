@@ -147,7 +147,9 @@ def preprocess_tod(
         
         logger.info(f"Saving to database under {db_data}")
         if len(db.inspect(db_data)) == 0:
-            db.add_entry(db_data, dest_file)
+            h5_path = os.path.relpath(h5_path,
+                    start=os.path.dirname(configs['archive']['index']))
+            db.add_entry(db_data, h5_path)
 
 def load_preprocess_det_select(obs_id, configs, context=None,
                                dets=None, meta=None):
