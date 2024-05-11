@@ -147,7 +147,9 @@ def preprocess_tod(
         
         logger.info(f"Saving to database under {db_data}")
         if len(db.inspect(db_data)) == 0:
-            db.add_entry(db_data, dest_file)
+            h5_path = os.path.relpath(dest_file,
+                    start=os.path.dirname(configs['archive']['index']))
+            db.add_entry(db_data, h5_path)
 
 def load_preprocess_det_select(obs_id, configs, context=None,
                                dets=None, meta=None):
@@ -286,10 +288,11 @@ def main(
         if tot_query=="":
             tot_query="1"
 
-    for i, tag in enumerate(tags):
-        tags[i] = tags[i].lower()
-        if '=' not in tags[i]:
-            tags[i] += '=1'
+    if not(tags is None):
+        for i, tag in enumerate(tags):
+            tags[i] = tag.lower()
+            if '=' not in tag:
+                tags[i] += '=1'
 
     if planet_obs:
         obs_list = []
