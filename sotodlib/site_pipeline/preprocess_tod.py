@@ -290,8 +290,8 @@ def main(
 
     if not(tags is None):
         for i, tag in enumerate(tags):
-            tags[i] = tags[i].lower()
-            if '=' not in tags[i]:
+            tags[i] = tag.lower()
+            if '=' not in tag:
                 tags[i] += '=1'
 
     if planet_obs:
