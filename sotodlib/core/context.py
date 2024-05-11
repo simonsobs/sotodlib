@@ -123,7 +123,7 @@ class Context(odict):
             else:
                 self[k] = v
 
-    def reload(self, load_list='all'):
+    def reload(self, load_list='all', readwrite=False):
         """Load (or reload) certain databases associated with this dataset.
         (Note we don't load any per-observation metadata here.)
 
@@ -140,7 +140,9 @@ class Context(odict):
                 db_file = os.path.abspath(db_file)
                 logger.info(f'Loading {key} from {self[key]} -> {db_file}.')
                 try:
-                    db = cls.from_file(db_file, force_new_db=False)
+                    db = cls.from_file(
+                        db_file, force_new_db=False, readonly=(not readwrite)
+                    )
                 except Exception as e:
                     logger.error(f'DB failure when loading {key} from {self[key]} -> {db_file}\n')
                     raise e
