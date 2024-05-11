@@ -29,7 +29,7 @@ class ObsDb(object):
 
     """
 
-    def __init__(self, map_file=None, init_db=True, wafer_info=None):
+    def __init__(self, map_file=None, init_db=True, wafer_info=None, readonly=False):
         """Instantiate an ObsDb.
 
         Args:
@@ -54,12 +54,16 @@ class ObsDb(object):
           this object be written back to the file.
 
         """
+        if init_db and readonly:
+            raise ValueError("Cannot initialize a read-only DB")
+        self._readonly = readonly
         if isinstance(map_file, sqlite3.Connection):
             self.conn = map_file
         else:
-            if map_file is None:
-                map_file = ':memory:'
-            self.conn = sqlite3.connect(map_file)
+            self.conn = common.sqlite_connect(
+                filename=map_file,
+                mode=("r" if readonly else "w"),
+            )
 
         self.conn.row_factory = sqlite3.Row  # access columns by name
         if init_db:
@@ -77,14 +81,14 @@ class ObsDb(object):
                                     *(f"{k} varchar(256)" for k in pkeys),
                                     f"PRIMARY KEY ({', '.join(pkeys)}, `tag`)"
                                 ]}
-            
+
             # Define indices dynamically based on primary keys
             pkeys_str = ', '.join([k.strip('`') for k in pkeys])
             self._indices = {
                 'idx_obs': f'obs({pkeys_str})',
                 'idx_tags': f'tags({pkeys_str})',
             }
-            
+
             c = self.conn.cursor()
             c.execute("SELECT type, name FROM sqlite_master "
                       "WHERE type in ('table', 'index') and name not like 'sqlite_%';")
@@ -118,7 +122,7 @@ class ObsDb(object):
                 raise ValueError(f"Primary keys do not match: {primary_keys} != {pkeys}"+
                                 f" must use `wafer_info`=={primary_keys} or create a new dB with {pkeys}")
         return primary_keys
-    
+
     def _convert_wafer_info(self, obs_id, wafer_info):
         """Helper function to allow flexibility in way obs_id and wafer_info are passed in."""
         if isinstance(wafer_info, dict):
@@ -138,7 +142,7 @@ class ObsDb(object):
         return obs_id, wafer_info
 
     def _warn_primary_keys(self, wafer_info):
-        """Warn the user if the primary keys are not specified 
+        """Warn the user if the primary keys are not specified
            and we're defaulting to using _all."""
         if len(self.primary_keys) == 1:
             return []
@@ -160,10 +164,10 @@ class ObsDb(object):
             """
             warnings.warn(warn_str, UserWarning)
         return wafer_info
-    
+
     def __len__(self):
         return self.conn.execute(f'SELECT COUNT({self.primary_keys[0]}) FROM obs').fetchone()[0]
-    
+
     def add_obs_columns(self, column_defs, ignore_duplicates=True, commit=True):
         """Add columns to the obs table.
 
@@ -196,6 +200,8 @@ class ObsDb(object):
             'timestamp float, drift str'
 
         """
+        if self._readonly:
+            raise RuntimeError("Cannot add_obs_columns() on a read-only DB")
         current_cols = self.conn.execute('pragma table_info(obs)').fetchall()
         current_cols = [r[1] for r in current_cols]
         if isinstance(column_defs, str):
@@ -241,7 +247,7 @@ class ObsDb(object):
         Example of ways to pass updates to obsdb when there are multiple primary keys.
 
         1) obs_id as str and wafer_info as tuple::
-        
+
             obsdb.update_obs('obs_2345_xyz_110', wafer_info=('ws0', 'f090'), ...)
 
         2) obs_id as str and wafer_info as dict::
@@ -255,8 +261,10 @@ class ObsDb(object):
         4) obs_id as tuple and wafer_info is None::
 
             obsdb.update_obs(('obs_2345_xyz_110', 'ws0', 'f090'), ...)
-        
+
         """
+        if self._readonly:
+            raise RuntimeError("Cannot update_obs() on a read-only DB")
         obs_id, wafer_info = self._convert_wafer_info(obs_id, wafer_info)
 
         obs_key = {'obs_id': obs_id}
@@ -270,13 +278,13 @@ class ObsDb(object):
         placeholders = ', '.join(['?'] * len(obs_key))
         c.execute(f'INSERT OR IGNORE INTO obs ({columns}) VALUES ({placeholders})',
                   tuple(obs_key.values()))
-            
+
         if len(data.keys()):
             settors = [f'{k}=?' for k in data.keys()]
             where_str = ' AND '.join([f'{k}=?' for k in obs_key.keys()])
             c.execute(f'UPDATE obs SET {", ".join(settors)} WHERE {where_str}',
                       tuple(data.values()) + tuple(obs_key.values()))
-                        
+
         for t in tags:
             if t[0] == '!':
                 # Kill this tag
@@ -307,7 +315,7 @@ class ObsDb(object):
             else:
                 raise RuntimeError("Output file %s exists (overwrite=True "
                                    "to overwrite)." % map_file)
-        new_db = ObsDb(map_file=map_file, init_db=False)
+        new_db = ObsDb(map_file=map_file, init_db=False, readonly=False)
         script = ' '.join(self.conn.iterdump())
         new_db.conn.executescript(script)
         return new_db
@@ -360,7 +368,7 @@ class ObsDb(object):
         obs_id, wafer_info = self._convert_wafer_info(obs_id, wafer_info)
         if obs_id is None:
             return self.query('1', add_prefix=add_prefix)
-        
+
         wafer_info = self._warn_primary_keys(wafer_info)
         query_text = " AND ".join([f"{key} == '{val}'" for key, val in zip(self.primary_keys, [obs_id] + wafer_info)])
 
@@ -410,13 +418,13 @@ class ObsDb(object):
 
           When filtering is activated in this way, the returned
           results must satisfy all the criteria (i.e. the individual
-          constraints are AND-ed). If your tag name contains special 
-          characters (e.g. '-'), you will need to enclose it in 
+          constraints are AND-ed). If your tag name contains special
+          characters (e.g. '-'), you will need to enclose it in
           backticks when using it in a query string, e.g.:
- 
+
             obsdb.query('`bad-tag`=1', tags=['bad-tag'])
 
-          For this reason, we generally advise against the use of 
+          For this reason, we generally advise against the use of
           non-alphanumeric characters in tags.
 
         """
@@ -455,7 +463,7 @@ class ObsDb(object):
         if add_prefix is not None:
             results.keys = [add_prefix + k for k in results.keys]
         return results
-    
+
     def query_linked_dbs(self, secondary_dbs, query_text, add_prefix='',
                          wafer_info=None):
         """
@@ -480,7 +488,7 @@ class ObsDb(object):
         # Ensure secondary_dbs is a list
         if not isinstance(secondary_dbs, list):
             secondary_dbs = [secondary_dbs]
-        
+
         # Query the primary database
         primary_results = self.query(query_text, add_prefix=add_prefix)
         if len(primary_results) == 0:
