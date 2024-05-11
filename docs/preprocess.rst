@@ -30,7 +30,7 @@ A preprocessing pipeline is series of modules, each inheriting from
 ``_Preprocess``, that are defined through a configuration file and intended to be
 run successively on an AxisManager containing time ordered data.
 
-.. autoclass:: sotodlib.preprocess.core._Preprocess
+.. autoclass:: sotodlib.preprocess.pcore._Preprocess
     :members:
 
 The preprocessing pipeline is defined in the ``Pipeline`` class. This class
@@ -38,7 +38,7 @@ inherits from list so that you can easily find and interact with the various
 pipeline elements. Note that splicing a pipeline will return a list of process
 modules that can be used to make a new pipeline.
 
-.. autoclass:: sotodlib.preprocess.core.Pipeline
+.. autoclass:: sotodlib.preprocess.pcore.Pipeline
     :members:
 
 
