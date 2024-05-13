@@ -693,6 +693,49 @@ Command line arguments
     :prog: make_hwp_solutions
 
 
+make-cosamp-hk
+------------------
+
+This element generates house-keeping data with timestamps co-sampled
+with detector timestamps. 
+
+Command line arguments
+``````````````````````
+.. argparse::
+    :module: sotodlib.site_pipeline.make_cosamp_hk
+    :func: get_parser
+    :prog: make-cosamp-hk
+    
+An example config for wiregrid is shown below.
+With the config file, ``wiregrid.sqlite`` and ``wiregrid_XXXX.h5``, 
+where XXXX is substituted with the first four digits of timestamps, 
+are generated on ``/path/to/manifests/wiregrid``. ``context_file``, 
+``input_dir``, ``output_dir``, ``fields``, ``aliases``, and ``output_prefix``
+are required::
+
+    context_file: '/path/to/context.yaml'
+    query_text: 'type == "obs"'
+    min_ctime: 1700000000
+    max_ctime: null
+    query_tags: ['wiregrid=1']
+    input_dir: '/path/to/level2/hk'
+    output_dir: '/path/to/manifests/wiregrid'
+    fields: 
+            ['satpX.wg-encoder.feeds.wgencoder_full.reference_count',
+             'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSL1',
+             'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSL2',
+             'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSR1',
+             'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSR2',]
+    aliases: 
+        ['encoder',
+         'LS1',
+         'LS2',
+         'LSR1',
+         'LSR2']
+    output_prefix: 'wiregrid'
+
+
+    
 make-ml-map
 -----------
 

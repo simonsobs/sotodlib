@@ -1,4 +1,4 @@
-.. py:module:: sotodlib.preprocess.core
+.. py:module:: sotodlib.preprocess.pcore
 
 .. _preprocess-module:
 
@@ -30,7 +30,7 @@ A preprocessing pipeline is series of modules, each inheriting from
 ``_Preprocess``, that are defined through a configuration file and intended to be
 run successively on an AxisManager containing time ordered data.
 
-.. autoclass:: sotodlib.preprocess.core._Preprocess
+.. autoclass:: sotodlib.preprocess.pcore._Preprocess
     :members:
 
 The preprocessing pipeline is defined in the ``Pipeline`` class. This class
@@ -38,7 +38,7 @@ inherits from list so that you can easily find and interact with the various
 pipeline elements. Note that splicing a pipeline will return a list of process
 modules that can be used to make a new pipeline.
 
-.. autoclass:: sotodlib.preprocess.core.Pipeline
+.. autoclass:: sotodlib.preprocess.pcore.Pipeline
     :members:
 
 
@@ -140,6 +140,54 @@ the processing pipe. The ``process`` function is always run before the
 ``calc_and_save`` function for each module. The ``plot`` function can be run after
 ``calc_and_save`` when ``plot: True`` for a module that supports it.
 
+Example Planet TOD Pipeline Configuration File
+----------------------------------------------
+Similar to a regular TOD pipeline, if we want to run one for planet observations,
+we must first flag sources in the signal and gapfill them. An example configuration
+file should be equivalent to non-planet data processing after a few extra first
+steps::
+
+    # Context for the data
+    context_file: 'context.yaml'
+
+    # Plot directory prefix
+    plot_dir: './plots'
+
+    # How to subdivide observations
+    subobs:
+        use: wafer_slot
+        label: wafer_slot
+
+    # Metadata index & archive filenaming
+    archive:
+        index: 'preprocess_archive.sqlite'
+        policy:
+            type: 'simple'
+            filename: 'preprocess_archive.h5'
+
+    process_pipe:
+        - name : "dark_dets"
+          calc: True
+          save: True
+          select: True
+
+        - name: "source_flags"
+          calc:
+            mask: {'shape': 'circle',
+                  'xyr': [0, 0, 1.]}
+            center_on: 'jupiter' # set to 'planet' for variable according to planet tag of each obs (must use --planet-obs argument of site-pipeline script)
+            res: 20 # np.radians(20/60)
+            max_pix: 4.0e+6
+          save: True
+
+        - name: "glitchfill"
+          flag_aman: "sources"
+          flag: "source_flags"
+          process:
+            nbuf: 10
+            use_pca: True
+            modes: 3
+
 Example Obs Pipeline Configuration File
 ---------------------------------------
 
@@ -162,6 +210,8 @@ A configuration file for the processing pipeline would look like::
     process_pipe:
         - name: "sso_footprint"
           calc:
+            # If you want to search for nearby sources, exclude source_list
+            source_list: ['jupiter']
             distance: 20
             nstep: 100
           save: True
@@ -197,6 +247,8 @@ Flagging and Products
 .. autoclass:: sotodlib.preprocess.processes.GlitchFill
 .. autoclass:: sotodlib.preprocess.processes.Noise
 .. autoclass:: sotodlib.preprocess.processes.FlagTurnarounds
+.. autoclass:: sotodlib.preprocess.processes.DarkDets
+.. autoclass:: sotodlib.preprocess.processes.SourceFlags
 
 HWP Related
 :::::::::::

@@ -10,8 +10,8 @@ import numpy as np
 from tqdm import tqdm
 from so3g import hk
 
-
 import logging
+from .datapkg_utils import load_configs
 
 logger = logging.getLogger(__name__)
 
@@ -543,9 +543,12 @@ class G3tHk:
         configs - dictionary containing `data_prefix` and `g3thk_db` keys
         """
         if type(configs) == str:
-            configs = yaml.safe_load(open(configs, "r"))
+            configs = load_configs(configs)
 
-        return cls(os.path.join(configs["data_prefix"], "hk"), configs["g3thk_db"])
+        return cls(
+            os.path.join(configs["data_prefix"], "hk"), 
+            configs["g3thk_db"]
+        )
 
     def delete_file(self, hkfile, dry_run=False, my_logger=None):
         """WARNING: Removes actual files from file system.

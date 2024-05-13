@@ -285,23 +285,25 @@ class SuperLoader:
                     for k in to_drop:
                         mi1.move(k, None)
 
-                # For AxisManager results, the dets axis *must*
-                # reconcile 1-to-1 with some field in det_info, and
-                # that may be used to toss things out based on
-                # index_line.
-                det_restricts = _filter_items('dets:', index_line, remove=True)
-                dets_key = 'readout_id'
-                new_dets, i_new, i_info = core.util.get_coindices(
-                    mi1.dets.vals, det_info[dets_key])
+                # If the dets axis is present, it *must* reconcile
+                # 1-to-1 with some field in det_info, and that may be
+                # used to toss things out based on index_line.
+                if 'dets' in mi1:
+                    det_restricts = _filter_items('dets:', index_line, remove=True)
+                    dets_key = 'readout_id'
+                    new_dets, i_new, i_info = core.util.get_coindices(
+                        mi1.dets.vals, det_info[dets_key])
 
-                mask = np.ones(len(i_new), bool)
-                if len(i_info):
-                    for k, v in det_restricts.items():
-                        mask *= (det_info[k][i_info] == v)
-                if mask.all() and len(new_dets) == mi1.dets.count:
-                    mi2 = mi1
+                    mask = np.ones(len(i_new), bool)
+                    if len(i_info):
+                        for k, v in det_restricts.items():
+                            mask *= (det_info[k][i_info] == v)
+                    if mask.all() and len(new_dets) == mi1.dets.count:
+                        mi2 = mi1
+                    else:
+                        mi2 = mi1.restrict('dets', new_dets[mask])
                 else:
-                    mi2 = mi1.restrict('dets', new_dets[mask])
+                    mi2 = mi1
 
             else:
                 raise LoaderError(
@@ -514,23 +516,24 @@ class SuperLoader:
                     f'The decoded item {item} is not an AxisManager or '
                     f'other well-understood type.  Request was: {request}.')
 
-            # You have to check for detector loss here -- compare
-            # item.dets.vals to what's in det_info.
-            i0 = core.util.get_multi_index(
-                item.dets.vals, det_info['readout_id'])
+            if 'dets' in item:
+                # You have to check for detector loss here -- compare
+                # item.dets.vals to what's in det_info.
+                i0 = core.util.get_multi_index(
+                    item.dets.vals, det_info['readout_id'])
 
-            n_dets_item = len(set(i0[i0>=0]))
-            if n_dets_item < n_dets:
-                message = (f"Only {n_dets_item} of {n_dets} detectors "
-                           "have data for metadata specified by "
-                           f"spec={_spec}. ")
-                if _on_missing == 'trim':
-                    logger.warning(message + 'Trimming.')
-                elif _on_missing == 'fail':
-                    raise IncompleteMetadataError(message)
-                else:  # skip
-                    logger.warning(message + 'Discarding.')
-                    continue
+                n_dets_item = len(set(i0[i0>=0]))
+                if n_dets_item < n_dets:
+                    message = (f"Only {n_dets_item} of {n_dets} detectors "
+                               "have data for metadata specified by "
+                               f"spec={_spec}. ")
+                    if _on_missing == 'trim':
+                        logger.warning(message + 'Trimming.')
+                    elif _on_missing == 'fail':
+                        raise IncompleteMetadataError(message)
+                    else:  # skip
+                        logger.warning(message + 'Discarding.')
+                        continue
 
             # Unpack it.
             try:
@@ -538,8 +541,9 @@ class SuperLoader:
             except Exception as e:
                 reraise(_spec, e)
 
-            logger.debug(f'load(): dest now has shape {dest.shape}')
-            n_dets = dest.dets.count
+            if 'dets' in dest:
+                logger.debug(f'load(): dest now has shape {dest.shape}')
+                n_dets = dest.dets.count
 
         check_tags(det_info, aug_request, final=True)
 
