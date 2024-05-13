@@ -7,7 +7,7 @@ tod_ops submodule
 This submodule includes functions for processing time-ordered signals,
 including time and Fourier domain filtering, PCA, gap-filling, etc.
 
-.. _fourier-filter:
+.. _fourier-filters:
 
 Fourier space filters
 =====================

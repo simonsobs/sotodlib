@@ -234,11 +234,16 @@ TOD Operations
 .. autoclass:: sotodlib.preprocess.processes.FFTTrim
 .. autoclass:: sotodlib.preprocess.processes.Detrend
 .. autoclass:: sotodlib.preprocess.processes.PSDCalc
-.. autoclass:: sotodlib.preprocess.processes.Calibrate
 .. autoclass:: sotodlib.preprocess.processes.Apodize
 .. autoclass:: sotodlib.preprocess.processes.SubPolyf
 .. autoclass:: sotodlib.preprocess.processes.Jumps
 .. autoclass:: sotodlib.preprocess.processes.FixJumps
+.. autoclass:: sotodlib.preprocess.processes.FourierFilter
+
+Calibration
+:::::::::::
+.. autoclass:: sotodlib.preprocess.processes.Calibrate
+.. autoclass:: sotodlib.preprocess.processes.PCARelCal
 
 Flagging and Products
 :::::::::::::::::::::
