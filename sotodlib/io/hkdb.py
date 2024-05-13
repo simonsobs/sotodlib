@@ -413,7 +413,7 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False):
             HkFrame.start_time <= load_spec.end,
             HkFrame.end_time >= load_spec.start,
             HkFrame.agent.in_(agent_set)
-        )
+        ).order_by(HkFrame.start_time)
         for frame in query:
             if frame.file.path not in file_spec:
                 file_spec[frame.file.path] = []
