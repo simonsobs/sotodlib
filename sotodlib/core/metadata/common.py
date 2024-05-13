@@ -4,13 +4,17 @@ import os
 
 
 def sqlite_connect(filename=None, mode="w"):
-    """Utility function for connecting to an sqlite3 DB.
+    """Utility function for connecting to a sqlite3 DB.
 
     This provides a single function for opening an sqlite connection
     consistently across the code base.  When connecting to a file on
     disk we try to use options which will be more performant in the
     situation where the DB is on a networked / shared filesystem and
     being accessed from multiple processes.
+
+    Note that throughout the codebase we use the Connection.execute()
+    shortcut which internally creates a Cursor object.  This technique
+    is not portable between SQL backends, but is fine for sqlite use.
 
     Args:
         filename (str):  The path on disk or None if using an
@@ -75,7 +79,15 @@ def sqlite_connect(filename=None, mode="w"):
         connstr = f"file:{filename}?mode=ro"
     else:
         connstr = f"file:{filename}?mode=rwc"
-    conn = sqlite3.connect(connstr, uri=True, timeout=busy_time)
+    try:
+        # Python >= 3.12
+        conn = sqlite3.connect(
+            connstr, uri=True, timeout=busy_time, autocommit=True
+        )
+    except TypeError:
+        conn = sqlite3.connect(
+            connstr, uri=True, timeout=busy_time, isolation_level="IMMEDIATE"
+        )
 
     # Set cache sizes
     conn.execute(f"pragma page_size={page_size}")
@@ -137,7 +149,7 @@ def sqlite_to_file(db, filename, overwrite=True, fmt=None):
     else:
         raise RuntimeError(f'Unknown format "{fmt}" requested.')
 
-def sqlite_from_file(filename, fmt=None, force_new_db=True):
+def sqlite_from_file(filename, fmt=None, force_new_db=True, readonly=False):
     """Instantiate an sqlite3.Connection and return it, with the data
     copied in from the specified file. The function can either map the database
     file directly, or map a copy of the database in memory (see force_new_db
@@ -147,7 +159,7 @@ def sqlite_from_file(filename, fmt=None, force_new_db=True):
       filename (str): path to the file.
       fmt (str): format of the input; see to_file for details.
       force_new_db (bool): Used if connecting to an sqlite database. If True the
-        databas is copied into memory and if False returns a connection to the
+        database is copied into memory and if False returns a connection to the
         database without reading it into memory
 
     """
@@ -156,7 +168,7 @@ def sqlite_from_file(filename, fmt=None, force_new_db=True):
         if filename.endswith('.gz'):
             fmt = 'gz'
     if fmt == 'sqlite':
-        db0 = sqlite_connect(filename=filename, mode="r")
+        db0 = sqlite_connect(filename=filename, mode=("r" if readonly else "w"))
         if not force_new_db:
             return db0
         data = ' '.join(db0.iterdump())

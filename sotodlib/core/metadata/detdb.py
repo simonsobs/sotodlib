@@ -249,12 +249,13 @@ class DetDb(object):
             raise RuntimeError(f'Unknown format "{fmt}" requested.')
 
     @classmethod
-    def from_file(cls, filename, fmt=None, force_new_db=True):
+    def from_file(cls, filename, fmt=None, force_new_db=True, readonly=False):
         """This method calls
             :func:`sotodlib.core.metadata.common.sqlite_from_file`
         """
-        conn = common.sqlite_from_file(filename, fmt=fmt,
-                                       force_new_db=force_new_db)
+        conn = common.sqlite_from_file(
+            filename, fmt=fmt, force_new_db=force_new_db, readonly=readonly
+        )
         return cls(conn, init_db=False)
 
 

@@ -99,7 +99,7 @@ class ObsFileDb:
         """
         if prefix is not None:
             return prefix
-        if map_file == ':memory:':
+        if map_file is None:
             return ''
         return os.path.split(os.path.abspath(map_file))[0] + '/'
 
@@ -117,12 +117,20 @@ class ObsFileDb:
         return common.sqlite_to_file(self.conn, filename, overwrite=overwrite, fmt=fmt)
 
     @classmethod
-    def from_file(cls, filename, prefix=None, fmt=None, force_new_db=True):
+    def from_file(
+            cls,
+            filename,
+            prefix=None,
+            fmt=None,
+            force_new_db=True,
+            readonly=False,
+        ):
         """This method calls
             :func:`sotodlib.core.metadata.common.sqlite_from_file`
         """
-        conn = common.sqlite_from_file(filename, fmt=fmt,
-                                       force_new_db=force_new_db)
+        conn = common.sqlite_from_file(
+            filename, fmt=fmt, force_new_db=force_new_db, readonly=readonly
+        )
         if prefix is None:
             prefix = os.path.split(filename)[0] + '/'
         return cls(conn, init_db=False, prefix=prefix, )

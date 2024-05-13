@@ -408,7 +408,7 @@ class ManifestDb:
         return common.sqlite_to_file(self.conn, filename, overwrite=overwrite, fmt=fmt)
 
     @classmethod
-    def from_file(cls, filename, fmt=None, force_new_db=True):
+    def from_file(cls, filename, fmt=None, force_new_db=True, readonly=False):
         """Instantiate an ManifestDb and return it, with the data copied in
         from the specified file.
 
@@ -429,7 +429,9 @@ class ManifestDb:
           constructor map_file argument.
 
         """
-        conn = common.sqlite_from_file(filename, fmt=fmt, force_new_db=force_new_db)
+        conn = common.sqlite_from_file(
+            filename, fmt=fmt, force_new_db=force_new_db, readonly=readonly
+        )
         return cls(conn)
 
     @classmethod
