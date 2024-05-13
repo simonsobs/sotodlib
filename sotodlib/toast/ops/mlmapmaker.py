@@ -22,6 +22,12 @@ from toast.instrument_coords import xieta_to_quat, quat_to_xieta
 
 import so3g
 
+# The mapmaking tools import pixell.mpi, which will try to import
+# mpi4py if it is available, even if running on a login node.
+# Check to see if MPI is enabled in toast and if not, disable here.
+if not toast.mpi.use_mpi:
+    os.environ["DISABLE_MPI"] = "true"
+
 from ... import mapmaking as mm
 from ...core import AxisManager, IndexAxis, OffsetAxis, LabelAxis
 

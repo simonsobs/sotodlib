@@ -4,6 +4,7 @@
 import os
 import re
 import datetime
+import yaml
 
 import numpy as np
 import traitlets
@@ -11,8 +12,9 @@ from astropy import units as u
 from astropy.table import Column, QTable
 
 import toast
+from toast.dist import distribute_uniform
 from toast.timing import function_timer, Timer
-from toast.traits import trait_docs, Int, Unicode, Instance, List, Unit
+from toast.traits import trait_docs, Int, Unicode, Instance, List, Unit, Dict, Bool
 from toast.ops.operator import Operator
 from toast.utils import Environment, Logger
 from toast.dist import distribute_discrete
@@ -22,6 +24,7 @@ import so3g
 
 from ...core import Context, AxisManager, FlagManager
 from ...core.axisman import AxisInterface
+from ...preprocess import Pipeline as PreProcPipe
 
 from ..instrument import SOFocalplane, SOSite
 
@@ -79,6 +82,16 @@ class LoadContext(Operator):
         help="Text file containing observation IDs to load",
     )
 
+    preprocess_config = Unicode(
+        None,
+        allow_none=True,
+        help="Apply pre-processing with this configuration",
+    )
+
+    read_independent = Bool(
+        False, help="If True, all processes read det data independently"
+    )
+
     observations = List(list(), help="List of observation IDs to load")
 
     readout_ids = List(list(), help="Only load this list of readout_id values")
@@ -86,6 +99,8 @@ class LoadContext(Operator):
     detsets = List(list(), help="Only load this list of detset values")
 
     bands = List(list(), help="Only load this list of band values")
+
+    dets_select = Dict(dict(), help="The full detector selection dictionary to use")
 
     ax_times = Unicode(
         "timestamps",
@@ -124,6 +139,12 @@ class LoadContext(Operator):
         "boresight_roll",
         allow_none=True,
         help="Field with boresight Roll",
+    )
+
+    ax_hwp_angle = Unicode(
+        "hwp_angle",
+        allow_none=True,
+        help="Field with HWP angle",
     )
 
     axis_detector = Unicode(
@@ -207,6 +228,16 @@ class LoadContext(Operator):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+    def _open_context(self):
+        if self.context is None:
+            return Context(self.context_file)
+        else:
+            return self.context
+
+    def _close_context(self, ctx):
+        if self.context is None:
+            del ctx
+
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
@@ -219,30 +250,32 @@ class LoadContext(Operator):
             if self.context_file is None:
                 msg = "Either the context or context_file must be specified"
                 raise RuntimeError(msg)
-            self.context = Context(self.context_file)
         else:
             if self.context_file is not None:
                 msg = "Only one of the context or context_file should be specified"
                 raise RuntimeError(msg)
 
         # Build our detector selection dictionary
-        det_select = None
-        if len(self.readout_ids) > 0 or len(self.bands) > 0 or len(self.detsets) > 0:
-            # We have some selection
-            det_select = dict()
+        dets_select = None
+        if len(self.dets_select) > 0:
+            # Use the full dictionary provided by the user
+            dets_select = self.dets_select
+        elif len(self.readout_ids) > 0 or len(self.bands) > 0 or len(self.detsets) > 0:
+            # We have some selection, build the dictionary
+            dets_select = dict()
             if len(self.readout_ids) > 0:
-                det_select["readout_id"] = list(self.readout_ids)
+                dets_select["readout_id"] = list(self.readout_ids)
             if len(self.bands) > 0:
-                det_select["band"] = list(self.bands)
+                dets_select["band"] = list(self.bands)
             if len(self.detsets) > 0:
-                det_select["detset"] = list(self.detsets)
+                dets_select["detset"] = list(self.detsets)
 
         # One global process queries the observation metadata and computes
         # the observation distribution among process groups.
         obs_check = (
-            (self.observation_regex is not None) +
-            (len(self.observations) > 0) +
-            (self.observation_file is not None)
+            (self.observation_regex is not None)
+            + (len(self.observations) > 0)
+            + (self.observation_file is not None)
         )
         if obs_check != 1:
             msg = "Exactly one of observation_regex, observation_file"
@@ -261,27 +294,40 @@ class LoadContext(Operator):
             self.observations = olist
 
         obs_props = None
+        preproc_conf = None
         if comm.world_rank == 0:
             obs_props = list()
             obs_list = self.observations
+            if self.preprocess_config is not None:
+                with open(self.preprocess_config, "r") as f:
+                    preproc_conf = yaml.safe_load(f)
+            ctx = self._open_context()
             if self.observation_regex is not None:
                 # Match against the full list of observation IDs
                 obs_list = []
                 pat = re.compile(self.observation_regex)
-                all_obs = self.context.obsdb.query()
+                all_obs = ctx.obsdb.query()
                 for result in all_obs:
                     if pat.match(result["obs_id"]) is not None:
                         obs_list.append(result["obs_id"])
+
             for iobs, obs_id in enumerate(obs_list):
-                meta = self.context.get_meta(obs_id=obs_id, dets=det_select)
+                meta = ctx.get_meta(obs_id=obs_id, dets=dets_select)
                 oprops = dict()
                 oprops["name"] = obs_id
                 oprops["duration"] = meta["obs_info"]["duration"]
                 oprops["n_det"] = len(meta["dets"].vals)
                 obs_props.append(oprops)
+            self._close_context(ctx)
 
         if comm.comm_world is not None:
             obs_props = comm.comm_world.bcast(obs_props, root=0)
+            if self.preprocess_config is not None:
+                preproc_conf = comm.comm_world.bcast(preproc_conf, root=0)
+
+        log.info_rank(
+            "LoadContext parsed observation sizes in", comm=comm.comm_world, timer=timer
+        )
 
         if len(obs_props) == 0:
             msg = "No observation IDs specified or matched the regex"
@@ -298,6 +344,8 @@ class LoadContext(Operator):
         # Every group loads its observations
         for obindx in range(group_firstobs, group_firstobs + group_numobs):
             obs_name = obs_props[obindx]["name"]
+            otimer = Timer()
+            otimer.start()
 
             # One process in the group loads the metadata, builds the focalplane
             # model, and broadcasts to the rest of the group.
@@ -305,16 +353,23 @@ class LoadContext(Operator):
             det_props = None
             obs_meta = None
             n_samp = None
-            rate = None
             if comm.group_rank == 0:
-                meta = self.context.get_meta(obs_name, dets=det_select)
-                # Read telescope data to get number of samples
-                axtemp = self.context.get_obs(obs_name, no_signal=True)
-                n_samp = len(axtemp[self.ax_times])
-                # Now that we have timestamps loaded, update our focalplane sample rate
-                (rate, dt, dt_min, dt_max, dt_std) = toast.utils.rate_from_times(
-                    axtemp[self.ax_times]
-                )
+                # Load metadata
+                ctx = self._open_context()
+                meta = ctx.get_meta(obs_name, dets=dets_select)
+                self._close_context(ctx)
+                n_samp = meta["samps"].count
+
+                if self.preprocess_config is not None:
+                    # Cut detectors with preprocessing
+                    prepipe = PreProcPipe(
+                        preproc_conf["process_pipe"],
+                        logger=log,
+                    )
+                    for process in prepipe:
+                        log.debug(f"Preprocess selecting on {process.name}")
+                        process.select(meta)
+
                 # For each element of meta we do the following:
                 # - If the object has one axis and it is the detector axis,
                 #   treat it as a column in the detector property table
@@ -331,23 +386,52 @@ class LoadContext(Operator):
 
                 # Construct table
                 det_props = QTable(fp_cols)
+                del meta
+
+            log.info_rank(
+                f"LoadContext {obs_name} metadata loaded in",
+                comm=comm.comm_group,
+                timer=otimer,
+            )
 
             if comm.comm_group is not None:
                 obs_meta = comm.comm_group.bcast(obs_meta, root=0)
                 det_props = comm.comm_group.bcast(det_props, root=0)
                 n_samp = comm.comm_group.bcast(n_samp, root=0)
-                rate = comm.comm_group.bcast(rate, root=0)
-            rate = u.Quantity(rate, u.Hz)
+
+            log.info_rank(
+                f"LoadContext {obs_name} metadata bcast took",
+                comm=comm.comm_group,
+                timer=otimer,
+            )
 
             # Create the observation.  We intentionally use the generic focalplane
             # and class here, in case we are loading data from legacy experiments.
 
-            # Convert any focalplane quaternion offsets to toast format
+            # Convert any focalplane quaternion offsets to toast format.  We also
+            # look for any detectors with NaN values and flag those with the
+            # processing bit.
 
             name_col = Column(name="name", data=det_props["det_info_readout_id"])
             det_props.add_column(name_col, index=0)
 
+            fp_flags = dict()
             if "focal_plane_xi" in det_props.colnames:
+                fp_bad = np.logical_or(
+                    np.isnan(det_props["focal_plane_xi"]),
+                    np.logical_or(
+                        np.isnan(det_props["focal_plane_eta"]),
+                        np.isnan(det_props["focal_plane_gamma"]),
+                    ),
+                )
+                fp_flags = {
+                    x: defaults.det_mask_processing
+                    for x, y in zip(det_props["name"], fp_bad)
+                    if y
+                }
+                det_props["focal_plane_xi"][fp_bad] = 0
+                det_props["focal_plane_eta"][fp_bad] = 0
+                det_props["focal_plane_gamma"][fp_bad] = 0
                 quat_data = toast.instrument_coords.xieta_to_quat(
                     det_props["focal_plane_xi"],
                     det_props["focal_plane_eta"],
@@ -359,6 +443,19 @@ class LoadContext(Operator):
                     np.array([0, 0, 0, 1], dtype=np.float64),
                     len(det_props["det_info_readout_id"]),
                 ).reshape((-1, 4))
+
+            # Do we have any good detectors left?
+            n_good = 0
+            for det in det_props["name"]:
+                if det not in fp_flags or fp_flags[det] == 0:
+                    n_good += 1
+            if n_good == 0:
+                log.warning_rank(
+                    f"LoadContext {obs_name} has no unflagged detectors, skipping!",
+                    comm=comm.comm_group,
+                )
+                continue
+
             quat_col = Column(
                 name="quat",
                 data=quat_data,
@@ -367,7 +464,7 @@ class LoadContext(Operator):
 
             focalplane = toast.instrument.Focalplane(
                 detector_data=det_props,
-                sample_rate=rate,
+                sample_rate=1.0 * u.Hz,
             )
 
             if self.detset_key is None:
@@ -396,6 +493,17 @@ class LoadContext(Operator):
                 sample_sets=None,
                 process_rows=comm.group_size,
             )
+
+            log.info_rank(
+                f"LoadContext {obs_name} construct Observation in",
+                comm=comm.comm_group,
+                timer=otimer,
+            )
+
+            # Apply detector flags for bad pointing reconstruction
+            local_dets = set(ob.local_detectors)
+            local_fp_flags = {x: y for x, y in fp_flags.items() if x in local_dets}
+            ob.update_local_detector_flags(local_fp_flags)
 
             # Create observation fields
             ob.shared.create_column(
@@ -440,7 +548,7 @@ class LoadContext(Operator):
                     shape=(ob.n_local_samples, 4),
                     dtype=np.float64,
                 )
-            if self.hwp_angle is not None:
+            if self.hwp_angle is not None and self.ax_hwp_angle is not None:
                 ob.shared.create_column(
                     self.hwp_angle,
                     shape=(ob.n_local_samples,),
@@ -480,9 +588,33 @@ class LoadContext(Operator):
                 )
                 ob.detdata.create(self.det_flags, dtype=np.uint8)
 
-            # Now every process loads its data
-            axtod = self.context.get_obs(obs_name, dets=ob.local_detectors)
+            log.info_rank(
+                f"LoadContext {obs_name} allocated TOD in",
+                comm=comm.comm_group,
+                timer=otimer,
+            )
+
+            # Load and distribute the detector data
+            axtod = self._read_detdata(
+                ob, preproc_conf, allread=self.read_independent
+            )
+
+            log.info_rank(
+                f"LoadContext {obs_name} AxisManager loaded in",
+                comm=comm.comm_group,
+                timer=otimer,
+            )
+
             self._parse_data(ob, have_pointing, axtod, None)
+
+            # No longer needed
+            del axtod
+
+            log.info_rank(
+                f"LoadContext {obs_name} AxisManager to Observation conversion took",
+                comm=comm.comm_group,
+                timer=otimer,
+            )
 
             # Position and velocity of the observatory are simply computed.  Only the
             # first row of the process grid needs to do this.
@@ -493,26 +625,195 @@ class LoadContext(Operator):
                     position, velocity = site.position_velocity(ob.shared[self.times])
                 ob.shared[defaults.position].set(position, offset=(0, 0), fromrank=0)
                 ob.shared[defaults.velocity].set(velocity, offset=(0, 0), fromrank=0)
+                log.info_rank(
+                    f"LoadContext {obs_name} site position/velocity took",
+                    comm=comm.comm_group,
+                    timer=otimer,
+                )
 
-                # First row of the process grid computes boresight quaternions from
-                # boresight angles.
+                # Since this step takes some time, all processes in the group
+                # contribute
+                pnt_dist = distribute_uniform(ob.n_all_samples, comm.group_size)
+
                 bore_azel = None
                 bore_radec = None
-                if ob.comm_col_rank == 0:
-                    bore_azel = toast.qarray.from_lonlat_angles(
-                        -ob.shared[self.azimuth].data,
-                        ob.shared[self.elevation].data,
-                        ob.shared[self.roll].data,
-                    )
-                    bore_radec = toast.coordinates.azel_to_radec(
-                        site,
-                        ob.shared[self.times].data,
-                        bore_azel,
-                        use_qpoint=True,
-                    )
-                ob.shared[self.boresight_azel].set(bore_azel, offset=(0, 0), fromrank=0)
-                ob.shared[self.boresight_radec].set(bore_radec, offset=(0, 0), fromrank=0)
+                bore_flags = None
+
+                slc_off = pnt_dist[comm.group_rank].offset
+                slc_n = pnt_dist[comm.group_rank].n_elem
+                slc = slice(slc_off, slc_n, 1)
+
+                bore_bad = np.logical_or(
+                    np.isnan(ob.shared[self.azimuth].data[slc]),
+                    np.logical_or(
+                        np.isnan(ob.shared[self.elevation].data[slc]),
+                        np.isnan(ob.shared[self.roll].data[slc]),
+                    ),
+                )
+                bore_flags = np.array(ob.shared[self.shared_flags].data[slc])
+                bore_flags[bore_bad] |= defaults.shared_mask_processing
+                temp_az = np.array(ob.shared[self.azimuth].data[slc])
+                temp_el = np.array(ob.shared[self.elevation].data[slc])
+                temp_roll = np.array(ob.shared[self.roll].data[slc])
+                temp_az[bore_bad] = 0
+                temp_el[bore_bad] = 0
+                temp_roll[bore_bad] = 0
+                bore_azel = toast.qarray.from_lonlat_angles(
+                    -temp_az,
+                    temp_el,
+                    temp_roll,
+                )
+                bore_radec = toast.coordinates.azel_to_radec(
+                    site,
+                    ob.shared[self.times].data[slc],
+                    bore_azel,
+                    use_qpoint=True,
+                )
+
+                if comm.comm_group is None:
+                    all_bore_flags = bore_flags
+                    all_bore_azel = bore_azel
+                    all_bore_radec = bore_radec
+                else:
+                    if ob.comm_col_rank == 0:
+                        all_bore_flags = np.concatenate(
+                            comm.comm_group.gather(bore_flags, root=0)
+                        )
+                    else:
+                        all_bore_flags = None
+                        _ = comm.comm_group.gather(bore_flags, root=0)
+                    del bore_flags
+                    if ob.comm_col_rank == 0:
+                        all_bore_azel = np.concatenate(
+                            comm.comm_group.gather(bore_azel, root=0)
+                        )
+                    else:
+                        all_bore_azel = None
+                        _ = comm.comm_group.gather(bore_azel, root=0)
+                    del bore_azel
+                    if ob.comm_col_rank == 0:
+                        all_bore_radec = np.concatenate(
+                            comm.comm_group.gather(bore_radec, root=0)
+                        )
+                    else:
+                        all_bore_radec = None
+                        _ = comm.comm_group.gather(bore_radec, root=0)
+                    del bore_radec
+
+                ob.shared[self.shared_flags].set(
+                    all_bore_flags, offset=(0,), fromrank=0
+                )
+                ob.shared[self.boresight_azel].set(
+                    all_bore_azel, offset=(0, 0), fromrank=0
+                )
+                ob.shared[self.boresight_radec].set(
+                    all_bore_radec, offset=(0, 0), fromrank=0
+                )
+
+                log.info_rank(
+                    f"LoadContext {obs_name} boresight pointing conversion took",
+                    comm=comm.comm_group,
+                    timer=otimer,
+                )
+
             data.obs.append(ob)
+
+    def _read_detdata(self, obs, pconf, allread=False):
+        log = Logger.get()
+        obs_name = obs.name
+
+        # By default, we attempt to use a single reading process and send
+        # restricted axis managers to each process.  Since these are potentially
+        # larger than 2GB, we try to use the new mpi4py support for pickle-5.
+        # If that is not available, we revert to having every process read
+        # independently.
+        gcomm = obs.comm.comm_group
+        if gcomm is None or gcomm.size == 1:
+            allread = True
+        elif not allread:
+            try:
+                from mpi4py.util import pkl5
+
+                gcomm = pkl5.Intracomm(gcomm)
+            except Exception:
+                msg = "Could not use pickle-5 communication, falling back to"
+                msg += " independent det data reading"
+                log.warning_rank(msg, comm=gcomm)
+                allread = True
+
+        if allread:
+            msg = f"LoadContext {obs_name} {obs.comm.group_size} processes "
+            msg += "reading independently"
+            log.info_rank(msg, comm=gcomm)
+            # Independent reading
+            ctx = self._open_context()
+            axtod = ctx.get_obs(obs_name, dets=obs.local_detectors)
+            self._close_context(ctx)
+            # Apply preprocessing.
+            if self.preprocess_config is not None:
+                prepipe = PreProcPipe(pconf["process_pipe"], logger=log)
+                prepipe.run(axtod, axtod.preprocess)
+        else:
+            msg = f"LoadContext {obs_name} one reader sending"
+            msg += f" data to {obs.comm.group_size} processes"
+            log.info_rank(msg, comm=gcomm)
+            # One process loads the whole observation and applies preprocessing
+            if gcomm.rank == 0:
+                ctx = self._open_context()
+                axfull = ctx.get_obs(obs_name, dets=obs.all_detectors)
+                self._close_context(ctx)
+                # Apply preprocessing.
+                if self.preprocess_config is not None:
+                    prepipe = PreProcPipe(pconf["process_pipe"], logger=log)
+                    prepipe.run(axfull, axfull.preprocess)
+
+            if gcomm.rank == 0:
+                # We will keep 2 buffers in memory to better overlap
+                # axis manager restriction and communication.
+                req_even = None
+                req_odd = None
+                tod_even = None
+                tod_odd = None
+                # Loop in reverse order so that the rank zero process
+                # can restrict its own data while waiting for communication
+                # to finish at the end.
+                for grank in range(gcomm.size - 1, -1, -1):
+                    rank_dets = obs.dist.dets[grank]
+                    if grank == 0:
+                        # Extract our own data
+                        axtod = axfull.restrict("dets", rank_dets, in_place=False)
+                    else:
+                        # Restrict and send
+                        if grank % 2 == 0:
+                            if req_even is not None:
+                                req_even.wait()
+                                del tod_even
+                        else:
+                            if req_odd is not None:
+                                req_odd.wait()
+                                del tod_odd
+                        if grank % 2 == 0:
+                            tod_even = axfull.restrict(
+                                "dets", rank_dets, in_place=False
+                            )
+                        else:
+                            tod_odd = axfull.restrict("dets", rank_dets, in_place=False)
+                        if grank % 2 == 0:
+                            req_even = gcomm.isend(tod_even, grank, tag=grank)
+                        else:
+                            req_odd = gcomm.isend(tod_odd, grank, tag=grank)
+                if req_even is not None:
+                    req_even.wait()
+                    del tod_even
+                if req_odd is not None:
+                    req_odd.wait()
+                    del tod_odd
+                del axfull
+            else:
+                # Receive our data
+                axtod = gcomm.recv(source=0, tag=gcomm.rank)
+            gcomm.barrier()
+        return axtod
 
     def _parse_data(self, obs, have_pointing, axman, base):
         # Some metadata has already been parsed, but some new values
@@ -523,6 +824,8 @@ class LoadContext(Operator):
             shared_ax_to_obs[self.ax_boresight_az] = self.azimuth
             shared_ax_to_obs[self.ax_boresight_el] = self.elevation
             shared_ax_to_obs[self.ax_boresight_roll] = self.roll
+        if self.hwp_angle is not None and self.ax_hwp_angle is not None:
+            shared_ax_to_obs[self.ax_hwp_angle] = self.hwp_angle
         shared_flag_invert = {x[0]: (x[1] < 0) for x in self.ax_flags}
         shared_flag_fields = {x[0]: abs(x[1]) for x in self.ax_flags}
         det_flag_invert = {x[0]: (x[1] < 0) for x in self.ax_det_flags}
@@ -611,6 +914,8 @@ class LoadContext(Operator):
                                 dtype=axman[key].dtype,
                                 units=u.dimensionless_unscaled,
                             )
+                            for idet, det in enumerate(obs.local_detectors):
+                                obs.detdata[data_key][idet] = axman[key][idet]
                     else:
                         # Must be some other type of object...
                         if data_key not in om:
@@ -632,7 +937,6 @@ class LoadContext(Operator):
                             axbuf = axman[key]
                         obs.shared[shared_ax_to_obs[data_key]].set(
                             axbuf,
-                            offset=(0,),
                             fromrank=0,
                         )
                     elif data_key in shared_flag_fields:
@@ -647,11 +951,14 @@ class LoadContext(Operator):
                             axbuf |= temp
                         obs.shared[self.shared_flags].set(
                             axbuf,
-                            offset=(0,),
                             fromrank=0,
                         )
                     else:
                         # This is some other shared data.
+                        # FIXME: we skip this for now.  If we want to re-enable,
+                        # we should pre-create this shared data or debug a
+                        # deadlock that occurs when running the code as it is.
+                        continue
                         obs.shared.create_column(
                             data_key,
                             shape=axman[key].shape,
@@ -665,6 +972,13 @@ class LoadContext(Operator):
                     # Some other object...
                     if data_key not in om:
                         om[key] = axman[key]
+
+        # Now that we have timestamps loaded, update our focalplane sample rate
+        (rate, dt, dt_min, dt_max, dt_std) = toast.utils.rate_from_times(
+            obs.shared[self.times].data
+        )
+        obs.telescope.focalplane.rate = rate * u.Hz
+
         if base is not None and len(om) == 0:
             # We created a dictionary that was not used, clean it up
             del obs[base]
