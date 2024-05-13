@@ -18,9 +18,41 @@ following yaml file can be loaded in directly with ``HkConfig.from_yaml``:
 .. code-block:: yaml
 
     hk_root: /so/data/satp1/hk
-    hk_db: satp1_hk.db
+    db_file: satp1_hk.db
     aliases:
         fp_temp: cryo-ls372-lsa21yc.temperatures.Channel_02_T
+
+In the example above, the ``db_file`` is the path to the sqlite index database.
+It is possible to use a general database engine instead of sqlite by using the
+``db_url`` parameter instead of ``db_file``, which should be a valid sqlalchemy
+database URL as is described `here
+<https://docs.sqlalchemy.org/en/20/core/engines.html#database-urls>`_. For
+example, if the index is saved in a postgres database, you can use the following
+config:
+
+.. code-block:: yaml
+
+    hk_root: /so/data/satp1/hk
+    db_url: postgresql://<user>:${psql_password}@storage1/hkdb_satp1
+    aliases:
+        fp_temp: cryo-ls372-lsa21yc.temperatures.Channel_02_T
+
+where ``psql_password`` will be expanded with the value of the environment
+variable. Similarly, the ``db_url`` can also be set as a dictionary with fields
+matching the URL fields from the sqlalchemy docs, for example:
+
+.. code-block:: yaml
+
+    hk_root: /so/data/satp1/hk
+    db_url:
+        drivername: postgresql
+        username: <user>
+        password: ${psql_password}
+        host: storage1
+        database: hkdb_satp1
+    aliases:
+        fp_temp: cryo-ls372-lsa21yc.temperatures.Channel_02_T
+
 
 In addition to the hk-root and database paths, an "alias" dictionary can
 be defined here, to provide a mapping from a human-readable name to the
