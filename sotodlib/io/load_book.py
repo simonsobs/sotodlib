@@ -34,6 +34,8 @@ from sotodlib import core
 from .check_book import _compact_list  # just a list with a limited repr
 from . import load_smurf
 
+import toast
+import toast.timing
 
 logger = logging.getLogger(__name__)
 
@@ -70,14 +72,20 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
     # the list of detsets implicated in this observation.  Make sure
     # this list is ordered by detset or the signal might not be
     # ordered properly (checked later).
+    gt = toast.timing.GlobalTimers.get()
+    gt.start("select obs detsets")
     c = db.conn.execute('select distinct DS.name, DS.det from detsets DS '
                         'join files on DS.name=files.detset '
                         'where obs_id=? '
                         'order by DS.name',
                         (obs_id,))
+    gt.stop("select obs detsets")
+    gt.start("select obs detsets all_pairs")
     all_pairs = [tuple(r) for r in c.fetchall()]
+    gt.stop("select obs detsets all_pairs")
 
     # Now filter to only the dets requested.
+    gt.start("select obs detsets filter")
     if dets is None:
         pairs_req = all_pairs
     else:
@@ -98,7 +106,9 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
     for _ds in detsets_req:
         dets_req.extend([p[1] for p in pairs_req if p[0] == _ds])
     del pairs_req
+    gt.stop("select obs detsets filter")
 
+    gt.start("get_files 1")
     file_map = db.get_files(obs_id)
     one_group = list(file_map.values())[0]  # [('file0', 0, 1000), ('file1', 1000, 2000), ...]
     
@@ -115,8 +125,11 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         samples[1] = sample_range[1] + samples[1]
     samples[0] = min(max(0, samples[0]), sample_range[1])
     samples[1] = min(max(samples), sample_range[1])
+    gt.stop("get_files 1")
 
+    gt.start("get_files 2")
     file_map = db.get_files(obs_id)
+    gt.stop("get_files 2")
 
     # Consider pre-allocating the signal buffer.
     signal_buffer = None
@@ -128,6 +141,7 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
     timestamps = None
     results = {}
 
+    gt.start("load_book_detset")
     for detset in detsets_req:
         files = file_map[detset]
         results[detset] = _load_book_detset(
@@ -137,7 +151,9 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         if ancil is None:
             ancil = results[detset]['ancil']
             timestamps = results[detset]['timestamps']
+    gt.stop("load_book_detset")
 
+    gt.start("load ancil")
     if len(results) == 0:
         # Load the ancil files, to get ancil stuff.
         _one_fileset = next(iter(file_map.values()))
@@ -146,11 +162,14 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
                                  samples=samples, dets=[])
         ancil = _res['ancil']
         timestamps = _res['timestamps']
+    gt.stop("load ancil")
 
+    gt.start("concat filesets")
     obs = _concat_filesets(results, ancil, timestamps,
                            sample0=samples[0], obs_id=obs_id,
                            signal_buffer=signal_buffer,
                            get_frame_det_info=False)
+    gt.stop("concat filesets")
     if signal_buffer is not None:
         # Make sure that, whatever happened during concatenation, the
         # dets are still ordered as was assumed by signal_buffer.

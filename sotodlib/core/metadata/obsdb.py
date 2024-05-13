@@ -221,11 +221,13 @@ class ObsDb(object):
         return common.sqlite_to_file(self.conn, filename, overwrite=overwrite, fmt=fmt)
 
     @classmethod
-    def from_file(cls, filename, fmt=None, force_new_db=True):
+    def from_file(cls, filename, fmt=None, force_new_db=True, readonly=False):
         """This method calls
             :func:`sotodlib.core.metadata.common.sqlite_from_file`
         """
-        conn = common.sqlite_from_file(filename, fmt=fmt, force_new_db=force_new_db)
+        conn = common.sqlite_from_file(
+            filename, fmt=fmt, force_new_db=force_new_db, readonly=readonly
+        )
         return cls(conn, init_db=False)
 
     def get(self, obs_id=None, tags=None, add_prefix=''):
