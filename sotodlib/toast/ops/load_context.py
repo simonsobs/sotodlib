@@ -100,7 +100,9 @@ class LoadContext(Operator):
 
     bands = List(list(), help="Only load this list of band values")
 
-    dets_select = Dict(dict(), help="The full detector selection dictionary to use")
+    dets_select = Dict(
+        dict(), help="The `dets` selection dictionary to pass to get_obs()"
+    )
 
     ax_times = Unicode(
         "timestamps",
@@ -230,12 +232,17 @@ class LoadContext(Operator):
 
     def _open_context(self):
         if self.context is None:
+            # The user did not specify a context- create a temporary
+            # one from the file
             return Context(self.context_file)
         else:
+            # Just return the user-specified context.
             return self.context
 
     def _close_context(self, ctx):
         if self.context is None:
+            # We previously created a context from a file.  Close
+            # / delete that now.
             del ctx
 
     @function_timer
