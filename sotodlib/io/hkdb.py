@@ -26,7 +26,7 @@ class HkConfig:
     """
     Configuration object for indexing and loading from an HK archive.
 
-    Attributes
+    Args
     ------------
     hk_root: str
         Root directory for the HK archive
