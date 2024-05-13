@@ -874,6 +874,7 @@ class FourierFilter(_Preprocess):
             cutoff: 1
             width: 0.1
 
+    See :ref:`fourier-filters` documentation for more details.
     """
     name = 'fourier_filter'
     def __init__(self, step_cfgs):
@@ -891,12 +892,23 @@ class FourierFilter(_Preprocess):
                                         signal_name=self.signal_name)
         if self.process_cfgs.get("trim_samps"):
             trim = self.process_cfgs["trim_samps"]
-            aman.restrict('samps',(trim, -trim))
-            proc_aman.restrict('samps', (trim, -trim))
+            aman.restrict('samps', (aman.samps.offset + trim,
+                                    aman.samps.offset + aman.samps.count - trim))
+            proc_aman.restrict('samps', (aman.samps.offset + trim,
+                                         aman.samps.offset + aman.samps.count - trim))
 
 class PCARelCal(_Preprocess):
     """
     Estimate the relcal factor from the atmosphere using PCA.
+    
+    Example configuration file entry::
+
+      - name: 'pca_relcal'
+        signal: 'hwpss_remove'
+        calc: True
+        save: True
+
+    See :ref:`pca-background` for more details on the method.
     """
     name = 'pca_relcal'
     def __init__(self, step_cfgs):
@@ -909,24 +921,22 @@ class PCARelCal(_Preprocess):
         pca_signal = tod_ops.pca.get_pca_model(aman, pca_out,
                                        signal=aman[self.signal])
         bands = np.unique(aman.det_info.wafer.bandpass)
-        bands = [bands != 'NC']
+        bands = bands[bands != 'NC']
         m0 = aman.det_info.wafer.bandpass == bands[0]
         med0 = np.median(pca_signal.weights[m0,0])
         med1 = np.median(pca_signal.weights[~m0,0])
-        relcal0 = np.zeros(aman.dets.count)
+        relcal = np.zeros(aman.dets.count)
         relcal[m0] = med0/pca_signal.weights[m0,0]
         relcal[~m0] = med1/pca_signal.weights[~m0,0]
 
-        rc_aman = core.AxisManager(aman.dets, 
+        rc_aman = core.AxisManager(aman.dets, aman.samps,
                                    core.LabelAxis(name='bandpass',
                                                   vals=bands))
         rc_aman.wrap('relcal', relcal, [(0,'dets')])
-        rc_aman.wrap('medians', [med0, med1], [(0, 'bandpass')])
+        rc_aman.wrap('medians', np.asarray([med0, med1]),
+                     [(0, 'bandpass')])
+        rc_aman.wrap('pca_mode0', pca_signal.modes[0], [(0, 'samps')])
         self.save(proc_aman, rc_aman)
-
-    def process(self, aman, proc_aman):
-        aman.signal = np.multiply(aman.signal.T,
-                                  proc_aman[self.name].relcal).T
 
     def save(self, proc_aman, rc_aman):
         if self.save_cfgs is None:
