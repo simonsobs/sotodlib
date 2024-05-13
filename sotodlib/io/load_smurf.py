@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 from .. import core
 from . import load as io_load
+from .datapkg_utils import load_configs
 from .g3thk_db import G3tHk, HKFiles, HKAgents, HKFields
 from .g3thk_utils import pysmurf_monitor_control_list
 
@@ -160,6 +161,7 @@ class G3tSmurf:
         db_args={},
         finalize={},
         hk_db_path=None,
+        make_db=False,
     ):
         """
         Class to manage a smurf data archive.
@@ -180,6 +182,11 @@ class G3tSmurf:
                 Additional arguments to pass to sqlalchemy.create_engine
             finalize: dict, optional
                 Arguments required for fast tracking of data file transfers
+            hk_db_path: str
+                Path the HK database for finalization tracking
+            make_db: bool
+                if True and db_path does not exist it will make a new database.
+                otherwise will throw and error if database path does not exist
         """
         if db_path is None:
             db_path = os.path.join(archive_path, "frames.db")
@@ -188,14 +195,30 @@ class G3tSmurf:
         self.db_path = db_path
         self.hk_db_path = hk_db_path
         self.finalize = finalize
-        self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo, **db_args)
-        Session.configure(bind=self.engine)
-        self.Session = sessionmaker(bind=self.engine)
-        Base.metadata.create_all(self.engine)
+
+        if os.path.exists(self.db_path):
+            new_db = False
+        elif make_db:
+            new_db = True
+        else:
+            raise ValueError(
+                f"Path {self.db_path} does not exist and make_db is False"
+            )
+        
+        try:
+            self.engine = db.create_engine(
+                f"sqlite:///{db_path}", echo=echo, **db_args
+            )
+            Session.configure(bind=self.engine)
+            self.Session = sessionmaker(bind=self.engine)
+            Base.metadata.create_all(self.engine)
+        except db.exc.OperationalError as e:
+            logger.error(f"Unable to connect to database file {db_path}")
+            raise e
 
         # Defines frame_types
-        self._create_frame_types()
-        self._start_finalization()
+        if new_db:
+            self._create_frame_types()
 
     def _create_frame_types(self):
         session = self.Session()
@@ -206,7 +229,7 @@ class G3tSmurf:
                 session.add(ft)
             session.commit()
 
-    def _start_finalization(self):
+    def _start_finalization(self, session):
         """Initialize finalization rows if they are not in the database yet"""
         session = self.Session()
         row = session.query(Finalize).filter(Finalize.agent == "G3tSMURF").one_or_none()
@@ -229,7 +252,7 @@ class G3tSmurf:
                 session.commit()
 
     @classmethod
-    def from_configs(cls, configs):
+    def from_configs(cls, configs, **kwargs):
         """
         Create a G3tSmurf instance from a configs dictionary or yaml file
         example configuration file will all relevant entries::
@@ -257,8 +280,9 @@ class G3tSmurf:
         -----
         configs - dictionary containing `data_prefix` and `g3tsmurf_db` keys
         """
-        if type(configs) == str:
-            configs = yaml.safe_load(open(configs, "r"))
+        if isinstance(configs, str):
+            configs = load_configs(configs)
+
         return cls(
             os.path.join(configs["data_prefix"], "timestreams"),
             configs["g3tsmurf_db"],
@@ -266,6 +290,7 @@ class G3tSmurf:
             db_args=configs.get("db_args", {}),
             finalize=configs.get("finalization", {}),
             hk_db_path=configs.get("g3thk_db"),
+            **kwargs
         )
 
     @staticmethod
@@ -425,6 +450,18 @@ class G3tSmurf:
                         timing = timing and (
                             frame.get("timing_paradigm", "") == "High Precision"
                         )
+                    fo = frame.get('primary', None)
+                    if fo is None:
+                        timing = False # no good timing without primary
+                    else:
+                        key_map = {k: i for i, k in enumerate(fo.names)}
+                        counters = np.all(
+                            np.diff( fo.data[ key_map['Counter0']] ) != 0 
+                        ) and np.all( 
+                            np.diff( fo.data[ key_map['Counter2']] ) != 0
+                        )
+                        # check all counters are incrementing
+                        timing = timing and counters 
 
                 else:
                     db_frame.n_samples = data.n_samples
@@ -468,6 +505,7 @@ class G3tSmurf:
         min_ctime=None,
         max_ctime=None,
         show_pb=True,
+        session=None,
     ):
         """
         Adds all files from an archive to the File and Frame sqlite tables.
@@ -489,7 +527,10 @@ class G3tSmurf:
         show_pb: bool
             If true, will show progress bar for file indexing
         """
-        session = self.Session()
+        new_session = False
+        if session is None:
+            session = self.Session()
+            new_session=True
         indexed_files = [f[0] for f in session.query(Files.name).all()]
 
         files = []
@@ -536,7 +577,9 @@ class G3tSmurf:
                 if stop_at_error:
                     raise e
                 logger.warning(f"Failed on file {f}:\n{e}")
-        session.close()
+
+        if new_session:
+            session.close()
 
     def delete_file(self, db_file, session=None, dry_run=False, my_logger=None):
         """WARNING: Deletes data from the file system
@@ -1101,6 +1144,14 @@ class G3tSmurf:
                 np.all([f.timing or (f.timing is None) for f in flist]) 
                 and status.downsample_external
             )
+            ## data not usable for science
+            if not obs.timing:
+                logger.warning(f"{obs.obs_id} has bad timing. Updating tags")
+                tags = obs.tag.split(',')
+                tags.insert(1, 'bad')
+                tags[2] = f'bad_{tags[2]}'
+                tags.append('timing_issues')
+                obs.tag = ','.join(tags)
             logger.debug(f"Setting {obs.obs_id} stop time to {obs.stop}")
         session.commit()
 
@@ -1350,6 +1401,9 @@ class G3tSmurf:
 
         if session is None:
             session = self.Session()
+        # look for new rows to add to table
+        self._start_finalization(session)
+
         HK = G3tHk(
             os.path.join(os.path.split(self.archive_path)[0], "hk"),
             self.hk_db_path,
@@ -1601,7 +1655,8 @@ class G3tSmurf:
                     )
 
     def index_metadata(
-        self, min_ctime=16000 * 1e5, max_ctime=None, stop_at_error=False
+        self, min_ctime=16000 * 1e5, max_ctime=None, stop_at_error=False,
+        session=None,
     ):
         """Adds all channel assignments, tunes, and observations in archive to
         database. Adding relevant entries to Files as well.
@@ -1620,8 +1675,10 @@ class G3tSmurf:
             raise ValueError(
                 "Archiver needs meta_path attribute to index channel assignments"
             )
-
-        session = self.Session()
+        new_session = False
+        if session is None:
+            session = self.Session()
+            new_session = True
         logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
 
         logger.debug("Indexing Channel Assignments")
@@ -1638,11 +1695,12 @@ class G3tSmurf:
             max_ctime=max_ctime,
             stop_at_error=stop_at_error,
         )
-
-        session.close()
+        if new_session:
+            session.close()
 
     def index_action_observations(
-        self, min_ctime=16000 * 1e5, max_ctime=None, stop_at_error=False
+        self, min_ctime=16000 * 1e5, max_ctime=None, stop_at_error=False,
+        session=None,
     ):
         """Looks through Action folders to build Observations not built off of
         tags in add_file. This function is a hold-over from when tags were not
@@ -1657,8 +1715,9 @@ class G3tSmurf:
         stop_at_error: bool
            If True, will stop if there is an error indexing a file.
         """
-
-        session = self.Session()
+        new_session = False
+        if session is None:
+            session = self.Session()
         logger.debug(f"Ignoring ctime folders below {int(min_ctime//1e5)}")
 
         logger.debug("Indexing Observations")
@@ -1668,7 +1727,8 @@ class G3tSmurf:
             max_ctime=max_ctime,
             stop_at_error=stop_at_error,
         )
-        session.close()
+        if new_session:
+            session.close()
 
     def lookup_file(self, filename, fail_ok=False):
         """Lookup a file's observations details in database. Meant to look

@@ -27,8 +27,7 @@ def main(config=None, from_scratch=False, verbosity=2):
     elif verbosity == 3:
         logger.setLevel(logging.DEBUG)
 
-    cfgs = yaml.safe_load( open(config, "r"))
-    HK = G3tHk.from_configs(cfgs)
+    HK = G3tHk.from_configs(config)
 
     if from_scratch or HK.session.query(HKFiles).count()==0:
         logger.info("Building Database from Scratch, May take awhile")
