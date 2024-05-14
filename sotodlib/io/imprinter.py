@@ -27,7 +27,7 @@ from .load_smurf import (
     SupRsyncType,
     Files,
 )
-from .datapkg_utils import load_configs
+from .datapkg_utils import load_configs, get_imprinter_config
 from .check_book import BookScanner
 from .g3thk_db import G3tHk, HKFiles
 from ..site_pipeline.util import init_logger
@@ -60,6 +60,15 @@ class BookBoundError(Exception):
 
 class NoFilesError(Exception):
     """Exception raised when no files are found in the book"""
+    pass
+
+class MissingReadoutIDError(Exception):
+    """Exception raised when we find books with observations with missing readout IDs"""
+    pass
+
+class OverlapObsError(Exception):
+    """Exception raised when we find observations that could be registered to
+    multiple books"""
     pass
 
 ###################
@@ -280,7 +289,10 @@ class Imprinter:
         self.hk_archive = None
         self.librarian = None
 
-        
+    @classmethod
+    def for_platform(cls, platform, *args, **kwargs):
+        config = get_imprinter_config(platform)
+        return cls( config, *args, **kwargs)
 
     def get_session(self):
         """Get a new session or return the existing one
@@ -616,9 +628,9 @@ class Imprinter:
 
     def _get_binder_for_book(self, 
         book, 
-        pbar=False, 
         ignore_tags=False,
         ancil_drop_duplicates=False,
+        allow_bad_timing=False
     ):
         """get the appropriate bookbinder for the book based on its type"""
         g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
@@ -639,6 +651,7 @@ class Imprinter:
                 book, obsdb, filedb, lvl2_data_root, readout_ids, book_path,
                 ignore_tags=ignore_tags,
                 ancil_drop_duplicates=ancil_drop_duplicates,
+                allow_bad_timing=allow_bad_timing,
             )
             return bookbinder
 
@@ -738,6 +751,7 @@ class Imprinter:
         pbar=False,
         ignore_tags=False,
         ancil_drop_duplicates=False,
+        allow_bad_timing=False,
         check_configs={}
     ):
         """Bind book using bookbinder
@@ -759,6 +773,8 @@ class Imprinter:
         ancil_drop_duplicates: if true, will drop duplicate data from ancilary  
             files. added to deal with an ocs aggregator error. Only ever 
             expected to be turned on by hand.
+        allow_bad_timing: if true, will bind books even if the timing is low 
+            precision
         check_configs: dict
             additional non-default configurations to send to check book
         """
@@ -786,6 +802,7 @@ class Imprinter:
                 book, 
                 ignore_tags=ignore_tags,
                 ancil_drop_duplicates=ancil_drop_duplicates,
+                allow_bad_timing=allow_bad_timing,
             )
             binder.bind(pbar=pbar)
 
@@ -902,7 +919,9 @@ class Imprinter:
 
         """
         if session is None: session = self.get_session()
-        return session.query(Books).filter(Books.status == status).all()
+        return session.query(Books).filter(
+            Books.status == status
+        ).order_by(Books.start).all()
     
     def get_level2_deleteable_books(
             self, session=None, cleanup_delay=None, max_time=None
@@ -1218,15 +1237,26 @@ class Imprinter:
                 f"updating max ctime to {new_ctime}"
             )
             max_ctime = new_ctime
+
+        min_start = dt.datetime.utcfromtimestamp(min_ctime)
         max_stop = dt.datetime.utcfromtimestamp(max_ctime)
 
-        # find all complete observations that start within the time range
+        # find observations in time range that are already in books
+        already_registered = [ x[0] for x in
+            self.get_session().query(Observations.obs_id).join(Books).filter(
+            Books.start >= min_start-dt.timedelta(hours=3),
+            Books.stop <= max_stop+dt.timedelta(hours=3),
+        ).all()]
+
+        # find all complete observations that start within the time range and
+        # are not already in books
         obs_q = session.query(G3tObservations).filter(
             G3tObservations.timestamp >= min_ctime,
             G3tObservations.timestamp < max_ctime,
             stream_filt,
             G3tObservations.stop < max_stop,
             not_(G3tObservations.stop == None),
+            G3tObservations.obs_id.not_in(already_registered),
         )
         self.logger.debug(
             f"Found {obs_q.count()} level 2 observations to consider"
@@ -1336,6 +1366,16 @@ class Imprinter:
         if return_obsset:
             return output
 
+        # look for repeat obs_ids
+        obs_ids = []
+        [obs_ids.extend( o.obs_ids) for o in output]
+        if np.any([obs_ids.count(o) != 1 for o in obs_ids]):
+            repeats = np.where( [obs_ids.count(o) != 1 for o in obs_ids])[0]
+            raise OverlapObsError(f"Found repeated level 2 obs_ids in book "
+                    f"list. {np.unique([obs_ids[x] for x in repeats])} overlap "
+                    "multiple observations. Need to choose which books to put " 
+                    "them in.")
+
         # register books in the book database (bdb)
         for oset in output:
             try:
@@ -1444,12 +1484,12 @@ class Imprinter:
             status = SmurfStatus.from_file(files[0])
             ch_info = get_channel_info(status, archive=SMURF)
             if "readout_id" not in ch_info:
-                raise ValueError(
+                raise MissingReadoutIDError(
                     f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing"
                 )
             checks = ["NONE" in rid for rid in ch_info.readout_id]
             if np.all(checks):
-                raise ValueError(
+                raise MissingReadoutIDError(
                     f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing"
                 )
             if np.any(checks):
@@ -1544,7 +1584,7 @@ class Imprinter:
         )
         return {o.obs_id: o for o in obs}
 
-    def upload_book_to_librarian(self, book, session=None):
+    def upload_book_to_librarian(self, book, session=None, raise_on_error=True):
         """Upload bound book to the librarian
 
         Parameters
@@ -1552,6 +1592,8 @@ class Imprinter:
         book: Book object
         session: imprinter sqlalchemy session
             session that made book
+        raise_on_error: bool
+            raise an error if the librarian throws an error on the upload
         """
 
         if session is None:
@@ -1567,6 +1609,7 @@ class Imprinter:
             self.librarian = LibrarianClient.from_info(conn)
         
         assert book.status == BOUND, "cannot upload unbound books"
+
         self.logger.info(f"Uploading book {book.bid} to librarian")
         try:     
             self.librarian.upload(
@@ -1579,7 +1622,12 @@ class Imprinter:
             self.logger.error(
                 f"Failed to upload book {book.bid}."
             )
-            raise e
+            if raise_on_error:
+                raise e
+            else:
+                return False, e
+        return True, None
+            
 
     def delete_level2_files(self, book, dry_run=True):
         """Delete level 2 data from already bound books
