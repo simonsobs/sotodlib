@@ -11,7 +11,7 @@ import toast.ops
 
 from .. import ops as so_ops
 from .job import workflow_timer
-from .proc_mapmaker import mapmaker_select_noise_and_binner
+from .proc_mapmaker import mapmaker_select_noise_and_binner, mapmaker_run
 
 
 def setup_splits(operators):
@@ -46,4 +46,4 @@ def splits(job, otherargs, runargs, data):
     if job_ops.splits.enabled:
         mapmaker_select_noise_and_binner(job, otherargs, runargs, data)
         job_ops.splits.output_dir = otherargs.out_dir
-        job_ops.splits.apply(data)
+        mapmaker_run(job_ops.splits, job, otherargs, runargs, data)

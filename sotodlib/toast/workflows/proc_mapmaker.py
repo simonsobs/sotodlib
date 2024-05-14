@@ -166,12 +166,14 @@ def mapmaker_select_noise_and_binner(job, otherargs, runargs, data):
 
 
 @workflow_timer
-def mapmaker_run(job, otherargs, runargs, data):
-    """Run the TOAST mapmaker.
+def mapmaker_run(map_op, job, otherargs, runargs, data):
+    """Run a mapmaker, optionally per observation.
 
-    This runs the mapmaker either in single shot or per observation.
+    This runs the mapmaker either in single shot or per observation.  Currently
+    this supports instances of the `Mapmaker` and `Splits` operators.
 
     Args:
+        map_op (Operator):  The operator to run.
         job (namespace):  The configured operators and templates for this job.
         otherargs (namespace):  Other commandline arguments.
         runargs (namespace):  Job related runtime parameters.
@@ -183,16 +185,13 @@ def mapmaker_run(job, otherargs, runargs, data):
     """
     log = toast.utils.Logger.get()
 
-    # Configured operators for this job
-    job_ops = job.operators
-
-    if job_ops.mapmaker.enabled:
+    if map_op.enabled:
         if hasattr(otherargs, "obsmaps") and otherargs.obsmaps:
             # Map each observation separately
             timer_obs = toast.timing.Timer()
             timer_obs.start()
             group = data.comm.group
-            orig_name = job_ops.mapmaker.name
+            orig_name = map_op.name
             orig_comm = data.comm
             new_comm = toast.Comm(world=data.comm.comm_group)
             for iobs, obs in enumerate(data.obs):
@@ -204,9 +203,21 @@ def mapmaker_run(job, otherargs, runargs, data):
                 obs_data = data.select(obs_uid=obs.uid)
                 # Replace comm_world with the group communicator
                 obs_data._comm = new_comm
-                job_ops.mapmaker.name = f"{orig_name}_{obs.name}"
-                job_ops.mapmaker.reset_pix_dist = True
-                job_ops.mapmaker.apply(obs_data)
+
+                # Rename the operator with the observation suffix
+                map_op.name = f"{orig_name}_{obs.name}"
+
+                if isinstance(map_op, so_ops.Splits):
+                    # Reset the pixel distribution of the underlying
+                    # mapmaker
+                    map_op.mapmaker.reset_pix_dist = True
+                else:
+                    # Reset the trait on this mapmaker
+                    map_op.reset_pix_dist = True
+
+                # Map this observation
+                map_op.apply(obs_data)
+
                 log.info_rank(
                     f"{group} : Mapped {obs.name} in",
                     comm=new_comm.comm_world,
@@ -216,9 +227,11 @@ def mapmaker_run(job, otherargs, runargs, data):
                 f"{group} : Done mapping {len(data.obs)} observations.",
                 comm=new_comm.comm_world,
             )
+            map_op.name = orig_name
             data._comm = orig_comm
+            del new_comm
         else:
-            job_ops.mapmaker.apply(data)
+            map_op.apply(data)
 
 
 @workflow_timer
@@ -244,5 +257,4 @@ def mapmaker(job, otherargs, runargs, data):
     job_ops = job.operators
 
     mapmaker_select_noise_and_binner(job, otherargs, runargs, data)
-
-    mapmaker_run(job, otherargs, runargs, data)
+    mapmaker_run(job_ops.mapmaker, job, otherargs, runargs, data)
