@@ -1,6 +1,7 @@
 import os
 import yaml
 import time
+import numpy as np
 import argparse
 import logging
 from typing import Optional
@@ -100,8 +101,6 @@ def main(config: str,
     elif verbose == 3:
         logger.setLevel(logging.DEBUG)
     
-
-    
     # load configuration file
     if type(config) == str:
         with open(config) as f:
@@ -132,6 +131,21 @@ def main(config: str,
         if 'update_delay' in config.keys():
             update_delay = config['update_delay']
     
+    save_mean = config.get('save_mean', False)
+    save_median = config.get('save_median', False)
+    save_rms = config.get('save_rms', False)
+    save_ptp = config.get('save_ptp', False)
+    
+    min_valid_value = config.get('min_valid_value', None)
+    max_valid_value = config.get('max_valid_value', None)
+    max_valid_dvalue_dt = config.get('max_valid_dvalue_dt', None)
+    if np.all(np.array([min_valid_value is None,
+                        max_valid_value is None,
+                        max_valid_dvalue_dt is None])):
+        save_nan_fraction = False
+    else:
+        save_nan_fraction = True
+
     if (min_ctime is None) and (update_delay is not None):
         min_ctime = int(time.time()) - update_delay*86400
     logger.info(f'min_ctime: {min_ctime}')
@@ -151,10 +165,23 @@ def main(config: str,
         scheme = core.metadata.ManifestScheme()
         scheme.add_exact_match('obs:obs_id')
         scheme.add_data_field('dataset')
+           
+        if save_mean:
+            scheme.add_data_field(f'{output_prefix}_mean')
+        if save_median:
+            scheme.add_data_field(f'{output_prefix}_median')
+        if save_rms:
+            scheme.add_data_field(f'{output_prefix}_rms')
+        if save_ptp:
+            scheme.add_data_field(f'{output_prefix}_ptp')
+        if save_nan_fraction:
+            scheme.add_data_field(f'{output_prefix}_nan_fraction')
+        
         man_db = core.metadata.ManifestDb(
             man_db_filename,
             scheme=scheme
         )
+        
     
     # query observations
     if obs_id is not None:
@@ -194,7 +221,7 @@ def main(config: str,
             
             hkman = core.AxisManager(meta.dets, aman.samps)
             hkman.wrap('timestamps', aman.timestamps, [(0, 'samps')])
-
+            
             full_fields = config['fields']
             aliases = config['aliases']
             data_fields = [full_field.split('.')[1] for full_field in full_fields]
@@ -205,11 +232,35 @@ def main(config: str,
                 i_in_same_field = i - num_different_field
                 hkman.wrap(alias, _hkman[data_field][data_field][i_in_same_field], [(0, 'samps')])
             
+            # set values nan if it is invalid
+            mask_invalid = np.zeros(hkman.samps.count, dtype=bool)
+            if min_valid_value is not None:
+                mask_invalid[hkman[aliases[0]] < min_valid_value] = True
+            if max_valid_value is not None:
+                mask_invalid[max_valid_value < hkman[aliases[0]]] = True
+            if max_valid_dvalue_dt is not None:
+                dt = np.median(np.diff(aman.timestamps))
+                mask_invalid[ np.abs( np.diff(np.append(hkman[aliases[0]], hkman[aliases[0]][-1])) / dt) > max_valid_dvalue_dt ] = True
+                mask_invalid[ np.abs( np.diff(np.append(hkman[aliases[0]][0],  hkman[aliases[0]])) / dt) > max_valid_dvalue_dt ] = True
+            if np.any(mask_invalid):
+                hkman[aliases[0]][mask_invalid] = np.nan
+            
             h5_filename = f"{output_prefix}_{obs_id.split('_')[1][:4]}.h5"
             output_filename = os.path.join(output_dir, h5_filename)
             hkman.save(dest=output_filename, group=obs_id, overwrite=overwrite)
-            man_db.add_entry({'obs:obs_id': obs_id, 'dataset': obs_id}, 
-                     filename=output_filename, replace=overwrite)
+            
+            entry_dict = {'obs:obs_id': obs_id, 'dataset': obs_id}
+            if save_mean:
+                entry_dict[f'{output_prefix}_mean'] = np.nanmean(hkman[aliases[0]])
+            if save_median:
+                entry_dict[f'{output_prefix}_median'] = np.nanmedian(hkman[aliases[0]])
+            if save_rms:
+                entry_dict[f'{output_prefix}_rms'] = np.nanstd(hkman[aliases[0]])
+            if save_ptp:
+                entry_dict[f'{output_prefix}_ptp'] = np.nanmax(hkman[aliases[0]]) - np.nanmin(hkman[aliases[0]])
+            if save_nan_fraction:
+                entry_dict[f'{output_prefix}_nan_fraction'] = np.mean(np.isnan(hkman[aliases[0]]).astype('float'))
+            man_db.add_entry(entry_dict, filename=output_filename, replace=overwrite)
             logger.info(f"saved: {obs_id}")
             
         except Exception as e:
