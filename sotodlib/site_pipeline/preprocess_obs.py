@@ -4,7 +4,7 @@ import time
 import numpy as np
 import argparse
 import traceback
-from typing import Optional
+from typing import Optional, List
 
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
@@ -185,7 +185,7 @@ def main(
     min_ctime: Optional[int] = None,
     max_ctime: Optional[int] = None,
     update_delay: Optional[int] = None,
-    tags: Optional[str] = None,
+    tags: Optional[List[str]] = None,
     planet_obs: bool = False,
  ):
     configs, context = _get_preprocess_context(configs)
