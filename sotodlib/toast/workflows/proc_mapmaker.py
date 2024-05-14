@@ -166,18 +166,18 @@ def mapmaker_select_noise_and_binner(job, otherargs, runargs, data):
 
 
 @workflow_timer
-def mapmaker_run(map_op, job, otherargs, runargs, data):
+def mapmaker_run(job, otherargs, runargs, data, map_op):
     """Run a mapmaker, optionally per observation.
 
     This runs the mapmaker either in single shot or per observation.  Currently
     this supports instances of the `Mapmaker` and `Splits` operators.
 
     Args:
-        map_op (Operator):  The operator to run.
         job (namespace):  The configured operators and templates for this job.
         otherargs (namespace):  Other commandline arguments.
         runargs (namespace):  Job related runtime parameters.
         data (Data):  The data container.
+        map_op (Operator):  The operator to run.
 
     Returns:
         None
@@ -257,4 +257,4 @@ def mapmaker(job, otherargs, runargs, data):
     job_ops = job.operators
 
     mapmaker_select_noise_and_binner(job, otherargs, runargs, data)
-    mapmaker_run(job_ops.mapmaker, job, otherargs, runargs, data)
+    mapmaker_run(job, otherargs, runargs, data, job_ops.mapmaker)

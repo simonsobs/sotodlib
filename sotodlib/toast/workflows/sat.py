@@ -46,4 +46,4 @@ def splits(job, otherargs, runargs, data):
     if job_ops.splits.enabled:
         mapmaker_select_noise_and_binner(job, otherargs, runargs, data)
         job_ops.splits.output_dir = otherargs.out_dir
-        mapmaker_run(job_ops.splits, job, otherargs, runargs, data)
+        mapmaker_run(job, otherargs, runargs, data, job_ops.splits)
