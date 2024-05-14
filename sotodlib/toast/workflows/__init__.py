@@ -39,6 +39,8 @@ from .proc_filters import (
 from .proc_flagging import (
     setup_flag_sso,
     flag_sso,
+    setup_flag_diff_noise_outliers,
+    flag_diff_noise_outliers,
     setup_flag_noise_outliers,
     flag_noise_outliers,
     setup_processing_mask,
@@ -49,7 +51,12 @@ from .proc_mapmaker_filterbin import setup_mapmaker_filterbin, mapmaker_filterbi
 from .proc_mapmaker_madam import setup_mapmaker_madam, mapmaker_madam
 from .proc_mapmaker_ml import setup_mapmaker_ml, mapmaker_ml
 from .proc_mapmaker import setup_mapmaker, mapmaker
-from .proc_noise_est import setup_noise_estimation, noise_estimation
+from .proc_noise_est import (
+    setup_diff_noise_estimation,
+    diff_noise_estimation,
+    setup_noise_estimation,
+    noise_estimation,
+)
 from .proc_characterize import (
     setup_raw_statistics,
     raw_statistics,
