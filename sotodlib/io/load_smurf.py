@@ -450,6 +450,18 @@ class G3tSmurf:
                         timing = timing and (
                             frame.get("timing_paradigm", "") == "High Precision"
                         )
+                    fo = frame.get('primary', None)
+                    if fo is None:
+                        timing = False # no good timing without primary
+                    else:
+                        key_map = {k: i for i, k in enumerate(fo.names)}
+                        counters = np.all(
+                            np.diff( fo.data[ key_map['Counter0']] ) != 0 
+                        ) and np.all( 
+                            np.diff( fo.data[ key_map['Counter2']] ) != 0
+                        )
+                        # check all counters are incrementing
+                        timing = timing and counters 
 
                 else:
                     db_frame.n_samples = data.n_samples
@@ -1132,6 +1144,14 @@ class G3tSmurf:
                 np.all([f.timing or (f.timing is None) for f in flist]) 
                 and status.downsample_external
             )
+            ## data not usable for science
+            if not obs.timing:
+                logger.warning(f"{obs.obs_id} has bad timing. Updating tags")
+                tags = obs.tag.split(',')
+                tags.insert(1, 'bad')
+                tags[2] = f'bad_{tags[2]}'
+                tags.append('timing_issues')
+                obs.tag = ','.join(tags)
             logger.debug(f"Setting {obs.obs_id} stop time to {obs.stop}")
         session.commit()
 

@@ -11,7 +11,7 @@ import pylab as pl
 import scipy.signal
 
 from sotodlib import core, tod_ops
-from sotodlib.preprocess.core import _expand
+from sotodlib.preprocess.pcore import _expand
 
 from numpy.testing import assert_array_equal
 

@@ -17,6 +17,7 @@ Welcome to SOTODLib's documentation!
    context.rst
    g3tsmurf.rst
    hwp.rst
+   hkdb.rst
    tod_ops.rst
    obs_ops.rst
    coords.rst
