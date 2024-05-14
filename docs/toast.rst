@@ -189,6 +189,9 @@ Here is a list of the supported high-level operations:
 .. autofunction:: sotodlib.toast.workflows.setup_flag_noise_outliers
 .. autofunction:: sotodlib.toast.workflows.flag_noise_outliers
 
+.. autofunction:: sotodlib.toast.workflows.setup_flag_diff_noise_outliers
+.. autofunction:: sotodlib.toast.workflows.flag_diff_noise_outliers
+
 .. autofunction:: sotodlib.toast.workflows.setup_mapmaker_filterbin
 .. autofunction:: sotodlib.toast.workflows.mapmaker_filterbin
 
@@ -203,6 +206,9 @@ Here is a list of the supported high-level operations:
 
 .. autofunction:: sotodlib.toast.workflows.setup_noise_estimation
 .. autofunction:: sotodlib.toast.workflows.noise_estimation
+
+.. autofunction:: sotodlib.toast.workflows.setup_diff_noise_estimation
+.. autofunction:: sotodlib.toast.workflows.diff_noise_estimation
 
 .. autofunction:: sotodlib.toast.workflows.setup_raw_statistics
 .. autofunction:: sotodlib.toast.workflows.raw_statistics
