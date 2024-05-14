@@ -454,6 +454,7 @@ def main():
     os.makedirs(os.path.dirname(outpath), exist_ok=True)
 
     weight_factor = config.get("weight_factor", 1000)
+    min_points = config.get("min_points", 50)
     gen_template = "template" not in config
     template_path = config.get("template", "nominal.h5")
     have_template = os.path.exists(template_path)
@@ -529,6 +530,9 @@ def main():
                 )
 
             focal_plane = FocalPlane.empty(template, stream_id, len(amans))
+            if focal_plane.template is None:
+                raise ValueError("Template is somehow None")
+
             for i, (aman, obs_id) in enumerate(zip(amans_restrict, obs_ids)):
                 logger.info("\tWorking on %s", obs_id)
                 if aman.dets.count == 0:
@@ -587,6 +591,11 @@ def main():
                 focal_plane.n_point,
                 focal_plane.n_gamma,
             ) = _avg_focalplane(focal_plane.full_fp, focal_plane.tot_weight)
+            tot_points = np.sum((focal_plane.n_point > 0).astype(int))
+            logger.info("\t%d points in fit", tot_points)
+            if tot_points < min_points:
+                logger.error("\tToo few points! Skipping...")
+                continue
 
             # Compute transformation between the two nominal and measured pointing
             focal_plane.have_gamma = np.sum(focal_plane.n_gamma) > 0
@@ -656,8 +665,13 @@ def main():
             ots[ot].focal_planes.append(focal_plane)
 
         # Per OT common mode
-        for ot in ots.values():
+        todel = []
+        for name, ot in ots.items():
             logger.info("Fitting common mode for %s", ot.name)
+            if len(ot.focal_planes) == 0:
+                logger.error("\tNo focal planes found! Skipping...")
+                todel.append(name)
+                continue
             centers = np.vstack([fp.template.center for fp in ot.focal_planes])
             centers_transformed = np.vstack(
                 [fp.center_transformed for fp in ot.focal_planes]
@@ -691,10 +705,15 @@ def main():
                 ot.transform_fullcm.rot,
                 ("xi", "eta", "gamma"),
             )
+        for ot in todel:
+            del ots[ot]
 
         # Full receiver common mode
         logger.info("Fitting receiver common mode")
-        if len(ots) == 1:
+        if len(ots) == 0:
+            logger.error("\tNo optics tubes found! Skipping...")
+            continue
+        elif len(ots) == 1:
             logger.info(
                 "\tOnly one OT found, receiver common mode will be from this tube"
             )
