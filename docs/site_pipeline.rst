@@ -295,6 +295,17 @@ Below is the full docs of the configuration class.
 
 .. autoclass:: sotodlib.site_pipeline.update_det_match.UpdateDetMatchesConfig
 
+update-hkdb
+----------------
+
+The update_hkdb site-pipeline script is used to scan through housekeeping files,
+and update the index database. Configuration for this script must be passed in
+through a config file, with fields that map to the HkConfig dataclass, described
+below:
+
+.. autoclass:: sotodlib.io.hkdb.HkConfig
+  :no-index:
+
 analyze-bright-ptsrc
 --------------------
 
