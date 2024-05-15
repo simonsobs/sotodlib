@@ -31,17 +31,20 @@ def multi_run_pca(ctx, oids, ufm, ghz, num_runs=2):
         Bandpass, i.e., 'f90s', 'f150s'.
     num_runs : int, optional
         Specifies the number of PCA runs to make. Defaults to 2.
-        
+
     """
     pca_run = 1
     good_dets = None
 
     for _ in range(num_runs):
-        good_dets = results.get('good_dets', {}).get('det_ids') if pca_run != 1 else None
-        amans, pca_signals_cal = compute_pca(ctx, oids, ufm, ghz, pca_run, good_dets=good_dets)
+        good_dets = results.get('good_dets', {}).get(
+            'det_ids') if pca_run != 1 else None
+        amans, pca_signals_cal = compute_pca(
+            ctx, oids, ufm, ghz, pca_run, good_dets=good_dets)
 
         results = find_pcabounds(amans=amans, pca_signals_cal=pca_signals_cal)
-        plot_pcabounds(amans=amans, pca_signals_cal=pca_signals_cal, results=results)
+        plot_pcabounds(
+            amans=amans, pca_signals_cal=pca_signals_cal, results=results)
         print(f'Plotted some plots for run {pca_run}')
 
         # Increment to the next run
@@ -49,8 +52,36 @@ def multi_run_pca(ctx, oids, ufm, ghz, num_runs=2):
 
 
 def compute_pca(ctx, oids, ufm, ghz, pca_run, good_dets=None):
-    """
-    good_dets = dictionary of detids
+    """Compute the PCA for a given observation, wafer, and bandpass.
+
+    Parameters
+    ----------
+    ctx : object
+        Context object for loading detector metatata and observations
+    oids : list
+        List of observation ids.
+    ufm : str
+        UFM name.
+    ghz : str
+        Bandpass, i.e., 'f90s', 'f150s'.    
+    pca_run : int
+        The iteration number of the PCA run.
+    good_dets : dict, optional
+        Dictionary of detector id's per observation for the good 
+        batch of detectors. `good_dets` only exists when the 
+        pca iteration number is > 1. Default is None.
+
+    Returns
+    -------
+    tuple
+        A tuple containing two elements:
+        - amansf : list
+            list of axismanagers per observation after they go 
+            through preprocessing
+        - pca_signals_cal : dict
+            dictionary of pca axismanagers per observation id.
+            also holds information about the pca aman's pca iteration 
+
     """
     metas = load_metas(ctx, oids, ufm)
     if good_dets and pca_run >= 2:
@@ -72,17 +103,17 @@ def compute_pca(ctx, oids, ufm, ghz, pca_run, good_dets=None):
 
 
 def pca_cal(amans):
-    """_summary_
+    """Computes the pca given a list of preprocessed axismanagers
 
     Parameters
     ----------
-    amans : _type_
-        _description_
+    amans : list
+        list of observation axismanagers
 
     Returns
     -------
-    _type_
-        _description_
+    dict
+        dictionary of pca axismanagers per observation
     """
     pca_signals_cal = {}
     for aman in tqdm(amans, desc='Post-cal PCA'):
@@ -96,7 +127,22 @@ def pca_cal(amans):
 
 
 def find_pcabounds(amans, pca_signals_cal, **kwargs):
-    """
+    """Finds the bounds of the pca box using IQR 
+    statistics
+
+    Parameters
+    ----------
+    amans : list
+        list of observation axismanagers
+    pca_signals_cal : dict
+        dictionary of pca axismanagers per observation
+
+    Returns
+    -------
+    dict
+        `results` dictionary with the x and y bounds, and det id's of 
+        good and bad detectors for each axismanager/observation
+
     """
     xfac = kwargs.get('xfac', 2)
     yfac = kwargs.get('yfac', 1.5)
@@ -185,7 +231,22 @@ def find_pcabounds(amans, pca_signals_cal, **kwargs):
 
 
 def plot_pcabounds(amans, pca_signals_cal, results, ufm, ghz):
-    """
+    """Subplot of pca bounds as well as the good and bad detector
+    timestreams with 0th mode weight overplotted
+
+    Parameters
+    ----------
+    amans : list
+        list of preprocessed observation axismanagers
+    pca_signals_cal : dict
+        dictionary of pca axismanagers for each observation
+    results : dict
+        dict of bounds and good and bad detector id's
+    ufm : str
+        UFM name (for plotting purposes)
+    ghz : str
+        Bandpass (for plotting purposes)
+
     """
     for aman in amans:
         pca_run = pca_signals_cal['pca_run_iteration']
@@ -197,15 +258,12 @@ def plot_pcabounds(amans, pca_signals_cal, results, ufm, ghz):
         goodids = results['good_dets']['det_ids'][obs]
         badids = results['baddets']['det_ids'][obs]
 
-#        pdb.set_trace()
         ids = list(aman.det_info.det_id)
         good_indices = [ids.index(det_id) for det_id in goodids]
         bad_indices = [ids.index(det_id) for det_id in badids]
 
         xbounds = results['bounds'][obs]['x']
         ybounds = results['bounds'][obs]['y']
-
-        #ufm, ghz, _ = goodids[0].split('_')
 
         timestamps = aman.timestamps[::20]  # because of the lpf
         modes = pca_signal.modes[0][::20]
@@ -256,11 +314,12 @@ def plot_pcabounds(amans, pca_signals_cal, results, ufm, ghz):
                  color='navy', linestyle='-.', linewidth=1.5, label='Boundary',
                  alpha=1)
 
-        unique_bias_groups = sorted(set(aman.det_cal.bg))
-        bias_groups = aman.det_cal.bg
-        markers = ['o', '^', '^', 'D', 'x', '+']
-        bias_group_markers = {
-            bg: markers[i % len(markers)] for i, bg in enumerate(unique_bias_groups)}
+        # Todo: incorporate bias groups into Si vs weight plot
+        # unique_bias_groups = sorted(set(aman.det_cal.bg))
+        # bias_groups = aman.det_cal.bg
+        # markers = ['o', '^', '^', 'D', 'x', '+']
+        # bias_group_markers = {
+        #    bg: markers[i % len(markers)] for i, bg in enumerate(unique_bias_groups)}
         # legend_handles = []
         # for bg in unique_bias_groups:
         #  marker = bias_group_markers[bg]
@@ -286,12 +345,8 @@ def plot_pcabounds(amans, pca_signals_cal, results, ufm, ghz):
         ax3.grid()
 
         fig.suptitle(f'{ufm} {ghz} {aman.obs_info.obs_id[0:20]}')
-
-        # Automatically adjust padding horizontally and vertically
         plt.tight_layout()
-        plt.show()
-
         plt.savefig(
             f'{ufm}_{ghz}_{aman.obs_info.obs_id[0:20]}_pca{pca_run}.png')
-        plt.figure()
 
+        plt.figure()
