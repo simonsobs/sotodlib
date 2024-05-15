@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2023 Simons Observatory.
+# Copyright (c) 2020-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Simons Observatory processing modules.
 
@@ -23,3 +23,4 @@ from .sim_mumux_crosstalk import SimMuMUXCrosstalk
 from .splits import Splits
 from .mumux_crosstalk_util import detmap_available, pos_to_chi
 from .load_context import LoadContext
+from .readout_filter import ReadoutFilter
