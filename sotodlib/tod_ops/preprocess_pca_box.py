@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 # NOTE: This is all preprocessing done for pca analysis but is just for personal use;
 # the pca box method will take advantage of preprocessing that's already setup as part
 # of the site pipeline architecture
+# NOTE: Docstrings not added to all functions cus i'm lazy and i know it won't be integrated
+# into sotodlib
 
 def load_metas(ctx, oids, ufm):
     """ Given a set of observation ids and a context .yaml file,
