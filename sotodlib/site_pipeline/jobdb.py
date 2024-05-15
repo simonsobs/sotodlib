@@ -1,3 +1,77 @@
+"""
+jobdb
+=====
+
+Connect to a database
+---------------------
+
+With sqlite::
+
+  jdb = jobdb.JobManager(sqlite_file='jobsdb-test.db')
+
+With postgres::
+
+  db_url = sqy.engine.URL.create(
+        "postgresql",
+        username="abc",
+        password="def",
+        host="ghi",
+        database="jkl")
+  jdb = jobdb.JobManager(url=db_url)
+
+
+Create new jobs
+---------------
+
+Check if job exists; create::
+
+  jclass = 'my_analysis'
+  tags = {'obs_id': '1234', 'wafer_slot': 10}
+  if not len(jdb.get_jobs(jclass=jclass, tags=tags)):
+    jdb.create_job(jclass, tags)
+
+Identifying work
+----------------
+
+Find jobs to do::
+
+  all_jobs = jdb.get_jobs(jclass=jclass, jstate='open')
+  done_everything = len(all_jobs) == 0
+
+Filter jobs to ones we might want to work on now::
+
+  recent_memory = time.time() - 3600  # Don't retry until 1 hour has passed.
+  to_do = [j for j in all_jobs \
+           if j.jstate == 'open' and j.visit_time <= recent_memory]
+
+Lock a job and work on it::
+
+  with jdb.locked(to_do) as job:
+    if job is not None:
+      job.mark_visited()
+      ok = do_a_job(job.tags)
+      if ok:
+        job.jstate = 'done'
+      else:
+        if job.visit_count > 5:
+          job.state = 'failed'
+
+Fixing things
+-------------
+
+Forcibly unlock all jobs (though feel free to be more targeted)::
+
+  for j in jdb.get_jobs(jclass='my_analysis'):
+    jdb.unlock(j.id)
+
+Delete some jobs::
+
+  for j in jdb.get_jobs(jclass='my_analysis'):
+    jdb.remove_job(j.id)
+
+
+"""
+
 import sqlalchemy as sqy
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship, aliased

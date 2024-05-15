@@ -1165,3 +1165,7 @@ Support
 .. automodule:: sotodlib.site_pipeline.util
    :members:
    :undoc-members:
+
+.. automodule:: sotodlib.site_pipeline.jobdb
+   :members:
+   :undoc-members:
