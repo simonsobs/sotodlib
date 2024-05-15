@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2023 Simons Observatory.
+# Copyright (c) 2022-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import os
@@ -14,7 +14,9 @@ from astropy.table import Column, QTable
 import toast
 from toast.dist import distribute_uniform
 from toast.timing import function_timer, Timer
-from toast.traits import trait_docs, Int, Unicode, Instance, List, Unit, Dict, Bool
+from toast.traits import (
+    trait_docs, Int, Unicode, Instance, List, Unit, Dict, Bool, Float
+)
 from toast.ops.operator import Operator
 from toast.utils import Environment, Logger
 from toast.dist import distribute_discrete
@@ -227,6 +229,10 @@ class LoadContext(Operator):
         help="Observation shared key for HWP angle (if it is used)",
     )
 
+    analytic_bandpass = Bool(False, help="Add analytic bandpass to each detector")
+
+    bandwidth = Float(0.2, help="Fractional bandwith used in analytic bandpass")
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -390,6 +396,15 @@ class LoadContext(Operator):
                 obs_meta = dict()
                 fp_cols = dict()
                 self._parse_meta(meta, None, obs_meta, None, fp_cols)
+
+                if self.analytic_bandpass:
+                    # Add bandpass information to the focalplane
+                    band = fp_cols["det_info_band"]
+                    freq = [float(b[1:]) for b in band]
+                    bandcenter = np.array(freq) * u.GHz
+                    bandwidth = bandcenter * self.bandwidth
+                    fp_cols["bandcenter"] = bandcenter
+                    fp_cols["bandwidth"] = bandwidth
 
                 # Construct table
                 det_props = QTable(fp_cols)
