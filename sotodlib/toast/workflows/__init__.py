@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Simons Observatory workflow functions.
 
@@ -37,6 +37,10 @@ from .proc_filters import (
     filter_common_mode,
 )
 from .proc_flagging import (
+    setup_simple_jumpcorrect,
+    simple_jumpcorrect,
+    setup_simple_deglitch,
+    simple_deglitch,
     setup_flag_sso,
     flag_sso,
     setup_flag_diff_noise_outliers,
