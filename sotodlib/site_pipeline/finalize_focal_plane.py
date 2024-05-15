@@ -225,6 +225,8 @@ def _load_ctx(config):
     dets = config["context"].get("dets", {})
     for obs_id in obs_ids:
         aman = ctx.get_meta(obs_id, dets=dets)
+        if aman.obs_info.tube_slot == "stp1":
+            aman.obs_info.tube_slot = "st1"
         if "det_info" not in aman:
             raise ValueError(f"No det_info in {obs_id}")
         if "wafer" not in aman.det_info and dm_name in aman:
@@ -254,6 +256,7 @@ def _load_ctx(config):
             amans.append(_aman)
         elif tod_pointing_name not in aman:
             raise ValueError(f"No pointing found in {obs_id}")
+    obs_ids = [aman.obs_info.obs_id for aman in amans]
     stream_ids = np.unique(np.concatenate([aman.det_info.stream_id for aman in amans]))
 
     return amans, obs_ids, stream_ids
@@ -442,16 +445,14 @@ def main():
 
     # Build output path
     append = config.get("append", "")
-    froot = f"focal_plane{bool(append)*'_'}{append}{per_obs*('_'+obs_ids[0])}"
     dbroot = f"db{bool(append)*'_'}{append}"
     subdir = config.get("subdir", "")
     subdir = subdir + (subdir == "") * (
         per_obs * "per_obs" + (not per_obs) * "combined"
     )
-    outpath = os.path.join(config["outdir"], subdir, f"{froot}.h5")
-    dbpath = os.path.join(config["outdir"], subdir, f"{dbroot}.sqlite")
-    outpath = os.path.abspath(outpath)
-    os.makedirs(os.path.dirname(outpath), exist_ok=True)
+    outdir = os.path.join(config["outdir"], subdir)
+    dbpath = os.path.join(outdir, f"{dbroot}.sqlite")
+    os.makedirs(outdir, exist_ok=True)
 
     weight_factor = config.get("weight_factor", 1000)
     min_points = config.get("min_points", 50)
@@ -471,6 +472,9 @@ def main():
     else:
         batches = [(amans, obs_ids)]
     for amans, obs_ids in batches:
+        froot = f"focal_plane{bool(append)*'_'}{append}{per_obs*('_'+obs_ids[0])}"
+        outpath = os.path.join(outdir, f"{froot}.h5")
+        outpath = os.path.abspath(outpath)
         logger.info("Working on batch containing: %s", str(obs_ids))
         ots = {}
         for stream_id in stream_ids:
