@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2019-2021 Simons Observatory.
+# Copyright (c) 2019-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 """
@@ -62,6 +62,8 @@ def reduce_data(job, otherargs, runargs, data):
     wrk.select_pointing(job, otherargs, runargs, data)
     wrk.simple_noise_models(job, otherargs, runargs, data)
     wrk.create_az_intervals(job, otherargs, runargs, data)
+    wrk.simple_deglitch(job, otherargs, runargs, data)
+    wrk.simple_jumpcorrect(job, otherargs, runargs, data)
 
     wrk.flag_noise_outliers(job, otherargs, runargs, data)
     wrk.filter_hwpss(job, otherargs, runargs, data)
@@ -176,6 +178,8 @@ def main():
     wrk.setup_filter_hwpss(operators)
     wrk.setup_demodulate(operators)
     wrk.setup_noise_estimation(operators)
+    wrk.setup_simple_deglitch(operators)
+    wrk.setup_simple_jumpcorrect(operators)
     wrk.setup_flag_sso(operators)
     wrk.setup_hn_map(operators)
     wrk.setup_cadence_map(operators)

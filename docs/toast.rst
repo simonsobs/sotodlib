@@ -183,6 +183,12 @@ Here is a list of the supported high-level operations:
 .. autofunction:: sotodlib.toast.workflows.setup_filter_common_mode
 .. autofunction:: sotodlib.toast.workflows.filter_common_mode
 
+.. autofunction:: sotodlib.toast.workflows.setup_simple_jumpcorrect
+.. autofunction:: sotodlib.toast.workflows.simple_jumpcorrect
+
+.. autofunction:: sotodlib.toast.workflows.setup_simple_deglitch
+.. autofunction:: sotodlib.toast.workflows.simple_deglitch
+
 .. autofunction:: sotodlib.toast.workflows.setup_flag_sso
 .. autofunction:: sotodlib.toast.workflows.flag_sso
 
