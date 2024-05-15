@@ -35,6 +35,10 @@ class DuplicateAncillaryData(Exception):
     """Exception raised when we find the HK data has copies of the same timestamps"""
     pass
 
+class BookDirHasFiles(Exception):
+    """Exception raised when files already exist in a book directory"""
+    pass
+
 def setup_logger(logfile=None):
     """
     This setups up a logger for bookbinder. If a logfile is passed, it will
@@ -685,7 +689,7 @@ class BookBinder:
 
         if os.path.exists(outdir):
             if len(os.listdir(outdir)) > 1:
-                raise ValueError(
+                raise BookDirHasFiles(
                     f"Output directory {outdir} contains files. Delete to retry"
                       " bookbinding"
                 )
