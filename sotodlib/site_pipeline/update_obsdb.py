@@ -177,7 +177,7 @@ def main(config: str,
                 #obsfiledb creation
                 checkbook(
                     bookpath, config, add=True, 
-                    overwrite=True
+                    overwrite=overwrite
                 )
             except Exception as e:
                 if config_dict["skip_bad_books"]:
