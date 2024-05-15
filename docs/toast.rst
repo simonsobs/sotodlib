@@ -246,6 +246,9 @@ Here is a list of the supported high-level operations:
 .. autofunction:: sotodlib.toast.workflows.setup_simulate_catalog_signal
 .. autofunction:: sotodlib.toast.workflows.simulate_catalog_signal
 
+.. autofunction:: sotodlib.toast.workflows.setup_weather_model
+.. autofunction:: sotodlib.toast.workflows.append_weather_model
+
 .. autofunction:: sotodlib.toast.workflows.setup_simulate_atmosphere_signal
 .. autofunction:: sotodlib.toast.workflows.simulate_atmosphere_signal
 

@@ -68,6 +68,8 @@ def simulate_data(job, otherargs, runargs, comm):
         # optionally zero out
         if otherargs.zero_loaded_data:
             toast.ops.Reset(detdata=[defaults.det_data])
+        # Append a weather model
+        wrk.append_weather_model(job, otherargs, runargs, data)
 
     wrk.select_pointing(job, otherargs, runargs, data)
     wrk.simple_noise_models(job, otherargs, runargs, data)
@@ -205,6 +207,7 @@ def main():
     wrk.setup_pointing(operators)
     wrk.setup_az_intervals(operators)
     wrk.setup_simple_noise_models(operators)
+    wrk.setup_weather_model(operators)
     wrk.setup_simulate_atmosphere_signal(operators)
     wrk.setup_simulate_sky_map_signal(operators)
     wrk.setup_simulate_conviqt_signal(operators)
