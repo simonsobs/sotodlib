@@ -211,6 +211,7 @@ def _load_ctx(config):
     map_pointing_name = config["context"].get("map_pointing", "map_pointing")
     pol_name = config["context"].get("polarization", "polarization")
     dm_name = config["context"].get("detmap", "detmap")
+    roll_range = config.get("roll_range", [-1 * np.inf, np.inf])
     query = []
     if "query" in config["context"]:
         query = (ctx.obsdb.query(config["context"]["query"])["obs_id"],)
@@ -224,6 +225,10 @@ def _load_ctx(config):
     amans = []
     dets = config["context"].get("dets", {})
     for obs_id in obs_ids:
+        roll = ctx.obsdb.get(obs_id)["roll_center"]
+        if roll < roll_range[0] or roll > roll_range[1]:
+            logger.info("%s has a roll that is out of range", obs_id)
+            continue
         aman = ctx.get_meta(obs_id, dets=dets)
         if aman.obs_info.tube_slot == "stp1":
             aman.obs_info.tube_slot = "st1"
