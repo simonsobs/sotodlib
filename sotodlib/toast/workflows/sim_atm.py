@@ -12,6 +12,47 @@ from .. import ops as so_ops
 from .job import workflow_timer
 
 
+def setup_weather_model(operators):
+    """Add commandline args and operators for appending weather models.
+    Args:
+        operators (list):  The list of operators to extend.
+    Returns:
+        None
+    """
+    operators.append(
+        toast.ops.WeatherModel(
+            name="weather_model",
+            weather="atacama",
+            enabled=False,
+        )
+    )
+
+
+@workflow_timer
+def append_weather_model(job, otherargs, runargs, data):
+    """Append a weather model to the data.
+    Args:
+        job (namespace):  The configured operators and templates for this job.
+        otherargs (namespace):  Other commandline arguments.
+        runargs (namespace):  Job related runtime parameters.
+        data (Data):  The data container.
+    Returns:
+        None
+    """
+    log = toast.utils.Logger.get()
+    timer = toast.timing.Timer()
+    timer.start()
+    wm = job.operators.weather_model
+    if wm.enabled:
+        if otherargs.realization is not None:
+            wm.realization = otherargs.realization
+        log.info_rank(f"  Running {wm.name}...", comm=data.comm.comm_world)
+        wm.apply(data)
+        log.info_rank(
+            f"  Applied {wm.name} in", comm=data.comm.comm_world, timer=timer
+        )
+
+
 def setup_simulate_atmosphere_signal(operators):
     """Add commandline args and operators for simulating atmosphere.
 

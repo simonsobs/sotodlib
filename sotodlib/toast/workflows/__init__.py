@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Simons Observatory workflow functions.
 
@@ -86,7 +86,12 @@ from .sim_sources import (
     setup_simulate_catalog_signal,
     simulate_catalog_signal,
 )
-from .sim_atm import setup_simulate_atmosphere_signal, simulate_atmosphere_signal
+from .sim_atm import (
+    setup_simulate_atmosphere_signal,
+    simulate_atmosphere_signal,
+    setup_weather_model,
+    append_weather_model,
+)
 from .sim_calibrator import (
     setup_simulate_wiregrid_signal,
     simulate_wiregrid_signal,
