@@ -868,7 +868,6 @@ class Imprinter:
                 session.commit()
             else:
                 session.rollback()
-
             raise e
 
     def get_book(self, bid, session=None):
