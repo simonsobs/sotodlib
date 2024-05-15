@@ -4,6 +4,7 @@ import time
 import argparse
 import logging
 from typing import Optional
+import numpy as np
 from sotodlib import core
 import sotodlib.coords.planets as planets
 
@@ -134,7 +135,7 @@ def main(config: str,
         min_ctime = int(time.time()) - update_delay*86400
         logger.info(f'min_ctime: {min_ctime}')
     
-    source_list = configs.get('source_list', None)
+    source_list = config.get('source_list', None)
     source_names = []
     for _s in source_list:
         if isinstance(_s, str):
@@ -143,7 +144,7 @@ def main(config: str,
             source_names.append(_s[0])
         else:
             raise ValueError('Invalid style of source')
-    distance = configs.get('distance', 1.)
+    distance = config.get('distance', 1.)
     
     # Load metadata sqlite
     if not os.path.exists(output_dir):
@@ -195,6 +196,7 @@ def main(config: str,
                 focal_plane.wrap('xi', np.zeros(meta.dets.count), [(0, 'dets')])
                 focal_plane.wrap('eta', np.zeros(meta.dets.count), [(0, 'dets')])
                 focal_plane.wrap('gamma', np.zeros(meta.dets.count), [(0, 'dets')])
+                aman.wrap('focal_plane', focal_plane)
             else:
                 aman.wrap('focal_plane', meta.focal_plane)
                 flag_fp_isnan = (np.isnan(aman.focal_plane.xi)) | \
