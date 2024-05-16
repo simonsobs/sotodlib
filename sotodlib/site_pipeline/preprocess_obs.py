@@ -211,11 +211,11 @@ def main(
         if tot_query=="":
             tot_query="1"
     
-	if not(tags is None):
-    	for i, tag in enumerate(tags):
-        	tags[i] = tags[i].lower()
-        	if '=' not in tags[i]:
-            	tags[i] += '=1'
+    if not(tags is None):
+        for i, tag in enumerate(tags):
+            tags[i] = tags[i].lower()
+            if '=' not in tags[i]:
+                tags[i] += '=1'
 
     if planet_obs:
         obs_list = []
