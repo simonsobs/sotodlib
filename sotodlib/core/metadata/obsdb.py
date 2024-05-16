@@ -379,11 +379,11 @@ class ObsDb(object):
             tag is set for that observation.  We can include expressions
             involving planet and stare in the query, for example::
 
-            obsdb.query('planet=1 or stare=1', tags=['planet', 'stare'])
+                obsdb.query('planet=1 or stare=1', tags=['planet', 'stare'])
 
             For simple filtering on tags, pass '=1' or '=0', like this::
 
-            obsdb.query(tags=['planet=1','hwp=1'])
+                obsdb.query(tags=['planet=1','hwp=1'])
 
             When filtering is activated in this way, the returned
             results must satisfy all the criteria (i.e. the individual
