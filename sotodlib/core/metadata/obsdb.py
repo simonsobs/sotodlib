@@ -356,7 +356,7 @@ class ObsDb(object):
         This function constructs and executes an SQL query on the main database,
         incorporating conditions, joins, and fields from optional sub-databases and tags.
 
-        Args:
+        Args:            
             query_text (str, optional): The initial query condition. Defaults to '1'.
 
             tags (list of str, optional): A list of tags to filter the observations.
@@ -367,20 +367,20 @@ class ObsDb(object):
             add_prefix (str, optional): A prefix to add to the result keys. Defaults to ''.
 
             subdbs_info_list (list of dict, optional): A list of dictionaries containing sub-database information. 
-                Each dictionary should contain,
-
-                - filepath (str): The file path to the sub-database.
-
-                - query_list (list of str, optional): A list of query conditions to be applied on the sub-database.
-                    All components should start with the parameter name. For example, if you want to query "1.0 < param1 < 3.0",
-                    query_list should be "['param1 > 1.0', 'param1 < 3.0']", not "['param1 > 1.0 and param1 < 3.0']".
-
-                - params_list (list of str, optional): A list of parameters to be selected from the sub-database.
-
-                - table_name (str, optional): The name of the table in the sub-database. Defaults to 'map'.
-
-                - obs_id_name (str, optional): The name of the observation ID field in the sub-database. 
-                    Defaults to 'obs:obs_id'.
+                Each dictionary should contain: 
+                    
+                    filepath (str): The file path to the sub-database.
+                    
+                    query_list (list of str, optional): A list of query conditions to be applied on the sub-database.
+                      All components should start with the parameter name. For example, if you want to query "1.0 < param1 < 3.0",
+                      query_list should be "['param1 > 1.0', 'param1 < 3.0']", not "['param1 > 1.0 and param1 < 3.0']".
+                    
+                    params_list (list of str, optional): A list of parameters to be selected from the sub-database.
+                    
+                    table_name (str, optional): The name of the table in the sub-database. Defaults to 'map'.
+                    
+                    obs_id_name (str, optional): The name of the observation ID field in the sub-database. 
+                      Defaults to 'obs:obs_id'.
 
                 If not provided, only the query for the main obsdb is executed.
 
