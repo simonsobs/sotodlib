@@ -131,6 +131,10 @@ def main(config: str,
         if 'update_delay' in config.keys():
             update_delay = config['update_delay']
     
+    full_fields = config['fields']
+    aliases = config['aliases']
+    data_fields = [full_field.split('.')[1] for full_field in full_fields]
+            
     save_mean = config.get('save_mean', False)
     save_median = config.get('save_median', False)
     save_rms = config.get('save_rms', False)
@@ -207,10 +211,14 @@ def main(config: str,
         try:
             meta = ctx.get_meta(obs_id)
             aman = ctx.get_obs(obs_id, dets=[])
+        except Exception as e:
+            logger.error(f"Exception \n '{e}' \n thrown while aman loading of {obs_id}. Skipped")
+            continue
+            
+        try:
             _hkman = hk_utils.get_detcosamp_hkaman(aman, 
                                       fields = config['fields'],
                                       data_dir = config['input_dir'])
-            
             dt_buffer = 60
             start = float(aman.timestamps[0] - dt_buffer)
             stop = float(aman.timestamps[-1] + dt_buffer)
@@ -218,20 +226,15 @@ def main(config: str,
                                          data_dir=config['input_dir'], alias=None)
             _hkman = hk_utils.make_hkaman(grouped_data=_data, alias_exists=False,
                                           det_cosampled=True, det_aman=aman)
-            
             hkman = core.AxisManager(meta.dets, aman.samps)
             hkman.wrap('timestamps', aman.timestamps, [(0, 'samps')])
             
-            full_fields = config['fields']
-            aliases = config['aliases']
-            data_fields = [full_field.split('.')[1] for full_field in full_fields]
             num_different_field = 0
             for i, (data_field, alias) in enumerate(zip(data_fields, aliases)):
                 if i > 0:
                     num_different_field += int(data_fields[i-1] != data_field)
                 i_in_same_field = i - num_different_field
                 hkman.wrap(alias, _hkman[data_field][data_field][i_in_same_field], [(0, 'samps')])
-            
             # set values nan if it is invalid
             mask_invalid = np.zeros(hkman.samps.count, dtype=bool)
             if min_valid_value is not None:
@@ -244,7 +247,19 @@ def main(config: str,
                 mask_invalid[ np.abs( np.diff(np.append(hkman[aliases[0]][0],  hkman[aliases[0]])) / dt) > max_valid_dvalue_dt ] = True
             if np.any(mask_invalid):
                 hkman[aliases[0]][mask_invalid] = np.nan
+                
+        except Exception as e:
+            logger.warning(f"Exception \n '{e}' \n thrown while hk loading of {obs_id}. Making dummy hkaman")
+            hkman = core.AxisManager(meta.dets, aman.samps)
+            hkman.wrap('timestamps', aman.timestamps, [(0, 'samps')])
+            num_different_field = 0
+            for i, (data_field, alias) in enumerate(zip(data_fields, aliases)):
+                if i > 0:
+                    num_different_field += int(data_fields[i-1] != data_field)
+                i_in_same_field = i - num_different_field
+                hkman.wrap(alias, np.nan*np.zeros(hkman.samps.count), [(0, 'samps')])
             
+        try:
             h5_filename = f"{output_prefix}_{obs_id.split('_')[1][:4]}.h5"
             output_filename = os.path.join(output_dir, h5_filename)
             hkman.save(dest=output_filename, group=obs_id, overwrite=overwrite)
@@ -262,10 +277,12 @@ def main(config: str,
                 entry_dict[f'{output_prefix}_nan_fraction'] = np.mean(np.isnan(hkman[aliases[0]]).astype('float'))
             man_db.add_entry(entry_dict, filename=output_filename, replace=overwrite)
             logger.info(f"saved: {obs_id}")
-            
         except Exception as e:
-            logger.error(f"Exception '{e}' thrown while processing {obs_id}")
+            logger.error(f"Exception \n '{e}' \n thrown while saving of {obs_id}. Skipped")
             continue
+            
+            
+
 
 if __name__ == '__main__':
     util.main_launcher(main, get_parser)
