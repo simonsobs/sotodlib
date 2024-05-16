@@ -350,7 +350,7 @@ class ObsDb(object):
 
     def query(self, query_text='1', tags=None, sort=['obs_id'], add_prefix='', subdbs_info_list=None):
         """
-        Generate and execute a new query on the main database with optional sub-databases.
+        Generate and execute a query on the main database with optional sub-databases.
 
         This function constructs and executes an SQL query on the main database,
         incorporating conditions, joins, and fields from optional sub-databases and tags.
@@ -427,6 +427,7 @@ class ObsDb(object):
             from sotolib.core import metadata
             subdb = metadata.ManifestDb('/path/to/pwv_class.sqlite')
             print(subdb.scheme._get_map_table_def())
+        
         """
         cursor = self.conn.cursor()
 
