@@ -348,7 +348,7 @@ class ObsDb(object):
             output['tags'] = [r[0] for r in c]
         return output
 
-    def new_query(self, query_text='1', tags=None, sort=['obs_id'], add_prefix='', subdbs_info_list=None):
+    def query(self, query_text='1', tags=None, sort=['obs_id'], add_prefix='', subdbs_info_list=None):
         """
         Generate and execute a new query on the main database with optional sub-databases.
 
