@@ -1021,6 +1021,7 @@ def get_frame_times(frame, allow_bad_timing=False):
     elif allow_bad_timing:
         return False, np.array(frame['data'].times) / core.G3Units.s
     else:
+        ## don't change this error message. used in Imprinter CLI
         raise TimingSystemOff("Timing counters not incrementing")
 
 

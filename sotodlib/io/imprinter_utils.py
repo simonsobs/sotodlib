@@ -52,6 +52,14 @@ def set_book_wont_bind(imprint, book, message=None, session=None):
         imprint.logger.warning(
             f"Book {book} has not failed before being set not to WONT_BIND"
         )
+    
+    book_dir = imprint.get_book_abs_path(book)
+    if op.exists(book_dir):
+        print(f"Removing all files from {book_dir}")
+        shutil.rmtree(book_dir)
+    else: 
+        print(f"Found no files in {book_dir} to remove")
+
     book.status = WONT_BIND 
     if message is not None:
         book.message = message
