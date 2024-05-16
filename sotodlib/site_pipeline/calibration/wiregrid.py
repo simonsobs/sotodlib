@@ -91,7 +91,8 @@ def _get_operation_range(tod):
 # Correct wires' direction for each telescope
 def correct_wg_angle(tod, telescope=None, restrict=True):
     """
-    Correct offset of wires' direction by the mechanical design and hardware testing. This function is still under construction.
+    Correct offset of wires' direction by the mechanical design and hardware testing. Users can use this first,
+    but developers need to implement offsets of other SATs as well.
 
     Parameters
     ----------
@@ -399,7 +400,9 @@ def get_cal_gamma(tod, wrap_aman=False, remove_cal_data=False):
 
     Returns
     -------
-        (det_angle, det_angle_err) : polarization response angle of detectors in radian, which has the shape of (dets, wire's step)
+        (gamma, gamma_err, cal_amp) : 
+            polarization response angle of detectors in radian, which has the shape of (dets, wire's step)
+            also the input power of the calibration signal.
         (bg_amp, bg_theta) : The amplitude and the direction of the background polarization not about the wires' signal.
         tod : AxisManager
             which has calibrated angles(tod.wg.gamma_cal). Only returned this by wrap_aman==True
@@ -419,21 +422,24 @@ def get_cal_gamma(tod, wrap_aman=False, remove_cal_data=False):
     _det_angle = np.array(_det_angle).T
     _det_angle_err = np.array(_det_angle_err).T
     _cal_amp = _cfit_result.cr
-    _bg_theta = 0.5*np.arctan2(_cfit_result.cy0, _cfit_result.cx0)%np.pi - np.nanmean(_det_angle%np.pi, axis=1)
+    gamma = np.nanmean(np.unwrap(_det_angle, period=np.pi), axis=1)%np.pi
+    gamma_err = np.nanmean(_det_angle_err, axis=1)/np.sqrt(np.shape(_det_angle_err)[1])
+    #
+    _bg_theta = 0.5*np.arctan2(_cfit_result.cy0, _cfit_result.cx0)%np.pi - gamma
     _bg_amp = np.sqrt(_cfit_result.cx0**2 + _cfit_result.cy0**2)
     if remove_cal_data: tod.move('wg', None)
     if wrap_aman:
-        if 'gamma_cal' in dir(tod): tod.move('gamma_cal', None)
+        if 'gamma_cal0' in dir(tod): tod.move('gamma_cal0', None)
         _gamma_ax = core.AxisManager(tod.dets)
         _gamma_ax.wrap('gamma_raw', _det_angle, [(0, 'dets')])
         _gamma_ax.wrap('gamma_raw_err', _det_angle_err, [(0, 'dets')])
         _gamma_ax.wrap('wires_relative_power', _cal_amp, [(0, 'dets')])
-        _gamma_ax.wrap('gamma', np.nanmean(np.unwrap(_det_angle, period=np.pi), axis=1), [(0, 'dets')])
-        _gamma_ax.wrap('gamma_err', np.nanmean(_det_angle_err, axis=1)/np.sqrt(np.shape(_det_angle_err)[1]), [(0, 'dets')])
+        _gamma_ax.wrap('gamma', gamma, [(0, 'dets')])
+        _gamma_ax.wrap('gamma_err', gamma_err, [(0, 'dets')])
         _gamma_ax.wrap('background_pol_rad', _bg_theta, [(0, 'dets')])
         _gamma_ax.wrap('background_pol_relative_power', _bg_amp, [(0, 'dets')])
-        _gamma_ax.wrap('theta_det_instr', 0.5*np.pi - np.nanmean(np.unwrap(_det_angle, period=np.pi), axis=1), [(0, 'dets')]) # instumental angle of dets
-        tod.wrap('gamma_cal', _gamma_ax)
+        _gamma_ax.wrap('theta_det_instr', 0.5*np.pi - gamma, [(0, 'dets')]) # instumental angle of dets
+        tod.wrap('gamma_cal0', _gamma_ax)
         return tod
     else:
-        return (_det_angle, _det_angle_err), (_bg_amp, _bg_theta)
+        return (gamma, gamma_err, _cal_amp), (_bg_amp, _bg_theta)
