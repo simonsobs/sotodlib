@@ -14,6 +14,7 @@ from so3g.proj import Ranges, RangesMatrix
 from sotodlib.core import AxisManager
 
 from ..flag_utils import _merge
+from .utils import get_block_moment
 
 NFUTURE = int(os.environ.get("NUM_FUTURES", min(32, int(os.cpu_count() or 0) + 4)))
 
@@ -110,13 +111,16 @@ def _jumpfinder(
     # Build a mean filter
     win_size += win_size % 2  # Odd win size adds a wierd phasing issue
     half_win = int(win_size / 2)
-    x_br = block_mean_filter(x[msk], win_size)
+    x_br = get_block_moment(x[msk], win_size)
     diff = x[msk] - x_br
     # Take cumulative sum, this is equivalent to convolving with a step
     x_step = np.abs(np.cumsum(diff, axis=-1))
 
     # If the jump is at a multiple of win_size we will miss it so also do a shifted filter
-    x_br_shift = block_mean_filter(x[msk, half_win:], win_size)
+    # Reusing the same buffer here
+    x_br_shift = get_block_moment(
+        x[msk, half_win:], win_size
+    )  # , output=x_br[:, half_win:])
     x_step[:, half_win:] = np.maximum(
         x_step[:, half_win:],
         np.abs(np.cumsum(x[msk, half_win:] - x_br_shift, axis=-1)),
