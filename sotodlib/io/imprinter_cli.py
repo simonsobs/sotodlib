@@ -35,7 +35,9 @@ def main():
     elif args.action == 'autofix':
         autofix_failed_books(imprint, args.test_mode)
     else:
-        raise ValueError("Chosen action must be 'failed' or 'timecodes'")
+        raise ValueError(
+            "Chosen action must be 'failed' 'autofix' or 'timecodes'"
+        )
 
 def fix_single_book(imprint:Imprinter, book:Books):
     print(
@@ -118,10 +120,7 @@ def autofix_failed_books(imprint:Imprinter, test_mode=False):
                     imprint.bind_book(book)
             except Exception as e :
                 print(f"Book {book.bid} failed again!")
-        elif (
-            "DuplicateAncillaryData" in book.message or 
-            "duplicate timestamps" in book.message # old valueerror message
-        ):
+        elif "DuplicateAncillaryData" in book.message:
             print(f"Binding {book.bid} while fixing Duplicate Ancil Data")
             try:
                 if not test_mode:
@@ -138,8 +137,12 @@ def autofix_failed_books(imprint:Imprinter, test_mode=False):
                     f"{book.bid} Timing system errors weren't caught by level 2"
                 )
                 if book.type == 'obs':
-                    book.message = book.message + \
-                    ' LEVEL2-FAIL! Book re-update level 2 and delete book'
+                    if not test_mode:
+                        book.message = book.message + \
+                            " LEVEL2-FAIL! Book re-update needed at level 2" \
+                            " and probably have to delete book"
+                        imprint.get_session().commit()
+                    continue
                 elif book.type == 'oper':
                     if not test_mode:
                         utils.set_book_rebind(imprint, book, update_level2=True)
@@ -150,11 +153,15 @@ def autofix_failed_books(imprint:Imprinter, test_mode=False):
                 if not test_mode:
                     utils.set_book_rebind(imprint, book)
                     imprint.bind_book(book, allow_bad_timing=True,)
-            except Exception as e :
+            except Exception as e:
                 print(f"Book {book.bid} failed again!")
                 book.message = book.message + \
                     ' SECOND-FAIL. Tried with `allow_bad_timing=True`'
                 imprint.get_session().commit()
+        elif 'MissingReadoutIDError' in book.message:
+            print(f"Book {book.bid} does not have readout ids, not binding")
+            if not test_mode:
+                utils.set_book_wont_bind(imprint, book)
         else:
             print(f"I cannot catagorize book {book.bid}")
 
