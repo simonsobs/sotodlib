@@ -119,11 +119,15 @@ def mapmaker_select_noise_and_binner(job, otherargs, runargs, data):
             # We will use the noise estimate made after demodulation
             log.info_rank("  Using demodulated noise model", comm=data.comm.comm_world)
             noise_model = job_ops.demod_noise_estim_fit.out_model
-        elif job_ops.diff_noise_estim.enabled:
+        elif hasattr(job_ops, "diff_noise_estim") and job_ops.diff_noise_estim.enabled:
             # We have a signal-diff noise estimate
             log.info_rank("  Using signal diff noise model", comm=data.comm.comm_world)
             noise_model = job_ops.diff_noise_estim.noise_model
-        elif job_ops.noise_estim.enabled and job_ops.noise_estim_fit.enabled:
+        elif (
+            hasattr(job_ops, "noise_estim")
+            and job_ops.noise_estim.enabled
+            and job_ops.noise_estim_fit.enabled
+        ):
             # We have a noise estimate
             log.info_rank("  Using estimated noise model", comm=data.comm.comm_world)
             noise_model = job_ops.noise_estim_fit.out_model
