@@ -400,7 +400,7 @@ def get_cal_gamma(tod, wrap_aman=False, remove_cal_data=False):
 
     Returns
     -------
-        (gamma, gamma_err, cal_amp) : 
+        (gamma, gamma_err, cal_amp) :
             polarization response angle of detectors in radian, which has the shape of (dets, wire's step)
             also the input power of the calibration signal.
         (bg_amp, bg_theta) : The amplitude and the direction of the background polarization not about the wires' signal.
@@ -429,7 +429,7 @@ def get_cal_gamma(tod, wrap_aman=False, remove_cal_data=False):
     _bg_amp = np.sqrt(_cfit_result.cx0**2 + _cfit_result.cy0**2)
     if remove_cal_data: tod.move('wg', None)
     if wrap_aman:
-        if 'gamma_cal0' in dir(tod): tod.move('gamma_cal0', None)
+        if 'gamma_cal' in dir(tod): tod.move('gamma_cal', None)
         _gamma_ax = core.AxisManager(tod.dets)
         _gamma_ax.wrap('gamma_raw', _det_angle, [(0, 'dets')])
         _gamma_ax.wrap('gamma_raw_err', _det_angle_err, [(0, 'dets')])
@@ -439,7 +439,7 @@ def get_cal_gamma(tod, wrap_aman=False, remove_cal_data=False):
         _gamma_ax.wrap('background_pol_rad', _bg_theta, [(0, 'dets')])
         _gamma_ax.wrap('background_pol_relative_power', _bg_amp, [(0, 'dets')])
         _gamma_ax.wrap('theta_det_instr', 0.5*np.pi - gamma, [(0, 'dets')]) # instumental angle of dets
-        tod.wrap('gamma_cal0', _gamma_ax)
+        tod.wrap('gamma_cal', _gamma_ax)
         return tod
     else:
         return (gamma, gamma_err, _cal_amp), (_bg_amp, _bg_theta)
