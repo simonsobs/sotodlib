@@ -398,25 +398,25 @@ class ObsDb(object):
             to include the necessary fields and conditions from both 
             the main and sub-databases. For instance::
 
-            subdb_info = {
-                'filepath': '/path/to/pwv_class.sqlite',
-                'query_list': ['pwv_class_median<2.0', 'pwv_class_rms<0.1'],
-                'params_list': ['pwv_class_median', 'pwv_class_rms'],
-            }
-            obsdb.query(query_text='start_time>1700000000 and planet=1',
-                        tags=['planet'], 
-                        subdbs_info_list=[subdb_info])
+                subdb_info = {
+                    'filepath': '/path/to/pwv_class.sqlite',
+                    'query_list': ['pwv_class_median<2.0', 'pwv_class_rms<0.1'],
+                    'params_list': ['pwv_class_median', 'pwv_class_rms'],
+                }
+                obsdb.query(query_text='start_time>1700000000 and planet=1',
+                            tags=['planet'], 
+                            subdbs_info_list=[subdb_info])
 
             This queries observations with a start_time greater than 1700000000, 
             a tag of planet, a median pwv smaller than 2.0 [mm], and an rms of pwv
-            smaller than 0.1 [mm]. 
+            smaller than 0.1 [mm].
 
             If you do not know the parameters in the sub-database, you can view the params 
             as long as it is a ManifestDb like below::
 
-            from sotolib.core import metadata
-            subdb = metadata.ManifestDb('/path/to/pwv_class.sqlite')
-            print(subdb.scheme._get_map_table_def())
+                from sotolib.core import metadata
+                subdb = metadata.ManifestDb('/path/to/pwv_class.sqlite')
+                print(subdb.scheme._get_map_table_def())
         
         """
         cursor = self.conn.cursor()
