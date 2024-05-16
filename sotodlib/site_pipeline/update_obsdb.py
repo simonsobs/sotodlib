@@ -176,6 +176,7 @@ def main(config: str,
             try:
                 #obsfiledb creation
                 checkbook(bookpath, config, add=True, overwrite=True)
+                logger.info(f"Ran check_book for {bookpath} in {time.time()-t1} s")
             except Exception as e:
                 if config_dict["skip_bad_books"]:
                     logger.warning(f"failed to add {bookpath}")
@@ -278,6 +279,7 @@ def main(config: str,
             tags = [t.strip() for t in tags if t.strip() != '']
 
             bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
+            logger.info(f"Added {obs_id} in {time.time()-t1} s")
         else:
             bookcart.remove(bookpath)
 
