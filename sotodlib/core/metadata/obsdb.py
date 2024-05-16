@@ -17,23 +17,24 @@ TABLE_DEFS = {
     ],
 }
 
-def _generate_query_components_from_tags(tags=None):
+def _generate_query_components_from_tags(query_text='1', tags=None):
     """
     Generate query components from given tags.
 
     This function creates SQL query components based on the provided tags.
-    It generates join clauses and extra fields to be included in the final query.
+    It generates join clauses, extra fields, and updates the query text to be included in the final query.
 
     Args:
-        tags (list of str): Tags to include in the output; if they
-            are listed here then they can also be used in the query
-            string.  Filtering on tag value can be done here by
-            appending '=0' or '=1' to a tag name.
+        query_text (str, optional): The initial query condition. Defaults to '1'.
+        tags (list of str, optional): Tags to include in the output; if they
+            are listed here then they can also be used in the query string.
+            Filtering on tag value can be done here by appending '=0' or '=1' to a tag name.
 
     Returns:
         tuple: A tuple containing:
             - extra_fields (str): Comma-separated string of extra fields for the SELECT clause.
             - joins (str): String of join clauses to be added to the query.
+            - query_text (str): Updated query text including conditions for the tags.
     """
     joins = ''
     extra_fields = []
@@ -56,7 +57,7 @@ def _generate_query_components_from_tags(tags=None):
             joins += (f' {join_type} (select distinct obs_id from tags where tag="{t}") as tt{tagi} on '
                       f'obs.obs_id = tt{tagi}.obs_id')
     extra_fields = ''.join([','+f for f in extra_fields])
-    return extra_fields, joins
+    return extra_fields, joins, query_text
 
 def _generate_query_components_from_subdb(filepath,
                                           alias,
@@ -430,9 +431,7 @@ class ObsDb(object):
         
         """
         cursor = self.conn.cursor()
-
-        extra_fields_main, joins_main = _generate_query_components_from_tags(tags=tags)
-        query_text_main = query_text
+        extra_fields_main, joins_main, query_text_main = _generate_query_components_from_tags(query_text=query_text, tags=tags)
 
         if subdbs_info_list is not None:
             assert isinstance(subdbs_info_list, list)
