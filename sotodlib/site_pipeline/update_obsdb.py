@@ -35,6 +35,7 @@ from sotodlib.io import load_book
 import os
 import glob
 import yaml
+import re
 import numpy as np
 import time
 import argparse
@@ -158,27 +159,23 @@ def main(config: str,
     for bd in base_dir:
         #Find folders that are book-like and recent
         for dirpath, _, _ in os.walk(bd):
-            last_mod = max(os.path.getmtime(root) for root, _, _ in os.walk(dirpath))
-            if last_mod < tback:#Ignore older directories
-                continue
             if os.path.exists(os.path.join(dirpath, "M_index.yaml")):
                 _, book_id = os.path.split(dirpath)
                 if book_id in existing and not overwrite:
                     continue
-                #Looks like a book folder
-                bookcart.append(dirpath)
+                found_timestamp = re.search(r"\d{10}", book_id)#Find the rough timestamp
+                if found_timestamp and int(found_timestamp.group())>tback:
+                    #Looks like a book folder and young enough
+                    bookcart.append(dirpath)
+    
+    logger.info(f"Found {len(bookcart)} new books in {time.time()-tnow} s")
     #Check the books for the observations we want
-
-
     for bookpath in sorted(bookcart):
         if check_meta_type(bookpath) in accept_type:
-
+            t1 = time.time()
             try:
                 #obsfiledb creation
-                checkbook(
-                    bookpath, config, add=True, 
-                    overwrite=overwrite
-                )
+                checkbook(bookpath, config, add=True, overwrite=True)
             except Exception as e:
                 if config_dict["skip_bad_books"]:
                     logger.warning(f"failed to add {bookpath}")
@@ -281,7 +278,6 @@ def main(config: str,
             tags = [t.strip() for t in tags if t.strip() != '']
 
             bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
-           
         else:
             bookcart.remove(bookpath)
 
