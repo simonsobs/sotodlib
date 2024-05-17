@@ -37,6 +37,10 @@ class ReadoutFilter(Operator):
         "timeconst", help="Observation key for time constant"
     )
 
+    readout_filter_cal = Unicode(
+        "readout_filter_cal", help="Observation key for readout filter gain"
+    )
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         return
@@ -79,9 +83,14 @@ class ReadoutFilter(Operator):
 
             # Correct for the readout filter gain
             # (unclear why there is one)
-            gain = ob["readout_filter_cal"]
-            signal /= gain[:, np.newaxis]
-
+            if self.readout_filter_cal is not None:
+                if self.readout_filter_cal in ob:
+                    gain = ob[self.readout_filter_cal]
+                    signal /= gain[:, np.newaxis]
+                else:
+                    msg = f"Cannot correct for readout filter gain. "
+                    msg += f"'{self.readout_filter_cal}' not in '{ob.name}'"
+                    log.warning_rank(msg, comm=gcomm)
         return
 
     def _finalize(self, data, **kwargs):
