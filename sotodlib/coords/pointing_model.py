@@ -201,8 +201,18 @@ def _get_sat_enc_radians(ancil):
             -ancil.boresight_enc * DEG)
 
 def get_base_tilt_q(c, s):
+    """Returns the quaternion rotation that applies base tilt, taking
+    vectors in the platforms horizon coordinates to vectors in the
+    site's local horizon coordinates.  The c and s parameters together
+    define a direction and amplitude of the base tilt.
+
+    In this implementation, c and s have the same meaning and sign
+    convention as TPOINT parameters AN and AW, respectively.
+
+    """
     # Imagine az=-phi
     phi = np.arctan2(s, c)
-    # And that base tilt causes the el to bump upwards by amp at that position.
+    # And that base tilt causes the true el to lie below the expected
+    # (encoder) el, at that position.
     amp = (c**2 + s**2)**.5
-    return quat.euler(2, phi) * quat.euler(1, -amp) * quat.euler(2, -phi)
+    return quat.euler(2, phi) * quat.euler(1, amp) * quat.euler(2, -phi)
