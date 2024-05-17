@@ -158,6 +158,13 @@ def main():
         action="store_true",
         help="Map each observation separately.",
     )
+    parser.add_argument(
+        "--intervalmaps",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Map each interval separately.",
+    )
 
     # The operators and templates we want to configure from the command line
     # or a parameter file.
