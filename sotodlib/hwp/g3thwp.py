@@ -961,7 +961,6 @@ class G3tHWP():
 
         """
 
-        # write solution, metadata loader requires a dets axis
         aman = sotodlib.core.AxisManager(tod.samps)
         aman.wrap_new('timestamps', ('samps', ))[:] = tod.timestamps
         self._set_empty_axes(aman)
