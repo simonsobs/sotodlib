@@ -198,8 +198,6 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
             log.warning_rank(
                 "--intervalmaps overrides --obsmaps", data.comm.comm_world
             )
-        if do_intervalmaps and isinstance(map_op, so_ops.Splits):
-            raise RuntimeError("Interval mapping cannot be used with Splits")
         if do_obsmaps or do_intervalmaps:
             # Map each observation separately
             timer_obs = toast.timing.Timer()
@@ -221,6 +219,9 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                 binner = map_op.binning
                 orig_view = binner.pixel_pointing.view
                 if do_intervalmaps and orig_view is not None:
+                    if isinstance(map_op, so_ops.Splits):
+                        msg = "Interval mapping cannot be used with Splits"
+                        raise RuntimeError(msg)
                     # Map each interval separately
                     ob = obs_data.obs[0]
                     times = ob.shared[defaults.times].data
