@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Template regression mapmaking.
 """
@@ -190,7 +190,15 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
     log = toast.utils.Logger.get()
 
     if map_op.enabled:
-        if hasattr(otherargs, "obsmaps") and otherargs.obsmaps:
+        do_obsmaps = hasattr(otherargs, "obsmaps") and otherargs.obsmaps
+        do_intervalmaps = (
+            hasattr(otherargs, "intervalmaps") and otherargs.intevalmaps
+        )
+        if do_obsmaps and do_intervalmaps:
+            log.warning_rank(
+                "--intervalmaps overrides --obsmaps", data.comm.comm_world
+            )
+        if do_obsmaps or do_intervalmaps:
             # Map each observation separately
             timer_obs = toast.timing.Timer()
             timer_obs.start()
@@ -200,24 +208,60 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
             new_comm = toast.Comm(world=data.comm.comm_group)
             for iobs, obs in enumerate(data.obs):
                 log.info_rank(
-                    f"{group} : mapping observation {iobs + 1} / {len(data.obs)}.",
+                    f"{group} : mapping observation {iobs + 1} "
+                    f"/ {len(data.obs)}.",
                     comm=new_comm.comm_world,
                 )
                 # Data object that only covers one observation
                 obs_data = data.select(obs_uid=obs.uid)
                 # Replace comm_world with the group communicator
                 obs_data._comm = new_comm
-
-                # Rename the operator with the observation suffix
-                map_op.name = f"{orig_name}_{obs.name}"
-
-                if isinstance(map_op, so_ops.Splits):
-                    # Reset the pixel distribution of the underlying
-                    # mapmaker
-                    map_op.mapmaker.reset_pix_dist = True
+                binner = map_op.binning
+                orig_view = binner.pixel_pointing.view
+                if do_intervalmaps and orig_view is not None:
+                    if isinstance(map_op, so_ops.Splits):
+                        msg = "Interval mapping cannot be used with Splits"
+                        raise RuntimeError(msg)
+                    # Map each interval separately
+                    ob = obs_data.obs[0]
+                    times = ob.shared[defaults.times].data
+                    views = ob.intervals[orig_view]
+                    for iview, view in enumerate(views):
+                        # Add a view for this specific interval
+                        single_view = f"{orig_view}-{iview}"
+                        ob.intervals[single_view] = IntervalList(
+                            times, timespans=[(view.start, view.stop)]
+                        )
+                        binner.pixel_pointing.view = single_view
+                        map_op.name = f"{orig_name}_{obs.name}-{iview}"
+                        map_op.reset_pix_dist = True
+                        try:
+                            map_op.apply(obs_data)
+                            log.info_rank(
+                                f"{group} : Mapped "
+                                f"{obs.name}-{iview} / {len(views)} in",
+                                comm=new_comm.comm_world,
+                                timer=timer_obs,
+                            )
+                        except Exception as e:
+                            log.info_rank(
+                                f"{group} : Failed to map "
+                                f"{obs.name}-{iview} / {len(views)} (e) in",
+                                comm=new_comm.comm_world,
+                                timer=timer_obs,
+                            )
+                    binner.pixel_pointing.view = orig_view
                 else:
-                    # Reset the trait on this mapmaker
-                    map_op.reset_pix_dist = True
+                    # Map the observation as a whole
+                    # Rename the operator with the observation suffix
+                    map_op.name = f"{orig_name}_{obs.name}"
+                    if isinstance(map_op, so_ops.Splits):
+                        # Reset the pixel distribution of the underlying
+                        # mapmaker
+                        map_op.mapmaker.reset_pix_dist = True
+                    else:
+                        # Reset the trait on this mapmaker
+                        map_op.reset_pix_dist = True
 
                 # Map this observation
                 map_op.apply(obs_data)
